@@ -118,10 +118,12 @@ export function ciFixRetryable(fix: CiFixTry | undefined, headSha: string): bool
 }
 
 /**
- * Open pull requests whose "try again" label has nothing left to do: their
- * current head is no longer one to try again -- retried, fixed, or a new head
- * the label was not put on for. The round takes the label off them. The
- * server never acts on a label older than the head's try anyway.
+ * Open pull requests whose "try again" label has done its work: the report
+ * shows the retry started on their current head. Only that confirmation
+ * takes a label off -- a report that is missing, unread or lacks the entry
+ * says nothing, and the operator's request stays. A label left on from an
+ * earlier head is harmless: the server acts only on one put on after the
+ * head's try, and "Analyse again" puts it on afresh.
  */
 export function ciFixLabelsToClear(
   pulls: readonly { number: number; headSha: string; labels?: readonly string[] }[],
@@ -131,7 +133,7 @@ export function ciFixLabelsToClear(
     .filter((pull) => (pull.labels ?? []).includes(CI_FIX_AGAIN_LABEL))
     .filter((pull) => {
       const fix = view.byPull[pull.number];
-      return !ciFixRetryable(fix, pull.headSha);
+      return fix !== undefined && fix.head === pull.headSha && fix.retried;
     })
     .map((pull) => pull.number);
 }

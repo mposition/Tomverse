@@ -34,8 +34,10 @@
 #   no test file, no deletion, no binary, at most 400 changed lines; a root
 #   file only for a Dependabot head, and only the app's own build and
 #   instrumentation config), or, for a conflict, merges base_sha itself and
-#   judges the resolution (exactly the conflicted files, no marker left, no
-#   line on neither side in a gate path, at most 40 such lines in all), and
+#   judges the resolution (exactly the conflicted files, regular files on
+#   both sides and written through no link, everything git merged outside the
+#   conflicts kept in order, no marker left, no line on none of a conflict's
+#   sides in a gate path, at most 40 such lines in all), and
 #   only then pushes with GH_AUTOMATION_PAT, leased to the commit judged. It
 #   installs and runs nothing from the pull request.
 

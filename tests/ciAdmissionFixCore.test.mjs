@@ -90,18 +90,22 @@ test("analysing again helps only a tried, unfixed head not retried yet", () => {
   assert.equal(ciFixRetryable(view.byPull[1], B), false, "another head was not tried");
 });
 
-test("the round takes the label off once the current head is no longer one to try again", () => {
+test("the round takes the label off only once the report shows the retry on the current head", () => {
   const view = ciFixView(stored([entry(1, A, "started", { retried: true }), entry(2, A, "no_change"), entry(3, A, "no_change")]), NOW, REVIEW_ORCHESTRATOR_STALE_AFTER_MS);
   const pulls = [
     // Retried: done.
     { number: 1, headSha: A, labels: [CI_FIX_AGAIN_LABEL] },
     // Asked for and not started yet: kept.
     { number: 2, headSha: A, labels: [CI_FIX_AGAIN_LABEL] },
-    // A new head the label was not put on for.
+    // Another head: the report says nothing about this one.
     { number: 3, headSha: B, labels: [CI_FIX_AGAIN_LABEL] },
     { number: 4, headSha: A, labels: [] },
+    // No entry in the report.
+    { number: 5, headSha: A, labels: [CI_FIX_AGAIN_LABEL] },
   ];
-  assert.deepEqual(ciFixLabelsToClear(pulls, view), [1, 3]);
+  assert.deepEqual(ciFixLabelsToClear(pulls, view), [1]);
+  // An unread report (an empty view) takes nothing off.
+  assert.deepEqual(ciFixLabelsToClear(pulls, emptyCiFixView()), []);
 });
 
 test("the app and the review server name the label and the result codes alike", () => {

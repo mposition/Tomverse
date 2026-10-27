@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -45,23 +45,46 @@ const pull = (number, ref, sha, extra = {}) => ({
   ...extra,
 });
 
-test("the guard commits a resolution of exactly the conflicted files, with no marker and few new lines", () => {
-  const file = (path, resolved, ours = "a\nb-branch\nc\n", theirs = "a\nb-develop\nc\n") => ({ path, ours, theirs, resolved });
-  const ok = judgePrCiAutoFixConflict({ files: [file("lib/x.ts", "a\nb-branch\nb-develop\nc\n")], proposed: ["lib/x.ts"] });
-  assert.deepEqual(ok, { push: true });
+test("the guard commits a resolution that keeps everything outside the conflicts and replaces only them", () => {
+  // What git left: a shared security step before, one conflict, a shared step after.
+  const MERGED = "name: ci\n- run: npm audit\n<<<<<<< HEAD\nb-branch\n=======\nb-develop\n>>>>>>> dev\n- run: npm test\n";
+  const file = (path, resolved, extra = {}) => ({ path, regular: true, merged: MERGED, resolved, ...extra });
+  const verdict = (input) => {
+    const result = judgePrCiAutoFixConflict(input);
+    return result.push ? [] : result.reasons;
+  };
+  const one = (path, resolved, extra) => verdict({ files: [file(path, resolved, extra)], proposed: [path] });
+  assert.deepEqual(judgePrCiAutoFixConflict({ files: [file("lib/x.ts", "name: ci\n- run: npm audit\nb-branch\nb-develop\n- run: npm test\n")], proposed: ["lib/x.ts"] }), { push: true });
+  // Taking one side is a resolution; so is joining them in a line.
+  assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nb-develop\n- run: npm test\n"), []);
+  assert.deepEqual(one("lib/x.ts", "name: ci\n- run: npm audit\nb-branch + b-develop\n- run: npm test\n"), []);
 
-  const verdict = (input) => (judgePrCiAutoFixConflict(input).push ? [] : judgePrCiAutoFixConflict(input).reasons);
-  assert.deepEqual(verdict({ files: [file("lib/x.ts", "a\nb-branch\nc\n")], proposed: ["lib/x.ts", "lib/other.ts"] }), ["not_conflicted"]);
-  assert.deepEqual(verdict({ files: [file("lib/x.ts", null)], proposed: [] }), ["unresolved"]);
-  assert.deepEqual(verdict({ files: [file("lib/x.ts", "a\n<<<<<<< HEAD\nb-branch\n=======\nb-develop\n>>>>>>> dev\nc\n")], proposed: ["lib/x.ts"] }), ["marker_left"]);
-  assert.deepEqual(verdict({ files: [{ path: "lib/x.ts", ours: null, theirs: "a\n", resolved: "a\n" }], proposed: ["lib/x.ts"] }), ["deleted_side"]);
-  // A gate path takes lines from its two sides only; elsewhere a few joined lines are fine.
-  assert.deepEqual(verdict({ files: [file(".github/workflows/ci.yml", "a\nb-branch\nc\n")], proposed: [".github/workflows/ci.yml"] }), []);
-  assert.deepEqual(verdict({ files: [file(".github/workflows/ci.yml", "a\nrun: curl evil\nc\n")], proposed: [".github/workflows/ci.yml"] }), ["gate_path_new_line"]);
-  assert.deepEqual(verdict({ files: [file("package.json", "a\n\"x\": \"1\"\nc\n")], proposed: ["package.json"] }), ["gate_path_new_line"]);
+  // Outside the conflict nothing may go, move or change: dropping the shared
+  // audit step adds no line, and is still refused.
+  assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\nb-branch\n- run: npm test\n"), ["outside_conflict_changed"]);
+  assert.deepEqual(one("lib/x.ts", "name: ci\n- run: npm test\nb-branch\n- run: npm audit\n"), ["outside_conflict_changed"]);
+  assert.deepEqual(one("lib/x.ts", "name: ci\n- run: npm audit\nb-branch\n- run: npm test --bail\n"), ["outside_conflict_changed"]);
+
+  // Inside it, a gate path takes only its sides' lines; elsewhere a few joined lines are fine.
+  assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
+  assert.deepEqual(one("package.json", "name: ci\n- run: npm audit\n\"x\": \"1\"\n- run: npm test\n"), ["gate_path_new_line"]);
   const many = Array.from({ length: PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES + 1 }, (_, i) => `new ${i}`).join("\n");
-  assert.deepEqual(verdict({ files: [file("lib/x.ts", `a\n${many}\nc\n`)], proposed: ["lib/x.ts"] }), ["too_many_new_lines"]);
+  assert.deepEqual(one("lib/x.ts", `name: ci\n- run: npm audit\n${many}\n- run: npm test\n`), ["too_many_new_lines"]);
+
+  assert.deepEqual(verdict({ files: [file("lib/x.ts", "name: ci\n- run: npm audit\nb-branch\n- run: npm test\n")], proposed: ["lib/x.ts", "lib/other.ts"] }), ["not_conflicted"]);
+  assert.deepEqual(one("lib/x.ts", null), ["unresolved"]);
+  assert.ok(one("lib/x.ts", MERGED).includes("marker_left"));
+  assert.deepEqual(one("lib/x.ts", "x\n", { merged: null }), ["deleted_side"]);
+  assert.deepEqual(one("lib/x.ts", "x\n", { regular: false }), ["not_regular_file"]);
+  assert.deepEqual(one("lib/x.ts", "x\n", { merged: "a\n<<<<<<< HEAD\nb\n" }), ["markers_unreadable"]);
   assert.deepEqual(verdict({ files: [], proposed: [] }), ["no_conflict"]);
+});
+
+test("two conflicts in one file are each replaced, the text between them kept", () => {
+  const merged = "top\n<<<<<<< HEAD\na1\n=======\na2\n>>>>>>> dev\nmiddle\n<<<<<<< HEAD\nb1\n||||||| base\nb0\n=======\nb2\n>>>>>>> dev\nend\n";
+  const judge = (resolved) => judgePrCiAutoFixConflict({ files: [{ path: "lib/x.ts", regular: true, merged, resolved }], proposed: ["lib/x.ts"] });
+  assert.deepEqual(judge("top\na1\na2\nmiddle\nb0\nend\n"), { push: true }, "a diff3 base line is a side");
+  assert.deepEqual(judge("top\na1\nend\n"), { push: false, reasons: ["outside_conflict_changed"] });
 });
 
 test("a conflict may be resolved on a draft, and counts its own attempts", () => {
@@ -234,6 +257,28 @@ test("a resolution that leaves a marker is recorded and not sent", async () => {
     const entry = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`];
     assert.deepEqual({ outcome: entry.outcome, reason: entry.reason }, { outcome: "no_change", reason: "not_found" });
     assert.equal((await pass(f, () => assert.fail("one try per head"))).outcome, "nothing_to_fix");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("the guard writes through no link: a conflicted path that is one is refused", { skip: process.platform === "win32" }, () => {
+  const f = conflictFixture();
+  try {
+    const checkout = join(f.root, "pr");
+    sh(f.root, "clone", "-q", f.source, checkout);
+    sh(checkout, "checkout", "-q", "--detach", f.head);
+    spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "merge", "--no-commit", "--no-ff", f.develop], { cwd: checkout });
+    const outside = join(f.root, "outside.txt");
+    writeFileSync(outside, "keep me\n");
+    rmSync(join(checkout, "lib", "app.js"));
+    symlinkSync(outside, join(checkout, "lib", "app.js"));
+    const resolutionPath = join(f.root, "resolution.json");
+    writeFileSync(resolutionPath, JSON.stringify({ files: { "lib/app.js": Buffer.from("owned\n").toString("base64") } }));
+    const guard = spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "conflict", checkout, resolutionPath], { encoding: "utf8" });
+    assert.equal(guard.status, 1);
+    assert.match(guard.stdout, /not_regular_file/);
+    assert.equal(readFileSync(outside, "utf8"), "keep me\n");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

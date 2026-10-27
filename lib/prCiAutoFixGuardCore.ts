@@ -139,20 +139,64 @@ export function judgePrCiAutoFixTarget(input: {
   return reasons.length === 0 ? { push: true } : { push: false, reasons };
 }
 
+/** One conflicted file as git left it: the text outside its conflicts, and each conflict's sides. */
+type MergedFile = { outside: string[][]; hunks: { sides: string[] }[] };
+
+/**
+ * Splits a file git left with conflict markers into the text outside the
+ * conflicts (one more piece than there are conflicts) and each conflict's
+ * lines (the branch's, develop's and, in diff3 style, the base's). Null when
+ * the markers do not nest as git writes them.
+ */
+export function parseConflictMarkers(text: string): MergedFile | null {
+  const outside: string[][] = [[]];
+  const hunks: { sides: string[] }[] = [];
+  let state: "outside" | "ours" | "base" | "theirs" = "outside";
+  for (const line of text.split("\n")) {
+    const bare = line.replace(/\r$/, "");
+    if (/^<{7}( |$)/.test(bare)) {
+      if (state !== "outside") return null;
+      state = "ours";
+      hunks.push({ sides: [] });
+    } else if (/^\|{7}( |$)/.test(bare) && state === "ours") {
+      state = "base";
+    } else if (bare === "=======" && (state === "ours" || state === "base")) {
+      state = "theirs";
+    } else if (/^>{7}( |$)/.test(bare)) {
+      if (state !== "theirs") return null;
+      state = "outside";
+      outside.push([]);
+    } else if (state === "outside") {
+      outside[outside.length - 1].push(line);
+    } else {
+      hunks[hunks.length - 1].sides.push(line);
+    }
+  }
+  return state === "outside" && hunks.length > 0 ? { outside, hunks } : null;
+}
+
+const sameLine = (a: string, b: string) => a.trimEnd() === b.trimEnd();
+const startsAt = (lines: string[], at: number, piece: string[]) =>
+  at + piece.length <= lines.length && piece.every((line, index) => sameLine(lines[at + index], line));
+
 /**
  * Whether a resolution of a conflict with develop may be committed. The
  * workflow has merged develop itself; `files` is every conflicted path with
- * the branch's side (`ours`), develop's (`theirs`) and the proposed content
- * (`resolved`), and `proposed` every path the resolution names.
+ * the text git left in it (`merged`, with its markers), whether both sides
+ * are regular files (`regular`), and the proposed content (`resolved`), and
+ * `proposed` every path the resolution names.
  *
- * Refused: a resolution for any path that is not conflicted, or none for one
- * that is; a conflict a side deleted (a resolution can only be content); a
- * conflict marker or a NUL byte left; a line on neither side in a gate path
- * (the merge lane's list, the test-free fence aside: a merge brings tests in);
- * more than PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES such lines in all.
+ * The resolution must keep everything git merged outside the conflicts, in
+ * order and unchanged: only the conflicts themselves are replaced. Inside a
+ * conflict a line on none of its sides is new; a gate path may take none
+ * (the merge lane's list, the test-free fence aside: a merge brings tests in),
+ * and all files together at most PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES.
+ * Refused as well: a resolution for any path that is not conflicted, or none
+ * for one that is; a conflict a side deleted, or a side that is not a regular
+ * file; markers git did not write; a marker or a NUL byte left.
  */
 export function judgePrCiAutoFixConflict(input: {
-  files: readonly { path: string; ours: string | null; theirs: string | null; resolved: string | null }[];
+  files: readonly { path: string; regular: boolean; merged: string | null; resolved: string | null }[];
   proposed: readonly string[];
   headBranch?: string;
 }): PrCiAutoFixVerdict {
@@ -163,7 +207,11 @@ export function judgePrCiAutoFixConflict(input: {
   const dependabot = PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.test(input.headBranch ?? "");
   let newLines = 0;
   for (const file of input.files) {
-    if (file.ours === null || file.theirs === null) {
+    if (!file.regular) {
+      reasons.add("not_regular_file");
+      continue;
+    }
+    if (file.merged === null) {
       reasons.add("deleted_side");
       continue;
     }
@@ -173,8 +221,40 @@ export function judgePrCiAutoFixConflict(input: {
     }
     if (CONFLICT_MARKER.test(file.resolved)) reasons.add("marker_left");
     if (file.resolved.includes("\u0000")) reasons.add("binary");
-    const known = new Set([...file.ours.split("\n"), ...file.theirs.split("\n")].map((line) => line.trimEnd()));
-    const added = file.resolved.split("\n").filter((line) => !known.has(line.trimEnd())).length;
+    const merged = parseConflictMarkers(file.merged);
+    if (merged === null) {
+      reasons.add("markers_unreadable");
+      continue;
+    }
+    // Walk the resolution: each piece of outside text in turn, unchanged; what
+    // lies between two pieces replaced the conflict between them.
+    const lines = file.resolved.split("\n");
+    const last = merged.outside.length - 1;
+    const tail = merged.outside[last];
+    const tailAt = lines.length - tail.length;
+    let kept = startsAt(lines, 0, merged.outside[0]) && tailAt >= merged.outside[0].length;
+    let at = merged.outside[0].length;
+    let added = 0;
+    for (let index = 0; kept && index < merged.hunks.length; index += 1) {
+      let end: number;
+      if (index + 1 === last) {
+        end = tailAt;
+        kept = end >= at && startsAt(lines, end, tail);
+      } else {
+        const next = merged.outside[index + 1];
+        end = at;
+        while (end <= tailAt - next.length && !startsAt(lines, end, next)) end += 1;
+        kept = end <= tailAt - next.length;
+      }
+      if (!kept) break;
+      const sides = new Set(merged.hunks[index].sides.map((line) => line.trimEnd()));
+      added += lines.slice(at, end).filter((line) => !sides.has(line.trimEnd())).length;
+      at = end + (index + 1 === last ? tail.length : merged.outside[index + 1].length);
+    }
+    if (!kept) {
+      reasons.add("outside_conflict_changed");
+      continue;
+    }
     newLines += added;
     const gate =
       CONTRACT_DOCUMENT.test(file.path) ||

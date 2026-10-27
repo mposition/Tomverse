@@ -17,8 +17,8 @@
 // model or the pull request could change. Prints the verdict as one JSON line
 // and exits 0 to proceed, 1 to stop.
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, constants, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { judgePrCiAutoFixConflict, judgePrCiAutoFixDiff, judgePrCiAutoFixTarget } from "../lib/prCiAutoFixGuardCore.ts";
 
@@ -53,22 +53,50 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const [checkoutDir, resolutionPath, headBranch] = args;
   const git = (gitArgs) =>
     execFileSync("git", ["-C", checkoutDir, "--literal-pathspecs", ...gitArgs], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  // One side of a conflicted path, or null when that side deleted it.
-  const side = (stage, path) => {
+  // Each unmerged path's stages and modes, from the index git wrote here.
+  const stages = new Map();
+  for (const entry of git(["ls-files", "-u", "-z"]).split("\0").filter(Boolean)) {
+    const tab = entry.indexOf("\t");
+    const [mode, , stage] = entry.slice(0, tab).split(" ");
+    const path = entry.slice(tab + 1);
+    stages.set(path, { ...(stages.get(path) ?? {}), [stage]: mode });
+  }
+  const root = realpathSync(checkoutDir);
+  const fullPath = (path) => join(root, path);
+  // A regular file on both sides, and here a regular file inside the checkout:
+  // never a link a write would follow, nor a path through one.
+  const regular = (path) => {
+    const seen = stages.get(path) ?? {};
+    if (!["2", "3"].every((stage) => seen[stage] === "100644" || seen[stage] === "100755")) return false;
     try {
-      return git(["show", `:${stage}:${path}`]);
+      return lstatSync(fullPath(path)).isFile() && realpathSync(dirname(fullPath(path))).startsWith(root);
     } catch {
-      return null;
+      return false;
     }
   };
-  const conflicted = git(["diff", "--name-only", "-z", "--diff-filter=U"]).split("\0").filter(Boolean);
+  const conflicted = [...stages.keys()].sort();
   const resolution = JSON.parse(readFileSync(resolutionPath, "utf8"));
   const proposed = resolution && typeof resolution.files === "object" && resolution.files !== null ? resolution.files : {};
   const text = (path) => (typeof proposed[path] === "string" ? Buffer.from(proposed[path], "base64").toString("utf8") : null);
-  const files = conflicted.map((path) => ({ path, ours: side(2, path), theirs: side(3, path), resolved: text(path) }));
+  const files = conflicted.map((path) => {
+    const ok = regular(path);
+    // What git left in the file, markers and all: the resolution keeps its text outside the conflicts.
+    const merged = ok && stages.get(path)["2"] && stages.get(path)["3"] ? readFileSync(fullPath(path), "utf8") : null;
+    return { path, regular: ok, merged, resolved: text(path) };
+  });
   verdict = judgePrCiAutoFixConflict({ files, proposed: Object.keys(proposed), headBranch });
   if (verdict.push) {
-    for (const file of files) writeFileSync(join(checkoutDir, file.path), file.resolved);
+    for (const file of files) {
+      // Opened without following a link, on top of the checks above (the
+      // workflow's Linux runner; a platform without O_NOFOLLOW relies on them).
+      const flags = constants.O_NOFOLLOW === undefined ? "w" : constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW;
+      const fd = openSync(fullPath(file.path), flags);
+      try {
+        writeSync(fd, file.resolved);
+      } finally {
+        closeSync(fd);
+      }
+    }
     git(["add", "--", ...conflicted]);
   }
 } else {
