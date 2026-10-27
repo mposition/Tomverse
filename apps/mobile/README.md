@@ -83,6 +83,25 @@ outputs remain ignored. Android builds require JDK 21, Android SDK 36 and Gradle
 run `npm --workspace @tomverse/mobile run build:android` after installing them.
 The iOS MVP targets iOS 17.4+ and requires macOS and Xcode. Signing and real device verification are separate.
 
+## Prepare an iOS build on Windows
+
+Run `npm run prepare:ios` from the repository root to type-check and build the
+production bundle, sync only iOS and validate its resources, local SPM paths,
+permissions, privacy declarations and plugin registrations. Run
+`npm run build:ios -- --dry-run` to inspect the unsigned Xcode command without
+executing it. `npm --workspace @tomverse/mobile run test:ui:ios` runs the existing
+synthetic UI scenarios in desktop WebKit; native permissions still need a device.
+
+On a Mac, `npm run build:ios` builds an unsigned Simulator application with
+Xcode 26+. It does not sign, upload, enroll a service or submit to a store.
+See [remote iOS build handoff](../../docs/ops/ios-remote-build.md) for clean-machine
+setup, output paths, validation evidence and the remaining Mac/device checks.
+
+The repository-root `codemagic.yaml` also provides a manual, unsigned Simulator
+build on a hosted Mac mini M2. See [Codemagic setup](../../docs/ops/ios-codemagic.md)
+for connecting the personal account, selecting the prepared branch and reading
+the artifacts. Apple membership is needed later for TestFlight device distribution.
+
 ## Authentication and operational boundary
 
 The primary sign-in action opens the existing web sign-in flow in the system
@@ -131,9 +150,9 @@ persistence checks remain in place. Cookie requests retain cookie authentication
 and CSRF checks. Live enrollment, paid calls, push, merge, deployment and store
 submission require their separate approvals.
 
-The existing `app.tomverse.shell` identifier is provisional. No production app
-IDs, Apple Team ID or signing certificate have been chosen by the owner. No
-association files are published or fabricated. The native declarations are
+The `app.tomverse.shell` Apple App ID and a Tomverse App Store Connect draft
+were registered on 2026-10-26. Signing certificates/profiles and payment activation
+remain operational setup. No association files are published or fabricated. The native declarations are
 preparation, not proof of verified links. Browser screenshots and sync output
 are not physical-device authentication evidence. iOS uses ASWebAuthenticationSession with an exact HTTPS callback, rather than
 relying on Safari same-domain navigation. Physical app-link and session evidence
