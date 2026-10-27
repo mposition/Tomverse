@@ -24,6 +24,7 @@ export async function mockComparisonReview(
   page: Page,
   options: {
     deferSetup?: boolean;
+    deferRun?: boolean;
     withSecondary?: boolean;
     longSource?: boolean;
     /**
@@ -38,13 +39,15 @@ export async function mockComparisonReview(
   let requestBody: Record<string, unknown> | null = null;
   let runCount = 0;
   let releaseSetup = () => {};
+  let releaseRun = () => {};
+  const runGate = options.deferRun ? new Promise<void>((resolve) => { releaseRun = resolve; }) : Promise.resolve();
   const setupGate = options.deferSetup
     ? new Promise<void>((resolve) => {
         releaseSetup = resolve;
       })
     : Promise.resolve();
   await page.route(
-    "**/api/conversations/qa-conversation/comparison-reviews",
+    /\/api\/conversations\/qa-conversation\/comparison-reviews(?:\?.*)?$/,
     async (route) => {
       if (route.request().method() === "GET") {
         await setupGate;
@@ -96,6 +99,7 @@ export async function mockComparisonReview(
 
       requestBody = route.request().postDataJSON() as Record<string, unknown>;
       runCount += 1;
+      await runGate;
       if (options.failRun === true || (options.failRun === "first" && runCount === 1)) {
         await route.fulfill({
           status: 500,
@@ -272,6 +276,8 @@ export async function mockComparisonReview(
   return {
     getRequestBody: () => requestBody,
     releaseSetup,
+    releaseRun,
+    getRunCount: () => runCount,
   };
 }
 

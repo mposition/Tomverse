@@ -79,6 +79,9 @@ import type { PromptRefinerProductChatDecision } from
   "@/lib/promptRefinerProductApiContract";
 import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
+import { StudioAnswerAnalysis, useStudioAnalysisDesktop } from "./StudioAnswerAnalysis";
+import type { GuestReviewSource } from "./ComparisonReviewDialog";
+import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -107,6 +110,8 @@ type PromptPayload = {
 };
 
 export type DesktopChatShellProps = {
+  getGuestReviewSource?: () => GuestReviewSource | null;
+  onAnalysisCompleted?: () => void;
   workspaceNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
@@ -398,7 +403,7 @@ export type DesktopChatShellProps = {
   availableCredits?: number | null;
   onComparisonReview: () => void;
   onGuestSignInPrompt: () => void;
-  onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
+  onResponseComplete: (promptId: string | null, modelId: string, responseText: string, searchMetadata?: WebSearchExecution | null) => void;
   /** A panel's turn ended in an error. Forwarded straight to the page. */
   onTurnError: (
     promptId: string | null,
@@ -539,6 +544,8 @@ export function DesktopChatShell({
   isQuickSummaryCached = false,
   availableCredits = null,
   onComparisonReview,
+  getGuestReviewSource,
+  onAnalysisCompleted,
   onGuestSignInPrompt,
   onResponseComplete,
   onTurnError,
@@ -551,6 +558,13 @@ export function DesktopChatShell({
   const [draggingFocusModel, setDraggingFocusModel] = useState<string | null>(null);
   useEffect(() => { if (promptPayload || imageWorkspace || review?.imageRequest) queueMicrotask(() => setStudioView("results")); }, [promptPayload, imageWorkspace, review?.imageRequest]);
   const singleTranscript = transcriptScope === "conversation";
+  const analysisDesktop = useStudioAnalysisDesktop();
+  const useStudioAnalysis = studio && Boolean(review) && !singleTranscript && analysisDesktop;
+  const [answerRevisions, setAnswerRevisions] = useState<Record<string, number>>({});
+  const handleAnalysisResponseComplete = useCallback((...args: Parameters<DesktopChatShellProps["onResponseComplete"]>) => {
+    onResponseComplete(...args);
+    if (currentChatId) setAnswerRevisions((values) => ({ ...values, [currentChatId]: (values[currentChatId] ?? 0) + 1 }));
+  }, [onResponseComplete, currentChatId]);
   const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
   const statusModels = useMemo(() => singleTranscript ? ["@conversation"] : selectedModels, [singleTranscript, selectedModels]);
   const {
@@ -1391,7 +1405,7 @@ export function DesktopChatShell({
                   onSavedQuestionNotSent={onSavedQuestionNotSent}
                   onDurableUndispatchedAccepted={onDurableUndispatchedAccepted}
                   onProviderDispatchStarted={onProviderDispatchStarted}
-                  onResponseComplete={onResponseComplete}
+                  onResponseComplete={handleAnalysisResponseComplete}
                   onPromptRefinerExecution={onPromptRefinerExecution}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
@@ -1488,7 +1502,7 @@ export function DesktopChatShell({
             }
           />
         )}
-        {!singleTranscript && <ComparisonActionRail
+        {!singleTranscript && !useStudioAnalysis && <ComparisonActionRail
           layout="desktop"
           readiness={comparisonReadiness}
           aiReviewAccess={aiReviewAccess}
@@ -1507,7 +1521,7 @@ export function DesktopChatShell({
           somewhere predictable -- a full-width row of its own directly above
           the composer, never inside a model panel.
         */}
-        {(singleTranscript || !comparisonReadiness.isVisible) && (
+        {(singleTranscript || !comparisonReadiness.isVisible || useStudioAnalysis) && (
           <GuestVerificationDesktopSlot variant="fallback" />
         )}
 
@@ -1586,6 +1600,14 @@ export function DesktopChatShell({
             />,
             composerPortalHost
           )}
+        <StudioAnswerAnalysis
+          enabled={useStudioAnalysis && comparisonReadiness.isVisible}
+          ready={comparisonReadiness.canRun && !isAnyModelResponding}
+          scope={JSON.stringify([identityKey, currentChatId, promptPayload?.chatId === currentChatId ? promptPayload?.id : null, answerRevisions[currentChatId ?? ""] ?? 0])}
+          conversationId={currentChatId} identityKey={identityKey} isGuest={isGuestMode}
+          access={aiReviewAccess} getGuestSource={getGuestReviewSource}
+          onCompleted={onAnalysisCompleted} onSignIn={onGuestSignInPrompt}
+        />
         {studio && !singleTranscript && <div className="review-mobile-starters"><ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /></div>}
         <div
           ref={setBottomConsentSlot}
