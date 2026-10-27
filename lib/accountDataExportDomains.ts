@@ -691,6 +691,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one AMUX worker capability change, not customer data. The actor id is the owner who recorded it and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a worker name, a model id, closed routing tags, tools and a v22 profile, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxCliModelLinkEvent",
+    publicName: "amux_cli_model_link_events",
+    prismaModel: "AmuxCliModelLinkEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one link from a worker CLI's model name to the Admin › Models entry that prices it, not customer data. The actor id is the owner who recorded it and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a CLI name, a CLI model name and a model id, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxTaskRecoveryInspectionRequest",
     publicName: "amux_v22_task_recovery_inspection_requests",
     prismaModel: "AmuxV22TaskRecoveryInspectionRequest",
