@@ -94,6 +94,13 @@ creating the signing certificate/profile require the owner's specific approval.
 Private keys and profiles stay outside Git; the workflow imports the named
 account identities and does not create new credentials during a build.
 
+The owner approved this credential setup in chat on 2026-10-27. The dedicated
+API integration, Apple Distribution certificate and App Store profile are now
+configured under the references above. Key/certificate/profile recovery files
+are retained outside Git. Independent review `r-20261027-105333-e11b71` accepted
+the manual internal-only signing and upload boundary; its versioning and
+Associated Domains setup notes were addressed before the signed run.
+
 The export option `testFlightInternalTestingOnly=true` restricts the resulting
 build to internal testing. Publishing uses the stored integration to upload the
 IPA; `submit_to_testflight=false` avoids an external beta-review submission and
@@ -145,6 +152,60 @@ The actual downloaded `tomverse-ios-simulator.zip` was inspected:
 This establishes native compilation and package contents. Simulator launch,
 signed-device installation, permission dialogs, authentication and StoreKit
 acceptance remain separate checks. No app-store upload or deployment occurred.
+
+## First signed TestFlight delivery (2026-10-27)
+
+[The first `ios-testflight` run](https://codemagic.io/app/6adf504aa37cedc4dfe11471/build/6ae08654206ce93970c66f78)
+compiled commit `32677a04c29e2957680bb306b7c9f69d4bfe67b1` on Mac mini M2 with
+Xcode 26.6 in 8m 32s. This is workflow run #1 and application-wide build #3.
+The CI admission merge at that commit added unrelated Android domain-association
+files; the iOS workflow and app sources match the verified signing changes.
+
+The Release archive, signed IPA export and pre-upload metadata checks passed.
+Apple upload reported `UPLOAD SUCCEEDED with no errors`. App Store Connect
+processed version **1.0 (3)** as **Internal** and **Ready to Test**, then changed
+to **Testing** after it was assigned to `Tomverse Internal`. That group contains
+only the owner's existing Account Holder/Admin user, whose status is **Accepted**
+(confirmed at 21:34 AEST).
+Automatic distribution is off. No external beta review or public App Store
+submission was performed.
+
+The downloaded `App.ipa` was independently inspected:
+
+- Size: 10,397,471 bytes.
+- SHA-256: `6a8f299d1dc0e9206832fac81f24ae4473d068c0832ebe9710a380b4b9f08333`.
+- Bundle ID `app.tomverse.shell`; version 1.0; build 3; minimum OS 17.4.
+- Device platform `iPhoneOS`, arm64 executable, iPhone/iPad device families.
+- Code signature resources and the correct embedded App Store profile present.
+- Associated Domains allowed, debugging disabled, beta reporting enabled.
+- All four new Chat/Review illustrations present; non-exempt encryption flag false.
+
+The owner accepted the invitation and sees version 1.0 (3), but installation on
+the iPad 7th generation fails with "The requested app is not available or doesn't
+exist." Reopening TestFlight and retrying did not resolve it. Installation and
+device acceptance are therefore **blocked**, despite the Testing label.
+
+App Store Connect's Build Metadata independently shows Binary State Validated,
+minimum iOS 17.4, arm64, iPhone/iPad families, the expected application identifier,
+Associated Domains, debugging disabled and beta reporting enabled. The downloaded
+executable uses ARM64_ALL, and its bundled frameworks require iOS 15.0. These
+checks found no OS, architecture or signing mismatch with the reported iPadOS
+18.7.10 device. Membership renews on 2027-10-27; the developer license is accepted;
+Free/Paid Apps agreements and required banking/tax records are Active. Apple's
+system-status page showed TestFlight available at 21:41 AEST.
+
+The empty Beta App Description and Feedback Email fields were completed with
+the internal test scope and the existing public support address. App Store
+Connect confirmed Saved. This completes test metadata; it does not establish
+that the installation error is resolved.
+
+The exact installation cause remains unconfirmed. Similar errors are reported
+on the [Apple Developer Forums](https://developer.apple.com/forums/thread/824745),
+where Apple directs unresolved account cases to Developer Support. Do not treat
+another developer's `BETA_CONTRACT_MISSING` report as a diagnosis for this app,
+or change credentials, public availability or external-review settings to probe
+it. Device launch, native sign-in, location consent and StoreKit results remain
+unobserved. The billing activation/pricing work described below remains separate.
 
 The Apple App ID `app.tomverse.shell` and [Tomverse App Store Connect draft](https://appstoreconnect.apple.com/apps/6827148073/distribution)
 were registered on 2026-10-26. Seven payment products have draft records as noted
