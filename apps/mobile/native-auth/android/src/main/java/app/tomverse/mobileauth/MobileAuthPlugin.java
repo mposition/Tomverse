@@ -148,6 +148,10 @@ public class MobileAuthPlugin extends Plugin {
         connection.setRequestMethod(body == null ? "GET" : "POST"); connection.setRequestProperty("Content-Type", "application/json");
         if (language != null && Arrays.asList("en", "ko", "zh", "de", "fr", "es", "pt").contains(language)) connection.setRequestProperty("Accept-Language", language);
         connection.setRequestProperty("Cookie", "");
+        if ("/api/auth/mobile/email".equals(path)) {
+            connection.setRequestProperty("X-Tomverse-App-Id", getContext().getPackageName());
+            connection.setRequestProperty("X-Tomverse-Build", Integer.toString(getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0).versionCode));
+        }
         try {
             if (body != null) { connection.setDoOutput(true); try (var output = connection.getOutputStream()) { output.write(body.toString().getBytes(StandardCharsets.UTF_8)); } }
             int status = connection.getResponseCode();

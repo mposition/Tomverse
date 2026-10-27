@@ -1,3 +1,46 @@
+import { z } from "zod";
+
+// Review credential configuration shares the existing mobile environment boundary.
+// Code hashing remains in the review-only entry point.
+export const MOBILE_STORE_REVIEW_STATUS = "mobile_store_review";
+export const isMobileStoreReviewAddress = (email: unknown): email is string =>
+  typeof email === "string" && /^play-review[-+][a-z0-9-]+@tomverse\.app$/i.test(email);
+
+const credentialSchema = z.object({
+  submissionId: z.string().min(8).max(120),
+  userId: z.string().min(1).max(120),
+  email: z.string().email().transform(value => value.trim().toLowerCase()).refine(isMobileStoreReviewAddress),
+  appId: z.literal("app.tomverse.shell"),
+  buildNumber: z.number().int().positive(),
+  plan: z.enum(["Free", "Max"]).default("Free"),
+  state: z.enum(["prepared", "submitted", "in_review", "unresolved"]),
+  validUntil: z.string().datetime(),
+  salt: z.string().regex(/^[a-f0-9]{64}$/),
+  codeHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type MobileStoreReviewCredential = z.infer<typeof credentialSchema>;
+
+/** One operator-managed, submission-scoped credential; disabled by default. */
+export function readMobileStoreReviewCredential(env = process.env, now = Date.now()): MobileStoreReviewCredential | null {
+  if (env.MOBILE_STORE_REVIEW_ENABLED !== "true") return null;
+  try {
+    const parsed = credentialSchema.safeParse(JSON.parse(env.MOBILE_STORE_REVIEW_CREDENTIAL_JSON || "null"));
+    if (!parsed.success) return null;
+    const expiry = Date.parse(parsed.data.validUntil);
+    if (expiry <= now || expiry > now + 31 * 86_400_000) return null;
+    return parsed.data;
+  } catch { return null; }
+}
+
+/** Checked again for existing access/refresh sessions, including cached snapshots. */
+export function mobileStoreReviewSessionAllowed(user: { id: string; email?: string | null; plan?: unknown; subscriptionStatus?: string | null; periodEndMs?: number | null }, env = process.env, now = Date.now()) {
+  if (!isMobileStoreReviewAddress(user.email)) return true;
+  const credential = readMobileStoreReviewCredential(env, now);
+  if (!credential || credential.userId !== user.id || credential.email !== user.email.toLowerCase() || credential.plan !== user.plan) return false;
+  return credential.plan === "Free" || (user.subscriptionStatus === MOBILE_STORE_REVIEW_STATUS &&
+    typeof user.periodEndMs === "number" && Number.isFinite(user.periodEndMs) && user.periodEndMs > now);
+}
+
 /**
  * The two key rings mobile bearer authentication runs on, and why they are two.
  *

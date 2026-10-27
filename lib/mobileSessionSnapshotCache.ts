@@ -57,6 +57,10 @@ export type MobileSessionSnapshot = {
   deviceId: string;
   familyId: string;
   accountStatus: string;
+  userEmail?: string | null;
+  reviewPlan?: string;
+  reviewSubscriptionStatus?: string | null;
+  reviewPeriodEndMs?: number | null;
   sessionsRevokedAtMs: number | null;
   familyRevokedAtMs: number | null;
   deviceRevokedAtMs: number | null;
