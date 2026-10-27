@@ -3,10 +3,11 @@ import { usagePercent } from "../../../components/chat/UsagePercentGauge";
 import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import type { AccountUsage, ChatTransport } from "./chatTransport";
 import { AppIcon } from "./AppIcon";
+import { mobileSettingsCopy } from "../../../locales/mobileSettings";
 
 /** Read the same account and monthly credit totals as the web sidebar. */
-export function SidebarAccount({ transport, language, onSettings }: {
-  transport: ChatTransport; language: MobileLanguage; onSettings: () => void;
+export function SidebarAccount({ transport, language, onSettings, onPlan }: {
+  transport: ChatTransport; language: MobileLanguage; onSettings: () => void; onPlan: () => void;
 }) {
   const [profile, setProfile] = useState<Awaited<ReturnType<ChatTransport["account"]>> | null>(null);
   const [usage, setUsage] = useState<AccountUsage | null>(null);
@@ -40,5 +41,6 @@ export function SidebarAccount({ transport, language, onSettings }: {
       {percent !== null && <progress aria-label={label} max={100} value={percent} />}
     </div>
     <button aria-label={copy.settings} onClick={onSettings}><AppIcon name="settings" /></button>
+    {import.meta.env.VITE_NATIVE_BILLING_ENABLED === "true" && <button type="button" className="sidebar-plan-entry" onClick={onPlan}>{mobileSettingsCopy(language).usageAndPlan}<span aria-hidden="true">→</span></button>}
   </footer>;
 }

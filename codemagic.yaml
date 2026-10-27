@@ -1,5 +1,5 @@
-# Start this workflow manually in Codemagic. It needs no Apple credentials and
-# creates a Simulator application, not an installable iPhone/iPad IPA.
+# Start workflows manually in Codemagic. Simulator builds need no Apple key;
+# TestFlight builds use the signing identities configured in the account UI.
 workflows:
   ios-simulator:
     name: Tomverse iOS Simulator
@@ -42,3 +42,86 @@ workflows:
       - .tmp/codemagic/prebuild.json
       - .tmp/codemagic/xcodebuild.log
       - .tmp/codemagic/tomverse-ios-simulator.zip
+
+  ios-testflight:
+    name: Tomverse iOS TestFlight Internal
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    integrations:
+      app_store_connect: Tomverse Codemagic Signing
+    environment:
+      node: "22.22.2"
+      xcode: "26.6"
+      ios_signing:
+        provisioning_profiles:
+          - tomverse-app-store
+        certificates:
+          - tomverse-apple-distribution
+      vars:
+        XCODE_PROJECT: apps/mobile/ios/App/App.xcodeproj
+        XCODE_SCHEME: App
+    scripts:
+      - name: Install locked dependencies
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+      - name: Prepare and verify the bundled iOS project
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          npm run prepare:ios
+          npm run test:ios-prebuild
+          npm run test:codemagic
+          npm run test:mobile-billing
+          mkdir -p .tmp/codemagic
+          npm run --silent check:ios-prebuild > .tmp/codemagic/prebuild.json
+      - name: Assign a unique project build number
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : "${PROJECT_BUILD_NUMBER:?Codemagic project build number is required}"
+          [[ "$PROJECT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid project build number" >&2; exit 1; }
+          cd apps/mobile/ios/App
+          agvtool new-version -all "$PROJECT_BUILD_NUMBER"
+      - name: Apply the internal TestFlight signing profile
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          xcode-project use-profiles --project "$XCODE_PROJECT" \
+            --archive-method app-store \
+            --custom-export-options='{"testFlightInternalTestingOnly":true}'
+      - name: Archive and export the signed IPA
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          xcode-project build-ipa --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME" --config Release \
+            2>&1 | tee .tmp/codemagic/xcodebuild-testflight.log
+          IPA_PATH="$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)"
+          test -f "$IPA_PATH"
+          python3 - "$IPA_PATH" "$PROJECT_BUILD_NUMBER" <<'PY'
+          import plistlib, re, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as ipa:
+              names = [name for name in ipa.namelist() if re.fullmatch(r"Payload/[^/]+\.app/Info\.plist", name)]
+              assert len(names) == 1, "Expected one app in the IPA"
+              info = plistlib.loads(ipa.read(names[0]))
+          assert info["CFBundleIdentifier"] == "app.tomverse.shell", "Unexpected app"
+          assert info["CFBundleVersion"] == sys.argv[2], "Unexpected build number"
+          assert info["MinimumOSVersion"] == "17.4", "Unexpected minimum OS"
+          assert set(info["UIDeviceFamily"]) == {1, 2}, "Expected iPhone and iPad support"
+          assert info["CFBundleSupportedPlatforms"] == ["iPhoneOS"], "Expected a device IPA"
+          print("Verified Tomverse device IPA and CI build number before upload")
+          PY
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - .tmp/codemagic/prebuild.json
+      - .tmp/codemagic/xcodebuild-testflight.log
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Upload for internal testing; adding the owner to a group is a separate
+        # account action. Internal-only builds cannot be released to customers.
+        submit_to_testflight: false
+        submit_to_app_store: false
