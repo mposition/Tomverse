@@ -160,7 +160,7 @@ const QA_RELEASE_MERGE_LANE_VARIABLES = [
   "QA_RELEASE_CONTROL_REVISION",
 ] as const;
 
-/** The release train: the lane's App and app secret, its own switch and slots. */
+/** The release train: the lane's App and app secret, its own switches and slots. */
 const QA_RELEASE_TRAIN_VARIABLES = [
   "QA_RELEASE_MERGE_LANE_SECRET",
   "QA_RELEASE_MERGE_LANE_APP_ID",
@@ -168,6 +168,7 @@ const QA_RELEASE_TRAIN_VARIABLES = [
   "QA_RELEASE_CONTROL_REVISION",
   "QA_RELEASE_TRAIN_ENABLED",
   "QA_RELEASE_TRAIN_SLOTS",
+  "QA_RELEASE_TRAIN_AUTO_PREDECESSORS",
   // "git": the deploy image has none, and the train clones and cherry-picks.
   "RAILPACK_DEPLOY_APT_PACKAGES",
 ] as const;

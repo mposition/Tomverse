@@ -205,7 +205,7 @@ export function createQaReleaseTrainGitPorts(input: {
     seats: number,
     aboard: ReadonlySet<number>,
     elsewhere: ReadonlySet<number>,
-  ): Promise<{ result: "applied"; boarded: QaReleaseTrainCandidate[] } | { result: "empty" | "workflows" } | { result: "conflict"; files: string[] }> => {
+  ): Promise<{ result: "applied"; boarded: QaReleaseTrainCandidate[] } | { result: "empty" } | { result: "workflows" } | { result: "conflict"; files: string[] }> => {
     const first = await pickOnce(pull.mergeCommitSha);
     if (first.result !== "conflict") return first.result === "applied" ? { result: "applied", boarded: [] } : { result: first.result };
     if (input.autoPredecessors === false || depth >= BOARDING_DEPTH) return first;
