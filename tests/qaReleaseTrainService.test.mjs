@@ -44,8 +44,8 @@ function ports(overrides = {}) {
       },
     },
     git: {
-      assemble: async (branch, list, capacity) => {
-        note("assemble", { branch, numbers: list.map((c) => c.number), capacity });
+      assemble: async (branch, list, capacity, onOpenTrains = []) => {
+        note("assemble", { branch, numbers: list.map((c) => c.number), capacity, ...(onOpenTrains.length > 0 ? { onOpenTrains } : {}) });
         const outcomes = overrides.outcomes ?? {};
         return { mainSha: MAIN, headSha: HEAD, picks: list.map((c) => ({ number: c.number, outcome: outcomes[c.number] ?? "included" })) };
       },
@@ -325,6 +325,8 @@ test("an emergency leaves out what an open train already carries, and says so", 
   const outcome = await runQaReleaseTrainRound(env(), p, at);
   assert.equal(outcome.train, "opened");
   assert.deepEqual(calls.find(([n]) => n === "assemble")[1].numbers, [12]);
+  // What open trains carry is never boarded as a predecessor either.
+  assert.deepEqual(calls.find(([n]) => n === "assemble")[1].onOpenTrains, [10]);
   assert.deepEqual(calls.find(([n]) => n === "report")[1].picks, [
     { number: 12, outcome: "included" },
     { number: 10, outcome: "in_open_train" },
