@@ -15,6 +15,8 @@ import {
   type CiAdmissionState,
   type CiRunnerOwner,
 } from "@/lib/ciAdmissionCore";
+import { readCiFixView } from "@/lib/ciAdmissionFix";
+import { CI_FIX_AGAIN_LABEL, ciFixLabelsToClear, emptyCiFixView } from "@/lib/ciAdmissionFixCore";
 import { ciAdmissionGithubConfig, createCiAdmissionGithub, type CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
 import { createCoalescedRunner } from "@/lib/ciAdmissionWebhookCore";
 import { prisma } from "@/lib/prisma";
@@ -233,6 +235,14 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
       extra.push({ at, kind: "failed", number, shadow: false, detail: `${action.kind}:${code(error)}`.slice(0, 120) });
       if (action.kind === "release") failedReleases.add(number);
     }
+  }
+
+  // The auto-fix's "try again" labels whose retry the review server has
+  // reported. Telemetry-driven housekeeping: a failure only leaves a label.
+  if (github.setLabel) {
+    const view = await readCiFixView(prisma, now()).catch(() => emptyCiFixView());
+    const done = ciFixLabelsToClear(openPulls, view);
+    for (const number of done) await github.setLabel(number, CI_FIX_AGAIN_LABEL, false).catch(() => undefined);
   }
 
   // 4. What happened, on top of the state as it is now.

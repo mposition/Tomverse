@@ -417,13 +417,18 @@ Agent office "독립 검토실"에서 그것을 봅니다.
   때문입니다. unit 파일도 같은 이유로 GitHub에서 받습니다.
 - **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, 계정 quota
   (`quota check`와 같은 probe가 마지막으로 읽은 상태 하나와 남은 양 하나 — 퍼센트, credits 또는
-  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
-  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, probe가 읽은
+  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown),
+  그리고 CI 자동 수정 ledger가 있을 때 최근 시도 12건(PR 번호, head 커밋 id, 종류, 결과, 모델의 결과 코드
+  — 모두 정해진 목록의 이름)과 최근 1시간 수정안 수.
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, 모델의 답·로그·patch, probe가 읽은
   계정 정보. daemon이 그런
   값을 snapshot에 넣지 않고, sender는 review 설정·job·reviewer 원문을 읽지 않으며 파일을
   필드 단위로 다시 만들어 그 밖의 것은 버리고, 앱도 모르는 필드를 거절합니다.
-- **`review` 계정이 할 수 있는 최악은 검토실 숫자를 틀리게 보이는 것입니다**(snapshot 파일을
-  고쳐 쓰는 것). 앱에서 이 숫자로 결정되는 것은 없습니다.
+- **`review` 계정이 할 수 있는 최악은 검토실 숫자와 CI 입장 화면의 자동 수정 상태를 틀리게 보이는 것입니다**
+  (snapshot 파일을 고쳐 쓰는 것). 앱에서 이 값으로 결정되는 것은 "다시 분석" 버튼을 보일지와, 입장 라운드가
+  `ci:fix-again` 라벨을 뗄지뿐입니다. 다시 시도할지는 이 서버가 자기 ledger로 정합니다.
+- **배포 순서**: 앱이 `ciFix` 필드를 받는 버전이 먼저 배포되어야 합니다. 그 전의 앱은 모르는 필드를
+  거절하므로, sender를 먼저 바꾸면 그동안 상태 보고 전체가 400으로 거절됩니다.
 - **검토에 영향을 주지 않습니다.** daemon은 작은 파일 하나를 쓸 뿐 네트워크를 기다리지
   않고, 쓰기에 실패해도 검토는 그대로 진행합니다. 로그는 결과가 바뀔 때만 한 줄입니다.
 - **daemon이 멈추면 sender도 조용해집니다.** snapshot이 3분보다 오래되면(1분 쓰기 세 번
@@ -528,6 +533,12 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
   60,000자 안에서 job마다 몫을 나눕니다.
 - **모델의 답.** 모델의 마지막 답이 서버 로그(`ci-fix: #PR model said: ...`)와 ledger의 `answer`에 남습니다.
   실행이 실패하면 stderr도 `stderr`에 남습니다. `no_change`의 이유는 여기서 봅니다.
+  답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
+  Admin › QA·릴리스 › CI 입장 화면에 PR별로 보입니다(2026-10-27). 모델의 문장 자체는 앱으로 가지 않습니다.
+- **다시 분석.** 같은 head는 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
+  PR에 `ci:fix-again` 라벨을 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
+  고치지 못함·분석 실패·검사 거부만 대상이고, 시도 2회 소진은 대상이 아닙니다. 입장 라운드는 보고에서
+  재시도를 확인하면 라벨을 뗍니다.
 - **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
   만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
   - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.

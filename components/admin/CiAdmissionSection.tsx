@@ -18,8 +18,10 @@ import {
   type CiAdmissionState,
   type CiRunnerOwner,
 } from "@/lib/ciAdmissionCore";
+import { ciFixRetryable, ciFixState, type CiFixState, type CiFixView } from "@/lib/ciAdmissionFixCore";
 
-export type CiAdmissionView = { mode: CiAdmissionMode; configured: boolean; state: CiAdmissionState };
+/** `fix` is absent from a server older than the auto-fix view. */
+export type CiAdmissionView = { mode: CiAdmissionMode; configured: boolean; state: CiAdmissionState; fix?: CiFixView };
 type View = CiAdmissionView;
 
 const RUNNER_REFRESH_MS = 20_000;
@@ -96,6 +98,15 @@ const clock = (iso: string) => {
 };
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
+const FIX_BADGE: Record<CiFixState, string> = {
+  analysing: "bg-amber-300/15 text-amber-300",
+  sent: "bg-sky-400/15 text-sky-300",
+  pushed: "bg-emerald-400/15 text-emerald-400",
+  not_fixed: "bg-rose-400/15 text-rose-300",
+  failed: "bg-rose-400/15 text-rose-300",
+  refused: "bg-rose-400/15 text-rose-300",
+  exhausted: "bg-rose-400/15 text-rose-300",
+};
 const COMMIT_URL = "https://github.com/mposition/Tomverse/commit/";
 const PAGE_PATH = "/admin/qa-release?tab=ci-admission";
 
@@ -187,6 +198,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const [announcement, setAnnouncement] = useState("");
   const [drag, setDrag] = useState<Drag | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // "Analyse again" asked in this page: the report shows the retry only once the server starts it.
+  const [fixAsked, setFixAsked] = useState<ReadonlySet<number>>(() => new Set());
   const runnerUsage = useRunnerUsage();
   const listRef = useRef<HTMLOListElement>(null);
   const rowRefs = useRef(new Map<number, HTMLLIElement>());
@@ -296,6 +309,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         code?: unknown;
         round?: { outcome?: string; failure?: string };
         stop?: { outcome?: string; cancelled?: number; failure?: string | null };
+        fixAgain?: { outcome?: string; failure?: string };
       };
       if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
         restore();
@@ -323,7 +337,17 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       // could not run. Silent before, which hid a missing App installation.
       const number = typeof body.number === "number" ? body.number : 0;
       const stop = payload.stop;
-      if (stop?.outcome === "stopped") {
+      const fixAgain = payload.fixAgain;
+      if (fixAgain?.outcome === "requested") {
+        setFixAsked((asked) => new Set(asked).add(number));
+        setNotice(fill(m.fixAgainRequested, { number }));
+      } else if (fixAgain?.outcome === "not_configured") {
+        setNotice(m.fixAgainNotConfigured);
+      } else if (fixAgain?.outcome === "failed") {
+        setNotice(fill(m.fixAgainFailed, { number, failure: fixAgain.failure ?? "unknown" }));
+      } else if (fixAgain) {
+        setNotice(fill(m.fixAgainNotRetryable, { number }));
+      } else if (stop?.outcome === "stopped") {
         setNotice(
           stop.failure
             ? fill(m.stoppedPartly, { number, failure: stop.failure })
@@ -547,6 +571,52 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
     );
   };
 
+  // The CI auto-fix's try on each pull request's current head (lib/ciAdmissionFixCore.ts).
+  const fix = view.fix;
+  const fixPanel = (entry: CiAdmissionQueueEntry) => {
+    const found = fix?.byPull[entry.number];
+    const state = ciFixState(found, entry.headSha);
+    if (!found || !state) return null;
+    const retry = canWrite && ciFixRetryable(found, entry.headSha) && !fixAsked.has(entry.number);
+    // A pushed fix moved the head on: the try's reason no longer describes the new head.
+    const reason = state === "not_fixed" || state === "refused" || state === "sent" ? m.fixReason[found.reason ?? "none"] : null;
+    const toCommits = state === "pushed" || state === "sent";
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-zinc-800 pt-2 pl-[3.25rem]" data-testid={`ci-admission-fix-${entry.number}`}>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${FIX_BADGE[state]}`} data-testid={`ci-admission-fix-state-${entry.number}`}>
+          {m.fixKind[found.kind]} · {m.fixState[state]}
+        </span>
+        {reason ? <span className="min-w-0 text-xs text-zinc-300">{reason}</span> : null}
+        <span className="font-mono text-[11px] text-zinc-500">
+          {fill(m.fixAt, { minutes: minutes(found.at) })}
+          {found.retried ? ` · ${m.fixRetried}` : ""}
+        </span>
+        <span className="ml-auto flex items-center gap-2">
+          <a
+            className="text-xs font-medium text-zinc-400 hover:text-zinc-100"
+            href={`${PULL_URL}${entry.number}/${toCommits ? "commits" : "checks"}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {toCommits ? m.fixCommits : m.fixChecks} ↗
+          </a>
+          {retry ? (
+            <button
+              type="button"
+              className={button}
+              disabled={busy || drag !== null}
+              aria-label={fill(m.fixAgainLabel, { number: entry.number })}
+              onClick={() => void send({ action: "fix_again", number: entry.number })}
+              data-testid={`ci-admission-fix-again-${entry.number}`}
+            >
+              {m.fixAgain}
+            </button>
+          ) : null}
+        </span>
+      </div>
+    );
+  };
+
   const draggedEntry = drag ? byNumber.get(drag.number) : undefined;
 
   return (
@@ -707,6 +777,18 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           <span className="font-mono text-sm text-zinc-400">{state.queue.length}</span>
           {state.queue.length > 1 ? <span className="ml-auto text-xs text-zinc-500">{m.hint}</span> : null}
         </div>
+        {fix ? (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-zinc-800/40 px-3 py-2 text-xs" data-testid="ci-admission-fix-summary" title={m.fixNote}>
+            <span className="font-medium text-zinc-100">{m.fixTitle}</span>
+            <span className={fix.connected ? "text-emerald-400" : "text-rose-300"}>
+              {fix.connected && fix.receivedAt ? fill(m.fixConnected, { minutes: minutes(fix.receivedAt) }) : m.fixDisconnected}
+            </span>
+            <span className="text-zinc-300">
+              {fix.claude?.remainingPercent != null ? fill(m.fixQuota, { percent: Math.round(fix.claude.remainingPercent) }) : m.fixQuotaUnknown}
+            </span>
+            {fix.queuedLastHour !== null ? <span className="text-zinc-300">{fill(m.fixQueued, { count: fix.queuedLastHour })}</span> : null}
+          </div>
+        ) : null}
         {state.queue.length === 0 ? (
           <p className="text-sm text-zinc-400">{m.empty}</p>
         ) : (
@@ -737,7 +819,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                       if (node) rowRefs.current.set(number, node);
                       else rowRefs.current.delete(number);
                     }}
-                    className={`flex items-center gap-3 rounded-xl border bg-zinc-950 p-3 transition-shadow ${
+                    className={`flex flex-col gap-2 rounded-xl border bg-zinc-950 p-3 transition-shadow ${
                       isDragged
                         ? "border-blue-400 shadow-[0_12px_28px_rgba(0,0,0,0.55)] ring-1 ring-blue-400"
                         : entry.status === "running" || entry.status === "next"
@@ -746,54 +828,57 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                     }`}
                     data-testid={`ci-admission-row-${number}`}
                   >
-                    <button
-                      type="button"
-                      ref={(node) => {
-                        if (node) handleRefs.current.set(number, node);
-                        else handleRefs.current.delete(number);
-                      }}
-                      className="flex h-8 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-zinc-500 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:cursor-grabbing"
-                      aria-label={fill(m.handle, { number })}
-                      aria-pressed={isDragged}
-                      disabled={!canWrite || (busy && !isDragged)}
-                      onPointerDown={(event) => onPointerDown(event, number)}
-                      onKeyDown={(event) => onHandleKey(event, number)}
-                      onBlur={() => {
-                        // Moving a row moves its handle in the DOM, which blurs it for
-                        // a moment; only a focus that really went elsewhere cancels.
-                        requestAnimationFrame(() => {
-                          const current = dragRef.current;
-                          if (current?.by !== "keyboard" || current.number !== number) return;
-                          if (document.activeElement === handleRefs.current.get(number)) return;
-                          setDrag(null);
-                          setAnnouncement(m.cancelled);
-                        });
-                      }}
-                      data-testid={`ci-admission-handle-${number}`}
-                    >
-                      <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                        {[5, 10, 15].flatMap((cy) => [7, 13].map((cx) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.5" />))}
-                      </svg>
-                    </button>
-                    {rowBody(entry, index + 1, false)}
-                    {index > 0 ? (
+                    <div className="flex items-center gap-3">
                       <button
                         type="button"
-                        className={button}
-                        disabled={!canWrite || busy || drag !== null}
-                        onClick={() => void send({ action: "move_top", number })}
+                        ref={(node) => {
+                          if (node) handleRefs.current.set(number, node);
+                          else handleRefs.current.delete(number);
+                        }}
+                        className="flex h-8 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-zinc-500 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:cursor-grabbing"
+                        aria-label={fill(m.handle, { number })}
+                        aria-pressed={isDragged}
+                        disabled={!canWrite || (busy && !isDragged)}
+                        onPointerDown={(event) => onPointerDown(event, number)}
+                        onKeyDown={(event) => onHandleKey(event, number)}
+                        onBlur={() => {
+                          // Moving a row moves its handle in the DOM, which blurs it for
+                          // a moment; only a focus that really went elsewhere cancels.
+                          requestAnimationFrame(() => {
+                            const current = dragRef.current;
+                            if (current?.by !== "keyboard" || current.number !== number) return;
+                            if (document.activeElement === handleRefs.current.get(number)) return;
+                            setDrag(null);
+                            setAnnouncement(m.cancelled);
+                          });
+                        }}
+                        data-testid={`ci-admission-handle-${number}`}
                       >
-                        {m.moveTop}
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                          {[5, 10, 15].flatMap((cy) => [7, 13].map((cx) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.5" />))}
+                        </svg>
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="min-h-8 rounded-lg px-2 text-[13px] font-medium text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
-                      disabled={!canWrite || busy || drag !== null}
-                      onClick={() => void send({ action: "move_bottom", number })}
-                    >
-                      {m.remove}
-                    </button>
+                      {rowBody(entry, index + 1, false)}
+                      {index > 0 ? (
+                        <button
+                          type="button"
+                          className={button}
+                          disabled={!canWrite || busy || drag !== null}
+                          onClick={() => void send({ action: "move_top", number })}
+                        >
+                          {m.moveTop}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="min-h-8 rounded-lg px-2 text-[13px] font-medium text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
+                        disabled={!canWrite || busy || drag !== null}
+                        onClick={() => void send({ action: "move_bottom", number })}
+                      >
+                        {m.remove}
+                      </button>
+                    </div>
+                    {fixPanel(entry)}
                   </li>
                 );
               })}

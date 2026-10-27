@@ -41,6 +41,14 @@ const MAX_COUNT = 100_000;
 const QUOTA_STATES = ["available", "exhausted", "unknown", "disabled"];
 const QUOTA_UNITS = ["percent", "credits", "usd"];
 const MAX_QUOTA_AMOUNT = 1_000_000_000;
+// The CI auto-fix's tries (lib/ci-fix.mjs ciFixReport), the app's limits.
+const CI_FIX_KINDS = ["ci", "conflict"];
+const CI_FIX_OUTCOMES = ["started", "queued", "no_change", "model_failed", "model_timeout", "patch_refused", "patch_too_large",
+  "attempts_exhausted", "error", "unknown"];
+const CI_FIX_REASONS = ["fixed", "transient", "outside_rules", "not_found"];
+const CI_FIX_MAX_ENTRIES = 12;
+const CI_FIX_MAX_AGE_SECONDS = 30 * 86_400;
+const SHA = /^[0-9a-f]{40}$/;
 
 const isCount = (value) => Number.isInteger(value) && value >= 0;
 
@@ -63,6 +71,28 @@ function normaliseQuota(quota) {
   if (remaining > (unit === "percent" ? 100 : MAX_QUOTA_AMOUNT)) return null;
   return { state, remaining, unit, ...extra };
 }
+/**
+ * The auto-fix part rebuilt field by field, or undefined when absent or not
+ * one: a bad part is dropped, never the reviewers' report with it. Only
+ * numbers, commit ids and names from fixed lists pass.
+ */
+export function normaliseCiFix(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { queuedLastHour, entries } = value;
+  if (!isCount(queuedLastHour) || !Array.isArray(entries) || entries.length > CI_FIX_MAX_ENTRIES) return undefined;
+  const rebuilt = [];
+  for (const entry of entries) {
+    if (entry === null || typeof entry !== "object") return undefined;
+    const { pr, head, kind, outcome, reason, retried, ageSeconds } = entry;
+    if (!Number.isInteger(pr) || pr < 1 || pr > 9_999_999 || !SHA.test(head ?? "")) return undefined;
+    if (!CI_FIX_KINDS.includes(kind) || !CI_FIX_OUTCOMES.includes(outcome)) return undefined;
+    if (reason !== null && !CI_FIX_REASONS.includes(reason)) return undefined;
+    if (typeof retried !== "boolean" || !isCount(ageSeconds) || ageSeconds > CI_FIX_MAX_AGE_SECONDS) return undefined;
+    rebuilt.push({ pr, head, kind, outcome, reason, retried, ageSeconds });
+  }
+  return { queuedLastHour: Math.min(queuedLastHour, MAX_COUNT), entries: rebuilt };
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -73,6 +103,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export function normaliseStatusSnapshot(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const { schemaVersion, draining, pendingJobs, providers, last24h } = value;
+  const ciFix = normaliseCiFix(value.ciFix);
   if (schemaVersion !== 1 || typeof draining !== "boolean" || !isCount(pendingJobs)) return null;
   if (!Array.isArray(providers) || providers.length > MAX_PROVIDERS) return null;
   if (last24h === null || typeof last24h !== "object" || !["accept", "reject", "unknown"].every((key) => isCount(last24h[key]))) {
@@ -101,6 +132,7 @@ export function normaliseStatusSnapshot(value) {
       reject: Math.min(last24h.reject, MAX_COUNT),
       unknown: Math.min(last24h.unknown, MAX_COUNT),
     },
+    ...(ciFix ? { ciFix } : {}),
   };
 }
 

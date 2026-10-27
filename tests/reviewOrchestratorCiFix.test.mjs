@@ -16,10 +16,13 @@ import {
   CI_FIX_BRANCH,
   CI_FIX_DEPENDABOT_AUTHOR,
   CI_FIX_DEPENDABOT_BRANCH,
+  CI_FIX_AGAIN_LABEL,
   CI_FIX_ANSWER_CHARS,
+  CI_FIX_REPORT_ENTRIES,
   CI_FIX_MAX_PATCH_CHARS,
   CI_FIX_MAX_QUEUED_PER_HOUR,
   answerLine,
+  ciFixReport,
   autoFixAttempts,
   ciFixPrompt,
   deniedPaths,
@@ -32,6 +35,7 @@ import {
   pruneOutbox,
   readLedger,
   readTail,
+  resultCode,
   runCiFix,
   runClaude,
   servedPulls,
@@ -728,4 +732,73 @@ test("a failed model run records its answer and stderr", async () => {
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+test("the model ends with a result code from a fixed list; anything else is no code", () => {
+  assert.match(ciFixPrompt({ workflows: ["PR Fast Gate"], logFile: "/w/ci.log" }), /RESULT: fixed[\s\S]*RESULT: transient[\s\S]*RESULT: outside_rules[\s\S]*RESULT: not_found/);
+  assert.equal(resultCode("The test waits on a runner that timed out.\nRESULT: transient"), "transient");
+  assert.equal(resultCode("RESULT: fixed ... on second thought\nRESULT: not_found"), "not_found", "the last line wins");
+  assert.equal(resultCode("RESULT: rm -rf"), null);
+  assert.equal(resultCode(""), null);
+});
+
+test("an operator's label tries a head once more, and only once", async () => {
+  const f = passFixture();
+  try {
+    let labels = [];
+    const github = {
+      ...f.github,
+      async json(path) {
+        if (path.startsWith("/pulls?")) return [pull(41, "claude/to-develop/broken", f.sha, { labels })];
+        return f.github.json(path);
+      },
+    };
+    let calls = 0;
+    const claude = () => {
+      calls += 1;
+      return { ok: true, timedOut: false, tail: "The runner lost its connection.\nRESULT: transient" };
+    };
+    const pass = (at) => runCiFix({ ...f, github, model: "sonnet", minRemainingPercent: 0,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => at, log: () => {} });
+    const ledgerPath = join(f.config.stateDir, "ci-fix", "ledger.json");
+
+    assert.equal((await pass(1000)).outcome, "no_change");
+    assert.deepEqual(
+      (({ kind, outcome, reason, retried }) => ({ kind, outcome, reason, retried }))(readLedger(ledgerPath)[f.sha]),
+      { kind: "ci", outcome: "no_change", reason: "transient", retried: undefined },
+    );
+    assert.equal((await pass(2000)).outcome, "nothing_to_fix", "no label, no second try");
+
+    labels = [{ name: CI_FIX_AGAIN_LABEL }];
+    assert.equal((await pass(3000)).outcome, "no_change");
+    assert.equal(calls, 2);
+    const retried = readLedger(ledgerPath)[f.sha];
+    assert.equal(retried.retried, true);
+    assert.equal(retried.at, 3000, "the retry starts the entry afresh");
+
+    assert.equal((await pass(4000)).outcome, "nothing_to_fix", "the label is not a standing licence");
+    assert.equal(calls, 2);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("the report carries numbers, commit ids and fixed names only, newest first", () => {
+  const ledger = {
+    [SHA_A]: { pr: 41, kind: "ci", outcome: "no_change", reason: "not_found", answer: "secret-ish model words", at: 1000 },
+    [SHA_B]: { pr: 42, outcome: "queued", queuedAt: 59_000, reason: "fixed", retried: true, at: 2000 },
+    "not-a-sha": { pr: 43, outcome: "queued", at: 3000 },
+    ["c".repeat(40)]: { pr: "44", outcome: "queued", at: 3000 },
+    ["d".repeat(40)]: { pr: 45, outcome: "started", reason: "rm -rf", at: 1500 },
+  };
+  const report = ciFixReport(ledger, 61_000);
+  assert.equal(report.queuedLastHour, 1);
+  assert.deepEqual(report.entries, [
+    { pr: 42, head: SHA_B, kind: "ci", outcome: "queued", reason: "fixed", retried: true, ageSeconds: 59 },
+    { pr: 45, head: "d".repeat(40), kind: "ci", outcome: "started", reason: null, retried: false, ageSeconds: 60 },
+    { pr: 41, head: SHA_A, kind: "ci", outcome: "no_change", reason: "not_found", retried: false, ageSeconds: 60 },
+  ]);
+  assert.doesNotMatch(JSON.stringify(report), /secret-ish/);
+  const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [i.toString(16).padStart(40, "0"), { pr: i + 1, outcome: "no_change", at: i }]));
+  assert.equal(ciFixReport(many, 100).entries.length, CI_FIX_REPORT_ENTRIES);
 });

@@ -162,6 +162,11 @@ export type CiAdmissionGithub = {
   cancelRuns(pull: CiAdmissionPull, options?: { force?: boolean }): Promise<number>;
   /** Who holds or waits for a GitHub-hosted runner right now, repository-wide: each pull request, deploy and other workflow. */
   runnerUsage(): Promise<CiRunnerOwner[]>;
+  /**
+   * Puts a label on the pull request or takes it off (absent already is
+   * fine): the CI auto-fix's "try again" request (CI_FIX_AGAIN_LABEL).
+   */
+  setLabel?(number: number, name: string, present: boolean): Promise<void>;
   /** The `CI admission` commit status on the pull request's head. */
   setStatus(sha: string, state: "pending" | "success", description: string): Promise<void>;
   /**
@@ -214,7 +219,7 @@ export function updateBranchRefusal(status: number, body: () => unknown): string
 }
 
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
-  const call = async (method: "GET" | "POST" | "PUT", url: string, auth: string, body?: Json) => {
+  const call = async (method: "GET" | "POST" | "PUT" | "DELETE", url: string, auth: string, body?: Json) => {
     const response = await fetch(url, {
       method,
       headers: {
@@ -398,6 +403,14 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       const answer = await call("GET", `${REPO}${path}`, await installationToken(permissions));
       if (answer.status !== 200) throw new Error(`github_${answer.status}`);
       return answer.json();
+    },
+    async setLabel(number, name, present) {
+      if (!/^[a-z0-9:-]{1,50}$/.test(name)) throw new Error("github_label_name");
+      const token = await installationToken({ pull_requests: "write", metadata: "read" });
+      const answer = present
+        ? await call("POST", `${REPO}/issues/${number}/labels`, token, { labels: [name] })
+        : await call("DELETE", `${REPO}/issues/${number}/labels/${encodeURIComponent(name)}`, token);
+      if (answer.status !== 200 && !(answer.status === 404 && !present)) throw new Error(`github_label_${answer.status}`);
     },
     async updateBranch(pull) {
       // Only this write needs Contents write; every other token stays without it.
