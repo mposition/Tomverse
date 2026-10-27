@@ -1,35 +1,6 @@
 import { scryptSync, timingSafeEqual } from "node:crypto";
-import { z } from "zod";
-
-export const MOBILE_STORE_REVIEW_STATUS = "mobile_store_review";
-export const isMobileStoreReviewAddress = (email: unknown): email is string =>
-  typeof email === "string" && /^play-review[-+][a-z0-9-]+@tomverse\.app$/i.test(email);
-
-const credentialSchema = z.object({
-  submissionId: z.string().min(8).max(120),
-  userId: z.string().min(1).max(120),
-  email: z.string().email().transform(value => value.trim().toLowerCase()).refine(isMobileStoreReviewAddress),
-  appId: z.literal("app.tomverse.shell"),
-  buildNumber: z.number().int().positive(),
-  plan: z.enum(["Free", "Max"]).default("Free"),
-  state: z.enum(["prepared", "submitted", "in_review", "unresolved"]),
-  validUntil: z.string().datetime(),
-  salt: z.string().regex(/^[a-f0-9]{64}$/),
-  codeHash: z.string().regex(/^[a-f0-9]{64}$/),
-}).strict();
-export type MobileStoreReviewCredential = z.infer<typeof credentialSchema>;
-
-/** One operator-managed, submission-scoped credential; disabled by default. */
-export function readMobileStoreReviewCredential(env = process.env, now = Date.now()): MobileStoreReviewCredential | null {
-  if (env.MOBILE_STORE_REVIEW_ENABLED !== "true") return null;
-  try {
-    const parsed = credentialSchema.safeParse(JSON.parse(env.MOBILE_STORE_REVIEW_CREDENTIAL_JSON || "null"));
-    if (!parsed.success) return null;
-    const expiry = Date.parse(parsed.data.validUntil);
-    if (expiry <= now || expiry > now + 31 * 86_400_000) return null;
-    return parsed.data;
-  } catch { return null; }
-}
+import type { MobileStoreReviewCredential } from "@/lib/mobileAuthKeyring";
+export { MOBILE_STORE_REVIEW_STATUS, isMobileStoreReviewAddress, mobileStoreReviewSessionAllowed, readMobileStoreReviewCredential, type MobileStoreReviewCredential } from "@/lib/mobileAuthKeyring";
 
 export function hashMobileStoreReviewCode(credential: Pick<MobileStoreReviewCredential, "email" | "submissionId" | "appId" | "buildNumber" | "salt"> & { plan?: "Free" | "Max" }, code: string) {
   return scryptSync(code, [credential.salt, credential.email, credential.submissionId, credential.appId, credential.buildNumber, credential.plan ?? "Free"].join(":"), 32).toString("hex");
@@ -41,11 +12,3 @@ export function matchesMobileStoreReviewCode(credential: MobileStoreReviewCreden
   return timingSafeEqual(Buffer.from(hashMobileStoreReviewCode(credential, input.code), "hex"), Buffer.from(credential.codeHash, "hex"));
 }
 
-/** Checked again for existing access/refresh sessions, including cached snapshots. */
-export function mobileStoreReviewSessionAllowed(user: { id: string; email?: string | null; plan?: unknown; subscriptionStatus?: string | null; periodEndMs?: number | null }, env = process.env, now = Date.now()) {
-  if (!isMobileStoreReviewAddress(user.email)) return true;
-  const credential = readMobileStoreReviewCredential(env, now);
-  if (!credential || credential.userId !== user.id || credential.email !== user.email.toLowerCase() || credential.plan !== user.plan) return false;
-  return credential.plan === "Free" || (user.subscriptionStatus === MOBILE_STORE_REVIEW_STATUS &&
-    typeof user.periodEndMs === "number" && Number.isFinite(user.periodEndMs) && user.periodEndMs > now);
-}

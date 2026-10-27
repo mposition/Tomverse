@@ -48,7 +48,7 @@ import {
 } from "@/lib/mobileSessionSnapshotCache";
 import type { MobileAccessTokenIdentity } from "@/lib/mobileAccessTokenCore";
 import { prisma } from "@/lib/prisma";
-import { mobileStoreReviewSessionAllowed } from "@/lib/mobileStoreReviewCore";
+import { mobileStoreReviewSessionAllowed } from "@/lib/mobileAuthKeyring";
 
 const TTL_MS = MOBILE_REVOCATION_OBSERVATION_BOUND_SECONDS * 1000;
 const IDLE_WINDOW_MS = MOBILE_REFRESH_IDLE_SECONDS * 1000;

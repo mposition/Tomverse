@@ -53,7 +53,7 @@ import {
 import { invalidateMobileSessionSnapshots } from "@/lib/mobileSessionAuthorization";
 import { prisma } from "@/lib/prisma";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
-import { mobileStoreReviewSessionAllowed } from "@/lib/mobileStoreReviewCore";
+import { mobileStoreReviewSessionAllowed } from "@/lib/mobileAuthKeyring";
 
 const IDLE_WINDOW_MS = MOBILE_REFRESH_IDLE_SECONDS * 1000;
 const ABSOLUTE_WINDOW_MS = MOBILE_REFRESH_ABSOLUTE_SECONDS * 1000;

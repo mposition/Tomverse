@@ -14,7 +14,7 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { resolveManualPlanPeriodEnd } from "@/lib/adminPlanAdjustCore";
 import { ADMIN_PLAN_CHANGED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
-import { isMobileStoreReviewAddress, MOBILE_STORE_REVIEW_STATUS } from "@/lib/mobileStoreReviewCore";
+import { isMobileStoreReviewAddress, MOBILE_STORE_REVIEW_STATUS } from "@/lib/mobileAuthKeyring";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   apiSecurityResponse,
