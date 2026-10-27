@@ -1332,11 +1332,11 @@ export const RAW_SQL_ALLOWLIST = [
   ...["AmuxWorkerRegistryEvent", "AmuxWorkerCapabilityEvent", "AdminAuditLog"].map((table) => ({
     path: "prisma/migrations/20261027100000_amux_cli_models_and_worker_cli/migration.sql",
     table,
-    tableMentions: 1,
+    tableMentions: table === "AdminAuditLog" ? 2 : 1,
     writeVerbs: 18,
     reason:
       (table === "AdminAuditLog"
-        ? "The one mention is the new CLI model link table's foreign key to its audit row (ON DELETE RESTRICT)."
+        ? "Its two mentions are the new CLI model link table's foreign key to its audit row (ON DELETE RESTRICT) and the link guard's one SELECT EXISTS read of the person's audit row of the same transaction."
         : `The one mention is the ALTER TABLE that replaces ${table}'s worker name CHECK with the free grammar (owner decision 2026-10-27: the CLI is chosen at registration, not read from the name).`) +
       " The migration only replaces five name CHECKs, drops the registry's name/class CHECK and creates the CLI model tables with their append-only guard; its write verbs are DROP/ALTER clauses, the guard's TG_OP comparison and words of comments. It writes no row.",
   })),
@@ -3430,6 +3430,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "The same three EXECUTE reads in the replaced capability event guard (owner decision 2026-10-26 widens only its class check): the worker's newest registry event, its newest capability revision and one SELECT EXISTS on AdminAuditLog, each over a TG_TABLE_SCHEMA-qualified constant name quoted with %I and bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261027100000_amux_cli_models_and_worker_cli/migration.sql",
+    count: 1,
+    reason:
+      "One EXECUTE read in the CLI model link guard (owner decision 2026-10-27): a SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction naming this link, over a TG_TABLE_SCHEMA-qualified constant name quoted with %I because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. It reads and never writes.",
   },
   {
     path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",

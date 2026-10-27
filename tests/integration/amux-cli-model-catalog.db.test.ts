@@ -8,6 +8,7 @@ import {
   recordAmuxCliModelLinkByOwner,
   recordAmuxCliModelRefresh,
 } from "@/lib/amux/cliModelCatalogStore";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { prisma } from "@/lib/prisma";
 
@@ -113,7 +114,53 @@ test("a link carries its audit row, the newest wins, and none is ever changed or
   // A link needs an audit row that exists.
   await rejectsWith(prisma.$executeRaw`
     INSERT INTO "AmuxCliModelLinkEvent" ("id", "cli", "cliModel", "pricedModelId", "actorUserId", "auditLogId")
-    VALUES (${randomUUID()}, 'cursor', 'x', NULL, 'someone', ${randomUUID()})`, /AmuxCliModelLinkEvent_auditLogId_fkey/);
+    VALUES (${randomUUID()}, 'cursor', 'x', NULL, 'someone', ${randomUUID()})`, /AMUX_CLI_MODEL_LINK_UNAUDITED|auditLogId_fkey/);
+});
+
+/** A raw link insert with the audit the test chooses, bypassing the store. */
+const insertLink = (options: {
+  audit?: Partial<{ action: string; targetType: string; targetId: string; actor: string; metadata: Record<string, unknown> }>;
+  row?: Partial<{ cliModel: string; pricedModelId: string | null; actor: string }>;
+  auditLogId?: string;
+} = {}) =>
+  prisma.$transaction(async (tx) => {
+    const id = randomUUID();
+    const actor = options.audit?.actor ?? "link-owner";
+    const row = { cliModel: "composer-2.5", pricedModelId: null as string | null, actor, ...options.row };
+    const auditLogId = options.auditLogId ?? await writeAdminAuditLog({
+      tx,
+      session: { user: { id: actor, email: "owner@example.test" }, expires: "2099-01-01T00:00:00.000Z" } as Session,
+      action: options.audit?.action ?? "amux.cli_model.link",
+      targetType: options.audit?.targetType ?? "AmuxCliModelLinkEvent",
+      targetId: options.audit?.targetId ?? id,
+      summary: "test",
+      metadata: options.audit?.metadata ?? { cli: "cursor", cli_model: row.cliModel, priced_model_id: row.pricedModelId },
+    });
+    await tx.$executeRaw`
+      INSERT INTO "AmuxCliModelLinkEvent" ("id", "cli", "cliModel", "pricedModelId", "actorUserId", "auditLogId")
+      VALUES (${id}, 'cursor', ${row.cliModel}, ${row.pricedModelId}, ${row.actor}, ${auditLogId})`;
+    return auditLogId;
+  });
+
+test("a link is accepted only with a person's audit of this very link, written in the same transaction", async () => {
+  // The audit the store writes is the only shape accepted.
+  const accepted = await insertLink();
+  const unaudited = /AMUX_CLI_MODEL_LINK_UNAUDITED/;
+  await rejectsWith(insertLink({ audit: { action: "amux.worker.capability" } }), unaudited);
+  await rejectsWith(insertLink({ audit: { targetType: "AmuxWorkerCapabilityEvent" } }), unaudited);
+  await rejectsWith(insertLink({ audit: { targetId: randomUUID() } }), unaudited);
+  await rejectsWith(insertLink({ row: { actor: "someone-else" } }), unaudited);
+  // A person's audit cannot claim a system actor (the writer refuses it), and
+  // the guard refuses a system actor's audit as well.
+  await rejectsWith(insertLink({ audit: { metadata: { cli: "cursor", cli_model: "composer-2.5", priced_model_id: null, systemActor: "x" } } }),
+    /systemActor|AMUX_CLI_MODEL_LINK_UNAUDITED/);
+  // The audit must name what the row links.
+  await rejectsWith(insertLink({ audit: { metadata: { cli: "cursor", cli_model: "other", priced_model_id: null } } }), unaudited);
+  await rejectsWith(insertLink({ audit: { metadata: { cli: "copilot", cli_model: "composer-2.5", priced_model_id: null } } }), unaudited);
+  await rejectsWith(insertLink({ audit: { metadata: { cli: "cursor", cli_model: "composer-2.5", priced_model_id: "kimi-k3" } } }), unaudited);
+  // An audit row from an earlier transaction cannot carry a new link.
+  await rejectsWith(insertLink({ auditLogId: accepted }), unaudited);
+  assert.equal(await prisma.amuxCliModelLinkEvent.count(), 1);
 });
 
 test("the cost catalog's one statement reads the registry and the newest links as JSON", async () => {

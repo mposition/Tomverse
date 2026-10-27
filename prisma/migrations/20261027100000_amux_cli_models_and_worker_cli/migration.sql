@@ -106,15 +106,30 @@ ALTER TABLE "AmuxCliModelLinkEvent"
   FOREIGN KEY ("auditLogId") REFERENCES "AdminAuditLog"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- A link is history: it is never changed or removed, and its time is the
--- database's.
+-- database's. It prices AMUX Tasks, so it is written only with a person's
+-- audit entry of the same transaction that names this very link: the action,
+-- the event as its target, the same actor, no system actor, and the CLI, the
+-- name and the priced model in its metadata. An unrelated or older audit row
+-- cannot carry a link.
 CREATE OR REPLACE FUNCTION "amux_cli_model_link_event_guard"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$
+DECLARE
+    audited BOOLEAN;
 BEGIN
     IF TG_OP <> 'INSERT' THEN
         RAISE EXCEPTION 'AMUX_CLI_MODEL_LINK_IMMUTABLE';
+    END IF;
+    EXECUTE pg_catalog.format(
+        'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE "id" = $1 AND "action" = $2 AND "targetType" = $3 AND "targetId" = $4 AND "actorUserId" = $5 AND NOT coalesce(pg_catalog.jsonb_typeof("metadata") = ''object'' AND "metadata" ? ''systemActor'', false) AND pg_catalog.jsonb_typeof("metadata") = ''object'' AND "metadata" ->> ''cli'' = $6 AND "metadata" ->> ''cli_model'' = $7 AND ("metadata" ->> ''priced_model_id'') IS NOT DISTINCT FROM $8 AND xmin = pg_catalog.pg_current_xact_id()::xid)',
+        TG_TABLE_SCHEMA,
+        'AdminAuditLog'
+    ) INTO audited USING NEW."auditLogId", 'amux.cli_model.link', 'AmuxCliModelLinkEvent', NEW."id", NEW."actorUserId",
+        NEW."cli", NEW."cliModel", NEW."pricedModelId";
+    IF audited IS DISTINCT FROM TRUE THEN
+        RAISE EXCEPTION 'AMUX_CLI_MODEL_LINK_UNAUDITED';
     END IF;
     NEW."createdAt" := pg_catalog.clock_timestamp();
     RETURN NEW;
