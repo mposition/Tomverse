@@ -175,7 +175,7 @@ export function readSent(path, now) {
     }
   })());
   const sent = {};
-  // Keys are requests (`<head>@<created>`); a bare head is a sender older than that.
+  // Keys are requests (head sha, then the created stamp); a bare head is a sender older than that.
   for (const [key, at] of Object.entries(value ?? {})) {
     if (SENT_KEY.test(key) && Number.isFinite(at) && now - at < SENT_KEEP_MS) sent[key] = at;
   }
