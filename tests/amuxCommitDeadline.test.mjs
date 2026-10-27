@@ -288,6 +288,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // guard body and three CHECK constraints admit the Codex, Copilot and Cursor
   // CLIs; no commit-deadline marker, classifier or deferred trigger changes.
   "20261026100000_amux_v22_all_providers",
+  // Version 52, owner decision 2026-10-27: the capability guard body drops
+  // the implementation ceiling on v22 implement; no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261027100000_amux_v22_routine_implement",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
