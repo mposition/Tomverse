@@ -38,6 +38,127 @@ async function expectHeaderControlsFit(page: Page) {
   }))).toEqual([]);
 }
 
+function storedComparison(models: string[]): QaConversationMessage[] {
+  return [
+    { id: "layout-question", role: "user", content: "Compare the stored answers." },
+    ...models.map((modelId, index) => ({ id: `layout-answer-${index}`, role: "assistant" as const, modelId, content: `Stored layout answer ${index + 1}.` })),
+  ];
+}
+
+async function expectEqualComparisonPanels(page: Page, count: number) {
+  const panels = page.getByTestId("desktop-model-panel");
+  await expect(panels).toHaveCount(count);
+  await expect.poll(() => panels.evaluateAll(nodes => {
+    const boxes = nodes.map(node => node.getBoundingClientRect());
+    return boxes.every((box, index) => box.width > 200 && box.height > 200 &&
+      Math.abs(box.width - boxes[0].width) < 1 && Math.abs(box.height - boxes[0].height) < 1 &&
+      Math.abs(box.y - boxes[0].y) < 1 && (index === 0 || box.x > boxes[index - 1].right));
+  })).toBe(true);
+}
+
+for (const [width, theme] of [[1280, "light"], [2048, "dark"]] as const) {
+  test(`Two Studio models use equal columns without a view switch at ${width}px ${theme}`, { tag: "@ui-risk" }, async ({ page }) => {
+    const models = THREE_MODELS.slice(0, 2);
+    await prepare(page, width, theme, models, 2, storedComparison(models));
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "compare");
+    await expectEqualComparisonPanels(page, 2);
+    await expect(page.locator(".review-comparison-switch")).toHaveCount(0);
+    await expect(page.getByTestId("review-focus-model")).toHaveCount(2);
+    await expect(page.locator("#review-layout-instructions")).toContainText("순서를 바꾸세요");
+    await expect(page.getByRole("button", { name: "질문 수정", exact: true })).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: `artifacts/review-two-models-${width}-${theme}.png`, fullPage: true });
+  });
+}
+
+for (const view of ["focus", "compare"] as const) {
+  test(`Removing a model from Studio ${view} restores equal columns and hides the view switch`, async ({ page }) => {
+    await prepare(page, 1600, "light", THREE_MODELS, 3, storedComparison(THREE_MODELS));
+    await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
+    await page.getByTestId("chat-textarea").fill("Keep this draft while changing the layout.");
+    if (view === "compare") await page.locator(".review-comparison-switch").getByRole("button", { name: "나란히 비교", exact: true }).click();
+    await page.getByTestId("desktop-model-panel").last().getByTitle("모델 패널 닫기", { exact: true }).click();
+    await page.getByRole("button", { name: "모델 패널 닫기", exact: true }).click();
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "compare");
+    await expectEqualComparisonPanels(page, 2);
+    await expect(page.locator(".review-comparison-switch")).toHaveCount(0);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep this draft while changing the layout.");
+    await expect(page.getByText("Stored layout answer 1.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Stored layout answer 2.", { exact: true })).toBeVisible();
+    await page.getByTestId("desktop-model-panel").last().getByTitle("모델 패널 닫기", { exact: true }).click();
+    await page.getByRole("button", { name: "모델 패널 닫기", exact: true }).click();
+    await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
+    await expect(page.locator(".review-focus-controls")).toHaveCount(0);
+    await expect(page.getByTestId("review-model-drag-handle")).toHaveAttribute("draggable", "false");
+  });
+}
+
+for (const count of [2, 3]) {
+  test(`Side-by-side reorders ${count} live panels and chips without losing answers or follow-up drafts`, { tag: "@ui-risk" }, async ({ page }) => {
+    let sends = 0;
+    await page.route(/\/api\/(chat|review\/route)(\?|$)/, async route => {
+      if (route.request().method() === "POST") sends++;
+      await route.fulfill({ status: 500, json: { error: "Unexpected execution" } });
+    });
+    const models = THREE_MODELS.slice(0, count);
+    await prepare(page, 1600, "light", models, count, storedComparison(models));
+    if (count === 3) await page.locator(".review-comparison-switch").getByRole("button", { name: "나란히 비교", exact: true }).click();
+    const panel = (id: string) => page.locator(`[data-testid="desktop-model-panel"][data-model-id="${id}"]`);
+    const chip = (id: string) => page.locator(`[data-testid="review-focus-model"][data-model-id="${id}"]`);
+    const expectOrder = async (order: string[]) => {
+      for (const testId of ["desktop-model-panel", "review-focus-model"]) {
+        await expect.poll(() => page.getByTestId(testId).evaluateAll(nodes => nodes.map(node => node.getAttribute("data-model-id")))).toEqual(order);
+      }
+    };
+    const followup = panel(models[0]).getByTestId("model-only-input");
+    await followup.fill("Keep this model's unsent follow-up.");
+    await followup.evaluate(node => { (window as typeof window & { __reorderInput?: Element }).__reorderInput = node; });
+    await panel(models[0]).getByTestId("review-model-drag-handle").dragTo(panel(models[count - 1]), { sourcePosition: { x: 8, y: 8 }, targetPosition: { x: 100, y: 100 } });
+    await expectOrder([...models.slice(1), models[0]]);
+    await expect(followup).toHaveValue("Keep this model's unsent follow-up.");
+    expect(await followup.evaluate(node => node === (window as typeof window & { __reorderInput?: Element }).__reorderInput)).toBe(true);
+    await chip(models[0]).dragTo(panel(models[1]), { targetPosition: { x: 100, y: 100 } });
+    await expectOrder(models);
+    await chip(models[1]).click();
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "compare");
+    await expectEqualComparisonPanels(page, count);
+    for (let index = 0; index < count; index++) await expect(panel(models[index]).getByText(`Stored layout answer ${index + 1}.`, { exact: true })).toBeVisible();
+    expect(sends).toBe(0);
+  });
+}
+
+test("Side-by-side reordering preserves every active response stream", { tag: "@ui-risk" }, async ({ page }) => {
+  await installChatModelStub(page, Object.fromEntries(THREE_MODELS.map((id, index) => [id, { kind: "controlled", channel: `reorder-${index}` }])));
+  await prepare(page, 1600, "dark", THREE_MODELS, 3, storedComparison(THREE_MODELS));
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
+  await page.locator(".review-comparison-switch").getByRole("button", { name: "나란히 비교", exact: true }).click();
+  await page.getByTestId("chat-textarea").fill("Keep streaming as I reorder the answers.");
+  await page.getByTestId("chat-send-button").click();
+  for (let index = 0; index < 3; index++) {
+    await waitForControlledStream(page, `reorder-${index}`);
+    await pushControlledChunk(page, `reorder-${index}`, `Streaming answer ${index + 1}`);
+  }
+  const panel = (id: string) => page.locator(`[data-testid="desktop-model-panel"][data-model-id="${id}"]`);
+  await panel(THREE_MODELS[0]).getByTestId("review-model-drag-handle").dragTo(panel(THREE_MODELS[2]), { sourcePosition: { x: 8, y: 8 }, targetPosition: { x: 100, y: 100 } });
+  await expect.poll(() => page.getByTestId("desktop-model-panel").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-model-id")))).toEqual([...THREE_MODELS.slice(1), THREE_MODELS[0]]);
+  for (let index = 0; index < 3; index++) {
+    await pushControlledChunk(page, `reorder-${index}`, " finished.");
+    await finishControlledStream(page, `reorder-${index}`);
+    await expect(panel(THREE_MODELS[index]).getByText(`Streaming answer ${index + 1} finished.`, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+  const requests = await page.evaluate(() => (window as unknown as { __chatModelStubRequests: Array<{ modelId: string }> }).__chatModelStubRequests);
+  expect(requests.map(request => request.modelId).sort()).toEqual([...THREE_MODELS].sort());
+  await page.setViewportSize({ width: 820, height: 1000 });
+  const tabs = page.getByTestId("model-compare-tab");
+  await expect.poll(() => tabs.evaluateAll(nodes => nodes.map(node => node.getAttribute("data-model-id")))).toEqual([...THREE_MODELS.slice(1), THREE_MODELS[0]]);
+  await tabs.first().focus();
+  await page.keyboard.press("Home");
+  await expect(tabs.first()).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowRight");
+  await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+});
+
 for (const theme of ["light", "dark"] as const) {
   test(`Focus ${theme} moves the large answer by mouse, click and keyboard without sending`, { tag: "@ui-risk" }, async ({ page }) => {
     let sends = 0;
@@ -64,8 +185,16 @@ for (const theme of ["light", "dark"] as const) {
     for (let i = 1; i <= 3; i++) await expect(page.getByText(`Stored answer ${i}.`, { exact: true })).toBeVisible();
     await page.locator(".review-result-toolbar").getByRole("button", { name: "나란히 비교", exact: true }).click();
     await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "compare");
+    await expect(page.locator("#review-layout-instructions")).toContainText("순서를 바꾸세요");
+    const chipsBox = await page.locator(".review-model-chips").boundingBox();
+    const switchBox = await page.locator(".review-comparison-switch").boundingBox();
+    expect(Math.abs(chipsBox!.y + chipsBox!.height / 2 - switchBox!.y - switchBox!.height / 2)).toBeLessThan(1);
+    await page.screenshot({ path: `artifacts/review-three-models-compare-${theme}.png`, fullPage: true });
     await focus(THREE_MODELS[2]).click();
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "compare");
+    await page.locator(".review-comparison-switch").getByRole("button", { name: "집중 보기", exact: true }).click();
     await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "focus");
+    await expect(page.locator("#review-layout-instructions")).toContainText("집중해서 보세요");
     await page.setViewportSize({ width: 430, height: 932 });
     await focus(THREE_MODELS[0]).click();
     await expect(page.getByText("Stored answer 1.", { exact: true })).toBeVisible();

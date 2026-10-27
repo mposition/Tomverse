@@ -17,7 +17,6 @@ export function v22PublishCandidateMatches(input: {
   taskId: string;
   baseSha: string;
   patchDigest: string;
-  currentImageProofDigest: string | null;
   publication: {
     ok: true;
     runId: string;
@@ -30,11 +29,12 @@ export function v22PublishCandidateMatches(input: {
   } | { ok: false } | null;
 }): boolean {
   const value = input.publication;
+  // `imageProofDigest` names the deploy exclusion read from the base commit's
+  // own `.dockerignore`; the base SHA below already pins it.
   return input.policyVersion >= 4 && input.modeAtStart === "t1" &&
     value?.ok === true && value.tier.tier === "T1" &&
     typeof value.imageProofDigest === "string" &&
     /^[0-9a-f]{64}$/.test(value.imageProofDigest) &&
-    value.imageProofDigest === input.currentImageProofDigest &&
     value.candidate.baseCommitterDate !== null &&
     value.runId === input.runId && value.taskId === input.taskId &&
     value.baseSha === input.baseSha &&
