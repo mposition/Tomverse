@@ -402,9 +402,14 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
     await expect(page.getByTestId("prompt-refiner-ready")).toBeVisible();
     await page.getByTestId("prompt-refiner-use").click();
     await expect(page.getByTestId("prompt-refiner-accepted-preview")).toBeVisible();
-    await page.getByTestId("composer-tools-button").click();
-    await expect(page.getByTestId("tools-image-generation-row")).toBeVisible();
-    await page.getByTestId("tools-image-generation-row").click();
+    await page.getByTestId("composer-model-select").click();
+    await page.getByTestId("model-picker-tab-image").click();
+    await page
+      .getByTestId("image-model-tab-panel")
+      .getByTestId("image-model-option")
+      .filter({ hasNot: page.getByTestId("image-model-hold-note") })
+      .first()
+      .click();
     await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
     await expect(textarea).toHaveValue(SOURCE_PROMPT);
   });

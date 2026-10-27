@@ -3,7 +3,7 @@
 ## Status
 
 - Contract type: Non-negotiable product invariant
-- Applies to: The image generation workspace, its four entry points, and the catalogue's image tab — desktop and mobile alike
+- Applies to: The image generation workspace and its three entry points — desktop and mobile alike
 - Severity when violated: Release blocker
 - Owners: Product Design, Frontend, Accessibility, QA
 - Last reviewed: 2026-08-05
@@ -30,7 +30,7 @@ its own complete full-width row.
 | Unified new-conversation launcher (split button / menu rows) | `components/chat/NewConversationLauncher.tsx` |
 | Catalogue `Chat \| Image` tabs | `components/chat/ModelPickerPanel.tsx` |
 | Image tab rows, hold state, "from" pricing | `components/chat/ImageModelTabPanel.tsx` |
-| Composer tools-menu entry and the picker wiring | `components/chat/ChatInput.tsx` |
+| Composer model-picker wiring | `components/chat/ChatInput.tsx` |
 | Draft carry-over/restore, lock derivation, workspace mounting | `app/(site)/(application)/chat/ChatPageClient.tsx` |
 | Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |
 | Which models exist, their prices and their holds | `lib/imageModelRegistry.ts` |
@@ -50,17 +50,17 @@ entry point rather than at the submit button.
 
 ## Entry points
 
-There are exactly four, and no standalone "New image" button:
+There are exactly three, and no standalone "New image" button. The composer
+tools menu has no image-generation action; image requests are judged from the
+submitted prompt through the existing LLM routing.
 
 1. Desktop sidebar **split button** — the primary click stays "new chat"; the
    caret opens the menu that holds image generation.
 2. Mobile drawer — the same launcher, rendered as **full-size menu rows**. The
    caret is never shrunk into a sub-44px target to fit a phone.
-3. Chat composer **tools menu** → image generation, which switches to the image
-   draft client-side.
-4. Model catalogue → **image tab** (see below).
+3. Model catalogue → **image tab** (see below).
 
-On Review (`/review`) entries 3 and 4, and the starter catalogue's image card,
+On Review (`/review`) entry 3 and the starter catalogue's image card
 do not open this workspace: they arm the Review composer's image mode
 (`review-image-mode`) and the answer is generated inside the conversation
 (`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). The sidebar
@@ -106,7 +106,7 @@ what survives of its rules is the following.
     click spends credits, and a per-device preference would let a shared
     computer spend somebody else's.
   - **Only a handoff that began with a typed request may act on it**
-    (`fromImageRequest`). The launcher, the drawer rows, the tools menu and the
+    (`fromImageRequest`). The launcher, the drawer rows and the
     catalogue tab are someone opening the workspace to compose. A workspace
     that generated because it was opened would spend credits on navigation.
   - **It never bypasses a refusal.** The arrival submits only when the button
