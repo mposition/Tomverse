@@ -23,7 +23,8 @@ export type AmuxCliModelCli = AmuxWorkerProviderClass;
 export const AMUX_CLI_MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 export const AMUX_CLI_MODEL_DISPLAY_NAME_MAX = 120;
 export const AMUX_CLI_MODEL_REFRESH_MAX = 500;
-export const AMUX_CLI_MODEL_PRICED_ID_MAX = 160;
+/** 160 less `model-registry:`, so a linked route's pricing source fits the cost catalog's 160. */
+export const AMUX_CLI_MODEL_PRICED_ID_MAX = 145;
 
 export const AMUX_CLI_MODEL_LINK_AUDIT_ACTION = "amux.cli_model.link" as const;
 export const AMUX_CLI_MODEL_LINK_AUDIT_TARGET_TYPE = "AmuxCliModelLinkEvent" as const;

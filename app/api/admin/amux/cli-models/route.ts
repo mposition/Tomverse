@@ -43,7 +43,7 @@ const bodySchema = z
   .object({
     cli: z.string().max(16),
     cliModel: z.string().max(160),
-    pricedModelId: z.string().max(160).nullable(),
+    pricedModelId: z.string().max(145).nullable(),
   })
   .strict();
 

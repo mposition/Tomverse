@@ -152,7 +152,7 @@ export function AmuxWorkerRegisterForm({
   const [providerClass, setProviderClass] = useState<AmuxWorkerProviderClass>("codex");
   const [roleCeiling, setRoleCeiling] = useState<AmuxWorkerRoleCeiling>("implementation");
   const ceilings = AMUX_WORKER_ROLE_CEILINGS.filter((ceiling) => amuxWorkerRoleWithinClass(providerClass, ceiling));
-  const ceiling = ceilings.includes(roleCeiling) ? roleCeiling : ceilings[ceilings.length - 1]!;
+  const ceiling = ceilings.includes(roleCeiling) ? roleCeiling : ceilings[ceilings.length - 1] ?? "chore";
   const name = workerName.trim();
   const problem = name.length === 0 ? null : !isAmuxWorkerName(name) ? m.register.nameInvalid
     : taken.has(name) ? m.register.nameTaken : null;
@@ -305,7 +305,7 @@ export function AmuxWorkersOverviewView({
   const canChange = isOwner && writesLatch;
   const models = cliModels ?? null;
   // The model a worker runs: its one-shot model when it takes Tasks.
-  const usedModel = (row: AmuxWorkerOverviewRow) => row.capability?.current?.capability.v22?.model ?? row.model;
+  const usedModel = (row: AmuxWorkerOverviewRow) => row.capability?.current?.capability.v22?.model || row.model;
   const fixable = (row: AmuxWorkerOverviewRow) =>
     canChange && overview !== null && overview.capabilitiesReadable && row.capability !== null && onFix !== undefined;
 

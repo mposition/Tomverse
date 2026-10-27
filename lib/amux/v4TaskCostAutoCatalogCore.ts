@@ -137,6 +137,10 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const cacheRead = Number.isFinite(multiplier) && multiplier > 0
       ? Math.ceil(uncached * multiplier) : uncached;
     const cacheWrite = verifiedWrite;
+    // A linked name names the entry that priced it; an unlinked one is unchanged.
+    const pricingSource = `model-registry:${price.linkedModelId ?? worker.modelId}`;
+    // One route the catalog would refuse never takes every other route with it.
+    if (pricingSource.length > 160) continue;
     const identity = { workerName: worker.workerName, provider: worker.provider,
       modelId: worker.modelId, roles, grade };
     routes.push({
@@ -150,8 +154,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       enabled: true,
       roles,
       grades: [grade],
-      // A linked name names the entry that priced it; an unlinked one is unchanged.
-      pricingSource: `model-registry:${price.linkedModelId ?? worker.modelId}`,
+      pricingSource,
       pricingVerifiedAt: PRICES_FROM,
       pricingExpiresAt: PRICES_UNTIL,
       uncachedInputMicroUsdPerMillion: uncached,

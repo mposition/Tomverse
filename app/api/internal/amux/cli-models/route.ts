@@ -29,7 +29,8 @@ function authorized(request: Request): boolean {
   const credential = agentOfficeCliMonitorCredential();
   const provided = request.headers.get("authorization") ?? "";
   const digest = createHash("sha256").update(provided.startsWith("Bearer ") ? provided.slice(7) : "").digest();
-  return credential !== null && timingSafeEqual(digest, Buffer.from(credential, "hex"));
+  const expected = credential === null ? null : Buffer.from(credential, "hex");
+  return expected !== null && expected.length === digest.length && timingSafeEqual(digest, expected);
 }
 
 export async function POST(request: Request) {

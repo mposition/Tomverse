@@ -90,7 +90,7 @@ CREATE TABLE "AmuxCliModelLinkEvent" (
     CONSTRAINT "AmuxCliModelLinkEvent_cli_model_check"
       CHECK ("cliModel" ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$'),
     CONSTRAINT "AmuxCliModelLinkEvent_priced_model_check"
-      CHECK ("pricedModelId" IS NULL OR pg_catalog.length("pricedModelId") BETWEEN 1 AND 160),
+      CHECK ("pricedModelId" IS NULL OR pg_catalog.length("pricedModelId") BETWEEN 1 AND 145),
     CONSTRAINT "AmuxCliModelLinkEvent_actor_user_check" CHECK (pg_catalog.length("actorUserId") > 0)
 );
 
