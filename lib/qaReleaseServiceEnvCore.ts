@@ -39,6 +39,9 @@ export const QA_RELEASE_SERVICE_VARIABLES = Object.freeze({
     "QA_RELEASE_CONTROL_REVISION",
     "QA_RELEASE_TRAIN_ENABLED",
     "QA_RELEASE_TRAIN_SLOTS",
+    // Optional: `false` stops a conflicting pick from boarding the develop
+    // pull requests it needs (owner, 2026-10-27: on by default).
+    "QA_RELEASE_TRAIN_AUTO_PREDECESSORS",
     // The train clones and cherry-picks; Railpack's deploy image has no git
     // unless this names it (2026-10-23: the first admitted departure failed
     // assemble for want of it). Read by the build, not by the service.

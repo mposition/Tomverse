@@ -171,3 +171,54 @@ test("open trains are counted across every page of open main pull requests", asy
     { count: 1, riders: [2985, 2989] },
   );
 });
+
+test("a pull request boarded for another's sake is listed as included and says why", () => {
+  const { body, title } = qaReleaseTrainPullRequest({
+    slot: "20261027-1100",
+    candidates: [
+      { number: 11, title: "eleven", mergeCommitSha: "a".repeat(40), mergedAt: "2026-10-27T00:00:00Z" },
+      { number: 10, title: "ten", mergeCommitSha: "d".repeat(40), mergedAt: "2026-10-26T00:00:00Z" },
+    ],
+    picks: [
+      { number: 10, outcome: "included", boardedFor: 11 },
+      { number: 11, outcome: "included" },
+    ],
+    rcSha: "b".repeat(40),
+    rollbackSha: "c".repeat(40),
+  });
+  assert.match(title, /\(2 PRs\)/);
+  assert.match(body, /^- #10 ten \(not picked; boarded because #11 needs it\)$/m);
+  assert.match(body, /^- #11 eleven$/m);
+});
+
+test("a report an older app refuses for boardedFor is sent again without it; any other refusal stands", async () => {
+  const env = { RAILWAY_ENVIRONMENT_NAME: "production", QA_RELEASE_MERGE_LANE_SECRET: "lane-secret", QA_RELEASE_CONTROL_REVISION: "3" };
+  const sent = [];
+  const ports = (statuses) =>
+    createQaReleaseTrainAppPorts({
+      env,
+      http: async (request) => {
+        sent.push(JSON.parse(request.body));
+        const status = statuses.shift();
+        return { status, text: JSON.stringify(status === 200 ? { ok: true } : { error: "bad" }) };
+      },
+    });
+  const report = {
+    slot: "20261027-1100",
+    outcome: "opened",
+    pullRequestNumber: 3100,
+    branch: "release/train-20261027-1100",
+    rcSha: "b".repeat(40),
+    failure: null,
+    picks: [
+      { number: 10, outcome: "included", boardedFor: 11 },
+      { number: 11, outcome: "included" },
+    ],
+  };
+  await ports([400, 200]).report(report);
+  assert.deepEqual(sent.map((body) => body.picks), [report.picks, [{ number: 10, outcome: "included" }, { number: 11, outcome: "included" }]]);
+  sent.length = 0;
+  await assert.rejects(ports([500]).report(report), /app_500/);
+  await assert.rejects(ports([400]).report({ ...report, picks: [{ number: 11, outcome: "included" }] }), /app_400/);
+  assert.equal(sent.length, 2);
+});
