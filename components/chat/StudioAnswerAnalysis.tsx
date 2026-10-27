@@ -14,6 +14,7 @@ import { StudioAnswerAnalysisSession } from "@/lib/studioAnswerAnalysisSession";
 import { studioAnswerAnalysisCopy } from "@/lib/studioAnswerAnalysisCopy";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { ComparisonReview, ReviewSetup } from "../../packages/chat-core/src/review";
 import type { AiReviewAccess } from "./ComparisonActionRail";
 import "./studio-answer-analysis.css";
@@ -68,7 +69,10 @@ export function StudioAnswerAnalysis({
   const loadAccount = useCallback(async () => {
     if (!conversationId) throw new Error("No conversation");
     const response = await fetch(`/api/conversations/${conversationId}/comparison-reviews?reviewMode=balanced&includeSynthesis=false`, { cache: "no-store" });
-    if (!response.ok) throw new Error("Cannot prepare analysis");
+    if (!response.ok) {
+      await discardResponseBody(response);
+      throw new Error("Cannot prepare analysis");
+    }
     return await response.json() as ReviewSetup;
   }, [conversationId]);
 
@@ -92,7 +96,10 @@ export function StudioAnswerAnalysis({
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(guest), cache: "no-store",
       });
-      if (!response.ok) throw new Error("Cannot prepare analysis");
+      if (!response.ok) {
+        await discardResponseBody(response);
+        throw new Error("Cannot prepare analysis");
+      }
       const setup = await response.json() as ReviewSetup;
       return { ...setup, source: { question: guest.question, responses: guest.responses } };
     } : loadAccount;
