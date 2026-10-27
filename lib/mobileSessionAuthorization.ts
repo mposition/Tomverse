@@ -48,6 +48,7 @@ import {
 } from "@/lib/mobileSessionSnapshotCache";
 import type { MobileAccessTokenIdentity } from "@/lib/mobileAccessTokenCore";
 import { prisma } from "@/lib/prisma";
+import { mobileStoreReviewSessionAllowed } from "@/lib/mobileStoreReviewCore";
 
 const TTL_MS = MOBILE_REVOCATION_OBSERVATION_BOUND_SECONDS * 1000;
 const IDLE_WINDOW_MS = MOBILE_REFRESH_IDLE_SECONDS * 1000;
@@ -81,7 +82,7 @@ const loadSnapshot = async (
       absoluteExpiresAt: true,
       lastRotatedAt: true,
       device: { select: { revokedAt: true } },
-      user: { select: { accountStatus: true, sessionsRevokedAt: true } },
+      user: { select: { accountStatus: true, sessionsRevokedAt: true, email: true, plan: true, subscriptionStatus: true, subscriptionCurrentPeriodEnd: true } },
     },
   });
   if (!family) return null;
@@ -91,6 +92,10 @@ const loadSnapshot = async (
     deviceId: family.deviceId,
     familyId: family.id,
     accountStatus: family.user.accountStatus,
+    userEmail: family.user.email,
+    reviewPlan: family.user.plan,
+    reviewSubscriptionStatus: family.user.subscriptionStatus,
+    reviewPeriodEndMs: family.user.subscriptionCurrentPeriodEnd?.getTime() ?? null,
     sessionsRevokedAtMs: family.user.sessionsRevokedAt?.getTime() ?? null,
     familyRevokedAtMs: family.revokedAt?.getTime() ?? null,
     deviceRevokedAtMs: family.device.revokedAt?.getTime() ?? null,
@@ -146,6 +151,10 @@ export const authorizeMobileSession = async (
   }
 
   if (snapshot.accountStatus !== "active") {
+    return { ok: false, refusal: "account_not_active" };
+  }
+  if (!mobileStoreReviewSessionAllowed({ id: snapshot.userId, email: snapshot.userEmail, plan: snapshot.reviewPlan,
+    subscriptionStatus: snapshot.reviewSubscriptionStatus, periodEndMs: snapshot.reviewPeriodEndMs }, process.env, now.getTime())) {
     return { ok: false, refusal: "account_not_active" };
   }
   if (

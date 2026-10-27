@@ -1,10 +1,14 @@
 import { scryptSync, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
+export const MOBILE_STORE_REVIEW_STATUS = "mobile_store_review";
+export const isMobileStoreReviewAddress = (email: unknown): email is string =>
+  typeof email === "string" && /^play-review[-+][a-z0-9-]+@tomverse\.app$/i.test(email);
+
 const credentialSchema = z.object({
   submissionId: z.string().min(8).max(120),
   userId: z.string().min(1).max(120),
-  email: z.string().email().transform(value => value.trim().toLowerCase()),
+  email: z.string().email().transform(value => value.trim().toLowerCase()).refine(isMobileStoreReviewAddress),
   appId: z.literal("app.tomverse.shell"),
   buildNumber: z.number().int().positive(),
   plan: z.enum(["Free", "Max"]).default("Free"),
@@ -35,4 +39,13 @@ export function matchesMobileStoreReviewCode(credential: MobileStoreReviewCreden
   if (input.email.trim().toLowerCase() !== credential.email || input.platform !== "android" ||
       input.appId !== credential.appId || input.buildNumber !== credential.buildNumber || !/^\d{6}$/.test(input.code)) return false;
   return timingSafeEqual(Buffer.from(hashMobileStoreReviewCode(credential, input.code), "hex"), Buffer.from(credential.codeHash, "hex"));
+}
+
+/** Checked again for existing access/refresh sessions, including cached snapshots. */
+export function mobileStoreReviewSessionAllowed(user: { id: string; email?: string | null; plan?: unknown; subscriptionStatus?: string | null; periodEndMs?: number | null }, env = process.env, now = Date.now()) {
+  if (!isMobileStoreReviewAddress(user.email)) return true;
+  const credential = readMobileStoreReviewCredential(env, now);
+  if (!credential || credential.userId !== user.id || credential.email !== user.email.toLowerCase() || credential.plan !== user.plan) return false;
+  return credential.plan === "Free" || (user.subscriptionStatus === MOBILE_STORE_REVIEW_STATUS &&
+    typeof user.periodEndMs === "number" && Number.isFinite(user.periodEndMs) && user.periodEndMs > now);
 }

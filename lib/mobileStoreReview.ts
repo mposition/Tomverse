@@ -2,7 +2,7 @@ import "server-only";
 import { consumeApiRateLimit } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
 import { normalizeAdminList } from "@/lib/adminAuthCore";
-import { matchesMobileStoreReviewCode, readMobileStoreReviewCredential } from "@/lib/mobileStoreReviewCore";
+import { matchesMobileStoreReviewCode, mobileStoreReviewSessionAllowed, readMobileStoreReviewCredential } from "@/lib/mobileStoreReviewCore";
 
 export async function requestMobileStoreReviewCode(request: Request, email: string) {
   const credential = readMobileStoreReviewCredential();
@@ -24,7 +24,6 @@ export async function verifyMobileStoreReviewCode(request: Request, input: { ema
       !user.emailVerified || !user.emailLoginEnabled || user.accountStatus !== "active" ||
       normalizeAdminList(process.env.ADMIN_USER_IDS).includes(user.id.toLowerCase()) ||
       normalizeAdminList(process.env.ADMIN_EMAILS).includes(credential.email)) return refused;
-  if (credential.plan === "Max" && (user.subscriptionStatus !== "manually_adjusted" ||
-      !user.subscriptionCurrentPeriodEnd || user.subscriptionCurrentPeriodEnd.getTime() <= Date.now())) return refused;
+  if (!mobileStoreReviewSessionAllowed({ ...user, periodEndMs: user.subscriptionCurrentPeriodEnd?.getTime() })) return refused;
   return { ok: true as const, userId: user.id };
 }

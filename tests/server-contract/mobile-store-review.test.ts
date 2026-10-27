@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { hashMobileStoreReviewCode } from "../../lib/mobileStoreReviewCore";
 
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
-const credential = { submissionId: "play-closed-synthetic", userId: "review-user", email: "review@example.invalid", appId: "app.tomverse.shell" as const, buildNumber: 16, state: "prepared", validUntil: new Date(Date.now() + 86400000).toISOString(), salt: "a".repeat(64), codeHash: "" };
+const credential = { submissionId: "play-closed-synthetic", userId: "review-user", email: "play-review-synthetic@tomverse.app", appId: "app.tomverse.shell" as const, buildNumber: 16, state: "prepared", validUntil: new Date(Date.now() + 86400000).toISOString(), salt: "a".repeat(64), codeHash: "" };
 credential.codeHash = hashMobileStoreReviewCode(credential, "654321");
 const input = { email: credential.email, code: "654321", appId: credential.appId, buildNumber: 16, platform: "android" };
 let user: Record<string, unknown>;
@@ -62,7 +62,11 @@ test("Max review access needs a separately granted, unexpired manual plan", asyn
   assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
   user.plan = "Max";
   assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
-  user.subscriptionStatus = "manually_adjusted"; user.subscriptionCurrentPeriodEnd = new Date(Date.now() + 86400000);
+  user.subscriptionStatus = "active"; user.subscriptionCurrentPeriodEnd = new Date(Date.now() + 86400000);
+  assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
+  user.subscriptionStatus = "mobile_store_review"; user.subscriptionCurrentPeriodEnd = null;
+  assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
+  user.subscriptionCurrentPeriodEnd = new Date(Date.now() + 86400000);
   assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, true);
   user.subscriptionCurrentPeriodEnd = new Date(Date.now() - 1000);
   assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
