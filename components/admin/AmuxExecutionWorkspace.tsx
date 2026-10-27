@@ -234,6 +234,20 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     queueMicrotask(() => { void refreshBoard(); });
     return () => { boardGeneration.current += 1; };
   }, [refreshBoard]);
+  const activeCardCount = board ? AMUX_EXECUTION_VISIBLE_LANES.reduce(
+    (total, lane) => total + board.counts[lane], 0) : 0;
+  const archiveAll = async () => {
+    if (!window.confirm(m.archiveAllConfirm(activeCardCount))) return;
+    setBoardLoading(true); setError(null);
+    try {
+      const response = await adminFetch("/api/admin/amux/execution-archive", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: "archive_all_active_cards" }) });
+      if (response.status === 428) throw new Error("reauth");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch (reason) { showError(reason); setBoardLoading(false); return; }
+    await refreshBoard();
+  };
   useEffect(() => {
     let cancelled = false;
     void getJson<ActivationSnapshot>("/api/admin/amux/execution-view?view=activation")
@@ -539,6 +553,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           className={styles.viewButton} onClick={openHierarchy}>{m.hierarchy}</button>
         <button type="button" className={styles.button} disabled={boardLoading}
           onClick={() => void refreshBoard()}><RefreshCw size={14} aria-hidden="true" />{m.refresh}</button>
+        {canMoveCards && board && activeCardCount > 0 && <button type="button"
+          className={styles.button} disabled={boardLoading} data-testid="amux-archive-all"
+          onClick={() => void archiveAll()}>{m.archiveAll}</button>}
       </div>
     </div>
     <p className="text-xs text-zinc-500">{m.globalAttention} <Link
