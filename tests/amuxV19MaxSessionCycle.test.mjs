@@ -497,7 +497,8 @@ test("with the detail switch on a rejected analysis writes one private file of n
     assert.match(written.recordedAt, /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
     assert.equal(text.includes(detailSecret), false);
     assert.equal(text.includes("prompt"), false);
-    assert.equal(text.includes(origin), false);
+    // Split, not includes: the origin is a value to find, not a URL to vet.
+    assert.equal(text.split(origin).length, 1);
     assert.equal(text.includes(identity.claimId), false);
     // The status line only says whether the file was written.
     const { line } = amuxV19MaxSessionCycleStatus(result);
