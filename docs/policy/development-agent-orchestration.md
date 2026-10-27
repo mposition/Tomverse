@@ -1742,7 +1742,8 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
   | 태그 또는 v22 역할 | 필요한 것 |
   |---|---|
   | `chore`; v22 `investigate`(읽기 전용, `repo_read`만) | 아무 상한 |
-  | `implementation`; v22 `implement` | 상한 `implementation` 이상 |
+  | v22 `implement`(`repo_write` 필요, Cursor 불가) | 아무 상한. v4 Task에서 상한은 worker의 등급이므로(버전 52 2항), `chore` worker가 `routine` implement Task를 맡는다(운영자 결정 2026-10-27) |
+  | `implementation` | 상한 `implementation` 이상 |
   | `contract`, `architecture`, `security`; v22 `design` | 상한 `contract` |
   | `review`; v22 `review` | 검증된 종류(버전 31 2항). 아래 선택 규칙도 함께 적용 |
   | 그 밖의 작업 태그(`bugfix`, `tests`, `multi_file`, `reasoning`, `integration`, `long_running`, `fallback`) | 아무 상한 |
@@ -2864,6 +2865,11 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
 
 v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 worker의 등급**이다. legacy 카드에는
 버전 35·45의 상한 의미가 그대로 남는다.
+
+운영자 결정 2026-10-27: 그래서 v22 `implement`는 상한을 요구하지 않는다(`repo_write`는 필요, Cursor는 계속 불가).
+버전 35의 표가 `implementation` 이상을 요구해 `chore` worker가 implement를 가질 수 없었고, routine implement
+경로가 없어 그런 Task를 가진 아이디어의 무인 등록이 `not_ready`로 실패했다(production, 2026-10-27).
+migration `20261027100000_amux_v22_routine_implement`가 능력 guard에서 그 조건만 뺀다.
 
 ### 3. contract 경로 목록
 
