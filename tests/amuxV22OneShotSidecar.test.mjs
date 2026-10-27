@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { createConnection } from "node:net";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -759,4 +759,72 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
     assert.equal(value.kind, "outcome_unknown");
     throw new Error("checked");
   }), /checked/);
+});
+
+// The sidecar takes absolute POSIX paths only.
+test("a Codex or Copilot run never holds the operator's refresh token, and an expiring login never starts",
+  { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "amux-v22-sidecar-auth-"));
+  try {
+    const home = join(root, "home");
+    const cli = join(root, "cli");
+    await mkdir(home);
+    await mkdir(cli);
+    const now = Date.now();
+    const jwt = (expiresAt) => ["e30", Buffer.from(JSON.stringify({
+      exp: Math.floor(expiresAt / 1000) })).toString("base64url"), "c3ludGhldGlj"].join(".");
+    const login = (expiresIn) => JSON.stringify({ auth_mode: "chatgpt", OPENAI_API_KEY: null,
+      tokens: { id_token: jwt(now + expiresIn), access_token: jwt(now + expiresIn),
+        refresh_token: "synthetic-operator-refresh-secret", account_id: "acct-1" },
+      last_refresh: new Date(now - 60_000).toISOString() });
+    const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+      homePath: home, claudeConfigDir: cli };
+    const investigate = { ...request, role: "investigate", modelId: "gpt-6-luna" };
+    const output = [{ type: "turn.started" },
+      { type: "item.completed", item: { type: "agent_message", text: "Findings." } },
+      { type: "turn.completed", usage: { input_tokens: 9, cached_input_tokens: 0,
+        output_tokens: 3 } }].map((event) => JSON.stringify(event)).join("\n") + "\n";
+    // What the CLI would find in its CODEX_HOME at the moment it starts.
+    const seen = [];
+    const fake = fakeSpawn(output);
+    const spawnChild = (binary, args, spawnOptions) => {
+      seen.push(readFile(join(spawnOptions.env.CODEX_HOME, "auth.json"), "utf8"));
+      return fake.spawnChild(binary, args, spawnOptions);
+    };
+    await writeFile(join(cli, "auth.json"), login(24 * 60 * 60 * 1000));
+    const ran = await runAmuxV22OneShot(investigate, codex,
+      { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
+    assert.equal(ran.kind, "succeeded");
+    const copy = JSON.parse(await seen[0]);
+    assert.equal(copy.tokens.refresh_token, "");
+    assert.ok(!JSON.stringify(copy).includes("synthetic-operator-refresh-secret"));
+    // The operator's own file is untouched.
+    assert.match(await readFile(join(cli, "auth.json"), "utf8"), /synthetic-operator-refresh-secret/);
+
+    await writeFile(join(cli, "auth.json"), login(5 * 60 * 60 * 1000));
+    const expiring = await runAmuxV22OneShot(investigate, codex,
+      { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
+    assert.deepEqual([expiring.kind, expiring.cliStarted, expiring.failure],
+      ["failed", false, "channel_auth_refused"]);
+    assert.equal(fake.calls.length, 1);
+
+    // Copilot: the checked token is the only sign-in, carried in its env.
+    const copilot = { ...codex, provider: "github-copilot",
+      binaryPath: "/opt/tomverse-amux-v22/copilot" };
+    const copilotRequest = { ...investigate, modelId: "gpt-6-luna" };
+    const token = `gho_${"a".repeat(36)}`;
+    await writeFile(join(cli, "auth-token"), `${token}\n`);
+    await runAmuxV22OneShot(copilotRequest, copilot,
+      { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
+    assert.equal(fake.calls.length, 2);
+    assert.equal(fake.calls[1].spawnOptions.env.COPILOT_GITHUB_TOKEN, token);
+    await writeFile(join(cli, "auth-token"), "not-a-token");
+    const badToken = await runAmuxV22OneShot(copilotRequest, copilot,
+      { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
+    assert.deepEqual([badToken.kind, badToken.cliStarted, badToken.failure],
+      ["failed", false, "channel_auth_refused"]);
+    assert.equal(fake.calls.length, 2);
+    // Every run home was removed.
+    assert.deepEqual((await readdir(home)).filter((name) => name.startsWith("run-")), []);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
