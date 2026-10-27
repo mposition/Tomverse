@@ -119,7 +119,7 @@ test("a link carries its audit row, the newest wins, and none is ever changed or
 
 /** A raw link insert with the audit the test chooses, bypassing the store. */
 const insertLink = (options: {
-  audit?: Partial<{ action: string; targetType: string; targetId: string; actor: string; metadata: Record<string, unknown> }>;
+  audit?: Partial<{ action: string; targetType: string; targetId: string; actor: string; metadata: Record<string, string | null> }>;
   row?: Partial<{ cliModel: string; pricedModelId: string | null; actor: string }>;
   auditLogId?: string;
 } = {}) =>
