@@ -1,9 +1,64 @@
-.native-billing { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem; overflow-wrap: anywhere; }
+.native-billing { min-width: 0; overflow-wrap: anywhere; }
+.mobile-app > .native-billing { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; }
 .native-billing-heading, .native-billing-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
 .native-billing-heading { justify-content: space-between; }
-.native-billing-heading h2 { font-size: 1.25rem; }
-.native-billing-current, .native-billing-products article { border: 1px solid #a1a1aa; border-radius: .75rem; padding: 1rem; margin: 1rem 0; }
-.native-billing h4 { margin: 0 0 .5rem; font-size: 1.125rem; }
+.native-billing-heading h2 { margin: 0 0 12px; color: var(--mobile-muted); font-size: 13px; font-weight: 500; }
+.native-billing > h3 { margin: 20px 0 8px; font-size: 14px; font-weight: 600; }
+.native-billing-current, .native-billing-products article { border: 1px solid var(--mobile-border); border-radius: 14px; padding: 14px; background: var(--mobile-paper); }
+.native-billing-current { margin-bottom: 14px; padding: 12px; }
+.native-billing-current h3 { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; font-size: 16px; }
+.native-billing-current h3 svg { flex-shrink: 0; color: var(--mobile-action); }
+.native-billing .native-billing-balance { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding-top: 10px; border-top: 1px solid var(--mobile-border); font-size: 13px; }
+.native-billing-balance strong { color: var(--mobile-ink); font-weight: 600; }
+.native-billing-current > p:not(.native-billing-balance) { margin: 10px 0 0; font-size: 12px; }
+.native-billing h4 { margin: 0; font-size: 15px; font-weight: 650; }
 .native-billing p { line-height: 1.6; }
-.native-billing a { color: var(--foreground); text-decoration: underline; }
-.native-billing button[aria-pressed="true"] { outline: 2px solid var(--tomverse-accent-mid); outline-offset: 1px; }
+.native-billing a { color: var(--mobile-muted); text-decoration: none; }
+.native-billing-interval { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 3px; margin: 12px 0 10px; border: 1px solid var(--mobile-border); border-radius: 12px; background: var(--mobile-soft); }
+.native-billing-interval button { min-width: 0; font-size: 13px; min-height: 40px; padding: 7px; border-radius: 9px; color: var(--mobile-muted); }
+.native-billing-interval button[aria-pressed="true"] { background: #2563eb; color: #fff; font-weight: 600; }
+.native-billing-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.native-billing-plans article { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.native-billing-plans article[data-featured="true"] { border-color: var(--mobile-action); }
+.native-billing-plans .native-billing-price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; margin: 0; font-size: 11px; }
+.native-billing-price strong { color: var(--mobile-ink); font-size: 19px; font-weight: 700; }
+.native-billing .native-billing-price { line-height: 1.25; }
+.native-billing .native-billing-benefits { margin: 0; font-size: 12px; line-height: 1.5; color: var(--mobile-muted); }
+.native-billing-plans button { width: 100%; margin-top: auto; padding: 9px 6px; border-radius: 10px; min-height: 44px; font-size: 13px; font-weight: 600; background: #2563eb; color: #fff; }
+.native-billing-plans button:disabled { background: var(--mobile-soft); color: var(--mobile-muted); opacity: .8; }
+.native-billing-details { margin: 10px 0 18px; color: var(--mobile-muted); font-size: 12px; }
+.native-billing-details summary { cursor: pointer; padding: 8px 0; }
+.native-billing-details p { margin: 6px 0 0; }
+.native-billing .native-billing-credit-terms { font-size: 12px; margin-bottom: 10px; }
+.native-billing-credit-list { border: 1px solid var(--mobile-border); border-radius: 14px; background: var(--mobile-paper); padding-inline: 12px; }
+.native-billing-credit-list article { display: flex; align-items: center; gap: 10px; border: 0; border-radius: 0; padding: 12px 0; min-height: 64px; }
+.native-billing-credit-list article + article { border-top: 1px solid var(--mobile-border); }
+.native-billing-credit-list article > svg { color: var(--mobile-muted); flex-shrink: 0; }
+.native-billing-credit-copy { flex: 1; min-width: 0; }
+.native-billing-credit-copy h4 { font-size: 13px; }
+.native-billing-credit-copy p { margin: 2px 0 0; font-size: 12px; }
+.native-billing-credit-list button { min-height: 40px; max-width: 40%; padding: 7px 10px; border: 1px solid var(--mobile-action); color: var(--mobile-action); border-radius: 9px; font-size: 12px; }
+.native-billing-management { display: grid; gap: 10px; margin-top: 14px; }
+.native-billing-management:empty { display: none; }
+.native-billing-management > button { display: flex; align-items: center; gap: 10px; padding: 12px; min-height: 48px; width: 100%; border: 1px solid var(--mobile-border); border-radius: 12px; font-size: 13px; background: var(--mobile-paper); text-align: left; }
+.native-billing-management > button span { flex: 1; }
+.native-billing-management > button svg { flex-shrink: 0; }
+.native-billing-management p { font-size: 12px; margin: 0; }
+.native-billing .native-billing-subscription-terms { color: var(--mobile-muted); font-size: 12px; margin: 14px 0; }
+.native-billing-actions { margin: 14px 0 8px; gap: 8px; }
+.native-billing-actions button { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; gap: 6px; font-size: 12px; border: 1px solid var(--mobile-border); background: var(--mobile-paper); border-radius: 10px; }
+.native-billing-actions button svg { flex-shrink: 0; }
+.native-billing .native-billing-legal { display: flex; justify-content: center; flex-wrap: wrap; gap: 14px; margin: 0; font-size: 12px; }
+.native-billing-legal a { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
+.settings-sheet .native-billing-heading:not(:has(button)), .native-billing-plan-heading { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.settings-sheet:has(.native-billing) .settings-tabs { margin-bottom: 16px; }
+.purchase-confirmation { margin: auto; width: min(328px, calc(100% - 40px)); max-height: calc(100dvh - 40px); padding: 24px 20px 22px; overflow-y: auto; border: 1px solid var(--mobile-border); border-radius: 22px; background: var(--mobile-paper); color: var(--mobile-ink); text-align: center; box-shadow: 0 24px 64px #080c1626; }
+.purchase-confirmation::backdrop { background: #080c1666; }
+.purchase-confirmation-icon { width: 80px; height: 80px; margin: 0 auto 16px; border-radius: 50%; display: grid; place-items: center; color: var(--mobile-action); background: var(--mobile-soft); }
+.purchase-confirmation h2 { margin: 0 auto 10px; max-width: 220px; font-size: 22px; font-weight: 700; line-height: 1.4; letter-spacing: -.6px; word-break: keep-all; overflow-wrap: anywhere; text-wrap: balance; }
+.purchase-confirmation p { margin: 0 0 24px; color: var(--mobile-muted); font-size: 14px; line-height: 1.6; word-break: keep-all; }
+.purchase-confirmation .purchase-confirmation-action { width: 100%; min-height: 48px; border-radius: 12px; color: #fff; background: #2563eb; font-size: 16px; font-weight: 650; }
+.purchase-confirmation .purchase-confirmation-action:hover { background: #1d4ed8; }
+.purchase-confirmation .purchase-confirmation-action:focus-visible { outline: 2px solid var(--mobile-action); outline-offset: 3px; }
+.purchase-verifying { margin: 12px 0 20px; padding: 16px; border: 1px solid var(--mobile-border); border-radius: 14px; background: var(--mobile-soft); }
+.purchase-verifying p { margin: 6px 0 0; font-size: 14px; }

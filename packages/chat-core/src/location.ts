@@ -120,11 +120,11 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
     canShare: (fix: ChatLocation, scope: string | null) =>
       isEnabled(scope) && grants.get(fix) === generation && parseChatLocation(fix) !== null,
     disable,
-    enable: async (scope: string | null) => {
+    enable: async (scope: string | null, requestPermission = true) => {
       setIdentity(scope);
       if (!scope) return;
       automaticSuppressed = false;
-      await read(true);
+      await read(requestPermission);
     },
     readForTurn: (scope: string | null, signal?: ChatLocationReadSignal, intent?: ChatLocationIntent): Promise<ChatLocation | null> => {
       const aborted = () => signal?.reason ?? new Error("aborted");

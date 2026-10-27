@@ -10,6 +10,7 @@ if (!webServer || Array.isArray(webServer)) {
 // server credentials or a payment. StoreKit still needs signed-device acceptance.
 export default defineConfig({
   ...base,
+  use: { ...base.use, baseURL: "http://127.0.0.1:13192" },
   testDir: "./tests/ios-billing",
   testMatch: "ios-billing.spec.ts",
   outputDir: "./test-results/ios-billing",
@@ -19,6 +20,8 @@ export default defineConfig({
   ],
   webServer: {
     ...webServer,
+    command: "npm run dev --workspace @tomverse/mobile -- --host 127.0.0.1 --port 13192 --strictPort",
+    url: "http://127.0.0.1:13192",
     env: {
       VITE_NATIVE_BILLING_ENABLED: "true",
       VITE_REVENUECAT_APPLE_API_KEY: "appl_ios_fixture_public_key",

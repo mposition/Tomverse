@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test, type Page } from '@playwright/test';
 import { resolve } from 'node:path';
 const storage = 'tomverse-native-synthetic-demo';
@@ -93,7 +94,7 @@ test('a lost share response persists a read-before-change marker and never publi
 
 test('Review reuses history controls and never treats multi-model images as comparison chats',async({page})=>{
   await page.evaluate(key=>{const existing=JSON.parse(localStorage.getItem(key)!);localStorage.setItem(key,JSON.stringify([...existing,{id:'review-c',title:'Review perspectives',surface:'workspace',kind:'chat',selectedModels:['demo','demo-b'],messages:[]},{id:'image-c',title:'Image alternatives',surface:'workspace',kind:'image',selectedModels:['image-a','image-b'],messages:[]}]));},storage);
-  await page.getByTestId('product-switcher').selectOption('review');await page.getByRole('button',{name:'Conversations',exact:true}).click();await expect(page.locator('.conversation-row')).toHaveCount(2);
+  await selectProduct(page, "review");await page.getByRole('button',{name:'Conversations',exact:true}).click();await expect(page.locator('.conversation-row')).toHaveCount(2);
   await menu(page,'Image alternatives');await expect(page.getByRole('button',{name:'Share',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Download TXT',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Rename',exact:true})).toBeVisible();await close(page);
   await filter(page,'Comparisons');await expect(page.locator('.conversation-row')).toHaveCount(1);await expect(page.locator('.conversation-row')).toContainText('Review perspectives');
 });
@@ -106,6 +107,6 @@ test('a WebView without clipboard support leaves the public link selectable',asy
 test('a last Review locked on another device stays in history without an automatic load',async({page})=>{
   await page.route('**/src/main.tsx',async route=>{const response=await route.fetch();const source=await response.text();const injection=`const originalLoad=transport.load;window.lockedReviewLoads=0;transport.load=async id=>{if(id==='locked-review'){window.lockedReviewLoads++;throw {status:423};}return originalLoad(id);};`;await route.fulfill({response,body:source.replace('createRoot(container).render(',injection+'createRoot(container).render(')});});
   await page.evaluate(key=>{localStorage.setItem(key,JSON.stringify([...JSON.parse(localStorage.getItem(key)!),{id:'locked-review',title:'Protected Review',surface:'workspace',kind:'chat',isLocked:true,selectedModels:['demo','demo-b'],messages:[]}]));localStorage.setItem('tomverse-native-last-review:synthetic-demo','locked-review');},storage);
-  await page.reload();await expect(page.locator('.header-new-chat')).toBeEnabled();await page.getByTestId('product-switcher').selectOption('review');await expect(page.getByRole('heading',{name:'Ask once. Three perspectives.'})).toBeVisible();await expect(page.locator('.header-new-chat')).toBeEnabled();await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.reload();await expect(page.locator('.header-new-chat')).toBeEnabled();await selectProduct(page, "review");await expect(page.getByTestId('review-landing')).toBeVisible();await expect(page.locator('.header-new-chat')).toBeEnabled();await expect(page.getByRole('alert')).toHaveCount(0);
   expect(await page.evaluate(()=>(window as unknown as {lockedReviewLoads:number}).lockedReviewLoads)).toBe(0);await page.getByRole('button',{name:'Conversations',exact:true}).click();await expect(page.locator('.conversation-row')).toContainText('Protected Review');
 });

@@ -8,8 +8,10 @@ import { mobileErrorText } from "../../../locales/mobileErrors";
 import type { MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
 import { mobileVoiceError, mobileVoiceCopy, mobileVoicePrivacy } from "../../../locales/mobileVoice";
-import { NativeLocationControl } from "./NativeLocationControl";
 import { ComposerTools, type ToolChange, type ComposerAction } from "./ComposerTools";
+import { WorkspaceNavigation, type MobileProduct } from "./WorkspaceNavigation";
+import { useCompactBottomDock, useVisibleViewportHeight } from "../../../components/chat/useVisualViewport";
+import { mobileComposerCopy } from "../../../locales/mobileComposer";
 
 type Props = {
   locationIdentity?: string | null;
@@ -18,9 +20,14 @@ type Props = {
   language: MobileLanguage;
   conversation?: Conversation | null; onConfigureTools?: (input: ToolChange) => Promise<void>;
   extraTools?: ComposerAction[];
+  product?: MobileProduct; onProductChange?: (product: MobileProduct) => void;
+  productBusy?: boolean; productLoading?: boolean; selectionControl?: ReactNode;
   offline?: boolean; disabled: boolean; streaming: boolean; onSend: (text: string, files: MobileAttachment[]) => Promise<void | boolean>; onStop: () => void;
 };
-export function Composer({ locationIdentity = null, copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, voiceConversation }: Props) {
+export function Composer({ locationIdentity = null, copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, voiceConversation, product = "chat", onProductChange, productBusy, productLoading, selectionControl }: Props) {
+  const shortViewport = useCompactBottomDock();
+  const visibleHeight = useVisibleViewportHeight();
+  const compact = shortViewport || (visibleHeight > 0 && visibleHeight < 640);
   const [files, setFiles] = useState<MobileAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -30,7 +37,7 @@ export function Composer({ locationIdentity = null, copy, language, transport, d
   const parityCopy = mobileParityCopy(language);
   const input = useRef<HTMLTextAreaElement>(null);
   const voiceCopy = mobileVoiceCopy(language);
-  useEffect(() => { const node = input.current; if (node) { node.style.height = "0px"; node.style.height = `${Math.min(120, Math.max(40, node.scrollHeight))}px`; } }, [draft]);
+  useEffect(() => { const node = input.current; if (node) { node.style.height = "0px"; node.style.height = `${Math.min(120, Math.max(44, node.scrollHeight))}px`; } }, [draft]);
   const composing = useRef(false);
   const previousConversation = useRef(conversation?.id);
   useEffect(() => {
@@ -66,23 +73,28 @@ export function Composer({ locationIdentity = null, copy, language, transport, d
     if (disabled || offline || streaming || uploading || voiceBusy || composing.current || (!draft.trim() && files.length === 0)) return;
     void onSend(draft, files).then(result => { if (result !== false) setFiles([]); });
   }
-  return <div className="composer-area">
-    {transport.location && <NativeLocationControl session={transport.location} identity={locationIdentity} language={language} compact />}
+  return <div className="composer-area" data-compact={compact || undefined}>
+    {onProductChange && !compact && <WorkspaceNavigation product={product} language={language} disabled={productBusy || streaming || uploading || voiceBusy} loading={productLoading} onChange={onProductChange} />}
     {error && <p role="alert" className="notice error">{error}</p>}
     {voice.state.status === "error" && <p role="alert" className="notice error">{mobileVoiceError(language, voice.state.code, voice.serverCode)}<button onClick={voice.dismissError}>×</button></p>}
     {files.length > 0 && <ul className="attachments">{files.map((file) => <li key={file.uploadId}>{file.name}<button aria-label={`${copy.remove}: ${file.name}`} onClick={() => setFiles((items) => items.filter((item) => item.uploadId !== file.uploadId))}>×</button></li>)}</ul>}
     <input data-testid="file-picker" ref={picker} type="file" multiple hidden accept={chatAttachmentAcceptAttribute({})} onChange={event => void attach(event.target.files)} />
     <input data-testid="photo-picker" ref={photos} type="file" multiple hidden accept="image/*" onChange={event => void attach(event.target.files)} />
     <form className={`composer compact-composer${voiceBusy ? " is-recording" : ""}`} onSubmit={event => { event.preventDefault(); submit(); }}>
-      <button className="composer-add" type="button" aria-label={copy.attach} aria-expanded={tools} disabled={disabled || offline || streaming || uploading || voiceBusy} onClick={() => setTools(true)}><AppIcon name="attach" /></button>
       <textarea ref={input} maxLength={40000} aria-label={copy.placeholder} placeholder={copy.placeholder} rows={1} value={draft} disabled={disabled || streaming || voiceBusy}
         onChange={event => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} />
+      <div className="composer-toolbar">
+      <div className="composer-tool-controls">
+        <button className="composer-add" type="button" aria-label={copy.attach} aria-expanded={tools} disabled={disabled || offline || streaming || uploading || voiceBusy} onClick={() => setTools(true)}><AppIcon name="attach" /><span>{mobileComposerCopy[language].tools}</span></button>
+        {selectionControl}
+      </div>
       <div className="composer-actions">
         {voiceBusy ? <><span className="voice-clock" role="status">{voice.state.status === "transcribing" ? voiceCopy.transcribing : `${voiceCopy.recording} ${voice.elapsedSeconds}s`}</span><button type="button" onClick={voice.cancel} aria-label={copy.cancelVoice}>×</button></> : <button type="button" aria-label={copy.voice} disabled={disabled || offline || streaming || uploading} onClick={voice.start}><AppIcon name="mic" /></button>}
         <div className="composer-primary-action" data-voice-default={!draft.trim() && !files.length && !streaming && !voiceBusy}>
           {voiceConversation?.(disabled || offline || streaming || uploading || voiceBusy || !!draft.trim() || files.length > 0)}
           {voiceBusy ? <button type="button" className="send" onClick={voice.stop} disabled={voice.state.status !== "recording"} aria-label={copy.finishVoice}>■</button> : streaming ? <button type="button" className="send" aria-label={copy.stop} onClick={onStop}>■</button> : <button type="submit" className="send" aria-label={copy.send} disabled={disabled || offline || uploading || (!draft.trim() && !files.length)}><AppIcon name="send" /></button>}
         </div>
+      </div>
       </div>
     </form>
     {voiceBusy && <p className="voice-privacy">{mobileVoicePrivacy(language)}</p>}

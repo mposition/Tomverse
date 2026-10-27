@@ -8,10 +8,10 @@ const bodyFamilies = {
 
 for (const lang of ["en", "ko", "zh"] as const) {
   for (const theme of ["light", "dark"] as const) {
-    test(`bundled wordmark keeps ${lang} body fonts in ${theme}`, async ({ page, browserName }) => {
+    test(`bundled wordmark keeps ${lang} body fonts in ${theme}`, async ({ page, browserName, baseURL }) => {
       const externalFonts: string[] = [];
       page.on("request", (request) => {
-        if (request.resourceType() === "font" && new URL(request.url()).origin !== "http://127.0.0.1:5186") {
+        if (request.resourceType() === "font" && new URL(request.url()).origin !== new URL(baseURL!).origin) {
           externalFonts.push(request.url());
         }
       });
