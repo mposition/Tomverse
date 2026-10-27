@@ -165,7 +165,8 @@ The Release archive, signed IPA export and pre-upload metadata checks passed.
 Apple upload reported `UPLOAD SUCCEEDED with no errors`. App Store Connect
 processed version **1.0 (3)** as **Internal** and **Ready to Test**, then changed
 to **Testing** after it was assigned to `Tomverse Internal`. That group contains
-only the owner's existing Account Holder/Admin user, whose status is **Invited**.
+only the owner's existing Account Holder/Admin user, whose status is **Accepted**
+(confirmed at 21:34 AEST).
 Automatic distribution is off. No external beta review or public App Store
 submission was performed.
 
@@ -179,10 +180,32 @@ The downloaded `App.ipa` was independently inspected:
 - Associated Domains allowed, debugging disabled, beta reporting enabled.
 - All four new Chat/Review illustrations present; non-exempt encryption flag false.
 
-To install, open the Apple TestFlight invitation on the iPad, choose View in
-TestFlight, accept the invitation and install Tomverse 1.0 (3). Device launch,
-native sign-in, location consent and StoreKit results are not yet observed.
-The billing activation/pricing work described below remains separate.
+The owner accepted the invitation and sees version 1.0 (3), but installation on
+the iPad 7th generation fails with "The requested app is not available or doesn't
+exist." Reopening TestFlight and retrying did not resolve it. Installation and
+device acceptance are therefore **blocked**, despite the Testing label.
+
+App Store Connect's Build Metadata independently shows Binary State Validated,
+minimum iOS 17.4, arm64, iPhone/iPad families, the expected application identifier,
+Associated Domains, debugging disabled and beta reporting enabled. The downloaded
+executable uses ARM64_ALL, and its bundled frameworks require iOS 15.0. These
+checks found no OS, architecture or signing mismatch with the reported iPadOS
+18.7.10 device. Membership renews on 2027-10-27; the developer license is accepted;
+Free/Paid Apps agreements and required banking/tax records are Active. Apple's
+system-status page showed TestFlight available at 21:41 AEST.
+
+The empty Beta App Description and Feedback Email fields were completed with
+the internal test scope and the existing public support address. App Store
+Connect confirmed Saved. This completes test metadata; it does not establish
+that the installation error is resolved.
+
+The exact installation cause remains unconfirmed. Similar errors are reported
+on the [Apple Developer Forums](https://developer.apple.com/forums/thread/824745),
+where Apple directs unresolved account cases to Developer Support. Do not treat
+another developer's `BETA_CONTRACT_MISSING` report as a diagnosis for this app,
+or change credentials, public availability or external-review settings to probe
+it. Device launch, native sign-in, location consent and StoreKit results remain
+unobserved. The billing activation/pricing work described below remains separate.
 
 The Apple App ID `app.tomverse.shell` and [Tomverse App Store Connect draft](https://appstoreconnect.apple.com/apps/6827148073/distribution)
 were registered on 2026-10-26. Seven payment products have draft records as noted
