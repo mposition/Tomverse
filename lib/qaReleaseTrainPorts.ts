@@ -193,16 +193,22 @@ export function createQaReleaseTrainGitPorts(input: {
   // (qaReleaseTrainSettleAdjacent) is settled in the working tree and staged;
   // false leaves the rest to the caller's abort.
   const settleAdjacent = async (files: readonly string[]): Promise<boolean> => {
-    if (!dir || files.length === 0) return false;
+    // A name the trailer cannot carry as one item is not settled.
+    if (!dir || files.length === 0 || files.some((file) => /[,\r\n]/.test(file))) return false;
     for (const file of files) {
-      // A file missing on a side (changed on one, deleted on the other) or holding marker-like lines is not settled.
+      // Only a regular file on all three sides: one changed on one side and
+      // deleted on the other, a symlink or a submodule is not settled.
+      const stages = (await git(["ls-files", "-u", "--", file], { allowFail: true })).stdout.split("\n").filter((row) => row !== "");
+      if (stages.length !== 3 || !stages.every((row) => /^100(644|755) [0-9a-f]{40} [123]\t/.test(row))) return false;
+      // Nor a binary one (git leaves it without markers) or one holding marker-like lines.
       for (const stage of [1, 2, 3]) {
         const side = await git(["show", `:${stage}:${file}`], { allowFail: true, raw: true });
-        if (!side.ok || MARKER_LINE.test(side.stdout)) return false;
+        if (!side.ok || side.stdout.includes("\0") || MARKER_LINE.test(side.stdout)) return false;
       }
       if (!(await git(["checkout", "--conflict=diff3", "--", file], { allowFail: true })).ok) return false;
       const lines = (await readFile(join(dir, file), "utf8")).split("\n");
       const settled: string[] = [];
+      let hunks = 0;
       for (let i = 0; i < lines.length; ) {
         if (!lines[i].startsWith("<<<<<<< ")) {
           settled.push(lines[i++]);
@@ -211,15 +217,19 @@ export function createQaReleaseTrainGitPorts(input: {
         const hunk = { main: [] as string[], base: [] as string[], pick: [] as string[] };
         let side = hunk.main;
         for (i++; i < lines.length && !lines[i].startsWith(">>>>>>> "); i++) {
-          if (lines[i].startsWith("||||||| ")) side = hunk.base;
-          else if (lines[i] === "=======") side = hunk.pick;
+          if (lines[i].startsWith("||||||| ") && side === hunk.main) side = hunk.base;
+          else if (lines[i] === "=======" && side === hunk.base) side = hunk.pick;
           else side.push(lines[i]);
         }
-        if (i++ >= lines.length) return false;
+        // An unclosed hunk, or one without all three sides, is not read.
+        if (i++ >= lines.length || side !== hunk.pick) return false;
         const resolved = qaReleaseTrainSettleAdjacent(hunk);
         if (resolved === null) return false;
         settled.push(...resolved);
+        hunks++;
       }
+      // A conflicted file with no hunk to read is one git could not mark: never staged as main's.
+      if (hunks === 0) return false;
       await writeFile(join(dir, file), settled.join("\n"));
       await git(["add", "--", file]);
     }

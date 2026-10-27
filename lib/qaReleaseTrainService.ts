@@ -58,9 +58,9 @@ export type QaReleaseTrainPorts = {
       mainSha: string;
       headSha: string;
       picks: QaReleaseTrainPick[];
-      /** Absent: nothing boarded. */
+      /** Absent or empty: nothing boarded. */
       boarded?: QaReleaseTrainCandidate[];
-      /** Riders whose adjacent-line conflict was settled, with the files; absent: none. */
+      /** Riders whose adjacent-line conflict was settled, with the files; absent or empty: none. */
       settled?: { number: number; files: string[] }[];
     }>;
     push(branch: string): Promise<void>;

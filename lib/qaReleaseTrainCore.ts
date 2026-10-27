@@ -148,9 +148,10 @@ export const QA_RELEASE_TRAIN_MAX_PREDECESSORS = 10;
  * settlement is main's lines with the pick's added lines on the same side,
  * which is the pick's own change and nothing else. Both adding lines at the
  * same place (an append-only list such as .gitleaksignore, #3032) keeps
- * main's first. When main already has the added lines in the hunk (a release
- * that ported them, #2867 and #2916), main's lines stand as they are. Null
- * when the pick changes or removes a line.
+ * main's first. When main's lines already start or end, on the side the pick
+ * adds to, with the added lines and they are not all blank (a release that
+ * ported them, #2867 and #2916), main's lines stand as they are. Null when
+ * the pick changes or removes a line.
  */
 export function qaReleaseTrainSettleAdjacent(hunk: { main: readonly string[]; base: readonly string[]; pick: readonly string[] }): string[] | null {
   const { main, base, pick } = hunk;
@@ -162,7 +163,13 @@ export function qaReleaseTrainSettleAdjacent(hunk: { main: readonly string[]; ba
       : null;
   if (added === null) return null;
   const run = added.lines.join("\n");
-  if (main.some((_, i) => main.slice(i, i + added.lines.length).join("\n") === run)) return [...main];
+  const n = added.lines.length;
+  // Appended at the same place (no develop lines between), the pick's lines may stand at either end.
+  const ported =
+    added.lines.some((line) => line.trim() !== "") &&
+    ((base.length === 0 || added.before) && main.slice(0, n).join("\n") === run ||
+      (base.length === 0 || !added.before) && main.length >= n && main.slice(main.length - n).join("\n") === run);
+  if (ported) return [...main];
   return added.before ? [...added.lines, ...main] : [...main, ...added.lines];
 }
 

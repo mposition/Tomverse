@@ -118,8 +118,13 @@ test("an adjacent-line hunk settles to main's lines plus the pick's added ones; 
   assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["m1"], base: ["d1"], pick: ["new", "d1"] }), ["new", "m1"]);
   // Both appended at the same place (#3032's .gitleaksignore): main's first.
   assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["", "main entry"], base: [], pick: ["", "pick entry"] }), ["", "main entry", "", "pick entry"]);
-  // Main already has what it adds (#2867, #2916): main stands.
+  // Main already has what it adds, on the side it adds to (#2867, #2916): main stands.
   assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["m1", "new"], base: ["d1"], pick: ["d1", "new"] }), ["m1", "new"]);
+  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["new", "m1"], base: ["d1"], pick: ["new", "d1"] }), ["new", "m1"]);
+  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["entry", "more"], base: [], pick: ["entry"] }), ["entry", "more"]);
+  // Elsewhere in main's lines, or only blank lines, is no proof: the pick's lines are added.
+  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["new", "m1"], base: ["d1"], pick: ["d1", "new"] }), ["new", "m1", "new"]);
+  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["m1", ""], base: ["d1"], pick: ["d1", ""] }), ["m1", "", ""]);
   // A changed or removed line is a real conflict.
   assert.equal(qaReleaseTrainSettleAdjacent({ main: ["m1"], base: ["d1"], pick: ["D1"] }), null);
   assert.equal(qaReleaseTrainSettleAdjacent({ main: ["m1"], base: ["d1", "d2"], pick: ["d1"] }), null);
