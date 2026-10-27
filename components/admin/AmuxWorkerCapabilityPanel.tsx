@@ -3,6 +3,7 @@
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import type { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import {
+  amuxCliModelHasChoices,
   amuxCliModelOptions,
   amuxCliModelStatus,
   type AmuxCliModelCatalogAdminView,
@@ -125,7 +126,9 @@ export function AmuxWorkerCapabilityEditor({
   const changes = amuxWorkerCapabilityFormChanges(row, form);
   const id = (field: string) => `amux-worker-capability-edit-${row.workerName}-${field}`;
   const presets = amuxWorkerProfilePresetsFor(row);
-  const options = cliModels === null ? [] : amuxCliModelOptions(cliModels, row.providerClass, form.model);
+  // A drop-down only when the catalog has real choices; otherwise the name is typed.
+  const options = cliModels === null || !amuxCliModelHasChoices(cliModels, row.providerClass)
+    ? [] : amuxCliModelOptions(cliModels, row.providerClass, form.model);
   return (
     <form
       className="flex flex-col gap-3 rounded-md border p-3 border-zinc-600"

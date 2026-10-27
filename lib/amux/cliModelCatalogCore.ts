@@ -257,6 +257,17 @@ export function amuxCliModelStatus(
 export type AmuxCliModelOption = { value: string; label: string; issues: AmuxCliModelIssue[] };
 
 /**
+ * Whether a worker of this CLI has names to choose from: what the CLI lists,
+ * or Admin › Models' entries for Claude and Codex. Without any, the editor
+ * keeps a text input, so a name can be typed in full.
+ */
+export function amuxCliModelHasChoices(view: AmuxCliModelCatalogAdminView, cli: AmuxCliModelCli): boolean {
+  if (view.entries.some((entry) => entry.cli === cli && entry.listed === true)) return true;
+  const vendor = FALLBACK_VENDOR[cli];
+  return vendor !== undefined && view.models.some((model) => model.provider === vendor && model.availability === "available");
+}
+
+/**
  * The names a worker of this CLI may be given: what the CLI lists now, or,
  * for Claude and Codex before their CLI is read, the usable Admin › Models
  * entries of their vendor by API model. The current value always stays, so

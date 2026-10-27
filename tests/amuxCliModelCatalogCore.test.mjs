@@ -134,3 +134,14 @@ test("the refresh script sends only to an https or loopback Tomverse, with the m
   assert.match(source, /\["help", "config"\]/);
   assert.doesNotMatch(source, /"-p"|--prompt|exec"/);
 });
+
+test("a CLI has choices only when it lists names, or Admin › Models has its vendor's", async () => {
+  const { amuxCliModelHasChoices } = await import("../lib/amux/cliModelCatalogCore.ts");
+  assert.equal(amuxCliModelHasChoices(view, "cursor"), true);
+  assert.equal(amuxCliModelHasChoices(view, "copilot"), true);
+  assert.equal(amuxCliModelHasChoices(view, "codex"), true);
+  const empty = buildAmuxCliModelCatalogAdminView({ observed: [], links: [], registry: REGISTRY });
+  assert.equal(amuxCliModelHasChoices(empty, "copilot"), false);
+  assert.equal(amuxCliModelHasChoices(empty, "cursor"), false);
+  assert.equal(amuxCliModelHasChoices(empty, "claude"), true);
+});

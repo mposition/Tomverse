@@ -218,3 +218,14 @@ test("an edit is one change against the recorded revision, receipt-checked and r
   assert.equal(await runAmuxWorkerCapabilityEdit(row, form, io(() => json(503, { error: "outcome_unknown" })), () => {}), false);
   assert.equal(posted.length, 3);
 });
+
+test("with no listed names for its CLI, the model stays a text input while it is typed", () => {
+  // Review r-20261027-041021-42cb25: a lone current value is not a choice.
+  const copilot = VIEW.rows.find((row) => row.workerName === "copilot-impl")!;
+  for (const model of ["", "k", "kimi-k3"]) {
+    const form = { ...amuxWorkerCapabilityFormFromRow(copilot), model };
+    const input = byTestId(renderEditor(form, copilot).tree, "amux-worker-capability-edit-model")[0]!;
+    assert.equal(input.maxLength, 160, model);
+    assert.equal(input.value, model);
+  }
+});
