@@ -23,7 +23,7 @@ import {
   writeDispatchRequest,
 } from "../tools/review-orchestrator/lib/ci-fix.mjs";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
-import { dispatchInputs, normaliseDispatchRequest } from "../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs";
+import { createDispatchSender, dispatchInputs, normaliseDispatchRequest } from "../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs";
 import {
   PR_CI_AUTO_FIX_CONFLICT_PREFIX,
   PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES,
@@ -283,6 +283,96 @@ test("one head carries one request: a conflict waits while a CI fix for that hea
     assert.equal(readLedger(ledgerPath)[`${f.head}:conflict`].kind, "conflict");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("the real sender sends a head's first request and, when it was not published, the operator's retry", async () => {
+  const f = conflictFixture();
+  const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-sender-state-"));
+  try {
+    let clock = 10 * 3_600_000;
+    let labels = [];
+    let labelledAt = null;
+    const github = {
+      async json(path) {
+        if (path.startsWith("/pulls?")) return [pull(51, "claude/to-develop/both", f.head, { draft: true, labels })];
+        if (path.startsWith("/issues/51/events")) {
+          return labelledAt === null ? [] : [{ event: "labeled", label: { name: "ci:fix-again" }, created_at: new Date(labelledAt).toISOString() }];
+        }
+        return f.github.json(path);
+      },
+    };
+    const resolve = ({ cwd }) => {
+      writeFileSync(join(cwd, "lib", "app.js"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
+      return { ok: true, timedOut: false, tail: "RESULT: fixed" };
+    };
+    const proposerPass = () => pass(f, resolve, { github, clock: () => clock });
+    const posts = [];
+    const sender = createDispatchSender({
+      settings: { token: "t".repeat(40), repo: "o/r", outbox: f.outbox, stateDir },
+      log: () => {},
+      now: () => clock,
+      fetchImpl: async (url, init) => {
+        posts.push(JSON.parse(init.body).inputs);
+        return { status: 204, body: null };
+      },
+    });
+
+    assert.equal((await proposerPass()).outcome, "queued");
+    await sender.scanOnce();
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].kind, "conflict");
+
+    // The workflow refused it: two hours on, the head has not moved.
+    clock += CI_FIX_PUBLISH_WAIT_MS + 60_000;
+    assert.equal((await proposerPass()).outcome, "nothing_to_fix", "no second try without the operator");
+    const ledger = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"));
+    assert.equal(ledger[`${f.head}:conflict`].outcome, "not_published");
+
+    // "Analyse again": the same head, a new request, and the sender sends it.
+    labels = [{ name: "ci:fix-again" }];
+    labelledAt = clock;
+    clock += 60_000;
+    assert.equal((await proposerPass()).outcome, "queued");
+    await sender.scanOnce();
+    assert.equal(posts.length, 2, "a new request for the same head is sent");
+    await sender.scanOnce();
+    assert.equal(posts.length, 2, "and only once");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("the sender sends each request once, honours an older sender's record, and caps a head", async () => {
+  const outbox = mkdtempSync(join(tmpdir(), "ci-fix-cap-outbox-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-cap-state-"));
+  try {
+    const now = 10 * 3_600_000;
+    let posts = 0;
+    const sender = () => createDispatchSender({
+      settings: { token: "t".repeat(40), repo: "o/r", outbox, stateDir },
+      log: () => {},
+      now: () => now,
+      fetchImpl: async () => {
+        posts += 1;
+        return { status: 204, body: null };
+      },
+    });
+    const request = (createdAt) => writeDispatchRequest(outbox, { prNumber: 9, headSha: SHA_A, runIds: [1], patchGzB64: "QUJD", now: createdAt });
+    // An older sender recorded the head itself when it sent a request made before then.
+    writeFileSync(join(stateDir, "sent.json"), JSON.stringify({ [SHA_A]: now - 5000 }));
+    request(now - 6000);
+    await sender().scanOnce();
+    assert.equal(posts, 0, "that request was sent already");
+    for (const createdAt of [now - 4000, now - 3000, now - 2000, now - 1000]) {
+      request(createdAt);
+      await sender().scanOnce();
+    }
+    assert.equal(posts, 3, "with the older record, four requests in all for the head");
+  } finally {
+    rmSync(outbox, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
   }
 });
 

@@ -230,7 +230,7 @@ function senderHarness({ files, now = 10 * 60 * 60_000, fetchImpl }) {
 const requestFile = (sha, createdAt, extra = {}) =>
   JSON.stringify({ schemaVersion: 1, prNumber: 5, headSha: sha, runIds: [1], patchGzB64: "QUJD", createdAt, ...extra });
 
-test("each head is sent once, oldest first, and recorded before its POST", async () => {
+test("each request is sent once, oldest first, and recorded before its POST", async () => {
   const now = 10 * 60 * 60_000;
   const shaC = "c".repeat(40);
   const h = senderHarness({
@@ -248,8 +248,8 @@ test("each head is sent once, oldest first, and recorded before its POST", async
     assert.deepEqual(h.posts, [SHA_A, SHA_B], "oldest first; the stale and the misnamed one are not sent");
     assert.ok(h.lines.some((line) => /is not a valid request/.test(line)));
     await h.sender.scanOnce();
-    assert.deepEqual(h.posts, [SHA_A, SHA_B], "a sent head is not sent again");
-    assert.deepEqual(Object.keys(h.sent()).sort(), [SHA_A, SHA_B]);
+    assert.deepEqual(h.posts, [SHA_A, SHA_B], "a sent request is not sent again");
+    assert.deepEqual(Object.keys(h.sent()).sort(), [`${SHA_A}@${now - 2000}`, `${SHA_B}@${now - 1000}`]);
   } finally {
     rmSync(h.stateDir, { recursive: true, force: true });
   }
@@ -262,7 +262,7 @@ test("an unknown dispatch outcome is never retried", async () => {
   });
   try {
     await h.sender.scanOnce();
-    assert.ok(h.sent()[SHA_A], "recorded before the POST");
+    assert.ok(h.sent()[`${SHA_A}@${10 * 60 * 60_000 - 1}`], "recorded before the POST");
     assert.match(h.lines.at(-1), /dispatch failed: network_error/);
     const before = h.lines.length;
     await h.sender.scanOnce();

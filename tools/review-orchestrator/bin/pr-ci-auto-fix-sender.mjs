@@ -10,8 +10,8 @@
  * the review account. Code the review account can edit must never run here.
  *
  * The outbox is written by the review account, so every request is untrusted:
- * it is rebuilt field by field, each head is sent once, and at most
- * MAX_DISPATCHES_PER_HOUR go out an hour. The workflow re-decides everything
+ * it is rebuilt field by field, each request is sent once, a head sends at
+ * most MAX_SENDS_PER_HEAD, and at most MAX_DISPATCHES_PER_HOUR go out an hour. The workflow re-decides everything
  * from GitHub's own records; the worst a forged request can do is what a bad
  * model patch can do, and the workflow's guard judges both.
  *
@@ -37,6 +37,16 @@ export const SCAN_INTERVAL_SECONDS = 60;
 export const REQUEST_MAX_AGE_MS = 6 * 60 * 60_000;
 export const REQUEST_MAX_BYTES = 128 * 1024;
 export const MAX_DISPATCHES_PER_HOUR = 6;
+/**
+ * Requests one head may send in all: a failed-CI fix and a conflict
+ * resolution, each tried once and once more on the operator's request. A
+ * request is sent once (its head and creation time), so a new request for a
+ * head -- a retry, the other kind -- is sent too, up to this many.
+ */
+export const MAX_SENDS_PER_HEAD = 4;
+const SENT_KEY = /^([0-9a-f]{40})(@[0-9]{1,16})?$/;
+/** A request's identity in the sent ledger. */
+export const requestKey = (request) => `${request.headSha}@${request.createdAt}`;
 export const SENT_KEEP_MS = 14 * 86_400_000;
 const TIMEOUT_MS = 30_000;
 // The workflow's own input limits (its target job refuses anything else).
@@ -163,8 +173,9 @@ export function readSent(path, now) {
     }
   })());
   const sent = {};
-  for (const [sha, at] of Object.entries(value ?? {})) {
-    if (SHA.test(sha) && Number.isFinite(at) && now - at < SENT_KEEP_MS) sent[sha] = at;
+  // Keys are requests (`<head>@<created>`); a bare head is a sender older than that.
+  for (const [key, at] of Object.entries(value ?? {})) {
+    if (SENT_KEY.test(key) && Number.isFinite(at) && now - at < SENT_KEEP_MS) sent[key] = at;
   }
   return sent;
 }
@@ -176,9 +187,10 @@ function writeSent(path, sent) {
 }
 
 /**
- * One scan per call, oldest request first. A head is written to the sent
- * ledger before its POST, so an unknown outcome is never sent again. Logs
- * one line per request it acts on, and the rate cap once while it holds.
+ * One scan per call, oldest request first. A request is written to the
+ * sent ledger before its POST, so an unknown outcome is never sent again; a
+ * head sends at most MAX_SENDS_PER_HEAD requests. Logs one line per request
+ * it acts on, and the rate cap once while it holds.
  */
 export function createDispatchSender({
   settings, log, fetchImpl = fetch, now = Date.now,
@@ -200,7 +212,7 @@ export function createDispatchSender({
       const sent = readSent(sentPath, at);
       const requests = [];
       for (const name of names) {
-        if (!REQUEST_NAME.test(name) || sent[name.slice(0, 40)] !== undefined) continue;
+        if (!REQUEST_NAME.test(name)) continue;
         let text;
         try {
           text = readRequest(join(settings.outbox, name));
@@ -217,6 +229,15 @@ export function createDispatchSender({
           expired.add(request.headSha);
           continue;
         }
+        const head = request.headSha;
+        if (sent[requestKey(request)] !== undefined) continue;
+        // A head an older sender recorded: the request it sent was made before then.
+        if (sent[head] !== undefined && sent[head] >= request.createdAt) continue;
+        if (Object.keys(sent).filter((key) => key.startsWith(head)).length >= MAX_SENDS_PER_HEAD) {
+          if (!expired.has(`cap:${head}`)) log(`#${request.prNumber} ${head.slice(0, 9)}: ${MAX_SENDS_PER_HEAD} requests sent for this head; not sending`);
+          expired.add(`cap:${head}`);
+          continue;
+        }
         requests.push(request);
       }
       requests.sort((a, b) => a.createdAt - b.createdAt);
@@ -228,7 +249,7 @@ export function createDispatchSender({
           return;
         }
         capped = false;
-        sent[request.headSha] = at;
+        sent[requestKey(request)] = at;
         mkdirSync(settings.stateDir, { recursive: true });
         writeSent(sentPath, sent);
         const result = await dispatchWorkflow({ repo: settings.repo, token: settings.token, request, fetchImpl });

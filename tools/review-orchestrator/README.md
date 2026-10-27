@@ -580,8 +580,9 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 - **sender(`bin/pr-ci-auto-fix-sender.mjs`, systemd `DynamicUser`)**: workflow를 dispatch할 수
   있는 유일한 토큰을 갖습니다. Node 내장 모듈만 쓰는 파일 하나이고, 운영자가 GitHub main에서
   root 소유 경로로 받습니다. outbox 파일은 `review` 계정이 쓰므로 필드 단위로 다시 만들고,
-  head 하나에 한 번(POST 전에 기록하므로 결과를 모르는 요청도 다시 보내지 않습니다), 한 시간에
-  최대 6건 보냅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
+  요청 하나에 한 번(head와 생성 시각으로 기록합니다. POST 전에 기록하므로 결과를 모르는 요청도 다시
+  보내지 않습니다), head 하나에 최대 4건(CI 수정·충돌 해결 × 첫 시도·다시 분석), 한 시간에 최대 6건
+  보냅니다. 예전 sender가 head만으로 남긴 기록은 그 시각 이전에 만든 요청을 보낸 것으로 봅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
 - **판단의 경계는 workflow입니다.** dispatch 입력을 믿지 않고 GitHub 기록으로 다시 확인합니다
   (PR이 그 head에서 열려 있는지, 넘겨받은 run이 그 커밋에서 실패한 필수 run이면서 그 workflow의
   최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 자동 수정 커밋이
