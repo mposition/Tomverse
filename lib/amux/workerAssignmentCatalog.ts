@@ -7,6 +7,8 @@ import {
   amuxWorkerCapabilityNewestJsonSql,
 } from "@/lib/amux/workerCapabilityStore";
 import { deriveAmuxWorkerCatalog, type AmuxDerivedCatalog } from "@/lib/amux/workerDerivedCatalogCore";
+import { AMUX_V22_MULTI_PROVIDER_ENV, amuxV22MultiProviderEnabled, type AmuxV22Provider } from
+  "@/lib/amux/v22WorkerClaimCore";
 import type { AmuxWorkerRegistration, AmuxWorkerRoleCeiling } from "@/lib/amux/workerRegistryCore";
 import {
   amuxWorkerLatchNewestJsonSql,
@@ -57,7 +59,7 @@ export type AmuxConfiguredWorker = {
  * intersected with the profile's, as the overlay has always been typed.
  */
 export type AmuxConfiguredV22Worker = AmuxConfiguredWorker & {
-  provider: "anthropic";
+  provider: AmuxV22Provider;
   model: string;
   routing_roles: string[];
   tool_capabilities: Array<"repo_read" | "repo_write">;
@@ -111,6 +113,7 @@ export async function readAmuxRegistryAndDerivedCatalog(client: CatalogReader): 
       registrations: registry.registrations,
       capabilities,
       latches: registry.latches,
+      multiProvider: amuxV22MultiProviderEnabled(process.env[AMUX_V22_MULTI_PROVIDER_ENV]),
     }),
   };
 }

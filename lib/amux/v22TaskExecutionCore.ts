@@ -54,6 +54,19 @@ export function amuxV22DeliveryBudgetMicrousd(reservedMicrousd: number,
 /** One supervised CLI process is the whole v22 attempt. Its invocation ID is
  * the durable attempt ID, allocated before dispatch. A caller-supplied subset
  * of receipts cannot turn an unobserved second call into a successful run. */
+/** The usage source each one-shot executor writes, by assignment provider. */
+export type V22ExecutionSource = "claude_result" | "anthropic_messages_api" |
+  "codex_jsonl" | "copilot_json" | "cursor_stream";
+const V22_EXECUTOR_BY_SOURCE: Record<V22ExecutionSource, string> = {
+  claude_result: "claude", anthropic_messages_api: "anthropic_api",
+  codex_jsonl: "codex", copilot_json: "copilot", cursor_stream: "cursor",
+};
+const V22_UNATTESTED_SOURCES = new Set<V22ExecutionSource>(["codex_jsonl", "cursor_stream"]);
+export const v22ExecutionSourceForProvider = (provider: string): V22ExecutionSource | null =>
+  ({ anthropic: "claude_result", openai: "codex_jsonl",
+    "github-copilot": "copilot_json", cursor: "cursor_stream" } as const)[
+    provider as "anthropic" | "openai" | "github-copilot" | "cursor"] ?? null;
+
 export function v22ExecutionReceiptVerified(input: {
   attemptId: string;
   invocationIds: string[];
@@ -64,7 +77,8 @@ export function v22ExecutionReceiptVerified(input: {
   outcome: "succeeded" | "failed" | "blocked";
   reservedCostMicrousd: bigint;
   resultStored: boolean;
-  expectedExecutionSource?: "claude_result" | "anthropic_messages_api";
+  /** Null (an assignment provider with no executor) never settles. */
+  expectedExecutionSource?: V22ExecutionSource | null;
   /** The attempt ran under a dollar budget: only the one-off read-only
    * retry does, bound to its signed risk acceptance. */
   budgetBound: boolean;
@@ -72,20 +86,20 @@ export function v22ExecutionReceiptVerified(input: {
   if (input.invocationIds.length !== 1 ||
       input.invocationIds[0] !== input.attemptId ||
       input.events.length !== 1 ||
-      input.reservedCostMicrousd <= BigInt(0)) return false;
+      input.reservedCostMicrousd <= BigInt(0) ||
+      input.expectedExecutionSource === null) return false;
   const event = input.events[0];
   const expectedSource = input.expectedExecutionSource ?? "claude_result";
-  const expectedExecutor = expectedSource === "anthropic_messages_api" ?
-    "anthropic_api" : "claude";
+  const expectedExecutor = V22_EXECUTOR_BY_SOURCE[expectedSource];
   return (input.outcome !== "succeeded" || input.resultStored) &&
     event.invocationId === input.attemptId &&
     event.completeness === "reported_complete" &&
-    // Codex JSONL currently reports the configured model, not an attested
-    // provider-served model. Keep its usage for telemetry but never settle a
-    // v22 Task until independent served-model evidence exists.
     event.cli === expectedExecutor && event.source === expectedSource &&
-    event.actualModelId !== null &&
-    event.actualModelId === event.selectedModelId &&
+    // Codex and Cursor never name the model that answered (v19's "requested"
+    // attestation). Owner decision 2026-10-26: their v22 runs settle on the
+    // selected model; a CLI that does name one must name the selected one.
+    (event.actualModelId === null ? V22_UNATTESTED_SOURCES.has(expectedSource) :
+      event.actualModelId === event.selectedModelId) &&
     // Owner decision 2026-10-25: a run without a dollar budget settles on its
     // observed usage; comparing it with the reservation would only strand a
     // run already paid for. The one-off read-only retry ran under its signed

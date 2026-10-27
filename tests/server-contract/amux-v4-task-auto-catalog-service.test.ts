@@ -17,7 +17,7 @@ const NOW = new Date("2026-10-25T00:00:00.000Z");
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
   readAmuxRegistryAndDerivedCatalog: async () => ({
     registrations: [{ workerName: "claude-impl", roleCeiling: "implementation" }],
-    derived: { v22: [{ worker_name: "claude-impl", model: "claude-sonnet-5",
+    derived: { v22: [{ worker_name: "claude-impl", provider: "anthropic", model: "claude-sonnet-5",
       routing_roles: ["implement", "investigate"] }] },
   }),
 } });

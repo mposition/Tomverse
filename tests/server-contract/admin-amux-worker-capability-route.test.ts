@@ -251,7 +251,7 @@ test("a body outside the strict shape never reaches the store; the change rule's
   assert.equal(invalid.status, 400);
   assert.deepEqual(await invalid.json(), { error: "invalid_change" });
 
-  for (const code of ["tag_above_ceiling", "stale_revision", "retired", "v22_not_claude", "unreadable_registry"]) {
+  for (const code of ["tag_above_ceiling", "stale_revision", "retired", "v22_role_provider", "unreadable_registry"]) {
     reset({ storeError: new FakeWriteError(code) });
     const refused = await POST(post(VALID));
     assert.equal(refused.status, 409, code);

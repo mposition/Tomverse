@@ -36,6 +36,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
+import { AMUX_V22_PROVIDERS, amuxV22Provider } from "@/lib/amux/v22WorkerClaimCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -267,7 +268,7 @@ export type AmuxPulledDelivery =
           budgetMicrousd: number;
           gradeGuard?: true;
           executionGrade?: string;
-          reviewAuthor?: "claude";
+          reviewAuthor?: string;
           reviewAuthorVendor?: string;
           reviewScope?: string;
           reviewFeedbackJobId?: string;
@@ -543,8 +544,11 @@ export async function pullAmuxWorkDelivery(input: {
           ...(gradeGuard ? { gradeGuard: true as const,
             executionGrade: assignment.grade,
             ...(reviewScope ? {
-              // The approved v22 one-shot catalog uses the fixed Claude CLI.
-              reviewAuthor: "claude" as const,
+              // The review server's author is the CLI that wrote the change.
+              reviewAuthor: (() => {
+                const provider = amuxV22Provider(assignment.provider);
+                return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
+              })(),
               reviewAuthorVendor: assignment.provider,
               reviewScope,
               ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
