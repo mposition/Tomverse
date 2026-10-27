@@ -60,6 +60,8 @@ export type QaReleaseTrainPorts = {
       picks: QaReleaseTrainPick[];
       /** Absent: nothing boarded. */
       boarded?: QaReleaseTrainCandidate[];
+      /** Riders whose adjacent-line conflict was settled, with the files; absent: none. */
+      settled?: { number: number; files: string[] }[];
     }>;
     push(branch: string): Promise<void>;
   };
@@ -268,6 +270,7 @@ export async function runQaReleaseTrainRound(
     rcSha: assembled.headSha,
     rollbackSha: assembled.mainSha,
     emergency: departure.emergency,
+    settled: assembled.settled,
   });
   let number: number;
   try {

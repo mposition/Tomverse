@@ -139,6 +139,33 @@ export type QaReleaseTrainPick = {
 /** At most this many predecessors are named for one conflict. */
 export const QA_RELEASE_TRAIN_MAX_PREDECESSORS = 10;
 
+/**
+ * One conflict hunk of a pick (diff3: main's lines, the develop lines the
+ * pick was made against, and the pick's), settled when the pick only adds
+ * lines right before or after develop's: git conflicts on adjacent lines, and
+ * main differs in lines the pick never touched (2026-10-27: #3042 added two
+ * package.json scripts next to ones a develop-only #2131 had changed). The
+ * settlement is main's lines with the pick's added lines on the same side,
+ * which is the pick's own change and nothing else. Both adding lines at the
+ * same place (an append-only list such as .gitleaksignore, #3032) keeps
+ * main's first. When main already has the added lines in the hunk (a release
+ * that ported them, #2867 and #2916), main's lines stand as they are. Null
+ * when the pick changes or removes a line.
+ */
+export function qaReleaseTrainSettleAdjacent(hunk: { main: readonly string[]; base: readonly string[]; pick: readonly string[] }): string[] | null {
+  const { main, base, pick } = hunk;
+  if (pick.length <= base.length) return null;
+  const added = base.every((line, i) => pick[i] === line)
+    ? { lines: pick.slice(base.length), before: false }
+    : base.every((line, i) => pick[pick.length - base.length + i] === line)
+      ? { lines: pick.slice(0, pick.length - base.length), before: true }
+      : null;
+  if (added === null) return null;
+  const run = added.lines.join("\n");
+  if (main.some((_, i) => main.slice(i, i + added.lines.length).join("\n") === run)) return [...main];
+  return added.before ? [...added.lines, ...main] : [...main, ...added.lines];
+}
+
 /** The pull request a develop merge commit's subject names (`Merge pull request #2950 from ...`), or null. */
 export function qaReleaseTrainMergedPullNumber(subject: string): number | null {
   const match = /^Merge pull request #(\d{1,7}) from /.exec(subject);
@@ -183,6 +210,8 @@ export function qaReleaseTrainPullRequest(input: {
   rollbackSha: string;
   /** Requested in Admin outside the departure hours. The operator's reason stays in the audit row, never in this public body. */
   emergency?: boolean;
+  /** Included pull requests whose adjacent-line conflict the train settled, with the files. */
+  settled?: readonly { number: number; files: readonly string[] }[];
 }): { title: string; body: string } {
   const title = (n: number) => input.candidates.find((c) => c.number === n)?.title.replace(/\s+/g, " ").slice(0, 120) ?? "";
   const included = input.picks.filter((p) => p.outcome === "included");
@@ -203,7 +232,12 @@ export function qaReleaseTrainPullRequest(input: {
     "",
     `## Included (${included.length})`,
     "",
-    ...included.map((p) => `- #${p.number} ${title(p.number)}${p.boardedFor === undefined ? "" : ` (not picked; boarded because #${p.boardedFor} needs it)`}`),
+    ...included.map((p) => {
+      const settled = input.settled?.find((s) => s.number === p.number);
+      return `- #${p.number} ${title(p.number)}${p.boardedFor === undefined ? "" : ` (not picked; boarded because #${p.boardedFor} needs it)`}${
+        settled === undefined ? "" : ` (conflicted only beside lines main has differently in ${settled.files.map((f) => `\`${f}\``).join(", ")}: main's lines kept, its own added lines placed next to them; check)`
+      }`;
+    }),
     "",
     `## Left out (${left.length})`,
     "",

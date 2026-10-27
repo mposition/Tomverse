@@ -266,3 +266,75 @@ test("a predecessor main already has takes no seat when a pick boards what it ne
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// 2026-10-27, #3042: a pick that only adds lines next to lines main has
+// differently conflicts in git, and rides with main's lines kept and its own
+// added; one whose added lines main already has is already on main. A pick
+// that changes such a line still conflicts, and names only the develop pull
+// request that wrote the line main lacks, not every one that touched the file.
+test("an adjacent-line conflict is settled; a real one names only the pull request that wrote the line main lacks", async () => {
+  const root = mkdtempSync(join(tmpdir(), "train-git-settle-test-"));
+  try {
+    const repo = join(root, "origin");
+    const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    const text = (...rows) => `${rows.join("\n")}\n`;
+    const base = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen"];
+    const with_ = (changes) => text(...base.flatMap((row, i) => changes[i] ?? [row]));
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", repo]);
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "x.txt"), with_({}));
+    writeFileSync(join(repo, "list.txt"), text("first"));
+    git("add", ".");
+    git("commit", "--quiet", "-m", "base");
+    git("switch", "--quiet", "-c", "develop");
+    const mergePull = (number, files) => {
+      git("switch", "--quiet", "-c", `feature-${number}`, "develop");
+      for (const [file, content] of Object.entries(files)) writeFileSync(join(repo, file), content);
+      git("add", ".");
+      git("commit", "--quiet", "-m", `change ${number}`);
+      git("switch", "--quiet", "develop");
+      git("merge", "--quiet", "--no-ff", "-m", `Merge pull request #${number} from mposition/feature-${number}\n\ntitle ${number}`, `feature-${number}`);
+      return git("rev-parse", "HEAD");
+    };
+    // #19 rewrites row 10 and #20 row 1; main gets neither.
+    mergePull(19, { "x.txt": with_({ 9: ["TEN"] }) });
+    mergePull(20, { "x.txt": with_({ 0: ["ONE"], 9: ["TEN"] }) });
+    // #21 adds a row after row 10 and a line to list.txt, where main appended its own.
+    const adds = mergePull(21, { "x.txt": with_({ 0: ["ONE"], 9: ["TEN", "ten and a half"] }), "list.txt": text("first", "develop's") });
+    // #22 changes the row #21 added, right after row 10.
+    const changes = mergePull(22, { "x.txt": with_({ 0: ["ONE"], 9: ["TEN", "TEN AND A HALF"] }), "list.txt": text("first", "develop's") });
+    // #23 adds a row main already has.
+    const ported = mergePull(23, { "x.txt": with_({ 0: ["ONE"], 9: ["TEN", "TEN AND A HALF"], 12: ["thirteen", "ported"] }), "list.txt": text("first", "develop's") });
+    git("switch", "--quiet", "main");
+    writeFileSync(join(repo, "x.txt"), with_({ 9: ["ten on main"], 12: ["thirteen on main", "ported"] }));
+    writeFileSync(join(repo, "list.txt"), text("first", "main's"));
+    git("commit", "--quiet", "-am", "main moves");
+
+    const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo, autoPredecessors: false });
+    try {
+      const now = Date.now();
+      const result = await ports.assemble("release/train-20261027-2300", [
+        { number: 21, title: "21", mergeCommitSha: adds, mergedAt: new Date(now).toISOString() },
+        { number: 22, title: "22", mergeCommitSha: changes, mergedAt: new Date(now + 1).toISOString() },
+        { number: 23, title: "23", mergeCommitSha: ported, mergedAt: new Date(now + 2).toISOString() },
+      ], 30);
+      assert.deepEqual(result.picks, [
+        { number: 21, outcome: "included" },
+        // Row 10 as #19 wrote it is what main lacks; #20 changed only row 1.
+        { number: 22, outcome: "conflict", predecessors: [19] },
+        { number: 23, outcome: "already_in_main" },
+      ]);
+      assert.deepEqual(result.settled, [{ number: 21, files: ["list.txt", "x.txt"] }]);
+      await ports.push("release/train-20261027-2300");
+      assert.equal(git("show", "release/train-20261027-2300:x.txt"), with_({ 9: ["ten on main", "ten and a half"], 12: ["thirteen on main", "ported"] }).trim());
+      assert.equal(git("show", "release/train-20261027-2300:list.txt"), text("first", "main's", "develop's").trim());
+      assert.match(git("log", "-1", "--format=%B", "release/train-20261027-2300"), /^Merge pull request #21 from [\s\S]*^Release-train-settled: list\.txt, x\.txt$/m);
+    } finally {
+      await ports.cleanup();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
