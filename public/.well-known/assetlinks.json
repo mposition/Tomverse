@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.tomverse.shell",
+      "sha256_cert_fingerprints": [
+        "8B:86:07:CF:60:7A:9C:81:C4:FE:13:86:49:5C:EE:13:D5:B8:3F:4E:A2:D2:7F:41:80:4A:20:8F:D3:F9:59:6E",
+        "0B:07:15:6B:5A:0F:47:ED:7E:F8:42:F6:21:FF:17:51:83:61:08:DC:4D:04:67:84:F8:80:B6:C4:22:5F:0F:FD"
+      ]
+    }
+  }
+]
