@@ -216,3 +216,53 @@ test("a conflicting pick boards the develop pull requests it needs and rides; ot
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Review r-20261026-235556-e84578: a predecessor whose change main already has
+// (picked there by hand, so not an ancestor) applies nothing and takes no seat.
+test("a predecessor main already has takes no seat when a pick boards what it needs", async () => {
+  const root = mkdtempSync(join(tmpdir(), "train-git-seat-test-"));
+  try {
+    const repo = join(root, "origin");
+    const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    const lines = (first, last) => `${[first, "b", "c", "d", "e", "f", last].join(String.fromCharCode(10))}${String.fromCharCode(10)}`;
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", repo]);
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "x.txt"), lines("a", "g"));
+    git("add", ".");
+    git("commit", "--quiet", "-m", "base");
+    git("switch", "--quiet", "-c", "develop");
+    const mergePull = (number, text) => {
+      git("switch", "--quiet", "-c", `feature-${number}`, "develop");
+      writeFileSync(join(repo, "x.txt"), text);
+      git("add", ".");
+      git("commit", "--quiet", "-m", `change ${number}`);
+      git("switch", "--quiet", "develop");
+      git("merge", "--quiet", "--no-ff", "-m", `Merge pull request #${number} from mposition/feature-${number}`, `feature-${number}`);
+      return git("rev-parse", "HEAD");
+    };
+    mergePull(40, lines("A", "g"));
+    mergePull(41, lines("A", "G"));
+    const fortyTwo = mergePull(42, lines("AA", "GG"));
+    // main took #41's change by hand.
+    git("switch", "--quiet", "main");
+    writeFileSync(join(repo, "x.txt"), lines("a", "G"));
+    git("commit", "--quiet", "-am", "main takes 41 by hand");
+
+    const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo });
+    try {
+      const result = await ports.assemble("release/train-20261027-2000", [{ number: 42, title: "42", mergeCommitSha: fortyTwo, mergedAt: new Date().toISOString() }], 2);
+      assert.deepEqual(result.picks, [
+        { number: 40, outcome: "included", boardedFor: 42 },
+        { number: 42, outcome: "included" },
+      ]);
+      await ports.push("release/train-20261027-2000");
+      assert.equal(git("show", "release/train-20261027-2000:x.txt"), lines("AA", "GG").trim());
+    } finally {
+      await ports.cleanup();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

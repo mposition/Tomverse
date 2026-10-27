@@ -219,11 +219,15 @@ export function createQaReleaseTrainGitPorts(input: {
     for (const needs of needed) {
       // Already reachable from main: nothing to board.
       if ((await git(["merge-base", "--is-ancestor", needs.mergeCommitSha, "HEAD"], { allowFail: true })).ok) continue;
-      if (elsewhere.has(needs.number) || boarded.length + 1 >= seats) return undo();
+      if (elsewhere.has(needs.number)) return undo();
       const taken = new Set([...aboard, ...boarded.map((b) => b.number), pull.number]);
-      const ride = await board(needs, depth + 1, seats - 1 - boarded.length, taken, elsewhere);
-      if (ride.result === "applied") boarded.push(...ride.boarded, needs);
-      else if (ride.result !== "empty") return undo();
+      const ride = await board(needs, depth + 1, Math.max(seats - 1 - boarded.length, 0), taken, elsewhere);
+      // One with nothing to apply (main has its change) takes no seat.
+      if (ride.result === "empty") continue;
+      if (ride.result !== "applied") return undo();
+      boarded.push(...ride.boarded, needs);
+      // The pick itself needs a seat too.
+      if (boarded.length + 1 > seats) return undo();
     }
     if (boarded.length === 0) return undo();
     const again = await pickOnce(pull.mergeCommitSha);
