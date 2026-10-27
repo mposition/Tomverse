@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -13,11 +14,12 @@ async function send(page: Page, text: string) { await page.getByRole("textbox").
 test("Smart Adaptive, settings and composer tools use the existing account and conversation controls", async ({ page }) => {
   await signIn(page); await expect(page.getByRole("button", { name: "Smart Adaptive" })).toBeVisible();
   await page.getByRole("button", { name: "대화", exact: true }).click(); await page.getByRole("button", { name: "설정", exact: true }).click();
-  await page.getByRole("button", { name: "AI 및 개인화", exact: true }).click(); await expect(page.getByRole("switch", { name: "메모리", exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "AI 개인화", exact: true }).click(); await page.getByRole("button", { name: "계정 장기 기억", exact: true }).click(); await expect(page.getByRole("switch", { name: "메모리", exact: true })).toBeChecked();
   await page.getByRole("switch", { name: "메모리", exact: true }).uncheck(); await page.getByRole("button", { name: "변경사항 저장" }).click(); await expect(page.getByRole("status")).toContainText("저장했습니다");
   await page.screenshot({ path: resolve(output, "settings-dark.png") });
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "파일 첨부", exact: true }).click();
+  await expect(page.getByRole("dialog").getByLabel("메모리", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "사진 선택" })).toBeVisible();
   await expect(page.getByRole("switch", { name: /웹 검색/ })).toBeChecked();
   await page.getByRole("switch", { name: /웹 검색/ }).uncheck();
@@ -29,10 +31,12 @@ test("Smart Adaptive, settings and composer tools use the existing account and c
   await send(page, "도구를 사용한 질문"); await expect(page.locator(".message.user .message-label")).toHaveCount(0);
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]);
   expect(saved.webSearchMode).toBe("always"); expect(saved.assistantProfileId).toBe("demo-assistant");
+  const memory = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo:memory")!));
+  expect(memory.masterEnabled).toBe(false);
 });
 
 test("Review provider tabs never resubmit, follow-ups and reopening restore the same comparison", async ({ page }) => {
-  await signIn(page); await page.getByTestId("product-switcher").selectOption("review");
+  await signIn(page); await selectProduct(page, "review");
   await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeVisible();
   await send(page, "여러 관점으로 비교해주세요");
   await expect(page.locator("article.user")).toHaveCount(1); await expect(page.getByRole("heading", { name: "Local demo A", exact: true })).toBeVisible();
@@ -41,38 +45,24 @@ test("Review provider tabs never resubmit, follow-ups and reopening restore the 
   let saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]); expect(saved.messages).toHaveLength(4);
   await send(page, "다음 질문입니다"); await expect(page.locator("article.user")).toHaveCount(2);
   const geometry = await page.evaluate(() => ({ height: innerHeight, conversation: document.querySelector(".review-transcript")!.getBoundingClientRect().height, composer: document.querySelector(".composer-area")!.getBoundingClientRect().height }));
-  expect(geometry.conversation / geometry.height).toBeGreaterThan(0.72); expect(geometry.composer / geometry.height).toBeLessThan(0.11);
+  expect(geometry.conversation / geometry.height).toBeGreaterThan(0.72);
+  expect(geometry.composer).toBeLessThanOrEqual(164);
   await page.screenshot({ path: resolve(output, "review-conversation-dark-v2.png") });
-  await page.reload(); await page.getByTestId("product-switcher").selectOption("review"); await expect(page.getByTestId("review-landing")).toBeVisible();
+  await page.reload(); await selectProduct(page, "review"); await expect(page.getByTestId("review-landing")).toBeVisible();
   await page.getByRole("button", { name: "대화", exact: true }).click(); await page.locator(".conversation-row").click(); await expect(page.locator("article.user")).toHaveCount(2);
   saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]); expect(saved.messages).toHaveLength(8);
 });
 
-test("cross-review keeps per-quote grounding, reversible feedback and separate web verification consent", async ({ page }) => {
-  await page.route("**/src/main.tsx", async route => {
-    const response = await route.fetch(); const source = await response.text();
-    const injection = `
-      const result = { consensus: [{ text: "Shared claim", citations: [{ responseId: "A", quote: "A synthetic perspective", verified: true }, { responseId: "B", quote: "Missing quote", verified: false }], verified: false }], differences: [], contradictions: [], missingPoints: [], verificationNeeded: [], modelAssessments: [], synthesis: "", confidence: "medium", limitations: ["Not external verification"], groundingStats: { totalCitations: 2, verifiedCitations: 1 } };
-      let cached = null; let verdict = null;
-      transport.reviewPreview = async () => ({ available: true, promptMessageId: "question", assistantMessageIds: ["a", "b"], estimatedCredits: 9, ...(cached ? { storedReview: cached } : {}) });
-      transport.runComparison = async id => { window.reviewRuns = (window.reviewRuns || 0) + 1; const rows = (await transport.load(id)).messages.filter(m => m.role === "assistant"); cached = { id: "review", result: { primary: { reviewerModelId: "Synthetic reviewer", result }, secondary: null, agreement: null }, responseMap: rows.slice(0,2).map((m,i) => ({responseId:i ? "B" : "A",messageId:m.id,modelId:m.modelId,modelName:m.modelId})), reviewerModelId: "Synthetic reviewer", usageCredits: 9, cached: false, disclaimer: "Compares supplied answers only.", reviewItems: [{id:"server-item",reviewer:"primary",section:"consensus",ordinal:0}] }; return cached; };
-      transport.reviewFeedback = async () => ({ feedback: verdict ? [{reviewItemId:"server-item",verdict}] : [] });
-      transport.setReviewFeedback = async (id,reviewId,itemId,value) => { verdict = value; };
-      transport.verifyReviewItem = async () => { window.verifyRuns = (window.verifyRuns || 0) + 1; return {status:"inconclusive",summary:"Synthetic result",usageCredits:2,reviewerModelId:"Synthetic web reviewer",disclaimer:"Not a truth guarantee"}; };
-    `;
-    await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
-  });
-  await signIn(page); await page.getByTestId("product-switcher").selectOption("review"); await send(page, "Compare");
-  await page.getByRole("button", { name: "파일 첨부", exact: true }).click(); await page.getByRole("button", { name: "AI 교차검토", exact: true }).click();
-  expect(await page.evaluate(() => (window as unknown as { reviewRuns?: number }).reviewRuns ?? 0)).toBe(0);
-  await page.getByRole("button", { name: "교차검토 실행", exact: true }).click();
-  await expect(page.getByText("출처 인용 일치율: 50% (1/2)")).toBeVisible(); await expect(page.getByText(/B · 원문 일치가 확인되지 않은 인용/)).toBeVisible();
-  const helpful = page.getByRole("button", { name: "도움 됨", exact: true }); await helpful.click(); await expect(helpful).toHaveAttribute("aria-pressed", "true"); await helpful.click(); await expect(helpful).toHaveAttribute("aria-pressed", "false");
-  await page.getByRole("button", { name: "웹에서 확인 · 별도 크레딧" }).click();
-  expect(await page.evaluate(() => (window as unknown as { verifyRuns?: number }).verifyRuns ?? 0)).toBe(0);
-  await page.getByRole("button", { name: "웹 검증 실행 확인" }).click(); await expect(page.getByText("Synthetic result", { exact: true })).toBeVisible();
-  await page.screenshot({ path: resolve(output, "cross-review-dark.png") });
-  expect(await page.evaluate(() => (window as unknown as { reviewRuns: number }).reviewRuns)).toBe(1);
+test("Review message tools omit cross-review and image studio actions", async ({ page }) => {
+  await signIn(page); await selectProduct(page, "review");
+  await send(page, "Compare these options");
+  await page.getByRole("button", { name: "파일 첨부", exact: true }).click();
+  const tools = page.getByRole("dialog");
+  await expect(tools.getByRole("button", { name: "AI 교차검토", exact: true })).toHaveCount(0);
+  await expect(tools.getByRole("button", { name: "이미지 스튜디오", exact: true })).toHaveCount(0);
+  await expect(tools.getByRole("button", { name: "사진 선택", exact: true })).toBeVisible();
+  await expect(tools.getByRole("switch", { name: /웹 검색/ })).toBeVisible();
+  await page.screenshot({ path: resolve(output, "review-tools-dark.png") });
 });
 
 test("historical generated images renew an expired signed URL without exposing storage keys", async ({ page }) => {
@@ -98,12 +88,15 @@ test("image quotes require fresh consent after a price change and never run auto
   await page.route("**/src/main.tsx", async route => {
     const response = await route.fetch(); const source = await response.text();
     const injection = `let capReads=0; transport.mobileCapabilities=async()=>{capReads++;return {reviewEasy:true,assistants:false,maxModels:3,plan:"Max",images:{enabled:true,maxModels:3,models:[{id:"synthetic-image",name:"Synthetic image model",provider:"openai",pricingVersion:window.priceChanged?"v2":"v1",prices:[{quality:"medium",size:"1024x1024",credits:window.priceChanged?12:10}]}]}};};
+      transport.routeReview=async()=>({kind:"image",preset:"standard",choices:[{provider:"openai",modelId:"synthetic-image"}]});
       transport.generateImages=async()=>{window.imageRuns=(window.imageRuns||0)+1;return {groupId:"group",conversationId:"image-chat"};};
       transport.imageGroup=async()=>({status:"failed",targets:[],generations:[]});`;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
-  await signIn(page); await page.getByTestId("product-switcher").selectOption("review");
-  await page.getByRole("button", { name: "파일 첨부", exact: true }).click(); await page.getByRole("button", { name: "이미지 스튜디오", exact: true }).click(); await page.getByLabel("이미지 설명").fill("Synthetic prompt");
+  await signIn(page); await selectProduct(page, "review");
+  await page.getByRole("textbox").fill("Synthetic image prompt");
+  await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
+  await page.getByLabel("이미지 설명").fill("Synthetic prompt");
   expect(await page.evaluate(() => (window as unknown as { imageRuns?: number }).imageRuns ?? 0)).toBe(0);
   const consent = page.getByRole("checkbox", { name: /선택한 모델과 표시된 크레딧/ }); await consent.check(); await page.evaluate(() => { (window as unknown as { priceChanged: boolean }).priceChanged = true; }); await page.getByRole("button", { name: "이미지 생성", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("모델 또는 가격이 변경되었습니다"); await expect(consent).not.toBeChecked();
@@ -131,13 +124,15 @@ for (const recovery of ["receipt", "same-request", 400, 401, 403, 409, 422, 429]
   await page.route("**/src/main.tsx", async route => {
     const response = await route.fetch(); const source = await response.text();
     const injection = `transport.mobileCapabilities=async()=>({reviewEasy:true,assistants:false,maxModels:3,plan:"Max",images:{enabled:true,maxModels:1,models:[{id:"synthetic-image",name:"Synthetic image model",provider:"openai",pricingVersion:"v1",prices:[{quality:"medium",size:"1024x1024",credits:10}]}]}});
+      transport.routeReview=async()=>({kind:"image",preset:"standard",choices:[{provider:"openai",modelId:"synthetic-image"}]});
       window.imageRequests=[];transport.generateImages=async input=>{window.imageRequests.push(input);if(window.imageRequests.length===1)throw new TypeError("Lost response");${typeof recovery === "number" ? `throw {status:${recovery}};` : 'return {groupId:"saved-group",conversationId:"image-chat"};'}};
       transport.imageRequest=async key=>{window.receiptKey=key;if(window.receiptAvailable) return {groupId:"saved-group",conversationId:"image-chat"};${recovery === "receipt" ? 'return {groupId:"saved-group",conversationId:"image-chat"};' : 'throw {status:404};'}};
       transport.imageGroup=async()=>({status:"failed",targets:[],generations:[]});`;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
-  await signIn(page); await page.getByTestId("product-switcher").selectOption("review");
-  await page.getByRole("button", { name: "파일 첨부", exact: true }).click(); await page.getByRole("button", { name: "이미지 스튜디오", exact: true }).click();
+  await signIn(page); await selectProduct(page, "review");
+  await page.getByRole("textbox").fill("Synthetic image prompt");
+  await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
   await page.getByLabel("이미지 설명").fill("Keep the same image request");
   const consent = page.getByRole("checkbox", { name: /선택한 모델과 표시된 크레딧/ }); await consent.check(); await page.getByRole("button", { name: "이미지 생성", exact: true }).click();
   await expect(page.getByLabel("이미지 설명")).toBeDisabled();
@@ -169,7 +164,7 @@ for (const recovery of ["receipt", "same-request", 400, 401, 403, 409, 422, 429]
 });
 
 for (const mode of ["Easy", "Professional"] as const) test(`missing ${mode} Review participants keeps the attachment and draft editable`, async ({ page }) => {
-  await signIn(page);await page.getByTestId("product-switcher").selectOption("review");
+  await signIn(page);await selectProduct(page, "review");
   await page.getByTestId("file-picker").setInputFiles({name:"keep.txt",mimeType:"text/plain",buffer:Buffer.from("Keep")});
   await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();
   await page.getByRole("textbox").fill("Keep my question");await page.getByRole("button",{name:/참여 모델 선택/}).click();
@@ -188,7 +183,7 @@ test("a refused Review admission preserves the draft and selected attachment wit
     const response=await route.fetch();const source=await response.text();
     await route.fulfill({response,body:source.replace("createRoot(container).render(", 'transport.sendReview=async()=>{throw Object.assign(new Error("CHAT_RATE_LIMITED"),{status:429,code:"CHAT_RATE_LIMITED",questionPersisted:false,retryAfterSeconds:12,traceId:"synthetic-trace"});};createRoot(container).render(')});
   });
-  await signIn(page);await page.getByTestId("product-switcher").selectOption("review");
+  await signIn(page);await selectProduct(page, "review");
   await page.getByTestId("file-picker").setInputFiles({name:"keep.txt",mimeType:"text/plain",buffer:Buffer.from("Keep this attachment")});
   await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();
   await page.getByRole("textbox").fill("Keep my question");await page.getByRole("button",{name:"메시지 보내기",exact:true}).click();
