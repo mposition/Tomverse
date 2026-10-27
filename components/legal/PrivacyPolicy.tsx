@@ -254,7 +254,8 @@ export function PrivacyPolicy() {
                     {sections.map(([titleKey, bodyKey, Icon]) => (
                         <section
                             key={titleKey}
-                            className="grid gap-4 py-7 md:grid-cols-[180px_1fr]"
+                            id={bodyKey === "rights" ? "account-deletion" : undefined}
+                            className="grid scroll-mt-24 gap-4 py-7 md:grid-cols-[180px_1fr]"
                         >
                             <h2 className="flex items-center gap-2 text-sm font-semibold">
                                 <Icon className="h-4 w-4 text-blue-500" />
@@ -262,6 +263,17 @@ export function PrivacyPolicy() {
                             </h2>
                             <div className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                                 <p>{t(`privacyPolicy.${bodyKey}`)}</p>
+                                {bodyKey === "rights" && (
+                                    <div className="mt-5 space-y-3">
+                                        <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{t("auth.deleteAccount")}</h3>
+                                        <p>{t("privacyPolicy.deletionRequest")}</p>
+                                        <a href="mailto:support@tomverse.app?subject=Tomverse%20account%20and%20data%20deletion%20request" className="inline-flex items-center gap-2 font-semibold text-blue-600 underline underline-offset-4 dark:text-blue-400">
+                                            <Mail className="h-4 w-4" aria-hidden="true" />
+                                            {t("auth.deleteAccount")} · support@tomverse.app
+                                        </a>
+                                        <p>{t("privacyPolicy.deletionSubscriptions")}</p>
+                                    </div>
+                                )}
                                 {bodyKey === "providers" && (
                                     <>
                                         <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
