@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test } from "@playwright/test";
 import { resolve } from "node:path";
 
@@ -38,7 +39,7 @@ test("Easy uses server effective providers, preserves an explicit empty selectio
   await page.evaluate(() => {
     localStorage.setItem("tomverse-native-synthetic-demo:preferences", JSON.stringify({ theme: "system", language: "en", defaultModel: "demo", timeZone: "UTC", imageHandoffAutoGenerate: false, reviewEasyEffectiveProviders: ["Synthetic B"], reviewEasyProviderOptions: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyMaxProviders: 3 }));
   });
-  await page.getByTestId("product-switcher").selectOption("review");
+  await selectProduct(page, "review");
   const picker = page.getByRole("button", { name: /Choose participants · Easy/ });
   await expect(picker).toBeEnabled(); await picker.click();
   await expect(page.getByRole("checkbox", { name: "Synthetic A", exact: true })).not.toBeChecked();
@@ -105,7 +106,7 @@ test("settings and sign-out remain reachable during an active response", async (
   await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
   await page.getByTestId("sidebar-account").getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "Privacy & data", exact: true }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue with Tomverse" })).toBeVisible();
 });
@@ -115,7 +116,7 @@ test("a failed Easy defaults read leaves Professional Review usable", async ({ p
     const response = await route.fetch(); const source = await response.text();
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", `transport.preferences=async()=>{throw Error('Temporary settings failure');};createRoot(container).render(`) });
   });
-  await page.reload(); await page.getByTestId("product-switcher").selectOption("review");
+  await page.reload(); await selectProduct(page, "review");
   await expect(page.getByRole("alert")).toContainText("Easy defaults could not be loaded");
   await page.getByRole("button", { name: /Choose participants/ }).click();
   await page.getByRole("button", { name: "Professional", exact: true }).click();
@@ -136,7 +137,7 @@ test("a list read completing after sign-out never starts background title genera
   await expect.poll(() => page.evaluate(() => typeof (window as unknown as { finishList?: unknown }).finishList)).toBe("function");
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
   await page.getByTestId("sidebar-account").getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "Privacy & data", exact: true }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.evaluate(async () => { await (window as unknown as { finishList: () => Promise<void> }).finishList(); });
   await expect(page.getByRole("button", { name: "Continue with Tomverse" })).toBeVisible();

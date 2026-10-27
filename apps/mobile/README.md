@@ -102,6 +102,29 @@ build on a hosted Mac mini M2. See [Codemagic setup](../../docs/ops/ios-codemagi
 for connecting the personal account, selecting the prepared branch and reading
 the artifacts. Apple membership is needed later for TestFlight device distribution.
 
+## Android and iOS design parity (2026-10-27)
+
+The Android design revision `bf48eaf2c` now supplies the same shared React
+screens, styles, artwork and seven-language copy to iOS. This includes the
+illustrated Chat/Review starts, centered brand, conversation return navigation,
+message tools, provider/model lists, all six settings tabs and server-verified
+purchase confirmation. Location controls stay in Tools; the composer has no
+extra location status row. iOS native configuration remains separate.
+
+From the repository root in local PowerShell, without production credentials:
+
+- `npm --workspace @tomverse/mobile run test:ui:ios` checks shared UI in WebKit.
+- `npm --workspace @tomverse/mobile run test:ui:ios-design` checks light/dark
+  layouts on iPhone and iPad 7 portrait/landscape WebKit profiles, including
+  navigation, model selectors, tools, all settings tabs and overflow.
+- `npm run test:ios-billing-ui` checks the Apple billing UI with synthetic
+  native bridges and server responses. No purchase is made.
+- `npm run prepare:ios` rebuilds and synchronizes the local iOS resources.
+
+WebKit previews establish browser layout compatibility. Xcode compilation,
+signed-device permissions, StoreKit purchases and store submission still need
+their Mac/device acceptance steps.
+
 ## Authentication and operational boundary
 
 The primary sign-in action opens the existing web sign-in flow in the system
@@ -323,6 +346,19 @@ followed by a supported capability response from the actual target server.
 
 ## Foreground location
 
-The current Chat and Review composers offer a Current location switch in Tools. When location is off, a bounded analysis by the configured routing model can identify a location-dependent question and request foreground device permission before the same question is answered. Existing device permission is reused, including after reload; the app does not show another permission dialog of its own. Once enabled, each message reads a fresh approximate fix. Manual off, denial and acquisition failures suppress automatic requests for the current identity session. Location is excluded from stored messages and device drafts. Switching accounts, signing out, or reloading clears in-memory state without changing the browser/device permission setting. Ordinary chat remains available on any analysis or acquisition failure. Analysis uses the existing routing provider operational budget; no new provider, price or budget ceiling is enabled.
+The current Chat and Review composers offer a Current location switch in Tools.
+Native first launch offers an optional foreground-location explanation before
+the system permission request; skipping it leaves ordinary chat available.
+Explicit choices are saved per account, without coordinates. A saved grant is
+restored only after checking existing device permission, without another OS
+prompt. Switching accounts or signing out clears the in-memory fix.
+
+When location is off, the existing, separately gated routing-model analysis can
+identify a location-dependent question and request foreground permission before
+answering. Manual off, denial and acquisition failures suppress automatic
+requests for the current identity session. Each enabled message reads a fresh
+approximate fix; location is excluded from stored messages and drafts. Ordinary
+chat remains available on analysis or acquisition failure. This UI update does
+not enable the analysis switch, a new provider, price or budget ceiling.
 
 The existing native chat enrollment, browser login, secure store and product navigation are unchanged. Run the workspace cap:sync script after dependency changes; its post-sync hook configures foreground coarse Android location and reduced-accuracy iOS usage descriptions. Physical-device permission and GPS observations remain separate from browser fixtures.

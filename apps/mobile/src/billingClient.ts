@@ -56,7 +56,7 @@ export function createNativeBillingClient(input: {
       const state = await sync(); await identify(state);
       return { state, products: await readProducts(state) };
     }),
-    purchase: (product: PurchasesStoreProduct) => serialized(async () => {
+    purchase: (product: PurchasesStoreProduct, onStoreCompleted?: (before: MobileBillingState) => void) => serialized(async () => {
       const state = await sync();
       const item = state.products.find((p) => p.productId === product.identifier);
       if (!item || !canPurchaseMobileProduct(state, item, input.store)) throw new Error("BILLING_PLAN_CHANGED");
@@ -74,7 +74,7 @@ export function createNativeBillingClient(input: {
         throw error;
       }
       // Only current server/webhook evidence can grant access after payment.
-      current(); return sync();
+      current(); onStoreCompleted?.(prepared); return sync();
     }),
     restore: () => serialized(async () => {
       const state = await sync(); await identify(state); await input.sdk.restorePurchases(); current(); return sync();
