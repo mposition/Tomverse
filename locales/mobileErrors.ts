@@ -18,11 +18,22 @@ const retry: Record<MobileLanguage, string> = {
   es: "Las solicitudes se están enviando demasiado rápido. Inténtalo de nuevo en {seconds} segundos.",
   pt: "As solicitações estão sendo enviadas rápido demais. Tente novamente em {seconds} segundos.",
 };
+const credits: Record<MobileLanguage, { balance: string; daily: string }> = {
+  en: { balance: "You do not have enough credits for this request. Check your balance in Settings > Plan.", daily: "This request exceeds your remaining daily plan credits. Try a lower-cost option or wait for the daily reset." },
+  ko: { balance: "이 요청에 필요한 크레딧이 부족합니다. 설정 > 플랜에서 잔액을 확인해 주세요.", daily: "이 요청은 오늘 남은 플랜 크레딧 한도를 초과합니다. 비용이 낮은 옵션을 선택하거나 일일 한도가 초기화된 뒤 다시 시도해 주세요." },
+  zh: { balance: "积分不足以完成此请求，请在设置 > 套餐中查看余额。", daily: "此请求超出今日剩余套餐积分，请选择费用更低的选项或等待每日额度重置。" },
+  de: { balance: "Deine Credits reichen für diese Anfrage nicht aus. Prüfe dein Guthaben unter Einstellungen > Tarif.", daily: "Diese Anfrage übersteigt deine verbleibenden täglichen Tarif-Credits. Wähle eine günstigere Option oder warte auf die tägliche Zurücksetzung." },
+  fr: { balance: "Vos crédits sont insuffisants pour cette demande. Vérifiez votre solde dans Paramètres > Forfait.", daily: "Cette demande dépasse vos crédits quotidiens restants. Choisissez une option moins coûteuse ou attendez la réinitialisation quotidienne." },
+  es: { balance: "No tienes suficientes créditos para esta solicitud. Consulta tu saldo en Ajustes > Plan.", daily: "Esta solicitud supera los créditos diarios restantes. Elige una opción más económica o espera al restablecimiento diario." },
+  pt: { balance: "Seus créditos são insuficientes para esta solicitação. Confira o saldo em Configurações > Plano.", daily: "Esta solicitação excede os créditos diários restantes. Escolha uma opção mais econômica ou aguarde a redefinição diária." },
+};
 export function mobileErrorText(error: unknown, language: MobileLanguage, fallback: string): string {
   const input = (error ?? {}) as { code?: unknown; status?: unknown; retryAfterSeconds?: unknown; traceId?: unknown };
   const annotate = (text: string) => text + (typeof input.traceId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(input.traceId) ? ` · Trace ID: ${input.traceId}` : "");
   const code = typeof input.code === "string" ? input.code : "";
   const status = typeof input.status === "number" ? input.status : undefined;
+  if (code === "CREDIT_BALANCE_INSUFFICIENT") return annotate(credits[language].balance);
+  if (code === "PLAN_DAILY_CREDIT_LIMIT_REACHED") return annotate(credits[language].daily);
   if (["ATTACHMENT_UNSUPPORTED_FORMAT", "UNSUPPORTED_ATTACHMENT_TYPE"].includes(code)) return annotate(copy[language].unsupported);
   if (code.includes("TOO_LARGE") || status === 413) return annotate(copy[language].size);
   if (code.startsWith("ATTACHMENT_") || code.startsWith("ARCHIVE_")) return annotate(copy[language].file);
