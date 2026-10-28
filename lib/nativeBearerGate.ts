@@ -168,6 +168,8 @@ export function nativeChatBearerRoute(path: string, method: string, enabled = fa
 /** Native web-parity additions require their own reviewed operational activation. */
 export function nativeParityBearerRoute(path: string, method: string, enabled = false): boolean {
   if (!enabled) return false;
+  // Checkout itself restricts bearer requests to complimentary internal passes.
+  if (path === "/api/billing/checkout") return method === "POST";
   if (path === "/api/user/usage") return method === "GET";
   if (path === "/api/conversations/search") return method === "GET";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path)) return method === "GET";

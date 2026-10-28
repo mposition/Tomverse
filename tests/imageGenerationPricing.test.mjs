@@ -93,10 +93,10 @@ test("pricing metadata is pinned", () => {
   }
 });
 
-test("plan entitlement is Pro/Max only", () => {
+test("signed-in plans may use their existing image credit allowance while guests remain excluded", () => {
   assert.equal(planAllowsImageGeneration("Pro"), true);
   assert.equal(planAllowsImageGeneration("Max"), true);
-  assert.equal(planAllowsImageGeneration("Free"), false);
+  assert.equal(planAllowsImageGeneration("Free"), true);
   assert.equal(planAllowsImageGeneration("Guest"), false);
 });
 

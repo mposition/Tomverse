@@ -3,7 +3,7 @@ import { mobileCopy, type MobileLanguage } from "../../locales/mobile";
 import { mobileSettingsCopy } from "../../locales/mobileSettings";
 import { mobileBillingCopy, formatMobileBillingCopy } from "../../locales/mobileBilling";
 
-async function installBilling(page: Page, web = false, overlap = false, bothStores = false, pending = false, catalogFails = false, language: MobileLanguage = "en", outcome: "confirmed" | "delayed" | "unchanged" | "cancelled" = "confirmed") {
+async function installBilling(page: Page, web = false, overlap = false, bothStores = false, pending = false, catalogFails = false, language: MobileLanguage = "en", outcome: "confirmed" | "delayed" | "unchanged" | "cancelled" = "confirmed", passOutcome?: "confirmed" | "expired" | "lost") {
   const calls: { plugin: string; method: string; options: Record<string, unknown> }[] = [];
   await page.exposeFunction("billingCall", (call: typeof calls[number]) => { calls.push(call); });
   await page.addInitScript(({ pending, catalogFails, language, outcome }) => {
@@ -32,12 +32,21 @@ async function installBilling(page: Page, web = false, overlap = false, bothStor
     };
   }, { pending, catalogFails, language, outcome });
   let purchasedCredits = 500; let cancelled = false;
+  let passActivated = false;
   let postPurchaseReads = 0;
   let subscriptionPurchaseAttempt: { id: string; store: string; productId: string; startedAt: string } | null = null;
   await page.route("https://api.native-chat.test/**", async (route) => {
     const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Authorization,Content-Type", "Access-Control-Allow-Methods": "GET,POST,OPTIONS" };
     if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/billing/checkout" && passOutcome) {
+      expect(route.request().headers().authorization).toBe("Bearer test-access");
+      expect(route.request().postDataJSON()).toMatchObject({ planId: "pro", billingInterval: "monthly", promoCode: "TEST-PASS", language });
+      if (passOutcome === "lost") return route.abort();
+      if (passOutcome === "expired") return route.fulfill({ status: 409, json: { code: "PROMOTION_EXPIRED" }, headers });
+      passActivated = true;
+      return route.fulfill({ json: { success: true, accessType: "founding_tester_pass", automaticRenewal: false, paymentMethodRequired: false, periodEnd: "2099-01-01T00:00:00Z" }, headers });
+    }
     if (path === "/api/user/account") return route.fulfill({ json: { id: "billing-user", name: "Billing user", email: "billing@example.test", actionsEnabled: false }, headers });
     if (path === "/api/conversations") return route.fulfill({ json: [], headers });
     if (path === "/api/models/catalog") return route.fulfill({ json: { models: [] }, headers });
@@ -54,6 +63,7 @@ async function installBilling(page: Page, web = false, overlap = false, bothStor
     await route.fulfill({ headers, json: {
       billingId: "billing-account", plan: upgraded ? "Max" : "Pro", subscriptionStore: web ? "web" : "play_store", productId: upgraded ? "max:monthly" : "pro:monthly", subscriptionPurchaseAttempt,
       interval: "monthly", expiresAt: "2026-11-25T00:00:00Z", active: true, cancelAtPeriodEnd: cancelled, purchasedCredits,
+      promotionPasses: true, accessPass: passActivated ? { expiresAt: "2099-01-01T00:00:00Z" } : null,
       webSubscription: { active: web || overlap, cancelAtPeriodEnd: cancelled, expiresAt: "2026-11-25T00:00:00Z" },
       storeSubscriptions: bothStores ? [
         { store: "play_store", productId: "pro:monthly", plan: "Pro", interval: "monthly", expiresAt: "2099-01-01T00:00:00Z", cancelAtPeriodEnd: false },
@@ -74,6 +84,30 @@ async function installBilling(page: Page, web = false, overlap = false, bothStor
   await expect(page.getByText(formatMobileBillingCopy(mobileBillingCopy(language).currentPlan, { plan: "Pro" }), { exact: true })).toBeVisible();
   return calls;
 }
+for (const language of ["en", "ko"] as const) test(`native plan applies a Tomverse pass and shows its access period: ${language}`, async ({ page }) => {
+  const calls = await installBilling(page, false, false, false, false, false, language, "confirmed", "confirmed");
+  const c = mobileBillingCopy(language);
+  await page.getByRole("textbox", { name: c.promotionCode, exact: true }).fill("  test-pass  ");
+  await page.getByRole("button", { name: c.applyCode, exact: true }).click();
+  await expect(page.getByText(c.passApplied, { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: c.promotionCode, exact: true })).toHaveValue("");
+  await expect(page.getByText(formatMobileBillingCopy(c.passAccessUntil, { date: new Date("2099-01-01T00:00:00Z").toLocaleDateString(language) }), { exact: true })).toBeVisible();
+  expect(calls.filter(call => call.method === "purchaseStoreProduct")).toHaveLength(0);
+  await page.screenshot({ path: test.info().outputPath(`promotion-pass-${language}.png`), fullPage: true });
+});
+
+for (const outcome of ["expired", "lost"] as const) test(`native pass redemption explains ${outcome} without automatic retries`, async ({ page }) => {
+  await installBilling(page, false, false, false, false, false, "ko", "confirmed", outcome);
+  let requests = 0;
+  page.on("request", request => { if (request.method() === "POST" && new URL(request.url()).pathname === "/api/billing/checkout") requests++; });
+  const c = mobileBillingCopy("ko");
+  await page.getByRole("textbox", { name: c.promotionCode, exact: true }).fill("test-pass");
+  await page.getByRole("button", { name: c.applyCode, exact: true }).click();
+  await expect(page.getByText(outcome === "expired" ? c.passExpired : c.passUnconfirmed, { exact: true })).toBeVisible();
+  await expect(page.getByText(c.passApplied, { exact: true })).toHaveCount(0);
+  expect(requests).toBe(1);
+});
+
 test("native billing shows store prices, buys credits, upgrades, restores and opens store cancellation", async ({ page }) => {
   const calls = await installBilling(page);
   await expect(page.getByText("A$7.49", { exact: true })).toBeVisible();
