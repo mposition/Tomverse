@@ -372,27 +372,37 @@ test("a worker checkout moves to its publication base only when clean and the ba
         return { stdout: Buffer.alloc(0) };
       }
       if (command[0] === "checkout") { state.head = command.at(-1); return { stdout: Buffer.alloc(0) }; }
+      if (command[0] === "rev-parse" && command[1] === "--show-toplevel")
+        return { stdout: Buffer.from(state.root ?? "/repo") };
       if (command[0] === "rev-parse") return { stdout: Buffer.from(state.moved ?? state.head) };
       throw new Error("unexpected git command");
     };
     return { run, calls };
   };
-  const names = (calls) => calls.map((call) => call.command[0]);
+  const names = (calls) => calls.map((call) => call.command[0])
+    .filter((name) => name !== "rev-parse");
+  const realpath = async (value) => value;
 
   const dirty = repo({ dirty: true, present: true });
-  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: dirty.run }),
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: dirty.run, realpath }),
     { ok: false, reason: "worktree_dirty" });
   assert.deepEqual(names(dirty.calls), ["status"]);
 
   const local = repo({ present: true });
-  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: local.run }),
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: local.run, realpath }),
     { ok: true, baseSha: base });
   assert.equal(names(local.calls).includes("fetch"), false);
   assert.ok(local.calls.some((call) => call.command[0] === "checkout" &&
-    call.command.includes("--detach") && call.command.at(-1) === base));
+    call.command.includes("--detach") &&
+    call.command.includes("--no-overwrite-ignore") && call.command.at(-1) === base));
+
+  const foreign = repo({ present: true, root: "/outer" });
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base,
+    { run: foreign.run, realpath }), { ok: false, reason: "foreign_worktree" });
+  assert.deepEqual(names(foreign.calls), []);
 
   const fetched = repo({ fetchable: ["refs/heads/develop"] });
-  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: fetched.run }),
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: fetched.run, realpath }),
     { ok: true, baseSha: base });
   const fetch = fetched.calls.find((call) => call.command[0] === "fetch");
   assert.deepEqual(fetch.command, ["fetch", "--no-tags", "--quiet", "origin",
@@ -400,19 +410,19 @@ test("a worker checkout moves to its publication base only when clean and the ba
   assert.equal(fetch.timeout, 120_000);
 
   const exact = repo({ fetchable: [base] });
-  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: exact.run }),
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: exact.run, realpath }),
     { ok: true, baseSha: base });
 
   const missing = repo({});
-  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: missing.run }),
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: missing.run, realpath }),
     { ok: false, reason: "base_unavailable" });
   assert.equal(names(missing.calls).includes("checkout"), false);
 
   const moved = repo({ present: true, moved: "c".repeat(40) });
-  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: moved.run }),
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: moved.run, realpath }),
     { ok: false, reason: "base_checkout_unverified" });
 
   for (const [path, sha] of [["repo", base], ["/repo", "B".repeat(40)], ["/repo", undefined]])
-    assert.deepEqual(await syncAmuxV22WorktreeBase(path, sha, { run: local.run }),
+    assert.deepEqual(await syncAmuxV22WorktreeBase(path, sha, { run: local.run, realpath }),
       { ok: false, reason: "invalid_input" });
 });
