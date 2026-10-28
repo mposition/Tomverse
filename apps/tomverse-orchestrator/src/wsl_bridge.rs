@@ -2267,6 +2267,20 @@ async fn v22_sidecar_call(
 const V22_READ_ONLY_RETRY_TASK_ID: &str = "c48886b9-86f8-4631-8db8-c0b288a707af";
 const V22_READ_ONLY_LAUNCHER_POLICY: &str = "amux-v22-read-only-retry-v1";
 
+/// The publication run's base, which the sidecar checks out before the CLI
+/// runs. Only a lowercase 40-hex commit id crosses to the sidecar.
+fn v22_insert_base_sha(payload: &mut serde_json::Value,
+    base_sha: Option<&str>) -> Result<()> {
+    let Some(base_sha) = base_sha else { return Ok(()); };
+    if base_sha.len() != 40 || !base_sha.bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+        bail!("invalid v22 base commit");
+    }
+    payload.as_object_mut().context("v22 payload object")?
+        .insert("baseSha".into(), serde_json::json!(base_sha));
+    Ok(())
+}
+
 fn v22_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) &&
         value.bytes().all(|byte| !byte.is_ascii_uppercase())
@@ -2624,6 +2638,7 @@ impl LocalAmux for HttpLocal {
                 .insert("executionGrade".into(),
                     serde_json::json!(profile.execution_grade));
         }
+        v22_insert_base_sha(&mut payload, profile.base_sha.as_deref())?;
         if let Some(read_only_retry) = read_only_retry {
             payload.as_object_mut().context("v22 payload object")?
                 .insert("readOnlyRetry".into(), read_only_retry);
@@ -4092,6 +4107,7 @@ mod tests {
             review_author_vendor: Some("anthropic".into()),
             review_scope: Some("test".into()), review_feedback_job_id: None,
             read_only_retry: None,
+            base_sha: None,
         };
         let mut result = V22SidecarResult {
             state: V22SidecarState::Succeeded, read_only_retry: None,
@@ -5823,6 +5839,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn v22_execute_payload_carries_only_a_plain_base_commit() {
+        let mut payload = serde_json::json!({"op": "execute"});
+        v22_insert_base_sha(&mut payload, None).unwrap();
+        assert!(payload.get("baseSha").is_none());
+        v22_insert_base_sha(&mut payload, Some(&"a".repeat(40))).unwrap();
+        assert_eq!(payload["baseSha"], "a".repeat(40));
+        for bad in ["A".repeat(40), "a".repeat(39), "g".repeat(40), "a".repeat(64)] {
+            let mut other = serde_json::json!({"op": "execute"});
+            assert!(v22_insert_base_sha(&mut other, Some(&bad)).is_err());
+            assert!(other.get("baseSha").is_none());
+        }
+    }
+
     #[tokio::test]
     async fn v22_dispatch_uses_only_the_one_shot_sidecar() {
         let mut local = SidecarOnlyLocal { sidecar_sends: 0,
@@ -5838,6 +5868,7 @@ mod tests {
             review_feedback_job_id: None,
             budget_microusd: 1_000_000,
             read_only_retry: None,
+            base_sha: None,
         });
         assert!(matches!(dispatch_v22(&delivery, "00000000-0000-4000-8000-000000000001", 3, &mut local).await,
             BridgeTickResult::Pending { .. }));
@@ -5885,6 +5916,7 @@ mod tests {
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+            base_sha: None,
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
         assert_eq!(payload["launchBindingId"], retry.launch_binding_id);
@@ -5936,6 +5968,7 @@ mod tests {
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+            base_sha: None,
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
         assert_eq!(payload["executorKind"], "read_only_api_retry_v1");
