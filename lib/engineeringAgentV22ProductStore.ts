@@ -20,7 +20,7 @@ const livePorts: Ports = { open: openEngineeringAgentWorkItem,
   issue: issueEngineeringAgentCapability };
 
 /** Settlement keeps every v22 patch private: a draft whose tier is read later
- * when the run may still publish (§4), otherwise an ordinary draft. Reading
+ * when the run may still publish, otherwise an ordinary draft. Reading
  * the tier needs the base tree and GitHub, which settlement has no time for. */
 export async function openEngineeringAgentV22Product(
   tx: EngineeringAgentTransaction,
@@ -50,7 +50,7 @@ const capabilityFor = (input: { runId: string; taskId: string;
 });
 
 /** A queued publish item whose capability lapsed before a round claimed it,
- * judged again (§10): a new capability for the same patch and tree. */
+ * judged again: a new capability for the same patch and tree. */
 export async function reissueEngineeringAgentV22Capability(
   tx: EngineeringAgentTransaction,
   input: { workItemId: string; runId: string; taskId: string;

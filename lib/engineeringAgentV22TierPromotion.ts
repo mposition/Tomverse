@@ -122,8 +122,8 @@ const t1Candidate = (item: Pending, stored: Stored | null) =>
     baseCommitterDate: stored.candidate.baseCommitterDate,
     imageProofDigest: stored.imageProofDigest! } : null;
 
-/** One round outside any route budget (§4). A v22 publish item whose
- * capability lapsed before a round claimed it is judged again first (§10):
+/** One round outside any route budget. A v22 publish item whose
+ * capability lapsed before a round claimed it is judged again first:
  * the same verdict on the same tree gets a new capability, any other closes
  * the item so it neither holds the queue nor comes first again. Otherwise one
  * pending draft's tier: T1 opens the run's publish item with its capability,
@@ -188,7 +188,7 @@ export async function promoteEngineeringAgentV22Draft(
 
 let running: Promise<unknown> | null = null;
 
-/** The publisher's claim starts this after answering (§8): one round at a
+/** The publisher's claim starts this after answering: one round at a
  * time in this process, and a failure is logged, never retried here. */
 export function startEngineeringAgentV22TierPromotion(): Promise<unknown> {
   running ??= promoteEngineeringAgentV22Draft()
