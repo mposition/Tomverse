@@ -195,6 +195,8 @@ that cookie-only request and cannot accidentally log out a valid native session.
 Unavailable usage never renders a fabricated zero. The usage route enrollment and
 capability declaration must be deployed together for production totals to load.
 
+Native CORS exposes `X-Chat-Response-Mode` to the existing app origins so the
+WebView can read the image handoff marker.
 Smart Adaptive image handoffs are recognized by the `image-turn` response mode,
 separately from deep-research receipts. The `chatImageTurns` capability advertises
 the exact native POST `/api/conversations/{id}/image-turn` enrollment behind the
