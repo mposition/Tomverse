@@ -893,6 +893,14 @@ export const amuxRouteHasBudgetForMs = (transactionMaxMs: number): boolean => {
 export const amuxRouteHasBudgetFor = (boundary: AmuxDbBoundary): boolean =>
   amuxRouteHasBudgetForMs(amuxDbTransactionBudgetMs(boundary));
 
+/** What the route has left beyond one transaction's budget, for work that
+ * must finish before it; null outside `withAmuxRouteBudget`. */
+export const amuxRouteSpareMsFor = (boundary: AmuxDbBoundary): number | null => {
+  const deadline = amuxRouteDeadline.getStore();
+  return deadline ? deadline.localDeadlineMs - Date.now() -
+    amuxDbTransactionBudgetMs(boundary) : null;
+};
+
 /**
  * The route deadline for a transaction that is not a `withAmuxDbBoundary`
  * one: it keeps its own statement timeout and Prisma limits (the
