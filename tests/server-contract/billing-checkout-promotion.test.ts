@@ -869,9 +869,14 @@ test("native pass redemption preserves expired promotion refusal before any gran
   assert.deepEqual(world.grantedUsers, []);
 });
 
-test("a paid plan acquired during pass validation cannot be overwritten when the account lock is taken", async () => {
+for (const [name, entitlement] of [
+  ["Stripe Max", { plan: "Max", webSubscriptionPlan: "Max", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" }],
+  ["Stripe Pro", { plan: "Pro", webSubscriptionPlan: "Pro", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" }],
+  ["store Pro", { plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Pro", storeSubscriptionExpiresAt: new Date("2099-01-01T00:00:00Z") }],
+  ["store Max", { plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: new Date("2099-01-01T00:00:00Z") }],
+] as const) test(`a concurrent ${name} plan cannot be overwritten by pass redemption under the account lock`, async () => {
   enableNativePass();
-  world.lockedUser = { ...world.user, plan: "Max", webSubscriptionPlan: "Max", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" };
+  world.lockedUser = { ...world.user, ...entitlement };
   const response = await post({ planId: "pro", promoCode: "test-pass" }, nativeHeaders);
   assert.equal(response.status, 409);
   assert.deepEqual(world.grantedUsers, []);
