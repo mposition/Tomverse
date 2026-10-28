@@ -63,7 +63,7 @@ test("each admitted train is a row: what rode, what was left out and why, and wh
         pullRequestNumber: 2986,
         picks: [
           { number: 2978, outcome: "included" },
-          { number: 2913, outcome: "conflict", predecessors: [2726] },
+          { number: 2913, outcome: "conflict", why: "It needs #2726." },
           { number: 2950, outcome: "conflict" },
           { number: 2900, outcome: "changes_workflows" },
           { number: 2824, outcome: "already_in_main" },
@@ -93,17 +93,18 @@ test("each admitted train is a row: what rode, what was left out and why, and wh
   const arrived = rows[2];
   assert.equal(arrived.settledAt, "2026-10-25T03:00:00Z");
   assert.deepEqual(arrived.included, [{ number: 2978, title: "ci admission stop fast" }]);
-  // A train that never named predecessors is unknown, not "none".
+  // A train that did not ask the model says no why.
   assert.deepEqual(
-    arrived.leftOut.map((p) => [p.number, p.outcome, p.predecessors]),
+    arrived.leftOut.map((p) => [p.number, p.outcome, p.why]),
     [
-      [2913, "conflict", [2726]],
+      [2913, "conflict", "It needs #2726."],
       [2950, "conflict", null],
       [2900, "changes_workflows", null],
     ],
   );
   assert.deepEqual(arrived.alreadyOnMain, [2824]);
-  assert.deepEqual(rows[3].leftOut[0].predecessors, []);
+  // A report from before model resolution names predecessors; they are not read.
+  assert.equal(rows[3].leftOut[0].why, null);
   assert.equal(rows[4].failure, "push_failed");
 });
 
@@ -122,8 +123,8 @@ test("a train whose state GitHub did not give is unknown, never boarding; a clos
     nowMs: NOW,
   });
   assert.deepEqual(rows.map((r) => r.status), ["unknown", "cancelled"]);
-  // The service is killed at ten minutes: past eleven, a train with no report never will have one.
-  assert.equal(QA_RELEASE_TRAIN_BOARD_RUNNING_MS, 11 * 60 * 1000);
+  // The service is killed at 25 minutes: past 26, a train with no report never will have one.
+  assert.equal(QA_RELEASE_TRAIN_BOARD_RUNNING_MS, 26 * 60 * 1000);
 });
 
 test("the board holds seven AEST days, today first, each with only its own trains", () => {
@@ -148,25 +149,3 @@ test("the board holds seven AEST days, today first, each with only its own train
   assert.deepEqual(days[6].rows.map((r) => r.slot), ["2026-10-19T14:00:00Z"]);
 });
 
-test("a pull request boarded for another pick is shown as rode, with the pick that needed it", () => {
-  const [row] = qaReleaseTrainBoardRows({
-    admissions: [{ slot: "s", at: ago(30), emergency: false }],
-    reports: [
-      report("s", 28, {
-        outcome: "opened",
-        pullRequestNumber: 3100,
-        picks: [
-          { number: 10, outcome: "included", boardedFor: 11 },
-          { number: 11, outcome: "included" },
-        ],
-      }),
-    ],
-    pullStates: new Map([[3100, { state: "open", settledAt: null }]]),
-    titles: new Map([[10, "ten"]]),
-    nowMs: NOW,
-  });
-  assert.deepEqual(row.included, [
-    { number: 10, title: "ten", boardedFor: 11 },
-    { number: 11, title: "" },
-  ]);
-});

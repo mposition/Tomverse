@@ -179,8 +179,8 @@ test("what the last train left out rides the next one until a new pick is saved"
     pullRequestNumber: 2948,
     picks: [
       { number: 2912, outcome: "included" },
-      { number: 2763, outcome: "conflict", predecessors: [2598, 2341] },
-      { number: 2742, outcome: "conflict", predecessors: [] },
+      { number: 2763, outcome: "conflict", why: "It needs #2598." },
+      { number: 2742, outcome: "conflict", why: "" },
       { number: 2950, outcome: "over_capacity" },
       { number: 2900, outcome: "changes_workflows" },
       { number: 2759, outcome: "already_in_main" },
@@ -191,17 +191,15 @@ test("what the last train left out rides the next one until a new pick is saved"
     slot: "20261024-1100",
     pullRequestNumber: 2948,
     carried: [
-      { number: 2763, reason: "conflict", predecessors: [2598, 2341] },
-      // It looked and found none.
-      { number: 2742, reason: "conflict", predecessors: [] },
-      { number: 2950, reason: "over_capacity", predecessors: null },
+      { number: 2763, reason: "conflict", why: "It needs #2598." },
+      { number: 2742, reason: "conflict", why: null },
+      { number: 2950, reason: "over_capacity", why: null },
     ],
   });
-  // A train assembled before predecessors were looked up (#2964) named none:
-  // unknown, not "none found".
+  // A train that did not ask the model gives no why.
   assert.deepEqual(
     qaReleaseTrainLastTrainFrom({ slot: "20261024-2300", outcome: "opened", pullRequestNumber: 2964, picks: [{ number: 2913, outcome: "conflict" }] }).carried,
-    [{ number: 2913, reason: "conflict", predecessors: null }],
+    [{ number: 2913, reason: "conflict", why: null }],
   );
   // A train that failed before its pull request opened carries what it had included too.
   assert.deepEqual(

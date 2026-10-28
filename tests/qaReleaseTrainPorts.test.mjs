@@ -172,26 +172,7 @@ test("open trains are counted across every page of open main pull requests", asy
   );
 });
 
-test("a pull request boarded for another's sake is listed as included and says why", () => {
-  const { body, title } = qaReleaseTrainPullRequest({
-    slot: "20261027-1100",
-    candidates: [
-      { number: 11, title: "eleven", mergeCommitSha: "a".repeat(40), mergedAt: "2026-10-27T00:00:00Z" },
-      { number: 10, title: "ten", mergeCommitSha: "d".repeat(40), mergedAt: "2026-10-26T00:00:00Z" },
-    ],
-    picks: [
-      { number: 10, outcome: "included", boardedFor: 11 },
-      { number: 11, outcome: "included" },
-    ],
-    rcSha: "b".repeat(40),
-    rollbackSha: "c".repeat(40),
-  });
-  assert.match(title, /\(2 PRs\)/);
-  assert.match(body, /^- #10 ten \(not picked; boarded because #11 needs it\)$/m);
-  assert.match(body, /^- #11 eleven$/m);
-});
-
-test("a report an older app refuses for boardedFor is sent again without it; any other refusal stands", async () => {
+test("a report an older app refuses for why is sent again without it; any other refusal stands", async () => {
   const env = { RAILWAY_ENVIRONMENT_NAME: "production", QA_RELEASE_MERGE_LANE_SECRET: "lane-secret", QA_RELEASE_CONTROL_REVISION: "3" };
   const sent = [];
   const ports = (statuses) =>
@@ -211,12 +192,12 @@ test("a report an older app refuses for boardedFor is sent again without it; any
     rcSha: "b".repeat(40),
     failure: null,
     picks: [
-      { number: 10, outcome: "included", boardedFor: 11 },
+      { number: 10, outcome: "conflict", why: "It needs #9." },
       { number: 11, outcome: "included" },
     ],
   };
   await ports([400, 200]).report(report);
-  assert.deepEqual(sent.map((body) => body.picks), [report.picks, [{ number: 10, outcome: "included" }, { number: 11, outcome: "included" }]]);
+  assert.deepEqual(sent.map((body) => body.picks), [report.picks, [{ number: 10, outcome: "conflict" }, { number: 11, outcome: "included" }]]);
   sent.length = 0;
   await assert.rejects(ports([500]).report(report), /app_500/);
   await assert.rejects(ports([400]).report({ ...report, picks: [{ number: 11, outcome: "included" }] }), /app_400/);
