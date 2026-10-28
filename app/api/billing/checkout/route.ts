@@ -172,9 +172,20 @@ async function activateInternalPass({
   ) {
     throw new Error("INTERNAL_PASS_POLICY_INVALID");
   }
-  const accessStartsAt = new Date();
-  const periodEnd = addUtcDays(accessStartsAt, promotion.accessDurationDays);
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
+    await lockSubscriptionAccount(tx, userId);
+    const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    // A store/web grant may have committed since the initial checkout read.
+    // Re-check under the same account lock before consuming the code or access.
+    const block = checkoutPlanEligibilityBlock({
+      effectivePlan: effectivePlanForAccess(entitlement),
+      targetTier: tierForPlanId(planId),
+      hasStripeSubscription: Boolean(entitlement.stripeSubscriptionId),
+      subscriptionStatus: entitlement.subscriptionStatus,
+    });
+    if (block) throw new ApiSecurityError(block.status, block.code, block.error);
+    const accessStartsAt = new Date();
+    const periodEnd = addUtcDays(accessStartsAt, promotion.accessDurationDays!);
     if (!promotion.maxRedemptions || !promotion.endsAt || !clientIpHash) {
       throw new Error("PROMOTION_POLICY_INCOMPLETE");
     }
@@ -206,8 +217,6 @@ async function activateInternalPass({
       },
     });
 
-    await lockSubscriptionAccount(tx, userId);
-    const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     await tx.user.update({
       where: { id: userId },
       data: {
@@ -222,9 +231,8 @@ async function activateInternalPass({
         subscriptionCancelAtPeriodEnd: true,
       },
     });
+    return periodEnd;
   });
-
-  return periodEnd;
 }
 
 async function createCheckoutSession(

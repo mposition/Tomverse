@@ -63,6 +63,7 @@ type World = {
   promotionIncrements: number;
   session: { user: { id: string } } | null;
   user: Record<string, unknown>;
+  lockedUser?: Record<string, unknown>;
   promotionValid: boolean;
   /**
    * Overridable so a fixed-amount promotion can reach the currency gate.
@@ -197,7 +198,7 @@ async function loadRoute(): Promise<{
             billingPromotion: { updateMany: async () => { world.promotionIncrements++; return { count: 1 }; } },
             billingPromotionRedemption: { create: async ({ data }: { data: { userId: string } }) => { world.redemptionUsers.push(data.userId); return {}; } },
             user: {
-              findUniqueOrThrow: async () => world.user,
+              findUniqueOrThrow: async () => world.lockedUser ?? world.user,
               update: async ({ where }: { where: { id: string } }) => { world.grantedUsers.push(where.id); return world.user; },
             },
           }),
@@ -866,4 +867,13 @@ test("native pass redemption preserves expired promotion refusal before any gran
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, "PROMOTION_EXPIRED");
   assert.deepEqual(world.grantedUsers, []);
+});
+
+test("a paid plan acquired during pass validation cannot be overwritten when the account lock is taken", async () => {
+  enableNativePass();
+  world.lockedUser = { ...world.user, plan: "Max", webSubscriptionPlan: "Max", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" };
+  const response = await post({ planId: "pro", promoCode: "test-pass" }, nativeHeaders);
+  assert.equal(response.status, 409);
+  assert.deepEqual(world.grantedUsers, []);
+  assert.equal(world.promotionIncrements, 0);
 });
