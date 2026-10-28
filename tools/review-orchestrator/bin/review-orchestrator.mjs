@@ -25,6 +25,7 @@ import { loadConfig } from "../lib/config.mjs";
 import { Orchestrator, UsageError, isDraining, setDraining, submitJob } from "../lib/service.mjs";
 import { Store, isJobId, summarise } from "../lib/store.mjs";
 import { buildStatusSnapshot, createStatusSnapshotWriter } from "../lib/status-report.mjs";
+import { ciFixReport, pruneLedger, readLedger } from "../lib/ci-fix.mjs";
 import { release, tryAcquire } from "../lib/fsutil.mjs";
 import { Transform } from "node:stream";
 
@@ -154,6 +155,22 @@ function acquireDaemonLock(config) {
   return () => release(path, token);
 }
 
+/**
+ * The CI auto-fix's latest tries for the status report, or undefined when
+ * this server keeps no auto-fix ledger (bin/pr-ci-auto-fix.mjs writes it in
+ * the same state directory). A ledger that cannot be read is left out too:
+ * the report is telemetry.
+ */
+function ciFixSnapshot(config, now) {
+  const path = join(config.stateDir, "ci-fix", "ledger.json");
+  if (!existsSync(path)) return undefined;
+  try {
+    return ciFixReport(pruneLedger(readLedger(path), now), now);
+  } catch {
+    return undefined;
+  }
+}
+
 async function daemon(config) {
   const releaseLock = acquireDaemonLock(config);
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
@@ -184,6 +201,7 @@ async function daemon(config) {
         quotas: readQuotaStatus(config, now),
         draining: isDraining(config),
         now,
+        ciFix: ciFixSnapshot(config, now),
       });
     },
   });
