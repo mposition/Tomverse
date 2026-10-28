@@ -8,7 +8,6 @@ import {
   qaReleaseTrainDeparture,
   qaReleaseTrainEmergencySlot,
   qaReleaseTrainPullRequest,
-  qaReleaseTrainSettleAdjacent,
   qaReleaseTrainShouldDepart,
   qaReleaseTrainNextDepartureMs,
 } from "../lib/qaReleaseTrainCore.ts";
@@ -111,34 +110,21 @@ test("an emergency train is named by its AEST minute, never a scheduled departur
   assert.equal(qaReleaseTrainBranch(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T02:37:00Z"), hours)), "release/train-20261020-1237");
 });
 
-test("an adjacent-line hunk settles to main's lines plus the pick's added ones; any changed or removed line does not", () => {
-  // #3042: two scripts added after lines main has differently.
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["m1", "m2"], base: ["d1"], pick: ["d1", "new1", "new2"] }), ["m1", "m2", "new1", "new2"]);
-  // Added before develop's lines: before main's.
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["m1"], base: ["d1"], pick: ["new", "d1"] }), ["new", "m1"]);
-  // Both appended at the same place (#3032's .gitleaksignore): main's first.
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["", "main entry"], base: [], pick: ["", "pick entry"] }), ["", "main entry", "", "pick entry"]);
-  // Main already has what it adds, on the side it adds to (#2867, #2916): main stands.
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["m1", "new"], base: ["d1"], pick: ["d1", "new"] }), ["m1", "new"]);
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["new", "m1"], base: ["d1"], pick: ["new", "d1"] }), ["new", "m1"]);
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["entry", "more"], base: [], pick: ["entry"] }), ["entry", "more"]);
-  // Elsewhere in main's lines, or only blank lines, is no proof: the pick's lines are added.
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["new", "m1"], base: ["d1"], pick: ["d1", "new"] }), ["new", "m1", "new"]);
-  assert.deepEqual(qaReleaseTrainSettleAdjacent({ main: ["m1", ""], base: ["d1"], pick: ["d1", ""] }), ["m1", "", ""]);
-  // A changed or removed line is a real conflict.
-  assert.equal(qaReleaseTrainSettleAdjacent({ main: ["m1"], base: ["d1"], pick: ["D1"] }), null);
-  assert.equal(qaReleaseTrainSettleAdjacent({ main: ["m1"], base: ["d1", "d2"], pick: ["d1"] }), null);
-  assert.equal(qaReleaseTrainSettleAdjacent({ main: ["m1"], base: ["d1", "d2"], pick: ["d1", "x", "d2"] }), null);
-});
-
-test("a settled rider is named in the body with its files, to be checked", () => {
+test("a rider the model resolved is named with its files and what it said; a conflict it declined says why", () => {
   const { body } = qaReleaseTrainPullRequest({
-    slot: "20261027-1100",
-    candidates: [{ number: 3042, title: "ai review", mergeCommitSha: A, mergedAt: "2026-10-27T00:00:00Z" }],
-    picks: [{ number: 3042, outcome: "included" }],
+    slot: "20261028-2000",
+    candidates: [
+      { number: 2702, title: "marketing", mergeCommitSha: A, mergedAt: "2026-10-19T00:00:00Z" },
+      { number: 2746, title: "catalog", mergeCommitSha: A, mergedAt: "2026-10-19T01:00:00Z" },
+    ],
+    picks: [
+      { number: 2702, outcome: "included" },
+      { number: 2746, outcome: "conflict", why: "It needs the llm settings store, which main lacks." },
+    ],
     rcSha: B,
     rollbackSha: C,
-    settled: [{ number: 3042, files: ["package.json"] }],
+    resolved: [{ number: 2702, files: ["AGENTS.md"], why: "The edited paragraph was moved out of AGENTS.md; kept main's text." }],
   });
-  assert.match(body, /^- #3042 ai review \(conflicted only beside lines main has differently in `package\.json`: main's lines kept, its own added lines placed next to them; check\)$/m);
+  assert.match(body, /^- #2702 marketing \(conflicted on main in `AGENTS\.md`; resolved by a model, check it: The edited paragraph was moved out of AGENTS\.md; kept main's text\.\)$/m);
+  assert.match(body, /^- #2746 catalog — cherry-pick conflict on main; it rides the next train again \(the model: It needs the llm settings store, which main lacks\.\)$/m);
 });

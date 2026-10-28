@@ -119,6 +119,8 @@ export async function POST(request: Request) {
               model_id: outcome.delivery.v22Execution.modelId,
               role: outcome.delivery.v22Execution.role,
               budget_microusd: outcome.delivery.v22Execution.budgetMicrousd,
+              ...(outcome.delivery.v22Execution.baseSha ?
+                { base_sha: outcome.delivery.v22Execution.baseSha } : {}),
               ...(outcome.delivery.v22Execution.gradeGuard ?
                 { grade_guard: true,
                   execution_grade: outcome.delivery.v22Execution.executionGrade,

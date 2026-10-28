@@ -232,12 +232,8 @@ export type QaReleaseTrainCarryReason = "conflict" | "over_capacity" | "train_fa
 export type QaReleaseTrainCarried = {
   number: number;
   reason: QaReleaseTrainCarryReason;
-  /**
-   * What the train named for a conflict; null when its report named nothing,
-   * as a train assembled before predecessors were looked up (#2964) did.
-   * An empty list means it looked and found none.
-   */
-  predecessors: number[] | null;
+  /** What the model said a conflict lacks; null when the train did not ask it. */
+  why: string | null;
 };
 export type QaReleaseTrainLastTrain = { slot: string; pullRequestNumber: number | null; carried: QaReleaseTrainCarried[] };
 
@@ -256,8 +252,7 @@ export function qaReleaseTrainLastTrainFrom(report: unknown): QaReleaseTrainLast
           ? "train_failed"
           : null;
     if (reason === null) continue;
-    const predecessors = Array.isArray(pick.predecessors) ? pick.predecessors.filter(isNumber) : null;
-    carried.push({ number: pick.number, reason, predecessors });
+    carried.push({ number: pick.number, reason, why: typeof pick.why === "string" && pick.why !== "" ? pick.why : null });
   }
   return {
     slot: value.slot,
