@@ -1542,7 +1542,7 @@ export async function settleAmuxV22TaskExecution(input: {
           bodyPurgedAt: true },
       });
       if (!v22SettlementPatchMatches({ taskId: task.id,
-        readPatch: patch, storedPatch }))
+        outcome: input.outcome, readPatch: patch, storedPatch }))
         return { settled: false as const,
           reason: "publication_state_changed" as const };
       let escalationReceipt: Awaited<ReturnType<

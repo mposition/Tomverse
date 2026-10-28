@@ -21,14 +21,20 @@ export const AMUX_V22_SEALED_DELIVERY_MARKER = "amux-v22:sealed-brief";
 
 /** Settlement must use the same sealed patch it read before the transaction.
  * A patch arriving or being purged between those reads is not a private
- * result and cannot be silently ignored. */
+ * result and cannot be silently ignored. Only a succeeded settlement reads
+ * the patch; a blocked or failed one never publishes it, so a patch already
+ * stored for that attempt stays a private result instead of refusing the
+ * settlement (which left the bridge halted with the attempt open). */
 export function v22SettlementPatchMatches(input: {
   taskId: string;
+  outcome?: "succeeded" | "failed" | "blocked";
   readPatch: { taskId: string; sha256: string; baseSha: string } | null;
   storedPatch: { taskId: string; patchSha256: string; baseSha: string;
     bodyPurgedAt: Date | null } | null;
 }) {
   const { readPatch, storedPatch } = input;
+  if (input.outcome !== undefined && input.outcome !== "succeeded")
+    return readPatch === null;
   if (readPatch === null || storedPatch === null)
     return readPatch === null && storedPatch === null;
   return readPatch.taskId === input.taskId &&
