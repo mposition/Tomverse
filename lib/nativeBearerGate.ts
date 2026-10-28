@@ -168,6 +168,8 @@ export function nativeChatBearerRoute(path: string, method: string, enabled = fa
 /** Native web-parity additions require their own reviewed operational activation. */
 export function nativeParityBearerRoute(path: string, method: string, enabled = false): boolean {
   if (!enabled) return false;
+  // Checkout itself restricts bearer requests to complimentary internal passes.
+  if (path === "/api/billing/checkout") return method === "POST";
   if (path === "/api/user/usage") return method === "GET";
   if (path === "/api/conversations/search") return method === "GET";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path)) return method === "GET";
@@ -191,6 +193,7 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   if (path === "/api/products/review/conversations" || path === "/api/review/route") return method === "POST";
   if (path === "/api/images/generations") return ["GET", "POST"].includes(method);
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path)) return method === "GET";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/image-turn$/.test(path)) return method === "POST";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews$/.test(path)) return ["GET", "POST"].includes(method);
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews\/verify-item$/.test(path)) return method === "POST";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews\/item-feedback$/.test(path)) return ["GET", "PUT", "DELETE"].includes(method);

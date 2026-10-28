@@ -11,6 +11,7 @@ import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArt
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
 import { displayTimeZoneHeaders } from "../../../lib/continuationTitleContext";
+import { readChatImageTurnRequest, readChatImageTurnRef } from "../../../lib/chatImageTurnCore";
 import { uploadMobileFile } from "./nativeUpload";
 import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
 
@@ -176,6 +177,25 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const routed = response.headers.get("X-Chat-Routed-Model");
       if (routed) routedModelByMessage.set(assistantMessageId, routed);
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new ApiClientError(response.status, typeof body?.code === "string" ? body.code : "CHAT_REQUEST_FAILED"); }
+      if (response.headers.get("X-Chat-Response-Mode") === "image-turn") {
+        watchdog.stop();
+        const body = await response.json().catch(() => null);
+        const decision = readChatImageTurnRequest(body?.imageTurn);
+        if (!decision || review) throw Error("CHAT_IMAGE_TURN_INVALID");
+        // An older server's image-turn route accepts web cookies only. Never
+        // call it with a native bearer until the server advertises enrollment.
+        if (!(await requireParity()).chatImageTurns) throw new ApiClientError(503, "NATIVE_IMAGE_TURNS_UNAVAILABLE");
+        controller.signal.throwIfAborted();
+        // Reuse the saved question and this answer's idempotency key. An
+        // unreadable outcome is restored through load(), never resubmitted.
+        const receipt = await request<{ imageTurn?: unknown }>(`${pathFor(persisted.id)}/image-turn`, {
+          ...json("POST", { sourceUserMessageId: sourceId, assistantMessageId, modelId,
+            imageModelIds: decision.modelIds, preset: decision.preset,
+            ...(decision.prompt ? { prompt: decision.prompt } : {}) }), signal: controller.signal,
+        });
+        if (!readChatImageTurnRef(receipt.imageTurn)) throw Error("CHAT_IMAGE_RECEIPT_INVALID");
+        return;
+      }
       if ((response.headers.get("content-type") ?? "").includes("application/json")) {
         const receipt = await response.json();
         if (receipt.deepResearchJobId !== assistantMessageId) throw Error("RESEARCH_RECEIPT_INVALID");

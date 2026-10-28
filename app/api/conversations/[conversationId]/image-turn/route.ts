@@ -8,14 +8,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 968;
 
 import { after, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { startChatImageTurn } from "@/lib/chatImageTurn";
 import { processImageGenerationGroup } from "@/lib/imageGenerationService";
@@ -46,7 +45,9 @@ type Params = { params: Promise<{ conversationId: string }> };
 
 export async function POST(req: Request, { params }: Params) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }

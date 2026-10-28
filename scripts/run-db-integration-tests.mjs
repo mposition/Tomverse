@@ -895,6 +895,14 @@ run(
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
+// Native pass redemption uses real promotion/entitlement rows with mocked
+// authentication and email/provider seams. Keep those mocks in their own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/native-pass-redemption.db.test.ts"],
+  "Running native access pass activation, expiry and duplicate redemption scenarios",
+);
 // Managed Code replaces only provider/session seams while exercising the real
 // credit ledger. Keep its module mocks in a separate finance-lane process.
 run(
