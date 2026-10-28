@@ -248,7 +248,7 @@ test("every reason a v22 draft is written with fits the column's CHECK", () => {
   const pattern = /"EngineeringAgentWorkItem_reason_check"\n\s*CHECK \("reason" IS NULL OR "reason" ~ '([^']*)'\)/.exec(sql);
   assert.ok(pattern, "the reason CHECK");
   for (const reason of [ENGINEERING_AGENT_V22_TIER_PENDING_REASON, ENGINEERING_AGENT_V22_PROMOTED_REASON,
-    "tier_two", "tier_evidence_unavailable"]) {
+    "tier_two", "tier_evidence_unavailable", "publish_refused"]) {
     assert.match(reason, new RegExp(pattern[1]), reason);
   }
 });

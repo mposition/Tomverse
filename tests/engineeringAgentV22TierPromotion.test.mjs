@@ -16,6 +16,7 @@ const t1 = { ok: true, runId: pending.runId, taskId: pending.taskId,
 const ports = (overrides = {}) => {
   const resolved = [];
   return { resolved, readPending: async () => pending,
+    prQueueFull: async () => false,
     loadStored: async () => t1,
     resolve: async (input) => {
       resolved.push(input);
@@ -70,10 +71,31 @@ test("anything short of T1 on this exact patch keeps an owner draft", async () =
   assert.equal(shadow.resolved[0].candidate, null);
 });
 
-test("a draft no longer pending is left alone, and a refused write is not hidden", async () => {
+test("a full pull request queue reads no tier; every pending draft waits", async () => {
+  let loads = 0;
+  const value = ports({ prQueueFull: async () => true,
+    loadStored: async () => { loads++; return t1; } });
+  assert.deepEqual(await promoteEngineeringAgentV22Draft(value),
+    { outcome: "waiting" });
+  assert.equal(loads, 0);
+  assert.equal(value.resolved.length, 0);
+});
+
+test("a refused promotion becomes an ordinary draft, never pending again", async () => {
+  const value = ports();
+  value.resolve = async (input) => {
+    value.resolved.push(input);
+    if (input.candidate) throw new Error("v22_publication_disabled");
+    return { kept: true };
+  };
+  assert.deepEqual(await promoteEngineeringAgentV22Draft(value),
+    { outcome: "kept", reason: "publish_refused" });
+  assert.deepEqual(value.resolved.map((input) => input.candidate === null),
+    [false, true]);
   assert.deepEqual(await promoteEngineeringAgentV22Draft(ports({
     resolve: async () => ({ kept: false }) })), { outcome: "stale" });
   await assert.rejects(promoteEngineeringAgentV22Draft(ports({
-    resolve: async () => { throw new Error("the owner queue is full"); } })),
-  /owner queue is full/);
+    resolve: async () => { throw new Error("database_unavailable"); },
+    loadStored: async () => ({ ok: false, reason: "patch_unavailable" }) })),
+  /database_unavailable/);
 });

@@ -2,7 +2,8 @@ import "server-only";
 
 import { ENGINEERING_AGENT_POLICY_VERSION,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
-import { runEngineeringAgentTransaction } from "@/lib/engineeringAgentStore";
+import { readEngineeringAgentOwnerQueues,
+  runEngineeringAgentTransaction } from "@/lib/engineeringAgentStore";
 import { loadEngineeringAgentV22Candidate } from
   "@/lib/engineeringAgentV22CandidateLoad";
 import { resolveEngineeringAgentV22Product } from
@@ -18,6 +19,7 @@ type Pending = { workItemId: string; runId: string; attemptId: string;
 type Stored = Awaited<ReturnType<typeof loadEngineeringAgentV22StoredCandidate>>;
 type Ports = {
   readPending: () => Promise<Pending | null>;
+  prQueueFull: () => Promise<boolean>;
   loadStored: (pending: Pending) => Promise<Stored>;
   resolve: (input: Parameters<typeof resolveEngineeringAgentV22Product>[1]) =>
     ReturnType<typeof resolveEngineeringAgentV22Product>;
@@ -61,20 +63,25 @@ const loadStored = (pending: Pending) =>
 
 const livePorts: Ports = {
   readPending, loadStored,
+  // A pending draft comes only from a run that started under `t1`.
+  prQueueFull: async () =>
+    (await readEngineeringAgentOwnerQueues(prisma, "t1")).prFull,
   resolve: (input) => runEngineeringAgentTransaction(prisma,
     (tx) => resolveEngineeringAgentV22Product(tx, input)),
 };
 
 /** One pending draft's tier, read outside any route budget (§4): T1 opens
  * the run's publish item with its capability, anything else leaves an
- * ordinary draft for the owner. A write the database refuses -- the pull
- * request queue is full -- leaves the draft pending for a later round. */
+ * ordinary draft for the owner. While the pull request queue is full no tier
+ * is read and every pending draft waits; a promotion the database still
+ * refuses becomes an ordinary draft, so no draft is read again and again. */
 export async function promoteEngineeringAgentV22Draft(
   ports: Ports = livePorts,
-): Promise<{ outcome: "none" | "promoted" | "kept" | "stale";
+): Promise<{ outcome: "none" | "waiting" | "promoted" | "kept" | "stale";
   reason?: string }> {
   const pending = await ports.readPending();
   if (!pending) return { outcome: "none" };
+  if (await ports.prQueueFull()) return { outcome: "waiting" };
   const stored = await ports.loadStored(pending).catch(() => null);
   const promote = v22PublishCandidateMatches({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
@@ -85,18 +92,28 @@ export async function promoteEngineeringAgentV22Draft(
   const named = stored === null ? null : !stored.ok ? stored.reason :
     stored.tier.tier !== "T1" ? "tier_two" : null;
   const reason = named && REASON.test(named) ? named : "tier_evidence_unavailable";
-  const resolved = await ports.resolve({
-    workItemId: pending.workItemId, runId: pending.runId,
+  const draft = { workItemId: pending.workItemId, runId: pending.runId,
     taskId: pending.taskId, patchDigest: pending.patchDigest,
-    baseSha: pending.baseSha, reason,
-    candidate: promote ? {
+    baseSha: pending.baseSha };
+  const keep = async (why: string) => {
+    const kept = await ports.resolve({ ...draft, reason: why, candidate: null });
+    return "kept" in kept && kept.kept ? { outcome: "kept" as const, reason: why } :
+      { outcome: "stale" as const };
+  };
+  if (!promote) return keep(reason);
+  let promoted;
+  try {
+    promoted = await ports.resolve({ ...draft, reason, candidate: {
       expectedTreeId: promote.candidate.expectedTreeId,
       baseCommitterDate: promote.candidate.baseCommitterDate,
       imageProofDigest: promote.imageProofDigest!,
-    } : null,
-  });
-  if ("publishWorkItemId" in resolved) return { outcome: "promoted" };
-  return resolved.kept ? { outcome: "kept", reason } : { outcome: "stale" };
+    } });
+  } catch {
+    // The switch, consent or queue changed since it was read.
+    return keep("publish_refused");
+  }
+  return "publishWorkItemId" in promoted ? { outcome: "promoted" } :
+    { outcome: "stale" };
 }
 
 let running: Promise<unknown> | null = null;

@@ -39,9 +39,9 @@ const requestSchema = z
 
 export async function POST(request: Request) {
   if (!isEngineeringAgentRouteAuthorized(request, "publisher")) return engineeringAgentUnauthorized();
-  after(startEngineeringAgentV22TierPromotion);
   try {
     const body = await readLimitedJson(request, 1024, requestSchema);
+    after(startEngineeringAgentV22TierPromotion);
     const outcome = await runIdempotentEngineeringAgentRequest({
       route: "publish/claim",
       requestKey: body.requestKey,
