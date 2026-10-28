@@ -68,7 +68,8 @@ export function StudioAnswerAnalysis({
 
   const loadAccount = useCallback(async () => {
     if (!conversationId) throw new Error("No conversation");
-    const response = await fetch(`/api/conversations/${conversationId}/comparison-reviews?reviewMode=balanced&includeSynthesis=false`, { cache: "no-store" });
+    const query = new URLSearchParams({ reviewMode: "balanced", includeSynthesis: "false" });
+    const response = await fetch(`/api/conversations/${conversationId}/comparison-reviews?${query}`, { cache: "no-store" });
     if (!response.ok) {
       await discardResponseBody(response);
       throw new Error("Cannot prepare analysis");
