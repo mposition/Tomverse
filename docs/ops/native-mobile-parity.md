@@ -180,6 +180,16 @@ that cookie-only request and cannot accidentally log out a valid native session.
 Unavailable usage never renders a fabricated zero. The usage route enrollment and
 capability declaration must be deployed together for production totals to load.
 
+Smart Adaptive image handoffs are recognized by the `image-turn` response mode,
+separately from deep-research receipts. The `chatImageTurns` capability advertises
+the exact native POST `/api/conversations/{id}/image-turn` enrollment behind the
+existing native parity flag. Deploy the route and capability before distributing
+the updated mobile bundle. Older servers never receive that cookie-only request.
+The handler uses the verified bearer owner and retains the image service's existing
+ownership, conversation lock, plan, pricing, credit and provider-budget checks.
+The saved question and assistant answer ID are reused; a lost receipt is recovered
+by reading saved history, without resubmitting the question or another image.
+
 Chat startup restores the signed-in account and history list while staying on the
 new-conversation screen. It never opens the last Chat automatically. Selecting a
 history row restores its saved messages, files, images and voice session receipts;
