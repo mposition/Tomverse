@@ -594,7 +594,7 @@ export async function POST(req: Request) {
     if (internalPass) {
       if (billingInterval !== "monthly" || finalPriceMinor !== 0) {
         return NextResponse.json(
-          { error: "This access pass is available only for the monthly Pro plan." },
+          { code: "INTERNAL_PASS_NOT_ELIGIBLE", error: "This access pass is available only for the monthly Pro plan." },
           { status: 400 }
         );
       }

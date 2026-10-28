@@ -127,14 +127,14 @@ what survives of its rules is the following.
 
 ## Locked exposure, everywhere
 
-Guest and Free viewers **see** every image entry point. They are never hidden,
-never disabled-with-no-explanation, and never allowed to reach a prompt box
-that will refuse them.
+Guest and Free viewers **see** every image entry point. Guest access requires
+sign-in. Owner decision (2026-10-28): Free accounts can generate under their
+existing credit allowance, daily/monthly limits and provider guardrails.
 
 | Viewer | Entry renders | Click goes to |
 | --- | --- | --- |
 | Guest | visible, `data-locked="true"`, sign-in requirement stated | the sign-in prompt |
-| Free | visible, `data-locked="true"`, plan requirement stated | `/pricing` |
+| Free | visible, unlocked | the workspace; existing credit checks apply |
 | Pro/Max | visible, unlocked | the workspace |
 | Flag off | **absent** — the feature does not exist for anyone | — |
 
@@ -476,7 +476,7 @@ Verified for **both** desktop and mobile projects:
 | --- | --- | --- |
 | 1 | flag off | no entry point renders anywhere |
 | 2 | Guest | entries visible and locked; click reaches the sign-in prompt |
-| 3 | Free | entries visible and locked; click reaches `/pricing`, never a prompt box |
+| 3 | Free | entries visible and unlocked; click opens the workspace; insufficient credits refuse before generation |
 | 4 | Pro, single model | end-to-end run; price quoted before submit |
 | 5 | Pro, multiple models | one POST carrying every `modelIds`; total = sum of per-model prices |
 | 6 | moderation failure | reason stated on the card; refund retained in accounting metadata |
@@ -529,7 +529,7 @@ rather than the behaviour.
 ## Change checklist
 
 - [ ] No standalone "new image" button was reintroduced
-- [ ] Every entry point still renders for Guest/Free, locked and stated up front
+- [ ] Every entry point renders for Guest/Free; Guest requires sign-in, Free can enter under existing credits
 - [ ] Flag off still removes the feature entirely
 - [ ] Image generation models are still a separate catalogue from chat models
 - [ ] Held models are still listed with their hold, and still not selectable

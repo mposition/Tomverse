@@ -125,7 +125,7 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
         : code === "PROMOTION_EXPIRED" || code === "PROMOTION_REDEMPTION_LIMIT_REACHED" ? "passExpired"
         : code === "NATIVE_PASS_UNAVAILABLE" ? "passUnavailable"
         : code === "PROMOTION_INVALID" || code === "NATIVE_PASS_REQUIRED" || code === "PROMOTION_UNAVAILABLE" || code === "PROMOTION_NOT_STARTED" ? "passInvalid"
-        : code.includes("PLAN") || code === "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY" ? "passIneligible" : "passUnconfirmed";
+        : ["PROMOTION_PLAN_NOT_ELIGIBLE", "PLAN_CHANGE_NOT_SUPPORTED", "ACTIVE_SUBSCRIPTION_EXISTS", "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", "INTERNAL_PASS_NOT_ELIGIBLE"].includes(code) ? "passIneligible" : "passUnconfirmed";
       if (alive.current) setPassStatus(key);
     } finally { action.current = false; if (alive.current) { setBusy(false); setRedeemingPass(false); } }
   };

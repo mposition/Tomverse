@@ -60,6 +60,7 @@ type World = {
   cookieReads: number;
   redemptionUsers: string[];
   grantedUsers: string[];
+  promotionIncrements: number;
   session: { user: { id: string } } | null;
   user: Record<string, unknown>;
   promotionValid: boolean;
@@ -83,7 +84,7 @@ type World = {
 };
 
 const freshWorld = (): World => ({
-  cookieReads: 0, redemptionUsers: [], grantedUsers: [],
+  cookieReads: 0, redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
   session: { user: { id: "user_1" } },
   user: {
     id: "user_1",
@@ -118,7 +119,7 @@ let world = freshWorld();
 let mocksInstalled = false;
 let sessionSequence = 0;
 
-const PROMOTION = {
+const PROMOTION: import("../../lib/billingConfig").BillingPromotionConfig = {
   id: "promo_db",
   code: "EDDIEFRIEND100",
   discountPercent: 100,
@@ -190,10 +191,10 @@ async function loadRoute(): Promise<{
             update: async () => world.user,
             updateMany: async () => ({ count: 1 }),
           },
-          billingPromotion: { updateMany: async () => ({ count: 1 }) },
+          billingPromotion: { updateMany: async () => { world.promotionIncrements++; return { count: 1 }; } },
           $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
             $executeRaw: async () => 1,
-            billingPromotion: { updateMany: async () => ({ count: 1 }) },
+            billingPromotion: { updateMany: async () => { world.promotionIncrements++; return { count: 1 }; } },
             billingPromotionRedemption: { create: async ({ data }: { data: { userId: string } }) => { world.redemptionUsers.push(data.userId); return {}; } },
             user: {
               findUniqueOrThrow: async () => world.user,
@@ -831,6 +832,7 @@ test("native pass redemption uses the bearer account and never a cookie or Strip
   assert.equal(world.cookieReads, 0);
   assert.deepEqual(world.redemptionUsers, ["native-user"]);
   assert.deepEqual(world.grantedUsers, ["native-user"]);
+  assert.equal(world.promotionIncrements, 1);
   assert.equal(world.sessionCreateCalls.length, 0);
   assert.equal(world.customerCreateKeys.length, 0);
 });
@@ -841,6 +843,7 @@ for (const promoCode of [undefined, "STRIPE-FREE-COUPON"]) test(`native requests
   assert.equal(response.status, 400);
   assert.equal((await response.json()).code, "NATIVE_PASS_REQUIRED");
   assert.deepEqual(world.redemptionUsers, []);
+  assert.equal(world.promotionIncrements, 0);
   assert.equal(world.sessionCreateCalls.length, 0);
   assert.equal(world.customerCreateKeys.length, 0);
 });
