@@ -18,7 +18,7 @@ const importedPage = (offset: number, ids: string[]) => ({
 const rows = [
   { id: 'ordinary', title: 'Ordinary chat', surface: 'chat', kind: 'chat', selectedModels: ['demo'], messages: [] },
   {
-    id: 'chat-continuation', title: 'Imported trip plan', surface: 'continuation', productKey: 'chat', kind: 'chat',
+    id: 'chat-continuation', title: 'Continued from an imported chat', sourceTitle: 'Imported trip plan', sourceState: 'available', surface: 'continuation', productKey: 'chat', kind: 'chat',
     selectedModels: ['demo'], selectionMode: 'auto', autoSelection: { offered: true }, messages: [],
     imported: importedPage(2, ['ext-2', 'ext-3']), importedPages: { '0': importedPage(0, ['ext-0', 'ext-1']) },
   },

@@ -134,6 +134,14 @@ an explicit email-code option inside the app. The email form's alternate sign-in
 action uses the same native browser flow; it does not open a standalone website
 login that cannot return a session to the app. Cancelled, expired and unavailable
 browser sign-ins retain the email-code option and show an appropriate message.
+An HTTPS association verification failure gets one fresh Auth Tab attempt with
+new PKCE and state. Only a verified callback can issue the native session;
+cancellation and a second verification failure never exchange a grant.
+
+Continued conversations use the web's source-title display rules in native
+history. Their read-only original endpoint accepts the same owned mobile bearer
+as the conversation itself, behind the existing native parity switch. Snapshot
+locks, conversation locks and account ownership still apply to every read.
 
 After web authentication, the completion page automatically requests one
 short-lived PKCE grant and navigates to the HTTPS callback. There is no extra
