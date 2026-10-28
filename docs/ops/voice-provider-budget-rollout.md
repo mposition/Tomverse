@@ -375,8 +375,13 @@ Railway MCP에 명령 실행 도구가 없고 CLI도 토큰도 이 컨테이너�
    `usable — both values are set and consistent`가 아니면 다음 단계로 가지
    않습니다.
 
-4. **[Railway 웹 대시보드]** staging이 `dde6ad87` 이상을 서비스 중인지
-   확인합니다. 아니라면 `develop`을 배포합니다.
+4. **[브라우저 — 읽기]** `https://staging.tomverse.app/api/build-info`의
+   `commitSha`가 `dde6ad87` 이상인지 확인합니다. 아니라면
+   **[로컬 PC의 PowerShell, Tomverse clone 폴더 안 — 쓰기: `test` 브랜치를 옮김.
+   Node 22·`npm ci`, `mposition/Tomverse` push 권한, `gh` 로그인 필요. 자격증명 값은
+   다루지 않습니다]** 그 SHA를 포함한 develop 병합 commit으로
+   `npm run promote:test -- --sha=<commit>`을 실행합니다. 되돌리기는 이전 SHA로 같은
+   명령에 `--allow-rewind`입니다(`docs/ops/dev-test-lanes.md`).
 
 5. **[staging Postgres shell — 쓰기]** staging에서만 flag를 켭니다.
    ```sql

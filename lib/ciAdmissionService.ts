@@ -12,6 +12,8 @@ import {
   type CiAdmissionMode,
   type CiAdmissionState,
 } from "@/lib/ciAdmissionCore";
+import { readCiFixView } from "@/lib/ciAdmissionFix";
+import { CI_FIX_AGAIN_LABEL, ciFixRetryable, type CiFixView } from "@/lib/ciAdmissionFixCore";
 import { ciAdmissionGithubConfig, createCiAdmissionGithub } from "@/lib/ciAdmissionGithub";
 import { ciAdmissionMode, readState, serially, takeLock, writeState } from "@/lib/ciAdmissionRound";
 import { prisma } from "@/lib/prisma";
@@ -39,10 +41,13 @@ export type CiAdmissionAdminView = {
   mode: CiAdmissionMode;
   configured: boolean;
   state: CiAdmissionState;
+  /** The CI auto-fix on the review server, as it last reported (lib/ciAdmissionFixCore.ts). */
+  fix: CiFixView;
 };
 
 export async function readCiAdmissionAdminView(): Promise<CiAdmissionAdminView> {
-  return { mode: ciAdmissionMode(), configured: ciAdmissionGithubConfig() !== null, state: await readState(prisma) };
+  const [state, fix] = await Promise.all([readState(prisma), readCiFixView(prisma)]);
+  return { mode: ciAdmissionMode(), configured: ciAdmissionGithubConfig() !== null, state, fix };
 }
 
 export type CiAdmissionAdminChange =
@@ -188,4 +193,58 @@ async function stopPull(actor: AdminActor, number: number): Promise<CiAdmissionS
     });
   });
   return { outcome: "stopped", drafted, cancelled, failure };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Auto-fix: analyse again                                                    */
+/* ------------------------------------------------------------------------- */
+
+export type CiFixAgainOutcome =
+  | { outcome: "requested" }
+  | { outcome: "not_configured" | "not_found" | "not_open" | "not_retryable" }
+  | { outcome: "failed"; failure: string };
+
+/**
+ * The operator's "Analyse again": the review server's CI auto-fix tries the
+ * pull request's current head once more. Only a head it tried and did not fix,
+ * and has not retried, is asked for; the request is the CI_FIX_AGAIN_LABEL
+ * label put on now (the server reads GitHub, never the app, and acts only on
+ * a label put on after the head's try), audited here.
+ */
+export async function requestCiFixAgain(actor: AdminActor, number: number): Promise<CiFixAgainOutcome> {
+  const config = ciAdmissionGithubConfig();
+  if (!config) return { outcome: "not_configured" };
+  const github = createCiAdmissionGithub(config);
+  let found: Awaited<ReturnType<typeof github.pull>>;
+  try {
+    found = await github.pull(number);
+  } catch (error) {
+    return { outcome: "failed", failure: failureCode(error) };
+  }
+  if (!found) return { outcome: "not_found" };
+  if (!found.open) return { outcome: "not_open" };
+  const fix = (await readCiFixView(prisma)).byPull[number];
+  if (!ciFixRetryable(fix, found.pull.headSha, Date.now())) return { outcome: "not_retryable" };
+  if (!github.setLabel) return { outcome: "not_configured" };
+  try {
+    // Off, then on: the server acts only on a "labeled" event newer than the
+    // head's try, and a label still on from before makes no new one.
+    await github.setLabel(number, CI_FIX_AGAIN_LABEL, false);
+    await github.setLabel(number, CI_FIX_AGAIN_LABEL, true);
+  } catch (error) {
+    return { outcome: "failed", failure: failureCode(error) };
+  }
+  await prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    await writeAdminAuditLog({
+      ...actor,
+      tx,
+      action: "ci.admission.fix_again",
+      targetType: "PullRequest",
+      targetId: String(number),
+      summary: `Asked the CI auto-fix to try #${number} again at ${found.pull.headSha.slice(0, 9)}.`,
+      metadata: { number, headSha: found.pull.headSha, previous: fix ? { outcome: fix.outcome, reason: fix.reason } : null },
+    });
+  });
+  return { outcome: "requested" };
 }

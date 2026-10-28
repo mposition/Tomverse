@@ -4,7 +4,7 @@
 // holds while Railway has any deployment in flight for that environment.
 //
 //   npm run merge-train -- --dry-run --once      # read-only: say what would merge
-//   npm run merge-train                           # develop -> staging only
+//   npm run merge-train                           # develop -> dev only
 //   npm run merge-train -- --include-main         # also main -> production
 //   npm run merge-train -- --pr=1916 --once       # consider only this PR
 //   npm run merge-train -- --clear-latch=develop  # a person clears a stop

@@ -1,0 +1,25 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-development-readback-followup-v2",
+  "requirement": "Formal successor to concluded chat01-refiner-vnext-one-shot-development-readback-v1, which remains on_hold after maxRevisions=2 with two Claude Code Max nit findings. Preserve every v1 package, verdict and on_hold status; this is not a retroactive pass. Under approved CHAT-01 one-shot policy v2, Codex authors a content-free owner-only development readback and Claude Code Max first-party subscription CLI independently reviews. No Anthropic API, real holdout content, provider call, stage/run authority, dispatch, flag change, or product traffic.",
+  "completionCriteria": [
+    "The route test asserts the verifier receives the app's own process.cwd() root and would reject a parent-root mutation.",
+    "Deployment and price failures surface only allowlisted content-free codes; unexpected exceptions never expose private details and emit only a fixed server-side diagnostic message.",
+    "Only a recently reauthenticated owner can GET the rate-limited no-store route; no POST exists.",
+    "Even when all reads match, final closure, reservation, stage, run and dispatch remain false.",
+    "Focused synthetic and server-contract tests, typecheck, lint and staged whitespace guard pass; Claude review returns zero findings."
+  ],
+  "baseCommit": "d780f82e528a14ce9e99346d534291d51db400d0",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-development-readback-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-development-readback-followup-v2.task.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotDevelopmentReadback.ts",
+    "app/api/admin/prompt-refiner/vnext-development-readback/route.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotDevelopmentReadback.test.mjs",
+    "tests/server-contract/admin-prompt-refiner-vnext-development-readback-route.test.ts"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-development-readback-v1",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-development-readback-v1/exchange.json"
+  }
+}

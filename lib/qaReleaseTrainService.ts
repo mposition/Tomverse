@@ -42,26 +42,21 @@ export type QaReleaseTrainPorts = {
   git: {
     /**
      * On a fresh clone of main: a branch with each commit cherry-picked with
-     * -m 1, in order, a conflict aborted and left out, an already applied one
-     * skipped; once `capacity` have ridden, the rest are over capacity without
-     * being picked. A conflict may board the develop pull requests it needs
-     * first (`boarded`, the operator did not pick them). Returns main's head
-     * before the picks and the branch head after.
+     * -m 1, in order, a conflict resolved by the model when it is switched on
+     * and otherwise aborted and left out, an already applied one skipped;
+     * once `capacity` have ridden, the rest are over capacity without being
+     * picked. Returns main's head before the picks and the branch head after.
      */
     assemble(
       branch: string,
       cargo: readonly QaReleaseTrainCandidate[],
       capacity: number,
-      /** Pull requests riding an open train: never boarded as a predecessor. */
-      onOpenTrains?: readonly number[],
     ): Promise<{
       mainSha: string;
       headSha: string;
       picks: QaReleaseTrainPick[];
-      /** Absent or empty: nothing boarded. */
-      boarded?: QaReleaseTrainCandidate[];
-      /** Riders whose adjacent-line conflict was settled, with the files; absent or empty: none. */
-      settled?: { number: number; files: string[] }[];
+      /** Riders whose conflict the model resolved, with the files and what it said; absent or empty: none. */
+      resolved?: { number: number; files: string[]; why: string }[];
     }>;
     push(branch: string): Promise<void>;
   };
@@ -134,7 +129,7 @@ export async function runQaReleaseTrainRound(
   // admitted and reported empty without a clone, spending the request, and
   // the round goes on to a due scheduled departure. One that is assembled
   // and carries nothing ends the round: a second clone could outrun the
-  // service's ten-minute limit after the scheduled pick was spent.
+  // service's time limit after the scheduled pick was spent.
   let departure: { slot: string; emergency: boolean; emergencyRequestId?: string };
   let branch: string;
   let cargo: QaReleaseTrainCandidate[] = [];
@@ -142,8 +137,6 @@ export async function runQaReleaseTrainRound(
   // An emergency's pull requests already riding an open train: never picked
   // onto a second release branch, reported as such.
   let onOpenTrain: number[] = [];
-  // Every pull request open trains carry: a predecessor among them is not boarded again.
-  let openRiders: number[] = [];
   let step = "selection";
   try {
     const scheduledNow = qaReleaseTrainDeparture(nowMs, hours);
@@ -162,7 +155,6 @@ export async function runQaReleaseTrainRound(
         if (!emergencyLeft) {
           step = "open_trains";
           const riding = new Set((await ports.github.openTrains()).riders);
-          openRiders = [...riding];
           step = "cargo";
           const merged = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency.numbers));
           const riders = merged.filter((c) => !riding.has(c.number));
@@ -195,7 +187,6 @@ export async function runQaReleaseTrainRound(
       step = "open_trains";
       const open = await ports.github.openTrains();
       openTrains = open.count;
-      openRiders = open.riders;
       step = "cargo";
       cargo = openTrains > 0 || selection.numbers.length === 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.cargo(selection.numbers));
     }
@@ -242,7 +233,7 @@ export async function runQaReleaseTrainRound(
 
   let assembled;
   try {
-    assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO, openRiders);
+    assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO);
   } catch (error) {
     // The port's own code (git_missing, git_clone ...) says what to fix.
     const message = error instanceof Error ? error.message : "";
@@ -265,12 +256,12 @@ export async function runQaReleaseTrainRound(
   }
   const pr = qaReleaseTrainPullRequest({
     slot: departure.slot,
-    candidates: [...cargo, ...(assembled.boarded ?? [])],
+    candidates: cargo,
     picks,
     rcSha: assembled.headSha,
     rollbackSha: assembled.mainSha,
     emergency: departure.emergency,
-    settled: assembled.settled,
+    resolved: assembled.resolved,
   });
   let number: number;
   try {

@@ -6,21 +6,27 @@
 // lane.
 //
 // It holds the lane's app secret, the GitHub App id and key, the operator
-// control revision, its enable flag and its departure hours -- nothing else.
+// control revision, its enable flag, its departure hours and, for the model
+// conflict resolver (off unless QA_RELEASE_TRAIN_MODEL_RESOLVE is "true"), its
+// own Anthropic key -- nothing else.
 // All decisions are in lib/qaReleaseTrainService.ts; this file only connects
 // the ports. The output is the outcome and a short failure code -- never a
 // header, a token, a key or a body.
 
 import { qaReleaseInstallationToken } from "../lib/qaReleaseMergeLaneGithub.ts";
 import { createQaReleaseTrainAppPorts, createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
+import { createQaReleaseTrainResolver } from "../lib/qaReleaseTrainResolve.ts";
 import { runQaReleaseTrainRound } from "../lib/qaReleaseTrainService.ts";
 
 // The app routes budget each call at 50 s; this side waits a little longer.
 const APP_TIMEOUT_MS = 55_000;
 const READ_TIMEOUT_MS = 30_000;
+// One model call resolving one pick's conflict hunks.
+const MODEL_TIMEOUT_MS = 4 * 60 * 1000;
 
-// Railway's cron does not stop a run on its own: the service stops itself.
-const HARD_TIMEOUT_MS = 10 * 60 * 1000;
+// Railway's cron does not stop a run on its own: the service stops itself,
+// inside the 30-minute cron interval (model calls can take minutes each).
+const HARD_TIMEOUT_MS = 25 * 60 * 1000;
 const supervisor = setTimeout(() => {
   console.log(JSON.stringify({ exitCode: 1, train: "hard_timeout" }));
   process.exit(1);
@@ -45,7 +51,12 @@ const privateKey = (env.QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY ?? "").includes("\
 
 const readHttp = httpWith(READ_TIMEOUT_MS);
 const token = qaReleaseInstallationToken(readHttp, (env.QA_RELEASE_MERGE_LANE_APP_ID ?? "").trim(), privateKey, Date.now);
-const git = createQaReleaseTrainGitPorts({ token, autoPredecessors: (env.QA_RELEASE_TRAIN_AUTO_PREDECESSORS ?? "").trim() !== "false" });
+const apiKey = (env.QA_RELEASE_TRAIN_ANTHROPIC_API_KEY ?? "").trim();
+const resolve =
+  (env.QA_RELEASE_TRAIN_MODEL_RESOLVE ?? "").trim() === "true" && apiKey !== ""
+    ? createQaReleaseTrainResolver({ http: httpWith(MODEL_TIMEOUT_MS), apiKey })
+    : undefined;
+const git = createQaReleaseTrainGitPorts({ token, resolve });
 const train = await runQaReleaseTrainRound(
   env,
   {

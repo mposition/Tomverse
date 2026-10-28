@@ -214,7 +214,7 @@ try {
   );
   if (pending.length > 0 && schemaMatchesPrisma()) {
     // The match is no evidence about a migration the diff cannot see. Each one
-    // may name the relation it creates; only proof that every one of them is
+    // may name the relation or function it creates; only proof that every one of them is
     // absent lets the deploy go on.
     const { probes, undeclared } = pendingProbes(pending, (name) =>
       readFileSync(joinPath(MIGRATIONS_DIR, name, "migration.sql"), "utf8"),

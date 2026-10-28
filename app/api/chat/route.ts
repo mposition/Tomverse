@@ -2149,12 +2149,15 @@ async function handleChatPost(
                       fileContext: fileRoutingContext,
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
-                      recordDecision: autoImageDecisionPromise.then(
-                          (decision) => !decision.image
-                      ),
+                      recordDecision: (pick) => pick?.requiresFileGeneration
+                          ? Promise.resolve(true)
+                          : autoImageDecisionPromise.then((decision) => !decision.image),
                   })
             : null;
-        const autoImageDecision = await autoImageDecisionPromise;
+        const detectedImageDecision = await autoImageDecisionPromise;
+        // A document about images is still a file request, not an image turn.
+        const autoImageDecision = llmPick?.requiresFileGeneration
+            ? { image: false as const } : detectedImageDecision;
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
             llmPick?.modelId ?? null,
@@ -6102,7 +6105,6 @@ async function handleChatPost(
                     ]),
                     ...attemptDispatchOptions(plan),
                 });
-                await recordDispatched(nextRecord);
             } catch (dispatchError) {
                 nextAttemptAbortController.abort(dispatchError);
                 if (nextStream) {
@@ -6134,6 +6136,23 @@ async function handleChatPost(
             if (!nextStream) {
                 await abandonFallback("dispatch_failed");
                 return streamState !== "open" || req.signal.aborted;
+            }
+
+            try {
+                await recordDispatched(nextRecord);
+            } catch (recordError) {
+                // `streamText` has crossed the provider invocation boundary.
+                // Its SDK work is scheduled independently of reading the
+                // returned stream, so a recording error cannot prove that the
+                // provider was never called. Keep the hold and continue the
+                // actual fallback: its ordinary two-attempt settlement still
+                // accounts for the provider work and charges the user once.
+                logRequestError(
+                    "chat_fallback_dispatch_record_failed",
+                    traceId,
+                    recordError,
+                    plan.modelId
+                );
             }
 
             // From here the swap is committed, and only from here.

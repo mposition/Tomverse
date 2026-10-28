@@ -1,0 +1,115 @@
+name: Develop push unit tests
+
+# The unit tests, on every push to develop.
+#
+# They already run on every pull request, in PR Fast Gate. What they did not run
+# on was a push, and a push is how content reaches develop without any pull
+# request having seen it -- an automated back-merge being the case that proved
+# it. On 2026-10-08 the back-merge at 06e18adf5 resolved the admin navigation's
+# `office` entry by keeping both sides, which duplicated an object key and a
+# route-table entry. `tests/adminNavigation.test.mjs` asserts unique ids and
+# hrefs and would have refused it, but no lane running on that push ran it: the
+# develop push lane was Admin Console E2E, the Rust workspace, the DB lanes,
+# ops-observer bounds and support-triage. The duplicate reached staging and the
+# production build failed type-check there, with the deploy reported only as
+# SKIPPED.
+#
+# This is deliberately the unit tests alone, not PR Fast Gate on a second
+# trigger. Running the whole gate on push would double what every merged pull
+# request already paid for.
+#
+# PR Fast Gate triggers on `pull_request` only, so none of its jobs -- the
+# static checks, the smoke tests, the UI-risk shards -- run on a push. What
+# does run on a push to develop is other workflows: Admin Console E2E, the
+# Rust workspace, the Credit-and-finance DB lanes, ops-observer transaction
+# bounds and the support-triage suites. Whether more of the gate belongs on
+# this trigger is a separate question with a separate cost; the operator
+# decision was the unit tests.
+#
+# Railway reads the check runs on a develop commit before it deploys, so this
+# job is also what now stops a failing unit test at the lane rather than at
+# the deployed environment. The environment is deliberately not named here:
+# docs/ops/dev-test-lanes.md records the operator decision of 2026-10-07 to
+# move develop to `dev` and give the environment Railway still calls
+# `staging` the `test` branch, and §3 of that document is the switchover,
+# which has not been performed -- so today a develop push still deploys to
+# `staging`. Naming it would date this comment either way.
+#
+# That costs the deploy the length of this job; the alternative is what
+# happened on 2026-10-08.
+#
+# Operator decision, 2026-10-08.
+
+# Push only, and the concurrency group below carries the event name.
+#
+# A `workflow_dispatch` sharing a ref-only group would cancel the push run,
+# and Railway reads a cancelled suite as a failure and skips that commit's
+# deploy even if the manual run then passes. The workflows that face this
+# answer it in the group: orchestrator-rust.yml and secret-history-scan.yml
+# both key concurrency by `github.event_name`, so a dispatch and a push
+# cannot cancel each other. This lane does both -- it has no dispatch at all,
+# because the operator decision did not ask for one, and the group is keyed
+# by event name anyway so adding one later cannot reach the push run.
+#
+# (`continue-on-error` is a different tool for a different problem: those two
+# use it so a failing *extra* suite -- a schedule, a dispatch -- stays green
+# for Railway. It cannot undo a cancelled suite, so it is not the answer
+# here. An earlier draft of this comment said it was.)
+#
+# tests/developPushUnitTestLane.test.mjs holds all of this, because a comment
+# cannot refuse an edit.
+on:
+  push:
+    branches:
+      - develop
+
+# A push is a trusted trigger, and a trusted trigger defaults to `write`. Read
+# is what this job needs: it restores the npm cache and writes nothing to it.
+# See scripts/ci-cache-key-policy.mjs.
+cache-mode: read
+
+permissions:
+  contents: read
+
+# One run per ref per event, and a newer push cancels an older one -- so the
+# superseded commit's suite does not finish, and Railway will not deploy that
+# commit. That is the behaviour the other push lanes have and the one worth
+# having: during a merge train the commit that matters is the newest, and
+# paying for every intermediate suite buys a deploy nobody waits for. It is
+# not "one run per commit", which an earlier draft of this comment claimed.
+#
+# The event name is in the key so a trigger added later cannot cancel a push
+# run (orchestrator-rust.yml and secret-history-scan.yml do the same).
+concurrency:
+  group: develop-push-unit-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit and API policy tests (develop push)
+    runs-on: ubuntu-latest
+    # The same bound PR Fast Gate gives this suite: ~14 minutes serial, a
+    # fraction of that concurrent, and 20 stops a hang while still covering a
+    # run that falls back to serial.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Some unit tests read git history (memory-eval signing commits,
+          # pinned source snapshots); a depth-1 clone cannot answer them.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit and API policy tests
+        timeout-minutes: 18
+        run: npm run test:unit

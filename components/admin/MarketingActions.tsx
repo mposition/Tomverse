@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { ArrowRight, Check, Loader2, Pause } from "lucide-react";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
@@ -77,6 +77,14 @@ export type MarketingAction = {
   /** Said before the request, not after: this is the last chance to stop. */
   confirm?: string;
   danger?: boolean;
+  /** The row's main decision (approve, confirm): drawn as the one filled button. */
+  primary?: boolean;
+  /** An icon before the label. */
+  icon?: "check" | "pause" | "arrow";
+  /** Drawn at the far end of the rail, apart from the row's decisions. */
+  align?: "end";
+  /** For the `switch` appearance: whether the switch is on. */
+  checked?: boolean;
   fields?: MarketingActionField[];
   body: (values: Record<string, string>) => unknown;
 };
@@ -112,8 +120,16 @@ export function MarketingActionRail({
   section,
   onDone,
   m,
+  appearance = "rail",
 }: {
   actions: MarketingAction[];
+  /**
+   * `rail` is a row of buttons under a divider. `switch` draws each action as
+   * an on/off switch (`checked`) with no divider, for a settings row. `block`
+   * draws one full-width button with no divider, for a card's single control.
+   * All three send, confirm and refuse the same way.
+   */
+  appearance?: "rail" | "switch" | "block";
   /**
    * The tab this rail is on.
    *
@@ -223,37 +239,88 @@ export function MarketingActionRail({
   if (actions.length === 0) return null;
   const opened = open ? byId.get(open) : null;
 
-  return (
-    <div className="mt-3 border-t border-zinc-800 pt-3">
-      <div className="flex flex-wrap gap-2">
-        {actions.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            data-testid={`marketing-action-${action.id}`}
-            onClick={() => start(action)}
-            disabled={busy !== null || action.unavailable !== undefined}
-            title={action.unavailable}
-            aria-describedby={
-              action.unavailable ? `marketing-why-${action.id}` : undefined
-            }
-            aria-expanded={
-              action.fields && !action.unavailable ? open === action.id : undefined
-            }
-            className={`inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-              action.danger
-                ? "border-red-500/40 text-red-200 hover:bg-red-500/10"
-                : "border-zinc-700 text-zinc-200 hover:bg-zinc-800"
+  const ICONS = { check: Check, pause: Pause, arrow: ArrowRight } as const;
+  const button = (action: MarketingAction) => {
+    const Icon = action.icon ? ICONS[action.icon] : null;
+    const common = {
+      type: "button" as const,
+      "data-testid": `marketing-action-${action.id}`,
+      onClick: () => start(action),
+      disabled: busy !== null || action.unavailable !== undefined,
+      title: action.unavailable ?? (appearance === "switch" ? action.label : undefined),
+      "aria-describedby": action.unavailable ? `marketing-why-${action.id}` : undefined,
+      "aria-expanded": action.fields && !action.unavailable ? open === action.id : undefined,
+    };
+    if (appearance === "switch") {
+      // A switch, not a button that says "turn on": its position is the state
+      // and pressing it is the change. The label names the change for a screen
+      // reader; the confirmation and the step-up refusal are the rail's own.
+      return (
+        <button
+          key={action.id}
+          {...common}
+          role="switch"
+          aria-checked={action.checked === true}
+          aria-label={action.label}
+          className={`relative inline-flex h-11 w-12 shrink-0 cursor-pointer items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          <span
+            className={`flex h-6 w-11 items-center rounded-full p-0.5 transition ${
+              action.checked ? "justify-end bg-blue-600" : "justify-start bg-zinc-700"
             }`}
           >
-            {busy === action.id ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : null}
-            {action.label}
-          </button>
-        ))}
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-full shadow-sm ${
+                action.checked ? "bg-white" : "bg-zinc-300"
+              }`}
+            >
+              {busy === action.id ? <Loader2 className="h-3 w-3 animate-spin text-zinc-500" /> : null}
+            </span>
+          </span>
+        </button>
+      );
+    }
+    return (
+      <button
+        key={action.id}
+        {...common}
+        className={`inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+          appearance === "block" ? "w-full " : ""
+        }${
+          action.primary
+            ? "border-blue-600 bg-blue-600 text-white hover:bg-blue-500"
+            : action.danger
+              ? "border-transparent text-red-300 hover:bg-red-500/10"
+              : action.align === "end"
+                ? "border-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                : "border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+        }`}
+      >
+        {busy === action.id ? <Loader2 className="h-4 w-4 animate-spin" /> : Icon ? <Icon className="h-4 w-4" /> : null}
+        {action.label}
+      </button>
+    );
+  };
+  const leading = actions.filter((action) => action.align !== "end");
+  const trailing = actions.filter((action) => action.align === "end");
+
+  return (
+    <div className={appearance === "rail" ? "mt-4 border-t border-zinc-800 pt-4" : ""}>
+      <div className={appearance === "switch" ? "flex" : "flex flex-wrap items-center justify-between gap-2"}>
+        {appearance === "switch" ? (
+          actions.map(button)
+        ) : (
+          <>
+            <div className={`flex flex-wrap gap-2 ${appearance === "block" ? "w-full" : ""}`}>{leading.map(button)}</div>
+            {trailing.length > 0 ? <div className="flex flex-wrap gap-2">{trailing.map(button)}</div> : null}
+          </>
+        )}
       </div>
-      {actions.some((action) => action.unavailable) ? (
+      {/*
+        A switch row says why in its own description, under the id this list
+        would have used, so the reason sits beside the label it explains.
+      */}
+      {appearance !== "switch" && actions.some((action) => action.unavailable) ? (
         <ul className="mt-2 grid gap-1">
           {actions
             .filter((action) => action.unavailable)
@@ -261,7 +328,7 @@ export function MarketingActionRail({
               <li
                 key={action.id}
                 id={`marketing-why-${action.id}`}
-                className="text-[11px] text-zinc-500"
+                className="text-xs text-zinc-500"
               >
                 {action.label}: {action.unavailable}
               </li>
@@ -272,7 +339,7 @@ export function MarketingActionRail({
       {opened ? (
         <form
           data-testid={`marketing-form-${opened.id}`}
-          className="mt-3 grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3"
+          className="mt-3 grid gap-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
           onSubmit={(event) => {
             event.preventDefault();
             // Asked here as well as on a plain button. An action with fields
@@ -285,7 +352,7 @@ export function MarketingActionRail({
         >
           {(opened.fields ?? []).map((field) => (
             <label key={field.name} className="grid gap-1">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+              <span className="text-xs font-medium text-zinc-400">
                 {field.label}
               </span>
               {field.kind === "checkbox" ? (
@@ -312,7 +379,7 @@ export function MarketingActionRail({
                       [field.name]: event.target.value,
                     }))
                   }
-                  className="w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 >
                   <option value="">{m.actionChoose}</option>
                   {(field.options ?? []).map((option) => (
@@ -331,7 +398,7 @@ export function MarketingActionRail({
                     }))
                   }
                   rows={6}
-                  className="w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 />
               ) : (
                 <input
@@ -351,11 +418,11 @@ export function MarketingActionRail({
                       [field.name]: event.target.value,
                     }))
                   }
-                  className="w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 />
               )}
               {field.hint && field.kind !== "checkbox" ? (
-                <span className="text-[11px] text-zinc-500">{field.hint}</span>
+                <span className="text-xs text-zinc-500">{field.hint}</span>
               ) : null}
             </label>
           ))}
@@ -364,14 +431,14 @@ export function MarketingActionRail({
               type="submit"
               data-testid={`marketing-submit-${opened.id}`}
               disabled={busy !== null}
-              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-blue-600 bg-blue-600 px-3.5 py-2 text-[13px] font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {opened.label}
             </button>
             <button
               type="button"
               onClick={() => setOpen(null)}
-              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-zinc-800 px-3 py-2 text-xs font-bold text-zinc-400 transition hover:bg-zinc-800"
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-zinc-700 px-3.5 py-2 text-[13px] font-semibold text-zinc-300 transition hover:bg-zinc-800"
             >
               {m.actionCancel}
             </button>

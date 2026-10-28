@@ -1,7 +1,8 @@
 /**
- * One run of A3, market intelligence (S3 plan, S3f): every approved competitor
- * with tracked pages, its pages read, one call per competitor through the LLM
- * cost ledger, and one signed `market_intel` report of everything kept. Pure
+ * One run of A3, market intelligence (S3 plan, S3f): every approved competitor,
+ * one web-search call each through the LLM cost ledger -- the search limited
+ * to the competitor's official domains -- and one signed `market_intel`
+ * report of everything kept. Pure
  * orchestration over ports, so the worker and the tests drive the same code.
  *
  * **It stops rather than presses on**, as A5's run does: a refused reservation
@@ -23,8 +24,7 @@ import {
   marketingA3ReportBody,
   readMarketingA3Answer,
   type MarketIntelFact,
-  type MarketingA3Page,
-  type MarketingA3PageRefusal,
+  type MarketingA3DropReason,
 } from "./marketingA3Core.ts";
 import {
   MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
@@ -32,10 +32,7 @@ import {
 } from "./marketingIntelReportCore.ts";
 import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
-/**
- * Time a competitor is not started without: its pages (read together, each
- * bounded by the fetch timeout), one call and the report.
- */
+/** Time a competitor is not started without: one web-search call and the report. */
 export const MARKETING_A3_COMPETITOR_BUDGET_MS = 90_000;
 
 /** Sends of the signed report when its answer is lost or a 5xx: the first and two resends. */
@@ -58,20 +55,17 @@ export const MARKETING_A3_REPORT_MARGIN_MS = 30_000;
 const REPORT_BYTE_LIMIT = MARKETING_INTEL_REPORT_MAX_BODY_BYTES - 4 * 1024;
 
 /** The report's id within a run: one A3 report per run. */
-export const MARKETING_A3_REPORT_ID = "a3-tracked-pages";
+export const MARKETING_A3_REPORT_ID = "a3-web-search";
 
 export type MarketingA3CycleDeps = {
   /** The app's context route, answered as JSON. Throws when there is no answer. */
   readonly readContext: () => Promise<unknown>;
-  /** One tracked page, read as `fetchMarketingA3Page` reads it. */
-  readonly fetchPage: (
-    url: string,
-    hosts: readonly string[],
-  ) => Promise<
-    { readonly ok: true; readonly page: MarketingA3Page } | { readonly ok: false; readonly reason: MarketingA3PageRefusal }
-  >;
-  /** One ledger-accounted call for the `market_intel` purpose. */
-  readonly callLlm: (messages: readonly MarketingLlmMessage[], requestKey: string) => Promise<MarketingLlmCallOutcome>;
+  /** One ledger-accounted web-search call for the `market_intel` purpose, limited to these domains. */
+  readonly callLlm: (
+    messages: readonly MarketingLlmMessage[],
+    requestKey: string,
+    allowedDomains: readonly string[],
+  ) => Promise<MarketingLlmCallOutcome>;
   /** The report route. Throws when there is no answer. */
   readonly submitReport: (
     report: MarketingGeneratorReport,
@@ -84,11 +78,11 @@ export type MarketingA3CycleDeps = {
 
 export type MarketingA3CycleSummary = {
   readonly competitors: number;
-  readonly pagesRead: number;
-  readonly pagesRefused: Partial<Record<MarketingA3PageRefusal, number>>;
   readonly calls: number;
   readonly factsKept: number;
   readonly unrepresentable: number;
+  /** The facts the service did not keep, by reason (the model's own unrepresentable count is not here). */
+  readonly dropped: Partial<Record<MarketingA3DropReason | "unreadable_answer", number>>;
   /** The report route's answer, or null when nothing was reported. */
   readonly report: null | { readonly httpStatus: number; readonly status: string };
   readonly stoppedAt: null | { readonly stage: "context" | "deadline" | "llm" | "submit"; readonly detail: string };
@@ -98,7 +92,6 @@ type TrackedCompetitor = {
   readonly competitorId: string;
   readonly displayName: string;
   readonly officialHosts: readonly string[];
-  readonly trackedPages: readonly string[];
 };
 
 const strings = (list: unknown): list is string[] =>
@@ -121,8 +114,7 @@ function trackedFrom(context: unknown): TrackedCompetitor[] | null {
     if (
       typeof value.competitorId !== "string" ||
       typeof value.displayName !== "string" ||
-      !strings(value.officialHosts) ||
-      !(value.trackedPages === undefined || strings(value.trackedPages))
+      !strings(value.officialHosts)
     ) {
       return null;
     }
@@ -130,7 +122,6 @@ function trackedFrom(context: unknown): TrackedCompetitor[] | null {
       competitorId: value.competitorId,
       displayName: value.displayName,
       officialHosts: value.officialHosts,
-      trackedPages: value.trackedPages ?? [],
     });
   }
   return rows.sort((left, right) => (left.competitorId < right.competitorId ? -1 : 1));
@@ -142,21 +133,19 @@ export async function runMarketingA3Cycle(
 ): Promise<MarketingA3CycleSummary> {
   const startedAt = new Date(deps.now()).toISOString();
   let competitors = 0;
-  let pagesRead = 0;
   let calls = 0;
   let unrepresentable = 0;
-  const pagesRefused: Partial<Record<MarketingA3PageRefusal, number>> = {};
+  const dropped: Partial<Record<MarketingA3DropReason | "unreadable_answer", number>> = {};
   const facts: MarketIntelFact[] = [];
   const summary = (
     stoppedAt: MarketingA3CycleSummary["stoppedAt"],
     report: MarketingA3CycleSummary["report"] = null,
   ): MarketingA3CycleSummary => ({
     competitors,
-    pagesRead,
-    pagesRefused,
     calls,
     factsKept: facts.length,
     unrepresentable,
+    dropped,
     report,
     stoppedAt,
   });
@@ -170,34 +159,17 @@ export async function runMarketingA3Cycle(
   if (tracked === null) return summary({ stage: "context", detail: "context_unreadable" });
 
   const deadline = Date.parse(input.deadlineAt);
-  for (const competitor of tracked.filter((row) => row.trackedPages.length > 0)) {
+  for (const competitor of tracked.filter((row) => row.officialHosts.length > 0)) {
     if (deadline - deps.now() < MARKETING_A3_COMPETITOR_BUDGET_MS) {
       return summary({ stage: "deadline", detail: "deadline_too_close" });
     }
     competitors += 1;
-    // Read together, so one competitor's pages take one fetch timeout, not ten.
-    // A read cut off by the run's own deadline is a read that did not happen.
-    const reads = await Promise.all(
-      competitor.trackedPages.map((url) =>
-        deps.fetchPage(url, competitor.officialHosts).catch(() => ({ ok: false as const, reason: "timeout" as const })),
-      ),
-    );
-    const pages: MarketingA3Page[] = [];
-    for (const read of reads) {
-      if (read.ok) {
-        pages.push(read.page);
-        pagesRead += 1;
-      } else {
-        pagesRefused[read.reason] = (pagesRefused[read.reason] ?? 0) + 1;
-      }
-    }
-    if (pages.length === 0) continue;
 
     const checkedAt = new Date(deps.now()).toISOString();
     calls += 1;
     let outcome: MarketingLlmCallOutcome;
     try {
-      outcome = await deps.callLlm(marketingA3Messages(competitor, pages), deps.newId());
+      outcome = await deps.callLlm(marketingA3Messages(competitor), deps.newId(), competitor.officialHosts);
     } catch {
       // Nothing says whether the provider was reached: unknown, and the run stops.
       return summary({ stage: "llm", detail: "threw" });
@@ -209,9 +181,18 @@ export async function runMarketingA3Cycle(
     // comes back as `stopped` and does stop the run.
     if (outcome.status === "released") return summary({ stage: "deadline", detail: "released_before_dispatch" });
     if (outcome.status !== "answered") return summary({ stage: "llm", detail: outcome.status });
-    const read = readMarketingA3Answer(outcome.content, { competitorId: competitor.competitorId, pages, checkedAt });
+    const read = readMarketingA3Answer(outcome.content, {
+      competitorId: competitor.competitorId,
+      officialHosts: competitor.officialHosts,
+      citations: outcome.citations,
+      checkedAt,
+    });
     // An answer that is not the JSON asked for found nothing usable: counted, not guessed at.
     unrepresentable += read.unreadable ? 1 : read.unrepresentable;
+    if (read.unreadable) dropped.unreadable_answer = (dropped.unreadable_answer ?? 0) + 1;
+    for (const [reason, count] of Object.entries(read.dropped) as Array<[MarketingA3DropReason, number]>) {
+      dropped[reason] = (dropped[reason] ?? 0) + count;
+    }
     facts.push(...read.facts);
   }
 

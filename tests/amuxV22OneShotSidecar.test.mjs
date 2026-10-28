@@ -828,3 +828,39 @@ test("a Codex or Copilot run never holds the operator's refresh token, and an ex
     assert.deepEqual((await readdir(home)).filter((name) => name.startsWith("run-")), []);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("an implement attempt is checked out on its publication base before the CLI starts", async () => {
+  const base = "b".repeat(40);
+  assert.deepEqual(parseAmuxV22OneShotRequest({ ...request, baseSha: base },
+    "worker-a"), { ...request, baseSha: base });
+  for (const bad of [{ ...request, baseSha: "B".repeat(40) },
+    { ...request, baseSha: "b".repeat(39) },
+    { ...request, baseSha: 7 },
+    { ...request, role: "investigate", baseSha: base }])
+    assert.throws(() => parseAmuxV22OneShotRequest(bad, "worker-a"));
+
+  let spawned = 0;
+  const failed = await runAmuxV22OneShot({ ...request, baseSha: base }, config, {
+    syntheticPlatform: true,
+    syncBase: async (path, sha) => {
+      assert.equal(path, config.worktreePath);
+      assert.equal(sha, base);
+      return { ok: false, reason: "worktree_dirty" };
+    },
+    spawnChild: () => { spawned += 1; throw new Error("must not spawn"); },
+  });
+  assert.equal(failed.kind, "failed");
+  assert.equal(failed.cliStarted, false);
+  assert.equal(failed.failure, "base_sync_worktree_dirty");
+  assert.equal(spawned, 0);
+
+  const order = [];
+  const fake = fakeSpawn(JSON.stringify(usage));
+  await runAmuxV22OneShot({ ...request, baseSha: base }, config, {
+    syntheticPlatform: true,
+    syncBase: async () => { order.push("sync"); return { ok: true, baseSha: base }; },
+    captureBaseline: async () => { order.push("baseline"); return { ok: true, baseSha: base }; },
+    spawnChild: (...args) => { order.push("spawn"); return fake.spawnChild(...args); },
+  });
+  assert.deepEqual(order.slice(0, 3), ["sync", "baseline", "spawn"]);
+});

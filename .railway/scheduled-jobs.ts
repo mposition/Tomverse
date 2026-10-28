@@ -16,24 +16,44 @@
 // listed here is removed by the next apply. `plan` shows it as
 // "Delete variable"; stop there and add the name.
 
-export type RailwayEnvironment = "production" | "staging";
+export type RailwayEnvironment = "production" | "staging" | "dev";
+
+/**
+ * production and staging must list every job: a job missing from either is a
+ * service the partial deletes there. dev is opt-in per job, and a job without
+ * a dev list is not declared in dev at all (operator decision, 2026-10-07:
+ * dev does not run Provider Probe or Provider Usage Sync).
+ */
+export type RailwayCronVariables = Readonly<
+  Record<Exclude<RailwayEnvironment, "dev">, readonly string[]> &
+    Partial<Record<"dev", readonly string[]>>
+>;
 
 export type RailwayCronService = {
   readonly key: string;
   readonly service: string;
   readonly startCommand: string;
   readonly cronSchedule: string;
-  readonly variables: Readonly<Record<RailwayEnvironment, readonly string[]>>;
+  readonly variables: RailwayCronVariables;
 };
 
 export const RAILWAY_REPOSITORY = "mposition/Tomverse";
 
-/** The branch each Railway environment deploys. */
+/**
+ * The branch each Railway environment deploys.
+ *
+ * dev takes every develop merge, so that staging (shown to people as Test) can
+ * hold one release candidate while develop keeps moving. staging deploys the
+ * `test` branch, which only the promotion script moves (`npm run promote:test`,
+ * .github/RELEASE_CHECKLIST.md 7.9). An apply here reconnects staging's cron
+ * services to `test`, so the branch must exist before the first apply.
+ */
 export const RAILWAY_ENVIRONMENT_BRANCHES: Readonly<
   Record<RailwayEnvironment, string>
 > = {
   production: "main",
-  staging: "develop",
+  staging: "test",
+  dev: "develop",
 };
 
 export const isRailwayEnvironment = (
@@ -88,6 +108,7 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
     variables: {
       production: ["MAINTENANCE_SECRET", "MAINTENANCE_URL"],
       staging: ["MAINTENANCE_SECRET", "MAINTENANCE_URL"],
+      dev: ["MAINTENANCE_SECRET", "MAINTENANCE_URL"],
     },
   },
   {
@@ -98,6 +119,7 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
     variables: {
       production: ["MAINTENANCE_SECRET", "PROVIDER_PROBE_URL"],
       staging: ["MAINTENANCE_SECRET", "PROVIDER_PROBE_URL"],
+      // Not on dev (operator decision, 2026-10-07).
     },
   },
   {
@@ -108,6 +130,7 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
     variables: {
       production: ["MAINTENANCE_SECRET", "MAINTENANCE_URL"],
       staging: ["MAINTENANCE_SECRET", "MAINTENANCE_URL"],
+      dev: ["MAINTENANCE_SECRET", "MAINTENANCE_URL"],
     },
   },
   {
@@ -118,6 +141,7 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
     variables: {
       production: ["MAINTENANCE_SECRET", "PROVIDER_MODEL_CATALOG_SYNC_URL"],
       staging: ["MAINTENANCE_SECRET", "PROVIDER_MODEL_CATALOG_SYNC_URL"],
+      dev: ["MAINTENANCE_SECRET", "PROVIDER_MODEL_CATALOG_SYNC_URL"],
     },
   },
   {
@@ -139,6 +163,7 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
         "PROVIDER_USAGE_SYNC_SECRET",
         "PROVIDER_USAGE_SYNC_URL",
       ],
+      // Not on dev (operator decision, 2026-10-07).
     },
   },
   {
@@ -153,6 +178,7 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
     variables: {
       production: AUTO_ROUTER_OPTIMIZER_VARIABLES,
       staging: AUTO_ROUTER_OPTIMIZER_VARIABLES,
+      dev: AUTO_ROUTER_OPTIMIZER_VARIABLES,
     },
   },
 ];
@@ -191,17 +217,22 @@ export const buildScheduledJobResources = <Source, Preserved, Resource>(
         "Add it to .railway/scheduled-jobs.ts before planning it."
     );
   }
-  const cron = RAILWAY_CRON_SERVICES.map((job) =>
-    dsl.service(job.service, {
-      source: dsl.github(RAILWAY_REPOSITORY, {
-        branch: RAILWAY_ENVIRONMENT_BRANCHES[environment],
-      }),
-      start: job.startCommand,
-      deploy: { cronSchedule: job.cronSchedule, restartPolicyType: "NEVER" },
-      env: Object.fromEntries(
-        job.variables[environment].map((name) => [name, dsl.preserve()])
-      ),
-    })
-  );
+  const cron: Resource[] = [];
+  for (const job of RAILWAY_CRON_SERVICES) {
+    const variables = job.variables[environment];
+    // Only dev may leave a job out; the type requires production and staging.
+    // An empty env instead would declare the service and delete its variables.
+    if (variables === undefined) continue;
+    cron.push(
+      dsl.service(job.service, {
+        source: dsl.github(RAILWAY_REPOSITORY, {
+          branch: RAILWAY_ENVIRONMENT_BRANCHES[environment],
+        }),
+        start: job.startCommand,
+        deploy: { cronSchedule: job.cronSchedule, restartPolicyType: "NEVER" },
+        env: Object.fromEntries(variables.map((name) => [name, dsl.preserve()])),
+      })
+    );
+  }
   return cron;
 };

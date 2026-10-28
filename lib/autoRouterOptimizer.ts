@@ -556,7 +556,9 @@ export async function autoCandidateMenu(runtimeModels: readonly AiModel[]) {
         return autoLlmRouterCandidates(
             decision.record.eligibleModelIds,
             models,
-            Object.fromEntries(estimate.models.map((model) => [model.modelId, model.totalCredits]))
+            Object.fromEntries(estimate.models.map((model) => [model.modelId, model.totalCredits])),
+            // Synthetic menus represent saved, signed-in Chat turns without search.
+            { isAuthenticated: true, canPersist: true, webSearchRequested: false }
         );
     };
 }

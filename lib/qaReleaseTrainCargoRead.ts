@@ -2,7 +2,6 @@ import "server-only";
 
 import {
   QA_RELEASE_TRAIN_CANDIDATE_DAYS,
-  QA_RELEASE_TRAIN_CARGO_MAX,
   qaReleaseTrainCargoCandidates,
   type QaReleaseTrainCargoCandidate,
 } from "@/lib/qaReleaseTrainCargoCore";
@@ -22,6 +21,23 @@ const FRESH_MIN_MS = 30 * 1000;
 const FILE_READS_AT_ONCE = 6;
 /** GitHub lists at most 250 commits of a pull request. */
 const COMMIT_PAGE_CAP = 3;
+
+/**
+ * What a merged pull request holds never changes, so its files and commits
+ * are read once and kept for every later read (owner 2026-10-28: only the
+ * newest 30 candidates were read, and the rest showed "files not checked").
+ * A read starts at most NEW_READS_PER_ROUND candidates not read before; any
+ * more are read by the next one. Only a successful read is kept.
+ */
+const NEW_READS_PER_ROUND = 120;
+const KEPT_MAX = 3000;
+type Commit = { sha: string; message: string; merge: boolean };
+const keptFiles = new Map<number, string[]>();
+const keptCommits = new Map<number, Commit[]>();
+function keep<V>(map: Map<number, V>, number: number, value: V): void {
+  map.set(number, value);
+  if (map.size > KEPT_MAX) map.delete(map.keys().next().value as number);
+}
 
 export type QaReleaseTrainCargoCandidatesRead =
   | {
@@ -144,8 +160,11 @@ async function readOpenMain(readJson: (path: string) => Promise<unknown>): Promi
   throw new Error("github_pages");
 }
 
-async function readFromGithub(nowMs: number): Promise<QaReleaseTrainCargoCandidatesRead> {
-  const readJson = createGithubRepoReader();
+/** `readJson`: GitHub through lib/githubRepoRead.ts; a test passes its own. */
+export async function readFromGithub(
+  nowMs: number,
+  readJson: (path: string) => Promise<unknown> = createGithubRepoReader(),
+): Promise<QaReleaseTrainCargoCandidatesRead> {
   try {
     const sinceMs = nowMs - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
     // Each list says where it failed: `develop:github_403`, `open:timeout`.
@@ -161,39 +180,54 @@ async function readFromGithub(nowMs: number): Promise<QaReleaseTrainCargoCandida
     ]);
     // What each main pull request in the window really carries: its commits,
     // beside the numbers its title names.
-    const mainPulls = [
-      ...(Array.isArray(mergedMainJson) ? mergedMainJson : []).filter((pull) => {
+    const numberOf = (pull: unknown) => (pull as { number?: unknown }).number;
+    const mergedMain = (Array.isArray(mergedMainJson) ? mergedMainJson : [])
+      .filter((pull) => {
         const mergedAt = (pull as { merged_at?: unknown }).merged_at;
         return typeof mergedAt === "string" && Date.parse(mergedAt) >= sinceMs;
-      }),
-      ...openMainJson,
-    ]
-      .map((pull) => (pull as { number?: unknown }).number)
+      })
+      .map(numberOf)
       .filter((number): number is number => typeof number === "number");
+    const openMain = openMainJson.map(numberOf).filter((number): number is number => typeof number === "number");
     const mainCommits = new Map<number, { sha: string; message: string }[]>();
-    await inBatches(mainPulls, async (number) => {
+    // A merged release's commits are kept; an open one can still change.
+    for (const number of mergedMain) {
+      const kept = keptCommits.get(number);
+      if (kept) mainCommits.set(number, kept);
+    }
+    await inBatches([...mergedMain.filter((number) => !mainCommits.has(number)), ...openMain], async (number) => {
       const commits = await readCommits(readJson, number);
       // More commits than the pages read (a whole-develop release), or not
       // read: what its title names decides.
-      if (commits) mainCommits.set(number, commits);
+      if (!commits) return;
+      mainCommits.set(number, commits);
+      if (!openMain.includes(number)) keep(keptCommits, number, commits);
     });
     // First without files, to learn which could ride; only those are read,
     // with their own commits (merge commits left out) to tell whether main
     // already holds every one of them.
     const unchecked = qaReleaseTrainCargoCandidates({ mergedDevelopJson, mergedMainJson, openMainJson, files: new Map(), mainCommits, nowMs })
       .filter((candidate) => candidate.status === "unchecked")
-      .slice(0, QA_RELEASE_TRAIN_CARGO_MAX);
+      .map((candidate) => candidate.number);
+    const toRead = unchecked.filter((number) => !keptFiles.has(number) || !keptCommits.has(number)).slice(0, NEW_READS_PER_ROUND);
+    await inBatches(toRead, async (number) => {
+      const [list, commits] = await Promise.all([
+        keptFiles.has(number) ? null : readJson(`/pulls/${number}/files?per_page=100`).catch(() => null),
+        keptCommits.has(number) ? null : readCommits(readJson, number),
+      ]);
+      if (Array.isArray(list)) keep(keptFiles, number, list.map((file) => String((file as { filename?: unknown }).filename ?? "")));
+      if (commits) keep(keptCommits, number, commits);
+    });
+    // Files not read (this round's limit, or a failed read): left unchecked;
+    // the train itself still leaves a workflow change out.
     const files = new Map<number, string[]>();
     const developCommits = new Map<number, string[]>();
-    await inBatches(
-      unchecked.map((candidate) => candidate.number),
-      async (number) => {
-        const [list, commits] = await Promise.all([readJson(`/pulls/${number}/files?per_page=100`).catch(() => null), readCommits(readJson, number)]);
-        // Files not read: left unchecked; the train itself still leaves a workflow change out.
-        if (Array.isArray(list)) files.set(number, list.map((file) => String((file as { filename?: unknown }).filename ?? "")));
-        if (commits) developCommits.set(number, commits.filter((commit) => !commit.merge).map((commit) => commit.sha));
-      },
-    );
+    for (const number of unchecked) {
+      const keptList = keptFiles.get(number);
+      const commits = keptCommits.get(number);
+      if (keptList) files.set(number, keptList);
+      if (commits) developCommits.set(number, commits.filter((commit) => !commit.merge).map((commit) => commit.sha));
+    }
     const value: QaReleaseTrainCargoCandidatesRead = {
       status: "ok",
       readAt: new Date(nowMs).toISOString(),

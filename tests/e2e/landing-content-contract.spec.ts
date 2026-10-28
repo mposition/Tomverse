@@ -304,9 +304,8 @@ for (const path of ["/", "/ko"] as const) {
 test("the hero names both products and keeps the primary guest CTA on Review", async ({
   page,
 }) => {
-  // The first screen has to answer four questions: Tomverse is the brand,
-  // Tomverse Review is this product, it compares several AI answers, and the
-  // button opens this product's comparison rather than Tomverse Chat.
+  // The first screen names both product jobs. The guest primary action remains
+  // Review, while Chat has its own Guest Smart Adaptive entry.
   await openLanding(page, "/");
 
   const brand = await page.getByTestId("landing-brand-note").innerText();
@@ -314,7 +313,7 @@ test("the hero names both products and keeps the primary guest CTA on Review", a
   expect(brand).toContain("Tomverse");
 
   const cta = await page.getByTestId("landing-primary-cta").innerText();
-  // This page introduces Review, so its CTA must name that comparison.
+  // The primary guest action is Review; Chat has the adjacent trial entry.
   expect(cta.toLowerCase()).not.toContain("chat");
   expect(cta.toLowerCase()).toContain("compar");
   await expect(page.getByTestId("landing-chat-product-cta")).toHaveAttribute(

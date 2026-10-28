@@ -113,9 +113,7 @@ test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no
   assert.equal(service.cronSchedule, `0 ${SCOUT_SCHEDULE_UTC_HOUR} * * *`);
   assert.equal(service.startCommand, "npm run agent:product-research-scout");
   assert.equal(service.dockerfile.path, "docker/product-research-scout.Dockerfile");
-  // Production on every branch; dev only where the IaC knows a dev environment.
-  assert.ok(Object.keys(service.environments).includes("production"));
-  for (const environment of Object.keys(service.environments)) assert.ok(["dev", "production"].includes(environment), environment);
+  assert.deepEqual(Object.keys(service.environments).sort(), ["dev", "production"]);
   for (const variables of Object.values(service.environments)) assert.deepEqual([...variables].sort(), names);
   // The image carries what the walker imports.
   for (const path of ["scripts/agents/product-research-scout.mjs", "scripts/report-product-consistency-core.mjs"]) {

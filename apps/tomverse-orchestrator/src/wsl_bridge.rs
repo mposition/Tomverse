@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -2266,6 +2267,20 @@ async fn v22_sidecar_call(
 const V22_READ_ONLY_RETRY_TASK_ID: &str = "c48886b9-86f8-4631-8db8-c0b288a707af";
 const V22_READ_ONLY_LAUNCHER_POLICY: &str = "amux-v22-read-only-retry-v1";
 
+/// The publication run's base, which the sidecar checks out before the CLI
+/// runs. Only a lowercase 40-hex commit id crosses to the sidecar.
+fn v22_insert_base_sha(payload: &mut serde_json::Value,
+    base_sha: Option<&str>) -> Result<()> {
+    let Some(base_sha) = base_sha else { return Ok(()); };
+    if base_sha.len() != 40 || !base_sha.bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+        bail!("invalid v22 base commit");
+    }
+    payload.as_object_mut().context("v22 payload object")?
+        .insert("baseSha".into(), serde_json::json!(base_sha));
+    Ok(())
+}
+
 fn v22_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) &&
         value.bytes().all(|byte| !byte.is_ascii_uppercase())
@@ -2623,6 +2638,7 @@ impl LocalAmux for HttpLocal {
                 .insert("executionGrade".into(),
                     serde_json::json!(profile.execution_grade));
         }
+        v22_insert_base_sha(&mut payload, profile.base_sha.as_deref())?;
         if let Some(read_only_retry) = read_only_retry {
             payload.as_object_mut().context("v22 payload object")?
                 .insert("readOnlyRetry".into(), read_only_retry);
@@ -3290,6 +3306,23 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                             still_running.push(entry);
                             continue;
                         };
+                        // This opt-in probe is deliberately fail-closed even for a
+                        // non-target Codex card when the app cannot classify it.
+                        // Enable only for the isolated U21 test window: an app
+                        // eligibility outage will halt unrelated settlements too.
+                        if entry.delivery.assignment_id.is_none() && outcome == "succeeded" &&
+                            to_status == "review" &&
+                            std::env::var("TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_CANDIDATE_BRIDGE")
+                                .ok().as_deref() == Some("enabled") &&
+                            transfer_chat_optimizer_candidate(&api, &client, &base,
+                                &entry, &session.instance_id, session.generation).await.is_err() {
+                            // Never settle a CHAT-01 author attempt when its
+                            // candidate write or exact read-back is unknown.
+                            // The app attempt remains open for operator read-back.
+                            halted = true;
+                            note_halt(&mut halt_cause, "optimizer_candidate_outcome_unknown");
+                            continue;
+                        }
                         let settled = if entry.delivery.assignment_id.is_some() {
                             let retry_echo = v22_result.as_ref()
                                 .and_then(|result| result.read_only_retry.as_ref());
@@ -3374,6 +3407,23 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                     },
                                     other => other,
                                 };
+                                // The same fail-closed blast radius applies to
+                                // v22 results while this opt-in switch is on.
+                                if outcome == "succeeded" &&
+                                    matches!(&result_record,
+                                        Ok(crate::tomverse_api::V22UsageRecord::Recorded)) &&
+                                    std::env::var("TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_CANDIDATE_BRIDGE")
+                                        .ok().as_deref() == Some("enabled") &&
+                                    transfer_chat_optimizer_v22_candidate(&api, &entry,
+                                        v22_result.as_ref(), &session.instance_id,
+                                        session.generation).await.is_err() {
+                                    // The sidecar may have the only plaintext copy. Never
+                                    // confirm it or settle the attempt after an unknown write.
+                                    halted = true;
+                                    note_halt(&mut halt_cause,
+                                        "optimizer_candidate_outcome_unknown");
+                                    continue;
+                                }
                                 match result_record {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
                                         if outcome == "succeeded" {
@@ -3899,6 +3949,95 @@ async fn local_completion(
     }
 }
 
+/// This optional bridge path only reads a linked, finished local Codex card
+/// after the app names the exact live CHAT-01 attempt and its public source.
+/// It never forwards the result of an unrelated AMUX task.
+async fn transfer_chat_optimizer_candidate(
+    api: &crate::tomverse_api::TomverseApi,
+    client: &reqwest::Client,
+    base: &str,
+    entry: &PendingExecution,
+    instance_id: &str,
+    generation: i64,
+) -> Result<()> {
+    if entry.delivery.worker != "codex-impl" { return Ok(()); }
+    let Some(pin) = api.chat_optimizer_candidate_eligibility(
+        &entry.delivery.attempt_id).await? else { return Ok(()); };
+    let card_id = entry.card.as_deref().context("optimizer local card unlinked")?;
+    let detail = fetch_board_card(client, base, card_id).await?
+        .context("optimizer local card disappeared")?;
+    let result = chat_optimizer_result_from_card(&detail,
+        &entry.delivery.attempt_id)?;
+    let digest = hex::encode(Sha256::digest(result.as_bytes()));
+    match api.chat_optimizer_candidate_readback(
+        &entry.delivery.attempt_id, &digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => return Ok(()),
+        crate::tomverse_api::V22UsageRecord::Rejected => {},
+        crate::tomverse_api::V22UsageRecord::PrivateOnly =>
+            bail!("optimizer candidate read-back invariant failed"),
+    }
+    match api.chat_optimizer_candidate_record_once(&entry.delivery,
+        instance_id, generation, &pin, result, &digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => Ok(()),
+        _ => bail!("optimizer candidate was not durably recorded"),
+    }
+}
+
+/// V22 results are sealed by the app before this bridge writes a proposal.
+/// The exact app eligibility pin selects one v4 Task; a wrong operator pin
+/// halts settlement instead of silently accepting an ordinary Task. The
+/// sidecar digest and app result read-back bind the one live worker response.
+async fn transfer_chat_optimizer_v22_candidate(
+    api: &crate::tomverse_api::TomverseApi,
+    entry: &PendingExecution,
+    result: Option<&V22SidecarResult>,
+    instance_id: &str,
+    generation: i64,
+) -> Result<()> {
+    if entry.delivery.worker != "codex-impl" { return Ok(()); }
+    let Some(pin) = api.chat_optimizer_candidate_eligibility(
+        &entry.delivery.attempt_id).await? else { return Ok(()); };
+    let result = result.context("optimizer v22 sidecar result absent")?;
+    let digest = result.result_sha256.as_deref()
+        .context("optimizer v22 result digest absent")?;
+    match api.chat_optimizer_candidate_readback(
+        &entry.delivery.attempt_id, digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => return Ok(()),
+        crate::tomverse_api::V22UsageRecord::Rejected => {},
+        crate::tomverse_api::V22UsageRecord::PrivateOnly =>
+            bail!("optimizer v22 candidate read-back invariant failed"),
+    }
+    let text = result.result_text.as_deref()
+        .context("optimizer v22 result text unavailable")?;
+    if text.is_empty() || text.len() > 65_536 || text.contains('\0') ||
+        hex::encode(Sha256::digest(text.as_bytes())) != digest {
+        bail!("optimizer v22 result digest mismatch");
+    }
+    match api.chat_optimizer_candidate_record_once(&entry.delivery,
+        instance_id, generation, &pin, text, digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => Ok(()),
+        _ => bail!("optimizer v22 candidate was not durably recorded"),
+    }
+}
+
+fn chat_optimizer_result_from_card<'a>(
+    detail: &'a serde_json::Value,
+    attempt_id: &str,
+) -> Result<&'a str> {
+    if !card_links_attempt(detail, attempt_id) ||
+        detail.get("session").and_then(serde_json::Value::as_str) != Some("codex-impl") ||
+        detail.get("status").and_then(serde_json::Value::as_str) != Some("done") {
+        bail!("optimizer local card is not the linked completed attempt");
+    }
+    let result = detail.get("last_result")
+        .and_then(serde_json::Value::as_str)
+        .context("optimizer local result absent")?;
+    if result.is_empty() || result.len() > 65_536 || result.contains('\0') {
+        bail!("optimizer local result outside bounded envelope");
+    }
+    Ok(result)
+}
+
 async fn fetch_roster(client: &reqwest::Client, base: &str) -> Result<Vec<SessionObservation>> {
     let body = client
         .get(format!("{base}/api/sessions"))
@@ -3968,6 +4107,7 @@ mod tests {
             review_author_vendor: Some("anthropic".into()),
             review_scope: Some("test".into()), review_feedback_job_id: None,
             read_only_retry: None,
+            base_sha: None,
         };
         let mut result = V22SidecarResult {
             state: V22SidecarState::Succeeded, read_only_retry: None,
@@ -5148,6 +5288,147 @@ mod tests {
     }
 
     #[test]
+    fn optimizer_result_requires_the_exact_linked_done_card_and_bounded_bytes() {
+        let attempt = "00000000-0000-4000-8000-000000000001";
+        let mut detail = serde_json::json!({
+            "id": "AMUX-1", "session": "codex-impl", "status": "done",
+            "last_result": "{\"taskGuidance\":\"safe\"}",
+            "messages": [{"card_id": "AMUX-1",
+                "text": format!("Execution attempt: {attempt}")}],
+        });
+        assert_eq!(chat_optimizer_result_from_card(&detail, attempt).unwrap(),
+            "{\"taskGuidance\":\"safe\"}");
+        assert!(chat_optimizer_result_from_card(&detail,
+            "00000000-0000-4000-8000-000000000002").is_err());
+        detail["session"] = serde_json::json!("claude-impl");
+        assert!(chat_optimizer_result_from_card(&detail, attempt).is_err());
+        detail["session"] = serde_json::json!("codex-impl");
+        detail["status"] = serde_json::json!("doing");
+        assert!(chat_optimizer_result_from_card(&detail, attempt).is_err());
+        detail["status"] = serde_json::json!("done");
+        detail["last_result"] = serde_json::json!("x".repeat(65_537));
+        assert!(chat_optimizer_result_from_card(&detail, attempt).is_err());
+    }
+
+    #[tokio::test]
+    async fn optimizer_linked_result_crosses_only_after_eligibility_and_exact_readback() {
+        let result = r#"{"taskGuidance":"safe","publicExampleRefs":[]}"#;
+        let digest = hex::encode(Sha256::digest(result.as_bytes()));
+        let pin = serde_json::json!({"repositoryId": 123,
+            "commitSha": "a".repeat(40), "blobSha": "b".repeat(40),
+            "sha256": "c".repeat(64)});
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api_base = tomverse_sequence(vec![
+            ("200 OK".into(), serde_json::json!({"eligible": true,
+                "attemptId": ATTEMPT_ID, "sourcePin": pin}).to_string()),
+            ("200 OK".into(), r#"{"status":"absent"}"#.into()),
+            ("200 OK".into(), "{}".into()),
+            ("200 OK".into(), serde_json::json!({"status": "recorded",
+                "attemptId": ATTEMPT_ID, "resultSha256": digest,
+                "cycleId": "22222222-2222-4222-8222-222222222222",
+                "candidateDigest": "d".repeat(64),
+                "bundleDigest": "e".repeat(64),
+                "authorshipVerified": false}).to_string()),
+        ], paths.clone());
+        let local_body = serde_json::json!({"id": "AMUX-1", "status": "done",
+            "session": "codex-impl", "last_result": result, "messages": [{"card_id": "AMUX-1",
+                "text": format!("Execution attempt: {ATTEMPT_ID}")}],
+        }).to_string();
+        let local_base = tomverse_answering("200 OK",
+            Box::leak(local_body.into_boxed_str()));
+        let mut delivery = pulled_delivery();
+        delivery.worker = "codex-impl".into();
+        let entry = PendingExecution { delivery, sent_at: 0,
+            card: Some("AMUX-1".into()) };
+        let api = tomverse_api(api_base);
+        let client = local_client(&local_base).unwrap();
+        transfer_chat_optimizer_candidate(&api, &client, &local_base,
+            &entry, "00000000-0000-4000-8000-000000000010", 1).await.unwrap();
+        let paths = paths.lock().unwrap();
+        assert_eq!(paths.len(), 4);
+        assert!(paths[0].ends_with("/eligibility?attemptId=4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f"));
+        assert!(paths[1].contains("/amux-candidate?attemptId="));
+        assert!(paths[2].ends_with("/amux-candidate"));
+        assert!(paths[3].contains("/amux-candidate?attemptId="));
+        assert!(paths.iter().all(|path| !path.contains("taskGuidance")));
+    }
+
+    #[tokio::test]
+    async fn optimizer_v22_result_crosses_only_after_eligibility_and_result_readback() {
+        let text = r#"{"taskGuidance":"safe","publicExampleRefs":[]}"#;
+        let digest = hex::encode(Sha256::digest(text.as_bytes()));
+        let pin = serde_json::json!({"repositoryId": 123,
+            "commitSha": "a".repeat(40), "blobSha": "b".repeat(40),
+            "sha256": "c".repeat(64)});
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api_base = tomverse_sequence(vec![
+            ("200 OK".into(), serde_json::json!({"eligible": true,
+                "attemptId": ATTEMPT_ID, "sourcePin": pin}).to_string()),
+            ("200 OK".into(), r#"{"status":"absent"}"#.into()),
+            ("200 OK".into(), "{}".into()),
+            ("200 OK".into(), serde_json::json!({"status": "recorded",
+                "attemptId": ATTEMPT_ID, "resultSha256": digest,
+                "cycleId": "22222222-2222-4222-8222-222222222222",
+                "candidateDigest": "d".repeat(64),
+                "bundleDigest": "e".repeat(64),
+                "authorshipVerified": false}).to_string()),
+        ], paths.clone());
+        let mut delivery = pulled_delivery();
+        delivery.worker = "codex-impl".into();
+        delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
+        let entry = PendingExecution { delivery, sent_at: 0, card: None };
+        let result = V22SidecarResult { state: V22SidecarState::Succeeded,
+            read_only_retry: None, api_execution_receipt: None,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: Some(text.into()), result_sha256: Some(digest),
+            patch_body: None, patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None,
+            changed_paths: None, review_commit_sha: None,
+            review_base_sha: None, review_touches_contract: None,
+            review_ref: None };
+        let api = tomverse_api(api_base);
+        transfer_chat_optimizer_v22_candidate(&api, &entry, Some(&result),
+            "00000000-0000-4000-8000-000000000010", 1).await.unwrap();
+        let paths = paths.lock().unwrap();
+        assert_eq!(paths.len(), 4);
+        assert!(paths[0].contains("/eligibility?attemptId="));
+        assert!(paths[1].contains("/amux-candidate?attemptId="));
+        assert!(paths[2].ends_with("/amux-candidate"));
+        assert!(paths[3].contains("/amux-candidate?attemptId="));
+    }
+
+    #[tokio::test]
+    async fn optimizer_v22_digest_mismatch_never_posts_a_candidate() {
+        let pin = serde_json::json!({"repositoryId": 123,
+            "commitSha": "a".repeat(40), "blobSha": "b".repeat(40),
+            "sha256": "c".repeat(64)});
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api_base = tomverse_sequence(vec![
+            ("200 OK".into(), serde_json::json!({"eligible": true,
+                "attemptId": ATTEMPT_ID, "sourcePin": pin}).to_string()),
+            ("200 OK".into(), r#"{"status":"absent"}"#.into()),
+        ], paths.clone());
+        let mut delivery = pulled_delivery();
+        delivery.worker = "codex-impl".into();
+        delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
+        let entry = PendingExecution { delivery, sent_at: 0, card: None };
+        let result = V22SidecarResult { state: V22SidecarState::Succeeded,
+            read_only_retry: None, api_execution_receipt: None,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: Some("different text".into()),
+            result_sha256: Some("a".repeat(64)),
+            patch_body: None, patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None,
+            changed_paths: None, review_commit_sha: None,
+            review_base_sha: None, review_touches_contract: None,
+            review_ref: None };
+        let api = tomverse_api(api_base);
+        assert!(transfer_chat_optimizer_v22_candidate(&api, &entry, Some(&result),
+            "00000000-0000-4000-8000-000000000010", 1).await.is_err());
+        assert_eq!(paths.lock().unwrap().len(), 2);
+    }
+
+    #[test]
     fn a_discarded_card_blocks_without_a_pr_and_an_open_card_keeps_running() {
         let closed = serde_json::json!({
             "status": "discarded",
@@ -5558,6 +5839,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn v22_execute_payload_carries_only_a_plain_base_commit() {
+        let mut payload = serde_json::json!({"op": "execute"});
+        v22_insert_base_sha(&mut payload, None).unwrap();
+        assert!(payload.get("baseSha").is_none());
+        v22_insert_base_sha(&mut payload, Some(&"a".repeat(40))).unwrap();
+        assert_eq!(payload["baseSha"], "a".repeat(40));
+        for bad in ["A".repeat(40), "a".repeat(39), "g".repeat(40), "a".repeat(64)] {
+            let mut other = serde_json::json!({"op": "execute"});
+            assert!(v22_insert_base_sha(&mut other, Some(&bad)).is_err());
+            assert!(other.get("baseSha").is_none());
+        }
+    }
+
     #[tokio::test]
     async fn v22_dispatch_uses_only_the_one_shot_sidecar() {
         let mut local = SidecarOnlyLocal { sidecar_sends: 0,
@@ -5573,6 +5868,7 @@ mod tests {
             review_feedback_job_id: None,
             budget_microusd: 1_000_000,
             read_only_retry: None,
+            base_sha: None,
         });
         assert!(matches!(dispatch_v22(&delivery, "00000000-0000-4000-8000-000000000001", 3, &mut local).await,
             BridgeTickResult::Pending { .. }));
@@ -5620,6 +5916,7 @@ mod tests {
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+            base_sha: None,
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
         assert_eq!(payload["launchBindingId"], retry.launch_binding_id);
@@ -5671,6 +5968,7 @@ mod tests {
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+            base_sha: None,
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
         assert_eq!(payload["executorKind"], "read_only_api_retry_v1");

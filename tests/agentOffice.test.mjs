@@ -1239,7 +1239,7 @@ test("the routing room's colour and lines follow the latest optimizer cycle and 
 test("the office reads the optimizer's cycle status and spend, never its guidance, cases or summary", () => {
   const routing = readFunction("readRouting");
   assert.match(routing, /prisma\.autoRouterOptimizerCycle\.findFirst\(\{\s*orderBy: \{ createdAt: "desc" \}/);
-  assert.match(routing, /select: \{ status: true, failure: true, createdAt: true, finishedAt: true \}/);
+  assert.match(routing, /select: \{ target: true, status: true, failure: true, createdAt: true, finishedAt: true \}/);
   assert.match(routing, /select: \{ createdAt: true, spentMicroUsd: true \}/);
   assert.match(routing, /promotedAt: \{ not: null \}/);
   assert.doesNotMatch(routing, /guidance|candidateGuidance|incumbentGuidance|cases|summary|Guidance/);

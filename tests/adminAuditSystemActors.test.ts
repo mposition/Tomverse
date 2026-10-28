@@ -65,6 +65,25 @@ test("the Prompt Refiner Auto budget actor has only its audited hold transitions
     "prompt_refiner.provider_dispatch", "PromptRefinerAutoBudgetHold"), false);
 });
 
+test("the unified optimizer actor is limited to provider-free ledger facts", () => {
+  assert.equal(isSystemAuditActor("chat-unified-optimizer"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.run_admitted", "ChatUnifiedOptimizerRun"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.dispatch_intended",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.run_terminal",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.queued_before_dispatch_terminal",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_candidate.promoted", "ChatUnifiedOptimizerCandidate"), false);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.dispatch_intended", "AdminAuditLog"), false);
+});
+
 // The closed list of system actors and the reserved metadata key.
 //
 // Contract: docs/policy/marketing-automation.md §6. Several later checks ask
@@ -133,6 +152,9 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-checker",
     "amux-v22-recovery-controller",
     "amux-v22-api-model-access",
+    // docs/policy/chat-unified-router-refiner-v1.md §7 and
+    // docs/policy/chat-unified-router-refiner-v1.md §12: provider-free facts.
+    "chat-unified-optimizer",
     "auto-router-optimizer",
     "auto-router-rec-agent",
     "amux-v4-intake",
@@ -142,28 +164,31 @@ test("the system actor list is closed and changes only by review", () => {
     "engineering-agent-retention",
     "engineering-agent-observer",
     "engineering-agent-registrar",
-    // docs/policy/qa-release-agent.md section 5: the digest intake route.
-    "qa-release-intake",
-    // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
-    "qa-release-merge-lane",
-    // The shared AgentDigestItem body expiry and meta purge, for every agent
-    // (docs/policy/qa-release-agent.md section 4).
-    "agent-digest-retention",
     // The product-research agent's two actions and no more
     // (docs/policy/product-research-agent.md §5): a slot recorded, and rows
     // removed once past the retention period. Neither is a person, and this
     // agent has nothing to approve because it decides nothing.
     "product-research-observer",
     "product-research-retention",
+    // docs/policy/qa-release-agent.md section 5: the digest intake route.
+    "qa-release-intake",
+    "support-triage-worker",
+    "support-triage-retention",
     // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
     "billing-finance-ops-intake",
+    "support-triage-account-deletion",
+    // The shared AgentDigestItem body expiry and meta purge, for every agent
+    // (docs/policy/billing-finance-ops.md §1.4).
+    "agent-digest-retention",
+    // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
+    "qa-release-merge-lane",
+    // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
+    "ops-observer",
     // docs/policy/amux-decision-maker.md §10: the routing route and one actor
     // per DM instance. A DM writes proposals, never approvals (§1).
     "amux-decision-router",
     "amux-decision-maker-openai",
     "amux-decision-maker-anthropic",
-    // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
-    "ops-observer",
     // The scheduled renewal of the Code client's coding catalogue snapshot:
     // identical content only, one action about one snapshot row.
     "model-catalog-renewal",

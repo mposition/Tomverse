@@ -20,6 +20,9 @@ process.env.DATABASE_URL ||=
 
 const created: unknown[] = [];
 let mocksInstalled = false;
+let routerOutput: { reason: string; topic: string; modelId: string; requiresFileGeneration?: boolean } = {
+  reason: "short question", topic: "cats", modelId: "deepseek-v4-flash",
+};
 
 const prismaMock = {
   appSetting: { findUnique: async () => null },
@@ -42,7 +45,7 @@ async function load() {
       namedExports: {
         ...realAi,
         generateText: async () => ({
-          output: { reason: "short question", topic: "cats", modelId: "deepseek-v4-flash" },
+          output: routerOutput,
           usage: { inputTokens: 100, outputTokens: 20 },
         }),
       },
@@ -69,7 +72,7 @@ async function load() {
   return import(mod("lib/autoLlmRouter.ts"));
 }
 
-const pick = async (recordDecision?: Promise<boolean>) => {
+const pick = async (recordDecision?: Promise<boolean>, canPersist = false) => {
   const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts")) as {
     AVAILABLE_MODELS: Array<{ id: string }>;
   };
@@ -85,6 +88,7 @@ const pick = async (recordDecision?: Promise<boolean>) => {
     userId: "user-1",
     conversationId: "conv-1",
     traceId: "trace-1",
+    fileContext: { isAuthenticated: true, canPersist, webSearchRequested: false },
     ...(recordDecision ? { recordDecision } : {}),
   });
   // The row write is not awaited by the turn.
@@ -107,4 +111,22 @@ test("an image turn's decision row is not written; the pick is still returned", 
   const result = await pick(Promise.resolve(false));
   assert.equal(result?.modelId, "deepseek-v4-flash");
   assert.equal(created.length, 0);
+});
+
+test("file routing records the raw model and reason without losing intent when capability is unavailable", async () => {
+  const original = routerOutput;
+  routerOutput = { ...original, reason: "Deliver a spreadsheet.", requiresFileGeneration: true };
+  try {
+    for (const canPersist of [true, false]) {
+      created.length = 0;
+      const result = await pick(Promise.resolve(true), canPersist);
+      assert.equal(result?.requiresFileGeneration, true);
+      assert.equal(result?.modelId, routerOutput.modelId);
+      assert.equal(created.length, 1);
+      const row = created[0] as { pickedModelId: string; reason: string; outcome: string };
+      assert.equal(row.pickedModelId, routerOutput.modelId);
+      assert.equal(row.reason, routerOutput.reason);
+      assert.equal(row.outcome, "picked");
+    }
+  } finally { routerOutput = original; }
 });

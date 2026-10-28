@@ -417,13 +417,18 @@ Agent office "독립 검토실"에서 그것을 봅니다.
   때문입니다. unit 파일도 같은 이유로 GitHub에서 받습니다.
 - **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, 계정 quota
   (`quota check`와 같은 probe가 마지막으로 읽은 상태 하나와 남은 양 하나 — 퍼센트, credits 또는
-  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
-  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, probe가 읽은
+  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown),
+  그리고 CI 자동 수정 ledger가 있을 때 최근 시도 12건(PR 번호, head 커밋 id, 종류, 결과, 모델의 결과 코드
+  — 모두 정해진 목록의 이름)과 최근 1시간 수정안 수.
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, 모델의 답·로그·patch, probe가 읽은
   계정 정보. daemon이 그런
   값을 snapshot에 넣지 않고, sender는 review 설정·job·reviewer 원문을 읽지 않으며 파일을
   필드 단위로 다시 만들어 그 밖의 것은 버리고, 앱도 모르는 필드를 거절합니다.
-- **`review` 계정이 할 수 있는 최악은 검토실 숫자를 틀리게 보이는 것입니다**(snapshot 파일을
-  고쳐 쓰는 것). 앱에서 이 숫자로 결정되는 것은 없습니다.
+- **`review` 계정이 할 수 있는 최악은 검토실 숫자와 CI 입장 화면의 자동 수정 상태를 틀리게 보이는 것입니다**
+  (snapshot 파일을 고쳐 쓰는 것). 앱에서 이 값으로 결정되는 것은 "다시 분석" 버튼을 보일지와, 입장 라운드가
+  `ci:fix-again` 라벨을 뗄지뿐입니다. 다시 시도할지는 이 서버가 자기 ledger로 정합니다.
+- **배포 순서**: 앱이 `ciFix` 필드를 받는 버전이 먼저 배포되어야 합니다. 그 전의 앱은 모르는 필드를
+  거절하므로, sender를 먼저 바꾸면 그동안 상태 보고 전체가 400으로 거절됩니다.
 - **검토에 영향을 주지 않습니다.** daemon은 작은 파일 하나를 쓸 뿐 네트워크를 기다리지
   않고, 쓰기에 실패해도 검토는 그대로 진행합니다. 로그는 결과가 바뀔 때만 한 줄입니다.
 - **daemon이 멈추면 sender도 조용해집니다.** snapshot이 3분보다 오래되면(1분 쓰기 세 번
@@ -497,11 +502,43 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 
 ## CI 자동 수정 (PR CI Auto-Fix)
 
-develop으로 가는 `claude/to-develop/**`·`codex/to-develop/**` PR에서 필수 CI(PR Fast Gate,
+develop으로 가는 `claude/to-develop/**`·`codex/to-develop/**`·`dependabot/**` PR에서 필수 CI(PR Fast Gate,
 Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패하면, 이 서버의
 구독 Claude CLI가 가장 작은 수정을 만들고 `.github/workflows/pr-ci-auto-fix.yml`이 검사한 뒤
 그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
 운영자 결정 2026-10-23). PR 하나에 자동 수정 커밋은 최대 2개이고, head 하나에 한 번만 시도합니다.
+
+**develop과의 충돌(운영자 결정 2026-10-27, 기본 꺼짐).** 실패한 CI가 없을 때, 같은 대상 브랜치의 PR(draft 포함)이
+GitHub에서 develop과 충돌하면 이 서버가 mirror의 develop을 그 head에 merge하고(커밋하지 않음) 모델이
+충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 충돌 파일들의 내용과 merge한 develop 커밋뿐이고,
+workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(conflict):` merge 커밋으로 push합니다.
+- 충돌 파일만 바꿨는지, 충돌 표시가 남지 않았는지 봅니다.
+- git이 충돌 구간 밖에 합쳐 둔 내용은 공백까지, 순서까지 그대로 남아야 합니다. 바뀌는 것은 충돌 구간뿐입니다.
+- 충돌 구간 안에서 그 구간의 어느 쪽에도 없던 줄은 새 줄입니다. 게이트 경로에서는 새 줄을 쓸 수 없고,
+  그 밖의 경로도 모두 합쳐 40줄까지입니다.
+- 양쪽 모두 일반 파일이어야 하고, 링크를 따라가지 않고 씁니다.
+- 한쪽이 지운 파일, symlink, 지시 파일이 걸린 충돌은 풀지 않습니다(`no_change`, `outside_rules`).
+- PR마다 `auto-fix(conflict):` 커밋은 최대 2개입니다.
+- head 하나에는 요청 하나만 보냅니다. 같은 head의 CI 수정이 진행 중이거나 보내졌으면 충돌 해결은 기다립니다(반대도 같습니다).
+켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,
+그리고 GitHub 저장소 변수 `PR_AUTO_FIX_CONFLICTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이
+main에 들어간 뒤에 켭니다. develop 쪽에서 workflow 파일이 바뀐 merge는 `GH_AUTOMATION_PAT`에
+workflow 권한이 없으면 push가 거절됩니다.
+
+**보낸 수정의 확인.** 다음 pass가 PR의 새 head를 보고, 그것이 자동 수정 커밋(접두사가 맞고 부모가 시도한
+head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `superseded`로 바꿉니다. 입장 화면의
+"push됨"은 `pushed`이고 그 자동 수정 커밋이 지금도 head일 때만 나옵니다(보고의 `settled`). 보낸 지 2시간이
+지나도 head가 그대로면 workflow가 거절했거나 push가 실패한 것으로 보고 `not_published`로 끝냅니다. 이 상태는
+다시 분석할 수 있고, 같은 head의 다른 종류 수정을 더 막지 않습니다.
+
+**Dependabot PR(운영자 결정 2026-10-26).**
+- main으로 가는 보안 업데이트는 대상이 아닙니다. Dependabot이 연 PR만 대상이고, 사람이 `dependabot/` 이름으로 만든 브랜치는 대상이 아닙니다.
+- 수정은 업데이트된 패키지에 맞춰 앱 코드를 고치는 것입니다. 패키지 버전과 `package.json`·lock은 그대로 둡니다.
+- 루트에서는 앱 빌드·계측 설정(`next.config.ts|mjs|js`, `sentry.client|server|edge.config.ts`, `instrumentation.ts`, `instrumentation-client.ts`)만 고칠 수 있습니다.
+  `proxy.ts`와 검사 설정(`tsconfig`, `eslint`, `playwright` 등)은 계속 막힙니다.
+- 다른 계정의 커밋이 들어간 PR은 Dependabot이 더 이상 자동 rebase하지 않습니다. `@dependabot recreate`를
+  쓰면 자동 수정 커밋은 지워집니다.
+- merge lane은 `dependabot/**`를 병합하지 않으므로, 수정된 Dependabot PR의 병합은 사람이 합니다.
 
 **두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.** 상태 보고와 같은 이유입니다. 모델은 `review`
 계정으로 돌고, CI 로그와 브랜치 내용은 모델에게 그 계정이 읽을 수 있는 파일이나 프로세스 환경을
@@ -519,6 +556,13 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
   60,000자 안에서 job마다 몫을 나눕니다.
 - **모델의 답.** 모델의 마지막 답이 서버 로그(`ci-fix: #PR model said: ...`)와 ledger의 `answer`에 남습니다.
   실행이 실패하면 stderr도 `stderr`에 남습니다. `no_change`의 이유는 여기서 봅니다.
+  답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
+  Admin › QA·릴리스 › CI 입장 화면에 PR별로 보입니다(2026-10-27). 모델의 문장 자체는 앱으로 가지 않습니다.
+- **다시 분석.** 같은 head는 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
+  PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
+  서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 시도보다 **나중에** 붙은 라벨만 요청으로 봅니다.
+  그래서 예전 head에서 남은 라벨은 새 head를 다시 시도하게 하지 않습니다. 고치지 못함·분석 실패·검사 거부만
+  대상이고, 시도 2회 소진은 대상이 아닙니다. 입장 라운드는 보고에서 현재 head의 재시도가 시작된 것을 확인했을 때만 라벨을 뗍니다(보고가 없거나 기록이 빠진 것은 근거가 아닙니다).
 - **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
   만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
   - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.
@@ -536,8 +580,9 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
 - **sender(`bin/pr-ci-auto-fix-sender.mjs`, systemd `DynamicUser`)**: workflow를 dispatch할 수
   있는 유일한 토큰을 갖습니다. Node 내장 모듈만 쓰는 파일 하나이고, 운영자가 GitHub main에서
   root 소유 경로로 받습니다. outbox 파일은 `review` 계정이 쓰므로 필드 단위로 다시 만들고,
-  head 하나에 한 번(POST 전에 기록하므로 결과를 모르는 요청도 다시 보내지 않습니다), 한 시간에
-  최대 6건 보냅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
+  요청 하나에 한 번(head와 생성 시각으로 기록합니다. POST 전에 기록하므로 결과를 모르는 요청도 다시
+  보내지 않습니다), head 하나에 최대 4건(CI 수정·충돌 해결 × 첫 시도·다시 분석), 한 시간에 최대 6건
+  보냅니다. 예전 sender가 head만으로 남긴 기록은 그 시각 이전에 만든 요청을 보낸 것으로 봅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
 - **판단의 경계는 workflow입니다.** dispatch 입력을 믿지 않고 GitHub 기록으로 다시 확인합니다
   (PR이 그 head에서 열려 있는지, 넘겨받은 run이 그 커밋에서 실패한 필수 run이면서 그 workflow의
   최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 자동 수정 커밋이

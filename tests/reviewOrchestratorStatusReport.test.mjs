@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
+import { reviewStatusSnapshotSchema } from "../lib/reviewOrchestratorStatusCore.ts";
 import {
   STATUS_REPORT_SECRET_ENV,
   STATUS_SNAPSHOT_INTERVAL_SECONDS,
@@ -380,4 +381,32 @@ test("a reviewer's credit travels with its quota, only when the probe read it", 
   ]) {
     assert.equal(withQuota(bad), null, JSON.stringify(bad));
   }
+});
+
+test("the CI auto-fix's tries travel as numbers and fixed names; a bad part is dropped, never the report", () => {
+  const SHA = "a".repeat(40);
+  const ciFix = { queuedLastHour: 1, entries: [{ pr: 7, head: SHA, kind: "ci", outcome: "no_change", reason: "transient", retried: false, settled: null, ageSeconds: 30 }] };
+  // The daemon adds the part only when a ledger exists.
+  assert.deepEqual(buildStatusSnapshot({ jobs: [], providers: [], load: {}, now: NOW, ciFix }).ciFix, ciFix);
+  assert.equal("ciFix" in buildStatusSnapshot({ jobs: [], providers: [], load: {}, now: NOW }), false);
+
+  const sent = normaliseStatusSnapshot({ ...SNAPSHOT, ciFix: { ...ciFix, entries: [{ ...ciFix.entries[0], answer: "model words" }] } });
+  assert.deepEqual(sent.ciFix, ciFix, "a field of its own is not rebuilt, so it is not sent");
+  for (const bad of [
+    { reason: "the model's own words" },
+    { outcome: "pushed to main" },
+    { head: "main" },
+    { pr: 0 },
+    { kind: "deploy" },
+    { ageSeconds: -1 },
+  ]) {
+    const report = normaliseStatusSnapshot({ ...SNAPSHOT, ciFix: { ...ciFix, entries: [{ ...ciFix.entries[0], ...bad }] } });
+    assert.equal(report.ciFix, undefined, JSON.stringify(bad));
+    assert.deepEqual(report.providers, SNAPSHOT.providers, "the reviewers' report still goes");
+  }
+  const kept = normaliseStatusSnapshot({ ...SNAPSHOT, ciFix });
+  assert.deepEqual(kept.ciFix, ciFix);
+  // What the sender sends, the app accepts.
+  assert.equal(reviewStatusSnapshotSchema.safeParse(kept).success, true);
+  assert.ok(JSON.stringify(kept).length < 8192);
 });

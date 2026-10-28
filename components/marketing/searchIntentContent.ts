@@ -1,6 +1,5 @@
 import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
-import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 
 export const SEARCH_INTENT_SLUGS = [
   "compare-ai-models",
@@ -62,7 +61,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Start comparing",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=en`
+        "href": "/review?lang=en"
       }
     },
     "ko": {
@@ -104,7 +103,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "모델 비교 시작하기",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=ko`
+        "href": "/review?lang=ko"
       }
     },
     "zh": {
@@ -146,7 +145,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "开始比较",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=zh`
+        "href": "/review?lang=zh"
       }
     },
     "fr": {
@@ -188,7 +187,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Commencer la comparaison",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=fr`
+        "href": "/review?lang=fr"
       }
     },
     "de": {
@@ -230,7 +229,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Vergleich starten",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=de`
+        "href": "/review?lang=de"
       }
     },
     "es": {
@@ -272,7 +271,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Empezar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=es`
+        "href": "/review?lang=es"
       }
     },
     "pt": {
@@ -314,7 +313,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Começar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=pt`
+        "href": "/review?lang=pt"
       }
     }
   },
@@ -359,7 +358,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Start comparing",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=en`
+        "href": "/review?lang=en"
       }
     },
     "ko": {
@@ -402,7 +401,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "모델 비교 시작하기",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=ko`
+        "href": "/review?lang=ko"
       }
     },
     "zh": {
@@ -445,7 +444,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "开始比较",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=zh`
+        "href": "/review?lang=zh"
       }
     },
     "fr": {
@@ -488,7 +487,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Commencer la comparaison",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=fr`
+        "href": "/review?lang=fr"
       }
     },
     "de": {
@@ -531,7 +530,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Vergleich starten",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=de`
+        "href": "/review?lang=de"
       }
     },
     "es": {
@@ -574,7 +573,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Empezar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=es`
+        "href": "/review?lang=es"
       }
     },
     "pt": {
@@ -617,7 +616,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Começar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=pt`
+        "href": "/review?lang=pt"
       }
     }
   },
@@ -653,7 +652,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Start comparing",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=en`
+        "href": "/review?lang=en"
       }
     },
     "ko": {
@@ -687,7 +686,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "모델 비교 시작하기",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=ko`
+        "href": "/review?lang=ko"
       }
     },
     "zh": {
@@ -721,7 +720,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "开始比较",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=zh`
+        "href": "/review?lang=zh"
       }
     },
     "fr": {
@@ -755,7 +754,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Commencer la comparaison",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=fr`
+        "href": "/review?lang=fr"
       }
     },
     "de": {
@@ -789,7 +788,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Vergleich starten",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=de`
+        "href": "/review?lang=de"
       }
     },
     "es": {
@@ -823,7 +822,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Empezar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=es`
+        "href": "/review?lang=es"
       }
     },
     "pt": {
@@ -857,7 +856,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Começar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=pt`
+        "href": "/review?lang=pt"
       }
     }
   },
@@ -893,7 +892,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Start comparing",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=en`
+        "href": "/review?lang=en"
       }
     },
     "ko": {
@@ -927,7 +926,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "모델 비교 시작하기",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=ko`
+        "href": "/review?lang=ko"
       }
     },
     "zh": {
@@ -961,7 +960,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "开始比较",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=zh`
+        "href": "/review?lang=zh"
       }
     },
     "fr": {
@@ -995,7 +994,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Commencer la comparaison",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=fr`
+        "href": "/review?lang=fr"
       }
     },
     "de": {
@@ -1029,7 +1028,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Vergleich starten",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=de`
+        "href": "/review?lang=de"
       }
     },
     "es": {
@@ -1063,7 +1062,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Empezar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=es`
+        "href": "/review?lang=es"
       }
     },
     "pt": {
@@ -1097,7 +1096,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       ],
       "cta": {
         "label": "Começar a comparar",
-        "href": `${REVIEW_WORKSPACE_PATH}?lang=pt`
+        "href": "/review?lang=pt"
       }
     }
   }

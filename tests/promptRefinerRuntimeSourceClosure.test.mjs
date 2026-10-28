@@ -367,34 +367,7 @@ const compilerOptions = parsedConfig.options;
 // same frame from `lib/accountEmails.ts` -- both already listed, so the file
 // set stays 190. No element access is added; this repins positions only.
 //
-// 2026-10-02, AMUX v4 integration: the scoped system-audit actor changes
-// `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts`, both already in the
-// 190-file closure. The count remains 228 and the position-free inventory
-// retains digest 9aa7ec49...; only source positions moved. The actor identity
-// is defined in the existing audit module to avoid adding an AMUX module to
-// the fixed runtime import closure. Repinning the marketing pipeline over the
-// merged Prisma schema also moved positions in its already-listed module;
-// the final position-free inventory is still unchanged.
-//
-// 2026-10-04, merge current main: marketing, account email and AMUX edits
-// coexist in the fixed closure. Count and position-free inventory remain
-// unchanged; the digest below is repinned for source positions only.
-//
-// 2026-10-07, selective release of marketing S2e onto main: the S2e
-// pipeline additions in `lib/marketingAutomationAccess.ts` move source
-// positions only. Count 228 and the position-free inventory are unchanged.
-//
-// 2026-10-07, QA-release merge lane selective release merged over that: two
-// QA-release system actors and the shared agent-digest retention actor in
-// `lib/adminAuditSystemActors.ts` and the
-// marketing pipeline fingerprint repin move source positions only. Count and
-// position-free inventory are unchanged.
-// 2026-10-08, the AMUX-only release adds scoped budget, settlement, expiry,
-// unknown-outcome, auto-cancel, claim, result and retention audit actions.
-// Repin the source-position digest after assembling the release tree.
-//
-// 2026-10-08, the product-research selective release onto main: two audit
-// actor names are added to
+// 2026-10-02, product-research audit actors: two names are added to
 // `lib/adminAuditSystemActors.ts` as their own exported array
 // (docs/policy/product-research-agent.md §5), and one dated record is added to
 // `lib/marketingAutomationAccess.ts` above that file's accesses. Both files are
@@ -424,6 +397,80 @@ const compilerOptions = parsedConfig.options;
 // line or column -- a declaration above one, as here, or a comment above one.
 // Text added *below* every access in a file moves nothing. The check belongs
 // at the end of a change, not the start.
+//
+// 2026-10-02, AMUX v4 integration: the scoped system-audit actor changes
+// `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts`, both already in the
+// 190-file closure. The count remains 228 and the position-free inventory
+// retains digest 9aa7ec49...; only source positions moved. The actor identity
+// is defined in the existing audit module to avoid adding an AMUX module to
+// the fixed runtime import closure. Repinning the marketing pipeline over the
+// merged Prisma schema also moved positions in its already-listed module;
+// the final position-free inventory is still unchanged.
+//
+// 2026-10-03, taking develop: both branches had repinned this -- develop for
+// changes of its own, this one for the actors array -- so neither value
+// described the merged tree and the one below is computed over it. The count
+// and the position-free digest are unchanged on both sides, which is what
+// says the merge repositioned accesses rather than adding any.
+//
+// 2026-10-03, webhook schema slice: `lib/marketingAutomationAccess.ts` gains
+// the schema-slice function for the webhook pipeline fingerprint. No computed
+// element access is added; count 228 and the position-free inventory are
+// unchanged, so this repins positions only.
+//
+// 2026-10-04, merged main and sre-ops: account, AMUX, audit actor and
+// marketing fingerprint edits coexist in the fixed closure. The count and
+// position-free inventory stay unchanged; repin source positions below.
+//
+// 2026-10-05, AMUX v4 analysis budget: an existing admin-audit helper now
+// selects an action-specific actor scope. The count (228) and position-free
+// inventory are unchanged; only positions in this fixed closure moved.
+// 2026-10-05, AMUX v4 settlement: four more scoped actions are added to the
+// same audit helper. The 228-entry count and position-free inventory still
+// match origin/develop; only source positions moved.
+// 2026-10-07, AMUX v22 worker claim: one named system actor shifts positions
+// in the already-reviewed audit module. The 228-entry count and position-free
+// inventory still match; this repins positions only.
+// 2026-10-07, AMUX v22 integration: the webhook pipeline fingerprint note in
+// marketingAutomationAccess.ts shifts positions of its existing computed
+// accesses. The count and position-free digest remain unchanged.
+// 2026-10-07, A06 analysis claim, result and retention actions extend that
+// helper again. The position-free 228-entry inventory is unchanged; only
+// source line positions in the reviewed closure move.
+// 2026-10-07, dev environment: the marketing pipeline fingerprint record in
+// `lib/marketingAutomationAccess.ts` gains a note, above that file's seven
+// accesses, for `lib/deploymentEnvironment.ts` listing `dev`. No access is
+// added; count 228 and the position-free inventory are unchanged.
+// 2026-10-07, A12 merge: the A09/A12 notes and shared audit-helper lines
+// move source positions only; count 228 and position-free digest stay fixed.
+// 2026-10-07, A15 merge: the same 228 computed accesses retain their
+// position-free digest; A13-A15 additions move reviewed source positions.
+// 2026-10-07, AMUX Decision Maker switch store (S1b): three actor names join
+// the existing line of `SYSTEM_AUDIT_ACTORS` in `lib/adminAuditSystemActors.ts`
+// and their array is declared at the end of that file, so none of its
+// accesses moves; the fingerprint record in `lib/marketingAutomationAccess.ts`
+// gains a note above that file's seven accesses, which moves them. No access
+// is added; count 228 and the position-free inventory are unchanged.
+// 2026-10-08, AMUX Decision Maker request ledger (S1c): the fingerprint record
+// in `lib/marketingAutomationAccess.ts` gains a note for the ledger's two back
+// relations on `AdminAuditLog`, above that file's seven accesses, which moves
+// them. No closure file gains an access; count 228 and the position-free
+// inventory are unchanged.
+// 2026-10-08, AMUX Decision Maker body store (S1d): the fingerprint record in
+// `lib/marketingAutomationAccess.ts` gains a note for the body store's three
+// back relations on `AdminAuditLog`, above that file's seven accesses, which
+// moves them. No closure file gains an access; count 228 and the position-free
+// inventory are unchanged.
+// 2026-10-08, the S1d review: the same record gains a note for the result
+// detail's back relation, which moves those seven accesses again. Count 228
+// and the position-free inventory are unchanged.
+// 2026-10-08, AMUX Decision Maker judgment and delivery (S1e): the same record
+// gains a note for the judgment's and the delivery event's back relations,
+// which moves those seven accesses again. Count 228 and the position-free
+// inventory are unchanged.
+// 2026-10-09, product-Auto budget hold: the shared audit actor and the
+// marketing fingerprint note move reviewed access positions only. Count 228
+// and the position-free inventory remain unchanged.
 // 2026-10-09, selective release of the AMUX Decision Maker S1 slices to main:
 // three actor names join the existing line of `SYSTEM_AUDIT_ACTORS`, their
 // array is declared at the end of `lib/adminAuditSystemActors.ts`, and the
@@ -435,31 +482,51 @@ const compilerOptions = parsedConfig.options;
 // `lib/adminAuditSystemActors.ts`, `lib/adminAudit.ts` gains
 // `writeSystemAuditLogEntry()`, and the fingerprint record gains a note. No
 // access is added; count and the position-free inventory are unchanged.
+// 2026-10-10, CHAT-01 product connection: release readiness, the product audit
+// scope and the reviewed marketing fingerprint provenance move only existing
+// accesses in promptRefinerAccess.ts, adminAuditSystemActors.ts and
+// marketingAutomationAccess.ts. The strict decision schema stays in the
+// existing promptRefinerSuggestion.ts closure, so the runtime remains 178/190
+// files. Count 228 and the position-free inventory remain unchanged; only
+// positions in the reviewed closure move.
 // 2026-10-10, CHAT-01 production selective integration: the product release
 // readiness and audit scopes move existing accesses in the already-reviewed
 // closure. The 228-entry count and position-free inventory remain unchanged;
 // this repins only their final source positions on the main release base.
-// 2026-10-12, Guest Smart Adaptive main compatibility repair: the reviewed
-// Guest audit actor joins the marketing schema fingerprint provenance. That
-// moves existing accesses in `lib/marketingAutomationAccess.ts`; capability
-// naming changes no access expression. The 228-entry count and position-free
-// digest remain unchanged, so this repins source positions only.
-// 2026-10-12, AMUX worker registry R1 (orchestration policy version 31), main
-// selective release: the marketing webhook fingerprint's history comment in
-// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
-// below it. Count 228 and the position-free inventory remain unchanged; only
-// their source positions are repinned.
+// 2026-10-12, back-merge of main 9cd033fa5 into develop: both histories above
+// are kept. Every closure file equals develop's, so develop's pins hold.
+// 2026-10-12, Guest Smart Adaptive CI repair: the reviewed Guest audit actor
+// joins the marketing schema fingerprint provenance. That moves existing
+// accesses in `lib/marketingAutomationAccess.ts`; capability naming changes no
+// access expression. The 228-entry count and position-free digest remain
+// unchanged, so this repins source positions only.
 // 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
 // pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
 // below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
 // in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
 // lines. No access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
+// 2026-10-12, AMUX worker registry R1 (orchestration policy version 31): the
+// marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
+// 2026-10-12, merge pinned main after the integrated AMUX source: both
+// histories above remain, while their combined comments and audit helpers
+// reposition only already-reviewed accesses. The count and position-free
+// inventory remain unchanged, so this repins source positions only.
+// 2026-10-12, Guest Smart Adaptive plus AMUX worker registry merge: both
+// fingerprint provenance notes coexist. Access count 228 and position-free
+// digest are unchanged; the positions below the combined note are repinned.
 // 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
 // save-time checks and its writer in `lib/appSettings.ts` sit above that file's
 // one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
 // lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
-// position-free inventory are unchanged; positions only.
+// position-free inventory are unchanged; positions only. Repinned after the AMUX
+// record above merged in from develop.
+// 2026-10-12, merge frozen develop c9c557f3 into the integrated AMUX source:
+// both reviewed histories remain and the combined app-setting offsets only
+// reposition existing accesses. Count and position-free inventory are unchanged.
 // 2026-10-12, selective release of both to main: the same commits on the main
 // base. The four files they move (`lib/modelPricing.ts`, `lib/models.ts`,
 // `lib/appSettings.ts`, `lib/appDefaults.ts`) are identical on main and on the
@@ -471,6 +538,15 @@ const compilerOptions = parsedConfig.options;
 // clamp while adopting the server-managed guest trio and retirement replacement
 // resolver. Those additions move downstream accesses only. Count 228 and the
 // position-free inventory remain unchanged; positions are repinned here.
+// 2026-10-13, merge frozen develop 709ccb7a into the verified halt source:
+// the Guest, default-model and worker histories above remain alongside the
+// no-commit halt changes. Count and position-free inventory remain unchanged;
+// only the actual merged source positions are repinned below.
+// 2026-10-13, AMUX worker capabilities (orchestration policy version 35, R2a):
+// the marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
 // 2026-10-13, selective release of AMUX worker capabilities (orchestration
 // policy version 35, R2a) to main: the same four-line growth of the
 // marketing webhook fingerprint's history comment in
@@ -480,14 +556,49 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-13, operator-controlled Chat availability: the marketing webhook
 // fingerprint provenance comment grows by three lines. Count 228 and the
 // position-free inventory remain unchanged; this repins source positions only.
-// 2026-10-13, guarded v22 Task recovery, selective release to main: the two
-// approved recovery system actors and their action scopes add twelve lines
-// above the one existing computed access in lib/adminAuditSystemActors.ts. No
-// access is added, removed or altered: count 228, every path and expression,
-// and the position-free inventory remain unchanged; positions only.
+// 2026-10-13, back-merge the Chat availability hotfix into develop: preserve
+// both provenance histories and repin their combined source positions only.
+// 2026-10-13, guarded v22 Task recovery: the two approved recovery system
+// actors and their action scopes add twelve lines above the one existing
+// computed access in lib/adminAuditSystemActors.ts, moving it from 295:17 to
+// 307:17. No access is added, removed or altered: count 228, every path and
+// expression, and the position-free inventory remain unchanged.
+// 2026-10-13, merge develop 09ad68fc into the guarded v22 Task recovery: both
+// histories above remain; count 228 and the position-free inventory are
+// unchanged and only the combined source positions are repinned.
 // 2026-10-13, guarded v22 Task recovery: the marketing webhook fingerprint's
 // history comment in lib/marketingAutomationAccess.ts grows by six lines. Count
 // 228 and the position-free inventory remain unchanged; positions only.
+// 2026-10-16, AMUX v19 session submission: the scoped session actor extends
+// `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts` above their existing
+// computed accesses. The asserted count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so this repins source positions only.
+// 2026-10-16, AMUX v19.5 system registration: the registration and portfolio
+// system actors extend lib/adminAuditSystemActors.ts above its existing
+// computed access. Count 228 and the position-free inventory remain unchanged;
+// only that source position moves.
+// 2026-10-17, AMUX v19 pinned-checkout evidence: its closed system action,
+// target and scope extend lib/adminAuditSystemActors.ts above the same reviewed
+// computed access. Count 228 and the position-free inventory remain unchanged;
+// only source positions are repinned.
+// 2026-10-17, the closed v19 session budget audit actions move those same
+// accesses again. The count and position-free digest still match unchanged.
+// 2026-10-17, AMUX v19 session analysis reservation: its closed system action,
+// target and scope extend lib/adminAuditSystemActors.ts above the same reviewed
+// computed access. Count 228 and the position-free inventory remain unchanged;
+// only source positions are repinned.
+// 2026-10-17, AMUX v19 read-manifest orphan-key audit actions move the existing
+// computed access in lib/adminAuditSystemActors.ts from line 424 to 454. The
+// count and position-free inventory remain unchanged; only its position moves.
+// 2026-10-18, the Chat optimizer adds a scoped audit actor above the existing
+// computed access in lib/adminAuditSystemActors.ts. The count and position-free
+// digest remain unchanged; only source positions move.
+// 2026-10-19, correcting the Chat optimizer schema separator restores the
+// marketing fingerprint and removes the mistaken provenance comment. The
+// already reviewed computed access inventory is unchanged; its positions move.
+// 2026-10-19, AMUX intake v19 Max shadow and session-result audit actions
+// extend lib/adminAuditSystemActors.ts above the same computed access. Count
+// 228 and the position-free inventory are unchanged; only positions move.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";

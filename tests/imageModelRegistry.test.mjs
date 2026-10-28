@@ -51,6 +51,7 @@ test("client components never write the module-global image catalogue", () => {
     "../components/images/ImageGenerationWorkspace.tsx",
     "../components/chat/ImageModelTabPanel.tsx",
     "../components/chat/ChatMessageList.tsx",
+    "../components/chat/ChatImageTurnCard.tsx",
   ]) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     assert.doesNotMatch(source, /setActiveImageModelCatalog/, file);

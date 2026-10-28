@@ -140,7 +140,7 @@ export const autoLlmRouterCandidates = (
     models: readonly AiModel[],
     creditsByModelId: Readonly<Record<string, number>>,
     fileContext: AutoFileGenerationContext = {
-        isAuthenticated: true, canPersist: true, webSearchRequested: false,
+        isAuthenticated: false, canPersist: false, webSearchRequested: false,
     }
 ): AutoLlmRouterCandidate[] => {
     const byId = new Map(models.map((model) => [model.id, model]));
@@ -210,6 +210,7 @@ const AUTO_LLM_ROUTER_SYSTEM_HEAD = [
     "Pick exactly one id from the candidates.",
     "Set requiresFileGeneration to true when this message asks you to create, edit or deliver a downloadable file (spreadsheet, document, PDF, slides, text/source file or archive). Use previousAnswer for follow-ups such as 'download that as Excel'. Reading an attachment, explaining code, inline text and image generation alone do not require file generation.",
     "When requiresFileGeneration is true, choose only a candidate with canCreateFiles=true. This capability is supplied by the application; never infer or invent it from a model name or guidance.",
+    "If no candidate can create files, keep requiresFileGeneration=true and choose an eligible candidate to explain that file generation is unavailable.",
     CHAT_RESEARCH_ROUTING_CRITERIA,
 ].join("\n");
 
@@ -416,19 +417,12 @@ export const parseAutoLlmRouterOutput = (
     if (typeof modelId !== "string") return null;
     if (requiresFileGeneration !== undefined && typeof requiresFileGeneration !== "boolean") return null;
     if (!candidates.some((candidate) => candidate.id === modelId)) return null;
-    // The model reads intent; code enforces the existing tool boundary. A bad
-    // pick cannot overrule capability, plan, budget or search eligibility.
-    const fileCandidates = candidates.filter(candidate => candidate.canCreateFiles);
-    const selected = requiresFileGeneration === true
-        ? fileCandidates.find(candidate => candidate.id === modelId)
-            ?? [...fileCandidates].sort((a, b) => (a.credits ?? Infinity) - (b.credits ?? Infinity))[0]
-        : candidates.find(candidate => candidate.id === modelId);
-    if (!selected) return null;
+    // Keep the model's actual answer for telemetry and session memory. The
+    // selection boundary enforces file capability without inventing an LLM pick.
+    // Intent also survives a turn with no capable candidate, for refusal/image precedence.
     return {
-        modelId: selected.id,
-        reason: selected.id !== modelId
-            ? "Selected a verified file-capable model for a downloadable file."
-            : cut(reason, AUTO_LLM_ROUTER_MAX_REASON_CHARS),
+        modelId,
+        reason: cut(reason, AUTO_LLM_ROUTER_MAX_REASON_CHARS),
         topic: cut(topic, AUTO_LLM_ROUTER_MAX_TOPIC_CHARS),
         rewrite: rewriteOf === null ? null : admitRouterRewrite(rewrite, rewriteOf),
         ...(requiresFileGeneration === true ? { requiresFileGeneration: true as const } : {}),

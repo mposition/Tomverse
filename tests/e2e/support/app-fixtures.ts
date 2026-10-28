@@ -428,13 +428,18 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", 
   }, { lang: language, appearance: reviewAppearance, chatAppearance });
 }
 
-export async function mockChatStream(page: Page, responseText: string) {
+export async function mockChatStream(
+  page: Page,
+  responseText: string,
+  onPost?: () => void | Promise<void>
+) {
   await page.route("**/api/chat", async (route) => {
     if (route.request().method() !== "POST") {
       await route.fallback();
       return;
     }
 
+    await onPost?.();
     await route.fulfill({
       status: 200,
       contentType: "text/plain; charset=utf-8",
@@ -494,6 +499,8 @@ export type AuthenticatedQaState = {
    * so nothing generates on a press by accident.
    */
   imageHandoffAutoGenerate: boolean;
+  /** Models a server-side answer save when a spec replaces the real /api/chat route. */
+  persistServerMessage: (message: QaConversationMessage) => void;
 };
 
 /**
@@ -702,6 +709,8 @@ export async function mockAuthenticatedApi(
     },
   ]);
 
+  const savedMessages: QaConversationMessage[] = [...(options.messages || [])];
+
   const state: AuthenticatedQaState = {
     conversationListReads: 0,
     deleted: false,
@@ -727,6 +736,11 @@ export async function mockAuthenticatedApi(
     timeZoneChangedAt: "2026-05-01T00:00:00.000Z",
     userSettingsReads: 0,
     imageHandoffAutoGenerate: false,
+    persistServerMessage: (message) => {
+      if (!savedMessages.some((saved) => saved.id === message.id)) {
+        savedMessages.push(message);
+      }
+    },
   };
 
   const conversation = () => ({
@@ -1132,8 +1146,6 @@ export async function mockAuthenticatedApi(
   // saved the message, streamed /api/chat and generated a title showed nothing
   // at all. That was the ~30% flake in the mobile keyboard suite, and it was
   // the mock disagreeing with itself rather than anything the product does.
-  const savedMessages: QaConversationMessage[] = [...(options.messages || [])];
-
   // What the upload step recorded about each file, read back when the save
   // binds it. In the real system this lives on the upload row and the client is
   // never believed about it; here the two mocks share one page-scoped registry

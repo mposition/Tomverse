@@ -15,15 +15,20 @@ import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint } from "./
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
 import {
-  QA_RELEASE_TRAIN_MAX_PREDECESSORS,
   QA_RELEASE_TRAIN_REPOSITORY,
   qaReleaseTrainIncludedNumbers,
   qaReleaseTrainIsTrainPull,
   qaReleaseTrainMergedPullNumber,
-  qaReleaseTrainSettleAdjacent,
   type QaReleaseTrainCandidate,
   type QaReleaseTrainPick,
 } from "./qaReleaseTrainCore.ts";
+import {
+  QA_RELEASE_TRAIN_MARKER_LINE,
+  qaReleaseTrainApplyHunks,
+  qaReleaseTrainDiff3Hunks,
+  type QaReleaseTrainConflict,
+  type QaReleaseTrainResolver,
+} from "./qaReleaseTrainResolve.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
 
 const REPOSITORY = QA_RELEASE_TRAIN_REPOSITORY;
@@ -113,27 +118,27 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
   };
 }
 
-/** How deep a conflict's predecessors are followed: a predecessor that conflicts in turn may board its own, this many levels down. */
-const BOARDING_DEPTH = 3;
-/** At most this many of a conflict's files are blamed for its predecessors. */
-const BLAMED_FILES = 20;
-/** File versions fetched at once before a blame: a partial clone would fetch each alone. */
-const BLAMED_VERSIONS = 500;
-/** The commit trailer naming the files of a settled adjacent-line conflict. */
-const SETTLED_TRAILER = "Release-train-settled";
-/** A line git would read as a conflict marker: a file holding one is never settled. */
-const MARKER_LINE = /^(<{7}|\|{7}|>{7})( |$)|^={7}$/m;
+/** At most this many conflicting picks go to the model in one train: each call is paid. */
+const RESOLVES_PER_TRAIN = 6;
+/**
+ * No model call starts this long after a train began assembling: a call takes
+ * up to four minutes, and the push, pull request and report must still fit
+ * inside the service's 25 minutes (scripts/qa-release-train-service.mjs).
+ */
+const RESOLVE_WINDOW_MS = 15 * 60 * 1000;
+/** The commit trailer naming the files of a conflict the model resolved. */
+const RESOLVED_TRAILER = "Release-train-model-resolved";
 
 /**
  * `remote` is for tests only: a local repository path stands in for GitHub,
- * and the push goes to it without a token. `autoPredecessors` (owner,
- * 2026-10-27; on unless `QA_RELEASE_TRAIN_AUTO_PREDECESSORS=false`): a pick
- * that conflicts boards the develop pull requests it needs first.
+ * and the push goes to it without a token. `resolve` (owner, 2026-10-28; the
+ * service passes one only when switched on): a pick that conflicts has its
+ * conflict hunks filled by the model (lib/qaReleaseTrainResolve.ts).
  */
 export function createQaReleaseTrainGitPorts(input: {
   token: () => Promise<string>;
   remote?: string;
-  autoPredecessors?: boolean;
+  resolve?: QaReleaseTrainResolver;
 }): QaReleaseTrainPorts["git"] & { cleanup(): Promise<void> } {
   let dir: string | null = null;
   const git = async (args: string[], options: { cwd?: string; allowFail?: boolean; extraEnv?: Record<string, string>; raw?: boolean } = {}) => {
@@ -152,118 +157,66 @@ export function createQaReleaseTrainGitPorts(input: {
       throw new Error(`git_${args[0] === "clone" ? "clone" : args[0] === "push" ? "push" : "failed"}`);
     }
   };
-  // The develop pull requests that wrote what a conflicting pick needs and
-  // main lacks, newest first (2026-10-27: "changed a conflicted file in the
-  // last 14 days" named ten unrelated package.json pull requests for #3042 and
-  // missed the cause, #2131). For each conflicted file, the lines the pick's
-  // change was made against (its diff's old side, context included) are
-  // blamed along develop's merges; only a line main lacks at that place (an
-  // added side of main-to-develop's line diff of the file, not a line that
-  // merely appears somewhere in main's file) is a cause. The fetch of the merge
-  // commit brought develop's history; a failed read names none. Each comes
-  // with its merge commit, so it can board.
-  // A conflict that stays one is read once for boarding and once for the report, at the same head.
-  const named = new Map<string, QaReleaseTrainCandidate[]>();
-  /** Commits this train made by settling an adjacent-line conflict, with the files. */
-  const settledCommits = new Map<string, readonly string[]>();
-  const predecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<QaReleaseTrainCandidate[]> => {
-    const key = [(await git(["rev-parse", "HEAD"])).stdout, pull.mergeCommitSha, ...files].join("\n");
-    const known = named.get(key);
-    if (known) return known;
-    const found = await blamePredecessors(pull, files);
-    named.set(key, found);
-    return found;
-  };
-  const blamePredecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<QaReleaseTrainCandidate[]> => {
-    const parent = `${pull.mergeCommitSha}^1`;
-    const causes = new Set<string>();
-    for (const file of files.slice(0, BLAMED_FILES)) {
-      const diff = await git(["diff", "-U3", "--no-color", "--no-ext-diff", parent, pull.mergeCommitSha, "--", file], { allowFail: true });
-      const ranges = [...diff.stdout.matchAll(/^@@ -(\d+)(?:,(\d+))? /gm)].map((m) => ({ start: Number(m[1]), count: m[2] === undefined ? 1 : Number(m[2]) })).filter((r) => r.count > 0);
-      if (ranges.length === 0) continue;
-      const versions = await git(["log", "--first-parent", "--diff-merges=first-parent", "--format=", "--raw", "--no-abbrev", "-n", String(BLAMED_VERSIONS), parent, "--", file], { allowFail: true });
-      const blobs = [...new Set([...versions.stdout.matchAll(/^:\d+ \d+ [0-9a-f]{40} ([0-9a-f]{40}) /gm)].map((m) => m[1]))].filter((blob) => !/^0+$/.test(blob));
-      if (blobs.length > 0) await git(["-c", "fetch.negotiationAlgorithm=noop", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--filter=blob:none", "origin", ...blobs], { allowFail: true });
-      const blame = await git(["blame", "--first-parent", "--porcelain", ...ranges.flatMap((r) => ["-L", `${r.start},+${r.count}`]), parent, "--", file], { allowFail: true, raw: true });
-      // Develop's lines main lacks where they stand: the new side of main -> develop, no context. Main without the file lacks them all.
-      const missing = [...(await git(["diff", "-U0", "--no-color", "--no-ext-diff", "HEAD", parent, "--", file], { allowFail: true })).stdout.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)].map((m) => ({
-        start: Number(m[1]),
-        count: m[2] === undefined ? 1 : Number(m[2]),
-      }));
-      // Porcelain gives every line a header: the commit, its line there, and its line in develop's file.
-      for (const header of blame.stdout.matchAll(/^\^?([0-9a-f]{40}) \d+ (\d+)/gm)) {
-        const line = Number(header[2]);
-        if (missing.some((r) => line >= r.start && line < r.start + r.count)) causes.add(header[1]);
-      }
-    }
-    const found = new Map<number, QaReleaseTrainCandidate>();
-    for (const sha of causes) {
-      // GitHub's merge commit: subject "Merge pull request #N from ...", body's first line the pull request's title.
-      const [mergedAt = "", subject = "", body = ""] = (await git(["log", "-1", "--format=%cI%x1f%s%x1f%b", sha], { allowFail: true })).stdout.split("\x1f");
-      const number = qaReleaseTrainMergedPullNumber(subject);
-      if (number === null || number === pull.number || found.has(number) || !SHA.test(sha)) continue;
-      found.set(number, { number, title: body.split("\n")[0].trim(), mergeCommitSha: sha, mergedAt: mergedAt || pull.mergedAt });
-    }
-    return [...found.values()].sort((a, b) => Date.parse(b.mergedAt) - Date.parse(a.mergedAt)).slice(0, QA_RELEASE_TRAIN_MAX_PREDECESSORS);
-  };
-  // A stopped pick whose every conflict is adjacent lines
-  // (qaReleaseTrainSettleAdjacent) is settled in the working tree and staged;
-  // false leaves the rest to the caller's abort.
-  const settleAdjacent = async (files: readonly string[]): Promise<boolean> => {
-    // A name the trailer or the body's code span cannot carry as one item is not settled.
-    if (!dir || files.length === 0 || files.some((file) => /[,`\r\n]/.test(file))) return false;
+  /** Commits whose conflict the model resolved, with the files and what it said. */
+  const resolvedCommits = new Map<string, { files: readonly string[]; why: string }>();
+  // Both counted per train: assemble resets them.
+  let resolves = 0;
+  let assembleStartedMs = 0;
+  // A stopped pick's conflicts handed to the model, which fills every hunk;
+  // the files are written and staged. Only regular UTF-8 text files on all
+  // three sides with no marker-like line are handed over. `why` is empty
+  // when no resolver is set.
+  const resolveConflict = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<{ resolved: boolean; why: string }> => {
+    if (!input.resolve) return { resolved: false, why: "" };
+    // A name the trailer or the body's code span cannot carry as one item is not resolved.
+    if (!dir || files.length === 0 || files.some((file) => /[,`\r\n]/.test(file))) return { resolved: false, why: "A conflicted file's name cannot be carried." };
+    if (resolves >= RESOLVES_PER_TRAIN) return { resolved: false, why: "This train already handed the model its limit of conflicts." };
+    if (Date.now() - assembleStartedMs > RESOLVE_WINDOW_MS) return { resolved: false, why: "This train ran out of time to ask the model." };
+    // A workflow change is left out whatever the model writes: never paid for.
+    const changed = (await git(["diff", "--name-only", `${pull.mergeCommitSha}^1`, pull.mergeCommitSha], { allowFail: true })).stdout.split("\n");
+    if (changed.some((file) => file.startsWith(".github/workflows/"))) return { resolved: false, why: "It changes .github/workflows, which the train cannot push." };
+    const marked = new Map<string, string[]>();
+    const conflict: QaReleaseTrainConflict = { number: pull.number, title: pull.title, diff: "", files: [] };
     for (const file of files) {
-      // Only a regular file on all three sides: one changed on one side and
-      // deleted on the other, a symlink or a submodule is not settled.
+      const notText = { resolved: false, why: `\`${file}\` is not a text file changed on both sides.` };
+      // Changed on one side and deleted on the other, a symlink or a submodule is not handed over.
       const stages = (await git(["ls-files", "-u", "--", file], { allowFail: true })).stdout.split("\n").filter((row) => row !== "");
-      if (stages.length !== 3 || !stages.every((row) => /^100(644|755) [0-9a-f]{40} [123]\t/.test(row))) return false;
+      if (stages.length !== 3 || !stages.every((row) => /^100(644|755) [0-9a-f]{40} [123]\t/.test(row))) return notText;
       // Nor a binary one (git leaves it without markers) or one holding marker-like lines.
       for (const stage of [1, 2, 3]) {
         const side = await git(["show", `:${stage}:${file}`], { allowFail: true, raw: true });
-        if (!side.ok || side.stdout.includes("\0") || MARKER_LINE.test(side.stdout)) return false;
+        if (!side.ok || side.stdout.includes("\0") || QA_RELEASE_TRAIN_MARKER_LINE.test(side.stdout)) return notText;
       }
-      if (!(await git(["checkout", "--conflict=diff3", "--", file], { allowFail: true })).ok) return false;
-      // Rewritten as UTF-8, so only a file that is strictly UTF-8 (byte order mark kept): any other text encoding is not settled.
+      if (!(await git(["checkout", "--conflict=diff3", "--", file], { allowFail: true })).ok) return notText;
+      // Written back as UTF-8, so only a file that is strictly UTF-8 (byte order mark kept).
       let text: string;
       try {
         text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readFile(join(dir, file)));
       } catch {
-        return false;
+        return notText;
       }
       const lines = text.split("\n");
-      const settled: string[] = [];
-      let hunks = 0;
-      for (let i = 0; i < lines.length; ) {
-        if (!lines[i].startsWith("<<<<<<< ")) {
-          settled.push(lines[i++]);
-          continue;
-        }
-        const hunk = { main: [] as string[], base: [] as string[], pick: [] as string[] };
-        let side = hunk.main;
-        for (i++; i < lines.length && !lines[i].startsWith(">>>>>>> "); i++) {
-          if (lines[i].startsWith("||||||| ") && side === hunk.main) side = hunk.base;
-          else if (lines[i] === "=======" && side === hunk.base) side = hunk.pick;
-          else side.push(lines[i]);
-        }
-        // An unclosed hunk, or one without all three sides, is not read.
-        if (i++ >= lines.length || side !== hunk.pick) return false;
-        const resolved = qaReleaseTrainSettleAdjacent(hunk);
-        if (resolved === null) return false;
-        settled.push(...resolved);
-        hunks++;
-      }
-      // A conflicted file with no hunk to read is one git could not mark: never staged as main's.
-      if (hunks === 0) return false;
-      await writeFile(join(dir, file), settled.join("\n"));
-      if (!(await git(["add", "--", file], { allowFail: true })).ok) return false;
+      const hunks = qaReleaseTrainDiff3Hunks(lines);
+      // A conflicted file with no hunk to read is one git could not mark.
+      if (hunks === null || hunks.length === 0) return notText;
+      marked.set(file, lines);
+      conflict.files.push({ path: file, hunks });
     }
-    return true;
+    conflict.diff = (await git(["diff", "--no-color", "--no-ext-diff", `${pull.mergeCommitSha}^1`, pull.mergeCommitSha, "--", ...files], { allowFail: true })).stdout;
+    resolves += 1;
+    const answer = await input.resolve(conflict);
+    if (!answer.resolved) return answer;
+    for (const file of answer.files) {
+      await writeFile(join(dir, file.path), qaReleaseTrainApplyHunks(marked.get(file.path) ?? [], file.hunks).join("\n"));
+      if (!(await git(["add", "--", file.path], { allowFail: true })).ok) return { resolved: false, why: "A resolved file could not be staged." };
+    }
+    return answer;
   };
-  type Attempt = { result: "applied" | "empty" | "workflows" } | { result: "conflict"; files: string[] };
+  type Attempt = { result: "applied" } | { result: "empty" } | { result: "workflows" } | { result: "conflict"; why: string };
   // One cherry-pick onto the train branch; whatever it does not keep is undone.
-  const pickOnce = async (sha: string): Promise<Attempt> => {
+  const pickOnce = async (pull: QaReleaseTrainCandidate): Promise<Attempt> => {
     const before = (await git(["rev-parse", "HEAD"])).stdout;
-    let picked = (await git(["cherry-pick", "-m", "1", sha], { allowFail: true })).ok;
+    let picked = (await git(["cherry-pick", "-m", "1", pull.mergeCommitSha], { allowFail: true })).ok;
     if (!picked) {
       // A pick that stopped with nothing to apply and no conflict is already on main.
       const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"])).stdout;
@@ -273,20 +226,21 @@ export function createQaReleaseTrainGitPorts(input: {
         return { result: "empty" };
       }
       const files = unmerged.split("\n").filter((file) => file !== "");
-      picked = await settleAdjacent(files);
-      // Settled to nothing new: main already had what it adds. A skip that fails is aborted like a conflict.
+      const answer = await resolveConflict(pull, files);
+      picked = answer.resolved;
+      // Resolved to nothing new: main already had what it adds. A skip that fails is aborted like a conflict.
       if (picked && (await git(["diff", "--cached", "--quiet"], { allowFail: true })).ok) {
         if ((await git(["cherry-pick", "--skip"], { allowFail: true })).ok) return { result: "empty" };
         picked = false;
       }
-      // Settled, it commits with the original message and a trailer naming the files.
-      picked = picked && (await git(["commit", "--quiet", "--no-edit", "--trailer", `${SETTLED_TRAILER}: ${files.join(", ")}`], { allowFail: true })).ok;
+      // Resolved, it commits with the original message and a trailer naming the files.
+      picked = picked && (await git(["commit", "--quiet", "--no-edit", "--trailer", `${RESOLVED_TRAILER}: ${files.join(", ")}`], { allowFail: true })).ok;
       if (!picked) {
         await git(["cherry-pick", "--abort"]);
-        return { result: "conflict", files };
+        return { result: "conflict", why: answer.why };
       }
       // Kept here, not read back from messages: a develop merge commit's own message could carry the trailer's words.
-      settledCommits.set((await git(["rev-parse", "HEAD"])).stdout, files);
+      resolvedCommits.set((await git(["rev-parse", "HEAD"])).stdout, { files, why: answer.why });
     }
     if ((await git(["rev-parse", "HEAD"])).stdout === before) return { result: "empty" };
     // The App has no workflows permission, and GitHub refuses a push that
@@ -299,59 +253,10 @@ export function createQaReleaseTrainGitPorts(input: {
     }
     return { result: "applied" };
   };
-  /**
-   * A pick, and when it conflicts, the develop pull requests it needs boarded
-   * first (oldest first, each the same way, BOARDING_DEPTH levels down), then
-   * the pick again. Short of the pick riding in the end, everything is undone:
-   * the branch is as before and nothing boarded. `seats` is how many may still
-   * ride, the pick included; `aboard` is what already rides. A predecessor
-   * riding an open train (`elsewhere`) is never boarded a second time: the
-   * pick that needs it waits for that train instead.
-   */
-  const board = async (
-    pull: QaReleaseTrainCandidate,
-    depth: number,
-    seats: number,
-    aboard: ReadonlySet<number>,
-    elsewhere: ReadonlySet<number>,
-  ): Promise<{ result: "applied"; boarded: QaReleaseTrainCandidate[] } | { result: "empty" } | { result: "workflows" } | { result: "conflict"; files: string[] }> => {
-    const first = await pickOnce(pull.mergeCommitSha);
-    if (first.result !== "conflict") return first.result === "applied" ? { result: "applied", boarded: [] } : { result: first.result };
-    if (input.autoPredecessors === false || depth >= BOARDING_DEPTH) return first;
-    const mark = (await git(["rev-parse", "HEAD"])).stdout;
-    const boarded: QaReleaseTrainCandidate[] = [];
-    const undo = async () => {
-      await git(["reset", "--quiet", "--hard", mark]);
-      return first;
-    };
-    const needed = (await predecessors(pull, first.files)).filter((p) => !aboard.has(p.number)).reverse();
-    for (const needs of needed) {
-      // Already reachable from main: nothing to board.
-      if ((await git(["merge-base", "--is-ancestor", needs.mergeCommitSha, "HEAD"], { allowFail: true })).ok) continue;
-      if (elsewhere.has(needs.number)) return undo();
-      const taken = new Set([...aboard, ...boarded.map((b) => b.number), pull.number]);
-      const ride = await board(needs, depth + 1, Math.max(seats - 1 - boarded.length, 0), taken, elsewhere);
-      // One with nothing to apply (main has its change) takes no seat.
-      if (ride.result === "empty") continue;
-      if (ride.result !== "applied") return undo();
-      boarded.push(...ride.boarded, needs);
-      // The pick itself needs a seat too.
-      if (boarded.length + 1 > seats) return undo();
-    }
-    if (boarded.length === 0) return undo();
-    const again = await pickOnce(pull.mergeCommitSha);
-    // Nothing left to apply: what it carries came with its predecessors, so it rides with them.
-    if (again.result === "applied" || again.result === "empty") return { result: "applied", boarded };
-    // A workflow change is released on its own, predecessors or not.
-    if (again.result === "workflows") {
-      await undo();
-      return { result: "workflows" };
-    }
-    return undo();
-  };
   return {
-    async assemble(branch, cargo, capacity, onOpenTrains = []) {
-      const elsewhere = new Set(onOpenTrains);
+    async assemble(branch, cargo, capacity) {
+      resolves = 0;
+      assembleStartedMs = Date.now();
       // A round that assembles twice (an empty emergency, then the scheduled
       // train) keeps one clone: the first is removed before the second.
       if (dir) await rm(dir, { recursive: true, force: true });
@@ -364,13 +269,8 @@ export function createQaReleaseTrainGitPorts(input: {
       if (cargo.length > 0) await git(["fetch", "--quiet", "--filter=blob:none", "origin", ...cargo.map((c) => c.mergeCommitSha)]);
       await git(["switch", "--quiet", "-c", branch]);
       const picks: QaReleaseTrainPick[] = [];
-      const boarded: QaReleaseTrainCandidate[] = [];
       const riding = () => picks.filter((p) => p.outcome === "included").length;
-      const picked = new Set(cargo.map((c) => c.number));
       for (const pull of cargo) {
-        // Boarded earlier for a later pick's sake (cargo is in develop merge
-        // order, so only when it was left out first): it rides already.
-        if (picks.some((p) => p.number === pull.number)) continue;
         if (riding() >= capacity) {
           picks.push({ number: pull.number, outcome: "over_capacity" });
           continue;
@@ -380,36 +280,22 @@ export function createQaReleaseTrainGitPorts(input: {
           picks.push({ number: pull.number, outcome: "already_in_main" });
           continue;
         }
-        const aboard = new Set(picks.filter((p) => p.outcome === "included").map((p) => p.number));
-        const ride = await board(pull, 0, capacity - riding(), aboard, elsewhere);
-        if (ride.result === "applied") {
-          for (const needs of ride.boarded) {
-            // A pick left out earlier in this train rides now as a predecessor:
-            // the operator's own, so no boardedFor.
-            const earlier = picks.findIndex((p) => p.number === needs.number);
-            if (earlier !== -1) picks.splice(earlier, 1);
-            picks.push(picked.has(needs.number) ? { number: needs.number, outcome: "included" } : { number: needs.number, outcome: "included", boardedFor: pull.number });
-            if (!picked.has(needs.number)) boarded.push(needs);
-          }
-          picks.push({ number: pull.number, outcome: "included" });
-        } else if (ride.result === "workflows") {
-          picks.push({ number: pull.number, outcome: "changes_workflows" });
-        } else if (ride.result === "empty") {
-          picks.push({ number: pull.number, outcome: "already_in_main" });
-        } else {
-          picks.push({ number: pull.number, outcome: "conflict", predecessors: (await predecessors(pull, ride.files)).map((p) => p.number) });
-        }
+        const ride = await pickOnce(pull);
+        if (ride.result === "applied") picks.push({ number: pull.number, outcome: "included" });
+        else if (ride.result === "workflows") picks.push({ number: pull.number, outcome: "changes_workflows" });
+        else if (ride.result === "empty") picks.push({ number: pull.number, outcome: "already_in_main" });
+        else picks.push({ number: pull.number, outcome: "conflict", ...(ride.why ? { why: ride.why } : {}) });
       }
       const headSha = (await git(["rev-parse", "HEAD"])).stdout;
-      // What rides settled: the commits this train settled that are still on the branch (an attempt undone took its commit with it).
-      const settled: { number: number; files: string[] }[] = [];
+      // What rides resolved: the commits the model resolved that are still on the branch (an attempt undone took its commit with it).
+      const resolved: { number: number; files: string[]; why: string }[] = [];
       for (const entry of (await git(["log", "--format=%H%x1f%s", `${mainSha}..HEAD`])).stdout.split("\n")) {
         const [sha = "", subject = ""] = entry.split("\x1f");
         const number = qaReleaseTrainMergedPullNumber(subject);
-        const files = settledCommits.get(sha);
-        if (number !== null && files) settled.push({ number, files: [...files] });
+        const kept = resolvedCommits.get(sha);
+        if (number !== null && kept) resolved.push({ number, files: [...kept.files], why: kept.why });
       }
-      return { mainSha, headSha, picks, boarded, settled };
+      return { mainSha, headSha, picks, resolved };
     },
     async push(branch) {
       if (!dir) throw new Error("git_not_assembled");
@@ -480,13 +366,13 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
       try {
         answer = await send(report.picks);
       } catch (error) {
-        // An app older than boarded predecessors refuses `boardedFor` (400:
-        // nothing was written). Sent again without it, the report still lands.
-        if (!(error instanceof Error && error.message === "app_400") || !report.picks.some((p) => p.boardedFor !== undefined)) throw error;
+        // An app older than model resolution refuses `why` (400: nothing was
+        // written). Sent again without it, the report still lands.
+        if (!(error instanceof Error && error.message === "app_400") || !report.picks.some((p) => p.why !== undefined)) throw error;
         answer = await send(
           report.picks.map((pick) => {
             const plain = { ...pick };
-            delete plain.boardedFor;
+            delete plain.why;
             return plain;
           }),
         );

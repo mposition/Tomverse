@@ -21,8 +21,9 @@ const poe = {
   competitorId: "poe",
   displayName: "Poe",
   officialHosts: ["poe.com"],
-  trackedPages: ["https://poe.com/pricing", "https://poe.com/changelog"],
 };
+/** What the provider cites, as it cites it: with its own query on the end. */
+const CITED = ["https://poe.com/pricing?utm_source=chatgpt.com"];
 const fact = (sourceUrl) => ({
   factType: "plan_tier",
   value: { kind: "token", value: "pro" },
@@ -31,21 +32,22 @@ const fact = (sourceUrl) => ({
 
 /** Ports that record what the run asked for, answering from the given table. */
 const ports = (overrides = {}) => {
-  const seen = { pages: [], calls: [], reports: [], sleeps: [] };
+  const seen = { calls: [], reports: [], sleeps: [] };
   let id = 0;
   const deps = {
     readContext: async () => context([poe]),
-    fetchPage: async (url) => {
-      seen.pages.push(url);
-      return url.endsWith("/changelog") ? { ok: false, reason: "http_status" } : { ok: true, page: { url, text: "Pro plan" } };
-    },
-    callLlm: async (messages, requestKey) => {
-      seen.calls.push({ messages, requestKey });
+    callLlm: async (messages, requestKey, allowedDomains) => {
+      seen.calls.push({ messages, requestKey, allowedDomains });
       return {
         status: "answered",
         callId: `call-${seen.calls.length}`,
         requestKey,
-        content: JSON.stringify({ facts: [fact("https://poe.com/pricing")], unrepresentable: 1 }),
+        content: JSON.stringify({
+          // The second cites a page the provider never cited: not kept.
+          facts: [fact("https://poe.com/pricing"), fact("https://poe.com/changelog")],
+          unrepresentable: 1,
+        }),
+        citations: CITED,
         ledgerState: "settled",
       };
     },
@@ -64,32 +66,30 @@ const ports = (overrides = {}) => {
   return { deps, seen };
 };
 
-test("a run reads each tracked page, asks once per competitor, and reports one signed market_intel report", async () => {
+test("a run searches once per competitor within its official domains, and reports one signed market_intel report", async () => {
   const { deps, seen } = ports();
   const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
   assert.deepEqual(summary, {
     competitors: 1,
-    pagesRead: 1,
-    pagesRefused: { http_status: 1 },
     calls: 1,
     factsKept: 1,
-    unrepresentable: 1,
+    unrepresentable: 2,
+    dropped: { source_not_retrieved: 1 },
     report: { httpStatus: 200, status: "recorded" },
     stoppedAt: null,
   });
-  assert.deepEqual(seen.pages.sort(), ["https://poe.com/changelog", "https://poe.com/pricing"]);
-  // The page that could not be read is not shown to the model.
+  assert.deepEqual(seen.calls[0].allowedDomains, ["poe.com"]);
   const data = JSON.parse(seen.calls[0].messages[1].content);
-  assert.deepEqual(data.pages.map((page) => page.url), ["https://poe.com/pricing"]);
+  assert.deepEqual(data.competitor, { id: "poe", name: "Poe", officialDomains: ["poe.com"] });
   const report = marketingGeneratorReportSchema.parse(seen.reports[0]);
   assert.equal(report.kind, "market_intel");
   assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
   assert.deepEqual(report.payload.facts.map((row) => [row.competitorId, row.sourceUrl]), [["poe", "https://poe.com/pricing"]]);
-  assert.equal(report.payload.unrepresentableFactCount, 1);
+  assert.equal(report.payload.unrepresentableFactCount, 2);
 });
 
-test("nothing is asked or reported when no competitor has a tracked page", async () => {
-  for (const tracked of [[], [{ ...poe, trackedPages: [] }]]) {
+test("nothing is asked or reported when no approved competitor has an official host", async () => {
+  for (const tracked of [[], [{ ...poe, officialHosts: [] }]]) {
     const { deps, seen } = ports({ readContext: async () => context(tracked) });
     const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
     assert.equal(summary.calls, 0);
@@ -125,7 +125,7 @@ test("a run that cannot finish a competitor before its deadline stops before sta
   const tight = new Date(NOW + MARKETING_A3_COMPETITOR_BUDGET_MS - 1).toISOString();
   const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: tight }, deps);
   assert.deepEqual(summary.stoppedAt, { stage: "deadline", detail: "deadline_too_close" });
-  assert.equal(seen.pages.length, 0);
+  assert.equal(seen.calls.length, 0);
   assert.equal(seen.reports.length, 0);
 });
 
@@ -160,7 +160,7 @@ test("a lost or 5xx answer resends the same signed report; a 4xx does not", asyn
   assert.deepEqual(unknown.stoppedAt, { stage: "submit", detail: "outcome_unknown" });
 });
 
-test("an unreadable context stops before any page is read", async () => {
+test("an unreadable context stops before anything is asked", async () => {
   for (const readContext of [
     async () => {
       throw new Error("http 500");
@@ -171,7 +171,7 @@ test("an unreadable context stops before any page is read", async () => {
     const { deps, seen } = ports({ readContext });
     const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
     assert.equal(summary.stoppedAt?.stage, "context");
-    assert.equal(seen.pages.length, 0);
+    assert.equal(seen.calls.length, 0);
   }
 });
 
@@ -186,18 +186,6 @@ test("a call that throws is an unknown outcome: the run stops and reports nothin
   assert.equal(seen.reports.length, 0);
 });
 
-test("a page read cut off by the deadline is a read that did not happen", async () => {
-  const { deps } = ports({
-    fetchPage: async () => {
-      throw new DOMException("aborted", "AbortError");
-    },
-  });
-  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
-  assert.deepEqual(summary.pagesRefused, { timeout: 2 });
-  assert.equal(summary.calls, 0);
-  assert.equal(summary.stoppedAt, null);
-});
-
 test("with too little time left the report is not sent, which is a deadline and not a failure", async () => {
   let clock = NOW;
   const { deps, seen } = ports({
@@ -210,6 +198,7 @@ test("with too little time left the report is not sent, which is a deadline and 
         callId: "c",
         requestKey,
         content: JSON.stringify({ facts: [fact("https://poe.com/pricing")], unrepresentable: 0 }),
+        citations: CITED,
         ledgerState: "settled",
       };
     },
@@ -230,16 +219,15 @@ test("a report never exceeds the route's byte limit; the facts that do not fit a
     competitorId: `c${index}`,
     displayName: `C${index}`,
     officialHosts: ["poe.com"],
-    trackedPages: [longUrl],
   }));
   const { deps, seen } = ports({
     readContext: async () => context(competitorsList),
-    fetchPage: async (url) => ({ ok: true, page: { url, text: "numbers" } }),
     callLlm: async (messages, requestKey) => ({
       status: "answered",
       callId: "c",
       requestKey,
       content: JSON.stringify({ facts: many, unrepresentable: 0 }),
+      citations: [longUrl],
       ledgerState: "settled",
     }),
   });

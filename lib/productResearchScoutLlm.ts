@@ -1,7 +1,7 @@
 /**
  * One LLM call per scout subject: the screenshots and signals of one page,
  * generated file or the catalogue in, up to five improvement suggestions out.
- * The same shape as the support-triage model step: build
+ * The same shape as the support-triage step (lib/supportTriageLlm.ts): build
  * the prompt, call once, validate the answer.
  *
  * The model is the one an owner chose in Admin (lib/productResearchScoutSettings.ts);

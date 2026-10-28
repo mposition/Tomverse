@@ -43,7 +43,7 @@ import { AmuxV4TaskCatalogApprovalError,
 import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
-import { classifyAmuxExecutionPath,
+import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
@@ -1409,9 +1409,10 @@ export async function settleAmuxV22TaskExecution(input: {
         input.outcome !== "blocked" ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
           input.changedPaths, patch?.files ?? null) : "pass";
-      const reviewRequired = gradeGuard &&
-        settlementAssignment?.role === "implement" &&
-        input.outcome === "succeeded" && pathDecision === "pass";
+      const reviewRequired = amuxV52ReviewRequired({ gradeGuard,
+        role: settlementAssignment?.role, outcome: input.outcome,
+        pathDecision, patchPresent: patch !== null,
+        changedPaths: input.changedPaths });
       const reviewRecord = reviewRequired ?
         await tx.amuxV52ReviewRecord.findUnique({
           where: { attemptId: attempt.id },
@@ -1421,7 +1422,7 @@ export async function settleAmuxV22TaskExecution(input: {
         }) : null;
       if (reviewRequired && (!reviewRecord?.auditLog.entryHash ||
           !patch || reviewRecord.baseSha !== patch.baseSha ||
-          reviewRecord.authorVendor !== settlementAssignment.provider ||
+          reviewRecord.authorVendor !== settlementAssignment?.provider ||
           !["accept", "reject", "unknown"].includes(reviewRecord.verdict)))
         return { settled: false as const, reason: "review_unverified" as const };
       const priorReviewRejections = reviewRecord ?
@@ -1541,7 +1542,7 @@ export async function settleAmuxV22TaskExecution(input: {
           bodyPurgedAt: true },
       });
       if (!v22SettlementPatchMatches({ taskId: task.id,
-        readPatch: patch, storedPatch }))
+        outcome: input.outcome, readPatch: patch, storedPatch }))
         return { settled: false as const,
           reason: "publication_state_changed" as const };
       let escalationReceipt: Awaited<ReturnType<

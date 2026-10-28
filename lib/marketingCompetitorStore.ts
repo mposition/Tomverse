@@ -44,31 +44,28 @@ export async function readApprovedMarketingCompetitorHosts(
 }
 
 /**
- * The approved hosts and tracked pages as a fact filter inside a writing
- * transaction uses them, each approved row held FOR SHARE until the
- * transaction ends: a retirement, a host change or a page withdrawn waits for
- * the facts read against the old sources to commit, rather than landing
- * between the read and the write (READ COMMITTED reads each statement afresh,
- * so a plain read would not hold). Facts come only from the pages a person
- * approved (docs/policy/marketing-automation.md §4.1), so both are returned.
+ * The approved hosts as a fact filter inside a writing transaction uses them,
+ * each approved row held FOR SHARE until the transaction ends: a retirement or
+ * a host change waits for the facts read against the old hosts to commit,
+ * rather than landing between the read and the write (READ COMMITTED reads
+ * each statement afresh, so a plain read would not hold). A3 finds pages by a
+ * web search limited to these hosts (operator direction 2026-10-19), so a fact
+ * counts from any page on them.
  *
  * Only rows approved when it reads are held. A competitor approved after that
  * is not, on purpose: this record kept nothing from its hosts, and the next
  * report reads it.
  */
-export async function holdApprovedMarketingCompetitorSources(
+export async function holdApprovedMarketingCompetitorHosts(
   tx: MarketingTransaction,
-): Promise<{ readonly hosts: MarketingCompetitorSourceHosts; readonly pages: MarketingCompetitorSourceHosts }> {
-  const rows = await tx.$queryRaw<Array<{ id: string; officialHosts: string[]; trackedPages: string[] }>>(Prisma.sql`
-    SELECT "id", "officialHosts", "trackedPages" FROM "MarketingCompetitor"
+): Promise<MarketingCompetitorSourceHosts> {
+  const rows = await tx.$queryRaw<Array<{ id: string; officialHosts: string[] }>>(Prisma.sql`
+    SELECT "id", "officialHosts" FROM "MarketingCompetitor"
      WHERE "status" = 'approved'
      ORDER BY "id"
        FOR SHARE
   `);
-  return Object.freeze({
-    hosts: Object.freeze(Object.fromEntries(rows.map((row) => [row.id, Object.freeze([...row.officialHosts])]))),
-    pages: Object.freeze(Object.fromEntries(rows.map((row) => [row.id, Object.freeze([...row.trackedPages])]))),
-  });
+  return Object.freeze(Object.fromEntries(rows.map((row) => [row.id, Object.freeze([...row.officialHosts])])));
 }
 
 /** The approved competitors as the generator may see them: who to track, and where. */

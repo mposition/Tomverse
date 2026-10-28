@@ -154,13 +154,14 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
     pricedBy: "marketing-llm-price-pins",
     sends: ["service_tier: MARKETING_LLM_SERVICE_TIER,"],
     reason:
-      "The marketing generator's adapter sends the ledger's tier (`default`) in its one provider request, as S3 plan §2's request allowlist requires; the call is priced by the person-set price pin's worst rate across tiers, never by lib/modelPricing.ts, and the reservation's config snapshot records the tier so a call served at another one is kept at its reservation. The other lines read the served tier off the response and pass it to the ledger.",
+      "The marketing generator's adapter sends the ledger's tier (`default`) in each provider request it builds (chat completions, and the Responses web-search request for A3), as S3 plan §2's request allowlist requires; the call is priced by the person-set price pin's worst rate across tiers, never by lib/modelPricing.ts, and the reservation's config snapshot records the tier so a call served at another one is kept at its reservation. The other lines read the served tier off the response and pass it to the ledger.",
     mentions: [
       "service_tier: MARKETING_LLM_SERVICE_TIER,",
       "readonly serviceTier: string;",
       "service_tier?: unknown;",
       "typeof root.service_tier !== \"string\" ||",
-      "return { content, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };",
+      "return { content, citations: [], model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };",
+      "return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };",
       "reportedServiceTier: answer.serviceTier,",
     ],
   },
