@@ -18,7 +18,7 @@ const importedPage = (offset: number, ids: string[]) => ({
 const rows = [
   { id: 'ordinary', title: 'Ordinary chat', surface: 'chat', kind: 'chat', selectedModels: ['demo'], messages: [] },
   {
-    id: 'chat-continuation', title: 'Imported trip plan', surface: 'continuation', productKey: 'chat', kind: 'chat',
+    id: 'chat-continuation', title: 'Continued from an imported chat', sourceTitle: 'Imported trip plan', sourceState: 'available', surface: 'continuation', productKey: 'chat', kind: 'chat',
     selectedModels: ['demo'], selectionMode: 'auto', autoSelection: { offered: true }, messages: [],
     imported: importedPage(2, ['ext-2', 'ext-3']), importedPages: { '0': importedPage(0, ['ext-0', 'ext-1']) },
   },
@@ -50,6 +50,10 @@ test('a Chat continuation is listed with Chat and opens with its original above 
   await expect(page.locator('.conversation-row')).toHaveCount(3);
   await expect(page.locator('.conversation-row', { hasText: 'Imported trip plan' })).toBeVisible();
   await expect(page.locator('.conversation-row', { hasText: 'Imported comparison' })).toHaveCount(0);
+  await expect(page.locator('.history-more[aria-label$="Imported trip plan"]')).toBeVisible();
+  await page.getByPlaceholder('대화 검색').fill('Imported trip');
+  await expect(page.locator('.conversation-row')).toHaveCount(1);
+  await page.getByPlaceholder('대화 검색').fill('');
 
   await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
   await expect(page.getByTestId('continuation-provenance')).toContainText('ChatGPT에서 가져온 대화');

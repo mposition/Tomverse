@@ -48,6 +48,7 @@ public class MobileAuthPlugin extends Plugin {
     private volatile boolean browserActive;
     private final AtomicLong signInGeneration = new AtomicLong();
     private long pendingGeneration;
+    private int browserVerificationRetries;
     private BiometricPrompt devicePrompt;
     private long devicePromptGeneration;
     private boolean cancelledRevocationUnconfirmed;
@@ -198,6 +199,7 @@ public class MobileAuthPlugin extends Plugin {
     @PluginMethod public void signIn(PluginCall call) {
         if (browserActive) { call.reject("Close the previous sign-in window first", "LOGIN_IN_PROGRESS"); return; }
         long generation = nextSignIn();
+        browserVerificationRetries = 0;
         queue.execute(() -> {
             try {
                 if (!request("/api/auth/mobile/email", null, null).optBoolean("browserSignIn")) throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE");
@@ -220,7 +222,8 @@ public class MobileAuthPlugin extends Plugin {
                 tab.intent.setPackage(browser);
                 browserActive = true;
                 tab.launch(browserLauncher, url, Uri.parse(origin).getHost(), "/auth/mobile/callback");
-                main.postDelayed(() -> { if (pendingLogin == call) { pendingLogin = null; verifier = null; state = null; call.reject("Sign-in expired", "LOGIN_EXPIRED"); } }, 180000);
+                String launchedState = state;
+                main.postDelayed(() -> { if (pendingLogin == call && launchedState.equals(state)) { pendingLogin = null; verifier = null; state = null; call.reject("Sign-in expired", "LOGIN_EXPIRED"); } }, 180000);
             } catch (Exception e) { browserActive = false; pendingLogin = null; verifier = null; state = null; call.reject("Could not open sign-in", "LOGIN_UNAVAILABLE"); }
         });
     }
@@ -234,6 +237,18 @@ public class MobileAuthPlugin extends Plugin {
         if (!browserActive) return;
         browserActive = false;
         if (pendingLogin == null) return;
+        // A cold browser can finish web login before its HTTPS association
+        // check completes. Retry once with fresh PKCE; never accept a failed
+        // verification or reuse the first tab's grant.
+        if ((result.resultCode == AuthTabIntent.RESULT_VERIFICATION_FAILED || result.resultCode == AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT)
+            && browserVerificationRetries == 0 && currentSignIn(pendingGeneration)) {
+            browserVerificationRetries++;
+            PluginCall call = pendingLogin;
+            long generation = pendingGeneration;
+            pendingLogin = null; verifier = null; state = null;
+            openBrowser(call, generation);
+            return;
+        }
         if (result.resultCode != AuthTabIntent.RESULT_OK || result.resultUri == null) {
             rejectBrowserSignIn(result.resultCode == AuthTabIntent.RESULT_CANCELED ? "LOGIN_CANCELLED" : "LOGIN_VERIFICATION_FAILED");
             return;
