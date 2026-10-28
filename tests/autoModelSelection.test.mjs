@@ -3,6 +3,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { autoLlmRouterCandidates, parseAutoLlmRouterOutput } from "../lib/autoLlmRouterCore.ts";
 import {
   applyLlmModelPick,
   selectAutoModel,
@@ -119,6 +120,46 @@ test("file-capable fallback preserves an unchanged exploration choice and sticky
     assert.equal(routed.record[field], selection.record[field], field);
   }
   assert.deepEqual(routed.fallbackCandidateModelIds, []);
+});
+
+test("an unsupported raw file pick preserves a capable primary instead of fabricating a cheaper LLM choice", () => {
+  const ids = ["deepseek-v4-flash", "gpt-5-6-luna", "claude-haiku-4-5"];
+  const candidates = autoLlmRouterCandidates(ids, AVAILABLE_MODELS,
+    { "deepseek-v4-flash": 1, "gpt-5-6-luna": 3, "claude-haiku-4-5": 2 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false });
+  const pick = parseAutoLlmRouterOutput({ modelId: ids[0], reason: "Deliver a file.", requiresFileGeneration: true }, candidates);
+  assert.equal(pick.modelId, ids[0]);
+  assert.equal(pick.reason, "Deliver a file.");
+  const capable = candidates.filter(c => c.canCreateFiles).map(c => c.id);
+  assert.deepEqual(capable, ids.slice(1));
+  for (const primary of capable) {
+    const original = selectAutoModel(input());
+    const selection = { ...original, modelId: primary,
+      sticky: { modelId: primary, turnsFavouringChallenger: 2 }, stickyMemoryModelId: primary,
+      fallbackCandidateModelIds: ids.filter(id => id !== primary),
+      record: { ...original.record, selectedModelId: primary, eligibleModelIds: ids,
+        allocationMode: "explore_bounded", allocationSeedGrain: "session" } };
+    const routed = applyLlmModelPick(selection, pick.modelId,
+      { required: pick.requiresFileGeneration, capableModelIds: capable });
+    assert.equal(routed.modelId, primary);
+    assert.deepEqual(routed.sticky, selection.sticky);
+    assert.equal(routed.stickyMemoryModelId, primary);
+    for (const field of ["selectionReason", "selectionDecidedBy", "allocationMode", "allocationSeedGrain"]) {
+      assert.equal(routed.record[field], selection.record[field], field);
+    }
+    assert.ok(routed.fallbackCandidateModelIds.every(id => capable.includes(id)));
+  }
+});
+
+test("file enforcement considers all eligible candidates even when a capable model is absent from ranked fallbacks", () => {
+  const original = selectAutoModel(input());
+  const selection = { ...original, modelId: "deepseek-v4-flash", fallbackCandidateModelIds: [],
+    record: { ...original.record, eligibleModelIds: ["deepseek-v4-flash", "gpt-5-6-luna"] } };
+  const routed = applyLlmModelPick(selection, "deepseek-v4-flash",
+    { required: true, capableModelIds: ["gpt-5-6-luna", "foreign"] });
+  assert.equal(routed.modelId, "gpt-5-6-luna");
+  assert.equal(routed.record.selectionReason, "fallback_order");
+  assert.deepEqual(routed.record.eligibleModelIds, ["gpt-5-6-luna"]);
 });
 
 test("an Auto conversation in an open cohort is routed by the Router", () => {

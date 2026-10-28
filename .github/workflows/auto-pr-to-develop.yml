@@ -140,10 +140,11 @@ jobs:
             exit 0
           fi
           if ! gh pr create \
+            --draft \
             --head "$BRANCH" \
             --base develop \
             --title "$BRANCH -> develop" \
-            --body "Auto-created by the Auto PR to Develop workflow. Auto-merge is not armed: green PRs are merged one Railway deployment at a time by the operator-run merge train (npm run merge-train)."; then
+            --body "Auto-created by the Auto PR to Develop workflow, as a draft: pull-request CI runs nothing on a draft. Mark it ready (gh pr ready <number>) when the branch is complete; that starts CI once. Auto-merge is not armed: green, non-draft PRs are merged one Railway deployment at a time by the operator-run merge train (npm run merge-train)."; then
             echo "::error::gh pr create failed for $BRANCH -> develop."
             exit 1
           fi

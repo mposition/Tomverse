@@ -1,0 +1,19 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-development-readback-v1",
+  "requirement": "Under approved CHAT-01 one-shot policy v2, add an owner-only, read-only diagnostic endpoint that composes the existing development source, Railway deployment, and registry price readbacks without accepting holdout content, issuing provider calls, creating stage/run authority, or allowing dispatch. Codex authors; Claude Code Max first-party subscription CLI independently reviews. Do not use Anthropic API.",
+  "completionCriteria": [
+    "Only a recently reauthenticated owner can GET the route, which is rate-limited and no-store.",
+    "The app reads development source from its own checkout, observes exact Railway deployment, and locks/reads pinned registry price in a short app transaction; failures stay content-free and closed.",
+    "Even when all three reads match, the response explicitly says final closure, reservation, stage, run, and dispatch remain false.",
+    "Focused synthetic and server-contract route tests, typecheck, lint and staged whitespace checks pass; Claude review reports zero findings."
+  ],
+  "baseCommit": "d780f82e528a14ce9e99346d534291d51db400d0",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-development-readback-v1.task.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotDevelopmentReadback.ts",
+    "app/api/admin/prompt-refiner/vnext-development-readback/route.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotDevelopmentReadback.test.mjs",
+    "tests/server-contract/admin-prompt-refiner-vnext-development-readback-route.test.ts"
+  ],
+  "generatedPaths": []
+}

@@ -406,7 +406,10 @@ export const applyLlmModelPick = (
   files?: { required: boolean; capableModelIds: readonly string[] }
 ): AutoSelection => {
   if (!selection.routed) return selection;
-  const ranked = [selection.modelId, ...selection.fallbackCandidateModelIds];
+  const ranked = [...new Set([
+    selection.modelId, ...selection.fallbackCandidateModelIds,
+    ...(files?.required ? selection.record.eligibleModelIds : []),
+  ])];
   const eligible = files?.required
     ? selection.record.eligibleModelIds.filter(id => files.capableModelIds.includes(id))
     : selection.record.eligibleModelIds;

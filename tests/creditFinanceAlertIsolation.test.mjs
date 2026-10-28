@@ -45,9 +45,11 @@ function jobSource(jobId) {
 }
 
 test("the lanes that run the checked-out tree reference no secret", () => {
-    const lanes = jobSource("credit-finance-db");
-    assert.doesNotMatch(lanes, /secrets\./);
-    assert.doesNotMatch(lanes, /notify-release-lane-failure/);
+    for (const jobId of ["credit-finance-db", "credit-finance-db-postgres16"]) {
+        const lanes = jobSource(jobId);
+        assert.doesNotMatch(lanes, /secrets\./, jobId);
+        assert.doesNotMatch(lanes, /notify-release-lane-failure/, jobId);
+    }
 });
 
 test("the token the checked-out tree runs with can only read", () => {
@@ -70,11 +72,14 @@ test("no job other than the alert job references a secret", () => {
     }
 });
 
-test("the alert job takes only the matrix result and never runs the tree under test", () => {
+test("the alert job takes only the lane results and never runs the tree under test", () => {
     const job = workflow.jobs["report-red-lane"];
     assert.ok(job, "report-red-lane job is missing");
-    assert.equal(job.needs, "credit-finance-db");
-    assert.match(job.if, /needs\.credit-finance-db\.result == 'failure'/);
+    // Both jobs that run the tree under test: the PostgreSQL 16 job going red
+    // on its own must still raise the release-lane alert.
+    assert.deepEqual(job.needs, ["credit-finance-db", "credit-finance-db-postgres16"]);
+    // Fires when either needed job failed: needs.*.result covers both above.
+    assert.match(job.if, /contains\(join\(needs\.\*\.result, ','\), 'failure'\)/);
     assert.match(job.if, /github\.event_name != 'pull_request'/);
     assert.match(job.if, /^always\(\) && /);
     assert.deepEqual(job.permissions, { contents: "read" });

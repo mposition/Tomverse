@@ -9,12 +9,11 @@
 // computes it from what it stored. A submitter that sent its own digest would
 // be attesting to its own payload, which attests to nothing.
 
-import { createHash } from "node:crypto";
-
 import {
   OBSERVATION_FAILURE_STAGES,
   OBSERVATION_ROW_LIMIT,
   OBSERVATION_SCHEMA_VERSION,
+  observationPayloadDigest,
   validateObservationPayload,
 } from "./productResearchObservationCore.mjs";
 import { detectSecrets } from "./engineeringAgentSecretPatterns";
@@ -78,27 +77,12 @@ const refuse = (code: string, detail: string | null = null): SubmissionDecision 
   detail,
 });
 
+// Re-exported rather than redefined: the runner imports it from the core, and
+// one digest is the whole point of comparing them.
+export { observationPayloadDigest };
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** sha256 of the payload, serialised with its object keys in sorted order. */
-export const observationPayloadDigest = (payload: unknown): string => {
-  // Canonical, so the same observation submitted twice digests the same whatever
-  // order the runner happened to build its objects in. Arrays keep their order,
-  // because the row order is part of what was observed.
-  const canonical = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(canonical);
-    if (isPlainObject(value)) {
-      return Object.fromEntries(
-        Object.keys(value)
-          .sort()
-          .map((key) => [key, canonical(value[key])])
-      );
-    }
-    return value;
-  };
-  return createHash("sha256").update(JSON.stringify(canonical(payload)), "utf8").digest("hex");
-};
 
 /**
  * Whether this body may become a row, and what the row would be.

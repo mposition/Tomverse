@@ -4,6 +4,7 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminPrivacyRequestsPanel } from "@/components/admin/AdminPrivacyRequestsPanel";
 import { AutoFixReviewPanel } from "@/components/admin/AutoFixReviewPanel";
 import { FeedbackInboxPanel } from "@/components/admin/FeedbackInboxPanel";
+import { SupportTriageModelPanel } from "@/components/admin/SupportTriageModelPanel";
 import {
   ADMIN_READ_LIMITS,
   loadAutoFixReviewRows,
@@ -46,12 +47,15 @@ export default async function AdminSupportPage({
           configurationProblems={promotionConfigurationProblems()}
         />
       ) : (
+        <>
+        <SupportTriageModelPanel />
         <FeedbackInboxPanel
           rows={await loadFeedbackRows({
             includeId: typeof query.q === "string" ? query.q.trim() || undefined : undefined,
           })}
           rowLimit={ADMIN_READ_LIMITS.feedback}
         />
+        </>
       )}
     </div>
   );

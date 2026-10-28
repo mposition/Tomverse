@@ -62,6 +62,11 @@ export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-contr
 /** Policy v42: records only content-free, exact FIRST model-access evidence. */
 export const AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR = "amux-v22-api-model-access" as const;
 
+/** Provider-free CHAT-01 optimizer metadata only. The scoped actions below
+ * cannot authorize a paid call, external dispatch or candidate promotion
+ * (docs/policy/chat-unified-router-refiner-v1.md §§7, 12). */
+export const CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR =
+  "chat-unified-optimizer" as const;
 /** The Auto router guidance optimizer (lib/autoRouterOptimizer.ts) when the
  * owner has turned on its daily cycle or automatic promotion. */
 export const AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR = "auto-router-optimizer" as const;
@@ -85,6 +90,19 @@ export const ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS = [
 export type EngineeringAgentSystemAuditActor =
   (typeof ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS)[number];
 
+/**
+ * The product-research agent's actors
+ * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
+ * recorded, and rows removed once past the retention period. Neither is a
+ * person, so neither is approval evidence -- and this agent has nothing to
+ * approve, because it decides nothing.
+ */
+export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
+  "product-research-observer",
+  "product-research-retention",
+] as const;
+export type ProductResearchSystemAuditActor =
+  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
 /** AMUX intake policy v12 (approved by mposition, 2026-10-01): the v4 actor
  * has an explicit action/target scope per writer, not general audit authority. */
 export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
@@ -223,19 +241,6 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
   "amux-intake-retention",
   "amux-portfolio-scorer",
 ] as const;
-/**
- * The product-research agent's actors
- * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
- * recorded, and rows removed once past the retention period. Neither is a
- * person, so neither is approval evidence -- and this agent has nothing to
- * approve, because it decides nothing.
- */
-export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
-  "product-research-observer",
-  "product-research-retention",
-] as const;
-export type ProductResearchSystemAuditActor =
-  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
 
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
@@ -254,16 +259,14 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
+  CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  "qa-release-intake",
-  "qa-release-merge-lane",
-  "agent-digest-retention",
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "model-catalog-renewal",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -448,6 +451,13 @@ export const systemAuditActionAllowed = (
      // 2026-10-20, on the one settings row they live in.
      ((action === "auto.llm_router_tunable.applied" || action === "auto.llm_router_tunable.reverted") &&
       targetType === "AppSettings")) &&
+  (actor !== CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR ||
+    (action === "chat.unified_optimizer.run_admitted" &&
+      targetType === "ChatUnifiedOptimizerRun") ||
+    ((action === "chat.unified_optimizer.dispatch_intended" ||
+      action === "chat.unified_optimizer.run_terminal" ||
+      action === "chat.unified_optimizer.queued_before_dispatch_terminal") &&
+      targetType === "ChatUnifiedOptimizerRoleJob")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||
@@ -542,6 +552,29 @@ export const auditRowActorKind = (
 };
 
 /**
+ * The support-triage agent's actors (docs/policy/support-triage.md §7): the
+ * worker pass and the retention run, listed in SYSTEM_AUDIT_ACTORS above.
+ * Neither is a person, so neither is approval evidence. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
+  "support-triage-worker",
+  "support-triage-retention",
+  "support-triage-account-deletion",
+] as const satisfies readonly SystemAuditActor[];
+export type SupportTriageSystemAuditActor =
+  (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];
+
+/**
+ * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
+ * state transition, reservation close and retention batch the store writes.
+ * Not a person, so never approval evidence -- a genesis is the owner's own
+ * Admin action and is written with writeAdminAuditLog. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;
+
+/**
  * The AMUX Decision Maker's actors (docs/policy/amux-decision-maker.md §10):
  * the app route that routes a question, and one per DM instance. A DM writes
  * proposals, never approvals, so none of them is a person in any gate (§1).
@@ -555,15 +588,6 @@ export const AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS = [
 ] as const satisfies readonly SystemAuditActor[];
 export type AmuxDecisionMakerSystemAuditActor =
   (typeof AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS)[number];
-
-/**
- * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
- * state transition, reservation close and retention batch the store writes.
- * Not a person, so never approval evidence -- a genesis is the owner's own
- * Admin action and is written with writeAdminAuditLog. Declared at the end of
- * the file, and listed above on an existing line, so no access above moves.
- */
-export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;
 
 /**
  * The marketing generator writes only the LLM cost ledger's five actions, each

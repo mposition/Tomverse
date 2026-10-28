@@ -6,7 +6,8 @@
  * month, the call row -- then answers a replay from what is stored before it
  * reads any current setting, so a pin rotation, an adapter release or the kill
  * switch never changes the answer to a request already recorded. Only a new
- * write reads the deadline, the kill switch, the cap and the pins; the audit
+ * write reads the deadline, the kill switch, the operator's settings (model and
+ * cap, from the Admin Console) and the pins; the audit
  * row is written first and the ledger row names it.
  *
  * Each action expects a transaction of its own. The statement, idle and
@@ -29,20 +30,24 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { MARKETING_RETENTION_SETTING } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
-  MARKETING_LLM_ADAPTER_PROFILE,
+  MARKETING_LLM_ADAPTER_PROFILES,
   MARKETING_LLM_ADAPTER_VERSION,
-  MARKETING_LLM_PRICE_PINS,
   MARKETING_LLM_PROVIDER,
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
   marketingLlmConfigSnapshot,
+  marketingLlmPinAllows,
   marketingLlmConsumerDigest,
   marketingLlmDispatchDigest,
   marketingLlmRequestDigest,
   marketingLlmReservation,
   marketingLlmReservePayloadDigest,
   marketingLlmSettleOutcome,
+  MARKETING_LLM_SETTINGS_KEY,
+  MARKETING_LLM_WEB_SEARCH_PROFILE,
+  MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
   parseMarketingLlmMonthlyCap,
+  parseMarketingLlmSettings,
   resolveMarketingLlmPin,
   type MarketingLlmClose,
   type MarketingLlmConfigSnapshot,
@@ -63,6 +68,28 @@ export const MARKETING_LLM_ACTIONS = {
   released: "marketing_llm.released",
 } as const;
 
+/**
+ * What one ledger row counts against the monthly cap, in micro-USD (operator
+ * decision 2026-10-23: a finished call counts at its cost, not its
+ * reservation). A settled call reported its tokens, so it counts at them and
+ * the pinned worst rates, plus every search its request could be billed for
+ * (the provider does not report searches per call), never more than it
+ * reserved. A released call never reached the provider and counts nothing.
+ * Any other row -- reserved, dispatched, or kept unknown -- may have cost up
+ * to its reservation, so it counts at that.
+ */
+export const MARKETING_LLM_COUNTED_MICRO_USD_SQL = Prisma.sql`CASE "state"
+  WHEN 'released' THEN 0
+  WHEN 'settled' THEN LEAST("reservedMicroUsd", ceil(
+    ("reportedInputTokens"::numeric * ("configSnapshot"->'pin'->>'worstInputMicroUsdPerMillion')::numeric
+     + "reportedOutputTokens"::numeric * ("configSnapshot"->'pin'->>'worstOutputMicroUsdPerMillion')::numeric)
+    / 1000000)
+    + CASE WHEN "configSnapshot"->>'adapterProfile' = ${MARKETING_LLM_WEB_SEARCH_PROFILE}
+        THEN (COALESCE(("configSnapshot"->'pin'->>'maxWebSearchCalls')::numeric, 0) + ${MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE})
+             * COALESCE(("configSnapshot"->'pin'->>'webSearchMicroUsdPerCall')::numeric, 0)
+        ELSE 0 END)
+  ELSE "reservedMicroUsd" END`;
+
 /** The most one ledger transaction may take; the timer is armed to it. */
 export const MARKETING_LLM_TRANSACTION_MS = 10_000;
 const STATEMENT_TIMEOUT_MS = 5_000;
@@ -74,7 +101,11 @@ type Tx = Prisma.TransactionClient;
 export type MarketingLlmBudgetEnvironment = {
   /** `null` when the kill switch cannot be read; that refuses like `true`. */
   readonly killSwitchOn: boolean | null;
-  readonly monthlyCapRaw: string | undefined;
+  /**
+   * The catalog's pins, read by the caller before its transaction: the
+   * catalog read takes another connection and may seed the registry, so it
+   * never runs while this one holds the audit chain lock. None, none pinned.
+   */
   readonly pins?: readonly MarketingLlmPricePin[];
   readonly adapterVersion?: string;
 };
@@ -85,6 +116,7 @@ export type MarketingLlmRefusal =
   | "deadline_too_close"
   | "kill_switch"
   | "cap_unreadable"
+  | "model_not_selected"
   | "model_not_pinned"
   | "pin_expired"
   | "adapter_profile_unknown"
@@ -187,24 +219,35 @@ export async function reserveMarketingLlmCall(
 
   if (bounds.late) return refused("deadline_too_close");
   if (env.killSwitchOn !== false) return refused("kill_switch");
-  if (input.payload.adapterProfile !== MARKETING_LLM_ADAPTER_PROFILE) return refused("adapter_profile_unknown");
-  const cap = parseMarketingLlmMonthlyCap(env.monthlyCapRaw);
-  if (cap === null) return refused("cap_unreadable");
+  const profile = MARKETING_LLM_ADAPTER_PROFILES.find((known) => known === input.payload.adapterProfile);
+  if (profile === undefined) return refused("adapter_profile_unknown");
+  // The operator's settings, read after the audit chain lock that every
+  // settings change also takes, so a reservation sees a change either wholly
+  // before it or wholly after. Only the selected model may spend.
+  const stored = await tx.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+    SELECT "value" FROM "AppSetting" WHERE "key" = ${MARKETING_LLM_SETTINGS_KEY}
+  `);
+  const settings = parseMarketingLlmSettings(stored[0]?.value);
+  const cap = parseMarketingLlmMonthlyCap(settings?.monthlyUsdCap ?? undefined);
+  if (settings === null || cap === null) return refused("cap_unreadable");
+  if (settings.model !== input.payload.model) return refused("model_not_selected");
   const pin = resolveMarketingLlmPin(
-    env.pins ?? MARKETING_LLM_PRICE_PINS,
+    env.pins ?? [],
     input.payload.model,
     new Date(`${reserveAt}Z`),
   );
   if (!pin.ok) return refused(pin.code);
+  // A web-search call needs a pin that prices its searches and caps them.
+  if (!marketingLlmPinAllows(pin.pin, profile)) return refused("adapter_profile_unknown");
 
-  const reservation = marketingLlmReservation(pin.pin);
-  // The month's committed sum, and -- the last reading of the database clock
+  const reservation = marketingLlmReservation(pin.pin, profile);
+  // The month's counted sum, and -- the last reading of the database clock
   // before the audit row -- whether the deadline has passed.
   const sum = await tx.$queryRaw<Array<{ total: bigint; inTime: boolean }>>(Prisma.sql`
-    SELECT COALESCE(SUM("reservedMicroUsd"), 0)::bigint AS "total",
+    SELECT COALESCE(SUM(${MARKETING_LLM_COUNTED_MICRO_USD_SQL}), 0)::bigint AS "total",
            clock_timestamp() < ${input.deadlineAt}::timestamptz AS "inTime"
     FROM "MarketingLlmCall"
-    WHERE "monthStart" = (${monthKey} || '-01')::date::timestamp AND "state" <> 'released'
+    WHERE "monthStart" = (${monthKey} || '-01')::date::timestamp
   `);
   if (Number(sum[0]?.total ?? 0) + reservation.reservedMicroUsd > cap) return refused("budget_exhausted");
   if (sum[0]?.inTime !== true) return refused("deadline_too_close");
@@ -212,6 +255,7 @@ export async function reserveMarketingLlmCall(
   const configSnapshot = marketingLlmConfigSnapshot({
     pin: pin.pin,
     adapterVersion: env.adapterVersion ?? MARKETING_LLM_ADAPTER_VERSION,
+    adapterProfile: profile,
   });
   const requestDigest = marketingLlmRequestDigest({ reservePayloadDigest: payloadDigest, configSnapshot });
   const callId = newCallId();

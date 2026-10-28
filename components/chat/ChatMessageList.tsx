@@ -42,7 +42,8 @@ import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
-import { getImageModel, imageModelOwner } from "@/lib/imageModelRegistry";
+import { imageModelOwner } from "@/lib/imageModelRegistry";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
@@ -438,6 +439,7 @@ export function ChatMessageList({
   importedTranscript,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS, getModel } = useModelCatalog();
+  const { getModel: getImageModel } = useImageModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);

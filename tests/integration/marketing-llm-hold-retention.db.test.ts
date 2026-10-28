@@ -16,6 +16,7 @@ import {
 } from "@/lib/marketingLlmBudgetStore";
 import { runMarketingRetention } from "@/lib/marketingRetention";
 import { prisma } from "@/lib/prisma";
+import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
 
 // Legal hold and retention for the LLM cost ledger (S3c3c), against a real
@@ -30,9 +31,13 @@ before(() => {
 });
 const reset = () =>
   resetTestFixture(prisma, `TRUNCATE TABLE "MarketingLlmCall", "AdminAuditLog" RESTART IDENTITY CASCADE`);
-beforeEach(reset);
+beforeEach(async () => {
+  await reset();
+  await setMarketingLlmSettings(prisma, PIN.model, "1");
+});
 after(async () => {
   await reset();
+  await clearMarketingLlmSettings(prisma);
   await prisma.$disconnect();
   if (previousAuditKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
   else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousAuditKey;
@@ -60,7 +65,7 @@ const PIN: MarketingLlmPricePin = {
   expiresAt: new Date(verifiedAt + 90 * day).toISOString(),
   source: "https://example.invalid/pricing",
 };
-const OPEN: MarketingLlmBudgetEnvironment = { killSwitchOn: false, monthlyCapRaw: "1", pins: [PIN] };
+const OPEN: MarketingLlmBudgetEnvironment = { killSwitchOn: false, pins: [PIN] };
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const deadline = () => new Date(Date.now() + 60_000);
 const tx = <T>(fn: (client: Prisma.TransactionClient) => Promise<T>) => prisma.$transaction(fn);

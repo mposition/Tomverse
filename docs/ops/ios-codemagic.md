@@ -220,6 +220,35 @@ stored outside this checkout; it is not a Codemagic signing credential. The
 public Apple SDK key has been obtained, but the workflow does not yet inject it
 or enable the billing build flag.
 
+## Android 1.0.16 (17) parity (2026-10-28)
+
+The delivered Android release identifies `4cc180126` as its native source.
+All 70 tracked files under `apps/mobile/src` match the current iOS source from
+develop `85aca533b`; their shared Git tree is
+`d098f09df2e4a89ad3fdc6547f4af9b73e7483c4`. The continuation title context and
+translations also match. These changes are already merged in main, but the
+previously uploaded iOS 1.0 (3), built from `32677a04c`, predates them.
+
+The refreshed iOS bundle includes original continuation titles in history,
+search and accessible action names, and the shared read-only source endpoint
+fix that prevents reopening an imported conversation from losing the session.
+Marketing version is now 1.0.16; Codemagic assigns its own increasing build
+number independently of Android's 17.
+
+Android's one-time HTTPS Auth Tab verification retry is platform-specific.
+iOS continues to use ASWebAuthenticationSession with the claimed HTTPS callback;
+it does not accept failed verification or copy Android result codes. Android's
+store-review credential exception remains Android-only. Ordinary iOS sign-in
+and the existing Apple purchase activation requirements are unchanged.
+
+Local validation passed 20 title/transport/continuation tests, 14 iOS preparation
+tests, 7 Codemagic tests, 21 WebKit continuation/login tests and 6 responsive
+design cases across iPhone and iPad 7th generation portrait/landscape. The
+continuation case now leaves history and reopens the original again. Production
+bundle preparation, iOS sync and the unsigned build dry run passed. These checks
+do not establish a new signed upload or resolution of the earlier installation
+failure; record the cloud build and actual device result separately.
+
 ## Local verification
 
 Machine: local Windows PC. Shell: PowerShell. Directory: repository root.

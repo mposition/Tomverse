@@ -1298,6 +1298,138 @@ model PromptRefinerProductAttempt {
   @@index([state, createdAt])
 }
 
+/// One provider-free optimizer validation cycle. This metadata ledger grants
+/// no paid execution, external dispatch, promotion or product-runtime authority.
+model ChatUnifiedOptimizerCycle {
+  id                         String    @id @db.Uuid
+  ledgerVersion              String
+  policyVersion              Int
+  purpose                    String
+  registrationRequestId      String    @unique @db.Uuid
+  registrationDigest         String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  promotionAuthorized        Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  candidate ChatUnifiedOptimizerCandidate?
+  runs      ChatUnifiedOptimizerRun[]
+  evidence  ChatUnifiedOptimizerEvidence[]
+
+  @@index([state, createdAt])
+}
+
+/// Frozen candidate identity only. Candidate source, examples and hidden
+/// evaluation material never enter this table.
+model ChatUnifiedOptimizerCandidate {
+  id                   String   @id @db.Uuid
+  cycleId              String   @unique @db.Uuid
+  candidateVersion     String
+  bundleVersion        String
+  candidateDigest      String
+  bundleDigest         String   @unique
+  controlsDigest       String
+  schemaVersion        String
+  promptVersion        String
+  stageCandidateDigest String
+  adapterConfigDigest  String
+  pricePinDigest       String
+  sourceCommitSha      String
+  sourceRepositoryId   BigInt?
+  sourceBlobSha        String?
+  sourceSha256         String?
+  runtimeAuthorized    Boolean  @default(false)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  cycle    ChatUnifiedOptimizerCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence ChatUnifiedOptimizerEvidence[]
+
+  @@index([candidateDigest])
+}
+
+/// The first provider-free validation run in a cycle. Three independent paid
+/// evaluation runs remain a later admission contract; this row does not waive it.
+model ChatUnifiedOptimizerRun {
+  id                         String    @id @db.Uuid
+  cycleId                    String    @db.Uuid
+  ordinal                    Int
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  admissionAuditLogId        String    @unique
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  cycle          ChatUnifiedOptimizerCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  admissionAudit AdminAuditLog                  @relation("ChatUnifiedOptimizerRunAdmissionAudit", fields: [admissionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  jobs           ChatUnifiedOptimizerRoleJob[]
+  evidence       ChatUnifiedOptimizerEvidence[]
+
+  @@unique([cycleId, ordinal])
+  @@index([state, createdAt])
+}
+
+/// One closed optimizer role job. A claim is single-use and carries no vendor
+/// or paid-dispatch authority. There is no lease/requeue transition in v1.
+model ChatUnifiedOptimizerRoleJob {
+  id                         String    @id @db.Uuid
+  runId                      String    @db.Uuid
+  role                       String
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  claimRequestId             String?   @unique @db.Uuid
+  claimRequestDigest         String?
+  claimToken                 String?   @unique @db.Uuid
+  claimAuditLogId            String?   @unique
+  claimedAt                  DateTime? @db.Timestamptz(3)
+  terminalRequestId          String?   @unique @db.Uuid
+  terminalRequestDigest      String?
+  terminalOutcome            String?
+  terminalAuditLogId         String?   @unique
+  terminalAt                 DateTime? @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit    AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence      ChatUnifiedOptimizerEvidence?
+
+  @@unique([runId, role])
+  @@index([state, createdAt])
+}
+
+/// Content-free terminal evidence identity for one known role-job outcome.
+/// The evidence body and any provider prose live outside this ledger.
+model ChatUnifiedOptimizerEvidence {
+  id                 String   @id @db.Uuid
+  jobId              String   @unique @db.Uuid
+  runId              String   @db.Uuid
+  cycleId            String   @db.Uuid
+  candidateId        String   @db.Uuid
+  outcome            String
+  evidenceRef        String
+  payloadDigest      String
+  terminalAuditLogId String   @unique
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  job           ChatUnifiedOptimizerRoleJob   @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cycle         ChatUnifiedOptimizerCycle     @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate     ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog                 @relation("ChatUnifiedOptimizerEvidenceTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([cycleId, createdAt])
+  @@index([runId, createdAt])
+}
+
 /// Content-free immutable product execution fact. It deliberately has no
 /// user, conversation, session, attachment, prompt or digest column.
 model PromptRefinerProductExecutionReceipt {
@@ -2267,8 +2399,11 @@ model Feedback {
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
 
-  lifecycleEvents FeedbackLifecycleEvent[]
-  autoFixCase     FeedbackAutoFixCase?
+  lifecycleEvents          FeedbackLifecycleEvent[]
+  autoFixCase              FeedbackAutoFixCase?
+  supportTriageSuggestions SupportTriageSuggestion[]
+  supportTriageMemberships SupportTriageGroupMember[]
+  supportTriageDecisionLinks SupportTriageDecisionRecordLink[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
@@ -2624,6 +2759,10 @@ model AdminAuditLog {
   marketingLlmCallCloses       MarketingLlmCall[] @relation("MarketingLlmCallCloseAudit")
   marketingLlmCallLegalHolds   MarketingLlmCall[] @relation("MarketingLlmCallLegalHoldAudit")
   promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
+  chatUnifiedOptimizerRunAdmissions ChatUnifiedOptimizerRun[] @relation("ChatUnifiedOptimizerRunAdmissionAudit")
+  chatUnifiedOptimizerRoleClaims ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleClaimAudit")
+  chatUnifiedOptimizerRoleTerminals ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleTerminalAudit")
+  chatUnifiedOptimizerEvidenceTerminals ChatUnifiedOptimizerEvidence[] @relation("ChatUnifiedOptimizerEvidenceTerminalAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -9650,6 +9789,39 @@ model SignupConsentAttempt {
   @@index([expiresAt])
 }
 
+/// One scheduled observation slot of the product-research agent, written once
+/// and never changed (docs/policy/product-research-agent.md §4).
+///
+/// The database owns three things here: one row per slot (a unique constraint,
+/// so two runs of the same slot cannot both find it empty), the refusal of a
+/// submission outside the slot's one-hour window, and the refusal of an update
+/// or of a delete before the retention period. A failed slot carries no
+/// payload, which is what keeps a failure from showing an earlier success's
+/// content.
+model ProductResearchObservation {
+  id            String   @id
+  /// The scheduled UTC instant this row answers for, on a whole minute.
+  slot          DateTime @unique
+  /// ok | failed
+  outcome       String
+  /// One of OBSERVATION_FAILURE_STAGES; set exactly when the outcome is failed.
+  failureStage  String?
+  schemaVersion Int
+  /// The commits the report was computed from. Present on a successful slot.
+  developSha    String?
+  mainSha       String?
+  issueCount    Int?
+  /// The observation rows and the counts recomputed from them.
+  payload       Json?
+  /// sha256 of the canonical payload, computed by the route from what it
+  /// stored -- never the digest the submitter sent.
+  payloadDigest String?
+  /// The database's own clock, set by the insert trigger.
+  submittedAt   DateTime @default(now())
+
+  @@index([outcome, slot])
+  @@index([submittedAt])
+}
 
 /// One improvement suggestion from the product-research scout (owner direction
 /// 2026-10-19, LLM-first): the model looked at a page, a generated file or the
@@ -9695,6 +9867,305 @@ model ProductResearchScoutLlmCall {
 
   @@index([createdAt])
 }
+
+/// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
+/// only by the Admin genesis action; never updated or deleted. The migration's
+/// trigger enforces the chain: one first genesis (shadow), every later one
+/// replacing the current head -- recovery in the same mode, activation shadow
+/// to live once.
+model OpsObserverGenesis {
+  id                  String            @id @db.Uuid
+  /// The database clock, set by the trigger.
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  /// One of GENESIS_REASONS.
+  reason              String
+  /// One of GENESIS_MODES.
+  mode                String
+  /// The head this genesis replaced; null only on the first genesis.
+  supersedesGenesisId String?           @unique @db.Uuid
+  /// 1 on the first genesis and null otherwise, so there is only one first genesis.
+  rootMarker          Int?              @unique
+  /// sha256 of the canonical genesis request the owner approved.
+  requestDigest       String
+  invariantVersion    Int
+  /// The deadline the approving request claimed; checked again at COMMIT.
+  runDeadlineAt       DateTime              @db.Timestamptz(3)
+  state               OpsObserverState?
+  deliveries          OpsObserverDelivery[]
+  transitions         OpsObserverTransition[]
+  deferredItems       OpsObserverDeferredItem[]
+}
+
+/// The key state of one genesis. Every update is exactly the next generation
+/// (the compare-and-set); the trigger writes the stamps and refuses a state
+/// write whose genesis has been superseded or whose run deadline has passed by
+/// COMMIT.
+model OpsObserverState {
+  genesisId                 String             @id @db.Uuid
+  genesis                   OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation                Int
+  keys                      Json
+  updatedAt                 DateTime           @default(now()) @db.Timestamptz(3)
+  invariantVersion          Int
+  stampGeneration           Int
+  stampKeysSha256           String
+  verifiedThroughGeneration Int                @default(0)
+  verifiedThroughAuditId    String?
+  verifiedThroughAuditHash  String?
+  stampCheckpointSha256     String
+  /// The deadline the writing run claimed; checked again at COMMIT.
+  runDeadlineAt             DateTime           @db.Timestamptz(3)
+}
+
+/// One reservation of the sre-ops agent: what a run may send, at most once
+/// (docs/policy/sre-ops.md §3 rules 3 and 9, §5). Created reserved and closed
+/// once -- confirmed (live), shadowed (shadow) or abandoned; at most one is
+/// open at a time. The migration's triggers enforce all of it.
+model OpsObserverDelivery {
+  id               String                    @id @db.Uuid
+  genesisId        String                    @db.Uuid
+  genesis          OpsObserverGenesis        @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Copied from the genesis by the trigger.
+  mode             String
+  /// The run that reserved it; one reservation per run.
+  runId            String                    @unique
+  /// One of DELIVERY_STATUSES.
+  status           String
+  /// 1 while reserved, null once closed; unique, so one reservation is open.
+  reservedMarker   Int?                      @unique
+  reservedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  confirmedAt      DateTime?                 @db.Timestamptz(3)
+  shadowedAt       DateTime?                 @db.Timestamptz(3)
+  abandonedAt      DateTime?                 @db.Timestamptz(3)
+  /// The owner's calendar date the daily budget counts against.
+  ownerDate        DateTime                  @db.Date
+  /// Set on the reservation that carries the weekly channel check; one per date.
+  channelCheckDate DateTime?                 @unique @db.Date
+  /// The AgentDigestItem the page links to; null for a check-only message.
+  digestItemId     String?                   @db.Uuid
+  invariantVersion Int
+  stampStatus      String
+  /// The deadline of the run that last wrote it; checked again at COMMIT.
+  runDeadlineAt    DateTime                  @db.Timestamptz(3)
+  items            OpsObserverDeliveryItem[]
+
+  @@index([genesisId, ownerDate])
+}
+
+/// One message kind for one incident inside a reservation. Written in the
+/// reservation's own transaction and never changed; (mode, signal, scope,
+/// kind, openedAt) is unique, so each kind is reserved once per incident.
+model OpsObserverDeliveryItem {
+  id         String              @id @db.Uuid
+  deliveryId String              @db.Uuid
+  delivery   OpsObserverDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  /// Copied from the reservation by the trigger.
+  mode       String
+  signal     String
+  scope      String
+  /// One of MESSAGE_KINDS.
+  kind       String
+  /// One of ITEM_ORIGINS.
+  origin     String
+  openedAt   DateTime            @db.Timestamptz(3)
+  /// Whether this item counted against the shared daily cap.
+  capped     Boolean
+
+  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeliveryItem_incident_kind_key")
+  @@index([deliveryId])
+}
+
+/// Support-triage run record (docs/policy/support-triage.md §4, §8). One row per
+/// worker or retention run, content-free. Triggers in migration
+/// 20261003120000_support_triage_run own createdAt and deadlineAt, cap runs at
+/// 52 per kind per UTC day, downgrade a late success to deadline_exceeded, make
+/// a finished row final and refuse deleting a row younger than 30 days.
+model SupportTriageRun {
+  id                      String    @id
+  sequence                BigInt    @unique @default(autoincrement())
+  kind                    String
+  outcome                 String    @default("running")
+  createdAt               DateTime  @default(now())
+  deadlineAt              DateTime
+  finishedAt              DateTime?
+  batchesCompleted        Int?
+  overdueRemaining        Int?
+  oldestOverdueAgeSeconds Int?
+  blocked                 Int?
+
+  @@index([kind, createdAt])
+}
+
+/// One message the daily cap held back (docs/policy/sre-ops.md §1 item 3,
+/// §5): written by the advance that moved its key, from the owed messages the
+/// app derives itself, so the digest can still report it. Never changed;
+/// deleted 90 days after it was written. Triggers in
+/// migrations/20261009120000_ops_observer_deferred_item.
+model OpsObserverDeferredItem {
+  id               String             @id @db.Uuid
+  genesisId        String             @db.Uuid
+  genesis          OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Copied from the genesis by the trigger.
+  mode             String
+  /// The owner's calendar date the cap counted against.
+  ownerDate        DateTime           @db.Date
+  signal           String
+  scope            String
+  /// One of MESSAGE_KINDS.
+  kind             String
+  /// One of ITEM_ORIGINS.
+  origin           String
+  openedAt         DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  deferredAt       DateTime           @default(now()) @db.Timestamptz(3)
+  invariantVersion Int
+  /// The deadline of the advance that wrote it; checked again at COMMIT.
+  runDeadlineAt    DateTime           @db.Timestamptz(3)
+
+  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeferredItem_incident_kind_key")
+  @@index([ownerDate, mode])
+}
+
+/// The sre-ops run guard: one row per daily digest, its transaction's last
+/// write, whose deferred trigger refuses a late COMMIT of the shared rows
+/// written before it (docs/policy/sre-ops.md §6 item 5). Triggers in
+/// migrations/20261008020000_ops_observer_run_guard.
+model OpsObserverRunGuard {
+  /// sre-ops:daily:<owner date>.
+  runId            String   @id
+  /// One of RUN_GUARD_KINDS.
+  kind             String
+  /// The database clock, set by the trigger.
+  startedAt        DateTime @default(now()) @db.Timestamptz(3)
+  /// The deadline the run claimed; checked again at COMMIT.
+  runDeadlineAt    DateTime @db.Timestamptz(3)
+  invariantVersion Int
+}
+
+/// One row per state advance of the sre-ops agent, naming the system audit
+/// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
+/// Append-only; triggers in migrations/20261004030000_ops_observer_transition.
+model OpsObserverTransition {
+  genesisId      String             @db.Uuid
+  genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation     Int
+  /// The AdminAuditLog entry of this advance. Not a relation: the audit table
+  /// is append-only already, and the insert trigger checks the entry exists.
+  auditLogId     String             @unique
+  auditEntryHash String
+  keysSha256     String
+  /// The deadline the advancing run claimed; checked again at COMMIT.
+  runDeadlineAt  DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@id([genesisId, generation])
+}
+
+/// Support-triage suggestion (docs/policy/support-triage.md §1, §2, §6). At most one
+/// open row per (report, input digest); terminal rows may repeat it: a proposed lane and keyword-flag codes,
+/// never the text of the report. Migration
+/// 20261004010000_support_triage_suggestion holds the state machine, the
+/// lease and the display stamp.
+model SupportTriageSuggestion {
+  id              String    @id
+  feedbackId      String
+  inputDigest     String
+  state           String    @default("pending")
+  failureCode     String?
+  claimToken      String?
+  leaseExpiresAt  DateTime?
+  attemptCount    Int       @default(0)
+  lane            String?
+  keywordFlags    String[]  @default([])
+  /// Where the lane came from: keyword or llm (migration 20261019100000).
+  laneSource      String?
+  /// Every other report the LLM was shown, at most 30: an account deletion of
+  /// any of them deletes this row.
+  contextFeedbackIds String[] @default([])
+  /// Open reports the LLM named as duplicates, at most five, among those shown.
+  duplicateOfFeedbackIds String[] @default([])
+  /// A reply draft for the operator to review; never sent by itself.
+  replyDraft      String?
+  ownerQueueState String    @default("not_queued")
+  displayedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now())
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  // One open row per (report, input): a partial unique index in migration
+  // 20261008100000_support_triage_suggestion_open_input_unique.
+  @@index([feedbackId, inputDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([leaseExpiresAt])
+  @@index([contextFeedbackIds], type: Gin)
+}
+
+/// Support-triage group (docs/policy/support-triage.md §5, §6): one
+/// equivalence class of one kind over server facts, for display only. Its
+/// members carry its primary digest through a composite key, so a terminal
+/// group (digest NULL) can hold none. Migration
+/// 20261004020000_support_triage_group holds the state machine and the
+/// tombstone rules.
+model SupportTriageGroup {
+  id                            String    @id
+  state                         String    @default("candidate")
+  primaryKind                   String
+  primarySnapshotDigest         String?
+  groupCandidateKey             String?   @unique
+  groupInputDigest              String?
+  keyRetiredAt                  DateTime?
+  retiredMemberIds              String[]  @default([])
+  decision                      String?
+  decidedAt                     DateTime?
+  ownerQueueState               String    @default("not_queued")
+  displayedAt                   DateTime?
+  keyRecheckDeferredCount       Int       @default(0)
+  keyRecheckDeferredRunId       String?
+  keyRecheckLastEvaluatedRunSeq BigInt?
+  keyRecheckDeferredRunSeq      BigInt?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @default(now())
+
+  members SupportTriageGroupMember[]
+  signals SupportTriageGroupSignal[]
+
+  @@unique([id, primarySnapshotDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([keyRetiredAt])
+  @@index([retiredMemberIds], type: Gin)
+}
+
+/// A report in an open support-triage group. Inserted and deleted, never updated.
+model SupportTriageGroupMember {
+  groupId               String
+  feedbackId            String   @unique
+  primarySnapshotDigest String
+  createdAt             DateTime @default(now())
+
+  group    SupportTriageGroup @relation(fields: [groupId, primarySnapshotDigest], references: [id, primarySnapshotDigest], onDelete: Cascade, onUpdate: Restrict, map: "SupportTriageGroupMember_group_digest_fkey")
+  feedback Feedback           @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, feedbackId])
+}
+
+/// One signal per (group, kind): the SHA-256 of a server value its members
+/// share, never the value. Inserted and deleted, never updated.
+model SupportTriageGroupSignal {
+  groupId           String
+  kind              String
+  snapshotDigest    String
+  provenanceClass   String
+  snapshotExpiresAt DateTime
+  observedAt        DateTime @default(now())
+
+  group SupportTriageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, kind])
+  @@index([snapshotExpiresAt])
+}
+
 /// Operator-approved Frontier eligibility for one exact CLI provider/model.
 /// Names are data, never a permanent code allowlist. A revocation is a
 /// one-way update of the current row; a later reapproval is a new version.
@@ -9789,6 +10260,9 @@ model AmuxIdeaSubmission {
   @@index([actorUserId, submittedAt])
 }
 
+/// Intake v19 queue identity created atomically with one session submission.
+/// It reserves no money and grants no CLI dispatch permission; later analysis
+/// stages must independently satisfy the monthly budget and execution gates.
 model AmuxIdeaSessionAnalysisReservation {
   id                      String   @id @db.Uuid
   ideaId                  String   @unique
@@ -9811,6 +10285,9 @@ model AmuxIdeaSessionAnalysisReservation {
   @@index([status, createdAt])
 }
 
+/// Content-free evidence for one fixed Git reference prepared for v19 direct
+/// analysis. Paths, repository names, checkout directories and file contents
+/// never enter this row. Read-event paths use a separate encrypted row.
 model AmuxIdeaTrackedCheckoutEvidence {
   id                         String   @id @db.Uuid
   ideaId                     String
@@ -9836,6 +10313,9 @@ model AmuxIdeaTrackedCheckoutEvidence {
   @@index([ideaId, createdAt])
 }
 
+/// Encrypted CLI-observed read paths for one pinned reference. The verified
+/// host result is recorded once per analysis page (one Max claim each);
+/// plaintext paths never enter audit metadata.
 model AmuxIdeaTrackedCheckoutReadManifest {
   id                 String   @id @db.Uuid
   ideaId             String
@@ -9861,6 +10341,8 @@ model AmuxIdeaTrackedCheckoutReadManifest {
   @@index([bodyPurgedAt, createdAt])
 }
 
+/// Durable identity for the external key before its creation. Even an
+/// uncertain object-store write or DB COMMIT leaves a seven-day cleanup target.
 model AmuxIdeaReadManifestKeyIntent {
   id                  String    @id @db.Uuid
   ideaId              String
@@ -9904,7 +10386,8 @@ model AmuxIdeaContentKeyRetirement {
   @@index([keyDeletedAt, bodyPurgedAt])
 }
 
-/// One owner-approved idea-wide hold pauses all four analysis content clocks.
+/// One owner-approved idea-wide hold pauses analysis content clocks, including
+/// CLI read-file paths.
 /// It never moves those clocks; expiry or release makes overdue rows due again.
 model AmuxIdeaRetentionHold {
   id                String    @id @db.Uuid
@@ -10068,6 +10551,9 @@ model AmuxIdeaAnalysisBudgetSetting {
   approvalAudit AdminAuditLog @relation("AmuxV4AnalysisBudgetSettingAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetSetting_audit_fkey")
 }
 
+/// docs/policy/amux-intake.md v19 item 2: the owner operating scope (repository
+/// allowlist and analysis model). Append-only; each version is bound to its
+/// same-transaction human audit. No row means intake is refused.
 model AmuxIdeaOperatingScopeSetting {
   id                 String   @id
   version            Int      @unique
@@ -10135,6 +10621,8 @@ model AmuxIdeaAnalysisPriceVersion {
   @@index([provider, modelId, mode, status], map: "AmuxIdeaAnalysisPriceVersion_lookup_idx")
 }
 
+/// One v19 session CLI claim against the same owner-managed monthly ledger as
+/// v4. An uncertain call keeps its full reservation until exact-ID resolution.
 model AmuxIdeaSessionAnalysisBudgetClaim {
   id                       String   @id @db.Uuid
   reservationId            String   @db.Uuid
@@ -10173,6 +10661,9 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   @@unique([reservationId, invocationOrdinal], map: "AmuxIdeaSessionAnalysisBudgetClaim_reservation_ordinal_key")
 }
 
+/// One Max CLI output bound to its budget claim and observed reference. The
+/// body is encrypted under a claim-specific external key and purged on the
+/// idea's absolute retention clock; only digest and aggregate usage remain.
 model AmuxIdeaSessionAnalysisResult {
   claimId          String    @id @db.Uuid
   reservationId    String    @db.Uuid
@@ -10201,6 +10692,8 @@ model AmuxIdeaSessionAnalysisResult {
   @@index([bodyPurgedAt, createdAt])
 }
 
+/// Durable terminal fence for a Max claim whose external result key may have
+/// been created before a failed or uncertain result transaction.
 model AmuxIdeaSessionResultOrphanKeyRetirement {
   claimId             String    @id @db.Uuid
   ideaId              String
@@ -10472,6 +10965,10 @@ model AmuxIdeaUnitDecision {
   /// and keyed digest, and atomic card/node/unit writes before activation.
 }
 
+/// One deterministic v20 Task registration refusal. The row is immutable and
+/// contains identifiers and closed metadata only; expected paths and proposal
+/// text never enter it. A retry with the same request id reads this row rather
+/// than recording a second refusal.
 model AmuxIdeaRegistrationRefusal {
   id                     String   @id @db.Uuid
   requestId              String   @unique @db.Uuid
@@ -10558,40 +11055,6 @@ model AmuxPortfolioNodeRevision {
 
   @@unique([nodeId, revision])
   @@index([decisionId])
-}
-
-/// One scheduled observation slot of the product-research agent, written once
-/// and never changed (docs/policy/product-research-agent.md §4).
-///
-/// The database owns three things here: one row per slot (a unique constraint,
-/// so two runs of the same slot cannot both find it empty), the refusal of a
-/// submission outside the slot's one-hour window, and the refusal of an update
-/// or of a delete before the retention period. A failed slot carries no
-/// payload, which is what keeps a failure from showing an earlier success's
-/// content.
-model ProductResearchObservation {
-  id            String   @id
-  /// The scheduled UTC instant this row answers for, on a whole minute.
-  slot          DateTime @unique
-  /// ok | failed
-  outcome       String
-  /// One of OBSERVATION_FAILURE_STAGES; set exactly when the outcome is failed.
-  failureStage  String?
-  schemaVersion Int
-  /// The commits the report was computed from. Present on a successful slot.
-  developSha    String?
-  mainSha       String?
-  issueCount    Int?
-  /// The observation rows and the counts recomputed from them.
-  payload       Json?
-  /// sha256 of the canonical payload, computed by the route from what it
-  /// stored -- never the digest the submitter sent.
-  payloadDigest String?
-  /// The database's own clock, set by the insert trigger.
-  submittedAt   DateTime @default(now())
-
-  @@index([outcome, slot])
-  @@index([submittedAt])
 }
 
 /// Owner-confirmed evidence for one v4 hierarchy node or Story/Task. Model
@@ -11059,177 +11522,36 @@ model AmuxV4TaskCostCatalogApproval {
   updatedAt            DateTime  @updatedAt
 }
 
-/// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
-/// only by the Admin genesis action; never updated or deleted. The migration's
-/// trigger enforces the chain: one first genesis (shadow), every later one
-/// replacing the current head -- recovery in the same mode, activation shadow
-/// to live once.
-model OpsObserverGenesis {
-  id                  String            @id @db.Uuid
-  /// The database clock, set by the trigger.
-  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
-  /// One of GENESIS_REASONS.
-  reason              String
-  /// One of GENESIS_MODES.
-  mode                String
-  /// The head this genesis replaced; null only on the first genesis.
-  supersedesGenesisId String?           @unique @db.Uuid
-  /// 1 on the first genesis and null otherwise, so there is only one first genesis.
-  rootMarker          Int?              @unique
-  /// sha256 of the canonical genesis request the owner approved.
-  requestDigest       String
-  invariantVersion    Int
-  /// The deadline the approving request claimed; checked again at COMMIT.
-  runDeadlineAt       DateTime              @db.Timestamptz(3)
-  state               OpsObserverState?
-  deliveries          OpsObserverDelivery[]
-  transitions         OpsObserverTransition[]
-  deferredItems       OpsObserverDeferredItem[]
+/// A person's support-triage decision (docs/policy/support-triage.md §5, §6):
+/// its kind, when, and a keyed digest of what it was bound to. Kept twelve
+/// months, and deleted whole the moment any linked report's account is.
+/// Migration 20261005010000_support_triage_decision_record holds the rules.
+model SupportTriageDecisionRecord {
+  id                     String   @id
+  decisionKind           String
+  decidedAt              DateTime @default(now())
+  decisionEnvelopeDigest String
+  digestVersion          Int
+  retentionUntil         DateTime @default(now())
+
+  links SupportTriageDecisionRecordLink[]
+
+  @@index([retentionUntil])
+  @@index([digestVersion])
 }
 
-/// The key state of one genesis. Every update is exactly the next generation
-/// (the compare-and-set); the trigger writes the stamps and refuses a state
-/// write whose genesis has been superseded or whose run deadline has passed by
-/// COMMIT.
-model OpsObserverState {
-  genesisId                 String             @id @db.Uuid
-  genesis                   OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  generation                Int
-  keys                      Json
-  updatedAt                 DateTime           @default(now()) @db.Timestamptz(3)
-  invariantVersion          Int
-  stampGeneration           Int
-  stampKeysSha256           String
-  verifiedThroughGeneration Int                @default(0)
-  verifiedThroughAuditId    String?
-  verifiedThroughAuditHash  String?
-  stampCheckpointSha256     String
-  /// The deadline the writing run claimed; checked again at COMMIT.
-  runDeadlineAt             DateTime           @db.Timestamptz(3)
-}
+/// One report a decision was bound to. Inserted and deleted, never updated;
+/// deleting any link deletes its record and every other link.
+model SupportTriageDecisionRecordLink {
+  id         String @id
+  recordId   String
+  feedbackId String
 
-/// One reservation of the sre-ops agent: what a run may send, at most once
-/// (docs/policy/sre-ops.md §3 rules 3 and 9, §5). Created reserved and closed
-/// once -- confirmed (live), shadowed (shadow) or abandoned; at most one is
-/// open at a time. The migration's triggers enforce all of it.
-model OpsObserverDelivery {
-  id               String                    @id @db.Uuid
-  genesisId        String                    @db.Uuid
-  genesis          OpsObserverGenesis        @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  /// Copied from the genesis by the trigger.
-  mode             String
-  /// The run that reserved it; one reservation per run.
-  runId            String                    @unique
-  /// One of DELIVERY_STATUSES.
-  status           String
-  /// 1 while reserved, null once closed; unique, so one reservation is open.
-  reservedMarker   Int?                      @unique
-  reservedAt       DateTime                  @default(now()) @db.Timestamptz(3)
-  confirmedAt      DateTime?                 @db.Timestamptz(3)
-  shadowedAt       DateTime?                 @db.Timestamptz(3)
-  abandonedAt      DateTime?                 @db.Timestamptz(3)
-  /// The owner's calendar date the daily budget counts against.
-  ownerDate        DateTime                  @db.Date
-  /// Set on the reservation that carries the weekly channel check; one per date.
-  channelCheckDate DateTime?                 @unique @db.Date
-  /// The AgentDigestItem the page links to; null for a check-only message.
-  digestItemId     String?                   @db.Uuid
-  invariantVersion Int
-  stampStatus      String
-  /// The deadline of the run that last wrote it; checked again at COMMIT.
-  runDeadlineAt    DateTime                  @db.Timestamptz(3)
-  items            OpsObserverDeliveryItem[]
+  record   SupportTriageDecisionRecord @relation(fields: [recordId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  feedback Feedback                    @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
-  @@index([genesisId, ownerDate])
-}
-
-/// One message kind for one incident inside a reservation. Written in the
-/// reservation's own transaction and never changed; (mode, signal, scope,
-/// kind, openedAt) is unique, so each kind is reserved once per incident.
-model OpsObserverDeliveryItem {
-  id         String              @id @db.Uuid
-  deliveryId String              @db.Uuid
-  delivery   OpsObserverDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-  /// Copied from the reservation by the trigger.
-  mode       String
-  signal     String
-  scope      String
-  /// One of MESSAGE_KINDS.
-  kind       String
-  /// One of ITEM_ORIGINS.
-  origin     String
-  openedAt   DateTime            @db.Timestamptz(3)
-  /// Whether this item counted against the shared daily cap.
-  capped     Boolean
-
-  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeliveryItem_incident_kind_key")
-  @@index([deliveryId])
-}
-
-/// One message the daily cap held back (docs/policy/sre-ops.md §1 item 3,
-/// §5): written by the advance that moved its key, from the owed messages the
-/// app derives itself, so the digest can still report it. Never changed;
-/// deleted 90 days after it was written. Triggers in
-/// migrations/20261009120000_ops_observer_deferred_item.
-model OpsObserverDeferredItem {
-  id               String             @id @db.Uuid
-  genesisId        String             @db.Uuid
-  genesis          OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  /// Copied from the genesis by the trigger.
-  mode             String
-  /// The owner's calendar date the cap counted against.
-  ownerDate        DateTime           @db.Date
-  signal           String
-  scope            String
-  /// One of MESSAGE_KINDS.
-  kind             String
-  /// One of ITEM_ORIGINS.
-  origin           String
-  openedAt         DateTime           @db.Timestamptz(3)
-  /// The database clock, set by the trigger.
-  deferredAt       DateTime           @default(now()) @db.Timestamptz(3)
-  invariantVersion Int
-  /// The deadline of the advance that wrote it; checked again at COMMIT.
-  runDeadlineAt    DateTime           @db.Timestamptz(3)
-
-  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeferredItem_incident_kind_key")
-  @@index([ownerDate, mode])
-}
-
-/// The sre-ops run guard: one row per daily digest, its transaction's last
-/// write, whose deferred trigger refuses a late COMMIT of the shared rows
-/// written before it (docs/policy/sre-ops.md §6 item 5). Triggers in
-/// migrations/20261008020000_ops_observer_run_guard.
-model OpsObserverRunGuard {
-  /// sre-ops:daily:<owner date>.
-  runId            String   @id
-  /// One of RUN_GUARD_KINDS.
-  kind             String
-  /// The database clock, set by the trigger.
-  startedAt        DateTime @default(now()) @db.Timestamptz(3)
-  /// The deadline the run claimed; checked again at COMMIT.
-  runDeadlineAt    DateTime @db.Timestamptz(3)
-  invariantVersion Int
-}
-
-/// One row per state advance of the sre-ops agent, naming the system audit
-/// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
-/// Append-only; triggers in migrations/20261004030000_ops_observer_transition.
-model OpsObserverTransition {
-  genesisId      String             @db.Uuid
-  genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  generation     Int
-  /// The AdminAuditLog entry of this advance. Not a relation: the audit table
-  /// is append-only already, and the insert trigger checks the entry exists.
-  auditLogId     String             @unique
-  auditEntryHash String
-  keysSha256     String
-  /// The deadline the advancing run claimed; checked again at COMMIT.
-  runDeadlineAt  DateTime           @db.Timestamptz(3)
-  /// The database clock, set by the trigger.
-  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
-
-  @@id([genesisId, generation])
+  @@unique([recordId, feedbackId])
+  @@index([feedbackId])
 }
 
 /// AMUX worker registry events (orchestration policy version 31, section 3):

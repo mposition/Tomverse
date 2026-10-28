@@ -272,7 +272,7 @@ export async function pickAutoModelWithLlm(input: {
      * is then not kept, so routing data, the optimizer's samples and the
      * session memory hold only turns a chat model answered. Absent is true.
      */
-    recordDecision?: Promise<boolean>;
+    recordDecision?: Promise<boolean> | ((pick: AutoLlmRouterPick | null) => Promise<boolean>);
 }): Promise<{ modelId: string; rewrite: string | null; requiresFileGeneration?: true } | null> {
     const routerModel = resolveAutoLlmRouterModel(
         input.models,
@@ -369,7 +369,9 @@ export async function pickAutoModelWithLlm(input: {
     if (input.userId && input.conversationId) {
         const userId = input.userId;
         const conversationId = input.conversationId;
-        void Promise.resolve(input.recordDecision ?? true)
+        void Promise.resolve()
+            .then(() => typeof input.recordDecision === "function"
+                ? input.recordDecision(pick) : input.recordDecision ?? true)
             .then((keep) => {
                 if (!keep) return;
                 return prisma.autoRouterDecision.create({

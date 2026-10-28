@@ -50,22 +50,31 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   // those two older version strings produce.
   //
   // Re-baselined again on 2026-10-12: `gpt-6-luna` and `claude-haiku-5-5`
-  // joined the catalogue (two models, so 96 more rows) and DEFAULT_MODEL_ID --
+  // joined the catalogue (two models, so 48 more rows) and DEFAULT_MODEL_ID --
   // the plan's requested model -- moved to `gpt-6-luna`. Every digest below
-  // moved for that reason alone; the previous plan digest was 4e6f769a…892784.
-  // The new pair is exactly develop's v4 counterfactual for the same catalogue
-  // (develop also carries D03's v5 diagnostic label): the same plan, byte for
-  // byte, with only that label taken out.
+  // moved for that reason alone; the previous plan digest was 3386b70b…22a1bc.
+  // D03 adds separate, offline per-model coverage to the diagnostic report.
+  // The development plan records its version but does not consume those new
+  // rows. Substituting v4 for v5 in this exact current body must reproduce
+  // the previous plan and serialized digests, proving that no plan row,
+  // selection, catalogue entry, or price changed in this re-baseline.
   assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
   assert.equal(legacy.versions.router.selection, "router-selection-v3");
-  assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v4");
-  assert.equal(legacy.planDigest, "1bb44ad1d5802e97413d8376e99c33237e52b1354b936b2dd668ef043293a92c");
-  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "e71f9adc8e6f694949046d7854e23b68c4f40d9148d71dbf179f90b2b28f76a6");
+  assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v5");
+  assert.equal(legacy.planDigest, "bfd36d19fe37ff50b28bda50c76c2602abded1a51aa1cdf8134ae17019db565f");
+  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "77b14cc19cd9df747d954117d3bd00b554e0b1a1e162f055c57780e5ef2492dc");
 
   // The digest covers the body without itself, and it is written last, so
   // dropping it leaves the remaining keys in the order they were built in.
   const body = { ...legacy };
   delete body.planDigest;
+  const asV4 = { ...body, versions: { ...body.versions, diagnostic: "router-full-catalog-diagnostic-v4" } };
+  const v4Digest = benchmarkDigest(canonicalBenchmarkJson(asV4));
+  assert.equal(v4Digest, "1bb44ad1d5802e97413d8376e99c33237e52b1354b936b2dd668ef043293a92c");
+  assert.equal(
+    benchmarkDigest(JSON.stringify({ ...asV4, planDigest: v4Digest })),
+    "e71f9adc8e6f694949046d7854e23b68c4f40d9148d71dbf179f90b2b28f76a6"
+  );
   const asBefore = {
     ...body,
     versions: {

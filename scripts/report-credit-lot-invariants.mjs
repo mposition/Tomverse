@@ -24,6 +24,7 @@
 // Requires DATABASE_URL. Point it at a read-only role.
 
 import { prisma } from "../lib/prisma.ts";
+import { readRunInstant, runInstantIso, runInstantLine } from "./report-run-instant.mjs";
 
 const json = process.argv.includes("--json");
 
@@ -39,6 +40,13 @@ const CONSTRAINTS = [
   "CreditLot_remainingCredits_non_negative_check",
   "CreditLot_remainingFundedCost_non_negative_check",
 ];
+
+// The instant of the reading, for whoever writes it into a release record.
+// Read before the survey so the printed instant is never later than the rows
+// it describes.
+const runInstant = await readRunInstant(
+  () => prisma.$queryRaw`SELECT now() AS at`
+);
 
 const constraintState = await prisma.$queryRaw`
   SELECT con.conname AS name, con.convalidated AS validated
@@ -79,6 +87,7 @@ const unvalidated = constraintState
   .map((row) => row.name);
 
 const report = {
+  readAt: runInstantIso(runInstant),
   constraints: {
     expected: CONSTRAINTS,
     missing,
@@ -100,6 +109,8 @@ const report = {
 if (json) {
   console.log(JSON.stringify(report, null, 2));
 } else {
+  console.log(`${runInstantLine(runInstant)}
+`);
   if (missing.length > 0) {
     console.log(
       `Constraints not present on this database: ${missing.join(", ")}.\n` +

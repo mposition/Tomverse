@@ -10,10 +10,16 @@ import test from "node:test";
 import {
   OBSERVATION_FAILURE_STAGES,
   OBSERVATION_ROW_LIMIT,
+  OBSERVATION_SCHEMA_VERSION,
   OBSERVED_BRANCHES,
   TITLE_MAX_CODE_POINTS,
+  observationPayloadDigest,
+  summariseObservation,
 } from "../lib/productResearchObservationCore.mjs";
-import { DEFAULT_RUN_TIMINGS } from "../lib/productResearchObservationRunnerCore.mjs";
+import {
+  DEFAULT_RUN_TIMINGS,
+  slotForInstant,
+} from "../lib/productResearchObservationRunnerCore.mjs";
 import {
   ISSUE_FETCH_MAX_REQUESTS,
   ISSUE_FETCH_PER_PAGE,
@@ -31,6 +37,7 @@ import {
   readBranchTip,
   readLimitedBody,
   readReport,
+  readSubmissionReceipt,
   reportArgv,
   submissionBody,
   worstCaseStepMs,
@@ -419,4 +426,89 @@ test("a body stream that fails mid-read answers instead of throwing", async () =
     assert.fail(`readLimitedBody threw: ${error?.name}`);
   }
   assert.ok(aborted.problem);
+});
+
+test("a 2xx is not a receipt", () => {
+  // The route answers with the row it wrote and the digest it computed from
+  // what it stored, and its own comment says why: so the run can compare and
+  // report a mismatch rather than believing the row holds what it sent.
+  // Nothing was doing that comparison.
+  const expected = { slot: "2026-10-09T21:30:00.000Z", outcome: "ok", payloadDigest: "d" };
+  const receipt = (answer) => readSubmissionReceipt(answer, expected);
+
+  assert.deepEqual(
+    receipt({ recorded: true, slot: expected.slot, outcome: "ok", payloadDigest: "d" }),
+    { ok: true },
+  );
+
+  // A body that is not a receipt at all -- a 200 with an empty or truncated
+  // answer is exactly what a connection dropped after the headers looks like.
+  for (const answer of [null, undefined, "", 7, []]) {
+    assert.match(receipt(answer).problem, /no receipt/, JSON.stringify(answer));
+  }
+  assert.match(receipt({ slot: expected.slot, outcome: "ok" }).problem, /did not say it recorded/);
+  assert.match(receipt({ recorded: "yes" }).problem, /did not say it recorded/);
+
+  // A row under another slot is not this run's answer, and the slot is the
+  // table's only identity.
+  assert.match(
+    receipt({ recorded: true, slot: "2026-10-08T21:30:00.000Z", outcome: "ok", payloadDigest: "d" })
+      .problem,
+    /different slot/,
+  );
+  assert.match(
+    receipt({ recorded: true, slot: expected.slot, outcome: "failed", payloadDigest: "d" }).problem,
+    /is failed, not ok/,
+  );
+  // The one this exists for.
+  assert.match(
+    receipt({ recorded: true, slot: expected.slot, outcome: "ok", payloadDigest: "other" }).problem,
+    /digest/,
+  );
+});
+
+test("a failed slot has no digest to agree about", () => {
+  const expected = { slot: "2026-10-09T21:30:00.000Z", outcome: "failed" };
+  assert.deepEqual(
+    readSubmissionReceipt(
+      { recorded: true, slot: expected.slot, outcome: "failed", payloadDigest: null },
+      expected,
+    ),
+    { ok: true },
+  );
+  // A failure stores no payload, so a digest coming back for one means the row
+  // is not the row that was sent.
+  assert.match(
+    readSubmissionReceipt(
+      { recorded: true, slot: expected.slot, outcome: "failed", payloadDigest: "d" },
+      expected,
+    ).problem,
+    /holding a payload digest/,
+  );
+});
+
+test("the digest the runner computes is the one the route stores", async () => {
+  // Both sides import the same function, and this is what says so: the value
+  // the submission module puts in the row is the value the core computes. Two
+  // implementations could drift, and a drifted comparison either reports
+  // mismatches that are not real or stops reporting the ones that are.
+  const { admitObservationSubmission } = await import("../lib/productResearchObservationSubmission.ts");
+  const payload = {
+    schemaVersion: OBSERVATION_SCHEMA_VERSION,
+    issues: [],
+    ...summariseObservation([]),
+  };
+  const admitted = admitObservationSubmission(
+    {
+      schemaVersion: OBSERVATION_SCHEMA_VERSION,
+      slot: slotForInstant(Date.now()),
+      outcome: "ok",
+      developSha: "a".repeat(40),
+      mainSha: "b".repeat(40),
+      payload,
+    },
+    { now: Date.now(), id: "obs-2026-10-09-abcdef12" },
+  );
+  assert.equal(admitted.accepted, true, JSON.stringify(admitted));
+  assert.equal(admitted.row.payloadDigest, observationPayloadDigest(payload));
 });

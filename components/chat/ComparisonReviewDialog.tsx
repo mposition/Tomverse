@@ -17,7 +17,6 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { ComparisonReviewWorkspace } from "@/components/chat/ComparisonReviewWorkspace";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -252,7 +251,7 @@ const sectionOf = (itemId: string) => {
  * there is no review for a verdict to point at) and hiding it would read as
  * the feature being missing.
  */
-function ReviewItemFeedback({
+export function ReviewItemFeedback({
   conversationId,
   reviewId,
   itemId,
@@ -365,6 +364,7 @@ export function VerifyItemButton({
   checkingLabel,
   failedLabel,
   statusLabels,
+  showServerError = true,
 }: {
   conversationId: string;
   item: string;
@@ -372,6 +372,7 @@ export function VerifyItemButton({
   checkingLabel: string;
   failedLabel: string;
   statusLabels: Record<VerifyItemResult["status"], string>;
+  showServerError?: boolean;
 }) {
   const [state, setState] = useState<
     | { phase: "idle" }
@@ -395,7 +396,7 @@ export function VerifyItemButton({
         | VerifyItemResult
         | { error?: string };
       if (!response.ok || !("status" in data)) {
-        throw new Error("error" in data && data.error ? data.error : failedLabel);
+        throw new Error(showServerError && "error" in data && data.error ? data.error : failedLabel);
       }
       setState({ phase: "done", result: data });
       // The step past the review itself: the user asked the live web about one
@@ -862,17 +863,10 @@ export function ComparisonReviewDialog({
                   )}
 
                   <div className="flex flex-wrap items-center gap-2">
-                    {review.cached ? (
+                    {review.cached && (
                       <span className="rounded-full bg-status-success-500/10 px-3 py-1 text-xs font-bold text-status-success-600 dark:text-status-success-300">
                         {t("chat.aiReviewCached")}
                       </span>
-                    ) : (
-                      <CreditCostBadge
-                        credits={review.usageCredits}
-                        size="md"
-                        label={`${review.usageCredits} ${t("chat.aiReviewCreditsUsed")}`}
-                        testId="ai-review-used-credits"
-                      />
                     )}
                     <SourceGroundingBadge
                       grounding={toSourceGrounding(activeResult)}
@@ -1188,23 +1182,11 @@ export function ComparisonReviewDialog({
 
                   <div className="rounded-2xl bg-zinc-50 p-4 dark:bg-zinc-950">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
-                          {t("chat.aiReviewEstimatedCost")}
+                      {setup.dualReview && (
+                        <p className="text-xs leading-5 text-zinc-500">
+                          {t("chat.aiReviewDualReviewerNote")}
                         </p>
-                        <CreditCostBadge
-                          credits={setup.estimatedCredits || 0}
-                          size="md"
-                          className="mt-1"
-                          label={`${setup.estimatedCredits || 0} ${t("chat.aiReviewCredits")}`}
-                          testId="ai-review-estimated-credits"
-                        />
-                        {setup.dualReview && (
-                          <p className="mt-1 text-xs leading-5 text-zinc-500">
-                            {t("chat.aiReviewDualReviewerNote")}
-                          </p>
-                        )}
-                      </div>
+                      )}
                       <div className="text-right text-xs leading-5 text-zinc-500">
                         <p>{setup.reviewerClass} reviewer</p>
                         {setup.freeMonthlyReviews ? (
@@ -1265,20 +1247,12 @@ export function ComparisonReviewDialog({
               type="button"
               onClick={runReview}
               disabled={running}
-              className="flex h-11 w-full items-center justify-between gap-3 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto sm:min-w-48"
+              className="flex h-11 w-full items-center justify-center gap-3 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto sm:min-w-48"
             >
               <span className="flex min-w-0 items-center gap-2">
                 {running ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Sparkles className="h-4 w-4 shrink-0" />}
                 <span className="truncate">{running ? t("chat.aiReviewRunning") : t("chat.aiReviewRun")}</span>
               </span>
-              <CreditCostBadge
-                credits={setup.estimatedCredits || 0}
-                size="xs"
-                tone="onColor"
-                label={`${setup.estimatedCredits || 0} ${t("chat.aiReviewCredits")}`}
-                testId="ai-review-run-credit-cost"
-                className="border-0 bg-white/20"
-              />
             </button>
           </footer>
         )}

@@ -78,7 +78,7 @@ jobs:
   # one-worker rule (it resets one database) still holds inside each shard.
   # The required check keeps its name on the rollup job below.
   admin-console-e2e-shard:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Admin Console E2E (PostgreSQL, shard ${{ matrix.shard }}/${{ matrix.shards }})
     # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
     # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
@@ -337,7 +337,7 @@ jobs:
   # held the deployment until it did. Skipped on push, the run concludes when
   # the shards do, and a failing one still fails the run.
   admin-console-e2e:
-    if: always() && github.event_name == 'pull_request' && (!github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))
+    if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
     name: Admin Console E2E (PostgreSQL)
     runs-on: ubuntu-latest
     timeout-minutes: 5

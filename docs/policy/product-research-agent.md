@@ -7,7 +7,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | v1 | mposition 2026-10-03 | 최초 승인. 비공개 설계서(revision 15)의 공개 가능한 계약 |
-| v2 | mposition, 병합 2026-10-12(UTC, #2411) | 개선 탐색 기능 추가(당시 10~21절). 관측 기능의 변경 넷: 각 외부 호출 직전의 상태 확인(§3), Agent 전체 kill switch와 쓰기 직렬화(§6), kill switch 중 보존 삭제 지연(§4), kill switch 중 침묵 검사 정지(§5). 비공개 설계서(revision 20)의 공개 가능한 계약 |
+| v2 | mposition, 병합 2026-10-12(UTC, #2411) | 개선 탐색 기능 추가(§10~§21). 관측 기능의 변경 넷: 각 외부 호출 직전의 상태 확인(§3), Agent 전체 kill switch와 쓰기 직렬화(§6), kill switch 중 보존 삭제 지연(§4), kill switch 중 침묵 검사 정지(§5). 비공개 설계서(revision 20)의 공개 가능한 계약 |
 | v3 | mposition 2026-10-13 | 승인 기록 정정만. v2는 UTC 2026-10-12 22:16에 병합되어 `approvedAt` 2026-10-13과 승인 판정 5가 맞지 않았습니다. 본문은 v2와 같습니다 |
 | 2026-10-19 | 운영자 결정(대화) | 개선 탐색을 LLM-first로 전환(§10~§14). v2·v3의 개선 탐색 장치(slot·latch·kill switch·page token·손으로 짠 규칙)와 관측 기능의 v2 변경 넷은 만들지 않았고 이 문서에서 뺐습니다 |
 

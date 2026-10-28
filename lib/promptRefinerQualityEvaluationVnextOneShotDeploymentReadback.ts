@@ -61,7 +61,7 @@ export async function observePromptRefinerVnextOneShotDeployment(
                         id: deploymentId,
                         input: {
                             projectId, serviceId, environmentId,
-                            status: { successfulOnly: true },
+                            status: { in: ["SUCCESS"] },
                         },
                     },
                 }),

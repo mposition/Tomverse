@@ -134,18 +134,11 @@ test("the observation runner's declared variables are the ones the run checks fo
 
 test("the probe measures every environment's image and can submit in none", () => {
   const probe = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_probe");
-  // Every environment this tree has, because each builds its own image and the
-  // probe's whole job is to say what an image can do. Production was the one
-  // left out, so its image was the only one never measured -- and P2's first
-  // condition is a production run (docs/policy/product-research-agent.md §9).
-  //
-  // Read from the environments the table itself declares rather than listed
-  // here: `dev` exists on develop and not in this tree, and a list written out
-  // would have to be edited by whichever release brings the lane across.
-  assert.deepEqual(
-    Object.keys(probe.environments).sort(),
-    Object.keys(AGENT_ENVIRONMENT_BRANCHES).sort(),
-  );
+  // Every environment, because each builds its own image and the probe's whole
+  // job is to say what an image can do. Production was the one left out, so its
+  // image was the only one never measured -- and P2's first condition is a
+  // production run (docs/policy/product-research-agent.md §9).
+  assert.deepEqual(Object.keys(probe.environments).sort(), ["dev", "production", "staging"]);
   for (const environment of Object.keys(probe.environments)) {
     assert.deepEqual(
       [...probe.environments[environment]].sort(),
@@ -168,6 +161,15 @@ test("the probe measures every environment's image and can submit in none", () =
   // have to be the same list: a name declared here and not there stops the
   // probe, and a name there and not here is deleted by the next apply.
   assert.deepEqual([...variables].sort(), [...PROBE_SERVICE_VARIABLES].sort());
+});
+
+test("both projects deploy the same branch per environment", async () => {
+  // The Agent project's staging observes the release candidate the app's
+  // staging serves; a project left on develop would compare one build with
+  // another.
+  const { RAILWAY_ENVIRONMENT_BRANCHES } = await import("../.railway/scheduled-jobs.ts");
+  assert.deepEqual(AGENT_ENVIRONMENT_BRANCHES, RAILWAY_ENVIRONMENT_BRANCHES);
+  assert.equal(AGENT_ENVIRONMENT_BRANCHES.staging, "test");
 });
 
 test("the resource list is exactly the table for that environment, and refuses the unknown", () => {
@@ -232,9 +234,7 @@ test("the resource list is exactly the table for that environment, and refuses t
   // the absence of the key, not a null. Checked in every environment the probe
   // is declared for, because production is the one where a schedule would mean
   // an unattended run against the image P2 is judged on.
-  // Driven by the environments the table declares, for the same reason the
-  // assertion above is: `dev` exists on develop and not in this tree.
-  for (const environment of Object.keys(AGENT_ENVIRONMENT_BRANCHES)) {
+  for (const environment of ["production", "staging", "dev"]) {
     const probe = buildAgentRunnerResources(environment, dsl).find(
       (resource) => resource.name === "Product Research Probe"
     );
@@ -303,8 +303,10 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
   for (const [script, project] of [
     ["agents:use:staging", AGENT_RAILWAY_PROJECT],
     ["agents:use:production", AGENT_RAILWAY_PROJECT],
+    ["agents:use:dev", AGENT_RAILWAY_PROJECT],
     ["use:staging", "Tomverse"],
     ["use:production", "Tomverse"],
+    ["use:dev", "Tomverse"],
   ]) {
     assert.match(iac.scripts[script], new RegExp(`--project "?${project}"?`), script);
   }
@@ -314,11 +316,54 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
   for (const script of [
     "railway:agents:use-staging",
     "railway:agents:use-production",
+    "railway:agents:use-dev",
     "railway:agents:plan",
     "railway:agents:apply",
   ]) {
     assert.ok(root.scripts[script], `package.json has no "${script}" script`);
     assert.match(root.scripts[script], /npm run --prefix \.railway agents:/, script);
+  }
+});
+
+test("services that can only reach staging or production are not declared in dev", () => {
+  // The QA-release digest and monitor submit through an endpoint table naming
+  // staging and production only, and billing-finance-ops through a run
+  // endpoint table of the same two. In dev each would start and refuse every
+  // run, so dev does not get them until their tables name dev.
+  for (const key of [
+    "qa_release_digest",
+    "qa_release_monitor",
+    "billing_finance_ops_deadline",
+    "qa_release_merge_lane",
+    "qa_release_train",
+    "support_triage_retention",
+    "support_triage_worker",
+  ]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.equal(runner.environments.dev, undefined, key);
+  }
+  const observation = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "product_research_observation");
+  assert.deepEqual([...observation.environments.dev].sort(), [...observation.environments.staging].sort());
+});
+
+test("the QA-release services declare exactly the variables their start check accepts", async () => {
+  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  for (const [key, service] of [["qa_release_digest", "digest"], ["qa_release_monitor", "monitor"]]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.ok(runner, key);
+    for (const environment of ["production", "staging"]) {
+      assert.deepEqual([...runner.environments[environment]].sort(), [...QA_RELEASE_SERVICE_VARIABLES[service]].sort(), `${key} ${environment}`);
+    }
+  }
+  // The Monitor's 30-minute cron, approved by the operator on 2026-10-03.
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_monitor").cronSchedule, "*/30 * * * *");
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_digest").cronSchedule, "0 21 * * *");
+});
+
+test("the QA-release services start node directly, so npm adds nothing their start check would refuse", () => {
+  for (const key of ["qa_release_digest", "qa_release_monitor"]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.match(runner.startCommand, /^node --experimental-strip-types scripts\/qa-release-[a-z]+-service\.mjs$/, key);
   }
 });
 
@@ -340,14 +385,6 @@ test("the region is named rather than left to Railway's default", () => {
   }
 });
 
-test("the repository the run clones is the one the services deploy from", () => {
-  // Two files name a repository: the IaC gives it to Railway as the services'
-  // source, and the step core clones it. A run that cloned a different one
-  // would answer for a backlog that is not this product's while looking
-  // exactly like a correct run, and nothing downstream could tell.
-  assert.equal(OBSERVED_REPOSITORY, AGENT_RAILWAY_REPOSITORY);
-});
-
 test("the billing-finance-ops trigger declares exactly the variables its start check accepts, and starts node directly", async () => {
   const { BILLING_FINANCE_OPS_SERVICE_VARIABLES } = await import("../lib/billingFinanceOpsServiceCore.ts");
   const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "billing_finance_ops_deadline");
@@ -358,6 +395,16 @@ test("the billing-finance-ops trigger declares exactly the variables its start c
   // docs/policy/billing-finance-ops.md §1.1: once a day at 01:00 UTC.
   assert.equal(runner.cronSchedule, "0 1 * * *");
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs");
+});
+
+test("the merge lane runs in production only, every 10 minutes, with exactly its start check's variables", async () => {
+  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_merge_lane");
+  assert.ok(runner);
+  assert.deepEqual(Object.keys(runner.environments), ["production"]);
+  assert.deepEqual([...runner.environments.production].sort(), [...QA_RELEASE_SERVICE_VARIABLES.mergeLane].sort());
+  assert.equal(runner.cronSchedule, "*/10 * * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs");
 });
 
 test("the release train is its own production service, every 30 minutes, with exactly its start check's variables", async () => {
@@ -372,6 +419,28 @@ test("the release train is its own production service, every 30 minutes, with ex
   const { readFileSync } = await import("node:fs");
   const lane = readFileSync(new URL("../scripts/qa-release-merge-lane-service.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(lane, /runQaReleaseTrainRound/);
+});
+
+test("the repository the run clones is the one the services deploy from", () => {
+  // Two files name a repository: the IaC gives it to Railway as the services'
+  // source, and the step core clones it. A run that cloned a different one
+  // would answer for a backlog that is not this product's while looking
+  // exactly like a correct run, and nothing downstream could tell.
+  assert.equal(OBSERVED_REPOSITORY, AGENT_RAILWAY_REPOSITORY);
+});
+
+test("the Support Triage services declare exactly the variable their start check accepts, and start node directly", async () => {
+  const { supportTriageServiceVariables } = await import("../lib/supportTriageServiceCore.ts");
+  for (const [key, kind] of [["support_triage_worker", "worker"], ["support_triage_retention", "retention"]]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.ok(runner, key);
+    for (const environment of ["production", "staging"]) {
+      assert.deepEqual([...runner.environments[environment]].sort(), [...supportTriageServiceVariables(kind)].sort(), `${key} ${environment}`);
+    }
+    // docs/policy/support-triage.md §3: both every 30 minutes.
+    assert.equal(runner.cronSchedule, "*/30 * * * *", key);
+    assert.equal(runner.startCommand, `node --experimental-strip-types scripts/support-triage-${kind}-service.mjs`, key);
+  }
 });
 
 test("the sre-ops page service declares the supervisor's page list at S1b, production only", async () => {
@@ -407,16 +476,6 @@ test("the sre-ops digest service declares the supervisor's digest list, daily at
   assert.deepEqual([...digest.environments.production].sort(), [...SERVICE_VARIABLES.digest].sort());
   // The child the supervisor starts for it exists.
   assert.ok(existsSync(CHILD_SCRIPTS.digest), CHILD_SCRIPTS.digest);
-});
-
-test("the merge lane runs in production only, every 10 minutes, with exactly its start check's variables", async () => {
-  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
-  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_merge_lane");
-  assert.ok(runner);
-  assert.deepEqual(Object.keys(runner.environments), ["production"]);
-  assert.deepEqual([...runner.environments.production].sort(), [...QA_RELEASE_SERVICE_VARIABLES.mergeLane].sort());
-  assert.equal(runner.cronSchedule, "*/10 * * * *");
-  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs");
 });
 
 test("the AMUX orchestrator is a long-running production service that cannot run commands", () => {

@@ -64,9 +64,12 @@ import {
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
-import { AGENT_DIGEST_RETENTION_BATCH, expireAgentDigestBodies, purgeAgentDigestMeta } from "@/lib/agentDigestStore";
 import { checkBillingFinanceOpsSilence } from "@/lib/billingFinanceOpsSilence";
+import { AGENT_DIGEST_RETENTION_BATCH, expireAgentDigestBodies, purgeAgentDigestMeta } from "@/lib/agentDigestStore";
 import { DELIVERY_RETENTION_BATCH_LIMIT, purgeOpsObserverDeliveries } from "@/lib/opsObserverStore";
+
+/** Batches each agent digest retention step may run in one maintenance pass. */
+const AGENT_DIGEST_RETENTION_BATCHES_PER_RUN = 5;
 import {
   OBSERVATION_SILENCE_HOURS,
   observationSilenceVerdict,
@@ -429,9 +432,6 @@ const sweepExpiredGuestAttachments = async (now: Date) => {
   }
   return { deleted, failed, listed: true };
 };
-
-/** Batches each agent digest retention step may run in one maintenance pass. */
-const AGENT_DIGEST_RETENTION_BATCHES_PER_RUN = 5;
 
 export async function cleanupExpiredData() {
   // Not a step: without the encryption key the OAuth sweep would write
@@ -968,32 +968,6 @@ export async function cleanupExpiredData() {
     })
   );
 
-  // The shared AgentDigestItem retention, for every agent
-  // (docs/policy/qa-release-agent.md section 4): bodies past their retention
-  // first, then rows whose body is gone and whose 365 days are up -- the purge
-  // reads bodyDeletedAt, so the expiry has to have run. Each batch is its own
-  // transaction and audit entry; a few batches a day is far more than the
-  // agents write, so a backlog cannot build up, and a step stops early once a
-  // batch comes back short.
-  const agentDigestBodiesExpired = await step("agent_digest_body_expiry", async () => {
-    let expired = 0;
-    for (let batch = 0; batch < AGENT_DIGEST_RETENTION_BATCHES_PER_RUN; batch += 1) {
-      const result = await expireAgentDigestBodies();
-      expired += result.expired;
-      if (result.expired < AGENT_DIGEST_RETENTION_BATCH) break;
-    }
-    return expired;
-  });
-  const agentDigestMetaPurged = await step("agent_digest_meta_retention", async () => {
-    let purged = 0;
-    for (let batch = 0; batch < AGENT_DIGEST_RETENTION_BATCHES_PER_RUN; batch += 1) {
-      const result = await purgeAgentDigestMeta();
-      purged += result.purged;
-      if (result.purged < AGENT_DIGEST_RETENTION_BATCH) break;
-    }
-    return purged;
-  });
-
   // The product-research agent's two app-side duties
   // (docs/policy/product-research-agent.md §4). Separate steps because they
   // answer different questions and one must not hide the other: a sweep that
@@ -1049,6 +1023,31 @@ export async function cleanupExpiredData() {
   // or an incident. Its own step, so a failure here never takes another
   // agent's check with it.
   const billingFinanceOpsSilence = await step("billing_finance_ops_silence", () => checkBillingFinanceOpsSilence());
+  // The shared AgentDigestItem retention, for every agent
+  // (docs/policy/billing-finance-ops.md §1.4): bodies past their retention
+  // first, then rows whose body is gone and whose 365 days are up -- the purge
+  // reads bodyDeletedAt, so the expiry has to have run. Each batch is its own
+  // transaction and audit entry; a few batches a day is far more than the
+  // agents write, so a backlog cannot build up, and a step stops early once a
+  // batch comes back short.
+  const agentDigestBodiesExpired = await step("agent_digest_body_expiry", async () => {
+    let expired = 0;
+    for (let batch = 0; batch < AGENT_DIGEST_RETENTION_BATCHES_PER_RUN; batch += 1) {
+      const result = await expireAgentDigestBodies();
+      expired += result.expired;
+      if (result.expired < AGENT_DIGEST_RETENTION_BATCH) break;
+    }
+    return expired;
+  });
+  const agentDigestMetaPurged = await step("agent_digest_meta_retention", async () => {
+    let purged = 0;
+    for (let batch = 0; batch < AGENT_DIGEST_RETENTION_BATCHES_PER_RUN; batch += 1) {
+      const result = await purgeAgentDigestMeta();
+      purged += result.purged;
+      if (result.purged < AGENT_DIGEST_RETENTION_BATCH) break;
+    }
+    return purged;
+  });
 
   // The sre-ops reservations past their ninety days (docs/policy/sre-ops.md
   // §10). Its own step: each batch is its own bounded transaction with its
@@ -1131,11 +1130,11 @@ export async function cleanupExpiredData() {
     testerPassExpirations,
     testerPassEndedNotices,
     scheduledAccountsDeleted,
-    agentDigestBodiesExpired,
-    agentDigestMetaPurged,
     productResearchObservations: productResearchObservations?.removed ?? null,
     productResearchSilence: productResearchSilence?.state ?? null,
     billingFinanceOpsSilence,
+    agentDigestBodiesExpired,
+    agentDigestMetaPurged,
     opsObserverDeliveriesPurged,
     failedSteps: failures,
   };

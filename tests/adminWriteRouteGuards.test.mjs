@@ -314,19 +314,6 @@ const reachesCanonicalAmuxReviewAudit = (route) =>
   amuxProposalWriter.includes('action: "amux.human_escalation.proposed"') &&
   performs(amuxProposalWriter, "writeAdminAuditLog");
 
-const oneShotStageWriter = withoutComments(readFileSync(
-  join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
-const oneShotStageAuditWriter = withoutComments(readFileSync(
-  join(LIB_DIR, "promptRefinerVnextOneShotStageApprovalAudit.ts"), "utf8"));
-const reachesCanonicalOneShotStageAudit = (route) =>
-  route.name === "prompt-refiner/vnext-stage-approval/route.ts" &&
-  route.source.includes("createPromptRefinerVnextOneShotStageWithSlots({") &&
-  oneShotStageWriter.includes("return prisma.$transaction(async (tx) => {") &&
-  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx })") &&
-  oneShotStageAuditWriter.includes('action: "prompt_refiner.vnext_one_shot.stage_approved"') &&
-  oneShotStageAuditWriter.includes("tx: input.tx,") &&
-  performs(oneShotStageAuditWriter, "writeAdminAuditLog");
-
 /** A POST body is needed for a private scope proposal, but this particular
  * handler is read-only. Keep the audit exemption conditional on one of the two
  * reviewed code-switch states, the single service call and the transaction's
@@ -463,6 +450,7 @@ test("the read-only POST audit exception closes when its source boundary changes
     amuxSourceScopePreviewService.replace("await configureAmuxSourceScopeReadOnlyTransaction(tx);",
       "await tx.$queryRaw`INSERT INTO audit_probe DEFAULT VALUES RETURNING id`;\nawait configureAmuxSourceScopeReadOnlyTransaction(tx);")), false);
 });
+
 test("the resolution dry-run audit exception closes when its source boundary changes", () => {
   const route = routes.find((candidate) =>
     candidate.name === "amux/ideas/resolution-preview/route.ts");
@@ -496,6 +484,18 @@ test("the resolution dry-run audit exception closes when its source boundary cha
       "if (amuxV4ResolutionPreviewEnabled("),
   }), false);
 });
+const oneShotStageWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
+const oneShotStageAuditWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageApprovalAudit.ts"), "utf8"));
+const reachesCanonicalOneShotStageAudit = (route) =>
+  route.name === "prompt-refiner/vnext-stage-approval/route.ts" &&
+  route.source.includes("createPromptRefinerVnextOneShotStageWithSlots({") &&
+  oneShotStageWriter.includes("return prisma.$transaction(async (tx) => {") &&
+  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx })") &&
+  oneShotStageAuditWriter.includes('action: "prompt_refiner.vnext_one_shot.stage_approved"') &&
+  oneShotStageAuditWriter.includes("tx: input.tx,") &&
+  performs(oneShotStageAuditWriter, "writeAdminAuditLog");
 
 /** This owner-only POST carries custody pins in its body but does not mutate
  * product state. Keep the exception tied to the read-only transaction and a
@@ -525,6 +525,19 @@ const isReadOnlyOneShotV5StagePreflight = (route) => {
     !/\$(?:executeRaw|queryRaw)(?:Unsafe)?(?:<[^`]+>)?`\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(body) &&
     !/\b(?:fetch|require|import)\s*\(/.test(body);
 };
+
+test("v5 stage preflight remains a read-only audit exception", () => {
+  const route = routes.find((candidate) =>
+    candidate.name === "prompt-refiner/vnext-v5-stage-preflight/route.ts");
+  assert.ok(route);
+  assert.equal(isReadOnlyOneShotV5StagePreflight(route), true);
+  assert.equal(isReadOnlyOneShotV5StagePreflight({ ...route,
+    source: `${route.source}\nawait tx.promptRefinerVnextOneShotStage.create({});`,
+  }), false);
+  assert.equal(isReadOnlyOneShotV5StagePreflight({ ...route,
+    source: `${route.source}\nimport { createPromptRefinerVnextOneShotV5Stage } from "@/lib/promptRefinerVnextOneShotV5StageWriter";`,
+  }), false);
+});
 
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(

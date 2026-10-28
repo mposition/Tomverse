@@ -1668,12 +1668,14 @@ export function ChatPageClient({
     }
     const dismissable = promptRefinerState.status === "failed"
       ? promptRefinerState.request
-      : promptRefinerState.status === "accepted_preview"
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
         ? promptRefinerState.suggestion
         : null;
     const sourcePrompt = promptRefinerState.status === "failed"
       ? promptRefinerState.request.prompt
-      : promptRefinerState.status === "accepted_preview"
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
         ? promptRefinerState.suggestion.sourcePrompt
         : null;
     if (!dismissable || dismissable.requestId !== requestId) return false;
@@ -7393,7 +7395,7 @@ export function ChatPageClient({
       // question it carried came from a finished turn, not from the composer.
       if (!isOverrideSend && !preparedDraft) {
         const currentDraft = readDraft(activeChatId);
-        if (mountedSurface !== "chat" || chatDraftMatchesSubmission({
+        if (chatDraftMatchesSubmission({
           submittedText: inputValue,
           submittedAttachmentIds: attachments.map((attachment) => attachment.id),
           currentText: currentDraft.text,
@@ -10465,6 +10467,12 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          getGuestReviewSource={readGuestComparisonTurn}
+          onAnalysisCompleted={() => {
+            if (isGuestMode) {
+              refreshGuestUsage();
+            }
+          }}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
@@ -11107,12 +11115,8 @@ export function ChatPageClient({
               </h2>
               <p id="model-comparison-note" className="mt-1 text-sm leading-5 text-zinc-500">
                 {compareSummary.cached
-                  ? formatCopy("chat.quickDifferenceSummaryCachedNote", {
-                      credits: String(compareSummary.originalUsageCredits || 0),
-                    })
-                  : formatCopy("chat.quickDifferenceSummaryNote", {
-                      credits: String(compareSummary.usageCredits),
-                    })}
+                  ? t("chat.quickDifferenceSummaryCachedNote")
+                  : t("chat.quickDifferenceSummaryNote")}
               </p>
               <p className="mt-0.5 text-xs leading-5 text-zinc-400">
                 {t("chat.aiReviewedBy")}:{" "}

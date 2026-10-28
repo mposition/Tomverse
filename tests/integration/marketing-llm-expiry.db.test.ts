@@ -20,13 +20,18 @@ import {
 } from "@/lib/marketingLlmBudgetStore";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
+import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
 
 const reset = () =>
   resetTestFixture(prisma, `TRUNCATE TABLE "MarketingLlmCall", "AdminAuditLog" RESTART IDENTITY CASCADE`);
-beforeEach(reset);
+beforeEach(async () => {
+  await reset();
+  await setMarketingLlmSettings(prisma, PIN.model, "1");
+});
 after(async () => {
   await reset();
+  await clearMarketingLlmSettings(prisma);
   await prisma.$disconnect();
 });
 
@@ -47,7 +52,7 @@ const PIN: MarketingLlmPricePin = {
   expiresAt: new Date(verifiedAt + 90 * day).toISOString(),
   source: "https://example.invalid/pricing",
 };
-const OPEN: MarketingLlmBudgetEnvironment = { killSwitchOn: false, monthlyCapRaw: "1", pins: [PIN] };
+const OPEN: MarketingLlmBudgetEnvironment = { killSwitchOn: false, pins: [PIN] };
 const ADAPTER = marketingLlmAdapterConfigDigest(
   marketingLlmConfigSnapshot({ pin: PIN, adapterVersion: MARKETING_LLM_ADAPTER_VERSION }),
 );
