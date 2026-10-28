@@ -67,6 +67,47 @@ test("store access expires even if the expiration webhook is delayed", () => {
   }
 });
 const base = { billingId: "opaque-account", plan: "Pro", subscriptionStore: "play_store", productId: "pro:monthly", interval: "monthly", active: true, cancelAtPeriodEnd: false, products, purchasedCredits: 0 };
+
+test("native pass redemption normalizes the code, reads canonical access and never starts a store purchase", async () => {
+  const paths = []; const bodies = []; let activated = false;
+  const state = { ...base, plan: "Free", promotionPasses: true };
+  const client = createNativeBillingClient({ store: "play_store", apiKey: "", isCurrent: () => true,
+    sdk: { purchaseStoreProduct: async () => assert.fail("A pass must never purchase a store product") },
+    api: async (path, init) => {
+      paths.push(path); bodies.push(JSON.parse(init().body));
+      if (path === "/api/billing/checkout") {
+        activated = true;
+        return Response.json({ success: true, accessType: "founding_tester_pass", automaticRenewal: false, paymentMethodRequired: false, periodEnd: "2099-01-01T00:00:00Z" });
+      }
+      return Response.json({ ...state, ...(activated ? { plan: "Pro", accessPass: { expiresAt: "2099-01-01T00:00:00Z" } } : {}) });
+    } });
+  const result = await client.redeemPass("  trial-pass  ", "ko");
+  assert.equal(result.plan, "Pro");
+  assert.deepEqual(paths, ["/api/mobile/billing", "/api/billing/checkout", "/api/mobile/billing"]);
+  assert.deepEqual(bodies[1], { planId: "pro", billingInterval: "monthly", promoCode: "TRIAL-PASS", language: "ko" });
+});
+
+test("an older backend never receives a pass redemption on its cookie-only checkout route", async () => {
+  const paths = [];
+  const client = createNativeBillingClient({ sdk: {}, store: "play_store", apiKey: "", isCurrent: () => true,
+    api: async (path) => { paths.push(path); return Response.json(base); } });
+  await assert.rejects(client.redeemPass("trial-pass", "en"), /NATIVE_PASS_UNAVAILABLE/);
+  assert.deepEqual(paths, ["/api/mobile/billing"]);
+});
+
+for (const failure of ["lost-receipt", "paid-coupon", "expired", "already-used", "stale-state"]) test(`native pass does not repeat redemption or report success after ${failure}`, async () => {
+  let redemptions = 0;
+  const client = createNativeBillingClient({ sdk: {}, store: "play_store", apiKey: "", isCurrent: () => true,
+    api: async path => {
+      if (path !== "/api/billing/checkout") return Response.json({ ...base, plan: "Free", promotionPasses: true });
+      redemptions++;
+      if (failure === "lost-receipt") throw Error("connection lost");
+      if (failure === "expired" || failure === "already-used") return Response.json({ code: failure === "expired" ? "PROMOTION_EXPIRED" : "PROMOTION_ALREADY_USED" }, { status: 409 });
+      return Response.json({ success: true, accessType: failure === "paid-coupon" ? "stripe_subscription" : "founding_tester_pass", automaticRenewal: false, paymentMethodRequired: false, periodEnd: "2099-01-01T00:00:00Z" });
+    } });
+  await assert.rejects(client.redeemPass("test-pass", "en"));
+  assert.equal(redemptions, 1);
+});
 test("subscription changes cannot create duplicate or cross-provider subscriptions or silently resume renewal", () => {
   assert.equal(canPurchaseMobileProduct({ ...base, active: false, plan: "Max" }, products[1], "app_store"), false);
   assert.equal(canPurchaseMobileProduct({ ...base, active: false, plan: "Pro" }, products[0], "app_store"), false);

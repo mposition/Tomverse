@@ -7,7 +7,7 @@ import { getCreditPack } from "@/lib/creditPacks";
 import { getBillingPlans } from "@/lib/billingConfig";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { increaseCreditDebt, lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { effectivePlanForAccess, FOUNDING_TESTER_PASS_STATUS } from "@/lib/foundingTesterPassCore";
 import { getStripe } from "@/lib/stripe";
 import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
 import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
@@ -119,6 +119,9 @@ export async function readMobileBillingState(userId: string, store: MobileStore)
   const active = nativeActive || webActive;
   return {
     billingId: user.mobileBillingId, plan, subscriptionStore: nativeActive ? subscriptionStore : webActive ? "web" : null,
+    promotionPasses: process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" && process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true",
+    accessPass: user.subscriptionStatus === FOUNDING_TESTER_PASS_STATUS && user.subscriptionCurrentPeriodEnd && user.subscriptionCurrentPeriodEnd > new Date()
+      ? { expiresAt: user.subscriptionCurrentPeriodEnd.toISOString() } : null,
     productId: native?.productId || user.subscriptionStoreProductId,
     interval: native?.interval || (nativeActive ? user.storeSubscriptionBillingInterval : user.subscriptionBillingInterval),
     expiresAt: native?.expiresAt || (nativeActive ? user.storeSubscriptionExpiresAt : webActive ? user.subscriptionCurrentPeriodEnd : null)?.toISOString() || null,

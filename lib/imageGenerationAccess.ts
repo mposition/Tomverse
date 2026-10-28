@@ -15,10 +15,8 @@ export const imageGenerationEnabledFromValue = (
   value: string | null | undefined
 ): boolean => value === "true";
 
-// Plan entitlement is a code default on the plan tier, deliberately not a
-// BillingPlanConfig column: PR 1 must not carry a schema migration, and the
-// Pro/Max-only beta is a product decision rather than a per-plan admin knob.
-// If an admin override becomes necessary it moves to a DB-backed field in a
-// schema PR, with this function as the documented fallback for NULL.
+// Owner decision, 2026-10-28: every signed-in plan can use its existing credit
+// allowance for images. Reservation still enforces the same balance, daily
+// allowance, provider budget and concurrency limits; this grants no credits.
 export const planAllowsImageGeneration = (tier: ModelTier): boolean =>
-  tier === "Pro" || tier === "Max";
+  tier === "Free" || tier === "Pro" || tier === "Max";

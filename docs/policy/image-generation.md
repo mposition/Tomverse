@@ -63,8 +63,11 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
    달리 **명시적 opt-in**이다. 행이 없거나 값이 `"true"`가 아니면 꺼진다
    (`imageGenerationEnabledFromValue`). default-on helper
    (`enabledFromValue`)를 이 키에 재사용하지 않는다.
-2. **플랜 entitlement** `BillingFeature`의 `imageGeneration` — 코드 기본값
-   (`planAllowsImageGeneration`: Pro·Max만 true)이며 v1에서는 DB 컬럼을 두지
+2. **플랜 entitlement** `BillingFeature`의 `imageGeneration` — 2026-10-28 운영자 승인으로
+   `planAllowsImageGeneration`은 Free·Pro·Max에 true이고 Guest에는 false입니다.
+   Free도 기존 지급·구매 크레딧 잔액 안에서 이미지를 생성하며 추가 크레딧을 지급하지 않습니다.
+   기존 일일·월간 크레딧, 이미지 가격, 동시 실행 및 공급자 비용 한도는 그대로 적용합니다.
+   코드 기본값이며 v1에서는 DB 컬럼을 두지
    않는다. admin override가 필요해지면 스키마 PR에서 컬럼을 추가하고 NULL은
    코드 기본값 상속을 뜻한다.
 

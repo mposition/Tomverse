@@ -22,6 +22,9 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
   const [error, setError] = useState<MobileBillingCopyKey | "">(() => Capacitor.isNativePlatform() ? "" : "installedOnly");
   const [interval, setInterval] = useState("monthly");
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [passStatus, setPassStatus] = useState<MobileBillingCopyKey | "">("");
+  const [redeemingPass, setRedeemingPass] = useState(false);
   const [reload, setReload] = useState(0);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [checkingPurchase, setCheckingPurchase] = useState(false);
@@ -110,6 +113,22 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
     pendingPurchase.current = { before, productId: product.identifier };
     if (alive.current) setCheckingPurchase(true);
   }), "storeCompleted");
+  const redeemPass = async () => {
+    if (action.current || !client.current) return;
+    action.current = true; setBusy(true); setRedeemingPass(true); setPassStatus("");
+    try {
+      const value = await client.current.redeemPass(promoCode, language);
+      if (alive.current) { acceptState(value); setPromoCode(""); setPassStatus("passApplied"); }
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : "";
+      const key: MobileBillingCopyKey = code === "PROMOTION_ALREADY_USED" ? "passUsed"
+        : code === "PROMOTION_EXPIRED" || code === "PROMOTION_REDEMPTION_LIMIT_REACHED" ? "passExpired"
+        : code === "NATIVE_PASS_UNAVAILABLE" ? "passUnavailable"
+        : code === "PROMOTION_INVALID" || code === "NATIVE_PASS_REQUIRED" || code === "PROMOTION_UNAVAILABLE" || code === "PROMOTION_NOT_STARTED" ? "passInvalid"
+        : ["PROMOTION_PLAN_NOT_ELIGIBLE", "PLAN_CHANGE_NOT_SUPPORTED", "ACTIVE_SUBSCRIPTION_EXISTS", "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", "INTERNAL_PASS_NOT_ELIGIBLE"].includes(code) ? "passIneligible" : "passUnconfirmed";
+      if (alive.current) setPassStatus(key);
+    } finally { action.current = false; if (alive.current) { setBusy(false); setRedeemingPass(false); } }
+  };
   const manage = async () => {
     if (!state?.subscriptionStore || state.subscriptionStore === "web") return;
     await Browser.open({ url: state.subscriptionStore === "app_store" ? "https://apps.apple.com/account/subscriptions" : "https://play.google.com/store/account/subscriptions" });
@@ -118,13 +137,14 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
     <div className="native-billing-heading"><h2 id="native-billing-title">{c.title}</h2>{onClose && <button type="button" onClick={onClose} disabled={busy}>{c.back}</button>}</div>
     {checkingPurchase && <div className="purchase-verifying" role="status"><strong>{c.purchaseChecking}</strong><p>{c.purchaseCheckingDescription}</p></div>}
     {confirmation && <PurchaseConfirmation confirmation={confirmation} language={language} onClose={() => setConfirmation(null)} />}
-    {busy && <p role="status">{formatMobileBillingCopy(c.connecting, { store: storeName })}</p>}
+    {busy && <p role="status">{redeemingPass ? c.passApplying : formatMobileBillingCopy(c.connecting, { store: storeName })}</p>}
     {state && <>
       {state.verificationPending && <p role="status">{c.verificationPending}</p>}
       {state.subscriptionPurchaseAttempt && <p role="status">{c.subscriptionPending}</p>}
       {!!state.creditPurchasesNeedingReview && <p role="alert">{c.creditReview}</p>}
       <div className="native-billing-current"><h3><CreditCard size={22} aria-hidden="true" /><span>{formatMobileBillingCopy(c.currentPlan, { plan: state.plan })}</span></h3><p className="native-billing-balance"><span>{creditPrefix}</span>{" "}<strong>{number(state.purchasedCredits)}{creditSuffix}</strong></p>
         {state.active && state.expiresAt && <p>{formatMobileBillingCopy(state.cancelAtPeriodEnd ? c.accessUntil : c.renews, { date: date(state.expiresAt) })}</p>}
+        {state.accessPass && <p>{formatMobileBillingCopy(c.passAccessUntil, { date: date(state.accessPass.expiresAt) })}</p>}
       </div>
       {state.subscriptionStore !== "web" && state.webSubscription?.active && <p role="alert">{c.overlap}</p>}
       {state.active && state.subscriptionStore !== store && <p>{c.originalProvider}</p>}
@@ -144,6 +164,17 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
             {item.kind === "subscription" && state.active && state.plan === item.plan ? c.currentPlanButton : state.active ? c.changePlan : c.subscribe}
           </button></article>;
       })}</div>
+
+      <form className="native-billing-promotion" onSubmit={event => { event.preventDefault(); void redeemPass(); }}>
+        <label htmlFor="native-promotion-code">{c.promotionCode}</label>
+        <p id="native-promotion-description">{c.passDescription}</p>
+        <div><input id="native-promotion-code" value={promoCode} onChange={event => { setPromoCode(event.target.value); setPassStatus(""); }}
+          autoCapitalize="characters" autoComplete="off" spellCheck={false} maxLength={32} disabled={busy}
+          aria-describedby="native-promotion-description" />
+          <button type="submit" disabled={busy || !state.promotionPasses || promoCode.trim().length < 2}>{c.applyCode}</button></div>
+        {!state.promotionPasses && <p>{c.passUnavailable}</p>}
+        {passStatus && <p role={passStatus === "passApplied" ? "status" : "alert"}>{c[passStatus]}</p>}
+      </form>
 
       <h3>{c.additionalCredits}</h3><p className="native-billing-credit-terms">{c.creditTerms}</p>
       <div className="native-billing-products native-billing-credit-list">{state.products.filter((p) => p.kind === "credits").map((item) => {
