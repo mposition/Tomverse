@@ -138,7 +138,6 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
   AmuxDbBoundaryError: class extends Error {},
   amuxBoundaryWithAttachment: (value: unknown) => value,
   amuxRouteOrchestratorReceiptsMayHaveCommitted: () => false,
-  amuxRouteSpareMsFor: () => null,
   withAmuxDbBoundary: async (_value: unknown,
     work: (client: unknown, context: unknown) => Promise<unknown>) => work(tx, {
       dbNow: now, attachedTransaction: tx, requireLeaseAt: () => undefined,
@@ -201,10 +200,6 @@ mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), { namedExports: {
   loadEngineeringAgentV22SettlementPatch: async () => null,
-} });
-mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), { namedExports: {
-  ENGINEERING_AGENT_V22_PREFLIGHT_MS: 12_000,
-  loadEngineeringAgentV22StoredCandidateWithin: async () => null,
 } });
 
 const execution = import(mod("lib/amux/execution.ts"));

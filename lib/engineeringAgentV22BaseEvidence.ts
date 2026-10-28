@@ -71,8 +71,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   read?: ReadFile;
   stat?: FileStat;
   fetchBlob?: FetchBlob;
-  /** Settlement stopped waiting: start no further reads. */
-  signal?: AbortSignal;
 }): Promise<{
   baseFiles: { path: string; text: string }[];
   workflows: WorkflowFile[];
@@ -125,21 +123,20 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   if (!ignoreEntry || baseExcluded === null) return null;
   const excluded = new Set(baseExcluded);
   // The texts the loop below reads, read ahead in parallel: a few hundred
-  // sequential GitHub blob reads outran the settlement budget (2026-10-28).
+  // sequential GitHub blob reads took most of a minute (2026-10-28).
   const toRead = input.tree.filter((entry) => entry.type === "blob" &&
     isCanonicalRepoPath(entry.path) &&
     (entry.mode === "100644" || entry.mode === "100755") &&
     !excluded.has(entry.path) && !entry.path.startsWith("vendor/amux/") &&
     ANALYSIS_TEXT.test(entry.path));
-  // Any missing text, the byte cap or an abort fails the whole read, so the
-  // first of them stops new reads.
+  // Any missing text or the byte cap fails the whole read, so the first of
+  // them stops new reads.
   const texts = new Map<string, Uint8Array>();
   let next = 0;
   let readBytes = 0;
   let stopped = false;
   await Promise.all(Array.from({ length: READ_CONCURRENCY }, async () => {
     while (!stopped && next < toRead.length) {
-      if (input.signal?.aborted) { stopped = true; break; }
       const entry = toRead[next++];
       const bytes = await baseBytes(entry);
       readBytes += bytes?.byteLength ?? 0;

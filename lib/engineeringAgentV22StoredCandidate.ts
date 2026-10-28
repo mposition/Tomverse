@@ -25,19 +25,17 @@ type Ports = {
   readSwitch: () => Promise<boolean>;
   publicationEnabled: () => boolean;
   loadCandidate: typeof loadEngineeringAgentV22Candidate;
-  readTier: (candidate: Extract<Candidate,
-    { ok: true }>, signal?: AbortSignal) => Promise<{ tier: TierVerdict;
-      imageProofDigest: string | null }>;
+  readTier: (candidate: Extract<Candidate, { ok: true }>) =>
+    Promise<{ tier: TierVerdict; imageProofDigest: string | null }>;
 };
 
 // The base commit is bound through `candidate.baseTree`; its own
 // `.dockerignore` says which test sources its image leaves out. The field
 // keeps its stored name, `imageProofDigest`, for the exclusion digest.
-async function readTier(candidate: Extract<Candidate, { ok: true }>,
-  signal?: AbortSignal):
+async function readTier(candidate: Extract<Candidate, { ok: true }>):
   Promise<{ tier: TierVerdict; imageProofDigest: string | null }> {
   const evidence = await loadEngineeringAgentV22BaseEvidence({
-    tree: candidate.baseTree, signal,
+    tree: candidate.baseTree,
     fetchBlob: (oid, maxBytes) =>
       readEngineeringAgentGitBlob(oid, {}, maxBytes),
   });
@@ -95,15 +93,17 @@ const livePorts: Ports = {
 
 /** This is a verified candidate, not T1 authority. Every read that could
  * change during GitHub I/O is repeated before returning the patch to the
- * deterministic tier gate. No patch or source text is sent to a client. */
+ * deterministic tier gate. No patch or source text is sent to a client. A
+ * caller after settlement names its own snapshot (the pending draft's run). */
 export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
-  ports: Ports = livePorts, signal?: AbortSignal): Promise<
+  given: Partial<Ports> = {}): Promise<
     { ok: true; runId: string; taskId: string; baseSha: string;
       patchBody: string; patchDigest: string;
       candidate: Extract<Candidate, { ok: true }>;
       tier: TierVerdict; imageProofDigest: string | null } |
     { ok: false; reason: string }
   > {
+  const ports = { ...livePorts, ...given };
   const first = await ports.readSnapshot(attemptId);
   if (!first || !ports.publicationEnabled() ||
       !(await ports.readSwitch()) ||
@@ -115,9 +115,7 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
   const candidate = await ports.loadCandidate({ baseSha: first.baseSha,
     files: patch.files });
   if (!candidate.ok) return { ok: false, reason: candidate.reason };
-  if (signal?.aborted) return { ok: false, reason: "preflight_timeout" };
-  const tierEvidence = await ports.readTier(candidate, signal);
-  if (signal?.aborted) return { ok: false, reason: "preflight_timeout" };
+  const tierEvidence = await ports.readTier(candidate);
   const current = await ports.readSnapshot(attemptId);
   if (!current || current.runId !== first.runId ||
       current.taskId !== first.taskId || current.baseSha !== first.baseSha ||
@@ -128,33 +126,6 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
     patchDigest: patch.sha256, candidate,
     tier: tierEvidence.tier,
     imageProofDigest: tierEvidence.imageProofDigest };
-}
-
-/** How long settlement waits for the candidate. A slower read keeps the
- * result private (a T2 draft) rather than outrun the settle route's budget
- * and the bridge, which halts on an unanswered settlement. */
-export const ENGINEERING_AGENT_V22_PREFLIGHT_MS = 12_000;
-
-export async function loadEngineeringAgentV22StoredCandidateWithin(
-  attemptId: string, ms = ENGINEERING_AGENT_V22_PREFLIGHT_MS,
-  ports: Ports = livePorts) {
-  // The abort stops reads that have not started; settlement does not wait
-  // for the ones in flight.
-  const stop = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<{ ok: false; reason: string }>((resolve) => {
-    timer = setTimeout(() => {
-      stop.abort();
-      resolve({ ok: false, reason: "preflight_timeout" });
-    }, ms);
-  });
-  try {
-    return await Promise.race([
-      loadEngineeringAgentV22StoredCandidate(attemptId, ports, stop.signal),
-      timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /** The internal preflight may report identifiers and digests, never the
