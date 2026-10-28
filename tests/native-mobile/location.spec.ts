@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -32,11 +33,14 @@ test("the current native composer keeps location opt-in transient and preserves 
   await expect(page.getByTestId("native-location-toggle")).toBeChecked();
   await page.keyboard.press("Escape");
   await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
-  await expect(page.getByTestId("native-location-status")).toBeVisible();
+  await expect(page.getByTestId("native-location-status")).toHaveCount(0);
   await expect(page.locator(".composer textarea")).toBeVisible();
   const input = await page.locator(".composer textarea").boundingBox();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
-  await page.getByTestId("native-location-disable").click();
+  await page.locator(".composer-add").click();
+  await page.getByTestId("native-location-toggle").click();
+  await expect(page.getByTestId("native-location-toggle")).not.toBeChecked();
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("native-location-status")).toHaveCount(0);
   const withoutLocation = await page.locator(".composer textarea").boundingBox();
   expect(input!.width).toBeGreaterThanOrEqual(withoutLocation!.width - 1);
@@ -53,11 +57,11 @@ test("native Chat and Review share only the current account's transient location
   await page.goto("/"); await page.getByRole("button", { name: "Tomverse로 계속" }).click();
   await page.locator(".composer-add").click(); await page.getByTestId("native-location-toggle").click();
   await expect(page.getByTestId("native-location-toggle")).toBeChecked(); await page.keyboard.press("Escape");
-  await page.getByTestId("product-switcher").selectOption("review");
+  await selectProduct(page, "review");
   await page.locator(".composer-add").click();
   await expect(page.getByTestId("native-location-toggle")).toBeChecked();
   await page.getByTestId("native-location-toggle").click(); await page.keyboard.press("Escape");
-  await page.getByTestId("product-switcher").selectOption("chat");
+  await selectProduct(page, "chat");
   await expect(page.getByTestId("native-location-status")).toHaveCount(0);
 });
 
@@ -71,7 +75,8 @@ for (const code of [1, 3]) {
     await page.goto("/"); await page.getByRole("button", { name: "Tomverse로 계속" }).click();
     await page.locator(".composer-add").click(); await page.getByTestId("native-location-toggle").click();
     await expect(page.getByTestId("native-location-toggle")).not.toBeChecked();
-    await expect(page.getByTestId("native-location-status")).toContainText(code === 1 ? "권한" : "시간");
+    await expect(page.locator(".tool-location").getByRole("status")).toContainText(code === 1 ? "권한" : "시간");
+    await expect(page.getByTestId("native-location-status")).toHaveCount(0);
     await page.keyboard.press("Escape"); await page.getByRole("textbox").fill("Continue without location");
     await expect(page.getByRole("button", { name: "메시지 보내기", exact: true })).toBeEnabled();
   });

@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test } from '@playwright/test';
 
 /*
@@ -40,13 +41,13 @@ test('a Chat answer opens its question, with earlier questions, as a new Review 
   await expect(compare.first()).toHaveAccessibleName('이 질문을 새 Review에서 여러 모델로 비교');
   await compare.last().click();
 
-  await expect(page.getByTestId('product-switcher')).toHaveValue('review');
+  await expect(page.getByRole('navigation').getByRole('button', {name:'Review',exact:true})).toHaveAttribute('aria-current','page');
   await expect(page.locator('.review-workspace textarea')).toHaveValue('이전 질문:\n- 도쿄 3일 여행 계획 짜줘\n\n더 저렴하게');
   // A draft, not a sent comparison.
   await expect(page.getByTestId('review-landing')).toBeVisible();
 
   // The Chat conversation is unchanged.
-  await page.getByTestId('product-switcher').selectOption('chat');
+  await selectProduct(page, "chat");
   await page.getByRole('button', { name: '대화', exact: true }).click();
   await page.locator('.conversation-row', { hasText: 'Tokyo trip' }).click();
   await expect(page.locator('.message.user')).toHaveCount(3);

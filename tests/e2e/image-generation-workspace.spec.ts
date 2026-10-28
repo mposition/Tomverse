@@ -1130,7 +1130,7 @@ test("a Free plan sees the image tab locked, not hidden", { tag: "@ui-risk" }, a
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 
-test("the composer entry carries the chat draft and restores it on cancel", { tag: "@ui-risk" }, async ({
+test("the catalogue entry keeps the chat draft when leaving image mode", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -1141,7 +1141,16 @@ test("the composer entry carries the chat draft and restores it on cancel", { ta
 
   await page.getByTestId("chat-textarea").fill("a lighthouse at dusk");
   await page.getByTestId("composer-tools-button").click();
-  await page.getByTestId("tools-image-generation-row").click();
+  await expect(page.getByTestId("tools-image-generation-row")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+  await page
+    .getByTestId("image-model-tab-panel")
+    .getByTestId("image-model-option")
+    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
+    .first()
+    .click();
 
   // Review turns the same composer into the image prompt
   // (docs/ui-contracts/review-studio.md): the typed text stays where it was.

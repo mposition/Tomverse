@@ -1,8 +1,8 @@
-# Codemagic: first unsigned iOS build
+# Codemagic: Simulator and internal TestFlight builds
 
 Prepared on 2026-10-26 for the owner's personal Codemagic account. The Apple
 Developer Program is not required for this Simulator compile. The workflow has
-been checked locally; a Codemagic/Xcode build has not run yet.
+been checked locally; the first hosted build is recorded below.
 
 ## Repository and workflow
 
@@ -13,11 +13,11 @@ the iOS bundle, runs the preparation and billing-boundary tests, compiles withou
 the Simulator application. There are no automatic triggers or publishing steps.
 
 Repository: `https://github.com/mposition/Tomverse`.
-Prepared branch: `codex/to-develop/ios-remote-build-prep`. Its initial main revision
-and subsequent develop rebase are recorded in
-[the remote-build handoff](ios-remote-build.md). The six iOS patches were preserved
-unchanged when resolving PR #3044 on 2026-10-27. The branch is pushed and can be
-built directly; a merge to main or develop is not needed.
+Prepared branch: `codex/to-develop/ios-android-design-parity`, including the
+2026-10-27 Android design. The original iOS preparation and PR #3044 were merged
+before this branch was created. Its initial main revision and develop rebase
+are recorded in [the remote-build handoff](ios-remote-build.md). The branch is
+pushed and can be built directly; a merge to main or develop is not needed.
 
 ## Connect from Windows
 
@@ -34,7 +34,7 @@ it requires no production service secrets or Apple signing credentials.
    selector is shown, use **Other** for this repository's custom Capacitor build.
    Finish adding the application to your personal account.
 4. After the prepared branch is available on GitHub, choose **Start new build**,
-   select branch `codex/to-develop/ios-remote-build-prep` and workflow
+   select branch `codex/to-develop/ios-android-design-parity` and workflow
    `ios-simulator` / **Tomverse iOS Simulator**.
 5. Confirm the personal account's remaining free M2 minutes before starting the
    build. The published personal plan includes 500 M2 minutes per month; the
@@ -63,8 +63,149 @@ The Simulator ZIP cannot be installed on a physical iPad or iPhone. For iPad
 testing through TestFlight, the next stage needs an active Apple Developer
 Program membership, a final Bundle ID and App Store Connect app, and signing/API
 access configured inside Codemagic. The existing target supports iPhone and iPad
-on iOS/iPadOS 17.4+. Signed builds and TestFlight upload are a separate workflow;
-this file does not configure or perform them.
+on iOS/iPadOS 17.4+. The separate manual `ios-testflight` workflow below creates
+an internal-only signed IPA and uploads it to the existing App Store Connect app.
+
+## Internal TestFlight workflow
+
+The owner requested signed-device testing on 2026-10-27. `ios-testflight`
+(display name `Tomverse iOS TestFlight Internal`) prepares and verifies the same
+production bundle, assigns Codemagic's application-wide `PROJECT_BUILD_NUMBER`,
+applies the specified App Store signing profile, and archives the Release IPA.
+The first upload uses the existing marketing version 1.0 and bundle identifier
+`app.tomverse.shell` (App Store Connect app `6827148073`).
+
+Configure these names in the existing Codemagic personal account before running:
+
+| Account setting | Required value |
+|---|---|
+| Apple Developer Portal API integration | `Tomverse Codemagic Signing` |
+| Apple Distribution certificate reference | `tomverse-apple-distribution` |
+| App Store profile reference for `app.tomverse.shell` | `tomverse-app-store` |
+
+The registered App ID and provisioning profile must include Associated Domains
+for the existing `applinks:tomverse.app` and `webcredentials:tomverse.app`
+entitlements. Enable that capability before generating the App Store profile.
+
+The signing API integration needs a dedicated App Store Connect key with App
+Manager access. It is separate from the RevenueCat In-App Purchase key. Creating
+the key, retaining its private file locally, sharing it with Codemagic, and
+creating the signing certificate/profile require the owner's specific approval.
+Private keys and profiles stay outside Git; the workflow imports the named
+account identities and does not create new credentials during a build.
+
+The owner approved this credential setup in chat on 2026-10-27. The dedicated
+API integration, Apple Distribution certificate and App Store profile are now
+configured under the references above. Key/certificate/profile recovery files
+are retained outside Git. Independent review `r-20261027-105333-e11b71` accepted
+the manual internal-only signing and upload boundary; its versioning and
+Associated Domains setup notes were addressed before the signed run.
+
+The export option `testFlightInternalTestingOnly=true` restricts the resulting
+build to internal testing. Publishing uses the stored integration to upload the
+IPA; `submit_to_testflight=false` avoids an external beta-review submission and
+`submit_to_app_store=false` avoids a public release submission. No automatic
+trigger or recipient notification is configured. Once Apple finishes processing,
+add only the owner's existing App Store Connect user to an internal tester group
+and assign this build. Open that invitation in TestFlight on the iPad.
+
+`ITSAppUsesNonExemptEncryption=false` records the current use of Apple's
+platform cryptography (URLSession TLS, Keychain and CryptoKit PKCE hashing).
+The bundled app does not implement a separate encryption algorithm. Reassess
+this declaration if the app or a bundled SDK adds non-exempt encryption.
+
+For this first upload, the Apple dashboard had no existing TestFlight builds.
+If builds are uploaded from another system later, keep the Codemagic project
+number above the latest Apple build number before starting another upload.
+The project enables Apple Generic versioning; the finished IPA is checked for
+the expected bundle ID, CI build number, minimum OS, iPhone/iPad families and
+device platform before publishing. Artifacts include only the IPA, preflight
+receipt and Xcode logs. Signed-device
+installation and actual location/login/purchase behavior require observations
+on the iPad; a successful upload alone does not establish those results.
+
+## First hosted build (2026-10-27)
+
+The owner authorized the first cloud build. Personal-account usage was 0/500
+free macOS minutes before starting; no paid subscription was enabled.
+
+Build #1 at `23ec58bad` reached Xcode and failed because Swift inferred the
+native file bridge's methods as `[CAPPluginMethod?]`, which does not satisfy
+`CAPBridgedPlugin`. Commit `e3e7530bd` explicitly declares `[CAPPluginMethod]`,
+matching the existing authentication bridge and Capacitor's protocol. File
+validation, upload restrictions and document-picker behavior are unchanged.
+
+[Build #2](https://codemagic.io/app/6adf504aa37cedc4dfe11471/build/6ae07b76206ce93970c66b94)
+compiled commit `e3e7530bd9ab745858770ccfeb982c8e26e98359` successfully in
+3m 32s on Mac mini M2 with Xcode 26.6. The production bundle preparation,
+prebuild/billing tests, native compile and artifact packaging all completed.
+The downloaded Xcode log contains `BUILD SUCCEEDED`.
+
+The actual downloaded `tomverse-ios-simulator.zip` was inspected:
+
+- Size: 19,271,534 bytes.
+- SHA-256: `ebba05de7ede048a04172af3b469fe0cee8bb058b3c0fe7b4cf9e2a17eb5a42e`.
+- Bundle ID `app.tomverse.shell`; minimum OS 17.4; device families iPhone/iPad.
+- Simulator platform with both arm64 and x86_64 executable architectures.
+- All four new Chat/Review light/dark illustrations are bundled.
+
+This establishes native compilation and package contents. Simulator launch,
+signed-device installation, permission dialogs, authentication and StoreKit
+acceptance remain separate checks. No app-store upload or deployment occurred.
+
+## First signed TestFlight delivery (2026-10-27)
+
+[The first `ios-testflight` run](https://codemagic.io/app/6adf504aa37cedc4dfe11471/build/6ae08654206ce93970c66f78)
+compiled commit `32677a04c29e2957680bb306b7c9f69d4bfe67b1` on Mac mini M2 with
+Xcode 26.6 in 8m 32s. This is workflow run #1 and application-wide build #3.
+The CI admission merge at that commit added unrelated Android domain-association
+files; the iOS workflow and app sources match the verified signing changes.
+
+The Release archive, signed IPA export and pre-upload metadata checks passed.
+Apple upload reported `UPLOAD SUCCEEDED with no errors`. App Store Connect
+processed version **1.0 (3)** as **Internal** and **Ready to Test**, then changed
+to **Testing** after it was assigned to `Tomverse Internal`. That group contains
+only the owner's existing Account Holder/Admin user, whose status is **Accepted**
+(confirmed at 21:34 AEST).
+Automatic distribution is off. No external beta review or public App Store
+submission was performed.
+
+The downloaded `App.ipa` was independently inspected:
+
+- Size: 10,397,471 bytes.
+- SHA-256: `6a8f299d1dc0e9206832fac81f24ae4473d068c0832ebe9710a380b4b9f08333`.
+- Bundle ID `app.tomverse.shell`; version 1.0; build 3; minimum OS 17.4.
+- Device platform `iPhoneOS`, arm64 executable, iPhone/iPad device families.
+- Code signature resources and the correct embedded App Store profile present.
+- Associated Domains allowed, debugging disabled, beta reporting enabled.
+- All four new Chat/Review illustrations present; non-exempt encryption flag false.
+
+The owner accepted the invitation and sees version 1.0 (3), but installation on
+the iPad 7th generation fails with "The requested app is not available or doesn't
+exist." Reopening TestFlight and retrying did not resolve it. Installation and
+device acceptance are therefore **blocked**, despite the Testing label.
+
+App Store Connect's Build Metadata independently shows Binary State Validated,
+minimum iOS 17.4, arm64, iPhone/iPad families, the expected application identifier,
+Associated Domains, debugging disabled and beta reporting enabled. The downloaded
+executable uses ARM64_ALL, and its bundled frameworks require iOS 15.0. These
+checks found no OS, architecture or signing mismatch with the reported iPadOS
+18.7.10 device. Membership renews on 2027-10-27; the developer license is accepted;
+Free/Paid Apps agreements and required banking/tax records are Active. Apple's
+system-status page showed TestFlight available at 21:41 AEST.
+
+The empty Beta App Description and Feedback Email fields were completed with
+the internal test scope and the existing public support address. App Store
+Connect confirmed Saved. This completes test metadata; it does not establish
+that the installation error is resolved.
+
+The exact installation cause remains unconfirmed. Similar errors are reported
+on the [Apple Developer Forums](https://developer.apple.com/forums/thread/824745),
+where Apple directs unresolved account cases to Developer Support. Do not treat
+another developer's `BETA_CONTRACT_MISSING` report as a diagnosis for this app,
+or change credentials, public availability or external-review settings to probe
+it. Device launch, native sign-in, location consent and StoreKit results remain
+unobserved. The billing activation/pricing work described below remains separate.
 
 The Apple App ID `app.tomverse.shell` and [Tomverse App Store Connect draft](https://appstoreconnect.apple.com/apps/6827148073/distribution)
 were registered on 2026-10-26. Seven payment products have draft records as noted

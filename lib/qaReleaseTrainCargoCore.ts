@@ -102,6 +102,13 @@ export function qaReleaseTrainCarried(messages: readonly string[]): { numbers: S
 export const qaReleaseTrainIsBackMerge = (headRef: string, title: string): boolean =>
   headRef === "main" || /back-?merge/i.test(headRef) || /back-?merge/i.test(title);
 
+/**
+ * A Dependabot package update: never a candidate, since Dependabot opens its
+ * own main pull request for the same update (owner 2026-10-27).
+ */
+export const qaReleaseTrainIsDependabot = (pull: { user?: unknown }): boolean =>
+  /^dependabot(\[bot\])?$/i.test(String(record(pull.user)?.login ?? ""));
+
 /** The last segment of a branch name: `claude/to-develop/x` → `x`. */
 const branchTail = (ref: string): string => ref.slice(ref.lastIndexOf("/") + 1);
 
@@ -170,7 +177,7 @@ export function qaReleaseTrainCargoCandidates(input: {
   const inMainPullBranches = branches(openMain, false);
   return list(input.mergedDevelopJson)
     .filter((pull) => record(pull.base)?.ref === "develop" && typeof pull.merged_at === "string" && typeof pull.number === "number")
-    .filter((pull) => Date.parse(pull.merged_at as string) >= since)
+    .filter((pull) => Date.parse(pull.merged_at as string) >= since && !qaReleaseTrainIsDependabot(pull))
     .sort((a, b) => Date.parse(b.merged_at as string) - Date.parse(a.merged_at as string))
     .map((pull) => {
       const number = pull.number as number;

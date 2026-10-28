@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mobileSettingsCopy } from "../../locales/mobileSettings";
 
 type Call = { plugin: string; method: string; options: Record<string, unknown> };
 type Request = { action: string; store: string; productId?: string; attemptId?: string };
@@ -9,6 +10,7 @@ async function appleBilling(page: Page, outcome: "success" | "pending" | "cancel
   const requests: Request[] = [];
   await page.exposeFunction("iosBillingCall", (call: Call) => { calls.push(call); });
   await page.addInitScript((outcome) => {
+    localStorage.setItem("tomverse-native-location-consent-v1", JSON.stringify({ offered: true, unclaimedGrant: false, accounts: {} }));
     const device = window as unknown as { webkit: object; Capacitor: object; iosBillingCall: (call: Call) => Promise<void> };
     device.webkit = { messageHandlers: { bridge: { postMessage: () => {} } } };
     const methods = {
@@ -71,10 +73,7 @@ async function appleBilling(page: Page, outcome: "success" | "pending" | "cancel
   });
   await page.goto("/");
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Privacy & data", exact: true }).click();
-  await page.getByRole("button", { name: "Account, export & deletion", exact: true }).click();
-  await page.getByRole("button", { name: "Plans & credits", exact: true }).click();
+  await page.getByTestId("sidebar-account").getByRole("button", { name: mobileSettingsCopy("en").usageAndPlan, exact: true }).click();
   await expect(page.getByText("Current plan: Pro")).toBeVisible();
   await expect(page.getByRole("button", { name: "Buy credits", exact: true })).toBeEnabled();
   return {
@@ -108,12 +107,17 @@ test("annual plans show the full localized annual charge and period", async ({ p
 test("an Apple SDK success cannot grant credits before the server verifies payment", async ({ page }) => {
   const fixture = await appleBilling(page);
   await page.getByRole("button", { name: "Buy credits", exact: true }).click();
-  await expect(page.getByText(/Purchase submitted/)).toBeVisible();
+  await expect(page.locator(".purchase-verifying")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "1,500 credits added", exact: true })).toHaveCount(0);
   await expect(page.getByText("Purchased credits: 500", { exact: true })).toBeVisible();
   expect(fixture.requests.some(request => request.action === "prepare_credit_purchase" && request.productId === "apple.credits1500")).toBe(true);
   expect(fixture.calls.filter(call => call.method === "purchaseStoreProduct")).toHaveLength(1);
   fixture.verifyCredits();
   await page.getByRole("button", { name: "Refresh balance", exact: true }).click();
+  const confirmation = page.getByRole("dialog", { name: "1,500 credits added", exact: true });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation.getByRole("button", { name: "Done", exact: true })).toBeFocused();
+  await confirmation.getByRole("button", { name: "Done", exact: true }).click();
   await expect(page.getByText("Purchased credits: 2,000", { exact: true })).toBeVisible();
 });
 
@@ -126,6 +130,8 @@ test("an iOS upgrade delegates to StoreKit and waits for verified subscription s
   expect(purchase?.options).toEqual({ product: expect.objectContaining({ identifier: "apple.max.monthly" }) });
   fixture.verifyUpgrade();
   await page.getByRole("button", { name: "Refresh balance", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "You're subscribed to Max", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   await expect(page.getByText("Current plan: Max", { exact: true })).toBeVisible();
 });
 

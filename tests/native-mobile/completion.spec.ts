@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 async function signIn(page: import("@playwright/test").Page) { await page.goto("/"); await page.getByRole("button", { name: "Continue with Tomverse" }).click(); await expect(page.getByRole("textbox")).toBeVisible(); }
-async function account(page: import("@playwright/test").Page) { await page.getByRole("button", { name: "Conversations", exact: true }).click(); await page.getByRole("button", { name: "Settings" }).click(); await page.getByRole("button", { name: "Privacy & data", exact: true }).click(); await page.getByRole("button", { name: "Account, export & deletion" }).click(); }
+async function account(page: import("@playwright/test").Page) { await page.getByRole("button", { name: "Conversations", exact: true }).click(); await page.getByRole("button", { name: "Settings" }).click(); await page.getByRole("button", { name: "Data", exact: true }).click(); await page.getByRole("button", { name: /Your account data/ }).click(); }
 
 test("answers render Markdown, citations and generated files with a real browser download", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Make a file"); await page.getByRole("button", { name: "Send message", exact: true }).click();
