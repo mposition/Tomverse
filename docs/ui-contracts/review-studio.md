@@ -91,8 +91,23 @@ Analytics consent sits after the composer and AI disclaimer, at the bottom of
 the Studio question panel or mobile dock, without changing the consent actions.
 The mobile dock reserves the bottom safe area after its last visible footer.
 
-In Review Studio, drag a model card or answer header into the large answer
-panel to focus that model. The same cards support click, tap, Enter and Space.
+With two selected models, desktop Review Studio shows equal-width, full-height
+answers side by side. Only three selected models expose the Focus/Side-by-side
+view switch. Model chips and the view switch share one toolbar row, without
+the redundant Edit question action; the existing Write/Results control remains.
+The hint describes focusing in Focus and reordering in Side-by-side. Removing a
+model from a focused trio immediately restores the two-column comparison without
+resending or losing answers. Narrow screens retain the existing active-answer
+tabs.
+
+In side-by-side view, dragging a model chip or answer header onto another panel
+moves that answer to the target position. This changes display order only and
+preserves each panel's transcript, follow-up draft and pending stream without
+resending.
+
+With three selected models in Review Studio, drag a model card or answer header
+into the large answer panel to focus that model. The same cards support click,
+tap, Enter and Space in Focus; selecting a card in Side-by-side keeps that view.
 Changing focus or switching to side-by-side only changes the live layout:
 answers, pending streams and selected models stay intact, and no request is
 sent. Narrow screens use the same cards to select the visible answer. Opening

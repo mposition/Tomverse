@@ -2233,6 +2233,8 @@ export const en = {
         sharingTitle: "Share links",
         sharing: "When sharing is enabled, anyone with the link may read the shared conversation. Users should remove sensitive information before sharing.",
         rightsTitle: "User choices and rights",
+        deletionRequest: "To request deletion of your Tomverse account and associated data without the app, email support@tomverse.app from your account's email address. We verify ownership before processing. Account deletion has a 7-day safety period. To delete only specific data, describe it in your request. Do not send passwords or sign-in codes.",
+        deletionSubscriptions: "Cancel Google Play or App Store subscriptions separately in that store; deleting your Tomverse account does not cancel them. Minimal billing, legal and security records may be retained as described in the retention section above.",
         rights: "Users can delete and export chats and choose whether to share them. Privacy requests may be submitted through Tomverse's official support channel.",
         securityTitle: "Security",
         security: "We apply reasonable safeguards including access controls, encrypted transport, password hashing, usage limits, and private object storage. No internet transmission can be guaranteed absolutely secure.",

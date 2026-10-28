@@ -461,7 +461,7 @@
     "@eslint/eslintrc": {
       "brace-expansion": "^1.1.17"
     },
-    "@hono/node-server": "1.19.13",
+    "@hono/node-server": "1.19.15",
     "@prisma/config": {
       "deepmerge-ts": "^8.0.1"
     },

@@ -1,5 +1,15 @@
 import type { Language } from "@/lib/language";
 
+export const reviewReorderHint: Record<Language, string> = {
+  en: "Drag a model card or answer header onto another answer to change the order.",
+  ko: "모델 카드나 답변 헤더를 다른 답변 위로 드래그해 순서를 바꾸세요.",
+  zh: "将模型卡片或回答标题拖到另一个回答上以调整顺序。",
+  fr: "Glissez une carte de modèle ou un en-tête sur une autre réponse pour changer l’ordre.",
+  de: "Ziehen Sie eine Modellkarte oder einen Antwortkopf auf eine andere Antwort, um die Reihenfolge zu ändern.",
+  es: "Arrastra una tarjeta de modelo o un encabezado sobre otra respuesta para cambiar el orden.",
+  pt: "Arraste um cartão de modelo ou um cabeçalho sobre outra resposta para alterar a ordem.",
+};
+
 export const reviewFocusHint: Record<Language, string> = {
   en: "Drag a model card into the large answer area, or select a card to focus it.",
   ko: "모델 카드를 큰 답변 영역으로 드래그하거나 카드를 선택해 집중해서 보세요.",

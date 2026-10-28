@@ -29,6 +29,18 @@ export const PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR = "dependabot[bot]";
 export const PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES =
   /^(next\.config\.(ts|mjs|js)|sentry\.(client|server|edge)\.config\.ts|instrumentation(-client)?\.ts)$/;
 export const PR_CI_AUTO_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
+/**
+ * A conflict with develop resolved by the auto-fix (owner 2026-10-27): a
+ * merge commit of develop into the branch. Off unless the repository
+ * variable PR_AUTO_FIX_CONFLICTS_ENABLED is "true".
+ */
+export const PR_CI_AUTO_FIX_CONFLICT_PREFIX = "auto-fix(conflict): ";
+/**
+ * Lines a conflict resolution may write that are on neither side, in all its
+ * files: joining two edits of one line takes a few. Gate paths may take none.
+ */
+export const PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES = 40;
+const CONFLICT_MARKER = /^(<{7}|>{7})( |$)|^={7}$|^\|{7}( |$)/m;
 
 export type PrCiAutoFixVerdict = { push: true } | { push: false; reasons: string[] };
 
@@ -106,11 +118,14 @@ export function judgePrCiAutoFixTarget(input: {
   commitMessages: readonly string[];
   /** The number of commits GitHub says the pull request has; the attempt count is only trusted when every one was read. */
   commitCount: number;
+  /** A failed CI (the default) or a conflict with develop, which a draft may have too. */
+  kind?: "ci" | "conflict";
 }): PrCiAutoFixVerdict {
+  const conflict = input.kind === "conflict";
   const reasons: string[] = [];
   if (!input.sameRepository) reasons.push("fork");
   if (input.baseBranch !== "develop") reasons.push("base_not_develop");
-  if (input.draft) reasons.push("draft");
+  if (input.draft && !conflict) reasons.push("draft");
   if (!PR_CI_AUTO_FIX_BRANCH.test(input.headBranch)) reasons.push("branch_not_served");
   // A dependabot/ name alone is not Dependabot: a person with push access can
   // name a branch so, and the root allowance follows the name.
@@ -118,7 +133,145 @@ export function judgePrCiAutoFixTarget(input: {
     reasons.push("dependabot_branch_not_by_dependabot");
   }
   if (!Number.isInteger(input.commitCount) || input.commitMessages.length !== input.commitCount) reasons.push("commits_incomplete");
-  const attempts = input.commitMessages.filter((m) => m.startsWith(PR_CI_AUTO_FIX_COMMIT_PREFIX)).length;
+  const prefix = conflict ? PR_CI_AUTO_FIX_CONFLICT_PREFIX : PR_CI_AUTO_FIX_COMMIT_PREFIX;
+  const attempts = input.commitMessages.filter((m) => m.startsWith(prefix)).length;
   if (attempts >= PR_CI_AUTO_FIX_MAX_ATTEMPTS) reasons.push("attempts_exhausted");
   return reasons.length === 0 ? { push: true } : { push: false, reasons };
+}
+
+/** One conflicted file as git left it: the text outside its conflicts, and each conflict's sides. */
+type MergedFile = { outside: string[][]; hunks: { sides: string[] }[] };
+
+/**
+ * Splits a file git left with conflict markers into the text outside the
+ * conflicts (one more piece than there are conflicts) and each conflict's
+ * lines (the branch's, develop's and, in diff3 style, the base's). Null when
+ * the markers do not nest as git writes them.
+ */
+export function parseConflictMarkers(text: string): MergedFile | null {
+  const outside: string[][] = [[]];
+  const hunks: { sides: string[] }[] = [];
+  let state: "outside" | "ours" | "base" | "theirs" = "outside";
+  for (const line of text.split("\n")) {
+    const bare = line.replace(/\r$/, "");
+    if (/^<{7}( |$)/.test(bare)) {
+      if (state !== "outside") return null;
+      state = "ours";
+      hunks.push({ sides: [] });
+    } else if (/^\|{7}( |$)/.test(bare) && state === "ours") {
+      state = "base";
+    } else if (bare === "=======" && (state === "ours" || state === "base")) {
+      state = "theirs";
+    } else if (/^>{7}( |$)/.test(bare)) {
+      if (state !== "theirs") return null;
+      state = "outside";
+      outside.push([]);
+    } else if (state === "outside") {
+      outside[outside.length - 1].push(line);
+    } else {
+      hunks[hunks.length - 1].sides.push(line);
+    }
+  }
+  return state === "outside" && hunks.length > 0 ? { outside, hunks } : null;
+}
+
+// Exact, whitespace included: a trailing space can carry meaning (a shell
+// line continuation, a multi-line string).
+const sameLine = (a: string, b: string) => a === b;
+const startsAt = (lines: string[], at: number, piece: string[]) =>
+  at + piece.length <= lines.length && piece.every((line, index) => sameLine(lines[at + index], line));
+
+/**
+ * Whether a resolution of a conflict with develop may be committed. The
+ * workflow has merged develop itself; `files` is every conflicted path with
+ * the text git left in it (`merged`, with its markers), whether both sides
+ * are regular files (`regular`), and the proposed content (`resolved`), and
+ * `proposed` every path the resolution names.
+ *
+ * The resolution must keep everything git merged outside the conflicts, in
+ * order and unchanged: only the conflicts themselves are replaced. Inside a
+ * conflict a line on none of its sides is new; a gate path may take none
+ * (the merge lane's list, the test-free fence aside: a merge brings tests in),
+ * and all files together at most PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES.
+ * Refused as well: a resolution for any path that is not conflicted, or none
+ * for one that is; a conflict a side deleted, or a side that is not a regular
+ * file; markers git did not write; a marker or a NUL byte left.
+ */
+export function judgePrCiAutoFixConflict(input: {
+  files: readonly { path: string; regular: boolean; merged: string | null; resolved: string | null }[];
+  proposed: readonly string[];
+  headBranch?: string;
+}): PrCiAutoFixVerdict {
+  const reasons = new Set<string>();
+  const conflicted = new Set(input.files.map((file) => file.path));
+  if (conflicted.size === 0) reasons.add("no_conflict");
+  for (const path of input.proposed) if (!conflicted.has(path)) reasons.add("not_conflicted");
+  const dependabot = PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.test(input.headBranch ?? "");
+  let newLines = 0;
+  for (const file of input.files) {
+    if (!file.regular) {
+      reasons.add("not_regular_file");
+      continue;
+    }
+    if (file.merged === null) {
+      reasons.add("deleted_side");
+      continue;
+    }
+    if (file.resolved === null) {
+      reasons.add("unresolved");
+      continue;
+    }
+    if (CONFLICT_MARKER.test(file.resolved)) reasons.add("marker_left");
+    if (file.resolved.includes("\u0000")) reasons.add("binary");
+    const merged = parseConflictMarkers(file.merged);
+    if (merged === null) {
+      reasons.add("markers_unreadable");
+      continue;
+    }
+    // Walk the resolution: each piece of outside text in turn, unchanged; what
+    // lies between two pieces replaced the conflict between them.
+    const lines = file.resolved.split("\n");
+    const last = merged.outside.length - 1;
+    const tail = merged.outside[last];
+    const tailAt = lines.length - tail.length;
+    let kept = startsAt(lines, 0, merged.outside[0]) && tailAt >= merged.outside[0].length;
+    let at = merged.outside[0].length;
+    let added = 0;
+    for (let index = 0; kept && index < merged.hunks.length; index += 1) {
+      let end: number;
+      if (index + 1 === last) {
+        end = tailAt;
+        kept = end >= at && startsAt(lines, end, tail);
+      } else {
+        const next = merged.outside[index + 1];
+        end = at;
+        while (end <= tailAt - next.length && !startsAt(lines, end, next)) end += 1;
+        kept = end <= tailAt - next.length;
+      }
+      if (!kept) break;
+      const sides = new Set(merged.hunks[index].sides);
+      added += lines.slice(at, end).filter((line) => !sides.has(line)).length;
+      at = end + (index + 1 === last ? tail.length : merged.outside[index + 1].length);
+    }
+    if (!kept) {
+      reasons.add("outside_conflict_changed");
+      continue;
+    }
+    newLines += added;
+    const gate =
+      CONTRACT_DOCUMENT.test(file.path) ||
+      AUTO_FIX_FENCE.test(file.path) ||
+      PACKAGE_FILE.test(file.path) ||
+      (!file.path.includes("/") && !(dependabot && PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES.test(file.path))) ||
+      judgeQaReleaseMergeLaneExclusion({
+        headBranch: "auto-fix",
+        changedFiles: [{ path: file.path }],
+        changedFilesComplete: true,
+        policyTestPaths: [],
+        agentOwnPatterns: [],
+      }).excluded;
+    if (gate && added > 0) reasons.add("gate_path_new_line");
+  }
+  if (newLines > PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES) reasons.add("too_many_new_lines");
+  return reasons.size === 0 ? { push: true } : { push: false, reasons: [...reasons].sort() };
 }

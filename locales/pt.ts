@@ -2220,6 +2220,8 @@ export const pt = {
         sharingTitle: "Links de compartilhamento",
         sharing: "Quando o compartilhamento está ativo, qualquer pessoa com o link pode ler a conversa compartilhada. Remova informações sensíveis antes de compartilhar.",
         rightsTitle: "Escolhas e direitos do usuário",
+        deletionRequest: "Para solicitar a exclusão da sua conta Tomverse e dos dados associados sem instalar o app, envie um e-mail para support@tomverse.app usando o endereço da conta. Verificamos a titularidade antes do processamento. A exclusão da conta tem um prazo de segurança de 7 dias. Para excluir apenas determinados dados, descreva-os na solicitação. Não envie senhas nem códigos de acesso.",
+        deletionSubscriptions: "Cancele separadamente as assinaturas do Google Play ou da App Store na respectiva loja; excluir sua conta Tomverse não as cancela. Registros mínimos de cobrança, legais e de segurança podem ser mantidos conforme a seção de retenção acima.",
         rights: "Usuários podem excluir e exportar chats e escolher se desejam compartilhá-los. Solicitações de privacidade podem ser enviadas pelo canal oficial de suporte do Tomverse.",
         securityTitle: "Segurança",
         security: "Aplicamos salvaguardas razoáveis, incluindo controles de acesso, transporte criptografado, hash de senhas, limites de uso e armazenamento privado. Nenhuma transmissão pela internet pode ser garantida como absolutamente segura.",

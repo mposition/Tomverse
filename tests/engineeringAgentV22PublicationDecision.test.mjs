@@ -23,7 +23,6 @@ const input = (overrides = {}) => ({ policyVersion: 4,
   modeAtStart: "t1", runId: publication.runId,
   taskId: publication.taskId, baseSha: publication.baseSha,
   patchDigest: publication.patchDigest,
-  currentImageProofDigest: publication.imageProofDigest,
   publication, ...overrides });
 
 test("v22 publication requires the approved policy and exact locked bindings", () => {
@@ -35,7 +34,7 @@ test("v22 publication requires the approved policy and exact locked bindings", (
     { taskId: "another-card" },
     { baseSha: "c".repeat(40) },
     { patchDigest: "d".repeat(64) },
-    { currentImageProofDigest: "d".repeat(64) },
+    { publication: { ...publication, imageProofDigest: "not-a-digest" } },
     { publication: { ...publication, imageProofDigest: null } },
     { publication: null },
     { publication: { ok: false } },

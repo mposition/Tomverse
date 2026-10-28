@@ -14,6 +14,7 @@ import {
   changeCiAdmission,
   readCiAdmissionAdminView,
   requestCiAdmissionRound,
+  requestCiFixAgain,
   runCiAdmissionRound,
   stopCiAdmissionPull,
 } from "@/lib/ciAdmissionService";
@@ -37,6 +38,8 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("evaluate") }).strict(),
   // The operator's stop: back to draft and every run force-cancelled.
   z.object({ action: z.literal("stop"), number: prNumber }).strict(),
+  // The CI auto-fix tries the pull request's head once more (lib/ciAdmissionFixCore.ts).
+  z.object({ action: z.literal("fix_again"), number: prNumber }).strict(),
 ]);
 
 export async function GET(req: Request) {
@@ -68,6 +71,10 @@ export async function POST(req: Request) {
     await consumeApiRateLimit(req, session.user.id, "admin-ci-admission-write", { minute: 30, day: 500 });
     const body = await readLimitedJson(req, 4096, actionSchema);
 
+    if (body.action === "fix_again") {
+      const fixAgain = await requestCiFixAgain({ session, request: req }, body.number);
+      return NextResponse.json({ ...(await readCiAdmissionAdminView()), fixAgain });
+    }
     let stop: Awaited<ReturnType<typeof stopCiAdmissionPull>> | undefined;
     if (body.action === "stop") {
       stop = await stopCiAdmissionPull({ session, request: req }, body.number);

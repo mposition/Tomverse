@@ -2224,6 +2224,8 @@ export const de = {
         sharingTitle: "Freigabelinks",
         sharing: "Wenn Teilen aktiviert ist, kann jede Person mit dem Link die geteilte Unterhaltung lesen. Entfernen Sie sensible Informationen vor dem Teilen.",
         rightsTitle: "Nutzerentscheidungen und Rechte",
+        deletionRequest: "Um Ihr Tomverse-Konto und zugehörige Daten ohne die App löschen zu lassen, schreiben Sie von Ihrer Konto-E-Mail-Adresse an support@tomverse.app. Vor der Bearbeitung prüfen wir die Kontoinhaberschaft. Für die Kontolöschung gilt eine Sicherheitsfrist von 7 Tagen. Nennen Sie die betreffenden Daten, wenn nur bestimmte Daten gelöscht werden sollen. Senden Sie keine Passwörter oder Anmeldecodes.",
+        deletionSubscriptions: "Kündigen Sie Google-Play- oder App-Store-Abonnements separat im jeweiligen Store; das Löschen Ihres Tomverse-Kontos kündigt diese nicht. Minimale Abrechnungs-, Rechts- und Sicherheitsnachweise können gemäß dem Abschnitt zur Aufbewahrung oben gespeichert bleiben.",
         rights: "Nutzer können Chats löschen und exportieren und entscheiden, ob sie geteilt werden. Datenschutzanfragen können über den offiziellen Tomverse-Support gestellt werden.",
         securityTitle: "Sicherheit",
         security: "Wir wenden angemessene Schutzmaßnahmen an, einschließlich Zugriffskontrollen, verschlüsselter Übertragung, Passwort-Hashing, Nutzungslimits und privatem Objektspeicher. Keine Internetübertragung kann absolut sicher garantiert werden.",

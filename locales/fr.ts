@@ -2220,6 +2220,8 @@ export const fr = {
         sharingTitle: "Liens de partage",
         sharing: "Lorsque le partage est activé, toute personne disposant du lien peut lire la conversation partagée. Supprimez les informations sensibles avant de partager.",
         rightsTitle: "Choix et droits de l'utilisateur",
+        deletionRequest: "Pour demander la suppression de votre compte Tomverse et des données associées sans l’application, écrivez à support@tomverse.app depuis l’adresse de votre compte. Nous vérifions sa propriété avant traitement. La suppression du compte prévoit un délai de sécurité de 7 jours. Précisez les données concernées si vous souhaitez n’en supprimer qu’une partie. N’envoyez ni mot de passe ni code de connexion.",
+        deletionSubscriptions: "Annulez séparément vos abonnements Google Play ou App Store dans la boutique concernée : supprimer votre compte Tomverse ne les annule pas. Des données minimales de facturation, légales et de sécurité peuvent être conservées selon la section sur la conservation ci-dessus.",
         rights: "Les utilisateurs peuvent supprimer et exporter les chats et choisir de les partager. Les demandes de confidentialité peuvent être envoyées via le canal d'assistance officiel de Tomverse.",
         securityTitle: "Sécurité",
         security: "Nous appliquons des mesures raisonnables, notamment contrôles d'accès, transport chiffré, hachage des mots de passe, limites d'utilisation et stockage objet privé. Aucune transmission Internet ne peut être garantie totalement sûre.",
