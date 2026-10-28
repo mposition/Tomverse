@@ -73,6 +73,13 @@ test('a Chat continuation is listed with Chat and opens with its original above 
   await expect(imported.first()).toContainText('Imported ext-0');
   await expect(page.getByTestId('imported-load-older')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  await page.getByRole('button', { name: '대화', exact: true }).click();
+  await expect(page.locator('.history-more[aria-label$="Imported trip plan"]')).toBeVisible();
+  await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
+  await expect(page.locator('[data-message-source="imported"]', { hasText: 'Imported ext-2' })).toBeVisible();
+  await expect(page.getByTestId('continuation-divider')).toBeVisible();
+  await expect(page.locator('.email-login')).toHaveCount(0);
 });
 
 test('a Review continuation is listed with Review and shows its original', async ({ page }) => {
