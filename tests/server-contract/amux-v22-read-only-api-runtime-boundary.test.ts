@@ -138,6 +138,7 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
   AmuxDbBoundaryError: class extends Error {},
   amuxBoundaryWithAttachment: (value: unknown) => value,
   amuxRouteOrchestratorReceiptsMayHaveCommitted: () => false,
+  amuxRouteSpareMsFor: () => null,
   withAmuxDbBoundary: async (_value: unknown,
     work: (client: unknown, context: unknown) => Promise<unknown>) => work(tx, {
       dbNow: now, attachedTransaction: tx, requireLeaseAt: () => undefined,
