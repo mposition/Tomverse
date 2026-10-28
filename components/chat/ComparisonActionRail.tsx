@@ -2,7 +2,6 @@
 
 import { useId, useState, type ReactNode } from "react";
 import { ChevronUp, Lock } from "lucide-react";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
@@ -180,9 +179,8 @@ export function ComparisonActionRail({
   const statusId = `${baseId}-status`;
   // The two actions cost different numbers of credits, so a single shared
   // description made "not enough credits" read against whichever button the
-  // sentence happened to be written for. Each action now owns a description
-  // that names its own comparison target, its own price and its own reason for
-  // being unavailable.
+  // sentence happened to be written for. Each action owns its comparison
+  // target and blocked reason; routine cost labels are not displayed.
   const quickDescriptionId = `${baseId}-quick-description`;
   const reviewDescriptionId = `${baseId}-review-description`;
   const [isExpandedWhileCompact, setIsExpandedWhileCompact] = useState(false);
@@ -248,7 +246,7 @@ export function ComparisonActionRail({
         ? insufficientText(AI_REVIEW_CREDITS)
         : null;
   // What a guest's one free run is, said once, in the description that already
-  // carries this action's price and scope -- so it reaches both shells without
+  // carries this action's scope -- so it reaches both shells without
   // competing with the 320px label budget for a row of its own.
   const reviewTrialNote =
     aiReviewAccess.kind === "guestTrial"
@@ -258,30 +256,26 @@ export function ComparisonActionRail({
         })
       : null;
 
-  const quickCostLabel = isQuickSummaryCached
-    ? t("chat.aiReviewCached")
-    : interpolate(t("chat.quickDifferenceSummaryApproximateCost"), {
-        credits: QUICK_SUMMARY_CREDITS,
-      });
-  // The accessible *name* is now the action alone. Scope, price and blocked
+  // The accessible *name* is the action alone. Scope and blocked
   // reason live in the description instead of being concatenated into the
   // name, so a screen reader no longer reads the same sentence twice (once as
   // the button's name, once as its description).
   const quickAccessibleName = t("chat.quickDifferenceSummary");
   const reviewAccessibleName = t("chat.aiReviewButton");
   const describeAction = (
-    costLabel: string,
     reason: string | null,
     note: string | null = null
   ) => {
-    const parts = [statusText, costLabel];
+    const parts = [statusText];
     if (note) parts.push(note);
     if (reason && reason !== statusText) parts.push(reason);
     return parts.join(" · ");
   };
-  const quickDescription = describeAction(quickCostLabel, quickReason);
+  const quickDescription = describeAction(
+    quickReason,
+    isQuickSummaryCached ? t("chat.aiReviewCached") : null
+  );
   const reviewDescription = describeAction(
-    `${AI_REVIEW_CREDITS} ${t("chat.aiReviewCredits")}`,
     reviewReason,
     reviewTrialNote
   );
@@ -444,13 +438,6 @@ export function ComparisonActionRail({
                   ? t("chat.quickDifferenceSummaryShort")
                   : t("chat.quickDifferenceSummary")}
               </span>
-              <CreditCostBadge
-                credits={quickCredits}
-                size="xs"
-                approximate={!isQuickSummaryCached}
-                label={quickCostLabel}
-                testId="quick-comparison-credit-cost"
-              />
             </button>
 
             {
@@ -518,15 +505,6 @@ export function ComparisonActionRail({
                       </span>
                     )}
                   </span>
-                  <CreditCostBadge
-                    credits={AI_REVIEW_CREDITS}
-                    size="xs"
-                    tone="onColor"
-                    approximate
-                    label={`${AI_REVIEW_CREDITS} ${t("chat.aiReviewCredits")}`}
-                    testId="ai-review-entry-credit-cost"
-                    className="border-0 bg-white/20"
-                  />
                 </button>
                 <FeatureHelpPopover
                   title={helpCopy.aiReviewTitle}
