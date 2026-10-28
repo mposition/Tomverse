@@ -33,12 +33,14 @@ import {
   recordEngineeringAgentServiceFinish,
   removeEngineeringAgentReviewer,
   replaceEngineeringAgentBinding,
+  resolveEngineeringAgentV22TierPendingDraft,
   runEngineeringAgentTransaction,
   setEngineeringAgentSwitch,
   settleEngineeringAgentWorkItem,
 } from "@/lib/engineeringAgentStore";
 import { readEngineeringAgentLastLook } from "@/lib/engineeringAgentLastLook";
-import { openEngineeringAgentV22Product } from "@/lib/engineeringAgentV22ProductStore";
+import { openEngineeringAgentV22Product,
+  resolveEngineeringAgentV22Product } from "@/lib/engineeringAgentV22ProductStore";
 import { runIdempotentEngineeringAgentRequest } from "@/lib/engineeringAgentRouteAuth";
 import { prisma } from "@/lib/prisma";
 
@@ -259,46 +261,97 @@ const commitFields = (runId: string, cardRef: string) => ({
   cardRef,
 });
 
-test("v22 publish and its capability commit together, or neither commits", async () => {
+/** A run whose patch settled as a `tier_pending` draft, the run then ended as settlement ends it. */
+const pendingDraftFor = async (seed: string) => {
   const run = await startRun();
-  const patch = { text: "patch", sha256: sha256("patch"), baseSha: sha1("base") };
-  const product = await inTx((tx) => openEngineeringAgentV22Product(tx, {
-    runId: run.runId, taskId: run.cardId, patch, publish: true,
-    candidate: { expectedTreeId: sha1("tree"),
-      baseCommitterDate: "1759000000 +1000" },
+  const patch = { text: seed, sha256: sha256(seed), baseSha: sha1("base") };
+  const draft = await inTx((tx) => openEngineeringAgentV22Product(tx, {
+    runId: run.runId, patch, tierPending: true,
   }));
-  assert.equal(product.kind, "publish");
-  const capability = await prisma.engineeringAgentCapability.findFirstOrThrow({
-    where: { unconsumedWorkItemId: product.id },
-  });
-  assert.equal(capability.consumedAt, null);
-  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
-    workItemId: product.id, mode: "write", leaseMs: 60_000,
-  }));
-  const bound = await settleAndBind(product.id, claim.fencingToken, run.runId);
   await inTx((tx) => endEngineeringAgentRun(tx, {
     runId: run.runId, amuxAttemptId: run.amuxAttemptId,
-    outcome: "t1_queued", halt: "none",
+    outcome: "t2_draft", halt: "none",
   }));
+  return { run, patch, draft };
+};
+
+const promotionInput = (pending: Awaited<ReturnType<typeof pendingDraftFor>>) => ({
+  workItemId: pending.draft.id, runId: pending.run.runId,
+  taskId: pending.run.cardId, patchDigest: pending.patch.sha256,
+  baseSha: pending.patch.baseSha, reason: "tier_two",
+  candidate: { expectedTreeId: sha1("tree"),
+    baseCommitterDate: "1759000000 +1000", imageProofDigest: sha256("image") },
+});
+
+test("a v22 draft settled before its tier is promoted to its run's one publish item", async () => {
+  const pending = await pendingDraftFor("promoted patch");
+  // Started now: once the first is promoted, no run starts in the first T1 window.
+  const waiting = await pendingDraftFor("waiting patch");
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: pending.draft.id } })).reason, "tier_pending");
+  // Without a promoted draft, a finished run makes no publish item.
+  await assert.rejects(inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${pending.run.runId}`,
+    runId: pending.run.runId, patchBody: pending.patch.text,
+    patchDigest: pending.patch.sha256, baseSha: pending.patch.baseSha,
+    expectedTreeId: sha1("tree"),
+  })), /must be the product of an active run/);
+
+  // A capability that cannot be issued leaves the draft pending, nothing opened.
+  await assert.rejects(inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    promotionInput(pending), {
+      resolve: resolveEngineeringAgentV22TierPendingDraft,
+      issue: async () => { throw new Error("injected_capability_failure"); },
+    })), /injected_capability_failure/);
+  const untouched = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: pending.draft.id } });
+  assert.deepEqual([untouched.state, untouched.reason], ["open", "tier_pending"]);
+  assert.equal(await prisma.engineeringAgentWorkItem.count({
+    where: { runId: pending.run.runId, kind: "publish" } }), 0);
+
+  const resolved = await inTx((tx) =>
+    resolveEngineeringAgentV22Product(tx, promotionInput(pending)));
+  assert.ok("publishWorkItemId" in resolved);
+  const promoted = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: pending.draft.id } });
+  assert.deepEqual([promoted.state, promoted.reason], ["expired", "publish_promoted"]);
+  const publish = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: resolved.publishWorkItemId } });
+  assert.deepEqual([publish.kind, publish.state, publish.patchBody, publish.patchDigest],
+    ["publish", "queued", pending.patch.text, pending.patch.sha256]);
+  // Still one product: a second publish item for the run is refused.
+  await assert.rejects(inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${pending.run.runId}:again`,
+    runId: pending.run.runId, patchBody: pending.patch.text,
+    patchDigest: pending.patch.sha256, baseSha: pending.patch.baseSha,
+    expectedTreeId: sha1("tree"),
+  })), /a run has one product/);
+
+  // The first T1 window holds one pull request: a second promotion waits.
+  await assert.rejects(inTx((tx) =>
+    resolveEngineeringAgentV22Product(tx, promotionInput(waiting))),
+  /the owner queue is full/);
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: waiting.draft.id } })).reason, "tier_pending");
+
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
+    workItemId: resolved.publishWorkItemId, mode: "write", leaseMs: 60_000,
+  }));
+  const bound = await settleAndBind(resolved.publishWorkItemId,
+    claim.fencingToken, pending.run.runId);
   await retireBinding(bound.bindingId);
 
-  const rejectedRun = await startRun();
-  await assert.rejects(
-    inTx((tx) => openEngineeringAgentV22Product(tx, {
-      runId: rejectedRun.runId, taskId: rejectedRun.cardId,
-      patch, publish: true,
-      candidate: { expectedTreeId: sha1("tree"),
-        baseCommitterDate: "1759000000 +1000" },
-    }, { open: openEngineeringAgentWorkItem,
-      issue: async () => { throw new Error("injected_capability_failure"); } })),
-    /injected_capability_failure/,
-  );
-  assert.equal(await prisma.engineeringAgentWorkItem.count({
-    where: { causeKey: `publish:${rejectedRun.runId}` },
-  }), 0);
-  await inTx((tx) => endEngineeringAgentRun(tx, {
-    runId: rejectedRun.runId, amuxAttemptId: rejectedRun.amuxAttemptId,
-    outcome: "no_change", halt: "none",
+  // Any other verdict leaves an ordinary owner draft, once.
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    { ...promotionInput(waiting), candidate: null })), { kept: true });
+  const kept = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: waiting.draft.id } });
+  assert.deepEqual([kept.state, kept.reason], ["open", "tier_two"]);
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    promotionInput(waiting))), { kept: false });
+  await inTx((tx) => decideEngineeringAgentT2Draft(tx, {
+    session: owner, workItemId: waiting.draft.id, decision: "rejected",
+    patchDigest: waiting.patch.sha256, baseSha: waiting.patch.baseSha,
   }));
 });
 

@@ -3,24 +3,44 @@ import test from "node:test";
 
 import { ENGINEERING_AGENT_COMMIT_IDENTITY } from
   "../lib/engineeringAgentCore.ts";
-import { openEngineeringAgentV22Product } from
+import { openEngineeringAgentV22Product,
+  resolveEngineeringAgentV22Product } from
   "../lib/engineeringAgentV22ProductStore.ts";
 
 const tx = { transactionMarker: "same-transaction" };
 const patch = { text: "diff --git a/a.ts b/a.ts\n",
   sha256: "a".repeat(64), baseSha: "b".repeat(40) };
 const candidate = { expectedTreeId: "c".repeat(40),
-  baseCommitterDate: "1791336934 +1000" };
-const input = { runId: "123456789012", taskId: "card-1", patch,
-  candidate };
+  baseCommitterDate: "1791336934 +1000", imageProofDigest: "e".repeat(64) };
+const input = { workItemId: "draft-1", runId: "123456789012",
+  taskId: "card-1", patchDigest: patch.sha256, baseSha: patch.baseSha,
+  reason: "tier_two" };
 
-test("T1 product and its one-use capability use the same transaction", async () => {
+test("settlement opens a draft only, pending a tier when the run may publish", async () => {
+  const opened = [];
+  const ports = { open: async (usedTx, request) => {
+    opened.push({ usedTx, request });
+    return { workItemId: `item-${opened.length}` };
+  } };
+  const pending = await openEngineeringAgentV22Product(tx,
+    { runId: input.runId, patch, tierPending: true }, ports);
+  await openEngineeringAgentV22Product(tx,
+    { runId: input.runId, patch, tierPending: false }, ports);
+  assert.equal(pending.kind, "t2_draft");
+  assert.deepEqual(opened.map(({ usedTx, request }) =>
+    [usedTx, request.kind, request.reason]), [
+    [tx, "t2_draft", "tier_pending"],
+    [tx, "t2_draft", "tier_evidence_unavailable"],
+  ]);
+});
+
+test("a promotion and its one-use capability use the same transaction", async () => {
   const calls = [];
-  const product = await openEngineeringAgentV22Product(tx,
-    { ...input, publish: true }, {
-      open: async (usedTx, request) => {
+  const resolved = await resolveEngineeringAgentV22Product(tx,
+    { ...input, candidate }, {
+      resolve: async (usedTx, request) => {
         calls.push({ usedTx, request });
-        return { workItemId: "item-1" };
+        return { publishWorkItemId: "item-1" };
       },
       issue: async (usedTx, request) => {
         calls.push({ usedTx, request });
@@ -28,12 +48,13 @@ test("T1 product and its one-use capability use the same transaction", async () 
           expiresAt: new Date() };
       },
     });
-  assert.equal(product.kind, "publish");
-  assert.equal(product.id, "item-1");
+  assert.deepEqual(resolved, { publishWorkItemId: "item-1" });
   assert.equal(calls.length, 2);
   assert.equal(calls[0].usedTx, tx);
   assert.equal(calls[1].usedTx, tx);
-  assert.equal(calls[0].request.kind, "publish");
+  assert.deepEqual(calls[0].request.promote, {
+    expectedTreeId: candidate.expectedTreeId,
+    imageProofDigest: candidate.imageProofDigest });
   assert.equal(calls[1].request.workItemId, "item-1");
   assert.deepEqual(calls[1].request.capability.commit,
     { identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
@@ -41,19 +62,21 @@ test("T1 product and its one-use capability use the same transaction", async () 
       runId: input.runId, cardRef: input.taskId });
 });
 
-test("T2 draft issues no capability, and a failed issuer is not hidden", async () => {
+test("a kept draft issues no capability, and a failed issuer is not hidden", async () => {
   let issued = 0;
-  const ports = { open: async () => ({ workItemId: "item-2" }),
-    issue: async () => { issued++; throw new Error("issuer_refused"); } };
-  const draft = await openEngineeringAgentV22Product(tx,
-    { ...input, publish: false, candidate: null }, ports);
-  assert.equal(draft.kind, "t2_draft");
+  const ports = {
+    resolve: async (_tx, request) => request.promote ?
+      { publishWorkItemId: "item-2" } : { kept: true },
+    issue: async () => { issued++; throw new Error("issuer_refused"); },
+  };
+  assert.deepEqual(await resolveEngineeringAgentV22Product(tx,
+    { ...input, candidate: null }, ports), { kept: true });
   assert.equal(issued, 0);
-  await assert.rejects(openEngineeringAgentV22Product(tx,
-    { ...input, publish: true }, ports), /issuer_refused/);
+  await assert.rejects(resolveEngineeringAgentV22Product(tx,
+    { ...input, candidate }, ports), /issuer_refused/);
   assert.equal(issued, 1);
-  await assert.rejects(openEngineeringAgentV22Product(tx,
-    { ...input, publish: true, candidate: null }, ports),
+  await assert.rejects(resolveEngineeringAgentV22Product(tx,
+    { ...input, candidate: { ...candidate, baseCommitterDate: null } }, ports),
   /v22_publish_candidate_missing/);
   assert.equal(issued, 1);
 });

@@ -62,6 +62,8 @@ import {
 import {
   ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY,
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
+  ENGINEERING_AGENT_V22_PROMOTED_REASON,
+  ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
   ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
@@ -1264,6 +1266,55 @@ export async function issueEngineeringAgentCapability(
     commitDigest,
   });
   return { capabilityId: created.id, commitDigest, expiresAt: created.expiresAt };
+}
+
+/**
+ * The tier of a v22 draft settled as `tier_pending`, read after settlement
+ * (§4). A T1 verdict promotes it: the draft closes as `expired` with reason
+ * `publish_promoted` and the run's publish item opens with the draft's own patch,
+ * which the database admits only after that draft and only while the pull
+ * request queue has room. Any other verdict leaves an ordinary draft for the
+ * owner, under the reason that kept it private. A draft that is no longer
+ * pending, or no longer this patch, is left alone.
+ */
+export async function resolveEngineeringAgentV22TierPendingDraft(
+  tx: EngineeringAgentTransaction,
+  input: { workItemId: string; patchDigest: string; baseSha: string;
+    promote: { expectedTreeId: string; imageProofDigest: string } | null;
+    reason: string },
+): Promise<{ publishWorkItemId: string } | { kept: boolean }> {
+  if (!REASON.test(input.reason)) refuse("reason_invalid");
+  const item = await lockWorkItem(tx, input.workItemId);
+  const draft = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: item.id }, select: { reason: true, patchBody: true },
+  });
+  if (item.kind !== "t2_draft" || item.state !== "open" ||
+      draft.reason !== ENGINEERING_AGENT_V22_TIER_PENDING_REASON ||
+      item.patchDigest !== input.patchDigest || item.baseSha !== input.baseSha ||
+      !item.runId || draft.patchBody === null)
+    return { kept: false };
+  if (!input.promote) {
+    await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
+      data: { reason: input.reason } });
+    await systemAudit(tx, "engineering-agent-runner", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemSettled, "engineering_agent_work_item", item.id, {
+      kind: "t2_draft", reason: input.reason,
+    });
+    return { kept: true };
+  }
+  await requireSwitch(tx, "publishAllowed");
+  await requireV22PublicationAllowed(tx, item.runId);
+  await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
+    data: { state: "expired", reason: ENGINEERING_AGENT_V22_PROMOTED_REASON } });
+  await systemAudit(tx, "engineering-agent-runner", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemExpired, "engineering_agent_work_item", item.id, {
+    kind: "t2_draft", reason: ENGINEERING_AGENT_V22_PROMOTED_REASON,
+    imageProofDigest: input.promote.imageProofDigest,
+  });
+  const opened = await openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${item.runId}`, runId: item.runId,
+    patchBody: draft.patchBody, patchDigest: input.patchDigest,
+    baseSha: input.baseSha, expectedTreeId: input.promote.expectedTreeId,
+  });
+  return { publishWorkItemId: opened.workItemId };
 }
 
 /* ------------------------------------------------------------------------- */

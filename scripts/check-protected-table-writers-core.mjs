@@ -2496,6 +2496,46 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration creates EngineeringAgentRequest and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentRun mentions reads the producing run, locked, and counts active runs and the first T1 run.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 27,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentWorkItem mentions is the guarded table itself: the promoted draft and the run's products are read from it.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentApproval",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentApproval mention is the unchanged T2 decision read.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentCapability",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentCapability mentions are the unchanged consumed-capability reads.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentBinding mention counts the open pull requests the queue holds.",
+  },
+  {
     path: "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 3,
@@ -3688,6 +3728,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 21,
     reason:
       "The engineering agent triggers read their sibling tables, AMUX and AppSetting's mode row, all with EXECUTE over a name built from TG_TABLE_SCHEMA, for the reason the permission ledger gives: an unqualified name resolves through the session search path, where a temporary table of the same name answers for the real one, and a hard-coded public. is wrong under ?schema=. Every function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    count: 7,
+    reason:
+      "The replaced work item guard keeps the original's reads and adds two: whether the run's v22 draft closed as promoted with this patch, and the pull request queue's open count, active runs and first T1 run. All are EXECUTE over a TG_TABLE_SCHEMA-qualified constant name quoted with %I, because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",

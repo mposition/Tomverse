@@ -10,6 +10,8 @@ import {
   ENGINEERING_AGENT_MODE_SETTING_KEY,
   ENGINEERING_AGENT_MODES,
   ENGINEERING_AGENT_NOT_APPROVED_REASONS,
+  ENGINEERING_AGENT_V22_PROMOTED_REASON,
+  ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
   ENGINEERING_AGENT_WORK_ITEM_KINDS,
   FIRST_T1_WINDOW_DAYS,
   HALT_VALUES,
@@ -36,6 +38,10 @@ import { REGISTRATION_CAPS } from "../lib/engineeringAgentRegistrationGuard.ts";
  */
 const sql = readFileSync(
   new URL("../prisma/migrations/20260928120000_engineering_agent_state/migration.sql", import.meta.url),
+  "utf8",
+).replace(/\r\n/g, "\n");
+const promotionSql = readFileSync(
+  new URL("../prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql", import.meta.url),
   "utf8",
 ).replace(/\r\n/g, "\n");
 const outcomeSql = readFileSync(
@@ -204,4 +210,45 @@ test("time the triggers write or compare is the database clock in UTC, never the
 test("the migration writes no row and holds no user content column", () => {
   assert.doesNotMatch(sql, /INSERT INTO/i);
   assert.doesNotMatch(sql, /"(?:title|body|message|content|prompt|email)"\s+TEXT/i);
+});
+
+test("the promotion guard keeps every transition and counts the caps the code holds", () => {
+  const guard = (text) =>
+    /CREATE OR REPLACE FUNCTION "engineering_agent_work_item_guard"\(\)\n[\s\S]*?\nAS \$\$\n([\s\S]*?)\n\$\$;/.exec(text)[1];
+  // Only the insert rule changes: every transition block is the original's.
+  const blocks = (text) =>
+    [...text.matchAll(/-- transitions: (\w+ \w+)\n([\s\S]*?)-- end transitions/g)].map(
+      (m) => `${m[1]} ${sorted(pairs(m[2])).join(",")}`,
+    );
+  assert.deepEqual(blocks(guard(promotionSql)), blocks(guard(sql)));
+  const limits = Object.fromEntries(
+    [...promotionSql.matchAll(/-- limit: ([A-Z_0-9]+(?:\.\w+)?)\n\s*\w+ CONSTANT INTEGER := (\d+);/g)].map((m) => [
+      m[1],
+      Number(m[2]),
+    ]),
+  );
+  assert.deepEqual(limits, {
+    "OWNER_QUEUE_LIMITS.pr": OWNER_QUEUE_LIMITS.pr,
+    "OWNER_QUEUE_LIMITS.prDuringFirstT1Days": OWNER_QUEUE_LIMITS.prDuringFirstT1Days,
+    FIRST_T1_WINDOW_DAYS,
+  });
+  const reason = /-- reason: ENGINEERING_AGENT_V22_PROMOTED_REASON\n\s*promoted_reason CONSTANT TEXT := '([^']*)';/.exec(
+    promotionSql,
+  );
+  assert.equal(reason?.[1], ENGINEERING_AGENT_V22_PROMOTED_REASON);
+  assert.doesNotMatch(promotionSql, /INSERT INTO|\bnow\(\)/i);
+  for (const match of guard(promotionSql).matchAll(/(%(?:1\$)?I\.)?"((?:EngineeringAgent|Amux|AppSetting|AdminAuditLog)\w*)"/g)) {
+    assert.ok(match[1], `names "${match[2]}" without the trigger's schema`);
+  }
+});
+
+
+test("every reason a v22 draft is written with fits the column's CHECK", () => {
+  // A digit in "t1_evidence_unavailable" made every v22 draft write refuse.
+  const pattern = /"EngineeringAgentWorkItem_reason_check"\n\s*CHECK \("reason" IS NULL OR "reason" ~ '([^']*)'\)/.exec(sql);
+  assert.ok(pattern, "the reason CHECK");
+  for (const reason of [ENGINEERING_AGENT_V22_TIER_PENDING_REASON, ENGINEERING_AGENT_V22_PROMOTED_REASON,
+    "tier_two", "tier_evidence_unavailable"]) {
+    assert.match(reason, new RegExp(pattern[1]), reason);
+  }
 });
