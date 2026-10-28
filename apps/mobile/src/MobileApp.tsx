@@ -249,6 +249,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       return receipt;
     } catch (error) {
       if (current !== requestEpoch.current) return;
+      setPartial(value => value || null);
       setUncertain(Boolean(item)); setError(mobileErrorText(error, language, item ? copy.disconnected : copy.error));
       if (fromVoice) throw error;
     } finally { if (current === requestEpoch.current) setStreaming(false); }

@@ -20,12 +20,33 @@ test.beforeEach(async ({ page }) => {
       transport.downloadArtifact = async () => saveMobileResponse(await fetch("/fixture-file"), "answer.txt");
       transport.account = async () => ({ id: "synthetic-demo", email: "demo@example.invalid", actionsEnabled: true });
       const originalSignOut = transport.signOut;
+      const originalSend = transport.send;
+      transport.send = async (...args) => {
+        if (window.failNativeSend) {
+          if (window.partialNativeSend) args[4]("Saved partial answer");
+          throw Error("Synthetic connection failure");
+        }
+        return originalSend(...args);
+      };
       transport.signOut = async () => { window.signOutCount = (window.signOutCount || 0) + 1; await originalSignOut(); if (window.uncertainLogout) throw { code: "LOGOUT_UNCONFIRMED" }; };
       transport.exportAccount = async () => { window.exportCount = (window.exportCount || 0) + 1; if (window.requireReauth) throw { status: 428 }; };
       transport.deleteAccount = async () => { window.deleteCount = (window.deleteCount || 0) + 1; if (window.unknownDelete) throw Error("Unknown result"); };
     `;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
+});
+
+for (const partial of [false, true]) test(`a disconnected native answer stops Thinking and preserves partial text: ${partial}`, async ({ page }) => {
+  await signIn(page);
+  await page.evaluate(partial => Object.assign(window, { failNativeSend: true, partialNativeSend: partial }), partial);
+  await page.getByRole("textbox").fill("Make an event flyer");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Connection interrupted");
+  await expect(page.getByRole("button", { name: /Check saved response/ })).toBeVisible();
+  await expect(page.getByText("Thinking…", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Stop response", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("textbox")).toBeDisabled();
+  if (partial) await expect(page.getByText("Saved partial answer", { exact: true })).toBeVisible();
 });
 async function signIn(page: import("@playwright/test").Page) { await page.goto("/"); await page.getByRole("button", { name: "Continue with Tomverse" }).click(); await expect(page.getByRole("textbox")).toBeVisible(); }
 async function account(page: import("@playwright/test").Page) { await page.getByRole("button", { name: "Conversations", exact: true }).click(); await page.getByRole("button", { name: "Settings" }).click(); await page.getByRole("button", { name: "Data", exact: true }).click(); await page.getByRole("button", { name: /Your account data/ }).click(); }
