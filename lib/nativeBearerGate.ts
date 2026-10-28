@@ -170,6 +170,7 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   if (!enabled) return false;
   if (path === "/api/user/usage") return method === "GET";
   if (path === "/api/conversations/search") return method === "GET";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path)) return method === "GET";
   if (path === "/api/projects") return ["GET", "POST"].includes(method);
   if (/^\/api\/projects\/[A-Za-z0-9_-]{1,100}$/.test(path)) return ["PATCH", "DELETE"].includes(method);
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "DELETE";
