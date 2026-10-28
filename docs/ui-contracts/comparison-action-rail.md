@@ -10,6 +10,14 @@
 
 ## Scope
 
+Owner direction, 2026-10-27: PC Review Studio replaces the two-button rail with
+one composer-side analysis entry and a wide Summary/Detailed review modal.
+See `docs/ui-contracts/review-studio.md`. The rules below continue to describe
+the rail in Classic and mobile. Credit amounts are no longer displayed on the
+rail or analysis results; affordability checks still use the existing domain
+values and APIs. Historical cost-copy examples below do not mandate visible
+amounts.
+
 | Area | File |
 | --- | --- |
 | Rail markup, actions, status sentence, per-action descriptions | `components/chat/ComparisonActionRail.tsx` |

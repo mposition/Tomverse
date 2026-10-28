@@ -71,6 +71,7 @@
     "test:one-shot-recovery-contract": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test tests/server-contract/prompt-refiner-vnext-v3-stage-writer.test.mjs",
     "test:one-shot-terminal": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test tests/promptRefinerVnextOneShotOwnerDispatch.test.mjs tests/promptRefinerVnextOneShotRunnerBanner.test.mjs tests/server-contract/admin-prompt-refiner-vnext-terminal-readback-route.test.ts",
     "verify:ai-review-workspace": "node --import tsx scripts/verify-ai-review-workspace.mjs",
+    "verify:studio-answer-analysis": "node --import tsx scripts/verify-studio-answer-analysis.mjs",
     "verify:ai-review-admin": "node --import tsx scripts/verify-ai-review-admin.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
     "test:auto-router-limited-release": "node --conditions=react-server --import tsx --test tests/autoRouterLimitedRelease.test.mjs tests/autoRouterLimitedReleaseSeam.test.mjs tests/autoCohort.test.mjs tests/autoDrillOverride.test.mjs tests/autoModelSelection.test.mjs tests/autoRoutingUi.test.mjs tests/autoRoutingRuntimeReadback.test.mjs tests/autoProductBoundary.test.mjs",
