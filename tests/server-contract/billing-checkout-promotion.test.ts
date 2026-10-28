@@ -63,6 +63,7 @@ type World = {
   promotionIncrements: number;
   session: { user: { id: string } } | null;
   user: Record<string, unknown>;
+  lockedUser?: Record<string, unknown>;
   promotionValid: boolean;
   /**
    * Overridable so a fixed-amount promotion can reach the currency gate.
@@ -197,7 +198,7 @@ async function loadRoute(): Promise<{
             billingPromotion: { updateMany: async () => { world.promotionIncrements++; return { count: 1 }; } },
             billingPromotionRedemption: { create: async ({ data }: { data: { userId: string } }) => { world.redemptionUsers.push(data.userId); return {}; } },
             user: {
-              findUniqueOrThrow: async () => world.user,
+              findUniqueOrThrow: async () => world.lockedUser ?? world.user,
               update: async ({ where }: { where: { id: string } }) => { world.grantedUsers.push(where.id); return world.user; },
             },
           }),
@@ -866,4 +867,18 @@ test("native pass redemption preserves expired promotion refusal before any gran
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, "PROMOTION_EXPIRED");
   assert.deepEqual(world.grantedUsers, []);
+});
+
+for (const [name, entitlement] of [
+  ["Stripe Max", { plan: "Max", webSubscriptionPlan: "Max", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" }],
+  ["Stripe Pro", { plan: "Pro", webSubscriptionPlan: "Pro", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" }],
+  ["store Pro", { plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Pro", storeSubscriptionExpiresAt: new Date("2099-01-01T00:00:00Z") }],
+  ["store Max", { plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: new Date("2099-01-01T00:00:00Z") }],
+] as const) test(`a concurrent ${name} plan cannot be overwritten by pass redemption under the account lock`, async () => {
+  enableNativePass();
+  world.lockedUser = { ...world.user, ...entitlement };
+  const response = await post({ planId: "pro", promoCode: "test-pass" }, nativeHeaders);
+  assert.equal(response.status, 409);
+  assert.deepEqual(world.grantedUsers, []);
+  assert.equal(world.promotionIncrements, 0);
 });
