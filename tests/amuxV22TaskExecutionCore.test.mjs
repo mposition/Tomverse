@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV22DeliveryBudgetMicrousd, amuxV22EngineeringPublicationEnabled,
+import { amuxV22DeliveryBaseShaEnabled, amuxV22DeliveryBudgetMicrousd,
+  amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
   v22ReadOnlyApiReceiptMatchesUsage,
@@ -146,4 +147,10 @@ test("an ordinary delivery's budget field stays within the bridge's 5 USD wire r
     "a dear ordinary run is still delivered, not refused by the bridge");
   assert.equal(amuxV22DeliveryBudgetMicrousd(3_400_000, true), 3_400_000,
     "the read-only retry carries its exact signed amount");
+});
+
+test("the publication base reaches the box only behind its default-off switch", () => {
+  assert.equal(amuxV22DeliveryBaseShaEnabled(undefined), false);
+  assert.equal(amuxV22DeliveryBaseShaEnabled("true"), false);
+  assert.equal(amuxV22DeliveryBaseShaEnabled("enabled"), true);
 });

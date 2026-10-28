@@ -10,8 +10,9 @@ import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
-import { AMUX_V22_TASK_EXECUTION_ENV,
+import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
   AMUX_V22_SEALED_DELIVERY_MARKER,
+  amuxV22DeliveryBaseShaEnabled,
   amuxV22DeliveryBudgetMicrousd,
   amuxV22TaskExecutionEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
@@ -266,6 +267,7 @@ export type AmuxPulledDelivery =
           modelId: string;
           role: string;
           budgetMicrousd: number;
+          baseSha?: string;
           gradeGuard?: true;
           executionGrade?: string;
           reviewAuthor?: string;
@@ -397,6 +399,16 @@ export async function pullAmuxWorkDelivery(input: {
     if (assignmentAudit?.action !== "amux.v22.worker.assigned" ||
         assignmentAudit.targetId !== assignment.id)
       throw new Error("v22 delivery assignment audit is invalid");
+    // Settlement accepts a patch only on the base its publication run was
+    // pinned to at start, so the sidecar checks that commit out first.
+    const publicationRun = assignment.role === "implement" &&
+      amuxV22DeliveryBaseShaEnabled(process.env[AMUX_V22_DELIVERY_BASE_SHA_ENV]) ?
+      await tx.engineeringAgentRun.findUnique({
+        where: { amuxAttemptId: delivery.attemptId },
+        select: { baseSha: true },
+      }) : null;
+    const baseSha = publicationRun && /^[0-9a-f]{40}$/.test(publicationRun.baseSha) ?
+      publicationRun.baseSha : null;
     const gradeGuard = !!assignmentAudit.metadata &&
       typeof assignmentAudit.metadata === "object" &&
       !Array.isArray(assignmentAudit.metadata) &&
@@ -541,6 +553,7 @@ export async function pullAmuxWorkDelivery(input: {
           AMUX_V22_WORKER_AUTHORITY_NOTICE,
         v22Execution: { modelId: assignment.modelId, role: assignment.role,
           budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
+          ...(baseSha ? { baseSha } : {}),
           ...(gradeGuard ? { gradeGuard: true as const,
             executionGrade: assignment.grade,
             ...(reviewScope ? {
@@ -567,7 +580,8 @@ export async function pullAmuxWorkDelivery(input: {
       // + 3: the base counts the canonical audit as one call, but appending it
       // takes four (chain lock, clock, previous entry, insert). A recovery
       // delivery makes 22 calls; 19 refused it on 2026-10-15 at the 20th.
-      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 + 3 + 1 },
+      // + 1: an implement delivery reads its publication run's base.
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 + 3 + 1 + 1 },
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       // Safe-stop request and all ownership/start/delivery writers share this
