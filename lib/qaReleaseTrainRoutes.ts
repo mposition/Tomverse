@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
-import { QA_RELEASE_TRAIN_MAX_PREDECESSORS } from "@/lib/qaReleaseTrainCore";
+import { QA_RELEASE_TRAIN_RESOLVE_WHY_CHARS } from "@/lib/qaReleaseTrainResolve";
 import { admitQaReleaseTrain, readQaReleaseTrainSelection, recordQaReleaseTrainSchedule, reportQaReleaseTrain } from "@/lib/qaReleaseTrainStore";
 
 /**
@@ -44,7 +44,9 @@ const body = z.union([
             .object({
               number: PR,
               outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows", "in_open_train"]),
-              predecessors: z.array(PR).max(QA_RELEASE_TRAIN_MAX_PREDECESSORS).optional(),
+              why: z.string().max(QA_RELEASE_TRAIN_RESOLVE_WHY_CHARS).optional(),
+              // Sent by a train service from before model resolution (2026-10-28); not read.
+              predecessors: z.array(PR).max(10).optional(),
               boardedFor: PR.optional(),
             })
             .strict(),

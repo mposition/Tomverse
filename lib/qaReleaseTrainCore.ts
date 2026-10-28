@@ -5,8 +5,9 @@
  * 2026-10-20: departures at 08, 11, 14, 17 and 20 AEST (UTC+10, no daylight
  * saving), configurable as one value; the cargo is the merged develop pull
  * requests the operator picked in Admin (2026-10-23; until then a `main:next`
- * label) that are not already on main; a conflicting
- * one is left out and named, never resolved; one open train at a time.
+ * label) that are not already on main; a conflicting one is left out and
+ * named, unless the model resolves it (2026-10-28, lib/qaReleaseTrainResolve.ts,
+ * off by default); one open train at a time.
  *
  * Pure: no clock, network, git or database. The service
  * (lib/qaReleaseTrainService.ts) passes what it read.
@@ -124,54 +125,10 @@ export type QaReleaseTrainPick = {
    * `in_open_train`: an emergency train's pull request already riding an
    * open train; never picked onto a second release branch.
    *
-   * For a conflict: develop pull requests merged before it that changed a
-   * conflicted file, newest first. Some may be on main already; Admin shows
-   * only those that are not.
+   * For a conflict the model was asked about: what it said was missing.
    */
-  predecessors?: number[];
-  /**
-   * An included pull request the operator did not pick, boarded because the
-   * named pick conflicted without it (owner, 2026-10-27).
-   */
-  boardedFor?: number;
+  why?: string;
 };
-
-/** At most this many predecessors are named for one conflict. */
-export const QA_RELEASE_TRAIN_MAX_PREDECESSORS = 10;
-
-/**
- * One conflict hunk of a pick (diff3: main's lines, the develop lines the
- * pick was made against, and the pick's), settled when the pick only adds
- * lines right before or after develop's: git conflicts on adjacent lines, and
- * main differs in lines the pick never touched (2026-10-27: #3042 added two
- * package.json scripts next to ones a develop-only #2131 had changed). The
- * settlement is main's lines with the pick's added lines on the same side,
- * which is the pick's own change and nothing else. Both adding lines at the
- * same place (an append-only list such as .gitleaksignore, #3032) keeps
- * main's first. When main's lines already start or end, on the side the pick
- * adds to, with the added lines and they are not all blank (a release that
- * ported them, #2867 and #2916), main's lines stand as they are. Null when
- * the pick changes or removes a line.
- */
-export function qaReleaseTrainSettleAdjacent(hunk: { main: readonly string[]; base: readonly string[]; pick: readonly string[] }): string[] | null {
-  const { main, base, pick } = hunk;
-  if (pick.length <= base.length) return null;
-  const added = base.every((line, i) => pick[i] === line)
-    ? { lines: pick.slice(base.length), before: false }
-    : base.every((line, i) => pick[pick.length - base.length + i] === line)
-      ? { lines: pick.slice(0, pick.length - base.length), before: true }
-      : null;
-  if (added === null) return null;
-  const run = added.lines.join("\n");
-  const n = added.lines.length;
-  // Appended at the same place (no develop lines between), the pick's lines may stand at either end.
-  const ported =
-    added.lines.some((line) => line.trim() !== "") &&
-    ((base.length === 0 || added.before) && main.slice(0, n).join("\n") === run ||
-      (base.length === 0 || !added.before) && main.length >= n && main.slice(main.length - n).join("\n") === run);
-  if (ported) return [...main];
-  return added.before ? [...added.lines, ...main] : [...main, ...added.lines];
-}
 
 /** The pull request a develop merge commit's subject names (`Merge pull request #2950 from ...`), or null. */
 export function qaReleaseTrainMergedPullNumber(subject: string): number | null {
@@ -217,8 +174,8 @@ export function qaReleaseTrainPullRequest(input: {
   rollbackSha: string;
   /** Requested in Admin outside the departure hours. The operator's reason stays in the audit row, never in this public body. */
   emergency?: boolean;
-  /** Included pull requests whose adjacent-line conflict the train settled, with the files. */
-  settled?: readonly { number: number; files: readonly string[] }[];
+  /** Included pull requests whose conflict the model resolved, with the files and what it said. */
+  resolved?: readonly { number: number; files: readonly string[]; why: string }[];
 }): { title: string; body: string } {
   const title = (n: number) => input.candidates.find((c) => c.number === n)?.title.replace(/\s+/g, " ").slice(0, 120) ?? "";
   const included = input.picks.filter((p) => p.outcome === "included");
@@ -228,9 +185,7 @@ export function qaReleaseTrainPullRequest(input: {
   // A scheduled train's left-out pull requests ride the next scheduled train
   // again; an emergency train's do not (its request is spent).
   const reason = {
-    conflict: input.emergency
-      ? "cherry-pick conflict on main; pick it for a later train, and Admin names the develop pull requests it needs"
-      : "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs",
+    conflict: input.emergency ? "cherry-pick conflict on main; pick it for a later train" : "cherry-pick conflict on main; it rides the next train again",
     over_capacity: input.emergency ? "train full; pick it for a later train" : "train full; it rides the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;
@@ -240,15 +195,17 @@ export function qaReleaseTrainPullRequest(input: {
     `## Included (${included.length})`,
     "",
     ...included.map((p) => {
-      const settled = input.settled?.find((s) => s.number === p.number);
-      return `- #${p.number} ${title(p.number)}${p.boardedFor === undefined ? "" : ` (not picked; boarded because #${p.boardedFor} needs it)`}${
-        settled === undefined ? "" : ` (conflicted only beside lines main has differently in ${settled.files.map((f) => `\`${f}\``).join(", ")}: main's lines kept, its own added lines placed next to them; check)`
+      const resolved = input.resolved?.find((r) => r.number === p.number);
+      return `- #${p.number} ${title(p.number)}${
+        resolved === undefined ? "" : ` (conflicted on main in ${resolved.files.map((f) => `\`${f}\``).join(", ")}; resolved by a model, check it: ${resolved.why})`
       }`;
     }),
     "",
     `## Left out (${left.length})`,
     "",
-    ...(left.length === 0 ? ["None."] : left.map((p) => `- #${p.number} ${title(p.number)} — ${reason[p.outcome as keyof typeof reason]}`)),
+    ...(left.length === 0
+      ? ["None."]
+      : left.map((p) => `- #${p.number} ${title(p.number)} — ${reason[p.outcome as keyof typeof reason]}${p.why ? ` (the model: ${p.why})` : ""}`)),
     "",
     `Already on main, skipped: ${already.length === 0 ? "none" : already.map((p) => `#${p.number}`).join(", ")}.`,
     ...(onOpenTrain.length === 0 ? [] : ["", `Already on an open train, skipped: ${onOpenTrain.map((p) => `#${p.number}`).join(", ")}.`]),
