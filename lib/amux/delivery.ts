@@ -10,8 +10,9 @@ import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
-import { AMUX_V22_TASK_EXECUTION_ENV,
+import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
   AMUX_V22_SEALED_DELIVERY_MARKER,
+  amuxV22DeliveryBaseShaEnabled,
   amuxV22DeliveryBudgetMicrousd,
   amuxV22TaskExecutionEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
@@ -400,7 +401,8 @@ export async function pullAmuxWorkDelivery(input: {
       throw new Error("v22 delivery assignment audit is invalid");
     // Settlement accepts a patch only on the base its publication run was
     // pinned to at start, so the sidecar checks that commit out first.
-    const publicationRun = assignment.role === "implement" ?
+    const publicationRun = assignment.role === "implement" &&
+      amuxV22DeliveryBaseShaEnabled(process.env[AMUX_V22_DELIVERY_BASE_SHA_ENV]) ?
       await tx.engineeringAgentRun.findUnique({
         where: { amuxAttemptId: delivery.attemptId },
         select: { baseSha: true },
