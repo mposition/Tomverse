@@ -1015,7 +1015,7 @@ test.describe("per-action descriptions", { tag: "@ui-risk" }, () => {
     );
   });
 
-  test("the two actions point at two different descriptions", async ({ page }) => {
+  test("the two actions keep separate target descriptions without routine credit amounts", async ({ page }) => {
     await enterAuthenticatedComparison(page);
 
     const quickId = await quickButton(page).getAttribute("aria-describedby");
@@ -1026,15 +1026,15 @@ test.describe("per-action descriptions", { tag: "@ui-risk" }, () => {
     expect(reviewId).toBeTruthy();
     expect(quickId).not.toBe(reviewId);
 
-    // Each description names that action's own comparison target and price.
+    // Each action retains its own comparison target; routine prices are omitted.
     await expect(page.locator(`#${quickId}`)).toContainText(
       "Comparing 3 completed answers"
     );
-    await expect(page.locator(`#${quickId}`)).toContainText("About 1 credit");
+    await expect(page.locator(`#${quickId}`)).not.toContainText(/credits?/i);
     await expect(page.locator(`#${reviewId}`)).toContainText(
       "Comparing 3 completed answers"
     );
-    await expect(page.locator(`#${reviewId}`)).toContainText("8 credits");
+    await expect(page.locator(`#${reviewId}`)).not.toContainText(/credits?/i);
     // The name is the action alone -- the description is not read twice.
     await expect(quickButton(page)).toHaveAccessibleName("Quick difference summary");
     await expect(page.getByTestId("ai-review-button")).toHaveAccessibleName(
