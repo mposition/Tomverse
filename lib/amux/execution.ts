@@ -14,7 +14,6 @@ import {
   AmuxDbBoundaryError,
   amuxBoundaryWithAttachment,
   amuxRouteOrchestratorReceiptsMayHaveCommitted,
-  amuxRouteSpareMsFor,
   withAmuxDbBoundary,
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
@@ -70,10 +69,7 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
-import { ENGINEERING_AGENT_V22_PREFLIGHT_MS,
-  loadEngineeringAgentV22StoredCandidateWithin } from
-  "@/lib/engineeringAgentV22StoredCandidate";
-import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
+import { v22PublishPreflightEligible } from
   "@/lib/engineeringAgentV22PublicationDecision";
 import { openEngineeringAgentV22Product } from
   "@/lib/engineeringAgentV22ProductStore";
@@ -1354,27 +1350,17 @@ export async function settleAmuxV22TaskExecution(input: {
 }) {
   const patch = input.outcome === "succeeded" ?
     await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
-  // Tier work and GitHub reads happen outside the short settlement transaction.
-  // Any missing evidence keeps the result private; it never becomes a worker
-  // assertion that the patch is T1.
+  // Settlement reads no tier: a patch the run may still publish is stored as
+  // a `tier_pending` draft, and the publisher's round reads its tier with
+  // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
     prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 };
-  // The settlement transaction keeps its whole budget: the candidate gets
-  // only what the route has beyond it, less a second of slack.
-  const spareMs = amuxRouteSpareMsFor(settleBoundary);
-  const preflightMs = spareMs === null ? ENGINEERING_AGENT_V22_PREFLIGHT_MS :
-    Math.min(ENGINEERING_AGENT_V22_PREFLIGHT_MS, spareMs - 1_000);
-  const publication = v22PublishPreflightEligible({
+  const publicationEligible = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
     patchPresent: patch !== null,
     publicationEnabled: amuxV22EngineeringPublicationEnabled(
       process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
-  }) ? preflightMs <= 0 ? { ok: false as const, reason: "preflight_timeout" } :
-    await loadEngineeringAgentV22StoredCandidateWithin(input.attemptId,
-      preflightMs).catch(() => null) : null;
-  if (publication?.ok === false && publication.reason === "preflight_timeout")
-    console.warn(JSON.stringify({ subsystem: "amux",
-      event: "v22_publication_preflight_timeout", attemptId: input.attemptId }));
+  });
   return withAmuxDbBoundary(settleBoundary,
     async (tx, context) => {
       const now = context.dbNow;
@@ -1618,21 +1604,14 @@ export async function settleAmuxV22TaskExecution(input: {
           return { settled: false as const,
             reason: "publication_product_conflict" as const };
         if (!product) {
-          const publish = v22PublishCandidateMatches({
-            policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
-            modeAtStart: run.modeAtStart, runId: run.id,
-            taskId: task.id, baseSha: patch.baseSha,
-            patchDigest: patch.sha256, publication,
-          }) &&
-            amuxV22EngineeringPublicationEnabled(
-              process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
+          const tierPending = publicationEligible &&
+            run.modeAtStart === "t1" &&
             (await readEngineeringAgentSwitches(tx)).publishAllowed &&
             await readAmuxV22PublicPrConsent(task.id, tx);
           const engineeringTx = engineeringAgentTransactionInAmux(
             context.attachedTransaction);
           product = await openEngineeringAgentV22Product(engineeringTx, {
-            runId: run.id, taskId: task.id, patch, publish,
-            candidate: publication?.ok ? publication.candidate : null,
+            runId: run.id, patch, tierPending,
           });
         }
       }
@@ -1727,9 +1706,7 @@ export async function settleAmuxV22TaskExecution(input: {
             (gradeEscalated ? "escalate" : next === "blocked" ? "blocked" :
               effectivePathDecision) : null,
           v52ReviewJobId: reviewRecord?.jobId ?? null,
-          v52ReviewVerdict: reviewRecord?.verdict ?? null,
-          imageProofDigest: product?.kind === "publish" &&
-            publication?.ok ? publication.imageProofDigest : null },
+          v52ReviewVerdict: reviewRecord?.verdict ?? null },
       });
       if (run?.status === "active") {
         await endEngineeringAgentRun(
