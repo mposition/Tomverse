@@ -839,7 +839,8 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    패치로 그 run의 publish 항목과 단회 capability를 연다. DB는 끝난 run의 publish 항목을
    이 경우에만, PR 대기열에 자리가 있을 때만 받는다. 자리가 없으면 판정하지 않고 초안은
    다음 회차까지 대기로 남는다. 판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면
-   `publish_refused` 사유의 보통 T2 초안이 된다. T1이 아니거나 근거를 읽지 못하면 그 사유를 단 보통 T2 초안으로 둔다.
+   `publish_refused` 사유의 보통 T2 초안이 된다. 다음 회차가 claim하기 전에 capability가 만료된 publish 항목은
+   각 회차가 대기 초안보다 먼저 다시 판정해(§10), 같은 tree의 T1이면 새 capability를 발급한다. T1이 아니거나 근거를 읽지 못하면 그 사유를 단 보통 T2 초안으로 둔다.
    정산과 판정 사이에 develop이 움직일 수 있으므로 base는 develop head이거나 head가 포함한
    commit이면 된다(GitHub compare로 확인). 판정 규칙, capability, 게시 서비스의 검사는
    그대로이고, PR이 열리는 시점만 최대 두 회차(약 20분) 늦어진다. 정산 때 연 AMUX 검토

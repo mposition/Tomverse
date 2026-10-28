@@ -15,7 +15,10 @@ const t1 = { ok: true, runId: pending.runId, taskId: pending.taskId,
 
 const ports = (overrides = {}) => {
   const resolved = [];
-  return { resolved, readPending: async () => pending,
+  return { resolved, readLapsed: async () => null,
+    readPending: async () => pending,
+    stillPending: async () => true, stillLapsed: async () => true,
+    reissue: async (input) => { resolved.push({ reissue: input }); },
     prQueueFull: async () => false,
     loadStored: async () => t1,
     resolve: async (input) => {
@@ -85,7 +88,7 @@ test("a refused promotion becomes an ordinary draft, never pending again", async
   const value = ports();
   value.resolve = async (input) => {
     value.resolved.push(input);
-    if (input.candidate) throw new Error("v22_publication_disabled");
+    if (input.candidate) throw new Error("Database error. Code: `23514`. the owner queue is full");
     return { kept: true };
   };
   assert.deepEqual(await promoteEngineeringAgentV22Draft(value),
@@ -98,4 +101,47 @@ test("a refused promotion becomes an ordinary draft, never pending again", async
     resolve: async () => { throw new Error("database_unavailable"); },
     loadStored: async () => ({ ok: false, reason: "patch_unavailable" }) })),
   /database_unavailable/);
+});
+
+test("a transient failure of a promotion leaves the draft pending for a later round", async () => {
+  const value = ports();
+  value.resolve = async (input) => {
+    value.resolved.push(input);
+    throw new Error("connection reset");
+  };
+  await assert.rejects(promoteEngineeringAgentV22Draft(value), /connection reset/);
+  assert.equal(value.resolved.length, 1);
+});
+
+test("a publish item whose capability lapsed is judged again before any draft", async () => {
+  const lapsed = { ...pending, workItemId: "publish-1",
+    expectedTreeId: t1.candidate.expectedTreeId };
+  let snapshotChecked = 0;
+  const value = ports({ readLapsed: async () => lapsed,
+    stillLapsed: async () => { snapshotChecked++; return true; },
+    loadStored: async (item, still) => { await still(); return t1; },
+    readPending: async () => { throw new Error("no draft is read"); } });
+  assert.deepEqual(await promoteEngineeringAgentV22Draft(value),
+    { outcome: "reissued" });
+  assert.equal(snapshotChecked, 1);
+  assert.equal(value.resolved[0].reissue.workItemId, "publish-1");
+  assert.equal(value.resolved[0].reissue.candidate.baseCommitterDate,
+    t1.candidate.baseCommitterDate);
+  // A full queue does not hold back a reissue: the item already counts in it.
+  const full = ports({ readLapsed: async () => lapsed,
+    prQueueFull: async () => true });
+  assert.equal((await promoteEngineeringAgentV22Draft(full)).outcome, "reissued");
+  for (const [stored, reason] of [
+    [{ ...t1, tier: { tier: "T2", findings: [] } }, "tier_changed"],
+    [{ ...t1, candidate: { ...t1.candidate, expectedTreeId: "f".repeat(40) } },
+      "tier_changed"],
+    [{ ok: false, reason: "publication_not_authorized" },
+      "publication_not_authorized"],
+  ]) {
+    const refused = ports({ readLapsed: async () => lapsed,
+      loadStored: async () => stored });
+    assert.deepEqual(await promoteEngineeringAgentV22Draft(refused),
+      { outcome: "reissue_refused", reason });
+    assert.equal(refused.resolved.length, 0);
+  }
 });

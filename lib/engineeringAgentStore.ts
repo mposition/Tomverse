@@ -1283,7 +1283,8 @@ export async function resolveEngineeringAgentV22TierPendingDraft(
     promote: { expectedTreeId: string; imageProofDigest: string } | null;
     reason: string },
 ): Promise<{ publishWorkItemId: string } | { kept: boolean }> {
-  if (!REASON.test(input.reason)) refuse("reason_invalid");
+  if (!REASON.test(input.reason) ||
+      input.reason === ENGINEERING_AGENT_V22_TIER_PENDING_REASON) refuse("reason_invalid");
   const item = await lockWorkItem(tx, input.workItemId);
   const draft = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: item.id }, select: { reason: true, patchBody: true },

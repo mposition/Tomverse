@@ -4,6 +4,7 @@ import test from "node:test";
 import { ENGINEERING_AGENT_COMMIT_IDENTITY } from
   "../lib/engineeringAgentCore.ts";
 import { openEngineeringAgentV22Product,
+  reissueEngineeringAgentV22Capability,
   resolveEngineeringAgentV22Product } from
   "../lib/engineeringAgentV22ProductStore.ts";
 
@@ -79,4 +80,26 @@ test("a kept draft issues no capability, and a failed issuer is not hidden", asy
     { ...input, candidate: { ...candidate, baseCommitterDate: null } }, ports),
   /v22_publish_candidate_missing/);
   assert.equal(issued, 1);
+});
+
+test("a lapsed publish item's new capability binds the same commit fields", async () => {
+  const issued = [];
+  await reissueEngineeringAgentV22Capability(tx, { ...input,
+    workItemId: "publish-1", candidate }, { issue: async (usedTx, request) => {
+    issued.push({ usedTx, request });
+    return { capabilityId: "cap-2", commitDigest: "d".repeat(64),
+      expiresAt: new Date() };
+  } });
+  assert.equal(issued[0].usedTx, tx);
+  assert.equal(issued[0].request.workItemId, "publish-1");
+  assert.deepEqual(issued[0].request.capability, {
+    baseSha: patch.baseSha, patchDigest: patch.sha256,
+    expectedTreeId: candidate.expectedTreeId,
+    commit: { identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
+      baseCommitterDate: candidate.baseCommitterDate,
+      runId: input.runId, cardRef: input.taskId } });
+  await assert.rejects(reissueEngineeringAgentV22Capability(tx, { ...input,
+    workItemId: "publish-1", candidate: { ...candidate, baseCommitterDate: null } },
+  { issue: async () => { throw new Error("not reached"); } }),
+  /v22_publish_candidate_missing/);
 });

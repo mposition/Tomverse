@@ -40,6 +40,29 @@ export async function openEngineeringAgentV22Product(
     patchDigest: patch.sha256, baseSha: patch.baseSha };
 }
 
+const capabilityFor = (input: { runId: string; taskId: string;
+  patchDigest: string; baseSha: string }, candidate: Candidate) => ({
+  baseSha: input.baseSha, patchDigest: input.patchDigest,
+  expectedTreeId: candidate.expectedTreeId,
+  commit: { identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
+    baseCommitterDate: candidate.baseCommitterDate!,
+    runId: input.runId, cardRef: input.taskId },
+});
+
+/** A queued publish item whose capability lapsed before a round claimed it,
+ * judged again (§10): a new capability for the same patch and tree. */
+export async function reissueEngineeringAgentV22Capability(
+  tx: EngineeringAgentTransaction,
+  input: { workItemId: string; runId: string; taskId: string;
+    patchDigest: string; baseSha: string; candidate: Candidate },
+  ports: Pick<Ports, "issue"> = livePorts,
+) {
+  if (!input.candidate.baseCommitterDate)
+    throw new Error("v22_publish_candidate_missing");
+  return ports.issue(tx, { workItemId: input.workItemId,
+    capability: capabilityFor(input, input.candidate) });
+}
+
 /** The caller holds one engineering transaction. A failed capability issue
  * aborts the promotion too, never leaving a queued item without authority. */
 export async function resolveEngineeringAgentV22Product(
@@ -60,13 +83,6 @@ export async function resolveEngineeringAgentV22Product(
   });
   if (candidate && "publishWorkItemId" in resolved)
     await ports.issue(tx, { workItemId: resolved.publishWorkItemId,
-      capability: { baseSha: input.baseSha,
-        patchDigest: input.patchDigest,
-        expectedTreeId: candidate.expectedTreeId,
-        commit: { identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
-          baseCommitterDate: candidate.baseCommitterDate!,
-          runId: input.runId, cardRef: input.taskId },
-      },
-    });
+      capability: capabilityFor(input, candidate) });
   return resolved;
 }

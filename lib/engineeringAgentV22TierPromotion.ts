@@ -2,11 +2,13 @@ import "server-only";
 
 import { ENGINEERING_AGENT_POLICY_VERSION,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
-import { readEngineeringAgentOwnerQueues,
+import { EngineeringAgentStoreRefusedError,
+  readEngineeringAgentOwnerQueues,
   runEngineeringAgentTransaction } from "@/lib/engineeringAgentStore";
 import { loadEngineeringAgentV22Candidate } from
   "@/lib/engineeringAgentV22CandidateLoad";
-import { resolveEngineeringAgentV22Product } from
+import { reissueEngineeringAgentV22Capability,
+  resolveEngineeringAgentV22Product } from
   "@/lib/engineeringAgentV22ProductStore";
 import { v22PublishCandidateMatches } from
   "@/lib/engineeringAgentV22PublicationDecision";
@@ -16,82 +18,141 @@ import { prisma } from "@/lib/prisma";
 
 type Pending = { workItemId: string; runId: string; attemptId: string;
   taskId: string; modeAtStart: string; patchDigest: string; baseSha: string };
+type Lapsed = Pending & { expectedTreeId: string };
 type Stored = Awaited<ReturnType<typeof loadEngineeringAgentV22StoredCandidate>>;
 type Ports = {
+  readLapsed: () => Promise<Lapsed | null>;
   readPending: () => Promise<Pending | null>;
   prQueueFull: () => Promise<boolean>;
-  loadStored: (pending: Pending) => Promise<Stored>;
+  loadStored: (item: Pending, still: () => Promise<boolean>) => Promise<Stored>;
+  stillLapsed: (item: Lapsed) => Promise<boolean>;
+  stillPending: (item: Pending) => Promise<boolean>;
+  reissue: (input: Parameters<typeof reissueEngineeringAgentV22Capability>[1]) =>
+    Promise<unknown>;
   resolve: (input: Parameters<typeof resolveEngineeringAgentV22Product>[1]) =>
     ReturnType<typeof resolveEngineeringAgentV22Product>;
 };
 
 const REASON = /^[a-z_]{1,64}$/;
+const runSelect = { select: { id: true, amuxAttemptId: true, cardId: true,
+  modeAtStart: true } } as const;
+const asPending = (item: { id: string; patchDigest: string | null;
+  baseSha: string | null; run: { id: string; amuxAttemptId: string;
+    cardId: string; modeAtStart: string } | null }): Pending | null =>
+  item.run && item.patchDigest && item.baseSha ? {
+    workItemId: item.id, runId: item.run.id,
+    attemptId: item.run.amuxAttemptId, taskId: item.run.cardId,
+    modeAtStart: item.run.modeAtStart, patchDigest: item.patchDigest,
+    baseSha: item.baseSha } : null;
 
 async function readPending(): Promise<Pending | null> {
   const item = await prisma.engineeringAgentWorkItem.findFirst({
     where: { kind: "t2_draft", state: "open",
       reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { id: true, patchDigest: true, baseSha: true,
-      run: { select: { id: true, amuxAttemptId: true, cardId: true,
-        modeAtStart: true } } },
+    select: { id: true, patchDigest: true, baseSha: true, run: runSelect },
   });
-  if (!item?.run || !item.patchDigest || !item.baseSha) return null;
-  return { workItemId: item.id, runId: item.run.id,
-    attemptId: item.run.amuxAttemptId, taskId: item.run.cardId,
-    modeAtStart: item.run.modeAtStart, patchDigest: item.patchDigest,
-    baseSha: item.baseSha };
+  return item ? asPending(item) : null;
 }
 
-/** The run has ended, so the draft still pending is the snapshot the
+/** A v22 publish item nobody claimed before its capability lapsed: queued,
+ * no capability ever consumed, none live. */
+const lapsedWhere = () => ({ kind: "publish", state: "queued",
+  run: { card: { sourceSystem: "admin-idea-v4" } },
+  capabilities: { none: { OR: [{ consumedAt: { not: null } },
+    { unconsumedWorkItemId: { not: null }, expiresAt: { gt: new Date() } }] } },
+});
+
+async function readLapsed(): Promise<Lapsed | null> {
+  const item = await prisma.engineeringAgentWorkItem.findFirst({
+    where: lapsedWhere(),
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, patchDigest: true, baseSha: true,
+      expectedTreeId: true, run: runSelect },
+  });
+  const pending = item ? asPending(item) : null;
+  return pending && item?.expectedTreeId ?
+    { ...pending, expectedTreeId: item.expectedTreeId } : null;
+}
+
+/** The run has ended, so the item still waiting is the snapshot the
  * candidate's reads are repeated against. Develop may have moved since
  * settlement; the base need only be one of its commits. */
-const loadStored = (pending: Pending) =>
-  loadEngineeringAgentV22StoredCandidate(pending.attemptId, {
-    readSnapshot: async () => {
-      const item = await prisma.engineeringAgentWorkItem.findUnique({
-        where: { id: pending.workItemId },
-        select: { state: true, reason: true } });
-      return item?.state === "open" &&
-        item.reason === ENGINEERING_AGENT_V22_TIER_PENDING_REASON ?
-        { runId: pending.runId, taskId: pending.taskId,
-          baseSha: pending.baseSha } : null;
-    },
+const loadStored = (item: Pending, still: () => Promise<boolean>) =>
+  loadEngineeringAgentV22StoredCandidate(item.attemptId, {
+    readSnapshot: async () => await still() ?
+      { runId: item.runId, taskId: item.taskId, baseSha: item.baseSha } : null,
     loadCandidate: (input) =>
       loadEngineeringAgentV22Candidate({ ...input, onDevelop: true }),
   });
 
 const livePorts: Ports = {
-  readPending, loadStored,
+  readLapsed, readPending, loadStored,
+  stillLapsed: async (item) => (await prisma.engineeringAgentWorkItem.count({
+    where: { id: item.workItemId, ...lapsedWhere() } })) === 1,
+  stillPending: async (item) => (await prisma.engineeringAgentWorkItem.count({
+    where: { id: item.workItemId, state: "open",
+      reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } })) === 1,
   // A pending draft comes only from a run that started under `t1`.
   prQueueFull: async () =>
     (await readEngineeringAgentOwnerQueues(prisma, "t1")).prFull,
+  reissue: (input) => runEngineeringAgentTransaction(prisma,
+    (tx) => reissueEngineeringAgentV22Capability(tx, input)),
   resolve: (input) => runEngineeringAgentTransaction(prisma,
     (tx) => resolveEngineeringAgentV22Product(tx, input)),
 };
 
-/** One pending draft's tier, read outside any route budget (§4): T1 opens
- * the run's publish item with its capability, anything else leaves an
- * ordinary draft for the owner. While the pull request queue is full no tier
- * is read and every pending draft waits; a promotion the database still
- * refuses becomes an ordinary draft, so no draft is read again and again. */
+/** A database refusal (store or trigger), as opposed to a failure to reach it. */
+const refused = (error: unknown) =>
+  error instanceof EngineeringAgentStoreRefusedError ||
+  /\b23514\b|check_violation/.test(error instanceof Error ? error.message : "");
+
+const t1Candidate = (item: Pending, stored: Stored | null) =>
+  v22PublishCandidateMatches({
+    policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
+    modeAtStart: item.modeAtStart, runId: item.runId,
+    taskId: item.taskId, baseSha: item.baseSha,
+    patchDigest: item.patchDigest, publication: stored,
+  }) && stored?.ok === true ? { expectedTreeId: stored.candidate.expectedTreeId,
+    baseCommitterDate: stored.candidate.baseCommitterDate,
+    imageProofDigest: stored.imageProofDigest! } : null;
+
+/** One round outside any route budget (§4). A v22 publish item whose
+ * capability lapsed before a round claimed it is judged again first (§10):
+ * the same verdict on the same tree gets a new capability. Otherwise one
+ * pending draft's tier: T1 opens the run's publish item with its capability,
+ * anything else leaves an ordinary draft for the owner. While the pull
+ * request queue is full no draft's tier is read; a promotion the database
+ * still refuses becomes an ordinary draft, so no draft is read again and
+ * again. A failure to reach the database leaves it pending. */
 export async function promoteEngineeringAgentV22Draft(
   ports: Ports = livePorts,
-): Promise<{ outcome: "none" | "waiting" | "promoted" | "kept" | "stale";
-  reason?: string }> {
+): Promise<{ outcome: "none" | "waiting" | "promoted" | "kept" | "stale" |
+  "reissued" | "reissue_refused"; reason?: string }> {
+  const lapsed = await ports.readLapsed();
+  if (lapsed) {
+    const stored = await ports.loadStored(lapsed,
+      () => ports.stillLapsed(lapsed)).catch(() => null);
+    const candidate = t1Candidate(lapsed, stored);
+    if (!candidate || candidate.expectedTreeId !== lapsed.expectedTreeId)
+      return { outcome: "reissue_refused",
+        reason: stored?.ok === false ? stored.reason : "tier_changed" };
+    await ports.reissue({ workItemId: lapsed.workItemId, runId: lapsed.runId,
+      taskId: lapsed.taskId, patchDigest: lapsed.patchDigest,
+      baseSha: lapsed.baseSha, candidate });
+    return { outcome: "reissued" };
+  }
   const pending = await ports.readPending();
   if (!pending) return { outcome: "none" };
   if (await ports.prQueueFull()) return { outcome: "waiting" };
-  const stored = await ports.loadStored(pending).catch(() => null);
-  const promote = v22PublishCandidateMatches({
-    policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
-    modeAtStart: pending.modeAtStart, runId: pending.runId,
-    taskId: pending.taskId, baseSha: pending.baseSha,
-    patchDigest: pending.patchDigest, publication: stored,
-  }) && stored?.ok === true ? stored : null;
+  const stored = await ports.loadStored(pending,
+    () => ports.stillPending(pending)).catch(() => null);
+  const candidate = t1Candidate(pending, stored);
   const named = stored === null ? null : !stored.ok ? stored.reason :
     stored.tier.tier !== "T1" ? "tier_two" : null;
-  const reason = named && REASON.test(named) ? named : "tier_evidence_unavailable";
+  const reason = named && REASON.test(named) &&
+    named !== ENGINEERING_AGENT_V22_TIER_PENDING_REASON ? named :
+    "tier_evidence_unavailable";
   const draft = { workItemId: pending.workItemId, runId: pending.runId,
     taskId: pending.taskId, patchDigest: pending.patchDigest,
     baseSha: pending.baseSha };
@@ -100,17 +161,14 @@ export async function promoteEngineeringAgentV22Draft(
     return "kept" in kept && kept.kept ? { outcome: "kept" as const, reason: why } :
       { outcome: "stale" as const };
   };
-  if (!promote) return keep(reason);
+  if (!candidate) return keep(reason);
   let promoted;
   try {
-    promoted = await ports.resolve({ ...draft, reason, candidate: {
-      expectedTreeId: promote.candidate.expectedTreeId,
-      baseCommitterDate: promote.candidate.baseCommitterDate,
-      imageProofDigest: promote.imageProofDigest!,
-    } });
-  } catch {
+    promoted = await ports.resolve({ ...draft, reason, candidate });
+  } catch (error) {
     // The switch, consent or queue changed since it was read.
-    return keep("publish_refused");
+    if (refused(error)) return keep("publish_refused");
+    throw error;
   }
   return "publishWorkItemId" in promoted ? { outcome: "promoted" } :
     { outcome: "stale" };
