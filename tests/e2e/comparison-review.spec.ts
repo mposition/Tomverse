@@ -133,12 +133,8 @@ test("AI comparison review does not flash an unavailable setup before loading", 
 
   const reviewButton = page.getByRole("button", { name: "AI 답변 교차검토" });
   await expect(reviewButton).toBeVisible({ timeout: 30_000 });
-  // The entry badge is the rail's own approximate figure, and it says 8
-  // because a review runs two reviewers. The dialog below quotes the server's
-  // exact price for the chosen setup, which is why the two numbers are
-  // asserted separately rather than shared.
-  await expect(reviewButton.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
-  await expect(reviewButton.getByTestId("credit-coin-icon")).toBeVisible();
+  await expect(reviewButton.getByTestId("ai-review-entry-credit-cost")).toHaveCount(0);
+  await expect(reviewButton.getByTestId("credit-coin-icon")).toHaveCount(0);
   await reviewButton.click();
   const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
   await expect(dialog.getByTestId("comparison-review-loading")).toBeVisible();
@@ -166,12 +162,11 @@ for (const viewport of [
     await openReviewConversation(page);
 
     const reviewEntryButton = page.getByRole("button", { name: "AI 답변 교차검토" });
-    await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
+    await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toHaveCount(0);
     await reviewEntryButton.click();
     const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByTestId("ai-review-estimated-credits")).toContainText("4");
-    await expect(dialog.getByTestId("ai-review-estimated-credits").getByTestId("credit-coin-icon")).toBeVisible();
+    await expect(dialog.getByTestId("ai-review-estimated-credits")).toHaveCount(0);
     await dialog.getByRole("button", { name: /근거 중심/ }).click();
     await dialog.getByText("신중한 종합안 포함").click();
     await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
@@ -285,8 +280,8 @@ test("quick comparison performs a structured AI analysis on mobile", async ({
   await openReviewConversation(page);
 
   const quickButton = page.getByTestId("quick-comparison-button");
-  await expect(quickButton.getByTestId("quick-comparison-credit-cost")).toContainText("1");
-  await expect(quickButton.getByTestId("credit-coin-icon")).toBeVisible();
+  await expect(quickButton.getByTestId("quick-comparison-credit-cost")).toHaveCount(0);
+  await expect(quickButton.getByTestId("credit-coin-icon")).toHaveCount(0);
   await quickButton.click();
   await expect(page.getByTestId("quick-comparison-setup")).toHaveCount(0);
   const dialog = page.getByTestId("quick-comparison-dialog");
