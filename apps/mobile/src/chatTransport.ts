@@ -48,7 +48,7 @@ export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limi
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
 export type AssistantSummary = { id: string; name: string; description?: string | null };
-export type ChatSummary = Pick<Conversation, "id" | "title"> & { kind?: string; surface?: string; productKey?: string | null; updatedAt?: string; pinned?: boolean; pinSeq?: number; projectId?: string | null; selectedModels?: string[]; isLocked?: boolean; shareEnabled?: boolean; sourceState?: string | null };
+export type ChatSummary = Pick<Conversation, "id" | "title"> & Partial<import("../../../lib/continuationTitleContext").ContinuationRowNaming> & { kind?: string; surface?: string; productKey?: string | null; updatedAt?: string; pinned?: boolean; pinSeq?: number; projectId?: string | null; selectedModels?: string[]; isLocked?: boolean; shareEnabled?: boolean };
 export type HistoryProject = { id: string; name: string; conversationCount?: number };
 export type HistorySearch = { results: Array<{ id: string; kind?: string; conversationId: string; conversationTitle: string; snippet: string; surface?: string }>; truncated?: boolean; sourceSearch?: string; validUntil?: string | null };
 export interface HistoryTransport {

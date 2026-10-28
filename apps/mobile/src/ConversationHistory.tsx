@@ -4,6 +4,7 @@ import { partitionConversationRows } from '../../../lib/conversationListGrouping
 import type { ChatSummary, ChatTransport, HistoryProject, HistorySearch } from './chatTransport';
 import { historyCopy } from './historyCopy';
 import { Sheet } from './Sheet';
+import { nativeConversationTitle } from './conversationTitle';
 
 type Action = 'menu' | 'rename' | 'move' | 'share' | 'remove' | 'lock' | 'unlock' | 'open' | 'sourceDownload';
 export function ConversationHistory({ transport, language, owner, chats, currentId, disabled, onOpen, onRefresh, onChanged }: {
@@ -66,7 +67,7 @@ export function ConversationHistory({ transport, language, owner, chats, current
   }
   const normalized = query.trim().toLocaleLowerCase();
   const matching = new Map(search?.results.map(hit => [hit.conversationId, hit]));
-  const filtered = chats.filter(chat => (!normalized || chat.title.toLocaleLowerCase().includes(normalized) || matching.has(chat.id)) && (
+  const filtered = chats.filter(chat => (!normalized || nativeConversationTitle(chat, language).toLocaleLowerCase().includes(normalized) || matching.has(chat.id)) && (
     filter === 'all' || (filter === 'locked' && chat.isLocked) || (filter === 'shared' && chat.shareEnabled) || (filter === 'comparison' && chat.kind !== 'image' && (chat.selectedModels?.length ?? 0) > 1) ||
     (filter.startsWith('project:') && chat.projectId === filter.slice(8)) || (filter.startsWith('model:') && chat.kind !== 'image' && chat.selectedModels?.includes(filter.slice(6)))
   ));
@@ -88,8 +89,8 @@ export function ConversationHistory({ transport, language, owner, chats, current
     {(search?.truncated || (search?.sourceSearch && search.sourceSearch !== 'ok')) && <p role="status" className="history-notice">{c.searchLimited}</p>}
     {!filtered.length && <p className="history-notice">{c.empty}</p>}
     {groups.filter(group => group.rows.length).map(group => <section key={group.name} className="history-group"><h2>{group.name}</h2>{group.rows.map(chat => <div className="history-row" key={chat.id}>
-      <button className="conversation-row" aria-current={currentId === chat.id ? 'page' : undefined} disabled={disabled || busy} onClick={() => chat.isLocked && !history?.unlocked(chat.id) ? choose(chat, 'open') : onOpen(chat.id)}><span className="conversation-title">{chat.isLocked && <svg className="history-lock" aria-label={c.locked} width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="10" width="16" height="12" rx="2" /><path d="M8 10V6a4 4 0 0 1 8 0v4" /></svg>}{chat.title}{matching.has(chat.id) && <span className="history-snippet">{matching.get(chat.id)?.kind === 'imported' && `${c.original} · `}{matching.get(chat.id)?.snippet}</span>}</span></button>
-      <button className="history-more" aria-label={`${c.more}: ${chat.title}`} disabled={disabled || busy} onClick={() => choose(chat, 'menu')}>⋯</button>
+      <button className="conversation-row" aria-current={currentId === chat.id ? 'page' : undefined} disabled={disabled || busy} onClick={() => chat.isLocked && !history?.unlocked(chat.id) ? choose(chat, 'open') : onOpen(chat.id)}><span className="conversation-title">{chat.isLocked && <svg className="history-lock" aria-label={c.locked} width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="10" width="16" height="12" rx="2" /><path d="M8 10V6a4 4 0 0 1 8 0v4" /></svg>}{nativeConversationTitle(chat, language)}{matching.has(chat.id) && <span className="history-snippet">{matching.get(chat.id)?.kind === 'imported' && `${c.original} · `}{matching.get(chat.id)?.snippet}</span>}</span></button>
+      <button className="history-more" aria-label={`${c.more}: ${nativeConversationTitle(chat, language)}`} disabled={disabled || busy} onClick={() => choose(chat, 'menu')}>⋯</button>
     </div>)}</section>)}
     {filterOpen && <Sheet title={c.filter} closeLabel={c.cancel} onClose={() => { if (!busy) setFilterOpen(false); }}><div className="history-menu">
       {(['all', 'locked', 'shared', 'comparison'] as const).map(key => <button key={key} aria-pressed={filter === key} onClick={() => { setFilter(key); setFilterOpen(false); }}>{c[key]}</button>)}
