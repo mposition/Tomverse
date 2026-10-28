@@ -17,6 +17,16 @@ export function amuxV22EngineeringPublicationEnabled(value: string | undefined) 
   return AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH && value === "enabled";
 }
 
+/** The box bridge refuses unknown delivery fields, so the publication base
+ * is sent only once the operator has rolled out a bridge and sidecar that
+ * read it. Default off. */
+export const AMUX_V22_DELIVERY_BASE_SHA_ENV =
+  "TOMVERSE_AMUX_V22_DELIVERY_BASE_SHA";
+
+export function amuxV22DeliveryBaseShaEnabled(value: string | undefined) {
+  return value === "enabled";
+}
+
 export const AMUX_V22_SEALED_DELIVERY_MARKER = "amux-v22:sealed-brief";
 
 /** Settlement must use the same sealed patch it read before the transaction.

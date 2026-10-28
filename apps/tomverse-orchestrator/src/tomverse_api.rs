@@ -3057,6 +3057,11 @@ pub struct V22ExecutionProfile {
     pub model_id: String,
     pub role: String,
     pub budget_microusd: i64,
+    /// The commit the Task's publication run was pinned to at start. The
+    /// sidecar checks it out before the CLI runs, so the patch and its review
+    /// commit are built on the base settlement compares them with.
+    #[serde(default)]
+    pub base_sha: Option<String>,
     #[serde(default)]
     pub grade_guard: bool,
     #[serde(default)]
