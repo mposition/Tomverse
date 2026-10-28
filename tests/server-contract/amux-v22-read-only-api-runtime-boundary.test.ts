@@ -203,6 +203,7 @@ mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), { namedExports: {
   loadEngineeringAgentV22SettlementPatch: async () => null,
 } });
 mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), { namedExports: {
+  ENGINEERING_AGENT_V22_PREFLIGHT_MS: 12_000,
   loadEngineeringAgentV22StoredCandidateWithin: async () => null,
 } });
 
