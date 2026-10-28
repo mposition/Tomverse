@@ -50,6 +50,10 @@ test('a Chat continuation is listed with Chat and opens with its original above 
   await expect(page.locator('.conversation-row')).toHaveCount(3);
   await expect(page.locator('.conversation-row', { hasText: 'Imported trip plan' })).toBeVisible();
   await expect(page.locator('.conversation-row', { hasText: 'Imported comparison' })).toHaveCount(0);
+  await expect(page.locator('.history-more[aria-label$="Imported trip plan"]')).toBeVisible();
+  await page.getByPlaceholder('대화 검색').fill('Imported trip');
+  await expect(page.locator('.conversation-row')).toHaveCount(1);
+  await page.getByPlaceholder('대화 검색').fill('');
 
   await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
   await expect(page.getByTestId('continuation-provenance')).toContainText('ChatGPT에서 가져온 대화');

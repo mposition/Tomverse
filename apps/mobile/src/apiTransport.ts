@@ -10,6 +10,7 @@ import { mobileApiFetch, MobileAuth } from "./authBridge";
 import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArtifactCore";
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
+import { displayTimeZoneHeaders } from "../../../lib/continuationTitleContext";
 import { uploadMobileFile } from "./nativeUpload";
 import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
 
@@ -297,7 +298,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     setDeviceLock: async (enabled, reason) => { await bridge.setDeviceLock({ enabled, reason }); window.dispatchEvent(new Event("tomverse-device-security-changed")); },
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
     // A Review continuation is listed with Review (owner request 2026-10-26).
-    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
+    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations", { headers: displayTimeZoneHeaders() })).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
     createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
@@ -344,7 +345,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     verifyEmailCode: (email, code) => { clearSessionState(); return bridge.verifyEmailCode({ email, code }); },
     signOut: () => { clearSessionState(); return bridge.signOut(); },
     list: async () => {
-      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean; productKey?: string | null }>>("/api/conversations");
+      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean; productKey?: string | null }>>("/api/conversations", { headers: displayTimeZoneHeaders() });
       // A Chat continuation is a Chat conversation with its imported original
       // above it, so it is listed with Chat (owner request 2026-10-26).
       return rows.filter((row) => row.kind === "chat" && (row.surface === "chat" || (row.surface === "continuation" && row.productKey === "chat")));

@@ -71,8 +71,9 @@ test("the real list response preserves product identity for imported and legacy 
 });
 
 test("native history lists the server's continued Chat with Chat and continued Review with Review", async () => {
-  const transport = createApiTransport(async path => {
+  const transport = createApiTransport(async (path, init) => {
     assert.equal(path, "/api/conversations");
+    assert.equal(new Headers(init?.headers).get("X-Tomverse-Time-Zone"), Intl.DateTimeFormat().resolvedOptions().timeZone);
     return GET(request());
   }, { signOut: async () => {} });
   assert.deepEqual((await transport.list()).map(value => value.id), ["ordinary-chat", "imported-chat"]);
