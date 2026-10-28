@@ -71,6 +71,8 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   read?: ReadFile;
   stat?: FileStat;
   fetchBlob?: FetchBlob;
+  /** Settlement stopped waiting: start no further reads. */
+  signal?: AbortSignal;
 }): Promise<{
   baseFiles: { path: string; text: string }[];
   workflows: WorkflowFile[];
@@ -129,14 +131,23 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     (entry.mode === "100644" || entry.mode === "100755") &&
     !excluded.has(entry.path) && !entry.path.startsWith("vendor/amux/") &&
     ANALYSIS_TEXT.test(entry.path));
-  const texts = new Map<string, Uint8Array | null>();
+  // Any missing text, the byte cap or an abort fails the whole read, so the
+  // first of them stops new reads.
+  const texts = new Map<string, Uint8Array>();
   let next = 0;
+  let readBytes = 0;
+  let stopped = false;
   await Promise.all(Array.from({ length: READ_CONCURRENCY }, async () => {
-    while (next < toRead.length) {
+    while (!stopped && next < toRead.length) {
+      if (input.signal?.aborted) { stopped = true; break; }
       const entry = toRead[next++];
-      texts.set(entry.path, await baseBytes(entry));
+      const bytes = await baseBytes(entry);
+      readBytes += bytes?.byteLength ?? 0;
+      if (!bytes || readBytes > MAX_TOTAL_BYTES) stopped = true;
+      else texts.set(entry.path, bytes);
     }
   }));
+  if (stopped) return null;
   for (const entry of input.tree) {
     if (entry.type === "tree") continue;
     if (!isCanonicalRepoPath(entry.path) ||

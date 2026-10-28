@@ -106,3 +106,13 @@ test("settlement stops waiting for a slow candidate and keeps the result private
     1_000, ports());
   assert.equal(quick.ok, true);
 });
+
+test("a timed-out settlement aborts the tier read it stopped waiting for", async () => {
+  let seen = null;
+  await loadEngineeringAgentV22StoredCandidateWithin(attemptId, 20,
+    ports({ readTier: (_candidate, signal) => {
+      seen = signal;
+      return new Promise(() => {});
+    } }));
+  assert.equal(seen?.aborted, true);
+});
