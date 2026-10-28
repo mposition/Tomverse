@@ -7,6 +7,17 @@ import { mobileErrorText } from "../locales/mobileErrors.ts";
 import { createChatLocationSession } from "../packages/chat-core/src/location.ts";
 import { authenticatedFetch } from "../apps/mobile/src/authenticatedFetch.ts";
 
+for (const language of ["en", "ko", "zh", "de", "fr", "es", "pt"]) test(`native credit refusals explain the balance or daily limit instead of a disconnection: ${language}`, () => {
+  const balance = mobileErrorText({ status: 402, code: "CREDIT_BALANCE_INSUFFICIENT" }, language, "Connection interrupted");
+  const daily = mobileErrorText({ status: 429, code: "PLAN_DAILY_CREDIT_LIMIT_REACHED" }, language, "Connection interrupted");
+  const unavailable = mobileErrorText({ status: 403, code: "PLAN_FEATURE_UNAVAILABLE" }, language, "Connection interrupted");
+  assert.notEqual(balance, "Connection interrupted");
+  assert.notEqual(daily, "Connection interrupted");
+  assert.notEqual(daily, unavailable);
+  assert.notEqual(balance, daily);
+  if (language === "ko") { assert.match(balance, /크레딧이 부족/); assert.match(daily, /오늘 남은 플랜 크레딧/); }
+});
+
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
 
 test("voice configuration recognizes continuous funding while preserving older server capabilities", async () => {

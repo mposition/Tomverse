@@ -80,6 +80,28 @@ export function createNativeBillingClient(input: {
       const state = await sync(); await identify(state); await input.sdk.restorePurchases(); current(); return sync();
     }),
     refresh: () => serialized(() => sync()),
+    redeemPass: (code: string, language: string) => serialized(async () => {
+      const before = await sync();
+      if (!before.promotionPasses) throw new Error("NATIVE_PASS_UNAVAILABLE");
+      const promoCode = code.trim().toUpperCase();
+      if (promoCode.length < 2 || promoCode.length > 32) throw new Error("PROMOTION_INVALID");
+      current();
+      const response = await input.api("/api/billing/checkout", () => {
+        current();
+        return { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planId: "pro", billingInterval: "monthly", promoCode, language }) };
+      });
+      current();
+      const receipt = await response.json();
+      if (!response.ok) throw new Error(response.status < 500 && typeof receipt.code === "string" ? receipt.code : "NATIVE_PASS_UNCONFIRMED");
+      if (receipt.success !== true || receipt.accessType !== "founding_tester_pass" || receipt.automaticRenewal !== false || receipt.paymentMethodRequired !== false || !Number.isFinite(Date.parse(receipt.periodEnd))) {
+        throw new Error("NATIVE_PASS_UNCONFIRMED");
+      }
+      // Read current server entitlement; never replay a redemption after a lost receipt.
+      const state = await sync();
+      if (state.billingId !== before.billingId || !state.accessPass || state.plan === "Free") throw new Error("NATIVE_PASS_UNCONFIRMED");
+      return state;
+    }),
     cancelWeb: () => serialized(() => sync("cancel_web")),
   };
 }

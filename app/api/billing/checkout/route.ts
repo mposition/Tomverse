@@ -1,11 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { randomUUID } from "node:crypto";
 import type Stripe from "stripe";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import {
   ApiSecurityError,
   apiSecurityResponse,
@@ -371,7 +370,9 @@ export async function POST(req: Request) {
   // finds the exact request in the structured log.
   const traceId = randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json(
         { code: "AUTHENTICATION_REQUIRED", error: "Authentication required." },
@@ -503,6 +504,12 @@ export async function POST(req: Request) {
       promotionRiskFlags = promotionValidation.riskFlags;
     }
 
+    // Native redemption grants only existing complimentary passes. A bearer
+    // request must never reach Stripe, even for a 100% subscription coupon.
+    if (req.headers.has("authorization") && (!appliedPromotion || !isInternalPassPromotion(appliedPromotion))) {
+      return NextResponse.json({ code: "NATIVE_PASS_REQUIRED", error: "Enter a Tomverse access pass code." }, { status: 400 });
+    }
+
     // Fail closed, a second time, from the same pure predicate the validation
     // above already ran. Unreachable while both agree, which is the point: a
     // forged request that skipped the validate endpoint, or a future edit that
@@ -587,7 +594,7 @@ export async function POST(req: Request) {
     if (internalPass) {
       if (billingInterval !== "monthly" || finalPriceMinor !== 0) {
         return NextResponse.json(
-          { error: "This access pass is available only for the monthly Pro plan." },
+          { code: "INTERNAL_PASS_NOT_ELIGIBLE", error: "This access pass is available only for the monthly Pro plan." },
           { status: 400 }
         );
       }
