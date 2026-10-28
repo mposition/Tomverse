@@ -165,6 +165,18 @@ export const decideAmuxV52SettlementPaths = (grade: unknown,
   return missing.length === 0 ? reported : "blocked";
 };
 
+/** An implement run that succeeded with a diff needs its v52 review. One that
+ * reported no changed path and left no patch has nothing to review: it settles
+ * to `review` with its result for an owner to read (owner decision 2026-10-28). */
+export const amuxV52ReviewRequired = (input: { gradeGuard: boolean;
+  role: string | null | undefined; outcome: string;
+  pathDecision: AmuxV52PathDecision; patchPresent: boolean;
+  changedPaths: unknown }) =>
+  input.gradeGuard && input.role === "implement" &&
+  input.outcome === "succeeded" && input.pathDecision === "pass" &&
+  !(!input.patchPresent && Array.isArray(input.changedPaths) &&
+    input.changedPaths.length === 0);
+
 export type AmuxExecutionGradeInput = {
   taskRole: string | null | undefined;
   expectedPaths: readonly unknown[] | null | undefined;

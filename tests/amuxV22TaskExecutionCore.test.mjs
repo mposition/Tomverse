@@ -36,6 +36,26 @@ test("settlement refuses a patch inserted, removed, or changed after decrypt", (
   assert.equal(matches({ ...readPatch, taskId: "task-2" }, storedPatch), false);
 });
 
+test("a blocked or failed settlement keeps a stored patch private", () => {
+  const storedPatch = { taskId: "task-1", patchSha256: "a".repeat(64),
+    baseSha: "b".repeat(40), bodyPurgedAt: null };
+  const readPatch = { taskId: "task-1", sha256: "a".repeat(64),
+    baseSha: "b".repeat(40) };
+  for (const outcome of ["blocked", "failed"]) {
+    // These outcomes never read the patch, so the stored one is not a race.
+    assert.equal(v22SettlementPatchMatches({ taskId: "task-1", outcome,
+      readPatch: null, storedPatch }), true);
+    assert.equal(v22SettlementPatchMatches({ taskId: "task-1", outcome,
+      readPatch: null, storedPatch: null }), true);
+    // A patch read for an outcome that never publishes one is unexpected.
+    assert.equal(v22SettlementPatchMatches({ taskId: "task-1", outcome,
+      readPatch, storedPatch }), false);
+  }
+  // A succeeded settlement still refuses a patch it did not read.
+  assert.equal(v22SettlementPatchMatches({ taskId: "task-1",
+    outcome: "succeeded", readPatch: null, storedPatch }), false);
+});
+
 test("v22 settlement accepts only its one preallocated invocation receipt", () => {
   const base = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
     outcome: "succeeded", resultStored: true, reservedCostMicrousd: 1_000n,
