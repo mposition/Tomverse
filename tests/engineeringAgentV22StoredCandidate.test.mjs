@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { engineeringAgentV22CandidateSummary,
-  loadEngineeringAgentV22StoredCandidate } from
+  loadEngineeringAgentV22StoredCandidate,
+  loadEngineeringAgentV22StoredCandidateWithin } from
   "../lib/engineeringAgentV22StoredCandidate.ts";
 
 const attemptId = "29cf907f-2741-4dd1-b6d4-d85c881eb357";
@@ -95,4 +96,13 @@ test("stored v22 patch refuses missing files, base drift and candidate errors", 
     ports({ loadCandidate: async () => ({ ok: false,
       reason: "tree_verification_failed" }) })),
   { ok: false, reason: "tree_verification_failed" });
+});
+
+test("settlement stops waiting for a slow candidate and keeps the result private", async () => {
+  const slow = await loadEngineeringAgentV22StoredCandidateWithin(attemptId, 20,
+    ports({ readTier: () => new Promise(() => {}) }));
+  assert.deepEqual(slow, { ok: false, reason: "preflight_timeout" });
+  const quick = await loadEngineeringAgentV22StoredCandidateWithin(attemptId,
+    1_000, ports());
+  assert.equal(quick.ok, true);
 });

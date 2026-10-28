@@ -16,6 +16,7 @@ const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 // Production runs `main`, not the `develop` base, so some image files differ
 // from the base tree. Those come from GitHub by OID, up to this many.
 const MAX_FETCHED_BLOBS = 500;
+const READ_CONCURRENCY = 16;
 
 type ReadFile = (path: string) => Promise<Uint8Array>;
 type FileStat = (path: string) => Promise<{ isFile(): boolean }>;
@@ -121,6 +122,21 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       .map((entry) => entry.path));
   if (!ignoreEntry || baseExcluded === null) return null;
   const excluded = new Set(baseExcluded);
+  // The texts the loop below reads, read ahead in parallel: a few hundred
+  // sequential GitHub blob reads outran the settlement budget (2026-10-28).
+  const toRead = input.tree.filter((entry) => entry.type === "blob" &&
+    isCanonicalRepoPath(entry.path) &&
+    (entry.mode === "100644" || entry.mode === "100755") &&
+    !excluded.has(entry.path) && !entry.path.startsWith("vendor/amux/") &&
+    ANALYSIS_TEXT.test(entry.path));
+  const texts = new Map<string, Uint8Array | null>();
+  let next = 0;
+  await Promise.all(Array.from({ length: READ_CONCURRENCY }, async () => {
+    while (next < toRead.length) {
+      const entry = toRead[next++];
+      texts.set(entry.path, await baseBytes(entry));
+    }
+  }));
   for (const entry of input.tree) {
     if (entry.type === "tree") continue;
     if (!isCanonicalRepoPath(entry.path) ||
@@ -145,7 +161,7 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       baseFiles.push({ path: entry.path, text: "" });
       continue;
     }
-    const bytes = await baseBytes(entry);
+    const bytes = texts.get(entry.path);
     if (!bytes) return null;
     totalBytes += bytes.byteLength;
     if (totalBytes > MAX_TOTAL_BYTES) return null;

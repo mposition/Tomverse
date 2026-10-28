@@ -202,7 +202,7 @@ mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), { namedExports: {
   loadEngineeringAgentV22SettlementPatch: async () => null,
 } });
 mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), { namedExports: {
-  loadEngineeringAgentV22StoredCandidate: async () => null,
+  loadEngineeringAgentV22StoredCandidateWithin: async () => null,
 } });
 
 const execution = import(mod("lib/amux/execution.ts"));

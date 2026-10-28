@@ -127,6 +127,26 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
     imageProofDigest: tierEvidence.imageProofDigest };
 }
 
+/** How long settlement waits for the candidate. A slower read keeps the
+ * result private (a T2 draft) rather than outrun the settle route's budget
+ * and the bridge, which halts on an unanswered settlement. */
+export const ENGINEERING_AGENT_V22_PREFLIGHT_MS = 12_000;
+
+export async function loadEngineeringAgentV22StoredCandidateWithin(
+  attemptId: string, ms = ENGINEERING_AGENT_V22_PREFLIGHT_MS,
+  ports: Ports = livePorts) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ ok: false; reason: string }>((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, reason: "preflight_timeout" }), ms);
+  });
+  try {
+    return await Promise.race([
+      loadEngineeringAgentV22StoredCandidate(attemptId, ports), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The internal preflight may report identifiers and digests, never the
  * decrypted patch, proposed file bytes, or policy change text. */
 export function engineeringAgentV22CandidateSummary(

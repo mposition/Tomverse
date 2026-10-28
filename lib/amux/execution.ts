@@ -69,7 +69,7 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
-import { loadEngineeringAgentV22StoredCandidate } from
+import { loadEngineeringAgentV22StoredCandidateWithin } from
   "@/lib/engineeringAgentV22StoredCandidate";
 import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
   "@/lib/engineeringAgentV22PublicationDecision";
@@ -1358,8 +1358,11 @@ export async function settleAmuxV22TaskExecution(input: {
     publicationEnabled: amuxV22EngineeringPublicationEnabled(
       process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
   }) ?
-    await loadEngineeringAgentV22StoredCandidate(input.attemptId)
+    await loadEngineeringAgentV22StoredCandidateWithin(input.attemptId)
       .catch(() => null) : null;
+  if (publication?.ok === false && publication.reason === "preflight_timeout")
+    console.warn(JSON.stringify({ subsystem: "amux",
+      event: "v22_publication_preflight_timeout", attemptId: input.attemptId }));
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,
     prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 },
     async (tx, context) => {
