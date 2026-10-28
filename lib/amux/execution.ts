@@ -509,6 +509,9 @@ export async function startAmuxV22TaskExecution(input: {
             1_000_000_000_000));
         } catch (error) {
           if (!(error instanceof EngineeringAgentStoreRefusedError)) throw error;
+          console.warn(JSON.stringify({ subsystem: "amux",
+            event: "v22_publication_skipped", taskId: input.taskId,
+            reason: `run_admission_${error.code}` }));
         }
       }
       const changed = await tx.amuxWorkItem.updateMany({ where: {
