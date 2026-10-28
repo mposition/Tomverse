@@ -33,6 +33,7 @@ import {
   recordEngineeringAgentServiceFinish,
   removeEngineeringAgentReviewer,
   replaceEngineeringAgentBinding,
+  expireEngineeringAgentV22LapsedPublish,
   resolveEngineeringAgentV22TierPendingDraft,
   runEngineeringAgentTransaction,
   setEngineeringAgentSwitch,
@@ -353,6 +354,44 @@ test("a v22 draft settled before its tier is promoted to its run's one publish i
     session: owner, workItemId: waiting.draft.id, decision: "rejected",
     patchDigest: waiting.patch.sha256, baseSha: waiting.patch.baseSha,
   }));
+});
+
+test("a v22 publish item never claimed closes only without a live capability", async () => {
+  const live = await startRun();
+  const liveItem = await inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${live.runId}`, runId: live.runId,
+    patchBody: "live patch", patchDigest: sha256("live patch"),
+    baseSha: sha1("base"), expectedTreeId: sha1("tree"),
+  }));
+  await inTx((tx) => issueEngineeringAgentCapability(tx, { workItemId: liveItem.workItemId,
+    capability: { baseSha: sha1("base"), patchDigest: sha256("live patch"),
+      expectedTreeId: sha1("tree"), commit: commitFields(live.runId, live.cardId) } }));
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId: liveItem.workItemId, reason: "tier_changed" })), { expired: false });
+  await refusedWith(inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId: liveItem.workItemId, reason: "Tier 2" })), "reason_invalid");
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
+    workItemId: liveItem.workItemId, mode: "write", leaseMs: 60_000 }));
+  const bound = await settleAndBind(liveItem.workItemId, claim.fencingToken, live.runId);
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: live.runId,
+    amuxAttemptId: live.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  await retireBinding(bound.bindingId);
+
+  // No live capability (here none was ever issued; a lapsed one is the same).
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${run.runId}`, runId: run.runId,
+    patchBody: "lapsed patch", patchDigest: sha256("lapsed patch"),
+    baseSha: sha1("base"), expectedTreeId: sha1("tree"),
+  }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId,
+    amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId, reason: "tier_changed" })), { expired: true });
+  const closed = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } });
+  assert.deepEqual([closed.state, closed.reason], ["expired", "tier_changed"]);
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId, reason: "tier_changed" })), { expired: false });
 });
 
 test("a publish consumes its one capability on the write claim, and settles where the core says", async () => {

@@ -19,6 +19,8 @@ const ports = (overrides = {}) => {
     readPending: async () => pending,
     stillPending: async () => true, stillLapsed: async () => true,
     reissue: async (input) => { resolved.push({ reissue: input }); },
+    expireLapsed: async (workItemId, reason) => {
+      resolved.push({ expire: { workItemId, reason } }); },
     prQueueFull: async () => false,
     loadStored: async () => t1,
     resolve: async (input) => {
@@ -142,6 +144,12 @@ test("a publish item whose capability lapsed is judged again before any draft", 
       loadStored: async () => stored });
     assert.deepEqual(await promoteEngineeringAgentV22Draft(refused),
       { outcome: "reissue_refused", reason });
-    assert.equal(refused.resolved.length, 0);
+    // Closed, so it neither holds the queue nor comes first again.
+    assert.deepEqual(refused.resolved, [{ expire: { workItemId: "publish-1", reason } }]);
   }
+  const unreadable = ports({ readLapsed: async () => lapsed,
+    loadStored: async () => { throw new Error("github_unavailable"); } });
+  assert.deepEqual(await promoteEngineeringAgentV22Draft(unreadable),
+    { outcome: "reissue_refused", reason: "tier_evidence_unavailable" });
+  assert.equal(unreadable.resolved.length, 0);
 });

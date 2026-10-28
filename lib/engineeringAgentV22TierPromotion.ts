@@ -3,6 +3,7 @@ import "server-only";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
 import { EngineeringAgentStoreRefusedError,
+  expireEngineeringAgentV22LapsedPublish,
   readEngineeringAgentOwnerQueues,
   runEngineeringAgentTransaction } from "@/lib/engineeringAgentStore";
 import { loadEngineeringAgentV22Candidate } from
@@ -29,6 +30,7 @@ type Ports = {
   stillPending: (item: Pending) => Promise<boolean>;
   reissue: (input: Parameters<typeof reissueEngineeringAgentV22Capability>[1]) =>
     Promise<unknown>;
+  expireLapsed: (workItemId: string, reason: string) => Promise<unknown>;
   resolve: (input: Parameters<typeof resolveEngineeringAgentV22Product>[1]) =>
     ReturnType<typeof resolveEngineeringAgentV22Product>;
 };
@@ -48,7 +50,8 @@ const asPending = (item: { id: string; patchDigest: string | null;
 async function readPending(): Promise<Pending | null> {
   const item = await prisma.engineeringAgentWorkItem.findFirst({
     where: { kind: "t2_draft", state: "open",
-      reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON },
+      reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
+      run: { card: { sourceSystem: "admin-idea-v4" } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, patchDigest: true, baseSha: true, run: runSelect },
   });
@@ -98,6 +101,8 @@ const livePorts: Ports = {
     (await readEngineeringAgentOwnerQueues(prisma, "t1")).prFull,
   reissue: (input) => runEngineeringAgentTransaction(prisma,
     (tx) => reissueEngineeringAgentV22Capability(tx, input)),
+  expireLapsed: (workItemId, reason) => runEngineeringAgentTransaction(prisma,
+    (tx) => expireEngineeringAgentV22LapsedPublish(tx, { workItemId, reason })),
   resolve: (input) => runEngineeringAgentTransaction(prisma,
     (tx) => resolveEngineeringAgentV22Product(tx, input)),
 };
@@ -119,7 +124,8 @@ const t1Candidate = (item: Pending, stored: Stored | null) =>
 
 /** One round outside any route budget (§4). A v22 publish item whose
  * capability lapsed before a round claimed it is judged again first (§10):
- * the same verdict on the same tree gets a new capability. Otherwise one
+ * the same verdict on the same tree gets a new capability, any other closes
+ * the item so it neither holds the queue nor comes first again. Otherwise one
  * pending draft's tier: T1 opens the run's publish item with its capability,
  * anything else leaves an ordinary draft for the owner. While the pull
  * request queue is full no draft's tier is read; a promotion the database
@@ -133,10 +139,16 @@ export async function promoteEngineeringAgentV22Draft(
   if (lapsed) {
     const stored = await ports.loadStored(lapsed,
       () => ports.stillLapsed(lapsed)).catch(() => null);
+    // Unreadable now (GitHub, say) is not a verdict: a later round reads it.
+    if (stored === null) return { outcome: "reissue_refused",
+      reason: "tier_evidence_unavailable" };
     const candidate = t1Candidate(lapsed, stored);
-    if (!candidate || candidate.expectedTreeId !== lapsed.expectedTreeId)
-      return { outcome: "reissue_refused",
-        reason: stored?.ok === false ? stored.reason : "tier_changed" };
+    if (!candidate || candidate.expectedTreeId !== lapsed.expectedTreeId) {
+      const why = !stored.ok && REASON.test(stored.reason) ? stored.reason :
+        "tier_changed";
+      await ports.expireLapsed(lapsed.workItemId, why);
+      return { outcome: "reissue_refused", reason: why };
+    }
     await ports.reissue({ workItemId: lapsed.workItemId, runId: lapsed.runId,
       taskId: lapsed.taskId, patchDigest: lapsed.patchDigest,
       baseSha: lapsed.baseSha, candidate });
