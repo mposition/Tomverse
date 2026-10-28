@@ -194,3 +194,60 @@ test("vendored AMUX control-plane assets do not exhaust source-reading limits", 
   assert.deepEqual(result.baseFiles.find((file) =>
     file.path === vendorPath), { path: vendorPath, text: "" });
 });
+
+test("base blobs are fetched in parallel and kept in tree order", async () => {
+  const many = Array.from({ length: 40 }, (_, index) => {
+    const text = `export const parallel${index} = ${index};\n`;
+    const oid = gitObjectId("blob", Buffer.from(text));
+    blobs.set(oid, Buffer.from(text));
+    return { path: `lib/parallel/p${index}.ts`, mode: "100644",
+      type: "blob", oid };
+  });
+  let inFlight = 0;
+  let peak = 0;
+  const result = await loadEngineeringAgentV22BaseEvidence({
+    ...ports, tree: [...tree, ...many],
+    read: async (path) => path.includes("parallel") ?
+      Promise.reject(new Error("not_in_image")) : ports.read(path),
+    fetchBlob: async (oid) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      // Later entries answer first, so a result kept by arrival would reorder.
+      await new Promise((resolve) => setTimeout(resolve, 40 - many.findIndex(
+        (entry) => entry.oid === oid)));
+      inFlight -= 1;
+      return fetchBlob(oid);
+    },
+  });
+  assert.ok(result);
+  assert.ok(peak > 1 && peak <= 16, `peak ${peak}`);
+  assert.deepEqual(result.baseFiles.slice(-40).map((file) => file.text),
+    many.map((_, index) => `export const parallel${index} = ${index};\n`));
+});
+
+test("an abort or the first missing text starts no further reads", async () => {
+  const many = Array.from({ length: 100 }, (_, index) => {
+    const text = `export const stop${index} = ${index};\n`;
+    const oid = gitObjectId("blob", Buffer.from(text));
+    blobs.set(oid, Buffer.from(text));
+    return { path: `lib/stop/s${index}.ts`, mode: "100644", type: "blob", oid };
+  });
+  const run = async (fetch, signal) => {
+    let calls = 0;
+    const result = await loadEngineeringAgentV22BaseEvidence({
+      ...ports, tree: [...tree, ...many], signal,
+      read: async (path) => path.includes("/stop/") ?
+        Promise.reject(new Error("not_in_image")) : ports.read(path),
+      fetchBlob: async (oid) => { calls += 1; return fetch(oid); },
+    });
+    return { result, calls };
+  };
+  const aborted = new AbortController();
+  aborted.abort();
+  const gone = await run(fetchBlob, aborted.signal);
+  assert.equal(gone.result, null);
+  assert.equal(gone.calls, 0);
+  const missing = await run(async () => { throw new Error("absent"); });
+  assert.equal(missing.result, null);
+  assert.ok(missing.calls <= 16, `calls ${missing.calls}`);
+});

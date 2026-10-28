@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   AMUX_DB_COMMIT_RESERVE_MS,
   AmuxDbBoundaryError,
+  amuxDbTransactionBudgetMs,
   amuxRouteHasBudgetForMs,
+  amuxRouteSpareMsFor,
   anchorAmuxRouteDeadline,
   fenceAmuxRouteDeadline,
   withAmuxRouteBudget,
@@ -110,4 +112,13 @@ test("the fence refuses when the commit deadline trigger is not there to fire", 
     console.warn = originalWarn;
   }
   assert.equal(warnings.length, 4);
+});
+
+test("work before a transaction gets only what the route has beyond its budget", async () => {
+  const boundary = { prismaCallCeiling: 66 };
+  assert.equal(amuxDbTransactionBudgetMs(boundary), 20_000);
+  assert.equal(amuxRouteSpareMsFor(boundary), null);
+  const spare = await withAmuxRouteBudget(async () =>
+    amuxRouteSpareMsFor(boundary), 24_000);
+  assert.ok(spare <= 4_000 && spare > 3_000, `spare ${spare}`);
 });

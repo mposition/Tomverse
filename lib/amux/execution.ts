@@ -14,6 +14,7 @@ import {
   AmuxDbBoundaryError,
   amuxBoundaryWithAttachment,
   amuxRouteOrchestratorReceiptsMayHaveCommitted,
+  amuxRouteSpareMsFor,
   withAmuxDbBoundary,
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
@@ -69,7 +70,8 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
-import { loadEngineeringAgentV22StoredCandidate } from
+import { ENGINEERING_AGENT_V22_PREFLIGHT_MS,
+  loadEngineeringAgentV22StoredCandidateWithin } from
   "@/lib/engineeringAgentV22StoredCandidate";
 import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
   "@/lib/engineeringAgentV22PublicationDecision";
@@ -1355,16 +1357,25 @@ export async function settleAmuxV22TaskExecution(input: {
   // Tier work and GitHub reads happen outside the short settlement transaction.
   // Any missing evidence keeps the result private; it never becomes a worker
   // assertion that the patch is T1.
+  const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 };
+  // The settlement transaction keeps its whole budget: the candidate gets
+  // only what the route has beyond it, less a second of slack.
+  const spareMs = amuxRouteSpareMsFor(settleBoundary);
+  const preflightMs = spareMs === null ? ENGINEERING_AGENT_V22_PREFLIGHT_MS :
+    Math.min(ENGINEERING_AGENT_V22_PREFLIGHT_MS, spareMs - 1_000);
   const publication = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
     patchPresent: patch !== null,
     publicationEnabled: amuxV22EngineeringPublicationEnabled(
       process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
-  }) ?
-    await loadEngineeringAgentV22StoredCandidate(input.attemptId)
-      .catch(() => null) : null;
-  return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 },
+  }) ? preflightMs <= 0 ? { ok: false as const, reason: "preflight_timeout" } :
+    await loadEngineeringAgentV22StoredCandidateWithin(input.attemptId,
+      preflightMs).catch(() => null) : null;
+  if (publication?.ok === false && publication.reason === "preflight_timeout")
+    console.warn(JSON.stringify({ subsystem: "amux",
+      event: "v22_publication_preflight_timeout", attemptId: input.attemptId }));
+  return withAmuxDbBoundary(settleBoundary,
     async (tx, context) => {
       const now = context.dbNow;
       const runtime = await lockRuntime(tx, input.worker);
