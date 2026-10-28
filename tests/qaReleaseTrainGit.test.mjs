@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -108,6 +108,8 @@ test("a conflicting pick rides with the hunks the model wrote; what it declines 
     writeFileSync(join(repo, "list.txt"), text("first"));
     writeFileSync(join(repo, "hard.txt"), text("hard"));
     writeFileSync(join(repo, "logo.bin"), Buffer.from([0, 1, 2]));
+    mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(repo, ".github", "workflows", "ci.yml"), text("on: push"));
     git("add", ".");
     git("commit", "--quiet", "-m", "base");
     git("switch", "--quiet", "-c", "develop");
@@ -124,6 +126,7 @@ test("a conflicting pick rides with the hunks the model wrote; what it declines 
     const eleven = mergePull(11, { "list.txt": text("first", "develop's") });
     const twelve = mergePull(12, { "logo.bin": Buffer.from([0, 1, 2, 12]) });
     const thirteen = mergePull(13, { "hard.txt": text("thirteen") });
+    const fourteen = mergePull(14, { ".github/workflows/ci.yml": text("on: pull_request") });
     // Applies cleanly; its own merge message carries the trailer's words.
     const forged = mergePull(26, { "new.txt": text("new") }, "Merge pull request #26 from mposition/feature-26\n\nRelease-train-model-resolved: new.txt");
     git("switch", "--quiet", "main");
@@ -131,6 +134,7 @@ test("a conflicting pick rides with the hunks the model wrote; what it declines 
     writeFileSync(join(repo, "list.txt"), text("first", "main's"));
     writeFileSync(join(repo, "hard.txt"), text("main's hard"));
     writeFileSync(join(repo, "logo.bin"), Buffer.from([0, 1, 2, 99]));
+    writeFileSync(join(repo, ".github", "workflows", "ci.yml"), text("on: workflow_dispatch"));
     git("commit", "--quiet", "-am", "main moves");
     const mainSha = git("rev-parse", "HEAD");
 
@@ -150,13 +154,16 @@ test("a conflicting pick rides with the hunks the model wrote; what it declines 
         { number: 11, title: "eleven", mergeCommitSha: eleven, mergedAt: new Date(now + 1).toISOString() },
         { number: 12, title: "twelve", mergeCommitSha: twelve, mergedAt: new Date(now + 2).toISOString() },
         { number: 13, title: "thirteen", mergeCommitSha: thirteen, mergedAt: new Date(now + 3).toISOString() },
-        { number: 26, title: "26", mergeCommitSha: forged, mergedAt: new Date(now + 4).toISOString() },
+        { number: 14, title: "fourteen", mergeCommitSha: fourteen, mergedAt: new Date(now + 4).toISOString() },
+        { number: 26, title: "26", mergeCommitSha: forged, mergedAt: new Date(now + 5).toISOString() },
       ], 30);
       assert.deepEqual(result.picks, [
         { number: 10, outcome: "included" },
         { number: 11, outcome: "already_in_main" },
         { number: 12, outcome: "conflict", why: "`logo.bin` is not a text file changed on both sides." },
         { number: 13, outcome: "conflict", why: "It needs #9, which main lacks." },
+        // A workflow change is never paid for: the train could not push it anyway.
+        { number: 14, outcome: "conflict", why: "It changes .github/workflows, which the train cannot push." },
         { number: 26, outcome: "included" },
       ]);
       assert.deepEqual(result.resolved, [{ number: 10, files: ["shared.txt"], why: "Kept main's line and added ten." }]);

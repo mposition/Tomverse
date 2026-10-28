@@ -120,6 +120,12 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
 
 /** At most this many conflicting picks go to the model in one train: each call is paid. */
 const RESOLVES_PER_TRAIN = 6;
+/**
+ * No model call starts this long after a train began assembling: a call takes
+ * up to four minutes, and the push, pull request and report must still fit
+ * inside the service's 25 minutes (scripts/qa-release-train-service.mjs).
+ */
+const RESOLVE_WINDOW_MS = 15 * 60 * 1000;
 /** The commit trailer naming the files of a conflict the model resolved. */
 const RESOLVED_TRAILER = "Release-train-model-resolved";
 
@@ -153,7 +159,9 @@ export function createQaReleaseTrainGitPorts(input: {
   };
   /** Commits whose conflict the model resolved, with the files and what it said. */
   const resolvedCommits = new Map<string, { files: readonly string[]; why: string }>();
+  // Both counted per train: assemble resets them.
   let resolves = 0;
+  let assembleStartedMs = 0;
   // A stopped pick's conflicts handed to the model, which fills every hunk;
   // the files are written and staged. Only regular UTF-8 text files on all
   // three sides with no marker-like line are handed over. `why` is empty
@@ -163,6 +171,10 @@ export function createQaReleaseTrainGitPorts(input: {
     // A name the trailer or the body's code span cannot carry as one item is not resolved.
     if (!dir || files.length === 0 || files.some((file) => /[,`\r\n]/.test(file))) return { resolved: false, why: "A conflicted file's name cannot be carried." };
     if (resolves >= RESOLVES_PER_TRAIN) return { resolved: false, why: "This train already handed the model its limit of conflicts." };
+    if (Date.now() - assembleStartedMs > RESOLVE_WINDOW_MS) return { resolved: false, why: "This train ran out of time to ask the model." };
+    // A workflow change is left out whatever the model writes: never paid for.
+    const changed = (await git(["diff", "--name-only", `${pull.mergeCommitSha}^1`, pull.mergeCommitSha], { allowFail: true })).stdout.split("\n");
+    if (changed.some((file) => file.startsWith(".github/workflows/"))) return { resolved: false, why: "It changes .github/workflows, which the train cannot push." };
     const marked = new Map<string, string[]>();
     const conflict: QaReleaseTrainConflict = { number: pull.number, title: pull.title, diff: "", files: [] };
     for (const file of files) {
@@ -243,6 +255,8 @@ export function createQaReleaseTrainGitPorts(input: {
   };
   return {
     async assemble(branch, cargo, capacity) {
+      resolves = 0;
+      assembleStartedMs = Date.now();
       // A round that assembles twice (an empty emergency, then the scheduled
       // train) keeps one clone: the first is removed before the second.
       if (dir) await rm(dir, { recursive: true, force: true });
