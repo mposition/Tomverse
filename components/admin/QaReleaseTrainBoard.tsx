@@ -89,13 +89,7 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
   const reason = (row: QaReleaseTrainBoardRow["leftOut"][number]) => {
     if (row.outcome === "over_capacity") return m.detailOverCapacity;
     if (row.outcome === "changes_workflows") return m.detailWorkflows;
-    const needs =
-      row.predecessors === null
-        ? m.detailNeedsUnknown
-        : row.predecessors.length === 0
-          ? m.detailNeedsNone
-          : m.detailNeeds.replace("{numbers}", row.predecessors.map((n) => `#${n}`).join(" "));
-    return `${m.detailConflict} · ${needs}`;
+    return row.why === null ? m.detailConflict : `${m.detailConflict} · ${m.detailModelWhy.replace("{why}", row.why)}`;
   };
   const pullLink = (number: number, title: string) => (
     <>
@@ -255,9 +249,6 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
                             {row.included.map((pull) => (
                               <li key={pull.number}>
                                 {pullLink(pull.number, pull.title)}
-                                {pull.boardedFor !== undefined ? (
-                                  <span className="block text-xs text-[#a8d672]">{m.detailBoardedFor.replace("{number}", `#${pull.boardedFor}`)}</span>
-                                ) : null}
                               </li>
                             ))}
                           </ul>
