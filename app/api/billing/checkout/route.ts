@@ -184,8 +184,9 @@ async function activateInternalPass({
       subscriptionStatus: entitlement.subscriptionStatus,
     });
     if (block) throw new ApiSecurityError(block.status, block.code, block.error);
+    if (!promotion.accessDurationDays) throw new Error("INTERNAL_PASS_POLICY_INVALID");
     const accessStartsAt = new Date();
-    const periodEnd = addUtcDays(accessStartsAt, promotion.accessDurationDays!);
+    const periodEnd = addUtcDays(accessStartsAt, promotion.accessDurationDays);
     if (!promotion.maxRedemptions || !promotion.endsAt || !clientIpHash) {
       throw new Error("PROMOTION_POLICY_INCOMPLETE");
     }
