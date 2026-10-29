@@ -214,6 +214,20 @@ export function createQaReleaseTrainGitPorts(input: {
     }
     return answer;
   };
+  // develop's tip, fetched once per train the first time a pick conflicts; "" when it could not be read.
+  let developSha: string | null = null;
+  const supersededOnMain = async (pull: QaReleaseTrainCandidate, base: string): Promise<boolean> => {
+    if (developSha === null) {
+      const fetched = await git(["fetch", "--quiet", "--filter=blob:none", "origin", "develop"], { allowFail: true });
+      const tip = fetched.ok ? (await git(["rev-parse", "FETCH_HEAD"], { allowFail: true })).stdout : "";
+      developSha = SHA.test(tip) ? tip : "";
+    }
+    if (developSha === "") return false;
+    const changed = await git(["diff", "--name-only", "--no-renames", `${pull.mergeCommitSha}^1`, pull.mergeCommitSha], { allowFail: true });
+    const files = changed.stdout.split("\n").filter((file) => file !== "");
+    if (!changed.ok || files.length === 0) return false;
+    return (await git(["diff", "--quiet", base, developSha, "--", ...files], { allowFail: true })).ok;
+  };
   type Attempt = { result: "applied" } | { result: "empty" } | { result: "workflows" } | { result: "conflict"; why: string };
   // One cherry-pick onto the train branch; whatever it does not keep is undone.
   const pickOnce = async (pull: QaReleaseTrainCandidate): Promise<Attempt> => {
@@ -225,6 +239,13 @@ export function createQaReleaseTrainGitPorts(input: {
       const staged = await git(["diff", "--cached", "--quiet"], { allowFail: true });
       if (unmerged === "" && staged.ok) {
         await git(["cherry-pick", "--skip"], { allowFail: true });
+        return { result: "empty" };
+      }
+      // Every file it changed already reads on main as it does on develop now:
+      // a later pull request rewrote them and main has that, so nothing is
+      // left to bring (2026-10-29: #3061's golden, re-recorded by #3106).
+      if (await supersededOnMain(pull, before)) {
+        await git(["cherry-pick", "--abort"]);
         return { result: "empty" };
       }
       const files = unmerged.split("\n").filter((file) => file !== "");
@@ -258,6 +279,7 @@ export function createQaReleaseTrainGitPorts(input: {
   return {
     async assemble(branch, cargo, capacity) {
       resolves = 0;
+      developSha = null;
       assembleStartedMs = Date.now();
       // A round that assembles twice (an empty emergency, then the scheduled
       // train) keeps one clone: the first is removed before the second.

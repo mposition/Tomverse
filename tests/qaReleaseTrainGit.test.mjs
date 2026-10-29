@@ -183,3 +183,70 @@ test("a conflicting pick rides with the hunks the model wrote; what it declines 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// 2026-10-29: #3061 re-recorded a golden, #3106 re-recorded it again, and main
+// got #3106's. Picking #3061 conflicts on a binary file, yet main already reads
+// as develop does for every file it changed: already on main, never carried.
+// One whose file main still lacks develop's version of stays a conflict.
+test("a conflicting pick whose every file main already has as develop does is already on main", async () => {
+  const root = mkdtempSync(join(tmpdir(), "train-git-superseded-test-"));
+  try {
+    const repo = join(root, "origin");
+    const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", repo]);
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "golden.png"), Buffer.from([0, 1, 2]));
+    writeFileSync(join(repo, "notes.txt"), "base\n");
+    git("add", ".");
+    git("commit", "--quiet", "-m", "base");
+    git("switch", "--quiet", "-c", "develop");
+    const mergePull = (name, files) => {
+      git("switch", "--quiet", "-c", name, "develop");
+      for (const [file, content] of Object.entries(files)) writeFileSync(join(repo, file), content);
+      git("add", ".");
+      git("commit", "--quiet", "-m", name);
+      git("switch", "--quiet", "develop");
+      git("merge", "--quiet", "--no-ff", "-m", `Merge ${name}`, name);
+      return git("rev-parse", "HEAD");
+    };
+    const older = mergePull("older", { "golden.png": Buffer.from([0, 9, 9]) });
+    const notes = mergePull("notes", { "notes.txt": "develop\n" });
+    mergePull("newer", { "golden.png": Buffer.from([0, 7, 7]) });
+    // main took the newer golden on its own, and a different notes line.
+    git("switch", "--quiet", "main");
+    writeFileSync(join(repo, "golden.png"), Buffer.from([0, 7, 7]));
+    writeFileSync(join(repo, "notes.txt"), "main\n");
+    git("add", ".");
+    git("commit", "--quiet", "-m", "main moves");
+    const mainSha = git("rev-parse", "HEAD");
+
+    let asked = 0;
+    const ports = createQaReleaseTrainGitPorts({
+      token: async () => "unused",
+      remote: repo,
+      resolve: async () => {
+        asked += 1;
+        return { resolved: false, why: "declined" };
+      },
+    });
+    try {
+      const result = await ports.assemble("release/train-20261029-2000", [
+        { number: 3061, title: "older", mergeCommitSha: older, mergedAt: "2026-10-27T00:00:00Z" },
+        { number: 3062, title: "notes", mergeCommitSha: notes, mergedAt: "2026-10-27T00:01:00Z" },
+      ], 30);
+      assert.deepEqual(result.picks, [
+        { number: 3061, outcome: "already_in_main" },
+        { number: 3062, outcome: "conflict", why: "declined" },
+      ]);
+      // The superseded pick never reached the model, and nothing rides.
+      assert.equal(asked, 1);
+      assert.equal(result.headSha, mainSha);
+    } finally {
+      await ports.cleanup();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
