@@ -8,6 +8,7 @@ import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorContr
 import {
   qaReleaseTrainEmergencyAdmissible,
   qaReleaseTrainEmergencyFrom,
+  qaReleaseTrainFoundOnMain,
   qaReleaseTrainHiddenFrom,
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainSelectionFrom,
@@ -237,6 +238,27 @@ export async function readQaReleaseTrainAdmissions(since: Date, limit = 200): Pr
   });
   return rows.flatMap((row) =>
     typeof row.targetId === "string" ? [{ slot: row.targetId, at: row.createdAt, emergency: row.action === QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION }] : [],
+  );
+}
+
+/**
+ * Pull requests a train skipped as already on main since a moment, by the
+ * newest train that did: the train compared their content with main, which
+ * the cargo list's GitHub records cannot (lib/qaReleaseTrainCargoCore.ts).
+ * `limit` only bounds a runaway fortnight.
+ */
+export async function readQaReleaseTrainFoundOnMain(since: Date, limit = 500): Promise<Map<number, string>> {
+  const rows = await prisma.adminAuditLog.findMany({
+    where: { action: QA_RELEASE_TRAIN_REPORTED_ACTION, targetType: TARGET_TYPE, createdAt: { gte: since } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { targetId: true, metadata: true },
+  });
+  return qaReleaseTrainFoundOnMain(
+    rows.flatMap((row) => {
+      const metadata = row.metadata as { pullRequestNumber?: unknown; picks?: unknown } | null;
+      return metadata && typeof row.targetId === "string" ? [{ slot: row.targetId, report: metadata }] : [];
+    }),
   );
 }
 
