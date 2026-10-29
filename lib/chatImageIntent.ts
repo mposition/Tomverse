@@ -158,9 +158,9 @@ export async function detectChatImageRequest(input: {
         );
         candidates = chatImageModelCandidates(imageModels);
         if (attachedPhoto) {
-            // Only models that can edit, at the price an edit charges -- the
-            // same check the reservation makes, so no preset is offered that
-            // the reservation would refuse.
+            // Only models that can edit, at the square price an edit charges --
+            // the check the reservation makes, applied to the 1024x1024 option
+            // these candidates show. A non-square edit is checked again there.
             candidates = candidates.flatMap((candidate) => {
                 const model = imageModels.find((entry) => entry.id === candidate.id);
                 const credits = Object.fromEntries(
