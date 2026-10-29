@@ -196,6 +196,8 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     "docs/listed/one.json": "{}\n",
     "scripts/ops/check.ps1": "$allow = Get-Content .\\docs\\ops\\allowlist.json\n",
     "docs/ops/allowlist.json": "[]\n",
+    "docker/runner/Dockerfile": "COPY docs/copied /app/docs/copied\n",
+    "docs/copied/inner/c.json": "{}\n",
     "docs/inputs/base.json": "{}\n",
     "docs/deep/top.json": "{}\n",
     "docs/deep/a/b.json": "{}\n",
@@ -203,6 +205,7 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     "docs/never/x.json": "{}\n",
   });
   const read = [
+    "docs/copied/inner/c.json",
     "docs/deep/a/b.json",
     "docs/deep/top.json",
     "docs/globbed/g.json",
@@ -298,6 +301,9 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "var require = module.require.bind(module);\nexport const helper = (name) => require(name);\n",
     // A parameter shadows the helper defined around it.
     "const require = (ok) => ok;\nexport function helper(require, name) { return require(name); }\n",
+    // A helper given something else later is that.
+    "export const helper = (name) => { let require = (x) => x; require = module.require.bind(module); return require(name); };\n",
+    "function require(x) { return x; }\nrequire = module.require.bind(module);\nexport const helper = (name) => require(name);\n",
   ]) {
     assert.equal(slice([change("lib/leaf.ts")], helper(text)).status, "failed", text);
   }

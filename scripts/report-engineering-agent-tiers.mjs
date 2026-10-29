@@ -34,6 +34,7 @@ import { AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS } from "../lib/agentCredentialRevi
 import { computeControlPlaneSlice } from "../lib/agentControlPlaneSlice.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
 import { TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
+import { engineeringAgentV22UnreadText } from "../lib/engineeringAgentV22BaseEvidence.ts";
 
 import { judgeAgentPrCacheIsolation } from "./agent-pr-cache-isolation-policy.mjs";
 
@@ -109,13 +110,20 @@ for (const commit of commits) {
   const base = git(["rev-parse", `${commit}^1`]).toString("utf8").trim();
   const baseEntries = treeListing(base, true);
   const listing = baseEntries.filter((entry) => entry.type === "blob");
-  const wanted = listing.filter((entry) => TEXT_FOR_ANALYSIS.test(entry.path));
+  // The same texts the app's base evidence holds: none for what the base
+  // build leaves out (test helpers aside) or for the vendored AMUX tree.
+  const ignore = listing.find((entry) => entry.path === ".dockerignore");
+  const ignoreBlob = ignore === undefined ? undefined : readBlobs([ignore.oid]).get(ignore.oid);
+  const ignoreText = ignoreBlob === undefined ? null : decodeText(ignoreBlob);
+  const unread = engineeringAgentV22UnreadText(ignoreText, listing.map((entry) => entry.path)) ?? new Set();
+  const read = (entry) => TEXT_FOR_ANALYSIS.test(entry.path) && !unread.has(entry.path);
+  const wanted = listing.filter(read);
   const blobs = readBlobs(wanted.map((entry) => entry.oid));
   const text = (oid) => {
     const content = blobs.get(oid);
     return content === undefined ? "" : (decodeText(content) ?? "");
   };
-  const baseFiles = listing.map((entry) => ({ path: entry.path, text: TEXT_FOR_ANALYSIS.test(entry.path) ? text(entry.oid) : "" }));
+  const baseFiles = listing.map((entry) => ({ path: entry.path, text: read(entry) ? text(entry.oid) : "" }));
 
   const raw = git(["diff-tree", "-r", "--no-renames", "-z", base, commit]).toString("utf8").split("\0").filter(Boolean);
   const diffs = [];

@@ -65,7 +65,7 @@ export const isGateOutsideRuntime = (path: string) =>
 export const isTextGate = (path: string) =>
   classifyPath(path) === "control-plane" && !path.startsWith("vendor/") &&
   (/^\.github\/(?:workflows|actions)\/.+\.ya?ml$/.test(path) || /\.(?:sh|ps1)$/.test(path) ||
-    /(?:^|\/)Dockerfile[^/]*$/.test(path) || path === "package.json" ||
+    /(?:^|\/)Dockerfile[^/]*$/.test(path) || /(?:^|\/)package\.json$/.test(path) ||
     /^(?:\.railway\/.+|railway[^/]*)\.(?:json|toml)$/.test(path));
 
 // A forward or back slash separates segments: PowerShell spells `.\docs\x.json`.
@@ -196,6 +196,12 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
         !(ts.isVariableDeclaration(node) && isFunctionValue(node.initializer))) {
       otherBinding = true;
     }
+    // A name that is assigned again is whatever it was last given.
+    if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) && node.left.text === "require" &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      otherBinding = true;
+    }
     ts.forEachChild(node, bindings);
   };
   bindings(source);
@@ -204,7 +210,8 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
     !otherBinding &&
     statements.some((statement) =>
       (ts.isFunctionDeclaration(statement) && statement.name?.text === "require") ||
-      (ts.isVariableStatement(statement) &&
+      // Only a `const`: a `let` or `var` may be given something else later.
+      (ts.isVariableStatement(statement) && (statement.declarationList.flags & ts.NodeFlags.Const) !== 0 &&
         statement.declarationList.declarations.some((d) =>
           ts.isIdentifier(d.name) && d.name.text === "require" && isFunctionValue(d.initializer))));
   const visit = (node: ts.Node): void => {
@@ -619,7 +626,9 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
       const patterns = globs.flatMap((glob) => pathReadings(file.path, glob)).map(globPattern);
       const matched = new Set(patterns.length === 0 ? [] :
         files.map((other) => other.path).filter((other) => patterns.some((pattern) => pattern.test(other))));
-      named.set(file.path, { exact, prefixes: matched });
+      // A path it spells out may be a directory it reads or copies
+      // (`COPY docs/ops /app/docs/ops`): what is below it is data as well.
+      named.set(file.path, { exact, prefixes: new Set([...matched, ...exact]) });
       continue;
     }
     if (!CODE_FILE.test(file.path) || isAppRuntimeCode(file.path)) continue;

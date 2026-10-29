@@ -67,6 +67,18 @@ export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
   });
 }
 
+/** Which of `paths` the evidence passes with no text: what the base build
+ * leaves out of its image other than test helpers, and the vendored AMUX
+ * tree. Null when the `.dockerignore` cannot be read. The tier report reads
+ * the same set. */
+export function engineeringAgentV22UnreadText(dockerIgnore: string | null,
+  paths: readonly string[]): Set<string> | null {
+  const excluded = engineeringAgentV22DeployExclusion(dockerIgnore, paths);
+  if (excluded === null) return null;
+  return new Set([...excluded.filter((path) => !TEST_HELPER_CODE.test(path)),
+    ...paths.filter((path) => path.startsWith("vendor/amux/"))]);
+}
+
 /** The GitHub tree is already bound to the current develop commit. A file is
  * accepted only when its bytes match that tree's Git blob OID: the image copy
  * when it matches, otherwise the blob read from GitHub by that OID. Paths the
@@ -121,12 +133,10 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     entry.path === ".dockerignore" && entry.type === "blob");
   const ignoreBytes = ignoreEntry ? await baseBytes(ignoreEntry) : null;
   const ignoreText = ignoreBytes && decode(ignoreBytes);
-  const baseExcluded = engineeringAgentV22DeployExclusion(ignoreText,
-    input.tree.filter((entry) => entry.type === "blob")
-      .map((entry) => entry.path));
-  if (!ignoreEntry || baseExcluded === null) return null;
   // Left out of the image and not read: test bodies and test data.
-  const excluded = new Set(baseExcluded.filter((path) => !TEST_HELPER_CODE.test(path)));
+  const excluded = engineeringAgentV22UnreadText(ignoreText,
+    input.tree.filter((entry) => entry.type === "blob").map((entry) => entry.path));
+  if (!ignoreEntry || excluded === null) return null;
   // The texts the loop below reads, read ahead in parallel: a few hundred
   // sequential GitHub blob reads took most of a minute (2026-10-28).
   const toRead = input.tree.filter((entry) => entry.type === "blob" &&
