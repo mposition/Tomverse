@@ -57,8 +57,10 @@ export const isGateOutsideRuntime = (path: string) =>
  * Gate files that are not code but run or steer what runs: workflows and
  * actions, shell scripts, container and deploy configuration, the root
  * manifest's scripts. A repository path they spell out (`require("./docs/x.json")`
- * in a workflow step) is in the slice. Comment lines do not count, and neither
- * does a glob, which in a workflow chooses when it runs, not what it reads.
+ * in a workflow step) is in the slice, and so is every file a glob they spell
+ * out matches (`cat docs/ops/*.json`). Comment lines do not count, nor do a
+ * workflow's trigger filters (`paths:`, `branches:` and the like), which
+ * choose when it runs, not what it reads.
  */
 export const isTextGate = (path: string) =>
   classifyPath(path) === "control-plane" && !path.startsWith("vendor/") &&
@@ -66,20 +68,71 @@ export const isTextGate = (path: string) =>
     /(?:^|\/)Dockerfile[^/]*$/.test(path) || path === "package.json" ||
     /^(?:\.railway\/.+|railway[^/]*)\.(?:json|toml)$/.test(path));
 
-const TEXT_PATH = /[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+/g;
+const TEXT_PATH = /[A-Za-z0-9_.@*?{},[\]-]+(?:\/[A-Za-z0-9_.@*?{},[\]-]+)+/g;
+const TRIGGER_FILTER = /^(\s*)(?:paths|paths-ignore|branches|branches-ignore|tags|tags-ignore):(.*)$/;
 
-/** The repository paths a text gate spells out, outside comment lines. */
-export const textGatePaths = (text: string): Set<string> => {
-  const found = new Set<string>();
+const globPattern = (glob: string) => {
+  let source = "";
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index];
+    if (glob.startsWith("**", index)) {
+      source += ".*";
+      index += 1;
+    } else if (char === "*") source += "[^/]*";
+    else if (char === "?") source += "[^/]";
+    else if (char === "{") source += "(?:";
+    else if (char === "}") source += ")";
+    else if (char === ",") source += "|";
+    else if (char === "[" || char === "]") source += char;
+    else source += char.replace(/[.+^$()|\\]/g, "\\$&");
+  }
+  try {
+    return new RegExp(`^${source}$`);
+  } catch {
+    // A glob this cannot read means every file below its fixed head.
+    const head = glob.slice(0, glob.search(/[*?{[]/));
+    return new RegExp(`^${head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  }
+};
+
+/**
+ * What a text gate spells out, outside comment lines and workflow trigger
+ * filters: exact repository paths, and the globs it reads through.
+ */
+export const textGatePaths = (path: string, text: string): { exact: Set<string>; globs: RegExp[] } => {
+  const exact = new Set<string>();
+  const globs: RegExp[] = [];
+  const workflow = /\.ya?ml$/.test(path);
+  let filterIndent: number | null = null;
   for (const line of text.split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
+    if (/^\s*#/.test(line) || line.trim() === "") continue;
+    const indent = line.length - line.trimStart().length;
+    if (filterIndent !== null) {
+      // A filter's list sits deeper than its key, or level with it as `- item`.
+      if (indent > filterIndent || (indent === filterIndent && /^\s*-/.test(line))) continue;
+      filterIndent = null;
+    }
+    const filter = workflow ? TRIGGER_FILTER.exec(line) : null;
+    if (filter) {
+      if (filter[2].trim() === "") filterIndent = filter[1].length;
+      continue;
+    }
     for (const match of line.matchAll(TEXT_PATH)) {
-      // A glob is cut where its wildcard starts; what is left is not a file.
-      if (/[*?[{]/.test(line[match.index + match[0].length] ?? "")) continue;
-      found.add(normalisePathText(match[0]));
+      // A comma separates paths outside braces; a bracket with no partner is
+      // the list around the path, not part of it.
+      const pieces = match[0].includes("{") ? [match[0]] : match[0].split(",");
+      for (const piece of pieces) {
+        let token = piece.replace(/[.]+$/, "");
+        if (!token.includes("]")) token = token.replace(/^\[+/, "");
+        if (!token.includes("[")) token = token.replace(/\]+$/, "");
+        token = normalisePathText(token);
+        if (!token.includes("/")) continue;
+        if (/[*?{[]/.test(token)) globs.push(globPattern(token));
+        else exact.add(token);
+      }
     }
   }
-  return found;
+  return { exact, globs };
 };
 
 /* ------------------------------------------------------------------------- */
@@ -112,17 +165,35 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   // A `require` the enclosing block itself defines as a function (an
   // assertion helper, say) is that, not the module loader: a function
   // declaration, or a variable whose value is a function or arrow written
-  // there. A parameter, or a variable bound to anything else
-  // (`module.require.bind(module)`), may be the loader and counts as one.
+  // there. Any other binding of the name anywhere in the file -- a parameter,
+  // an import, a destructured or caught name, a variable bound to anything
+  // else (`module.require.bind(module)`) -- may be the loader and may shadow
+  // such a function, so then every computed `require` call counts as one.
   // `createRequire` is caught on its own below.
+  const isFunctionValue = (node: ts.Expression | undefined) =>
+    node !== undefined && (ts.isArrowFunction(node) || ts.isFunctionExpression(node));
+  let otherBinding = false;
+  const bindings = (node: ts.Node): void => {
+    const binds = ts.isParameter(node) || ts.isVariableDeclaration(node) || ts.isBindingElement(node) ||
+      ts.isImportSpecifier(node) || ts.isImportClause(node) || ts.isNamespaceImport(node) ||
+      ts.isImportEqualsDeclaration(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node) ||
+      ts.isFunctionExpression(node) || ts.isEnumDeclaration(node) || ts.isModuleDeclaration(node);
+    const name = binds ? (node as { name?: ts.Node }).name : undefined;
+    if (name !== undefined && ts.isIdentifier(name) && name.text === "require" &&
+        !(ts.isVariableDeclaration(node) && isFunctionValue(node.initializer))) {
+      otherBinding = true;
+    }
+    ts.forEachChild(node, bindings);
+  };
+  bindings(source);
   const scopes: boolean[] = [];
   const definesRequireIn = (statements: ts.NodeArray<ts.Statement>) =>
+    !otherBinding &&
     statements.some((statement) =>
       (ts.isFunctionDeclaration(statement) && statement.name?.text === "require") ||
       (ts.isVariableStatement(statement) &&
         statement.declarationList.declarations.some((d) =>
-          ts.isIdentifier(d.name) && d.name.text === "require" && d.initializer !== undefined &&
-          (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer)))));
+          ts.isIdentifier(d.name) && d.name.text === "require" && isFunctionValue(d.initializer))));
   const visit = (node: ts.Node): void => {
     const scope = ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node)
       ? definesRequireIn(node.statements) : null;
@@ -523,8 +594,16 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   for (const [path, fileFacts] of facts) if (fileFacts.runtimeLoader) loaders.add(path);
   for (const file of files) {
     if (isTextGate(file.path)) {
-      if (file.text === "") unreadable.add(file.path);
-      else named.set(file.path, { exact: textGatePaths(file.text), prefixes: new Set() });
+      if (file.text === "") {
+        unreadable.add(file.path);
+        continue;
+      }
+      // What a glob matches is data the gate reads: named like a file below a
+      // named directory, not followed as code.
+      const { exact, globs } = textGatePaths(file.path, file.text);
+      const matched = new Set(globs.length === 0 ? [] :
+        files.map((other) => other.path).filter((other) => globs.some((glob) => glob.test(other))));
+      named.set(file.path, { exact, prefixes: matched });
       continue;
     }
     if (!CODE_FILE.test(file.path) || isAppRuntimeCode(file.path)) continue;
@@ -608,13 +687,13 @@ const gateSlice = (graph: Graph, paths: readonly string[]) => {
       for (const text of texts?.exact ?? []) for (const reading of pathReadings(path, text)) exact.add(reading);
       for (const text of texts?.prefixes ?? []) for (const reading of pathReadings(path, text)) prefixes.add(reading);
     }
+    // Whether a file is named and whether it is followed are separate: a file
+    // first seen below a named directory may be named exactly later on.
     for (const path of paths) {
-      if (followed.has(path) || named.has(path)) continue;
-      if (exact.has(path) || selfAndAncestors(path).some((dir) => prefixes.has(dir))) {
-        named.add(path);
-        if (exact.has(path) && CODE_FILE.test(path) && !path.startsWith("tests/") && !path.startsWith("vendor/")) {
-          frontier.push(path);
-        }
+      if (followed.has(path)) continue;
+      if (exact.has(path) || selfAndAncestors(path).some((dir) => prefixes.has(dir))) named.add(path);
+      if (exact.has(path) && CODE_FILE.test(path) && !path.startsWith("tests/") && !path.startsWith("vendor/")) {
+        frontier.push(path);
       }
     }
   }

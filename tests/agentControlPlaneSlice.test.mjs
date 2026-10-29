@@ -144,7 +144,7 @@ test("gate code outside the app brings in what it imports and the files it names
   assert.equal(slice([change("lib/leaf.ts")], tree({ "scripts/bad.mjs": "export const = ;\n" })).status, "failed");
 });
 
-test("a workflow or shell gate brings in the paths it spells out, not comments or globs; one with no text fails", () => {
+test("a workflow or shell gate brings in the paths and globs it reads, not comments or trigger filters; one with no text fails", () => {
   const workflow =
     "on:\n  push:\n    paths: ['lib/trigger*.ts']\njobs:\n  x:\n    steps:\n" +
     "      # docs/ops/commented.json is only mentioned\n" +
@@ -167,6 +167,22 @@ test("a workflow or shell gate brings in the paths it spells out, not comments o
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
   assert.deepEqual([...result.slicePaths].sort(), [...paths].sort());
   assert.equal(slice([change("lib/leaf.ts")], tree({ ".github/workflows/x.yml": "" })).status, "failed");
+
+  // A glob a gate reads through is its read set; one in a trigger filter list is not.
+  const globbing = tree({
+    ".github/workflows/y.yml":
+      "on:\n  pull_request:\n    paths:\n      - 'lib/filtered/**'\n    branches: [develop]\njobs:\n  y:\n    steps:\n" +
+      "      - run: cat docs/ops/run-*.json\n",
+    "scripts/y.sh": "for f in docs/shell/*.json; do cat \"$f\"; done\n",
+    "docs/ops/run-a.json": "{}\n",
+    "docs/shell/b.json": "{}\n",
+    "lib/filtered/c.ts": "export const c = 1;\n",
+  });
+  const globbed = ["docs/ops/run-a.json", "docs/shell/b.json"];
+  assert.deepEqual(
+    [...slice([...globbed, "lib/filtered/c.ts"].map((path) => change(path, { newText: "{}\n" })), globbing).slicePaths].sort(),
+    globbed,
+  );
 });
 
 test("a code file a gate names by path is followed; a test or fixture a runner names is its input", () => {
@@ -180,6 +196,16 @@ test("a code file a gate names by path is followed; a test or fixture a runner n
   const result = slice(["lib/viaNamed.ts", "lib/viaFixture.ts"].map((path) => change(path, { newText: "export const x = 2;\n" })), files);
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
   assert.deepEqual([...result.slicePaths], ["lib/viaNamed.ts"]);
+
+  // A file first seen below a named directory is still followed once named exactly.
+  const both = tree({
+    "lib/amux/gate.ts":
+      'import { join } from "node:path";\nexport const dir = () => join(process.cwd(), "lib", "plugins");\nexport const ENTRY = "lib/entry.ts";\n',
+    "lib/entry.ts": 'export const PLUGIN = "lib/plugins/a.ts";\n',
+    "lib/plugins/a.ts": 'import { v } from "../value.ts";\nexport { v };\n',
+    "lib/value.ts": "export const v = 1;\n",
+  });
+  assert.ok(slice([change("lib/value.ts", { newText: "export const v = 2;\n" })], both).slicePaths.has("lib/value.ts"));
 
   // Code under a directory a gate reads is data there; running it takes a computed load.
   const byDirectory = tree({
@@ -238,6 +264,8 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "function check(require) { return require; }\nexport const helper = (name) => require(name);\n",
     "export const helper = (require, name) => require(name);\n",
     "var require = module.require.bind(module);\nexport const helper = (name) => require(name);\n",
+    // A parameter shadows the helper defined around it.
+    "const require = (ok) => ok;\nexport function helper(require, name) { return require(name); }\n",
   ]) {
     assert.equal(slice([change("lib/leaf.ts")], helper(text)).status, "failed", text);
   }
