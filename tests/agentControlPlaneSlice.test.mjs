@@ -332,6 +332,11 @@ test("a followed product file that loads by a computed name fails the analysis; 
     // A shell the options turn on, by a string key or through a variable.
     'import { execFile } from "node:child_process";\nexport const helper = (args) => execFile("git", args, { "shell": true });\n',
     'import { execFile } from "node:child_process";\nconst options = { shell: true };\nexport const helper = (args) => execFile("git", args, options);\n',
+    // A source written by destructuring or a loop; a builtin imported after its use.
+    'import { Worker } from "node:worker_threads";\nfunction run(code) { [code] = [process.env.CODE]; return new Worker(code, { eval: true }); }\nrun("0");\nexport const helper = () => 1;\n',
+    'import { Worker } from "node:worker_threads";\nfunction run(code) { for (code of [process.env.CODE]) {} return new Worker(code, { eval: true }); }\nrun("0");\nexport const helper = () => 1;\n',
+    'export function helper(path) { return new Worker(path); }\nimport { Worker } from "node:worker_threads";\n',
+    'export function helper(p) { return execFile("node", [p], { cwd: "." }); }\nimport { execFile } from "node:child_process";\n',
     // A parameter shadowing a const of the same name; options before a callback.
     'import { Worker } from "node:worker_threads";\nconst source = "0";\nexport const helper = (source) => new Worker(source, { eval: true });\n',
     'import { execFile } from "node:child_process";\nexport const helper = () => execFile("git", { shell: true }, (error) => error);\n',

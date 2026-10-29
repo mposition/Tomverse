@@ -372,6 +372,24 @@ const shellProvenOff = (args: ts.NodeArray<ts.Expression>) => {
     }));
 };
 
+/** Every name an assignment target writes, through any destructuring. */
+const writtenNames = (target: ts.Node, into: Set<string>): void => {
+  const node = ts.isExpression(target) ? unwrap(target) : target;
+  if (ts.isIdentifier(node)) into.add(node.text);
+  else if (ts.isArrayLiteralExpression(node)) node.elements.forEach((element) => writtenNames(element, into));
+  else if (ts.isObjectLiteralExpression(node)) {
+    for (const property of node.properties) {
+      if (ts.isShorthandPropertyAssignment(property)) into.add(property.name.text);
+      else if (ts.isPropertyAssignment(property)) writtenNames(property.initializer, into);
+      else if (ts.isSpreadAssignment(property)) writtenNames(property.expression, into);
+    }
+  } else if (ts.isSpreadElement(node)) writtenNames(node.expression, into);
+  else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    // A default value: `[code = "0"] = …` writes `code`.
+    writtenNames(node.left, into);
+  }
+};
+
 /**
  * The texts an inline worker's source argument can be: a literal, a `const`
  * of the file bound to one and never assigned, or a parameter of a function
@@ -440,12 +458,17 @@ const workerSourceTexts = (source: ts.SourceFile, argument: ts.Expression): stri
       declare(node.name.text);
       notReferences.add(node.name);
     }
-    if ((ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(unwrap(node.left))) ) {
-      assigned.add((unwrap(node.left) as ts.Identifier).text);
+    // Every name an assignment writes, destructuring included (`[code] = …`,
+    // `({ code } = …)`), and every name a `for … of`/`for … in` writes.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      writtenNames(node.left, assigned);
     }
-    if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && ts.isIdentifier(node.operand)) {
-      assigned.add(node.operand.text);
+    if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
+      writtenNames(node.initializer, assigned);
+    }
+    if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && ts.isIdentifier(unwrap(node.operand))) {
+      assigned.add((unwrap(node.operand) as ts.Identifier).text);
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(unwrap(node.expression))) {
       const callee = unwrap(node.expression) as ts.Identifier;
@@ -526,7 +549,9 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
       else processRunners.add(local);
     }
   };
-  const visit = (node: ts.Node): void => {
+  // First every binding taken from a builtin, wherever it is written (an
+  // import may follow the code that uses it), then every use.
+  const collect = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const which = builtin(node.moduleSpecifier.text);
       const clause = node.importClause;
@@ -571,13 +596,27 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
         (node.expression.kind === ts.SyntaxKind.ImportKeyword || calleeMayRequire(unwrap(node.expression)) === "require")) {
       mark(builtin((node.arguments[0] as ts.StringLiteral).text));
     }
-    // `const run = promisify(execFile)` is execFile by another name.
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined &&
-        ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
-        node.initializer.expression.text === "promisify" && node.initializer.arguments.length === 1) {
-      const wrapped = unwrap(node.initializer.arguments[0]);
-      if (ts.isIdentifier(wrapped) && processRunners.has(wrapped.text)) processRunners.add(node.name.text);
-    }
+    ts.forEachChild(node, collect);
+  };
+  collect(source);
+  // `const run = promisify(execFile)` is execFile by another name, in any order.
+  for (let grew = true; grew;) {
+    grew = false;
+    const aliases = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined &&
+          ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
+          node.initializer.expression.text === "promisify" && node.initializer.arguments.length === 1) {
+        const wrapped = unwrap(node.initializer.arguments[0]);
+        if (ts.isIdentifier(wrapped) && processRunners.has(wrapped.text) && !processRunners.has(node.name.text)) {
+          processRunners.add(node.name.text);
+          grew = true;
+        }
+      }
+      ts.forEachChild(node, aliases);
+    };
+    aliases(source);
+  }
+  const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = unwrap(node.expression);
       if (ts.isIdentifier(callee) && processRunners.has(callee.text)) {
