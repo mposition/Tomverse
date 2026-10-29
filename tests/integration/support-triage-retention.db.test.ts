@@ -312,7 +312,8 @@ const withDisabled = async (table: string, trigger: string, sql: string) => {
 
 const seedOtherClasses = async (age: string) => {
   await prisma.feedback.create({ data: { id: "fb-ret-1", type: "bug", message: "retention fixture" } });
-  // Two terminal suggestions and one open one, all with the given age.
+  // Two terminal suggestions with the given age, and one open one created a
+  // day ago, inside its 7-day expiry, so it stays open whatever the age.
   await withDisabled(
     "SupportTriageSuggestion",
     "SupportTriageSuggestion_guard",
@@ -322,7 +323,7 @@ const seedOtherClasses = async (age: string) => {
             ('s-fail', 'fb-ret-1', '${"b".repeat(64)}', 'failed', 'internal_error',
              (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}', (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}'),
             ('s-open', 'fb-ret-1', '${"c".repeat(64)}', 'pending', NULL,
-             (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}', (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}')`
+             (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 day', (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 day')`
   );
   // One terminal group and one open group.
   await withDisabled(
@@ -375,6 +376,7 @@ test("terminal suggestions, terminal groups and expired decision records are del
     groups: 1,
     decisionRecords: 1,
     invalidated: 0,
+    expired: 0,
     systemActor: "support-triage-retention",
   });
 });
@@ -423,6 +425,73 @@ test("an open suggestion of a closed report is invalidated, so it is deleted 30 
   assert.equal((await prisma.supportTriageSuggestion.findUniqueOrThrow({ where: { id: "s-open-report" } })).state, "pending");
   const [batch] = await prisma.adminAuditLog.findMany({ where: { action: "support_triage.retention_batch" } });
   assert.equal((batch.metadata as Record<string, unknown>).invalidated, 1);
+});
+
+/** Inserts an open suggestion of an open report, created `age` ago, through the guard's own path where it can. */
+const seedUnqueued = async (id: string, state: "pending" | "claimed" | "ready", age: string, digit: string) => {
+  await prisma.feedback.upsert({
+    where: { id: "fb-ret-unqueued" },
+    create: { id: "fb-ret-unqueued", type: "bug", message: "still open" },
+    update: {},
+  });
+  await withDisabled(
+    "SupportTriageSuggestion",
+    "SupportTriageSuggestion_guard",
+    `INSERT INTO "SupportTriageSuggestion" ("id", "feedbackId", "inputDigest", "state", "lane", "claimToken", "leaseExpiresAt", "createdAt", "updatedAt")
+     VALUES ('${id}', 'fb-ret-unqueued', '${digit.repeat(64)}', '${state}',
+             ${state === "ready" ? "'other'" : "NULL"},
+             ${state === "claimed" ? "'token'" : "NULL"},
+             ${state === "claimed" ? "(clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes'" : "NULL"},
+             (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}', (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}')`
+  );
+};
+
+test("a suggestion never shown to the owner expires 7 days after creation though its report is open", async () => {
+  await seedUnqueued("s-ready-old", "ready", "8 days", "6");
+  await seedUnqueued("s-pending-old", "pending", "8 days", "7");
+  await seedUnqueued("s-claimed-old", "claimed", "8 days", "8");
+  await seedUnqueued("s-ready-young", "ready", "6 days", "9");
+  // Overdue before the run: the two expirable rows and the claimed one.
+  const result = await runSupportTriageRetention();
+  const states = Object.fromEntries(
+    (await prisma.supportTriageSuggestion.findMany({ select: { id: true, state: true, updatedAt: true } })).map((row) => [
+      row.id,
+      row,
+    ])
+  );
+  assert.equal(states["s-ready-old"].state, "expired");
+  assert.equal(states["s-pending-old"].state, "expired");
+  // Its 30 days start at the expiry, not at its creation.
+  assert.ok(Math.abs(states["s-ready-old"].updatedAt.getTime() - Date.now()) < 60_000);
+  // A live claim is the worker's; a young row is left alone.
+  assert.equal(states["s-claimed-old"].state, "claimed");
+  assert.equal(states["s-ready-young"].state, "ready");
+  assert.equal(result.deleted, 0);
+  assert.equal(result.batchesCompleted, 1);
+  // The claimed row is still past its expiry, so the run says so.
+  assert.equal(result.overdueRemaining, 1);
+  const [batch] = await prisma.adminAuditLog.findMany({ where: { action: "support_triage.retention_batch" } });
+  assert.equal((batch.metadata as Record<string, unknown>).expired, 2);
+  assert.equal((batch.metadata as Record<string, unknown>).invalidated, 0);
+});
+
+test("a suggestion past its 7-day expiry is overdue until a run expires it", async () => {
+  await seedUnqueued("s-unexpired", "ready", "10 days", "6");
+  // Every update sleeps past statement_timeout, so the run cannot expire it.
+  await prisma.$executeRawUnsafe(`CREATE FUNCTION test_slow_expire() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN PERFORM pg_sleep(1); RETURN NEW; END $$`);
+  await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_slow_expire" BEFORE UPDATE ON "SupportTriageSuggestion"
+    FOR EACH ROW EXECUTE FUNCTION test_slow_expire()`);
+  try {
+    const result = await runSupportTriageRetention();
+    assert.equal(result.overdueRemaining, 1);
+    assert.ok(result.oldestOverdueAgeSeconds >= 3 * 86_400 - 60, String(result.oldestOverdueAgeSeconds));
+    assert.equal(result.notProgressing, true);
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_slow_expire" ON "SupportTriageSuggestion"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_slow_expire()`);
+  }
+  assert.equal((await prisma.supportTriageSuggestion.findUniqueOrThrow({ where: { id: "s-unexpired" } })).state, "ready");
 });
 
 test("toxic rows in three classes cannot keep the fourth from committing", async () => {

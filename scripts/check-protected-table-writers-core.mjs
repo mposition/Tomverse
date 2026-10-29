@@ -2395,9 +2395,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageRetention.ts",
     table: "SupportTriageRun",
     tableMentions: 3,
-    writeVerbs: 1,
+    writeVerbs: 2,
     reason:
-      "The retention step is a named SupportTriageRun writer, and its run-row delete goes through the Prisma delegate. Its SQL literals only read SupportTriageRun (the window read and the overdue count). The one write verb is the UPDATE that moves open SupportTriageSuggestion rows of closed reports to invalidated; it names no protected table.",
+      "The retention step is a named SupportTriageRun writer, and its run-row delete goes through the Prisma delegate. Its SQL literals only read SupportTriageRun (the window read and the overdue count). The two write verbs are the UPDATEs that move open SupportTriageSuggestion rows to invalidated (closed reports) and to expired (never shown, 7 days old); neither names a protected table.",
   },
   {
     path: "lib/supportTriageDeletionManifest.ts",
