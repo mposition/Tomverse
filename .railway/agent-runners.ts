@@ -173,6 +173,19 @@ const BILLING_FINANCE_OPS_VARIABLES = [
   "BILLING_FINANCE_OPS_DEADMAN_URL",
 ] as const;
 
+/**
+ * The marketing generator's three variables (S3 plan, S3e3): the app's URL, its
+ * submit secret and the LLM key -- the same list as
+ * MARKETING_GENERATOR_WORKER_VARIABLES in lib/marketingGeneratorCycleCore.ts,
+ * which a test holds this to. The model and the monthly cap are not here: the
+ * operator sets them in the Admin Console (2026-10-19).
+ */
+const MARKETING_GENERATOR_VARIABLES = [
+  "MARKETING_APP_URL",
+  "MARKETING_GENERATOR_SUBMIT_SECRET",
+  "MARKETING_LLM_API_KEY",
+] as const;
+
 /** The marketing publisher's two variables (S2 plan, S2d1). */
 const MARKETING_PUBLISHER_VARIABLES = ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"] as const;
 
@@ -372,6 +385,26 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
       staging: MARKETING_PUBLISHER_VARIABLES,
       // Not on dev (operator decision, 2026-10-07): the one job that acts on
       // outside accounts, and dev runs every merge before anyone has verified it.
+    },
+  },
+  {
+    // The marketing generator (S3 plan, S3e3, S3f): A3's web search per
+    // competitor, then A5's drafts, every call through the app's LLM cost
+    // ledger. A supervisor that kills its worker at forty minutes
+    // (scripts/marketing-generator-service.mjs), once a day at 21:00 UTC --
+    // 07:00 in Brisbane, so the drafts wait for a person in the morning.
+    //
+    // No database, publishing, bucket or GitHub credential. The worker does
+    // nothing until a model is pinned and the operator has selected it with a
+    // monthly cap in the Admin Console; the ledger refuses every other call.
+    key: "marketing_generator",
+    service: "Marketing Generator",
+    startCommand: "node --experimental-strip-types scripts/marketing-generator-service.mjs",
+    cronSchedule: "0 21 * * *",
+    environments: {
+      production: MARKETING_GENERATOR_VARIABLES,
+      staging: MARKETING_GENERATOR_VARIABLES,
+      // Not on dev: every run can spend on the LLM.
     },
   },
   {

@@ -9,7 +9,8 @@
  * the ledger store expects.
  *
  * The handler takes its environment as an argument so tests can give it a
- * price pin; the route passes the build's, in which no model is pinned yet.
+ * price pin. With none given, a reservation reads the runtime model catalog's
+ * pins before its transaction opens; an explicit empty list pins nothing.
  */
 
 import "server-only";
@@ -20,6 +21,7 @@ import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 
 import { marketingLlmBudgetSignature, MARKETING_LLM_PURPOSES } from "@/lib/marketingLlmBudgetCore";
+import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import {
   dispatchMarketingLlmCall,
   releaseMarketingLlmCall,
@@ -112,7 +114,9 @@ async function run(
   const deadlineAt = new Date(request.deadlineAt);
   const options = { maxWait: 5_000, timeout: 15_000 };
   switch (request.action) {
-    case "reserve":
+    case "reserve": {
+      // The catalog is read before the transaction, never under its locks.
+      const reserveEnv = { ...env, pins: env.pins ?? (await marketingLlmCatalogPins()) };
       return prisma.$transaction(
         (tx) =>
           reserveMarketingLlmCall(
@@ -127,10 +131,11 @@ async function run(
               },
               deadlineAt,
             },
-            env,
+            reserveEnv,
           ),
         options,
       );
+    }
     case "dispatch":
       return prisma.$transaction(
         (tx) =>

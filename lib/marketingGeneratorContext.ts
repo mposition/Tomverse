@@ -23,6 +23,12 @@ import {
 } from "@/lib/marketingCompetitorStore";
 import { generatorProjection, type MarketingClaimProjection } from "@/lib/marketingClaims";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
+import {
+  MARKETING_LLM_SETTINGS_KEY,
+  parseMarketingLlmSettings,
+  type MarketingLlmPricePin,
+} from "@/lib/marketingLlmBudgetCore";
+import { marketingLlmCatalogPinsIn } from "@/lib/marketingLlmModelCatalog";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
@@ -57,6 +63,13 @@ export type MarketingGeneratorContext = {
   readonly brief: MarketingGeneratorReport | null;
   readonly marketIntel: MarketingGeneratorReport | null;
   readonly competitors: MarketingGeneratorCompetitors;
+  /**
+   * The model the operator selected in the Admin Console and its price pin
+   * from the chat catalog, or nulls when none is selected, the setting cannot
+   * be read or the catalog no longer prices it. The worker builds its requests
+   * from this pin; the ledger derives the same pin and refuses any other.
+   */
+  readonly llm: { readonly model: string | null; readonly pin: MarketingLlmPricePin | null };
 };
 
 /**
@@ -118,7 +131,10 @@ export type MarketingGeneratorReport = {
   readonly payload: unknown;
 };
 
-type ContextReader = Pick<MarketingTransaction, "marketingChannel" | "marketingReport" | "marketingCompetitor">;
+type ContextReader = Pick<
+  MarketingTransaction,
+  "marketingChannel" | "marketingReport" | "marketingCompetitor" | "appSetting" | "modelRegistryEntry"
+>;
 
 /**
  * Market facts without the page each came from. The model writes no URL
@@ -163,6 +179,12 @@ async function latestReport(
   return null;
 }
 
+const llmContext = async (db: ContextReader, model: string | null): Promise<MarketingGeneratorContext["llm"]> => {
+  // Through the caller's transaction, so the pin is read in its snapshot.
+  const pin = model === null ? undefined : (await marketingLlmCatalogPinsIn(db)).find((candidate) => candidate.model === model);
+  return pin ? { model, pin } : { model: null, pin: null };
+};
+
 export async function readMarketingGeneratorContext(
   db: ContextReader,
 ): Promise<MarketingGeneratorContext> {
@@ -179,11 +201,12 @@ export async function readMarketingGeneratorContext(
       allowedLocales: true,
     },
   });
-  const [brief, marketIntel, tracked, knownIds] = await Promise.all([
+  const [brief, marketIntel, tracked, knownIds, llmSetting] = await Promise.all([
     latestReport(db, "brief"),
     latestReport(db, "market_intel"),
     readMarketingCompetitorsForGenerator(db),
     readKnownMarketingCompetitorIds(db),
+    db.appSetting.findUnique({ where: { key: MARKETING_LLM_SETTINGS_KEY }, select: { value: true } }),
   ]);
   return {
     channels: channels.map((row) => ({
@@ -201,5 +224,6 @@ export async function readMarketingGeneratorContext(
     brief,
     marketIntel,
     competitors: { tracked, knownIds },
+    llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
   };
 }

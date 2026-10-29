@@ -167,28 +167,24 @@ export const MARKETING_GENERATOR_WORKER_VARIABLES = [
   "MARKETING_APP_URL",
   "MARKETING_GENERATOR_SUBMIT_SECRET",
   "MARKETING_LLM_API_KEY",
-  "MARKETING_GENERATOR_MODEL",
 ] as const;
 
-export type MarketingGeneratorWorkerConfig<Pin> = {
+export type MarketingGeneratorWorkerConfig = {
   readonly appUrl: URL;
   readonly secret: string;
   readonly apiKey: string;
-  readonly pin: Pin;
 };
 
 /**
  * The worker's configuration, or why it will not start.
  *
- * The model is named by the operator and must have a price pin -- a person's
- * decision, in code -- or the worker does nothing at all: without a pin the
- * app refuses every reservation anyway, and a worker that started would only
- * spend a run being refused.
+ * Which model it uses, and that model's price pin, come from the context:
+ * the operator's Admin setting priced by the chat catalog
+ * (`marketingGeneratorPinForContext`).
  */
-export function marketingGeneratorWorkerConfig<Pin extends { readonly model: string }>(
+export function marketingGeneratorWorkerConfig(
   env: Readonly<Record<string, string | undefined>>,
-  pins: readonly Pin[],
-): { readonly ok: true; readonly config: MarketingGeneratorWorkerConfig<Pin> } | { readonly ok: false; readonly reason: string } {
+): { readonly ok: true; readonly config: MarketingGeneratorWorkerConfig } | { readonly ok: false; readonly reason: string } {
   const missing = MARKETING_GENERATOR_WORKER_VARIABLES.filter((name) => !env[name]);
   if (missing.length > 0) return { ok: false, reason: `missing: ${missing.join(", ")}` };
   const secret = env.MARKETING_GENERATOR_SUBMIT_SECRET as string;
@@ -201,9 +197,28 @@ export function marketingGeneratorWorkerConfig<Pin extends { readonly model: str
   }
   const local = appUrl.hostname === "localhost" || appUrl.hostname === "127.0.0.1";
   if (appUrl.protocol !== "https:" && !local) return { ok: false, reason: "MARKETING_APP_URL must use HTTPS" };
-  const pin = pins.find((candidate) => candidate.model === env.MARKETING_GENERATOR_MODEL);
-  if (!pin) return { ok: false, reason: "no price pin for MARKETING_GENERATOR_MODEL; a person adds one" };
-  return { ok: true, config: { appUrl, secret, apiKey: env.MARKETING_LLM_API_KEY as string, pin } };
+  return { ok: true, config: { appUrl, secret, apiKey: env.MARKETING_LLM_API_KEY as string } };
+}
+
+/**
+ * The pin for the model the operator selected in the Admin Console, as the
+ * context carries it, or why the run does nothing. `problems` is the ledger's
+ * own pin check: a pin it would refuse is not used to build a request.
+ */
+export function marketingGeneratorPinForContext<Pin extends { readonly model: string }>(
+  context: unknown,
+  problems: (pin: Pin) => readonly string[],
+): { readonly ok: true; readonly pin: Pin } | { readonly ok: false; readonly reason: string } {
+  const llm = context && typeof context === "object" ? (context as { llm?: unknown }).llm : undefined;
+  const fields = llm && typeof llm === "object" ? (llm as { model?: unknown; pin?: unknown }) : {};
+  if (typeof fields.model !== "string") return { ok: false, reason: "no model is selected in the Admin Console" };
+  const pin = fields.pin as Pin | null | undefined;
+  if (!pin || typeof pin !== "object" || pin.model !== fields.model) {
+    return { ok: false, reason: "the selected model has no price pin" };
+  }
+  const found = problems(pin);
+  if (found.length > 0) return { ok: false, reason: `the selected model's pin is refused: ${found.join(", ")}` };
+  return { ok: true, pin };
 }
 
 /** The context, intake and report routes, over HTTP with the generator's secret. */
