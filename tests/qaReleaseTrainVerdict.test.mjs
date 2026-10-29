@@ -10,8 +10,21 @@ import { QA_RELEASE_TRAIN_VERDICT_ASKS_PER_ROUND, createQaReleaseTrainVerdictGit
 const MAIN = "a".repeat(40);
 const NOW = Date.parse("2026-10-29T03:00:00Z");
 const candidate = (number) => ({ number, title: `#${number}`, mergeCommitSha: String(number % 10).repeat(40), mergedAt: new Date(NOW - number * 60_000).toISOString(), mainPullRequest: null });
-const differs = { diff: "--- a/x.ts\n+++ b/x.ts\n+export const x = 1;\n", changed: [{ path: "x.ts", post: "b".repeat(40), main: null, develop: "b".repeat(40), binary: false, mainText: null, developText: "export const x = 1;\n" }] };
-const onMain = { diff: "--- a/y.ts\n+++ b/y.ts\n+export const y = 1;\n", changed: [{ path: "y.ts", post: "c".repeat(40), main: "c".repeat(40), develop: "c".repeat(40), binary: false }] };
+const differs = {
+  changed: [
+    {
+      path: "x.ts",
+      post: "b".repeat(40),
+      main: null,
+      develop: "b".repeat(40),
+      binary: false,
+      diff: ["--- /dev/null", "+++ b/x.ts", "@@ -0,0 +1 @@", "+export const x = 1;", ""].join("\n"),
+      mainText: null,
+      developText: "export const x = 1;\n",
+    },
+  ],
+};
+const onMain = { changed: [{ path: "y.ts", post: "c".repeat(40), main: "c".repeat(40), develop: "c".repeat(40), binary: false }] };
 
 const ports = ({ candidates, stored = null, head = MAIN, read = () => differs, ask } = {}) => {
   const calls = { prepare: 0, asks: [], saved: null };
@@ -185,8 +198,8 @@ test("the git port finds a change main carries under another commit, and names w
     const one = await port.analyse({ number: 11, title: "", mergeCommitSha: shipped, mergedAt: "2026-10-20T00:00:00Z", mainPullRequest: null });
     const two = await port.analyse({ number: 12, title: "", mergeCommitSha: missing, mergedAt: "2026-10-20T00:01:00Z", mainPullRequest: null });
     const { qaReleaseTrainContentGap } = await import("../lib/qaReleaseTrainVerdictCore.ts");
-    assert.equal(qaReleaseTrainContentGap(one.diff, one.changed).verdict.state, "on_main");
-    const gap = qaReleaseTrainContentGap(two.diff, two.changed);
+    assert.equal(qaReleaseTrainContentGap(one.changed).verdict.state, "on_main");
+    const gap = qaReleaseTrainContentGap(two.changed);
     assert.equal(gap.verdict.state, "differs");
     assert.deepEqual(gap.gap, [{ path: "b.ts", missing: ["export const notYet = true;"], leftOnMain: [] }]);
     // The release that touched a.ts after #11 merged.

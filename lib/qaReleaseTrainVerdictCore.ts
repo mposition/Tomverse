@@ -62,38 +62,57 @@ export const QA_RELEASE_TRAIN_VERDICT_EVIDENCE_MAX = 8;
  */
 export const qaReleaseTrainLineCounts = (line: string) => line.length >= 4 && /[A-Za-z0-9]/.test(line);
 
-/** The added and removed lines of a unified diff, by the file they belong to (`-U0` is enough). */
-export function qaReleaseTrainDiffLines(diff: string): Map<string, { added: string[]; removed: string[] }> {
-  const files = new Map<string, { added: string[]; removed: string[] }>();
-  let from: string | null = null;
-  let current: { added: string[]; removed: string[] } | null = null;
-  const entry = (path: string) => {
-    if (!files.has(path)) files.set(path, { added: [], removed: [] });
-    return files.get(path)!;
-  };
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      from = null;
-      current = null;
-    } else if (line.startsWith("--- ")) {
-      from = line === "--- /dev/null" ? null : line.slice(6);
-    } else if (line.startsWith("+++ ")) {
-      const to = line === "+++ /dev/null" ? null : line.slice(6);
-      const path = to ?? from;
-      current = path === null ? null : entry(path);
-    } else if (current && line.startsWith("+")) {
-      current.added.push(line.slice(1).trim());
-    } else if (current && line.startsWith("-")) {
-      current.removed.push(line.slice(1).trim());
+/** One hunk of a file's diff: its pre-image and post-image (context in order), and its own removed and added lines. */
+export type QaReleaseTrainDiffHunk = { before: string[]; after: string[]; removed: string[]; added: string[] };
+
+/**
+ * The hunks of one file's unified diff, lines trimmed and blank ones left
+ * out. Everything before the first `@@` is the file's header; a line inside
+ * a hunk is read by its first character only, so text that looks like a
+ * header is never one.
+ */
+export function qaReleaseTrainDiffHunks(diff: string): QaReleaseTrainDiffHunk[] {
+  const hunks: QaReleaseTrainDiffHunk[] = [];
+  let current: QaReleaseTrainDiffHunk | null = null;
+  for (const raw of diff.split("\n")) {
+    if (raw.startsWith("@@")) {
+      current = { before: [], after: [], removed: [], added: [] };
+      hunks.push(current);
+      continue;
+    }
+    if (!current) continue;
+    const line = raw.slice(1).trim();
+    if (line === "") continue;
+    if (raw.startsWith(" ")) {
+      current.before.push(line);
+      current.after.push(line);
+    } else if (raw.startsWith("+")) {
+      current.after.push(line);
+      current.added.push(line);
+    } else if (raw.startsWith("-")) {
+      current.before.push(line);
+      current.removed.push(line);
     }
   }
-  return files;
+  return hunks;
+}
+
+/** Whether `block` appears in `lines` as one unbroken run. */
+function holdsBlock(lines: readonly string[], block: readonly string[]): boolean {
+  if (block.length === 0) return true;
+  outer: for (let start = 0; start + block.length <= lines.length; start++) {
+    for (let offset = 0; offset < block.length; offset++) if (lines[start + offset] !== block[offset]) continue outer;
+    return true;
+  }
+  return false;
 }
 
 /**
  * One changed file as the git port reads it: the blob the candidate left,
- * and main's and develop's blob and text now. `post` is null for a file the
- * candidate deleted; a side's blob is null where the file does not exist.
+ * main's and develop's blob and text now, and the candidate's own diff of the
+ * file (`-U3`, read for this path alone, so no path is ever parsed out of a
+ * diff header). `post` is null for a file the candidate deleted; a side's
+ * blob is null where the file does not exist.
  */
 export type QaReleaseTrainChangedFile = {
   path: string;
@@ -101,39 +120,53 @@ export type QaReleaseTrainChangedFile = {
   main: string | null;
   develop: string | null;
   binary: boolean;
+  diff?: string;
   mainText?: string | null;
   developText?: string | null;
 };
 
 /**
- * The content check of one candidate: its diff and its files as main and
- * develop hold them now. A file main holds exactly as the candidate left it
- * is on main. Otherwise each line the candidate added that main lacks and
- * develop still holds is missing (one develop has since changed again is
- * another pull request's business), and each line it removed that main
- * still holds and develop no longer does is left on main. A binary file that
- * differs from main counts as one missing line unless main already matches
- * develop.
+ * The content check of one candidate. Wrong "on main" would hide a release
+ * the operator needs, so only what is shown in place counts:
+ *
+ * - a file main holds exactly as the candidate left it is on main;
+ * - otherwise each hunk is looked for whole, with its context, in order:
+ *   its post-image in main means main has its additions there. Not in main
+ *   but in develop, its added lines are missing. In neither (develop changed
+ *   the spot again since), its lines are read one by one: a line develop
+ *   still has and main lacks is missing, and a hunk with no line that says
+ *   enough by itself to be found (only `}` or `20,`) is missing whole;
+ * - its pre-image still in main, while develop no longer has it, leaves its
+ *   removed lines on main;
+ * - a binary file, or one whose diff has no hunk to read, that differs from
+ *   main is missing unless main already matches develop.
  */
-export function qaReleaseTrainContentGap(diff: string, changed: readonly QaReleaseTrainChangedFile[]): { verdict: QaReleaseTrainContentVerdict; gap: QaReleaseTrainGapFile[] } {
-  const lines = qaReleaseTrainDiffLines(diff);
+export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChangedFile[]): { verdict: QaReleaseTrainContentVerdict; gap: QaReleaseTrainGapFile[] } {
   const gap: QaReleaseTrainGapFile[] = [];
   let counted = 0;
-  const set = (text: string | null | undefined) => (typeof text === "string" ? new Set(text.split("\n").map((line) => line.trim())) : null);
+  const lines = (text: string | null | undefined) => (typeof text === "string" ? text.split("\n").map((line) => line.trim()).filter((line) => line !== "") : []);
   for (const file of changed) {
-    const own = lines.get(file.path) ?? { added: [], removed: [] };
-    const added = own.added.filter(qaReleaseTrainLineCounts);
-    const removed = own.removed.filter(qaReleaseTrainLineCounts);
-    counted += file.binary ? 1 : added.length + removed.length;
+    const hunks = file.binary ? [] : qaReleaseTrainDiffHunks(file.diff ?? "");
+    counted += hunks.length === 0 ? 1 : hunks.reduce((sum, hunk) => sum + hunk.added.length + hunk.removed.length, 0);
     if (file.main === file.post) continue;
-    if (file.binary) {
+    if (hunks.length === 0) {
       if (file.main !== file.develop) gap.push({ path: file.path, missing: [], leftOnMain: [], binary: true });
       continue;
     }
-    const main = set(file.mainText);
-    const develop = set(file.developText);
-    const missing = added.filter((line) => !main?.has(line) && develop?.has(line));
-    const leftOnMain = removed.filter((line) => main?.has(line) && !develop?.has(line));
+    const main = lines(file.mainText);
+    const develop = lines(file.developText);
+    const mainSet = new Set(main);
+    const developSet = new Set(develop);
+    const missing: string[] = [];
+    const leftOnMain: string[] = [];
+    for (const hunk of hunks) {
+      if (hunk.added.length > 0 && !holdsBlock(main, hunk.after)) {
+        if (holdsBlock(develop, hunk.after)) missing.push(...hunk.added);
+        else if (!hunk.added.some(qaReleaseTrainLineCounts)) missing.push(...hunk.added);
+        else missing.push(...hunk.added.filter((line) => developSet.has(line) && !mainSet.has(line)));
+      }
+      if (hunk.removed.length > 0 && holdsBlock(main, hunk.before) && !holdsBlock(develop, hunk.before)) leftOnMain.push(...hunk.removed);
+    }
     if (missing.length > 0 || leftOnMain.length > 0) gap.push({ path: file.path, missing, leftOnMain });
   }
   if (gap.length === 0) return { verdict: { state: "on_main", lines: counted }, gap };
@@ -270,16 +303,37 @@ export type QaReleaseTrainVerdicts = {
   verdicts: QaReleaseTrainVerdict[];
 };
 
-/** The stored verdicts by number, or none when the row does not parse. */
+/**
+ * The stored verdicts, or none when the row does not parse. A verdict with a
+ * state Admin does not know is dropped, and a model answer that is not whole
+ * is dropped from its verdict: the read is as strict as the route's write.
+ */
 export function qaReleaseTrainVerdictsFrom(value: unknown): QaReleaseTrainVerdicts | null {
   const row = value as Partial<QaReleaseTrainVerdicts> | null;
   if (typeof row !== "object" || row === null || typeof row.mainSha !== "string" || typeof row.at !== "string" || !Array.isArray(row.verdicts)) return null;
-  return {
-    mainSha: row.mainSha,
-    at: row.at,
-    verdicts: row.verdicts.filter(
-      (verdict): verdict is QaReleaseTrainVerdict =>
-        typeof verdict === "object" && verdict !== null && Number.isInteger(verdict.number) && typeof verdict.content?.state === "string",
-    ),
-  };
+  const verdicts: QaReleaseTrainVerdict[] = [];
+  for (const item of row.verdicts as unknown[]) {
+    const verdict = item as Partial<QaReleaseTrainVerdict> | null;
+    if (typeof verdict !== "object" || verdict === null || !Number.isInteger(verdict.number)) continue;
+    const content = verdict.content as
+      | { state?: unknown; lines?: unknown; missing?: unknown; leftOnMain?: unknown; fileCount?: unknown; files?: unknown }
+      | undefined;
+    const known =
+      content?.state === "unread" ||
+      (content?.state === "on_main" && Number.isInteger(content.lines)) ||
+      (content?.state === "differs" && Number.isInteger(content.missing) && Number.isInteger(content.leftOnMain) && Number.isInteger(content.fileCount) && Array.isArray(content.files));
+    if (!known) continue;
+    const model = verdict.model as Partial<QaReleaseTrainModelVerdict> | undefined;
+    const whole =
+      model !== undefined &&
+      (model.decision === "release" || model.decision === "not_needed" || model.decision === "operator") &&
+      typeof model.why?.ko === "string" &&
+      typeof model.why?.en === "string" &&
+      Array.isArray(model.evidence) &&
+      model.evidence.every((n) => Number.isInteger(n));
+    const kept = { ...(verdict as QaReleaseTrainVerdict) };
+    if (!whole) delete kept.model;
+    verdicts.push(kept);
+  }
+  return { mainSha: row.mainSha, at: row.at, verdicts };
 }

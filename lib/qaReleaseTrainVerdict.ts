@@ -71,7 +71,7 @@ export type QaReleaseTrainVerdictPorts = {
     /** A fresh clone holding main and develop; returns main's head. */
     prepare(): Promise<string>;
     /** One candidate's own change and its files as main and develop hold them. */
-    analyse(candidate: QaReleaseTrainVerdictCandidate): Promise<{ diff: string; changed: QaReleaseTrainChangedFile[] }>;
+    analyse(candidate: QaReleaseTrainVerdictCandidate): Promise<{ changed: QaReleaseTrainChangedFile[] }>;
     /** Main pull requests merged since a moment that touched these files, newest first. */
     mainPullsTouching(paths: readonly string[], since: string): Promise<number[]>;
   };
@@ -139,7 +139,7 @@ export async function runQaReleaseTrainVerdictRound(
       let checked;
       try {
         const read = await ports.git.analyse(candidate);
-        checked = qaReleaseTrainContentGap(read.diff, read.changed);
+        checked = qaReleaseTrainContentGap(read.changed);
       } catch {
         verdicts.push({ number: candidate.number, content: { state: "unread" }, ...checkedOn });
         continue;
@@ -277,7 +277,7 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
   const blobs = async (commit: string, paths: readonly string[]) => {
     const found = new Map<string, string>();
     for (let index = 0; index < paths.length; index += PATHS_PER_CALL) {
-      const out = await git(["ls-tree", "-r", "-z", commit, "--", ...paths.slice(index, index + PATHS_PER_CALL)]);
+      const out = await git(["--literal-pathspecs", "ls-tree", "-r", "-z", commit, "--", ...paths.slice(index, index + PATHS_PER_CALL)]);
       for (const entry of out.split("\0")) {
         const match = /^\d{6} blob ([0-9a-f]{40})\t([\s\S]+)$/.exec(entry);
         if (match) found.set(match[2], match[1]);
@@ -314,7 +314,6 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
     async analyse(candidate) {
       if (!dir || !SHA.test(candidate.mergeCommitSha)) throw new Error("git_not_prepared");
       const range = [`${candidate.mergeCommitSha}^1`, candidate.mergeCommitSha];
-      const diff = await git(["diff", "--no-color", "--no-ext-diff", "--no-renames", "-U0", ...range]);
       const post = new Map<string, string | null>();
       // `-z` raw output: ":<modes> <old> <new> <status>" then the path, each NUL-terminated.
       const raw = (await git(["diff", "--raw", "-z", "--no-renames", "--no-abbrev", ...range])).split("\0");
@@ -340,16 +339,18 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
           binary: binary.has(path),
         };
         if (!file.binary && file.main !== file.post) {
+          // This path's diff alone, the path given literally: nothing is parsed out of a header.
+          file.diff = await git(["--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", "--no-renames", "-U3", ...range, "--", path]);
           file.mainText = file.main ? await text(dir, path) : null;
           file.developText = file.develop ? await text(developRoot, path) : null;
         }
         changed.push(file);
       }
-      return { diff, changed };
+      return { changed };
     },
     async mainPullsTouching(paths, since) {
       if (!dir || paths.length === 0) return [];
-      const out = await git(["log", "--first-parent", `--since=${since}`, "--format=%s", mainSha, "--", ...paths]);
+      const out = await git(["--literal-pathspecs", "log", "--first-parent", `--since=${since}`, "--format=%s", mainSha, "--", ...paths]);
       return [...new Set(out.split("\n").map(qaReleaseTrainMergedPullNumber).filter((n): n is number => n !== null))];
     },
     async cleanup() {

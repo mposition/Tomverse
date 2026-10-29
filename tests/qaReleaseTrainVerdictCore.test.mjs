@@ -5,102 +5,79 @@ import { qaReleaseTrainWithContentVerdicts } from "../lib/qaReleaseTrainCargoCor
 import {
   QA_RELEASE_TRAIN_VERDICT_MAX_INPUT_CHARS,
   qaReleaseTrainContentGap,
-  qaReleaseTrainDiffLines,
+  qaReleaseTrainDiffHunks,
   qaReleaseTrainModelVerdictFrom,
   qaReleaseTrainVerdictPrompt,
   qaReleaseTrainVerdictsFrom,
 } from "../lib/qaReleaseTrainVerdictCore.ts";
 
 const blob = (c) => c.repeat(40);
+const diff = (...hunks) => ["diff --git a/f.ts b/f.ts", "--- a/f.ts", "+++ b/f.ts", ...hunks.flatMap((lines) => ["@@ -1 +1 @@", ...lines]), ""].join("\n");
+const file = (overrides) => ({ path: "f.ts", post: blob("a"), main: blob("b"), develop: blob("c"), binary: false, ...overrides });
+const text = (...lines) => `${lines.join("\n")}\n`;
 
-const DIFF = [
-  "diff --git a/lib/a.ts b/lib/a.ts",
-  "--- a/lib/a.ts",
-  "+++ b/lib/a.ts",
-  "@@ -1,2 +1,2 @@",
-  "-export const limit = 10;",
-  "+export const limit = 20;",
-  "+}",
-  "diff --git a/lib/gone.ts b/lib/gone.ts",
-  "--- a/lib/gone.ts",
-  "+++ /dev/null",
-  "@@ -1 +0,0 @@",
-  "-export const gone = true;",
-  "",
-].join("\n");
+// The swap a line-set comparison could not see: two functions trade return values.
+const SWAP = diff(
+  [" function first() {", "-  return true;", "+  return false;", " }"],
+  [" function second() {", "-  return false;", "+  return true;", " }"],
+);
+const BEFORE_SWAP = text("function first() {", "  return true;", "}", "function second() {", "  return false;", "}");
+const AFTER_SWAP = text("function first() {", "  return false;", "}", "function second() {", "  return true;", "}");
 
-test("a diff's added and removed lines are read by file, a deleted file under its old name", () => {
-  const files = qaReleaseTrainDiffLines(DIFF);
-  assert.deepEqual(files.get("lib/a.ts"), { added: ["export const limit = 20;", "}"], removed: ["export const limit = 10;"] });
-  assert.deepEqual(files.get("lib/gone.ts"), { added: [], removed: ["export const gone = true;"] });
+test("hunks are read by their first character only: a line that looks like a header inside a hunk is content", () => {
+  const hunks = qaReleaseTrainDiffHunks(diff([" a context line", "-old line", "++++ looks like a header", "", String.raw`\ No newline at end of file`]));
+  assert.deepEqual(hunks, [{ before: ["a context line", "old line"], after: ["a context line", "+++ looks like a header"], removed: ["old line"], added: ["+++ looks like a header"] }]);
 });
 
 test("a file main holds as the candidate left it, or a deletion main has too, is on main", () => {
-  const { verdict, gap } = qaReleaseTrainContentGap(DIFF, [
-    { path: "lib/a.ts", post: blob("a"), main: blob("a"), develop: blob("b"), binary: false },
-    { path: "lib/gone.ts", post: null, main: null, develop: null, binary: false },
-  ]);
-  // A bare `}` proves nothing and is not counted.
-  assert.deepEqual(verdict, { state: "on_main", lines: 3 });
-  assert.deepEqual(gap, []);
-});
-
-test("the same lines under another blob are on main: main moved on around them (#2591)", () => {
-  const { verdict } = qaReleaseTrainContentGap(DIFF, [
-    {
-      path: "lib/a.ts",
-      post: blob("a"),
-      main: blob("c"),
-      develop: blob("d"),
-      binary: false,
-      mainText: "export const other = 1;\nexport const limit = 20;\n",
-      developText: "export const limit = 20;\n",
-    },
-    { path: "lib/gone.ts", post: null, main: null, develop: null, binary: false },
-  ]);
+  const { verdict } = qaReleaseTrainContentGap([file({ main: blob("a"), diff: SWAP }), file({ path: "gone.ts", post: null, main: null, develop: null })]);
   assert.equal(verdict.state, "on_main");
 });
 
-test("what main lacks and develop keeps is missing; what develop changed again since is not counted", () => {
-  const { verdict, gap } = qaReleaseTrainContentGap(DIFF, [
-    {
-      path: "lib/a.ts",
-      post: blob("a"),
-      main: blob("c"),
-      develop: blob("d"),
-      binary: false,
-      mainText: "export const limit = 10;\n",
-      developText: "export const limit = 20;\n",
-    },
-    // main still has the file; develop later brought it back, so its removal is another pull request's business.
-    { path: "lib/gone.ts", post: null, main: blob("e"), develop: blob("e"), binary: false, mainText: "export const gone = true;\n", developText: "export const gone = true;\n" },
-  ]);
-  assert.deepEqual(verdict, {
-    state: "differs",
-    lines: 3,
-    missing: 1,
-    leftOnMain: 1,
-    files: [{ path: "lib/a.ts", lines: 2 }],
-    fileCount: 1,
-  });
-  assert.deepEqual(gap, [{ path: "lib/a.ts", missing: ["export const limit = 20;"], leftOnMain: ["export const limit = 10;"] }]);
+test("the change in place with other lines around it is on main: main moved on around it (#2591)", () => {
+  const main = text("// added by a later release", "function first() {", "  return false;", "}", "", "function second() {", "  return true;", "}", "export {};");
+  assert.equal(qaReleaseTrainContentGap([file({ diff: SWAP, mainText: main, developText: AFTER_SWAP })]).verdict.state, "on_main");
 });
 
-test("a line develop no longer has is not missing: a later pull request replaced it", () => {
-  const { verdict } = qaReleaseTrainContentGap(DIFF, [
-    { path: "lib/a.ts", post: blob("a"), main: blob("c"), develop: blob("d"), binary: false, mainText: "export const limit = 30;\n", developText: "export const limit = 30;\n" },
-    { path: "lib/gone.ts", post: null, main: null, develop: null, binary: false },
-  ]);
-  assert.equal(verdict.state, "on_main");
+test("main lacking a swap of lines it holds elsewhere differs: the hunk is found whole or not at all", () => {
+  const { verdict, gap } = qaReleaseTrainContentGap([file({ diff: SWAP, mainText: BEFORE_SWAP, developText: AFTER_SWAP })]);
+  assert.equal(verdict.state, "differs");
+  assert.deepEqual(gap, [{ path: "f.ts", missing: ["return false;", "return true;"], leftOnMain: ["return true;", "return false;"] }]);
 });
 
-test("a binary file that differs from main is missing unless main already matches develop", () => {
-  const binary = "diff --git a/e2e/x.png b/e2e/x.png\nBinary files a/e2e/x.png and b/e2e/x.png differ\n";
-  const differs = qaReleaseTrainContentGap(binary, [{ path: "e2e/x.png", post: blob("a"), main: blob("b"), develop: blob("a"), binary: true }]);
-  assert.equal(differs.verdict.state, "differs");
+test("a hunk develop changed again since: a line develop keeps and main lacks is missing, one develop dropped is not", () => {
+  const change = diff([" const config = {", "-  mode: 'a',", "+  mode: 'b',", "+  retries: 3,", " };"]);
+  // develop later renamed `mode` again, but keeps `retries`; main has neither.
+  const developText = text("const config = {", "  mode: 'c',", "  retries: 3,", "  timeout: 5,", "};");
+  const { gap } = qaReleaseTrainContentGap([file({ diff: change, mainText: text("const config = {", "  mode: 'a',", "};"), developText })]);
+  assert.deepEqual(gap[0].missing, ["retries: 3,"]);
+  // main has `retries` elsewhere and develop dropped `mode: 'b'`: nothing left to release.
+  assert.equal(qaReleaseTrainContentGap([file({ diff: change, mainText: text("const config = {", "  mode: 'c',", "  retries: 3,", "};"), developText })]).verdict.state, "on_main");
+});
+
+test("a hunk with no line that says enough by itself is missing whole when it is not found in place", () => {
+  const change = diff([" const limits = [", "-  10,", "+  20,", " ];"]);
+  const { verdict, gap } = qaReleaseTrainContentGap([
+    file({ diff: change, mainText: text("const limits = [", "  10,", "];", "const other = [20,", "];"), developText: text("const limits = [", "  30,", "];") }),
+  ]);
+  assert.equal(verdict.state, "differs");
+  assert.deepEqual(gap[0].missing, ["20,"]);
+});
+
+test("removed lines main still holds in place, while develop no longer does, are left on main", () => {
+  const change = diff([" export const a = 1;", "-export const legacy = true;", " export const b = 2;"]);
+  const { gap } = qaReleaseTrainContentGap([
+    file({ diff: change, mainText: text("export const a = 1;", "export const legacy = true;", "export const b = 2;"), developText: text("export const a = 1;", "export const b = 2;") }),
+  ]);
+  assert.deepEqual(gap, [{ path: "f.ts", missing: [], leftOnMain: ["export const legacy = true;"] }]);
+});
+
+test("a binary file, or one with no hunk to read, that differs from main is missing unless main already matches develop", () => {
+  const differs = qaReleaseTrainContentGap([file({ path: "e2e/x.png", binary: true, develop: blob("a") })]);
   assert.deepEqual(differs.gap, [{ path: "e2e/x.png", missing: [], leftOnMain: [], binary: true }]);
-  const rerecorded = qaReleaseTrainContentGap(binary, [{ path: "e2e/x.png", post: blob("a"), main: blob("c"), develop: blob("c"), binary: true }]);
-  assert.equal(rerecorded.verdict.state, "on_main");
+  assert.equal(qaReleaseTrainContentGap([file({ path: "e2e/x.png", binary: true, main: blob("c") })]).verdict.state, "on_main");
+  // A mode change: a diff with no hunk.
+  assert.equal(qaReleaseTrainContentGap([file({ diff: "diff --git a/f.ts b/f.ts\nold mode 100644\nnew mode 100755\n" })]).verdict.state, "differs");
 });
 
 const question = (overrides = {}) => ({

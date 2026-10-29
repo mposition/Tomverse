@@ -81,7 +81,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
   const [showAll, setShowAll] = useState(false);
   // Hidden by an operator (owner, 2026-10-27): out of the list until shown again; a picked one stays listed.
   const [hidden, setHidden] = useState<Set<number>>(new Set());
-  const [hiding, setHiding] = useState<number | null>(null);
+  const [hiding, setHiding] = useState<number | "several" | null>(null);
   // On the train tab its own "Read again" (and the emergency panel's save) read it again.
   const reads = useQaReleaseTrainReads();
 
@@ -153,7 +153,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
     .map((candidate) => candidate.number);
 
   const saveHidden = async (number: number | number[], hide: boolean) => {
-    setHiding(typeof number === "number" ? number : 0);
+    setHiding(typeof number === "number" ? number : "several");
     setNotice(null);
     try {
       const response = await adminFetch(`${API}/hidden`, {
