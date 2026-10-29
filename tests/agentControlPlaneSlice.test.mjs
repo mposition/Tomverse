@@ -409,10 +409,17 @@ test("imports come from the syntax tree, not from text that looks like one", () 
         'import fs = require("node:fs");',
         'const m = await import("./lazy");',
         'type L = import("./typeOnly").T;',
+        'const h = module.require("./viaModule");',
       ].join("\n"),
     }).sort(),
-    ["./barrel", "./lazy", "./typeOnly", "./types", "node:fs"],
+    ["./barrel", "./lazy", "./typeOnly", "./types", "./viaModule", "node:fs"],
   );
+  // A gate that loads a helper through module.require reaches it.
+  const viaModule = tree({
+    "lib/amux/gate.ts": 'export const gate = () => module.require("../moduleHelper");\n',
+    "lib/moduleHelper.ts": 'import { deep } from "./deep";\nexport const h = deep;\n',
+  });
+  assert.ok(slice([change("lib/deep.ts")], viaModule).slicePaths.has("lib/deep.ts"));
   assert.deepEqual(codeFacts(tsParse("export const x = obj['literal']();")).computedCall, true);
 });
 

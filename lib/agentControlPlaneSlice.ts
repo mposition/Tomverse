@@ -247,7 +247,9 @@ export const importSpecifiersOf = (source: ts.SourceFile): string[] => {
     } else if (ts.isCallExpression(node)) {
       const [first] = node.arguments;
       const isImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
+      // `require("x")` and `module.require("x")` alike.
+      const isRequire = (ts.isIdentifier(node.expression) && node.expression.text === "require") ||
+        (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "require");
       if ((isImport || isRequire) && first !== undefined && isStringLiteral(first)) {
         found.push((first as ts.StringLiteral).text);
       }
