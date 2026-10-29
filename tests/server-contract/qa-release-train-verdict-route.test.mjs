@@ -109,6 +109,6 @@ test("verdicts are stored only as the schema allows; only they may be a large bo
   const many = await call({ phase: "verdicts", mainSha: SHA, at: "2026-10-29T00:00:00Z", verdicts: Array.from({ length: 500 }, (_, i) => verdict(i + 1)) });
   assert.equal(many.status, 200);
   // Any other phase over 16 KiB is refused.
-  const padded = JSON.stringify({ phase: "selection" }).replace("{", `{${" ".repeat(17 * 1024)}`);
+  const padded = `{${" ".repeat(17 * 1024)}${JSON.stringify({ phase: "selection" }).slice(1)}`;
   assert.equal((await call(padded)).status, 400);
 });
