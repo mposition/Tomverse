@@ -35,6 +35,71 @@ export const IMAGE_PROMPT_BUDGET_MICRO_USD = Math.ceil(
     1_000_000
 ); // 5_000
 
+// Editing an attached photo (POST /v1/images/edits) sends that photo as image
+// input, billed at the image-input rate (gpt-image-2: US$8 per million tokens,
+// read 2026-10-29 from developers.openai.com/api/docs/pricing). OpenAI does
+// not publish a token formula for gpt-image-2 inputs; the model reads every
+// input at high fidelity. The server therefore downscales the photo to fit
+// IMAGE_EDIT_INPUT_MAX_EDGE_PX before sending it, and budgets
+// IMAGE_EDIT_INPUT_MAX_TOKENS for it -- about 1.5x what gpt-image-1 charged a
+// high-fidelity non-square input of that size (6,563 tokens). Settlement
+// records the reported image tokens, and a request over this budget is logged
+// (image_edit_input_over_budget) so the number is corrected from evidence.
+export const IMAGE_EDIT_INPUT_MAX_EDGE_PX = 1_024;
+export const IMAGE_EDIT_INPUT_MAX_TOKENS = 10_000;
+export const IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS = 8;
+export const IMAGE_EDIT_INPUT_BUDGET_MICRO_USD = Math.ceil(
+  (IMAGE_EDIT_INPUT_MAX_TOKENS * IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS * 1_000_000) /
+    1_000_000
+); // 80_000
+
+// Credits added to the option's own price for an edit. 90 credits carry the
+// 80,000 micro-USD input budget under the per-credit ceiling for every
+// gpt-image-2 option: the worst is high 1024x1024 at
+// (211,000 + 5,000 + 80,000) / (250 + 90) = 871 micro-USD per credit.
+export const IMAGE_EDIT_SURCHARGE_CREDITS = 90;
+
+// The photo is read from the user's own attachment storage; anything larger
+// is not a file /api/chat accepted (its MAX_ATTACHMENT_SIZE).
+export const IMAGE_EDIT_SOURCE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Attachment types an edit can start from: what sharp decodes here. */
+export const IMAGE_EDIT_SOURCE_MEDIA_TYPES: readonly string[] = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+];
+
+/**
+ * The priced size closest to the photo's shape, read upright (EXIF
+ * orientations 5-8 turn the stored width and height by 90 degrees). Within
+ * 10% of square stays square.
+ */
+export const imageEditOutputSize = (
+  width: number,
+  height: number,
+  orientation?: number
+): ImageSize => {
+  const [w, h] = orientation && orientation >= 5 ? [height, width] : [width, height];
+  if (!(w > 0 && h > 0)) return "1024x1024";
+  const ratio = w / h;
+  if (ratio > 1.1) return "1536x1024";
+  if (ratio < 1 / 1.1) return "1024x1536";
+  return "1024x1024";
+};
+
+/**
+ * Image models whose adapter can edit a supplied photo. Only OpenAI's Images
+ * API edit endpoint is implemented; every other model refuses an edit request
+ * before anything is reserved.
+ */
+export const IMAGE_EDIT_MODEL_IDS: readonly string[] = ["gpt-image-2"];
+
+export const imageModelSupportsEdit = (modelId: string) =>
+  IMAGE_EDIT_MODEL_IDS.includes(modelId);
+
+
 export type ImageQuality = "low" | "medium" | "high";
 export type ImageSize = "1024x1024" | "1536x1024" | "1024x1536";
 export type ImagePreset = "draft" | "standard" | "final";

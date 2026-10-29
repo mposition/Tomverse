@@ -149,6 +149,7 @@ import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageIntent } from "@/lib/chatImageIntentClient";
 import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
@@ -759,6 +760,7 @@ export function ChatPageClient({
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
   chatImageIntentEnabled = false,
+  chatImageEditEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
   voiceConversationEnabled = false,
@@ -791,6 +793,8 @@ export function ChatPageClient({
    * triage on.
    */
   chatImageIntentEnabled?: boolean;
+  /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
+  chatImageEditEnabled?: boolean;
   reviewEasyAvailable?: boolean;
   /**
    * The voice input opt-in flag AND its kill switch AND the signed-in
@@ -5922,7 +5926,12 @@ export function ChatPageClient({
       // (app/api/chat/route.ts), so it does not wait for this call first.
       selectionModeRef.current !== "auto" &&
       !isImageDraftActiveRef.current &&
-      attachments.length === 0 &&
+      // A photo is the one attachment the image turn uses: it may be edited.
+      (attachments.length === 0 ||
+        (chatImageEditEnabled &&
+          attachments.some((attachment) =>
+            IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(attachment.mediaType.toLowerCase())
+          ))) &&
       inputValue.trim().length > 0
     ) {
       if (imageIntentCheckPendingRef.current) return;
@@ -5930,6 +5939,8 @@ export function ChatPageClient({
       const intentScope = composerDraftConversationId;
       const intentTicket = conversationSelectionTicketRef.current;
       const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
+      const intentAttachmentIds = JSON.stringify(attachments.map((attachment) => attachment.id));
+      const intentAttachedPhoto = attachments.length > 0;
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
@@ -5937,6 +5948,7 @@ export function ChatPageClient({
         // image it changes.
         decision = await askChatImageIntent(intentText, {
           conversationId: currentChatIdRef.current,
+          ...(intentAttachedPhoto ? { attachedPhoto: true } : {}),
         });
       } finally {
         imageIntentCheckPendingRef.current = false;
@@ -5961,7 +5973,8 @@ export function ChatPageClient({
         intentTicket !== conversationSelectionTicketRef.current ||
         isImageDraftActiveRef.current ||
         liveDraft.text !== intentText ||
-        liveDraft.attachments.length > 0
+        JSON.stringify(liveDraft.attachments.map((attachment) => attachment.id)) !==
+          intentAttachmentIds
       ) {
         return;
       }
@@ -5979,6 +5992,7 @@ export function ChatPageClient({
                 modelIds: decision.modelId ? [decision.modelId] : [],
                 preset: decision.preset,
                 ...(decision.prompt ? { prompt: decision.prompt } : {}),
+                ...(decision.edit ? { edit: true as const } : {}),
               },
             }
           : {}),

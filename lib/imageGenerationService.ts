@@ -51,6 +51,7 @@ import {
   getImageModel,
   getImageModelPrice,
   imageThinkingBilling,
+  maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
@@ -59,12 +60,20 @@ import { imageExecutionDrift, imageExecutionProfile, stalePricingVersions } from
 import {
   generateImageWithProvider,
   ImageProviderError,
+  type ImageEditInput,
 } from "@/lib/imageProviderAdapter";
+import { ImageEditSourceError, imageEditEnabled, loadImageEditInput } from "@/lib/imageEditSource";
 import {
   getImageGenerationPricing,
+  IMAGE_EDIT_INPUT_BUDGET_MICRO_USD,
+  IMAGE_EDIT_INPUT_MAX_EDGE_PX,
+  IMAGE_EDIT_INPUT_MAX_TOKENS,
+  IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS,
+  IMAGE_EDIT_SURCHARGE_CREDITS,
   IMAGE_GENERATION_MODEL_ID,
   IMAGE_PROMPT_INPUT_USD_PER_MILLION_TOKENS,
   IMAGE_PROMPT_MAX_TOKENS,
+  imageModelSupportsEdit,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
@@ -161,6 +170,25 @@ const promptCostMicroUsd = (inputTokens: number) =>
       1_000_000
   );
 
+const editImageCostMicroUsd = (imageTokens: number) =>
+  Math.ceil(
+    (Math.max(0, imageTokens) * IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS * 1_000_000) /
+      1_000_000
+  );
+
+/**
+ * The attachment an edit reservation was priced for, or null for a plain
+ * generation. The reservation is the record of what was sold, so the executor
+ * and a retry read the edit from it rather than from anything else.
+ */
+export const reservationEditSource = (snapshot: unknown): string | null => {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const edit = (snapshot as { edit?: { attachmentId?: unknown } }).edit;
+  return edit && typeof edit.attachmentId === "string" && edit.attachmentId
+    ? edit.attachmentId
+    : null;
+};
+
 const reservationIdFor = (generationId: string) =>
   `image-credit-reservation:${generationId}:v1`;
 
@@ -198,6 +226,14 @@ export type ImageGenerationRequestInput = {
    * refusing a chat conversation.
    */
   chatTurnHost?: boolean;
+  /**
+   * Server-only, like `chatTurnHost`: edit this attachment instead of drawing
+   * from the prompt alone. The caller resolved it from the user's own saved
+   * message (lib/imageEditSource.ts); it is never read from a request body.
+   * Every model must support editing, and the price adds
+   * IMAGE_EDIT_SURCHARGE_CREDITS per target.
+   */
+  editSource?: { attachmentId: string };
 };
 
 export type ImageGenerationTargetResult = {
@@ -374,10 +410,29 @@ export const requestImageGeneration = async (
       { unsupportedModels: unavailable.map((plan) => plan.modelId) }
     );
   }
+  const edit = input.editSource ?? null;
+  if (edit) {
+    if (!imageEditEnabled()) {
+      throw new ChatAccessError(403, "IMAGE_EDIT_DISABLED", "Image editing is not enabled.");
+    }
+    const cannotEdit = targetPlans.filter((plan) => !imageModelSupportsEdit(plan.modelId));
+    if (cannotEdit.length > 0) {
+      throw new ChatAccessError(
+        400,
+        "IMAGE_OPTION_NOT_SUPPORTED",
+        "The requested image model cannot edit an image.",
+        undefined,
+        { unsupportedModels: cannotEdit.map((plan) => plan.modelId) }
+      );
+    }
+  }
   const resolvedTargets = targetPlans.map((plan) => ({
     modelId: plan.modelId,
     model: plan.model!,
     price: plan.price!,
+    // What this target charges: the option's fixed price, plus the edit
+    // surcharge that carries the photo's image-input budget.
+    credits: plan.price!.credits + (edit ? IMAGE_EDIT_SURCHARGE_CREDITS : 0),
   }));
   const stale = stalePricingVersions(
     input.expectedPricingVersions,
@@ -393,7 +448,7 @@ export const requestImageGeneration = async (
     );
   }
   const totalCredits = resolvedTargets.reduce(
-    (sum, target) => sum + target.price.credits,
+    (sum, target) => sum + target.credits,
     0
   );
 
@@ -427,7 +482,9 @@ export const requestImageGeneration = async (
   // per-provider pools (policy §8), so two OpenAI targets draw from one.
   const targetCosts = new Map<string, number>();
   for (const target of resolvedTargets) {
-    const cost = maxImageRequestCostMicroUsd(target.model, target.price);
+    const cost = edit
+      ? maxImageEditRequestCostMicroUsd(target.model, target.price)
+      : maxImageRequestCostMicroUsd(target.model, target.price);
     if (cost === null) {
       // Unreachable while the registry keeps unbounded models disabled; the
       // check stays because a fixed price without a finite worst case is the
@@ -748,21 +805,21 @@ export const requestImageGeneration = async (
           : Math.min(
               planCreditsLeft,
               Math.round(
-                (allocation.planReservedCredits * target.price.credits) /
+                (allocation.planReservedCredits * target.credits) /
                   totalCredits
               )
             );
         planCreditsLeft -= planShare;
         const addOnShare = isLast
           ? addOnCreditsLeft
-          : Math.min(addOnCreditsLeft, target.price.credits - planShare);
+          : Math.min(addOnCreditsLeft, target.credits - planShare);
         addOnCreditsLeft -= addOnShare;
 
         const targetMaxCost = targetCosts.get(target.modelId)!;
         const targetGenerationId = randomUUID();
         const targetFundedCost =
           addOnShare > 0
-            ? Math.ceil((targetMaxCost * addOnShare) / target.price.credits)
+            ? Math.ceil((targetMaxCost * addOnShare) / target.credits)
             : 0;
 
         const targetRow = await tx.imageGenerationTarget.create({
@@ -814,7 +871,7 @@ export const requestImageGeneration = async (
             groupId: group.id,
             targetId: targetRow.id,
             identitySource: "recorded",
-            reservedCredits: target.price.credits,
+            reservedCredits: target.credits,
             planReservedCredits: planShare,
             addOnReservedCredits: addOnShare,
             reservedCostMicroUsd: BigInt(targetMaxCost),
@@ -825,7 +882,7 @@ export const requestImageGeneration = async (
             pricingVersion: target.model.pricingVersion,
             costSource: "fixed_estimate",
             pricingSnapshot: {
-              credits: target.price.credits,
+              credits: target.credits,
               outputCostMicroUsd: target.price.outputCostMicroUsd,
               maxRequestCostMicroUsd: targetMaxCost,
               promptTokenLimit: IMAGE_PROMPT_MAX_TOKENS,
@@ -834,6 +891,20 @@ export const requestImageGeneration = async (
               // What the provider call may send; checked again before the call.
               executionProfile: imageExecutionProfile(target.model),
               thinkingCapMicroUsd: target.model.priceVerification.thinkingCapMicroUsd,
+              // An edit: which photo, and the image-input budget its
+              // surcharge bought. Read by the executor and by a retry.
+              ...(edit
+                ? {
+                    edit: {
+                      attachmentId: edit.attachmentId,
+                      surchargeCredits: IMAGE_EDIT_SURCHARGE_CREDITS,
+                      inputBudgetMicroUsd: IMAGE_EDIT_INPUT_BUDGET_MICRO_USD,
+                      inputMaxTokens: IMAGE_EDIT_INPUT_MAX_TOKENS,
+                      inputUsdPerMillionTokens: IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS,
+                      inputMaxEdgePx: IMAGE_EDIT_INPUT_MAX_EDGE_PX,
+                    },
+                  }
+                : {}),
             },
             // The per-lot payload belongs to the group's single add-on
             // reservation; it is stored on the first target that holds
@@ -850,7 +921,7 @@ export const requestImageGeneration = async (
           provider: target.model.provider,
           generationId: generation.id,
           status: generation.status,
-          reservedCredits: target.price.credits,
+          reservedCredits: target.credits,
         });
       }
 
@@ -1255,6 +1326,29 @@ export const processImageGeneration = async (
     return;
   }
 
+  // An edit sends the photo its reservation names. A photo that is gone or
+  // unreadable fails before the provider is reached, so everything is returned.
+  const editAttachmentId = reservationEditSource(reservation?.pricingSnapshot);
+  let editImage: ImageEditInput | undefined;
+  if (editAttachmentId) {
+    try {
+      editImage = await loadImageEditInput({
+        userId: generation.userId,
+        attachmentId: editAttachmentId,
+      });
+    } catch (error) {
+      await finalizeFailure({
+        generationId,
+        failurePhase: "edit_source_unavailable",
+        publicErrorCode: "IMAGE_GENERATION_FAILED",
+        internalErrorDetail:
+          error instanceof ImageEditSourceError ? error.message : String(error).slice(0, 500),
+        releaseProviderBudget: true,
+      });
+      return;
+    }
+  }
+
   const ttlSeconds = resolveLeaseTtlSeconds();
   const heartbeat = generation.leaseId
     ? setInterval(() => {
@@ -1271,6 +1365,7 @@ export const processImageGeneration = async (
         size: generation.size as ImageSize,
         quality: generation.quality as ImageQuality,
         modelId: generation.modelId,
+        ...(editImage ? { editImage } : {}),
       });
     } catch (error) {
       const providerError =
@@ -1452,10 +1547,27 @@ export const processImageGeneration = async (
       // one whose pinned thinking level carries a flat surcharge -- is settled
       // at the thinking cap the reservation held, never at zero.
       const thinkingCost = settledThinkingCostMicroUsd(reservation.pricingSnapshot, result.thinkingTokens);
+      // An edit's photo is billed as image input at its own rate.
+      const imageInputTokens = result.imageInputTokens ?? 0;
+      if (imageInputTokens > IMAGE_EDIT_INPUT_MAX_TOKENS) {
+        console.error(
+          JSON.stringify({
+            event: "image_edit_input_over_budget",
+            generationId,
+            modelId: generation.modelId,
+            imageInputTokens,
+            budgetTokens: IMAGE_EDIT_INPUT_MAX_TOKENS,
+            timestamp: new Date().toISOString(),
+          })
+        );
+      }
       const actualCostMicroUsd =
         snapshotOutputCost === null || thinkingCost === null
           ? Number(reservation.reservedCostMicroUsd)
-          : snapshotOutputCost + promptCostMicroUsd(result.inputTokens) + thinkingCost;
+          : snapshotOutputCost +
+            promptCostMicroUsd(result.inputTokens) +
+            editImageCostMicroUsd(imageInputTokens) +
+            thinkingCost;
 
       const entries = parseReservationPayload(reservation.reservationPayload);
       if (entries.length > 0) {
@@ -1802,8 +1914,10 @@ export const retryImageGenerationTarget = async (
   // IMAGE_PRICE_CHANGED instead of charging an amount the user was not shown.
   const failedReservation = await prisma.imageCreditReservation.findUnique({
     where: { generationId: current.id },
-    select: { pricingVersion: true },
+    select: { pricingVersion: true, pricingSnapshot: true },
   });
+  // A failed edit is retried as the same edit, never as a fresh drawing.
+  const retryEditAttachmentId = reservationEditSource(failedReservation?.pricingSnapshot);
   const result = await requestImageGeneration(
     {
       userId: input.userId,
@@ -1816,6 +1930,7 @@ export const retryImageGenerationTarget = async (
       ...(failedReservation
         ? { expectedPricingVersions: { [target.modelId]: failedReservation.pricingVersion } }
         : {}),
+      ...(retryEditAttachmentId ? { editSource: { attachmentId: retryEditAttachmentId } } : {}),
       // The retry stays in the conversation its group already lives in. A
       // chat conversation holds a group only through a Chat image turn
       // (lib/chatImageTurn.ts), so its retry keeps that host -- while the

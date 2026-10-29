@@ -5,6 +5,7 @@ import { isAssistantProfilesEnabled, isImageGenerationEnabledCached } from "@/li
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { imageModelOwner } from "@/lib/imageModelRegistry";
 import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
+import { imageEditEnabled } from "@/lib/imageEditSource";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { consumeApiRateLimit, apiSecurityResponse } from "@/lib/apiSecurity";
 
@@ -19,6 +20,6 @@ export async function GET(request: Request) {
     id: model.id, name: model.name, provider: imageModelOwner(model), pricingVersion: model.pricingVersion,
     prices: model.prices.map(price => ({ quality: price.quality, size: price.size, credits: price.credits })),
   })) };
-  return Response.json({ historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json({ historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits: imageEditEnabled(), reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }); }
 }
