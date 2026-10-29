@@ -17,9 +17,9 @@
  * A file whose change main is not proven to hold: the added and removed lines
  * of each hunk not found in place. `binary`: a file with no hunk to read
  * (binary, or a mode change). `changedSince`: develop no longer holds some of
- * those hunks either.
+ * those hunks either. `modeDiffers`: main's file lacks the mode the candidate set.
  */
-export type QaReleaseTrainGapFile = { path: string; missing: string[]; leftOnMain: string[]; binary?: boolean; changedSince?: boolean };
+export type QaReleaseTrainGapFile = { path: string; missing: string[]; leftOnMain: string[]; binary?: boolean; changedSince?: boolean; modeDiffers?: boolean };
 
 export type QaReleaseTrainContentVerdict =
   | { state: "on_main"; lines: number }
@@ -65,10 +65,11 @@ export const QA_RELEASE_TRAIN_VERDICT_EVIDENCE_MAX = 8;
 export type QaReleaseTrainDiffHunk = { before: string[]; after: string[]; removed: string[]; added: string[] };
 
 /**
- * The hunks of one file's unified diff, lines trimmed and blank ones left
- * out. Everything before the first `@@` is the file's header; a line inside
- * a hunk is read by its first character only, so text that looks like a
- * header is never one.
+ * The hunks of one file's unified diff, every line exactly as written:
+ * indentation and blank lines can be the change itself (Python, a template
+ * literal). Everything before the first `@@` is the file's header; a line
+ * inside a hunk is read by its first character only, so text that looks
+ * like a header is never one.
  */
 export function qaReleaseTrainDiffHunks(diff: string): QaReleaseTrainDiffHunk[] {
   const hunks: QaReleaseTrainDiffHunk[] = [];
@@ -80,8 +81,7 @@ export function qaReleaseTrainDiffHunks(diff: string): QaReleaseTrainDiffHunk[] 
       continue;
     }
     if (!current) continue;
-    const line = raw.slice(1).trim();
-    if (line === "") continue;
+    const line = raw.slice(1);
     if (raw.startsWith(" ")) {
       current.before.push(line);
       current.after.push(line);
@@ -137,24 +137,40 @@ export type QaReleaseTrainChangedFile = {
  *   context and added lines, in order -- is in main; a hunk that is not
  *   leaves its added and removed lines unconfirmed, marked when develop no
  *   longer holds that post-image either (develop changed the spot since);
+ * - lines compare exactly, whitespace and blank lines included;
+ * - a file the candidate deleted is on main only where main has no such
+ *   path (an empty file is not a deleted one);
+ * - a mode the candidate set that main's file lacks is unconfirmed, whatever
+ *   its text;
  * - a binary file, or one whose diff has no hunk (a mode change), that
  *   matches neither is unconfirmed whole.
  */
 export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChangedFile[]): { verdict: QaReleaseTrainContentVerdict; gap: QaReleaseTrainGapFile[] } {
   const gap: QaReleaseTrainGapFile[] = [];
   let counted = 0;
-  const lines = (text: string | null | undefined) => (typeof text === "string" ? text.split("\n").map((line) => line.trim()).filter((line) => line !== "") : []);
+  // A file's lines exactly; the newline that ends the last line starts no line of its own.
+  const lines = (text: string | null | undefined) => {
+    if (typeof text !== "string" || text === "") return [];
+    const all = text.split("\n");
+    return all[all.length - 1] === "" ? all.slice(0, -1) : all;
+  };
+  const mode = (side: string | null) => side?.split(" ")[0] ?? null;
   for (const file of changed) {
     const hunks = file.binary ? [] : qaReleaseTrainDiffHunks(file.diff ?? "");
     counted += hunks.length === 0 ? 1 : hunks.reduce((sum, hunk) => sum + hunk.added.length + hunk.removed.length, 0);
     if (file.main === file.post || file.main === file.develop) continue;
+    // Deleted by the candidate, still a path on main (main without it returned above).
+    if (file.post === null) {
+      gap.push({ path: file.path, missing: [], leftOnMain: hunks.flatMap((hunk) => hunk.removed), ...(hunks.length === 0 ? { binary: true } : {}) });
+      continue;
+    }
     if (hunks.length === 0) {
       gap.push({ path: file.path, missing: [], leftOnMain: [], binary: true });
       continue;
     }
     const main = lines(file.mainText);
     const develop = lines(file.developText);
-    // An empty post-image (the file emptied or deleted) is only "found" in a file with nothing left.
+    // An empty post-image (the file emptied) is only "found" in a file with nothing left.
     const holds = (side: readonly string[], block: readonly string[]) => (block.length === 0 ? side.length === 0 : holdsBlock(side, block));
     const missing: string[] = [];
     const leftOnMain: string[] = [];
@@ -165,10 +181,13 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
       leftOnMain.push(...hunk.removed);
       if (!holds(develop, hunk.after)) changedSince = true;
     }
-    if (missing.length > 0 || leftOnMain.length > 0) gap.push({ path: file.path, missing, leftOnMain, ...(changedSince ? { changedSince } : {}) });
+    const modeDiffers = file.main !== null && mode(file.main) !== mode(file.post);
+    if (missing.length > 0 || leftOnMain.length > 0 || modeDiffers) {
+      gap.push({ path: file.path, missing, leftOnMain, ...(changedSince ? { changedSince } : {}), ...(modeDiffers ? { modeDiffers } : {}) });
+    }
   }
   if (gap.length === 0) return { verdict: { state: "on_main", lines: counted }, gap };
-  const size = (file: QaReleaseTrainGapFile) => (file.binary ? 1 : file.missing.length + file.leftOnMain.length);
+  const size = (file: QaReleaseTrainGapFile) => (file.binary ? 1 : file.missing.length + file.leftOnMain.length || 1);
   const sorted = [...gap].sort((a, b) => size(b) - size(a) || a.path.localeCompare(b.path));
   return {
     verdict: {
@@ -185,7 +204,7 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
 
 /** The text the gap digest is taken over: every file and line, in a fixed order. */
 export const qaReleaseTrainGapText = (gap: readonly QaReleaseTrainGapFile[]) =>
-  JSON.stringify([...gap].sort((a, b) => a.path.localeCompare(b.path)).map((file) => [file.path, Boolean(file.binary), Boolean(file.changedSince), file.missing, file.leftOnMain]));
+  JSON.stringify([...gap].sort((a, b) => a.path.localeCompare(b.path)).map((file) => [file.path, Boolean(file.binary), Boolean(file.changedSince), Boolean(file.modeDiffers), file.missing, file.leftOnMain]));
 
 /* ------------------------------------------------------------------------- */
 /* The model's judgement of a difference                                     */
@@ -251,6 +270,7 @@ export function qaReleaseTrainVerdictPrompt(question: QaReleaseTrainVerdictQuest
       `File: ${file.path}`,
       ...(file.binary ? ["(no text to compare: binary, or a mode change; main's file differs)"] : []),
       ...(file.changedSince ? ["(develop changed since)"] : []),
+      ...(file.modeDiffers ? ["(main's file lacks the file mode this pull request set)"] : []),
       ...file.missing.slice(0, LINES_PER_FILE).map((line) => `+ ${line}`),
       ...(file.missing.length > LINES_PER_FILE ? [`+ ... ${file.missing.length - LINES_PER_FILE} more`] : []),
       ...file.leftOnMain.slice(0, LINES_PER_FILE).map((line) => `- ${line}`),

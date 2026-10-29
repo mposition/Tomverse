@@ -121,6 +121,8 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   // The verdicts are the one large body (up to 500 candidates with two short
   // reasons each); every other phase keeps the 16 KiB limit below.
   if (text === null || text.length > 1024 * 1024) return { status: 400, body: { error: "invalid_request" } };
+  // A large body that is not the verdicts is refused before it is parsed.
+  if (text.length > 16 * 1024 && !/"phase"\s*:\s*"verdicts"/.test(text)) return { status: 400, body: { error: "invalid_request" } };
   let parsed;
   try {
     parsed = body.safeParse(JSON.parse(text));

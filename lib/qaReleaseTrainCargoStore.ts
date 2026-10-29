@@ -100,7 +100,9 @@ export async function saveQaReleaseTrainHidden(
   hidden: boolean,
 ): Promise<number[]> {
   const changed = typeof number === "number" ? [number] : [...new Set(number)];
-  const label = changed.map((n) => `#${n}`).join(", ");
+  // The summary names up to ten; the metadata keeps every number.
+  const label =
+    changed.length > 10 ? `${changed.length} candidates (${changed.slice(0, 10).map((n) => `#${n}`).join(", ")}, …)` : changed.map((n) => `#${n}`).join(", ");
   return prisma.$transaction(
     async (tx) => {
       await takeAuditChainLock(tx);

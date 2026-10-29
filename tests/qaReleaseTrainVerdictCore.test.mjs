@@ -11,7 +11,7 @@ import {
   qaReleaseTrainVerdictsFrom,
 } from "../lib/qaReleaseTrainVerdictCore.ts";
 
-const blob = (c) => c.repeat(40);
+const blob = (c) => `100644 ${c.repeat(40)}`;
 const diff = (...hunks) => ["diff --git a/f.ts b/f.ts", "--- a/f.ts", "+++ b/f.ts", ...hunks.flatMap((lines) => ["@@ -1 +1 @@", ...lines]), ""].join("\n");
 const file = (overrides) => ({ path: "f.ts", post: blob("a"), main: blob("b"), develop: blob("c"), binary: false, ...overrides });
 const text = (...lines) => `${lines.join("\n")}\n`;
@@ -42,7 +42,7 @@ test("the change in place with other lines around it is on main: main moved on a
 test("main lacking a swap of lines it holds elsewhere differs: the hunk is found whole or not at all", () => {
   const { verdict, gap } = qaReleaseTrainContentGap([file({ diff: SWAP, mainText: BEFORE_SWAP, developText: AFTER_SWAP })]);
   assert.equal(verdict.state, "differs");
-  assert.deepEqual(gap, [{ path: "f.ts", missing: ["return false;", "return true;"], leftOnMain: ["return true;", "return false;"] }]);
+  assert.deepEqual(gap, [{ path: "f.ts", missing: ["  return false;", "  return true;"], leftOnMain: ["  return true;", "  return false;"] }]);
 });
 
 test("a hunk develop changed again since is unconfirmed and marked, never read line by line", () => {
@@ -50,7 +50,7 @@ test("a hunk develop changed again since is unconfirmed and marked, never read l
   // develop later renamed `mode` again; main has `retries` too, elsewhere in the file.
   const developText = text("const config = {", "  mode: 'c',", "  retries: 3,", "  timeout: 5,", "};");
   const { gap } = qaReleaseTrainContentGap([file({ diff: change, mainText: text("const config = {", "  mode: 'c',", "  retries: 3,", "};"), developText })]);
-  assert.deepEqual(gap, [{ path: "f.ts", missing: ["mode: 'b',", "retries: 3,"], leftOnMain: ["mode: 'a',"], changedSince: true }]);
+  assert.deepEqual(gap, [{ path: "f.ts", missing: ["  mode: 'b',", "  retries: 3,"], leftOnMain: ["  mode: 'a',"], changedSince: true }]);
   // main holding develop's file as it is now has nothing of this file left to receive.
   assert.equal(qaReleaseTrainContentGap([file({ diff: change, main: blob("c"), develop: blob("c") })]).verdict.state, "on_main");
 });
@@ -60,7 +60,7 @@ test("a short change (`10,` -> `20,`) not found in place differs, though main ho
   const { gap } = qaReleaseTrainContentGap([
     file({ diff: change, mainText: text("const limits = [", "  10,", "];", "const other = [", "  20,", "];"), developText: text("const limits = [", "  20,", "];") }),
   ]);
-  assert.deepEqual(gap, [{ path: "f.ts", missing: ["20,"], leftOnMain: ["10,"] }]);
+  assert.deepEqual(gap, [{ path: "f.ts", missing: ["  20,"], leftOnMain: ["  10,"] }]);
 });
 
 test("a removal main has not taken differs, even where main changed the line before it", () => {
@@ -76,11 +76,31 @@ test("a removal main has not taken differs, even where main changed the line bef
   assert.equal(qaReleaseTrainContentGap([file({ post: null, diff: deletion, mainText: text("export const gone = 1;"), develop: null, developText: null })]).verdict.state, "differs");
 });
 
+test("whitespace is compared exactly: an indentation change main lacks differs", () => {
+  const change = diff([" if ready:", "     start()", "-    finish()", "+finish()"]);
+  const main = text("if ready:", "    start()", "    finish()", "", "print(1)", "finish()");
+  const { gap } = qaReleaseTrainContentGap([file({ diff: change, mainText: main, developText: text("if ready:", "    start()", "finish()") })]);
+  assert.deepEqual(gap, [{ path: "f.ts", missing: ["finish()"], leftOnMain: ["    finish()"] }]);
+});
+
+test("a mode the candidate set that main lacks differs, though every text hunk is on main", () => {
+  const change = diff([" #!/bin/sh", "-echo old", "+echo new"]);
+  const { gap } = qaReleaseTrainContentGap([
+    file({ post: `100755 ${"a".repeat(40)}`, main: `100644 ${"b".repeat(40)}`, develop: `100755 ${"c".repeat(40)}`, diff: change, mainText: text("#!/bin/sh", "echo new"), developText: text("#!/bin/sh", "echo new", "exit 0") }),
+  ]);
+  assert.deepEqual(gap, [{ path: "f.ts", missing: [], leftOnMain: [], modeDiffers: true }]);
+});
+
+test("a deleted file that main keeps as an empty file differs", () => {
+  const deletion = ["diff --git a/f.ts b/f.ts", "deleted file mode 100644", "--- a/f.ts", "+++ /dev/null", "@@ -1 +0,0 @@", "-export const gone = 1;", ""].join("\n");
+  assert.equal(qaReleaseTrainContentGap([file({ post: null, diff: deletion, mainText: "", develop: null })]).verdict.state, "differs");
+});
+
 test("a binary file, or one with no hunk to read (a mode change), that matches neither the change nor develop differs", () => {
   const differs = qaReleaseTrainContentGap([file({ path: "e2e/x.png", binary: true, develop: blob("a") })]);
   assert.deepEqual(differs.gap, [{ path: "e2e/x.png", missing: [], leftOnMain: [], binary: true }]);
   assert.equal(qaReleaseTrainContentGap([file({ path: "e2e/x.png", binary: true, main: blob("c") })]).verdict.state, "on_main");
-  assert.equal(qaReleaseTrainContentGap([file({ post: `100755 ${blob("a")}`, main: `100644 ${blob("a")}`, diff: "diff --git a/f.ts b/f.ts\nold mode 100644\nnew mode 100755\n" })]).verdict.state, "differs");
+  assert.equal(qaReleaseTrainContentGap([file({ post: `100755 ${"a".repeat(40)}`, main: `100644 ${"a".repeat(40)}`, diff: "diff --git a/f.ts b/f.ts\nold mode 100644\nnew mode 100755\n" })]).verdict.state, "differs");
 });
 
 const question = (overrides = {}) => ({

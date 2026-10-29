@@ -249,7 +249,14 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
         </div>
       );
     }
-    if (verdict.content.state === "on_main") return null;
+    if (verdict.content.state === "on_main") {
+      // Listed though proven on main (a workflow change the train cannot carry): say so, so it can be hidden.
+      return candidate.status === "on_main" ? null : (
+        <div className="mt-1 text-xs text-emerald-300" data-testid={testId}>
+          {m.trainCargoOnMainByContent}
+        </div>
+      );
+    }
     const content = verdict.content;
     const paths = content.files.map((file) => `${file.path} (${file.lines})`).join(", ") + (content.fileCount > content.files.length ? ", …" : "");
     const model = verdict.model;
