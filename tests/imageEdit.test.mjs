@@ -19,7 +19,7 @@ import { nativeParityBearerRoute } from "../lib/nativeBearerGate.ts";
 // Required, not imported: the adapter reaches the registry through tsx's
 // CommonJS loader, and an ESM import is a second instance (see
 // tests/imageProviderAdapter.test.mjs).
-const { getImageModel, maxImageEditRequestCostMicroUsd, maxImageRequestCostMicroUsd } =
+const { getImageModel, imageEditCredits, maxImageEditRequestCostMicroUsd, maxImageRequestCostMicroUsd } =
   createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
 
 test("every edit option stays under the per-credit ceiling with its surcharge", () => {
@@ -319,6 +319,7 @@ test("an xAI edit posts the photo to the edits endpoint and never audits its byt
   assert.equal(body.resolution, "1k");
   assert.equal(body.aspect_ratio, "1:1");
   assert.equal(result.mimeType, "image/jpeg");
+  assert.equal(result.reportedCostMicroUsd, 60_000);
   assert.equal(result.requestParams.endpoint, "edits");
   assert.equal(result.requestParams.image.sha256, "a".repeat(64));
   assert.equal(JSON.stringify(result.requestParams).includes(Buffer.from("png-bytes").toString("base64")), false);
@@ -363,4 +364,18 @@ test("a fal edit calls the /edit endpoint once and never audits the photo", asyn
   assert.equal(result.outputWidth, 1024);
   assert.equal(result.requestParams.endpoint, "edits");
   assert.equal("image_urls" in result.requestParams, false);
+});
+
+test("an edit is priced on the live option and refused where its photo breaks the ceiling", () => {
+  const grok = getImageModel("grok-imagine-image-quality-20260403");
+  assert.equal(imageEditCredits(grok, grok.prices[0]), 85);
+  const gpt = getImageModel("gpt-image-2");
+  const high = gpt.prices.find((price) => price.quality === "high" && price.size === "1024x1024");
+  assert.equal(imageEditCredits(gpt, high), 340);
+  // A catalogue revision to 62 credits still carries the generation
+  // (55,000 / 62 = 887) but not the edit ((65,000) / 72 = 903).
+  const lowered = { ...grok.prices[0], credits: 62 };
+  assert.ok(maxImageRequestCostMicroUsd(grok, lowered) / 62 <= IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD);
+  assert.equal(imageEditCredits(grok, lowered), null);
+  assert.equal(imageEditCredits(getImageModel("gemini-3.1-flash-image"), { quality: "medium", size: "1024x1024", credits: 100, outputCostMicroUsd: 1 }), null);
 });

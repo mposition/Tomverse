@@ -43,6 +43,7 @@ import {
   parseXaiImageResponse,
   XAI_IMAGE_EDITS_URL,
   XAI_IMAGES_URL,
+  xaiReportedCostMicroUsd,
 } from "@/lib/xaiImageRequest";
 
 // The OpenAI Images API call, pinned to the parameter allowlist from
@@ -182,6 +183,11 @@ export type ImageProviderResult = {
    * null means the response reported no usage to read it from.
    */
   imageInputTokens?: number | null;
+  /**
+   * What the provider said the whole request cost, micro-USD, where it says
+   * (xAI). Compared against what an edit reserved; never what settles.
+   */
+  reportedCostMicroUsd?: number | null;
   /**
    * Billable internal reasoning tokens, when the provider charges for them.
    * 0 for models that do not (OpenAI images). Recorded so settlement can
@@ -938,9 +944,8 @@ const generateWithXai = async (
       throw error;
     }
 
-    const parsed = parseXaiImageResponse(
-      await response.json().catch(() => null)
-    );
+    const payload = await response.json().catch(() => null);
+    const parsed = parseXaiImageResponse(payload);
     if (!parsed) {
       throw new ImageProviderError(
         "provider_failed",
@@ -958,6 +963,7 @@ const generateWithXai = async (
       inputTokens: 0,
       thinkingTokens: 0,
       outputTokens: 0,
+      reportedCostMicroUsd: xaiReportedCostMicroUsd(payload),
       providerRequestId,
       // Verified absent 2026-08-04: xAI documents no watermark, C2PA or
       // metadata guarantee. Claiming provenance the bytes may not carry would

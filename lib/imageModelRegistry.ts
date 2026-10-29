@@ -838,6 +838,23 @@ export const maxImageEditRequestCostMicroUsd = (
 };
 
 /**
+ * What an edit of this option charges, or null when the model cannot edit or
+ * the edit's worst case would break the per-credit ceiling. Checked on the
+ * live price, because a catalogue revision can lower an option's credits to a
+ * value the generation still carries and the edit's photo does not.
+ */
+export const imageEditCredits = (
+  model: ImageModelProfile,
+  price: ImageModelOptionPrice
+): number | null => {
+  const edit = imageEditPricing(model.id);
+  const worst = maxImageEditRequestCostMicroUsd(model, price);
+  if (!edit || worst === null) return null;
+  const credits = price.credits + edit.surchargeCredits;
+  return credits > 0 && worst / credits <= IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD ? credits : null;
+};
+
+/**
  * The policy floor on credits for one option: the smallest number of credits
  * that keeps the worst-case cost at or under the per-credit ceiling. This is
  * a mathematical minimum, not the sale price -- the sale price adds the

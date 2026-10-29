@@ -50,6 +50,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModel,
   getImageModelPrice,
+  imageEditCredits,
   imageThinkingBilling,
   maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
@@ -447,10 +448,21 @@ export const requestImageGeneration = async (
     model: plan.model!,
     price: plan.price!,
     // What this target charges: the option's fixed price, plus the edit
-    // surcharge that carries the photo's image-input budget.
-    credits: plan.price!.credits + (edit ? imageEditPricing(plan.modelId)!.surchargeCredits : 0),
+    // surcharge that carries the photo's input budget (0 marks an edit that
+    // would break the per-credit ceiling, refused below).
+    credits: edit ? (imageEditCredits(plan.model!, plan.price!) ?? 0) : plan.price!.credits,
     editPricing: edit ? imageEditPricing(plan.modelId) : null,
   }));
+  const overCeiling = resolvedTargets.filter((target) => target.credits <= 0);
+  if (overCeiling.length > 0) {
+    throw new ChatAccessError(
+      400,
+      "IMAGE_OPTION_NOT_SUPPORTED",
+      "The requested image model cannot edit at this price.",
+      undefined,
+      { unsupportedModels: overCeiling.map((target) => target.modelId) }
+    );
+  }
   const stale = stalePricingVersions(
     input.expectedPricingVersions,
     (modelId) => getImageModel(modelId)?.pricingVersion ?? null
@@ -1588,6 +1600,28 @@ export const processImageGeneration = async (
             modelId: generation.modelId,
             imageInputTokens,
             budgetTokens: soldBudgetTokens,
+            timestamp: new Date().toISOString(),
+          })
+        );
+      }
+      // A photo billed per edit has no token count to check; where the
+      // provider reports the request's cost, it is checked against what the
+      // edit reserved for output and photo together.
+      const editBudget = (reservation.pricingSnapshot as { edit?: { inputBudgetMicroUsd?: unknown } } | null)
+        ?.edit?.inputBudgetMicroUsd;
+      if (
+        typeof editBudget === "number" &&
+        snapshotOutputCost !== null &&
+        typeof result.reportedCostMicroUsd === "number" &&
+        result.reportedCostMicroUsd > snapshotOutputCost + editBudget
+      ) {
+        console.error(
+          JSON.stringify({
+            event: "image_edit_input_over_budget",
+            generationId,
+            modelId: generation.modelId,
+            reportedCostMicroUsd: result.reportedCostMicroUsd,
+            reservedMicroUsd: snapshotOutputCost + editBudget,
             timestamp: new Date().toISOString(),
           })
         );

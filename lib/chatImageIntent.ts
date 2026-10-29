@@ -29,10 +29,8 @@ import {
 } from "@/lib/chatImageIntentCore";
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { imageEditEnabled } from "@/lib/imageEditSource";
-import {
-    imageEditPricing,
-    imageModelSupportsEdit,
-} from "@/lib/imageGenerationPricing";
+import { IMAGE_QUALITY_BY_PRESET, type ImagePreset } from "@/lib/imageGenerationPricing";
+import { imageEditCredits } from "@/lib/imageModelRegistry";
 import { planAllowsFeature } from "@/lib/billingEntitlements";
 import type { BillingPlanConfig } from "@/lib/billingPlanDefaults";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
@@ -160,18 +158,24 @@ export async function detectChatImageRequest(input: {
         );
         candidates = chatImageModelCandidates(imageModels);
         if (attachedPhoto) {
-            // Only models that can edit, at the price an edit charges.
-            candidates = candidates
-                .filter((candidate) => imageModelSupportsEdit(candidate.id))
-                .map((candidate) => ({
-                    ...candidate,
-                    credits: Object.fromEntries(
-                        Object.entries(candidate.credits).map(([preset, credits]) => [
-                            preset,
-                            (credits ?? 0) + imageEditPricing(candidate.id)!.surchargeCredits,
-                        ])
-                    ),
-                }));
+            // Only models that can edit, at the price an edit charges -- the
+            // same check the reservation makes, so no preset is offered that
+            // the reservation would refuse.
+            candidates = candidates.flatMap((candidate) => {
+                const model = imageModels.find((entry) => entry.id === candidate.id);
+                const credits = Object.fromEntries(
+                    (Object.keys(candidate.credits) as ImagePreset[]).flatMap((preset) => {
+                        const price = model?.prices.find(
+                            (option) =>
+                                option.size === "1024x1024" &&
+                                option.quality === IMAGE_QUALITY_BY_PRESET[preset]
+                        );
+                        const editCredits = model && price ? imageEditCredits(model, price) : null;
+                        return editCredits === null ? [] : [[preset, editCredits]];
+                    })
+                );
+                return Object.keys(credits).length > 0 ? [{ ...candidate, credits }] : [];
+            });
         }
     } catch {
         return NOT_IMAGE;
