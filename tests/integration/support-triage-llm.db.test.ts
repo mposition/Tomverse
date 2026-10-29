@@ -186,6 +186,13 @@ test("the model chosen in the Admin console is saved, audited and preferred over
       setting.SupportTriageModelRefused
     );
     assert.equal(await setting.readSupportTriageLlmModelSetting(), null);
+    // Nothing saved: the environment variable decides.
+    const { supportTriageLlmFromEnv } = await import("@/lib/supportTriageLlm");
+    assert.deepEqual(await setting.resolveSupportTriageLlmModel({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), {
+      modelId: enabled.id,
+      source: "environment",
+    });
+    assert.notEqual(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), null);
     await setting.writeSupportTriageLlmModelSetting({ session: session as never, request, modelId: enabled.id });
     assert.equal(await setting.readSupportTriageLlmModelSetting(), enabled.id);
     const audit = await prisma.adminAuditLog.findFirstOrThrow({
@@ -194,12 +201,15 @@ test("the model chosen in the Admin console is saved, audited and preferred over
     });
     assert.deepEqual(audit.metadata, { modelId: enabled.id });
     // The saved choice wins over an environment variable naming a model that does not exist.
-    const { supportTriageLlmFromEnv } = await import("@/lib/supportTriageLlm");
     assert.notEqual(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: "no-such-model" }), null);
-    // Clearing it hands the decision back to the environment: here, nothing usable.
+    // Off is saved, so an environment variable naming a usable model cannot turn the step back on.
     await setting.writeSupportTriageLlmModelSetting({ session: session as never, request, modelId: null });
-    assert.equal(await setting.readSupportTriageLlmModelSetting(), null);
-    assert.equal(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: "no-such-model" }), null);
+    assert.equal(await setting.readSupportTriageLlmModelSetting(), setting.SUPPORT_TRIAGE_LLM_MODEL_OFF);
+    assert.deepEqual(await setting.resolveSupportTriageLlmModel({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), {
+      modelId: null,
+      source: "admin",
+    });
+    assert.equal(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), null);
     assert.equal(await supportTriageLlmFromEnv({}), null);
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: setting.SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY } });

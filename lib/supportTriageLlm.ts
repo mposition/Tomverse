@@ -21,9 +21,8 @@ import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { TRIAGE_LANES, type TriageLane } from "@/lib/supportTriageCore";
-import { readSupportTriageLlmModelSetting } from "@/lib/supportTriageLlmSetting";
+import { resolveSupportTriageLlmModel } from "@/lib/supportTriageLlmSetting";
 
-export const SUPPORT_TRIAGE_LLM_MODEL_ENV = "SUPPORT_TRIAGE_LLM_MODEL_ID";
 export const SUPPORT_TRIAGE_LLM_MAX_OUTPUT_TOKENS = 1_200;
 export const SUPPORT_TRIAGE_LLM_TIMEOUT_MS = 60_000;
 export const REPLY_DRAFT_MAX_CHARS = 2_000;
@@ -105,8 +104,8 @@ export type TriageLlm = (input: TriageLlmInput) => Promise<TriageLlmAnswer | nul
 export const supportTriageLlmFromEnv = async (
   env: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<TriageLlm | null> => {
-  // The Admin console's choice first; the environment variable only when none is saved.
-  const modelId = (await readSupportTriageLlmModelSetting()) ?? env[SUPPORT_TRIAGE_LLM_MODEL_ENV]?.trim();
+  // The Admin console's choice (a model or Off) first; the environment variable only when none is saved.
+  const { modelId } = await resolveSupportTriageLlmModel(env);
   if (!modelId) return null;
   const model = await getEnabledRuntimeModel(modelId);
   if (!model) {

@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 import {
   listSupportTriageModelOptions,
-  readSupportTriageLlmModelSetting,
+  resolveSupportTriageLlmModel,
   resolveSupportTriageEnabled,
   SupportTriageModelRefused,
   writeSupportTriageEnabledSetting,
@@ -39,13 +39,19 @@ export async function GET(request: Request) {
       minute: 30,
       day: 600,
     });
-    const [modelId, options, switchState] = await Promise.all([
-      readSupportTriageLlmModelSetting(),
+    const [model, options, switchState] = await Promise.all([
+      resolveSupportTriageLlmModel(process.env),
       listSupportTriageModelOptions(),
       resolveSupportTriageEnabled(process.env),
     ]);
     return Response.json(
-      { modelId, options, enabled: switchState.enabled, enabledSource: switchState.source },
+      {
+        modelId: model.modelId,
+        modelSource: model.source,
+        options,
+        enabled: switchState.enabled,
+        enabledSource: switchState.source,
+      },
       { headers }
     );
   } catch (error) {

@@ -1,9 +1,10 @@
 /**
  * Which model the support-triage LLM step uses, chosen in the Admin console
- * (owner request 2026-10-19). Stored as one AppSetting row; when there is no
- * row, SUPPORT_TRIAGE_LLM_MODEL_ID is the fallback, and with neither the step
- * is off. Only an enabled runtime model can be saved, and every change is
- * audited in the same transaction.
+ * (owner request 2026-10-19). Stored as one AppSetting row holding a model id
+ * or "off"; only when there is no row is SUPPORT_TRIAGE_LLM_MODEL_ID the
+ * fallback, so Off in the console stops paid calls whatever the environment
+ * says. With neither the step is off. Only an enabled runtime model can be
+ * saved, and every change is audited in the same transaction.
  */
 import "server-only";
 
@@ -15,8 +16,11 @@ import { prisma } from "@/lib/prisma";
 import { isSupportTriageEnabled } from "@/lib/supportTriageRouteAuth";
 
 export const SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY = "supportTriage.llmModelId";
+/** Saved in place of a model id when the Admin console switched the step off. */
+export const SUPPORT_TRIAGE_LLM_MODEL_OFF = "off";
+export const SUPPORT_TRIAGE_LLM_MODEL_ENV = "SUPPORT_TRIAGE_LLM_MODEL_ID";
 
-/** The saved model id, or null when the Admin console has not chosen one. */
+/** The saved value (a model id or "off"), or null when the Admin console has not chosen. */
 export const readSupportTriageLlmModelSetting = async (): Promise<string | null> => {
   const row = await prisma.appSetting.findUnique({
     where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY },
@@ -24,6 +28,15 @@ export const readSupportTriageLlmModelSetting = async (): Promise<string | null>
   });
   const value = row?.value.trim();
   return value ? value : null;
+};
+
+/** The model the step uses (null: off) and where that came from. */
+export const resolveSupportTriageLlmModel = async (
+  env: Readonly<Record<string, string | undefined>>
+): Promise<{ modelId: string | null; source: "admin" | "environment" }> => {
+  const saved = await readSupportTriageLlmModelSetting();
+  if (saved === null) return { modelId: env[SUPPORT_TRIAGE_LLM_MODEL_ENV]?.trim() || null, source: "environment" };
+  return { modelId: saved === SUPPORT_TRIAGE_LLM_MODEL_OFF ? null : saved, source: "admin" };
 };
 
 export type SupportTriageModelOption = { id: string; name: string; provider: string };
@@ -37,8 +50,8 @@ export const listSupportTriageModelOptions = async (): Promise<SupportTriageMode
 export class SupportTriageModelRefused extends Error {}
 
 /**
- * Saves `modelId`, or clears the choice with null (the environment variable
- * then applies again). Refuses a model that is not enabled.
+ * Saves `modelId`, or with null saves Off, which the environment variable
+ * cannot override. Refuses a model that is not enabled.
  */
 export const writeSupportTriageLlmModelSetting = async (input: {
   session: Session;
@@ -48,16 +61,13 @@ export const writeSupportTriageLlmModelSetting = async (input: {
   if (input.modelId !== null && !(await getEnabledRuntimeModel(input.modelId))) {
     throw new SupportTriageModelRefused("model_not_enabled");
   }
+  const value = input.modelId ?? SUPPORT_TRIAGE_LLM_MODEL_OFF;
   await prisma.$transaction(async (tx) => {
-    if (input.modelId === null) {
-      await tx.appSetting.deleteMany({ where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY } });
-    } else {
-      await tx.appSetting.upsert({
-        where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY },
-        create: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY, value: input.modelId },
-        update: { value: input.modelId },
-      });
-    }
+    await tx.appSetting.upsert({
+      where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY },
+      create: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY, value },
+      update: { value },
+    });
     await writeAdminAuditLog({
       tx,
       session: input.session,
@@ -65,7 +75,7 @@ export const writeSupportTriageLlmModelSetting = async (input: {
       action: "support_triage.llm_model_updated",
       targetType: "AppSettings",
       targetId: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY,
-      summary: input.modelId === null ? "Support-triage LLM model cleared" : "Support-triage LLM model set",
+      summary: input.modelId === null ? "Support-triage LLM step switched off" : "Support-triage LLM model set",
       metadata: { modelId: input.modelId },
     });
   });
