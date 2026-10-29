@@ -13,6 +13,7 @@ import {
 } from "@/lib/imageGenerationPricing";
 import { findChatImageEditSource } from "@/lib/imageEditSource";
 import { requestImageGeneration } from "@/lib/imageGenerationService";
+import { DEFAULT_IMAGE_MODEL_ID, getImageModel } from "@/lib/imageModelRegistry";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -157,8 +158,12 @@ export async function startChatImageTurn(
             throw new ChatAccessError(400, "IMAGE_EDIT_SOURCE_MISSING", "Attach the photo to edit.");
         }
         editSource = { attachmentId: source.attachmentId };
-        // The edit keeps the photo's shape, at that size's own price.
-        size = source.size;
+        // The edit keeps the photo's shape, at that size's own price, when
+        // every model sells that size; one that sells only a square edits into it.
+        const editModelIds = input.imageModelIds.length > 0 ? input.imageModelIds : [DEFAULT_IMAGE_MODEL_ID];
+        size = editModelIds.every((modelId) => getImageModel(modelId)?.sizes.includes(source.size))
+            ? source.size
+            : "1024x1024";
     }
     const result = await requestImageGeneration({
         userId: input.userId,

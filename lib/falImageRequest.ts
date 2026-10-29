@@ -219,3 +219,22 @@ export const parseFalImageResponse = (payload: unknown): FalImageAsset | null =>
     height: finite(record.height),
   };
 };
+
+/** Appended to the model's id: fal serves Nano Banana 2's edit as its own endpoint. */
+export const FAL_EDIT_ENDPOINT_SUFFIX = "/edit";
+
+/**
+ * An edit: the generation's body, every priced field unchanged, plus the photo
+ * as a data URI. fal sells the edit endpoint per output image at the
+ * generation's price (its pricing API, 2026-10-29), so nothing priced moves.
+ */
+export const buildFalImageEditRequest = (
+  input: FalImageRequestInput & { image: { bytes: Uint8Array; mimeType: string } }
+): Record<string, unknown> | null => {
+  const body = buildFalImageRequest(input);
+  if (!body) return null;
+  return {
+    ...body,
+    image_urls: [`data:${input.image.mimeType};base64,${Buffer.from(input.image.bytes).toString("base64")}`],
+  };
+};
