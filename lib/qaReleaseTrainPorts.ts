@@ -30,6 +30,8 @@ import {
   type QaReleaseTrainResolver,
 } from "./qaReleaseTrainResolve.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
+import type { QaReleaseTrainVerdictCandidate, QaReleaseTrainVerdictPorts } from "./qaReleaseTrainVerdict.ts";
+import { qaReleaseTrainVerdictsFrom } from "./qaReleaseTrainVerdictCore.ts";
 
 const REPOSITORY = QA_RELEASE_TRAIN_REPOSITORY;
 const API = `https://api.github.com/repos/${REPOSITORY}`;
@@ -320,23 +322,64 @@ export function createQaReleaseTrainGitPorts(input: {
   };
 }
 
-export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: Readonly<Record<string, string | undefined>> }): QaReleaseTrainPorts["app"] {
-  const call = async (body: Json) => {
-    const url = qaReleaseMergeLaneEndpoint({ ...input.env }, "train");
-    assertQaReleaseMergeLaneEndpoint(url, "train");
-    const response = await input.http({
-      method: "POST",
-      url,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${input.env.QA_RELEASE_MERGE_LANE_SECRET ?? ""}`,
-        [QA_RELEASE_CONTROL_REVISION_HEADER]: (input.env.QA_RELEASE_CONTROL_REVISION ?? "").trim(),
-      },
-      body: JSON.stringify(body),
-    });
-    if (response.status !== 200 && response.status !== 409) throw new Error(`app_${response.status}`);
-    return { status: response.status, body: record(JSON.parse(response.text)) };
+type AppInput = { http: QaReleaseHttp; env: Readonly<Record<string, string | undefined>> };
+
+/** One call to the app's train route with the lane's secret and revision. */
+async function trainAppCall(input: AppInput, body: Json) {
+  const url = qaReleaseMergeLaneEndpoint({ ...input.env }, "train");
+  assertQaReleaseMergeLaneEndpoint(url, "train");
+  const response = await input.http({
+    method: "POST",
+    url,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${input.env.QA_RELEASE_MERGE_LANE_SECRET ?? ""}`,
+      [QA_RELEASE_CONTROL_REVISION_HEADER]: (input.env.QA_RELEASE_CONTROL_REVISION ?? "").trim(),
+    },
+    body: JSON.stringify(body),
+  });
+  if (response.status !== 200 && response.status !== 409) throw new Error(`app_${response.status}`);
+  return { status: response.status, body: record(JSON.parse(response.text)) };
+}
+
+/** The verdict round's app calls (lib/qaReleaseTrainVerdict.ts): read what to check, save what was found. */
+export function createQaReleaseTrainVerdictAppPorts(input: AppInput): QaReleaseTrainVerdictPorts["app"] {
+  return {
+    async queue() {
+      const answer = await trainAppCall(input, { phase: "verdict_queue" });
+      const candidates = answer.body.candidates;
+      if (answer.status !== 200 || !Array.isArray(candidates)) throw new Error("app_queue_shape");
+      return {
+        candidates: candidates.flatMap((item) => {
+          const candidate = item as Partial<QaReleaseTrainVerdictCandidate> | null;
+          return candidate &&
+            Number.isInteger(candidate.number) &&
+            typeof candidate.mergeCommitSha === "string" &&
+            SHA.test(candidate.mergeCommitSha) &&
+            typeof candidate.mergedAt === "string"
+            ? [
+                {
+                  number: candidate.number as number,
+                  title: String(candidate.title ?? ""),
+                  mergeCommitSha: candidate.mergeCommitSha,
+                  mergedAt: candidate.mergedAt,
+                  mainPullRequest: Number.isInteger(candidate.mainPullRequest) ? (candidate.mainPullRequest as number) : null,
+                },
+              ]
+            : [];
+        }),
+        stored: qaReleaseTrainVerdictsFrom(answer.body.stored ?? null),
+      };
+    },
+    async save(verdicts) {
+      const answer = await trainAppCall(input, { phase: "verdicts", ...verdicts });
+      if (answer.status !== 200) throw new Error("app_verdicts_refused");
+    },
   };
+}
+
+export function createQaReleaseTrainAppPorts(input: AppInput): QaReleaseTrainPorts["app"] {
+  const call = (body: Json) => trainAppCall(input, body);
   return {
     async schedule(hours) {
       await call({ phase: "schedule", hours });

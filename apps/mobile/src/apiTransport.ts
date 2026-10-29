@@ -11,7 +11,9 @@ import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArt
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
 import { displayTimeZoneHeaders } from "../../../lib/continuationTitleContext";
-import { readChatImageTurnRequest, readChatImageTurnRef } from "../../../lib/chatImageTurnCore";
+import { readChatImageTurnRequest, readChatImageTurnRef, type ChatImageTurnRequest } from "../../../lib/chatImageTurnCore";
+import { askChatImageIntent } from "../../../lib/chatImageIntentClient";
+import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "../../../lib/imageGenerationPricing";
 import { uploadMobileFile } from "./nativeUpload";
 import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
 
@@ -142,6 +144,36 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     if (!persisted.messages.some(message => message.id === sourceId)) throw Error("SAVED_MESSAGE_MISSING");
     return { persisted, sourceId };
   }
+  // Reuse the saved question and this answer's idempotency key. An unreadable
+  // outcome is restored through load(), never resubmitted. An edit only says
+  // so: the server finds the photo from the saved question.
+  async function postImageTurn(conversationId: string, sourceId: string, assistantMessageId: string, modelId: string, decision: ChatImageTurnRequest, signal: AbortSignal) {
+    const receipt = await request<{ imageTurn?: unknown }>(`${pathFor(conversationId)}/image-turn`, {
+      ...json("POST", { sourceUserMessageId: sourceId, assistantMessageId, modelId,
+        imageModelIds: decision.modelIds, preset: decision.preset,
+        ...(decision.prompt ? { prompt: decision.prompt } : {}),
+        ...(decision.edit ? { edit: true } : {}) }), signal,
+    });
+    if (!readChatImageTurnRef(receipt.imageTurn)) throw Error("CHAT_IMAGE_RECEIPT_INVALID");
+  }
+  // A manual-mode send with a photo may ask to change it. Auto asks on the
+  // server beside its router call; here the composer asks, as the web's does.
+  // Only when the server advertises edits, so an older server is never sent a
+  // bearer it does not enroll; any failure or "no" leaves the ordinary send.
+  async function manualPhotoEdit(persisted: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal): Promise<ChatImageTurnRequest | null> {
+    if (persisted.selectionMode === "auto" || !text.trim() ||
+      !files.some(file => IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(file.mediaType.toLowerCase()))) return null;
+    try { if (!(await requireParity()).chatImageEdits) return null; } catch { return null; }
+    const revision = sessionRevision;
+    const decision = await askChatImageIntent(text, { conversationId: persisted.id, attachedPhoto: true }, (path, init) => run(String(path), () => {
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      return init ?? {};
+    }));
+    signal.throwIfAborted();
+    return decision.image && decision.edit
+      ? { modelIds: decision.modelId ? [decision.modelId] : [], preset: decision.preset, edit: true }
+      : null;
+  }
   async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }) {
     const messages = fitChatRequestTranscript(persisted.messages.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
@@ -186,14 +218,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         // call it with a native bearer until the server advertises enrollment.
         if (!(await requireParity()).chatImageTurns) throw new ApiClientError(503, "NATIVE_IMAGE_TURNS_UNAVAILABLE");
         controller.signal.throwIfAborted();
-        // Reuse the saved question and this answer's idempotency key. An
-        // unreadable outcome is restored through load(), never resubmitted.
-        const receipt = await request<{ imageTurn?: unknown }>(`${pathFor(persisted.id)}/image-turn`, {
-          ...json("POST", { sourceUserMessageId: sourceId, assistantMessageId, modelId,
-            imageModelIds: decision.modelIds, preset: decision.preset,
-            ...(decision.prompt ? { prompt: decision.prompt } : {}) }), signal: controller.signal,
-        });
-        if (!readChatImageTurnRef(receipt.imageTurn)) throw Error("CHAT_IMAGE_RECEIPT_INVALID");
+        await postImageTurn(persisted.id, sourceId, assistantMessageId, modelId, decision, controller.signal);
         return;
       }
       if ((response.headers.get("content-type") ?? "").includes("application/json")) {
@@ -382,6 +407,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     },
     send: async (conversation, text, files, signal, onProgress) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
+      const edit = await manualPhotoEdit(persisted, text, files, signal);
+      if (edit) {
+        await postImageTurn(persisted.id, sourceId, crypto.randomUUID(), persisted.selectedModels[0], edit, signal);
+        return;
+      }
       await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress);
     },
     sendReview: async (conversation, text, files, signal, progress) => {

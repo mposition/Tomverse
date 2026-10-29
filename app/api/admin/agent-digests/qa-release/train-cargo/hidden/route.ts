@@ -10,7 +10,14 @@ import { saveQaReleaseTrainHidden } from "@/lib/qaReleaseTrainCargoStore";
 // no recent sign-in, and a looser limit for hiding a long list one by one.
 // The train never reads it.
 
-const schema = z.object({ number: z.number().int().positive().max(9_999_999), hidden: z.boolean() }).strict();
+const NUMBER = z.number().int().positive().max(9_999_999);
+const schema = z.union([
+  z.object({ number: NUMBER, hidden: z.boolean() }).strict(),
+  // Hiding several at once: what the verdicts say needs no release (owner, 2026-10-29).
+  z
+    .object({ numbers: z.array(NUMBER).min(1).max(200), hidden: z.literal(true) })
+    .strict(),
+]);
 
 export async function POST(request: Request) {
   return runQaReleaseControlAdminMutation({
@@ -19,6 +26,6 @@ export async function POST(request: Request) {
     schema,
     recentSignIn: false,
     limit: { minute: 60, day: 1000 },
-    run: ({ body, session }) => saveQaReleaseTrainHidden({ session, request }, body.number, body.hidden),
+    run: ({ body, session }) => saveQaReleaseTrainHidden({ session, request }, "numbers" in body ? body.numbers : body.number, body.hidden),
   });
 }

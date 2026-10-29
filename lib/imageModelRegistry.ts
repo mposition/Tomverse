@@ -14,6 +14,7 @@ import { FAL_HIGH_THINKING_SURCHARGE_MICRO_USD } from "@/lib/falImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
+  IMAGE_EDIT_INPUT_BUDGET_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
   type ImageQuality,
   type ImageSize,
@@ -820,6 +821,19 @@ export const maxImageRequestCostMicroUsd = (
   if (thinkingCap === null) return null;
   if (!imageThinkingCapEnforced(model)) return null;
   return price.outputCostMicroUsd + IMAGE_PROMPT_BUDGET_MICRO_USD + thinkingCap;
+};
+
+/**
+ * Worst legitimate cost of an edit: the generation's worst case plus the
+ * budget for the downscaled photo sent as image input
+ * (IMAGE_EDIT_INPUT_BUDGET_MICRO_USD). Null wherever the generation's is.
+ */
+export const maxImageEditRequestCostMicroUsd = (
+  model: ImageModelProfile,
+  price: ImageModelOptionPrice
+): number | null => {
+  const generation = maxImageRequestCostMicroUsd(model, price);
+  return generation === null ? null : generation + IMAGE_EDIT_INPUT_BUDGET_MICRO_USD;
 };
 
 /**

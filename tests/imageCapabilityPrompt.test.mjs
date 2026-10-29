@@ -43,15 +43,16 @@ test("every state produces a non-empty block", () => {
   }
 });
 
-test("the token range is 231 to 353", () => {
+test("the token range is 256 to 378", () => {
   const tokens = everyState().map((state) => estimateTextTokens(build(state)));
-  assert.equal(Math.min(...tokens), 231);
+  assert.equal(Math.min(...tokens), 256);
   // The handoff paragraph is a prohibition that carries its own reason, and a
   // rule whose reason the model cannot see is the one it argues with. The
   // maximum is core + handoff + the file paragraph. The edit-limitation and
   // imperative-SVG variants that used to raise it were removed 2026-10-20
-  // with the rule-based intent classifier.
-  assert.equal(Math.max(...tokens), 353);
+  // with the rule-based intent classifier. The one-line photo-edit limit
+  // (2026-10-29) adds 25 to every state.
+  assert.equal(Math.max(...tokens), 378);
 });
 
 test("the minimum is the core alone and the maximum is handoff plus SVG", () => {
@@ -233,5 +234,12 @@ test("a Free account is given no route, and is not told about the plan either", 
   // Free accounts do have the file tool, so the SVG paragraph is present --
   // this combination is real, not hypothetical.
   assert.ok(text.includes("SVG"));
-  assert.equal(estimateTextTokens(text), 353);
+  assert.equal(estimateTextTokens(text), 378);
+});
+
+test("an answer never sends the user to another model to edit a photo", () => {
+  // 2026-10-29: asked to shrink a tree in an attached photo, a chat model
+  // answered that choosing a file-capable model would do it. None would.
+  assert.match(IMAGE_CAPABILITY_CORE, /You cannot edit an attached photo/);
+  assert.match(IMAGE_CAPABILITY_CORE, /Never say another model, mode\sor setting would edit it/);
 });

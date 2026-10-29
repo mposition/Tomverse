@@ -38,6 +38,9 @@ const imageTurnSchema = z
     // the image workspace takes any prompt they type -- so nothing is
     // widened by accepting it here.
     prompt: z.string().trim().min(1).max(4_000).optional(),
+    // Edit the photo attached to the saved question. Only a flag: the server
+    // finds the photo from the question itself.
+    edit: z.boolean().optional(),
   })
   .strict();
 
@@ -71,6 +74,7 @@ export async function POST(req: Request, { params }: Params) {
       ...(body.imageGroupModelIds ? { imageGroupModelIds: body.imageGroupModelIds } : {}),
       preset: body.preset,
       prompt: body.prompt,
+      ...(body.edit ? { edit: true } : {}),
       request: req,
     });
 

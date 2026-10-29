@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useQaReleaseTrainReads } from "@/components/admin/QaReleaseTrainRefresher";
 import { QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS, announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
 import { adminFetch, isAdminFetchTimeout } from "@/lib/adminFetch";
@@ -20,10 +20,13 @@ import {
 import type { QaReleaseTrainCargoCandidatesRead } from "@/lib/qaReleaseTrainCargoRead";
 import { QA_RELEASE_TRAIN_DEFAULT_SLOTS } from "@/lib/qaReleaseTrainCore";
 import type { QaReleaseTrainSchedule } from "@/lib/qaReleaseTrainStore";
+import type { QaReleaseTrainModelDecision } from "@/lib/qaReleaseTrainVerdictCore";
 
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
 const PAGE_PATH = "/admin/qa-release?tab=train";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
+/** The hidden route takes at most this many numbers in one request. */
+const HIDE_BATCH = 200;
 
 const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   available: "bg-emerald-400/15 text-emerald-300",
@@ -41,6 +44,14 @@ type View = {
   /** Candidates an operator hid from this list; display only. */
   hidden?: number[];
   schedule: (QaReleaseTrainSchedule & { nextDepartureAt: string | null }) | null;
+  /** When the train service last checked the candidates' content (lib/qaReleaseTrainVerdictCore.ts). */
+  verdictsAt?: string | null;
+};
+
+const DECISION_BADGE: Record<QaReleaseTrainModelDecision, string> = {
+  release: "bg-blue-400/15 text-blue-300",
+  not_needed: "bg-zinc-800 text-zinc-300",
+  operator: "bg-amber-300/15 text-amber-300",
 };
 
 const hoursText = (hours: readonly number[]) => hours.map((hour) => String(hour).padStart(2, "0")).join("·");
@@ -59,6 +70,7 @@ const hoursText = (hours: readonly number[]) => hours.map((hour) => String(hour)
  */
 export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { canWrite: boolean; id?: string; reloadKey?: number }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
+  const { locale } = useAdminLocale();
   const [view, setView] = useState<View | null>(null);
   // "slow": the read outlasted the wait; the server goes on and keeps it for the next try.
   const [failed, setFailed] = useState<false | "error" | "slow">(false);
@@ -71,7 +83,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
   const [showAll, setShowAll] = useState(false);
   // Hidden by an operator (owner, 2026-10-27): out of the list until shown again; a picked one stays listed.
   const [hidden, setHidden] = useState<Set<number>>(new Set());
-  const [hiding, setHiding] = useState<number | null>(null);
+  const [hiding, setHiding] = useState<number | "several" | null>(null);
   // On the train tab its own "Read again" (and the emergency panel's save) read it again.
   const reads = useQaReleaseTrainReads();
 
@@ -137,21 +149,33 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
       return next;
     });
 
-  const saveHidden = async (number: number, hide: boolean) => {
-    setHiding(number);
+  // What the model says needs no release, still listed: one press hides them all.
+  const notNeeded = candidates
+    .filter((candidate) => listed(candidate) && !isHidden(candidate) && !picked.has(candidate.number) && candidate.verdict?.model?.decision === "not_needed")
+    .map((candidate) => candidate.number);
+
+  const saveHidden = async (number: number | number[], hide: boolean) => {
+    setHiding(typeof number === "number" ? number : "several");
     setNotice(null);
     try {
-      const response = await adminFetch(`${API}/hidden`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ number, hidden: hide }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { result?: unknown };
-      if (!response.ok || !Array.isArray(payload.result)) {
-        setNotice({ tone: "error", text: m.trainCargoHideFailed });
-        return;
+      // Several go in the route's batches of at most HIDE_BATCH, one after another.
+      const bodies =
+        typeof number === "number"
+          ? [{ number, hidden: hide }]
+          : Array.from({ length: Math.ceil(number.length / HIDE_BATCH) }, (_, i) => ({ numbers: number.slice(i * HIDE_BATCH, (i + 1) * HIDE_BATCH), hidden: true }));
+      for (const body of bodies) {
+        const response = await adminFetch(`${API}/hidden`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { result?: unknown };
+        if (!response.ok || !Array.isArray(payload.result)) {
+          setNotice({ tone: "error", text: m.trainCargoHideFailed });
+          return;
+        }
+        setHidden(new Set(payload.result as number[]));
       }
-      setHidden(new Set(payload.result as number[]));
     } catch {
       setNotice({ tone: "error", text: m.trainCargoHideFailed });
     } finally {
@@ -208,11 +232,78 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
       in_main_pull_request: m.trainCargoInMainPull.replace("{number}", String(candidate.mainPullRequest ?? "")),
       on_main: candidate.foundByTrain
         ? m.trainCargoOnMainByTrain.replace("{train}", candidate.foundByTrain)
-        : m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
+        : candidate.foundByContent
+          ? m.trainCargoOnMainByContent
+          : m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
       mentioned: m.trainCargoMentioned.replace("{number}", String(candidate.mainPullRequest ?? "")),
       changes_workflows: m.trainCargoWorkflows,
       back_merge: m.trainCargoBackMerge,
     })[candidate.status];
+
+  // The content check and the model's judgement under a listed candidate (owner, 2026-10-29).
+  const verdictLine = (candidate: QaReleaseTrainCargoCandidate) => {
+    const verdict = candidate.verdict;
+    const testId = `qa-release-train-cargo-verdict-${candidate.number}`;
+    if (!verdict) {
+      return (
+        <div className="mt-1 text-xs text-zinc-500" data-testid={testId}>
+          {m.trainCargoVerdictPending}
+        </div>
+      );
+    }
+    if (verdict.content.state === "unread") {
+      return (
+        <div className="mt-1 text-xs text-amber-300" data-testid={testId}>
+          {m.trainCargoVerdictUnread}
+        </div>
+      );
+    }
+    if (verdict.content.state === "on_main") {
+      // Listed though proven on main (a workflow change the train cannot carry): say so, so it can be hidden.
+      return candidate.status === "on_main" ? null : (
+        <div className="mt-1 text-xs text-emerald-300" data-testid={testId}>
+          {m.trainCargoOnMainByContent}
+        </div>
+      );
+    }
+    const content = verdict.content;
+    const paths = content.files.map((file) => `${file.path} (${file.lines})`).join(", ") + (content.fileCount > content.files.length ? ", …" : "");
+    const model = verdict.model;
+    return (
+      <div className="mt-1 space-y-1 text-xs" data-testid={testId}>
+        <div className="break-words text-zinc-400">
+          {m.trainCargoVerdictDiffers
+            .replace("{missing}", String(content.missing))
+            .replace("{left}", String(content.leftOnMain))
+            .replace("{files}", String(content.fileCount))
+            .replace("{paths}", paths)}
+        </div>
+        {model ? (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className={`rounded-full px-2 py-0.5 font-medium ${DECISION_BADGE[model.decision]}`} data-testid={`qa-release-train-cargo-decision-${candidate.number}`}>
+              {{ release: m.trainCargoVerdictRelease, not_needed: m.trainCargoVerdictNotNeeded, operator: m.trainCargoVerdictOperator }[model.decision]}
+            </span>
+            <span className="text-zinc-300">{locale === "ko" ? model.why.ko : model.why.en}</span>
+            {model.evidence.length > 0 ? (
+              <span className="text-zinc-500">
+                {m.trainCargoVerdictEvidence}{" "}
+                {model.evidence.map((number, index) => (
+                  <span key={number}>
+                    {index > 0 ? ", " : ""}
+                    <a href={`${PR_URL}${number}`} target="_blank" rel="noreferrer" className="hover:underline">
+                      #{number}
+                    </a>
+                  </span>
+                ))}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <div className="text-zinc-500">{m.trainCargoVerdictAwaiting}</div>
+        )}
+      </div>
+    );
+  };
 
   const button =
     "inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50";
@@ -241,6 +332,11 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
         ) : null}
       </div>
       <p className="mt-1 text-[13px] text-zinc-400">{m.trainCargoNote}</p>
+      {view ? (
+        <p className="mt-1 text-xs text-zinc-500" data-testid="qa-release-train-cargo-verdicts-at">
+          {view.verdictsAt ? m.trainCargoVerdictsAt.replace("{at}", aestStamp(view.verdictsAt)) : m.trainCargoVerdictsNone}
+        </p>
+      ) : null}
       {view?.selection.departedWith ? (
         <p className="mt-2 text-[13px] text-zinc-400" data-testid="qa-release-train-cargo-departed">
           {carriedCount > 0
@@ -302,6 +398,17 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
             <button type="button" className={button} disabled={!canWrite || busy} onClick={() => setPicked(new Set())}>
               {m.trainCargoClear}
             </button>
+            {canWrite && notNeeded.length > 0 ? (
+              <button
+                type="button"
+                className={button}
+                disabled={busy || hiding !== null}
+                onClick={() => void saveHidden(notNeeded, true)}
+                data-testid="qa-release-train-cargo-hide-not-needed"
+              >
+                {m.trainCargoHideNotNeeded.replace("{count}", String(notNeeded.length))}
+              </button>
+            ) : null}
           </div>
 
           {hiddenByStatus.size > 0 || hiddenByOperator > 0 ? (
@@ -372,6 +479,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
                           {m.trainCargoWorkflowsManual}
                         </div>
                       ) : null}
+                      {listed(candidate) ? verdictLine(candidate) : null}
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[candidate.status]}`}>{statusText(candidate)}</span>
                     {canWrite && listed(candidate) && !picked.has(candidate.number) ? (
