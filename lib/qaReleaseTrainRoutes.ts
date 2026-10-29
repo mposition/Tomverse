@@ -50,6 +50,8 @@ const VERDICT = z
         .strict(),
       z.object({ state: z.literal("unread") }).strict(),
     ]),
+    mainSha: SHA.optional(),
+    checkedAt: AT.optional(),
     gapDigest: z.string().regex(/^[0-9a-f]{32}$/).optional(),
     model: z
       .object({
@@ -116,7 +118,8 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   const callerRevision = REVISION.test(header) ? Number(header) : null;
 
   const text = await request.text().catch(() => null);
-  // The verdicts are the largest body: up to 500 candidates with two short reasons each.
+  // The verdicts are the one large body (up to 500 candidates with two short
+  // reasons each); every other phase keeps the 16 KiB limit below.
   if (text === null || text.length > 1024 * 1024) return { status: 400, body: { error: "invalid_request" } };
   let parsed;
   try {
@@ -126,6 +129,7 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   }
   if (!parsed.success) return { status: 400, body: { error: "invalid_request" } };
   const input = parsed.data;
+  if (input.phase !== "verdicts" && text.length > 16 * 1024) return { status: 400, body: { error: "invalid_request" } };
   try {
     if (input.phase === "schedule") {
       // Display only (Admin's next train): no revision check, no audit row.

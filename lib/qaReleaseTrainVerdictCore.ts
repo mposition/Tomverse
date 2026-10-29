@@ -42,6 +42,9 @@ export type QaReleaseTrainModelVerdict = {
 export type QaReleaseTrainVerdict = {
   number: number;
   content: QaReleaseTrainContentVerdict;
+  /** Main's head this candidate was checked against, and when: one checked against an older main is checked again. */
+  mainSha?: string;
+  checkedAt?: string;
   /** The content difference the model judged, so the same difference is never asked twice. */
   gapDigest?: string;
   model?: QaReleaseTrainModelVerdict;

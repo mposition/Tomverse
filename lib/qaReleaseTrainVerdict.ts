@@ -41,6 +41,8 @@ import {
 export const QA_RELEASE_TRAIN_VERDICT_ASKS_PER_ROUND = 4;
 /** A failed ask about the same difference waits this long before the next. */
 const VERDICT_RETRY_MS = 6 * 60 * 60 * 1000;
+/** A candidate whose content could not be read is checked again after this. */
+const UNREAD_RETRY_MS = 60 * 60 * 1000;
 /** No model call starts with less than this left before the round's deadline. */
 const ASK_MARGIN_MS = 5 * 60 * 1000;
 /** Main pull requests shown to the model for one candidate. */
@@ -94,6 +96,15 @@ const failure = (step: string, error: unknown) => {
 const awaitsModel = (verdict: QaReleaseTrainVerdict | undefined, nowMs: number) =>
   verdict?.content.state === "differs" && !verdict.model && (!verdict.askedAt || nowMs - Date.parse(verdict.askedAt) > VERDICT_RETRY_MS);
 
+/**
+ * A candidate to check again: none yet, checked against another main (one a
+ * round's deadline skipped keeps its older one), or unread long enough ago.
+ */
+const awaitsCheck = (verdict: QaReleaseTrainVerdict | undefined, head: string, nowMs: number) =>
+  !verdict ||
+  verdict.mainSha !== head ||
+  (verdict.content.state === "unread" && (!verdict.checkedAt || nowMs - Date.parse(verdict.checkedAt) > UNREAD_RETRY_MS));
+
 export async function runQaReleaseTrainVerdictRound(
   ports: QaReleaseTrainVerdictPorts,
   options: { deadlineMs: number; now?: () => number },
@@ -106,10 +117,10 @@ export async function runQaReleaseTrainVerdictRound(
     const before = new Map((stored?.verdicts ?? []).map((verdict) => [verdict.number, verdict]));
     step = "main_head";
     const head = await ports.git.mainHead();
-    const due =
-      stored?.mainSha !== head ||
-      candidates.some((candidate) => !before.has(candidate.number)) ||
-      (ports.ask !== undefined && candidates.some((candidate) => awaitsModel(before.get(candidate.number), now())));
+    const due = candidates.some(
+      (candidate) =>
+        awaitsCheck(before.get(candidate.number), head, now()) || (ports.ask !== undefined && awaitsModel(before.get(candidate.number), now())),
+    );
     if (!due) return { verdict: "unchanged" };
 
     step = "prepare";
@@ -124,22 +135,23 @@ export async function runQaReleaseTrainVerdictRound(
         if (earlier) verdicts.push(earlier);
         continue;
       }
+      const checkedOn = { mainSha, checkedAt: new Date(now()).toISOString() };
       let checked;
       try {
         const read = await ports.git.analyse(candidate);
         checked = qaReleaseTrainContentGap(read.diff, read.changed);
       } catch {
-        verdicts.push({ number: candidate.number, content: { state: "unread" } });
+        verdicts.push({ number: candidate.number, content: { state: "unread" }, ...checkedOn });
         continue;
       }
       const { verdict: content, gap } = checked;
       if (content.state !== "differs") {
-        verdicts.push({ number: candidate.number, content });
+        verdicts.push({ number: candidate.number, content, ...checkedOn });
         continue;
       }
       const gapDigest = digest(qaReleaseTrainGapText(gap));
       const earlier = before.get(candidate.number);
-      const kept: QaReleaseTrainVerdict = { number: candidate.number, content, gapDigest };
+      const kept: QaReleaseTrainVerdict = { number: candidate.number, content, ...checkedOn, gapDigest };
       if (earlier?.gapDigest === gapDigest) {
         // The same difference: what the model said, or when it was last asked, still holds.
         if (earlier.model) kept.model = earlier.model;
@@ -241,6 +253,9 @@ const PATHS_PER_CALL = 200;
  */
 export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}): QaReleaseTrainVerdictPorts["git"] & { cleanup(): Promise<void> } {
   const remote = input.remote ?? `https://github.com/${QA_RELEASE_TRAIN_REPOSITORY}.git`;
+  /** The temporary directory this port made, and the only one it removes. */
+  let root: string | null = null;
+  /** Main's checkout inside it, once cloned. */
   let dir: string | null = null;
   let mainSha = "";
   let developSha = "";
@@ -285,12 +300,12 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
       return sha;
     },
     async prepare() {
-      dir = await mkdtemp(join(tmpdir(), "qa-release-verdict-"));
-      const main = join(dir, "main");
-      await git(["clone", "--quiet", "--config", "core.autocrlf=false", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", "main", remote, main], dir);
+      root = await mkdtemp(join(tmpdir(), "qa-release-verdict-"));
+      const main = join(root, "main");
+      await git(["clone", "--quiet", "--config", "core.autocrlf=false", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", "main", remote, main], root);
       dir = main;
       await git(["fetch", "--quiet", "--filter=blob:none", "origin", "+refs/heads/develop:refs/remotes/origin/develop"]);
-      await git(["worktree", "add", "--quiet", "--detach", join(main, "..", "develop"), "origin/develop"]);
+      await git(["worktree", "add", "--quiet", "--detach", join(root, "develop"), "origin/develop"]);
       mainSha = (await git(["rev-parse", "HEAD"])).trim();
       developSha = (await git(["rev-parse", "origin/develop"])).trim();
       if (!SHA.test(mainSha) || !SHA.test(developSha)) throw new Error("git_shape");
@@ -314,7 +329,7 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
       }
       const paths = [...post.keys()];
       const [onMain, onDevelop] = await Promise.all([blobs(mainSha, paths), blobs(developSha, paths)]);
-      const developRoot = join(dir, "..", "develop");
+      const developRoot = join(root ?? dir, "develop");
       const changed: QaReleaseTrainChangedFile[] = [];
       for (const path of paths) {
         const file: QaReleaseTrainChangedFile = {
@@ -338,7 +353,9 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
       return [...new Set(out.split("\n").map(qaReleaseTrainMergedPullNumber).filter((n): n is number => n !== null))];
     },
     async cleanup() {
-      if (dir) await rm(join(dir, ".."), { recursive: true, force: true });
+      if (root) await rm(root, { recursive: true, force: true });
+      root = null;
+      dir = null;
     },
   };
 }

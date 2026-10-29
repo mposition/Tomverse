@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -50,10 +50,42 @@ const options = { deadlineMs: NOW + 20 * 60_000, now: () => NOW };
 test("nothing to check, or nothing new since the last check, clones nothing", async () => {
   const none = ports({ candidates: [] });
   assert.deepEqual(await runQaReleaseTrainVerdictRound(none.ports, options), { verdict: "none" });
-  const stored = { mainSha: MAIN, at: "x", verdicts: [{ number: 1, content: { state: "on_main", lines: 1 } }] };
+  const stored = { mainSha: MAIN, at: "x", verdicts: [{ number: 1, content: { state: "on_main", lines: 1 }, mainSha: MAIN }] };
   const same = ports({ candidates: [candidate(1)], stored });
   assert.deepEqual(await runQaReleaseTrainVerdictRound(same.ports, options), { verdict: "unchanged" });
   assert.equal(same.calls.prepare, 0);
+});
+
+test("a candidate the deadline skipped keeps its old verdict and is checked again next round; an unread one after an hour", async () => {
+  const old = "f".repeat(40);
+  const stored = { mainSha: old, at: "x", verdicts: [1, 2].map((number) => ({ number, content: { state: "on_main", lines: 1 }, mainSha: old })) };
+  let clock = NOW;
+  // The first candidate's check runs the clock past the deadline.
+  const run = ports({ candidates: [candidate(1), candidate(2)], stored, read: () => ((clock = NOW + 30 * 60_000), onMain) });
+  await runQaReleaseTrainVerdictRound(run.ports, { deadlineMs: NOW + 20 * 60_000, now: () => clock });
+  const saved = new Map(run.calls.saved.verdicts.map((v) => [v.number, v]));
+  assert.equal(saved.get(1).mainSha, MAIN);
+  assert.equal(saved.get(2).mainSha, old);
+  const next = ports({ candidates: [candidate(1), candidate(2)], stored: run.calls.saved, read: () => onMain });
+  assert.equal((await runQaReleaseTrainVerdictRound(next.ports, options)).verdict, "saved");
+
+  const unread = { mainSha: MAIN, at: "x", verdicts: [{ number: 1, content: { state: "unread" }, mainSha: MAIN, checkedAt: new Date(NOW).toISOString() }] };
+  const soon = ports({ candidates: [candidate(1)], stored: unread });
+  assert.deepEqual(await runQaReleaseTrainVerdictRound(soon.ports, { ...options, now: () => NOW + 30 * 60_000 }), { verdict: "unchanged" });
+  const later = ports({ candidates: [candidate(1)], stored: unread, read: () => onMain });
+  assert.equal((await runQaReleaseTrainVerdictRound(later.ports, { deadlineMs: NOW + 3 * 60 * 60_000, now: () => NOW + 61 * 60_000 })).onMain, 1);
+});
+
+test("a clone that fails leaves nothing behind and removes only the port's own directory", async () => {
+  const neighbour = mkdtempSync(join(tmpdir(), "train-verdict-neighbour-"));
+  const port = createQaReleaseTrainVerdictGit({ remote: join(neighbour, "no-such-repository") });
+  try {
+    await assert.rejects(port.prepare(), /git_clone/);
+    await port.cleanup();
+    assert.ok(existsSync(neighbour));
+  } finally {
+    rmSync(neighbour, { recursive: true, force: true });
+  }
 });
 
 test("a moved main checks every candidate, asks the model about each difference, at most the round's limit", async () => {
