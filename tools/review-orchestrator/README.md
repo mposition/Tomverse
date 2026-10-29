@@ -543,9 +543,14 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   `.d.ts`를 볼 수 없어 `not_found`). `read.env`에 `PR_CI_AUTO_FIX_INSTALL=on`을 두면 Dependabot head에서만
   모델을 부르기 전에 작업 checkout에 `npm ci`를 돌립니다. 설치는 다음 조건으로 돌고, 막히면 모델은 패키지 없이 돕니다.
   - 패키지 코드는 실행하지 않습니다(`--ignore-scripts`).
-  - git·로컬 경로·다른 host에서 받는 패키지가 lockfile에 하나라도 있으면 설치하지 않습니다
-    (`non_registry_package`). integrity가 없는 tarball도 설치하지 않습니다(`no_integrity`). npm은 이런 패키지를 받을 때
-    `--ignore-scripts`와 상관없이 git이나 prepare script를 실행하기 때문입니다.
+  - lockfile은 허용 목록으로 검사합니다. npm은 git이나 로컬 경로에서 패키지를 받을 때 `--ignore-scripts`와
+    상관없이 git이나 prepare script를 실행하기 때문입니다. lockfile의 모든 항목은 다음 셋 중 하나여야 합니다.
+    - registry(`registry.npmjs.org`) tarball과 integrity, 또는 registry에서 받는 버전 번호
+    - checkout 안의 workspace 폴더
+    - 그 폴더로 가는 link
+
+    아니면 설치하지 않습니다(`non_registry_package`, `no_integrity`, `link_outside`, `path_outside`).
+    `npm-shrinkwrap.json`이 있으면 npm이 그것을 먼저 쓰므로 설치하지 않습니다(`shrinkwrap`).
   - npm이 도는 동안 브랜치의 `.npmrc`는 모두 옆으로 치워 둡니다. `.npmrc`는 npm이 실행할 프로그램(`git`, `node-gyp` 등)을
     지정할 수 있는데, 명령줄 flag가 이기는 것은 그 flag가 지정한 키뿐이기 때문입니다.
   - registry, user config, global config, `git`(`/bin/false`)은 명령줄에서 고정합니다. 계정의 npm 설정과 토큰도 쓰이지 않습니다.

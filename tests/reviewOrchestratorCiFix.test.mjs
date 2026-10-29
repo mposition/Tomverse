@@ -831,7 +831,7 @@ test("the report carries numbers, commit ids and fixed names only, newest first"
 const LOCK = (packages) => JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "app" }, ...packages } });
 const REGISTRY_PACKAGE = { version: "11.0.0", resolved: "https://registry.npmjs.org/@sentry/nextjs/-/nextjs-11.0.0.tgz", integrity: "sha512-x" };
 
-test("a lockfile installs only registry tarballs with an integrity, and workspace links", () => {
+test("a lockfile installs only registry packages and links to its own workspace folders", () => {
   assert.equal(lockfileProblem(LOCK({
     "node_modules/@sentry/nextjs": REGISTRY_PACKAGE,
     "node_modules/@tomverse/ui": { resolved: "packages/ui", link: true },
@@ -844,10 +844,27 @@ test("a lockfile installs only registry tarballs with an integrity, and workspac
     [{ version: "file:../evil" }, "non_registry_package"],
     [{ version: "1.0.0", resolved: "https://evil.example/y-1.0.0.tgz", integrity: "sha512-x" }, "non_registry_package"],
     [{ version: "1.0.0", resolved: "https://registry.npmjs.org/y/-/y-1.0.0.tgz" }, "no_integrity"],
+    [{ version: "1.0.0", resolved: "https://registry.npmjs.org/y/-/y-1.0.0.tgz", integrity: "x" }, "no_integrity"],
+    // A path with no scheme is still not the registry.
+    [{ version: "1.0.0", resolved: "../evil", integrity: "sha512-x" }, "non_registry_package"],
+    [{ version: "1.0.0", resolved: "/home/review/evil", integrity: "sha512-x" }, "non_registry_package"],
+    [{ version: "../evil" }, "non_registry_package"],
+    [{}, "non_registry_package"],
+    // A link must lead to one of the lockfile's own workspace folders.
+    [{ resolved: "../outside", link: true }, "link_outside"],
+    [{ resolved: "/home/review", link: true }, "link_outside"],
+    [{ resolved: "packages/missing", link: true }, "link_outside"],
+    [{ resolved: "node_modules/@sentry/nextjs", link: true }, "link_outside"],
+    [{ resolved: "packages/ui", link: "yes" }, "link_outside"],
     ["text", "lockfile_unreadable"],
   ]) {
-    assert.equal(lockfileProblem(LOCK({ "node_modules/y": entry })), reason, JSON.stringify(entry));
+    assert.equal(lockfileProblem(LOCK({ "node_modules/y": entry, "packages/ui": { version: "0.0.0" },
+      "node_modules/@sentry/nextjs": REGISTRY_PACKAGE })), reason, JSON.stringify(entry));
   }
+  assert.equal(lockfileProblem(LOCK({ "../escape/node_modules/y": REGISTRY_PACKAGE })), "path_outside");
+  assert.equal(lockfileProblem(LOCK({ "/abs/node_modules/y": REGISTRY_PACKAGE })), "path_outside");
+  assert.equal(lockfileProblem(LOCK({ "packages/ui": { version: "0.0.0", resolved: "git+ssh://x" } })), "non_registry_package",
+    "a workspace folder is never fetched");
   assert.equal(lockfileProblem("{"), "lockfile_unreadable");
   assert.equal(lockfileProblem(JSON.stringify({ lockfileVersion: 1, dependencies: {} })), "lockfile_unreadable");
 });
@@ -891,6 +908,10 @@ test("a Dependabot head's packages are installed with no script, no token and no
     assert.equal(installPackages(root, { spawn, source }), "non_registry_package");
     rmSync(join(root, "package-lock.json"));
     assert.equal(installPackages(root, { spawn, source }), "no_lockfile");
+    // npm ci reads a shrinkwrap first, so a safe package-lock.json beside one proves nothing.
+    writeFileSync(join(root, "package-lock.json"), LOCK({ "node_modules/@sentry/nextjs": REGISTRY_PACKAGE }));
+    writeFileSync(join(root, "npm-shrinkwrap.json"), LOCK({ "node_modules/y": { version: "file:../evil" } }));
+    assert.equal(installPackages(root, { spawn, source }), "shrinkwrap");
     assert.equal(calls.length, 0, "npm never runs on a lockfile it may not install");
   } finally {
     rmSync(root, { recursive: true, force: true });

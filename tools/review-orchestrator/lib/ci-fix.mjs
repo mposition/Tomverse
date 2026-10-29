@@ -493,12 +493,22 @@ export function removeTreeSymlinks(worktree) {
 
 const NPM_REGISTRY = "https://registry.npmjs.org/";
 
+const PLAIN_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?$/;
+/** A relative path that stays inside the checkout: no "..", not absolute, no scheme. */
+const insidePath = (path) => typeof path === "string" && path !== "" && !path.startsWith("/") && !path.includes("\\")
+  && !path.includes(":") && path.split("/").every((segment) => segment !== ".." && segment !== "." && segment !== "");
+
 /**
  * Why the branch's lockfile cannot be installed without running anything,
- * or null. npm runs programs for a package fetched from git or a local path
- * (a clone, a pack, its prepare script) whatever --ignore-scripts says, so
- * every package must be a registry tarball with an integrity, or a workspace
- * link (checked after the install, packagesProblem).
+ * or null. npm runs programs for a package it fetches from git or packs from
+ * a local path (a clone, its prepare script) whatever --ignore-scripts says,
+ * so the lockfile is checked against what is allowed, not against what is
+ * known to be bad. Each entry must be one of three kinds:
+ * - a workspace folder: a path inside the checkout, with no resolved;
+ * - a link to a workspace folder (link: true), whose target is one of those
+ *   folders;
+ * - a package under node_modules, either a registry tarball with an
+ *   integrity, or a plain version npm resolves from the registry.
  */
 export function lockfileProblem(text) {
   let lock;
@@ -509,16 +519,26 @@ export function lockfileProblem(text) {
   }
   const packages = lock?.packages;
   if (packages === null || typeof packages !== "object" || Array.isArray(packages)) return "lockfile_unreadable";
+  const isPackage = (path) => path === "node_modules" || path.startsWith("node_modules/") || path.includes("/node_modules/");
   for (const [path, entry] of Object.entries(packages)) {
-    if (path === "" || entry?.link === true) continue;
-    if (entry === null || typeof entry !== "object") return "lockfile_unreadable";
-    // A spec with a scheme (git+ssh:, file:, https:) is not a registry version.
-    for (const value of [entry.resolved, entry.version]) {
-      if (typeof value === "string" && /^[a-z][a-z0-9+.-]*:/i.test(value) && !value.startsWith(NPM_REGISTRY)) {
-        return "non_registry_package";
-      }
+    if (path === "") continue;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return "lockfile_unreadable";
+    if (!insidePath(path)) return "path_outside";
+    if (!isPackage(path)) {
+      if (entry.resolved !== undefined || entry.link !== undefined) return "non_registry_package";
+      continue;
     }
-    if (typeof entry.resolved === "string" && typeof entry.integrity !== "string") return "no_integrity";
+    if (entry.link !== undefined) {
+      const target = entry.resolved;
+      if (entry.link !== true || !insidePath(target) || isPackage(target) || packages[target] === undefined) return "link_outside";
+      continue;
+    }
+    if (entry.resolved !== undefined) {
+      if (typeof entry.resolved !== "string" || !entry.resolved.startsWith(NPM_REGISTRY)) return "non_registry_package";
+      if (typeof entry.integrity !== "string" || !/^sha(256|384|512)-/.test(entry.integrity)) return "no_integrity";
+    } else if (typeof entry.version !== "string" || !PLAIN_VERSION.test(entry.version)) {
+      return "non_registry_package";
+    }
   }
   return null;
 }
@@ -539,8 +559,11 @@ export function lockfileProblem(text) {
  * GitHub token, no npm_config_*. Returns null when installed, or a reason.
  */
 export function installPackages(worktree, { spawn = spawnSync, timeoutMs = CI_FIX_INSTALL_TIMEOUT_MS, source = process.env } = {}) {
+  // npm ci reads a shrinkwrap before package-lock.json: the file checked must be the one npm uses.
+  if (lstatOrNull(join(worktree, "npm-shrinkwrap.json")) !== null) return "shrinkwrap";
   let lockfile;
   try {
+    if (!lstatSync(join(worktree, "package-lock.json")).isFile()) return "no_lockfile";
     lockfile = readFileSync(join(worktree, "package-lock.json"), "utf8");
   } catch {
     return "no_lockfile";
@@ -566,6 +589,14 @@ export function installPackages(worktree, { spawn = spawnSync, timeoutMs = CI_FI
   if (result.status === 0) return null;
   if (result.error?.code === "ETIMEDOUT") return "timeout";
   return answerLine(String(result.stderr ?? "")) || `exit_${result.status ?? result.error?.code ?? "unknown"}`;
+}
+
+function lstatOrNull(path) {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
 }
 
 /** Every .npmrc in the checkout, outside .git and any node_modules. */
