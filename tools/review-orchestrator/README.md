@@ -543,8 +543,13 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   `.d.ts`를 볼 수 없어 `not_found`). `read.env`에 `PR_CI_AUTO_FIX_INSTALL=on`을 두면 Dependabot head에서만
   모델을 부르기 전에 작업 checkout에 `npm ci`를 돌립니다. 설치는 다음 조건으로 돌고, 막히면 모델은 패키지 없이 돕니다.
   - 패키지 코드는 실행하지 않습니다(`--ignore-scripts`).
-  - registry와 user config는 명령줄에서 고정합니다. 그래서 브랜치의 `.npmrc`나 계정의 npm 설정·토큰은 쓰이지 않습니다.
-  - npm에는 `PATH`·`HOME`·`LANG`·`TMPDIR`만 넘깁니다. GitHub 토큰은 넘기지 않습니다.
+  - git·로컬 경로·다른 host에서 받는 패키지가 lockfile에 하나라도 있으면 설치하지 않습니다
+    (`non_registry_package`). integrity가 없는 tarball도 설치하지 않습니다(`no_integrity`). npm은 이런 패키지를 받을 때
+    `--ignore-scripts`와 상관없이 git이나 prepare script를 실행하기 때문입니다.
+  - npm이 도는 동안 브랜치의 `.npmrc`는 모두 옆으로 치워 둡니다. `.npmrc`는 npm이 실행할 프로그램(`git`, `node-gyp` 등)을
+    지정할 수 있는데, 명령줄 flag가 이기는 것은 그 flag가 지정한 키뿐이기 때문입니다.
+  - registry, user config, global config, `git`(`/bin/false`)은 명령줄에서 고정합니다. 계정의 npm 설정과 토큰도 쓰이지 않습니다.
+  - npm에는 `PATH`·`HOME`·`LANG`·`TMPDIR`만 넘깁니다. GitHub 토큰, `npm_config_*`, `NODE_OPTIONS`는 넘기지 않습니다.
   - lockfile은 브랜치의 것이라 임의의 경로로 가는 링크를 만들 수 있습니다. 그래서 설치 뒤 모델 앞에서 한 번 검사합니다.
     링크가 checkout 밖을 가리키거나(`link_outside`), hard link·특수 파일이 있으면 설치한 패키지를 지웁니다.
     패키지가 가진 지시 파일(`CLAUDE.md`, `.claude/` 등)은 지웁니다.

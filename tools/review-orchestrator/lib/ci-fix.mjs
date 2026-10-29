@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { readJson, withLock, writeJsonAtomic } from "./fsutil.mjs";
@@ -491,25 +491,97 @@ export function removeTreeSymlinks(worktree) {
   return links;
 }
 
+const NPM_REGISTRY = "https://registry.npmjs.org/";
+
+/**
+ * Why the branch's lockfile cannot be installed without running anything,
+ * or null. npm runs programs for a package fetched from git or a local path
+ * (a clone, a pack, its prepare script) whatever --ignore-scripts says, so
+ * every package must be a registry tarball with an integrity, or a workspace
+ * link (checked after the install, packagesProblem).
+ */
+export function lockfileProblem(text) {
+  let lock;
+  try {
+    lock = JSON.parse(text);
+  } catch {
+    return "lockfile_unreadable";
+  }
+  const packages = lock?.packages;
+  if (packages === null || typeof packages !== "object" || Array.isArray(packages)) return "lockfile_unreadable";
+  for (const [path, entry] of Object.entries(packages)) {
+    if (path === "" || entry?.link === true) continue;
+    if (entry === null || typeof entry !== "object") return "lockfile_unreadable";
+    // A spec with a scheme (git+ssh:, file:, https:) is not a registry version.
+    for (const value of [entry.resolved, entry.version]) {
+      if (typeof value === "string" && /^[a-z][a-z0-9+.-]*:/i.test(value) && !value.startsWith(NPM_REGISTRY)) {
+        return "non_registry_package";
+      }
+    }
+    if (typeof entry.resolved === "string" && typeof entry.integrity !== "string") return "no_integrity";
+  }
+  return null;
+}
+
 /**
  * npm ci on a Dependabot head's checkout, so the model can read the updated
- * packages' type definitions instead of guessing their new API. No package
- * code runs (--ignore-scripts). The registry and the user config are fixed on
- * the command line, which outranks any .npmrc the branch carries, so the
- * account's own npm config and any token in it are not read. npm gets none of
- * this process's environment beyond what it needs to run: no GitHub token.
- * Returns null when installed, or a reason.
+ * packages' type definitions instead of guessing their new API. Nothing the
+ * branch carries may make npm run a program as this account, which holds the
+ * subscription credential:
+ * - no package code runs (--ignore-scripts);
+ * - a lockfile naming a git, local or other non-registry package is refused
+ *   (lockfileProblem);
+ * - the branch's .npmrc files are moved aside while npm runs. A command-line
+ *   flag outranks a project .npmrc only for the keys it names, and a .npmrc
+ *   could name a program (git, node-gyp, script-shell).
+ * - the registry, both other configs and git are fixed on the command line.
+ * npm gets none of this process's environment beyond what it needs to run: no
+ * GitHub token, no npm_config_*. Returns null when installed, or a reason.
  */
 export function installPackages(worktree, { spawn = spawnSync, timeoutMs = CI_FIX_INSTALL_TIMEOUT_MS, source = process.env } = {}) {
+  let lockfile;
+  try {
+    lockfile = readFileSync(join(worktree, "package-lock.json"), "utf8");
+  } catch {
+    return "no_lockfile";
+  }
+  const problem = lockfileProblem(lockfile);
+  if (problem) return problem;
   const env = {};
   for (const name of ["PATH", "HOME", "LANG", "TMPDIR"]) if (source[name] !== undefined) env[name] = source[name];
-  const result = spawn("npm", [
-    "ci", "--ignore-scripts", "--include=dev", "--no-audit", "--no-fund", "--no-progress", "--loglevel=error",
-    "--registry=https://registry.npmjs.org/", "--userconfig=/dev/null",
-  ], { cwd: worktree, env, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
+  const hidden = npmrcFiles(worktree).map((path) => {
+    const aside = `${path}.ci-fix-aside`;
+    renameSync(path, aside);
+    return [path, aside];
+  });
+  let result;
+  try {
+    result = spawn("npm", [
+      "ci", "--ignore-scripts", "--include=dev", "--no-audit", "--no-fund", "--no-progress", "--loglevel=error",
+      `--registry=${NPM_REGISTRY}`, "--userconfig=/dev/null", "--globalconfig=/dev/null", "--git=/bin/false",
+    ], { cwd: worktree, env, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
+  } finally {
+    for (const [path, aside] of hidden) renameSync(aside, path);
+  }
   if (result.status === 0) return null;
   if (result.error?.code === "ETIMEDOUT") return "timeout";
   return answerLine(String(result.stderr ?? "")) || `exit_${result.status ?? result.error?.code ?? "unknown"}`;
+}
+
+/** Every .npmrc in the checkout, outside .git and any node_modules. */
+function npmrcFiles(worktree) {
+  const found = [];
+  const pending = [worktree];
+  while (pending.length > 0) {
+    const dir = pending.pop();
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) pending.push(path);
+      else if (entry.name.toLowerCase() === ".npmrc") found.push(path);
+    }
+  }
+  return found;
 }
 
 /** Every node_modules directory in the checkout, without descending into one. */

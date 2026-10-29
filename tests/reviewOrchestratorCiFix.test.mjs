@@ -28,6 +28,7 @@ import {
   ciFixPrompt,
   deniedPaths,
   installPackages,
+  lockfileProblem,
   packageDirs,
   packagesProblem,
   encodePatch,
@@ -827,27 +828,73 @@ test("the report carries numbers, commit ids and fixed names only, newest first"
   assert.equal(ciFixReport(many, 100).entries.length, CI_FIX_REPORT_ENTRIES);
 });
 
-test("a Dependabot head's packages are installed with no script, no token and npm's own config ignored", () => {
-  const calls = [];
-  const spawn = (command, args, options) => {
-    calls.push({ command, args, options });
-    return { status: 0, stdout: "", stderr: "" };
-  };
-  const source = { PATH: "/usr/bin", HOME: "/home/review", PR_CI_AUTO_FIX_READ_TOKEN: "x".repeat(40),
-    NODE_ENV: "production", npm_config_registry: "https://evil.example/" };
-  assert.equal(installPackages("/w/wt", { spawn, source }), null);
-  const [{ command, args, options }] = calls;
-  assert.equal(command, "npm");
-  assert.equal(args[0], "ci");
-  for (const flag of ["--ignore-scripts", "--include=dev", "--registry=https://registry.npmjs.org/", "--userconfig=/dev/null"]) {
-    assert.ok(args.includes(flag), flag);
+const LOCK = (packages) => JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "app" }, ...packages } });
+const REGISTRY_PACKAGE = { version: "11.0.0", resolved: "https://registry.npmjs.org/@sentry/nextjs/-/nextjs-11.0.0.tgz", integrity: "sha512-x" };
+
+test("a lockfile installs only registry tarballs with an integrity, and workspace links", () => {
+  assert.equal(lockfileProblem(LOCK({
+    "node_modules/@sentry/nextjs": REGISTRY_PACKAGE,
+    "node_modules/@tomverse/ui": { resolved: "packages/ui", link: true },
+    "packages/ui": { name: "@tomverse/ui", version: "0.0.0" },
+    "node_modules/bundled": { version: "1.0.0", inBundle: true },
+  })), null);
+  for (const [entry, reason] of [
+    [{ version: "1.0.0", resolved: "git+ssh://git@github.com/x/y.git#abc", integrity: "sha512-x" }, "non_registry_package"],
+    [{ version: "git+https://github.com/x/y.git#abc" }, "non_registry_package"],
+    [{ version: "file:../evil" }, "non_registry_package"],
+    [{ version: "1.0.0", resolved: "https://evil.example/y-1.0.0.tgz", integrity: "sha512-x" }, "non_registry_package"],
+    [{ version: "1.0.0", resolved: "https://registry.npmjs.org/y/-/y-1.0.0.tgz" }, "no_integrity"],
+    ["text", "lockfile_unreadable"],
+  ]) {
+    assert.equal(lockfileProblem(LOCK({ "node_modules/y": entry })), reason, JSON.stringify(entry));
   }
-  assert.equal(options.cwd, "/w/wt");
-  assert.equal(options.timeout, CI_FIX_INSTALL_TIMEOUT_MS);
-  assert.deepEqual(options.env, { PATH: "/usr/bin", HOME: "/home/review" }, "no token, no npm_config_*, no NODE_ENV");
-  assert.equal(installPackages("/w", { spawn: () => ({ status: 1, stderr: "npm error\ncode ERESOLVE\n" }), source }), "npm error code ERESOLVE");
-  assert.equal(installPackages("/w", { spawn: () => ({ status: null, error: { code: "ETIMEDOUT" } }), source }), "timeout");
-  assert.equal(installPackages("/w", { spawn: () => ({ status: 2, stderr: "" }), source }), "exit_2");
+  assert.equal(lockfileProblem("{"), "lockfile_unreadable");
+  assert.equal(lockfileProblem(JSON.stringify({ lockfileVersion: 1, dependencies: {} })), "lockfile_unreadable");
+});
+
+test("a Dependabot head's packages are installed with no script, no token and none of the branch's npm config", () => {
+  const root = mkdtempSync(join(tmpdir(), "ci-fix-npm-"));
+  try {
+    writeFileSync(join(root, "package-lock.json"), LOCK({ "node_modules/@sentry/nextjs": REGISTRY_PACKAGE }));
+    writeFileSync(join(root, ".npmrc"), "git=./evil.sh\n");
+    mkdirSync(join(root, "apps", "mobile"), { recursive: true });
+    writeFileSync(join(root, "apps", "mobile", ".npmrc"), "node-gyp=./evil.sh\n");
+    const calls = [];
+    const spawn = (command, args, options) => {
+      calls.push({ command, args, options, npmrc: [existsSync(join(root, ".npmrc")), existsSync(join(root, "apps", "mobile", ".npmrc"))] });
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    const source = { PATH: "/usr/bin", HOME: "/home/review", PR_CI_AUTO_FIX_READ_TOKEN: "x".repeat(40),
+      NODE_ENV: "production", NODE_OPTIONS: "--require ./evil.js", npm_config_registry: "https://evil.example/" };
+    assert.equal(installPackages(root, { spawn, source }), null);
+    const [{ command, args, options, npmrc }] = calls;
+    assert.equal(command, "npm");
+    assert.equal(args[0], "ci");
+    for (const flag of ["--ignore-scripts", "--include=dev", "--registry=https://registry.npmjs.org/",
+      "--userconfig=/dev/null", "--globalconfig=/dev/null", "--git=/bin/false"]) {
+      assert.ok(args.includes(flag), flag);
+    }
+    assert.deepEqual(npmrc, [false, false], "the branch's .npmrc files are aside while npm runs");
+    assert.equal(readFileSync(join(root, ".npmrc"), "utf8"), "git=./evil.sh\n", "and back afterwards");
+    assert.equal(existsSync(join(root, "apps", "mobile", ".npmrc")), true);
+    assert.equal(options.cwd, root);
+    assert.equal(options.timeout, CI_FIX_INSTALL_TIMEOUT_MS);
+    assert.deepEqual(options.env, { PATH: "/usr/bin", HOME: "/home/review" }, "no token, no npm_config_*, no NODE_*");
+
+    assert.equal(installPackages(root, { spawn: () => ({ status: 1, stderr: "npm error\ncode ERESOLVE\n" }), source }), "npm error code ERESOLVE");
+    assert.equal(installPackages(root, { spawn: () => ({ status: null, error: { code: "ETIMEDOUT" } }), source }), "timeout");
+    assert.equal(installPackages(root, { spawn: () => ({ status: 2, stderr: "" }), source }), "exit_2");
+    assert.equal(existsSync(join(root, ".npmrc")), true, "restored after a failure too");
+
+    writeFileSync(join(root, "package-lock.json"), LOCK({ "node_modules/y": { version: "git+ssh://git@github.com/x/y.git" } }));
+    calls.length = 0;
+    assert.equal(installPackages(root, { spawn, source }), "non_registry_package");
+    rmSync(join(root, "package-lock.json"));
+    assert.equal(installPackages(root, { spawn, source }), "no_lockfile");
+    assert.equal(calls.length, 0, "npm never runs on a lockfile it may not install");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("every node_modules directory is found, none looked into", () => {
