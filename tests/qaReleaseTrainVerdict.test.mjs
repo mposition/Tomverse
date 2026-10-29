@@ -69,6 +69,15 @@ test("nothing to check, or nothing new since the last check, clones nothing", as
   assert.equal(same.calls.prepare, 0);
 });
 
+test("a round due for one new candidate checks only it, keeping the others' verdicts as they are", async () => {
+  const stored = { mainSha: MAIN, at: "x", verdicts: [{ number: 1, content: { state: "on_main", lines: 1 }, mainSha: MAIN, checkedAt: "2026-10-29T00:00:00.000Z" }] };
+  const read = [];
+  const run = ports({ candidates: [candidate(1), candidate(2)], stored, read: (c) => (read.push(c.number), onMain) });
+  await runQaReleaseTrainVerdictRound(run.ports, options);
+  assert.deepEqual(read, [2]);
+  assert.deepEqual(run.calls.saved.verdicts.find((v) => v.number === 1), stored.verdicts[0]);
+});
+
 test("a candidate the deadline skipped keeps its old verdict and is checked again next round; an unread one after an hour", async () => {
   const old = "f".repeat(40);
   const stored = { mainSha: old, at: "x", verdicts: [1, 2].map((number) => ({ number, content: { state: "on_main", lines: 1 }, mainSha: old })) };

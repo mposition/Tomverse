@@ -18,6 +18,7 @@ import {
   QA_RELEASE_TRAIN_VERDICT_EVIDENCE_MAX,
   QA_RELEASE_TRAIN_VERDICT_FILES,
   QA_RELEASE_TRAIN_VERDICT_WHY_CHARS,
+  QA_RELEASE_TRAIN_VERDICTS_MAX,
 } from "@/lib/qaReleaseTrainVerdictCore";
 
 /**
@@ -67,7 +68,7 @@ const VERDICT = z
 
 const body = z.union([
   z.object({ phase: z.literal("verdict_queue") }).strict(),
-  z.object({ phase: z.literal("verdicts"), mainSha: SHA, at: AT, verdicts: z.array(VERDICT).max(500) }).strict(),
+  z.object({ phase: z.literal("verdicts"), mainSha: SHA, at: AT, verdicts: z.array(VERDICT).max(QA_RELEASE_TRAIN_VERDICTS_MAX) }).strict(),
   z
     .object({
       phase: z.literal("schedule"),
@@ -121,7 +122,8 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   // The verdicts are the one large body (up to 500 candidates with two short
   // reasons each); every other phase keeps the 16 KiB limit below.
   if (text === null || text.length > 1024 * 1024) return { status: 400, body: { error: "invalid_request" } };
-  // A large body that is not the verdicts is refused before it is parsed.
+  // A large body that is not the verdicts is refused before it is parsed; the
+  // check after parsing is the real guard (a verdicts body this misses is refused anyway).
   if (text.length > 16 * 1024 && !/"phase"\s*:\s*"verdicts"/.test(text)) return { status: 400, body: { error: "invalid_request" } };
   let parsed;
   try {
@@ -145,6 +147,8 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
       if (read.status !== "ok") return { status: 503, body: { error: "candidates_unread" } };
       const candidates = read.candidates
         .filter((candidate) => qaReleaseTrainVerdictWanted(candidate.status) && candidate.mergeCommitSha)
+        // Newest first, no more than one verdict record holds.
+        .slice(0, QA_RELEASE_TRAIN_VERDICTS_MAX)
         .map((candidate) => ({
           number: candidate.number,
           title: candidate.title,

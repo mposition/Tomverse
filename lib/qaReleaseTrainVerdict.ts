@@ -135,6 +135,12 @@ export async function runQaReleaseTrainVerdictRound(
         if (earlier) verdicts.push(earlier);
         continue;
       }
+      // Checked against this main already, and not waiting for the model: kept as it is.
+      const stale = before.get(candidate.number);
+      if (stale && !awaitsCheck(stale, mainSha, now()) && !(ports.ask && awaitsModel(stale, now()))) {
+        verdicts.push(stale);
+        continue;
+      }
       const checkedOn = { mainSha, checkedAt: new Date(now()).toISOString() };
       let checked;
       try {

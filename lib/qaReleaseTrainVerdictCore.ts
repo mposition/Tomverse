@@ -19,7 +19,16 @@
  * (binary, or a mode change). `changedSince`: develop no longer holds some of
  * those hunks either. `modeDiffers`: main's file lacks the mode the candidate set.
  */
-export type QaReleaseTrainGapFile = { path: string; missing: string[]; leftOnMain: string[]; binary?: boolean; changedSince?: boolean; modeDiffers?: boolean };
+export type QaReleaseTrainGapFile = {
+  path: string;
+  missing: string[];
+  leftOnMain: string[];
+  binary?: boolean;
+  changedSince?: boolean;
+  modeDiffers?: boolean;
+  /** Main's `<mode> <blob>` where no line says what differs, so the digest changes when main's file does. */
+  mainFile?: string | null;
+};
 
 export type QaReleaseTrainContentVerdict =
   | { state: "on_main"; lines: number }
@@ -58,6 +67,8 @@ export type QaReleaseTrainVerdict = {
 };
 
 export const QA_RELEASE_TRAIN_VERDICT_FILES = 8;
+/** Candidates one verdict record holds; the queue sends no more than this. */
+export const QA_RELEASE_TRAIN_VERDICTS_MAX = 500;
 export const QA_RELEASE_TRAIN_VERDICT_WHY_CHARS = 300;
 export const QA_RELEASE_TRAIN_VERDICT_EVIDENCE_MAX = 8;
 
@@ -164,11 +175,11 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
     if (file.main === file.post || file.main === file.develop) continue;
     // Deleted by the candidate, still a path on main (main without it returned above).
     if (file.post === null) {
-      gap.push({ path: file.path, missing: [], leftOnMain: hunks.flatMap((hunk) => hunk.removed), ...(hunks.length === 0 ? { binary: true } : {}) });
+      gap.push({ path: file.path, missing: [], leftOnMain: hunks.flatMap((hunk) => hunk.removed), mainFile: file.main, ...(hunks.length === 0 ? { binary: true } : {}) });
       continue;
     }
     if (hunks.length === 0) {
-      gap.push({ path: file.path, missing: [], leftOnMain: [], binary: true });
+      gap.push({ path: file.path, missing: [], leftOnMain: [], binary: true, mainFile: file.main });
       continue;
     }
     // Left by the candidate but not a path on main, or its final newline changed: unconfirmed whole.
@@ -198,7 +209,7 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
     }
     const modeDiffers = mode(file.main) !== mode(file.post);
     if (missing.length > 0 || leftOnMain.length > 0 || modeDiffers) {
-      gap.push({ path: file.path, missing, leftOnMain, ...(changedSince ? { changedSince } : {}), ...(modeDiffers ? { modeDiffers } : {}) });
+      gap.push({ path: file.path, missing, leftOnMain, ...(changedSince ? { changedSince } : {}), ...(modeDiffers ? { modeDiffers, mainFile: file.main } : {}) });
     }
   }
   if (gap.length === 0) return { verdict: { state: "on_main", lines: counted }, gap };
@@ -219,7 +230,7 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
 
 /** The text the gap digest is taken over: every file and line, in a fixed order. */
 export const qaReleaseTrainGapText = (gap: readonly QaReleaseTrainGapFile[]) =>
-  JSON.stringify([...gap].sort((a, b) => a.path.localeCompare(b.path)).map((file) => [file.path, Boolean(file.binary), Boolean(file.changedSince), Boolean(file.modeDiffers), file.missing, file.leftOnMain]));
+  JSON.stringify([...gap].sort((a, b) => a.path.localeCompare(b.path)).map((file) => [file.path, Boolean(file.binary), Boolean(file.changedSince), Boolean(file.modeDiffers), file.mainFile ?? null, file.missing, file.leftOnMain]));
 
 /* ------------------------------------------------------------------------- */
 /* The model's judgement of a difference                                     */
@@ -339,8 +350,9 @@ export type QaReleaseTrainVerdicts = {
 
 /**
  * The stored verdicts, or none when the row does not parse. A verdict with a
- * state Admin does not know is dropped, and a model answer that is not whole
- * is dropped from its verdict: the read is as strict as the route's write.
+ * state Admin does not know is dropped, a model answer that is not whole is
+ * dropped from its verdict, and a bookkeeping field that is not a string is
+ * dropped too (the verdict then reads as due for another check).
  */
 export function qaReleaseTrainVerdictsFrom(value: unknown): QaReleaseTrainVerdicts | null {
   const row = value as Partial<QaReleaseTrainVerdicts> | null;
@@ -367,6 +379,7 @@ export function qaReleaseTrainVerdictsFrom(value: unknown): QaReleaseTrainVerdic
       model.evidence.every((n) => Number.isInteger(n));
     const kept = { ...(verdict as QaReleaseTrainVerdict) };
     if (!whole) delete kept.model;
+    for (const field of ["mainSha", "checkedAt", "gapDigest", "askedAt"] as const) if (field in kept && typeof kept[field] !== "string") delete kept[field];
     verdicts.push(kept);
   }
   return { mainSha: row.mainSha, at: row.at, verdicts };

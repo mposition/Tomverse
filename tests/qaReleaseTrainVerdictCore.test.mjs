@@ -6,6 +6,7 @@ import {
   QA_RELEASE_TRAIN_VERDICT_MAX_INPUT_CHARS,
   qaReleaseTrainContentGap,
   qaReleaseTrainDiffHunks,
+  qaReleaseTrainGapText,
   qaReleaseTrainModelVerdictFrom,
   qaReleaseTrainVerdictPrompt,
   qaReleaseTrainVerdictsFrom,
@@ -88,7 +89,7 @@ test("a mode the candidate set that main lacks differs, though every text hunk i
   const { gap } = qaReleaseTrainContentGap([
     file({ post: `100755 ${"a".repeat(40)}`, main: `100644 ${"b".repeat(40)}`, develop: `100755 ${"c".repeat(40)}`, diff: change, mainText: text("#!/bin/sh", "echo new"), developText: text("#!/bin/sh", "echo new", "exit 0") }),
   ]);
-  assert.deepEqual(gap, [{ path: "f.ts", missing: [], leftOnMain: [], modeDiffers: true }]);
+  assert.deepEqual(gap, [{ path: "f.ts", missing: [], leftOnMain: [], modeDiffers: true, mainFile: `100644 ${"b".repeat(40)}` }]);
 });
 
 test("one run of main's lines never stands for two hunks: two identical changes need two places, in order", () => {
@@ -114,7 +115,10 @@ test("a deleted file that main keeps as an empty file differs", () => {
 
 test("a binary file, or one with no hunk to read (a mode change), that matches neither the change nor develop differs", () => {
   const differs = qaReleaseTrainContentGap([file({ path: "e2e/x.png", binary: true, develop: blob("a") })]);
-  assert.deepEqual(differs.gap, [{ path: "e2e/x.png", missing: [], leftOnMain: [], binary: true }]);
+  assert.deepEqual(differs.gap, [{ path: "e2e/x.png", missing: [], leftOnMain: [], binary: true, mainFile: blob("b") }]);
+  // Main's file is in the digest: a binary main changes again is a new difference to ask about.
+  const changedAgain = qaReleaseTrainContentGap([file({ path: "e2e/x.png", binary: true, main: blob("e"), develop: blob("a") })]);
+  assert.notEqual(qaReleaseTrainGapText(changedAgain.gap), qaReleaseTrainGapText(differs.gap));
   assert.equal(qaReleaseTrainContentGap([file({ path: "e2e/x.png", binary: true, main: blob("c") })]).verdict.state, "on_main");
   assert.equal(qaReleaseTrainContentGap([file({ post: `100755 ${"a".repeat(40)}`, main: `100644 ${"a".repeat(40)}`, diff: "diff --git a/f.ts b/f.ts\nold mode 100644\nnew mode 100755\n" })]).verdict.state, "differs");
 });
