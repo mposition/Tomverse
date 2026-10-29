@@ -550,7 +550,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
     - 그 폴더로 가는 link
 
     아니면 설치하지 않습니다(`non_registry_package`, `no_integrity`, `link_outside`, `path_outside`).
-    `npm-shrinkwrap.json`이 있으면 npm이 그것을 먼저 쓰므로 설치하지 않습니다(`shrinkwrap`).
+    `npm-shrinkwrap.json`이 있으면 npm이 그것을 먼저 쓰므로 설치하지 않습니다. 자기 shrinkwrap을 가진 패키지(`hasShrinkwrap`)가 있어도 설치하지 않습니다(`shrinkwrap`).
   - npm이 도는 동안 브랜치의 `.npmrc`는 모두 옆으로 치워 둡니다. `.npmrc`는 npm이 실행할 프로그램(`git`, `node-gyp` 등)을
     지정할 수 있는데, 명령줄 flag가 이기는 것은 그 flag가 지정한 키뿐이기 때문입니다.
   - registry, user config, global config, `git`(`/bin/false`)은 명령줄에서 고정합니다. 계정의 npm 설정과 토큰도 쓰이지 않습니다.

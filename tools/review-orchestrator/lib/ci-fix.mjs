@@ -508,7 +508,8 @@ const insidePath = (path) => typeof path === "string" && path !== "" && !path.st
  * - a link to a workspace folder (link: true), whose target is one of those
  *   folders;
  * - a package under node_modules, either a registry tarball with an
- *   integrity, or a plain version npm resolves from the registry.
+ *   integrity, or a plain version npm resolves from the registry, carrying
+ *   no shrinkwrap of its own.
  */
 export function lockfileProblem(text) {
   let lock;
@@ -533,6 +534,8 @@ export function lockfileProblem(text) {
       if (entry.link !== true || !insidePath(target) || isPackage(target) || packages[target] === undefined) return "link_outside";
       continue;
     }
+    // npm reads a package's own shrinkwrap after extracting it, which would add entries this check never saw.
+    if (entry.hasShrinkwrap !== undefined && entry.hasShrinkwrap !== false) return "shrinkwrap";
     if (entry.resolved !== undefined) {
       if (typeof entry.resolved !== "string" || !entry.resolved.startsWith(NPM_REGISTRY)) return "non_registry_package";
       if (typeof entry.integrity !== "string" || !/^sha(256|384|512)-/.test(entry.integrity)) return "no_integrity";

@@ -861,6 +861,9 @@ test("a lockfile installs only registry packages and links to its own workspace 
     assert.equal(lockfileProblem(LOCK({ "node_modules/y": entry, "packages/ui": { version: "0.0.0" },
       "node_modules/@sentry/nextjs": REGISTRY_PACKAGE })), reason, JSON.stringify(entry));
   }
+  // A package with its own shrinkwrap adds entries npm reads only after extracting it.
+  assert.equal(lockfileProblem(LOCK({ "node_modules/y": { ...REGISTRY_PACKAGE, hasShrinkwrap: true } })), "shrinkwrap");
+  assert.equal(lockfileProblem(LOCK({ "node_modules/y": { ...REGISTRY_PACKAGE, hasShrinkwrap: false } })), null);
   assert.equal(lockfileProblem(LOCK({ "../escape/node_modules/y": REGISTRY_PACKAGE })), "path_outside");
   assert.equal(lockfileProblem(LOCK({ "/abs/node_modules/y": REGISTRY_PACKAGE })), "path_outside");
   assert.equal(lockfileProblem(LOCK({ "packages/ui": { version: "0.0.0", resolved: "git+ssh://x" } })), "non_registry_package",
