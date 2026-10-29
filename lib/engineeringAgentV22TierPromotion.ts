@@ -61,7 +61,7 @@ async function readPending(): Promise<Pending | null> {
 /** A queued publish item with no live capability, which no claim can take:
  * its capability lapsed before a round claimed it, or a claim spent it and
  * came back proven unwritten (a refusal before the push, or a lookup that
- * found no prior write), which per §10 needs a new one. */
+ * found no prior write), which needs a new one. */
 export const queuedWithoutCapabilityWhere = () => ({ kind: "publish",
   state: "queued", capabilities: { none: {
     unconsumedWorkItemId: { not: null }, expiresAt: { gt: new Date() } } } });
