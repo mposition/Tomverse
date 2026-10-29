@@ -335,8 +335,13 @@ test("adding a configuration name the control plane reads, or any AppSetting key
   assert.ok(slice([change(outside, { addedText: 'const k = "feature.secretSwitch";' })]).slicePaths.has(outside));
   assert.equal(slice([change(outside, { addedText: "// a comment about switches" })]).slicePaths.size, 0);
   // A name a shell or workflow gate reads counts too.
-  const shell = tree({ "scripts/gate.sh": 'if [ "${GATE_SHELL_MODE}" = on ]; then exit 1; fi\n' });
-  assert.ok(slice([change(outside, { addedText: "if (process.env.GATE_SHELL_MODE) {}" })], shell).slicePaths.has(outside));
+  const shell = tree({
+    "scripts/gate.sh": 'if [ "${GATE_SHELL_MODE}" = on ]; then exit 1; fi\n',
+    "scripts/gate.ps1": "if ($env:GATE_ONLY_MODE) { exit 1 }\n",
+  });
+  for (const name of ["GATE_SHELL_MODE", "GATE_ONLY_MODE"]) {
+    assert.ok(slice([change(outside, { addedText: `if (process.env.${name}) {}` })], shell).slicePaths.has(outside), name);
+  }
   assert.deepEqual([...environmentNames('process.env.FOO_KEY process.env["BAR"]')].sort(), ["BAR", "FOO_KEY"]);
 });
 

@@ -742,9 +742,10 @@ export const computeControlPlaneSlice = (input: {
     if (isRuntimeControlPlane(file.path) || isGateOutsideRuntime(file.path) || baseSlice.has(file.path)) {
       for (const name of environmentNames(file.text)) names.add(name);
     }
-    // A shell, Dockerfile or workflow reads `$NAME` / `${NAME}` / `${{ env.NAME }}`.
+    // A shell, Dockerfile or workflow reads `$NAME` / `${NAME}` / `${{ env.NAME }}`;
+    // PowerShell reads `$env:NAME` / `${env:NAME}`.
     if (isTextGate(file.path)) {
-      for (const match of file.text.matchAll(/\$\{?([A-Z_][A-Z0-9_]*)|\benv\.([A-Z_][A-Z0-9_]*)/g)) {
+      for (const match of file.text.matchAll(/\$\{?([A-Z_][A-Z0-9_]*)|\benv[.:]([A-Za-z_][A-Za-z0-9_]*)/g)) {
         names.add(match[1] ?? match[2]);
       }
     }
