@@ -223,3 +223,9 @@ test("the switch does nothing until the photo budget is backed by a measurement"
   assert.equal(imageEditInputBudgetVerified({ verifiedAt: "2026-10-30", measuredMaxTokens: 12_000 }, 10_000), false);
   assert.equal(imageEditInputBudgetVerified({ verifiedAt: null, measuredMaxTokens: 6_000 }, 10_000), false);
 });
+
+test("only EXIF orientations 5 to 8 turn the photo", async () => {
+  const { imageEditOutputSize } = await import("../lib/imageGenerationPricing.ts");
+  assert.equal(imageEditOutputSize(4032, 3024, 8), "1024x1536");
+  assert.equal(imageEditOutputSize(4032, 3024, 9), "1536x1024");
+});

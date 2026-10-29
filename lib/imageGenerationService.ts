@@ -1574,14 +1574,20 @@ export const processImageGeneration = async (
         reservation.pricingSnapshot,
         imageInputTokens
       );
-      if (typeof imageInputTokens === "number" && imageInputTokens > IMAGE_EDIT_INPUT_MAX_TOKENS) {
+      // Against the budget this job was sold with, not the live constant.
+      const soldBudgetTokens =
+        (reservation.pricingSnapshot as { edit?: { inputMaxTokens?: unknown } } | null)?.edit
+          ?.inputMaxTokens;
+      const budgetTokens =
+        typeof soldBudgetTokens === "number" ? soldBudgetTokens : IMAGE_EDIT_INPUT_MAX_TOKENS;
+      if (typeof imageInputTokens === "number" && imageInputTokens > budgetTokens) {
         console.error(
           JSON.stringify({
             event: "image_edit_input_over_budget",
             generationId,
             modelId: generation.modelId,
             imageInputTokens,
-            budgetTokens: IMAGE_EDIT_INPUT_MAX_TOKENS,
+            budgetTokens,
             timestamp: new Date().toISOString(),
           })
         );

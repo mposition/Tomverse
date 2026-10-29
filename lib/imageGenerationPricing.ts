@@ -103,7 +103,7 @@ export const imageEditOutputSize = (
   height: number,
   orientation?: number
 ): ImageSize => {
-  const [w, h] = orientation && orientation >= 5 ? [height, width] : [width, height];
+  const [w, h] = orientation && orientation >= 5 && orientation <= 8 ? [height, width] : [width, height];
   if (!(w > 0 && h > 0)) return "1024x1024";
   const ratio = w / h;
   if (ratio > 1.1) return "1536x1024";
