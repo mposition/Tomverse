@@ -38,7 +38,7 @@ import {
 } from "./qaReleaseTrainVerdictCore.ts";
 
 /** Each call is paid: at most this many a round. */
-export const QA_RELEASE_TRAIN_VERDICT_ASKS_PER_ROUND = 4;
+export const QA_RELEASE_TRAIN_VERDICT_ASKS_PER_ROUND = 10;
 /** A failed ask about the same difference waits this long before the next. */
 const VERDICT_RETRY_MS = 6 * 60 * 60 * 1000;
 /** A candidate whose content could not be read is checked again after this. */
@@ -273,14 +273,14 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
       throw new Error(args[0] === "clone" ? "git_clone" : "git_failed");
     }
   };
-  /** Path -> blob at a commit, for these paths only. */
+  /** Path -> `<mode> <blob>` at a commit, for these paths only. */
   const blobs = async (commit: string, paths: readonly string[]) => {
     const found = new Map<string, string>();
     for (let index = 0; index < paths.length; index += PATHS_PER_CALL) {
       const out = await git(["--literal-pathspecs", "ls-tree", "-r", "-z", commit, "--", ...paths.slice(index, index + PATHS_PER_CALL)]);
       for (const entry of out.split("\0")) {
-        const match = /^\d{6} blob ([0-9a-f]{40})\t([\s\S]+)$/.exec(entry);
-        if (match) found.set(match[2], match[1]);
+        const match = /^(\d{6}) blob ([0-9a-f]{40})\t([\s\S]+)$/.exec(entry);
+        if (match) found.set(match[3], `${match[1]} ${match[2]}`);
       }
     }
     return found;
@@ -318,8 +318,9 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
       // `-z` raw output: ":<modes> <old> <new> <status>" then the path, each NUL-terminated.
       const raw = (await git(["diff", "--raw", "-z", "--no-renames", "--no-abbrev", ...range])).split("\0");
       for (let index = 0; index + 1 < raw.length && raw[index].startsWith(":"); index += 2) {
-        const after = raw[index].slice(1).split(" ")[3] ?? "";
-        post.set(raw[index + 1], ZERO.test(after) ? null : after);
+        const [, mode = "", , after = ""] = raw[index].slice(1).split(" ");
+        // Mode and blob together: a change of mode alone is a change.
+        post.set(raw[index + 1], ZERO.test(after) ? null : `${mode} ${after}`);
       }
       const binary = new Set<string>();
       for (const line of (await git(["diff", "--numstat", "-z", "--no-renames", ...range])).split("\0")) {

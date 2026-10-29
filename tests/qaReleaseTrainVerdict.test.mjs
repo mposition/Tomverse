@@ -102,28 +102,34 @@ test("a clone that fails leaves nothing behind and removes only the port's own d
 });
 
 test("a moved main checks every candidate, asks the model about each difference, at most the round's limit", async () => {
+  const limit = QA_RELEASE_TRAIN_VERDICT_ASKS_PER_ROUND;
+  // One difference more than a round may ask about, and one candidate on main.
+  const numbers = Array.from({ length: limit + 2 }, (_, i) => i + 1);
+  const waiting = limit + 1;
+  const already = limit + 2;
+  const read = (c) => (c.number === already ? onMain : differs);
   const run = ports({
-    candidates: [1, 2, 3, 4, 5, 6].map(candidate),
+    candidates: numbers.map(candidate),
     stored: { mainSha: "f".repeat(40), at: "x", verdicts: [] },
-    read: (c) => (c.number === 6 ? onMain : differs),
+    read,
     ask: (question) => ({ decision: "not_needed", why: { ko: "가", en: "a" }, evidence: [question.mainPulls[0].number] }),
   });
   const outcome = await runQaReleaseTrainVerdictRound(run.ports, options);
-  assert.deepEqual(outcome, { verdict: "saved", checked: 6, onMain: 1, differs: 5, asked: QA_RELEASE_TRAIN_VERDICT_ASKS_PER_ROUND });
+  assert.deepEqual(outcome, { verdict: "saved", checked: limit + 2, onMain: 1, differs: limit + 1, asked: limit });
   // Newest first; the model saw the description and the main pull request near the difference.
-  assert.deepEqual(run.calls.asks.map((q) => q.number), [1, 2, 3, 4]);
+  assert.deepEqual(run.calls.asks.map((q) => q.number), numbers.slice(0, limit));
   assert.equal(run.calls.asks[0].body, "body 1");
   assert.deepEqual(run.calls.asks[0].mainPulls, [{ number: 2856, title: "title 2856", body: "body 2856" }]);
   const saved = new Map(run.calls.saved.verdicts.map((v) => [v.number, v]));
-  assert.equal(saved.get(6).content.state, "on_main");
+  assert.equal(saved.get(already).content.state, "on_main");
   assert.equal(saved.get(1).model.decision, "not_needed");
-  // The fifth difference waits for the next round, which is due because of it.
-  assert.equal(saved.get(5).model, undefined);
-  const next = ports({ candidates: [1, 2, 3, 4, 5, 6].map(candidate), stored: run.calls.saved, read: (c) => (c.number === 6 ? onMain : differs), ask: () => null });
+  // The difference past the limit waits for the next round, which is due because of it.
+  assert.equal(saved.get(waiting).model, undefined);
+  const next = ports({ candidates: numbers.map(candidate), stored: run.calls.saved, read, ask: () => null });
   const again = await runQaReleaseTrainVerdictRound(next.ports, options);
   assert.equal(again.verdict, "saved");
-  // Only #5 is asked: the others' answers are kept for the same difference.
-  assert.deepEqual(next.calls.asks.map((q) => q.number), [5]);
+  // Only that one is asked: the others' answers are kept for the same difference.
+  assert.deepEqual(next.calls.asks.map((q) => q.number), [waiting]);
   assert.equal(new Map(next.calls.saved.verdicts.map((v) => [v.number, v])).get(1).model.decision, "not_needed");
 });
 
@@ -183,6 +189,13 @@ test("the git port finds a change main carries under another commit, and names w
     };
     const shipped = merge("p11", "a.ts", "export const base = 1;\nexport const shipped = true;\n");
     const missing = merge("p12", "b.ts", "export const notYet = true;\n");
+    // #13 only makes a.ts executable: the same blob, another mode.
+    git("switch", "--quiet", "-c", "p13", "develop");
+    git("update-index", "--chmod=+x", "a.ts");
+    git("commit", "--quiet", "-m", "p13");
+    git("switch", "--quiet", "develop");
+    git("merge", "--quiet", "--no-ff", "-m", "Merge pull request #13 from x/p13", "p13");
+    const modeOnly = git("rev-parse", "HEAD");
     // main got #11 with other lines around it, through a release of its own.
     git("switch", "--quiet", "main");
     git("switch", "--quiet", "-c", "release/x");
@@ -202,6 +215,8 @@ test("the git port finds a change main carries under another commit, and names w
     const gap = qaReleaseTrainContentGap(two.changed);
     assert.equal(gap.verdict.state, "differs");
     assert.deepEqual(gap.gap, [{ path: "b.ts", missing: ["export const notYet = true;"], leftOnMain: [] }]);
+    const three = await port.analyse({ number: 13, title: "", mergeCommitSha: modeOnly, mergedAt: "2026-10-20T00:02:00Z", mainPullRequest: null });
+    assert.equal(qaReleaseTrainContentGap(three.changed).verdict.state, "differs");
     // The release that touched a.ts after #11 merged.
     assert.deepEqual(await port.mainPullsTouching(["a.ts"], "2000-01-01T00:00:00Z"), [900]);
   } finally {

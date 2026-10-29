@@ -13,17 +13,22 @@
  * the train still checks its own picks at departure.
  */
 
-/** A line of the candidate's change that main lacks, or still holds after the candidate removed it. */
-export type QaReleaseTrainGapFile = { path: string; missing: string[]; leftOnMain: string[]; binary?: boolean };
+/**
+ * A file whose change main is not proven to hold: the added and removed lines
+ * of each hunk not found in place. `binary`: a file with no hunk to read
+ * (binary, or a mode change). `changedSince`: develop no longer holds some of
+ * those hunks either.
+ */
+export type QaReleaseTrainGapFile = { path: string; missing: string[]; leftOnMain: string[]; binary?: boolean; changedSince?: boolean };
 
 export type QaReleaseTrainContentVerdict =
   | { state: "on_main"; lines: number }
   | {
       state: "differs";
       lines: number;
-      /** Lines the candidate added that develop keeps and main lacks. */
+      /** Added lines of the hunks main is not proven to hold. */
       missing: number;
-      /** Lines the candidate removed that main still holds and develop no longer does. */
+      /** Removed lines of those hunks. */
       leftOnMain: number;
       /** The files with a difference, most first, at most QA_RELEASE_TRAIN_VERDICT_FILES. */
       files: { path: string; lines: number }[];
@@ -55,12 +60,6 @@ export type QaReleaseTrainVerdict = {
 export const QA_RELEASE_TRAIN_VERDICT_FILES = 8;
 export const QA_RELEASE_TRAIN_VERDICT_WHY_CHARS = 300;
 export const QA_RELEASE_TRAIN_VERDICT_EVIDENCE_MAX = 8;
-
-/**
- * Whether a line says enough to be found by itself: a bare `}` or `);` is in
- * nearly every file and proves nothing, so it is never counted either way.
- */
-export const qaReleaseTrainLineCounts = (line: string) => line.length >= 4 && /[A-Za-z0-9]/.test(line);
 
 /** One hunk of a file's diff: its pre-image and post-image (context in order), and its own removed and added lines. */
 export type QaReleaseTrainDiffHunk = { before: string[]; after: string[]; removed: string[]; added: string[] };
@@ -108,11 +107,12 @@ function holdsBlock(lines: readonly string[], block: readonly string[]): boolean
 }
 
 /**
- * One changed file as the git port reads it: the blob the candidate left,
- * main's and develop's blob and text now, and the candidate's own diff of the
- * file (`-U3`, read for this path alone, so no path is ever parsed out of a
- * diff header). `post` is null for a file the candidate deleted; a side's
- * blob is null where the file does not exist.
+ * One changed file as the git port reads it: the file the candidate left,
+ * main's and develop's now (each `<mode> <blob>`, so a mode change is a
+ * change), their text, and the candidate's own diff of the file (`-U3`, read
+ * for this path alone, so no path is ever parsed out of a diff header).
+ * `post` is null for a file the candidate deleted; a side is null where the
+ * file does not exist.
  */
 export type QaReleaseTrainChangedFile = {
   path: string;
@@ -126,20 +126,19 @@ export type QaReleaseTrainChangedFile = {
 };
 
 /**
- * The content check of one candidate. Wrong "on main" would hide a release
- * the operator needs, so only what is shown in place counts:
+ * The content check of one candidate. A wrong "on main" would hide a release
+ * the operator needs, so "on main" is only what is proven; everything else is
+ * a difference for the model and the operator to judge:
  *
- * - a file main holds exactly as the candidate left it is on main;
- * - otherwise each hunk is looked for whole, with its context, in order:
- *   its post-image in main means main has its additions there. Not in main
- *   but in develop, its added lines are missing. In neither (develop changed
- *   the spot again since), its lines are read one by one: a line develop
- *   still has and main lacks is missing, and a hunk with no line that says
- *   enough by itself to be found (only `}` or `20,`) is missing whole;
- * - its pre-image still in main, while develop no longer has it, leaves its
- *   removed lines on main;
- * - a binary file, or one whose diff has no hunk to read, that differs from
- *   main is missing unless main already matches develop.
+ * - a file main holds exactly as the candidate left it, or exactly as
+ *   develop holds it now (whatever develop did with the change since, main
+ *   has nothing of this file left to receive), is on main;
+ * - otherwise each hunk is on main only when its whole post-image -- its
+ *   context and added lines, in order -- is in main; a hunk that is not
+ *   leaves its added and removed lines unconfirmed, marked when develop no
+ *   longer holds that post-image either (develop changed the spot since);
+ * - a binary file, or one whose diff has no hunk (a mode change), that
+ *   matches neither is unconfirmed whole.
  */
 export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChangedFile[]): { verdict: QaReleaseTrainContentVerdict; gap: QaReleaseTrainGapFile[] } {
   const gap: QaReleaseTrainGapFile[] = [];
@@ -148,26 +147,25 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
   for (const file of changed) {
     const hunks = file.binary ? [] : qaReleaseTrainDiffHunks(file.diff ?? "");
     counted += hunks.length === 0 ? 1 : hunks.reduce((sum, hunk) => sum + hunk.added.length + hunk.removed.length, 0);
-    if (file.main === file.post) continue;
+    if (file.main === file.post || file.main === file.develop) continue;
     if (hunks.length === 0) {
-      if (file.main !== file.develop) gap.push({ path: file.path, missing: [], leftOnMain: [], binary: true });
+      gap.push({ path: file.path, missing: [], leftOnMain: [], binary: true });
       continue;
     }
     const main = lines(file.mainText);
     const develop = lines(file.developText);
-    const mainSet = new Set(main);
-    const developSet = new Set(develop);
+    // An empty post-image (the file emptied or deleted) is only "found" in a file with nothing left.
+    const holds = (side: readonly string[], block: readonly string[]) => (block.length === 0 ? side.length === 0 : holdsBlock(side, block));
     const missing: string[] = [];
     const leftOnMain: string[] = [];
+    let changedSince = false;
     for (const hunk of hunks) {
-      if (hunk.added.length > 0 && !holdsBlock(main, hunk.after)) {
-        if (holdsBlock(develop, hunk.after)) missing.push(...hunk.added);
-        else if (!hunk.added.some(qaReleaseTrainLineCounts)) missing.push(...hunk.added);
-        else missing.push(...hunk.added.filter((line) => developSet.has(line) && !mainSet.has(line)));
-      }
-      if (hunk.removed.length > 0 && holdsBlock(main, hunk.before) && !holdsBlock(develop, hunk.before)) leftOnMain.push(...hunk.removed);
+      if ((hunk.added.length === 0 && hunk.removed.length === 0) || holds(main, hunk.after)) continue;
+      missing.push(...hunk.added);
+      leftOnMain.push(...hunk.removed);
+      if (!holds(develop, hunk.after)) changedSince = true;
     }
-    if (missing.length > 0 || leftOnMain.length > 0) gap.push({ path: file.path, missing, leftOnMain });
+    if (missing.length > 0 || leftOnMain.length > 0) gap.push({ path: file.path, missing, leftOnMain, ...(changedSince ? { changedSince } : {}) });
   }
   if (gap.length === 0) return { verdict: { state: "on_main", lines: counted }, gap };
   const size = (file: QaReleaseTrainGapFile) => (file.binary ? 1 : file.missing.length + file.leftOnMain.length);
@@ -187,7 +185,7 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
 
 /** The text the gap digest is taken over: every file and line, in a fixed order. */
 export const qaReleaseTrainGapText = (gap: readonly QaReleaseTrainGapFile[]) =>
-  JSON.stringify([...gap].sort((a, b) => a.path.localeCompare(b.path)).map((file) => [file.path, Boolean(file.binary), file.missing, file.leftOnMain]));
+  JSON.stringify([...gap].sort((a, b) => a.path.localeCompare(b.path)).map((file) => [file.path, Boolean(file.binary), Boolean(file.changedSince), file.missing, file.leftOnMain]));
 
 /* ------------------------------------------------------------------------- */
 /* The model's judgement of a difference                                     */
@@ -212,7 +210,7 @@ const MAIN_BODY_CHARS = 5_000;
 
 export const QA_RELEASE_TRAIN_VERDICT_SYSTEM = [
   "You decide whether a develop pull request still needs releasing to main (production) in a web app's release train.",
-  "A content check compared its own change with main and develop: you get the lines it added that main lacks (and develop still has), and the lines it removed that main still has.",
+  "A content check looked for each hunk of its change in main, whole and in place: you get the hunks main is not proven to hold, as their added (+) and removed (-) lines. A file marked 'develop changed since' means develop no longer holds some of those hunks as written either: a later pull request changed that spot.",
   "Answer `release` when main lacks a change of this pull request that should reach production.",
   "Answer `not_needed` when what main lacks does not need releasing: only comments or wording, a record or document kept on develop, a file generated for develop, something main got in another form, or a change a main release deliberately left out (say which).",
   "Answer `operator` when the evidence does not settle it.",
@@ -241,7 +239,7 @@ export function qaReleaseTrainVerdictPrompt(question: QaReleaseTrainVerdictQuest
     "Its description:",
     question.body.slice(0, BODY_CHARS) || "(none)",
     "",
-    `Content check: ${question.verdict.missing} added line(s) main lacks and ${question.verdict.leftOnMain} removed line(s) main still has, in ${question.verdict.fileCount} file(s), out of ${question.verdict.lines} changed line(s).`,
+    `Content check: ${question.verdict.missing} added and ${question.verdict.leftOnMain} removed line(s) not proven on main, in ${question.verdict.fileCount} file(s), out of ${question.verdict.lines} changed line(s).`,
   ];
   const pulls = question.mainPulls.length
     ? ["", "Main pull requests that touched these files after it, or mention it:", ...question.mainPulls.flatMap((pull) => ["", `#${pull.number}: ${pull.title}`, pull.body.slice(0, MAIN_BODY_CHARS)])]
@@ -251,7 +249,8 @@ export function qaReleaseTrainVerdictPrompt(question: QaReleaseTrainVerdictQuest
   for (const file of question.gap) {
     const part = [
       `File: ${file.path}`,
-      ...(file.binary ? ["(binary file: main's copy differs)"] : []),
+      ...(file.binary ? ["(no text to compare: binary, or a mode change; main's file differs)"] : []),
+      ...(file.changedSince ? ["(develop changed since)"] : []),
       ...file.missing.slice(0, LINES_PER_FILE).map((line) => `+ ${line}`),
       ...(file.missing.length > LINES_PER_FILE ? [`+ ... ${file.missing.length - LINES_PER_FILE} more`] : []),
       ...file.leftOnMain.slice(0, LINES_PER_FILE).map((line) => `- ${line}`),
@@ -264,7 +263,7 @@ export function qaReleaseTrainVerdictPrompt(question: QaReleaseTrainVerdictQuest
     budget -= part.length + 1;
     files.push(part);
   }
-  return [...head, "", "What main lacks (+ added, - removed):", ...files, ...pulls].join("\n");
+  return [...head, "", "Not proven on main (+ added, - removed):", ...files, ...pulls].join("\n");
 }
 
 const clean = (value: unknown) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, QA_RELEASE_TRAIN_VERDICT_WHY_CHARS) : "");
