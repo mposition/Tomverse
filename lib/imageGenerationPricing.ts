@@ -35,56 +35,108 @@ export const IMAGE_PROMPT_BUDGET_MICRO_USD = Math.ceil(
     1_000_000
 ); // 5_000
 
-// Editing an attached photo (POST /v1/images/edits) sends that photo as image
-// input, billed at the image-input rate (gpt-image-2: US$8 per million tokens,
-// read 2026-10-29 from developers.openai.com/api/docs/pricing). OpenAI does
-// not publish a token formula for gpt-image-2 inputs; the model reads every
-// input at high fidelity. The server therefore downscales the photo to fit
-// IMAGE_EDIT_INPUT_MAX_EDGE_PX before sending it, and budgets
-// IMAGE_EDIT_INPUT_MAX_TOKENS for it -- about 1.5x what gpt-image-1 charged a
-// high-fidelity non-square input of that size (6,563 tokens). Settlement
-// records the reported image tokens, and a request over this budget is logged
-// (image_edit_input_over_budget) so the number is corrected from evidence.
-//
-// That budget is an estimate, not a proven bound, and a fixed price needs a
-// computable worst case (docs/policy/image-generation.md section 12). So edits
-// stay refused -- whatever IMAGE_EDIT_ENABLED says -- until this records the
-// image tokens actually reported for a 1024px edit input
-// (scripts/measure-image-edit-tokens.mjs) and the budget is set from them.
-//
-// Measured 2026-10-29 (owner-approved run, gpt-image-2, quality low): reported
-// image-input tokens were 1,024 for 1024x1024, 768 for 1024x768 and 768 for
-// 768x1024 -- one token per 32x32 pixels. A photo fitted inside 1024px is
-// therefore at most 1,024 image tokens, a tenth of the budget.
-export const IMAGE_EDIT_INPUT_BUDGET_VERIFICATION: {
-  verifiedAt: string | null;
-  /** The largest reported image-input tokens across the measured shapes. */
-  measuredMaxTokens: number | null;
-} = { verifiedAt: "2026-10-29", measuredMaxTokens: 1_024 };
-
-/** Whether the budget below is backed by a measurement it covers. */
-export const imageEditInputBudgetVerified = (
-  verification = IMAGE_EDIT_INPUT_BUDGET_VERIFICATION,
-  budgetTokens = IMAGE_EDIT_INPUT_MAX_TOKENS
-) =>
-  verification.verifiedAt !== null &&
-  verification.measuredMaxTokens !== null &&
-  verification.measuredMaxTokens > 0 &&
-  verification.measuredMaxTokens <= budgetTokens;
-
+// Editing an attached photo sends that photo to the provider as input. The
+// server first downscales it to fit IMAGE_EDIT_INPUT_MAX_EDGE_PX, and each
+// edit-capable model below states what that photo costs and the credits an
+// edit adds for it. A fixed price needs a computable worst case
+// (docs/policy/image-generation.md section 12), so a model edits only once
+// `verification` records the evidence its budget rests on.
 export const IMAGE_EDIT_INPUT_MAX_EDGE_PX = 1_024;
-export const IMAGE_EDIT_INPUT_MAX_TOKENS = 10_000;
-export const IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS = 8;
-export const IMAGE_EDIT_INPUT_BUDGET_MICRO_USD = Math.ceil(
-  (IMAGE_EDIT_INPUT_MAX_TOKENS * IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS * 1_000_000) /
-    1_000_000
-); // 80_000
 
-// Credits added to the option's own price for an edit. 90 credits carry the
-// 80,000 micro-USD input budget under the per-credit ceiling for every
-// gpt-image-2 option: the worst is high 1024x1024 at
-// (211,000 + 5,000 + 80,000) / (250 + 90) = 871 micro-USD per credit.
-export const IMAGE_EDIT_SURCHARGE_CREDITS = 90;
+export type ImageEditPricing = {
+  /** Credits added to the option's own price for an edit. */
+  surchargeCredits: number;
+  /** Worst-case provider cost of the photo as input, micro-USD. */
+  inputBudgetMicroUsd: number;
+  /**
+   * Set when the provider bills the photo per input token: settlement then
+   * charges the reported tokens at this rate. Null when the photo costs a
+   * fixed amount per edit, which settles at `inputBudgetMicroUsd`.
+   */
+  inputTokens: { maxTokens: number; usdPerMillionTokens: number } | null;
+  /**
+   * What the budget rests on: a published price or a billed measurement.
+   * Null holds edits on the model whatever IMAGE_EDIT_ENABLED says.
+   */
+  verification: {
+    verifiedAt: string;
+    source: string;
+    /** For a per-token photo: the largest image-input tokens measured. */
+    measuredMaxTokens?: number;
+  } | null;
+};
+
+const IMAGE_EDIT_PRICING: Readonly<Record<string, ImageEditPricing>> = {
+  // POST /v1/images/edits bills the photo as image input at US$8 per million
+  // tokens (read 2026-10-29 from developers.openai.com/api/docs/pricing). The
+  // budget is 10,000 tokens. Measured 2026-10-29 (owner-approved run,
+  // scripts/measure-image-edit-tokens.mjs, quality low): 1,024 image tokens
+  // for 1024x1024 and 768 for 1024x768 and 768x1024 -- one token per 32x32
+  // pixels, so a photo fitted inside 1024px is at most a tenth of the budget.
+  // 90 credits carry the 80,000 micro-USD budget under the ceiling for every
+  // option: the worst is high 1024x1024 at
+  // (211,000 + 5,000 + 80,000) / (250 + 90) = 871 micro-USD per credit.
+  "gpt-image-2": {
+    surchargeCredits: 90,
+    inputBudgetMicroUsd: 80_000,
+    inputTokens: { maxTokens: 10_000, usdPerMillionTokens: 8 },
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "scripts/measure-image-edit-tokens.mjs",
+      measuredMaxTokens: 1_024,
+    },
+  },
+  // fal-ai/nano-banana-2/edit is sold per output image at the generation's own
+  // price: fal's pricing API answered unit_price 0.08 per "images" for both
+  // endpoints on 2026-10-29, and the model page names no input-image charge.
+  // The edit therefore adds nothing to the 120 credits already approved. The
+  // owner-approved run of scripts/measure-image-edit-providers.mjs on
+  // 2026-10-29 sent a 1024x768 photo as a data URI and got back a 1024x1024
+  // PNG on fal's CDN -- the image that was priced.
+  "fal-ai/nano-banana-2": {
+    surchargeCredits: 0,
+    inputBudgetMicroUsd: 0,
+    inputTokens: null,
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "fal pricing API (fal-ai/nano-banana-2/edit) + scripts/measure-image-edit-providers.mjs",
+    },
+  },
+  // xAI publishes only the output price (US$0.05 per image). The owner-approved
+  // run of scripts/measure-image-edit-providers.mjs on 2026-10-29 read
+  // usage.cost_in_usd_ticks = 600,000,000 (US$0.06) for both a 1024x1024 and a
+  // 1024x768 photo: the photo adds a flat US$0.01 whatever its shape. 10
+  // credits carry it at (50,000 + 5,000 + 10,000) / (75 + 10) = 765 micro-USD
+  // per credit, beside the 733 the generation already carries.
+  "grok-imagine-image-quality-20260403": {
+    surchargeCredits: 10,
+    inputBudgetMicroUsd: 10_000,
+    inputTokens: null,
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "scripts/measure-image-edit-providers.mjs (usage.cost_in_usd_ticks)",
+    },
+  },
+};
+
+/** A model's edit pricing, or null when it cannot edit (yet). */
+export const imageEditPricing = (modelId: string): ImageEditPricing | null => {
+  const pricing = Object.hasOwn(IMAGE_EDIT_PRICING, modelId) ? IMAGE_EDIT_PRICING[modelId] : null;
+  if (!pricing?.verification) return null;
+  const { inputTokens, verification } = pricing;
+  // A per-token budget is proven only by a measurement inside it.
+  if (
+    inputTokens &&
+    !(
+      typeof verification.measuredMaxTokens === "number" &&
+      verification.measuredMaxTokens > 0 &&
+      verification.measuredMaxTokens <= inputTokens.maxTokens
+    )
+  ) {
+    return null;
+  }
+  return pricing;
+};
 
 // The photo is read from the user's own attachment storage; anything larger
 // is not a file /api/chat accepted (its MAX_ATTACHMENT_SIZE).
@@ -117,14 +169,13 @@ export const imageEditOutputSize = (
 };
 
 /**
- * Image models whose adapter can edit a supplied photo. Only OpenAI's Images
- * API edit endpoint is implemented; every other model refuses an edit request
- * before anything is reserved.
+ * Image models that edit a supplied photo: those with verified edit pricing.
+ * Every other model refuses an edit request before anything is reserved.
  */
-export const IMAGE_EDIT_MODEL_IDS: readonly string[] = ["gpt-image-2"];
+export const imageModelSupportsEdit = (modelId: string) => imageEditPricing(modelId) !== null;
 
-export const imageModelSupportsEdit = (modelId: string) =>
-  IMAGE_EDIT_MODEL_IDS.includes(modelId);
+/** Models with an edit adapter, verified or still held. */
+export const IMAGE_EDIT_MODEL_IDS: readonly string[] = Object.keys(IMAGE_EDIT_PRICING);
 
 
 export type ImageQuality = "low" | "medium" | "high";
