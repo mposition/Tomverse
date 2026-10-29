@@ -14,8 +14,8 @@ import { FAL_HIGH_THINKING_SURCHARGE_MICRO_USD } from "@/lib/falImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
-  IMAGE_EDIT_INPUT_BUDGET_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
+  imageEditPricing,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
@@ -825,15 +825,33 @@ export const maxImageRequestCostMicroUsd = (
 
 /**
  * Worst legitimate cost of an edit: the generation's worst case plus the
- * budget for the downscaled photo sent as image input
- * (IMAGE_EDIT_INPUT_BUDGET_MICRO_USD). Null wherever the generation's is.
+ * model's budget for the downscaled photo it is sent. Null wherever the
+ * generation's is, and for a model that cannot edit.
  */
 export const maxImageEditRequestCostMicroUsd = (
   model: ImageModelProfile,
   price: ImageModelOptionPrice
 ): number | null => {
+  const edit = imageEditPricing(model.id);
   const generation = maxImageRequestCostMicroUsd(model, price);
-  return generation === null ? null : generation + IMAGE_EDIT_INPUT_BUDGET_MICRO_USD;
+  return generation === null || edit === null ? null : generation + edit.inputBudgetMicroUsd;
+};
+
+/**
+ * What an edit of this option charges, or null when the model cannot edit or
+ * the edit's worst case would break the per-credit ceiling. Checked on the
+ * live price, because a catalogue revision can lower an option's credits to a
+ * value the generation still carries and the edit's photo does not.
+ */
+export const imageEditCredits = (
+  model: ImageModelProfile,
+  price: ImageModelOptionPrice
+): number | null => {
+  const edit = imageEditPricing(model.id);
+  const worst = maxImageEditRequestCostMicroUsd(model, price);
+  if (!edit || worst === null) return null;
+  const credits = price.credits + edit.surchargeCredits;
+  return credits > 0 && worst / credits <= IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD ? credits : null;
 };
 
 /**

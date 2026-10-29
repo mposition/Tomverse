@@ -86,3 +86,38 @@ export const parseXaiImageResponse = (payload: unknown): XaiImagePayload | null 
   if (!mimeType) return null;
   return { imageBase64, mimeType };
 };
+
+export const XAI_IMAGE_EDITS_URL = "https://api.x.ai/v1/images/edits";
+
+/**
+ * An edit: the generation's body -- the same 1K square scope -- plus the photo
+ * as a data URL, which xAI accepts for JPEG, PNG and WebP.
+ */
+export const buildXaiImageEditRequest = (input: {
+  apiModelId: string;
+  prompt: string;
+  size: ImageSize;
+  image: { bytes: Uint8Array; mimeType: string };
+}): Record<string, unknown> | null => {
+  const body = buildXaiImageRequest(input);
+  if (!body) return null;
+  return {
+    ...body,
+    image: {
+      url: `data:${input.image.mimeType};base64,${Buffer.from(input.image.bytes).toString("base64")}`,
+      type: "image_url",
+    },
+  };
+};
+
+/**
+ * What xAI says the request cost, in micro-USD (one USD is 10^10 ticks), or
+ * null when the response does not say.
+ */
+export const xaiReportedCostMicroUsd = (payload: unknown): number | null => {
+  const ticks = (payload as { usage?: { cost_in_usd_ticks?: unknown } } | null)?.usage
+    ?.cost_in_usd_ticks;
+  return typeof ticks === "number" && Number.isFinite(ticks) && ticks >= 0
+    ? Math.ceil(ticks / 10_000)
+    : null;
+};

@@ -1,6 +1,6 @@
 // Measures what OpenAI bills as image input for a gpt-image-2 edit of a photo
 // the size the executor sends (fit inside 1024px), so the edit budget in
-// lib/imageGenerationPricing.ts (IMAGE_EDIT_INPUT_BUDGET_VERIFICATION) can be
+// lib/imageGenerationPricing.ts (gpt-image-2's edit pricing) can be
 // recorded from evidence rather than estimated.
 //
 // PAID: three low-quality edits, roughly US$0.30 at the worst case. Runs only
