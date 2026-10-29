@@ -690,6 +690,44 @@ test("jobs that failed the same way are named once, and the whole file stays wit
   assert.ok(big.length <= 60_000);
 });
 
+// #3089 (2026-10-29): a release record check printed its finding as plain
+// text, so the excerpt held a TODO test and cleanup lines and the model found
+// no failure. #2997's npm ci ERESOLVE was lost the same way.
+test("a failed step's own last lines are shown, and a TODO test is not a failure", () => {
+  const log = [
+    stamp("not ok 827 - ART-FORMAT-01 (outcome): a txt call # TODO fix undecided"),
+    stamp("# fail 0"),
+    stamp("##[group]Run npm run check:release-records"),
+    stamp("npm run check:release-records"),
+    stamp("##[endgroup]"),
+    stamp("Release record check failed."),
+    stamp("  .github/audits/release-2026-10-28__7dcd418c6.md  leaves Release SHA blank."),
+    stamp("##[error]Process completed with exit code 1."),
+    ...Array.from({ length: 2000 }, (_, i) => stamp(`Post job cleanup line ${i} with some padding to make it long enough`, i)),
+  ].join("\n");
+  const { text, key } = failureExcerpt(log, 4000);
+  assert.match(text, /##\[group\]Run npm run check:release-records[\s\S]*Release record check failed\.[\s\S]*leaves Release SHA blank/);
+  assert.doesNotMatch(text, /ART-FORMAT-01/);
+  assert.equal(key, "npm run check:release-records", "with no failure line, the failed step names the failure");
+
+  // A long step with no header in reach still shows its last lines.
+  const long = [stamp("##[group]Run npm test"), ...Array.from({ length: 500 }, (_, i) => stamp(`ok ${i}`, i)), stamp("the last words"),
+    stamp("##[error]Process completed with exit code 1.")].join("\n");
+  const shown = failureExcerpt(long, 4000);
+  assert.match(shown.text, /the last words/);
+  assert.doesNotMatch(shown.text, /^ok 1$/m);
+  assert.equal(shown.key, "");
+});
+
+test("jobs that failed in the same step with no failure line are named once", async () => {
+  const failing = (shard) => [stamp(`checkout ${shard}`), stamp("##[group]Run npm ci"), stamp("##[endgroup]"),
+    stamp("npm error code ERESOLVE"), stamp("##[error]Process completed with exit code 1."), stamp(`cleanup ${shard}`)].join("\n");
+  const logs = { 1: failing("consent"), 2: failing("email") };
+  const text = await failureLog([{ id: 1, label: "DB / consent" }, { id: 2, label: "DB / email" }], 60_000, async (job) => logs[job.id]);
+  assert.equal((text.match(/npm error code ERESOLVE/g) ?? []).length, 1);
+  assert.match(text, /===== DB \/ email =====\n\(the same failure lines as DB \/ consent\)/);
+});
+
 test("the model's answer is kept as one line, its end first to stay", () => {
   assert.equal(answerLine("  The failure is\n\na runner timeout.  "), "The failure is a runner timeout.");
   const long = answerLine(`${"a".repeat(1000)} conclusion`);
