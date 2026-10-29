@@ -51,11 +51,16 @@ export const IMAGE_PROMPT_BUDGET_MICRO_USD = Math.ceil(
 // stay refused -- whatever IMAGE_EDIT_ENABLED says -- until this records the
 // image tokens actually reported for a 1024px edit input
 // (scripts/measure-image-edit-tokens.mjs) and the budget is set from them.
+//
+// Measured 2026-10-29 (owner-approved run, gpt-image-2, quality low): reported
+// image-input tokens were 1,024 for 1024x1024, 768 for 1024x768 and 768 for
+// 768x1024 -- one token per 32x32 pixels. A photo fitted inside 1024px is
+// therefore at most 1,024 image tokens, a tenth of the budget.
 export const IMAGE_EDIT_INPUT_BUDGET_VERIFICATION: {
   verifiedAt: string | null;
   /** The largest reported image-input tokens across the measured shapes. */
   measuredMaxTokens: number | null;
-} = { verifiedAt: null, measuredMaxTokens: null };
+} = { verifiedAt: "2026-10-29", measuredMaxTokens: 1_024 };
 
 /** Whether the budget below is backed by a measurement it covers. */
 export const imageEditInputBudgetVerified = (

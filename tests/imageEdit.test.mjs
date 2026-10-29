@@ -213,9 +213,13 @@ test("the switch does nothing until the photo budget is backed by a measurement"
   const { IMAGE_EDIT_INPUT_BUDGET_VERIFICATION, imageEditInputBudgetVerified } = await import(
     "../lib/imageGenerationPricing.ts"
   );
-  // Shipped unmeasured: on is still off.
-  assert.equal(IMAGE_EDIT_INPUT_BUDGET_VERIFICATION.verifiedAt, null);
-  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }), false);
+  // Measured 2026-10-29: a 1024px photo is at most 1,024 image tokens, inside
+  // the 10,000 budget, so the switch alone now decides.
+  assert.deepEqual(IMAGE_EDIT_INPUT_BUDGET_VERIFICATION, { verifiedAt: "2026-10-29", measuredMaxTokens: 1_024 });
+  assert.equal(imageEditInputBudgetVerified(), true);
+  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }), true);
+  assert.equal(imageEditEnabled({}), false);
+  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }, false), false);
   assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }, true), true);
   assert.equal(imageEditEnabled({}, true), false);
   // A measurement over the budget does not verify it.
