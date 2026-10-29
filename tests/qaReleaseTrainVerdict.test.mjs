@@ -183,6 +183,9 @@ test("the git port finds a change main carries under another commit, and names w
     git("config", "user.email", "t@t");
     git("config", "user.name", "t");
     git("config", "core.autocrlf", "false");
+    // #13 sets the mode in the index only; with fileMode on (Linux), the file
+    // left at 644 on disk would count as a local change and stop the next switch.
+    git("config", "core.fileMode", "false");
     writeFileSync(join(repo, "a.ts"), "export const base = 1;\n");
     git("add", ".");
     git("commit", "--quiet", "-m", "base");
