@@ -12,6 +12,7 @@ import {
   environmentNames,
   hasRuntimeLoader,
   importSpecifiers,
+  isGateOutsideRuntime,
 } from "../lib/agentControlPlaneSlice.ts";
 
 const tsParse = (text) => ts.createSourceFile("a.ts", text, ts.ScriptTarget.Latest, false);
@@ -141,6 +142,48 @@ test("gate code outside the app brings in what it imports and the files it names
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []), "an unresolved import outside the app fails nothing");
   assert.deepEqual([...result.slicePaths].sort(), ["docs/ops/allowlist.json", "lib/ruleCore.ts", "lib/ruleLeaf.ts"]);
   assert.equal(slice([change("lib/leaf.ts")], tree({ "scripts/bad.mjs": "export const = ;\n" })).status, "failed");
+});
+
+test("a path a gate names relative to itself or through the @/ alias is read as the file it means", () => {
+  const files = tree({
+    "lib/amux/gate.ts":
+      'import { readFileSync } from "node:fs";\n' +
+      'export const rules = () => readFileSync(new URL("../rules.json", import.meta.url));\n' +
+      'export const seed = "@/lib/seed.json";\n',
+    "lib/rules.json": "{}\n",
+    "lib/seed.json": "{}\n",
+  });
+  const result = slice(["lib/rules.json", "lib/seed.json"].map((path) => change(path, { newText: "[]\n" })), files);
+  assert.deepEqual([...result.slicePaths].sort(), ["lib/rules.json", "lib/seed.json"]);
+});
+
+test("imports are followed through test helpers, and a followed file that cannot be read fails the analysis", () => {
+  const files = tree({
+    "scripts/check.mjs": 'import { rule } from "../tests/support/check.mjs";\nexport const check = rule;\n',
+    "tests/support/check.mjs": 'import { rule } from "../../lib/rule.ts";\nexport { rule };\n',
+    "lib/rule.ts": "export const rule = 1;\n",
+  });
+  assert.deepEqual([...slice([change("lib/rule.ts")], files).slicePaths], ["lib/rule.ts"]);
+  // The evidence holds no text for a test file the image leaves out.
+  const unread = files.map((file) => (file.path === "tests/support/check.mjs" ? { ...file, text: "" } : file));
+  assert.equal(slice([change("lib/leaf.ts")], unread).status, "failed");
+});
+
+test("a followed product file that loads by a computed name fails the analysis; a gate script's own computed load does not", () => {
+  const helper = (text) => tree({ "lib/helper.ts": text });
+  assert.equal(slice([change("lib/leaf.ts")], helper("export const helper = (name) => import(name);\n")).status, "failed");
+  // An assertion helper that happens to be called `require` loads nothing.
+  assert.equal(
+    slice([change("lib/leaf.ts")], helper("const require = (ok, why) => { if (!ok) throw new Error(why); };\nexport const helper = (x) => require(x > 0, `x ${x}`);\n")).status,
+    "analysed",
+  );
+  assert.equal(
+    slice([change("lib/leaf.ts")], tree({ "scripts/check-locales.mjs": "export const load = (locale) => import(`../locales/${locale}.ts`);\n" })).status,
+    "analysed",
+  );
+  // The mobile apps are gates outside the app, by the manifest.
+  assert.equal(isGateOutsideRuntime("apps/mobile/src/screen.tsx"), true);
+  assert.equal(isGateOutsideRuntime("tests/support/check.mjs"), false);
 });
 
 test("a file the change brings under a gate is in the slice; a new caller of a gate is not", () => {

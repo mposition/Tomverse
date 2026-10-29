@@ -80,13 +80,24 @@ export type CodeFacts = {
 /** Facts read from the syntax tree, so the same words in a comment or string do not count. */
 export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   const facts: CodeFacts = { runtimeLoader: false, computedCall: false, computedEnv: false, appSettingAccess: false };
+  // A file that declares its own `require` (an assertion helper, say) calls
+  // that, not the module loader; `createRequire` is caught on its own below.
+  let declaresRequire = false;
+  const declarations = (node: ts.Node): void => {
+    if ((ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
+        node.name !== undefined && ts.isIdentifier(node.name) && node.name.text === "require") {
+      declaresRequire = true;
+    }
+    ts.forEachChild(node, declarations);
+  };
+  declarations(source);
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       if (callee.kind === ts.SyntaxKind.ImportKeyword && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
-      if (ts.isIdentifier(callee) && callee.text === "require" && !isStringLiteral(node.arguments[0])) {
+      if (ts.isIdentifier(callee) && callee.text === "require" && !declaresRequire && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
       // A call through an element access -- `table[name]()` or `table["gate"]()`
@@ -374,8 +385,12 @@ type Graph = {
   edges: Map<string, Set<string>>;
   facts: Map<string, CodeFacts>;
   appSettingKeys: Set<string>;
-  /** Per runtime file, the paths it names as text, exactly or as a directory. */
+  /** Per code file, the paths it names as text, exactly or as a directory. */
   named: Map<string, NamedPaths>;
+  /** Code files outside the app with no text to read or that do not parse. */
+  unreadable: Set<string>;
+  /** Code files that load a module by a computed name. */
+  loaders: Set<string>;
   problems: SliceProblem[];
 };
 
@@ -383,7 +398,7 @@ export type NamedPaths = { exact: Set<string>; prefixes: Set<string> };
 
 const PATH_LIKE = /^[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)*$/;
 const normalisePathText = (text: string) =>
-  text.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "").replace(/\/+$/, "");
+  text.replace(/\\/g, "/").replace(/^\/+/, "").replace(/^(?:\.\/)+/, "").replace(/\/+$/, "");
 const PATH_CALL = /(?:^|\.)(?:join|resolve)$/;
 const BASE_ARGUMENT = /^(?:process\.cwd\(\)|__dirname|import\.meta\.dirname)$/;
 
@@ -457,18 +472,25 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     }
     edges.set(file.path, targets);
   }
-  // Gate code outside the app is a starting point, not app runtime: an import
-  // it cannot resolve names no tracked file of this tree, so it adds no edge
-  // rather than failing -- a change that adds that file is read again in the
+  // Code outside the app -- gate scripts and tooling, and the tests and
+  // helpers they may import -- is read only for the gates' reach. An import it
+  // cannot resolve names no tracked file of this tree, so it adds no edge
+  // rather than failing; a change that adds that file is read again in the
   // result tree. A file it names exactly (an allowlist, a baseline) steers it;
   // a directory it walks holds what it checks, which the check reads afresh.
+  // What cannot be read here -- no text in the evidence, or no parse -- fails
+  // the analysis only if a gate reaches it.
+  const unreadable = new Set<string>();
+  const loaders = new Set<string>();
+  for (const [path, fileFacts] of facts) if (fileFacts.runtimeLoader) loaders.add(path);
   for (const file of files) {
-    if (!isGateOutsideRuntime(file.path)) continue;
-    const source = parse(file);
-    if (hasParseErrors(source)) {
-      problems.push({ path: file.path, specifier: null, problem: "parse_error" });
+    if (!CODE_FILE.test(file.path) || isAppRuntimeCode(file.path) || file.path.startsWith("vendor/")) continue;
+    const source = file.text === "" ? null : parse(file);
+    if (source === null || hasParseErrors(source)) {
+      unreadable.add(file.path);
       continue;
     }
+    if (codeFacts(source).runtimeLoader) loaders.add(file.path);
     named.set(file.path, { exact: namedPaths(source).exact, prefixes: new Set() });
     const targets = new Set<string>();
     for (const specifier of importSpecifiersOf(source)) {
@@ -477,7 +499,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     }
     edges.set(file.path, targets);
   }
-  return { edges, facts, appSettingKeys, named, problems };
+  return { edges, facts, appSettingKeys, named, unreadable, loaders, problems };
 };
 
 const isProduct = (path: string) => classifyPath(path) === "product";
@@ -490,40 +512,64 @@ const selfAndAncestors = (path: string) => {
 };
 
 /**
+ * The repository paths a path-shaped text may mean, read from `from`: as
+ * written from the root, through the `@/` alias, and relative to the file
+ * itself (`new URL("../x.json", import.meta.url)`). All of them count.
+ */
+const pathReadings = (from: string, text: string): string[] => {
+  const unaliased = text.startsWith("@/") ? text.slice(2) : text;
+  return [unaliased, normalise(`${dirname(from)}/${unaliased}`)].filter((path): path is string => path !== null);
+};
+
+/**
  * Every product file the gates reach (docs/policy/engineering-agent.md
- * version 6 item 2). From each runtime control-plane file it follows imports,
- * directly or through any other file, and takes every file a reached file
- * names by path -- exactly, or below a named directory; a named code file's
- * own imports are followed in turn. A product file the gates never reach is
- * not in the slice, although the deployed image contains it.
+ * version 6 item 2). From each gate it follows imports through any code file,
+ * test helpers included, and takes every file a followed file names by path
+ * -- exactly, or below a directory app runtime code names. A named file is in
+ * the slice; its own imports are followed when it is app runtime code, which
+ * the app may load by that path. A product file the gates never reach is not
+ * in the slice, although the deployed image contains it.
  *
- * The whole import graph is still built, because an import that does not
- * resolve, or a file that does not parse, anywhere in the app runtime fails
- * the analysis.
+ * The whole app runtime graph is still built, because an import that does not
+ * resolve, or a file that does not parse, anywhere in it fails the analysis.
+ * A followed file whose text the evidence does not hold, or a followed
+ * product file that loads a module by a computed name, fails it too: what it
+ * reaches cannot be known. A gate's own computed load outside the app (a
+ * check loading each locale it checks) loads its input, not its logic.
  */
 const gateSlice = (graph: Graph, paths: readonly string[]) => {
-  const reached = new Set<string>();
+  const followed = new Set<string>();
+  const named = new Set<string>();
   const exact = new Set<string>();
   const prefixes = new Set<string>();
-  let frontier = [...graph.edges.keys()].filter((path) => isRuntimeControlPlane(path) || isGateOutsideRuntime(path));
+  const problems: SliceProblem[] = [];
+  // Every gate, read or not: a gate that cannot be read fails the analysis.
+  let frontier = paths.filter((path) => isRuntimeControlPlane(path) || isGateOutsideRuntime(path));
   while (frontier.length > 0) {
     const stack = frontier;
     frontier = [];
     while (stack.length > 0) {
       const path = stack.pop() as string;
-      if (reached.has(path)) continue;
-      reached.add(path);
+      if (followed.has(path)) continue;
+      followed.add(path);
+      if (graph.unreadable.has(path)) problems.push({ path, specifier: null, problem: "gate_reaches_unreadable_code" });
+      if (graph.loaders.has(path) && classifyPath(path) !== "control-plane") {
+        problems.push({ path, specifier: null, problem: "gate_reaches_runtime_loader" });
+      }
       for (const target of graph.edges.get(path) ?? []) stack.push(target);
-      const named = graph.named.get(path);
-      for (const text of named?.exact ?? []) exact.add(text);
-      for (const text of named?.prefixes ?? []) prefixes.add(text);
+      const texts = graph.named.get(path);
+      for (const text of texts?.exact ?? []) for (const reading of pathReadings(path, text)) exact.add(reading);
+      for (const text of texts?.prefixes ?? []) for (const reading of pathReadings(path, text)) prefixes.add(reading);
     }
     for (const path of paths) {
-      if (!reached.has(path) &&
-          (exact.has(path) || selfAndAncestors(path).some((dir) => prefixes.has(dir)))) frontier.push(path);
+      if (followed.has(path) || named.has(path)) continue;
+      if (exact.has(path) || selfAndAncestors(path).some((dir) => prefixes.has(dir))) {
+        named.add(path);
+        if (isAppRuntimeCode(path)) frontier.push(path);
+      }
     }
   }
-  return new Set([...reached].filter(isProduct));
+  return { slice: new Set([...followed, ...named].filter(isProduct)), problems };
 };
 
 /**
@@ -540,11 +586,12 @@ export const computeControlPlaneSlice = (input: {
 }): SliceResult => {
   const base = buildGraph(input.baseFiles);
   if (base.problems.length > 0) return { status: "failed", problems: base.problems };
-  const baseSlice = gateSlice(base, input.baseFiles.map((file) => file.path));
+  const { slice: baseSlice, problems: baseProblems } = gateSlice(base, input.baseFiles.map((file) => file.path));
+  if (baseProblems.length > 0) return { status: "failed", problems: baseProblems };
 
   const names = new Set<string>(base.appSettingKeys);
   for (const file of input.baseFiles) {
-    if (isRuntimeControlPlane(file.path) || baseSlice.has(file.path)) {
+    if (isRuntimeControlPlane(file.path) || isGateOutsideRuntime(file.path) || baseSlice.has(file.path)) {
       for (const name of environmentNames(file.text)) names.add(name);
     }
   }
@@ -569,7 +616,8 @@ export const computeControlPlaneSlice = (input: {
   ];
   const result = buildGraph(resultFiles);
   if (result.problems.length > 0) return { status: "failed", problems: result.problems };
-  const resultSlice = gateSlice(result, resultFiles.map((file) => file.path));
+  const { slice: resultSlice, problems: resultProblems } = gateSlice(result, resultFiles.map((file) => file.path));
+  if (resultProblems.length > 0) return { status: "failed", problems: resultProblems };
 
   const slicePaths = new Set<string>();
   for (const change of input.changes) {
