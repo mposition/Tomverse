@@ -347,6 +347,7 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "const F = Function;\nexport const helper = (code) => F(code)();\n",
     'export const helper = (code) => globalThis["eval"](code);\n',
     "export const helper = (code) => (() => 0).constructor(code)();\n",
+    "const F = (() => 0).constructor;\nexport const helper = (code) => F(code)();\n",
     'import { execFile } from "node:child_process";\nexport const helper = (p) => execFile("uv", ["run", p], { cwd: "." });\n',
     // A parameter shadowing a const of the same name; options before a callback.
     'import { Worker } from "node:worker_threads";\nconst source = "0";\nexport const helper = (source) => new Worker(source, { eval: true });\n',
@@ -425,6 +426,9 @@ test("both sides of a rename are checked", () => {
 });
 
 test("adding a configuration name the control plane reads, or any AppSetting key, brings any file into the slice", () => {
+  // A changed file no gate reaches that runs code through a builtin is in the slice itself.
+  const runner = 'import { runInThisContext } from "node:vm";\nexport const run = (code) => runInThisContext(code);\n';
+  assert.ok(slice([change("lib/newRunner.ts", { status: "added", newText: runner })]).slicePaths.has("lib/newRunner.ts"));
   const outside = "tests/leaf.test.mjs";
   assert.ok(slice([change(outside, { addedText: "if (process.env.AMUX_GATE_MODE) {}" })]).slicePaths.has(outside));
   assert.ok(slice([change(outside, { addedText: 'const k = "feature.secretSwitch";' })]).slicePaths.has(outside));
@@ -533,7 +537,7 @@ test("on this repository the analysis resolves every import of the app runtime a
   const baseFiles = paths.map((path) => ({
     path,
     // The texts the base evidence reads, text gates included.
-    text: /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/.test(path)
+    text: /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/.test(path)
       ? readFileSync(new URL(path, root), "utf8")
       : "",
   }));

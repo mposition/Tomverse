@@ -313,17 +313,15 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
     if (ts.isIdentifier(node) && node.text === "createRequire") facts.runtimeLoader = true;
     // Code run from text: `eval` and the Function constructors in any value
     // use -- called, handed on (`const F = Function`), or reached as a member
-    // (`globalThis.eval`, `x["Function"]`) -- and any `.constructor` called or
-    // constructed, which reaches Function from any function value.
+    // (`globalThis.eval`, `x["Function"]`) -- and any `.constructor` reached at
+    // all, which leads to Function from any function value, called or handed
+    // on (`const F = fn.constructor`). No product file reads `.constructor`.
     if (ts.isIdentifier(node) && DYNAMIC_CODE.has(node.text) && !notValues.has(node)) facts.runtimeLoader = true;
-    if (ts.isPropertyAccessExpression(node) && DYNAMIC_CODE.has(node.name.text)) facts.runtimeLoader = true;
-    if (ts.isElementAccessExpression(node) && isStringLiteral(node.argumentExpression) &&
-        DYNAMIC_CODE.has((node.argumentExpression as ts.StringLiteral).text)) facts.runtimeLoader = true;
-    if ((ts.isCallExpression(node) || ts.isNewExpression(node))) {
-      const callee = unwrap(node.expression);
-      if ((ts.isPropertyAccessExpression(callee) && callee.name.text === "constructor") ||
-          (ts.isElementAccessExpression(callee) && isStringLiteral(callee.argumentExpression) &&
-            (callee.argumentExpression as ts.StringLiteral).text === "constructor")) facts.runtimeLoader = true;
+    if (ts.isPropertyAccessExpression(node) &&
+        (DYNAMIC_CODE.has(node.name.text) || node.name.text === "constructor")) facts.runtimeLoader = true;
+    if (ts.isElementAccessExpression(node) && isStringLiteral(node.argumentExpression)) {
+      const key = (node.argumentExpression as ts.StringLiteral).text;
+      if (DYNAMIC_CODE.has(key) || key === "constructor") facts.runtimeLoader = true;
     }
     if (ts.isPropertyAccessExpression(node)) {
       if (ts.isIdentifier(node.expression) && node.expression.text === "require") facts.runtimeLoader = true;
@@ -1206,7 +1204,7 @@ const gateSlice = (graph: Graph, paths: readonly string[]) => {
  * The slice for one change set. The base tree gives the slice a changed path
  * may already be in; the result tree gives the one it may have joined --
  * including through a barrel or a registrant the same change adds. A changed file that loads
- * by a computed name, calls through a computed member, reads a computed
+ * by a computed name or runs code through a builtin, calls through a computed member, reads a computed
  * environment key or touches AppSetting directly is in the slice, as is one
  * whose added lines name a configuration key.
  */
@@ -1269,7 +1267,8 @@ export const computeControlPlaneSlice = (input: {
       const changeFacts = result.facts.get(change.path);
       if (
         changeFacts !== undefined &&
-        (changeFacts.runtimeLoader || changeFacts.computedCall || changeFacts.computedEnv || changeFacts.appSettingAccess)
+        (changeFacts.runtimeLoader || changeFacts.loadingBuiltin || changeFacts.computedCall ||
+          changeFacts.computedEnv || changeFacts.appSettingAccess)
       ) {
         slicePaths.add(change.path);
       }
