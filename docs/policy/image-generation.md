@@ -889,30 +889,41 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     일부만 바꾸는 편집은 아래 "첨부 사진 편집"이다.
   - **첨부 사진 편집**(운영자 요청 2026-10-29, `IMAGE_EDIT_ENABLED=true`일 때만, 기본
     꺼짐). 보내는 메시지에 사진(png·jpeg·webp·gif)이 붙어 있으면 판정 호출에
-    "Attached photo" 절과 편집 가능한 모델(`IMAGE_EDIT_MODEL_IDS`, 지금은 `gpt-image-2`
-    하나)만 보이고, 사진을 바꾸라는 요청이면 `edit=true`를 돌려준다. 사진이 붙은 메시지에서
+    "Attached photo" 절과 편집 가능한 모델(편집 가격이 검증된 모델, `imageModelSupportsEdit`)만
+    보이고, 사진을 바꾸라는 요청이면 `edit=true`를 돌려준다. 사진이 붙은 메시지에서
     편집이 아닌 답은 채팅으로 간다(채팅 모델은 사진을 본다). 이미지 턴은 `edit: true`
     플래그만 받고, 편집할 사진은 저장된 질문의 첫 이미지 첨부에서 서버가 찾는다(요청이
     파일을 지목하지 않는다). 결과 크기는 사진 방향에 가까운 가격표 크기(가로 1536×1024,
-    세로 1024×1536, 그 밖은 정사각)이고 그 크기의 가격을 낸다. 실행기는 사진을 EXIF 방향대로 세우고 1024px 안으로 줄여 PNG로
-    만든 뒤 OpenAI `/v1/images/edits`로 보낸다. 사용자 파일은 지우거나 고치지 않는다.
-    가격은 옵션 가격에 `IMAGE_EDIT_SURCHARGE_CREDITS`(90)를 더한다. 이 가산이 입력 사진
-    예산(`IMAGE_EDIT_INPUT_MAX_TOKENS` 10,000 × 이미지 입력 US$8/M = 80,000µUSD)을
-    900µUSD/credit 상한 아래에 둔다(최악 high 1024² 871µ/credit). OpenAI가 gpt-image-2
-    입력 토큰 공식을 공개하지 않아, 예산은 gpt-image-1 high fidelity 비정사각 입력(6,563
-    토큰)의 약 1.5배로 잡았다. 이 예산은 추정치라 §12의 계산 가능한 최악 원가가 아니다.
-    그래서 `IMAGE_EDIT_INPUT_BUDGET_VERIFICATION`에 실측값(`npm` 밖에서
-    `node scripts/measure-image-edit-tokens.mjs --confirm-paid`, 유료 약 US$0.30, 운영자
-    승인 필요)을 기록하고 그 최댓값이 예산 이하일 때까지 `IMAGE_EDIT_ENABLED`가 켜져도 편집은
-    꺼져 있다. 2026-10-29 운영자 승인 실측(저품질 3장, 약 US$0.04): 이미지 입력 토큰은
-    1024×1024가 1,024, 1024×768과 768×1024가 768로 32×32 픽셀당 1토큰이었다. 1024px 안의
-    사진은 최대 1,024토큰이며, 이 값을 검증 기록에 남겨 이제 스위치만으로 켜진다.
-    정산은 예약 snapshot에 기록한 단가로 보고된 이미지 입력 토큰을 계산하고,
-    사용량이 없으면 예약한 사진 예산 전체로 정산하며, 예산을 넘으면
-    `image_edit_input_over_budget`을 남긴다. 사진이 없거나 읽을 수 없으면 provider를
-    부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다. 재시도는 같은 사진의
-    편집으로 남는다. Review는 편집하지 않는다. 다른 provider의 편집은 공식 편집 가격과
-    호출 방식을 확인한 뒤 모델별로 추가한다.
+    세로 1024×1536, 그 밖은 정사각)이고 그 크기의 가격을 낸다. 대상 모델 하나라도 그 크기를
+    팔지 않으면(Grok Imagine, Nano Banana 2는 1K 정사각만 판다) 정사각으로 편집한다.
+    실행기는 사진을 EXIF 방향대로 세우고 1024px 안으로 줄여 PNG로 만든 뒤 모델의 편집
+    요청으로 보낸다: OpenAI `/v1/images/edits`(multipart), xAI `/v1/images/edits`(data URL),
+    fal `fal-ai/nano-banana-2/edit`(`image_urls` data URI, 생성과 같은 가격 필드). 감사
+    기록에는 사진의 형식·크기·sha256만 남고 바이트는 남지 않는다. 사용자 파일은 지우거나
+    고치지 않는다. Google 직접 호출은 생성 자체가 `worst_case_cost_unbounded`로 막혀 있어
+    편집 adapter를 두지 않는다. 같은 Google 모델은 fal의 Nano Banana 2로 편집한다.
+  - **편집 가격은 모델별이다**(`lib/imageGenerationPricing.ts`의 편집 가격 표). 각 모델은
+    가산 크레딧, 입력 사진 예산, 토큰 과금이면 단가와 최대 토큰, 그리고 근거
+    (`verification`)를 가진다. 근거가 없거나, 토큰 과금 모델의 실측 최댓값이 예산을 넘으면
+    `IMAGE_EDIT_ENABLED`가 켜져도 그 모델은 편집하지 않는다.
+    - gpt-image-2: 가산 90, 사진 예산 10,000토큰 × 이미지 입력 US$8/M = 80,000µUSD(최악
+      high 1024² 871µ/credit). 2026-10-29 운영자 승인 실측(`scripts/measure-image-edit-tokens.mjs`,
+      저품질 3장, 약 US$0.04): 1024×1024가 1,024토큰, 1024×768과 768×1024가 768토큰으로
+      32×32 픽셀당 1토큰이었다. 정산은 예약 snapshot의 단가로 보고된 이미지 입력 토큰을
+      계산하고, 사용량이 없으면 사진 예산 전체로 정산하며, 예산을 넘으면
+      `image_edit_input_over_budget`을 남긴다.
+    - Nano Banana 2(fal): fal 가격 API가 2026-10-29 생성과 편집 엔드포인트 모두 출력 1장당
+      US$0.08로 답했고, 모델 페이지에 입력 사진 요금이 없다. 그래서 가산 0, 사진 예산 0이다.
+      편집 요청이 data URI 사진을 받고 가격을 매긴 1024×1024를 돌려주는지 실측 한 번으로
+      확인한 뒤 근거를 기록한다.
+    - Grok Imagine(xAI): 공개된 것은 출력 1장당 US$0.05뿐이고, 편집의 입력 사진 요금은
+      문서에 없다. 응답의 `usage.cost_in_usd_ticks`(US$1 = 10^10 ticks)가 실제 비용이라,
+      실측 편집 두 장(1024×1024, 1024×768)의 비용에서 사진 몫을 읽어 예산과 가산을 정한다.
+    - xAI·fal 실측은 `node --import tsx scripts/measure-image-edit-providers.mjs --confirm-paid`
+      (유료 약 US$0.25 이하, 운영자 승인 필요). 실측은 adapter와 같은 요청 빌더를 쓴다.
+    - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
+      없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
+      재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.
   - **확인 없는 과금은 운영자 결정이다**(2026-10-20). Chat의 텍스트 턴처럼
     제출 즉시 생성하며, 위 §3·§11의 "제출 전 가격 표시"와 ⑤의
     `imageHandoffAutoGenerate` 조건은 이 경로에 적용하지 않는다. 크레딧

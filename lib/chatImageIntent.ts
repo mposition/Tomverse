@@ -30,7 +30,7 @@ import {
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { imageEditEnabled } from "@/lib/imageEditSource";
 import {
-    IMAGE_EDIT_SURCHARGE_CREDITS,
+    imageEditPricing,
     imageModelSupportsEdit,
 } from "@/lib/imageGenerationPricing";
 import { planAllowsFeature } from "@/lib/billingEntitlements";
@@ -168,7 +168,7 @@ export async function detectChatImageRequest(input: {
                     credits: Object.fromEntries(
                         Object.entries(candidate.credits).map(([preset, credits]) => [
                             preset,
-                            (credits ?? 0) + IMAGE_EDIT_SURCHARGE_CREDITS,
+                            (credits ?? 0) + imageEditPricing(candidate.id)!.surchargeCredits,
                         ])
                     ),
                 }));

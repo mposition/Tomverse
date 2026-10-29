@@ -14,7 +14,9 @@ import {
 } from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
+  buildFalImageEditRequest,
   buildFalImageRequest,
+  FAL_EDIT_ENDPOINT_SUFFIX,
   falAuthorizationHeader,
   falPlatformHeaders,
   falAssetLengthRefused,
@@ -36,8 +38,10 @@ import {
   parseGoogleImageResponse,
 } from "@/lib/googleImageRequest";
 import {
+  buildXaiImageEditRequest,
   buildXaiImageRequest,
   parseXaiImageResponse,
+  XAI_IMAGE_EDITS_URL,
   XAI_IMAGES_URL,
 } from "@/lib/xaiImageRequest";
 
@@ -295,6 +299,24 @@ const auditableRequestParams = (
     Object.entries(body).filter(([key]) => !PROMPT_FIELD_NAMES.has(key))
   );
 
+/**
+ * The audit view of an edit's photo: described, never stored. The bytes are
+ * the user's attachment and already live where deletion finds them.
+ */
+const editAuditParams = (editImage: ImageEditInput | undefined): Record<string, unknown> =>
+  editImage
+    ? {
+        endpoint: "edits",
+        image: {
+          mimeType: editImage.mimeType,
+          width: editImage.width,
+          height: editImage.height,
+          byteSize: editImage.bytes.byteLength,
+          sha256: editImage.sha256,
+        },
+      }
+    : {};
+
 const wait = (ms: number) =>
   new Promise((resolveWait) => setTimeout(resolveWait, ms));
 
@@ -332,10 +354,13 @@ export const generateImageWithProvider = async (input: {
       `Image model ${modelId} has no thinking cap its request can enforce.`
     );
   }
-  // Only the OpenAI edit endpoint is implemented. Any other model asked to
-  // edit would draw a new picture from the prompt alone -- charged as an edit
-  // and ignoring the photo -- so it is refused instead.
-  if (input.editImage && !(model.provider === "openai" && imageModelSupportsEdit(model.id))) {
+  // OpenAI, xAI and fal have edit requests. Any other model asked to edit
+  // would draw a new picture from the prompt alone -- charged as an edit and
+  // ignoring the photo -- so it is refused, as is one whose edit price is held.
+  if (
+    input.editImage &&
+    !(["openai", "xai", "fal"].includes(model.provider) && imageModelSupportsEdit(model.id))
+  ) {
     throw new ImageProviderError(
       "provider_failed",
       `Image model ${modelId} cannot edit an image.`
@@ -367,23 +392,7 @@ export const generateImageWithProvider = async (input: {
     n: 1,
   };
   const editImage = input.editImage;
-  // An edit's photo is described, never stored, in the audit record: the
-  // bytes are the user's attachment and already live where deletion finds them.
-  const requestParams = {
-    ...auditableRequestParams(openAiBody),
-    ...(editImage
-      ? {
-          endpoint: "edits",
-          image: {
-            mimeType: editImage.mimeType,
-            width: editImage.width,
-            height: editImage.height,
-            byteSize: editImage.bytes.byteLength,
-            sha256: editImage.sha256,
-          },
-        }
-      : {}),
-  };
+  const requestParams = { ...auditableRequestParams(openAiBody), ...editAuditParams(editImage) };
   const openAiRequest = (): { url: string; init: RequestInit } => {
     if (!editImage) {
       return {
@@ -671,27 +680,33 @@ const generateWithGoogle = async (
  */
 const generateWithFal = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: { prompt: string; size: ImageSize; editImage?: ImageEditInput }
 ): Promise<ImageProviderResult> => {
-  const body = buildFalImageRequest({
+  const request = {
     prompt: input.prompt,
     size: input.size,
     // PNG for the same reason gpt-image-2 stores PNG: it is lossless, and the
     // response's own content type is still what gets recorded.
-    outputFormat: "png",
-  });
-  if (!body) {
+    outputFormat: "png" as const,
+  };
+  const generationBody = buildFalImageRequest(request);
+  const body = input.editImage
+    ? buildFalImageEditRequest({ ...request, image: input.editImage })
+    : generationBody;
+  if (!body || !generationBody) {
     throw new ImageProviderError(
       "provider_failed",
       `Image size ${input.size} has no approved fal price for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  // From the body without the photo: its data URI is the user's bytes.
+  const requestParams = { ...auditableRequestParams(generationBody), ...editAuditParams(input.editImage) };
   const apiKey = getFalApiKey();
+  const endpoint = `${FAL_RUN_URL_BASE}/${model.apiModelId}${input.editImage ? FAL_EDIT_ENDPOINT_SUFFIX : ""}`;
 
   let response: Response;
   try {
-    response = await fetch(`${FAL_RUN_URL_BASE}/${model.apiModelId}`, {
+    response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: falAuthorizationHeader(apiKey),
@@ -849,20 +864,26 @@ const generateWithFal = async (
  */
 const generateWithXai = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: { prompt: string; size: ImageSize; editImage?: ImageEditInput }
 ): Promise<ImageProviderResult> => {
-  const body = buildXaiImageRequest({
+  const request = {
     apiModelId: model.apiModelId,
     prompt: input.prompt,
     size: input.size,
-  });
-  if (!body) {
+  };
+  const generationBody = buildXaiImageRequest(request);
+  const body = input.editImage
+    ? buildXaiImageEditRequest({ ...request, image: input.editImage })
+    : generationBody;
+  if (!body || !generationBody) {
     throw new ImageProviderError(
       "provider_failed",
       `Image size ${input.size} has no xAI resolution mapping.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  // From the body without the photo: its data URL is the user's bytes.
+  const requestParams = { ...auditableRequestParams(generationBody), ...editAuditParams(input.editImage) };
+  const url = input.editImage ? XAI_IMAGE_EDITS_URL : XAI_IMAGES_URL;
   const apiKey = getXaiApiKey();
   let lastError: ImageProviderError | null = null;
 
@@ -873,7 +894,7 @@ const generateWithXai = async (
     }
     let response: Response;
     try {
-      response = await fetch(XAI_IMAGES_URL, {
+      response = await fetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,

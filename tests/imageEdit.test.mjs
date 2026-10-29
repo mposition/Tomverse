@@ -9,9 +9,8 @@ import {
 } from "../lib/imageProviderAdapter.ts";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
-  IMAGE_EDIT_INPUT_BUDGET_MICRO_USD,
   IMAGE_EDIT_MODEL_IDS,
-  IMAGE_EDIT_SURCHARGE_CREDITS,
+  imageEditPricing,
   imageModelSupportsEdit,
 } from "../lib/imageGenerationPricing.ts";
 import { readChatImageTurnRequest } from "../lib/chatImageTurnCore.ts";
@@ -24,14 +23,16 @@ const { getImageModel, maxImageEditRequestCostMicroUsd, maxImageRequestCostMicro
   createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
 
 test("every edit option stays under the per-credit ceiling with its surcharge", () => {
-  assert.ok(IMAGE_EDIT_MODEL_IDS.length > 0);
-  for (const modelId of IMAGE_EDIT_MODEL_IDS) {
+  const editing = IMAGE_EDIT_MODEL_IDS.filter(imageModelSupportsEdit);
+  assert.ok(editing.length > 0);
+  for (const modelId of editing) {
     const model = getImageModel(modelId);
     assert.ok(model, modelId);
+    const edit = imageEditPricing(modelId);
     for (const price of model.prices) {
       const worst = maxImageEditRequestCostMicroUsd(model, price);
-      assert.equal(worst, maxImageRequestCostMicroUsd(model, price) + IMAGE_EDIT_INPUT_BUDGET_MICRO_USD);
-      const credits = price.credits + IMAGE_EDIT_SURCHARGE_CREDITS;
+      assert.equal(worst, maxImageRequestCostMicroUsd(model, price) + edit.inputBudgetMicroUsd);
+      const credits = price.credits + edit.surchargeCredits;
       assert.ok(
         worst / credits <= IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
         `${modelId} ${price.quality} ${price.size}: ${worst / credits} per credit`
@@ -40,11 +41,23 @@ test("every edit option stays under the per-credit ceiling with its surcharge", 
   }
 });
 
-test("only the OpenAI edit endpoint is offered for edits", () => {
-  assert.deepEqual(IMAGE_EDIT_MODEL_IDS, ["gpt-image-2"]);
+test("OpenAI, xAI and fal have edit adapters; Google direct does not", () => {
+  assert.deepEqual([...IMAGE_EDIT_MODEL_IDS].sort(), [
+    "fal-ai/nano-banana-2",
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+  ]);
   assert.equal(imageModelSupportsEdit("gpt-image-2"), true);
-  assert.equal(imageModelSupportsEdit("grok-imagine-image-quality-20260403"), false);
-  assert.equal(imageModelSupportsEdit("fal-ai/nano-banana-2"), false);
+  assert.equal(imageModelSupportsEdit("gemini-3.1-flash-image"), false);
+  assert.equal(imageModelSupportsEdit("toString"), false);
+});
+
+test("a model edits only once its edit price is verified", () => {
+  // Held until the paid measurement (scripts/measure-image-edit-providers.mjs).
+  assert.equal(imageEditPricing("grok-imagine-image-quality-20260403"), null);
+  assert.equal(imageEditPricing("fal-ai/nano-banana-2"), null);
+  assert.equal(maxImageEditRequestCostMicroUsd(getImageModel("fal-ai/nano-banana-2"), getImageModel("fal-ai/nano-banana-2").prices[0]), null);
+  assert.deepEqual(imageEditPricing("gpt-image-2").inputTokens, { maxTokens: 10_000, usdPerMillionTokens: 8 });
 });
 
 test("an edit's input splits text from image tokens, and a missing split bills as image", () => {
@@ -200,6 +213,10 @@ test("the photo settles at the reservation's rate and budget, not the live const
   assert.equal(settledEditInputCostMicroUsd(snapshot, 4_360), 34_880);
   // A rate changed after the sale does not reach a job priced before it.
   assert.equal(settledEditInputCostMicroUsd({ edit: { inputUsdPerMillionTokens: 4, inputBudgetMicroUsd: 40_000 } }, 4_360), 17_440);
+  // A photo billed per edit settles at its budget, whatever the usage says.
+  assert.equal(settledEditInputCostMicroUsd({ edit: { inputUsdPerMillionTokens: null, inputBudgetMicroUsd: 20_000 } }, null), 20_000);
+  assert.equal(settledEditInputCostMicroUsd({ edit: { inputUsdPerMillionTokens: null, inputBudgetMicroUsd: 0 } }, undefined), 0);
+  assert.equal(settledEditInputCostMicroUsd({ edit: { inputUsdPerMillionTokens: null, inputBudgetMicroUsd: -1 } }, null), null);
   // No usage: the whole reserved photo budget, not a free photo.
   assert.equal(settledEditInputCostMicroUsd(snapshot, null), 80_000);
   assert.equal(settledEditInputCostMicroUsd(snapshot, undefined), 80_000);
@@ -208,28 +225,52 @@ test("the photo settles at the reservation's rate and budget, not the live const
   assert.equal(settledEditInputCostMicroUsd({ edit: { inputUsdPerMillionTokens: "8" } }, 4_360), null);
 });
 
-test("the switch does nothing until the photo budget is backed by a measurement", async () => {
+test("the switch is off unless set, and the gpt-image-2 budget rests on its measurement", async () => {
   const { imageEditEnabled } = await import("../lib/imageEditSource.ts");
-  const { IMAGE_EDIT_INPUT_BUDGET_VERIFICATION, imageEditInputBudgetVerified } = await import(
-    "../lib/imageGenerationPricing.ts"
-  );
-  // Measured 2026-10-29: a 1024px photo is at most 1,024 image tokens, inside
-  // the 10,000 budget, so the switch alone now decides.
-  assert.deepEqual(IMAGE_EDIT_INPUT_BUDGET_VERIFICATION, { verifiedAt: "2026-10-29", measuredMaxTokens: 1_024 });
-  assert.equal(imageEditInputBudgetVerified(), true);
   assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }), true);
   assert.equal(imageEditEnabled({}), false);
-  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }, false), false);
-  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }, true), true);
-  assert.equal(imageEditEnabled({}, true), false);
-  // A measurement over the budget does not verify it.
-  assert.equal(imageEditInputBudgetVerified({ verifiedAt: "2026-10-30", measuredMaxTokens: 6_000 }, 10_000), true);
-  assert.equal(imageEditInputBudgetVerified({ verifiedAt: "2026-10-30", measuredMaxTokens: 12_000 }, 10_000), false);
-  assert.equal(imageEditInputBudgetVerified({ verifiedAt: null, measuredMaxTokens: 6_000 }, 10_000), false);
+  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "1" }), false);
+  // Measured 2026-10-29: a 1024px photo is at most 1,024 image tokens.
+  assert.equal(imageEditPricing("gpt-image-2").verification.measuredMaxTokens, 1_024);
 });
 
 test("only EXIF orientations 5 to 8 turn the photo", async () => {
   const { imageEditOutputSize } = await import("../lib/imageGenerationPricing.ts");
   assert.equal(imageEditOutputSize(4032, 3024, 8), "1024x1536");
   assert.equal(imageEditOutputSize(4032, 3024, 9), "1536x1024");
+});
+
+test("an xAI edit is the generation's 1K square plus the photo as a data URL", async () => {
+  const { buildXaiImageEditRequest, buildXaiImageRequest, xaiReportedCostMicroUsd } = await import(
+    "../lib/xaiImageRequest.ts"
+  );
+  const request = { apiModelId: "grok-imagine-image-quality-20260403", prompt: "smaller tree", size: "1024x1024" };
+  const body = buildXaiImageEditRequest({ ...request, image: { bytes: Buffer.from("png-bytes"), mimeType: "image/png" } });
+  assert.deepEqual(body, {
+    ...buildXaiImageRequest(request),
+    image: { url: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`, type: "image_url" },
+  });
+  // The priced scope does not widen for an edit.
+  assert.equal(buildXaiImageEditRequest({ ...request, size: "1536x1024", image: { bytes: Buffer.from("x"), mimeType: "image/png" } }), null);
+  // One USD is 10^10 ticks.
+  assert.equal(xaiReportedCostMicroUsd({ usage: { cost_in_usd_ticks: 700_000_000 } }), 70_000);
+  assert.equal(xaiReportedCostMicroUsd({ usage: {} }), null);
+  assert.equal(xaiReportedCostMicroUsd(null), null);
+});
+
+test("a fal edit keeps every priced field and adds the photo as a data URI", async () => {
+  const { buildFalImageEditRequest, buildFalImageRequest, FAL_EDIT_ENDPOINT_SUFFIX } = await import(
+    "../lib/falImageRequest.ts"
+  );
+  const request = { prompt: "smaller tree", size: "1024x1024", outputFormat: "png" };
+  const body = buildFalImageEditRequest({ ...request, image: { bytes: Buffer.from("png-bytes"), mimeType: "image/png" } });
+  assert.deepEqual(body, {
+    ...buildFalImageRequest(request),
+    image_urls: [`data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`],
+  });
+  assert.equal(body.aspect_ratio, "1:1");
+  assert.equal(body.thinking_level, "high");
+  assert.equal(body.enable_web_search, false);
+  assert.equal(FAL_EDIT_ENDPOINT_SUFFIX, "/edit");
+  assert.equal(buildFalImageEditRequest({ ...request, size: "1536x1024", image: { bytes: Buffer.from("x"), mimeType: "image/png" } }), null);
 });
