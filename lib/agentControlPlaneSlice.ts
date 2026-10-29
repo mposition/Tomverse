@@ -101,11 +101,12 @@ const globPattern = (glob: string) => {
 
 /**
  * What a text gate spells out, outside comment lines and workflow trigger
- * filters: exact repository paths, and the globs it reads through.
+ * filters: exact paths, and the globs it reads through, both as written (the
+ * caller reads them as repository paths the way it reads any named path).
  */
-export const textGatePaths = (path: string, text: string): { exact: Set<string>; globs: RegExp[] } => {
+export const textGatePaths = (path: string, text: string): { exact: Set<string>; globs: string[] } => {
   const exact = new Set<string>();
-  const globs: RegExp[] = [];
+  const globs: string[] = [];
   const workflow = /^\.github\/workflows\/.+\.ya?ml$/.test(path);
   // Trigger filters live only in the workflow's top-level `on:` block; the
   // same keys elsewhere (a step's `with: paths:`) name what it reads.
@@ -131,11 +132,14 @@ export const textGatePaths = (path: string, text: string): { exact: Set<string>;
       const pieces = match[0].includes("{") ? [match[0]] : match[0].split(",");
       for (const piece of pieces) {
         let token = piece.replace(/[.]+$/, "");
+        // `[docs/x.json]` is a one-item list, not a character class.
+        const listed = /^\[([^[\]]*)\]$/.exec(token);
+        if (listed) token = listed[1];
         if (!token.includes("]")) token = token.replace(/^\[+/, "");
         if (!token.includes("[")) token = token.replace(/\]+$/, "");
         token = normalisePathText(token);
         if (!token.includes("/")) continue;
-        if (/[*?{[]/.test(token)) globs.push(globPattern(token));
+        if (/[*?{[]/.test(token)) globs.push(token);
         else exact.add(token);
       }
     }
@@ -608,9 +612,12 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
       }
       // What a glob matches is data the gate reads: named like a file below a
       // named directory, not followed as code.
+      // A glob is read every way a named path is (from the root, relative to
+      // the gate, under the image's /app) before it is matched.
       const { exact, globs } = textGatePaths(file.path, file.text);
-      const matched = new Set(globs.length === 0 ? [] :
-        files.map((other) => other.path).filter((other) => globs.some((glob) => glob.test(other))));
+      const patterns = globs.flatMap((glob) => pathReadings(file.path, glob)).map(globPattern);
+      const matched = new Set(patterns.length === 0 ? [] :
+        files.map((other) => other.path).filter((other) => patterns.some((pattern) => pattern.test(other))));
       named.set(file.path, { exact, prefixes: matched });
       continue;
     }
@@ -734,6 +741,12 @@ export const computeControlPlaneSlice = (input: {
   for (const file of input.baseFiles) {
     if (isRuntimeControlPlane(file.path) || isGateOutsideRuntime(file.path) || baseSlice.has(file.path)) {
       for (const name of environmentNames(file.text)) names.add(name);
+    }
+    // A shell, Dockerfile or workflow reads `$NAME` / `${NAME}` / `${{ env.NAME }}`.
+    if (isTextGate(file.path)) {
+      for (const match of file.text.matchAll(/\$\{?([A-Z_][A-Z0-9_]*)|\benv\.([A-Z_][A-Z0-9_]*)/g)) {
+        names.add(match[1] ?? match[2]);
+      }
     }
   }
 

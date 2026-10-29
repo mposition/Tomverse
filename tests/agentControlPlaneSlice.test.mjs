@@ -190,14 +190,24 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     ".github/workflows/z.yml":
       "on:\n  push:\n    paths: ['docs/never/**']\njobs:\n  z:\n    steps:\n      - uses: some/action@v1\n        with:\n" +
       "          paths:\n            - docs/inputs/base.json\n      - run: cat docs/deep/**/*.json\n",
-    "Dockerfile": "COPY . /app\nRUN node /app/docs/image/seed.json\n",
+    "Dockerfile": "COPY . /app\nRUN node /app/docs/image/seed.json\nRUN cat /app/docs/globbed/*.json\n",
+    ".github/actions/one/action.yml": "runs:\n  using: composite\n  steps:\n    - with:\n        paths: [docs/listed/one.json]\n",
+    "docs/globbed/g.json": "{}\n",
+    "docs/listed/one.json": "{}\n",
     "docs/inputs/base.json": "{}\n",
     "docs/deep/top.json": "{}\n",
     "docs/deep/a/b.json": "{}\n",
     "docs/image/seed.json": "{}\n",
     "docs/never/x.json": "{}\n",
   });
-  const read = ["docs/deep/a/b.json", "docs/deep/top.json", "docs/image/seed.json", "docs/inputs/base.json"];
+  const read = [
+    "docs/deep/a/b.json",
+    "docs/deep/top.json",
+    "docs/globbed/g.json",
+    "docs/image/seed.json",
+    "docs/inputs/base.json",
+    "docs/listed/one.json",
+  ];
   assert.deepEqual(
     [...slice([...read, "docs/never/x.json"].map((path) => change(path, { newText: "{}\n" })), inputs).slicePaths].sort(),
     read,
@@ -324,6 +334,9 @@ test("adding a configuration name the control plane reads, or any AppSetting key
   assert.ok(slice([change(outside, { addedText: "if (process.env.AMUX_GATE_MODE) {}" })]).slicePaths.has(outside));
   assert.ok(slice([change(outside, { addedText: 'const k = "feature.secretSwitch";' })]).slicePaths.has(outside));
   assert.equal(slice([change(outside, { addedText: "// a comment about switches" })]).slicePaths.size, 0);
+  // A name a shell or workflow gate reads counts too.
+  const shell = tree({ "scripts/gate.sh": 'if [ "${GATE_SHELL_MODE}" = on ]; then exit 1; fi\n' });
+  assert.ok(slice([change(outside, { addedText: "if (process.env.GATE_SHELL_MODE) {}" })], shell).slicePaths.has(outside));
   assert.deepEqual([...environmentNames('process.env.FOO_KEY process.env["BAR"]')].sort(), ["BAR", "FOO_KEY"]);
 });
 
