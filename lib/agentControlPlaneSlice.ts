@@ -53,6 +53,35 @@ export const isGateOutsideRuntime = (path: string) =>
   CODE_FILE.test(path) && !isAppRuntimeCode(path) && classifyPath(path) === "control-plane" &&
   !path.startsWith("tests/") && !path.startsWith("vendor/");
 
+/**
+ * Gate files that are not code but run or steer what runs: workflows and
+ * actions, shell scripts, container and deploy configuration, the root
+ * manifest's scripts. A repository path they spell out (`require("./docs/x.json")`
+ * in a workflow step) is in the slice. Comment lines do not count, and neither
+ * does a glob, which in a workflow chooses when it runs, not what it reads.
+ */
+export const isTextGate = (path: string) =>
+  classifyPath(path) === "control-plane" && !path.startsWith("vendor/") &&
+  (/^\.github\/(?:workflows|actions)\/.+\.ya?ml$/.test(path) || /\.(?:sh|ps1)$/.test(path) ||
+    /(?:^|\/)Dockerfile[^/]*$/.test(path) || path === "package.json" ||
+    /^(?:\.railway\/.+|railway[^/]*)\.(?:json|toml)$/.test(path));
+
+const TEXT_PATH = /[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+/g;
+
+/** The repository paths a text gate spells out, outside comment lines. */
+export const textGatePaths = (text: string): Set<string> => {
+  const found = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*#/.test(line)) continue;
+    for (const match of line.matchAll(TEXT_PATH)) {
+      // A glob is cut where its wildcard starts; what is left is not a file.
+      if (/[*?[{]/.test(line[match.index + match[0].length] ?? "")) continue;
+      found.add(normalisePathText(match[0]));
+    }
+  }
+  return found;
+};
+
 /* ------------------------------------------------------------------------- */
 /* Parsing                                                                    */
 /* ------------------------------------------------------------------------- */
@@ -80,21 +109,23 @@ export type CodeFacts = {
 /** Facts read from the syntax tree, so the same words in a comment or string do not count. */
 export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   const facts: CodeFacts = { runtimeLoader: false, computedCall: false, computedEnv: false, appSettingAccess: false };
-  // A `require` declared in a scope enclosing the call (an assertion helper,
-  // say) is that, not the module loader. Only a parameter or a declaration
-  // directly in an enclosing block counts; any other shape is the loader.
+  // A `require` the enclosing block itself defines as a function (an
+  // assertion helper, say) is that, not the module loader: a function
+  // declaration, or a variable whose value is a function or arrow written
+  // there. A parameter, or a variable bound to anything else
+  // (`module.require.bind(module)`), may be the loader and counts as one.
   // `createRequire` is caught on its own below.
   const scopes: boolean[] = [];
-  const declaresRequireIn = (statements: ts.NodeArray<ts.Statement>) =>
+  const definesRequireIn = (statements: ts.NodeArray<ts.Statement>) =>
     statements.some((statement) =>
       (ts.isFunctionDeclaration(statement) && statement.name?.text === "require") ||
       (ts.isVariableStatement(statement) &&
-        statement.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === "require")));
+        statement.declarationList.declarations.some((d) =>
+          ts.isIdentifier(d.name) && d.name.text === "require" && d.initializer !== undefined &&
+          (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer)))));
   const visit = (node: ts.Node): void => {
-    const scope =
-      ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node) ? declaresRequireIn(node.statements)
-        : ts.isFunctionLike(node) ? node.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === "require")
-          : null;
+    const scope = ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node)
+      ? definesRequireIn(node.statements) : null;
     if (scope !== null) scopes.push(scope);
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
@@ -491,6 +522,11 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   const loaders = new Set<string>();
   for (const [path, fileFacts] of facts) if (fileFacts.runtimeLoader) loaders.add(path);
   for (const file of files) {
+    if (isTextGate(file.path)) {
+      if (file.text === "") unreadable.add(file.path);
+      else named.set(file.path, { exact: textGatePaths(file.text), prefixes: new Set() });
+      continue;
+    }
     if (!CODE_FILE.test(file.path) || isAppRuntimeCode(file.path)) continue;
     const source = file.text === "" ? null : parse(file);
     if (source === null || hasParseErrors(source)) {
@@ -533,8 +569,12 @@ const pathReadings = (from: string, text: string): string[] => {
  * version 6 item 2). From each gate it follows imports through any code file,
  * test helpers included, and takes every file a followed file names by path
  * -- exactly, or below a directory app runtime code names. A named file is in
- * the slice; its own imports are followed when it is app runtime code, which
- * the app may load by that path. A product file the gates never reach is not
+ * the slice. A code file named exactly is followed in turn -- a gate may run
+ * it -- except under `tests/`, where a runner names the test or fixture it
+ * runs as its input, and under `vendor/`, a separate program; a test helper
+ * or vendored file a gate imports is still followed. A file under a named
+ * directory is data the gate reads: running code from there takes a computed
+ * load, which fails the analysis. A product file the gates never reach is not
  * in the slice, although the deployed image contains it.
  *
  * The whole app runtime graph is still built, because an import that does not
@@ -551,7 +591,7 @@ const gateSlice = (graph: Graph, paths: readonly string[]) => {
   const prefixes = new Set<string>();
   const problems: SliceProblem[] = [];
   // Every gate, read or not: a gate that cannot be read fails the analysis.
-  let frontier = paths.filter((path) => isRuntimeControlPlane(path) || isGateOutsideRuntime(path));
+  let frontier = paths.filter((path) => isRuntimeControlPlane(path) || isGateOutsideRuntime(path) || isTextGate(path));
   while (frontier.length > 0) {
     const stack = frontier;
     frontier = [];
@@ -572,7 +612,9 @@ const gateSlice = (graph: Graph, paths: readonly string[]) => {
       if (followed.has(path) || named.has(path)) continue;
       if (exact.has(path) || selfAndAncestors(path).some((dir) => prefixes.has(dir))) {
         named.add(path);
-        if (isAppRuntimeCode(path)) frontier.push(path);
+        if (exact.has(path) && CODE_FILE.test(path) && !path.startsWith("tests/") && !path.startsWith("vendor/")) {
+          frontier.push(path);
+        }
       }
     }
   }

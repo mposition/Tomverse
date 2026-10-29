@@ -10,7 +10,9 @@ import type { TreeEntry } from "@/lib/engineeringAgentTreeVerify";
 import { gitObjectId } from "@/lib/engineeringAgentTreeVerify";
 import type { WorkflowFile } from "@/lib/agentCredentialReachability";
 
-const ANALYSIS_TEXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md)$/;
+// Source, data and documents, and the text gates the slice reads (shell,
+// container and deploy configuration).
+const ANALYSIS_TEXT = /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 // Production runs `main`, not the `develop` base, so some image files differ
@@ -194,7 +196,8 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   catch { return null; }
   return { baseFiles, workflows, policyDocuments,
     exclusionDigest: createHash("sha256").update(JSON.stringify({
-      format: "engineering-agent-v22-deploy-exclusion-v1",
+      // v2: test helpers the image leaves out are read (gate slice, 2026-10-29).
+      format: "engineering-agent-v22-deploy-exclusion-v2",
       dockerIgnoreOid: ignoreEntry.oid,
     })).digest("hex"),
     installedVersions: Object.fromEntries(

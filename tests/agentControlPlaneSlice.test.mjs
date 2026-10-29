@@ -144,6 +144,55 @@ test("gate code outside the app brings in what it imports and the files it names
   assert.equal(slice([change("lib/leaf.ts")], tree({ "scripts/bad.mjs": "export const = ;\n" })).status, "failed");
 });
 
+test("a workflow or shell gate brings in the paths it spells out, not comments or globs; one with no text fails", () => {
+  const workflow =
+    "on:\n  push:\n    paths: ['lib/trigger*.ts']\njobs:\n  x:\n    steps:\n" +
+    "      # docs/ops/commented.json is only mentioned\n" +
+    '      - run: node -e \'require("./docs/ops/frozen.json")\'\n' +
+    "      - run: bash scripts/x.sh --input=docs/ops/input.json\n";
+  const files = tree({
+    ".github/workflows/x.yml": workflow,
+    "scripts/x.sh": "cat lib/shellRead.json\n",
+    "docs/ops/frozen.json": "{}\n",
+    "docs/ops/input.json": "{}\n",
+    "docs/ops/commented.json": "{}\n",
+    "lib/shellRead.json": "{}\n",
+    "lib/triggerA.ts": "export const a = 1;\n",
+  });
+  const paths = ["docs/ops/frozen.json", "docs/ops/input.json", "lib/shellRead.json"];
+  const result = slice(
+    [...paths, "docs/ops/commented.json", "lib/triggerA.ts"].map((path) => change(path, { newText: "{}\n" })),
+    files,
+  );
+  assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
+  assert.deepEqual([...result.slicePaths].sort(), [...paths].sort());
+  assert.equal(slice([change("lib/leaf.ts")], tree({ ".github/workflows/x.yml": "" })).status, "failed");
+});
+
+test("a code file a gate names by path is followed; a test or fixture a runner names is its input", () => {
+  const files = tree({
+    "scripts/run.mjs": 'export const LOADED = "lib/namedTool.ts";\nexport const SUITE = "tests/fixtures/process.mjs";\n',
+    "lib/namedTool.ts": 'import { x } from "./viaNamed.ts";\nexport { x };\n',
+    "tests/fixtures/process.mjs": 'import { y } from "../../lib/viaFixture.ts";\nexport const run = (m) => import(m);\nexport { y };\n',
+    "lib/viaNamed.ts": "export const x = 1;\n",
+    "lib/viaFixture.ts": "export const y = 1;\n",
+  });
+  const result = slice(["lib/viaNamed.ts", "lib/viaFixture.ts"].map((path) => change(path, { newText: "export const x = 2;\n" })), files);
+  assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
+  assert.deepEqual([...result.slicePaths], ["lib/viaNamed.ts"]);
+
+  // Code under a directory a gate reads is data there; running it takes a computed load.
+  const byDirectory = tree({
+    "lib/amux/gate.ts": 'import { join } from "node:path";\nexport const dir = (root) => join(root, "lib", "plugins");\n',
+    "lib/plugins/a.ts": 'import { z } from "../viaDirectory.ts";\nexport { z };\n',
+    "lib/viaDirectory.ts": "export const z = 1;\n",
+  });
+  assert.deepEqual(
+    [...slice(["lib/plugins/a.ts", "lib/viaDirectory.ts"].map((path) => change(path, { newText: byDirectory.find((f) => f.path === path).text })), byDirectory).slicePaths],
+    ["lib/plugins/a.ts"],
+  );
+});
+
 test("a path a gate names relative to itself or through the @/ alias is read as the file it means", () => {
   const files = tree({
     "lib/amux/gate.ts":
@@ -184,11 +233,14 @@ test("a followed product file that loads by a computed name fails the analysis; 
     slice([change("lib/leaf.ts")], helper("const require = (ok, why) => { if (!ok) throw new Error(why); };\nexport const helper = (x) => require(x > 0, `x ${x}`);\n")).status,
     "analysed",
   );
-  // ... but only where that declaration encloses the call.
-  assert.equal(
-    slice([change("lib/leaf.ts")], helper("function check(require) { return require; }\nexport const helper = (name) => require(name);\n")).status,
-    "failed",
-  );
+  // ... but only where that function encloses the call, and only a function written there.
+  for (const text of [
+    "function check(require) { return require; }\nexport const helper = (name) => require(name);\n",
+    "export const helper = (require, name) => require(name);\n",
+    "var require = module.require.bind(module);\nexport const helper = (name) => require(name);\n",
+  ]) {
+    assert.equal(slice([change("lib/leaf.ts")], helper(text)).status, "failed", text);
+  }
   assert.equal(
     slice([change("lib/leaf.ts")], tree({ "scripts/check-locales.mjs": "export const load = (locale) => import(`../locales/${locale}.ts`);\n" })).status,
     "analysed",
@@ -295,7 +347,10 @@ test("on this repository the analysis resolves every import of the app runtime a
     .filter(Boolean);
   const baseFiles = paths.map((path) => ({
     path,
-    text: /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json)$/.test(path) ? readFileSync(new URL(path, root), "utf8") : "",
+    // The texts the base evidence reads, text gates included.
+    text: /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/.test(path)
+      ? readFileSync(new URL(path, root), "utf8")
+      : "",
   }));
   // The policy's own example (a gate writes its audit through lib/adminAudit.ts),
   // and an operating document no gate reads.
