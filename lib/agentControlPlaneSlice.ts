@@ -1033,6 +1033,23 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   const facts = new Map<string, CodeFacts>();
   const appSettingKeys = new Set<string>();
   const named = new Map<string, NamedPaths>();
+  const loaders = new Set<string>();
+  // What code embedded in a string requires (an inline worker's source).
+  // Node resolves a worker's relative require from the working directory --
+  // the repository root -- so a relative one is read from there and from the
+  // file alike. A relative one that names no file either way is a load this
+  // cannot follow (true is returned); a package name that is not installed
+  // is the package's concern.
+  const followEmbedded = (path: string, source: ts.SourceFile, targets: Set<string>) => {
+    let unknown = false;
+    for (const specifier of embeddedSpecifiers(source)) {
+      const relative = specifier.startsWith("./") || specifier.startsWith("../");
+      const readings = [resolve(path, specifier), ...(relative ? [resolve("index.js", specifier)] : [])];
+      for (const reading of readings) if (reading !== null && reading !== "external") targets.add(reading);
+      if (relative && readings.every((reading) => reading === null)) unknown = true;
+    }
+    return unknown;
+  };
   for (const file of files) {
     if (!isAppRuntimeCode(file.path)) continue;
     const source = parse(file);
@@ -1057,10 +1074,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     }
     // What an inline worker's source requires; text, so one that names no
     // tracked file adds nothing.
-    for (const specifier of embeddedSpecifiers(source)) {
-      const resolved = resolve(file.path, specifier);
-      if (resolved !== null && resolved !== "external") targets.add(resolved);
-    }
+    if (followEmbedded(file.path, source, targets)) loaders.add(file.path);
     edges.set(file.path, targets);
   }
   // Code outside the app -- gate scripts and tooling, and the tests and
@@ -1073,7 +1087,6 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   // server, for one), or no parse -- fails the analysis only if a gate reaches
   // it.
   const unreadable = new Set<string>();
-  const loaders = new Set<string>();
   for (const [path, fileFacts] of facts) if (fileFacts.runtimeLoader || fileFacts.loadingBuiltin) loaders.add(path);
   for (const file of files) {
     if (isTextGate(file.path)) {
@@ -1110,10 +1123,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
       const resolved = resolve(file.path, specifier);
       if (resolved !== null && resolved !== "external") targets.add(resolved);
     }
-    for (const specifier of embeddedSpecifiers(source)) {
-      const resolved = resolve(file.path, specifier);
-      if (resolved !== null && resolved !== "external") targets.add(resolved);
-    }
+    if (followEmbedded(file.path, source, targets)) loaders.add(file.path);
     edges.set(file.path, targets);
   }
   return { edges, facts, appSettingKeys, named, unreadable, loaders, problems };

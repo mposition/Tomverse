@@ -394,6 +394,21 @@ test("a followed product file that loads by a computed name fails the analysis; 
   const inlined = slice([change("lib/workerDep.js", { newText: "exports.x = 2;\n" })], inline);
   assert.equal(inlined.status, "analysed", JSON.stringify(inlined.problems ?? []));
   assert.ok(inlined.slicePaths.has("lib/workerDep.js"));
+  // A worker resolves a relative require from the working directory, the root.
+  const fromRoot = tree({
+    "lib/helper.ts":
+      'import { Worker } from "node:worker_threads";\nconst source = `require("./lib/plugin.js")`;\n' +
+      "export const helper = () => new Worker(source, { eval: true });\n",
+    "lib/plugin.js": "exports.p = 1;\n",
+  });
+  assert.ok(slice([change("lib/plugin.js", { newText: "exports.p = 2;\n" })], fromRoot).slicePaths.has("lib/plugin.js"));
+  // One that names no file either way cannot be followed.
+  const nowhere = tree({
+    "lib/helper.ts":
+      'import { Worker } from "node:worker_threads";\nconst source = `require("./missing/plugin.js")`;\n' +
+      "export const helper = () => new Worker(source, { eval: true });\n",
+  });
+  assert.equal(slice([change("lib/leaf.ts")], nowhere).status, "failed");
   assert.equal(
     slice([change("lib/leaf.ts")], tree({ "scripts/check-locales.mjs": "export const load = (locale) => import(`../locales/${locale}.ts`);\n" })).status,
     "analysed",
