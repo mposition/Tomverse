@@ -89,21 +89,33 @@ const IMAGE_EDIT_PRICING: Readonly<Record<string, ImageEditPricing>> = {
   // fal-ai/nano-banana-2/edit is sold per output image at the generation's own
   // price: fal's pricing API answered unit_price 0.08 per "images" for both
   // endpoints on 2026-10-29, and the model page names no input-image charge.
-  // The edit therefore adds nothing to the 120 credits already approved.
+  // The edit therefore adds nothing to the 120 credits already approved. The
+  // owner-approved run of scripts/measure-image-edit-providers.mjs on
+  // 2026-10-29 sent a 1024x768 photo as a data URI and got back a 1024x1024
+  // PNG on fal's CDN -- the image that was priced.
   "fal-ai/nano-banana-2": {
     surchargeCredits: 0,
     inputBudgetMicroUsd: 0,
     inputTokens: null,
-    verification: null,
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "fal pricing API (fal-ai/nano-banana-2/edit) + scripts/measure-image-edit-providers.mjs",
+    },
   },
-  // xAI publishes only the output price (US$0.05 per image) and says nothing
-  // about the source image of an edit. Held until a billed edit's
-  // usage.cost_in_usd_ticks shows what the photo adds.
+  // xAI publishes only the output price (US$0.05 per image). The owner-approved
+  // run of scripts/measure-image-edit-providers.mjs on 2026-10-29 read
+  // usage.cost_in_usd_ticks = 600,000,000 (US$0.06) for both a 1024x1024 and a
+  // 1024x768 photo: the photo adds a flat US$0.01 whatever its shape. 10
+  // credits carry it at (50,000 + 5,000 + 10,000) / (75 + 10) = 765 micro-USD
+  // per credit, beside the 733 the generation already carries.
   "grok-imagine-image-quality-20260403": {
-    surchargeCredits: 0,
-    inputBudgetMicroUsd: 0,
+    surchargeCredits: 10,
+    inputBudgetMicroUsd: 10_000,
     inputTokens: null,
-    verification: null,
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "scripts/measure-image-edit-providers.mjs (usage.cost_in_usd_ticks)",
+    },
   },
 };
 

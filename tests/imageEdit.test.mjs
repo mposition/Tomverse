@@ -52,12 +52,23 @@ test("OpenAI, xAI and fal have edit adapters; Google direct does not", () => {
   assert.equal(imageModelSupportsEdit("toString"), false);
 });
 
-test("a model edits only once its edit price is verified", () => {
-  // Held until the paid measurement (scripts/measure-image-edit-providers.mjs).
-  assert.equal(imageEditPricing("grok-imagine-image-quality-20260403"), null);
-  assert.equal(imageEditPricing("fal-ai/nano-banana-2"), null);
-  assert.equal(maxImageEditRequestCostMicroUsd(getImageModel("fal-ai/nano-banana-2"), getImageModel("fal-ai/nano-banana-2").prices[0]), null);
+test("each edit price is the measured one", () => {
   assert.deepEqual(imageEditPricing("gpt-image-2").inputTokens, { maxTokens: 10_000, usdPerMillionTokens: 8 });
+  // Measured 2026-10-29: xAI billed US$0.06 for an edit, US$0.01 over its output price.
+  const grok = imageEditPricing("grok-imagine-image-quality-20260403");
+  assert.equal(grok.inputBudgetMicroUsd, 10_000);
+  assert.equal(grok.surchargeCredits, 10);
+  assert.equal(grok.inputTokens, null);
+  // fal sells the edit at the generation price.
+  const fal = imageEditPricing("fal-ai/nano-banana-2");
+  assert.equal(fal.inputBudgetMicroUsd, 0);
+  assert.equal(fal.surchargeCredits, 0);
+  for (const modelId of IMAGE_EDIT_MODEL_IDS) {
+    assert.equal(imageEditPricing(modelId).verification.verifiedAt, "2026-10-29", modelId);
+  }
+  // A model without edit pricing has no edit worst case.
+  const gemini = getImageModel("gemini-3.1-flash-image");
+  assert.equal(maxImageEditRequestCostMicroUsd(gemini, { quality: "medium", size: "1024x1024", credits: 1, outputCostMicroUsd: 1 }), null);
 });
 
 test("an edit's input splits text from image tokens, and a missing split bills as image", () => {
@@ -169,10 +180,10 @@ test("a model without an edit adapter refuses an edit before any call", async ()
           prompt: "smaller tree",
           size: "1024x1024",
           quality: "medium",
-          modelId: "grok-imagine-image-quality-20260403",
+          modelId: "gemini-3.1-flash-image",
           editImage,
         }),
-        (error) => error instanceof ImageProviderError && /cannot edit/.test(error.message)
+        (error) => error instanceof ImageProviderError && /not available|cannot edit/.test(error.message)
       )
   );
   assert.equal(called, false);
@@ -273,4 +284,83 @@ test("a fal edit keeps every priced field and adds the photo as a data URI", asy
   assert.equal(body.enable_web_search, false);
   assert.equal(FAL_EDIT_ENDPOINT_SUFFIX, "/edit");
   assert.equal(buildFalImageEditRequest({ ...request, size: "1536x1024", image: { bytes: Buffer.from("x"), mimeType: "image/png" } }), null);
+});
+
+test("an xAI edit posts the photo to the edits endpoint and never audits its bytes", async () => {
+  const calls = [];
+  const result = await withFetch(
+    async (url, init) => {
+      calls.push({ url, init });
+      return Response.json({
+        data: [{ b64_json: Buffer.from("out").toString("base64"), mime_type: "image/jpeg" }],
+        usage: { cost_in_usd_ticks: 600_000_000 },
+      });
+    },
+    async () => {
+      const key = process.env.XAI_API_KEY;
+      process.env.XAI_API_KEY = "test-xai-key";
+      try {
+        return await generateImageWithProvider({
+          prompt: "smaller tree",
+          size: "1024x1024",
+          quality: "medium",
+          modelId: "grok-imagine-image-quality-20260403",
+          editImage,
+        });
+      } finally {
+        if (key === undefined) delete process.env.XAI_API_KEY;
+        else process.env.XAI_API_KEY = key;
+      }
+    }
+  );
+  assert.equal(calls[0].url, "https://api.x.ai/v1/images/edits");
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(body.image.url, `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`);
+  assert.equal(body.resolution, "1k");
+  assert.equal(body.aspect_ratio, "1:1");
+  assert.equal(result.mimeType, "image/jpeg");
+  assert.equal(result.requestParams.endpoint, "edits");
+  assert.equal(result.requestParams.image.sha256, "a".repeat(64));
+  assert.equal(JSON.stringify(result.requestParams).includes(Buffer.from("png-bytes").toString("base64")), false);
+});
+
+test("a fal edit calls the /edit endpoint once and never audits the photo", async () => {
+  const sharp = (await import("sharp")).default;
+  const png = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: "#888" } }).png().toBuffer();
+  const calls = [];
+  const result = await withFetch(
+    async (url, init) => {
+      calls.push({ url, init });
+      if (String(url).startsWith("https://fal.run/")) {
+        return Response.json({ images: [{ url: "https://v3b.fal.media/files/out.png", content_type: "image/png" }] });
+      }
+      const asset = new Response(png, { headers: { "content-type": "image/png", "content-length": String(png.byteLength) } });
+      Object.defineProperty(asset, "url", { value: String(url) });
+      return asset;
+    },
+    async () => {
+      const key = process.env.FAL_KEY;
+      process.env.FAL_KEY = "test-fal-key";
+      try {
+        return await generateImageWithProvider({
+          prompt: "smaller tree",
+          size: "1024x1024",
+          quality: "medium",
+          modelId: "fal-ai/nano-banana-2",
+          editImage,
+        });
+      } finally {
+        if (key === undefined) delete process.env.FAL_KEY;
+        else process.env.FAL_KEY = key;
+      }
+    }
+  );
+  assert.equal(calls[0].url, "https://fal.run/fal-ai/nano-banana-2/edit");
+  assert.equal(calls.filter((call) => String(call.url).startsWith("https://fal.run/")).length, 1);
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual(body.image_urls, [`data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`]);
+  assert.equal(body.thinking_level, "high");
+  assert.equal(result.outputWidth, 1024);
+  assert.equal(result.requestParams.endpoint, "edits");
+  assert.equal("image_urls" in result.requestParams, false);
 });
