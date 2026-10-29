@@ -202,7 +202,9 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
       available: m.trainCargoAvailable,
       unchecked: m.trainCargoUnchecked,
       in_main_pull_request: m.trainCargoInMainPull.replace("{number}", String(candidate.mainPullRequest ?? "")),
-      on_main: m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
+      on_main: candidate.foundByTrain
+        ? m.trainCargoOnMainByTrain.replace("{train}", candidate.foundByTrain)
+        : m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
       mentioned: m.trainCargoMentioned.replace("{number}", String(candidate.mainPullRequest ?? "")),
       changes_workflows: m.trainCargoWorkflows,
       back_merge: m.trainCargoBackMerge,
