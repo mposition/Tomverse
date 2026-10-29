@@ -371,7 +371,7 @@ test("the entry point does not exist while the flag is off", { tag: "@ui-risk" }
   await expect(page.getByTestId("new-conversation-menu-image")).toHaveCount(0);
 });
 
-test("a Free plan is routed to the upgrade, never into a composer it cannot submit", { tag: "@ui-risk" }, async ({
+test("a Free plan enters the image composer without a subscription", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -386,10 +386,8 @@ test("a Free plan is routed to the upgrade, never into a composer it cannot subm
   await page.getByTestId("sidebar-new-launcher-more").click();
   await page.getByTestId("new-conversation-menu-image").click();
 
-  // The requirement is stated before entry and the click goes to the plan
-  // page: a Free viewer never lands in a prompt box that would refuse them.
-  await page.waitForURL(/\/pricing/);
-  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("image-generation-prompt")).toBeVisible();
+  await expect(page).not.toHaveURL(/\/pricing/);
 });
 
 test("a Pro account generates an image end to end", { tag: "@ui-risk" }, async ({ page }) => {
@@ -1023,7 +1021,7 @@ test("a failed model retries in place while the group keeps its shape", { tag: "
   await expect(page.getByTestId("image-comparison-card")).toHaveCount(1);
 });
 
-test("a Free plan sees the image entry locked, not hidden", { tag: "@ui-risk" }, async ({ page }) => {
+test("a Free plan can open the image entry using its existing credit allowance", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await installImageGenerationApi(page);
@@ -1035,10 +1033,8 @@ test("a Free plan sees the image entry locked, not hidden", { tag: "@ui-risk" },
   }
   await page.getByTestId("sidebar-new-launcher-more").click();
   const entry = page.getByTestId("new-conversation-menu-image");
-  // Visible and stating the requirement up front -- never hidden, never a
-  // dead end at the last step.
   await expect(entry).toBeVisible();
-  await expect(entry).toHaveAttribute("data-locked", "true");
+  await expect(entry).toHaveAttribute("data-locked", "false");
 });
 
 test("the catalogue's image tab is its own list and seeds the picked model", { tag: "@ui-risk" }, async ({
@@ -1108,7 +1104,7 @@ test("the catalogue's image tab is its own list and seeds the picked model", { t
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 
-test("a Free plan sees the image tab locked, not hidden", { tag: "@ui-risk" }, async ({ page }) => {
+test("a Free plan can select an image model without an upgrade redirect", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await installImageGenerationApi(page);
@@ -1123,10 +1119,11 @@ test("a Free plan sees the image tab locked, not hidden", { tag: "@ui-risk" }, a
     .filter({ hasNot: page.getByTestId("image-model-hold-note") })
     .first();
   await expect(selectable).toBeVisible();
-  await expect(selectable).toHaveAttribute("data-locked", "true");
+  await expect(selectable).toHaveAttribute("data-locked", "false");
 
   await selectable.click();
-  await page.waitForURL(/\/pricing/);
+  await expect(page.getByTestId("review-image-mode")).toBeVisible();
+  await expect(page).not.toHaveURL(/\/pricing/);
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 

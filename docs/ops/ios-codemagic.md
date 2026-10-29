@@ -249,6 +249,41 @@ bundle preparation, iOS sync and the unsigned build dry run passed. These checks
 do not establish a new signed upload or resolution of the earlier installation
 failure; record the cloud build and actual device result separately.
 
+## Android 1.0.17 (18) parity (2026-10-29)
+
+The final Android 1.0.17 (18) release records native source `ffe7fd0d9`.
+All 70 files in `apps/mobile/src` match the refreshed iOS source; their shared
+Git tree is `5bb45666f703c62127ea5ce78d35cc26d4c12a59`. The iOS marketing
+version is 1.0.17. Codemagic assigns the iOS build number independently of
+Android's 18.
+
+The shared bundle now consumes Chat image handoffs in the original conversation,
+preserves the saved question and answer idempotency key, and reads back an
+uncertain result without submitting another image. Credit-balance and daily
+credit refusals have distinct localized explanations, and an empty failed
+response no longer leaves the Thinking indicator active. The native plan screen
+includes access-pass code entry, server-confirmed access periods and specific
+expired/ineligible/unconfirmed-result messages.
+
+The image-response CORS header and authenticated server routes are already in
+the Android release's merged backend. They apply to the existing iOS origin
+as well. No additional backend deployment or authorization change is introduced
+by this iOS refresh. The Apple billing build flag and product/SDK configuration
+remain subject to the existing setup above; synthetic pass tests do not activate
+App Store purchases or make the disabled production plan menu available.
+
+The iOS-specific fixture suite additionally covers English/Korean access-pass
+redemption on an iPad-sized screen, Apple-store routing, no StoreKit purchase
+for a pass, and expired/lost responses without automatic retries or unverified
+access. Local verification passed 66 image/transport/billing tests, 27 iOS
+preparation/Codemagic/CORS tests, 24 Apple billing browser cases, 12 WebKit
+completion/continuation cases and 6 iPhone/iPad responsive cases. Production
+bundle generation, iOS sync, the build dry run, scoped ESLint and diff checks
+also passed. A signed cloud build and physical-device installation remain
+separate steps. The previously diagnosed
+TestFlight install-data HTTP 404 occurs before app download; refreshing the
+application source does not establish that Apple's delivery failure is fixed.
+
 ## Local verification
 
 Machine: local Windows PC. Shell: PowerShell. Directory: repository root.

@@ -1,5 +1,20 @@
 # Native mobile parity
 
+## Tomverse access pass codes
+
+Owner request (2026-10-28): the native Plan tab accepts the same complimentary
+Tomverse trial/access pass codes as the web. `POST /api/billing/checkout` uses
+the native bearer account only under the existing native Chat/parity switches;
+bearer requests without an `internal_pass` promotion are refused before any
+Stripe customer, checkout, or redemption write. Web checkout remains unchanged.
+The existing pass transaction, expiry, one-use-per-account constraint and total
+redemption cap apply. No new promotion, extra credit grant, store discount or
+automatic renewal is introduced. Mobile billing advertises `promotionPasses`
+only when those switches are enabled. Deploy the server before the client;
+older servers never receive native redemption requests. A lost receipt is
+checked through balance refresh, never an automatic redemption retry.
+
+
 The bundled Capacitor client reuses the existing account settings, conversation,
 Review, image-generation and Deep Research services. It does not load the website
 as its application UI. No provider, pricing, credit, quota or product-key contract
@@ -180,6 +195,8 @@ that cookie-only request and cannot accidentally log out a valid native session.
 Unavailable usage never renders a fabricated zero. The usage route enrollment and
 capability declaration must be deployed together for production totals to load.
 
+Native CORS exposes `X-Chat-Response-Mode` to the existing app origins so the
+WebView can read the image handoff marker.
 Smart Adaptive image handoffs are recognized by the `image-turn` response mode,
 separately from deep-research receipts. The `chatImageTurns` capability advertises
 the exact native POST `/api/conversations/{id}/image-turn` enrollment behind the

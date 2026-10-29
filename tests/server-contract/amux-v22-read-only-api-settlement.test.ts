@@ -93,9 +93,6 @@ mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
   namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch },
 });
-mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), {
-  namedExports: { loadEngineeringAgentV22StoredCandidate: async () => null },
-});
 mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
   EngineeringAgentStoreRefusedError: class extends Error {},
   endEngineeringAgentRun: async () => undefined,

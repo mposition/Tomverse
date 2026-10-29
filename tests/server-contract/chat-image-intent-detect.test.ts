@@ -249,15 +249,15 @@ const turnImage = async (plan: { tier: string } | null) => {
   });
 };
 
-test("an Auto turn's image decision is made for an eligible account", async () => {
+for (const tier of ["Free", "Pro", "Max"]) test(`an Auto turn's image decision is made for an eligible ${tier} account`, async () => {
   reset();
-  const decision = await turnImage({ tier: "Pro" });
+  const decision = await turnImage({ tier });
   assert.equal(decision.image, true);
   assert.equal(calls.length, 1);
 });
 
 for (const [name, arrange, plan] of [
-  ["the plan has no image generation", () => {}, { tier: "Free" }],
+  ["the plan has no image generation", () => {}, { tier: "Guest" }],
   ["the plan is unknown", () => {}, null],
   ["image generation is off", () => (imageFlagOn = false), { tier: "Pro" }],
   ["the account is restricted", () => (accessRefused = true), { tier: "Pro" }],

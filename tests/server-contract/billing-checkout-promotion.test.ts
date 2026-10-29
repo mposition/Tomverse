@@ -57,15 +57,20 @@ type SessionCreateCall = {
 };
 
 type World = {
+  cookieReads: number;
+  redemptionUsers: string[];
+  grantedUsers: string[];
+  promotionIncrements: number;
   session: { user: { id: string } } | null;
   user: Record<string, unknown>;
+  lockedUser?: Record<string, unknown>;
   promotionValid: boolean;
   /**
    * Overridable so a fixed-amount promotion can reach the currency gate.
    * `null` means the default; it cannot hold `PROMOTION` itself because
    * `freshWorld()` runs before that constant is initialised.
    */
-  promotion: typeof PROMOTION | null;
+  promotion: import("../../lib/billingConfig").BillingPromotionConfig | null;
   promotionReserveError: Error | null;
   releases: string[];
   releaseShouldFail: boolean;
@@ -80,6 +85,7 @@ type World = {
 };
 
 const freshWorld = (): World => ({
+  cookieReads: 0, redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
   session: { user: { id: "user_1" } },
   user: {
     id: "user_1",
@@ -114,7 +120,7 @@ let world = freshWorld();
 let mocksInstalled = false;
 let sessionSequence = 0;
 
-const PROMOTION = {
+const PROMOTION: import("../../lib/billingConfig").BillingPromotionConfig = {
   id: "promo_db",
   code: "EDDIEFRIEND100",
   discountPercent: 100,
@@ -157,8 +163,16 @@ async function loadRoute(): Promise<{
       require(resolve(ROOT, path)) as Record<string, unknown>;
 
     mock.module(mod("node_modules/next-auth/next/index.js"), {
-      namedExports: { getServerSession: async () => world.session },
+      namedExports: { getServerSession: async () => { world.cookieReads++; return world.session; } },
     });
+    mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
+    mock.module(mod("lib/mobileAuthRoute.ts"), { namedExports: {
+      mobileAuthRefusal: (code: string) => Response.json({ code }, { status: 401 }),
+      requireMobileBearer: async (request: Request) => request.headers.get("authorization") === "Bearer native-valid"
+        ? { ok: true, identity: { userId: "native-user" } }
+        : { ok: false, response: Response.json({ code: "MOBILE_TOKEN_INVALID" }, { status: 401 }) },
+    } });
+    mock.module(mod("lib/standardEmailLane.ts"), { namedExports: { enqueueStandardEmail: async () => undefined } });
 
     const realApiSecurity = original("lib/apiSecurity.ts");
     apiSecurityErrorClass =
@@ -174,11 +188,20 @@ async function loadRoute(): Promise<{
       namedExports: {
         prisma: {
           user: {
-            findUnique: async () => world.user,
+            findUnique: async ({ where }: { where: { id: string } }) => ({ ...world.user, id: where.id, accountStatus: "active" }),
             update: async () => world.user,
             updateMany: async () => ({ count: 1 }),
           },
-          billingPromotion: { updateMany: async () => ({ count: 1 }) },
+          billingPromotion: { updateMany: async () => { world.promotionIncrements++; return { count: 1 }; } },
+          $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
+            $executeRaw: async () => 1,
+            billingPromotion: { updateMany: async () => { world.promotionIncrements++; return { count: 1 }; } },
+            billingPromotionRedemption: { create: async ({ data }: { data: { userId: string } }) => { world.redemptionUsers.push(data.userId); return {}; } },
+            user: {
+              findUniqueOrThrow: async () => world.lockedUser ?? world.user,
+              update: async ({ where }: { where: { id: string } }) => { world.grantedUsers.push(where.id); return world.user; },
+            },
+          }),
         },
       },
     });
@@ -347,12 +370,12 @@ async function loadRoute(): Promise<{
   )) as unknown as { POST: (request: Request) => Promise<Response> };
 }
 
-const post = async (body: Record<string, unknown>) => {
+const post = async (body: Record<string, unknown>, headers: Record<string, string> = {}) => {
   const { POST } = await loadRoute();
   return POST(
     new Request("http://127.0.0.1:3100/api/billing/checkout", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify({
         planId: "max",
         billingInterval: "monthly",
@@ -789,4 +812,73 @@ test("the same fixed-amount promotion is accepted for a USD checkout", async () 
   await response.json();
   assert.equal(world.sessionCreateCalls.length, 1);
   assert.equal(lastSessionCurrency(), "usd");
+});
+
+const nativeHeaders = { authorization: "Bearer native-valid", origin: "https://localhost" };
+const enableNativePass = () => {
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "true";
+  world.promotion = { ...PROMOTION, fulfillmentType: "internal_pass", appliesToPlanIds: ["pro"], accessDurationDays: 60 };
+};
+
+test("native pass redemption uses the bearer account and never a cookie or Stripe checkout", async () => {
+  enableNativePass();
+  const response = await post({ planId: "pro", promoCode: "test-pass" }, nativeHeaders);
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  assert.equal(receipt.accessType, "founding_tester_pass");
+  assert.equal(receipt.automaticRenewal, false);
+  assert.equal(receipt.paymentMethodRequired, false);
+  assert.ok(Date.parse(receipt.periodEnd) > Date.now());
+  assert.equal(world.cookieReads, 0);
+  assert.deepEqual(world.redemptionUsers, ["native-user"]);
+  assert.deepEqual(world.grantedUsers, ["native-user"]);
+  assert.equal(world.promotionIncrements, 1);
+  assert.equal(world.sessionCreateCalls.length, 0);
+  assert.equal(world.customerCreateKeys.length, 0);
+});
+
+for (const promoCode of [undefined, "STRIPE-FREE-COUPON"]) test(`native requests cannot open paid checkout: ${promoCode}`, async () => {
+  enableNativePass(); world.promotion = PROMOTION;
+  const response = await post({ promoCode }, nativeHeaders);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, "NATIVE_PASS_REQUIRED");
+  assert.deepEqual(world.redemptionUsers, []);
+  assert.equal(world.promotionIncrements, 0);
+  assert.equal(world.sessionCreateCalls.length, 0);
+  assert.equal(world.customerCreateKeys.length, 0);
+});
+
+for (const refusal of ["invalid-token", "hostile-origin", "disabled"]) test(`native pass authentication refuses ${refusal} without cookie fallback`, async () => {
+  enableNativePass();
+  const headers = { ...nativeHeaders };
+  if (refusal === "invalid-token") headers.authorization = "Bearer bad";
+  if (refusal === "hostile-origin") headers.origin = "https://evil.invalid";
+  if (refusal === "disabled") process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "false";
+  const response = await post({ planId: "pro", promoCode: "test-pass" }, headers);
+  assert.equal(response.status, refusal === "disabled" ? 503 : 401);
+  assert.equal(world.cookieReads, 0);
+  assert.deepEqual(world.grantedUsers, []);
+});
+
+test("native pass redemption preserves expired promotion refusal before any grant", async () => {
+  enableNativePass(); world.promotionValid = false;
+  const response = await post({ planId: "pro", promoCode: "expired-pass" }, nativeHeaders);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "PROMOTION_EXPIRED");
+  assert.deepEqual(world.grantedUsers, []);
+});
+
+for (const [name, entitlement] of [
+  ["Stripe Max", { plan: "Max", webSubscriptionPlan: "Max", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" }],
+  ["Stripe Pro", { plan: "Pro", webSubscriptionPlan: "Pro", stripeSubscriptionId: "sub-concurrent", subscriptionStatus: "active" }],
+  ["store Pro", { plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Pro", storeSubscriptionExpiresAt: new Date("2099-01-01T00:00:00Z") }],
+  ["store Max", { plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: new Date("2099-01-01T00:00:00Z") }],
+] as const) test(`a concurrent ${name} plan cannot be overwritten by pass redemption under the account lock`, async () => {
+  enableNativePass();
+  world.lockedUser = { ...world.user, ...entitlement };
+  const response = await post({ planId: "pro", promoCode: "test-pass" }, nativeHeaders);
+  assert.equal(response.status, 409);
+  assert.deepEqual(world.grantedUsers, []);
+  assert.equal(world.promotionIncrements, 0);
 });

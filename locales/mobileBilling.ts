@@ -1,6 +1,11 @@
 import type { MobileLanguage } from "./mobile";
 
 const en = {
+  promotionCode: "Promotion code", applyCode: "Apply", passDescription: "Use your Tomverse trial or access pass code. No payment or automatic renewal.",
+  passApplying: "Applying your code…", passApplied: "Your Tomverse pass is active.", passAccessUntil: "Tomverse pass · access until {date}",
+  passInvalid: "Check your Tomverse pass code and try again.", passUsed: "This account has already used this code.", passExpired: "This code has expired or reached its usage limit.",
+  passIneligible: "This code cannot be applied to your current plan.", passUnavailable: "Code redemption is not available yet. Update the app and try again later.",
+  passUnconfirmed: "We could not confirm activation. Refresh your balance to check your plan before trying again.",
   planInformation: "Plan credit details", planBenefitCompact: "{credits} credits/month · up to {models} models",
   creditsCompleted: "{credits} credits added", creditsCompletedDescription: "Your purchased credits are now in your account.",
   planCompleted: "You're subscribed to {plan}", planCompletedDescription: "Your new plan is now active on your account.",
@@ -40,6 +45,11 @@ type BillingCopy = Record<MobileBillingCopyKey, string>;
 const copies: Record<MobileLanguage, BillingCopy> = {
   en,
   ko: {
+    promotionCode: "프로모션 코드", applyCode: "적용", passDescription: "Tomverse 체험·패스 코드를 입력하세요. 결제나 자동 갱신은 없어요.",
+    passApplying: "코드를 적용하고 있어요…", passApplied: "Tomverse 패스가 적용되었습니다.", passAccessUntil: "Tomverse 패스 · {date}까지 이용",
+    passInvalid: "Tomverse 패스 코드를 확인한 뒤 다시 입력해 주세요.", passUsed: "이 계정에서 이미 사용한 코드입니다.", passExpired: "만료되었거나 사용 한도에 도달한 코드입니다.",
+    passIneligible: "현재 플랜에는 이 코드를 적용할 수 없습니다.", passUnavailable: "아직 코드를 적용할 수 없습니다. 앱 업데이트 후 다시 시도해 주세요.",
+    passUnconfirmed: "적용 결과를 확인하지 못했습니다. 다시 시도하기 전에 잔액을 새로고침해 플랜을 확인해 주세요.",
     planInformation: "플랜 크레딧 안내", planBenefitCompact: "월 {credits} 크레딧 · 최대 {models}개 모델",
     creditsCompleted: "{credits} 크레딧이 충전되었습니다", creditsCompletedDescription: "구매한 크레딧이 계정에 반영됐어요.",
     planCompleted: "{plan} 플랜에 가입되었습니다", planCompletedDescription: "새 플랜이 계정에 반영됐어요.",
@@ -71,6 +81,11 @@ const copies: Record<MobileLanguage, BillingCopy> = {
     purchasesRestored: "이 Tomverse 계정의 구매를 복원했습니다. 구매한 크레딧은 계정 잔액에 유지됩니다.",
   },
   zh: {
+    promotionCode: "优惠码", applyCode: "应用", passDescription: "输入 Tomverse 试用或通行证代码，无需付款，不会自动续订。",
+    passApplying: "正在应用代码…", passApplied: "Tomverse 通行证已生效。", passAccessUntil: "Tomverse 通行证 · 可用至 {date}",
+    passInvalid: "请检查 Tomverse 通行证代码后重试。", passUsed: "此账户已使用过该代码。", passExpired: "代码已过期或达到使用次数上限。",
+    passIneligible: "此代码不适用于当前套餐。", passUnavailable: "暂时无法兑换代码，请更新应用后重试。",
+    passUnconfirmed: "无法确认激活结果，请先刷新余额并检查套餐，再尝试兑换。",
     planInformation: "套餐积分说明", planBenefitCompact: "每月 {credits} 积分 · 最多 {models} 个模型",
     creditsCompleted: "已充值 {credits} 积分", creditsCompletedDescription: "购买的积分已到账。",
     planCompleted: "已订阅 {plan} 套餐", planCompletedDescription: "新套餐已在你的账户生效。",
@@ -102,6 +117,11 @@ const copies: Record<MobileLanguage, BillingCopy> = {
     purchasesRestored: "已恢复此 Tomverse 账户的购买，已购积分仍保留在账户余额中。",
   },
   de: {
+    promotionCode: "Aktionscode", applyCode: "Einlösen", passDescription: "Tomverse-Test- oder Zugangscode eingeben. Ohne Zahlung und automatische Verlängerung.",
+    passApplying: "Code wird eingelöst…", passApplied: "Dein Tomverse-Pass ist aktiv.", passAccessUntil: "Tomverse-Pass · Zugang bis {date}",
+    passInvalid: "Prüfe deinen Tomverse-Zugangscode und versuche es erneut.", passUsed: "Dieses Konto hat den Code bereits verwendet.", passExpired: "Der Code ist abgelaufen oder sein Nutzungslimit wurde erreicht.",
+    passIneligible: "Dieser Code gilt nicht für deinen aktuellen Tarif.", passUnavailable: "Codes können noch nicht eingelöst werden. Aktualisiere die App und versuche es später erneut.",
+    passUnconfirmed: "Die Aktivierung konnte nicht bestätigt werden. Aktualisiere vor einem erneuten Versuch dein Guthaben und prüfe deinen Tarif.",
     planInformation: "Details zu Tarif-Credits", planBenefitCompact: "{credits} Credits/Monat · bis zu {models} Modelle",
     creditsCompleted: "{credits} Credits aufgeladen", creditsCompletedDescription: "Die gekauften Credits wurden Ihrem Konto gutgeschrieben.",
     planCompleted: "{plan} erfolgreich abonniert", planCompletedDescription: "Ihr neuer Tarif ist jetzt in Ihrem Konto aktiv.",
@@ -133,6 +153,11 @@ const copies: Record<MobileLanguage, BillingCopy> = {
     purchasesRestored: "Käufe für dieses Tomverse-Konto wiederhergestellt. Gekaufte Credits bleiben im Kontoguthaben.",
   },
   fr: {
+    promotionCode: "Code promotionnel", applyCode: "Appliquer", passDescription: "Saisissez votre code d’essai ou de pass Tomverse. Sans paiement ni renouvellement automatique.",
+    passApplying: "Application du code…", passApplied: "Votre pass Tomverse est actif.", passAccessUntil: "Pass Tomverse · accès jusqu’au {date}",
+    passInvalid: "Vérifiez votre code de pass Tomverse et réessayez.", passUsed: "Ce compte a déjà utilisé ce code.", passExpired: "Ce code a expiré ou atteint sa limite d’utilisation.",
+    passIneligible: "Ce code ne s’applique pas à votre forfait actuel.", passUnavailable: "L’activation des codes n’est pas encore disponible. Mettez l’application à jour et réessayez plus tard.",
+    passUnconfirmed: "Impossible de confirmer l’activation. Actualisez votre solde pour vérifier votre forfait avant de réessayer.",
     planInformation: "Détails des crédits de l’offre", planBenefitCompact: "{credits} crédits/mois · jusqu’à {models} modèles",
     creditsCompleted: "{credits} crédits ajoutés", creditsCompletedDescription: "Les crédits achetés ont été ajoutés à votre compte.",
     planCompleted: "Vous avez souscrit à {plan}", planCompletedDescription: "Votre nouvelle offre est maintenant active sur votre compte.",
@@ -164,6 +189,11 @@ const copies: Record<MobileLanguage, BillingCopy> = {
     purchasesRestored: "Les achats de ce compte Tomverse ont été restaurés. Les crédits achetés restent dans le solde du compte.",
   },
   es: {
+    promotionCode: "Código promocional", applyCode: "Aplicar", passDescription: "Introduce tu código de prueba o pase de Tomverse. Sin pago ni renovación automática.",
+    passApplying: "Aplicando código…", passApplied: "Tu pase de Tomverse está activo.", passAccessUntil: "Pase de Tomverse · acceso hasta {date}",
+    passInvalid: "Comprueba tu código de pase de Tomverse e inténtalo de nuevo.", passUsed: "Esta cuenta ya ha utilizado este código.", passExpired: "El código ha caducado o alcanzado su límite de uso.",
+    passIneligible: "Este código no es válido para tu plan actual.", passUnavailable: "Aún no se pueden canjear códigos. Actualiza la aplicación e inténtalo más tarde.",
+    passUnconfirmed: "No pudimos confirmar la activación. Actualiza el saldo y comprueba tu plan antes de volver a intentarlo.",
     planInformation: "Detalles de los créditos del plan", planBenefitCompact: "{credits} créditos/mes · hasta {models} modelos",
     creditsCompleted: "Se han añadido {credits} créditos", creditsCompletedDescription: "Los créditos comprados ya están en tu cuenta.",
     planCompleted: "Te has suscrito al plan {plan}", planCompletedDescription: "Tu nuevo plan ya está activo en tu cuenta.",
@@ -195,6 +225,11 @@ const copies: Record<MobileLanguage, BillingCopy> = {
     purchasesRestored: "Se han restaurado las compras de esta cuenta de Tomverse. Los créditos comprados permanecen en el saldo de la cuenta.",
   },
   pt: {
+    promotionCode: "Código promocional", applyCode: "Aplicar código", passDescription: "Insira seu código de teste ou passe Tomverse. Sem pagamento nem renovação automática.",
+    passApplying: "Aplicando código…", passApplied: "Seu passe Tomverse está ativo.", passAccessUntil: "Passe Tomverse · acesso até {date}",
+    passInvalid: "Confira seu código de passe Tomverse e tente novamente.", passUsed: "Esta conta já utilizou este código.", passExpired: "O código expirou ou atingiu seu limite de uso.",
+    passIneligible: "Este código não se aplica ao seu plano atual.", passUnavailable: "Ainda não é possível resgatar códigos. Atualize o aplicativo e tente mais tarde.",
+    passUnconfirmed: "Não foi possível confirmar a ativação. Atualize o saldo e confira seu plano antes de tentar novamente.",
     planInformation: "Detalhes dos créditos do plano", planBenefitCompact: "{credits} créditos/mês · até {models} modelos",
     creditsCompleted: "{credits} créditos adicionados", creditsCompletedDescription: "Os créditos comprados já estão na sua conta.",
     planCompleted: "Subscreveu o plano {plan}", planCompletedDescription: "O seu novo plano já está ativo na sua conta.",

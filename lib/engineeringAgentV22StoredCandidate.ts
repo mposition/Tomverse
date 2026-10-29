@@ -25,9 +25,8 @@ type Ports = {
   readSwitch: () => Promise<boolean>;
   publicationEnabled: () => boolean;
   loadCandidate: typeof loadEngineeringAgentV22Candidate;
-  readTier: (candidate: Extract<Candidate,
-    { ok: true }>) => Promise<{ tier: TierVerdict;
-      imageProofDigest: string | null }>;
+  readTier: (candidate: Extract<Candidate, { ok: true }>) =>
+    Promise<{ tier: TierVerdict; imageProofDigest: string | null }>;
 };
 
 // The base commit is bound through `candidate.baseTree`; its own
@@ -94,15 +93,17 @@ const livePorts: Ports = {
 
 /** This is a verified candidate, not T1 authority. Every read that could
  * change during GitHub I/O is repeated before returning the patch to the
- * deterministic tier gate. No patch or source text is sent to a client. */
+ * deterministic tier gate. No patch or source text is sent to a client. A
+ * caller after settlement names its own snapshot (the pending draft's run). */
 export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
-  ports: Ports = livePorts): Promise<
+  given: Partial<Ports> = {}): Promise<
     { ok: true; runId: string; taskId: string; baseSha: string;
       patchBody: string; patchDigest: string;
       candidate: Extract<Candidate, { ok: true }>;
       tier: TierVerdict; imageProofDigest: string | null } |
     { ok: false; reason: string }
   > {
+  const ports = { ...livePorts, ...given };
   const first = await ports.readSnapshot(attemptId);
   if (!first || !ports.publicationEnabled() ||
       !(await ports.readSwitch()) ||
