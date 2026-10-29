@@ -1212,8 +1212,10 @@ export async function expireEngineeringAgentWorkItem(
  * A v22 publish item whose capability lapsed unclaimed and whose candidate,
  * judged again (§4, §10), no longer gets one: it closes as `expired` with the
  * reason, so it leaves the pull request queue and no later round reads it
- * again. Nothing was ever written to GitHub for it -- no capability of it was
- * consumed -- and a live capability keeps it open.
+ * again. Nothing was written to GitHub for it: an item is queued only before
+ * its first claim or after a claim proven unwritten (a refusal before the
+ * push, or a lookup that found no prior write), and a capability that claim
+ * spent stays consumed. A live capability keeps it open.
  */
 export async function expireEngineeringAgentV22LapsedPublish(
   tx: EngineeringAgentTransaction,
@@ -1226,8 +1228,6 @@ export async function expireEngineeringAgentV22LapsedPublish(
   const now = await databaseNow(tx);
   const live = await lockLiveCapability(tx, item.id);
   if (live && live.expiresAt.getTime() > now.getTime()) return { expired: false };
-  if (await tx.engineeringAgentCapability.count({
-    where: { workItemId: item.id, consumedAt: { not: null } } }) > 0) return { expired: false };
   // The trigger allows a lapse only after expiry, and a lapsed one is never consumed.
   if (live) await tx.engineeringAgentCapability.update({ where: { id: live.id }, data: { unconsumedWorkItemId: null } });
   await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "expired", reason: input.reason } });
