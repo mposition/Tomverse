@@ -313,6 +313,7 @@ export const zh = {
         deepResearchWritingStatus: "正在撰写报告…",
         deepResearchTakingLonger: "耗时比平时更长。深度研究报告可能需要几分钟才能完成。",
         responseGenerating: "正在生成回复。",
+        sendPreparing: "正在发送你的问题…",
         imageTurnGenerating: "正在生成图片…",
         imageTurnFailed: "图片生成失败，请重试。",
         imageTurnRetry: "重试",

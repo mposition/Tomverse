@@ -287,6 +287,7 @@ export const ko = {
         stopThisResponse: "이 응답 중지",
         stop: "중지",
         responseGenerating: "응답을 생성하고 있습니다.",
+        sendPreparing: "질문을 보내는 중…",
         imageTurnGenerating: "이미지를 만들고 있습니다…",
         imageTurnFailed: "이미지를 만들지 못했습니다. 다시 시도해 주세요.",
         imageTurnRetry: "다시 시도",

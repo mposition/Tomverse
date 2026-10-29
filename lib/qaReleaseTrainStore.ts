@@ -8,6 +8,7 @@ import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorContr
 import {
   qaReleaseTrainEmergencyAdmissible,
   qaReleaseTrainEmergencyFrom,
+  qaReleaseTrainFoundOnMain,
   qaReleaseTrainHiddenFrom,
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainSelectionFrom,
@@ -15,6 +16,7 @@ import {
   type QaReleaseTrainSelection,
 } from "@/lib/qaReleaseTrainCargoCore";
 import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
+import { qaReleaseTrainVerdictsFrom, type QaReleaseTrainVerdicts } from "@/lib/qaReleaseTrainVerdictCore";
 
 /**
  * The release train's records (docs/policy/qa-release-agent.md section 8 item
@@ -240,6 +242,27 @@ export async function readQaReleaseTrainAdmissions(since: Date, limit = 200): Pr
   );
 }
 
+/**
+ * Pull requests a train skipped as already on main since a moment, by the
+ * newest train that did: the train compared their content with main, which
+ * the cargo list's GitHub records cannot (lib/qaReleaseTrainCargoCore.ts).
+ * `limit` only bounds a runaway fortnight.
+ */
+export async function readQaReleaseTrainFoundOnMain(since: Date, limit = 500): Promise<Map<number, string>> {
+  const rows = await prisma.adminAuditLog.findMany({
+    where: { action: QA_RELEASE_TRAIN_REPORTED_ACTION, targetType: TARGET_TYPE, createdAt: { gte: since } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { targetId: true, metadata: true },
+  });
+  return qaReleaseTrainFoundOnMain(
+    rows.flatMap((row) => {
+      const metadata = row.metadata as { pullRequestNumber?: unknown; picks?: unknown } | null;
+      return metadata && typeof row.targetId === "string" ? [{ slot: row.targetId, report: metadata }] : [];
+    }),
+  );
+}
+
 /** The reports of these trains, newest first. Rows that do not parse are left out. */
 export async function readQaReleaseTrainReportsFor(slots: readonly string[]): Promise<QaReleaseTrainRecord[]> {
   if (slots.length === 0) return [];
@@ -281,6 +304,33 @@ export async function readQaReleaseTrainSchedule(): Promise<QaReleaseTrainSchedu
     const parsed = JSON.parse(row.value) as { hours?: unknown; reportedAt?: unknown };
     const hours = Array.isArray(parsed.hours) ? parsed.hours.filter((hour): hour is number => Number.isInteger(hour) && hour >= 0 && hour <= 23) : [];
     return hours.length > 0 && typeof parsed.reportedAt === "string" ? { hours, reportedAt: parsed.reportedAt } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The train service's verdicts on the next train's candidates (owner,
+ * 2026-10-29; lib/qaReleaseTrainVerdictCore.ts): one AppSetting row it
+ * overwrites whenever it checks again. Display only, never an audit event,
+ * never read by the train.
+ */
+export const QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY = "qa_release.train.verdicts";
+
+export async function recordQaReleaseTrainVerdicts(verdicts: QaReleaseTrainVerdicts): Promise<void> {
+  const value = JSON.stringify(verdicts);
+  await prisma.appSetting.upsert({
+    where: { key: QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY },
+    create: { key: QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY, value },
+    update: { value },
+  });
+}
+
+export async function readQaReleaseTrainVerdicts(): Promise<QaReleaseTrainVerdicts | null> {
+  const row = await prisma.appSetting.findUnique({ where: { key: QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY }, select: { value: true } });
+  if (!row) return null;
+  try {
+    return qaReleaseTrainVerdictsFrom(JSON.parse(row.value));
   } catch {
     return null;
   }

@@ -28,6 +28,7 @@ import {
   FileText,
   FileWarning,
   Image as ImageIcon,
+  Paperclip,
   Presentation,
   RotateCcw,
   Sheet,
@@ -112,6 +113,8 @@ type ChatMessageListProps = {
   isSending?: boolean;
   /** True while a retry/follow-up is awaiting its pre-send persistence gate. */
   isSendPreparing?: boolean;
+  /** The question just sent, shown until its real turn lands (`SendEchoTurn`). */
+  sendEcho?: SendEcho | null;
   // Aborts only this panel's in-flight request, distinct from the shell's
   // "stop all" button.
   onStopGenerating?: () => void;
@@ -415,6 +418,48 @@ function TypingIndicator({ label }: { label?: string }) {
   );
 }
 
+/** What a send echo shows; see `SendEchoTurn`. */
+export type SendEcho = { text: string; attachmentCount: number };
+/** A send echo and the conversation selection it was pressed in. */
+export type PendingSendEcho = { ticket: number; echo: SendEcho };
+
+/**
+ * The question the user just sent, drawn the moment they press send.
+ *
+ * Before a turn reaches this list it can wait seconds on work the screen used
+ * not to show: the image-intent and Review routing model calls, creating the
+ * conversation, saving the question. Nothing moved in that time, so people
+ * pressed send again. This is only a picture of the question -- it carries no
+ * id, no actions and is never persisted -- and it is replaced by the real user
+ * row as soon as the send hands its payload to the panels.
+ */
+export function SendEchoTurn({ echo }: { echo: SendEcho }) {
+  const { t } = useLanguage();
+  return (
+    <div data-testid="chat-send-echo" className="flex w-full flex-col gap-2">
+      <div className="flex w-full flex-col items-end">
+        <span className="sr-only">{t("chat.you")}</span>
+        <div className="relative max-w-[94%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-[13px] leading-[1.55] text-white shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed">
+          {echo.text}
+          {echo.attachmentCount > 0 && (
+            <span className="mt-1 block text-xs text-white/80">
+              <Paperclip aria-hidden="true" className="mr-1 inline h-3 w-3" />
+              {echo.attachmentCount}
+            </span>
+          )}
+        </div>
+      </div>
+      {/* aria-live without role="status", like the list's own live region. */}
+      <div aria-live="polite" className="flex items-center gap-2 px-1">
+        <TypingIndicator />
+        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          {t("chat.sendPreparing")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function ChatMessageList({
   transcriptFooter,
   messages,
@@ -434,6 +479,7 @@ export function ChatMessageList({
   guestImportAvailable = true,
   isSending = false,
   isSendPreparing = false,
+  sendEcho = null,
   onStopGenerating,
   importedTranscript,
 }: ChatMessageListProps) {
@@ -1888,6 +1934,7 @@ export function ChatMessageList({
               </Fragment>
             );
           })}
+          {sendEcho && <SendEchoTurn echo={sendEcho} />}
           {transcriptFooter}
         </div>
       </div>

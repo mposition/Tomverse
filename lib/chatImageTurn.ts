@@ -9,7 +9,9 @@ import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
     IMAGE_QUALITY_BY_PRESET,
     type ImagePreset,
+    type ImageSize,
 } from "@/lib/imageGenerationPricing";
+import { findChatImageEditSource } from "@/lib/imageEditSource";
 import { requestImageGeneration } from "@/lib/imageGenerationService";
 import { prisma } from "@/lib/prisma";
 
@@ -38,6 +40,11 @@ export type ChatImageTurnInput = {
     preset: ImagePreset | null;
     /** A follow-up's rewritten prompt; the saved question otherwise. */
     prompt?: string;
+    /**
+     * Change the photo attached to the question instead of drawing a new
+     * image. The photo is found from the saved question, never named here.
+     */
+    edit?: boolean;
     request?: Request;
 };
 
@@ -133,16 +140,37 @@ export async function startChatImageTurn(
         chatImageTurnGroupKey(input.assistantMessageId) === input.assistantMessageId)) {
         throw new ChatAccessError(400, "IMAGE_MODEL_SELECTION_INVALID", "Invalid comparison image selection.");
     }
+    // An edit starts from the question's own photo, looked up from the saved
+    // message so a request can never point an edit at another file.
+    let editSource: { attachmentId: string } | undefined;
+    let size: ImageSize = "1024x1024";
+    if (input.edit) {
+        if (isReview) {
+            throw new ChatAccessError(400, "IMAGE_EDIT_NOT_SUPPORTED", "Review does not edit photos.");
+        }
+        const source = await findChatImageEditSource({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            sourceUserMessageId: input.sourceUserMessageId,
+        });
+        if (!source) {
+            throw new ChatAccessError(400, "IMAGE_EDIT_SOURCE_MISSING", "Attach the photo to edit.");
+        }
+        editSource = { attachmentId: source.attachmentId };
+        // The edit keeps the photo's shape, at that size's own price.
+        size = source.size;
+    }
     const result = await requestImageGeneration({
         userId: input.userId,
         // The answer's text still names the question that was asked.
         prompt: input.prompt?.trim() || prompt,
-        size: "1024x1024",
+        size,
         quality: IMAGE_QUALITY_BY_PRESET[input.preset ?? "standard"],
         conversationId: input.conversationId,
         idempotencyKey: input.imageGroupModelIds ? chatImageTurnGroupKey(input.assistantMessageId) : input.assistantMessageId,
         modelIds: input.imageGroupModelIds ?? (input.imageModelIds.length > 0 ? input.imageModelIds : undefined),
         chatTurnHost: true,
+        ...(editSource ? { editSource } : {}),
     });
 
     if (result.conversationId !== input.conversationId || (input.imageGroupModelIds &&

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
@@ -129,6 +130,8 @@ export type DesktopChatShellProps = {
   selectedModels: string[];
   disabledPanels: string[];
   promptPayload: PromptPayload | null;
+  /** See ChatApp `sendEcho`: the question a send is still preparing. */
+  sendEcho?: PendingSendEcho | null;
   inputValue: string;
   setInputValue: (value: string) => void;
   personalizedPrompt?: string | null;
@@ -440,6 +443,7 @@ export function DesktopChatShell({
   selectedModels,
   disabledPanels,
   promptPayload,
+  sendEcho: pendingSendEcho = null,
   inputValue,
   setInputValue,
   personalizedPrompt,
@@ -638,10 +642,15 @@ export function DesktopChatShell({
     compare whatever else is on screen. Only the welcome surface asks the
     narrower question, and `lib/chatContentState.ts` owns the answer.
   */
+  // Only in the selection it was pressed in: leaving that conversation hides it.
+  const sendEcho =
+    pendingSendEcho?.ticket === conversationSelectionTicket ? pendingSendEcho.echo : null;
   const showsWelcomeSurface = shouldRenderWelcomeSurface({
     contentState: conversationContentState,
     hasConversationPrelude,
-  });
+  }) &&
+    // A send being prepared already has a question on screen.
+    !sendEcho;
   useEffect(() => {
     if (!showsWelcomeSurface) queueMicrotask(() => setStudioView("results"));
   }, [showsWelcomeSurface]);
@@ -1422,6 +1431,7 @@ export function DesktopChatShell({
                   importedTranscript={importedTranscript}
                   modelId={modelId}
                   initialConversationId={currentChatId}
+                  sendEcho={sendEcho}
                   promptPayload={promptPayload}
                   isPanelDisabled={isPanelDisabled}
                   isGuestMode={isGuestMode}

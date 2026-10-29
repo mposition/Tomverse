@@ -2,7 +2,6 @@ export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import {
   apiSecurityResponse,
@@ -10,12 +9,12 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
-import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan, planAllowsFeature } from "@/lib/billingEntitlements";
 import {
   chatImageTriageModelId,
   detectChatImageRequest,
 } from "@/lib/chatImageIntent";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 
 // POST /api/chat/image-intent -- asks the Auto router's model whether a chat
@@ -34,6 +33,10 @@ const imageIntentSchema = z
     // The Chat conversation the message is sent in; a follow-up such as
     // "make it bluer" reads its previous image from there.
     conversationId: z.string().trim().min(1).max(100).nullable().optional(),
+    // The message carries a photo; the call then only decides whether to
+    // edit it. Not trusted for anything else: the image turn finds the photo
+    // from the saved message and refuses an edit without one.
+    attachedPhoto: z.boolean().optional(),
   })
   .strict();
 
@@ -41,7 +44,9 @@ const notImage = () => NextResponse.json({ image: false });
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Authentication required." },
@@ -74,6 +79,7 @@ export async function POST(req: Request) {
       userId,
       conversationId: body.conversationId ?? null,
       request: req,
+      attachedPhoto: body.attachedPhoto === true,
     });
     return NextResponse.json(decision);
   } catch (error) {

@@ -16,6 +16,8 @@ import {
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainReferencedNumbers,
   qaReleaseTrainSelectionFrom,
+  qaReleaseTrainFoundOnMain,
+  qaReleaseTrainWithTrainVerdicts,
 } from "../lib/qaReleaseTrainCargoCore.ts";
 
 const NOW = Date.parse("2026-10-23T00:00:00Z");
@@ -468,4 +470,39 @@ test("a Dependabot package update is never a candidate: Dependabot opens its own
     nowMs: NOW,
   });
   assert.deepEqual(candidates.map((candidate) => candidate.number), [3045, 2973]);
+});
+
+test("a pull request a train found already on main reads as on main, named by the newest train that found it", () => {
+  // Newest report first, as the store reads them.
+  const found = qaReleaseTrainFoundOnMain([
+    { slot: "20261029-1100", report: { pullRequestNumber: null, picks: [{ number: 2979, outcome: "already_in_main" }, { number: 3001, outcome: "conflict" }] } },
+    {
+      slot: "20261028-2000",
+      report: {
+        pullRequestNumber: 3080,
+        picks: [{ number: 2979, outcome: "already_in_main" }, { number: 2990, outcome: "already_in_main" }, { number: "x", outcome: "already_in_main" }],
+      },
+    },
+    { slot: "20261028-1700", report: { pullRequestNumber: 3070, picks: "not a list" } },
+  ]);
+  assert.deepEqual([...found], [
+    [2979, "20261029-1100"],
+    [2990, "#3080"],
+  ]);
+  const candidate = (number, status, mainPullRequest = null) => ({ number, title: "t", author: "a", mergedAt: "2026-10-25T00:00:00Z", status, mainPullRequest });
+  const verdicts = qaReleaseTrainWithTrainVerdicts(
+    [candidate(2979, "available"), candidate(2990, "mentioned", 3050), candidate(3001, "unchecked"), candidate(2995, "in_main_pull_request", 3090)],
+    new Map([...found, [2995, "#3080"]]),
+  );
+  assert.deepEqual(
+    verdicts.map((c) => [c.number, c.status, c.mainPullRequest, c.foundByTrain]),
+    [
+      [2979, "on_main", null, "20261029-1100"],
+      [2990, "on_main", null, "#3080"],
+      [3001, "unchecked", null, undefined],
+      // A status GitHub's records already settle is kept.
+      [2995, "in_main_pull_request", 3090, undefined],
+    ],
+  );
+  assert.equal(qaReleaseTrainCargoPickable(verdicts[0].status), false);
 });

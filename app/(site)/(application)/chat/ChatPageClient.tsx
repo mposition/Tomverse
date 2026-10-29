@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
+import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
@@ -149,6 +150,7 @@ import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageIntent } from "@/lib/chatImageIntentClient";
 import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
@@ -759,6 +761,7 @@ export function ChatPageClient({
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
   chatImageIntentEnabled = false,
+  chatImageEditEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
   voiceConversationEnabled = false,
@@ -791,6 +794,8 @@ export function ChatPageClient({
    * triage on.
    */
   chatImageIntentEnabled?: boolean;
+  /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
+  chatImageEditEnabled?: boolean;
   reviewEasyAvailable?: boolean;
   /**
    * The voice input opt-in flag AND its kill switch AND the signed-in
@@ -1735,6 +1740,14 @@ export function ChatPageClient({
   const pendingSubmissionOwnerKey = identityKey ?? "unresolved";
   const pendingSubmission =
     pendingSubmissionOwners.get(pendingSubmissionOwnerKey) ?? null;
+  /*
+    The composer send being prepared, drawn in the panels at once
+    (`SendEchoTurn`). Bound to the selection it was pressed in, so leaving that
+    conversation hides it and frees the composer, and cleared when the send
+    either hands its payload to the panels or ends without one.
+  */
+  const sendEchoRef = useRef<PendingSendEcho | null>(null);
+  const [sendEcho, setSendEcho] = useState<PendingSendEcho | null>(null);
   const [promptPayload, setPromptPayload] = useState<{
     id: string;
     text: string;
@@ -5920,7 +5933,12 @@ export function ChatPageClient({
       // (app/api/chat/route.ts), so it does not wait for this call first.
       selectionModeRef.current !== "auto" &&
       !isImageDraftActiveRef.current &&
-      attachments.length === 0 &&
+      // A photo is the one attachment the image turn uses: it may be edited.
+      (attachments.length === 0 ||
+        (chatImageEditEnabled &&
+          attachments.some((attachment) =>
+            IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(attachment.mediaType.toLowerCase())
+          ))) &&
       inputValue.trim().length > 0
     ) {
       if (imageIntentCheckPendingRef.current) return;
@@ -5928,6 +5946,8 @@ export function ChatPageClient({
       const intentScope = composerDraftConversationId;
       const intentTicket = conversationSelectionTicketRef.current;
       const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
+      const intentAttachmentIds = JSON.stringify(attachments.map((attachment) => attachment.id));
+      const intentAttachedPhoto = attachments.length > 0;
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
@@ -5935,6 +5955,7 @@ export function ChatPageClient({
         // image it changes.
         decision = await askChatImageIntent(intentText, {
           conversationId: currentChatIdRef.current,
+          ...(intentAttachedPhoto ? { attachedPhoto: true } : {}),
         });
       } finally {
         imageIntentCheckPendingRef.current = false;
@@ -5959,7 +5980,8 @@ export function ChatPageClient({
         intentTicket !== conversationSelectionTicketRef.current ||
         isImageDraftActiveRef.current ||
         liveDraft.text !== intentText ||
-        liveDraft.attachments.length > 0
+        JSON.stringify(liveDraft.attachments.map((attachment) => attachment.id)) !==
+          intentAttachmentIds
       ) {
         return;
       }
@@ -5977,6 +5999,7 @@ export function ChatPageClient({
                 modelIds: decision.modelId ? [decision.modelId] : [],
                 preset: decision.preset,
                 ...(decision.prompt ? { prompt: decision.prompt } : {}),
+                ...(decision.edit ? { edit: true as const } : {}),
               },
             }
           : {}),
@@ -7336,6 +7359,9 @@ export function ChatPageClient({
         voiceTurnRef.current.promptId = comparisonId;
         voiceTurnRef.current.sourceUserMessageId = userMsgId;
       }
+      // The panels draw the real user turn from this payload, in this commit.
+      sendEchoRef.current = null;
+      setSendEcho(null);
       setPromptPayload({
         id: comparisonId,
         text: authoredPrompt,
@@ -8733,6 +8759,37 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
+  /*
+    The composer's send. Everything before the payload -- the image-intent and
+    Review routing calls, creating the conversation, saving the question --
+    used to run with nothing on screen, so a press looked ignored and was
+    pressed again. The question is drawn first; a second press while it is up
+    is the same question and is dropped here. The recursive re-entries inside
+    `handleGlobalSubmit` go through its ref and never come back here.
+  */
+  const handleComposerSubmit = async () => {
+    const active = sendEchoRef.current;
+    if (active && active.ticket === conversationSelectionTicketRef.current) return;
+    const text = inputValue.trim();
+    const mine = !isImageDraftActiveRef.current && (text || attachments.length > 0)
+      ? {
+          ticket: conversationSelectionTicketRef.current,
+          echo: { text, attachmentCount: attachments.length },
+        }
+      : null;
+    if (mine) {
+      sendEchoRef.current = mine;
+      setSendEcho(mine);
+    }
+    try {
+      await handleGlobalSubmit();
+    } finally {
+      if (mine && sendEchoRef.current === mine) {
+        sendEchoRef.current = null;
+        setSendEcho(null);
+      }
+    }
+  };
   const requestVoiceAnswer = (text: string): Promise<VoiceAnswerReceipt> => {
     if (voiceTurnRef.current || inputValue.trim() || attachments.length || pendingSubmission) {
       return Promise.reject(new Error("The composer is busy."));
@@ -10320,6 +10377,7 @@ export function ChatPageClient({
           selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
+          sendEcho={sendEcho}
           inputValue={inputValue}
           setInputValue={setInputValue}
           personalizedPrompt={personalizedPrompt}
@@ -10430,7 +10488,7 @@ export function ChatPageClient({
           onRequestUndoToast={(message, undo) =>
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
-          onSubmit={handleGlobalSubmit}
+          onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}
@@ -10501,6 +10559,7 @@ export function ChatPageClient({
           selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
+          sendEcho={sendEcho}
           inputValue={inputValue}
           setInputValue={setInputValue}
           personalizedPrompt={personalizedPrompt}
@@ -10608,7 +10667,7 @@ export function ChatPageClient({
           webSearchSuggestionCopyFor={webSearchSuggestionCopyFor}
           onWebSearchSuggestionConfirm={handleWebSearchSuggestionConfirm}
           onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
-          onSubmit={handleGlobalSubmit}
+          onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}
