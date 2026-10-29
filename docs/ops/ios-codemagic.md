@@ -276,13 +276,41 @@ The iOS-specific fixture suite additionally covers English/Korean access-pass
 redemption on an iPad-sized screen, Apple-store routing, no StoreKit purchase
 for a pass, and expired/lost responses without automatic retries or unverified
 access. Local verification passed 66 image/transport/billing tests, 27 iOS
-preparation/Codemagic/CORS tests, 24 Apple billing browser cases, 12 WebKit
+preparation/CORS tests, 24 Apple billing browser cases, 12 WebKit
 completion/continuation cases and 6 iPhone/iPad responsive cases. Production
 bundle generation, iOS sync, the build dry run, scoped ESLint and diff checks
 also passed. A signed cloud build and physical-device installation remain
 separate steps. The previously diagnosed
 TestFlight install-data HTTP 404 occurs before app download; refreshing the
 application source does not establish that Apple's delivery failure is fixed.
+
+## Android 1.0.18 (19) update prompt parity (2026-10-29)
+
+The signed Android 1.0.18 (19) candidate records source `d4b99ae21` from
+PR #3110. That candidate's record says it is not merged or published. This iOS
+branch includes that commit unchanged and adds the platform-specific update
+adapter. The iOS marketing version is 1.0.18; its CI build number remains
+independent of Android's 19.
+
+The shared launch/foreground banner, seven languages, 24-hour Later choice and
+response-in-progress suppression are retained. iOS checks Apple's public lookup
+metadata through the new `MobileUpdatesPlugin`, matches Tomverse's app/bundle
+identity, compares marketing versions numerically and excludes incompatible
+minimum OS versions. Lookup failures and unpublished apps stay quiet. The
+adapter caches checks for five minutes and opens the fixed App Store product
+page only after Update is tapped. App Store owns installation, so iOS never
+claims an in-app download or restart. The iOS prebuild check now requires this
+plugin's actual generated registration.
+
+Local verification passed 57 adapter/image/transport unit tests, 15 iOS prebuild
+tests, 7 Codemagic workflow tests, 24 WebKit update/composer cases, 15 Chromium
+update cases and 6 iPhone/iPad responsive cases (124 total). Mobile typecheck,
+production bundle preparation and sync, scoped lint and the build dry run passed.
+The Windows checks exercise the TypeScript adapter, browser banner and generated
+plugin registration. They do not compile the new Swift class or prove a store
+update. Record remote Xcode compilation separately from a signed upload after
+Apple's advised waiting period and actual iPhone/iPad acceptance. Public App Store
+metadata does not list TestFlight-only builds or fix the prior install-data 404.
 
 ## Local verification
 

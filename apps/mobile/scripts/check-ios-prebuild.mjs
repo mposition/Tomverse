@@ -85,7 +85,7 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   for (const [, name, relativePath] of packages) {
     assert.ok(existsSync(resolve(root, dirname(packagePath), relativePath, "Package.swift")), `SPM dependency ${name} cannot be resolved. Run npm ci and cap:sync:ios on this host.`);
   }
-  const requiredPlugins = ["MobileAuthPlugin", "MobileFilesPlugin", "PurchasesPlugin", "CAPBrowserPlugin", "GeolocationPlugin"];
+  const requiredPlugins = ["MobileAuthPlugin", "MobileFilesPlugin", "MobileUpdatesPlugin", "PurchasesPlugin", "CAPBrowserPlugin", "GeolocationPlugin"];
   for (const name of requiredPlugins) assert.ok(config.packageClassList?.includes(name), `Synced iOS plugin ${name} is missing.`);
   for (const name of ["TomverseMobileAuth", "RevenuecatPurchasesCapacitor", "CapacitorBrowser", "CapacitorGeolocation"]) {
     assert.ok(packages.some(([, packageName]) => packageName === name), `SPM product ${name} is missing.`);
