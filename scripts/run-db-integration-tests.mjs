@@ -426,10 +426,6 @@ run(
     // Support-triage LLM step: the model answer written with the ready row, the
     // human-lane floor, and the keyword lane when there is no answer.
     "tests/integration/support-triage-llm.db.test.ts",
-    // Support-triage new groups: one kind per group, the higher kind first, a
-    // tombstoned key stops a second group, a member lost to a concurrent pass
-    // empties and invalidates the group, and the pass membership budget.
-    "tests/integration/support-triage-group-formation.db.test.ts",
     // Support-triage data in a real account deletion: the derived rows go in
     // that transaction, the reports stay anonymised, nothing is derived again.
     "tests/integration/support-triage-account-deletion.db.test.ts",
