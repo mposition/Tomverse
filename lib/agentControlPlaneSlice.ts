@@ -1017,6 +1017,8 @@ type Graph = {
   unreadable: Set<string>;
   /** Per file, the environment names code embedded in its strings reads. */
   embeddedNames: Map<string, Set<string>>;
+  /** Code files whose embedded code cannot be followed (too deep, or a relative require naming no file). */
+  unfollowable: Set<string>;
   /** Code files that load a module by a computed name. */
   loaders: Set<string>;
   problems: SliceProblem[];
@@ -1080,6 +1082,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   const named = new Map<string, NamedPaths>();
   const loaders = new Set<string>();
   const embeddedNames = new Map<string, Set<string>>();
+  const unfollowable = new Set<string>();
   // What code embedded in a string requires (an inline worker's source).
   // Node resolves a worker's relative require from the working directory --
   // the repository root -- so a relative one is read from there and from the
@@ -1134,7 +1137,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     }
     // What an inline worker's source requires; text, so one that names no
     // tracked file adds nothing.
-    if (followEmbedded(file.path, source, targets)) loaders.add(file.path);
+    if (followEmbedded(file.path, source, targets)) unfollowable.add(file.path);
     edges.set(file.path, targets);
   }
   // Code outside the app -- gate scripts and tooling, and the tests and
@@ -1183,10 +1186,10 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
       const resolved = resolve(file.path, specifier);
       if (resolved !== null && resolved !== "external") targets.add(resolved);
     }
-    if (followEmbedded(file.path, source, targets)) loaders.add(file.path);
+    if (followEmbedded(file.path, source, targets)) unfollowable.add(file.path);
     edges.set(file.path, targets);
   }
-  return { edges, facts, appSettingKeys, named, unreadable, loaders, embeddedNames, problems };
+  return { edges, facts, appSettingKeys, named, unreadable, loaders, embeddedNames, unfollowable, problems };
 };
 
 const isProduct = (path: string) => classifyPath(path) === "product";
@@ -1249,6 +1252,8 @@ const gateSlice = (graph: Graph, paths: readonly string[]) => {
       if (followed.has(path)) continue;
       followed.add(path);
       if (graph.unreadable.has(path)) problems.push({ path, specifier: null, problem: "gate_reaches_unreadable_code" });
+      // Whatever the file is, a gate included: what its embedded code runs is unknown.
+      if (graph.unfollowable.has(path)) problems.push({ path, specifier: null, problem: "gate_reaches_unfollowable_embedded_code" });
       if (graph.loaders.has(path) && classifyPath(path) !== "control-plane") {
         problems.push({ path, specifier: null, problem: "gate_reaches_runtime_loader" });
       }
@@ -1340,9 +1345,10 @@ export const computeControlPlaneSlice = (input: {
       if (resultSlice.has(change.path)) slicePaths.add(change.path);
       const changeFacts = result.facts.get(change.path);
       if (
-        changeFacts !== undefined &&
-        (changeFacts.runtimeLoader || changeFacts.loadingBuiltin || changeFacts.computedCall ||
-          changeFacts.computedEnv || changeFacts.appSettingAccess)
+        (changeFacts !== undefined &&
+          (changeFacts.runtimeLoader || changeFacts.loadingBuiltin || changeFacts.computedCall ||
+            changeFacts.computedEnv || changeFacts.appSettingAccess)) ||
+        result.unfollowable.has(change.path)
       ) {
         slicePaths.add(change.path);
       }

@@ -429,6 +429,22 @@ test("a followed product file that loads by a computed name fails the analysis; 
       "export const helper = () => new Worker(source, { eval: true });\n",
   });
   assert.equal(slice([change("lib/leaf.ts")], nowhere).status, "failed");
+  // So in a gate itself, and so is a worker nested deeper than is read.
+  const gateNowhere = tree({
+    "lib/amux/gate.ts":
+      'import { Worker } from "node:worker_threads";\nconst source = `require("./missing/plugin.js")`;\n' +
+      "export const gate = () => new Worker(source, { eval: true });\n",
+  });
+  assert.equal(slice([change("lib/leaf.ts")], gateNowhere).status, "failed");
+  let deep = 'require("./lib/plugin.js")';
+  for (let level = 0; level < 8; level += 1) {
+    deep = `const { Worker } = require("node:worker_threads"); new Worker(${JSON.stringify(deep)}, { eval: true });`;
+  }
+  const tooDeep = tree({
+    "lib/amux/gate.ts": `const { Worker } = require("node:worker_threads");\nexport const gate = () => new Worker(${JSON.stringify(deep)}, { eval: true });\n`,
+    "lib/plugin.js": "exports.p = 1;\n",
+  });
+  assert.equal(slice([change("lib/leaf.ts")], tooDeep).status, "failed");
   assert.equal(
     slice([change("lib/leaf.ts")], tree({ "scripts/check-locales.mjs": "export const load = (locale) => import(`../locales/${locale}.ts`);\n" })).status,
     "analysed",
