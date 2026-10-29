@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
+import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
@@ -1737,6 +1738,14 @@ export function ChatPageClient({
   const pendingSubmissionOwnerKey = identityKey ?? "unresolved";
   const pendingSubmission =
     pendingSubmissionOwners.get(pendingSubmissionOwnerKey) ?? null;
+  /*
+    The composer send being prepared, drawn in the panels at once
+    (`SendEchoTurn`). Bound to the selection it was pressed in, so leaving that
+    conversation hides it and frees the composer, and cleared when the send
+    either hands its payload to the panels or ends without one.
+  */
+  const sendEchoRef = useRef<PendingSendEcho | null>(null);
+  const [sendEcho, setSendEcho] = useState<PendingSendEcho | null>(null);
   const [promptPayload, setPromptPayload] = useState<{
     id: string;
     text: string;
@@ -7338,6 +7347,9 @@ export function ChatPageClient({
         voiceTurnRef.current.promptId = comparisonId;
         voiceTurnRef.current.sourceUserMessageId = userMsgId;
       }
+      // The panels draw the real user turn from this payload, in this commit.
+      sendEchoRef.current = null;
+      setSendEcho(null);
       setPromptPayload({
         id: comparisonId,
         text: authoredPrompt,
@@ -8735,6 +8747,37 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
+  /*
+    The composer's send. Everything before the payload -- the image-intent and
+    Review routing calls, creating the conversation, saving the question --
+    used to run with nothing on screen, so a press looked ignored and was
+    pressed again. The question is drawn first; a second press while it is up
+    is the same question and is dropped here. The recursive re-entries inside
+    `handleGlobalSubmit` go through its ref and never come back here.
+  */
+  const handleComposerSubmit = async () => {
+    const active = sendEchoRef.current;
+    if (active && active.ticket === conversationSelectionTicketRef.current) return;
+    const text = inputValue.trim();
+    const mine = !isImageDraftActiveRef.current && (text || attachments.length > 0)
+      ? {
+          ticket: conversationSelectionTicketRef.current,
+          echo: { text, attachmentCount: attachments.length },
+        }
+      : null;
+    if (mine) {
+      sendEchoRef.current = mine;
+      setSendEcho(mine);
+    }
+    try {
+      await handleGlobalSubmit();
+    } finally {
+      if (mine && sendEchoRef.current === mine) {
+        sendEchoRef.current = null;
+        setSendEcho(null);
+      }
+    }
+  };
   const requestVoiceAnswer = (text: string): Promise<VoiceAnswerReceipt> => {
     if (voiceTurnRef.current || inputValue.trim() || attachments.length || pendingSubmission) {
       return Promise.reject(new Error("The composer is busy."));
@@ -10322,6 +10365,7 @@ export function ChatPageClient({
           selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
+          sendEcho={sendEcho}
           inputValue={inputValue}
           setInputValue={setInputValue}
           personalizedPrompt={personalizedPrompt}
@@ -10432,7 +10476,7 @@ export function ChatPageClient({
           onRequestUndoToast={(message, undo) =>
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
-          onSubmit={handleGlobalSubmit}
+          onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}
@@ -10503,6 +10547,7 @@ export function ChatPageClient({
           selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
+          sendEcho={sendEcho}
           inputValue={inputValue}
           setInputValue={setInputValue}
           personalizedPrompt={personalizedPrompt}
@@ -10610,7 +10655,7 @@ export function ChatPageClient({
           webSearchSuggestionCopyFor={webSearchSuggestionCopyFor}
           onWebSearchSuggestionConfirm={handleWebSearchSuggestionConfirm}
           onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
-          onSubmit={handleGlobalSubmit}
+          onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}

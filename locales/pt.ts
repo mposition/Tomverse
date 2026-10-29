@@ -304,6 +304,7 @@ export const pt = {
         firstResponseTimeout: "A resposta ainda estava sendo preparada depois de mais tempo do que o esperado, então a conexão foi encerrada. Tente novamente em instantes.",
         streamIdleTimeout: "A resposta parou de chegar por mais tempo do que o esperado, então a conexão foi encerrada. Esta resposta está incompleta.",
         responseGenerating: "Gerando uma resposta.",
+        sendPreparing: "Enviando sua pergunta…",
         imageTurnGenerating: "Criando a imagem…",
         imageTurnFailed: "Não foi possível criar a imagem. Tente novamente.",
         imageTurnRetry: "Tentar novamente",
