@@ -17,7 +17,7 @@ type Option = { id: string; name: string; provider: string };
  * recent sign-in; a stale sign-in is answered with the way back. "Off" is
  * saved as a choice, so the environment variable cannot turn the step back on;
  * the variable applies only while nothing has been saved here, and an
- * inherited value can always be saved so the owner can pin Off over it.
+ * inherited model can always be saved so the owner can pin Off over it.
  */
 export function SupportTriageModelPanel() {
   const m = useAdminMessages(adminFeedbackInboxMessages);
@@ -152,12 +152,12 @@ export function SupportTriageModelPanel() {
         <button
           type="button"
           onClick={() => void put({ modelId: choice === "" ? null : choice })}
-          disabled={options === null || busy || (choice === (saved ?? "") && modelSource === "admin")}
+          disabled={options === null || busy || (choice === (saved ?? "") && (modelSource === "admin" || saved === null))}
           className="min-h-11 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 text-sm font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:opacity-50"
         >
           {m.triageModelSave}
         </button>
-        {modelSource ? (
+        {modelSource === "admin" || saved !== null ? (
           <span className="text-xs text-zinc-500" data-testid="support-triage-model-source">
             {modelSource === "admin" ? m.triageSwitchFromAdmin : m.triageSwitchFromEnvironment}
           </span>
