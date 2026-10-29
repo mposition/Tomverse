@@ -42,6 +42,7 @@ import {
 import { readEngineeringAgentLastLook } from "@/lib/engineeringAgentLastLook";
 import { openEngineeringAgentV22Product,
   resolveEngineeringAgentV22Product } from "@/lib/engineeringAgentV22ProductStore";
+import { queuedWithoutCapabilityWhere } from "@/lib/engineeringAgentV22TierPromotion";
 import { runIdempotentEngineeringAgentRequest } from "@/lib/engineeringAgentRouteAuth";
 import { prisma } from "@/lib/prisma";
 
@@ -96,6 +97,10 @@ const nextRunId = () => String((runCounter += 1));
 
 const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
   runEngineeringAgentTransaction(prisma, work);
+
+/** 1 when the item waits in the queue with no live capability, as the v22 tier round reads it. */
+const waitingWithoutCapability = (workItemId: string) =>
+  prisma.engineeringAgentWorkItem.count({ where: { id: workItemId, ...queuedWithoutCapabilityWhere() } });
 
 const refusedWith = async (promise: Promise<unknown>, code: string) =>
   assert.rejects(promise, (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === code, code);
@@ -702,14 +707,42 @@ test("work proven unwritten returns to the queue, and its next claim runs on a n
   assert.equal(requeued.state, "queued");
   const spent = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: first.capabilityId } });
   assert.ok(spent.consumedAt, "the first capability stays consumed");
+  // Nothing can claim it now, so the tier round finds it for a new capability.
+  assert.equal(await waitingWithoutCapability(workItemId), 1);
 
   const second = await issue(workItemId);
   assert.notEqual(second.capabilityId, first.capabilityId);
+  assert.equal(await waitingWithoutCapability(workItemId), 0);
   const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
   assert.equal(again.fencingToken, BigInt(2));
   const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
   await retireBinding(bound.bindingId);
+});
+
+test("a publish item proven unwritten after its claim may still close when judged again", async () => {
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${run.runId}:rejudged`, runId: run.runId,
+    patchBody: "rejudged patch", patchDigest: sha256("rejudged patch"),
+    baseSha: sha1("base"), expectedTreeId: sha1("tree"),
+  }));
+  const first = await inTx((tx) => issueEngineeringAgentCapability(tx, { workItemId,
+    capability: { baseSha: sha1("base"), patchDigest: sha256("rejudged patch"),
+      expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) } }));
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
+    workItemId, mode: "write", leaseMs: 60_000 }));
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId,
+    fencingToken: claim.fencingToken, outcome: "refused_before_write" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId,
+    amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId, reason: "tier_changed" })), { expired: true });
+  const closed = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } });
+  assert.deepEqual([closed.state, closed.reason], ["expired", "tier_changed"]);
+  const spent = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: first.capabilityId } });
+  assert.ok(spent.consumedAt, "the spent capability stays consumed");
+  assert.equal(await waitingWithoutCapability(workItemId), 0);
 });
 
 test("the switches refuse claims, capabilities and publishes, but never the record of what happened", async () => {
@@ -939,7 +972,10 @@ test("a claim whose lease passed goes to a lookup, and a lost answer can be foun
     settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: lookup.fencingToken, outcome: "lookup_no_prior_write" }),
   );
   assert.equal(requeued.state, "queued");
+  // Its capability was spent on the lost claim: only a new one lets it be claimed.
+  assert.equal(await waitingWithoutCapability(workItemId), 1);
   await issue();
+  assert.equal(await waitingWithoutCapability(workItemId), 0);
   const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
   const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
   await retireBinding(bound.bindingId);
