@@ -431,6 +431,12 @@ export const RUNNER_REPORTABLE_OUTCOMES = RUN_OUTCOMES.filter(
 ) as [Exclude<RunOutcome, "abandoned" | "private_result">,
   ...Exclude<RunOutcome, "abandoned" | "private_result">[]];
 
+/** A v22 draft settled before its tier was read (policy §4). */
+export const ENGINEERING_AGENT_V22_TIER_PENDING_REASON = "tier_pending";
+/** The reason a v22 draft closes with when its run's publish item replaces
+ * it; the work item guard admits that publish item on exactly this reason. */
+export const ENGINEERING_AGENT_V22_PROMOTED_REASON = "publish_promoted";
+
 /** A v22 Task has at most one publication product. A private result is not
  * misreported as a draft, and an owner draft is not misreported as a PR. */
 export const v22RunOutcomeForProduct = (input: {

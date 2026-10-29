@@ -271,14 +271,29 @@ export async function readEngineeringAgentGitBlob(oid: string,
   return bytes;
 }
 
+/** Whether develop's head is this commit or descends from it: a base develop
+ * has since moved past is still one of develop's own commits. */
+async function developContains(sha: string, deps: Deps): Promise<boolean> {
+  const head = await readEngineeringAgentDevelopHead(deps);
+  if (head === sha) return true;
+  const compare = record(await githubJson(`/compare/${sha}...${head}?per_page=1`,
+    withDefaults(deps), MAX_TREE_JSON_BYTES));
+  return compare?.status === "ahead" && compare.behind_by === 0 &&
+    record(compare.merge_base_commit)?.sha === sha;
+}
+
 /** Read the complete pinned base from GitHub. The worker supplies only the
- * commit SHA; neither its tree listing nor a caller-provided URL is trusted. */
+ * commit SHA; neither its tree listing nor a caller-provided URL is trusted.
+ * The base is develop's head, or with `onDevelop` any commit develop's head
+ * contains (a tier read after settlement, when develop may have moved). */
 export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
-  deps: Deps = {}): Promise<{ base: TreeEntry[]; rootTreeId: string;
+  deps: Deps = {}, options: { onDevelop?: boolean } = {}): Promise<{
+    base: TreeEntry[]; rootTreeId: string;
     baseGitattributes: string | null; baseCommitterDate: string | null }> {
   if (!SHA.test(baseSha)) throw new EngineeringAgentGitHubReadError("invalid_input");
   const resolved = withDefaults(deps);
-  if (await readEngineeringAgentDevelopHead(deps) !== baseSha)
+  if (!(options.onDevelop ? await developContains(baseSha, deps) :
+      await readEngineeringAgentDevelopHead(deps) === baseSha))
     throw new EngineeringAgentGitHubReadError("invalid_input");
   const commit = record(await githubJson(`/git/commits/${baseSha}`, resolved));
   const treeRef = record(commit?.tree);

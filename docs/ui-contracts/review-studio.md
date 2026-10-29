@@ -29,6 +29,29 @@ Owner approved Concept B on 2026-10-20: Figma file
   supported providers retain the existing image execution/consent flow. An
   all-unsupported image request never substitutes a provider or calls text.
 
+## Desktop answer analysis (owner direction, 2026-10-27)
+
+PC Review Studio puts one Tomverse answer analysis entry below the composer.
+Results open in a wide modal with Summary and Detailed review tabs. Original
+model answers stay in the canvas; analysis never starts automatically while
+those answers are being generated. Classic and mobile retain their existing
+entry points. The new entry and modal show no credit figures or review-mode
+options.
+
+Both tabs project the same balanced comparison review (without synthesis), not
+two paid requests. Dismissal leaves pending work alive. Reopening and switching
+tabs reuse the result and preserve evidence/feedback state. The authenticated
+GET with the explicit review mode restores server-saved results after reload;
+guest results remain in the current mounted workspace session, not server
+storage. Question/answer changes select a different input; identity changes
+discard the local session. Existing API authorization, quotas and verification
+remain enforced. A progress bar is indeterminate, not an invented percentage.
+
+Verification: `npm run verify:studio-answer-analysis` mounts the real component
+against loopback responses (no provider/DB). It covers one execution across
+reopens, background completion, tabs and evidence, saved reload, changed input,
+identity scope, guest reuse, dark mode and mobile exclusion.
+
 ## In-conversation image answers (owner direction, 2026-10-23)
 
 Image prompts stay in the current Review conversation, as in Chat. Easy routes

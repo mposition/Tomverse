@@ -354,7 +354,7 @@ const runGuestReview = async (page: Page) => {
   await page.getByTestId("ai-review-button").click();
   await expect(page.getByTestId("comparison-review-setup")).toBeVisible();
   // Server-computed, never taken from the client.
-  await expect(page.getByTestId("ai-review-estimated-credits")).toContainText("8");
+  await expect(page.getByTestId("ai-review-estimated-credits")).toHaveCount(0);
   await page.getByRole("button", { name: /Run cross-review|교차 검토 실행/ }).click();
 };
 

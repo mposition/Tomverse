@@ -16,6 +16,7 @@ const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 // Production runs `main`, not the `develop` base, so some image files differ
 // from the base tree. Those come from GitHub by OID, up to this many.
 const MAX_FETCHED_BLOBS = 500;
+const READ_CONCURRENCY = 16;
 
 type ReadFile = (path: string) => Promise<Uint8Array>;
 type FileStat = (path: string) => Promise<{ isFile(): boolean }>;
@@ -121,6 +122,29 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       .map((entry) => entry.path));
   if (!ignoreEntry || baseExcluded === null) return null;
   const excluded = new Set(baseExcluded);
+  // The texts the loop below reads, read ahead in parallel: a few hundred
+  // sequential GitHub blob reads took most of a minute (2026-10-28).
+  const toRead = input.tree.filter((entry) => entry.type === "blob" &&
+    isCanonicalRepoPath(entry.path) &&
+    (entry.mode === "100644" || entry.mode === "100755") &&
+    !excluded.has(entry.path) && !entry.path.startsWith("vendor/amux/") &&
+    ANALYSIS_TEXT.test(entry.path));
+  // Any missing text or the byte cap fails the whole read, so the first of
+  // them stops new reads.
+  const texts = new Map<string, Uint8Array>();
+  let next = 0;
+  let readBytes = 0;
+  let stopped = false;
+  await Promise.all(Array.from({ length: READ_CONCURRENCY }, async () => {
+    while (!stopped && next < toRead.length) {
+      const entry = toRead[next++];
+      const bytes = await baseBytes(entry);
+      readBytes += bytes?.byteLength ?? 0;
+      if (!bytes || readBytes > MAX_TOTAL_BYTES) stopped = true;
+      else texts.set(entry.path, bytes);
+    }
+  }));
+  if (stopped) return null;
   for (const entry of input.tree) {
     if (entry.type === "tree") continue;
     if (!isCanonicalRepoPath(entry.path) ||
@@ -145,7 +169,7 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       baseFiles.push({ path: entry.path, text: "" });
       continue;
     }
-    const bytes = await baseBytes(entry);
+    const bytes = texts.get(entry.path);
     if (!bytes) return null;
     totalBytes += bytes.byteLength;
     if (totalBytes > MAX_TOTAL_BYTES) return null;

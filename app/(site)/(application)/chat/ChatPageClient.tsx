@@ -10465,6 +10465,12 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          getGuestReviewSource={readGuestComparisonTurn}
+          onAnalysisCompleted={() => {
+            if (isGuestMode) {
+              refreshGuestUsage();
+            }
+          }}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
@@ -11107,12 +11113,8 @@ export function ChatPageClient({
               </h2>
               <p id="model-comparison-note" className="mt-1 text-sm leading-5 text-zinc-500">
                 {compareSummary.cached
-                  ? formatCopy("chat.quickDifferenceSummaryCachedNote", {
-                      credits: String(compareSummary.originalUsageCredits || 0),
-                    })
-                  : formatCopy("chat.quickDifferenceSummaryNote", {
-                      credits: String(compareSummary.usageCredits),
-                    })}
+                  ? t("chat.quickDifferenceSummaryCachedNote")
+                  : t("chat.quickDifferenceSummaryNote")}
               </p>
               <p className="mt-0.5 text-xs leading-5 text-zinc-400">
                 {t("chat.aiReviewedBy")}:{" "}

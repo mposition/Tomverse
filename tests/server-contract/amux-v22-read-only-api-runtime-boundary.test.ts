@@ -201,9 +201,6 @@ mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), { namedExports: {
   loadEngineeringAgentV22SettlementPatch: async () => null,
 } });
-mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), { namedExports: {
-  loadEngineeringAgentV22StoredCandidate: async () => null,
-} });
 
 const execution = import(mod("lib/amux/execution.ts"));
 const delivery = import(mod("lib/amux/delivery.ts"));
