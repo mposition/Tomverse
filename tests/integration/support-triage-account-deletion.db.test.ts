@@ -7,6 +7,7 @@ import pg from "pg";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { resolvePostgresConnectionConfig } from "@/lib/postgresConnectionConfigCore.mjs";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 import { deleteSupportTriageDataForAccount } from "@/lib/supportTriageAccountDeletion";
 
 // Support-triage data in a real account deletion (docs/policy/support-triage.md §5).
@@ -22,7 +23,7 @@ const reset = async () => {
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageDecisionRecord"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-del-" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: "@support-triage-deletion.test" } } });
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
+  await resetTestFixture(prisma, `TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
 };
 
 const DIGEST = "a".repeat(64);
