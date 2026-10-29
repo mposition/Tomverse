@@ -183,7 +183,7 @@ test("a code file a gate names by path is followed; a test or fixture a runner n
 
   // Code under a directory a gate reads is data there; running it takes a computed load.
   const byDirectory = tree({
-    "lib/amux/gate.ts": 'import { join } from "node:path";\nexport const dir = (root) => join(root, "lib", "plugins");\n',
+    "lib/amux/gate.ts": 'import { join } from "node:path";\nexport const dir = () => join(process.cwd(), "lib", "plugins");\n',
     "lib/plugins/a.ts": 'import { z } from "../viaDirectory.ts";\nexport { z };\n',
     "lib/viaDirectory.ts": "export const z = 1;\n",
   });
