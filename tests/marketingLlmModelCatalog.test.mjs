@@ -3,11 +3,7 @@ import test from "node:test";
 
 import {
   MARKETING_LLM_MAX_OUTPUT_TOKENS,
-  MARKETING_LLM_WEB_SEARCH_CALLS,
-  MARKETING_LLM_WEB_SEARCH_PROFILE,
   MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
-  MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL,
-  marketingLlmPinAllows,
   marketingLlmPinProblems,
   marketingLlmReservation,
 } from "@/lib/marketingLlmBudgetCore";
@@ -34,14 +30,12 @@ test("every enabled catalog model is listed once, and only OpenAI can be selecte
   }
 });
 
-test("a pin is the catalog price at its worst, with the generator's own caps and OpenAI's search price", () => {
+test("a pin is the catalog price at its worst, with the generator's own output cap", () => {
   for (const { pin, model } of options.filter((entry) => entry.pin)) {
     const profiles = MODEL_PRICING.filter((profile) => profile.apiModelId === model);
     const rates = profiles.flatMap((profile) => [profile.tiers, ...(profile.priceSchedule ?? []).map((r) => r.tiers)].flat());
     assert.ok(pin.worstInputMicroUsdPerMillion >= Math.max(...rates.map((tier) => tier.inputUsdPerMillionTokens)) * 1e6 - 1, model);
     assert.equal(pin.maxOutputTokens, MARKETING_LLM_MAX_OUTPUT_TOKENS);
-    assert.equal(pin.maxWebSearchCalls, MARKETING_LLM_WEB_SEARCH_CALLS);
-    assert.ok(pin.webSearchMicroUsdPerCall >= MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL);
     assert.deepEqual(pin.tiers, ["default"]);
   }
 });
@@ -50,7 +44,7 @@ test("only a pin the ledger accepts is selectable, and every other option says w
   for (const entry of options.filter((candidate) => candidate.pin)) {
     const problems = marketingLlmPinProblems(entry.pin);
     assert.equal(entry.unavailable === null, problems.length === 0, entry.model);
-    if (entry.unavailable === null) assert.equal(marketingLlmPinAllows(entry.pin, MARKETING_LLM_WEB_SEARCH_PROFILE), true);
+    assert.equal(entry.worstCallMicroUsd, marketingLlmReservation(entry.pin).reservedMicroUsd, entry.model);
   }
   // The 1.05M-window catalog models fit the raised row limits.
   assert.equal(option("gpt-5.4-mini")?.unavailable, null);
@@ -126,11 +120,6 @@ test("an operator's registry price for both input and output is a verified price
   assert.equal(entry.pin.worstOutputMicroUsdPerMillion, 2_000_000);
 });
 
-test("the reservation's search overshoot is the chat path's recorded one", () => {
+test("the search overshoot is the chat path's recorded one", () => {
   assert.equal(MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE, OPENAI_SEARCH_OVERSHOOT_ALLOWANCE);
-  // A web-search reservation holds one search and one model pass more than
-  // the request asks for.
-  const { pin } = option("gpt-5.4-mini");
-  const billable = MARKETING_LLM_WEB_SEARCH_CALLS + OPENAI_SEARCH_OVERSHOOT_ALLOWANCE;
-  assert.equal(marketingLlmReservation(pin, MARKETING_LLM_WEB_SEARCH_PROFILE).reservedInputTokens, pin.contextWindowTokens * (billable + 1));
 });

@@ -6,9 +6,6 @@ import {
   MARKETING_LLM_KEY_SCOPED_PROJECT,
   MARKETING_LLM_MAX_OUTPUT_TOKENS,
   MARKETING_LLM_SERVICE_TIER,
-  MARKETING_LLM_WEB_SEARCH_CALLS,
-  MARKETING_LLM_WEB_SEARCH_PROFILE,
-  MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL,
   marketingLlmPinProblems,
   marketingLlmReservation,
   type MarketingLlmPricePin,
@@ -25,9 +22,8 @@ import { AVAILABLE_MODELS, type AiModel } from "@/lib/models";
  *
  * A pin is the catalog's own price at its worst: the long-context tier and
  * every scheduled revision, a registry override when an operator set one,
- * with the window the catalog records, the generator's output cap and search
- * count, and OpenAI's web search price. Every enabled catalog model is
- * listed; one the generator cannot use says why -- the adapter calls OpenAI
+ * with the window the catalog records and the generator's output cap. Every
+ * enabled catalog model is listed; one the generator cannot use says why -- the adapter calls OpenAI
  * only, an unverified (fallback) price is no price, and the ledger refuses a
  * pin outside its row limits.
  */
@@ -54,7 +50,7 @@ export type MarketingLlmModelOption = {
   readonly provider: string;
   /** Null when the model cannot be priced; then it is never selectable. */
   readonly pin: MarketingLlmPricePin | null;
-  /** The most one A3 web-search call can cost, in micro-USD; 0 without a pin. */
+  /** The most one generator call can cost, in micro-USD; 0 without a pin. */
   readonly worstCallMicroUsd: number;
   /** Why it cannot be selected, or null. */
   readonly unavailable: string | null;
@@ -145,17 +141,12 @@ export function marketingLlmModelOptionsFrom(
       verifiedAt: `${current.effectiveDate}T00:00:00.000Z`,
       expiresAt: FAR_FUTURE,
       source: PRICING_SOURCE,
-      webSearchMicroUsdPerCall: Math.max(
-        current.nativeSearchCostMicroUsdPerQuery ?? 0,
-        MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL,
-      ),
-      maxWebSearchCalls: MARKETING_LLM_WEB_SEARCH_CALLS,
     };
     const problems = marketingLlmPinProblems(pin);
     options.push({
       ...base,
       pin,
-      worstCallMicroUsd: marketingLlmReservation(pin, MARKETING_LLM_WEB_SEARCH_PROFILE).reservedMicroUsd,
+      worstCallMicroUsd: marketingLlmReservation(pin).reservedMicroUsd,
       unavailable: problems.length === 0 ? null : problems.join(", "),
     });
   }

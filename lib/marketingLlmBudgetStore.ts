@@ -43,8 +43,6 @@ import {
   marketingLlmReservePayloadDigest,
   marketingLlmSettleOutcome,
   MARKETING_LLM_SETTINGS_KEY,
-  MARKETING_LLM_WEB_SEARCH_PROFILE,
-  MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
   parseMarketingLlmMonthlyCap,
   parseMarketingLlmSettings,
   resolveMarketingLlmPin,
@@ -71,9 +69,8 @@ export const MARKETING_LLM_ACTIONS = {
  * What one ledger row counts against the monthly cap, in micro-USD (operator
  * decision 2026-10-23: a finished call counts at its cost, not its
  * reservation). A settled call reported its tokens, so it counts at them and
- * the pinned worst rates, plus every search its request could be billed for
- * (the provider does not report searches per call), never more than it
- * reserved. A released call never reached the provider and counts nothing.
+ * the pinned worst rates, never more than it reserved. A released call never
+ * reached the provider and counts nothing.
  * Any other row -- reserved, dispatched, or kept unknown -- may have cost up
  * to its reservation, so it counts at that.
  */
@@ -82,11 +79,7 @@ export const MARKETING_LLM_COUNTED_MICRO_USD_SQL = Prisma.sql`CASE "state"
   WHEN 'settled' THEN LEAST("reservedMicroUsd", ceil(
     ("reportedInputTokens"::numeric * ("configSnapshot"->'pin'->>'worstInputMicroUsdPerMillion')::numeric
      + "reportedOutputTokens"::numeric * ("configSnapshot"->'pin'->>'worstOutputMicroUsdPerMillion')::numeric)
-    / 1000000)
-    + CASE WHEN "configSnapshot"->>'adapterProfile' = ${MARKETING_LLM_WEB_SEARCH_PROFILE}
-        THEN (COALESCE(("configSnapshot"->'pin'->>'maxWebSearchCalls')::numeric, 0) + ${MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE})
-             * COALESCE(("configSnapshot"->'pin'->>'webSearchMicroUsdPerCall')::numeric, 0)
-        ELSE 0 END)
+    / 1000000))
   ELSE "reservedMicroUsd" END`;
 
 /** The most one ledger transaction may take; the timer is armed to it. */
