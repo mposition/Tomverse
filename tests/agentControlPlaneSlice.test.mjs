@@ -306,6 +306,11 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "export const helper = (name) => module.require(name);\n",
     'export const helper = (name) => module["require"](name);\n',
     "export const helper = (key, name) => module[key](name);\n",
+    // Parenthesised, or handed on as a value: the loader escapes.
+    "export const helper = (name) => (module.require)(name);\n",
+    "const load = module.require.bind(module);\nexport const helper = (name) => load(name);\n",
+    "export const helper = (run) => run(require);\n",
+    "export const helper = (run) => run(module);\n",
     "function check(require) { return require; }\nexport const helper = (name) => require(name);\n",
     "export const helper = (require, name) => require(name);\n",
     "var require = module.require.bind(module);\nexport const helper = (name) => require(name);\n",

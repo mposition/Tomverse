@@ -201,18 +201,70 @@ const calleeMayRequire = (callee: ts.Expression): "require" | "unknown" | null =
   if (ts.isElementAccessExpression(callee)) {
     const key = callee.argumentExpression;
     if (isStringLiteral(key)) return (key as ts.StringLiteral).text === "require" ? "require" : null;
-    const host = callee.expression;
+    const host = unwrap(callee.expression);
     return ts.isIdentifier(host) && LOADER_HOSTS.has(host.text) ? "unknown" : null;
   }
   return null;
 };
 
+/** An expression with its parentheses and type assertions taken off. */
+const unwrap = (node: ts.Expression): ts.Expression => {
+  let current = node;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isNonNullExpression(current) ||
+    ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current)) current = current.expression;
+  return current;
+};
+
+const isRequireReference = (node: ts.Node) =>
+  (ts.isIdentifier(node) && node.text === "require") ||
+  (ts.isPropertyAccessExpression(node) && node.name.text === "require") ||
+  (ts.isElementAccessExpression(node) && isStringLiteral(node.argumentExpression) &&
+    (node.argumentExpression as ts.StringLiteral).text === "require");
+
+/**
+ * The host whose loader is handed on by handing on the host itself:
+ * `module.require`. Node puts no `require` on `globalThis` or `global`.
+ */
+const ESCAPING_HOSTS = new Set(["module"]);
+
 /** Facts read from the syntax tree, so the same words in a comment or string do not count. */
 export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   const facts: CodeFacts = { runtimeLoader: false, computedCall: false, computedEnv: false, appSettingAccess: false };
+  // The loader may only be called on the spot. A `require` reference that is
+  // not the callee of a call -- `const load = module.require.bind(module)`,
+  // `run(require)` -- hands the loader on, and so does a loader host itself
+  // handed on (`run(module)`), so either counts as a computed load.
+  const called = new Set<ts.Node>();
+  const notValues = new Set<ts.Node>();
   const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(node)) {
+      notValues.add(node.name);
+      notValues.add(unwrap(node.expression));
+    }
+    if (ts.isElementAccessExpression(node) && isStringLiteral(node.argumentExpression)) {
+      notValues.add(unwrap(node.expression));
+    }
+    if (ts.isTypeOfExpression(node)) notValues.add(unwrap(node.expression));
+    // Type positions name types, not values.
+    if (ts.isQualifiedName(node)) notValues.add(node.left);
+    if (ts.isTypeQueryNode(node)) notValues.add(node.exprName);
+    // Names that declare or label something, not references.
+    if ((ts.isPropertyAssignment(node) || ts.isMethodDeclaration(node) || ts.isPropertyDeclaration(node) ||
+        ts.isPropertySignature(node) || ts.isMethodSignature(node) || ts.isVariableDeclaration(node) ||
+        ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isBindingElement(node) ||
+        ts.isImportSpecifier(node)) &&
+        node.name !== undefined) {
+      notValues.add(node.name);
+    }
+    if (isRequireReference(node) && !called.has(node) && !notValues.has(node)) facts.runtimeLoader = true;
+    if (ts.isIdentifier(node) && ESCAPING_HOSTS.has(node.text) && !notValues.has(node)) facts.runtimeLoader = true;
+    if (ts.isElementAccessExpression(node) && !isStringLiteral(node.argumentExpression)) {
+      const host = unwrap(node.expression);
+      if (ts.isIdentifier(host) && LOADER_HOSTS.has(host.text)) facts.runtimeLoader = true;
+    }
     if (ts.isCallExpression(node)) {
-      const callee = node.expression;
+      const callee = unwrap(node.expression);
+      called.add(callee);
       if (callee.kind === ts.SyntaxKind.ImportKeyword && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
