@@ -46,6 +46,11 @@ export type QaReleaseTrainCargoCandidate = {
   status: QaReleaseTrainCargoStatus;
   /** The main pull request that names it, for on_main and in_main_pull_request. */
   mainPullRequest: number | null;
+  /**
+   * For on_main: the train that found its change already on main (its pull
+   * request `#3046`, or its slot) when no main pull request names it.
+   */
+  foundByTrain?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -213,6 +218,38 @@ export function qaReleaseTrainCargoCandidates(input: {
 /** Whether a candidate may be picked: anything but released, queued in a main PR, or a workflow change. */
 export const qaReleaseTrainCargoPickable = (status: QaReleaseTrainCargoStatus) =>
   status === "available" || status === "unchecked" || status === "mentioned";
+
+/**
+ * Pull requests a train skipped as already on main, by the newest train that
+ * did (owner request 2026-10-29). The train cherry-picks and compares content,
+ * so it sees a change main got under another commit -- #2979's goldens came in
+ * a bot's re-record -- which no number or SHA in a main pull request names.
+ */
+export function qaReleaseTrainFoundOnMain(
+  reports: readonly { slot: string; report: { pullRequestNumber?: unknown; picks?: unknown } }[],
+): Map<number, string> {
+  const found = new Map<number, string>();
+  for (const { slot, report } of reports) {
+    const train = Number.isInteger(report.pullRequestNumber) ? `#${report.pullRequestNumber}` : slot;
+    for (const pick of list(report.picks)) {
+      if (pick.outcome === "already_in_main" && Number.isInteger(pick.number) && !found.has(pick.number as number)) found.set(pick.number as number, train);
+    }
+  }
+  return found;
+}
+
+/** Candidates a train found on main read as on main, whatever GitHub's records say. */
+export function qaReleaseTrainWithTrainVerdicts(
+  candidates: readonly QaReleaseTrainCargoCandidate[],
+  found: ReadonlyMap<number, string>,
+): QaReleaseTrainCargoCandidate[] {
+  return candidates.map((candidate) => {
+    const train = found.get(candidate.number);
+    return train !== undefined && qaReleaseTrainCargoPickable(candidate.status)
+      ? { ...candidate, status: "on_main", mainPullRequest: null, foundByTrain: train }
+      : candidate;
+  });
+}
 
 /** A pick as saved: distinct positive pull request numbers, at most the train's capacity. Null when not one. */
 export function parseQaReleaseTrainCargoPick(value: unknown): number[] | null {
