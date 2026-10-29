@@ -25,7 +25,7 @@ function fixture(t) {
   }
   cpSync(join(repositoryRoot, native, "Assets.xcassets/AppIcon.appiconset"), join(root, native, "Assets.xcassets/AppIcon.appiconset"), { recursive: true });
   write(`${native}/capacitor.config.json`, JSON.stringify({ appId: "app.tomverse.shell", loggingBehavior: "none",
-    packageClassList: ["MobileAuthPlugin", "MobileFilesPlugin", "PurchasesPlugin", "CAPBrowserPlugin", "GeolocationPlugin"] }));
+    packageClassList: ["MobileAuthPlugin", "MobileFilesPlugin", "MobileUpdatesPlugin", "PurchasesPlugin", "CAPBrowserPlugin", "GeolocationPlugin"] }));
   write("apps/mobile/dist/index.html", "<html>fixture</html>");
   write(`${native}/public/index.html`, "<html>fixture</html>");
   return { root, write, edit };
@@ -66,10 +66,10 @@ test("a copied bundle that differs from production output is refused", async t =
   await assert.rejects(checkIosPrebuild(f.root), /Stale iOS web asset/);
 });
 
-test("missing plugin registration is found before reaching a Mac", async t => {
+for (const plugin of ["MobileFilesPlugin", "MobileUpdatesPlugin"]) test(`missing ${plugin} registration is found before reaching a Mac`, async t => {
   const f = fixture(t);
-  f.edit(`${native}/capacitor.config.json`, text => { const data = JSON.parse(text); data.packageClassList = data.packageClassList.filter(name => name !== "MobileFilesPlugin"); return JSON.stringify(data); });
-  await assert.rejects(checkIosPrebuild(f.root), /plugin MobileFilesPlugin is missing/);
+  f.edit(`${native}/capacitor.config.json`, text => { const data = JSON.parse(text); data.packageClassList = data.packageClassList.filter(name => name !== plugin); return JSON.stringify(data); });
+  await assert.rejects(checkIosPrebuild(f.root), new RegExp(`plugin ${plugin} is missing`));
 });
 
 test("the shared scheme must reference the real native target", async t => {
