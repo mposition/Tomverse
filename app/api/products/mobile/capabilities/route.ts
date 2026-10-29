@@ -5,6 +5,8 @@ import { isAssistantProfilesEnabled, isImageGenerationEnabledCached } from "@/li
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { imageModelOwner } from "@/lib/imageModelRegistry";
 import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
+import { imageEditEnabled } from "@/lib/imageEditSource";
+import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { consumeApiRateLimit, apiSecurityResponse } from "@/lib/apiSecurity";
 
@@ -14,11 +16,13 @@ export async function GET(request: Request) {
   if (authentication.response) return authentication.response;
   if (!authentication.session?.user?.id) return Response.json({ code: "SIGN_IN_REQUIRED" }, { status: 401 });
   await consumeApiRateLimit(request, authentication.session.user.id, "native-capabilities-read", { minute: 60, day: 5000 });
-  const [plan, assistants, imageEnabled, catalog] = await Promise.all([getUserBillingPlan(authentication.session.user.id), isAssistantProfilesEnabled(), isImageGenerationEnabledCached(), refreshImageModelCatalog()]);
+  const [plan, assistants, imageEnabled, catalog, triageModelId] = await Promise.all([getUserBillingPlan(authentication.session.user.id), isAssistantProfilesEnabled(), isImageGenerationEnabledCached(), refreshImageModelCatalog(), chatImageTriageModelId()]);
+  // The same three conditions the web composer asks before it checks a photo.
+  const chatImageEdits = imageEnabled && planAllowsFeature(plan, "imageGeneration") && triageModelId !== null && imageEditEnabled();
   const images = { enabled: imageEnabled && planAllowsFeature(plan, "imageGeneration"), maxModels: imageGroupMaxModels(), models: catalog.filter(model => !model.disabledReason).map(model => ({
     id: model.id, name: model.name, provider: imageModelOwner(model), pricingVersion: model.pricingVersion,
     prices: model.prices.map(price => ({ quality: price.quality, size: price.size, credits: price.credits })),
   })) };
-  return Response.json({ historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json({ historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits,reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }); }
 }

@@ -38,6 +38,8 @@ export type ChatImageTurnRequest = {
      * applied). Absent means the saved question is the prompt.
      */
     prompt?: string;
+    /** Change the photo attached to the question instead of drawing anew. */
+    edit?: true;
     /**
      * Set on a retry only: the answer id the first try used, which is also
      * the image group's idempotency key, so the retry recovers that group
@@ -60,10 +62,11 @@ const TURN_PRESETS = ["draft", "standard", "final"] as const;
  */
 export const readChatImageTurnRequest = (value: unknown): ChatImageTurnRequest | null => {
     if (typeof value !== "object" || value === null) return null;
-    const { modelIds, preset, prompt } = value as {
+    const { modelIds, preset, prompt, edit } = value as {
         modelIds?: unknown;
         preset?: unknown;
         prompt?: unknown;
+        edit?: unknown;
     };
     if (!Array.isArray(modelIds)) return null;
     return {
@@ -73,5 +76,6 @@ export const readChatImageTurnRequest = (value: unknown): ChatImageTurnRequest |
                 ? (preset as ChatImageTurnRequest["preset"])
                 : null,
         ...(typeof prompt === "string" && prompt.trim() ? { prompt: prompt.trim() } : {}),
+        ...(edit === true ? { edit: true as const } : {}),
     };
 };

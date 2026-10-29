@@ -12,16 +12,19 @@ import {
  */
 export async function askChatImageIntent(
     text: string,
-    options: { conversationId?: string | null } = {},
+    /** `attachedPhoto`: the message carries a photo the user may want edited. */
+    options: { conversationId?: string | null; attachedPhoto?: boolean } = {},
     fetchImpl: typeof fetch = fetch
 ): Promise<ChatImageDecision> {
     try {
         const response = await fetchImpl("/api/chat/image-intent", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(
-                options.conversationId ? { text, conversationId: options.conversationId } : { text }
-            ),
+            body: JSON.stringify({
+                text,
+                ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+                ...(options.attachedPhoto ? { attachedPhoto: true } : {}),
+            }),
             signal: AbortSignal.timeout(CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS),
         });
         if (!response.ok) {

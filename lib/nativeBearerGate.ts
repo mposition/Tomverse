@@ -194,6 +194,10 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   if (path === "/api/images/generations") return ["GET", "POST"].includes(method);
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path)) return method === "GET";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/image-turn$/.test(path)) return method === "POST";
+  // Whether a manual-mode send with a photo asks to edit it (owner request
+  // 2026-10-29: photo edits in the native apps). Routing only; the image turn
+  // above is what reserves and charges.
+  if (path === "/api/chat/image-intent") return method === "POST";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews$/.test(path)) return ["GET", "POST"].includes(method);
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews\/verify-item$/.test(path)) return method === "POST";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews\/item-feedback$/.test(path)) return ["GET", "PUT", "DELETE"].includes(method);
