@@ -17,6 +17,19 @@ import { qaReleaseInstallationToken } from "../lib/qaReleaseMergeLaneGithub.ts";
 import { createQaReleaseTrainAppPorts, createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
 import { createQaReleaseTrainResolver } from "../lib/qaReleaseTrainResolve.ts";
 import { runQaReleaseTrainRound } from "../lib/qaReleaseTrainService.ts";
+import {
+  createQaReleaseTrainVerdictGit,
+  createQaReleaseTrainVerdictGithub,
+  createQaReleaseTrainVerdictModel,
+  runQaReleaseTrainVerdictRound,
+} from "../lib/qaReleaseTrainVerdict.ts";
+import { createQaReleaseTrainVerdictAppPorts } from "../lib/qaReleaseTrainPorts.ts";
+
+const STARTED_MS = Date.now();
+// The verdict round starts no model call within its last five minutes of this.
+const VERDICT_DEADLINE_MS = 22 * 60 * 1000;
+// A train that took longer than this leaves the verdicts to the next run.
+const VERDICT_START_BY_MS = 12 * 60 * 1000;
 
 // The app routes budget each call at 50 s; this side waits a little longer.
 const APP_TIMEOUT_MS = 55_000;
@@ -67,6 +80,27 @@ const train = await runQaReleaseTrainRound(
   Date.now(),
 ).finally(() => git.cleanup().catch(() => {}));
 
+// The verdict round (owner, 2026-10-29; lib/qaReleaseTrainVerdict.ts): after
+// the train, whatever it did, unless the service is off. Its model is on with
+// the train's key unless QA_RELEASE_TRAIN_MODEL_VERDICT is "false"; its own
+// failure never changes the round's exit code.
+let verdict = { verdict: "skipped" };
+if (train.train !== "disabled" && train.train !== "refused_to_start" && Date.now() - STARTED_MS < VERDICT_START_BY_MS) {
+  const verdictGit = createQaReleaseTrainVerdictGit();
+  verdict = await runQaReleaseTrainVerdictRound(
+    {
+      app: createQaReleaseTrainVerdictAppPorts({ http: httpWith(APP_TIMEOUT_MS), env }),
+      git: verdictGit,
+      github: createQaReleaseTrainVerdictGithub({ http: readHttp, token }),
+      ask:
+        apiKey !== "" && (env.QA_RELEASE_TRAIN_MODEL_VERDICT ?? "").trim() !== "false"
+          ? createQaReleaseTrainVerdictModel({ http: httpWith(MODEL_TIMEOUT_MS), apiKey })
+          : undefined,
+    },
+    { deadlineMs: STARTED_MS + VERDICT_DEADLINE_MS },
+  ).finally(() => verdictGit.cleanup().catch(() => {}));
+}
+
 clearTimeout(supervisor);
-console.log(JSON.stringify(train));
+console.log(JSON.stringify({ ...train, verdict }));
 process.exitCode = train.exitCode;
