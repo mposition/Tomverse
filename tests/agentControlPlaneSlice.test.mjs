@@ -332,6 +332,9 @@ test("a followed product file that loads by a computed name fails the analysis; 
     // A shell the options turn on, by a string key or through a variable.
     'import { execFile } from "node:child_process";\nexport const helper = (args) => execFile("git", args, { "shell": true });\n',
     'import { execFile } from "node:child_process";\nconst options = { shell: true };\nexport const helper = (args) => execFile("git", args, options);\n',
+    // A parameter shadowing a const of the same name; options before a callback.
+    'import { Worker } from "node:worker_threads";\nconst source = "0";\nexport const helper = (source) => new Worker(source, { eval: true });\n',
+    'import { execFile } from "node:child_process";\nexport const helper = () => execFile("git", { shell: true }, (error) => error);\n',
     // Two arguments: the second may be the options.
     'import { execFile } from "node:child_process";\nexport const helper = (args) => execFile("git", args);\n',
     // Parenthesised, or handed on as a value: the loader escapes.

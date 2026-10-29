@@ -350,11 +350,17 @@ const SAFE_MODULE_IMPORTS = new Set(["isBuiltin", "builtinModules"]);
  * read -- a variable in their place -- is not proven.
  */
 const shellProvenOff = (args: ts.NodeArray<ts.Expression>) => {
+  // A trailing callback first; then `(args, options)`, `(args)` or `(options)`.
   const rest = args.slice(1).map(unwrap);
-  // With three or more arguments the second is the argument list by position.
+  while (rest.length > 0 && (ts.isArrowFunction(rest[rest.length - 1]) || ts.isFunctionExpression(rest[rest.length - 1]))) {
+    rest.pop();
+  }
+  // Only an array literal is the argument list for certain; an object literal
+  // in that place is the options (`execFile(file, options, callback)`). A
+  // second argument after the list is the options. Anything else is unknown.
   const candidates = rest.filter((argument, index) =>
-    !(index === 0 && (ts.isArrayLiteralExpression(argument) || rest.length >= 2)) &&
-    !ts.isArrowFunction(argument) && !ts.isFunctionExpression(argument));
+    !(index === 0 && (ts.isArrayLiteralExpression(argument) ||
+      (rest.length >= 2 && !ts.isObjectLiteralExpression(argument) && ts.isIdentifier(argument)))));
   return candidates.every((argument) => ts.isObjectLiteralExpression(argument) &&
     argument.properties.every((property) => {
       if (ts.isSpreadAssignment(property)) return false;
@@ -425,7 +431,15 @@ const workerSourceTexts = (source: ts.SourceFile, argument: ts.Expression): stri
       functions.set(node.name.text, { exported: exported(node) });
       addParameters(node.name.text, node.parameters);
     }
-    if (ts.isParameter(node) && ts.isIdentifier(node.name)) notReferences.add(node.name);
+    // Every other binding of a name counts too: a parameter, a destructured
+    // or imported name, a class shadows a const of the same name somewhere,
+    // and names are matched without scopes.
+    if ((ts.isParameter(node) || ts.isBindingElement(node) || ts.isImportSpecifier(node) ||
+        ts.isImportClause(node) || ts.isNamespaceImport(node) || ts.isClassDeclaration(node)) &&
+        node.name !== undefined && ts.isIdentifier(node.name)) {
+      declare(node.name.text);
+      notReferences.add(node.name);
+    }
     if ((ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
         node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(unwrap(node.left))) ) {
       assigned.add((unwrap(node.left) as ts.Identifier).text);
@@ -455,7 +469,8 @@ const workerSourceTexts = (source: ts.SourceFile, argument: ts.Expression): stri
   const direct = resolveText(argument);
   if (direct !== null) return [direct];
   const value = unwrap(argument);
-  if (!ts.isIdentifier(value) || constants.has(value.text) || assigned.has(value.text)) return null;
+  if (!ts.isIdentifier(value) || constants.has(value.text) || assigned.has(value.text) ||
+      declarations.get(value.text) !== 1) return null;
   const owners = parameters.get(value.text) ?? [];
   if (owners.length !== 1) return null;
   const { fn, index } = owners[0];
