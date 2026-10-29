@@ -699,22 +699,30 @@ export const embeddedSpecifiers = (source: ts.SourceFile): string[] =>
   embeddedCode(source).flatMap(importSpecifiersOf);
 
 /**
- * Code written inside a string or template of the file -- the source an
- * inline worker runs -- parsed the way the worker runs it, so a require with
- * a comment before its parenthesis counts as it does there. Only text that can hold
- * a load, and so reach the file system or a setting, is parsed.
+ * Code written inside a string or template of the file, parsed the way a
+ * worker runs it, so a require with a comment before its parenthesis counts
+ * as it does there: every source an inline worker (`eval: true`) of the file
+ * can run, whatever it holds, and any other text that can hold a load.
  */
 export const embeddedCode = (source: ts.SourceFile): ts.SourceFile[] => {
-  const found: ts.SourceFile[] = [];
+  const texts = new Set<string>();
   const visit = (node: ts.Node): void => {
     if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && /require|import/.test(node.text)) {
-      const code = ts.createSourceFile("embedded.js", node.text, ts.ScriptTarget.Latest, false);
-      if (!hasParseErrors(code)) found.push(code);
+      texts.add(node.text);
+    }
+    if (ts.isNewExpression(node) && node.arguments !== undefined && node.arguments[0] !== undefined) {
+      const options = node.arguments[1];
+      const inline = options !== undefined && ts.isObjectLiteralExpression(options) &&
+        options.properties.some((property) => ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) &&
+          property.name.text === "eval" && property.initializer.kind === ts.SyntaxKind.TrueKeyword);
+      if (inline) for (const text of workerSourceTexts(source, node.arguments[0]) ?? []) texts.add(text);
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
-  return found;
+  return [...texts]
+    .map((text) => ts.createSourceFile("embedded.js", text, ts.ScriptTarget.Latest, false))
+    .filter((code) => !hasParseErrors(code));
 };
 
 /** Kept for callers and tests that ask the narrower question. */
