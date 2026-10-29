@@ -274,8 +274,10 @@ export const qaReleaseTrainVerdictWanted = (status: QaReleaseTrainCargoStatus) =
 export function qaReleaseTrainWithContentVerdicts(
   candidates: readonly QaReleaseTrainCargoCandidate[],
   verdicts: readonly QaReleaseTrainVerdict[],
+  /** The main the last check ran against: a verdict a round's deadline left on an older main is not shown. */
+  mainSha: string | null,
 ): QaReleaseTrainCargoCandidate[] {
-  const byNumber = new Map(verdicts.map((verdict) => [verdict.number, verdict]));
+  const byNumber = new Map(verdicts.filter((verdict) => verdict.mainSha === mainSha).map((verdict) => [verdict.number, verdict]));
   return candidates.map((candidate) => {
     const verdict = byNumber.get(candidate.number);
     if (!verdict || !qaReleaseTrainVerdictWanted(candidate.status)) return candidate;

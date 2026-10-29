@@ -96,14 +96,13 @@ export function qaReleaseTrainDiffHunks(diff: string): QaReleaseTrainDiffHunk[] 
   return hunks;
 }
 
-/** Whether `block` appears in `lines` as one unbroken run. */
-function holdsBlock(lines: readonly string[], block: readonly string[]): boolean {
-  if (block.length === 0) return true;
-  outer: for (let start = 0; start + block.length <= lines.length; start++) {
+/** Where `block` next appears in `lines` as one unbroken run, from `from` on: the index just past it, or -1. */
+function findBlock(lines: readonly string[], block: readonly string[], from: number): number {
+  outer: for (let start = from; start + block.length <= lines.length; start++) {
     for (let offset = 0; offset < block.length; offset++) if (lines[start + offset] !== block[offset]) continue outer;
-    return true;
+    return start + block.length;
   }
-  return false;
+  return -1;
 }
 
 /**
@@ -134,12 +133,16 @@ export type QaReleaseTrainChangedFile = {
  *   develop holds it now (whatever develop did with the change since, main
  *   has nothing of this file left to receive), is on main;
  * - otherwise each hunk is on main only when its whole post-image -- its
- *   context and added lines, in order -- is in main; a hunk that is not
- *   leaves its added and removed lines unconfirmed, marked when develop no
- *   longer holds that post-image either (develop changed the spot since);
- * - lines compare exactly, whitespace and blank lines included;
+ *   context and added lines, in order -- is in main, after the place the
+ *   file's previous hunk was found: one run of main's lines never stands for
+ *   two hunks. A hunk that is not leaves its added and removed lines
+ *   unconfirmed, marked when develop no longer holds that post-image either
+ *   (develop changed the spot since);
+ * - lines compare exactly, whitespace and blank lines included; a diff that
+ *   touches a file's final newline leaves the file unconfirmed whole;
  * - a file the candidate deleted is on main only where main has no such
- *   path (an empty file is not a deleted one);
+ *   path (an empty file is not a deleted one), and a file it left is not on
+ *   a main that has no such path (an empty file is not a missing one);
  * - a mode the candidate set that main's file lacks is unconfirmed, whatever
  *   its text;
  * - a binary file, or one whose diff has no hunk (a mode change), that
@@ -168,20 +171,32 @@ export function qaReleaseTrainContentGap(changed: readonly QaReleaseTrainChanged
       gap.push({ path: file.path, missing: [], leftOnMain: [], binary: true });
       continue;
     }
+    // Left by the candidate but not a path on main, or its final newline changed: unconfirmed whole.
+    if (file.main === null || /^\\/m.test(file.diff ?? "")) {
+      gap.push({ path: file.path, missing: hunks.flatMap((hunk) => hunk.added), leftOnMain: hunks.flatMap((hunk) => hunk.removed) });
+      continue;
+    }
     const main = lines(file.mainText);
     const develop = lines(file.developText);
     // An empty post-image (the file emptied) is only "found" in a file with nothing left.
-    const holds = (side: readonly string[], block: readonly string[]) => (block.length === 0 ? side.length === 0 : holdsBlock(side, block));
+    const find = (side: readonly string[], block: readonly string[], from: number) =>
+      block.length === 0 ? (side.length === 0 ? from : -1) : findBlock(side, block, from);
     const missing: string[] = [];
     const leftOnMain: string[] = [];
     let changedSince = false;
+    let cursor = 0;
     for (const hunk of hunks) {
-      if ((hunk.added.length === 0 && hunk.removed.length === 0) || holds(main, hunk.after)) continue;
+      if (hunk.added.length === 0 && hunk.removed.length === 0) continue;
+      const found = find(main, hunk.after, cursor);
+      if (found >= 0) {
+        cursor = found;
+        continue;
+      }
       missing.push(...hunk.added);
       leftOnMain.push(...hunk.removed);
-      if (!holds(develop, hunk.after)) changedSince = true;
+      if (find(develop, hunk.after, 0) < 0) changedSince = true;
     }
-    const modeDiffers = file.main !== null && mode(file.main) !== mode(file.post);
+    const modeDiffers = mode(file.main) !== mode(file.post);
     if (missing.length > 0 || leftOnMain.length > 0 || modeDiffers) {
       gap.push({ path: file.path, missing, leftOnMain, ...(changedSince ? { changedSince } : {}), ...(modeDiffers ? { modeDiffers } : {}) });
     }

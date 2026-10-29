@@ -91,6 +91,22 @@ test("a mode the candidate set that main lacks differs, though every text hunk i
   assert.deepEqual(gap, [{ path: "f.ts", missing: [], leftOnMain: [], modeDiffers: true }]);
 });
 
+test("one run of main's lines never stands for two hunks: two identical changes need two places, in order", () => {
+  const twice = diff([" const a = 1;", "-run(old);", "+run(next);", " const b = 2;"], [" const a = 1;", "-run(old);", "+run(next);", " const b = 2;"]);
+  const once = text("const a = 1;", "run(next);", "const b = 2;", "", "const a = 1;", "run(old);", "const b = 2;");
+  const both = text("const a = 1;", "run(next);", "const b = 2;", "", "const a = 1;", "run(next);", "const b = 2;");
+  assert.equal(qaReleaseTrainContentGap([file({ diff: twice, mainText: once, developText: both })]).verdict.state, "differs");
+  assert.equal(qaReleaseTrainContentGap([file({ diff: twice, mainText: both, developText: both })]).verdict.state, "on_main");
+});
+
+test("an emptied file is not on a main without the path, and a final newline change is unconfirmed", () => {
+  const emptied = ["diff --git a/__init__.py b/__init__.py", "--- a/__init__.py", "+++ b/__init__.py", "@@ -1 +0,0 @@", "-x = 1", ""].join("\n");
+  assert.equal(qaReleaseTrainContentGap([file({ diff: emptied, main: null, mainText: null, developText: "" })]).verdict.state, "differs");
+  assert.equal(qaReleaseTrainContentGap([file({ diff: emptied, mainText: "", developText: "" })]).verdict.state, "on_main");
+  const newline = diff(["-export const a = 1;", String.raw`\ No newline at end of file`, "+export const a = 1;"]);
+  assert.equal(qaReleaseTrainContentGap([file({ diff: newline, mainText: "export const a = 1;", developText: text("export const a = 1;") })]).verdict.state, "differs");
+});
+
 test("a deleted file that main keeps as an empty file differs", () => {
   const deletion = ["diff --git a/f.ts b/f.ts", "deleted file mode 100644", "--- a/f.ts", "+++ /dev/null", "@@ -1 +0,0 @@", "-export const gone = 1;", ""].join("\n");
   assert.equal(qaReleaseTrainContentGap([file({ post: null, diff: deletion, mainText: "", develop: null })]).verdict.state, "differs");
@@ -150,17 +166,21 @@ test("stored verdicts parse, dropping what is malformed", () => {
 
 test("Admin reads a candidate the content check found on main as on main, and the rest with their verdict", () => {
   const candidate = (number, status) => ({ number, title: `#${number}`, author: "a", mergedAt: "2026-10-20T00:00:00Z", status, mainPullRequest: null });
+  const MAIN = "a".repeat(40);
   const verdicts = [
-    { number: 1, content: { state: "on_main", lines: 4 } },
-    { number: 2, content: { state: "differs", lines: 3, missing: 3, leftOnMain: 0, files: [{ path: "a", lines: 3 }], fileCount: 1 }, model: { decision: "release", why: { ko: "가", en: "a" }, evidence: [] } },
+    { number: 1, content: { state: "on_main", lines: 4 }, mainSha: MAIN },
+    { number: 2, content: { state: "differs", lines: 3, missing: 3, leftOnMain: 0, files: [{ path: "a", lines: 3 }], fileCount: 1 }, model: { decision: "release", why: { ko: "가", en: "a" }, evidence: [] }, mainSha: MAIN },
     // A workflow change keeps its status: the train cannot carry it anyway.
-    { number: 3, content: { state: "on_main", lines: 1 } },
+    { number: 3, content: { state: "on_main", lines: 1 }, mainSha: MAIN },
     // Already on main by GitHub's records: untouched.
-    { number: 4, content: { state: "differs", lines: 1, missing: 1, leftOnMain: 0, files: [], fileCount: 1 } },
+    { number: 4, content: { state: "differs", lines: 1, missing: 1, leftOnMain: 0, files: [], fileCount: 1 }, mainSha: MAIN },
+    // Checked against an older main (a round's deadline skipped it): not shown.
+    { number: 6, content: { state: "on_main", lines: 1 }, mainSha: "b".repeat(40) },
   ];
   const out = qaReleaseTrainWithContentVerdicts(
-    [candidate(1, "available"), candidate(2, "mentioned"), candidate(3, "changes_workflows"), candidate(4, "on_main"), candidate(5, "available")],
+    [candidate(1, "available"), candidate(2, "mentioned"), candidate(3, "changes_workflows"), candidate(4, "on_main"), candidate(5, "available"), candidate(6, "available")],
     verdicts,
+    MAIN,
   );
   assert.deepEqual(
     out.map((c) => [c.number, c.status, c.foundByContent ?? false, c.verdict?.content.state ?? null]),
@@ -170,6 +190,7 @@ test("Admin reads a candidate the content check found on main as on main, and th
       [3, "changes_workflows", false, "on_main"],
       [4, "on_main", false, null],
       [5, "available", false, null],
+      [6, "available", false, null],
     ],
   );
 });

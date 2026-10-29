@@ -339,7 +339,8 @@ export function createQaReleaseTrainVerdictGit(input: { remote?: string } = {}):
           develop: onDevelop.get(path) ?? null,
           binary: binary.has(path),
         };
-        if (!file.binary && file.main !== file.post) {
+        // Text is read only where the check compares it: not where main already matches the change or develop.
+        if (!file.binary && file.main !== file.post && file.main !== file.develop) {
           // This path's diff alone, the path given literally: nothing is parsed out of a header.
           file.diff = await git(["--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", "--no-renames", "-U3", ...range, "--", path]);
           file.mainText = file.main ? await text(dir, path) : null;

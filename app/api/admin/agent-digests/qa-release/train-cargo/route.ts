@@ -55,7 +55,11 @@ export async function GET(request: Request) {
       read.status === "ok"
         ? {
             ...read,
-            candidates: qaReleaseTrainWithContentVerdicts(qaReleaseTrainWithTrainVerdicts(read.candidates, foundOnMain), verdicts?.verdicts ?? []),
+            candidates: qaReleaseTrainWithContentVerdicts(
+              qaReleaseTrainWithTrainVerdicts(read.candidates, foundOnMain),
+              verdicts?.verdicts ?? [],
+              verdicts?.mainSha ?? null,
+            ),
           }
         : read;
     // The next departure by the hours the train service reported, from this server clock.
