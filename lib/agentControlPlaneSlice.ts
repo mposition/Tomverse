@@ -628,7 +628,10 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
       unreadable.add(file.path);
       continue;
     }
-    if (codeFacts(source).runtimeLoader) loaders.add(file.path);
+    const fileFacts = codeFacts(source);
+    if (fileFacts.runtimeLoader) loaders.add(file.path);
+    // AppSetting keys are protected wherever they are read, as in the app.
+    if (fileFacts.appSettingAccess) for (const key of keyLiterals(source)) appSettingKeys.add(key);
     named.set(file.path, { exact: namedPaths(source).exact, prefixes: new Set() });
     const targets = new Set<string>();
     for (const specifier of importSpecifiersOf(source)) {

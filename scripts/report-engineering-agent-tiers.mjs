@@ -80,7 +80,9 @@ const treeListing = (commit, withTrees = false) =>
       return { path, mode, type, oid };
     });
 
-const TEXT_FOR_ANALYSIS = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md)$/;
+// The texts the app's base evidence reads, text gates included
+// (lib/engineeringAgentV22BaseEvidence.ts).
+const TEXT_FOR_ANALYSIS = /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/;
 
 const commits = git(["rev-list", "--first-parent", "--merges", `--max-count=${limit}`, ref])
   .toString("utf8")

@@ -351,6 +351,11 @@ test("adding a configuration name the control plane reads, or any AppSetting key
     "tests/support/mode.mjs": "export const mode = () => process.env.HELPER_GATE_MODE;\n",
   });
   assert.ok(slice([change(outside, { addedText: "if (process.env.HELPER_GATE_MODE) {}" })], helped).slicePaths.has(outside));
+  // An AppSetting key a gate outside the app reads is protected too.
+  const scripted = tree({
+    "scripts/check.mjs": 'export const on = (db) => db.appSetting.findUnique({ where: { key: "gate.scriptSwitch" } });\n',
+  });
+  assert.ok(slice([change(outside, { addedText: 'const k = "gate.scriptSwitch";' })], scripted).slicePaths.has(outside));
   assert.deepEqual([...environmentNames('process.env.FOO_KEY process.env["BAR"]')].sort(), ["BAR", "FOO_KEY"]);
 });
 
