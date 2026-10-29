@@ -16,6 +16,7 @@ import {
   type QaReleaseTrainSelection,
 } from "@/lib/qaReleaseTrainCargoCore";
 import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
+import { qaReleaseTrainVerdictsFrom, type QaReleaseTrainVerdicts } from "@/lib/qaReleaseTrainVerdictCore";
 
 /**
  * The release train's records (docs/policy/qa-release-agent.md section 8 item
@@ -303,6 +304,33 @@ export async function readQaReleaseTrainSchedule(): Promise<QaReleaseTrainSchedu
     const parsed = JSON.parse(row.value) as { hours?: unknown; reportedAt?: unknown };
     const hours = Array.isArray(parsed.hours) ? parsed.hours.filter((hour): hour is number => Number.isInteger(hour) && hour >= 0 && hour <= 23) : [];
     return hours.length > 0 && typeof parsed.reportedAt === "string" ? { hours, reportedAt: parsed.reportedAt } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The train service's verdicts on the next train's candidates (owner,
+ * 2026-10-29; lib/qaReleaseTrainVerdictCore.ts): one AppSetting row it
+ * overwrites whenever it checks again. Display only, never an audit event,
+ * never read by the train.
+ */
+export const QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY = "qa_release.train.verdicts";
+
+export async function recordQaReleaseTrainVerdicts(verdicts: QaReleaseTrainVerdicts): Promise<void> {
+  const value = JSON.stringify(verdicts);
+  await prisma.appSetting.upsert({
+    where: { key: QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY },
+    create: { key: QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY, value },
+    update: { value },
+  });
+}
+
+export async function readQaReleaseTrainVerdicts(): Promise<QaReleaseTrainVerdicts | null> {
+  const row = await prisma.appSetting.findUnique({ where: { key: QA_RELEASE_TRAIN_VERDICTS_SETTING_KEY }, select: { value: true } });
+  if (!row) return null;
+  try {
+    return qaReleaseTrainVerdictsFrom(JSON.parse(row.value));
   } catch {
     return null;
   }

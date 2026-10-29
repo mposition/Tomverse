@@ -4,7 +4,22 @@ import { z } from "zod";
 
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
 import { QA_RELEASE_TRAIN_RESOLVE_WHY_CHARS } from "@/lib/qaReleaseTrainResolve";
-import { admitQaReleaseTrain, readQaReleaseTrainSelection, recordQaReleaseTrainSchedule, reportQaReleaseTrain } from "@/lib/qaReleaseTrainStore";
+import { qaReleaseTrainVerdictWanted } from "@/lib/qaReleaseTrainCargoCore";
+import { readQaReleaseTrainCargoCandidates } from "@/lib/qaReleaseTrainCargoRead";
+import {
+  admitQaReleaseTrain,
+  readQaReleaseTrainSelection,
+  readQaReleaseTrainVerdicts,
+  recordQaReleaseTrainSchedule,
+  recordQaReleaseTrainVerdicts,
+  reportQaReleaseTrain,
+} from "@/lib/qaReleaseTrainStore";
+import {
+  QA_RELEASE_TRAIN_VERDICT_EVIDENCE_MAX,
+  QA_RELEASE_TRAIN_VERDICT_FILES,
+  QA_RELEASE_TRAIN_VERDICT_WHY_CHARS,
+  QA_RELEASE_TRAIN_VERDICTS_MAX,
+} from "@/lib/qaReleaseTrainVerdictCore";
 
 /**
  * The release train's app call (docs/policy/qa-release-agent.md section 8 item
@@ -16,7 +31,44 @@ const SLOT = z.string().regex(/^\d{8}-\d{4}$/);
 const SHA = z.string().regex(/^[0-9a-f]{40}$/);
 const PR = z.number().int().positive().max(1_000_000_000);
 
+const COUNT = z.number().int().min(0).max(10_000_000);
+const AT = z.string().max(40).refine((value) => !Number.isNaN(Date.parse(value)));
+const WHY = z.string().min(1).max(QA_RELEASE_TRAIN_VERDICT_WHY_CHARS);
+const VERDICT = z
+  .object({
+    number: PR,
+    content: z.discriminatedUnion("state", [
+      z.object({ state: z.literal("on_main"), lines: COUNT }).strict(),
+      z
+        .object({
+          state: z.literal("differs"),
+          lines: COUNT,
+          missing: COUNT,
+          leftOnMain: COUNT,
+          files: z.array(z.object({ path: z.string().min(1).max(512), lines: COUNT }).strict()).max(QA_RELEASE_TRAIN_VERDICT_FILES),
+          fileCount: COUNT,
+        })
+        .strict(),
+      z.object({ state: z.literal("unread") }).strict(),
+    ]),
+    mainSha: SHA.optional(),
+    checkedAt: AT.optional(),
+    gapDigest: z.string().regex(/^[0-9a-f]{32}$/).optional(),
+    model: z
+      .object({
+        decision: z.enum(["release", "not_needed", "operator"]),
+        why: z.object({ ko: WHY, en: WHY }).strict(),
+        evidence: z.array(PR).max(QA_RELEASE_TRAIN_VERDICT_EVIDENCE_MAX),
+      })
+      .strict()
+      .optional(),
+    askedAt: AT.optional(),
+  })
+  .strict();
+
 const body = z.union([
+  z.object({ phase: z.literal("verdict_queue") }).strict(),
+  z.object({ phase: z.literal("verdicts"), mainSha: SHA, at: AT, verdicts: z.array(VERDICT).max(QA_RELEASE_TRAIN_VERDICTS_MAX) }).strict(),
   z
     .object({
       phase: z.literal("schedule"),
@@ -67,7 +119,14 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   const callerRevision = REVISION.test(header) ? Number(header) : null;
 
   const text = await request.text().catch(() => null);
-  if (text === null || text.length > 16 * 1024) return { status: 400, body: { error: "invalid_request" } };
+  // The verdicts are the one large body (up to 500 candidates with two short
+  // reasons each); every other phase keeps the 16 KiB limit below.
+  // 4 MiB holds the largest record the schema allows (500 verdicts, each with
+  // eight 512-character paths and two 300-character reasons, is about 3 MB).
+  if (text === null || text.length > 4 * 1024 * 1024) return { status: 400, body: { error: "invalid_request" } };
+  // A large body that is not the verdicts is refused before it is parsed; the
+  // check after parsing is the real guard (a verdicts body this misses is refused anyway).
+  if (text.length > 16 * 1024 && !/"phase"\s*:\s*"verdicts"/.test(text)) return { status: 400, body: { error: "invalid_request" } };
   let parsed;
   try {
     parsed = body.safeParse(JSON.parse(text));
@@ -76,10 +135,35 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   }
   if (!parsed.success) return { status: 400, body: { error: "invalid_request" } };
   const input = parsed.data;
+  if (input.phase !== "verdicts" && text.length > 16 * 1024) return { status: 400, body: { error: "invalid_request" } };
   try {
     if (input.phase === "schedule") {
       // Display only (Admin's next train): no revision check, no audit row.
       await recordQaReleaseTrainSchedule(input.hours);
+      return { status: 200, body: { recorded: true } };
+    }
+    if (input.phase === "verdict_queue") {
+      // Read only: what Admin lists as able to ride (or to release by hand),
+      // before any verdict is applied, and the verdicts held now.
+      const [read, stored] = await Promise.all([readQaReleaseTrainCargoCandidates(Date.now()), readQaReleaseTrainVerdicts()]);
+      if (read.status !== "ok") return { status: 503, body: { error: "candidates_unread" } };
+      const candidates = read.candidates
+        .filter((candidate) => qaReleaseTrainVerdictWanted(candidate.status) && candidate.mergeCommitSha)
+        // Newest merged first, no more than one verdict record holds.
+        .sort((a, b) => Date.parse(b.mergedAt) - Date.parse(a.mergedAt))
+        .slice(0, QA_RELEASE_TRAIN_VERDICTS_MAX)
+        .map((candidate) => ({
+          number: candidate.number,
+          title: candidate.title,
+          mergeCommitSha: candidate.mergeCommitSha,
+          mergedAt: candidate.mergedAt,
+          mainPullRequest: candidate.status === "mentioned" ? candidate.mainPullRequest : null,
+        }));
+      return { status: 200, body: { candidates, stored } };
+    }
+    if (input.phase === "verdicts") {
+      // Display only (Admin's next train): no revision check, no audit row.
+      await recordQaReleaseTrainVerdicts({ mainSha: input.mainSha, at: input.at, verdicts: input.verdicts });
       return { status: 200, body: { recorded: true } };
     }
     if (input.phase === "selection") {
