@@ -1,6 +1,6 @@
 /**
  * One support-triage worker pass, suggestions only (design section 5.2 steps
- * 1 to 5 and 5.3; groups and display promotion come later).
+ * 1 to 5 and 5.3). Groups are not formed: the model names duplicates.
  *
  * A pass starts a `worker` run row, returns expired claims to pending (or
  * fails them after three attempts), then works in batches of 10 reports, at
@@ -37,9 +37,7 @@ import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import {
   DELETED_ACCOUNT_MARKER,
-  GROUP_MEMBER_CAP,
   LANE_TIMEOUTS,
-  SIGNAL_PROVENANCE,
   SUGGESTION_MAX_ATTEMPTS,
   SUGGESTION_STATES,
   SUGGESTION_TERMINAL_STATES,
@@ -49,18 +47,11 @@ import {
   WORKER_RECLAIM_MAX,
   maxGuardedBudgetMs,
   triageLaneFor,
-  type GroupKind,
   type LaneSource,
   type TriageLane,
 } from "@/lib/supportTriageCore";
 import { suggestionInputDigest } from "@/lib/supportTriageInputDigest";
 import { keywordFlagsIn } from "@/lib/supportTriageKeywords";
-import {
-  GROUP_NEW_MEMBERSHIPS_PER_PASS_MAX,
-  groupBinding,
-  planGroups,
-  type GroupFacts,
-} from "@/lib/supportTriageGroupCore";
 import {
   DUPLICATE_CANDIDATES_MAX,
   supportTriageLlmFromEnv,
@@ -333,310 +324,6 @@ export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, r
     };
   });
 
-/** The server facts grouping reads from a locked report row. */
-const groupFactsOf = (row: ReportRow): GroupFacts => ({
-  feedbackId: row.id,
-  status: row.status,
-  userId: row.userId,
-  errorReportVerification: row.errorReportVerification,
-  evidence:
-    row.evRouteClass === null || row.evOccurredAt === null
-      ? null
-      : {
-          errorCode: row.evErrorCode,
-          routeClass: row.evRouteClass,
-          release: row.evRelease,
-          occurredAt: row.evOccurredAt,
-        },
-  autoFixFingerprint: row.caseFingerprint,
-});
-
-/**
- * Eligible reports sharing a grouping value with any of `feedbackIds`, at
- * most one over the member cap per value so an oversized class is still seen
- * as one. A hint read outside any transaction: the result transaction locks
- * these rows with the batch and reads their facts again under that lock.
- */
-export const readGroupPeers = async (feedbackIds: readonly string[]): Promise<string[]> => {
-  if (feedbackIds.length === 0) return [];
-  const rows = await prisma.$queryRaw<{ id: string }[]>`
-    WITH facts AS (
-      SELECT f."id", f."userId", f."errorReportVerification" AS "verification",
-             e."errorCode", e."routeClass", e."release", c."fingerprint"
-        FROM "Feedback" f
-        LEFT JOIN "TraceErrorEvidence" e ON e."id" = f."traceEvidenceId"
-        LEFT JOIN "FeedbackAutoFixCase" c ON c."feedbackId" = f."id"
-       WHERE f."status" = ANY(${ELIGIBLE}::text[])
-         AND f."message" <> ${DELETED_ACCOUNT_MARKER}
-    ), batch AS (
-      SELECT * FROM facts WHERE "id" = ANY(${[...feedbackIds]}::text[])
-    ), peers AS (
-      SELECT p."id", pg_catalog.row_number() OVER (PARTITION BY p."userId" ORDER BY p."id") AS "rank"
-        FROM facts p WHERE p."userId" IN (SELECT b."userId" FROM batch b WHERE b."userId" IS NOT NULL)
-      UNION ALL
-      SELECT p."id", pg_catalog.row_number() OVER (PARTITION BY p."fingerprint" ORDER BY p."id")
-        FROM facts p WHERE p."fingerprint" IN (SELECT b."fingerprint" FROM batch b WHERE b."fingerprint" IS NOT NULL)
-      UNION ALL
-      SELECT p."id", pg_catalog.row_number() OVER (PARTITION BY p."errorCode", p."routeClass", p."release" ORDER BY p."id")
-        FROM facts p
-       WHERE p."verification" = 'verified' AND p."errorCode" IS NOT NULL AND p."release" IS NOT NULL
-         AND (p."errorCode", p."routeClass", p."release") IN (
-           SELECT b."errorCode", b."routeClass", b."release" FROM batch b
-            WHERE b."verification" = 'verified' AND b."errorCode" IS NOT NULL AND b."release" IS NOT NULL)
-    )
-    SELECT DISTINCT "id" FROM peers WHERE "rank" <= ${GROUP_MEMBER_CAP + 1}::integer ORDER BY "id"`;
-  return rows.map((row) => row.id);
-};
-
-export type GroupWriteCounts = {
-  readonly groupsCreated: number;
-  readonly groupMembers: number;
-  readonly groupSignals: number;
-  /** Created, then missing a planned member taken by a concurrent pass, and invalidated. */
-  readonly groupsLost: number;
-  /** Open groups that took new members this batch, and how many. */
-  readonly groupsJoined: number;
-  readonly joinedMembers: number;
-  /** A join undone because the grown member set's key already exists (a tombstone). */
-  readonly joinsUndone: number;
-  readonly memberCapReached: number;
-  readonly joinDeferred: number;
-  readonly moveDeferred: number;
-  readonly budgetDeferred: number;
-};
-
-const NO_GROUP_WRITES: GroupWriteCounts = Object.freeze({
-  groupsCreated: 0,
-  groupMembers: 0,
-  groupSignals: 0,
-  groupsLost: 0,
-  groupsJoined: 0,
-  joinedMembers: 0,
-  joinsUndone: 0,
-  memberCapReached: 0,
-  joinDeferred: 0,
-  moveDeferred: 0,
-  budgetDeferred: 0,
-});
-
-/**
- * Groups around the reports this batch made ready (policy section 6), inside
- * the result transaction and after the ready write: new groups, and joins of
- * a report in no open group to the candidate group of its kind and value.
- * Moving up a kind comes later; it is counted, not done.
- *
- * Lock order (design section 5.4): every member's report is already locked
- * FOR SHARE by this transaction with its eligibility re-checked. Every open
- * group those reports are in is then locked FOR UPDATE by one statement in id
- * order, before its members are read and before the plan is made; every
- * membership writer takes the group lock first, so the member lists read here
- * cannot change before these writes.
- *
- * New groups: a key that already exists (a live group or a tombstone) makes no
- * group. A group missing any planned member (another pass took one) is emptied
- * and invalidated before any signal is written, members before the group (the
- * composite key), keeping the planned ids its key was made from.
- *
- * Joins: the key, input digest and signals are recomputed from the members
- * the group actually has after the insert. If that key already belongs to
- * another row (a tombstone of exactly that set), the join is undone: the
- * newcomers' memberships are deleted and the group keeps its old key.
- *
- * Round trips in the result transaction, at most 17 of the worker lane's 20:
- * arm, report lock, ready update, group lock, member read, group insert,
- * member insert, [lost member delete, lost group update], key update, [join
- * undo], signal delete, signal insert, the audit entry's four, deadline check.
- */
-const writeGroups = async (
-  tx: Tx,
-  locked: readonly ReportRow[],
-  arriving: readonly string[],
-  membershipBudget: number
-): Promise<GroupWriteCounts & { membershipsUsed: number }> => {
-  const ids = locked.map((row) => row.id);
-  const current = await tx.$queryRaw<
-    { feedbackId: string; groupId: string; state: string; kind: GroupKind; snapshotDigest: string }[]
-  >`
-    SELECT m."feedbackId", g."id" AS "groupId", g."state", g."primaryKind" AS "kind",
-           m."primarySnapshotDigest" AS "snapshotDigest"
-      FROM "SupportTriageGroupMember" m
-      JOIN "SupportTriageGroup" g ON g."id" = m."groupId"
-     WHERE m."feedbackId" = ANY(${ids}::text[])
-     ORDER BY g."id", m."feedbackId"
-       FOR UPDATE OF g`;
-  const lockedGroupIds = [...new Set(current.map((row) => row.groupId))];
-  const existing =
-    lockedGroupIds.length === 0
-      ? []
-      : await tx.$queryRaw<{ groupId: string; feedbackId: string }[]>`
-          SELECT m."groupId", m."feedbackId" FROM "SupportTriageGroupMember" m
-           WHERE m."groupId" = ANY(${lockedGroupIds}::text[])
-           ORDER BY m."groupId", m."feedbackId"`;
-  const groupMembers = new Map<string, string[]>();
-  for (const row of existing) groupMembers.set(row.groupId, [...(groupMembers.get(row.groupId) ?? []), row.feedbackId]);
-  // The memberships come from the member read, not the lock statement: a
-  // statement that waited for a group lock keeps the snapshot it took before
-  // waiting, so a member the other transaction just added is missing from it
-  // but present here. Reading both from one snapshot keeps a report from being
-  // counted as a member and a newcomer at once.
-  const groupInfo = new Map(current.map((row) => [row.groupId, row]));
-  const lockedIds = new Set(ids);
-  const memberships = new Map(
-    existing
-      .filter((row) => lockedIds.has(row.feedbackId))
-      .map((row) => {
-        const group = groupInfo.get(row.groupId) as (typeof current)[number];
-        return [
-          row.feedbackId,
-          { groupId: row.groupId, state: group.state, kind: group.kind, snapshotDigest: group.snapshotDigest },
-        ] as const;
-      })
-  );
-  const facts = locked.map(groupFactsOf);
-  const factsById = new Map(facts.map((row) => [row.feedbackId, row]));
-  const plan = planGroups({
-    reports: facts,
-    arriving,
-    memberships,
-    groupMembers,
-    membershipBudget,
-  });
-  const deferred = {
-    memberCapReached: plan.memberCapReached,
-    joinDeferred: plan.joinDeferred,
-    moveDeferred: plan.moveDeferred,
-    budgetDeferred: plan.budgetDeferred,
-  };
-  if (plan.planned.length === 0 && plan.joins.length === 0) {
-    return { ...NO_GROUP_WRITES, ...deferred, membershipsUsed: 0 };
-  }
-
-  const groupIds = plan.planned.map(() => randomUUID());
-  const created =
-    plan.planned.length === 0
-      ? []
-      : await tx.$queryRaw<{ id: string }[]>`
-          INSERT INTO "SupportTriageGroup" ("id", "primaryKind", "primarySnapshotDigest", "groupCandidateKey", "groupInputDigest")
-          SELECT c."id", c."kind", c."digest", c."key", c."inputDigest"
-            FROM unnest(${groupIds}::text[], ${plan.planned.map((g) => g.kind)}::text[],
-                        ${plan.planned.map((g) => g.snapshotDigest)}::text[],
-                        ${plan.planned.map((g) => g.groupCandidateKey)}::text[],
-                        ${plan.planned.map((g) => g.groupInputDigest)}::text[]) AS c("id", "kind", "digest", "key", "inputDigest")
-          ON CONFLICT ("groupCandidateKey") DO NOTHING
-          RETURNING "id"`;
-  const createdIds = new Set(created.map((row) => row.id));
-  const kept = plan.planned.map((group, i) => ({ ...group, id: groupIds[i] })).filter((g) => createdIds.has(g.id));
-
-  const memberRows = [
-    ...kept.flatMap((g) => g.memberIds.map((feedbackId) => [g.id, feedbackId, g.snapshotDigest] as const)),
-    ...plan.joins.flatMap((j) => j.newcomerIds.map((feedbackId) => [j.groupId, feedbackId, j.snapshotDigest] as const)),
-  ];
-  const members =
-    memberRows.length === 0
-      ? []
-      : await tx.$queryRaw<{ groupId: string; feedbackId: string }[]>`
-          INSERT INTO "SupportTriageGroupMember" ("groupId", "feedbackId", "primarySnapshotDigest")
-          SELECT c."groupId", c."feedbackId", c."digest"
-            FROM unnest(${memberRows.map((r) => r[0])}::text[], ${memberRows.map((r) => r[1])}::text[],
-                        ${memberRows.map((r) => r[2])}::text[]) AS c("groupId", "feedbackId", "digest")
-           ORDER BY c."groupId", c."feedbackId"
-          ON CONFLICT ("feedbackId") DO NOTHING
-          RETURNING "groupId", "feedbackId"`;
-  const inserted = new Map<string, string[]>();
-  for (const row of members) inserted.set(row.groupId, [...(inserted.get(row.groupId) ?? []), row.feedbackId]);
-
-  // New groups: any planned member missing means the key and input digest name
-  // a set the group does not have, so the whole group goes, and it keeps every
-  // planned id so an account deletion can still find its tombstone.
-  const lostGroups = kept.filter((g) => (inserted.get(g.id)?.length ?? 0) !== g.memberIds.length);
-  const lost = lostGroups.map((g) => g.id);
-  if (lost.length > 0) {
-    await tx.$executeRaw`DELETE FROM "SupportTriageGroupMember" WHERE "groupId" = ANY(${lost}::text[])`;
-    await tx.$executeRaw`
-      UPDATE "SupportTriageGroup" g
-         SET "state" = 'invalidated', "primarySnapshotDigest" = NULL,
-             "retiredMemberIds" = pg_catalog.string_to_array(c."memberIds", ',')
-        FROM unnest(${lost}::text[], ${lostGroups.map((group) => group.memberIds.join(","))}::text[]) AS c("id", "memberIds")
-       WHERE g."id" = c."id" AND g."state" = 'candidate'`;
-  }
-  const live = kept.filter((g) => !lost.includes(g.id));
-
-  // Joins: rebind each grown group to the members it actually has now.
-  const grown = plan.joins
-    .filter((j) => (inserted.get(j.groupId)?.length ?? 0) > 0)
-    .map((j) => {
-      const newcomers = inserted.get(j.groupId) as string[];
-      const memberIds = [...j.existingIds, ...newcomers];
-      const binding = groupBinding(
-        j.kind,
-        j.snapshotDigest,
-        memberIds.map((id) => factsById.get(id) as GroupFacts)
-      );
-      return { ...j, newcomers, binding };
-    });
-  const rebound =
-    grown.length === 0
-      ? []
-      : await tx.$queryRaw<{ id: string }[]>`
-          UPDATE "SupportTriageGroup" g
-             SET "groupCandidateKey" = c."key", "groupInputDigest" = c."inputDigest"
-            FROM unnest(${grown.map((j) => j.groupId)}::text[],
-                        ${grown.map((j) => j.binding.groupCandidateKey)}::text[],
-                        ${grown.map((j) => j.binding.groupInputDigest)}::text[]) AS c("id", "key", "inputDigest")
-           WHERE g."id" = c."id" AND g."state" = 'candidate'
-             AND NOT EXISTS (SELECT 1 FROM "SupportTriageGroup" o WHERE o."groupCandidateKey" = c."key")
-          RETURNING g."id"`;
-  const reboundIds = new Set(rebound.map((row) => row.id));
-  const undone = grown.filter((j) => !reboundIds.has(j.groupId));
-  if (undone.length > 0) {
-    const pairs = undone.flatMap((j) => j.newcomers.map((feedbackId) => [j.groupId, feedbackId] as const));
-    await tx.$executeRaw`
-      DELETE FROM "SupportTriageGroupMember" m
-       USING unnest(${pairs.map((p) => p[0])}::text[], ${pairs.map((p) => p[1])}::text[]) AS c("groupId", "feedbackId")
-       WHERE m."groupId" = c."groupId" AND m."feedbackId" = c."feedbackId"`;
-  }
-  const joined = grown.filter((j) => reboundIds.has(j.groupId));
-
-  // A joined group's signals are replaced: a newcomer may not share a
-  // secondary value, and an earlier evidence occurrence moves the expiry.
-  if (joined.length > 0) {
-    await tx.$executeRaw`
-      DELETE FROM "SupportTriageGroupSignal" WHERE "groupId" = ANY(${joined.map((j) => j.groupId)}::text[])`;
-  }
-  const signalRows = [
-    ...live.flatMap((g) => g.signals.map((s) => [g.id, s.kind, s.snapshotDigest, s.expiresAt] as const)),
-    ...joined.flatMap((j) => j.binding.signals.map((s) => [j.groupId, s.kind, s.snapshotDigest, s.expiresAt] as const)),
-  ];
-  const signals =
-    signalRows.length === 0
-      ? 0
-      : await tx.$executeRaw`
-          INSERT INTO "SupportTriageGroupSignal" ("groupId", "kind", "snapshotDigest", "provenanceClass", "snapshotExpiresAt")
-          SELECT c."groupId", c."kind", c."digest", c."provenance", c."expiresAt"
-            FROM unnest(${signalRows.map((r) => r[0])}::text[], ${signalRows.map((r) => r[1])}::text[],
-                        ${signalRows.map((r) => r[2])}::text[],
-                        ${signalRows.map((r) => SIGNAL_PROVENANCE[r[1]])}::text[],
-                        ${signalRows.map((r) => r[3])}::timestamp(3)[])
-                 AS c("groupId", "kind", "digest", "provenance", "expiresAt")`;
-  return {
-    groupsCreated: live.length,
-    groupMembers: live.reduce((sum, g) => sum + (inserted.get(g.id)?.length ?? 0), 0),
-    groupSignals: signals,
-    groupsLost: lost.length,
-    groupsJoined: joined.length,
-    joinedMembers: joined.reduce((sum, j) => sum + j.newcomers.length, 0),
-    joinsUndone: undone.length,
-    ...deferred,
-    membershipsUsed: members.length,
-  };
-};
-
-/**
- * Step 4: ready only the rows still claimed with this token, for reports still
- * eligible; then the groups around them. `peerIds` (from `readGroupPeers`) are
- * locked with the batch in one statement, in id order, so the report lock is
- * taken once and before any group row.
- */
 const HUMAN_LANES: readonly TriageLane[] = ["billing_human", "trust_safety_human"];
 
 /**
@@ -687,24 +374,25 @@ export const runTriageLlm = async (
   );
 };
 
+/**
+ * Step 4: ready only the rows still claimed with this token, for reports still
+ * eligible. Reports are no longer grouped here: the model's duplicateOf answer
+ * replaced the keyword-era group formation (owner direction 2026-10-19, LLM
+ * first), so the worker writes no SupportTriageGroup rows.
+ */
 export const writeSupportTriageResults = (
   run: { id: string; deadlineAt: Date },
   token: string,
-  rows: readonly ClaimedRow[],
-  grouping: { readonly peerIds?: readonly string[]; readonly membershipBudget?: number } = {}
+  rows: readonly ClaimedRow[]
 ) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
-    // The batch, its group peers and every report the model was shown, in one
-    // id-ordered lock: an account deletion of a shown report either waits for
-    // this commit (and then deletes this row by contextFeedbackIds) or has
-    // already marked it, which drops the answer below.
+    // The batch and every report the model was shown, in one id-ordered lock:
+    // an account deletion of a shown report either waits for this commit (and
+    // then deletes this row by contextFeedbackIds) or has already marked it,
+    // which drops the answer below.
     const lockIds = [
-      ...new Set([
-        ...rows.map((row) => row.feedbackId),
-        ...(grouping.peerIds ?? []),
-        ...rows.flatMap((row) => row.llm?.contextIds ?? []),
-      ]),
+      ...new Set([...rows.map((row) => row.feedbackId), ...rows.flatMap((row) => row.llm?.contextIds ?? [])]),
     ];
     const locked = await lockEligibleReports(tx, lockIds);
     // Still eligible, and the same input the lane and flags were computed from.
@@ -739,35 +427,11 @@ export const writeSupportTriageResults = (
                    AS c("id", "lane", "laneSource", "flags", "context", "duplicates", "replyDraft")
              WHERE s."id" = c."id" AND s."state" = 'claimed' AND s."claimToken" = ${token}
             RETURNING s."id"`;
-    const readyIds = new Set(ready.map((row) => row.id));
-    const arriving = writable.filter((row) => readyIds.has(row.id)).map((row) => row.feedbackId);
-    const groups =
-      arriving.length === 0
-        ? { ...NO_GROUP_WRITES, membershipsUsed: 0 }
-        : await writeGroups(
-            tx,
-            locked,
-            arriving,
-            grouping.membershipBudget ?? GROUP_NEW_MEMBERSHIPS_PER_PASS_MAX
-          );
     if (ready.length > 0) {
-      await audit(tx, run.id, "support_triage.worker_result", {
-        ready: ready.length,
-        groupsCreated: groups.groupsCreated,
-        groupMembers: groups.groupMembers,
-        groupSignals: groups.groupSignals,
-        groupsLost: groups.groupsLost,
-        groupsJoined: groups.groupsJoined,
-        joinedMembers: groups.joinedMembers,
-        joinsUndone: groups.joinsUndone,
-        memberCapReached: groups.memberCapReached,
-        joinDeferred: groups.joinDeferred,
-        moveDeferred: groups.moveDeferred,
-        budgetDeferred: groups.budgetDeferred,
-      });
+      await audit(tx, run.id, "support_triage.worker_result", { ready: ready.length });
       await assertDeadline(tx, run.deadlineAt);
     }
-    return { ready: ready.length, stale: rows.length - ready.length, groups };
+    return { ready: ready.length, stale: rows.length - ready.length };
   });
 
 export type WorkerPassResult = {
@@ -779,7 +443,6 @@ export type WorkerPassResult = {
   readonly ready: number;
   readonly stale: number;
   readonly superseded: number;
-  readonly groupsCreated: number;
 };
 
 const databaseNow = async (): Promise<Date> => {
@@ -793,9 +456,8 @@ export const runSupportTriageWorker = async (
   options: { readonly llm?: TriageLlm | null } = {}
 ): Promise<WorkerPassResult> => {
   const run = await startSupportTriageRun("worker");
-  const totals = { reclaimed: 0, exhausted: 0, claimed: 0, ready: 0, stale: 0, superseded: 0, groupsCreated: 0 };
+  const totals = { reclaimed: 0, exhausted: 0, claimed: 0, ready: 0, stale: 0, superseded: 0 };
   const llm = options.llm === undefined ? await supportTriageLlmFromEnv() : options.llm;
-  let membershipBudget = GROUP_NEW_MEMBERSHIPS_PER_PASS_MAX;
   let batchesCompleted = 0;
   let partial = false;
   const hasBudget = async () =>
@@ -831,12 +493,9 @@ export const runSupportTriageWorker = async (
             partial = true;
             break;
           }
-          const peerIds = await readGroupPeers(batch.claimed.map((row) => row.feedbackId));
-          const result = await writeSupportTriageResults(run, batch.token, answered, { peerIds, membershipBudget });
+          const result = await writeSupportTriageResults(run, batch.token, answered);
           totals.ready += result.ready;
           totals.stale += result.stale;
-          totals.groupsCreated += result.groups.groupsCreated;
-          membershipBudget -= result.groups.membershipsUsed;
           batchesCompleted += 1;
         }
       }

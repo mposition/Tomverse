@@ -120,9 +120,8 @@ test("a result whose claim was lost is not written and is counted stale", async 
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" ENABLE TRIGGER "SupportTriageSuggestion_guard"`);
   }
-  const { ready, stale, groups } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
+  const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
   assert.deepEqual({ ready, stale }, { ready: 0, stale: 1 });
-  assert.equal(groups.groupsCreated, 0);
   assert.equal((await suggestions())[0].state, "claimed");
 });
 

@@ -14,8 +14,10 @@ type Option = { id: string; name: string; provider: string };
 
 /**
  * Which model the support-triage LLM step uses. Saving needs the owner and a
- * recent sign-in; a stale sign-in is answered with the way back. "Off" clears
- * the choice, and the environment variable applies again if it is set.
+ * recent sign-in; a stale sign-in is answered with the way back. "Off" is
+ * saved as a choice, so the environment variable cannot turn the step back on;
+ * the variable applies only while nothing has been saved here, and an
+ * inherited value can always be saved so the owner can pin Off over it.
  */
 export function SupportTriageModelPanel() {
   const m = useAdminMessages(adminFeedbackInboxMessages);
@@ -27,6 +29,7 @@ export function SupportTriageModelPanel() {
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [enabledSource, setEnabledSource] = useState<"admin" | "environment" | null>(null);
+  const [modelSource, setModelSource] = useState<"admin" | "environment" | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -35,6 +38,7 @@ export function SupportTriageModelPanel() {
         const response = await adminFetch(ROUTE);
         const payload = (await response.json()) as {
           modelId?: string | null;
+          modelSource?: "admin" | "environment";
           options?: Option[];
           enabled?: boolean;
           enabledSource?: "admin" | "environment";
@@ -47,6 +51,7 @@ export function SupportTriageModelPanel() {
         setOptions(payload.options);
         setSaved(payload.modelId ?? null);
         setChoice(payload.modelId ?? "");
+        setModelSource(payload.modelSource ?? null);
         setEnabled(payload.enabled ?? null);
         setEnabledSource(payload.enabledSource ?? null);
       } catch {
@@ -81,7 +86,10 @@ export function SupportTriageModelPanel() {
         setNotice({ tone: "error", text: response.status === 403 ? m.triageModelOwnerOnly : m.triageModelSaveFailed });
         return;
       }
-      if (body.modelId !== undefined) setSaved(payload.modelId ?? null);
+      if (body.modelId !== undefined) {
+        setSaved(payload.modelId ?? null);
+        setModelSource("admin");
+      }
       if (typeof payload.enabled === "boolean") {
         setEnabled(payload.enabled);
         setEnabledSource("admin");
@@ -144,11 +152,16 @@ export function SupportTriageModelPanel() {
         <button
           type="button"
           onClick={() => void put({ modelId: choice === "" ? null : choice })}
-          disabled={options === null || busy || choice === (saved ?? "")}
+          disabled={options === null || busy || (choice === (saved ?? "") && modelSource === "admin")}
           className="min-h-11 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 text-sm font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:opacity-50"
         >
           {m.triageModelSave}
         </button>
+        {modelSource ? (
+          <span className="text-xs text-zinc-500" data-testid="support-triage-model-source">
+            {modelSource === "admin" ? m.triageSwitchFromAdmin : m.triageSwitchFromEnvironment}
+          </span>
+        ) : null}
       </div>
       {reauthenticationRequired ? (
         <p role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-sm text-amber-300">
