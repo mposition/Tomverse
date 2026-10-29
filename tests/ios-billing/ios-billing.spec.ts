@@ -1,15 +1,20 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mobileSettingsCopy } from "../../locales/mobileSettings";
+import { mobileCopy, type MobileLanguage } from "../../locales/mobile";
+import { formatMobileBillingCopy, mobileBillingCopy } from "../../locales/mobileBilling";
 
 type Call = { plugin: string; method: string; options: Record<string, unknown> };
 type Request = { action: string; store: string; productId?: string; attemptId?: string };
 type Attempt = { id: string; store: string; productId: string; startedAt: string };
 
-async function appleBilling(page: Page, outcome: "success" | "pending" | "cancelled" = "success", web = false) {
+async function appleBilling(page: Page, outcome: "success" | "pending" | "cancelled" = "success", web = false,
+  passOutcome?: "success" | "expired" | "lost", language: MobileLanguage = "en") {
   const calls: Call[] = [];
   const requests: Request[] = [];
+  const passRequests: Record<string, unknown>[] = [];
   await page.exposeFunction("iosBillingCall", (call: Call) => { calls.push(call); });
-  await page.addInitScript((outcome) => {
+  await page.addInitScript(({ outcome, language }) => {
+    localStorage.setItem("tomverse-language", language);
     localStorage.setItem("tomverse-native-location-consent-v1", JSON.stringify({ offered: true, unclaimedGrant: false, accounts: {} }));
     const device = window as unknown as { webkit: object; Capacitor: object; iosBillingCall: (call: Call) => Promise<void> };
     device.webkit = { messageHandlers: { bridge: { postMessage: () => {} } } };
@@ -32,11 +37,12 @@ async function appleBilling(page: Page, outcome: "success" | "pending" | "cancel
         return {};
       },
     };
-  }, outcome);
+  }, { outcome, language });
 
   let purchasedCredits = 500;
-  let plan = "Pro";
-  let productId = "apple.pro.monthly";
+  let plan = passOutcome ? "Free" : "Pro";
+  let productId: string | null = passOutcome ? null : "apple.pro.monthly";
+  let passActivated = false;
   let subscriptionPurchaseAttempt: Attempt | null = null;
   await page.route("https://api.native-chat.test/**", async route => {
     const headers = {
@@ -45,6 +51,17 @@ async function appleBilling(page: Page, outcome: "success" | "pending" | "cancel
     };
     if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/billing/checkout" && passOutcome) {
+      expect(route.request().headers().authorization).toBe("Bearer ios-fixture-access");
+      const request = route.request().postDataJSON();
+      passRequests.push(request);
+      expect(request).toEqual({ planId: "pro", billingInterval: "monthly", promoCode: "TEST-PASS", language });
+      if (passOutcome === "lost") return route.abort();
+      if (passOutcome === "expired") return route.fulfill({ status: 409, json: { code: "PROMOTION_EXPIRED" }, headers });
+      passActivated = true; plan = "Pro";
+      return route.fulfill({ headers, json: { success: true, accessType: "founding_tester_pass",
+        automaticRenewal: false, paymentMethodRequired: false, periodEnd: "2099-01-01T00:00:00Z" } });
+    }
     if (path === "/api/user/account") return route.fulfill({ json: { id: "ios-fixture-user", email: "ios@example.test", actionsEnabled: false }, headers });
     if (path === "/api/conversations") return route.fulfill({ json: [], headers });
     if (path === "/api/models/catalog") return route.fulfill({ json: { models: [] }, headers });
@@ -58,9 +75,10 @@ async function appleBilling(page: Page, outcome: "success" | "pending" | "cancel
     };
     if (request.action === "cancel_subscription_purchase") subscriptionPurchaseAttempt = null;
     return route.fulfill({ headers, json: {
-      billingId: "ios-opaque-billing-id", plan, subscriptionStore: web ? "web" : "app_store", productId,
+      billingId: "ios-opaque-billing-id", plan, subscriptionStore: passOutcome ? null : web ? "web" : "app_store", productId,
       subscriptionPurchaseAttempt, interval: "monthly", expiresAt: "2099-11-25T00:00:00Z",
-      active: true, cancelAtPeriodEnd: false, purchasedCredits,
+      active: !passOutcome, cancelAtPeriodEnd: false, purchasedCredits,
+      promotionPasses: Boolean(passOutcome), accessPass: passActivated ? { expiresAt: "2099-01-01T00:00:00Z" } : null,
       webSubscription: { active: web, cancelAtPeriodEnd: false, expiresAt: "2099-11-25T00:00:00Z" },
       products: [
         ...["Pro", "Max"].flatMap(tier => ["monthly", "annual"].map(interval => ({
@@ -72,16 +90,47 @@ async function appleBilling(page: Page, outcome: "success" | "pending" | "cancel
     } });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Conversations", exact: true }).click();
-  await page.getByTestId("sidebar-account").getByRole("button", { name: mobileSettingsCopy("en").usageAndPlan, exact: true }).click();
-  await expect(page.getByText("Current plan: Pro")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Buy credits", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: mobileCopy[language].chats, exact: true }).click();
+  await page.getByTestId("sidebar-account").getByRole("button", { name: mobileSettingsCopy(language).usageAndPlan, exact: true }).click();
+  const copy = mobileBillingCopy(language);
+  await expect(page.getByText(formatMobileBillingCopy(copy.currentPlan, { plan }))).toBeVisible();
+  await expect(page.getByRole("button", { name: copy.buyCredits, exact: true })).toBeEnabled();
   return {
-    calls, requests,
+    calls, requests, passRequests,
     verifyCredits: () => { purchasedCredits = 2000; },
     verifyUpgrade: () => { plan = "Max"; productId = "apple.max.monthly"; subscriptionPurchaseAttempt = null; },
   };
 }
+
+for (const language of ["en", "ko"] as const) test(`iOS applies an access pass from verified server state without a StoreKit purchase: ${language}`, async ({ page }) => {
+  await page.setViewportSize({ width: 810, height: 1080 });
+  const { calls, requests, passRequests } = await appleBilling(page, "success", false, "success", language);
+  const copy = mobileBillingCopy(language);
+  await page.getByRole("textbox", { name: copy.promotionCode, exact: true }).fill("  test-pass  ");
+  await page.getByRole("button", { name: copy.applyCode, exact: true }).click();
+  await expect(page.getByText(copy.passApplied, { exact: true })).toBeVisible();
+  await expect(page.getByText(formatMobileBillingCopy(copy.currentPlan, { plan: "Pro" }), { exact: true })).toBeVisible();
+  await expect(page.getByText(formatMobileBillingCopy(copy.passAccessUntil, {
+    date: new Date("2099-01-01T00:00:00Z").toLocaleDateString(language),
+  }), { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: copy.promotionCode, exact: true })).toHaveValue("");
+  expect(passRequests).toHaveLength(1);
+  expect(requests.every(request => request.store === "app_store")).toBe(true);
+  expect(calls.some(call => call.method === "purchaseStoreProduct")).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+for (const outcome of ["expired", "lost"] as const) test(`iOS explains ${outcome} access pass results without retrying or granting access`, async ({ page }) => {
+  const { calls, passRequests } = await appleBilling(page, "success", false, outcome, "ko");
+  const copy = mobileBillingCopy("ko");
+  await page.getByRole("textbox", { name: copy.promotionCode, exact: true }).fill("test-pass");
+  await page.getByRole("button", { name: copy.applyCode, exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(outcome === "expired" ? copy.passExpired : copy.passUnconfirmed);
+  await expect(page.getByText(copy.passApplied, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(formatMobileBillingCopy(copy.currentPlan, { plan: "Free" }), { exact: true })).toBeVisible();
+  expect(passRequests).toHaveLength(1);
+  expect(calls.some(call => call.method === "purchaseStoreProduct")).toBe(false);
+});
 
 test("iOS configures the Apple SDK with the server identity and loads both product categories", async ({ page }) => {
   const { calls, requests } = await appleBilling(page);
