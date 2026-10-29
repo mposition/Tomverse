@@ -50,6 +50,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModel,
   getImageModelPrice,
+  imageEditCredits,
   imageThinkingBilling,
   maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
@@ -65,11 +66,8 @@ import {
 import { ImageEditSourceError, imageEditEnabled, loadImageEditInput } from "@/lib/imageEditSource";
 import {
   getImageGenerationPricing,
-  IMAGE_EDIT_INPUT_BUDGET_MICRO_USD,
   IMAGE_EDIT_INPUT_MAX_EDGE_PX,
-  IMAGE_EDIT_INPUT_MAX_TOKENS,
-  IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS,
-  IMAGE_EDIT_SURCHARGE_CREDITS,
+  imageEditPricing,
   IMAGE_GENERATION_MODEL_ID,
   IMAGE_PROMPT_INPUT_USD_PER_MILLION_TOKENS,
   IMAGE_PROMPT_MAX_TOKENS,
@@ -173,9 +171,10 @@ const promptCostMicroUsd = (inputTokens: number) =>
 /**
  * What an edit's photo settles at, from the rate and budget its reservation
  * recorded -- never the live constants, which a deploy may have moved since.
- * 0 for a generation; the whole reserved photo budget when the provider
- * reported no usage; null (settle the whole reservation) when the snapshot's
- * edit pricing is unreadable.
+ * 0 for a generation; the budget for a photo billed per edit (no rate); the
+ * whole reserved photo budget when a per-token provider reported no usage;
+ * null (settle the whole reservation) when the snapshot's edit pricing is
+ * unreadable.
  */
 export const settledEditInputCostMicroUsd = (
   snapshot: unknown,
@@ -187,12 +186,9 @@ export const settledEditInputCostMicroUsd = (
     inputUsdPerMillionTokens?: unknown;
     inputBudgetMicroUsd?: unknown;
   };
-  if (
-    typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 ||
-    typeof budget !== "number" || !Number.isFinite(budget) || budget <= 0
-  ) {
-    return null;
-  }
+  if (typeof budget !== "number" || !Number.isFinite(budget) || budget < 0) return null;
+  if (rate === null) return budget;
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 || budget <= 0) return null;
   if (typeof imageInputTokens !== "number" || !Number.isFinite(imageInputTokens)) return budget;
   return Math.ceil(Math.max(0, imageInputTokens) * rate);
 };
@@ -251,8 +247,8 @@ export type ImageGenerationRequestInput = {
    * Server-only, like `chatTurnHost`: edit this attachment instead of drawing
    * from the prompt alone. The caller resolved it from the user's own saved
    * message (lib/imageEditSource.ts); it is never read from a request body.
-   * Every model must support editing, and the price adds
-   * IMAGE_EDIT_SURCHARGE_CREDITS per target.
+   * Every model must support editing, and each target's price adds its
+   * model's edit surcharge (lib/imageGenerationPricing.ts).
    */
   editSource?: { attachmentId: string };
 };
@@ -452,9 +448,21 @@ export const requestImageGeneration = async (
     model: plan.model!,
     price: plan.price!,
     // What this target charges: the option's fixed price, plus the edit
-    // surcharge that carries the photo's image-input budget.
-    credits: plan.price!.credits + (edit ? IMAGE_EDIT_SURCHARGE_CREDITS : 0),
+    // surcharge that carries the photo's input budget (0 marks an edit that
+    // would break the per-credit ceiling, refused below).
+    credits: edit ? (imageEditCredits(plan.model!, plan.price!) ?? 0) : plan.price!.credits,
+    editPricing: edit ? imageEditPricing(plan.modelId) : null,
   }));
+  const overCeiling = resolvedTargets.filter((target) => target.credits <= 0);
+  if (overCeiling.length > 0) {
+    throw new ChatAccessError(
+      400,
+      "IMAGE_OPTION_NOT_SUPPORTED",
+      "The requested image model cannot edit at this price.",
+      undefined,
+      { unsupportedModels: overCeiling.map((target) => target.modelId) }
+    );
+  }
   const stale = stalePricingVersions(
     input.expectedPricingVersions,
     (modelId) => getImageModel(modelId)?.pricingVersion ?? null
@@ -914,14 +922,16 @@ export const requestImageGeneration = async (
               thinkingCapMicroUsd: target.model.priceVerification.thinkingCapMicroUsd,
               // An edit: which photo, and the image-input budget its
               // surcharge bought. Read by the executor and by a retry.
-              ...(edit
+              ...(edit && target.editPricing
                 ? {
                     edit: {
                       attachmentId: edit.attachmentId,
-                      surchargeCredits: IMAGE_EDIT_SURCHARGE_CREDITS,
-                      inputBudgetMicroUsd: IMAGE_EDIT_INPUT_BUDGET_MICRO_USD,
-                      inputMaxTokens: IMAGE_EDIT_INPUT_MAX_TOKENS,
-                      inputUsdPerMillionTokens: IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS,
+                      surchargeCredits: target.editPricing.surchargeCredits,
+                      inputBudgetMicroUsd: target.editPricing.inputBudgetMicroUsd,
+                      // Null for a photo billed per edit rather than per token.
+                      inputMaxTokens: target.editPricing.inputTokens?.maxTokens ?? null,
+                      inputUsdPerMillionTokens:
+                        target.editPricing.inputTokens?.usdPerMillionTokens ?? null,
                       inputMaxEdgePx: IMAGE_EDIT_INPUT_MAX_EDGE_PX,
                     },
                   }
@@ -1578,16 +1588,40 @@ export const processImageGeneration = async (
       const soldBudgetTokens =
         (reservation.pricingSnapshot as { edit?: { inputMaxTokens?: unknown } } | null)?.edit
           ?.inputMaxTokens;
-      const budgetTokens =
-        typeof soldBudgetTokens === "number" ? soldBudgetTokens : IMAGE_EDIT_INPUT_MAX_TOKENS;
-      if (typeof imageInputTokens === "number" && imageInputTokens > budgetTokens) {
+      if (
+        typeof soldBudgetTokens === "number" &&
+        typeof imageInputTokens === "number" &&
+        imageInputTokens > soldBudgetTokens
+      ) {
         console.error(
           JSON.stringify({
             event: "image_edit_input_over_budget",
             generationId,
             modelId: generation.modelId,
             imageInputTokens,
-            budgetTokens,
+            budgetTokens: soldBudgetTokens,
+            timestamp: new Date().toISOString(),
+          })
+        );
+      }
+      // A photo billed per edit has no token count to check; where the
+      // provider reports the request's cost, it is checked against what the
+      // edit reserved for output and photo together.
+      const editBudget = (reservation.pricingSnapshot as { edit?: { inputBudgetMicroUsd?: unknown } } | null)
+        ?.edit?.inputBudgetMicroUsd;
+      if (
+        typeof editBudget === "number" &&
+        snapshotOutputCost !== null &&
+        typeof result.reportedCostMicroUsd === "number" &&
+        result.reportedCostMicroUsd > snapshotOutputCost + editBudget
+      ) {
+        console.error(
+          JSON.stringify({
+            event: "image_edit_input_over_budget",
+            generationId,
+            modelId: generation.modelId,
+            reportedCostMicroUsd: result.reportedCostMicroUsd,
+            reservedMicroUsd: snapshotOutputCost + editBudget,
             timestamp: new Date().toISOString(),
           })
         );
