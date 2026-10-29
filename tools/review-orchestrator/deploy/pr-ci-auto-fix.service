@@ -23,6 +23,8 @@ UMask=0022
 # The host is shared with the reviews.
 MemoryMax=4G
 ExecStart=/usr/bin/node /opt/review-orchestrator/tools/review-orchestrator/bin/pr-ci-auto-fix.mjs
-# The model's own timeout is the provider's timeoutSeconds (default 40 minutes).
-TimeoutStartSec=50min
+# The model's own timeout is the provider's timeoutSeconds (default 40 minutes),
+# after at most 15 minutes installing a Dependabot head's packages
+# (PR_CI_AUTO_FIX_INSTALL, lib/ci-fix.mjs CI_FIX_INSTALL_TIMEOUT_MS).
+TimeoutStartSec=65min
 KillMode=control-group
