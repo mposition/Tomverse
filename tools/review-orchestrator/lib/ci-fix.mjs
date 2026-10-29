@@ -100,21 +100,41 @@ const FAILURE_LINES = [
 ];
 /** An annotation that only says a step failed, which every failed job ends with. */
 const NOISE_LINE = /##\[error\]Process completed with exit code \d+\.?\s*$/;
-const failureRank = (line) => (NOISE_LINE.test(line) ? -1 : FAILURE_LINES.findIndex((pattern) => pattern.test(line)));
+/** A TAP test marked TODO or SKIP: printed as "not ok", but it fails nothing. */
+const TAP_DIRECTIVE = /^\s*not ok \d+\b.*#\s*(TODO|SKIP)\b/i;
+/** The line Actions opens each step's log with. */
+const STEP_HEADER = /^##\[group\]Run /;
+const failureRank = (line) => (TAP_DIRECTIVE.test(line) ? -1 : FAILURE_LINES.findIndex((pattern) => pattern.test(line)));
 
 /**
  * The lines of one job log that say what failed, each with a few lines of
  * context (node:test's failing-tests summary with all of its own), taken by
  * rank and shown in log order, then the log's last lines when they fit.
- * `key` is the failure lines alone, so two jobs that failed the same way can
- * be told apart from their noise.
+ * The failed step's own last lines rank first: a check that prints its
+ * finding as plain text leaves no other failure line (#3089, 2026-10-29).
+ * `key` is the failure lines alone -- or, with none, the failed steps -- so
+ * two jobs that failed the same way can be told apart from their noise.
  */
-export function failureExcerpt(log, maxChars, { before = 3, after = 12, summaryAfter = 80, tailLines = 15 } = {}) {
+export function failureExcerpt(log, maxChars, { before = 3, after = 12, summaryAfter = 80, stepLines = 60, tailLines = 15 } = {}) {
   const lines = String(log ?? "").split(/\r?\n/).map((line) => line.replace(LOG_TIMESTAMP, "").replace(ANSI, ""));
   const windows = [];
   const strong = [];
   const weak = [];
+  const steps = [];
   lines.forEach((line, index) => {
+    if (NOISE_LINE.test(line)) {
+      // From the failed step's header when it is near, else its last lines.
+      let start = Math.max(0, index - stepLines);
+      for (let i = index - 1; i >= start; i -= 1) {
+        if (STEP_HEADER.test(lines[i])) {
+          start = i;
+          steps.push(lines[i].replace(STEP_HEADER, "").trim());
+          break;
+        }
+      }
+      windows.push({ rank: 0, start, end: index });
+      return;
+    }
     const rank = failureRank(line);
     if (rank < 0) return;
     (rank < FAILURE_LINES.length - 1 ? strong : weak).push(line.trim());
@@ -155,7 +175,7 @@ export function failureExcerpt(log, maxChars, { before = 3, after = 12, summaryA
   const tail = lines.map((line, index) => (index >= lines.length - tailLines && !keep.has(index) ? line : null))
     .filter((line) => line !== null).join("\n").trim();
   if (text.length + tail.length + 20 <= maxChars) text = text ? `${text}\n--- last lines ---\n${tail}` : tail;
-  return { text, key: [...new Set(strong.length > 0 ? strong : weak)].join("\n") };
+  return { text, key: [...new Set(strong.length > 0 ? strong : steps.length > 0 ? steps : weak)].join("\n") };
 }
 
 /**

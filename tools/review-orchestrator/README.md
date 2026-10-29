@@ -573,10 +573,14 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   넘게 내보내지 않습니다(sender의 상한과 같아서 sender에서 기다리다 만료되는 요청이 없습니다).
   로그를 읽지 못하면 시도로 치지 않고 다음 pass가 다시 합니다.
 - **모델이 받는 로그.** 실패한 job마다 로그 끝 16MB를 읽어, 실패를 말하는 줄만 앞뒤 몇 줄과 함께 뽑습니다.
-  우선순위는 node:test의 `✖ failing tests:` 요약, 그다음 `##[error]`·`error TS…`, 그다음 실패한 테스트 줄,
-  마지막으로 일반 `Error` 줄입니다. job 끝부분만 자르지 않습니다. 실패 뒤에 이어지는 정리 단계 로그가
-  오류 줄을 밀어냈기 때문입니다(#3048, 2026-10-27). 실패 줄이 앞 job과 같은 job은 이름만 적고, 전체는
-  60,000자 안에서 job마다 몫을 나눕니다.
+  우선순위는 실패한 step의 마지막 출력(`##[error]Process completed with exit code N` 바로 위, 가까우면
+  그 step의 `Run` 머리부터 최대 60줄)과 node:test의 `✖ failing tests:` 요약, 그다음 `##[error]`·`error TS…`,
+  그다음 실패한 테스트 줄, 마지막으로 일반 `Error` 줄입니다. TAP의 `not ok … # TODO`·`# SKIP`은 실패가
+  아니라서 뽑지 않습니다. step 출력을 맨 앞에 두는 것은 release record 검사나 `npm ci`처럼 결과를 평문으로만
+  쓰는 실패가 다른 실패 줄을 남기지 않기 때문입니다(#3089·#2997, 2026-10-29). job 끝부분만 자르지 않습니다.
+  실패 뒤에 이어지는 정리 단계 로그가 오류 줄을 밀어냈기 때문입니다(#3048, 2026-10-27). 실패 줄이 앞 job과
+  같은 job은 이름만 적습니다(실패 줄이 없으면 실패한 step 이름으로 비교합니다). 전체는 60,000자 안에서 job마다
+  몫을 나눕니다.
 - **모델의 답.** 모델의 마지막 답이 서버 로그(`ci-fix: #PR model said: ...`)와 ledger의 `answer`에 남습니다.
   실행이 실패하면 stderr도 `stderr`에 남습니다. `no_change`의 이유는 여기서 봅니다.
   답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
