@@ -30,8 +30,9 @@ type Ports = {
 };
 
 // The base commit is bound through `candidate.baseTree`; its own
-// `.dockerignore` says which test sources its image leaves out. The field
-// keeps its stored name, `imageProofDigest`, for the exclusion digest.
+// `.dockerignore` says which test sources its image leaves out, whose text
+// the evidence does not read. The field keeps its stored name,
+// `imageProofDigest`, for the exclusion digest.
 async function readTier(candidate: Extract<Candidate, { ok: true }>):
   Promise<{ tier: TierVerdict; imageProofDigest: string | null }> {
   const evidence = await loadEngineeringAgentV22BaseEvidence({
@@ -42,18 +43,9 @@ async function readTier(candidate: Extract<Candidate, { ok: true }>):
   if (!evidence) return { tier: { tier: "T2", findings: [{
     reason: "slice_analysis_failed", path: null,
   }] }, imageProofDigest: null };
-  const { deployExcluded, exclusionDigest, ...sources } = evidence;
-  // Exact file paths, base and changed alike: the slice treats each entry as
-  // that path or a directory above it, so a new test file a change adds is
-  // excluded by the same rules as an existing one.
-  const excluded = deployExcluded([...new Set([
-    ...sources.baseFiles.map((file) => file.path),
-    ...candidate.changes.flatMap((change) =>
-      [change.path, change.previousPath ?? change.path]),
-  ])]);
+  const { exclusionDigest, ...sources } = evidence;
   return { tier: decideEngineeringAgentV22Tier({
     changes: candidate.changes, ...sources,
-    deployExcludedPrefixes: excluded,
   }), imageProofDigest: exclusionDigest };
 }
 

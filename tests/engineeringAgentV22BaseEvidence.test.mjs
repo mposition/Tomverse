@@ -95,11 +95,6 @@ test("base evidence admits exact image bytes and the base build's exclusions", a
     file.path === "tests/fixtures/sample.json").text, "");
   assert.equal(result.baseFiles.find((file) =>
     file.path === "tests/kept.test.mjs").text, source.get("kept.test.mjs"));
-  // A test a change adds is excluded by the same base rules; a re-included
-  // one is not.
-  assert.deepEqual(result.deployExcluded(["tests/fixtures/sample.json",
-    "tests/new-feature.test.mjs", "tests/kept.test.mjs", "lib/new.ts"]),
-  ["tests/fixtures/sample.json", "tests/new-feature.test.mjs"]);
   assert.match(result.exclusionDigest, /^[0-9a-f]{64}$/);
   assert.equal(result.installedVersions.next, "16.3.8");
   assert.ok(result.policyDocuments.some((text) =>

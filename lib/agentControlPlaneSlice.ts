@@ -2,12 +2,12 @@
  * The control-plane slice: product files whose change can alter what the
  * control plane does even though the control plane's own files are untouched.
  *
- * docs/policy/engineering-agent.md §4 ("통제 평면에 닿는 제품 파일") is the
- * contract. The control plane runs inside the same application, and a
- * runtime file can change what it does with no import between them -- by a
- * framework-registered route, shared database or process state, or a callback
- * handed through other files. So every product file of the app runtime is in
- * the slice; the import graph is built to prove the tree can be read at all.
+ * docs/policy/engineering-agent.md §4 ("통제 평면에 닿는 제품 파일") and
+ * version 6 item 2 are the contract. The entry points are the gate files that
+ * run in the application (the runtime control plane); the slice is every file
+ * they import, directly or through other files, and every file that code
+ * names by path. Another product file is not in the slice merely because the
+ * deployed image contains it.
  *
  * Configuration is part of it too: an environment variable the control plane
  * or the slice reads, and every AppSetting key, is a name a change may not add.
@@ -35,13 +35,23 @@ const ROOT = "/repo";
 
 /**
  * The runtime control plane: control-plane code that runs in the product.
- * Scripts, tests, workflows, schema and documents are control-plane too, but
- * they do not run inside the app; what they execute is the credential
- * analysis's concern, not this one's. Root files (`proxy.ts`,
- * `instrumentation.ts`, framework configuration) are included.
+ * Root files (`proxy.ts`, `instrumentation.ts`, framework configuration) are
+ * included. Control-plane code outside the app is `isGateOutsideRuntime`.
  */
 export const isRuntimeControlPlane = (path: string) =>
   isAppRuntimeCode(path) && classifyPath(path) === "control-plane";
+
+/**
+ * Gate code that runs outside the app: scripts, CI and operator tooling,
+ * build and framework configuration, the mobile apps. What it imports or names
+ * is in the slice like a runtime gate's (policy version 6 item 2). Tests are
+ * left out -- an unchanged test stays the oracle, and the evidence reads no
+ * text for the tests the image leaves out -- and so is the vendored AMUX
+ * server, a separate program whose text the evidence does not read either.
+ */
+export const isGateOutsideRuntime = (path: string) =>
+  CODE_FILE.test(path) && !isAppRuntimeCode(path) && classifyPath(path) === "control-plane" &&
+  !path.startsWith("tests/") && !path.startsWith("vendor/");
 
 /* ------------------------------------------------------------------------- */
 /* Parsing                                                                    */
@@ -364,8 +374,8 @@ type Graph = {
   edges: Map<string, Set<string>>;
   facts: Map<string, CodeFacts>;
   appSettingKeys: Set<string>;
-  /** Paths runtime code names as text, exactly or as a directory. */
-  named: NamedPaths;
+  /** Per runtime file, the paths it names as text, exactly or as a directory. */
+  named: Map<string, NamedPaths>;
   problems: SliceProblem[];
 };
 
@@ -424,7 +434,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   const edges = new Map<string, Set<string>>();
   const facts = new Map<string, CodeFacts>();
   const appSettingKeys = new Set<string>();
-  const named: NamedPaths = { exact: new Set(), prefixes: new Set() };
+  const named = new Map<string, NamedPaths>();
   for (const file of files) {
     if (!isAppRuntimeCode(file.path)) continue;
     const source = parse(file);
@@ -435,9 +445,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     const fileFacts = codeFacts(source);
     facts.set(file.path, fileFacts);
     if (fileFacts.appSettingAccess) for (const key of keyLiterals(source)) appSettingKeys.add(key);
-    const fileNamed = namedPaths(source);
-    for (const path of fileNamed.exact) named.exact.add(path);
-    for (const path of fileNamed.prefixes) named.prefixes.add(path);
+    named.set(file.path, namedPaths(source));
     if (isRuntimeControlPlane(file.path) && fileFacts.runtimeLoader) {
       problems.push({ path: file.path, specifier: null, problem: "runtime_loader_in_control_plane" });
     }
@@ -449,56 +457,74 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     }
     edges.set(file.path, targets);
   }
+  // Gate code outside the app is a starting point, not app runtime: an import
+  // it cannot resolve names no tracked file of this tree, so it adds no edge
+  // rather than failing -- a change that adds that file is read again in the
+  // result tree. A file it names exactly (an allowlist, a baseline) steers it;
+  // a directory it walks holds what it checks, which the check reads afresh.
+  for (const file of files) {
+    if (!isGateOutsideRuntime(file.path)) continue;
+    const source = parse(file);
+    if (hasParseErrors(source)) {
+      problems.push({ path: file.path, specifier: null, problem: "parse_error" });
+      continue;
+    }
+    named.set(file.path, { exact: namedPaths(source).exact, prefixes: new Set() });
+    const targets = new Set<string>();
+    for (const specifier of importSpecifiersOf(source)) {
+      const resolved = resolve(file.path, specifier);
+      if (resolved !== null && resolved !== "external") targets.add(resolved);
+    }
+    edges.set(file.path, targets);
+  }
   return { edges, facts, appSettingKeys, named, problems };
 };
 
 const isProduct = (path: string) => classifyPath(path) === "product";
 
-/** Directories whose every file belongs to the running application, whatever its extension. */
-const RUNTIME_DIRECTORY = /^(?:app|components|lib|locales|packages|types|hooks|public)\//;
-
-/**
- * Path prefixes the deployed application does not contain. Empty: the image is
- * built from the whole tree unless the new .dockerignore exclusions are
- * actually observed in a deployed image. Source rules alone are not proof:
- * Railpack's exact build must be measured and tied to its image digest before
- * any prefix may enter this T1 authority list. Until then it remains empty.
- */
-export const DEPLOY_EXCLUDED_PREFIXES: readonly string[] = [];
-
-/**
- * Every product file the running application can read.
- *
- * Runtime code reads files by paths it assembles at runtime -- from
- * parameters, constants held in variables, the working directory -- so no
- * analysis here can prove that a file in the deployed image is never read,
- * and docs/policy/engineering-agent.md §4 sends what cannot be analysed to T2.
- * The slice is therefore every product file the image contains. Beyond that
- * floor, a file stays in the slice even under an excluded prefix when it is
- * under a runtime directory or a root runtime file, when runtime code imports
- * it (the build bundles it whatever the image holds), or when runtime code
- * names it by path.
- *
- * The control plane runs inside the same application: a runtime file reaches
- * it by framework-registered route, shared database or process state, or a
- * callback handed through other files, with no import between them. The
- * import graph is still built in full, because an import that does not
- * resolve, or a file that does not parse, fails the analysis.
- */
-const appRuntimeSlice = (graph: Graph, paths: Iterable<string>, excluded: readonly string[]) => {
-  const imported = new Set([...graph.edges.values()].flatMap((targets) => [...targets]));
-  const under = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
-  const slice = new Set<string>();
-  for (const path of paths) {
-    if (!isProduct(path)) continue;
-    const deployed = !excluded.some((prefix) => under(path, prefix));
-    const runtime = RUNTIME_ROOT_FILES.has(path) || RUNTIME_DIRECTORY.test(path);
-    const named = graph.named.exact.has(path) || [...graph.named.prefixes].some((prefix) => under(path, prefix));
-    if (deployed || runtime || imported.has(path) || named) slice.add(path);
-  }
-  return slice;
+/** The path and every directory above it, for matching a named directory. */
+const selfAndAncestors = (path: string) => {
+  const found = [path];
+  for (let dir = dirname(path); dir !== ""; dir = dirname(dir)) found.push(dir);
+  return found;
 };
 
+/**
+ * Every product file the gates reach (docs/policy/engineering-agent.md
+ * version 6 item 2). From each runtime control-plane file it follows imports,
+ * directly or through any other file, and takes every file a reached file
+ * names by path -- exactly, or below a named directory; a named code file's
+ * own imports are followed in turn. A product file the gates never reach is
+ * not in the slice, although the deployed image contains it.
+ *
+ * The whole import graph is still built, because an import that does not
+ * resolve, or a file that does not parse, anywhere in the app runtime fails
+ * the analysis.
+ */
+const gateSlice = (graph: Graph, paths: readonly string[]) => {
+  const reached = new Set<string>();
+  const exact = new Set<string>();
+  const prefixes = new Set<string>();
+  let frontier = [...graph.edges.keys()].filter((path) => isRuntimeControlPlane(path) || isGateOutsideRuntime(path));
+  while (frontier.length > 0) {
+    const stack = frontier;
+    frontier = [];
+    while (stack.length > 0) {
+      const path = stack.pop() as string;
+      if (reached.has(path)) continue;
+      reached.add(path);
+      for (const target of graph.edges.get(path) ?? []) stack.push(target);
+      const named = graph.named.get(path);
+      for (const text of named?.exact ?? []) exact.add(text);
+      for (const text of named?.prefixes ?? []) prefixes.add(text);
+    }
+    for (const path of paths) {
+      if (!reached.has(path) &&
+          (exact.has(path) || selfAndAncestors(path).some((dir) => prefixes.has(dir)))) frontier.push(path);
+    }
+  }
+  return new Set([...reached].filter(isProduct));
+};
 
 /**
  * The slice for one change set. The base tree gives the slice a changed path
@@ -511,13 +537,10 @@ const appRuntimeSlice = (graph: Graph, paths: Iterable<string>, excluded: readon
 export const computeControlPlaneSlice = (input: {
   baseFiles: readonly SourceFile[];
   changes: readonly SliceChange[];
-  /** Defaults to the repository's own list; tests pass their own. */
-  deployExcludedPrefixes?: readonly string[];
 }): SliceResult => {
-  const excluded = input.deployExcludedPrefixes ?? DEPLOY_EXCLUDED_PREFIXES;
   const base = buildGraph(input.baseFiles);
   if (base.problems.length > 0) return { status: "failed", problems: base.problems };
-  const baseSlice = appRuntimeSlice(base, input.baseFiles.map((file) => file.path), excluded);
+  const baseSlice = gateSlice(base, input.baseFiles.map((file) => file.path));
 
   const names = new Set<string>(base.appSettingKeys);
   for (const file of input.baseFiles) {
@@ -546,7 +569,7 @@ export const computeControlPlaneSlice = (input: {
   ];
   const result = buildGraph(resultFiles);
   if (result.problems.length > 0) return { status: "failed", problems: result.problems };
-  const resultSlice = appRuntimeSlice(result, resultFiles.map((file) => file.path), excluded);
+  const resultSlice = gateSlice(result, resultFiles.map((file) => file.path));
 
   const slicePaths = new Set<string>();
   for (const change of input.changes) {

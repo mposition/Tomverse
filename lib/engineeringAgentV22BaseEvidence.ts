@@ -26,10 +26,10 @@ type FetchBlob = (oid: string, maxBytes: number) => Promise<Uint8Array>;
  * decision 2026-10-27, replacing the operator-pasted image proof). The
  * commit's `.dockerignore` is read in order, last matching rule winning, a
  * rule on a directory covering everything below it -- as Docker applies it.
- * The same rules apply to paths a change adds. Only test sources and the
- * admin Playwright config may leave the runtime slice
- * (`docs/policy/engineering-agent.md §4`). A missing file or
- * a rule this reader does not fully understand is null: the tier is T2. */
+ * Only test sources and the admin Playwright config count as left out; the
+ * evidence reads no text for them, since the app cannot run them. A missing
+ * file or a rule this reader does not fully understand is null: the tier is
+ * T2. */
 export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
   paths: readonly string[]): string[] | null {
   if (dockerIgnore === null) return null;
@@ -77,9 +77,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   installedVersions: Record<keyof typeof CONVENTION_VERSIONS,
     string | null>;
   policyDocuments: string[];
-  /** The exact paths, base or added by a change, that the base build leaves
-   * out of its image. */
-  deployExcluded: (paths: readonly string[]) => string[];
   /** Names the `.dockerignore` blob the exclusion was read from. */
   exclusionDigest: string;
 } | null> {
@@ -191,9 +188,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   try { lock = JSON.parse(lockText); }
   catch { return null; }
   return { baseFiles, workflows, policyDocuments,
-    // The text parsed once above, so this cannot be null here.
-    deployExcluded: (paths) =>
-      engineeringAgentV22DeployExclusion(ignoreText, paths) ?? [],
     exclusionDigest: createHash("sha256").update(JSON.stringify({
       format: "engineering-agent-v22-deploy-exclusion-v1",
       dockerIgnoreOid: ignoreEntry.oid,

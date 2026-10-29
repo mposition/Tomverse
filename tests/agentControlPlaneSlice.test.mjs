@@ -6,7 +6,6 @@ import test from "node:test";
 import ts from "typescript";
 
 import {
-  DEPLOY_EXCLUDED_PREFIXES,
   codeFacts,
   computeControlPlaneSlice,
   createResolver,
@@ -65,87 +64,94 @@ const change = (path, overrides = {}) => ({
   ...overrides,
 });
 
-/** With the tests and docs trees left out of the image, so what the floor adds back can be seen. */
-const EXCLUDED = ["tests", "docs"];
-const slice = (changes, files = tree(), deployExcludedPrefixes = EXCLUDED) =>
-  computeControlPlaneSlice({ baseFiles: files, changes, deployExcludedPrefixes });
+const slice = (changes, files = tree()) => computeControlPlaneSlice({ baseFiles: files, changes });
 
-test("every app runtime file is in the slice, whether or not an import connects it to the control plane", () => {
+test("the slice is what the gates import, directly or through other files; a caller or an unreached file is not", () => {
   const result = slice([
     change("lib/deep.ts"),
     change("lib/helper.ts"),
+    // They use the gate; the gate does not use them.
+    change("lib/facade.ts", { newText: 'export { gate } from "./amux/gate";\nexport const more = 1;\n' }),
+    change("lib/page.ts", { newText: 'import { gate } from "@/lib/facade";\nexport const page = () => !gate();\n' }),
     change("lib/leaf.ts"),
     // Registered by the framework's route convention and reached only by a URL.
     change("app/api/example/route.ts", { status: "added", newText: 'export const POST = () => new Response("x");\n' }),
-    // Not app runtime.
     change("tests/leaf.test.mjs", { status: "added", newText: "export {};\n" }),
     change("docs/notes.md", { status: "added", newText: "notes\n" }),
   ]);
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
-  assert.deepEqual([...result.slicePaths].sort(), [
-    "app/api/example/route.ts",
-    "lib/deep.ts",
-    "lib/helper.ts",
-    "lib/leaf.ts",
-  ]);
+  assert.deepEqual([...result.slicePaths].sort(), ["lib/deep.ts", "lib/helper.ts"]);
 });
 
-test("data the running application reads is in the slice, whether imported, under a runtime directory or named by path", () => {
-  const files = tree({
-    "lib/amux/gate.ts": 'import rules from "../rules.json";\nexport const gate = () => rules.enabled;\n',
+test("data a gate reads is in the slice, whether imported or named by path; a named code file's imports follow", () => {
+  const overrides = {
+    "lib/amux/gate.ts":
+      'import rules from "../rules.json";\nimport { REGISTRY } from "@/lib/registry";\n' +
+      'export const gate = () => rules.enabled && REGISTRY;\nexport const LOADER = "lib/loaded.ts";\n',
     "lib/rules.json": '{"enabled": false}\n',
-    "docs/imported.json": '{"a": 1}\n',
-    "lib/useConfig.ts": 'import data from "../docs/imported.json";\nexport const d = data;\n',
     "lib/registry.ts":
       'import { readFileSync } from "node:fs";\nimport { join } from "node:path";\nexport const REGISTRY = "docs/marketing/registry.json";\n' +
       'export const font = () => readFileSync(join(process.cwd(), "docs", "fonts", "face.ttf"));\n' +
       "export const page = (name) => readFileSync(`docs/pages/${name}.md`);\n",
+    "lib/loaded.ts": 'import { inner } from "./inner";\nexport const loaded = inner;\n',
+    "lib/inner.ts": "export const inner = 1;\n",
+    // Read only by a file no gate reaches.
+    "docs/imported.json": '{"a": 1}\n',
+    "lib/useConfig.ts": 'import data from "../docs/imported.json";\nexport const d = data;\n',
     "docs/marketing/registry.json": "{}\n",
     "docs/fonts/face.ttf": "x",
     "docs/pages/home.md": "x",
     "docs/unrelated.md": "x",
-  });
+  };
   const paths = [
     "lib/rules.json",
-    "locales/strings.json",
-    "docs/imported.json",
+    "lib/registry.ts",
+    "lib/loaded.ts",
+    "lib/inner.ts",
     "docs/marketing/registry.json",
     "docs/fonts/face.ttf",
     "docs/pages/home.md",
   ];
   const result = slice(
-    [...paths, "docs/unrelated.md"].map((path) => change(path, { newText: "{}\n" })),
-    files,
+    [...paths, "docs/imported.json", "locales/strings.json", "docs/unrelated.md"]
+      .map((path) => change(path, { newText: path.endsWith(".ts") ? overrides[path] : "{}\n" })),
+    tree(overrides),
   );
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
   assert.deepEqual([...result.slicePaths].sort(), [...paths].sort());
 });
 
-test("every product file the deployed image contains is in the slice", () => {
-  const changes = [change("docs/notes.md", { status: "added" }), change("tests/leaf.test.mjs", { status: "added" })];
-  assert.deepEqual([...slice(changes, tree(), DEPLOY_EXCLUDED_PREFIXES).slicePaths].sort(), [
-    "docs/notes.md",
-    "tests/leaf.test.mjs",
-  ]);
+test("gate code outside the app brings in what it imports and the files it names exactly, not the directories it walks", () => {
+  const files = tree({
+    "scripts/check-x.mjs":
+      'import { rule } from "../lib/ruleCore.ts";\nimport "railway/iac";\nimport { join } from "node:path";\n' +
+      'export const ALLOW = "docs/ops/allowlist.json";\nexport const walk = (root) => join(root, "docs", "ops");\nexport const check = rule;\n',
+    "lib/ruleCore.ts": 'import { leafRule } from "./ruleLeaf";\nexport const rule = leafRule;\n',
+    "lib/ruleLeaf.ts": "export const leafRule = 1;\n",
+    "docs/ops/allowlist.json": "[]\n",
+    "docs/ops/walked.md": "x",
+    // A test is an oracle, not a starting point.
+    "tests/agentGate.test.mjs": 'import { leaf } from "../lib/leaf.ts";\nexport const t = leaf;\n',
+  });
+  const result = slice(
+    ["lib/ruleCore.ts", "lib/ruleLeaf.ts", "docs/ops/allowlist.json", "docs/ops/walked.md", "lib/leaf.ts"]
+      .map((path) => change(path, { newText: path.endsWith(".ts") ? files.find((f) => f.path === path).text : "x\n" })),
+    files,
+  );
+  assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []), "an unresolved import outside the app fails nothing");
+  assert.deepEqual([...result.slicePaths].sort(), ["docs/ops/allowlist.json", "lib/ruleCore.ts", "lib/ruleLeaf.ts"]);
+  assert.equal(slice([change("lib/leaf.ts")], tree({ "scripts/bad.mjs": "export const = ;\n" })).status, "failed");
 });
 
-/**
- * Nothing may leave the slice yet. Railpack merges .dockerignore with the
- * exclusions in railpack.json, applies glob and negation patterns and lets the
- * last match win, and no test here reproduces that. A prefix can be added only
- * together with a check that reads what the image actually contains -- the
- * generated build plan or the image inventory -- and replaces this test.
- */
-test("no prefix leaves the slice until the image contents are verified", () => {
-  assert.deepEqual([...DEPLOY_EXCLUDED_PREFIXES], []);
-});
-
-test("a new barrel and a new caller added together are both in the slice", () => {
+test("a file the change brings under a gate is in the slice; a new caller of a gate is not", () => {
   const result = slice([
+    change("lib/helper.ts", { newText: 'import { added } from "./added";\nexport const helper = () => added;\n' }),
+    change("lib/added.ts", { status: "added", newText: "export const added = true;\n" }),
     change("lib/newBarrel.ts", { status: "added", newText: 'export * from "./amux/gate";\n' }),
     change("lib/newCaller.ts", { status: "added", newText: 'import { gate } from "./newBarrel";\nexport const c = gate;\n' }),
   ]);
-  assert.deepEqual([...result.slicePaths].sort(), ["lib/newBarrel.ts", "lib/newCaller.ts"]);
+  assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
+  assert.deepEqual([...result.slicePaths].sort(), ["lib/added.ts", "lib/helper.ts"]);
 });
 
 test("both sides of a rename are checked", () => {
@@ -227,7 +233,7 @@ test("resolution follows TypeScript: .js names the .ts source, @/ maps to the ro
   assert.equal(resolve("lib/a.ts", "./both.js"), "lib/both.ts", "TypeScript prefers the source for a .js specifier");
 });
 
-test("on this repository the analysis resolves every import of the app runtime and finds a non-empty slice", () => {
+test("on this repository the analysis resolves every import of the app runtime and the slice is the gates' reach", () => {
   const root = new URL("..", import.meta.url);
   const paths = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
     .split("\0")
@@ -236,8 +242,13 @@ test("on this repository the analysis resolves every import of the app runtime a
     path,
     text: /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json)$/.test(path) ? readFileSync(new URL(path, root), "utf8") : "",
   }));
-  const result = computeControlPlaneSlice({ baseFiles, changes: [] });
+  // The policy's own example (a gate writes its audit through lib/adminAudit.ts),
+  // and an operating document no gate reads.
+  const probes = ["lib/adminAudit.ts", "docs/ops/dev-test-lanes.md"];
+  const changes = probes.map((path) => change(path, { newText: baseFiles.find((file) => file.path === path).text, addedText: "" }));
+  const result = computeControlPlaneSlice({ baseFiles, changes });
   assert.equal(result.status, "analysed", JSON.stringify((result.problems ?? []).slice(0, 5)));
+  assert.deepEqual([...result.slicePaths], ["lib/adminAudit.ts"]);
   assert.ok(result.baseSliceSize > 0);
 });
 
