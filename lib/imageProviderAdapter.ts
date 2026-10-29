@@ -139,22 +139,26 @@ export const classifyImageProviderFailure = (
 /**
  * Splits an edit's reported input into its text and image parts. With no
  * breakdown, every input token is counted as an image token -- the dearer
- * rate, so a missing field never under-settles the cost.
+ * rate, so a missing field never under-settles the cost. With no usage at all
+ * the image part is unknown (null), and settlement then charges the photo's
+ * whole reserved budget rather than nothing.
  */
 export const openAiEditInputTokens = (
-  totalInputTokens: number,
+  totalInputTokens: number | null,
   details: { text_tokens?: number; image_tokens?: number } | undefined
-): { textTokens: number; imageTokens: number } => {
+): { textTokens: number; imageTokens: number | null } => {
   const image = details?.image_tokens;
   if (!Number.isSafeInteger(image) || (image as number) < 0) {
-    return { textTokens: 0, imageTokens: Math.max(0, totalInputTokens) };
+    return totalInputTokens === null
+      ? { textTokens: 0, imageTokens: null }
+      : { textTokens: 0, imageTokens: Math.max(0, totalInputTokens) };
   }
   const text = details?.text_tokens;
   return {
     imageTokens: image as number,
     textTokens: Number.isSafeInteger(text) && (text as number) >= 0
       ? (text as number)
-      : Math.max(0, totalInputTokens - (image as number)),
+      : Math.max(0, (totalInputTokens ?? 0) - (image as number)),
   };
 };
 
@@ -170,9 +174,10 @@ export type ImageProviderResult = {
   inputTokens: number;
   /**
    * Image input tokens an edit's photo was billed as. Absent for a
-   * generation; on an edit, `inputTokens` is then the text part alone.
+   * generation; on an edit, `inputTokens` is then the text part alone, and
+   * null means the response reported no usage to read it from.
    */
-  imageInputTokens?: number;
+  imageInputTokens?: number | null;
   /**
    * Billable internal reasoning tokens, when the provider charges for them.
    * 0 for models that do not (OpenAI images). Recorded so settlement can
@@ -472,13 +477,13 @@ export const generateImageWithProvider = async (input: {
         requestParams
       );
     }
-    const totalInputTokens = Number.isSafeInteger(payload?.usage?.input_tokens)
+    const reportedInputTokens = Number.isSafeInteger(payload?.usage?.input_tokens)
       ? Number(payload?.usage?.input_tokens)
-      : 0;
-    const editInput = editImage
-      ? openAiEditInputTokens(totalInputTokens, payload?.usage?.input_tokens_details)
       : null;
-    const inputTokens = editInput ? editInput.textTokens : totalInputTokens;
+    const editInput = editImage
+      ? openAiEditInputTokens(reportedInputTokens, payload?.usage?.input_tokens_details)
+      : null;
+    const inputTokens = editInput ? editInput.textTokens : (reportedInputTokens ?? 0);
     const imageBytes = Buffer.from(b64, "base64");
     // The request pins output_format: "png", so this is the format the
     // provider was told to produce -- still stated explicitly rather than

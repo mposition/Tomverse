@@ -895,8 +895,13 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     예산(`IMAGE_EDIT_INPUT_MAX_TOKENS` 10,000 × 이미지 입력 US$8/M = 80,000µUSD)을
     900µUSD/credit 상한 아래에 둔다(최악 high 1024² 871µ/credit). OpenAI가 gpt-image-2
     입력 토큰 공식을 공개하지 않아, 예산은 gpt-image-1 high fidelity 비정사각 입력(6,563
-    토큰)의 약 1.5배로 잡았다. 정산은 보고된 이미지 입력 토큰을 US$8/M로 계산하고, 예산을
-    넘으면 `image_edit_input_over_budget`을 남긴다. 사진이 없거나 읽을 수 없으면 provider를
+    토큰)의 약 1.5배로 잡았다. 이 예산은 추정치라 §12의 계산 가능한 최악 원가가 아니다.
+    그래서 `IMAGE_EDIT_INPUT_BUDGET_VERIFICATION`에 실측값(`npm` 밖에서
+    `node scripts/measure-image-edit-tokens.mjs --confirm-paid`, 유료 약 US$0.30, 운영자
+    승인 필요)을 기록하고 그 최댓값이 예산 이하일 때까지 `IMAGE_EDIT_ENABLED`가 켜져도 편집은
+    꺼져 있다. 정산은 예약 snapshot에 기록한 단가로 보고된 이미지 입력 토큰을 계산하고,
+    사용량이 없으면 예약한 사진 예산 전체로 정산하며, 예산을 넘으면
+    `image_edit_input_over_budget`을 남긴다. 사진이 없거나 읽을 수 없으면 provider를
     부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다. 재시도는 같은 사진의
     편집으로 남는다. Review는 편집하지 않는다. 다른 provider의 편집은 공식 편집 가격과
     호출 방식을 확인한 뒤 모델별로 추가한다.

@@ -45,6 +45,28 @@ export const IMAGE_PROMPT_BUDGET_MICRO_USD = Math.ceil(
 // high-fidelity non-square input of that size (6,563 tokens). Settlement
 // records the reported image tokens, and a request over this budget is logged
 // (image_edit_input_over_budget) so the number is corrected from evidence.
+//
+// That budget is an estimate, not a proven bound, and a fixed price needs a
+// computable worst case (docs/policy/image-generation.md section 12). So edits
+// stay refused -- whatever IMAGE_EDIT_ENABLED says -- until this records the
+// image tokens actually reported for a 1024px edit input
+// (scripts/measure-image-edit-tokens.mjs) and the budget is set from them.
+export const IMAGE_EDIT_INPUT_BUDGET_VERIFICATION: {
+  verifiedAt: string | null;
+  /** The largest reported image-input tokens across the measured shapes. */
+  measuredMaxTokens: number | null;
+} = { verifiedAt: null, measuredMaxTokens: null };
+
+/** Whether the budget below is backed by a measurement it covers. */
+export const imageEditInputBudgetVerified = (
+  verification = IMAGE_EDIT_INPUT_BUDGET_VERIFICATION,
+  budgetTokens = IMAGE_EDIT_INPUT_MAX_TOKENS
+) =>
+  verification.verifiedAt !== null &&
+  verification.measuredMaxTokens !== null &&
+  verification.measuredMaxTokens > 0 &&
+  verification.measuredMaxTokens <= budgetTokens;
+
 export const IMAGE_EDIT_INPUT_MAX_EDGE_PX = 1_024;
 export const IMAGE_EDIT_INPUT_MAX_TOKENS = 10_000;
 export const IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS = 8;

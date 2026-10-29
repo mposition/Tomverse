@@ -189,3 +189,37 @@ test("an edit keeps the photo's shape, read upright", async () => {
   assert.equal(imageEditOutputSize(4032, 3024, 6), "1024x1536");
   assert.equal(imageEditOutputSize(0, 0), "1024x1024");
 });
+
+test("an edit with no usage reported leaves the photo's tokens unknown, never zero", () => {
+  assert.deepEqual(openAiEditInputTokens(null, undefined), { textTokens: 0, imageTokens: null });
+});
+
+test("the photo settles at the reservation's rate and budget, not the live constants", async () => {
+  const { settledEditInputCostMicroUsd } = await import("../lib/imageGenerationService.ts");
+  const snapshot = { edit: { inputUsdPerMillionTokens: 8, inputBudgetMicroUsd: 80_000 } };
+  assert.equal(settledEditInputCostMicroUsd(snapshot, 4_360), 34_880);
+  // A rate changed after the sale does not reach a job priced before it.
+  assert.equal(settledEditInputCostMicroUsd({ edit: { inputUsdPerMillionTokens: 4, inputBudgetMicroUsd: 40_000 } }, 4_360), 17_440);
+  // No usage: the whole reserved photo budget, not a free photo.
+  assert.equal(settledEditInputCostMicroUsd(snapshot, null), 80_000);
+  assert.equal(settledEditInputCostMicroUsd(snapshot, undefined), 80_000);
+  // A generation has no photo; unreadable edit pricing settles the reservation.
+  assert.equal(settledEditInputCostMicroUsd({}, 4_360), 0);
+  assert.equal(settledEditInputCostMicroUsd({ edit: { inputUsdPerMillionTokens: "8" } }, 4_360), null);
+});
+
+test("the switch does nothing until the photo budget is backed by a measurement", async () => {
+  const { imageEditEnabled } = await import("../lib/imageEditSource.ts");
+  const { IMAGE_EDIT_INPUT_BUDGET_VERIFICATION, imageEditInputBudgetVerified } = await import(
+    "../lib/imageGenerationPricing.ts"
+  );
+  // Shipped unmeasured: on is still off.
+  assert.equal(IMAGE_EDIT_INPUT_BUDGET_VERIFICATION.verifiedAt, null);
+  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }), false);
+  assert.equal(imageEditEnabled({ IMAGE_EDIT_ENABLED: "true" }, true), true);
+  assert.equal(imageEditEnabled({}, true), false);
+  // A measurement over the budget does not verify it.
+  assert.equal(imageEditInputBudgetVerified({ verifiedAt: "2026-10-30", measuredMaxTokens: 6_000 }, 10_000), true);
+  assert.equal(imageEditInputBudgetVerified({ verifiedAt: "2026-10-30", measuredMaxTokens: 12_000 }, 10_000), false);
+  assert.equal(imageEditInputBudgetVerified({ verifiedAt: null, measuredMaxTokens: 6_000 }, 10_000), false);
+});

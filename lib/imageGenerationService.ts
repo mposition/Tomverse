@@ -170,11 +170,32 @@ const promptCostMicroUsd = (inputTokens: number) =>
       1_000_000
   );
 
-const editImageCostMicroUsd = (imageTokens: number) =>
-  Math.ceil(
-    (Math.max(0, imageTokens) * IMAGE_EDIT_INPUT_USD_PER_MILLION_TOKENS * 1_000_000) /
-      1_000_000
-  );
+/**
+ * What an edit's photo settles at, from the rate and budget its reservation
+ * recorded -- never the live constants, which a deploy may have moved since.
+ * 0 for a generation; the whole reserved photo budget when the provider
+ * reported no usage; null (settle the whole reservation) when the snapshot's
+ * edit pricing is unreadable.
+ */
+export const settledEditInputCostMicroUsd = (
+  snapshot: unknown,
+  imageInputTokens: number | null | undefined
+): number | null => {
+  const edit = (snapshot as { edit?: unknown } | null)?.edit;
+  if (edit === undefined || edit === null) return 0;
+  const { inputUsdPerMillionTokens: rate, inputBudgetMicroUsd: budget } = edit as {
+    inputUsdPerMillionTokens?: unknown;
+    inputBudgetMicroUsd?: unknown;
+  };
+  if (
+    typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 ||
+    typeof budget !== "number" || !Number.isFinite(budget) || budget <= 0
+  ) {
+    return null;
+  }
+  if (typeof imageInputTokens !== "number" || !Number.isFinite(imageInputTokens)) return budget;
+  return Math.ceil(Math.max(0, imageInputTokens) * rate);
+};
 
 /**
  * The attachment an edit reservation was priced for, or null for a plain
@@ -1547,9 +1568,13 @@ export const processImageGeneration = async (
       // one whose pinned thinking level carries a flat surcharge -- is settled
       // at the thinking cap the reservation held, never at zero.
       const thinkingCost = settledThinkingCostMicroUsd(reservation.pricingSnapshot, result.thinkingTokens);
-      // An edit's photo is billed as image input at its own rate.
-      const imageInputTokens = result.imageInputTokens ?? 0;
-      if (imageInputTokens > IMAGE_EDIT_INPUT_MAX_TOKENS) {
+      // An edit's photo is billed as image input at the rate it was sold at.
+      const imageInputTokens = result.imageInputTokens;
+      const editInputCost = settledEditInputCostMicroUsd(
+        reservation.pricingSnapshot,
+        imageInputTokens
+      );
+      if (typeof imageInputTokens === "number" && imageInputTokens > IMAGE_EDIT_INPUT_MAX_TOKENS) {
         console.error(
           JSON.stringify({
             event: "image_edit_input_over_budget",
@@ -1562,11 +1587,11 @@ export const processImageGeneration = async (
         );
       }
       const actualCostMicroUsd =
-        snapshotOutputCost === null || thinkingCost === null
+        snapshotOutputCost === null || thinkingCost === null || editInputCost === null
           ? Number(reservation.reservedCostMicroUsd)
           : snapshotOutputCost +
             promptCostMicroUsd(result.inputTokens) +
-            editImageCostMicroUsd(imageInputTokens) +
+            editInputCost +
             thinkingCost;
 
       const entries = parseReservationPayload(reservation.reservationPayload);
