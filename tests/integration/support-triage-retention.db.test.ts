@@ -428,7 +428,13 @@ test("an open suggestion of a closed report is invalidated, so it is deleted 30 
 });
 
 /** Inserts an open suggestion of an open report, created `age` ago, through the guard's own path where it can. */
-const seedUnqueued = async (id: string, state: "pending" | "claimed" | "ready", age: string, digit: string) => {
+const seedUnqueued = async (
+  id: string,
+  state: "pending" | "claimed" | "ready",
+  age: string,
+  digit: string,
+  lease = "5 minutes"
+) => {
   await prisma.feedback.upsert({
     where: { id: "fb-ret-unqueued" },
     create: { id: "fb-ret-unqueued", type: "bug", message: "still open" },
@@ -441,7 +447,7 @@ const seedUnqueued = async (id: string, state: "pending" | "claimed" | "ready", 
      VALUES ('${id}', 'fb-ret-unqueued', '${digit.repeat(64)}', '${state}',
              ${state === "ready" ? "'other'" : "NULL"},
              ${state === "claimed" ? "'token'" : "NULL"},
-             ${state === "claimed" ? "(clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes'" : "NULL"},
+             ${state === "claimed" ? `(clock_timestamp() AT TIME ZONE 'UTC') + interval '${lease}'` : "NULL"},
              (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}', (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}')`
   );
 };
@@ -450,8 +456,10 @@ test("a suggestion never shown to the owner expires 7 days after creation though
   await seedUnqueued("s-ready-old", "ready", "8 days", "6");
   await seedUnqueued("s-pending-old", "pending", "8 days", "7");
   await seedUnqueued("s-claimed-old", "claimed", "8 days", "8");
+  // A claim whose worker stopped: with triage off nothing would reclaim it.
+  await seedUnqueued("s-claimed-lapsed", "claimed", "8 days", "5", "-1 hour");
   await seedUnqueued("s-ready-young", "ready", "6 days", "9");
-  // Overdue before the run: the two expirable rows and the claimed one.
+  // Overdue before the run: the three expirable rows and the live claim.
   const result = await runSupportTriageRetention();
   const states = Object.fromEntries(
     (await prisma.supportTriageSuggestion.findMany({ select: { id: true, state: true, updatedAt: true } })).map((row) => [
@@ -461,6 +469,7 @@ test("a suggestion never shown to the owner expires 7 days after creation though
   );
   assert.equal(states["s-ready-old"].state, "expired");
   assert.equal(states["s-pending-old"].state, "expired");
+  assert.equal(states["s-claimed-lapsed"].state, "expired");
   // Its 30 days start at the expiry, not at its creation.
   assert.ok(Math.abs(states["s-ready-old"].updatedAt.getTime() - Date.now()) < 60_000);
   // A live claim is the worker's; a young row is left alone.
@@ -471,7 +480,7 @@ test("a suggestion never shown to the owner expires 7 days after creation though
   // The claimed row is still past its expiry, so the run says so.
   assert.equal(result.overdueRemaining, 1);
   const [batch] = await prisma.adminAuditLog.findMany({ where: { action: "support_triage.retention_batch" } });
-  assert.equal((batch.metadata as Record<string, unknown>).expired, 2);
+  assert.equal((batch.metadata as Record<string, unknown>).expired, 3);
   assert.equal((batch.metadata as Record<string, unknown>).invalidated, 0);
 });
 

@@ -39,11 +39,12 @@
  * run, which the liveness heartbeat bounds.
  *
  * A suggestion never shown to the owner expires 7 days after it was created,
- * whether or not its report is still open: each batch moves pending and ready
- * not_queued rows past that age to `expired`, which starts their 30 days. A
- * claimed row is left to the worker; a lapsed claim returns to pending and
- * expires on the next batch. The worker treats expired as settled, so the
- * same input is never derived (or charged for) again.
+ * whether or not its report is still open: each batch moves not_queued rows
+ * past that age to `expired`, which starts their 30 days. A claim whose lease
+ * is still live is the worker's and waits; a lapsed claim expires here, since
+ * with triage switched off the worker never reclaims it. The worker treats
+ * expired as settled, so the same input is never derived (or charged for)
+ * again, and its late result for a lapsed claim matches no claimed row.
  *
  * A class whose statement was cancelled is quarantined for the rest of the
  * run: later batches carry the other classes without it, so their deletes
@@ -103,8 +104,6 @@ type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 const GROUP_TERMINAL_STATES = ["dismissed", "expired", "invalidated"];
 const CLOSED_REPORT_STATUSES = FEEDBACK_STATUSES.filter(isTerminalFeedbackStatus);
 const OPEN_SUGGESTION_STATES = SUGGESTION_STATES.filter((state) => !SUGGESTION_TERMINAL_STATES.includes(state));
-/** Open states a 7-day expiry moves; claimed is the worker's until its lease lapses. */
-const EXPIRABLE_SUGGESTION_STATES = ["pending", "ready"];
 
 /**
  * Moves up to `size` open suggestions of closed reports to invalidated. The
@@ -129,21 +128,24 @@ export const invalidateClosedReportSuggestions = (tx: Tx, size: number) =>
         LIMIT ${size}::integer)`;
 
 /**
- * Moves up to `size` pending or ready suggestions that were never shown to the
- * owner and are 7 days old to expired. Like the invalidation, the condition is
- * repeated on the updated row, so a concurrent run's row is skipped, not refused.
+ * Moves up to `size` open suggestions that were never shown to the owner and
+ * are 7 days old to expired, except a claim whose lease is still live. Like the
+ * invalidation, the condition is repeated on the updated row, so a row another
+ * run or the worker moved meanwhile is skipped, not refused.
  */
 export const expireUnqueuedSuggestions = (tx: Tx, size: number) =>
   tx.$executeRaw`
     UPDATE "SupportTriageSuggestion" s
        SET "state" = 'expired'
-     WHERE s."state" = ANY(${EXPIRABLE_SUGGESTION_STATES}::text[])
+     WHERE s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
        AND s."ownerQueueState" = 'not_queued'
+       AND (s."state" <> 'claimed' OR s."leaseExpiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC'))
        AND s."id" IN (
        SELECT o."id"
          FROM "SupportTriageSuggestion" o
-        WHERE o."state" = ANY(${EXPIRABLE_SUGGESTION_STATES}::text[])
+        WHERE o."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
           AND o."ownerQueueState" = 'not_queued'
+          AND (o."state" <> 'claimed' OR o."leaseExpiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC'))
           AND o."createdAt" <= (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${NOT_QUEUED_SUGGESTION_EXPIRY_DAYS}::integer)
         ORDER BY o."createdAt", o."id"
         LIMIT ${size}::integer)`;
