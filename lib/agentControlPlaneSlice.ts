@@ -184,6 +184,29 @@ export type CodeFacts = {
   appSettingAccess: boolean;
 };
 
+/** The objects that hold a module loader. */
+const LOADER_HOSTS = new Set(["module", "require", "globalThis", "global", "process"]);
+
+/**
+ * Whether a callee may be the module loader: "require" for `require`,
+ * `x.require` and `x["require"]`; "unknown" for a loader host's member reached
+ * by a computed key (`module[key]`), which could be it; null otherwise. Another
+ * object's computed member (`handlers[type]()`) is reflection, not loading: a
+ * change that adds a load through it edits a file the gates follow, which is
+ * in the slice already.
+ */
+const calleeMayRequire = (callee: ts.Expression): "require" | "unknown" | null => {
+  if (ts.isIdentifier(callee)) return callee.text === "require" ? "require" : null;
+  if (ts.isPropertyAccessExpression(callee)) return callee.name.text === "require" ? "require" : null;
+  if (ts.isElementAccessExpression(callee)) {
+    const key = callee.argumentExpression;
+    if (isStringLiteral(key)) return (key as ts.StringLiteral).text === "require" ? "require" : null;
+    const host = callee.expression;
+    return ts.isIdentifier(host) && LOADER_HOSTS.has(host.text) ? "unknown" : null;
+  }
+  return null;
+};
+
 /** Facts read from the syntax tree, so the same words in a comment or string do not count. */
 export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   const facts: CodeFacts = { runtimeLoader: false, computedCall: false, computedEnv: false, appSettingAccess: false };
@@ -193,11 +216,12 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
       if (callee.kind === ts.SyntaxKind.ImportKeyword && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
-      // `require(name)` and `module.require(name)`, whatever `require` is bound
-      // to here: a local helper of that name is still read as the loader.
-      const requireCall = (ts.isIdentifier(callee) && callee.text === "require") ||
-        (ts.isPropertyAccessExpression(callee) && callee.name.text === "require");
-      if (requireCall && !isStringLiteral(node.arguments[0])) {
+      // `require(name)`, `module.require(name)`, `module["require"](name)`,
+      // whatever `require` is bound to here: a local helper of that name is
+      // still read as the loader, and so is a loader host's member called
+      // through a computed key (`module[key](name)`).
+      const may = calleeMayRequire(callee);
+      if ((may === "require" && !isStringLiteral(node.arguments[0])) || may === "unknown") {
         facts.runtimeLoader = true;
       }
       // A call through an element access -- `table[name]()` or `table["gate"]()`
@@ -247,9 +271,8 @@ export const importSpecifiersOf = (source: ts.SourceFile): string[] => {
     } else if (ts.isCallExpression(node)) {
       const [first] = node.arguments;
       const isImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-      // `require("x")` and `module.require("x")` alike.
-      const isRequire = (ts.isIdentifier(node.expression) && node.expression.text === "require") ||
-        (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "require");
+      // `require("x")`, `module.require("x")` and `module["require"]("x")` alike.
+      const isRequire = calleeMayRequire(node.expression) === "require";
       if ((isImport || isRequire) && first !== undefined && isStringLiteral(first)) {
         found.push((first as ts.StringLiteral).text);
       }

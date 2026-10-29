@@ -304,6 +304,8 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "const require = (ok, why) => { if (!ok) throw new Error(why); };\nexport const helper = (x) => require(x > 0, `x ${x}`);\n",
     "function require(name) { return module.require(name); }\nexport const helper = () => require(process.argv[2]);\n",
     "export const helper = (name) => module.require(name);\n",
+    'export const helper = (name) => module["require"](name);\n',
+    "export const helper = (key, name) => module[key](name);\n",
     "function check(require) { return require; }\nexport const helper = (name) => require(name);\n",
     "export const helper = (require, name) => require(name);\n",
     "var require = module.require.bind(module);\nexport const helper = (name) => require(name);\n",
@@ -414,12 +416,14 @@ test("imports come from the syntax tree, not from text that looks like one", () 
     }).sort(),
     ["./barrel", "./lazy", "./typeOnly", "./types", "./viaModule", "node:fs"],
   );
-  // A gate that loads a helper through module.require reaches it.
-  const viaModule = tree({
-    "lib/amux/gate.ts": 'export const gate = () => module.require("../moduleHelper");\n',
-    "lib/moduleHelper.ts": 'import { deep } from "./deep";\nexport const h = deep;\n',
-  });
-  assert.ok(slice([change("lib/deep.ts")], viaModule).slicePaths.has("lib/deep.ts"));
+  // A gate that loads a helper through module.require, by name or by bracket, reaches it.
+  for (const call of ['module.require("../moduleHelper")', 'module["require"]("../moduleHelper")']) {
+    const viaModule = tree({
+      "lib/amux/gate.ts": `export const gate = () => ${call};\n`,
+      "lib/moduleHelper.ts": 'import { deep } from "./deep";\nexport const h = deep;\n',
+    });
+    assert.ok(slice([change("lib/deep.ts")], viaModule).slicePaths.has("lib/deep.ts"), call);
+  }
   assert.deepEqual(codeFacts(tsParse("export const x = obj['literal']();")).computedCall, true);
 });
 

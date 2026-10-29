@@ -115,7 +115,9 @@ for (const commit of commits) {
   const ignore = listing.find((entry) => entry.path === ".dockerignore");
   const ignoreBlob = ignore === undefined ? undefined : readBlobs([ignore.oid]).get(ignore.oid);
   const ignoreText = ignoreBlob === undefined ? null : decodeText(ignoreBlob);
-  const unread = engineeringAgentV22UnreadText(ignoreText, listing.map((entry) => entry.path)) ?? new Set();
+  // No readable .dockerignore: the app holds no evidence and the slice fails.
+  const unreadOrNull = engineeringAgentV22UnreadText(ignoreText, listing.map((entry) => entry.path));
+  const unread = unreadOrNull ?? new Set();
   const read = (entry) => TEXT_FOR_ANALYSIS.test(entry.path) && !unread.has(entry.path);
   const wanted = listing.filter(read);
   const blobs = readBlobs(wanted.map((entry) => entry.oid));
@@ -176,7 +178,7 @@ for (const commit of commits) {
     ? analyseCredentialReachability({ workflows, exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, cacheIsolationRecorded: true })
     : blind;
   if (isolationRecorded) tally.cacheIsolationApplied += 1;
-  const slice = computeControlPlaneSlice({ baseFiles, changes });
+  const slice = unreadOrNull === null ? { status: "failed" } : computeControlPlaneSlice({ baseFiles, changes });
   const lock = JSON.parse(text(listing.find((entry) => entry.path === "package-lock.json")?.oid ?? "") || "{}");
   const installedVersions = Object.fromEntries(
     Object.keys(CONVENTION_VERSIONS).map((name) => [name, lock.packages?.[`node_modules/${name}`]?.version ?? null]),
