@@ -468,14 +468,16 @@ test("the orchestrator's restart policy is Railway's default, so it is declared 
   assert.equal(Object.prototype.hasOwnProperty.call(orchestrator.deploy, "restartPolicyType"), true, "null is declared, not left out");
 });
 
-test("the Support Triage Retention service declares exactly the variable its start check accepts, and starts node directly", async () => {
-  const { SUPPORT_TRIAGE_RETENTION_SERVICE_VARIABLES } = await import("../lib/supportTriageRetentionServiceCore.ts");
-  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "support_triage_retention");
-  assert.ok(runner);
-  for (const environment of ["production", "staging"]) {
-    assert.deepEqual([...runner.environments[environment]].sort(), [...SUPPORT_TRIAGE_RETENTION_SERVICE_VARIABLES].sort(), environment);
+test("the Support Triage services declare exactly the variable their start check accepts, and start node directly", async () => {
+  const { supportTriageServiceVariables } = await import("../lib/supportTriageServiceCore.ts");
+  for (const [key, kind] of [["support_triage_worker", "worker"], ["support_triage_retention", "retention"]]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.ok(runner, key);
+    for (const environment of ["production", "staging"]) {
+      assert.deepEqual([...runner.environments[environment]].sort(), [...supportTriageServiceVariables(kind)].sort(), `${key} ${environment}`);
+    }
+    // docs/policy/support-triage.md §3: both every 30 minutes.
+    assert.equal(runner.cronSchedule, "*/30 * * * *", key);
+    assert.equal(runner.startCommand, `node --experimental-strip-types scripts/support-triage-${kind}-service.mjs`, key);
   }
-  // docs/policy/support-triage.md §3: every 30 minutes.
-  assert.equal(runner.cronSchedule, "*/30 * * * *");
-  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/support-triage-retention-service.mjs");
 });
