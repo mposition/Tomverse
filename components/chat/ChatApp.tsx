@@ -14,7 +14,11 @@ import {
   useSyncExternalStore,
   type MouseEventHandler,
 } from "react";
-import { ChatMessageList } from "@/components/chat/ChatMessageList";
+import {
+  ChatMessageList,
+  SendEchoTurn,
+  type SendEcho,
+} from "@/components/chat/ChatMessageList";
 import { VoiceConversationHistory } from "@/components/chat/VoiceConversationHistory";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { reviewSeedFromChat } from "@/lib/chatReviewHandoff";
@@ -232,6 +236,11 @@ type ChatAppProps = {
   /** Chat: open a Review draft prefilled from one answer's question. */
   onCompareInReview?: (seed: string) => void;
   initialConversationId?: string | null;
+  /**
+   * The question a composer send is still preparing, drawn at the bottom of
+   * this panel until `promptPayload` replaces it with the real turn.
+   */
+  sendEcho?: SendEcho | null;
   promptPayload?: {
     id: string;
     text: string;
@@ -467,6 +476,7 @@ function ChatAppComponent({
   onRestorePrompt,
   onCompareInReview,
   initialConversationId = null,
+  sendEcho = null,
   promptPayload,
   onContextBundleStale,
   isPanelDisabled = false,
@@ -3165,7 +3175,14 @@ function ChatAppComponent({
       {!isPanelDisabled ? (
               <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
                   <div className="min-h-0 flex-1 overflow-hidden">
-      {!isCurrentMessageViewLoaded ? (
+      {!isCurrentMessageViewLoaded && sendEcho && !runtime.loadFailed ? (
+        // A first send adopts its new conversation mid-flight, and that
+        // conversation's history loads behind it; the question stays on
+        // screen rather than turning into a loading line.
+        <div className="flex h-full flex-col justify-end overflow-y-auto px-3 py-4 md:px-6">
+          <SendEchoTurn echo={sendEcho} />
+        </div>
+      ) : !isCurrentMessageViewLoaded ? (
         <div
           data-testid={runtime.loadFailed
             ? "chat-history-load-error" : "chat-panel-loading"}
@@ -3194,6 +3211,7 @@ function ChatAppComponent({
         </div>
       ) : useCenteredWelcome &&
         isConversationEmpty &&
+        !sendEcho &&
         // A continuation is not an empty conversation: the imported half is
         // its earlier turns, and they render inside this list.
         !hasImportedTranscript ? null : <ChatMessageList
@@ -3253,6 +3271,7 @@ function ChatAppComponent({
         currentChatId={initialConversationId}
         isSending={isSending}
         isSendPreparing={isSendPreparing}
+        sendEcho={sendEcho}
         // A durable recovery poll is read-only. Without a server cancellation
         // contract, presenting the local AbortController as "stop" would lie:
         // it would only hide the poll while the provider kept running.

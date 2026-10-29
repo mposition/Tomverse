@@ -102,16 +102,20 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
   const candidates = view?.candidates.status === "ok" ? view.candidates.candidates : [];
   const pickable = candidates.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status));
   const isHidden = (candidate: QaReleaseTrainCargoCandidate) => hidden.has(candidate.number) && !picked.has(candidate.number);
+  // Listed: what can ride, and a workflow change, which a train cannot carry
+  // but the operator releases by hand (owner 2026-10-29), then hides.
+  const listed = (candidate: QaReleaseTrainCargoCandidate) =>
+    qaReleaseTrainCargoPickable(candidate.status) || candidate.status === "changes_workflows";
   const shown = candidates.filter(
     (candidate) =>
-      (showAll || (qaReleaseTrainCargoPickable(candidate.status) && !isHidden(candidate))) &&
+      (showAll || (listed(candidate) && !isHidden(candidate))) &&
       (query.trim() === "" || `#${candidate.number} ${candidate.title}`.toLowerCase().includes(query.trim().toLowerCase())),
   );
   const hiddenByStatus = new Map<QaReleaseTrainCargoStatus, number>();
   for (const candidate of candidates) {
-    if (!qaReleaseTrainCargoPickable(candidate.status)) hiddenByStatus.set(candidate.status, (hiddenByStatus.get(candidate.status) ?? 0) + 1);
+    if (!listed(candidate)) hiddenByStatus.set(candidate.status, (hiddenByStatus.get(candidate.status) ?? 0) + 1);
   }
-  const hiddenByOperator = pickable.filter(isHidden).length;
+  const hiddenByOperator = candidates.filter((candidate) => listed(candidate) && isHidden(candidate)).length;
 
   // "Select all" covers what can ride among the rows shown, so a search narrows it.
   const shownPickable = shown.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status) && !isHidden(candidate)).map((candidate) => candidate.number);
@@ -308,7 +312,6 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
                   [
                     ["on_main", m.trainCargoHiddenOnMain],
                     ["in_main_pull_request", m.trainCargoHiddenInMainPull],
-                    ["changes_workflows", m.trainCargoHiddenWorkflows],
                     ["back_merge", m.trainCargoHiddenBackMerge],
                   ] as const
                 )
@@ -329,12 +332,12 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
             <ul className="mt-3 divide-y divide-zinc-800 rounded-lg border border-zinc-800" data-testid="qa-release-train-cargo-list">
               {shown.map((candidate) => {
                 const can = qaReleaseTrainCargoPickable(candidate.status);
-                const hiddenRow = can && isHidden(candidate);
+                const hiddenRow = listed(candidate) && isHidden(candidate);
                 const carried = can ? carriedByNumber.get(candidate.number) : undefined;
                 return (
                   <li
                     key={candidate.number}
-                    className={`flex items-center gap-3 px-3 py-2.5 ${can && !hiddenRow ? "" : "opacity-55"}`}
+                    className={`flex items-center gap-3 px-3 py-2.5 ${listed(candidate) && !hiddenRow ? "" : "opacity-55"}`}
                     data-testid={`qa-release-train-cargo-${candidate.number}`}
                   >
                     <input
@@ -364,9 +367,14 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
                           {carried.why ? <span className="block text-zinc-400">{m.trainCargoModelWhy.replace("{why}", carried.why)}</span> : null}
                         </div>
                       ) : null}
+                      {candidate.status === "changes_workflows" ? (
+                        <div className="mt-1 text-xs text-amber-300" data-testid={`qa-release-train-cargo-manual-${candidate.number}`}>
+                          {m.trainCargoWorkflowsManual}
+                        </div>
+                      ) : null}
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[candidate.status]}`}>{statusText(candidate)}</span>
-                    {canWrite && can && !picked.has(candidate.number) ? (
+                    {canWrite && listed(candidate) && !picked.has(candidate.number) ? (
                       <button
                         type="button"
                         className="shrink-0 text-xs font-medium text-zinc-400 underline hover:text-zinc-200 disabled:opacity-50"

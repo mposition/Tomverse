@@ -284,6 +284,7 @@ export const en = {
         stopThisResponse: "Stop this response",
         stop: "Stop",
         responseGenerating: "Generating a response.",
+        sendPreparing: "Sending your question…",
         imageTurnGenerating: "Creating the image…",
         imageTurnFailed: "The image could not be created. Please try again.",
         imageTurnRetry: "Try again",
