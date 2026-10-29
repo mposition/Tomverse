@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
+import { createAppStoreUpdates, type AppStoreUpdateBridge } from "./appStoreUpdates";
 
 export interface AppUpdateState {
   state: "none" | "available" | "downloading" | "downloaded";
@@ -10,7 +11,7 @@ export interface AppUpdates {
   complete(): Promise<void>;
   addListener(event: "stateChanged", listener: (state: AppUpdateState) => void): Promise<PluginListenerHandle>;
 }
-export const nativeAppUpdates = Capacitor.getPlatform() === "android" ? registerPlugin<AppUpdates>("MobileUpdates") : null;
+export const nativeAppUpdates = Capacitor.getPlatform() === "android" ? registerPlugin<AppUpdates>("MobileUpdates") : Capacitor.getPlatform() === "ios" ? createAppStoreUpdates(registerPlugin<AppStoreUpdateBridge>("MobileUpdates")) : null;
 const DISMISSED = "tomverse-update-later";
 export function updateWasDismissed(version: number) {
   try {
