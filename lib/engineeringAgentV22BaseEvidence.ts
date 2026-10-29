@@ -10,12 +10,18 @@ import type { TreeEntry } from "@/lib/engineeringAgentTreeVerify";
 import { gitObjectId } from "@/lib/engineeringAgentTreeVerify";
 import type { WorkflowFile } from "@/lib/agentCredentialReachability";
 
-const ANALYSIS_TEXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md)$/;
+// Source, data and documents, and the text gates the slice reads (shell,
+// container and deploy configuration).
+const ANALYSIS_TEXT = /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 // Production runs `main`, not the `develop` base, so some image files differ
-// from the base tree. Those come from GitHub by OID, up to this many.
-const MAX_FETCHED_BLOBS = 500;
+// from the base tree, and the test helpers the image leaves out are not in it
+// at all. Those come from GitHub by OID, up to this many.
+const MAX_FETCHED_BLOBS = 1000;
+// Test code that is not a test body: helpers and fixtures a gate script may
+// import, so the slice must read them (policy v6 item 2).
+const TEST_HELPER_CODE = /^(?!.*\.(?:test|spec)\.[A-Za-z]+$).*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const READ_CONCURRENCY = 16;
 
 type ReadFile = (path: string) => Promise<Uint8Array>;
@@ -26,10 +32,11 @@ type FetchBlob = (oid: string, maxBytes: number) => Promise<Uint8Array>;
  * decision 2026-10-27, replacing the operator-pasted image proof). The
  * commit's `.dockerignore` is read in order, last matching rule winning, a
  * rule on a directory covering everything below it -- as Docker applies it.
- * The same rules apply to paths a change adds. Only test sources and the
- * admin Playwright config may leave the runtime slice
- * (`docs/policy/engineering-agent.md §4`). A missing file or
- * a rule this reader does not fully understand is null: the tier is T2. */
+ * Only test sources and the admin Playwright config count as left out. Of
+ * those the evidence still reads the code that is not a test body (helpers,
+ * fixtures, that config), which a gate may import; test bodies and test data
+ * stay unread. A missing file or a rule this reader does not fully understand
+ * is null: the tier is T2. */
 export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
   paths: readonly string[]): string[] | null {
   if (dockerIgnore === null) return null;
@@ -60,6 +67,18 @@ export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
   });
 }
 
+/** Which of `paths` the evidence passes with no text: what the base build
+ * leaves out of its image other than test helpers, and the vendored AMUX
+ * tree. Null when the `.dockerignore` cannot be read. The tier report reads
+ * the same set. */
+export function engineeringAgentV22UnreadText(dockerIgnore: string | null,
+  paths: readonly string[]): Set<string> | null {
+  const excluded = engineeringAgentV22DeployExclusion(dockerIgnore, paths);
+  if (excluded === null) return null;
+  return new Set([...excluded.filter((path) => !TEST_HELPER_CODE.test(path)),
+    ...paths.filter((path) => path.startsWith("vendor/amux/"))]);
+}
+
 /** The GitHub tree is already bound to the current develop commit. A file is
  * accepted only when its bytes match that tree's Git blob OID: the image copy
  * when it matches, otherwise the blob read from GitHub by that OID. Paths the
@@ -77,9 +96,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   installedVersions: Record<keyof typeof CONVENTION_VERSIONS,
     string | null>;
   policyDocuments: string[];
-  /** The exact paths, base or added by a change, that the base build leaves
-   * out of its image. */
-  deployExcluded: (paths: readonly string[]) => string[];
   /** Names the `.dockerignore` blob the exclusion was read from. */
   exclusionDigest: string;
 } | null> {
@@ -117,11 +133,10 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     entry.path === ".dockerignore" && entry.type === "blob");
   const ignoreBytes = ignoreEntry ? await baseBytes(ignoreEntry) : null;
   const ignoreText = ignoreBytes && decode(ignoreBytes);
-  const baseExcluded = engineeringAgentV22DeployExclusion(ignoreText,
-    input.tree.filter((entry) => entry.type === "blob")
-      .map((entry) => entry.path));
-  if (!ignoreEntry || baseExcluded === null) return null;
-  const excluded = new Set(baseExcluded);
+  // Left out of the image and not read: test bodies and test data.
+  const excluded = engineeringAgentV22UnreadText(ignoreText,
+    input.tree.filter((entry) => entry.type === "blob").map((entry) => entry.path));
+  if (!ignoreEntry || excluded === null) return null;
   // The texts the loop below reads, read ahead in parallel: a few hundred
   // sequential GitHub blob reads took most of a minute (2026-10-28).
   const toRead = input.tree.filter((entry) => entry.type === "blob" &&
@@ -191,11 +206,9 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   try { lock = JSON.parse(lockText); }
   catch { return null; }
   return { baseFiles, workflows, policyDocuments,
-    // The text parsed once above, so this cannot be null here.
-    deployExcluded: (paths) =>
-      engineeringAgentV22DeployExclusion(ignoreText, paths) ?? [],
     exclusionDigest: createHash("sha256").update(JSON.stringify({
-      format: "engineering-agent-v22-deploy-exclusion-v1",
+      // v2: test helpers the image leaves out are read (gate slice, 2026-10-29).
+      format: "engineering-agent-v22-deploy-exclusion-v2",
       dockerIgnoreOid: ignoreEntry.oid,
     })).digest("hex"),
     installedVersions: Object.fromEntries(
