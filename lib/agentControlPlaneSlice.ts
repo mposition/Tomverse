@@ -343,8 +343,33 @@ const isCodeRunner = (program: string) => {
 const SAFE_MODULE_IMPORTS = new Set(["isBuiltin", "builtinModules"]);
 
 /**
+ * Whether a child-process call `(program, args?, options?, callback?)` is
+ * proven not to run a shell, which would turn the program into a shell line.
+ * Options must be an object literal with no spread, no computed key and no
+ * `shell` other than `false`; anything the options could be but this cannot
+ * read -- a variable in their place -- is not proven.
+ */
+const shellProvenOff = (args: ts.NodeArray<ts.Expression>) => {
+  const rest = args.slice(1).map(unwrap);
+  // With three or more arguments the second is the argument list by position.
+  const candidates = rest.filter((argument, index) =>
+    !(index === 0 && (ts.isArrayLiteralExpression(argument) || rest.length >= 2)) &&
+    !ts.isArrowFunction(argument) && !ts.isFunctionExpression(argument));
+  return candidates.every((argument) => ts.isObjectLiteralExpression(argument) &&
+    argument.properties.every((property) => {
+      if (ts.isSpreadAssignment(property)) return false;
+      const name = property.name;
+      if (name === undefined || ts.isComputedPropertyName(name)) return false;
+      const text = ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name) ? name.text : null;
+      if (text !== "shell") return true;
+      return ts.isPropertyAssignment(property) && property.initializer.kind === ts.SyntaxKind.FalseKeyword;
+    }));
+};
+
+/**
  * The texts an inline worker's source argument can be: a literal, a `const`
- * of the file bound to one, or a parameter of a function of the file whose
+ * of the file bound to one and never assigned, or a parameter of a function
+ * of the file -- declared once, never assigned, exported or handed on -- whose
  * every call in the file passes one of those. Null when any is something else.
  */
 const workerSourceTexts = (source: ts.SourceFile, argument: ts.Expression): string[] | null => {
@@ -352,32 +377,70 @@ const workerSourceTexts = (source: ts.SourceFile, argument: ts.Expression): stri
     const value = unwrap(node);
     return ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value) ? value.text : null;
   };
+  const exported = (node: ts.Node) =>
+    (ts.canHaveModifiers(node) ? ts.getModifiers(node) ?? [] : [])
+      .some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+  const declarations = new Map<string, number>();
+  const declare = (name: string) => declarations.set(name, (declarations.get(name) ?? 0) + 1);
   const constants = new Map<string, string | null>();
+  const functions = new Map<string, { exported: boolean }>();
   const parameters = new Map<string, { fn: string; index: number }[]>();
   const calls = new Map<string, ts.CallExpression[]>();
-  const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
-      const bound = unwrap(node.initializer);
-      // A later binding of the same name makes it unknown.
-      constants.set(node.name.text, constants.has(node.name.text) ? null : literal(node.initializer));
-      if (ts.isArrowFunction(bound) || ts.isFunctionExpression(bound)) {
-        bound.parameters.forEach((parameter, index) => {
-          if (ts.isIdentifier(parameter.name)) {
-            parameters.set(parameter.name.text, [...(parameters.get(parameter.name.text) ?? []), { fn: (node.name as ts.Identifier).text, index }]);
-          }
-        });
+  const assigned = new Set<string>();
+  const notReferences = new Set<ts.Node>();
+  const references = new Map<string, number>();
+  const statementDeclarations = new Set<ts.Node>();
+  const addParameters = (fn: string, list: ts.NodeArray<ts.ParameterDeclaration>) =>
+    list.forEach((parameter, index) => {
+      if (ts.isIdentifier(parameter.name)) {
+        parameters.set(parameter.name.text, [...(parameters.get(parameter.name.text) ?? []), { fn, index }]);
       }
+    });
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableStatement(node)) {
+      const isConst = (node.declarationList.flags & ts.NodeFlags.Const) !== 0;
+      for (const declaration of node.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) continue;
+        const name = declaration.name.text;
+        declare(name);
+        statementDeclarations.add(declaration);
+        notReferences.add(declaration.name);
+        const init = declaration.initializer;
+        constants.set(name, isConst && init !== undefined ? literal(init) : null);
+        const bound = init === undefined ? null : unwrap(init);
+        if (isConst && bound !== null && (ts.isArrowFunction(bound) || ts.isFunctionExpression(bound))) {
+          functions.set(name, { exported: exported(node) });
+          addParameters(name, bound.parameters);
+        }
+      }
+    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && !statementDeclarations.has(node)) {
+      // Any other binding (a loop, a catch): known to be nothing.
+      declare(node.name.text);
+      notReferences.add(node.name);
+      constants.set(node.name.text, null);
     }
     if (ts.isFunctionDeclaration(node) && node.name !== undefined) {
-      node.parameters.forEach((parameter, index) => {
-        if (ts.isIdentifier(parameter.name)) {
-          parameters.set(parameter.name.text, [...(parameters.get(parameter.name.text) ?? []), { fn: node.name!.text, index }]);
-        }
-      });
+      declare(node.name.text);
+      notReferences.add(node.name);
+      functions.set(node.name.text, { exported: exported(node) });
+      addParameters(node.name.text, node.parameters);
+    }
+    if (ts.isParameter(node) && ts.isIdentifier(node.name)) notReferences.add(node.name);
+    if ((ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(unwrap(node.left))) ) {
+      assigned.add((unwrap(node.left) as ts.Identifier).text);
+    }
+    if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && ts.isIdentifier(node.operand)) {
+      assigned.add(node.operand.text);
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(unwrap(node.expression))) {
-      const name = (unwrap(node.expression) as ts.Identifier).text;
-      calls.set(name, [...(calls.get(name) ?? []), node]);
+      const callee = unwrap(node.expression) as ts.Identifier;
+      calls.set(callee.text, [...(calls.get(callee.text) ?? []), node]);
+      notReferences.add(callee);
+    }
+    if (ts.isPropertyAccessExpression(node)) notReferences.add(node.name);
+    if (ts.isIdentifier(node) && !notReferences.has(node)) {
+      references.set(node.text, (references.get(node.text) ?? 0) + 1);
     }
     ts.forEachChild(node, visit);
   };
@@ -386,17 +449,22 @@ const workerSourceTexts = (source: ts.SourceFile, argument: ts.Expression): stri
     const direct = literal(node);
     if (direct !== null) return direct;
     const value = unwrap(node);
-    return ts.isIdentifier(value) ? constants.get(value.text) ?? null : null;
+    if (!ts.isIdentifier(value) || assigned.has(value.text) || declarations.get(value.text) !== 1) return null;
+    return constants.get(value.text) ?? null;
   };
   const direct = resolveText(argument);
   if (direct !== null) return [direct];
   const value = unwrap(argument);
-  if (!ts.isIdentifier(value) || constants.has(value.text)) return null;
+  if (!ts.isIdentifier(value) || constants.has(value.text) || assigned.has(value.text)) return null;
   const owners = parameters.get(value.text) ?? [];
   if (owners.length !== 1) return null;
   const { fn, index } = owners[0];
-  // An exported function can be called with anything from elsewhere.
-  if (new RegExp(`export\\s+(?:const|function|async\\s+function)\\s+${fn}\\b|export\\s*\\{[^}]*\\b${fn}\\b`).test(source.text)) return null;
+  const owner = functions.get(fn);
+  // A function exported, assigned, declared twice or handed on as a value
+  // (`export { fn }`, `run(fn)`, `const alias = fn`) can be called with
+  // anything from elsewhere.
+  if (owner === undefined || owner.exported || assigned.has(fn) || declarations.get(fn) !== 1 ||
+      (references.get(fn) ?? 0) > 0) return null;
   const sites = calls.get(fn) ?? [];
   if (sites.length === 0) return null;
   const texts: string[] = [];
@@ -499,11 +567,7 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
       const callee = unwrap(node.expression);
       if (ts.isIdentifier(callee) && processRunners.has(callee.text)) {
         const program = node.arguments[0];
-        // `shell: true` turns the program into a shell line.
-        const shell = node.arguments.some((argument) => ts.isObjectLiteralExpression(argument) &&
-          argument.properties.some((property) => ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) &&
-            property.name.text === "shell" && property.initializer.kind !== ts.SyntaxKind.FalseKeyword));
-        if (program === undefined || !isStringLiteral(program) || shell ||
+        if (program === undefined || !isStringLiteral(program) || !shellProvenOff(node.arguments) ||
             isCodeRunner((program as ts.StringLiteral).text)) childProcess = true;
       }
     }
@@ -556,11 +620,11 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
 export const embeddedSpecifiers = (source: ts.SourceFile): string[] => {
   const found: string[] = [];
   const visit = (node: ts.Node): void => {
-    const text = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text
-      : ts.isTemplateExpression(node) ? [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join("")
-        : null;
-    if (text !== null) {
-      for (const match of text.matchAll(/\b(?:require|import)\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) found.push(match[1]);
+    // Read as code, the way the worker runs it, so `require /* x */ ("./y")`
+    // counts as it does there. Only text that can hold a load is parsed.
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && /require|import/.test(node.text)) {
+      const code = ts.createSourceFile("embedded.js", node.text, ts.ScriptTarget.Latest, false);
+      if (!hasParseErrors(code)) found.push(...importSpecifiersOf(code));
     }
     ts.forEachChild(node, visit);
   };

@@ -326,6 +326,14 @@ test("a followed product file that loads by a computed name fails the analysis; 
     'import { Worker } from "node:worker_threads";\nexport const helper = (source) => new Worker(source, { eval: true });\n',
     'import { Worker } from "node:worker_threads";\nconst source = "require(process.env.PLUGIN)";\nexport const helper = () => new Worker(source, { eval: true });\n',
     'import { Worker } from "node:worker_threads";\nexport const helper = (name) => new Worker(`require("./${name}.js")`, { eval: true });\n',
+    // A source that is reassigned, or a wrapper handed on, is not known.
+    'import { Worker } from "node:worker_threads";\nlet source = "0";\nsource = process.env.CODE;\nexport const helper = () => new Worker(source, { eval: true });\n',
+    'import { Worker } from "node:worker_threads";\nconst run = (code) => new Worker(code, { eval: true });\nrun("0");\nexport const helper = run;\n',
+    // A shell the options turn on, by a string key or through a variable.
+    'import { execFile } from "node:child_process";\nexport const helper = (args) => execFile("git", args, { "shell": true });\n',
+    'import { execFile } from "node:child_process";\nconst options = { shell: true };\nexport const helper = (args) => execFile("git", args, options);\n',
+    // Two arguments: the second may be the options.
+    'import { execFile } from "node:child_process";\nexport const helper = (args) => execFile("git", args);\n',
     // Parenthesised, or handed on as a value: the loader escapes.
     "export const helper = (name) => (module.require)(name);\n",
     "const load = module.require.bind(module);\nexport const helper = (name) => load(name);\n",
@@ -345,7 +353,7 @@ test("a followed product file that loads by a computed name fails the analysis; 
   // A literal, non-runner program and an inline worker run nothing of the
   // repository by name; what the worker's source requires is followed.
   for (const text of [
-    'import { execFile } from "node:child_process";\nimport { promisify } from "node:util";\nconst run = promisify(execFile);\nexport const helper = (args) => run("git", args);\n',
+    'import { execFile } from "node:child_process";\nimport { promisify } from "node:util";\nconst run = promisify(execFile);\nexport const helper = (args) => run("git", args, { cwd: "." });\n',
     'import { isBuiltin } from "node:module";\nexport const helper = (name) => isBuiltin(name);\n',
   ]) {
     assert.equal(slice([change("lib/leaf.ts")], helper(text)).status, "analysed", text);
@@ -359,7 +367,7 @@ test("a followed product file that loads by a computed name fails the analysis; 
   })).status, "failed");
   const inline = tree({
     "lib/helper.ts":
-      'import { Worker } from "node:worker_threads";\nconst source = `const { x } = require("./workerDep.js");`;\n' +
+      'import { Worker } from "node:worker_threads";\nconst source = `const { x } = require /* the dep */ ("./workerDep.js");`;\n' +
       "export const helper = () => new Worker(source, { eval: true });\n",
     "lib/workerDep.js": "exports.x = 1;\n",
   });
