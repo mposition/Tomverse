@@ -187,56 +187,17 @@ export type CodeFacts = {
 /** Facts read from the syntax tree, so the same words in a comment or string do not count. */
 export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   const facts: CodeFacts = { runtimeLoader: false, computedCall: false, computedEnv: false, appSettingAccess: false };
-  // A `require` the enclosing block itself defines as a function (an
-  // assertion helper, say) is that, not the module loader: a function
-  // declaration, or a variable whose value is a function or arrow written
-  // there. Any other binding of the name anywhere in the file -- a parameter,
-  // an import, a destructured or caught name, a variable bound to anything
-  // else (`module.require.bind(module)`) -- may be the loader and may shadow
-  // such a function, so then every computed `require` call counts as one.
-  // `createRequire` is caught on its own below.
-  const isFunctionValue = (node: ts.Expression | undefined) =>
-    node !== undefined && (ts.isArrowFunction(node) || ts.isFunctionExpression(node));
-  let otherBinding = false;
-  const bindings = (node: ts.Node): void => {
-    const binds = ts.isParameter(node) || ts.isVariableDeclaration(node) || ts.isBindingElement(node) ||
-      ts.isImportSpecifier(node) || ts.isImportClause(node) || ts.isNamespaceImport(node) ||
-      ts.isImportEqualsDeclaration(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node) ||
-      ts.isFunctionExpression(node) || ts.isEnumDeclaration(node) || ts.isModuleDeclaration(node);
-    const name = binds ? (node as { name?: ts.Node }).name : undefined;
-    if (name !== undefined && ts.isIdentifier(name) && name.text === "require" &&
-        !(ts.isVariableDeclaration(node) && isFunctionValue(node.initializer))) {
-      otherBinding = true;
-    }
-    // A name that is assigned again is whatever it was last given.
-    if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) && node.left.text === "require" &&
-        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-      otherBinding = true;
-    }
-    ts.forEachChild(node, bindings);
-  };
-  bindings(source);
-  const scopes: boolean[] = [];
-  const definesRequireIn = (statements: ts.NodeArray<ts.Statement>) =>
-    !otherBinding &&
-    statements.some((statement) =>
-      (ts.isFunctionDeclaration(statement) && statement.name?.text === "require") ||
-      // Only a `const`: a `let` or `var` may be given something else later.
-      (ts.isVariableStatement(statement) && (statement.declarationList.flags & ts.NodeFlags.Const) !== 0 &&
-        statement.declarationList.declarations.some((d) =>
-          ts.isIdentifier(d.name) && d.name.text === "require" && isFunctionValue(d.initializer))));
   const visit = (node: ts.Node): void => {
-    const scope = ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node)
-      ? definesRequireIn(node.statements) : null;
-    if (scope !== null) scopes.push(scope);
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       if (callee.kind === ts.SyntaxKind.ImportKeyword && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
-      if (ts.isIdentifier(callee) && callee.text === "require" && !scopes.includes(true) &&
-          !isStringLiteral(node.arguments[0])) {
+      // `require(name)` and `module.require(name)`, whatever `require` is bound
+      // to here: a local helper of that name is still read as the loader.
+      const requireCall = (ts.isIdentifier(callee) && callee.text === "require") ||
+        (ts.isPropertyAccessExpression(callee) && callee.name.text === "require");
+      if (requireCall && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
       // A call through an element access -- `table[name]()` or `table["gate"]()`
@@ -262,7 +223,6 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
       facts.computedEnv = true;
     }
     ts.forEachChild(node, visit);
-    if (scope !== null) scopes.pop();
   };
   visit(source);
   return facts;

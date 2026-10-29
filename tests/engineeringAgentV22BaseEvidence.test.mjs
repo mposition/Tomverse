@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import test from "node:test";
 
+import { isTextGate } from "../lib/agentControlPlaneSlice.ts";
 import { engineeringAgentV22DeployExclusion,
+  engineeringAgentV22UnreadText,
   loadEngineeringAgentV22BaseEvidence } from
   "../lib/engineeringAgentV22BaseEvidence.ts";
 import { gitObjectId } from "../lib/engineeringAgentTreeVerify.ts";
@@ -87,6 +90,16 @@ test("the repository's own .dockerignore keeps the runtime-read tests in the ima
     ["tests/unit.test.mjs", "playwright.admin.config.ts", ...reincluded]);
   assert.deepEqual(excluded, ["tests/unit.test.mjs",
     "playwright.admin.config.ts"]);
+});
+
+// The slice fails the analysis on a text gate with no text, so one under a
+// path the evidence leaves unread would send every change to T2.
+test("no text gate sits where the evidence reads no text", () => {
+  const paths = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+    .split("\0").filter(Boolean);
+  const unread = engineeringAgentV22UnreadText(readFileSync(".dockerignore", "utf8"), paths);
+  assert.ok(unread);
+  assert.deepEqual(paths.filter((path) => isTextGate(path) && unread.has(path)), []);
 });
 
 test("base evidence admits exact image bytes and the base build's exclusions", async () => {

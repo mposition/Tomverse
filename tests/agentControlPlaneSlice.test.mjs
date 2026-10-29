@@ -298,13 +298,12 @@ test("imports are followed through test helpers, and a followed file that cannot
 test("a followed product file that loads by a computed name fails the analysis; a gate script's own computed load does not", () => {
   const helper = (text) => tree({ "lib/helper.ts": text });
   assert.equal(slice([change("lib/leaf.ts")], helper("export const helper = (name) => import(name);\n")).status, "failed");
-  // An assertion helper that happens to be called `require` loads nothing.
-  assert.equal(
-    slice([change("lib/leaf.ts")], helper("const require = (ok, why) => { if (!ok) throw new Error(why); };\nexport const helper = (x) => require(x > 0, `x ${x}`);\n")).status,
-    "analysed",
-  );
-  // ... but only where that function encloses the call, and only a function written there.
+  // Every computed `require` call is the loader, whatever the name is bound to,
+  // and so is `module.require(name)`.
   for (const text of [
+    "const require = (ok, why) => { if (!ok) throw new Error(why); };\nexport const helper = (x) => require(x > 0, `x ${x}`);\n",
+    "function require(name) { return module.require(name); }\nexport const helper = () => require(process.argv[2]);\n",
+    "export const helper = (name) => module.require(name);\n",
     "function check(require) { return require; }\nexport const helper = (name) => require(name);\n",
     "export const helper = (require, name) => require(name);\n",
     "var require = module.require.bind(module);\nexport const helper = (name) => require(name);\n",
