@@ -194,6 +194,8 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     ".github/actions/one/action.yml": "runs:\n  using: composite\n  steps:\n    - with:\n        paths: [docs/listed/one.json]\n",
     "docs/globbed/g.json": "{}\n",
     "docs/listed/one.json": "{}\n",
+    "scripts/ops/check.ps1": "$allow = Get-Content .\\docs\\ops\\allowlist.json\n",
+    "docs/ops/allowlist.json": "[]\n",
     "docs/inputs/base.json": "{}\n",
     "docs/deep/top.json": "{}\n",
     "docs/deep/a/b.json": "{}\n",
@@ -207,6 +209,7 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     "docs/image/seed.json",
     "docs/inputs/base.json",
     "docs/listed/one.json",
+    "docs/ops/allowlist.json",
   ];
   assert.deepEqual(
     [...slice([...read, "docs/never/x.json"].map((path) => change(path, { newText: "{}\n" })), inputs).slicePaths].sort(),
@@ -342,6 +345,12 @@ test("adding a configuration name the control plane reads, or any AppSetting key
   for (const name of ["GATE_SHELL_MODE", "GATE_ONLY_MODE"]) {
     assert.ok(slice([change(outside, { addedText: `if (process.env.${name}) {}` })], shell).slicePaths.has(outside), name);
   }
+  // So does one a test helper a gate imports reads.
+  const helped = tree({
+    "scripts/check.mjs": 'import { mode } from "../tests/support/mode.mjs";\nexport const check = mode;\n',
+    "tests/support/mode.mjs": "export const mode = () => process.env.HELPER_GATE_MODE;\n",
+  });
+  assert.ok(slice([change(outside, { addedText: "if (process.env.HELPER_GATE_MODE) {}" })], helped).slicePaths.has(outside));
   assert.deepEqual([...environmentNames('process.env.FOO_KEY process.env["BAR"]')].sort(), ["BAR", "FOO_KEY"]);
 });
 

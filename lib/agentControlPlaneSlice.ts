@@ -68,7 +68,8 @@ export const isTextGate = (path: string) =>
     /(?:^|\/)Dockerfile[^/]*$/.test(path) || path === "package.json" ||
     /^(?:\.railway\/.+|railway[^/]*)\.(?:json|toml)$/.test(path));
 
-const TEXT_PATH = /[A-Za-z0-9_.@*?{},[\]-]+(?:\/[A-Za-z0-9_.@*?{},[\]-]+)+/g;
+// A forward or back slash separates segments: PowerShell spells `.\docs\x.json`.
+const TEXT_PATH = /[A-Za-z0-9_.@*?{},[\]-]+(?:[/\\][A-Za-z0-9_.@*?{},[\]-]+)+/g;
 const TRIGGER_FILTER = /^(\s*)(?:paths|paths-ignore|branches|branches-ignore|tags|tags-ignore):(.*)$/;
 
 const globPattern = (glob: string) => {
@@ -717,7 +718,7 @@ const gateSlice = (graph: Graph, paths: readonly string[]) => {
       }
     }
   }
-  return { slice: new Set([...followed, ...named].filter(isProduct)), problems };
+  return { slice: new Set([...followed, ...named].filter(isProduct)), followed, problems };
 };
 
 /**
@@ -734,12 +735,15 @@ export const computeControlPlaneSlice = (input: {
 }): SliceResult => {
   const base = buildGraph(input.baseFiles);
   if (base.problems.length > 0) return { status: "failed", problems: base.problems };
-  const { slice: baseSlice, problems: baseProblems } = gateSlice(base, input.baseFiles.map((file) => file.path));
+  const { slice: baseSlice, followed: baseFollowed, problems: baseProblems } =
+    gateSlice(base, input.baseFiles.map((file) => file.path));
   if (baseProblems.length > 0) return { status: "failed", problems: baseProblems };
 
+  // The names every file the gates run reads -- gates, and every file followed
+  // from them, test helpers included -- and every file of the slice.
   const names = new Set<string>(base.appSettingKeys);
   for (const file of input.baseFiles) {
-    if (isRuntimeControlPlane(file.path) || isGateOutsideRuntime(file.path) || baseSlice.has(file.path)) {
+    if (isRuntimeControlPlane(file.path) || baseFollowed.has(file.path) || baseSlice.has(file.path)) {
       for (const name of environmentNames(file.text)) names.add(name);
     }
     // A shell, Dockerfile or workflow reads `$NAME` / `${NAME}` / `${{ env.NAME }}`;
