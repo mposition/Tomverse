@@ -307,6 +307,13 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
       }
     }
     if (ts.isIdentifier(node) && node.text === "createRequire") facts.runtimeLoader = true;
+    // Code run from text: `eval` in any use (`(0, eval)(x)` too), and the
+    // Function constructor called or constructed.
+    if (ts.isIdentifier(node) && node.text === "eval" && !notValues.has(node)) facts.runtimeLoader = true;
+    if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && ts.isIdentifier(unwrap(node.expression)) &&
+        /^(?:Function|AsyncFunction|GeneratorFunction|AsyncGeneratorFunction)$/.test((unwrap(node.expression) as ts.Identifier).text)) {
+      facts.runtimeLoader = true;
+    }
     if (ts.isPropertyAccessExpression(node)) {
       if (ts.isIdentifier(node.expression) && node.expression.text === "require") facts.runtimeLoader = true;
       if (ts.isMetaProperty(node.expression) && node.name.text === "glob") facts.runtimeLoader = true;
@@ -338,7 +345,8 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
  */
 const isCodeRunner = (program: string) => {
   const base = (program.split(/[\\/]/).pop() ?? "").toLowerCase().replace(/\.(?:exe|cmd|bat|com|ps1|sh)$/, "");
-  return /^(?:node(?:js)?\d*|tsx|ts-node|npx|npm|pnpm|yarn|bun|deno|bash|sh|zsh|dash|ksh|fish|pwsh|powershell|cmd|python[\d.]*|perl|ruby|php|env|sudo|xargs|nohup|time|timeout|nice)$/.test(base);
+  // A runner missing from this list is a gap; the policy note records it.
+  return /^(?:node(?:js)?\d*|tsx|ts-node|vite-node|nodemon|npx|npm|pnpm|pnpx|yarn|corepack|bun|bunx|deno|bash|sh|zsh|dash|ksh|fish|pwsh|powershell|cmd|python[\d.]*|uv|uvx|pipx|poetry|pipenv|perl|ruby|php|java|env|sudo|doas|xargs|nohup|time|timeout|nice|exec)$/.test(base);
 };
 const SAFE_MODULE_IMPORTS = new Set(["isBuiltin", "builtinModules"]);
 
@@ -555,14 +563,17 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const which = builtin(node.moduleSpecifier.text);
       const clause = node.importClause;
-      if (which !== null) {
+      // A type-only import binds no value.
+      if (which !== null && !clause?.isTypeOnly) {
         const named = clause?.namedBindings && ts.isNamedImports(clause.namedBindings)
           ? clause.namedBindings.elements : null;
         if (clause?.name !== undefined || named === null) {
           // A default or namespace import hands on the whole builtin.
           if (clause !== undefined) mark(which);
         } else {
-          for (const element of named) judge(which, (element.propertyName ?? element.name).text, element.name.text);
+          for (const element of named) {
+            if (!element.isTypeOnly) judge(which, (element.propertyName ?? element.name).text, element.name.text);
+          }
         }
       }
     }
@@ -649,13 +660,17 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
       allowed.add(node.name);
       if (node.propertyName !== undefined) allowed.add(node.propertyName);
     }
-    if (ts.isVariableDeclaration(node)) allowed.add(node.name);
-    if (ts.isCallExpression(node)) {
-      allowed.add(unwrap(node.expression));
-      if (ts.isIdentifier(node.expression) && node.expression.text === "promisify" && node.arguments[0] !== undefined) {
-        allowed.add(unwrap(node.arguments[0]));
+    if (ts.isVariableDeclaration(node)) {
+      allowed.add(node.name);
+      // Only `const run = promisify(execFile)` -- whose alias is tracked --
+      // may take a runner; `promisify(execFile)("node", …)` hands it on.
+      if (ts.isIdentifier(node.name) && node.initializer !== undefined && ts.isCallExpression(node.initializer) &&
+          ts.isIdentifier(node.initializer.expression) && node.initializer.expression.text === "promisify" &&
+          node.initializer.arguments[0] !== undefined) {
+        allowed.add(unwrap(node.initializer.arguments[0]));
       }
     }
+    if (ts.isCallExpression(node)) allowed.add(unwrap(node.expression));
     if (ts.isNewExpression(node)) allowed.add(node.expression);
     if (ts.isIdentifier(node) && !allowed.has(node)) {
       if (processRunners.has(node.text)) childProcess = true;

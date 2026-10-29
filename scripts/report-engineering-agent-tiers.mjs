@@ -178,7 +178,9 @@ for (const commit of commits) {
     ? analyseCredentialReachability({ workflows, exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, cacheIsolationRecorded: true })
     : blind;
   if (isolationRecorded) tally.cacheIsolationApplied += 1;
-  const slice = unreadOrNull === null ? { status: "failed" } : computeControlPlaneSlice({ baseFiles, changes });
+  const slice = unreadOrNull === null
+    ? { status: "failed", problems: [{ path: ".dockerignore", specifier: null, problem: "dockerignore_unreadable" }] }
+    : computeControlPlaneSlice({ baseFiles, changes });
   const lock = JSON.parse(text(listing.find((entry) => entry.path === "package-lock.json")?.oid ?? "") || "{}");
   const installedVersions = Object.fromEntries(
     Object.keys(CONVENTION_VERSIONS).map((name) => [name, lock.packages?.[`node_modules/${name}`]?.version ?? null]),

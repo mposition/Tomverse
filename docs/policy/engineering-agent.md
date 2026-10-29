@@ -904,8 +904,9 @@ v22 코드 작업이 공개 PR이 될 수 없다. 이 버전은 규칙을 지우
    파일이 계산된 이름으로 모듈을 불러옴(`require`·`x.require`·`x["require"]`를 바로 부르지
    않고 값으로 넘기거나 `module`을 값으로 넘기는 것, `node:module`의 `isBuiltin`·
    `builtinModules` 밖 사용, `vm`·`cluster`, 경로를 받는 `Worker`, 리터럴이 아니거나 코드
-   실행기인 자식 프로세스, `exec`·`fork`도 같다. 소스가 그 파일 안에 있는 `eval: true` worker는
-   그 소스의 `require("…")`를 따라간다), 따라간 코드나 실행 게이트의 본문이 증거에 없거나
+   실행기인 자식 프로세스, `exec`·`fork`, `eval`과 `Function` 생성자도 같다. 소스가 그 파일
+   안에 있는 `eval: true` worker는 그 소스의 `require("…")`를 따라간다. 코드 실행기 목록에
+   없는 실행기는 알려진 한계다), 따라간 코드나 실행 게이트의 본문이 증거에 없거나
    파싱되지 않음. 받아들인 위험: import 없이 framework 관례로 등록되는 파일(`app/**`의
    route·page)은 게이트가 닿지 않으면 slice가 아니다. 그런 파일이 공유 DB·프로세스 상태로
    통제 평면에 영향을 줄 수 있다는 점은 버전 6 승인이 받아들인 것이고, T1이어도 PR은 사람이

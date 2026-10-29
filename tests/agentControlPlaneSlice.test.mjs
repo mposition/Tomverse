@@ -337,6 +337,12 @@ test("a followed product file that loads by a computed name fails the analysis; 
     'import { Worker } from "node:worker_threads";\nfunction run(code) { for (code of [process.env.CODE]) {} return new Worker(code, { eval: true }); }\nrun("0");\nexport const helper = () => 1;\n',
     'export function helper(path) { return new Worker(path); }\nimport { Worker } from "node:worker_threads";\n',
     'export function helper(p) { return execFile("node", [p], { cwd: "." }); }\nimport { execFile } from "node:child_process";\n',
+    // A promisified runner called on the spot; code run from text.
+    'import { execFile } from "node:child_process";\nimport { promisify } from "node:util";\nexport const helper = (p) => promisify(execFile)("node", [p], { cwd: "." });\n',
+    "export const helper = (code) => eval(code);\n",
+    "export const helper = (code) => (0, eval)(code);\n",
+    "export const helper = (code) => new Function(code)();\n",
+    'import { execFile } from "node:child_process";\nexport const helper = (p) => execFile("uv", ["run", p], { cwd: "." });\n',
     // A parameter shadowing a const of the same name; options before a callback.
     'import { Worker } from "node:worker_threads";\nconst source = "0";\nexport const helper = (source) => new Worker(source, { eval: true });\n',
     'import { execFile } from "node:child_process";\nexport const helper = () => execFile("git", { shell: true }, (error) => error);\n',
