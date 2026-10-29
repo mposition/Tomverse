@@ -121,7 +121,9 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   const text = await request.text().catch(() => null);
   // The verdicts are the one large body (up to 500 candidates with two short
   // reasons each); every other phase keeps the 16 KiB limit below.
-  if (text === null || text.length > 1024 * 1024) return { status: 400, body: { error: "invalid_request" } };
+  // 4 MiB holds the largest record the schema allows (500 verdicts, each with
+  // eight 512-character paths and two 300-character reasons, is about 3 MB).
+  if (text === null || text.length > 4 * 1024 * 1024) return { status: 400, body: { error: "invalid_request" } };
   // A large body that is not the verdicts is refused before it is parsed; the
   // check after parsing is the real guard (a verdicts body this misses is refused anyway).
   if (text.length > 16 * 1024 && !/"phase"\s*:\s*"verdicts"/.test(text)) return { status: 400, body: { error: "invalid_request" } };
@@ -147,7 +149,8 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
       if (read.status !== "ok") return { status: 503, body: { error: "candidates_unread" } };
       const candidates = read.candidates
         .filter((candidate) => qaReleaseTrainVerdictWanted(candidate.status) && candidate.mergeCommitSha)
-        // Newest first, no more than one verdict record holds.
+        // Newest merged first, no more than one verdict record holds.
+        .sort((a, b) => Date.parse(b.mergedAt) - Date.parse(a.mergedAt))
         .slice(0, QA_RELEASE_TRAIN_VERDICTS_MAX)
         .map((candidate) => ({
           number: candidate.number,

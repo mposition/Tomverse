@@ -25,6 +25,8 @@ import type { QaReleaseTrainModelDecision } from "@/lib/qaReleaseTrainVerdictCor
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
 const PAGE_PATH = "/admin/qa-release?tab=train";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
+/** The hidden route takes at most this many numbers in one request. */
+const HIDE_BATCH = 200;
 
 const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   available: "bg-emerald-400/15 text-emerald-300",
@@ -156,17 +158,24 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
     setHiding(typeof number === "number" ? number : "several");
     setNotice(null);
     try {
-      const response = await adminFetch(`${API}/hidden`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(typeof number === "number" ? { number, hidden: hide } : { numbers: number, hidden: true }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { result?: unknown };
-      if (!response.ok || !Array.isArray(payload.result)) {
-        setNotice({ tone: "error", text: m.trainCargoHideFailed });
-        return;
+      // Several go in the route's batches of at most HIDE_BATCH, one after another.
+      const bodies =
+        typeof number === "number"
+          ? [{ number, hidden: hide }]
+          : Array.from({ length: Math.ceil(number.length / HIDE_BATCH) }, (_, i) => ({ numbers: number.slice(i * HIDE_BATCH, (i + 1) * HIDE_BATCH), hidden: true }));
+      for (const body of bodies) {
+        const response = await adminFetch(`${API}/hidden`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { result?: unknown };
+        if (!response.ok || !Array.isArray(payload.result)) {
+          setNotice({ tone: "error", text: m.trainCargoHideFailed });
+          return;
+        }
+        setHidden(new Set(payload.result as number[]));
       }
-      setHidden(new Set(payload.result as number[]));
     } catch {
       setNotice({ tone: "error", text: m.trainCargoHideFailed });
     } finally {

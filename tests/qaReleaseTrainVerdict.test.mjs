@@ -205,6 +205,16 @@ test("the git port finds a change main carries under another commit, and names w
     git("switch", "--quiet", "develop");
     git("merge", "--quiet", "--no-ff", "-m", "Merge pull request #13 from x/p13", "p13");
     const modeOnly = git("rev-parse", "HEAD");
+    // #14 changes a binary file main does not have yet.
+    const binary = (() => {
+      git("switch", "--quiet", "-c", "p14", "develop");
+      writeFileSync(join(repo, "logo.png"), Buffer.from([0, 1, 2, 3]));
+      git("add", ".");
+      git("commit", "--quiet", "-m", "p14");
+      git("switch", "--quiet", "develop");
+      git("merge", "--quiet", "--no-ff", "-m", "Merge pull request #14 from x/p14", "p14");
+      return git("rev-parse", "HEAD");
+    })();
     // main got #11 with other lines around it, through a release of its own.
     git("switch", "--quiet", "main");
     git("switch", "--quiet", "-c", "release/x");
@@ -226,6 +236,13 @@ test("the git port finds a change main carries under another commit, and names w
     assert.deepEqual(gap.gap, [{ path: "b.ts", missing: ["export const notYet = true;"], leftOnMain: [] }]);
     const three = await port.analyse({ number: 13, title: "", mergeCommitSha: modeOnly, mergedAt: "2026-10-20T00:02:00Z", mainPullRequest: null });
     assert.equal(qaReleaseTrainContentGap(three.changed).verdict.state, "differs");
+    // The binary is read as binary (numstat `-\t-\t<path>`), with no text read for it.
+    const four = await port.analyse({ number: 14, title: "", mergeCommitSha: binary, mergedAt: "2026-10-20T00:03:00Z", mainPullRequest: null });
+    assert.deepEqual(
+      four.changed.map((f) => [f.path, f.binary, f.mainText]),
+      [["logo.png", true, undefined]],
+    );
+    assert.equal(qaReleaseTrainContentGap(four.changed).verdict.state, "differs");
     // The release that touched a.ts after #11 merged.
     assert.deepEqual(await port.mainPullsTouching(["a.ts"], "2000-01-01T00:00:00Z"), [900]);
   } finally {
