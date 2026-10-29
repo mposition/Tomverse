@@ -471,6 +471,14 @@ test("adding a configuration name the control plane reads, or any AppSetting key
     "tests/support/mode.mjs": "export const mode = () => process.env.HELPER_GATE_MODE;\n",
   });
   assert.ok(slice([change(outside, { addedText: "if (process.env.HELPER_GATE_MODE) {}" })], helped).slicePaths.has(outside));
+  // And one an inline worker's source reads, however its quotes are escaped.
+  const workerReads = tree({
+    "lib/helper.ts":
+      'import { Worker } from "node:worker_threads";\n' +
+      "const source = \"const fs = require('node:fs'); console.log(process.env[\\\"WORKER_GATE_MODE\\\"]);\";\n" +
+      "export const helper = () => new Worker(source, { eval: true });\n",
+  });
+  assert.ok(slice([change(outside, { addedText: "if (process.env.WORKER_GATE_MODE) {}" })], workerReads).slicePaths.has(outside));
   // An AppSetting key a gate outside the app reads is protected too.
   const scripted = tree({
     "scripts/check.mjs": 'export const on = (db) => db.appSetting.findUnique({ where: { key: "gate.scriptSwitch" } });\n',

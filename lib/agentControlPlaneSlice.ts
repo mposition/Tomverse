@@ -979,6 +979,8 @@ type Graph = {
   named: Map<string, NamedPaths>;
   /** Code files outside the app with no text to read or that do not parse. */
   unreadable: Set<string>;
+  /** Per file, the environment names code embedded in its strings reads. */
+  embeddedNames: Map<string, Set<string>>;
   /** Code files that load a module by a computed name. */
   loaders: Set<string>;
   problems: SliceProblem[];
@@ -1041,6 +1043,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   const appSettingKeys = new Set<string>();
   const named = new Map<string, NamedPaths>();
   const loaders = new Set<string>();
+  const embeddedNames = new Map<string, Set<string>>();
   // What code embedded in a string requires (an inline worker's source).
   // Node resolves a worker's relative require from the working directory --
   // the repository root -- so a relative one is read from there and from the
@@ -1064,6 +1067,9 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
       for (const text of embeddedNamed.prefixes) own.prefixes.add(text);
       named.set(path, own);
       if (codeFacts(code).appSettingAccess) for (const key of keyLiterals(code)) appSettingKeys.add(key);
+      const names = embeddedNames.get(path) ?? new Set<string>();
+      for (const name of environmentNames(code.text)) names.add(name);
+      embeddedNames.set(path, names);
     }
     return unknown;
   };
@@ -1143,7 +1149,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     if (followEmbedded(file.path, source, targets)) loaders.add(file.path);
     edges.set(file.path, targets);
   }
-  return { edges, facts, appSettingKeys, named, unreadable, loaders, problems };
+  return { edges, facts, appSettingKeys, named, unreadable, loaders, embeddedNames, problems };
 };
 
 const isProduct = (path: string) => classifyPath(path) === "product";
@@ -1251,6 +1257,7 @@ export const computeControlPlaneSlice = (input: {
   for (const file of input.baseFiles) {
     if (isRuntimeControlPlane(file.path) || baseFollowed.has(file.path) || baseSlice.has(file.path)) {
       for (const name of environmentNames(file.text)) names.add(name);
+      for (const name of base.embeddedNames.get(file.path) ?? []) names.add(name);
     }
     // A shell, Dockerfile or workflow reads `$NAME` / `${NAME}` / `${{ env.NAME }}`;
     // PowerShell reads `$env:NAME` / `${env:NAME}`.
