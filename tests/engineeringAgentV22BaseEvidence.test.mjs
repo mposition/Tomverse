@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import test from "node:test";
 
+import { isTextGate } from "../lib/agentControlPlaneSlice.ts";
 import { engineeringAgentV22DeployExclusion,
+  engineeringAgentV22UnreadText,
   loadEngineeringAgentV22BaseEvidence } from
   "../lib/engineeringAgentV22BaseEvidence.ts";
 import { gitObjectId } from "../lib/engineeringAgentTreeVerify.ts";
@@ -14,6 +17,8 @@ const source = new Map([
   ["x.yml", "name: CI\non: pull_request\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n"],
   ["sample.json", '{"value":1}\n'],
   ["kept.test.mjs", "export const kept = true;\n"],
+  ["dropped.test.mjs", "export const dropped = true;\n"],
+  ["helper.mjs", "export const helper = true;\n"],
   ["security-regression-check.mjs",
     'read("tests/e2e/support/canonical-visual.ts");\n'],
   [".dockerignore",
@@ -26,6 +31,8 @@ const tree = [
   [".github/workflows/x.yml", "x.yml"],
   ["tests/fixtures/sample.json", "sample.json"],
   ["tests/kept.test.mjs", "kept.test.mjs"],
+  ["tests/dropped.test.mjs", "dropped.test.mjs"],
+  ["tests/support/helper.mjs", "helper.mjs"],
   ["scripts/security-regression-check.mjs", "security-regression-check.mjs"],
 ].map(([path, key]) => ({ path, mode: "100644", type: "blob",
   oid: gitObjectId("blob", Buffer.from(source.get(key))),
@@ -85,6 +92,16 @@ test("the repository's own .dockerignore keeps the runtime-read tests in the ima
     "playwright.admin.config.ts"]);
 });
 
+// The slice fails the analysis on a text gate with no text, so one under a
+// path the evidence leaves unread would send every change to T2.
+test("no text gate sits where the evidence reads no text", () => {
+  const paths = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+    .split("\0").filter(Boolean);
+  const unread = engineeringAgentV22UnreadText(readFileSync(".dockerignore", "utf8"), paths);
+  assert.ok(unread);
+  assert.deepEqual(paths.filter((path) => isTextGate(path) && unread.has(path)), []);
+});
+
 test("base evidence admits exact image bytes and the base build's exclusions", async () => {
   const result = await loadEngineeringAgentV22BaseEvidence(ports);
   assert.ok(result);
@@ -95,11 +112,12 @@ test("base evidence admits exact image bytes and the base build's exclusions", a
     file.path === "tests/fixtures/sample.json").text, "");
   assert.equal(result.baseFiles.find((file) =>
     file.path === "tests/kept.test.mjs").text, source.get("kept.test.mjs"));
-  // A test a change adds is excluded by the same base rules; a re-included
-  // one is not.
-  assert.deepEqual(result.deployExcluded(["tests/fixtures/sample.json",
-    "tests/new-feature.test.mjs", "tests/kept.test.mjs", "lib/new.ts"]),
-  ["tests/fixtures/sample.json", "tests/new-feature.test.mjs"]);
+  // A test body the image leaves out is not read; a test helper a gate
+  // script may import is, wherever its bytes come from.
+  assert.equal(result.baseFiles.find((file) =>
+    file.path === "tests/dropped.test.mjs").text, "");
+  assert.equal(result.baseFiles.find((file) =>
+    file.path === "tests/support/helper.mjs").text, source.get("helper.mjs"));
   assert.match(result.exclusionDigest, /^[0-9a-f]{64}$/);
   assert.equal(result.installedVersions.next, "16.3.8");
   assert.ok(result.policyDocuments.some((text) =>
@@ -162,7 +180,7 @@ test("a fetched blob must match its OID, and fetching is bounded", async () => {
     read: async () => { throw new Error("empty image"); },
     fetchBlob: async () => Buffer.from("forged"),
   }), null);
-  const many = Array.from({ length: 501 }, (_, index) => {
+  const many = Array.from({ length: 1001 }, (_, index) => {
     const text = `export const value${index} = ${index};\n`;
     const oid = gitObjectId("blob", Buffer.from(text));
     blobs.set(oid, Buffer.from(text));
@@ -176,7 +194,7 @@ test("a fetched blob must match its OID, and fetching is bounded", async () => {
       Promise.reject(new Error("absent")) : ports.read(path),
     fetchBlob: async (oid) => { calls += 1; return fetchBlob(oid); },
   }), null);
-  assert.equal(calls, 500);
+  assert.equal(calls, 1000);
 });
 
 test("vendored AMUX control-plane assets do not exhaust source-reading limits", async () => {

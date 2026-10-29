@@ -1581,12 +1581,11 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   `tests/agentCredentialReachability.test.mjs`. **workflow를 바꾸면 이 테스트의 base 결과
   고정값을 확인합니다** — 전체 금지가 풀리는 것은 사람 검토 제외와 cache 격리 기록뿐입니다.
 - **P1c(통제 평면 slice)**: `lib/agentControlPlaneSlice.ts`,
-  `tests/agentControlPlaneSlice.test.mjs`. **배포 이미지에 들어가는 모든 제품 파일이
-  slice입니다** — 이미지가 트리 전체로 만들어지고 런타임 코드가 조립한 경로로 파일을
-  읽으므로, 읽히지 않는다는 것을 증명할 방법이 없습니다. 그래서 지금은 제품 파일을
-  건드리는 모든 변경이 T2입니다. `DEPLOY_EXCLUDED_PREFIXES`는 **이미지의 실제 내용을
-  확인하는 검사가 생기기 전까지 비어 있어야 하며** 테스트가 강제합니다. 런타임 통제 평면
-  코드에 동적 로딩을 넣으면 분석 자체가 실패합니다.
+  `tests/agentControlPlaneSlice.test.mjs`. **slice는 게이트가 닿는 제품 파일입니다**
+  (정책 v6 2항) — 런타임 통제 평면 파일에서 import를 따라(다른 파일을 거쳐도) 닿는 파일과,
+  그 파일들이 경로로 지목하는 파일입니다. 게이트를 부르기만 하는 파일이나 아무 게이트도
+  닿지 않는 제품 파일은 이미지에 있어도 slice가 아닙니다. 앱 런타임의 import가 하나라도
+  풀리지 않거나 런타임 통제 평면 코드에 동적 로딩을 넣으면 분석 자체가 실패합니다.
 - **P1h(모델 호출)**: `lib/engineeringAgentModelCall.ts`,
   `tests/engineeringAgentModelCall.test.mjs`. 모델 도구는 `read_file` 하나이고, 이 모듈은
   하위 프로세스·평가·네트워크 global·환경변수·로그를 쓰지 않습니다. 구문 검사는 정직한

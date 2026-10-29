@@ -23,7 +23,6 @@
  * Read-only: it reads Git objects and writes nothing.
  *
  *   npm run report:engineering-agent-tiers -- --limit 30 [--ref origin/develop] [--json]
- *   npm run report:engineering-agent-tiers -- --limit 30 --simulate-tests-excluded --json
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -35,6 +34,7 @@ import { AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS } from "../lib/agentCredentialRevi
 import { computeControlPlaneSlice } from "../lib/agentControlPlaneSlice.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
 import { TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
+import { engineeringAgentV22UnreadText } from "../lib/engineeringAgentV22BaseEvidence.ts";
 
 import { judgeAgentPrCacheIsolation } from "./agent-pr-cache-isolation-policy.mjs";
 
@@ -46,9 +46,6 @@ const option = (name, fallback) => {
 const limit = Number.parseInt(option("--limit", "30"), 10);
 const ref = option("--ref", "origin/develop");
 const asJson = args.includes("--json");
-// This is a read-only what-if report. It does not change the deployed image,
-// policy, or the runtime T1 authority list.
-const simulateTestsExcluded = args.includes("--simulate-tests-excluded");
 
 const git = (gitArgs, input) =>
   execFileSync("git", gitArgs, { encoding: "buffer", maxBuffer: 1024 * 1024 * 1024, input });
@@ -84,7 +81,9 @@ const treeListing = (commit, withTrees = false) =>
       return { path, mode, type, oid };
     });
 
-const TEXT_FOR_ANALYSIS = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md)$/;
+// The texts the app's base evidence reads, text gates included
+// (lib/engineeringAgentV22BaseEvidence.ts).
+const TEXT_FOR_ANALYSIS = /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/;
 
 const commits = git(["rev-list", "--first-parent", "--merges", `--max-count=${limit}`, ref])
   .toString("utf8")
@@ -111,13 +110,22 @@ for (const commit of commits) {
   const base = git(["rev-parse", `${commit}^1`]).toString("utf8").trim();
   const baseEntries = treeListing(base, true);
   const listing = baseEntries.filter((entry) => entry.type === "blob");
-  const wanted = listing.filter((entry) => TEXT_FOR_ANALYSIS.test(entry.path));
+  // The same texts the app's base evidence holds: none for what the base
+  // build leaves out (test helpers aside) or for the vendored AMUX tree.
+  const ignore = listing.find((entry) => entry.path === ".dockerignore");
+  const ignoreBlob = ignore === undefined ? undefined : readBlobs([ignore.oid]).get(ignore.oid);
+  const ignoreText = ignoreBlob === undefined ? null : decodeText(ignoreBlob);
+  // No readable .dockerignore: the app holds no evidence and the slice fails.
+  const unreadOrNull = engineeringAgentV22UnreadText(ignoreText, listing.map((entry) => entry.path));
+  const unread = unreadOrNull ?? new Set();
+  const read = (entry) => TEXT_FOR_ANALYSIS.test(entry.path) && !unread.has(entry.path);
+  const wanted = listing.filter(read);
   const blobs = readBlobs(wanted.map((entry) => entry.oid));
   const text = (oid) => {
     const content = blobs.get(oid);
     return content === undefined ? "" : (decodeText(content) ?? "");
   };
-  const baseFiles = listing.map((entry) => ({ path: entry.path, text: TEXT_FOR_ANALYSIS.test(entry.path) ? text(entry.oid) : "" }));
+  const baseFiles = listing.map((entry) => ({ path: entry.path, text: read(entry) ? text(entry.oid) : "" }));
 
   const raw = git(["diff-tree", "-r", "--no-renames", "-z", base, commit]).toString("utf8").split("\0").filter(Boolean);
   const diffs = [];
@@ -170,9 +178,9 @@ for (const commit of commits) {
     ? analyseCredentialReachability({ workflows, exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, cacheIsolationRecorded: true })
     : blind;
   if (isolationRecorded) tally.cacheIsolationApplied += 1;
-  const slice = computeControlPlaneSlice({ baseFiles, changes,
-    ...(simulateTestsExcluded ? { deployExcludedPrefixes: ["tests"] } : {}),
-  });
+  const slice = unreadOrNull === null
+    ? { status: "failed", problems: [{ path: ".dockerignore", specifier: null, problem: "dockerignore_unreadable" }] }
+    : computeControlPlaneSlice({ baseFiles, changes });
   const lock = JSON.parse(text(listing.find((entry) => entry.path === "package-lock.json")?.oid ?? "") || "{}");
   const installedVersions = Object.fromEntries(
     Object.keys(CONVENTION_VERSIONS).map((name) => [name, lock.packages?.[`node_modules/${name}`]?.version ?? null]),
@@ -253,7 +261,6 @@ for (const commit of commits) {
 
 const summary = {
   ref,
-  simulatedTestsExcluded: simulateTestsExcluded,
   pullRequests: tally.total,
   t1: tally.t1,
   t2: tally.t2,
