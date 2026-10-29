@@ -202,6 +202,22 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 .answer-content img, .image-turn img { display: block; max-width: 100%; height: auto; border-radius: 14px; }
 .image-turn { display: grid; gap: 16px; } .image-turn figure { margin: 0; min-width: 0; }
 .image-turn figcaption, .image-turn a { font-size: 12px; color: var(--mobile-muted); }
+.native-image-progress { position: relative; overflow: hidden; isolation: isolate; display: flex; min-height: 172px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 16px; border: 1px solid var(--mobile-border); border-radius: 16px; background: var(--mobile-soft); text-align: center; }
+.native-image-progress::before { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(105deg, transparent 20%, color-mix(in srgb, var(--mobile-action) 12%, transparent) 50%, transparent 80%); animation: native-image-sweep 2.8s ease-in-out infinite; }
+.native-image-progress-icon { width: 56px; height: 44px; color: var(--mobile-action); }
+.native-image-progress strong { display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 600; }
+.native-image-progress > span { color: var(--mobile-muted); font-size: 12px; line-height: 1.6; }
+.native-image-progress-dots { display: inline-flex; gap: 3px; }
+.native-image-progress-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--mobile-action); animation: native-image-dot 1.4s ease-in-out infinite; }
+.native-image-progress-dots i:nth-child(2) { animation-delay: .16s; }
+.native-image-progress-dots i:nth-child(3) { animation-delay: .32s; }
+.native-image-quality { display: grid; gap: 7px; margin-top: 12px; }
+.native-image-quality > span { width: fit-content; padding: 3px 8px; border-radius: 6px; color: var(--mobile-action); background: var(--mobile-soft); font-size: 11px; font-weight: 600; }
+.answer-content .native-image-quality p { margin: 0; font-size: 12px; line-height: 1.65; }
+.native-image-quality small { color: var(--mobile-muted); font-size: 11px; line-height: 1.6; }
+@keyframes native-image-sweep { from { transform: translateX(-110%); } to { transform: translateX(110%); } }
+@keyframes native-image-dot { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .native-image-progress::before, .native-image-progress-dots i { animation: none; } .native-image-progress-dots i { opacity: .7; } }
 .generated-file { border-color: var(--mobile-border); background: var(--mobile-paper); }
 
 .native-settings { padding-bottom: 12px; }
