@@ -695,14 +695,21 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
  * `require("x")` and `import("x")` written inside a string or template in
  * the file -- the source an inline worker runs -- read as import specifiers.
  */
-export const embeddedSpecifiers = (source: ts.SourceFile): string[] => {
-  const found: string[] = [];
+export const embeddedSpecifiers = (source: ts.SourceFile): string[] =>
+  embeddedCode(source).flatMap(importSpecifiersOf);
+
+/**
+ * Code written inside a string or template of the file -- the source an
+ * inline worker runs -- parsed the way the worker runs it, so a require with
+ * a comment before its parenthesis counts as it does there. Only text that can hold
+ * a load, and so reach the file system or a setting, is parsed.
+ */
+export const embeddedCode = (source: ts.SourceFile): ts.SourceFile[] => {
+  const found: ts.SourceFile[] = [];
   const visit = (node: ts.Node): void => {
-    // Read as code, the way the worker runs it, so `require /* x */ ("./y")`
-    // counts as it does there. Only text that can hold a load is parsed.
     if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && /require|import/.test(node.text)) {
       const code = ts.createSourceFile("embedded.js", node.text, ts.ScriptTarget.Latest, false);
-      if (!hasParseErrors(code)) found.push(...importSpecifiersOf(code));
+      if (!hasParseErrors(code)) found.push(code);
     }
     ts.forEachChild(node, visit);
   };
@@ -1042,11 +1049,21 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   // is the package's concern.
   const followEmbedded = (path: string, source: ts.SourceFile, targets: Set<string>) => {
     let unknown = false;
-    for (const specifier of embeddedSpecifiers(source)) {
-      const relative = specifier.startsWith("./") || specifier.startsWith("../");
-      const readings = [resolve(path, specifier), ...(relative ? [resolve("index.js", specifier)] : [])];
-      for (const reading of readings) if (reading !== null && reading !== "external") targets.add(reading);
-      if (relative && readings.every((reading) => reading === null)) unknown = true;
+    for (const code of embeddedCode(source)) {
+      for (const specifier of importSpecifiersOf(code)) {
+        const relative = specifier.startsWith("./") || specifier.startsWith("../");
+        const readings = [resolve(path, specifier), ...(relative ? [resolve("index.js", specifier)] : [])];
+        for (const reading of readings) if (reading !== null && reading !== "external") targets.add(reading);
+        if (relative && readings.every((reading) => reading === null)) unknown = true;
+      }
+      // The paths and settings the embedded code reads are the file's own, as
+      // any code's are; a path is read from the root as well as from the file.
+      const embeddedNamed = namedPaths(code);
+      const own = named.get(path) ?? { exact: new Set<string>(), prefixes: new Set<string>() };
+      for (const text of embeddedNamed.exact) own.exact.add(text);
+      for (const text of embeddedNamed.prefixes) own.prefixes.add(text);
+      named.set(path, own);
+      if (codeFacts(code).appSettingAccess) for (const key of keyLiterals(code)) appSettingKeys.add(key);
     }
     return unknown;
   };

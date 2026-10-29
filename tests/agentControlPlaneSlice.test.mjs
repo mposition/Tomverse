@@ -402,6 +402,15 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "lib/plugin.js": "exports.p = 1;\n",
   });
   assert.ok(slice([change("lib/plugin.js", { newText: "exports.p = 2;\n" })], fromRoot).slicePaths.has("lib/plugin.js"));
+  // What a worker's source reads by path is read through the file.
+  const reads = tree({
+    "lib/helper.ts":
+      'import { Worker } from "node:worker_threads";\n' +
+      'const source = `const fs = require("node:fs"); fs.readFileSync("./docs/rules.json");`;\n' +
+      "export const helper = () => new Worker(source, { eval: true });\n",
+    "docs/rules.json": "{}\n",
+  });
+  assert.ok(slice([change("docs/rules.json", { newText: "[]\n" })], reads).slicePaths.has("docs/rules.json"));
   // One that names no file either way cannot be followed.
   const nowhere = tree({
     "lib/helper.ts":
