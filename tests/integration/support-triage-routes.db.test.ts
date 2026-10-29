@@ -29,7 +29,8 @@ const clearRuns = async () => {
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageRun" ENABLE TRIGGER "SupportTriageRun_before_delete"`);
   }
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
+  // This suite only reads SupportTriageRun. Cascading a global audit truncate
+  // would cross into unrelated append-only AMUX history tables.
 };
 
 beforeEach(clearRuns);
