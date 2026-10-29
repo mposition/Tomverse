@@ -167,6 +167,13 @@ test("imports are followed through test helpers, and a followed file that cannot
   // The evidence holds no text for a test file the image leaves out.
   const unread = files.map((file) => (file.path === "tests/support/check.mjs" ? { ...file, text: "" } : file));
   assert.equal(slice([change("lib/leaf.ts")], unread).status, "failed");
+  // Nor for the vendored AMUX server: reaching it fails; leaving it alone does not.
+  const vendored = tree({
+    "scripts/check.mjs": 'import { v } from "../vendor/amux/helper.mjs";\nexport const check = v;\n',
+    "vendor/amux/helper.mjs": "",
+  });
+  assert.equal(slice([change("lib/leaf.ts")], vendored).status, "failed");
+  assert.equal(slice([change("lib/leaf.ts")], tree({ "vendor/amux/helper.mjs": "" })).status, "analysed");
 });
 
 test("a followed product file that loads by a computed name fails the analysis; a gate script's own computed load does not", () => {
@@ -176,6 +183,11 @@ test("a followed product file that loads by a computed name fails the analysis; 
   assert.equal(
     slice([change("lib/leaf.ts")], helper("const require = (ok, why) => { if (!ok) throw new Error(why); };\nexport const helper = (x) => require(x > 0, `x ${x}`);\n")).status,
     "analysed",
+  );
+  // ... but only where that declaration encloses the call.
+  assert.equal(
+    slice([change("lib/leaf.ts")], helper("function check(require) { return require; }\nexport const helper = (name) => require(name);\n")).status,
+    "failed",
   );
   assert.equal(
     slice([change("lib/leaf.ts")], tree({ "scripts/check-locales.mjs": "export const load = (locale) => import(`../locales/${locale}.ts`);\n" })).status,

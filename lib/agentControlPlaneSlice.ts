@@ -80,24 +80,29 @@ export type CodeFacts = {
 /** Facts read from the syntax tree, so the same words in a comment or string do not count. */
 export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   const facts: CodeFacts = { runtimeLoader: false, computedCall: false, computedEnv: false, appSettingAccess: false };
-  // A file that declares its own `require` (an assertion helper, say) calls
-  // that, not the module loader; `createRequire` is caught on its own below.
-  let declaresRequire = false;
-  const declarations = (node: ts.Node): void => {
-    if ((ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
-        node.name !== undefined && ts.isIdentifier(node.name) && node.name.text === "require") {
-      declaresRequire = true;
-    }
-    ts.forEachChild(node, declarations);
-  };
-  declarations(source);
+  // A `require` declared in a scope enclosing the call (an assertion helper,
+  // say) is that, not the module loader. Only a parameter or a declaration
+  // directly in an enclosing block counts; any other shape is the loader.
+  // `createRequire` is caught on its own below.
+  const scopes: boolean[] = [];
+  const declaresRequireIn = (statements: ts.NodeArray<ts.Statement>) =>
+    statements.some((statement) =>
+      (ts.isFunctionDeclaration(statement) && statement.name?.text === "require") ||
+      (ts.isVariableStatement(statement) &&
+        statement.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === "require")));
   const visit = (node: ts.Node): void => {
+    const scope =
+      ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node) ? declaresRequireIn(node.statements)
+        : ts.isFunctionLike(node) ? node.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === "require")
+          : null;
+    if (scope !== null) scopes.push(scope);
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       if (callee.kind === ts.SyntaxKind.ImportKeyword && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
-      if (ts.isIdentifier(callee) && callee.text === "require" && !declaresRequire && !isStringLiteral(node.arguments[0])) {
+      if (ts.isIdentifier(callee) && callee.text === "require" && !scopes.includes(true) &&
+          !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
       // A call through an element access -- `table[name]()` or `table["gate"]()`
@@ -123,6 +128,7 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
       facts.computedEnv = true;
     }
     ts.forEachChild(node, visit);
+    if (scope !== null) scopes.pop();
   };
   visit(source);
   return facts;
@@ -478,13 +484,14 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   // rather than failing; a change that adds that file is read again in the
   // result tree. A file it names exactly (an allowlist, a baseline) steers it;
   // a directory it walks holds what it checks, which the check reads afresh.
-  // What cannot be read here -- no text in the evidence, or no parse -- fails
-  // the analysis only if a gate reaches it.
+  // What cannot be read here -- no text in the evidence (the vendored AMUX
+  // server, for one), or no parse -- fails the analysis only if a gate reaches
+  // it.
   const unreadable = new Set<string>();
   const loaders = new Set<string>();
   for (const [path, fileFacts] of facts) if (fileFacts.runtimeLoader) loaders.add(path);
   for (const file of files) {
-    if (!CODE_FILE.test(file.path) || isAppRuntimeCode(file.path) || file.path.startsWith("vendor/")) continue;
+    if (!CODE_FILE.test(file.path) || isAppRuntimeCode(file.path)) continue;
     const source = file.text === "" ? null : parse(file);
     if (source === null || hasParseErrors(source)) {
       unreadable.add(file.path);
