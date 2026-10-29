@@ -1781,6 +1781,7 @@ function ChatAppComponent({
             modelIds: request.modelIds,
             preset: request.preset,
             ...(request.prompt ? { prompt: request.prompt } : {}),
+            ...(request.edit ? { edit: true as const } : {}),
             assistantMessageId,
             ...(request.comparison ? { comparison: request.comparison } : {}),
           },
@@ -1810,6 +1811,9 @@ function ChatAppComponent({
                 ...(request.comparison ? { imageGroupModelIds: request.comparison.modelIds } : {}),
                 preset: request.preset,
                 ...(request.prompt ? { prompt: request.prompt } : {}),
+                // The photo is the one saved with the question; this only
+                // says to edit it.
+                ...(request.edit ? { edit: true } : {}),
               }),
               signal: controller.signal,
             }

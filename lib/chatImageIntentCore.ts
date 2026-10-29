@@ -1,5 +1,6 @@
 import type { ImageModelProfile } from "@/lib/imageModelRegistry";
 import {
+    IMAGE_EDIT_SOURCE_MEDIA_TYPES,
     IMAGE_QUALITY_BY_PRESET,
     type ImagePreset,
 } from "@/lib/imageGenerationPricing";
@@ -74,6 +75,11 @@ export type ChatImageDecision =
           modelId: string | null;
           preset: ImagePreset | null;
           prompt: string | null;
+          /**
+           * Change the photo attached to this message rather than draw a new
+           * image. Only ever true when the call was told a photo is attached.
+           */
+          edit: boolean;
       };
 
 /**
@@ -110,7 +116,8 @@ export const CHAT_IMAGE_ROUTING_CRITERIA = [
     "image=true when the user wants a picture made: draw, paint, generate, render or illustrate a photo, illustration, artwork, logo, poster, wallpaper, character, scene or similar visual, in any language.",
     "image=false for everything else, including:",
     "- questions about images or about how image generation works;",
-    "- describing, analysing or editing an attached or existing image;",
+    "- describing or analysing an attached or existing image;",
+    "- editing an attached image, unless an \"Attached photo\" section says it can be edited;",
     "- code or text that produces graphics (SVG, HTML/CSS, charts, plots, diagrams, ASCII art);",
     "- writing a prompt for another image tool;",
     "- messages that only mention a picture in passing.",
@@ -130,6 +137,7 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
     CHAT_IMAGE_ROUTING_CRITERIA,
     "",
     "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details, composition or quality, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\", \"regenerate this image in high quality\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
+    "An \"Attached photo\" section, when present, means the user sent a photo with this message and the listed models can edit it. A message that asks to change that photo -- resize, move, remove, add or recolour something in it, change its style or background, while keeping the rest -- is image=true and edit=true; the message itself is the edit instruction, so prompt is an empty string. A question about the photo, or a request to describe, analyse, translate or read it, is image=false. Without that section edit is always false.",
     "When image=false, fill modelId and preset with any listed value; they are ignored.",
 ].join("\n");
 
@@ -141,7 +149,9 @@ export const chatImageIntentPrompt = (text: string): string =>
 export const chatImageIntentUserMessage = (
     text: string,
     candidates: readonly ChatImageModelCandidate[],
-    previousImagePrompt: string | null = null
+    previousImagePrompt: string | null = null,
+    /** The message carries a photo the listed models can edit. */
+    attachedPhoto = false
 ): string =>
     [
         "Image models (credits per 1024x1024 image, by preset):",
@@ -161,6 +171,9 @@ export const chatImageIntentUserMessage = (
                   "",
               ]
             : []),
+        ...(attachedPhoto
+            ? ["Attached photo:", "The user attached a photo to this message.", ""]
+            : []),
         "Message:",
         chatImageIntentPrompt(text),
     ].join("\n");
@@ -174,8 +187,9 @@ export const chatImageIntentOutputSchema = (
         modelId: { type: "string" as const, enum: candidates.map((candidate) => candidate.id) },
         preset: { type: "string" as const, enum: [...PRESETS] },
         prompt: { type: "string" as const },
+        edit: { type: "boolean" as const },
     },
-    required: ["image", "modelId", "preset", "prompt"],
+    required: ["image", "modelId", "preset", "prompt", "edit"],
     additionalProperties: false as const,
 });
 
@@ -188,7 +202,13 @@ export const parseChatImageIntentOutput = (
     output: unknown,
     candidates: readonly ChatImageModelCandidate[],
     /** A rewrite is kept only when the call was shown a previous image. */
-    followUpAllowed = false
+    followUpAllowed = false,
+    /**
+     * The call was told a photo is attached. Then only an edit routes: a
+     * message sent with a photo that is not about changing it is answered by
+     * chat, which can see the photo.
+     */
+    attachedPhoto = false
 ): ChatImageDecision => {
     if (typeof output !== "object" || output === null) return { image: false };
     const value = output as {
@@ -196,8 +216,23 @@ export const parseChatImageIntentOutput = (
         modelId?: unknown;
         preset?: unknown;
         prompt?: unknown;
+        edit?: unknown;
     };
     if (value.image !== true) return { image: false };
+    const edit = attachedPhoto && value.edit === true;
+    if (attachedPhoto && !edit) return { image: false };
+    if (edit) {
+        const candidate = candidates.find((entry) => entry.id === value.modelId);
+        const preset =
+            candidate &&
+            typeof value.preset === "string" &&
+            (PRESETS as readonly string[]).includes(value.preset) &&
+            candidate.credits[value.preset as ImagePreset] !== undefined
+                ? (value.preset as ImagePreset)
+                : null;
+        // The message is the instruction; a rewrite is never taken for an edit.
+        return { image: true, modelId: candidate?.id ?? null, preset, prompt: null, edit: true };
+    }
     const rewrite =
         followUpAllowed && typeof value.prompt === "string" ? value.prompt.trim() : "";
     // Over the limit is refused, not cut: see CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS.
@@ -205,14 +240,14 @@ export const parseChatImageIntentOutput = (
     if (rewrite.length > CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS) return { image: false };
     const prompt = rewrite || null;
     const candidate = candidates.find((entry) => entry.id === value.modelId);
-    if (!candidate) return { image: true, modelId: null, preset: null, prompt };
+    if (!candidate) return { image: true, modelId: null, preset: null, prompt, edit: false };
     const preset =
         typeof value.preset === "string" &&
         (PRESETS as readonly string[]).includes(value.preset) &&
         candidate.credits[value.preset as ImagePreset] !== undefined
             ? (value.preset as ImagePreset)
             : null;
-    return { image: true, modelId: candidate.id, preset, prompt };
+    return { image: true, modelId: candidate.id, preset, prompt, edit: false };
 };
 
 /** The client's reading of the route's JSON; anything malformed is chat. */
@@ -243,7 +278,35 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
             typeof value.prompt === "string" && value.prompt.trim()
                 ? value.prompt.trim()
                 : null,
+        edit: (value as { edit?: unknown }).edit === true,
     };
+};
+
+/**
+ * Whether the message being sent carries a photo an edit could start from,
+ * by the type the request declares. Only an eligibility hint for asking the
+ * image-intent call: the image turn finds the photo from the saved message
+ * and refuses the edit when there is none.
+ */
+export const latestUserTurnHasImageAttachment = (
+    messages: readonly { role?: unknown; attachments?: unknown }[]
+): boolean => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== "user") continue;
+        return (
+            Array.isArray(message.attachments) &&
+            message.attachments.some(
+                (attachment) =>
+                    typeof attachment === "object" &&
+                    attachment !== null &&
+                    IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(
+                        String((attachment as { mediaType?: unknown }).mediaType ?? "").toLowerCase()
+                    )
+            )
+        );
+    }
+    return false;
 };
 
 /**
