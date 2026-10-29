@@ -63,10 +63,13 @@ export const isGateOutsideRuntime = (path: string) =>
  * choose when it runs, not what it reads.
  */
 export const isTextGate = (path: string) =>
-  classifyPath(path) === "control-plane" && !path.startsWith("vendor/") &&
+  !path.startsWith("vendor/") &&
+  // Any manifest's scripts may be what a gate runs, product packages' too.
+  (/(?:^|\/)package\.json$/.test(path) ||
+  (classifyPath(path) === "control-plane" &&
   (/^\.github\/(?:workflows|actions)\/.+\.ya?ml$/.test(path) || /\.(?:sh|ps1)$/.test(path) ||
-    /(?:^|\/)Dockerfile[^/]*$/.test(path) || /(?:^|\/)package\.json$/.test(path) ||
-    /^(?:\.railway\/.+|railway[^/]*)\.(?:json|toml)$/.test(path));
+    /(?:^|\/)Dockerfile[^/]*$/.test(path) ||
+    /^(?:\.railway\/.+|railway[^/]*)\.(?:json|toml)$/.test(path))));
 
 // A forward or back slash separates segments: PowerShell spells `.\docs\x.json`.
 const TEXT_PATH = /[A-Za-z0-9_.@*?{},[\]-]+(?:[/\\][A-Za-z0-9_.@*?{},[\]-]+)+/g;
@@ -143,6 +146,15 @@ export const textGatePaths = (path: string, text: string): { exact: Set<string>;
         if (/[*?{[]/.test(token)) globs.push(token);
         else exact.add(token);
       }
+    }
+    // A single segment can be a top-level directory it reads (`find docs`,
+    // `cp -r ./public out`); the caller treats every exact path as a directory
+    // as well. An absolute one (`/app`, the image root) is a destination, and a
+    // `key:` is YAML.
+    for (const word of line.split(/[\s"'`=(),;[\]{}|&<>]+/)) {
+      if (word === "" || word.startsWith("/") || word.endsWith(":") || word.startsWith("$")) continue;
+      const single = word.replace(/^(?:\.[/\\])+/, "").replace(/[/\\]+$/, "");
+      if (/^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(single)) exact.add(single);
     }
   }
   return { exact, globs };

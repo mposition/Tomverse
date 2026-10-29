@@ -36,7 +36,8 @@ const LOCK = JSON.stringify({ packages: { "": {}, "node_modules/react": {}, "nod
 const tree = (overrides = {}) => {
   const files = {
     "tsconfig.json": TSCONFIG,
-    "package.json": JSON.stringify({ name: "app", dependencies: { react: "19" } }),
+    // Not named after a directory: a manifest's words are read as paths.
+    "package.json": JSON.stringify({ name: "fixture", dependencies: { react: "19" } }),
     "package-lock.json": LOCK,
     "lib/amux/gate.ts": 'import { helper } from "@/lib/helper";\nexport const gate = () => process.env.AMUX_GATE_MODE === "on" && helper();\n',
     "lib/helper.ts": 'import { deep } from "./deep.js";\nexport const helper = () => deep();\n',
@@ -196,8 +197,14 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     "docs/listed/one.json": "{}\n",
     "scripts/ops/check.ps1": "$allow = Get-Content .\\docs\\ops\\allowlist.json\n",
     "docs/ops/allowlist.json": "[]\n",
-    "docker/runner/Dockerfile": "COPY docs/copied /app/docs/copied\n",
+    "docker/runner/Dockerfile": "COPY docs/copied /app/docs/copied\nWORKDIR /app\n",
     "docs/copied/inner/c.json": "{}\n",
+    // A single top-level directory a shell gate walks, and a product
+    // package's script that reads a file.
+    "scripts/walk.sh": "find ./locales -type f -exec cat {} \\;\n",
+    "locales/walked.json": "{}\n",
+    "packages/kit/package.json": '{"name":"kit","scripts":{"gen":"node gen.mjs docs/kit/seed.json"}}',
+    "docs/kit/seed.json": "{}\n",
     "docs/inputs/base.json": "{}\n",
     "docs/deep/top.json": "{}\n",
     "docs/deep/a/b.json": "{}\n",
@@ -211,8 +218,10 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     "docs/globbed/g.json",
     "docs/image/seed.json",
     "docs/inputs/base.json",
+    "docs/kit/seed.json",
     "docs/listed/one.json",
     "docs/ops/allowlist.json",
+    "locales/walked.json",
   ];
   assert.deepEqual(
     [...slice([...read, "docs/never/x.json"].map((path) => change(path, { newText: "{}\n" })), inputs).slicePaths].sort(),
