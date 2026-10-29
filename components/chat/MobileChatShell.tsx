@@ -1,5 +1,6 @@
 "use client";
 
+import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar } from "./ReviewStudioChrome";
 import "./review-studio.css";
@@ -169,6 +170,8 @@ type MobileChatShellProps = {
   selectedModels: string[];
   disabledPanels: string[];
   promptPayload: PromptPayload | null;
+  /** See ChatApp `sendEcho`: the question a send is still preparing. */
+  sendEcho?: PendingSendEcho | null;
   inputValue: string;
   setInputValue: (value: string) => void;
   personalizedPrompt?: string | null;
@@ -476,6 +479,7 @@ export function MobileChatShell({
   selectedModels,
   disabledPanels,
   promptPayload,
+  sendEcho: pendingSendEcho = null,
   inputValue,
   setInputValue,
   personalizedPrompt,
@@ -971,10 +975,15 @@ export function MobileChatShell({
     compare whatever else is on screen. Only the welcome surface asks the
     narrower question, and `lib/chatContentState.ts` owns the answer.
   */
+  // Only in the selection it was pressed in: leaving that conversation hides it.
+  const sendEcho =
+    pendingSendEcho?.ticket === conversationSelectionTicket ? pendingSendEcho.echo : null;
   const showsWelcomeSurface = shouldRenderWelcomeSurface({
     contentState: conversationContentState,
     hasConversationPrelude,
-  });
+  }) &&
+    // A send being prepared already has a question on screen.
+    !sendEcho;
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -1708,6 +1717,7 @@ export function MobileChatShell({
                   importedTranscript={importedTranscript}
                   modelId={modelId}
                   initialConversationId={currentChatId}
+                  sendEcho={sendEcho}
                   promptPayload={promptPayload}
                   isPanelDisabled={!singleTranscript && disabledPanels.includes(modelId)}
                   isGuestMode={isGuestMode}
