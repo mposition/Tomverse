@@ -318,6 +318,14 @@ test("a followed product file that loads by a computed name fails the analysis; 
     'import { execFile } from "node:child_process";\nexport const helper = (program) => execFile(program, []);\n',
     'import { execFile } from "node:child_process";\nimport { promisify } from "node:util";\nconst run = promisify(execFile);\nexport const helper = (p) => run("tsx", [p]);\n',
     'import { Worker } from "node:worker_threads";\nexport const helper = (path) => new Worker(path);\n',
+    // A runner by path or platform name, or a shell line.
+    'import { execFile } from "node:child_process";\nexport const helper = (p) => execFile("/usr/bin/node", [p]);\n',
+    'import { execFile } from "node:child_process";\nexport const helper = (p) => execFile("node.exe", [p]);\n',
+    'import { execFile } from "node:child_process";\nexport const helper = (line) => execFile("git", [line], { shell: true });\n',
+    // An inline worker whose source is not this file's, or loads by a computed name.
+    'import { Worker } from "node:worker_threads";\nexport const helper = (source) => new Worker(source, { eval: true });\n',
+    'import { Worker } from "node:worker_threads";\nconst source = "require(process.env.PLUGIN)";\nexport const helper = () => new Worker(source, { eval: true });\n',
+    'import { Worker } from "node:worker_threads";\nexport const helper = (name) => new Worker(`require("./${name}.js")`, { eval: true });\n',
     // Parenthesised, or handed on as a value: the loader escapes.
     "export const helper = (name) => (module.require)(name);\n",
     "const load = module.require.bind(module);\nexport const helper = (name) => load(name);\n",
@@ -342,6 +350,13 @@ test("a followed product file that loads by a computed name fails the analysis; 
   ]) {
     assert.equal(slice([change("lib/leaf.ts")], helper(text)).status, "analysed", text);
   }
+  // A runtime gate may start git; it may not load code into the app by name.
+  assert.equal(slice([change("lib/leaf.ts")], tree({
+    "lib/amux/git.ts": 'import { spawn } from "node:child_process";\nexport const git = (args) => spawn("git", args);\n',
+  })).status, "analysed");
+  assert.equal(slice([change("lib/leaf.ts")], tree({
+    "lib/amux/run.ts": 'import { runInThisContext } from "node:vm";\nexport const run = (code) => runInThisContext(code);\n',
+  })).status, "failed");
   const inline = tree({
     "lib/helper.ts":
       'import { Worker } from "node:worker_threads";\nconst source = `const { x } = require("./workerDep.js");`;\n' +

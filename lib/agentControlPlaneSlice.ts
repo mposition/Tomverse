@@ -201,6 +201,8 @@ export type CodeFacts = {
   appSettingAccess: boolean;
   /** Imports a builtin that loads or runs code by a name it is given. */
   loadingBuiltin: boolean;
+  /** Of those, one that loads code into this process (not a child process). */
+  inProcessLoad: boolean;
 };
 
 /** The objects that hold a module loader. */
@@ -250,6 +252,7 @@ const ESCAPING_HOSTS = new Set(["module"]);
 export const codeFacts = (source: ts.SourceFile): CodeFacts => {
   const facts: CodeFacts = {
     runtimeLoader: false, computedCall: false, computedEnv: false, appSettingAccess: false, loadingBuiltin: false,
+    inProcessLoad: false,
   };
   // The loader may only be called on the spot. A `require` reference that is
   // not the callee of a call -- `const load = module.require.bind(module)`,
@@ -322,16 +325,89 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
     ts.forEachChild(node, visit);
   };
   visit(source);
-  facts.loadingBuiltin = loadsThroughBuiltin(source);
+  const builtinUse = loadsThroughBuiltin(source);
+  facts.loadingBuiltin = builtinUse.inProcess || builtinUse.childProcess;
+  facts.inProcessLoad = builtinUse.inProcess;
   return facts;
 };
 
-/** Programs that run code they are handed, the repository's included. */
-const CODE_RUNNERS = new Set([
-  "node", "tsx", "ts-node", "npx", "npm", "pnpm", "yarn", "bun", "deno",
-  "bash", "sh", "zsh", "pwsh", "powershell", "cmd", "python", "python3",
-]);
+/**
+ * Programs that run code they are handed, the repository's included, by
+ * name, path or platform suffix (`/usr/bin/node`, `node.exe`, `python3.12`),
+ * and the wrappers that run another program (`env`, `sudo`).
+ */
+const isCodeRunner = (program: string) => {
+  const base = (program.split(/[\\/]/).pop() ?? "").toLowerCase().replace(/\.(?:exe|cmd|bat|com|ps1|sh)$/, "");
+  return /^(?:node(?:js)?\d*|tsx|ts-node|npx|npm|pnpm|yarn|bun|deno|bash|sh|zsh|dash|ksh|fish|pwsh|powershell|cmd|python[\d.]*|perl|ruby|php|env|sudo|xargs|nohup|time|timeout|nice)$/.test(base);
+};
 const SAFE_MODULE_IMPORTS = new Set(["isBuiltin", "builtinModules"]);
+
+/**
+ * The texts an inline worker's source argument can be: a literal, a `const`
+ * of the file bound to one, or a parameter of a function of the file whose
+ * every call in the file passes one of those. Null when any is something else.
+ */
+const workerSourceTexts = (source: ts.SourceFile, argument: ts.Expression): string[] | null => {
+  const literal = (node: ts.Expression) => {
+    const value = unwrap(node);
+    return ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value) ? value.text : null;
+  };
+  const constants = new Map<string, string | null>();
+  const parameters = new Map<string, { fn: string; index: number }[]>();
+  const calls = new Map<string, ts.CallExpression[]>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
+      const bound = unwrap(node.initializer);
+      // A later binding of the same name makes it unknown.
+      constants.set(node.name.text, constants.has(node.name.text) ? null : literal(node.initializer));
+      if (ts.isArrowFunction(bound) || ts.isFunctionExpression(bound)) {
+        bound.parameters.forEach((parameter, index) => {
+          if (ts.isIdentifier(parameter.name)) {
+            parameters.set(parameter.name.text, [...(parameters.get(parameter.name.text) ?? []), { fn: (node.name as ts.Identifier).text, index }]);
+          }
+        });
+      }
+    }
+    if (ts.isFunctionDeclaration(node) && node.name !== undefined) {
+      node.parameters.forEach((parameter, index) => {
+        if (ts.isIdentifier(parameter.name)) {
+          parameters.set(parameter.name.text, [...(parameters.get(parameter.name.text) ?? []), { fn: node.name!.text, index }]);
+        }
+      });
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(unwrap(node.expression))) {
+      const name = (unwrap(node.expression) as ts.Identifier).text;
+      calls.set(name, [...(calls.get(name) ?? []), node]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  const resolveText = (node: ts.Expression): string | null => {
+    const direct = literal(node);
+    if (direct !== null) return direct;
+    const value = unwrap(node);
+    return ts.isIdentifier(value) ? constants.get(value.text) ?? null : null;
+  };
+  const direct = resolveText(argument);
+  if (direct !== null) return [direct];
+  const value = unwrap(argument);
+  if (!ts.isIdentifier(value) || constants.has(value.text)) return null;
+  const owners = parameters.get(value.text) ?? [];
+  if (owners.length !== 1) return null;
+  const { fn, index } = owners[0];
+  // An exported function can be called with anything from elsewhere.
+  if (new RegExp(`export\\s+(?:const|function|async\\s+function)\\s+${fn}\\b|export\\s*\\{[^}]*\\b${fn}\\b`).test(source.text)) return null;
+  const sites = calls.get(fn) ?? [];
+  if (sites.length === 0) return null;
+  const texts: string[] = [];
+  for (const site of sites) {
+    const passed = site.arguments[index];
+    const text = passed === undefined ? null : resolveText(passed);
+    if (text === null) return null;
+    texts.push(text);
+  }
+  return texts;
+};
 
 /**
  * Whether a file runs code through a builtin that loads or runs what it is
@@ -341,7 +417,7 @@ const SAFE_MODULE_IMPORTS = new Set(["isBuiltin", "builtinModules"]);
  * inline worker (`eval: true`) runs source in this very file, whose own
  * `require("x")` lines `embeddedSpecifiers` follows.
  */
-const loadsThroughBuiltin = (source: ts.SourceFile): boolean => {
+const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; childProcess: boolean } => {
   const builtin = (text: string) => {
     const match = /^(?:node:)?(module|vm|worker_threads|child_process|cluster)(?:\/.*)?$/.exec(text);
     return match ? match[1] : null;
@@ -349,7 +425,24 @@ const loadsThroughBuiltin = (source: ts.SourceFile): boolean => {
   const processRunners = new Set<string>();
   const workers = new Set<string>();
   const allowed = new Set<ts.Node>();
-  let loads = false;
+  const destructured = new Set<ts.Node>();
+  let inProcess = false;
+  let childProcess = false;
+  // A child process is a separate program; everything else runs in this one.
+  const mark = (which: string | null) => {
+    if (which === "child_process") childProcess = true;
+    else inProcess = true;
+  };
+  // One name taken from a builtin, by a named import or a destructured require.
+  const judge = (which: string, imported: string, local: string) => {
+    if (which === "module" && !SAFE_MODULE_IMPORTS.has(imported)) inProcess = true;
+    if (which === "vm" || which === "cluster") inProcess = true;
+    if (which === "worker_threads" && imported === "Worker") workers.add(local);
+    if (which === "child_process") {
+      if (/^(?:exec|execSync|fork)$/.test(imported)) childProcess = true;
+      else processRunners.add(local);
+    }
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const which = builtin(node.moduleSpecifier.text);
@@ -359,33 +452,41 @@ const loadsThroughBuiltin = (source: ts.SourceFile): boolean => {
           ? clause.namedBindings.elements : null;
         if (clause?.name !== undefined || named === null) {
           // A default or namespace import hands on the whole builtin.
-          if (clause !== undefined) loads = true;
+          if (clause !== undefined) mark(which);
         } else {
-          for (const element of named) {
-            const imported = (element.propertyName ?? element.name).text;
-            if (which === "module" && !SAFE_MODULE_IMPORTS.has(imported)) loads = true;
-            if (which === "vm" || which === "cluster") loads = true;
-            if (which === "worker_threads" && imported === "Worker") workers.add(element.name.text);
-            if (which === "child_process") {
-              if (/^(?:exec|execSync|fork)$/.test(imported)) loads = true;
-              else processRunners.add(element.name.text);
-            }
-          }
+          for (const element of named) judge(which, (element.propertyName ?? element.name).text, element.name.text);
         }
       }
     }
-    if ((ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined && ts.isStringLiteral(node.moduleSpecifier) &&
-        builtin(node.moduleSpecifier.text) !== null) ||
-        (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) &&
-          ts.isStringLiteral(node.moduleReference.expression) && builtin(node.moduleReference.expression.text) !== null)) {
-      loads = true;
+    if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined && ts.isStringLiteral(node.moduleSpecifier) &&
+        builtin(node.moduleSpecifier.text) !== null) mark(builtin(node.moduleSpecifier.text));
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) &&
+        ts.isStringLiteral(node.moduleReference.expression) && builtin(node.moduleReference.expression.text) !== null) {
+      mark(builtin(node.moduleReference.expression.text));
     }
-    // `require("node:child_process")` and the like in code (not in an inline
-    // worker's source string, which is text here).
-    if (ts.isCallExpression(node) && isStringLiteral(node.arguments[0]) &&
+    // `const { parentPort } = require("node:worker_threads")`: each name is
+    // judged as a named import is. The declaration is visited before its call.
+    if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer !== undefined) {
+      const call = unwrap(node.initializer);
+      const which = ts.isCallExpression(call) && isStringLiteral(call.arguments[0]) &&
+        calleeMayRequire(unwrap(call.expression)) === "require"
+        ? builtin((call.arguments[0] as ts.StringLiteral).text) : null;
+      const plain = node.name.elements.every((element) => element.dotDotDotToken === undefined &&
+        ts.isIdentifier(element.name) && (element.propertyName === undefined || ts.isIdentifier(element.propertyName)));
+      if (which !== null && plain) {
+        destructured.add(call);
+        for (const element of node.name.elements) {
+          judge(which, ((element.propertyName ?? element.name) as ts.Identifier).text, (element.name as ts.Identifier).text);
+        }
+      }
+    }
+    // Any other `require("node:child_process")` and the like in code (not in
+    // an inline worker's source string, which is text here) hands on the
+    // whole builtin.
+    if (ts.isCallExpression(node) && !destructured.has(node) && isStringLiteral(node.arguments[0]) &&
         builtin((node.arguments[0] as ts.StringLiteral).text) !== null &&
         (node.expression.kind === ts.SyntaxKind.ImportKeyword || calleeMayRequire(unwrap(node.expression)) === "require")) {
-      loads = true;
+      mark(builtin((node.arguments[0] as ts.StringLiteral).text));
     }
     // `const run = promisify(execFile)` is execFile by another name.
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined &&
@@ -398,8 +499,12 @@ const loadsThroughBuiltin = (source: ts.SourceFile): boolean => {
       const callee = unwrap(node.expression);
       if (ts.isIdentifier(callee) && processRunners.has(callee.text)) {
         const program = node.arguments[0];
-        if (program === undefined || !isStringLiteral(program) ||
-            CODE_RUNNERS.has((program as ts.StringLiteral).text)) loads = true;
+        // `shell: true` turns the program into a shell line.
+        const shell = node.arguments.some((argument) => ts.isObjectLiteralExpression(argument) &&
+          argument.properties.some((property) => ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) &&
+            property.name.text === "shell" && property.initializer.kind !== ts.SyntaxKind.FalseKeyword));
+        if (program === undefined || !isStringLiteral(program) || shell ||
+            isCodeRunner((program as ts.StringLiteral).text)) childProcess = true;
       }
     }
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && workers.has(node.expression.text)) {
@@ -407,7 +512,18 @@ const loadsThroughBuiltin = (source: ts.SourceFile): boolean => {
       const inline = options !== undefined && ts.isObjectLiteralExpression(options) &&
         options.properties.some((property) => ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) &&
           property.name.text === "eval" && property.initializer.kind === ts.SyntaxKind.TrueKeyword);
-      if (!inline) loads = true;
+      const sourceArgument = node.arguments?.[0];
+      // An inline worker runs source this file holds: every text it can be is
+      // read as code, and a computed load there is one here.
+      const texts = inline && sourceArgument !== undefined ? workerSourceTexts(source, sourceArgument) : null;
+      if (texts === null) inProcess = true;
+      else {
+        for (const text of texts) {
+          const code = ts.createSourceFile("worker.js", text, ts.ScriptTarget.Latest, false);
+          const inner = hasParseErrors(code) ? null : codeFacts(code);
+          if (inner === null || inner.runtimeLoader || inner.loadingBuiltin) inProcess = true;
+        }
+      }
     }
     // A runner or Worker name used anywhere but as the callee checked above,
     // the promisify argument, or its own declaration hands it on.
@@ -423,13 +539,14 @@ const loadsThroughBuiltin = (source: ts.SourceFile): boolean => {
       }
     }
     if (ts.isNewExpression(node)) allowed.add(node.expression);
-    if (ts.isIdentifier(node) && (processRunners.has(node.text) || workers.has(node.text)) && !allowed.has(node)) {
-      loads = true;
+    if (ts.isIdentifier(node) && !allowed.has(node)) {
+      if (processRunners.has(node.text)) childProcess = true;
+      if (workers.has(node.text)) inProcess = true;
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
-  return loads;
+  return { inProcess, childProcess };
 };
 
 /**
@@ -785,7 +902,9 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     facts.set(file.path, fileFacts);
     if (fileFacts.appSettingAccess) for (const key of keyLiterals(source)) appSettingKeys.add(key);
     named.set(file.path, namedPaths(source));
-    if (isRuntimeControlPlane(file.path) && fileFacts.runtimeLoader) {
+    // A runtime gate may start a separate program (git, a CLI); loading code
+    // into the app by a computed name it may not.
+    if (isRuntimeControlPlane(file.path) && (fileFacts.runtimeLoader || fileFacts.inProcessLoad)) {
       problems.push({ path: file.path, specifier: null, problem: "runtime_loader_in_control_plane" });
     }
     const targets = new Set<string>();
@@ -796,10 +915,6 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     }
     // What an inline worker's source requires; text, so one that names no
     // tracked file adds nothing.
-    for (const specifier of embeddedSpecifiers(source)) {
-      const resolved = resolve(file.path, specifier);
-      if (resolved !== null && resolved !== "external") targets.add(resolved);
-    }
     for (const specifier of embeddedSpecifiers(source)) {
       const resolved = resolve(file.path, specifier);
       if (resolved !== null && resolved !== "external") targets.add(resolved);
@@ -850,6 +965,10 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     named.set(file.path, { exact: namedPaths(source).exact, prefixes: new Set() });
     const targets = new Set<string>();
     for (const specifier of importSpecifiersOf(source)) {
+      const resolved = resolve(file.path, specifier);
+      if (resolved !== null && resolved !== "external") targets.add(resolved);
+    }
+    for (const specifier of embeddedSpecifiers(source)) {
       const resolved = resolve(file.path, specifier);
       if (resolved !== null && resolved !== "external") targets.add(resolved);
     }
