@@ -40,7 +40,7 @@ export type Conversation = {
 export type MobileImageGroup = {
   status: string;
   targets: Array<{ targetId: string; modelId: string; currentGenerationId: string | null }>;
-  generations: Array<{ generationId: string; status: string; prompt: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
+  generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
 export type MobileCapabilities = { historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
