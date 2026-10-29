@@ -49,6 +49,25 @@ packs are available behind default-off billing switches. See
 [store billing setup](../../docs/ops/mobile-store-billing.md) for configuration,
 verification and activation requirements. Store credit purchases do not expire.
 
+## Android updates
+
+At launch and on return to the foreground, Android checks Google Play for an
+eligible update. The localized banner starts a flexible Play update only after
+the user taps Update. Downloads run alongside the app; completing installation
+requires an explicit Restart. Later postpones the same available version for
+24 hours. A downloaded update is offered again on the next foreground entry.
+The banner waits while Chat or Review is generating. Existing per-account text
+draft persistence also applies across restart. Offline/unowned installs and
+web/iOS never block app use or download an APK from a separate URL.
+
+Run the synthetic UI checks with
+`npm --workspace @tomverse/mobile run test:ui -- app-updates.spec.ts`.
+Android's `:tomverse-mobile-auth:testDebugUnitTest` uses
+Google's FakeAppUpdateManager. Store acceptance still requires a Play-installed
+build containing this feature and an eligible higher version for the same
+account, package and signing key. Older builds need one manual update first.
+See [Google's device testing guide](https://developer.android.com/guide/playcore/in-app-updates/test).
+
 ## Local development
 
 Automatic current-location intent analysis additionally requires the server-side
