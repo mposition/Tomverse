@@ -49,6 +49,55 @@ packs are available behind default-off billing switches. See
 [store billing setup](../../docs/ops/mobile-store-billing.md) for configuration,
 verification and activation requirements. Store credit purchases do not expire.
 
+## Android updates
+
+At launch and on return to the foreground, Android checks Google Play for an
+eligible update. The localized banner starts a flexible Play update only after
+the user taps Update. Downloads run alongside the app; completing installation
+requires an explicit Restart. Later postpones the same available version for
+24 hours. A downloaded update is offered again on the next foreground entry.
+The banner waits while Chat or Review is generating. Existing per-account text
+draft persistence also applies across restart. Offline/unowned installs and
+web/iOS never block app use or download an APK from a separate URL.
+
+Run the synthetic UI checks with
+`npm --workspace @tomverse/mobile run test:ui -- app-updates.spec.ts`.
+Android's `:tomverse-mobile-auth:testDebugUnitTest` uses
+Google's FakeAppUpdateManager. Store acceptance still requires a Play-installed
+build containing this feature and an eligible higher version for the same
+account, package and signing key. Older builds need one manual update first.
+See [Google's device testing guide](https://developer.android.com/guide/playcore/in-app-updates/test).
+
+## iOS updates
+
+iOS uses the same localized banner and 24-hour Later choice. At launch and on
+foreground/online entry, a native request looks up Tomverse's public App Store
+record and compares its marketing version and minimum OS with the installed
+app and device. Lookups share a five-minute in-memory cache. Missing, malformed,
+offline or unsupported-OS results leave ordinary Chat and Review available.
+The request uses an ephemeral session, no account credentials and a fixed app ID.
+
+Tapping Update opens Tomverse's fixed App Store product page through UIKit.
+App Store manages installation; iOS does not advertise Play's downloaded/restart
+states. Opening the page is not an installation receipt. Drafts remain in the
+existing account-scoped draft store. TestFlight-only versions are not discoverable
+in the public catalog, and TestFlight installation failures remain a separate
+delivery issue. Device acceptance requires a published higher App Store version.
+
+Local Windows / PowerShell / repository root, installed dependencies and no
+production credentials or payments:
+
+```powershell
+node --import tsx --test tests/iosAppUpdates.test.mjs
+npm --workspace @tomverse/mobile run test:ui:ios -- app-updates.spec.ts
+npm run prepare:ios
+```
+
+The synthetic tests do not compile Swift or open a real store. Swift compilation
+and the actual iPhone/iPad handoff require the remote Mac and signed-device tests.
+See [Apple lookup examples](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/LookupExamples.html)
+and [UIKit URL opening](https://developer.apple.com/documentation/uikit/uiapplication/open(_:options:completionhandler:)).
+
 ## Local development
 
 Automatic current-location intent analysis additionally requires the server-side
