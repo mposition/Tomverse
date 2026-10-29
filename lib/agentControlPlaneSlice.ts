@@ -665,7 +665,7 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
     }
     // A runner or Worker name used anywhere but as the callee checked above,
     // the promisify argument, or its own declaration hands it on.
-    if (ts.isImportSpecifier(node)) {
+    if (ts.isImportSpecifier(node) || ts.isBindingElement(node)) {
       allowed.add(node.name);
       if (node.propertyName !== undefined) allowed.add(node.propertyName);
     }
@@ -696,7 +696,35 @@ const loadsThroughBuiltin = (source: ts.SourceFile): { inProcess: boolean; child
  * the file -- the source an inline worker runs -- read as import specifiers.
  */
 export const embeddedSpecifiers = (source: ts.SourceFile): string[] =>
-  embeddedCode(source).flatMap(importSpecifiersOf);
+  nestedEmbeddedCode(source).codes.flatMap(importSpecifiersOf);
+
+/** How deep code inside code inside code is read before it counts as unknown. */
+const EMBEDDED_DEPTH = 6;
+
+/**
+ * Every piece of embedded code, and the code embedded in that in turn (a
+ * worker that starts a worker): all of it runs. Deeper than EMBEDDED_DEPTH it
+ * is not read, and `tooDeep` says so.
+ */
+const nestedEmbeddedCode = (source: ts.SourceFile): { codes: ts.SourceFile[]; tooDeep: boolean } => {
+  const codes: ts.SourceFile[] = [];
+  const seen = new Set<string>();
+  let tooDeep = false;
+  const walk = (from: ts.SourceFile, depth: number) => {
+    for (const code of embeddedCode(from)) {
+      if (seen.has(code.text)) continue;
+      if (depth >= EMBEDDED_DEPTH) {
+        tooDeep = true;
+        continue;
+      }
+      seen.add(code.text);
+      codes.push(code);
+      walk(code, depth + 1);
+    }
+  };
+  walk(source, 0);
+  return { codes, tooDeep };
+};
 
 /**
  * Code written inside a string or template of the file, parsed the way a
@@ -1059,8 +1087,9 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   // cannot follow (true is returned); a package name that is not installed
   // is the package's concern.
   const followEmbedded = (path: string, source: ts.SourceFile, targets: Set<string>) => {
-    let unknown = false;
-    for (const code of embeddedCode(source)) {
+    const { codes, tooDeep } = nestedEmbeddedCode(source);
+    let unknown = tooDeep;
+    for (const code of codes) {
       for (const specifier of importSpecifiersOf(code)) {
         const relative = specifier.startsWith("./") || specifier.startsWith("../");
         const readings = [resolve(path, specifier), ...(relative ? [resolve("index.js", specifier)] : [])];
@@ -1268,10 +1297,13 @@ export const computeControlPlaneSlice = (input: {
       for (const name of base.embeddedNames.get(file.path) ?? []) names.add(name);
     }
     // A shell, Dockerfile or workflow reads `$NAME` / `${NAME}` / `${{ env.NAME }}`;
-    // PowerShell reads `$env:NAME` / `${env:NAME}`.
+    // PowerShell reads `$env:NAME` / `${env:NAME}`. Comment lines, as for paths, do not.
     if (isTextGate(file.path)) {
-      for (const match of file.text.matchAll(/\$\{?([A-Z_][A-Z0-9_]*)|\benv[.:]([A-Za-z_][A-Za-z0-9_]*)/g)) {
-        names.add(match[1] ?? match[2]);
+      for (const line of file.text.split(/\r?\n/)) {
+        if (/^\s*#/.test(line)) continue;
+        for (const match of line.matchAll(/\$\{?([A-Z_][A-Z0-9_]*)|\benv[.:]([A-Za-z_][A-Za-z0-9_]*)/g)) {
+          names.add(match[1] ?? match[2]);
+        }
       }
     }
   }

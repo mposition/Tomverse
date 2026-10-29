@@ -411,6 +411,17 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "docs/rules.json": "{}\n",
   });
   assert.ok(slice([change("docs/rules.json", { newText: "[]\n" })], reads).slicePaths.has("docs/rules.json"));
+  // A worker that starts a worker: the inner one's loads are followed too.
+  const nested = tree({
+    "lib/helper.ts":
+      'import { Worker } from "node:worker_threads";\n' +
+      "const source = 'const { Worker } = require(\"node:worker_threads\"); new Worker(\\'require(\"./lib/plugin.js\")\\', { eval: true });';\n" +
+      "export const helper = () => new Worker(source, { eval: true });\n",
+    "lib/plugin.js": "exports.p = 1;\n",
+  });
+  const nestedResult = slice([change("lib/plugin.js", { newText: "exports.p = 2;\n" })], nested);
+  assert.equal(nestedResult.status, "analysed", JSON.stringify(nestedResult.problems ?? []));
+  assert.ok(nestedResult.slicePaths.has("lib/plugin.js"));
   // One that names no file either way cannot be followed.
   const nowhere = tree({
     "lib/helper.ts":
