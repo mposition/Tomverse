@@ -75,7 +75,11 @@ const globPattern = (glob: string) => {
   let source = "";
   for (let index = 0; index < glob.length; index += 1) {
     const char = glob[index];
-    if (glob.startsWith("**", index)) {
+    if (glob.startsWith("**/", index)) {
+      // Zero or more directories.
+      source += "(?:.*/)?";
+      index += 2;
+    } else if (glob.startsWith("**", index)) {
       source += ".*";
       index += 1;
     } else if (char === "*") source += "[^/]*";
@@ -102,17 +106,21 @@ const globPattern = (glob: string) => {
 export const textGatePaths = (path: string, text: string): { exact: Set<string>; globs: RegExp[] } => {
   const exact = new Set<string>();
   const globs: RegExp[] = [];
-  const workflow = /\.ya?ml$/.test(path);
+  const workflow = /^\.github\/workflows\/.+\.ya?ml$/.test(path);
+  // Trigger filters live only in the workflow's top-level `on:` block; the
+  // same keys elsewhere (a step's `with: paths:`) name what it reads.
+  let inTriggers = false;
   let filterIndent: number | null = null;
   for (const line of text.split(/\r?\n/)) {
     if (/^\s*#/.test(line) || line.trim() === "") continue;
     const indent = line.length - line.trimStart().length;
+    if (indent === 0) inTriggers = workflow && /^(?:on|"on"|'on'):\s*(?:#.*)?$/.test(line);
     if (filterIndent !== null) {
       // A filter's list sits deeper than its key, or level with it as `- item`.
       if (indent > filterIndent || (indent === filterIndent && /^\s*-/.test(line))) continue;
       filterIndent = null;
     }
-    const filter = workflow ? TRIGGER_FILTER.exec(line) : null;
+    const filter = inTriggers ? TRIGGER_FILTER.exec(line) : null;
     if (filter) {
       if (filter[2].trim() === "") filterIndent = filter[1].length;
       continue;
@@ -635,12 +643,17 @@ const selfAndAncestors = (path: string) => {
 
 /**
  * The repository paths a path-shaped text may mean, read from `from`: as
- * written from the root, through the `@/` alias, and relative to the file
- * itself (`new URL("../x.json", import.meta.url)`). All of them count.
+ * written from the root, through the `@/` alias, relative to the file itself
+ * (`new URL("../x.json", import.meta.url)`), and below the image's `/app`
+ * root (`/app/docs/x.json`, its leading slash already gone). All of them count.
  */
 const pathReadings = (from: string, text: string): string[] => {
   const unaliased = text.startsWith("@/") ? text.slice(2) : text;
-  return [unaliased, normalise(`${dirname(from)}/${unaliased}`)].filter((path): path is string => path !== null);
+  return [
+    unaliased,
+    normalise(`${dirname(from)}/${unaliased}`),
+    unaliased.startsWith("app/") ? unaliased.slice(4) : null,
+  ].filter((path): path is string => path !== null);
 };
 
 /**

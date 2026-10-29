@@ -183,6 +183,25 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     [...slice([...globbed, "lib/filtered/c.ts"].map((path) => change(path, { newText: "{}\n" })), globbing).slicePaths].sort(),
     globbed,
   );
+
+  // `**/` matches no directory too; `paths:` under a step is an input, not a
+  // trigger; an image path under /app is the repository path.
+  const inputs = tree({
+    ".github/workflows/z.yml":
+      "on:\n  push:\n    paths: ['docs/never/**']\njobs:\n  z:\n    steps:\n      - uses: some/action@v1\n        with:\n" +
+      "          paths:\n            - docs/inputs/base.json\n      - run: cat docs/deep/**/*.json\n",
+    "Dockerfile": "COPY . /app\nRUN node /app/docs/image/seed.json\n",
+    "docs/inputs/base.json": "{}\n",
+    "docs/deep/top.json": "{}\n",
+    "docs/deep/a/b.json": "{}\n",
+    "docs/image/seed.json": "{}\n",
+    "docs/never/x.json": "{}\n",
+  });
+  const read = ["docs/deep/a/b.json", "docs/deep/top.json", "docs/image/seed.json", "docs/inputs/base.json"];
+  assert.deepEqual(
+    [...slice([...read, "docs/never/x.json"].map((path) => change(path, { newText: "{}\n" })), inputs).slicePaths].sort(),
+    read,
+  );
 });
 
 test("a code file a gate names by path is followed; a test or fixture a runner names is its input", () => {

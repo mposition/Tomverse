@@ -32,10 +32,11 @@ type FetchBlob = (oid: string, maxBytes: number) => Promise<Uint8Array>;
  * decision 2026-10-27, replacing the operator-pasted image proof). The
  * commit's `.dockerignore` is read in order, last matching rule winning, a
  * rule on a directory covering everything below it -- as Docker applies it.
- * Only test sources and the admin Playwright config count as left out; the
- * evidence reads no text for them, since the app cannot run them. A missing
- * file or a rule this reader does not fully understand is null: the tier is
- * T2. */
+ * Only test sources and the admin Playwright config count as left out. Of
+ * those the evidence still reads the code that is not a test body (helpers,
+ * fixtures, that config), which a gate may import; test bodies and test data
+ * stay unread. A missing file or a rule this reader does not fully understand
+ * is null: the tier is T2. */
 export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
   paths: readonly string[]): string[] | null {
   if (dockerIgnore === null) return null;
