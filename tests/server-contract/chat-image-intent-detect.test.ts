@@ -130,6 +130,7 @@ test("the router model triages: model and preset come back", async () => {
     modelId: "gpt-image-2",
     preset: "draft",
     prompt: null,
+    edit: false,
   });
   assert.equal(calls.length, 1);
   assert.equal(reserved.length, 1);
@@ -185,7 +186,7 @@ test("a failed call or a 'no' goes to chat", async () => {
 test("a model outside the catalogue is not passed on", async () => {
   reset();
   modelOutput = { image: true, modelId: "made-up-image-model", preset: "final" };
-  assert.deepEqual(await detect(), { image: true, modelId: null, preset: null, prompt: null });
+  assert.deepEqual(await detect(), { image: true, modelId: null, preset: null, prompt: null, edit: false });
 });
 
 test("a follow-up sees the previous image and comes back with its rewrite", async () => {
@@ -214,6 +215,7 @@ test("a follow-up sees the previous image and comes back with its rewrite", asyn
     modelId: "gpt-image-2",
     preset: "draft",
     prompt: "파란색의 간단한 고양이 아이콘",
+    edit: false,
   });
   // Room to write the whole new prompt, and the budget hold sized to it.
   assert.equal(calls[0].maxOutputTokens, 2_500);

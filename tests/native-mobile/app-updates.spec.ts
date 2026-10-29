@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function fixture(page: Page, options: { state?: string; fail?: boolean; language?: string } = {}) {
+async function fixture(page: Page, options: { state?: string; fail?: boolean; language?: string; appStore?: boolean } = {}) {
   await page.addInitScript(({ state, fail, language }) => {
     localStorage.setItem("tomverse-language", language);
     const fixture = {
@@ -16,11 +16,23 @@ async function fixture(page: Page, options: { state?: string; fail?: boolean; la
         return { remove: async () => { if (fixture.listener === listener) fixture.listener = null; } };
       },
     } });
+    Object.assign(window, { testStoreUpdates: {
+      check: async () => {
+        fixture.checks++;
+        if (fixture.fail) throw Error("App Store unavailable");
+        return { installedVersion: "1.0.18", systemVersion: "18.7.10", lookup: { results: state === "none" ? [] : [
+          { trackId: 6827148073, bundleId: "app.tomverse.shell", version: "1.0.19", minimumOsVersion: "17.4" },
+        ] } };
+      },
+      start: async () => { fixture.starts++; return { accepted: true }; },
+    } });
   }, { state: options.state ?? "available", fail: options.fail ?? false, language: options.language ?? "en" });
   await page.route("https://tomverse.app/**", route => route.abort());
   await page.route("**/src/appUpdates.ts", async route => {
     const response = await route.fetch();
-    const body = (await response.text()).replace(/export const nativeAppUpdates = .*?;/, "export const nativeAppUpdates = window.testAppUpdates;");
+    const body = (await response.text()).replace(/export const nativeAppUpdates = .*?;/, options.appStore
+      ? "export const nativeAppUpdates = createAppStoreUpdates(window.testStoreUpdates);"
+      : "export const nativeAppUpdates = window.testAppUpdates;");
     await route.fulfill({ response, body });
   });
   await page.goto("/");
@@ -105,4 +117,41 @@ test("an already downloaded update offers restart after relaunch without another
   await expect(page.locator(".app-update-banner")).toHaveCount(0);
   await page.reload(); await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible();
   expect(await counts(page)).toEqual([0, 0]);
+});
+
+test("iOS opens App Store only on Update and keeps the unsent draft without offering Restart", async ({ page }) => {
+  await fixture(page, { appStore: true });
+  await expect(page.getByRole("button", { name: "Update", exact: true })).toBeVisible();
+  expect(await counts(page)).toEqual([0, 0]);
+  await page.getByRole("textbox").fill("Keep my iOS draft");
+  await page.getByRole("button", { name: "Update", exact: true }).click();
+  await expect(page.locator(".app-update-banner")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toHaveCount(0);
+  expect(await counts(page)).toEqual([1, 0]);
+  await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("Keep my iOS draft");
+});
+
+test("iOS Later postpones the same App Store version across relaunch", async ({ page }) => {
+  await fixture(page, { appStore: true });
+  await page.getByRole("button", { name: "Later", exact: true }).click();
+  await page.reload(); await expect(page.getByRole("textbox")).toBeVisible();
+  await expect(page.locator(".app-update-banner")).toHaveCount(0);
+  expect(await counts(page)).toEqual([0, 0]);
+});
+
+for (const viewport of [{ width: 810, height: 1080 }, { width: 1080, height: 810 }]) test(`iPad App Store prompt stays clear of the composer: ${viewport.width}`, async ({ page }) => {
+  await page.setViewportSize(viewport);
+  await fixture(page, { appStore: true, language: "ko" });
+  await expect(page.getByRole("button", { name: "업데이트", exact: true })).toBeInViewport();
+  await expect(page.getByRole("textbox")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  expect(await counts(page)).toEqual([0, 0]);
+  await page.screenshot({ path: test.info().outputPath(`ios-update-${viewport.width}.png`) });
+});
+
+for (const unavailable of ["none", "error"]) test(`iOS ${unavailable} store metadata leaves Chat usable`, async ({ page }) => {
+  await fixture(page, { appStore: true, state: unavailable, fail: unavailable === "error" });
+  await expect(page.locator(".app-update-banner")).toHaveCount(0);
+  await expect(page.getByRole("textbox")).toBeEnabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });

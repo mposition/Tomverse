@@ -124,9 +124,9 @@ export const CHAT_IMAGE_ROUTING_CRITERIA = [
     "When unsure, answer image=false.",
     "",
     "When image=true, choose the cheapest model and preset that will do the request well:",
-    "- draft: a quick sketch, a simple icon or symbol, a rough idea, or the user asks for something fast or cheap;",
-    "- standard: the ordinary request, one clear subject or scene;",
-    "- final: detailed or photorealistic work, several subjects, legible text inside the image, posters or other final deliverables, or the user asks for the best quality.",
+    "- standard: the default for ordinary image requests, including posters, legible text, several subjects and photorealistic scenes; complexity or the image's intended use alone does not upgrade the preset;",
+    "- draft: only when the user requests a rough sketch, draft, faster generation or lower cost;",
+    "- final: only when the user explicitly requests high quality, best quality or a higher-quality regeneration of a previous image.",
     "Give simple requests a cheaper or faster model and complex ones a stronger, pricier model. Use only a preset the chosen model lists.",
 ].join("\n");
 
@@ -136,7 +136,7 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
     "",
     CHAT_IMAGE_ROUTING_CRITERIA,
     "",
-    "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details or composition, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
+    "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details, composition or quality, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\", \"regenerate this image in high quality\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
     "An \"Attached photo\" section, when present, means the user sent a photo with this message and the listed models can edit it. A message that asks to change that photo -- resize, move, remove, add or recolour something in it, change its style or background, while keeping the rest -- is image=true and edit=true; the message itself is the edit instruction, so prompt is an empty string. A question about the photo, or a request to describe, analyse, translate or read it, is image=false. Without that section edit is always false.",
     "When image=false, fill modelId and preset with any listed value; they are ignored.",
 ].join("\n");
