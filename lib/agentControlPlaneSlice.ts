@@ -242,6 +242,9 @@ const isRequireReference = (node: ts.Node) =>
   (ts.isElementAccessExpression(node) && isStringLiteral(node.argumentExpression) &&
     (node.argumentExpression as ts.StringLiteral).text === "require");
 
+/** What runs code from text. */
+const DYNAMIC_CODE = new Set(["eval", "Function", "AsyncFunction", "GeneratorFunction", "AsyncGeneratorFunction"]);
+
 /**
  * The host whose loader is handed on by handing on the host itself:
  * `module.require`. Node puts no `require` on `globalThis` or `global`.
@@ -270,6 +273,7 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
     }
     if (ts.isTypeOfExpression(node)) notValues.add(unwrap(node.expression));
     // Type positions name types, not values.
+    if (ts.isTypeReferenceNode(node)) notValues.add(node.typeName);
     if (ts.isQualifiedName(node)) notValues.add(node.left);
     if (ts.isTypeQueryNode(node)) notValues.add(node.exprName);
     // Names that declare or label something, not references.
@@ -307,12 +311,19 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
       }
     }
     if (ts.isIdentifier(node) && node.text === "createRequire") facts.runtimeLoader = true;
-    // Code run from text: `eval` in any use (`(0, eval)(x)` too), and the
-    // Function constructor called or constructed.
-    if (ts.isIdentifier(node) && node.text === "eval" && !notValues.has(node)) facts.runtimeLoader = true;
-    if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && ts.isIdentifier(unwrap(node.expression)) &&
-        /^(?:Function|AsyncFunction|GeneratorFunction|AsyncGeneratorFunction)$/.test((unwrap(node.expression) as ts.Identifier).text)) {
-      facts.runtimeLoader = true;
+    // Code run from text: `eval` and the Function constructors in any value
+    // use -- called, handed on (`const F = Function`), or reached as a member
+    // (`globalThis.eval`, `x["Function"]`) -- and any `.constructor` called or
+    // constructed, which reaches Function from any function value.
+    if (ts.isIdentifier(node) && DYNAMIC_CODE.has(node.text) && !notValues.has(node)) facts.runtimeLoader = true;
+    if (ts.isPropertyAccessExpression(node) && DYNAMIC_CODE.has(node.name.text)) facts.runtimeLoader = true;
+    if (ts.isElementAccessExpression(node) && isStringLiteral(node.argumentExpression) &&
+        DYNAMIC_CODE.has((node.argumentExpression as ts.StringLiteral).text)) facts.runtimeLoader = true;
+    if ((ts.isCallExpression(node) || ts.isNewExpression(node))) {
+      const callee = unwrap(node.expression);
+      if ((ts.isPropertyAccessExpression(callee) && callee.name.text === "constructor") ||
+          (ts.isElementAccessExpression(callee) && isStringLiteral(callee.argumentExpression) &&
+            (callee.argumentExpression as ts.StringLiteral).text === "constructor")) facts.runtimeLoader = true;
     }
     if (ts.isPropertyAccessExpression(node)) {
       if (ts.isIdentifier(node.expression) && node.expression.text === "require") facts.runtimeLoader = true;

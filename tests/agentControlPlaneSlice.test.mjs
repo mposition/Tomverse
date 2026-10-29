@@ -342,6 +342,11 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "export const helper = (code) => eval(code);\n",
     "export const helper = (code) => (0, eval)(code);\n",
     "export const helper = (code) => new Function(code)();\n",
+    "export const helper = (code) => globalThis.eval(code);\n",
+    "export const helper = (code) => globalThis.Function(code)();\n",
+    "const F = Function;\nexport const helper = (code) => F(code)();\n",
+    'export const helper = (code) => globalThis["eval"](code);\n',
+    "export const helper = (code) => (() => 0).constructor(code)();\n",
     'import { execFile } from "node:child_process";\nexport const helper = (p) => execFile("uv", ["run", p], { cwd: "." });\n',
     // A parameter shadowing a const of the same name; options before a callback.
     'import { Worker } from "node:worker_threads";\nconst source = "0";\nexport const helper = (source) => new Worker(source, { eval: true });\n',
