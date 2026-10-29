@@ -33,6 +33,7 @@ import type { AccountSettingsTab } from "../../../lib/accountSettingsEvents";
 import { mobileSettingsCopy } from "../../../locales/mobileSettings";
 import { useCompactBottomDock, useVisibleViewportHeight } from "../../../components/chat/useVisualViewport";
 import { NativeLocationOnboarding } from "./NativeLocationOnboarding";
+import { NativeAppUpdate } from "./NativeAppUpdate";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 function AnswerAttribution({ message, language }: { message: ChatMessage; language: MobileLanguage }) {
@@ -289,6 +290,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       {compact && (loading || reviewLoading) && <span className="workspace-loading" role="status"><span className="sr-only">{copy.loading}</span></span>}
       {signedIn ? <button className="header-new-chat" aria-label={copy.newChat} disabled={streaming || reviewBusy || loading} onClick={newConversation}><AppIcon name="newChat" /></button> : <button className="account-button" aria-label={copy.settings} onClick={() => openSettings()}><AppIcon name="settings" /></button>}
     </header>
+    <NativeAppUpdate language={language} paused={loading || streaming || reviewBusy} />
     {demo && <div className="demo-label">{copy.demo}</div>}
     {offline && <p role="status" className="notice">{mobileCompletionCopy(language).offline}</p>}
     {emailLogin && !signedIn && <EmailLogin transport={transport} language={language} onClose={() => setEmailLogin(false)} onComplete={async () => {
