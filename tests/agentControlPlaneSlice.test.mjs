@@ -196,6 +196,9 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     "docs/globbed/g.json": "{}\n",
     "docs/listed/one.json": "{}\n",
     "scripts/ops/check.ps1": "$allow = Get-Content .\\docs\\ops\\allowlist.json\n",
+    // A path behind a runner variable.
+    "scripts/ops/patch.sh": 'git apply "$GITHUB_WORKSPACE/docs/runner/fix.json"\n',
+    "docs/runner/fix.json": "{}\n",
     "docs/ops/allowlist.json": "[]\n",
     "docker/runner/Dockerfile": "COPY docs/copied /app/docs/copied\nWORKDIR /app\n",
     "docs/copied/inner/c.json": "{}\n",
@@ -221,6 +224,7 @@ test("a workflow or shell gate brings in the paths and globs it reads, not comme
     "docs/kit/seed.json",
     "docs/listed/one.json",
     "docs/ops/allowlist.json",
+    "docs/runner/fix.json",
     "locales/walked.json",
   ];
   assert.deepEqual(
@@ -421,8 +425,13 @@ test("imports come from the syntax tree, not from text that looks like one", () 
     }).sort(),
     ["./barrel", "./lazy", "./typeOnly", "./types", "./viaModule", "node:fs"],
   );
-  // A gate that loads a helper through module.require, by name or by bracket, reaches it.
-  for (const call of ['module.require("../moduleHelper")', 'module["require"]("../moduleHelper")']) {
+  // A gate that loads a helper through module.require, by name, by bracket or in parentheses, reaches it.
+  for (const call of [
+    'module.require("../moduleHelper")',
+    'module["require"]("../moduleHelper")',
+    '(module.require)("../moduleHelper")',
+    '(require)("../moduleHelper")',
+  ]) {
     const viaModule = tree({
       "lib/amux/gate.ts": `export const gate = () => ${call};\n`,
       "lib/moduleHelper.ts": 'import { deep } from "./deep";\nexport const h = deep;\n',

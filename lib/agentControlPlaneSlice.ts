@@ -141,10 +141,19 @@ export const textGatePaths = (path: string, text: string): { exact: Set<string>;
         if (listed) token = listed[1];
         if (!token.includes("]")) token = token.replace(/^\[+/, "");
         if (!token.includes("[")) token = token.replace(/\]+$/, "");
-        token = normalisePathText(token);
+        token = normalisePathText(token.replace(/^[{}]+/, ""));
         if (!token.includes("/")) continue;
-        if (/[*?{[]/.test(token)) globs.push(token);
-        else exact.add(token);
+        // A path behind a runner variable (`$GITHUB_WORKSPACE/patch/x`,
+        // `${{ github.workspace }}/x.json`) keeps the variable as its first
+        // segments; every tail of the path is read as well.
+        const segments = token.split("/");
+        for (let start = 0; start < segments.length - 1; start += 1) {
+          // A tail starting at a wildcard would read the whole tree.
+          if (start > 0 && /[*?{[]/.test(segments[start])) continue;
+          const tail = segments.slice(start).join("/");
+          if (/[*?{[]/.test(tail)) globs.push(tail);
+          else exact.add(tail);
+        }
       }
     }
     // A single segment can be a top-level directory it reads (`find docs`,
@@ -324,7 +333,7 @@ export const importSpecifiersOf = (source: ts.SourceFile): string[] => {
       const [first] = node.arguments;
       const isImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
       // `require("x")`, `module.require("x")` and `module["require"]("x")` alike.
-      const isRequire = calleeMayRequire(node.expression) === "require";
+      const isRequire = calleeMayRequire(unwrap(node.expression)) === "require";
       if ((isImport || isRequire) && first !== undefined && isStringLiteral(first)) {
         found.push((first as ts.StringLiteral).text);
       }
