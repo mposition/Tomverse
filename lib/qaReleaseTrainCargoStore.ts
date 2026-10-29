@@ -93,19 +93,27 @@ export async function saveQaReleaseTrainEmergency(
  * under the audit chain lock, so two operators' clicks never drop each
  * other's. Display only: the train never reads it.
  */
-export async function saveQaReleaseTrainHidden(actor: { session: Session; request: Request }, number: number, hidden: boolean): Promise<number[]> {
+export async function saveQaReleaseTrainHidden(
+  actor: { session: Session; request: Request },
+  /** Several at once (owner, 2026-10-29): hiding what the verdicts say needs no release. */
+  number: number | readonly number[],
+  hidden: boolean,
+): Promise<number[]> {
+  const changed = typeof number === "number" ? [number] : [...new Set(number)];
+  const label = changed.map((n) => `#${n}`).join(", ");
   return prisma.$transaction(
     async (tx) => {
       await takeAuditChainLock(tx);
-      const numbers = qaReleaseTrainHiddenUpdate(await readQaReleaseTrainHidden(tx), number, hidden);
+      let numbers = await readQaReleaseTrainHidden(tx);
+      for (const one of changed) numbers = qaReleaseTrainHiddenUpdate(numbers, one, hidden);
       await writeAdminAuditLog({
         ...actor,
         tx,
         action: QA_RELEASE_TRAIN_HIDDEN_ACTION,
         targetType: QA_RELEASE_TRAIN_CARGO_TARGET_TYPE,
         targetId: QA_RELEASE_TRAIN_HIDDEN_TARGET_ID,
-        summary: hidden ? `Hid #${number} from the next release train's list.` : `Showed #${number} again in the next release train's list.`,
-        metadata: { number, hidden, numbers },
+        summary: hidden ? `Hid ${label} from the next release train's list.` : `Showed ${label} again in the next release train's list.`,
+        metadata: typeof number === "number" ? { number, hidden, numbers } : { changed, hidden, numbers },
       });
       return numbers;
     },

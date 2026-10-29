@@ -7,6 +7,7 @@
  * Pure: the read and the store pass what they read.
  */
 import { QA_RELEASE_TRAIN_REPOSITORY, qaReleaseTrainIncludedNumbers, qaReleaseTrainIsTrainPull } from "./qaReleaseTrainCore.ts";
+import type { QaReleaseTrainVerdict } from "./qaReleaseTrainVerdictCore.ts";
 
 export const QA_RELEASE_TRAIN_CARGO_MAX = 30;
 /** How far back merged develop pull requests are offered. */
@@ -46,11 +47,17 @@ export type QaReleaseTrainCargoCandidate = {
   status: QaReleaseTrainCargoStatus;
   /** The main pull request that names it, for on_main and in_main_pull_request. */
   mainPullRequest: number | null;
+  /** Its develop merge commit, for the train service's content check. */
+  mergeCommitSha?: string;
+  /** The content check and the model's judgement (lib/qaReleaseTrainVerdictCore.ts), when the train service sent one. */
+  verdict?: QaReleaseTrainVerdict;
   /**
    * For on_main: the train that found its change already on main (its pull
    * request `#3046`, or its slot) when no main pull request names it.
    */
   foundByTrain?: string;
+  /** For on_main: the train service's content check found every change of it on main. */
+  foundByContent?: boolean;
 };
 
 type Json = Record<string, unknown>;
@@ -211,6 +218,7 @@ export function qaReleaseTrainCargoCandidates(input: {
         mergedAt: pull.merged_at as string,
         status,
         mainPullRequest: mainNumber ?? mainPullNumber ?? (status === "mentioned" ? (mentionedBy ?? null) : null),
+        ...(typeof pull.merge_commit_sha === "string" && /^[0-9a-f]{40}$/.test(pull.merge_commit_sha) ? { mergeCommitSha: pull.merge_commit_sha } : {}),
       };
     });
 }
@@ -248,6 +256,32 @@ export function qaReleaseTrainWithTrainVerdicts(
     return train !== undefined && qaReleaseTrainCargoPickable(candidate.status)
       ? { ...candidate, status: "on_main", mainPullRequest: null, foundByTrain: train }
       : candidate;
+  });
+}
+
+/**
+ * What the train service's content check sends the verdict round: what Admin
+ * lists, before any verdict is applied -- one the check found on main stays
+ * in it, so its verdict is kept.
+ */
+export const qaReleaseTrainVerdictWanted = (status: QaReleaseTrainCargoStatus) => qaReleaseTrainCargoPickable(status) || status === "changes_workflows";
+
+/**
+ * Each candidate with its verdict (owner, 2026-10-29). One the content check
+ * found on main reads as on main, like one a train found there; the rest
+ * carry their verdict for Admin to show. Display only.
+ */
+export function qaReleaseTrainWithContentVerdicts(
+  candidates: readonly QaReleaseTrainCargoCandidate[],
+  verdicts: readonly QaReleaseTrainVerdict[],
+): QaReleaseTrainCargoCandidate[] {
+  const byNumber = new Map(verdicts.map((verdict) => [verdict.number, verdict]));
+  return candidates.map((candidate) => {
+    const verdict = byNumber.get(candidate.number);
+    if (!verdict || !qaReleaseTrainVerdictWanted(candidate.status)) return candidate;
+    return verdict.content.state === "on_main" && qaReleaseTrainCargoPickable(candidate.status)
+      ? { ...candidate, status: "on_main", mainPullRequest: null, foundByContent: true, verdict }
+      : { ...candidate, verdict };
   });
 }
 

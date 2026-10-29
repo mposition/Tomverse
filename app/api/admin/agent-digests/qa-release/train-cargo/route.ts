@@ -8,7 +8,12 @@ import { isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { runQaReleaseControlAdminMutation } from "@/lib/qaReleaseOperatorControlAdmin";
-import { QA_RELEASE_TRAIN_CANDIDATE_DAYS, QA_RELEASE_TRAIN_CARGO_MAX, qaReleaseTrainWithTrainVerdicts } from "@/lib/qaReleaseTrainCargoCore";
+import {
+  QA_RELEASE_TRAIN_CANDIDATE_DAYS,
+  QA_RELEASE_TRAIN_CARGO_MAX,
+  qaReleaseTrainWithContentVerdicts,
+  qaReleaseTrainWithTrainVerdicts,
+} from "@/lib/qaReleaseTrainCargoCore";
 import { qaReleaseTrainNextDepartureMs } from "@/lib/qaReleaseTrainCore";
 import { expireQaReleaseTrainBoardReads } from "@/lib/qaReleaseTrainBoardRead";
 import { readQaReleaseTrainCargoCandidates } from "@/lib/qaReleaseTrainCargoRead";
@@ -18,6 +23,7 @@ import {
   readQaReleaseTrainHidden,
   readQaReleaseTrainSchedule,
   readQaReleaseTrainSelection,
+  readQaReleaseTrainVerdicts,
 } from "@/lib/qaReleaseTrainStore";
 
 // The next release train's cargo (lib/qaReleaseTrainCargoCore.ts): any
@@ -34,22 +40,31 @@ export async function GET(request: Request) {
     // reads expire too, for the page's next server read.
     const fresh = new URL(request.url).searchParams.get("fresh") === "1";
     if (fresh) expireQaReleaseTrainBoardReads(Date.now());
-    const [read, selection, schedule, hidden, foundOnMain] = await Promise.all([
+    const [read, selection, schedule, hidden, foundOnMain, verdicts] = await Promise.all([
       readQaReleaseTrainCargoCandidates(Date.now(), { fresh }),
       readQaReleaseTrainSelection(),
       readQaReleaseTrainSchedule(),
       readQaReleaseTrainHidden(),
       readQaReleaseTrainFoundOnMain(new Date(Date.now() - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000)),
+      readQaReleaseTrainVerdicts(),
     ]);
-    // What a train found already on main reads as released, though no main
-    // pull request names it (its change came under another commit).
-    const candidates = read.status === "ok" ? { ...read, candidates: qaReleaseTrainWithTrainVerdicts(read.candidates, foundOnMain) } : read;
+    // What a train or the train service's content check found already on
+    // main reads as released, though no main pull request names it (its
+    // change came under another commit); the rest carry their verdict.
+    const candidates =
+      read.status === "ok"
+        ? {
+            ...read,
+            candidates: qaReleaseTrainWithContentVerdicts(qaReleaseTrainWithTrainVerdicts(read.candidates, foundOnMain), verdicts?.verdicts ?? []),
+          }
+        : read;
     // The next departure by the hours the train service reported, from this server clock.
     const nextMs = schedule ? qaReleaseTrainNextDepartureMs(Date.now(), schedule.hours) : null;
     return NextResponse.json({
       candidates,
       selection,
       hidden,
+      verdictsAt: verdicts?.at ?? null,
       schedule: schedule ? { ...schedule, nextDepartureAt: nextMs === null ? null : new Date(nextMs).toISOString() } : null,
     });
   } catch (error) {

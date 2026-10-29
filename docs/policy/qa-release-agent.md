@@ -311,6 +311,13 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       엽니다(운영자 2026-10-27).
       운영자는 후보를 목록에서 숨기거나 다시 보이게 할 수 있습니다(운영자 2026-10-27, `qa_release.train_cargo_hidden` 감사 기록,
       owner·ops). 화면 표시만 바꾸며 열차는 읽지 않고, 고른 PR은 숨겨도 목록에 남아 실립니다.
+    - **후보 판정**(운영자 2026-10-29, `lib/qaReleaseTrainVerdict.ts`): 열차 서비스가 열차 회차 뒤에, main이 바뀌었거나 새 후보가
+      있을 때 목록의 후보마다 내용을 대조합니다. PR이 추가한 줄 중 develop에는 있고 main에 없는 줄, 지운 줄 중 develop에서는 사라졌는데
+      main에 남은 줄이 없으면 "내용 대조로 main에 있음"이 되어 목록에서 빠집니다. 차이가 남은 PR은 모델이 PR 본문, 남은 차이, 그 파일을
+      나중에 건드린 main PR 본문을 보고 "릴리스 필요·불필요·운영자 판단"과 이유를 답하고, 근거로는 보여 준 PR만 인정합니다. 모델은 열차
+      전용 키로 돌며 한 회차 4건까지, 같은 차이는 한 번만 묻습니다(실패는 6시간 뒤 다시). `QA_RELEASE_TRAIN_MODEL_VERDICT=false`로
+      끕니다. 결과는 표시 전용 AppSetting 하나이고 열차는 읽지 않습니다. Admin은 판정과 근거를 후보마다 보여 주고, 모델이 불필요로 본
+      후보를 한 번에 숨기는 버튼을 둡니다(숨김은 위의 감사 기록 그대로).
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뜁니다. 충돌한 PR은
       `QA_RELEASE_TRAIN_MODEL_RESOLVE=true`이고 열차 전용 키 `QA_RELEASE_TRAIN_ANTHROPIC_API_KEY`가 있을 때 모델에 넘깁니다(운영자
