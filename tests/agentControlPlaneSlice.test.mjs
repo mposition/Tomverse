@@ -310,6 +310,14 @@ test("a followed product file that loads by a computed name fails the analysis; 
     "export const helper = (name) => module.require(name);\n",
     'export const helper = (name) => module["require"](name);\n',
     "export const helper = (key, name) => module[key](name);\n",
+    // Builtins that load or run code by a name they are given.
+    'import Module from "node:module";\nexport const helper = (name) => Module._load(name);\n',
+    'import { runInThisContext } from "node:vm";\nexport const helper = (code) => runInThisContext(code);\n',
+    'import { fork } from "node:child_process";\nexport const helper = (path) => fork(path);\n',
+    'import { execFile } from "node:child_process";\nexport const helper = (path) => execFile("node", [path]);\n',
+    'import { execFile } from "node:child_process";\nexport const helper = (program) => execFile(program, []);\n',
+    'import { execFile } from "node:child_process";\nimport { promisify } from "node:util";\nconst run = promisify(execFile);\nexport const helper = (p) => run("tsx", [p]);\n',
+    'import { Worker } from "node:worker_threads";\nexport const helper = (path) => new Worker(path);\n',
     // Parenthesised, or handed on as a value: the loader escapes.
     "export const helper = (name) => (module.require)(name);\n",
     "const load = module.require.bind(module);\nexport const helper = (name) => load(name);\n",
@@ -326,6 +334,23 @@ test("a followed product file that loads by a computed name fails the analysis; 
   ]) {
     assert.equal(slice([change("lib/leaf.ts")], helper(text)).status, "failed", text);
   }
+  // A literal, non-runner program and an inline worker run nothing of the
+  // repository by name; what the worker's source requires is followed.
+  for (const text of [
+    'import { execFile } from "node:child_process";\nimport { promisify } from "node:util";\nconst run = promisify(execFile);\nexport const helper = (args) => run("git", args);\n',
+    'import { isBuiltin } from "node:module";\nexport const helper = (name) => isBuiltin(name);\n',
+  ]) {
+    assert.equal(slice([change("lib/leaf.ts")], helper(text)).status, "analysed", text);
+  }
+  const inline = tree({
+    "lib/helper.ts":
+      'import { Worker } from "node:worker_threads";\nconst source = `const { x } = require("./workerDep.js");`;\n' +
+      "export const helper = () => new Worker(source, { eval: true });\n",
+    "lib/workerDep.js": "exports.x = 1;\n",
+  });
+  const inlined = slice([change("lib/workerDep.js", { newText: "exports.x = 2;\n" })], inline);
+  assert.equal(inlined.status, "analysed", JSON.stringify(inlined.problems ?? []));
+  assert.ok(inlined.slicePaths.has("lib/workerDep.js"));
   assert.equal(
     slice([change("lib/leaf.ts")], tree({ "scripts/check-locales.mjs": "export const load = (locale) => import(`../locales/${locale}.ts`);\n" })).status,
     "analysed",
