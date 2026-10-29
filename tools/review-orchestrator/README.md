@@ -539,6 +539,19 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 - 다른 계정의 커밋이 들어간 PR은 Dependabot이 더 이상 자동 rebase하지 않습니다. `@dependabot recreate`를
   쓰면 자동 수정 커밋은 지워집니다.
 - merge lane은 `dependabot/**`를 병합하지 않으므로, 수정된 Dependabot PR의 병합은 사람이 합니다.
+- **패키지 설치(기본 꺼짐).** 메이저 업데이트는 새 API를 봐야 고칠 수 있습니다(#2969: 모델이 v11의
+  `.d.ts`를 볼 수 없어 `not_found`). `read.env`에 `PR_CI_AUTO_FIX_INSTALL=on`을 두면 Dependabot head에서만
+  모델을 부르기 전에 작업 checkout에 `npm ci`를 돌립니다. 설치는 다음 조건으로 돌고, 막히면 모델은 패키지 없이 돕니다.
+  - 패키지 코드는 실행하지 않습니다(`--ignore-scripts`).
+  - registry와 user config는 명령줄에서 고정합니다. 그래서 브랜치의 `.npmrc`나 계정의 npm 설정·토큰은 쓰이지 않습니다.
+  - npm에는 `PATH`·`HOME`·`LANG`·`TMPDIR`만 넘깁니다. GitHub 토큰은 넘기지 않습니다.
+  - lockfile은 브랜치의 것이라 임의의 경로로 가는 링크를 만들 수 있습니다. 그래서 설치 뒤 모델 앞에서 한 번 검사합니다.
+    링크가 checkout 밖을 가리키거나(`link_outside`), hard link·특수 파일이 있으면 설치한 패키지를 지웁니다.
+    패키지가 가진 지시 파일(`CLAUDE.md`, `.claude/` 등)은 지웁니다.
+  - 설치는 15분 안에 끝나야 합니다. 그래서 unit의 `TimeoutStartSec`가 65분입니다.
+  결과는 ledger의 `packages`(`installed` 또는 사유)와 로그 `packages not installed: …`에 남습니다.
+  켜려면 갱신된 `pr-ci-auto-fix.service`를 ④처럼 다시 설치한 뒤, `read.env`에 한 줄을 더합니다.
+  서버에 `npm`(Node 22와 함께 오는 것)이 PATH에 있어야 합니다.
 
 **두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.** 상태 보고와 같은 이유입니다. 모델은 `review`
 계정으로 돌고, CI 로그와 브랜치 내용은 모델에게 그 계정이 읽을 수 있는 파일이나 프로세스 환경을
