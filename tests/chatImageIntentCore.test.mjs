@@ -14,7 +14,7 @@ import {
   parseChatImageIntentOutput,
   readChatImageDecision,
 } from "../lib/chatImageIntentCore.ts";
-import { askChatImageIntent } from "../lib/chatImageIntentClient.ts";
+import { askChatImageIntent, askChatImageTurn } from "../lib/chatImageIntentClient.ts";
 import { IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
 
 const price = (quality, size, credits) => ({
@@ -187,6 +187,27 @@ test("the client falls back to chat on no, refusal, malformed body or failure", 
       throw new TypeError("network");
     }),
     chat
+  );
+});
+
+test("the send reads the answer as the image turn to make, or none for text", async () => {
+  assert.deepEqual(
+    await askChatImageTurn("draw a cat", {}, async () =>
+      jsonResponse({ image: true, modelId: "quick", preset: "draft", edit: true })),
+    { modelIds: ["quick"], preset: "draft", edit: true }
+  );
+  assert.deepEqual(
+    await askChatImageTurn("x", {}, async () => jsonResponse({ image: true, preset: "huge" })),
+    { modelIds: [], preset: null }
+  );
+  assert.equal(await askChatImageTurn("x", {}, async () => jsonResponse({ image: false })), undefined);
+  // The send starts beside the question and reads it later, so a failure is a
+  // text answer, never a rejection left for nobody to catch.
+  assert.equal(
+    await askChatImageTurn("x", {}, async () => {
+      throw new TypeError("network");
+    }),
+    undefined
   );
 });
 
