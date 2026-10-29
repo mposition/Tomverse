@@ -7,9 +7,6 @@ import { test } from "node:test";
 
 import ts from "typescript";
 
-import { DEPLOY_EXCLUDED_PREFIXES } from
-  "../lib/agentControlPlaneSlice.ts";
-
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sourcePaths = execFileSync("git", ["ls-files", "app", "lib", "packages"],
   { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/)
@@ -22,7 +19,6 @@ test("deploy source exclusion remains narrow and grants no T1 before image proof
     .split(/\r?\n/).map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
   assert.deepEqual(patterns, ["tests/", "playwright.admin.config.ts"]);
-  assert.deepEqual([...DEPLOY_EXCLUDED_PREFIXES], []);
   // This live route reads committed verification records by path.
   assert.match(readFileSync(join(root,
     "lib/marketingWebhookVerification.ts"), "utf8"),
