@@ -11,7 +11,7 @@ import { issueEngineeringAgentCapability,
 
 type Patch = { text: string; sha256: string; baseSha: string };
 type Candidate = { expectedTreeId: string;
-  baseCommitterDate: string | null; imageProofDigest: string };
+  baseCommitterDate: string | null; imageProofDigest: string | null };
 type Ports = { open: typeof openEngineeringAgentWorkItem;
   resolve: typeof resolveEngineeringAgentV22TierPendingDraft;
   issue: typeof issueEngineeringAgentCapability };
@@ -64,12 +64,14 @@ export async function reissueEngineeringAgentV22Capability(
 }
 
 /** The caller holds one engineering transaction. A failed capability issue
- * aborts the promotion too, never leaving a queued item without authority. */
+ * aborts the promotion too, never leaving a queued item without authority.
+ * `ownerReview` opens the publish item as an owner review item: a T2 patch
+ * the publisher opens as a draft pull request. */
 export async function resolveEngineeringAgentV22Product(
   tx: EngineeringAgentTransaction,
   input: { workItemId: string; runId: string; taskId: string;
     patchDigest: string; baseSha: string; candidate: Candidate | null;
-    reason: string },
+    reason: string; ownerReview?: boolean },
   ports: Pick<Ports, "resolve" | "issue"> = livePorts,
 ) {
   const { candidate } = input;
@@ -79,7 +81,8 @@ export async function resolveEngineeringAgentV22Product(
     workItemId: input.workItemId, patchDigest: input.patchDigest,
     baseSha: input.baseSha, reason: input.reason,
     promote: candidate ? { expectedTreeId: candidate.expectedTreeId,
-      imageProofDigest: candidate.imageProofDigest } : null,
+      imageProofDigest: candidate.imageProofDigest,
+      ownerReview: input.ownerReview === true } : null,
   });
   if (candidate && "publishWorkItemId" in resolved)
     await ports.issue(tx, { workItemId: resolved.publishWorkItemId,

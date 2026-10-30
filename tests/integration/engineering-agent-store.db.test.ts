@@ -361,6 +361,45 @@ test("a v22 draft settled before its tier is promoted to its run's one publish i
   }));
 });
 
+test("a T2 draft promoted for the owner's review opens a review item only a review-draft publisher writes", async () => {
+  const pending = await pendingDraftFor("owner review patch");
+  const resolved = await inTx((tx) => resolveEngineeringAgentV22Product(tx, {
+    ...promotionInput(pending), ownerReview: true,
+    candidate: { ...promotionInput(pending).candidate, imageProofDigest: null },
+  }));
+  assert.ok("publishWorkItemId" in resolved);
+  const publish = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: resolved.publishWorkItemId } });
+  assert.deepEqual([publish.kind, publish.state, publish.causeKey],
+    ["publish", "queued", `publish_review:${pending.run.runId}`]);
+  const promotedAudit = await auditFor(pending.draft.id);
+  assert.ok(promotedAudit.some((row) => (row.metadata as { ownerReview?: boolean } | null)?.ownerReview === true));
+  // The cause key is what tells it apart, and it never changes.
+  await assert.rejects(prisma.engineeringAgentWorkItem.update({ where: { id: publish.id },
+    data: { causeKey: `publish:${pending.run.runId}` } }), /cannot change what it is about/);
+
+  const claimNext = (reviewDrafts?: boolean) => inTx((tx) =>
+    claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, reviewDrafts }));
+  const previous = process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+  try {
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
+    assert.equal(await claimNext(), null, "a publisher that does not open drafts never writes it");
+    assert.equal(await claimNext(false), null);
+    delete process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+    assert.equal(await claimNext(true), null, "the switch off holds it");
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
+    const work = await claimNext(true);
+    assert.ok(work && work.mode === "write");
+    assert.equal(work.workItemId, publish.id);
+    assert.equal(work.ownerReview, true);
+    const bound = await settleAndBind(publish.id, work.fencingToken, pending.run.runId);
+    await retireBinding(bound.bindingId);
+  } finally {
+    if (previous === undefined) delete process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+    else process.env.ENGINEERING_AGENT_V22_REVIEW_PR = previous;
+  }
+});
+
 test("a v22 publish item never claimed closes only without a live capability", async () => {
   const live = await startRun();
   const liveItem = await inTx((tx) => openEngineeringAgentWorkItem(tx, {
@@ -809,6 +848,7 @@ test("the publisher claims its next work, and the last look can only refuse", as
   assert.equal(work.patchBody, "patch");
   assert.equal(work.commitDigest, issued.commitDigest);
   assert.equal(work.branch, `agent/engineering/${run.runId}`);
+  assert.equal(work.ownerReview, false, "an ordinary item is no review item");
   assert.equal(await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 })), null, "nothing else to do");
 
   const look = (fencingToken: bigint, commitDigest: string) =>

@@ -170,6 +170,27 @@ branch 이름은 등급을 정하지 못한다.
 | **T1 PR** | 전용 branch를 push하고 `develop` 대상 PR을 연다. auto-merge 없음 | 병합은 사람이 한다. push와 PR은 공개되어 회수되지 않으므로, 공개 입력에서만 파생된 변경 또는 §2.1의 별도 공개 동의를 받은 v22 구현 Task의 검증된 패치에 한해 §13의 조건을 통과해야 한다. 동의가 있어도 아이디어 원문·실행 brief는 공개하지 않는다 |
 | 무인 병합 | **이 정책에서 부여하지 않는다** | — |
 
+**T2 검토 draft PR (운영자 결정 2026-10-30).** 완성된 작업은 PR로 끝나야 한다는 운영자 지시에 따라,
+v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족하면 게시 서비스가 전용 branch를 push하고
+`develop` 대상 **draft** PR을 연다. 제목 끝에 `(owner review)`를, 본문에 "Owner review (T2)"와 ready로
+바꾸면 이 변경의 코드가 저장소 secret과 함께 CI에서 돈다는 경고를 단다.
+
+- 앱 변수 `ENGINEERING_AGENT_V22_REVIEW_PR`가 정확히 `on`이다(기본 꺼짐).
+- T1 후보와 같은 결속(run·카드·base·patch digest, `t1`로 시작한 run, 카드의 공개 PR 동의, 게시 스위치)이
+  성립하고, base 증거로 결과 tree를 만들 수 있다. 게이트 증거를 읽지 못해 T2가 된 경우도 포함한다.
+- `.github/workflows/` 아래 파일을 바꾸지 않는다. 게시 서비스의 토큰에는 `workflows` 권한이 없어 GitHub이
+  push를 거절하고, 거절된 push는 다시 하지 않기 때문이다.
+
+이 PR이 draft인 동안에는 어떤 workflow도 돌지 않는다. 모든 `pull_request` workflow는 draft를 건너뛰고,
+`push` workflow는 `main`·`develop`·`to-develop` branch에서만 돈다. 토큰은 workflow 파일을 바꿀 수 없으므로
+이 조건을 PR이 스스로 풀지 못한다. ready 전환은 사람만 한다. CI admission은 `agent/engineering/` branch를
+줄에 넣지 않고, 병합 레인과 PR CI 자동 수정도 이 branch를 다루지 않는다. 검토 항목은 cause key
+`publish_review:<runId>`로 구별한다. DB가 cause key를 바꾸지 못하게 하므로, 재대기나 조회를 거쳐도 일반 PR이
+되지 않는다. 앱은 claim 요청 헤더 `x-engineering-publisher-features`에 `review_draft`를 적은 게시 서비스에만
+검토 항목의 쓰기 claim을 준다. 그래서 이 기능 이전에 배포된 게시 서비스는 이 항목을 ready PR로 열 수 없다.
+PR 대기열 상한(§12), 결과 불명 처리(§10), 병합은 사람이 한다는 규칙은 T1과 같다. 위 조건에 맞지 않는 T2는
+지금처럼 비공개 초안으로 남는다.
+
 ## 4. push 금지 집합
 
 변경 파일 중 하나라도 아래에 속하면 push하지 않는다(= T2로 끝난다). **판정은 파일
@@ -942,7 +963,8 @@ v22 코드 작업이 공개 PR이 될 수 없다. 이 버전은 규칙을 지우
    `development-agent-orchestration.md` v50이 정한다. `main` 병합은 계속 운영자의 release다.
 4. **owner PR 대기열(§12)**: 동시에 열린 PR 상한은 그대로 둔다. 자동 병합이 대기열을 비우므로
    처리량은 상한이 아니라 병합 주기가 정한다.
-5. **바뀌지 않는 것**: 에이전트는 slice를 push하지 않는다, 게시는 `develop`뿐, 결과 불명
+5. **바뀌지 않는 것**: 에이전트는 slice를 ready PR로 push하지 않는다(2026-10-30부터 §3의 T2 검토
+   draft PR은 예외다. ready 전환은 사람만 하고, 자동 병합 대상도 아니다), 게시는 `develop`뿐, 결과 불명
    처리, 비용 상한, kill switch, `t1` 진입 조건(v5 4항), 판정 과소 관측 시 `shadow` 복귀.
    "에이전트는 어떤 PR도 병합하지 않고 auto-merge를 켜지 않는다"(v5 5항, AGENTS.md)의 예외는
    위 3항의 조건을 모두 충족한 develop 결정적 병합 호출 하나뿐이고, 승인은 여전히 하지 않는다.
