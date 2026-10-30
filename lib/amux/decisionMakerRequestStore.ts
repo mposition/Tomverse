@@ -1238,6 +1238,32 @@ export async function closeDecisionMakerRequestOnDirectAnswer(
 }
 
 /**
+ * The requests routed for these cards, oldest first, in one statement: how a
+ * v22 worker's question card finds the request its confirmed answer closed
+ * (lib/amux/v22OwnerQuestionDmService.ts). Reads only.
+ */
+export async function readDecisionMakerRequestsForCards(
+  client: LedgerReader,
+  cardIds: readonly string[],
+): Promise<Array<{ requestId: string; cardId: string }>> {
+  if (cardIds.length === 0) return [];
+  if (cardIds.length > 32 || !cardIds.every((cardId) => isDmLedgerIdentifier(cardId))) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<{ id: unknown; cardId: unknown }>>`
+    SELECT "id", "cardId" FROM "AmuxDecisionMakerRequest"
+    WHERE "cardId" = ANY(${[...cardIds]}::text[])
+    ORDER BY "createdAt", "id"
+  `;
+  return rows.map((row) => {
+    if (!isDmRequestId(row.id) || typeof row.cardId !== "string") {
+      throw new DecisionMakerRequestWriteError("state_unreadable");
+    }
+    return { requestId: row.id, cardId: row.cardId };
+  });
+}
+
+/**
  * §10: an open request is closed 30 days after it was created, by the
  * database clock. Statements: 2 for a refusal; 6, or 7.
  */

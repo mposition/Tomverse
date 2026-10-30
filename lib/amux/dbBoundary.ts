@@ -492,7 +492,7 @@ export const AMUX_DB_BOUNDARIES = {
   // within docs/policy/amux-decision-maker.md §9's 12.
   decisionMakerDeliveryCandidateRead: {
     operation: "decision_maker_delivery_candidate_read",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "read",
   },
   decisionMakerDeliveryDecision: {
@@ -524,13 +524,14 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
-  // Resolve: setup + the confirmed question + request state + result detail
-  // + bodies + the answer (question lock, task, attempt, canonical audit 4,
-  // question, task) + fence; a cancel instead adds its update, the task read,
-  // an escalation (lookup, task, create, audit 4) and its own audit 4.
+  // Resolve: setup + open questions + their requests + up to 8 judgments +
+  // request state + result detail + bodies + the answer (question lock, task,
+  // attempt, canonical audit 4, question, task) + fence = 24; a cancel adds
+  // its update, the task read, an escalation (lookup, task, create, audit 4)
+  // and its own audit 4.
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 28,
+    prismaCallCeiling: 40,
     isolation: "mutation",
   },
   // Sync read: setup + pending + closing + fence.

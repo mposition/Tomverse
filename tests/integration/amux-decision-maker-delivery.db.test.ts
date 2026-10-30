@@ -650,7 +650,10 @@ test("a v22 question card's confirmed answer resumes its Task and is never offer
   const { requestId } = await proposed(FREE_TEXT, cardId);
   assert.deepEqual(await resolveQuestion(), { resolved: null }, "nobody confirmed it yet");
   await judge(requestId, "confirm");
-  assert.deepEqual(await nextCandidate(), { status: "none" });
+  const offered = await nextCandidate();
+  assert.equal(offered.status, "undeliverable");
+  assert.equal("reason" in offered && offered.reason, "v22_question_card");
+  assert.ok(!("message" in offered));
 
   assert.deepEqual(await resolveQuestion(), { resolved: "answered", questionId: question.id });
   const answered = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: question.id } });

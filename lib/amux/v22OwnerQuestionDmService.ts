@@ -8,7 +8,9 @@ import { readDecisionMakerBodies, readDecisionMakerResultDetail } from
   "@/lib/amux/decisionMakerBodyStore";
 import { dmDeliveryCandidate, dmDeliveryJudgmentFromRow,
   type DmDeliveryBodies } from "@/lib/amux/decisionMakerDeliveryCore";
-import { readDecisionMakerRequestState } from
+import { readDecisionMakerJudgment } from
+  "@/lib/amux/decisionMakerJudgmentStore";
+import { readDecisionMakerRequestState, readDecisionMakerRequestsForCards } from
   "@/lib/amux/decisionMakerRequestStore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import { BoardImportError } from "./boardImportCore.ts";
@@ -25,9 +27,10 @@ import { openAmuxV22TaskResultRow, type AmuxV22SealedRow } from
  * DM like any worker's ask; the operator confirms the proposal in Admin. The
  * confirmed answer is not typed into a terminal: a v22 worker has none.
  * Instead it answers the question here, which sends the Task back to the
- * same worker with the question and the answer, and the delivery walk never
- * offers it (decisionMakerJudgmentStore.ts). When the question has left
- * "open" the relay closes its local card.
+ * same worker with the question and the answer, and the delivery walk steps
+ * past it (decisionMakerDeliveryRead.ts). When the question has left "open"
+ * the relay closes its local card. The Decision Maker's tables are read only
+ * through their own stores.
  */
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -35,6 +38,19 @@ const QUESTION_ID = /^[0-9a-f-]{36}$/;
 
 /** At most this many questions or cards per relay tick. */
 export const AMUX_V22_QUESTION_SYNC_LIMIT = 3;
+
+/** Open questions with a local card a resolve looks at per tick. */
+export const AMUX_V22_QUESTION_RESOLVE_SCAN = 4;
+
+/** Whether a Decision Maker request's card mirrors a v22 worker question.
+ * One statement. */
+export async function isAmuxV22QuestionCard(
+  client: Pick<Prisma.TransactionClient, "$queryRaw">, cardId: string) {
+  const rows = await client.$queryRaw<Array<{ found: number }>>`
+    SELECT 1 AS "found" FROM "AmuxV22TaskQuestion"
+    WHERE "localCardId" = ${cardId} LIMIT 1`;
+  return rows.length > 0;
+}
 
 type PendingRow = AmuxV22SealedRow & { questionId: string; taskId: string;
   attemptId: string; worker: string; sequence: number; sourceSha256: string };
@@ -121,21 +137,28 @@ export async function recordAmuxV22QuestionLocalCardClosed(
  */
 export async function resolveAmuxV22QuestionFromDmJudgment(
   tx: Prisma.TransactionClient, now: Date) {
-  const rows = await tx.$queryRaw<Array<{ questionId: string; taskId: string;
-    requestId: string; kind: string; instance: string;
-    judgedAtEpochMs: bigint; actorUserId: string }>>`
-    SELECT q."id" AS "questionId", q."taskId", j."requestId", j."kind",
-      j."instance", j."actorUserId",
-      floor(extract(epoch FROM j."createdAt") * 1000)::bigint AS "judgedAtEpochMs"
-    FROM "AmuxV22TaskQuestion" q
-    JOIN "AmuxDecisionMakerRequest" r ON r."cardId" = q."localCardId"
-    JOIN "AmuxDecisionMakerJudgment" j ON j."requestId" = r."id"
-    WHERE q."state" = 'open' AND j."kind" IN ('confirm', 'edit_confirm')
-    ORDER BY j."createdAt", j."requestId"
-    LIMIT 1`;
-  const row = rows[0];
+  const open = await tx.amuxV22TaskQuestion.findMany({
+    where: { state: "open", localCardId: { not: null } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: AMUX_V22_QUESTION_RESOLVE_SCAN,
+    select: { id: true, taskId: true, localCardId: true } });
+  const requests = await readDecisionMakerRequestsForCards(tx,
+    open.map((question) => question.localCardId!));
+  let row: { questionId: string; taskId: string; requestId: string } | null = null;
+  let judgment: ReturnType<typeof dmDeliveryJudgmentFromRow> = null;
+  // At most two requests per card are read: a card has one question revision.
+  for (const request of requests.slice(0, AMUX_V22_QUESTION_RESOLVE_SCAN * 2)) {
+    const judged = await readDecisionMakerJudgment(tx, request.requestId);
+    if (judged?.kind !== "confirm" && judged?.kind !== "edit_confirm") continue;
+    const question = open.find((item) => item.localCardId === request.cardId)!;
+    row = { questionId: question.id, taskId: question.taskId,
+      requestId: request.requestId };
+    judgment = dmDeliveryJudgmentFromRow({ requestId: request.requestId,
+      kind: judged.kind, instance: judged.instance,
+      judgedAtEpochMs: Date.parse(judged.createdAt) });
+    break;
+  }
   if (!row) return { resolved: null };
-  const judgment = dmDeliveryJudgmentFromRow(row);
   const state = await readDecisionMakerRequestState(tx, row.requestId);
   const detail = await readDecisionMakerResultDetail(tx, row.requestId);
   const bodies: DmDeliveryBodies = {};
@@ -149,7 +172,8 @@ export async function resolveAmuxV22QuestionFromDmJudgment(
       throw new BoardImportError("answer_unavailable", 409);
     await answerAmuxV22OwnerQuestionInTransaction(tx, {
       questionId: row.questionId, answer: candidate.message,
-      source: "dm_confirmed", answeredByUserId: row.actorUserId, now,
+      // The person's judgment audit names who confirmed it.
+      source: "dm_confirmed", answeredByUserId: null, now,
       audit: (taskId) => writeSystemAuditLog({ tx,
         systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.v22.owner_question.answered",
