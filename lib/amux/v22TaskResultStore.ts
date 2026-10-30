@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
@@ -12,6 +12,8 @@ import { amuxContentDigest, openAmuxContent, verifyAmuxContentDigest } from
 import { decodeV22PatchEvidence, encodeV22PatchEvidence,
   type V22PublishFile } from "@/lib/amux/v22PatchEvidence";
 import { loadAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
+import { amuxV22OwnerQuestionSettlement, amuxV22OwnerQuestionSha256,
+  parseAmuxV22OwnerQuestion } from "@/lib/amux/v22OwnerQuestionCore";
 import { prisma } from "@/lib/prisma";
 
 export const AMUX_V22_RESULT_MAX_BYTES = 65_536;
@@ -148,13 +150,38 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
         byteLength: patchBytes.length,
       } });
     }
+    // A result whose last line is an owner question parks the Task at
+    // settlement instead of sending it to review (v22OwnerQuestionCore.ts).
+    // While an earlier question still waits, a new one is not recorded.
+    const question = parseAmuxV22OwnerQuestion(input.text);
+    let questionSequence: number | null = null;
+    if (question) {
+      // A question still open from an earlier attempt was never parked (that
+      // run was lost); it is closed rather than let it hide this one.
+      await tx.amuxV22TaskQuestion.updateMany({ where: { taskId: task.id,
+        state: "open", attemptId: { not: input.attemptId } },
+        data: { state: "cancelled" } });
+      const asked = await tx.amuxV22TaskQuestion.findMany({
+        where: { taskId: task.id }, select: { sequence: true, state: true },
+      });
+      if (!asked.some((row) => row.state === "open" || row.state === "answered")) {
+        questionSequence = asked.reduce((max, row) =>
+          Math.max(max, row.sequence), 0) + 1;
+        await tx.amuxV22TaskQuestion.create({ data: {
+          id: randomUUID(), taskId: task.id, attemptId: input.attemptId,
+          worker: input.worker, sequence: questionSequence,
+          questionSha256: amuxV22OwnerQuestionSha256(question),
+          state: amuxV22OwnerQuestionSettlement(questionSequence).questionState,
+        } });
+      }
+    }
     await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
       action: "amux.v22.task_result.recorded",
       targetType: "AmuxV22TaskResult", targetId: input.attemptId,
       summary: "Recorded one encrypted v22 Task result.",
       metadata: { taskId: task.id, sourceSha256: input.sourceSha256,
         byteLength: bytes.length,
-        patchSha256: patch?.sha256 ?? null },
+        patchSha256: patch?.sha256 ?? null, ownerQuestionSequence: questionSequence },
     });
     return { attemptId: input.attemptId, sourceSha256: input.sourceSha256,
       patchSha256: patch?.sha256 ?? null, duplicate: false };
@@ -256,5 +283,54 @@ export async function readAmuxV22TaskPatchEvidence(attemptId: string,
       throw new AmuxV22TaskResultError("result_invalid");
     return { ...evidence, sha256: patch.patchSha256,
       baseSha: patch.baseSha };
+  } finally { plain?.fill(0); keys.masterKey.fill(0); }
+}
+
+
+export type AmuxV22SealedRow = { ideaId: string; ciphertext: Uint8Array | null;
+  keyId: string | null; keyVersion: number | null; digest: string;
+  digestKeyId: string; bodyPurgedAt: Date | null };
+
+/** Internal only: opens one attempt's retained result row read elsewhere (the
+ * resumed delivery reads its rows inside its DB boundary and the keys
+ * outside it). Null when the body is purged. */
+export async function openAmuxV22TaskResultRow(attemptId: string,
+  row: AmuxV22SealedRow & { sourceSha256: string }): Promise<string | null> {
+  if (row.bodyPurgedAt || !row.ciphertext || !row.keyId || !row.keyVersion)
+    return null;
+  const keys = await loadAmuxContentUnitKeys({ ideaId: row.ideaId,
+    purpose: "task_result", subjectId: attemptId });
+  let plain: Buffer | null = null;
+  try {
+    plain = openAmuxContent({ ciphertext: Buffer.from(row.ciphertext),
+      keyId: row.keyId, keyVersion: row.keyVersion },
+      "task_result", attemptId, keys);
+    if (!verifyAmuxContentDigest(plain, "task_result", attemptId,
+      row.digest, row.digestKeyId, keys) ||
+      createHash("sha256").update(plain).digest("hex") !== row.sourceSha256)
+      throw new AmuxV22TaskResultError("result_invalid");
+    return plain.toString("utf8");
+  } finally { plain?.fill(0); keys.masterKey.fill(0); }
+}
+
+/** Internal only: the same for one attempt's patch row. */
+export async function openAmuxV22TaskPatchRow(attemptId: string,
+  row: AmuxV22SealedRow & { patchSha256: string }): Promise<string | null> {
+  if (row.bodyPurgedAt || !row.ciphertext || !row.keyId || !row.keyVersion)
+    return null;
+  const keys = await loadAmuxContentUnitKeys({ ideaId: row.ideaId,
+    purpose: "task_patch", subjectId: attemptId });
+  let plain: Buffer | null = null;
+  try {
+    plain = openAmuxContent({ ciphertext: Buffer.from(row.ciphertext),
+      keyId: row.keyId, keyVersion: row.keyVersion },
+      "task_patch", attemptId, keys);
+    if (!verifyAmuxContentDigest(plain, "task_patch", attemptId,
+      row.digest, row.digestKeyId, keys))
+      throw new AmuxV22TaskResultError("result_invalid");
+    const evidence = decodeV22PatchEvidence(plain);
+    if (v22TaskResultSha256(evidence.text) !== row.patchSha256)
+      throw new AmuxV22TaskResultError("result_invalid");
+    return evidence.text;
   } finally { plain?.fill(0); keys.masterKey.fill(0); }
 }

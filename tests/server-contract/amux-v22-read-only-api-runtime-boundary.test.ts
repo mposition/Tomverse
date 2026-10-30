@@ -91,6 +91,7 @@ const tx = {
     },
     updateMany: async () => { taskWrites += 1; return { count: 1 }; },
   },
+  amuxV22TaskQuestion: { findFirst: async () => null },
   amuxV22WorkerAssignment: { findUnique: async () => ({
     id: assignmentId, authorizationAuditLogId: "assignment-audit",
     workItemId: taskId, taskRevision: 5, workerName: worker,
