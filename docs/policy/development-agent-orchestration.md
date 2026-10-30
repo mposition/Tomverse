@@ -3339,3 +3339,13 @@ r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승
 - **16 상태 위치**: 담당 범위는 본 앱 DB(등록부·능력)에서 나온다.
 
 그 밖의 항목은 이 버전이 바꾸지 않는다.
+
+## v22 worker의 운영자 질문 (운영자 결정 2026-10-30)
+
+v22 실행은 마감 10분인 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그래서 운영자 결정이 필요한 worker는 추측하지 않고, 결과의 마지막 줄에 `AMUX_OWNER_QUESTION: {"question", "unblocks", "options"}`를 남기고 끝낸다(`lib/amux/v22OwnerQuestionCore.ts`).
+
+- **완료가 아니다.** 질문으로 끝난 실행은 정산에서 review·게시·등급 판정을 받지 않는다. Task는 `blocked`(attempt 사유 `owner_question`)로 답을 기다리고, 사람 escalation은 열지 않는다.
+- **질문은 Task당 3번까지다.** 네 번째 질문은 `owner_question_limit`으로 막히고 사람 escalation이 열린다.
+- **답하면 같은 worker가 이어서 한다.** 답이 기록되면 Task는 `todo`로 돌아간다. 배정은 질문한 worker에 그 Task의 경로가 남아 있는 한 그 worker를 기다린다. 다음 전달에는 질문, 답, 이전 실행의 변경이 붙는다. 변경은 프롬프트 상한에 들어갈 때만 붙인다.
+- **기록 방식.** 질문 원문은 그 attempt의 암호화된 결과 본문에 남고, `AmuxV22TaskQuestion`에는 digest·상태·순번만 둔다. 답은 재개된 실행이 정산될 때 지운다. 상태는 `open → answered | cancelled`, `answered → resumed`로만 움직이고 행은 지우지 않는다(DB trigger).
+- **답하는 길.** 1단계에서는 운영자가 Admin › AMUX 카드의 결과 보기에서 직접 답한다. Decision Maker 경로는 그 다음 단계다: 질문을 박스 로컬 카드의 typed ask로 올려 DM이 제안하고, 운영자가 Admin에서 확정하면 그 답으로 재개한다.

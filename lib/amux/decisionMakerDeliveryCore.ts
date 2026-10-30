@@ -187,7 +187,9 @@ export type DmDeliveryCandidate =
       status: "undeliverable";
       requestId: string;
       judgedAtMs: number;
-      reason: "answer_body_missing" | "message_too_long";
+      /** `v22_question_card`: a v22 worker's question card, answered in the
+       * app instead (lib/amux/v22OwnerQuestionDmService.ts). */
+      reason: "answer_body_missing" | "message_too_long" | "v22_question_card";
     };
 
 /**

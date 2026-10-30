@@ -7727,6 +7727,7 @@ model AmuxWorkItem {
   executionAttempts AmuxExecutionAttempt[]
   v22TaskResults    AmuxV22TaskResult[]
   v22TaskPatches    AmuxV22TaskPatch[]
+  v22OwnerQuestions AmuxV22TaskQuestion[]
   v52ReviewRecords  AmuxV52ReviewRecord[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
@@ -7843,6 +7844,7 @@ model AmuxExecutionAttempt {
   cliUsageEvents    AmuxCliUsageEvent[]
   v22TaskResult     AmuxV22TaskResult?
   v22TaskPatch      AmuxV22TaskPatch?
+  v22OwnerQuestion  AmuxV22TaskQuestion?
   v52ReviewRecord   AmuxV52ReviewRecord?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -7884,6 +7886,38 @@ model AmuxV22TaskResult {
   @@unique([attemptId, taskId])
   @@index([taskId, createdAt])
   @@index([ideaId, bodyPurgedAt])
+}
+
+/// A v22 worker question to the owner (operator decision 2026-10-30). The
+/// question text stays in the attempt's encrypted result; this row keeps its
+/// digest, where it stands and the answer until the resumed delivery reads it.
+model AmuxV22TaskQuestion {
+  id               String    @id
+  taskId           String
+  attemptId        String    @unique
+  worker           String
+  sequence         Int
+  questionSha256   String
+  /// open | answered | resumed | cancelled
+  state            String    @default("open")
+  answerText       String?
+  /// operator | dm_confirmed
+  answerSource     String?
+  answeredByUserId String?
+  answeredAt       DateTime?
+  resumedAttemptId String?
+  /// The typed-ask card mirroring this question on the AMUX host, once.
+  localCardId       String?  @unique
+  localCardClosedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@unique([taskId, sequence])
+  @@index([state, createdAt])
 }
 
 /// A bounded patch candidate, not a publication grant. The Publisher may
