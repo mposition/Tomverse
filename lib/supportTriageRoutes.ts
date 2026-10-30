@@ -157,7 +157,6 @@ export const handleSupportTriageRun = async (
       result: "ok",
       enabled: true,
       outcome: result.outcome,
-      reclaimed: result.reclaimed,
       exhausted: result.exhausted,
       claimed: result.claimed,
       ready: result.ready,
