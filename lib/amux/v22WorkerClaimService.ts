@@ -302,7 +302,20 @@ async function claimCandidate(taskId: string, assignmentId: string,
       }
       const authorWorkers = authors.map((author) => author.workerName);
       const authorProviders = authors.map((author) => author.provider);
-      const route = chooseAmuxV22WorkerRoute({ routes: quotaRoutes,
+      // A Task resumed after its owner question goes back to the worker that
+      // asked and waits for it -- busy, offline or out of quota alike -- as
+      // long as the approved routes still name that worker for the Task. The
+      // answer is pending until a resumed run settles.
+      const resume = await tx.amuxV22TaskQuestion.findFirst({
+        where: { taskId, answerText: { not: null },
+          state: { in: ["answered", "resumed"] } },
+        orderBy: [{ answeredAt: "desc" }, { id: "desc" }],
+        select: { worker: true } });
+      const resumeRoutes = resume && approved.receipt.routes.some((route) =>
+        route.workerName === resume.worker) ?
+        quotaRoutes.filter((route) => route.workerName === resume.worker) :
+        quotaRoutes;
+      const route = chooseAmuxV22WorkerRoute({ routes: resumeRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
         isReview: card.taskRole === "review" });
       if (!route) throw new BoardImportError(

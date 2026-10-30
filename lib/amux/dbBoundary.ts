@@ -492,7 +492,7 @@ export const AMUX_DB_BOUNDARIES = {
   // within docs/policy/amux-decision-maker.md §9's 12.
   decisionMakerDeliveryCandidateRead: {
     operation: "decision_maker_delivery_candidate_read",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "read",
   },
   decisionMakerDeliveryDecision: {
@@ -521,6 +521,46 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerDirectAnswerClose: {
     operation: "decision_maker_direct_answer_close",
     prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
+  // Each within docs/policy/amux-decision-maker.md §9's 12 statements.
+  // Resolve read: setup + switches + the next confirmation + request state +
+  // the open question of its card + result detail + bodies + fence.
+  decisionMakerV22QuestionResolve: {
+    operation: "decision_maker_v22_question_resolve",
+    prismaCallCeiling: 8,
+    isolation: "read",
+  },
+  // Answer: setup + audit chain lock + switches + the locked question, Task
+  // and newest attempt + canonical audit 4 + question + Task + fence.
+  decisionMakerV22QuestionAnswer: {
+    operation: "decision_maker_v22_question_answer",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // Escalate: setup + Task + escalation (lookup, Task, create, audit 4) + fence.
+  decisionMakerV22QuestionEscalate: {
+    operation: "decision_maker_v22_question_escalate",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // Cancel: setup + question + canonical audit 4 + fence.
+  decisionMakerV22QuestionCancel: {
+    operation: "decision_maker_v22_question_cancel",
+    prismaCallCeiling: 7,
+    isolation: "mutation",
+  },
+  // Sync read: setup + pending + closing + fence.
+  decisionMakerV22QuestionRead: {
+    operation: "decision_maker_v22_question_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  // Card or close record: setup + update + read-back + fence.
+  decisionMakerV22QuestionWrite: {
+    operation: "decision_maker_v22_question_write",
+    prismaCallCeiling: 4,
     isolation: "mutation",
   },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment

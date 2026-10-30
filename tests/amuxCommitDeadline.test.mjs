@@ -297,6 +297,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // append-only guard; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261027120000_amux_cli_models_and_worker_cli",
+  // v22 worker owner questions, operator decision 2026-10-30: one new table
+  // with a lifecycle guard; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261030120000_amux_v22_owner_question",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

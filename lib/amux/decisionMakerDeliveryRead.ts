@@ -18,6 +18,7 @@ import {
 } from "@/lib/amux/decisionMakerJudgmentStore";
 import { readDecisionMakerRequestState } from "@/lib/amux/decisionMakerRequestStore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
+import { isAmuxV22QuestionCard } from "@/lib/amux/v22OwnerQuestionDmService";
 
 /**
  * Stage S2-2b3 (docs/policy/amux-decision-maker.md §2-7, §6, §7): the bridge's
@@ -35,10 +36,13 @@ import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitch
  *
  * Statements, in this order on the caller's read transaction: 1 switch read
  * -- 1 under the kill switch; 1 confirmation read -- 2 when there is none; 1
- * request state, 1 result detail, 1 bodies -- 5. The DB boundary is that 5,
- * setup and fence (`decisionMakerDeliveryCandidateRead`), pinned by
- * tests/amuxDecisionMakerDelivery.test.mjs. A read transaction is one
- * snapshot, so the five agree with each other.
+ * request state, 1 result detail, 1 bodies -- 5; a ready one also asks
+ * whether its card is a v22 worker's question card -- 6. Such a card is
+ * answered in the app (lib/amux/v22OwnerQuestionDmService.ts) and never typed
+ * into a session, so the walk steps past it as undeliverable. The DB boundary
+ * is that 6, setup and fence (`decisionMakerDeliveryCandidateRead`), pinned
+ * by tests/amuxDecisionMakerDelivery.test.mjs. A read transaction is one
+ * snapshot, so the six agree with each other.
  *
  * The answer text is returned to the caller only; nothing here logs it.
  */
@@ -75,6 +79,10 @@ export async function readDecisionMakerDeliveryCandidate(
   }
   const candidate = dmDeliveryCandidate({ judgment, state, detail, bodies });
   if (!candidate) throw new DecisionMakerJudgmentWriteError("state_unreadable");
+  if (candidate.status === "ready" && await isAmuxV22QuestionCard(client, candidate.cardId)) {
+    return { status: "undeliverable", requestId: candidate.requestId,
+      judgedAtMs: candidate.judgedAtMs, reason: "v22_question_card" };
+  }
   return candidate;
 }
 

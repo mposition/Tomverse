@@ -41,6 +41,7 @@ pub mod direct;
 pub mod flow;
 pub mod io;
 pub mod snapshot;
+pub mod v22_question;
 pub mod wire;
 
 /// Exit status when the relay is enabled but its token is missing or
