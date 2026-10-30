@@ -2,7 +2,9 @@
  * Records A1's weekly KPI report (S3 plan, S3g): once a week, the counts
  * `lib/marketingWeeklyKpiCore.ts` makes of the week that has just ended, as
  * one `weekly_kpi` report. Run by the daily maintenance job, so a missed day
- * is caught up the next; a week already reported is left alone.
+ * is caught up the next; a week already reported is left alone. Only the
+ * latest ended week is ever recorded: maintenance down for a whole week
+ * leaves that week without a report.
  *
  * Nothing is recorded while there is no marketing account: there is no week
  * of marketing to count, and weeks of zeros would read as one. Nothing is

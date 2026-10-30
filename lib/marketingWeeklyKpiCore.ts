@@ -55,7 +55,9 @@ const MAX_CHANNELS = 20;
  * - Guard rejections: a post the Guard refused that was created in the week, once per code.
  *
  * Every account is listed, a quiet one with zeros: a missing account would
- * read as one nobody looked at. The result parses against the stored schema,
+ * read as one nobody looked at -- up to the payload schema's twenty, by slug.
+ * Past twenty, `postsPublished` still counts every account and the totals
+ * list the first twenty only. The result parses against the stored schema,
  * so a code that is not a registry id fails here rather than at the insert.
  */
 export function marketingWeeklyKpi(input: {
