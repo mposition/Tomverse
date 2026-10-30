@@ -341,9 +341,13 @@ const HUMAN_LANES: readonly TriageLane[] = ["billing_human", "trust_safety_human
 /**
  * The lane written: a money or trust-and-safety keyword keeps its human lane
  * whatever the model says (a floor, not a vote); otherwise the model's lane
- * when it answered, else the keyword lane.
+ * when it answered, else the keyword lane. The one move off a human floor is
+ * up: billing to trust and safety, which outranks it (policy section 1).
  */
 export const finalLane = (row: ClaimedRow): { finalLane: TriageLane; laneSource: LaneSource } => {
+  if (row.lane === "billing_human" && row.llm?.lane === "trust_safety_human") {
+    return { finalLane: "trust_safety_human", laneSource: "llm" };
+  }
   if (!row.llm || HUMAN_LANES.includes(row.lane)) return { finalLane: row.lane, laneSource: "keyword" };
   // Verified is a server fact: the keyword rule reads it from the report, the
   // model only from the prompt. The model cannot raise a report to verified.
@@ -367,25 +371,45 @@ export const readDuplicateCandidates = (): Promise<TriageCandidate[]> =>
 /**
  * The LLM step, outside any transaction: one call per claimed report, all at
  * once (a batch is at most 10). A failed or unusable answer leaves the row on
- * its keyword lane. The lease (5 minutes) outlasts the call timeout. The
- * duplicate pool is read before the claim, so nothing but the call runs
- * between the claim and the result transaction.
+ * its keyword lane. The lease (5 minutes) outlasts the call timeout.
+ *
+ * The duplicate pool is read before the claim and the reports in the claim, so
+ * an account deletion can complete after either read. Right before the calls,
+ * one read by id keeps only the reports still open and not anonymised: a
+ * deletion committed by then is never sent (docs/policy/support-triage.md §5).
+ * A deletion committed after it is ordered after the dispatch; the result
+ * transaction then keeps no answer that saw it, and the deletion removes the
+ * row that did.
  */
 export const runTriageLlm = async (
   llm: TriageLlm,
   claimed: readonly ClaimedRow[],
   reports: ReadonlyMap<string, ClaimedReport>,
   pool: readonly TriageCandidate[]
-): Promise<ClaimedRow[]> =>
-  Promise.all(
+): Promise<ClaimedRow[]> => {
+  const ids = [...new Set([...claimed.map((row) => row.feedbackId), ...pool.map((c) => c.id)])];
+  const showable = new Set(
+    (
+      await prisma.$queryRaw<{ id: string }[]>`
+        SELECT f."id" FROM "Feedback" f
+         WHERE f."id" = ANY(${ids}::text[])
+           AND f."status" = ANY(${ELIGIBLE}::text[])
+           AND f."message" <> ${DELETED_ACCOUNT_MARKER}`
+    ).map((row) => row.id)
+  );
+  const shown = pool.filter((c) => showable.has(c.id));
+  return Promise.all(
     claimed.map(async (row) => {
       const report = reports.get(row.feedbackId);
-      if (!report) return row;
-      const candidates = pool.filter((c) => c.id !== row.feedbackId).slice(0, DUPLICATE_CANDIDATES_MAX);
+      // A report closed or deleted since the claim is not sent; a claim still
+      // left lapses to failed.
+      if (!report || !showable.has(row.feedbackId)) return row;
+      const candidates = shown.filter((c) => c.id !== row.feedbackId).slice(0, DUPLICATE_CANDIDATES_MAX);
       const answer = await llm({ report, candidates });
       return answer ? { ...row, llm: answer } : row;
     })
   );
+};
 
 /**
  * Step 4: ready only the rows still claimed with this token, for reports still
