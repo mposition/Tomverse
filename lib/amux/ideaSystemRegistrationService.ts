@@ -1,5 +1,6 @@
 import "server-only";
 
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 
@@ -40,7 +41,8 @@ import { AmuxPortfolioError, writeAmuxPortfolioAssessmentInTx } from
 import { writeAmuxPortfolioScoreInTx } from "./portfolioScoreService.ts";
 import { AMUX_IDEA_PLAN_APPROVAL_TRANSACTION } from
   "./ideaRequestTimeoutsCore.ts";
-import { calculateCurrentApprovedAmuxV4TaskCost } from
+import { AmuxV4TaskCatalogApprovalError,
+  calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { AmuxV19PlanRegistrationRefusalDetected,
   AmuxV20RegistrationRefusalDetected } from
@@ -302,12 +304,29 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
   }
   for (const card of cards) {
     if (card.cardType !== "task") continue;
+    const identity = { ideaId, draftUnitId: card.draftUnitId,
+      analysisPreviewId: card.verified.previewId };
     const inspected = inspectAmuxV20TaskRegistration(card.verified.proposal);
     if (!inspected.ok) {
-      throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
-        ideaId, draftUnitId: card.draftUnitId,
-        analysisPreviewId: card.verified.previewId,
-      }, card.verified.proposal);
+      throw new AmuxV20RegistrationRefusalDetected(inspected.code, identity,
+        card.verified.proposal);
+    }
+    // No priced worker for the role and grade is a recorded refusal here, not
+    // an unknown outcome of the registration transaction below. A catalog
+    // that cannot be read at all still throws.
+    const priced = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+      await calculateCurrentApprovedAmuxV4TaskCost(tx,
+        card.verified.proposal.taskRole!, inspected.executionGrade);
+      return true;
+    }).catch((error: unknown) => {
+      if (error instanceof AmuxV4TaskCatalogApprovalError &&
+          error.code === "evidence_unverified") return false;
+      throw error;
+    });
+    if (!priced) {
+      throw new AmuxV20RegistrationRefusalDetected("task_route_unpriced",
+        identity, card.verified.proposal);
     }
   }
   const every = [...nodes, ...cards];
@@ -559,9 +578,9 @@ async function commitAmuxV19CompletedIdeaSystemRegistration(
       for (const entry of plan.cards) {
         const proposal = entry.verified.proposal;
         // amux-intake.md v19 item 5 explicitly makes this default true for
-        // unattended implement Tasks under the saved operating scope.
+        // unattended implement (and test) Tasks under the saved operating scope.
         const publicPrDisclosureApproved = entry.cardType === "task" &&
-          proposal.taskRole === "implement";
+          amuxV22TaskWritesPatch(proposal.taskRole);
         const ownerSession = deriveAmuxV19SystemRegistrationBinding({
           ideaId: plan.ideaId, decisionId: entry.decisionId,
           actorUserId: plan.actorUserId, key: plan.keys,

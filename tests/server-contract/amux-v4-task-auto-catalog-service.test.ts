@@ -82,7 +82,7 @@ test("a Task's ceiling comes from the registry price and reproduces at a pinned 
 test("no worker for the role, or no model in the registry, is a hold", async () => {
   const { calculateCurrentApprovedAmuxV4TaskCost } = await service;
   rows = [row()];
-  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "test", "advanced"),
+  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "operate", "advanced"),
     { name: "AmuxV4TaskCatalogApprovalError" });
   rows = [];
   await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "implement", "advanced"),

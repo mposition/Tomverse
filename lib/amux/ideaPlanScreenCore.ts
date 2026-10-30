@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import type { AmuxVisibleAnalysisUnit } from "./ideaAnalysisResultReadCore.ts";
 import { amuxV4CardPlanRound, orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
 
@@ -114,7 +115,8 @@ export function buildAmuxV4PlanRequest(input: {
   return {
     ideaId: input.ideaId, planRequestId: input.planRequestId, reasons: {},
     publicPrConsentOff: units.filter((unit) => unit.kind === "task" &&
-      unit.taskRole === "implement" && input.consentOff.has(unit.unitId)).map((unit) => unit.unitId),
+      amuxV22TaskWritesPatch(unit.taskRole) && input.consentOff.has(unit.unitId))
+      .map((unit) => unit.unitId),
     assessments, scoreTaskUnitIds, expectedUnitIds: units.map((unit) => unit.unitId),
   };
 }

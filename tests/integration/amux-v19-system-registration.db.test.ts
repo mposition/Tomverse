@@ -224,6 +224,7 @@ async function approveSyntheticTaskCatalog() {
 async function completedSessionIdea(options: {
   expectedPaths?: string[];
   taskTitle?: string;
+  taskRole?: string;
 } = {}) {
   const initialObjectKeys = new Set(objects.keys());
   const ideaId = randomUUID();
@@ -343,7 +344,7 @@ async function completedSessionIdea(options: {
       completionCriteria: ["The inert Task is auditable"],
       featureRef: "c0:node-2",
       parentStoryRef: null, dependencyRefs: [], duplicateCandidateRefs: [],
-      taskRole: "implement", executionGrade: "advanced",
+      taskRole: options.taskRole ?? "implement", executionGrade: "advanced",
       expectedPaths: options.expectedPaths ??
         ["lib/amux/ideaSystemRegistrationCore.ts"],
       executionBrief: "Implement and verify one bounded contract change.",
@@ -1089,4 +1090,49 @@ test("the deferred DB guard rejects a forged system actor scope", async () => {
   } });
   assert.equal((audit.metadata as { actorScope?: string }).actorScope,
     "system-unit-registration-v1");
+});
+
+test("a test Task registers through the implement execution with its public PR consent", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea({ taskRole: "test" });
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "committed");
+  if (result.state !== "committed") throw new Error("test Task was refused");
+  const decision = await prisma.amuxIdeaUnitDecision.findFirstOrThrow({
+    where: { ideaId, action: "register_card" },
+    select: { registeredWorkItemId: true } });
+  const cardId = decision.registeredWorkItemId!;
+  const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: cardId },
+    select: { taskRole: true } });
+  assert.equal(task.taskRole, "test");
+  assert.equal(await readAmuxV22PublicPrConsent(cardId), true);
+});
+
+test("an operate Task is a recorded refusal, never an unknown outcome", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea({ taskRole: "operate" });
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "awaiting_operator");
+  if (result.state !== "awaiting_operator") throw new Error("operate Task registered");
+  assert.equal(result.refusal.refusalCode, "task_role_not_runnable");
+  assert.equal(await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }), 0);
+});
+
+test("a Task no priced worker can take is a recorded refusal", async () => {
+  await ensureModelRegistrySeeded();
+  // The only worker runs investigate, so nothing prices an implement Task.
+  await seedAmuxWorkerCatalog([{ worker_name: "claude-contract",
+    routing_roles: ["contract"],
+    v22: { model: "claude-opus-4-8", routing_roles: ["investigate"],
+      tool_capabilities: ["repo_read"] } }]);
+  try {
+    const { ideaId } = await completedSessionIdea();
+    const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+    assert.equal(result.state, "awaiting_operator");
+    if (result.state !== "awaiting_operator") throw new Error("unpriced Task registered");
+    assert.equal(result.refusal.refusalCode, "task_route_unpriced");
+    assert.equal(await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }), 0);
+  } finally {
+    await approveSyntheticTaskCatalog();
+  }
 });

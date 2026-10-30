@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -117,7 +118,7 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       where: { id: attempt.v22AssignmentId },
       select: { role: true, workItemId: true },
     });
-    if (assignment?.role !== "implement" || assignment.workItemId !== task.id)
+    if (!amuxV22TaskWritesPatch(assignment?.role) || assignment!.workItemId !== task.id)
       patch = undefined;
     // A patch is a private Task result first. A missing, finished or
     // base-mismatched Engineering run must not erase it; the Publisher

@@ -301,6 +301,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // with a lifecycle guard; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261030120000_amux_v22_owner_question",
+  "20261031090000_amux_v22_test_verify_roles",
+  "20261031090100_amux_v22_test_recovery_workspace",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

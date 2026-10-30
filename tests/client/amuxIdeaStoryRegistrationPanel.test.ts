@@ -19,6 +19,8 @@ const EXPECTED = {
   task_execution_grade_mismatch: "taskRegistrationGradeRefused",
   task_confirmation_grade_mismatch: "taskRegistrationGradeRefused",
   task_cost_receipt_grade_mismatch: "taskRegistrationGradeRefused",
+  task_role_not_runnable: "taskRegistrationRoleNotRunnable",
+  task_route_unpriced: "taskRegistrationRouteUnpriced",
 } as const;
 
 test("all stable Task registration refusals clear stale duplicate state and select actionable copy", () => {

@@ -62,11 +62,12 @@ test("a Task whose path leaves the plan or lacks metrics is not scored here", ()
     units: amuxV4PlanScreenUnits(outside), edits: new Map(), consentOff: new Set() }).scoreTaskUnitIds, []);
 });
 
-test("public PR consent is turned off only for implement Tasks the owner unchecked", () => {
+test("public PR consent is turned off only for patch-writing Tasks the owner unchecked", () => {
+  // A test Task writes a patch through the implement execution (2026-10-30).
   const body = buildAmuxV4PlanRequest({ ideaId: "idea-0001", planRequestId: plan,
     units: amuxV4PlanScreenUnits(units), edits: new Map(),
     consentOff: new Set(["unit-task-01", "unit-task-02", "unit-story-1"]) });
-  assert.deepEqual(body.publicPrConsentOff, ["unit-task-01"]);
+  assert.deepEqual(body.publicPrConsentOff, ["unit-task-01", "unit-task-02"]);
 });
 
 test("the request names exactly the units this approval registers", () => {

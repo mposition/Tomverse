@@ -4,7 +4,9 @@ export type AmuxTaskRegistrationRefusalMessageKey =
   | "taskRegistrationExpectedPathsRefused"
   | "taskRegistrationMixedPathsRefused"
   | "taskRegistrationReviewRoleRefused"
-  | "taskRegistrationGradeRefused";
+  | "taskRegistrationGradeRefused"
+  | "taskRegistrationRoleNotRunnable"
+  | "taskRegistrationRouteUnpriced";
 
 export type AmuxTaskRegistrationRefusalPresentation = {
   messageKey: AmuxTaskRegistrationRefusalMessageKey;
@@ -32,6 +34,12 @@ export function amuxTaskRegistrationRefusalPresentation(
     case "task_confirmation_grade_mismatch":
     case "task_cost_receipt_grade_mismatch":
       return { messageKey: "taskRegistrationGradeRefused",
+        clearDuplicateState: true };
+    case "task_role_not_runnable":
+      return { messageKey: "taskRegistrationRoleNotRunnable",
+        clearDuplicateState: true };
+    case "task_route_unpriced":
+      return { messageKey: "taskRegistrationRouteUnpriced",
         clearDuplicateState: true };
     default:
       return null;
