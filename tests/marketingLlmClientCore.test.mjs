@@ -337,6 +337,8 @@ const searchAnswer = (overrides = {}) => ({
 });
 
 test("a web-search request is one domain-limited search tool, capped at the pin's search count", () => {
+  // No domains is A3's discovery search: the same tool with no domain filter.
+  assert.equal("filters" in marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, []).tools[0], false);
   const body = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com", "support.claude.com"]);
   assert.deepEqual(Object.keys(body).sort(), [
     "include",

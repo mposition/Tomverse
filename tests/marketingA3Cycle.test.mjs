@@ -16,7 +16,14 @@ const SECRET = "a".repeat(48);
 const NOW = Date.parse("2026-10-17T00:00:00.000Z");
 const DEADLINE = new Date(NOW + 20 * 60 * 1000).toISOString();
 
-const context = (tracked) => ({ channels: [], claims: [], assets: [], brief: null, marketIntel: null, competitors: { tracked, knownIds: [] } });
+const context = (tracked, knownIds = []) => ({
+  channels: [],
+  claims: [],
+  assets: [],
+  brief: null,
+  marketIntel: null,
+  competitors: { tracked, knownIds },
+});
 const poe = {
   competitorId: "poe",
   displayName: "Poe",
@@ -30,6 +37,27 @@ const fact = (sourceUrl) => ({
   sourceUrl,
 });
 
+/** A settled web-search answer. */
+const answered = (requestKey, content, citations) => ({
+  status: "answered",
+  callId: `call-${requestKey}`,
+  requestKey,
+  content: JSON.stringify(content),
+  citations,
+  ledgerState: "settled",
+});
+
+/** The discovery search's cited pages, and a candidate citing them. */
+const FOUND = ["https://www.typingmind.com/", "https://www.typingmind.com/pricing"];
+const candidate = (overrides = {}) => ({
+  competitorId: "typingmind",
+  displayName: "TypingMind",
+  officialHosts: ["typingmind.com"],
+  evidenceUrls: [FOUND[1]],
+  rationale: "A chat front end for many model providers, sold as one licence.",
+  ...overrides,
+});
+
 /** Ports that record what the run asked for, answering from the given table. */
 const ports = (overrides = {}) => {
   const seen = { calls: [], reports: [], sleeps: [] };
@@ -38,18 +66,17 @@ const ports = (overrides = {}) => {
     readContext: async () => context([poe]),
     callLlm: async (messages, requestKey, allowedDomains) => {
       seen.calls.push({ messages, requestKey, allowedDomains });
-      return {
-        status: "answered",
-        callId: `call-${seen.calls.length}`,
+      // No domains is the run's discovery search, which finds nothing by default.
+      if (allowedDomains.length === 0) return answered(requestKey, { candidates: [] }, []);
+      return answered(
         requestKey,
-        content: JSON.stringify({
+        {
           // The second cites a page the provider never cited: not kept.
           facts: [fact("https://poe.com/pricing"), fact("https://poe.com/changelog")],
           unrepresentable: 1,
-        }),
-        citations: CITED,
-        ledgerState: "settled",
-      };
+        },
+        CITED,
+      );
     },
     submitReport: async (report) => {
       seen.reports.push(report);
@@ -71,10 +98,12 @@ test("a run searches once per competitor within its official domains, and report
   const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
   assert.deepEqual(summary, {
     competitors: 1,
-    calls: 1,
+    calls: 2,
     factsKept: 1,
     unrepresentable: 2,
     dropped: { source_not_retrieved: 1 },
+    candidatesKept: 0,
+    candidatesDropped: {},
     report: { httpStatus: 200, status: "recorded" },
     stoppedAt: null,
   });
@@ -86,20 +115,108 @@ test("a run searches once per competitor within its official domains, and report
   assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
   assert.deepEqual(report.payload.facts.map((row) => [row.competitorId, row.sourceUrl]), [["poe", "https://poe.com/pricing"]]);
   assert.equal(report.payload.unrepresentableFactCount, 2);
+  // A report that proposes nothing carries no candidate field: its bytes are what they were.
+  assert.equal("competitorCandidates" in seen.reports[0], false);
 });
 
-test("nothing is asked or reported when no approved competitor has an official host", async () => {
+test("after the tracked competitors, one unrestricted search proposes new ones with evidence the provider cited", async () => {
+  const { deps, seen } = ports({
+    readContext: async () => context([poe], ["poe", "monica"]),
+    callLlm: async (messages, requestKey, allowedDomains) => {
+      seen.calls.push({ messages, requestKey, allowedDomains });
+      if (allowedDomains.length > 0) return answered(requestKey, { facts: [], unrepresentable: 0 }, CITED);
+      return answered(
+        requestKey,
+        {
+          candidates: [
+            candidate(),
+            // Already in the registry, under any status: not proposed again.
+            candidate({ competitorId: "monica", displayName: "Monica" }),
+            candidate({ competitorId: "poe", displayName: "Poe again" }),
+            // Evidence the provider did not return, even one character off: not evidence.
+            candidate({ competitorId: "chathub", displayName: "ChatHub", evidenceUrls: ["https://chathub.gg/"] }),
+            candidate({ competitorId: "msty", displayName: "Msty", evidenceUrls: [`${FOUND[1]}/`] }),
+            // No evidence at all, and a shape the registry would not store.
+            candidate({ competitorId: "noproof", displayName: "No proof", evidenceUrls: [] }),
+            candidate({ competitorId: "Bad Id" }),
+            // The same new id twice is proposed once.
+            candidate({ displayName: "TypingMind twice" }),
+          ],
+        },
+        FOUND,
+      );
+    },
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.equal(summary.stoppedAt, null);
+  assert.equal(summary.calls, 2);
+  assert.equal(summary.candidatesKept, 1);
+  assert.deepEqual(summary.candidatesDropped, { known: 3, evidence_not_cited: 2, shape: 2 });
+  // The discovery call is the last one, unrestricted, and told what the registry already holds.
+  const discovery = seen.calls[1];
+  assert.deepEqual(discovery.allowedDomains, []);
+  assert.deepEqual(JSON.parse(discovery.messages[1].content), { known: { ids: ["monica", "poe"], names: ["Poe"] } });
+  const report = marketingGeneratorReportSchema.parse(seen.reports[0]);
+  assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
+  assert.deepEqual(report.competitorCandidates, [candidate()]);
+});
+
+test("with no tracked competitor only the discovery search runs, and a run that finds nothing reports nothing", async () => {
   for (const tracked of [[], [{ ...poe, officialHosts: [] }]]) {
     const { deps, seen } = ports({ readContext: async () => context(tracked) });
     const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
-    assert.equal(summary.calls, 0);
+    assert.equal(summary.calls, 1);
+    assert.deepEqual(seen.calls[0].allowedDomains, []);
     assert.equal(summary.report, null);
     assert.equal(summary.stoppedAt, null);
     assert.equal(seen.reports.length, 0);
   }
-  // An app older than the registry sends no field at all: nobody is tracked.
+  // An app older than the registry sends no field at all: nobody is tracked or known.
   const { deps } = ports({ readContext: async () => ({ channels: [] }) });
   assert.equal((await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps)).stoppedAt, null);
+});
+
+test("a run that only discovers reports its candidates; a discovery call that does not settle stops the run", async () => {
+  const found = ports({
+    readContext: async () => context([]),
+    callLlm: async (messages, requestKey) => answered(requestKey, { candidates: [candidate()] }, FOUND),
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, found.deps);
+  assert.deepEqual(summary.report, { httpStatus: 200, status: "recorded" });
+  assert.deepEqual(found.seen.reports[0].competitorCandidates, [candidate()]);
+  assert.deepEqual(found.seen.reports[0].payload, { facts: [], unrepresentableFactCount: 0 });
+
+  // The facts already found are not reported: a stopped run reports nothing.
+  const { deps, seen } = ports({
+    callLlm: async (messages, requestKey, allowedDomains) =>
+      allowedDomains.length === 0
+        ? { status: "unknown", callId: "c", requestKey }
+        : answered(requestKey, { facts: [fact("https://poe.com/pricing")], unrepresentable: 0 }, CITED),
+  });
+  const stopped = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.deepEqual(stopped.stoppedAt, { stage: "llm", detail: "unknown" });
+  assert.equal(seen.reports.length, 0);
+
+  // An answer that is not the JSON asked for proposes nothing and is counted.
+  const garbled = ports({ callLlm: async (messages, requestKey, allowedDomains) =>
+    allowedDomains.length === 0 ? answered(requestKey, { facts: [] }, FOUND) : answered(requestKey, { facts: [], unrepresentable: 0 }, CITED) });
+  const read = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, garbled.deps);
+  assert.deepEqual(read.candidatesDropped, { unreadable_answer: 1 });
+});
+
+test("the discovery search is not started without the time a competitor gets", async () => {
+  let clock = NOW;
+  const { deps, seen } = ports({
+    now: () => clock,
+    callLlm: async (messages, requestKey) => {
+      clock = Date.parse(DEADLINE) - MARKETING_A3_COMPETITOR_BUDGET_MS + 1;
+      return answered(requestKey, { facts: [fact("https://poe.com/pricing")], unrepresentable: 0 }, CITED);
+    },
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.deepEqual(summary.stoppedAt, { stage: "deadline", detail: "deadline_too_close" });
+  assert.equal(summary.calls, 1);
+  assert.equal(seen.reports.length, 0);
 });
 
 test("an unknown or refused call stops the run, and a stopped run reports nothing", async () => {
@@ -145,7 +262,7 @@ test("a lost or 5xx answer resends the same signed report; a 4xx does not", asyn
   assert.equal(flaky.seen.reports.length, 3);
   assert.deepEqual(flaky.seen.reports[1], flaky.seen.reports[0]);
   assert.deepEqual(flaky.seen.reports[2], flaky.seen.reports[0]);
-  assert.equal(flaky.seen.calls.length, 1, "never a second call to the provider");
+  assert.equal(flaky.seen.calls.length, 2, "never another call to the provider: one search and the discovery");
 
   const refused = ports({ submitReport: async () => ({ httpStatus: 400, body: { code: "invalid_request" } }) });
   const answer = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, refused.deps);
@@ -190,17 +307,13 @@ test("with too little time left the report is not sent, which is a deadline and 
   let clock = NOW;
   const { deps, seen } = ports({
     now: () => clock,
-    callLlm: async (messages, requestKey) => {
-      // The call returns with less than the report's margin left.
+    callLlm: async (messages, requestKey, allowedDomains) => {
+      if (allowedDomains.length > 0) {
+        return answered(requestKey, { facts: [fact("https://poe.com/pricing")], unrepresentable: 0 }, CITED);
+      }
+      // The discovery call returns with less than the report's margin left.
       clock = Date.parse(DEADLINE) - MARKETING_A3_REPORT_MARGIN_MS + 1;
-      return {
-        status: "answered",
-        callId: "c",
-        requestKey,
-        content: JSON.stringify({ facts: [fact("https://poe.com/pricing")], unrepresentable: 0 }),
-        citations: CITED,
-        ledgerState: "settled",
-      };
+      return answered(requestKey, { candidates: [] }, []);
     },
   });
   const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
+import { MARKETING_DISCLOSURE_CONTRACT_READY, resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
 import type {
   MarketingAdmissionChannel,
   MarketingHealthObservation,
@@ -87,6 +87,17 @@ test("an autonomous channel is asked the autonomy question, which includes the a
   const answer = await resolvePublishAdmission(db, channel("autonomous_mode"), health(1_000));
   assert.ok(answer.reasons.includes("input_unreadable:commentsMonitorHealthy" as never));
   assert.ok(answer.reasons.includes("input_unreadable:recoveryContractAvailable" as never));
+});
+
+test("nothing is published until a person records how a post shows it is advertising (D9)", async () => {
+  assert.equal(MARKETING_DISCLOSURE_CONTRACT_READY, false);
+  for (const status of ["approval_mode", "autonomous_mode"] as const) {
+    for (const postMode of [undefined, "approval", "autonomous"] as const) {
+      const answer = await resolvePublishAdmission(database().database, channel(status), health(1_000), postMode);
+      assert.equal(answer.publish, false);
+      assert.ok(answer.reasons.includes("disclosure_contract_not_ready" as never), `${status}/${postMode}`);
+    }
+  }
 });
 
 test("a channel in any other mode is refused", async () => {

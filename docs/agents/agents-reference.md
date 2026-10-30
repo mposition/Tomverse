@@ -1453,6 +1453,19 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   기준 실패 항목은 남깁니다. 세 보존 writer는 `beginMarketingRetention()` 하나에서 보존 설정을 켭니다. 결과는 기존
   `retention_run` 모양 그대로(`compactedRowCount` = 제자리에서 바뀐 행)이며, webhook fingerprint를 움직이지 않도록
   store에 최상위 계산식을 두지 않습니다. 공개 버킷 이미지는 삭제 port가 생길 때입니다.
+- **S3g(A1 주간 KPI)**: `lib/marketingWeeklyKpiCore.ts`(순수 집계), `lib/marketingWeeklyKpi.ts`, `lib/maintenance.ts`의
+  `marketing_weekly_kpi` 단계, `tests/marketingWeeklyKpiCore.test.mjs`, `tests/integration/marketing-weekly-kpi.db.test.ts`.
+  주는 Brisbane 월요일 00:00부터 다음 월요일 00:00까지이며, 일일 정리가 막 끝난 주를 `weekly_kpi` 보고서로 **한 번** 기록합니다
+  (advisory lock 뒤 같은 `periodStart`가 있으면 건너뜀). 마케팅 계정이 하나도 없으면 기록하지 않습니다. 2026-10-30 운영자의 자동 개발 지시에 따라 정한 기본값:
+  첫 보고서는 Tomverse 자체 표만 셉니다 — 게시는 `publishedAt`, 사람 거절·실패는 그 상태의 마지막 변경 시각, Guard 거절은 생성
+  시각 기준이고 코드마다 한 번입니다. GA4·Search Console(계획 D8)은 읽기 자격증명이 필요한 다음 보고서입니다. 파생 데이터라
+  감사 행은 없습니다(`retention_run`과 같음).
+- **S3i(광고 표시 게이트)**: `lib/marketingAutonomousAdmission.ts`의 `MARKETING_DISCLOSURE_CONTRACT_READY`(지금 `false`),
+  `lib/marketingDraftIntakeCore.ts`, `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingPublishAdmission.test.ts`.
+  Tomverse 계정의 게시물은 모두 광고입니다(docs/policy/marketing-automation.md §13, AANA). 그래서 생성기는 `advertising` 플래그를 모델과 무관하게 붙이고, 접수는
+  그 플래그가 없는 초안을 거절합니다. 플랫폼에서 광고임을 어떻게 보일지(계획 D9)는 사람이 정하며, 그 결정을 이 상수로 기록하기
+  전에는 `resolvePublishAdmission()`이 승인·자율 게시 모두 `disclosure_contract_not_ready`로 거절합니다. 판정 모듈
+  `lib/marketingAutomationAccess.ts`는 Prompt Refiner closure 안이라 고치지 않고, 그 밖의 게시 직전 판정에 둡니다.
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
   `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
   `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **예약은 최대
@@ -1514,8 +1527,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **S3f-R3b(경쟁사 Admin 화면)**: `/admin/marketing?tab=competitors` — `lib/marketingConsoleSections.ts`,
   `lib/marketingConsoleRead.ts`, `components/admin/AdminMarketingPanel.tsx`, `lib/adminMessages/marketing.ts`. 승인된 것이
   먼저, 최대 100건이고 화면이 그 수와, 잘렸다면 잘렸다는 사실을 말합니다. 행마다 그 행이 보여 준
-  `decisionAuditLogId`로 결정하며, 승인은 이름·host를 고쳐서 보낼 수 있습니다. A3의 근거 URL은 링크가 아니라 텍스트로
-  보입니다 — 생성기가 읽은 것은 판정할 데이터이지 따라갈 링크가 아닙니다.
+  `decisionAuditLogId`로 결정하며, 승인은 이름·host를 고쳐서 보낼 수 있습니다. A3의 근거 URL은 https만 새 탭·
+  `rel="noopener noreferrer nofollow"` 링크로 보입니다(S3f-R5c) — 사람이 근거를 열어 보고 판정합니다.
 - **S3f-R4(생성기 문맥의 등록부)**: `lib/marketingGeneratorContext.ts`의 `competitors`. `tracked`는 승인된 경쟁사와 사람이
   승인한 host이고, `knownIds`는 상태와 무관하게 등록부가 아는 id 전부이며 자르지 않습니다(거절도 답이므로 다시 제안하지 않게;
   크기는 문맥 route의 byte 상한이 자르지 않고 거절합니다).
@@ -1532,6 +1545,11 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   정하고, 출처는 공급사가 실제로 인용한 URL이면서 공식 host 위여야 합니다(query·fragment 제거). 결과를 모르는 호출이나 답이
   없는 제출은 실행 전체를 멈추고 보고서를 내지 않으며, 시간 몫(20분)을 넘기면 보고서 없이 A5로 넘어갑니다. pin이 없으면(D4)
   worker는 시작하지 않습니다.
+- **S3f-R5c(신규 경쟁사 탐색)**: 같은 파일들. 추적 경쟁사 다음에 **실행당 한 번, domain 제한 없는 웹 검색**을 같은
+  `web-search-v1` profile로 합니다(`allowedDomains`가 비면 client가 `filters`를 빼고 보냅니다). 산출물은
+  `competitorCandidates`뿐이며(`readMarketingA3Discovery()`), 후보는 근거 URL이 1~5개이고 모두 같은 응답의 인용·검색
+  출처 URL과 문자열로 같아야 하고(정규화 없음), 문맥의 `knownIds`에 있는 id는 버립니다. 앱의 후보 schema도 근거
+  1개 이상을 요구합니다(`marketingCompetitorCandidateSchema`). 이 호출이 결과를 모르면 실행 전체가 멈추고 보고서를 내지 않습니다.
 
 # 엔지니어링 Agent
 
