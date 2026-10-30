@@ -50,6 +50,9 @@ mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
 } });
 const { reserveVoiceConversationCredits, reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } = await import(mod("lib/voiceConversationCredits.ts"));
 test.beforeEach(() => { w = { buckets: { day: 0, month: 0, "provider-cost-day": 0, "provider-cost-month": 0 }, purchased: 0, dailyLimit: 300, row: null, addOnReserved: 0, addOnSettlements: [], providerCosts: [], refundedPeriods: [] }; });
+// Mid-month noon UTC: a test that walks the clock forward never crosses a day or
+// month boundary, whatever the wall clock reads when CI runs it.
+const MID_DAY = Date.parse("2026-10-15T12:00:00Z");
 const input = () => ({ userId: "owner", requestId: "request-1", conversationId: "chat-1", creditsPerMinute: 36, maxSeconds: 60 });
 
 test("voice spends the same plan wallet and refunds unused duration exactly once", async () => {
@@ -155,7 +158,7 @@ const continuousInput = () => ({ userId: "owner", requestId: "rolling-1", conver
 const lease = () => { w.row.reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString(); };
 
 test("wallet-lock and funding delays do not consume the initial or renewed session window", async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.mock.timers.enable({ apis: ["Date"], now: MID_DAY });
   w.onWalletLock = () => { t.mock.timers.tick(20_000); };
   w.onFunding = () => { t.mock.timers.tick(20_000); };
   const row = await reserveContinuousVoiceCredits(continuousInput());
@@ -181,7 +184,7 @@ test("nullable purchase references remain settleable and malformed references ar
 });
 
 test("one continuously funded session passes 900 seconds with cumulative rounding and one settlement", async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.mock.timers.enable({ apis: ["Date"], now: MID_DAY });
   w.monthlyLimit = w.dailyLimit = 10_000;
   const row = await reserveContinuousVoiceCredits(continuousInput()); lease();
   assert.equal(row.reservedCredits, 36); assert.equal(row.reservationPayload.maxSeconds, 60);
@@ -199,7 +202,7 @@ test("one continuously funded session passes 900 seconds with cumulative roundin
 });
 
 test("renewal is idempotent while funded and cannot revive expired, closing, recovered or foreign sessions", async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.mock.timers.enable({ apis: ["Date"], now: MID_DAY });
   const row = await reserveContinuousVoiceCredits(continuousInput()); lease();
   await extendVoiceConversationCredits(row.id, "owner");
   assert.equal(w.row.reservedCredits, 36);
@@ -232,7 +235,7 @@ test("a balance without viable startup headroom is refused without retaining any
 });
 
 for (const limit of ["wallet", "daily", "voice", "provider"]) test(`${limit} exhaustion refuses additional funding without losing the existing hold`, async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.mock.timers.enable({ apis: ["Date"], now: MID_DAY });
   const row = await reserveContinuousVoiceCredits(continuousInput());
   t.mock.timers.tick(15_000); lease();
   if (limit === "wallet") w.monthlyLimit = 36;
@@ -247,7 +250,7 @@ for (const limit of ["wallet", "daily", "voice", "provider"]) test(`${limit} exh
 });
 
 test("purchased credits still fund renewals after the plan daily guardrail is exhausted", async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.mock.timers.enable({ apis: ["Date"], now: MID_DAY });
   const row = await reserveContinuousVoiceCredits(continuousInput());
   w.dailyLimit = 36; w.purchased = 20;
   t.mock.timers.tick(15_000); lease();
@@ -259,7 +262,7 @@ test("purchased credits still fund renewals after the plan daily guardrail is ex
 });
 
 test("small purchased-credit renewals fund both time and cost allowance and never issue free deltas", async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.mock.timers.enable({ apis: ["Date"], now: MID_DAY });
   w.monthlyLimit = w.dailyLimit = 36; w.purchased = 3;
   const row = await reserveContinuousVoiceCredits(continuousInput());
   t.mock.timers.tick(15_000); lease(); await extendVoiceConversationCredits(row.id, "owner");
@@ -273,7 +276,7 @@ test("small purchased-credit renewals fund both time and cost allowance and neve
 });
 
 test("unknown final usage retains all funded provider exposure but bills only observed seconds", async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.mock.timers.enable({ apis: ["Date"], now: MID_DAY });
   const row = await reserveContinuousVoiceCredits(continuousInput());
   t.mock.timers.tick(15_000); lease(); await extendVoiceConversationCredits(row.id, "owner");
   w.row.providerUsageSnapshot = { seconds: 20, confirmed: false };
