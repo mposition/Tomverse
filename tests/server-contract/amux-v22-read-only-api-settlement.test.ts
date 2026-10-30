@@ -54,6 +54,10 @@ function makeWorld(outcome: Outcome) {
     runtimeUpdates: 0,
     taskUpdateData: null as Record<string, unknown> | null,
     attemptUpdateData: null as Record<string, unknown> | null,
+    ownerQuestion: null as { id: string; state: string } | null,
+    questionAnswerClears: 0,
+    questionCancels: 0,
+    escalations: [] as Array<Record<string, unknown>>,
   };
 }
 
@@ -88,7 +92,9 @@ mock.module(mod("lib/amux/delivery.ts"), { namedExports: {
   cancelPendingAmuxWorkDelivery: async () => undefined,
 } });
 mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
-  openAmuxHumanEscalation: async () => undefined,
+  openAmuxHumanEscalation: async (_tx: unknown, input: Record<string, unknown>) => {
+    world.escalations.push(input);
+  },
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
   namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch },
@@ -199,6 +205,11 @@ const tx = {
     } } } },
   }) },
   engineeringAgentWorkItem: { findFirst: async () => null },
+  amuxV22TaskQuestion: {
+    findUnique: async () => world.ownerQuestion,
+    updateMany: async () => { world.questionAnswerClears += 1; return { count: 0 }; },
+    update: async () => { world.questionCancels += 1; },
+  },
   amuxWorkItem: { update: async (input: { data: Record<string, unknown> }) => {
     world.taskUpdates += 1;
     world.gradeAuditsAtTaskUpdate = world.gradeEscalationAudits.length;
@@ -750,4 +761,54 @@ test("settlement replay accepts only the stored native receipt digest", async ()
       assert.equal(world.taskUpdates, 0);
     }
   }
+});
+
+test("a run that ended with an owner question waits blocked, unreviewed and unpublished", async () => {
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.assignmentRole = "implement";
+  world.sourceApprovalId = "source-one";
+  world.patch = { taskId, baseSha: "a".repeat(40), sha256: "b".repeat(64),
+    text: "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n",
+    files: null };
+  world.ownerQuestion = { id: "question-one", state: "open" };
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("succeeded"),
+    changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.toStatus, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "owner_question");
+  // Its partial change is neither graded, reviewed nor escalated.
+  assert.equal(world.gradeEscalationAudits.length, 0);
+  assert.equal(world.taskUpdateData?.executionGrade, undefined);
+  assert.equal(world.reviewCreated, null);
+  assert.deepEqual(world.escalations, []);
+  // Settlement clears the answer of a question this attempt resumed.
+  assert.equal(world.questionAnswerClears, 1);
+});
+
+test("a question over the limit blocks the Task for a person", async () => {
+  world = makeWorld("succeeded");
+  world.ownerQuestion = { id: "question-four", state: "cancelled" };
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("succeeded"));
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "owner_question_limit");
+  assert.equal(world.escalations.length, 1);
+  assert.equal(world.escalations[0]?.reason, "owner_question_limit");
+});
+
+test("a question whose run fails is cancelled, never left holding the Task", async () => {
+  world = makeWorld("failed");
+  world.ownerQuestion = { id: "question-failed", state: "open" };
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("failed"));
+  assert.equal(result.settled, true);
+  assert.notEqual(world.attemptUpdateData?.reason, "owner_question");
+  assert.equal(world.questionCancels, 1);
 });
