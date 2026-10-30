@@ -1,7 +1,10 @@
 import "server-only";
 
 import { ENGINEERING_AGENT_POLICY_VERSION,
-  ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
+  ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
+  ENGINEERING_AGENT_V22_REVIEW_PR_ENV,
+  ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
+  engineeringAgentV22ReviewPrEnabled } from "@/lib/engineeringAgentCore";
 import { EngineeringAgentStoreRefusedError,
   expireEngineeringAgentV22LapsedPublish,
   readEngineeringAgentOwnerQueues,
@@ -11,7 +14,7 @@ import { loadEngineeringAgentV22Candidate } from
 import { reissueEngineeringAgentV22Capability,
   resolveEngineeringAgentV22Product } from
   "@/lib/engineeringAgentV22ProductStore";
-import { v22PublishCandidateMatches } from
+import { v22PublishCandidateMatches, v22ReviewCandidateMatches } from
   "@/lib/engineeringAgentV22PublicationDecision";
 import { loadEngineeringAgentV22StoredCandidate } from
   "@/lib/engineeringAgentV22StoredCandidate";
@@ -19,7 +22,7 @@ import { prisma } from "@/lib/prisma";
 
 type Pending = { workItemId: string; runId: string; attemptId: string;
   taskId: string; modeAtStart: string; patchDigest: string; baseSha: string };
-type Lapsed = Pending & { expectedTreeId: string };
+type Lapsed = Pending & { expectedTreeId: string; ownerReview: boolean };
 type Stored = Awaited<ReturnType<typeof loadEngineeringAgentV22StoredCandidate>>;
 type Ports = {
   readLapsed: () => Promise<Lapsed | null>;
@@ -33,6 +36,7 @@ type Ports = {
   expireLapsed: (workItemId: string, reason: string) => Promise<unknown>;
   resolve: (input: Parameters<typeof resolveEngineeringAgentV22Product>[1]) =>
     ReturnType<typeof resolveEngineeringAgentV22Product>;
+  reviewPrEnabled: () => boolean;
 };
 
 const REASON = /^[a-z_]{1,64}$/;
@@ -73,12 +77,14 @@ async function readLapsed(): Promise<Lapsed | null> {
   const item = await prisma.engineeringAgentWorkItem.findFirst({
     where: lapsedWhere(),
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { id: true, patchDigest: true, baseSha: true,
+    select: { id: true, causeKey: true, patchDigest: true, baseSha: true,
       expectedTreeId: true, run: runSelect },
   });
   const pending = item ? asPending(item) : null;
   return pending && item?.expectedTreeId ?
-    { ...pending, expectedTreeId: item.expectedTreeId } : null;
+    { ...pending, expectedTreeId: item.expectedTreeId,
+      ownerReview: item.causeKey.startsWith(
+        ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX) } : null;
 }
 
 /** The run has ended, so the item still waiting is the snapshot the
@@ -108,6 +114,8 @@ const livePorts: Ports = {
     (tx) => expireEngineeringAgentV22LapsedPublish(tx, { workItemId, reason })),
   resolve: (input) => runEngineeringAgentTransaction(prisma,
     (tx) => resolveEngineeringAgentV22Product(tx, input)),
+  reviewPrEnabled: () => engineeringAgentV22ReviewPrEnabled(
+    process.env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV]),
 };
 
 /** A database refusal (store or trigger), as opposed to a failure to reach it. */
@@ -125,19 +133,34 @@ const t1Candidate = (item: Pending, stored: Stored | null) =>
     baseCommitterDate: stored.candidate.baseCommitterDate,
     imageProofDigest: stored.imageProofDigest! } : null;
 
+/** A T2 verdict the owner reviews as a draft pull request: the candidate the
+ * same, its gate evidence whatever it was. */
+const reviewCandidate = (item: Pending, stored: Stored | null) =>
+  v22ReviewCandidateMatches({
+    policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
+    modeAtStart: item.modeAtStart, runId: item.runId,
+    taskId: item.taskId, baseSha: item.baseSha,
+    patchDigest: item.patchDigest, publication: stored,
+  }) && stored?.ok === true ? { expectedTreeId: stored.candidate.expectedTreeId,
+    baseCommitterDate: stored.candidate.baseCommitterDate,
+    imageProofDigest: stored.imageProofDigest } : null;
+
 /** One round outside any route budget. A v22 publish item left queued
  * without a live capability is judged again first:
  * the same verdict on the same tree gets a new capability, any other closes
- * the item so it neither holds the queue nor comes first again. Otherwise one
- * pending draft's tier: T1 opens the run's publish item with its capability,
- * anything else leaves an ordinary draft for the owner. While the pull
- * request queue is full no draft's tier is read; a promotion the database
- * still refuses becomes an ordinary draft, so no draft is read again and
- * again. A failure to reach the database leaves it pending. */
+ * the item so it neither holds the queue nor comes first again. An owner
+ * review item keeps its new capability on T1 or T2 alike, while its switch
+ * is on. Otherwise one pending draft's tier: T1 opens the run's publish item
+ * with its capability; T2, while the switch is on and the patch qualifies,
+ * opens it as an owner review item, which the publisher opens as a draft
+ * pull request; anything else leaves an ordinary draft for the owner. While
+ * the pull request queue is full no draft's tier is read; a promotion the
+ * database still refuses becomes an ordinary draft, so no draft is read
+ * again and again. A failure to reach the database leaves it pending. */
 export async function promoteEngineeringAgentV22Draft(
   ports: Ports = livePorts,
-): Promise<{ outcome: "none" | "waiting" | "promoted" | "kept" | "stale" |
-  "reissued" | "reissue_refused"; reason?: string }> {
+): Promise<{ outcome: "none" | "waiting" | "promoted" | "review_promoted" |
+  "kept" | "stale" | "reissued" | "reissue_refused"; reason?: string }> {
   const lapsed = await ports.readLapsed();
   if (lapsed) {
     const stored = await ports.loadStored(lapsed,
@@ -145,10 +168,13 @@ export async function promoteEngineeringAgentV22Draft(
     // Unreadable now (GitHub, say) is not a verdict: a later round reads it.
     if (stored === null) return { outcome: "reissue_refused",
       reason: "tier_evidence_unavailable" };
-    const candidate = t1Candidate(lapsed, stored);
+    const reviewOn = lapsed.ownerReview && ports.reviewPrEnabled();
+    const candidate = lapsed.ownerReview ?
+      (reviewOn ? t1Candidate(lapsed, stored) ?? reviewCandidate(lapsed, stored) : null) :
+      t1Candidate(lapsed, stored);
     if (!candidate || candidate.expectedTreeId !== lapsed.expectedTreeId) {
       const why = !stored.ok && REASON.test(stored.reason) ? stored.reason :
-        "tier_changed";
+        lapsed.ownerReview && !reviewOn ? "review_pr_off" : "tier_changed";
       await ports.expireLapsed(lapsed.workItemId, why);
       return { outcome: "reissue_refused", reason: why };
     }
@@ -162,7 +188,10 @@ export async function promoteEngineeringAgentV22Draft(
   if (await ports.prQueueFull()) return { outcome: "waiting" };
   const stored = await ports.loadStored(pending,
     () => ports.stillPending(pending)).catch(() => null);
-  const candidate = t1Candidate(pending, stored);
+  const t1 = t1Candidate(pending, stored);
+  const review = t1 || !ports.reviewPrEnabled() ? null :
+    reviewCandidate(pending, stored);
+  const candidate = t1 ?? review;
   const named = stored === null ? null : !stored.ok ? stored.reason :
     stored.tier.tier !== "T1" ? "tier_two" : null;
   const reason = named && REASON.test(named) &&
@@ -179,14 +208,15 @@ export async function promoteEngineeringAgentV22Draft(
   if (!candidate) return keep(reason);
   let promoted;
   try {
-    promoted = await ports.resolve({ ...draft, reason, candidate });
+    promoted = await ports.resolve({ ...draft, reason, candidate,
+      ownerReview: review !== null });
   } catch (error) {
     // The switch, consent or queue changed since it was read.
     if (refused(error)) return keep("publish_refused");
     throw error;
   }
-  return "publishWorkItemId" in promoted ? { outcome: "promoted" } :
-    { outcome: "stale" };
+  return !("publishWorkItemId" in promoted) ? { outcome: "stale" } :
+    review ? { outcome: "review_promoted" } : { outcome: "promoted" };
 }
 
 let running: Promise<unknown> | null = null;
