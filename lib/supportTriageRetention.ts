@@ -42,7 +42,7 @@
  * whether or not its report is still open: each batch moves not_queued rows
  * past that age to `expired`, which starts their 30 days. A claim whose lease
  * is still live is the worker's and waits; a lapsed claim expires here, since
- * with triage switched off the worker never reclaims it. The worker treats
+ * with triage switched off the worker never fails it. The worker treats
  * expired as settled, so the same input is never derived (or charged for)
  * again, and its late result for a lapsed claim matches no claimed row.
  *
