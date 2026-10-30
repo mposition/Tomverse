@@ -303,11 +303,14 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const authorWorkers = authors.map((author) => author.workerName);
       const authorProviders = authors.map((author) => author.provider);
       // A Task resumed after its owner question goes back to the worker that
-      // asked and waits for it, unless that worker no longer has a route for
-      // the Task at all.
+      // asked and waits for it -- busy, offline or out of quota alike -- as
+      // long as the approved routes still name that worker for the Task. The
+      // answer is pending until a resumed run settles.
       const resume = await tx.amuxV22TaskQuestion.findFirst({
-        where: { taskId, state: "answered" }, select: { worker: true } });
-      const resumeRoutes = resume && matchingRoutes.some((route) =>
+        where: { taskId, answerText: { not: null },
+          state: { in: ["answered", "resumed"] } },
+        select: { worker: true } });
+      const resumeRoutes = resume && approved.receipt.routes.some((route) =>
         route.workerName === resume.worker) ?
         quotaRoutes.filter((route) => route.workerName === resume.worker) :
         quotaRoutes;

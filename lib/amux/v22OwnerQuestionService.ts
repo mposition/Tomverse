@@ -136,10 +136,12 @@ export const AMUX_V22_RESUME_ROWS_PRISMA_CALLS = 3;
 export async function readAmuxV22ResumeRows(tx: Prisma.TransactionClient,
   taskId: string, attemptId: string) {
   const question = await tx.amuxV22TaskQuestion.findFirst({
-    where: { taskId, answerText: { not: null }, OR: [
-      { state: "answered" },
-      { state: "resumed", resumedAttemptId: attemptId },
-    ] },
+    // An answered question, or a resumed one whose answer no run of the
+    // Task has settled with yet (this attempt pulled again, or a resumed run
+    // that died before settling): the answer reaches the next run either way.
+    where: { taskId, answerText: { not: null },
+      state: { in: ["answered", "resumed"] } },
+    orderBy: [{ answeredAt: "desc" }, { id: "desc" }],
     select: { id: true, attemptId: true, state: true, answerText: true,
       answerSource: true },
   });

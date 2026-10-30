@@ -1713,9 +1713,10 @@ export async function settleAmuxV22TaskExecution(input: {
       if (recordedQuestion?.state === "open" && !ownerQuestion)
         await tx.amuxV22TaskQuestion.update({ where: { id: recordedQuestion.id },
           data: { state: "cancelled" } });
-      // The answer a resumed run read is not kept past that run.
+      // The answer a resumed run read is kept until a run of the Task settles,
+      // so a resumed run that died first still hands it to the next one.
       await tx.amuxV22TaskQuestion.updateMany({ where: {
-        resumedAttemptId: attempt.id, state: "resumed",
+        taskId: task.id, state: "resumed",
         answerText: { not: null } }, data: { answerText: null } });
       await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.v22.execution.settled", targetType: "AmuxWorkItem",
@@ -1765,7 +1766,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
     const changed = await withAmuxDbBoundary(
       { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
         prismaCallCeiling:
-          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 10 },
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 11 },
       async (tx, context) => {
         const now = context.dbNow;
         const runtime = await lockRuntime(tx, candidate.worker);
@@ -1789,6 +1790,10 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             endedBy: "system:amux-v22-execution-reaper",
             reason: "outcome_unknown" },
         });
+        // An owner question this run recorded is not parked by an unknown
+        // outcome; it is closed so it never holds the Task's question slot.
+        await tx.amuxV22TaskQuestion.updateMany({ where: {
+          attemptId: attempt.id, state: "open" }, data: { state: "cancelled" } });
         if (runtime?.instanceId === attempt.workerInstanceId &&
             runtime.generation === attempt.workerGeneration &&
             runtime.status === "busy")

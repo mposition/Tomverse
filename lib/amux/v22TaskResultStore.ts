@@ -156,6 +156,11 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
     const question = parseAmuxV22OwnerQuestion(input.text);
     let questionSequence: number | null = null;
     if (question) {
+      // A question still open from an earlier attempt was never parked (that
+      // run was lost); it is closed rather than let it hide this one.
+      await tx.amuxV22TaskQuestion.updateMany({ where: { taskId: task.id,
+        state: "open", attemptId: { not: input.attemptId } },
+        data: { state: "cancelled" } });
       const asked = await tx.amuxV22TaskQuestion.findMany({
         where: { taskId: task.id }, select: { sequence: true, state: true },
       });

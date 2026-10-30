@@ -67,8 +67,8 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient) 
     JOIN "AmuxExecutionAttempt" a ON a."id" = q."attemptId"
     JOIN "AmuxWorkItem" w ON w."id" = q."taskId"
     -- Only a question its run's settlement parked, on a Task still parked,
-    -- with a body still there: anything else is never listed, so it cannot
-    -- hold back the questions behind it.
+    -- with a body still there. A body that exists but cannot be opened (a
+    -- key store fault) stays listed and is skipped until it can be.
     WHERE q."state" = 'open' AND q."localCardId" IS NULL
       AND a."endedAt" IS NOT NULL AND a."reason" = 'owner_question'
       AND w."status" = 'blocked' AND w."archivedAt" IS NULL
@@ -130,7 +130,8 @@ export async function recordAmuxV22QuestionLocalCardClosed(
   const row = await tx.amuxV22TaskQuestion.findUnique({
     where: { id: input.questionId },
     select: { localCardId: true, localCardClosedAt: true } });
-  if (row?.localCardId !== input.cardId || !row.localCardClosedAt)
+  if (!row) throw new BoardImportError("not_found", 404);
+  if (row.localCardId !== input.cardId || !row.localCardClosedAt)
     throw new BoardImportError("not_closable", 409);
   return { recorded: true as const };
 }
