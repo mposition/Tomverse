@@ -271,7 +271,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    GitHub Actions 등)는 bypass에 넣고 **이 App만 넣지 않습니다**. 관측에는 그 자동화의 브랜치 갱신 성공도 포함하며, 거는 날과
    bypass 목록은 운영자가 관측 결과를 보고 정합니다. 2026-10-26 운영자 결정으로 CI 입장 App(`tomverse-ci-admission`,
    integration 5391627)을 "no updates outside develop" ruleset의 bypass에 더했습니다 — 뒤처진 draft의 브랜치를 base 기준으로
-   업데이트(update-branch)하기 위해서입니다. 병합 레인 App은 여전히 넣지 않습니다.
+   업데이트(update-branch)하기 위해서입니다. 2026-10-30 운영자 결정으로 엔지니어링 에이전트 게시 App(`tomverse-engineering-publisher`,
+   integration 5224114)을 같은 bypass에 `always`로 더했습니다 — `creation` 규칙이 이 App의 `agent/engineering/*` 브랜치 생성을 거절해
+   게시가 한 번도 되지 않았기 때문입니다. 병합 레인 App은 여전히 넣지 않습니다.
 8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
