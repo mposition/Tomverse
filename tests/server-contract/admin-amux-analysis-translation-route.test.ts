@@ -78,7 +78,7 @@ test("the owner gets the translation of the text the server read itself", async 
   assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
   const body = await response.json();
   assert.deepEqual(body.translations, { covered: "목록" });
-  assert.equal(body.viewKey, `p1|n1=${"a".repeat(64)}`);
+  assert.equal(body.viewKey, `p1|n1=${"a".repeat(64)}|covered,u:n1:title,u:n1:description`);
   assert.deepEqual(world.reads, [[ideaId, 0]]);
   assert.deepEqual(world.translated, [[
     { id: "covered", text: "Covers the list." },

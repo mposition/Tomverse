@@ -41,9 +41,14 @@ export const amuxAnalysisViewReadable = (
   view !== null && (view.state === "ready" || view.state === "partial" ||
     view.state === "needs_owner_input");
 
-/** The view a translation belongs to: a new page, preview or edited unit is another view. */
+/**
+ * The view a translation belongs to: a new page, preview or edited unit is
+ * another view, and so is one whose text has since expired, so a translation
+ * never stands under text that is no longer shown.
+ */
 export const amuxAnalysisTranslationViewKey = (view: ReadableView): string =>
-  [view.previewId, ...view.units.map((unit) => `${unit.id}=${unit.bodyDigest}`)].join("|");
+  [view.previewId, ...view.units.map((unit) => `${unit.id}=${unit.bodyDigest}`),
+    amuxAnalysisTranslationItems(view).map((item) => item.id).join(",")].join("|");
 
 /** Every free-text field the result panel shows, in screen order. Refs, levels and codes are not text. */
 export function amuxAnalysisTranslationItems(view: ReadableView): AmuxTranslationItem[] {

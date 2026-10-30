@@ -70,6 +70,11 @@ test("only a readable result has a view key, and a changed unit body is another 
   assert.equal(amuxAnalysisViewReadable(view), true);
   const changed = { ...view, units: [unit("n1", view.units[0].proposal, "b".repeat(64)), ...view.units.slice(1)] };
   assert.notEqual(amuxAnalysisTranslationViewKey(view), amuxAnalysisTranslationViewKey(changed));
+  // Freeform text past its retention reads back as null under the same preview and digests.
+  const expired = { ...view, coveredScope: null, remainingScope: null, ownerQuestion: null };
+  assert.notEqual(amuxAnalysisTranslationViewKey(view), amuxAnalysisTranslationViewKey(expired));
+  const purged = { ...view, units: [unit("n1", null), ...view.units.slice(1)] };
+  assert.notEqual(amuxAnalysisTranslationViewKey(view), amuxAnalysisTranslationViewKey(purged));
 });
 
 test("an empty or over-long page is refused before any call", () => {
