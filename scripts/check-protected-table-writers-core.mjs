@@ -358,6 +358,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/product-research-agent.md §4",
   },
   {
+    table: "SupportTriageRun",
+    delegate: "supportTriageRun",
+    writers: ["lib/supportTriageRunStore.ts", "lib/supportTriageRetention.ts"],
+    contract: "docs/policy/support-triage.md §4",
+  },
+  {
     table: "EngineeringAgentRun",
     delegate: "engineeringAgentRun",
     writers: ["lib/engineeringAgentStore.ts"],
@@ -961,6 +967,13 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 2,
     writeVerbs: 3,
     reason: "The account export registry names the claim model but opens no database connection and executes no SQL.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "SupportTriageRun",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The support-triage actors' audit scope names their run row as the audit target; it executes no SQL.",
   },
   {
     path: "lib/adminAuditSystemActors.ts",
@@ -2390,6 +2403,38 @@ export const RAW_SQL_ALLOWLIST = [
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
+    path: "lib/supportTriageWorker.ts",
+    table: "SupportTriageRun",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "SupportTriageRun appears once, as the audit entry's targetType string, never in SQL; the run row is written only through lib/supportTriageRunStore.ts. The write verbs are the worker's SupportTriageSuggestion statements: the retry_exhausted UPDATE of expired claims (none is reclaimed since 2026-10-30), supersede UPDATE, pending INSERT, claim UPDATE and ready UPDATE (it forms no groups since 2026-10-30); plus the words in comments describing them. None names a protected table.",
+  },
+  {
+    path: "lib/supportTriageRetention.ts",
+    table: "SupportTriageRun",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The retention step is a named SupportTriageRun writer, and its run-row delete goes through the Prisma delegate. Its SQL literals only read SupportTriageRun (the window read and the overdue count). The two write verbs are the UPDATEs that move open SupportTriageSuggestion rows to invalidated (closed reports) and to expired (never shown, 7 days old); neither names a protected table.",
+  },
+  {
+    path: "lib/supportTriageDeletionManifest.ts",
+    table: "SupportTriageRun",
+    tableMentions: 1,
+    writeVerbs: 5,
+    reason:
+      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears only as account-deletion action names (delete, delete_parent_record) and in comments about them. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
+  },
+  {
+    path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
+    table: "SupportTriageRun",
+    tableMentions: 12,
+    writeVerbs: 4,
+    reason:
+      "The migration creates SupportTriageRun, its CHECK constraints and its insert, update and delete triggers (database-owned deadline, daily cap, late-success downgrade, 30-day delete boundary); it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
     path: "prisma/migrations/20261002150000_product_research_observation/migration.sql",
     table: "ProductResearchObservation",
     tableMentions: 9,
@@ -3339,6 +3384,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261005010000_support_triage_decision_record/migration.sql",
+    count: 8,
+    reason:
+      "Triggers on SupportTriageDecisionRecord and its links, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: at commit, whether a record that still exists has a link; a link's report message FOR SHARE (no link to a deleted account's report); the record FOR UPDATE and then, as a separate statement, its link count (the fifty cap); and, after a link is deleted, a DELETE of its own record by id, so no record outlives any of its links. The functions pin search_path to pg_catalog, pg_temp. The one write deletes the record the deleted link pointed at and nothing else. The other three uses are support_triage_group_member_guard() replaced unchanged except that it now requires READ COMMITTED: the report FOR SHARE, the group FOR UPDATE, then its member count.",
+  },
+  {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
     count: 1,
     reason:
@@ -3397,6 +3448,24 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 6,
     reason:
       "Six constant reads in the version 33 halt guard use the trigger's own schema quoted with %I: the opening audit, the human-clear audit, the admitted write FOR SHARE, the receipt existence check, the no-commit resolution audit and the automatic-clear audit. Every variable value is bound with USING, search_path is pinned to pg_catalog and pg_temp, and none of the dynamic statements writes any table.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_support_triage_group/migration.sql",
+    count: 5,
+    reason:
+      "Five reads in the SupportTriageGroup, SupportTriageGroupMember and SupportTriageGroupSignal guard triggers, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: whether an ending group still has signals; a member's report message FOR SHARE (no membership for a deleted account's report); the group FOR UPDATE and then, as a separate statement with a fresh snapshot, its member count (the fifty cap); and a signal's group state FOR SHARE (no signal on a terminal group). The functions pin search_path to pg_catalog, pg_temp. They read and lock; they never write.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_support_triage_suggestion/migration.sql",
+    count: 1,
+    reason:
+      "One read in the SupportTriageSuggestion guard trigger: the report's message, FOR SHARE, over a name built from TG_TABLE_SCHEMA quoted with %I, with the report id bound by USING. It refuses a suggestion for a deleted account's report and holds the report so an account deletion cannot slip in between. The function pins search_path to pg_catalog, pg_temp. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
+    count: 1,
+    reason:
+      "One count in the SupportTriageRun insert trigger, over a name built from TG_TABLE_SCHEMA quoted with %I, with kind and the UTC day bounds bound by USING. It runs after the trigger takes a transaction advisory lock on (kind, UTC day), so two inserts at the cap are serialised. The function pins search_path to pg_catalog, pg_temp. It reads its own table and never writes a protected one.",
   },
   {
     path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",

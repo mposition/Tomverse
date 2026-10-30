@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
+  POSTGRES16_COMPAT_GROUP,
+  POSTGRES16_COMPAT_SUITES,
   dbIntegrationGroupOf,
 } from "./db-integration-groups.mjs";
 import { isSamePostgresDatabaseTarget } from "../lib/postgresConnectionConfigCore.mjs";
@@ -90,9 +92,9 @@ const testEnvironment = {
  * wants one answer rather than seven.
  */
 const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
-if (group && !DB_INTEGRATION_GROUPS.includes(group)) {
+if (group && group !== POSTGRES16_COMPAT_GROUP && !DB_INTEGRATION_GROUPS.includes(group)) {
   fail(
-    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+    `DB_INTEGRATION_GROUP must be one of ${[...DB_INTEGRATION_GROUPS, POSTGRES16_COMPAT_GROUP].join(", ")}; received "${group}".`
   );
 }
 if (group) {
@@ -113,7 +115,11 @@ const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
-    const mine = suites.filter((suite) => dbIntegrationGroupOf(suite) === group);
+    const mine = suites.filter((suite) =>
+      group === POSTGRES16_COMPAT_GROUP
+        ? POSTGRES16_COMPAT_SUITES.includes(suite)
+        : dbIntegrationGroupOf(suite) === group
+    );
     if (mine.length === 0) return;
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
@@ -390,6 +396,42 @@ run(
     // under the right actor, and results go where the core says. It closes
     // what it opens, so it passes whichever engineering file runs first.
     "tests/integration/engineering-agent-store.db.test.ts",
+    // Support-triage run record: the database owns the deadline, caps runs
+    // at 52 per kind per UTC day under concurrency, downgrades a late success
+    // and refuses deleting a row younger than 30 days.
+    "tests/integration/support-triage-run.db.test.ts",
+    // Support-triage timeouts: one call arms the lane timeouts, they survive
+    // the call, a slow statement is cancelled, and on 17 a short inherited
+    // transaction_timeout refuses the transaction before any write.
+    "tests/integration/support-triage-timeouts.db.test.ts",
+    // Support-triage run writer: a run row and its system audit entry commit
+    // or roll back together, and a late finish is recorded as such.
+    "tests/integration/support-triage-run-store.db.test.ts",
+    // Support-triage retention: rows past their boundary go in audited
+    // batches, a cancelling row is skipped and counted, and no progress is
+    // reported as such.
+    "tests/integration/support-triage-retention.db.test.ts",
+    // Support-triage suggestions: the state machine, the lease and the
+    // display stamp are the guard trigger's, and a report's deletion takes them.
+    "tests/integration/support-triage-suggestion.db.test.ts",
+    // Support-triage groups: one kind per group, members tied to its digest,
+    // members then signals then the group when it ends, and the tombstone.
+    "tests/integration/support-triage-group.db.test.ts",
+    // Support-triage decision records: twelve months by CHECK, never updated,
+    // at least one link at commit, and no record outlives any of its links.
+    "tests/integration/support-triage-decision-record.db.test.ts",
+    // Support-triage retention and heartbeat routes: own secrets, counts only,
+    // non-2xx when retention makes no progress, a fail-closed heartbeat.
+    "tests/integration/support-triage-routes.db.test.ts",
+    // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
+    // supersede on a changed input, nothing for a closed or deleted report.
+    "tests/integration/support-triage-worker.db.test.ts",
+    // Support-triage LLM step: the model answer written with the ready row, the
+    // human-lane floor, and the keyword lane when there is no answer.
+    "tests/integration/support-triage-llm.db.test.ts",
+    // Support-triage data in a real account deletion: the derived rows go in
+    // that transaction, the reports stay anonymised, nothing is derived again.
+    "tests/integration/support-triage-account-deletion.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.

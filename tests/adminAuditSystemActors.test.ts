@@ -144,6 +144,8 @@ test("the system actor list is closed and changes only by review", () => {
     "engineering-agent-registrar",
     // docs/policy/qa-release-agent.md section 5: the digest intake route.
     "qa-release-intake",
+    "support-triage-worker",
+    "support-triage-retention",
     // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
     "qa-release-merge-lane",
     // The shared AgentDigestItem body expiry and meta purge, for every agent
@@ -157,6 +159,7 @@ test("the system actor list is closed and changes only by review", () => {
     "product-research-retention",
     // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
     "billing-finance-ops-intake",
+    "support-triage-account-deletion",
     // docs/policy/amux-decision-maker.md §10: the routing route and one actor
     // per DM instance. A DM writes proposals, never approvals (§1).
     "amux-decision-router",
@@ -536,4 +539,29 @@ test("the Auto router optimizer actor may only start a cycle and promote one", (
     "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",
     "auto.llm_router_guidance.promoted", "AppSettings"), false);
+});
+
+test("the support-triage actors write only their own run's entries and the deletion entry", () => {
+  for (const action of ["support_triage.run_started", "support_triage.run_finished"]) {
+    assert.equal(systemAuditActionAllowed("support-triage-worker", action, "SupportTriageRun"), true, action);
+    assert.equal(systemAuditActionAllowed("support-triage-retention", action, "SupportTriageRun"), true, action);
+  }
+  for (const action of ["support_triage.worker_reclaim", "support_triage.worker_claim", "support_triage.worker_result"]) {
+    assert.equal(systemAuditActionAllowed("support-triage-worker", action, "SupportTriageRun"), true, action);
+    assert.equal(systemAuditActionAllowed("support-triage-retention", action, "SupportTriageRun"), false, action);
+    assert.equal(systemAuditActionAllowed("support-triage-worker", action, "Feedback"), false, action);
+  }
+  assert.equal(systemAuditActionAllowed("support-triage-retention", "support_triage.retention_batch", "SupportTriageRun"), true);
+  assert.equal(systemAuditActionAllowed("support-triage-worker", "support_triage.retention_batch", "SupportTriageRun"), false);
+  assert.equal(
+    systemAuditActionAllowed("support-triage-account-deletion", "support_triage.account_data_deleted", "SupportTriageAccountData"),
+    true
+  );
+  assert.equal(
+    systemAuditActionAllowed("support-triage-account-deletion", "support_triage.run_started", "SupportTriageRun"),
+    false
+  );
+  // An Admin action is never theirs.
+  assert.equal(systemAuditActionAllowed("support-triage-worker", "support_triage.enabled_updated", "AppSettings"), false);
+  assert.equal(systemAuditActionAllowed("support-triage-worker", "admin.user.updated", "User"), false);
 });

@@ -1,9 +1,9 @@
 // The marketing generator's worker: one run, then exit (S3 plan, S3e3, S3f).
 //
 // Started by scripts/marketing-generator-service.mjs, which gives it the run
-// id and the deadline and kills it at that deadline. A3 runs first: it reads
-// the pages a person approved for each tracked competitor and reports the
-// facts it finds. A5 then reads the app's context -- which now holds those
+// id and the deadline and kills it at that deadline. A3 runs first: one web
+// search per approved competitor, limited to its official domains, and the
+// facts it finds reported. A5 then reads the app's context -- which now holds those
 // facts -- asks the model once per approval-mode account through the LLM cost
 // ledger, and submits what survives the reading to the draft intake, where
 // the Guard judges it again. It holds the LLM key and the generator's secret
@@ -19,7 +19,6 @@ import { randomUUID } from "node:crypto";
 
 import { marketingLlmPinProblems } from "../lib/marketingLlmBudgetCore.ts";
 import { marketingLlmBudgetHttpPort, runMarketingLlmCall } from "../lib/marketingLlmClientCore.ts";
-import { fetchMarketingA3Page } from "../lib/marketingA3Core.ts";
 import { runMarketingA3Cycle } from "../lib/marketingA3CycleCore.ts";
 import {
   marketingGeneratorAppPorts,
@@ -104,12 +103,10 @@ try {
     { generatorRunId: runId, deadlineAt: a3DeadlineAt },
     {
       readContext: a3App.readContext,
-      // A page gets no credential and no header of the app's: the plain fetch,
-      // bounded by fetchMarketingA3Page and by A3's share.
-      fetchPage: (url, hosts) => fetchMarketingA3Page({ url, hosts }, { fetch, signal: a3Signal }),
-      callLlm: (messages, requestKey) =>
+      // One web search per competitor, limited to its official domains.
+      callLlm: (messages, requestKey, allowedDomains) =>
         runMarketingLlmCall(
-          { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey },
+          { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey, webSearch: { allowedDomains } },
           {
             budget: a3Budget,
             transport: fetch,

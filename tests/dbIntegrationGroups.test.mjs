@@ -6,6 +6,8 @@ import test from "node:test";
 import {
     DB_INTEGRATION_FALLBACK_GROUP,
     DB_INTEGRATION_GROUPS,
+    POSTGRES16_COMPAT_GROUP,
+    POSTGRES16_COMPAT_SUITES,
     dbIntegrationGroupOf,
 } from "../scripts/db-integration-groups.mjs";
 
@@ -105,6 +107,30 @@ test("the workflow runs every lane the module defines", () => {
             `the matrix does not include the ${lane} lane`
         );
     }
+});
+
+test("the PostgreSQL 16 compatibility job runs its suites on 16 and stays out of the lanes", () => {
+    // The support-triage policy requires its timeout suites on 16 and 17. The
+    // lanes run 17; this job reruns the listed suites on 16 without taking
+    // them out of their lane.
+    assert.ok(!DB_INTEGRATION_GROUPS.includes(POSTGRES16_COMPAT_GROUP));
+    for (const suite of POSTGRES16_COMPAT_SUITES) {
+        assert.ok(onDisk.includes(suite), `${suite} is not on disk`);
+        assert.notEqual(dbIntegrationGroupOf(suite), POSTGRES16_COMPAT_GROUP);
+    }
+    const workflow = readFileSync(
+        resolve(ROOT, ".github", "workflows", "credit-finance-db-integration.yml"),
+        "utf8"
+    );
+    assert.ok(
+        /credit-finance-db-postgres16:[\s\S]*?image: postgres:16-alpine[\s\S]*?DB_INTEGRATION_GROUP: postgres16/.test(workflow),
+        "a job must run the postgres16 group on postgres:16-alpine"
+    );
+    assert.ok(
+        /credit-finance-db-result:[\s\S]*?needs: \[[^\]]*\bcredit-finance-db-postgres16\b[^\]]*\]/.test(workflow) &&
+            workflow.includes('test "$POSTGRES16_RESULT" = "success"'),
+        "the required result job must fail when the PostgreSQL 16 job does"
+    );
 });
 
 test("no lane is large enough to put the timeout back where it was", () => {

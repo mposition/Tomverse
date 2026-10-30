@@ -67,6 +67,16 @@ export type FeedbackRow = {
   errorClassificationSource: string | null;
   clientErrorCode: string | null;
   evidenceAvailability: string | null;
+  /**
+   * The support-triage proposal: a lane, the open reports the model named as
+   * duplicates, and a reply draft. Shown to the operator only; nothing is sent.
+   */
+  triage?: {
+    lane: string;
+    laneSource: string | null;
+    duplicateOf: string[];
+    replyDraft: string | null;
+  } | null;
   /** Phase 2 diagnosis-only shadow case, when one was queued. Observational:
    * no auto-fix pipeline exists, and the panel says so in words. */
   autoFixCase: {
@@ -305,8 +315,11 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
   const [closeTarget, setCloseTarget] = useState<{
     feedback: FeedbackRow;
     status: "resolved" | "closed";
-    /** Opened from an auto-fix reply draft: the dialog starts from it. */
-    draft?: { outcomeCode: FeedbackClosureOutcome; userReply: string };
+    /**
+     * Opened from a reply draft: the dialog starts from it. A support-triage
+     * draft carries no outcome, so the operator picks one (policy section 2).
+     */
+    draft?: { outcomeCode?: FeedbackClosureOutcome; userReply: string };
   } | null>(null);
   // A dialog holding an operator's half-written reply, or a request in
   // flight, is never interrupted by the background refresh.
@@ -641,6 +654,22 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
                       {feedback.message}
                     </p>
+                    {feedback.triage ? (
+                      <TriageProposal
+                        triage={feedback.triage}
+                        m={m}
+                        onUseDraft={
+                          isTerminalFeedbackStatus(feedback.status)
+                            ? undefined
+                            : (userReply) =>
+                                setCloseTarget({
+                                  feedback,
+                                  status: "resolved",
+                                  draft: { userReply },
+                                })
+                        }
+                      />
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -938,7 +967,7 @@ function FeedbackCompletionDialog({
 }: {
   feedback: FeedbackRow;
   status: "resolved" | "closed";
-  draft?: { outcomeCode: FeedbackClosureOutcome; userReply: string };
+  draft?: { outcomeCode?: FeedbackClosureOutcome; userReply: string };
   busy: boolean;
   onCancel: () => void;
   onConfirm: (closure: {
@@ -947,8 +976,9 @@ function FeedbackCompletionDialog({
     notifyReporter?: boolean;
   }) => void;
 }) {
-  const [outcomeCode, setOutcomeCode] = useState<FeedbackClosureOutcome>(
-    draft?.outcomeCode ?? (feedback.type === "bug" ? "fixed" : "answered")
+  // A draft without an outcome leaves it unchosen ("") until the operator picks one.
+  const [outcomeCode, setOutcomeCode] = useState<FeedbackClosureOutcome | "">(
+    draft ? (draft.outcomeCode ?? "") : feedback.type === "bug" ? "fixed" : "answered"
   );
   const m = useAdminMessages(adminFeedbackInboxMessages);
   const [userReply, setUserReply] = useState(
@@ -991,13 +1021,15 @@ function FeedbackCompletionDialog({
   const alreadyCompleted = Boolean(feedback.completionSnapshot);
   const preview = useMemo(
     () =>
-      buildFeedbackLifecycleEmail("completed", {
-        reference: feedbackReferenceFromId(feedback.id),
-        type: feedback.type,
-        language: feedback.language,
-        outcomeCode,
-        userReply: userReply.trim() || null,
-      }),
+      outcomeCode === ""
+        ? null
+        : buildFeedbackLifecycleEmail("completed", {
+            reference: feedbackReferenceFromId(feedback.id),
+            type: feedback.type,
+            language: feedback.language,
+            outcomeCode,
+            userReply: userReply.trim() || null,
+          }),
     [feedback.id, feedback.language, feedback.type, outcomeCode, userReply]
   );
 
@@ -1059,6 +1091,11 @@ function FeedbackCompletionDialog({
             }
             className="mt-1.5 h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none transition focus:border-blue-500"
           >
+            {outcomeCode === "" ? (
+              <option value="" disabled>
+                {m.dialog.chooseOutcome}
+              </option>
+            ) : null}
             {FEEDBACK_CLOSURE_OUTCOMES.map((code) => (
               <option key={code} value={code}>
                 {code}
@@ -1111,7 +1148,7 @@ function FeedbackCompletionDialog({
           </label>
         ) : null}
 
-        {notifiable && !alreadyCompleted && !withholdEmail ? (
+        {preview && notifiable && !alreadyCompleted && !withholdEmail ? (
           <div
             data-testid="feedback-completion-preview"
             className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3"
@@ -1137,8 +1174,9 @@ function FeedbackCompletionDialog({
           <button
             type="button"
             data-testid="feedback-completion-confirm"
-            disabled={busy || !replyValid}
+            disabled={busy || !replyValid || outcomeCode === ""}
             onClick={() =>
+              outcomeCode !== "" &&
               onConfirm({
                 outcomeCode,
                 ...(userReply.trim() ? { userReply: userReply.trim() } : {}),
@@ -1161,6 +1199,85 @@ function FeedbackCompletionDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The support-triage proposal under a report: its lane and where the lane
+ * came from, links to the reports the model named as duplicates, and the
+ * reply draft with a copy button. Read-only: nothing here sends or changes
+ * the report.
+ */
+function TriageProposal({
+  triage,
+  m,
+  onUseDraft,
+}: {
+  triage: NonNullable<FeedbackRow["triage"]>;
+  m: FeedbackInboxMessages;
+  /** Opens the closing dialog with the draft as the reply; absent on a closed report. */
+  onUseDraft?: (userReply: string) => void;
+}) {
+  const laneLabel =
+    (m.triageLanes as Record<string, string>)[triage.lane] ?? triage.lane;
+  return (
+    <div
+      className="mt-3 rounded-xl border border-blue-500/25 bg-blue-500/5 p-3"
+      data-testid="feedback-triage-proposal"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-bold text-blue-100">{m.triageTitle}</span>
+        <span className="rounded-full border border-blue-500/30 px-2 py-0.5 font-bold text-blue-100">
+          {laneLabel}
+        </span>
+        <span className="text-zinc-400">
+          {triage.laneSource === "llm" ? m.triageByModel : m.triageByKeyword}
+        </span>
+      </div>
+      {triage.duplicateOf.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
+          <span>{m.triageDuplicates}:</span>
+          {triage.duplicateOf.map((id) => (
+            <a
+              key={id}
+              href={`/admin/support?tab=feedback&q=${encodeURIComponent(id)}`}
+              className="font-mono text-blue-200 underline underline-offset-2 hover:text-blue-100"
+            >
+              {id.slice(0, 10)}
+            </a>
+          ))}
+        </div>
+      ) : null}
+      {triage.replyDraft ? (
+        <div className="mt-2">
+          <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+            <span>{m.triageDraft}</span>
+            <span className="flex flex-wrap gap-2">
+            {onUseDraft ? (
+              <button
+                type="button"
+                data-testid="feedback-triage-use-draft"
+                onClick={() => onUseDraft(triage.replyDraft ?? "")}
+                className="inline-flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1 font-bold text-blue-100 transition hover:bg-blue-500/20"
+              >
+                <Mail className="h-3 w-3" />
+                {m.triageUseDraft}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(triage.replyDraft ?? "")}
+              className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 font-bold text-zinc-200 transition hover:bg-zinc-800"
+            >
+              <Clipboard className="h-3 w-3" />
+              {m.triageCopyDraft}
+            </button>
+            </span>
+          </div>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-200">{triage.replyDraft}</p>
+        </div>
+      ) : null}
     </div>
   );
 }

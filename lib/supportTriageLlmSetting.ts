@@ -1,0 +1,134 @@
+/**
+ * Which model the support-triage LLM step uses, chosen in the Admin console
+ * (owner request 2026-10-19). Stored as one AppSetting row holding a model id
+ * or "off"; only when there is no row is SUPPORT_TRIAGE_LLM_MODEL_ID the
+ * fallback, so Off in the console stops paid calls whatever the environment
+ * says. With neither the step is off. Only an enabled runtime model can be
+ * saved, and every change is audited in the same transaction.
+ */
+import "server-only";
+
+import type { Session } from "next-auth";
+
+import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { getEnabledRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
+import { prisma } from "@/lib/prisma";
+import { isSupportTriageEnabled } from "@/lib/supportTriageRouteAuth";
+
+export const SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY = "supportTriage.llmModelId";
+/** Saved in place of a model id when the Admin console switched the step off. */
+export const SUPPORT_TRIAGE_LLM_MODEL_OFF = "off";
+export const SUPPORT_TRIAGE_LLM_MODEL_ENV = "SUPPORT_TRIAGE_LLM_MODEL_ID";
+
+/** The saved value (a model id or "off"), or null when the Admin console has not chosen. */
+export const readSupportTriageLlmModelSetting = async (): Promise<string | null> => {
+  const row = await prisma.appSetting.findUnique({
+    where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY },
+    select: { value: true },
+  });
+  const value = row?.value.trim();
+  return value ? value : null;
+};
+
+/** The model the step uses (null: off) and where that came from. */
+export const resolveSupportTriageLlmModel = async (
+  env: Readonly<Record<string, string | undefined>>
+): Promise<{ modelId: string | null; source: "admin" | "environment" }> => {
+  const saved = await readSupportTriageLlmModelSetting();
+  if (saved === null) return { modelId: env[SUPPORT_TRIAGE_LLM_MODEL_ENV]?.trim() || null, source: "environment" };
+  return { modelId: saved === SUPPORT_TRIAGE_LLM_MODEL_OFF ? null : saved, source: "admin" };
+};
+
+export type SupportTriageModelOption = { id: string; name: string; provider: string };
+
+/** The models the Admin console can offer: enabled and in the catalogue. */
+export const listSupportTriageModelOptions = async (): Promise<SupportTriageModelOption[]> =>
+  (await getRuntimeModels())
+    .filter((model) => model.enabled && !model.catalogDeleted)
+    .map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
+
+export class SupportTriageModelRefused extends Error {}
+
+/**
+ * Saves `modelId`, or with null saves Off, which the environment variable
+ * cannot override. Refuses a model that is not enabled.
+ */
+export const writeSupportTriageLlmModelSetting = async (input: {
+  session: Session;
+  request: Request;
+  modelId: string | null;
+}): Promise<{ modelId: string | null }> => {
+  if (input.modelId !== null && !(await getEnabledRuntimeModel(input.modelId))) {
+    throw new SupportTriageModelRefused("model_not_enabled");
+  }
+  const value = input.modelId ?? SUPPORT_TRIAGE_LLM_MODEL_OFF;
+  await prisma.$transaction(async (tx) => {
+    await tx.appSetting.upsert({
+      where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY },
+      create: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY, value },
+      update: { value },
+    });
+    await writeAdminAuditLog({
+      tx,
+      session: input.session,
+      request: input.request,
+      action: "support_triage.llm_model_updated",
+      targetType: "AppSettings",
+      targetId: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY,
+      summary: input.modelId === null ? "Support-triage LLM step switched off" : "Support-triage LLM model set",
+      metadata: { modelId: input.modelId },
+    });
+  });
+  return { modelId: input.modelId };
+};
+
+/**
+ * Whether the support-triage worker runs, switched in the Admin console. A
+ * saved row wins; with none, SUPPORT_TRIAGE_ENABLED decides as before. Off
+ * means a run route call writes nothing.
+ */
+export const SUPPORT_TRIAGE_ENABLED_SETTING_KEY = "supportTriage.enabled";
+
+/** The saved switch, or null when the Admin console has not set one. */
+export const readSupportTriageEnabledSetting = async (): Promise<boolean | null> => {
+  const row = await prisma.appSetting.findUnique({
+    where: { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY },
+    select: { value: true },
+  });
+  return row?.value === "true" ? true : row?.value === "false" ? false : null;
+};
+
+/** The effective switch and where it came from. */
+export const resolveSupportTriageEnabled = async (
+  env: Readonly<Record<string, string | undefined>>
+): Promise<{ enabled: boolean; source: "admin" | "environment" }> => {
+  const saved = await readSupportTriageEnabledSetting();
+  return saved === null
+    ? { enabled: isSupportTriageEnabled(env), source: "environment" }
+    : { enabled: saved, source: "admin" };
+};
+
+export const writeSupportTriageEnabledSetting = async (input: {
+  session: Session;
+  request: Request;
+  enabled: boolean;
+}): Promise<{ enabled: boolean }> => {
+  await prisma.$transaction(async (tx) => {
+    await tx.appSetting.upsert({
+      where: { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY },
+      create: { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY, value: String(input.enabled) },
+      update: { value: String(input.enabled) },
+    });
+    await writeAdminAuditLog({
+      tx,
+      session: input.session,
+      request: input.request,
+      action: "support_triage.enabled_updated",
+      targetType: "AppSettings",
+      targetId: SUPPORT_TRIAGE_ENABLED_SETTING_KEY,
+      summary: input.enabled ? "Support-triage worker switched on" : "Support-triage worker switched off",
+      metadata: { enabled: input.enabled },
+    });
+  });
+  return { enabled: input.enabled };
+};

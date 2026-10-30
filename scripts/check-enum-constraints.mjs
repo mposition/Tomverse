@@ -1553,6 +1553,104 @@ const REGISTRY = {
     list: "SUGGESTION_STATUSES",
     reason: "open until the operator dismisses it or sends it to AMUX.",
   },
+  SupportTriageDecisionRecord_decisionKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "DECISION_KINDS",
+    reason:
+      "What a person decided: a suggestion accepted or rejected, a group confirmed or dismissed, a sample judged. One record per decision; the record itself is never changed.",
+  },
+  SupportTriageGroup_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_STATES",
+    reason:
+      "candidate and confirmed are open; dismissed, expired and invalidated are terminal. The guard trigger allows only the core table's transitions, and a terminal group takes nothing but its tombstone clearing.",
+  },
+  SupportTriageGroup_primaryKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "The one kind a group is an equivalence class of, in priority order. Fixed for the life of the group.",
+  },
+  SupportTriageGroup_decision_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_DECISIONS",
+    reason:
+      "A person's decision, kept apart from the state so that a confirmed group that later loses members still says it was confirmed.",
+  },
+  SupportTriageGroup_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a candidate group has been shown to a person; the same two values as a suggestion's, reached once and stamped by the database.",
+  },
+  SupportTriageGroupSignal_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "One signal row per group and kind. Every kind is an equality over a server fact; a report's text is never one.",
+  },
+  SupportTriageGroupSignal_provenanceClass_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SIGNAL_PROVENANCE_CLASSES",
+    reason:
+      "Where the signal's server value comes from. A second CHECK ties it to the kind, so the column can never disagree with SIGNAL_PROVENANCE.",
+  },
+  SupportTriageSuggestion_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_STATES",
+    reason:
+      "pending, claimed, ready and six terminal states. The guard trigger allows only the core table's transitions and never changes a terminal row.",
+  },
+  SupportTriageSuggestion_failureCode_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_FAILURE_CODES",
+    reason:
+      "Why a suggestion failed; present exactly when the state is failed. retry_exhausted is what a fourth reclaim must become, because the attempt count stops at three.",
+  },
+  SupportTriageSuggestion_lane_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "TRIAGE_LANES",
+    reason:
+      "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
+  },
+  SupportTriageSuggestion_laneSource_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "LANE_SOURCES",
+    reason:
+      "Where a ready suggestion's lane came from. llm when the model answered and no money or trust-and-safety keyword held the human lane; keyword otherwise.",
+  },
+  SupportTriageSuggestion_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a ready suggestion has been shown to a person. Separate from the state, reached once and stamped by the database.",
+  },
+  SupportTriageRun_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_KINDS",
+    reason:
+      "worker and retention. Each kind has its own deadline (5 minutes, 100 seconds) and its own daily cap of 52, both applied by the row-creation trigger from the kind alone.",
+  },
+  SupportTriageRun_outcome_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_OUTCOMES",
+    reason:
+      "running until the run finishes, then one final outcome. The finishing trigger turns a late success or partial into deadline_exceeded, so the list holds a value the database records and the application never asks for.",
+  },
   EngineeringAgentRun_status_check: {
     owner: "list",
     module: "lib/engineeringAgentCore.ts",

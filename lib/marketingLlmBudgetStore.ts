@@ -30,12 +30,13 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { MARKETING_RETENTION_SETTING } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
-  MARKETING_LLM_ADAPTER_PROFILE,
+  MARKETING_LLM_ADAPTER_PROFILES,
   MARKETING_LLM_ADAPTER_VERSION,
   MARKETING_LLM_PROVIDER,
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
   marketingLlmConfigSnapshot,
+  marketingLlmPinAllows,
   marketingLlmConsumerDigest,
   marketingLlmDispatchDigest,
   marketingLlmRequestDigest,
@@ -43,6 +44,8 @@ import {
   marketingLlmReservePayloadDigest,
   marketingLlmSettleOutcome,
   MARKETING_LLM_SETTINGS_KEY,
+  MARKETING_LLM_WEB_SEARCH_PROFILE,
+  MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
   parseMarketingLlmMonthlyCap,
   parseMarketingLlmSettings,
   resolveMarketingLlmPin,
@@ -69,8 +72,9 @@ export const MARKETING_LLM_ACTIONS = {
  * What one ledger row counts against the monthly cap, in micro-USD (operator
  * decision 2026-10-23: a finished call counts at its cost, not its
  * reservation). A settled call reported its tokens, so it counts at them and
- * the pinned worst rates, never more than it reserved. A released call never
- * reached the provider and counts nothing.
+ * the pinned worst rates, plus every search its request could be billed for
+ * (the provider does not report searches per call), never more than it
+ * reserved. A released call never reached the provider and counts nothing.
  * Any other row -- reserved, dispatched, or kept unknown -- may have cost up
  * to its reservation, so it counts at that.
  */
@@ -79,7 +83,11 @@ export const MARKETING_LLM_COUNTED_MICRO_USD_SQL = Prisma.sql`CASE "state"
   WHEN 'settled' THEN LEAST("reservedMicroUsd", ceil(
     ("reportedInputTokens"::numeric * ("configSnapshot"->'pin'->>'worstInputMicroUsdPerMillion')::numeric
      + "reportedOutputTokens"::numeric * ("configSnapshot"->'pin'->>'worstOutputMicroUsdPerMillion')::numeric)
-    / 1000000))
+    / 1000000)
+    + CASE WHEN "configSnapshot"->>'adapterProfile' = ${MARKETING_LLM_WEB_SEARCH_PROFILE}
+        THEN (COALESCE(("configSnapshot"->'pin'->>'maxWebSearchCalls')::numeric, 0) + ${MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE})
+             * COALESCE(("configSnapshot"->'pin'->>'webSearchMicroUsdPerCall')::numeric, 0)
+        ELSE 0 END)
   ELSE "reservedMicroUsd" END`;
 
 /** The most one ledger transaction may take; the timer is armed to it. */
@@ -211,7 +219,8 @@ export async function reserveMarketingLlmCall(
 
   if (bounds.late) return refused("deadline_too_close");
   if (env.killSwitchOn !== false) return refused("kill_switch");
-  if (input.payload.adapterProfile !== MARKETING_LLM_ADAPTER_PROFILE) return refused("adapter_profile_unknown");
+  const profile = MARKETING_LLM_ADAPTER_PROFILES.find((known) => known === input.payload.adapterProfile);
+  if (profile === undefined) return refused("adapter_profile_unknown");
   // The operator's settings, read after the audit chain lock that every
   // settings change also takes, so a reservation sees a change either wholly
   // before it or wholly after. Only the selected model may spend.
@@ -228,8 +237,10 @@ export async function reserveMarketingLlmCall(
     new Date(`${reserveAt}Z`),
   );
   if (!pin.ok) return refused(pin.code);
+  // A web-search call needs a pin that prices its searches and caps them.
+  if (!marketingLlmPinAllows(pin.pin, profile)) return refused("adapter_profile_unknown");
 
-  const reservation = marketingLlmReservation(pin.pin);
+  const reservation = marketingLlmReservation(pin.pin, profile);
   // The month's counted sum, and -- the last reading of the database clock
   // before the audit row -- whether the deadline has passed.
   const sum = await tx.$queryRaw<Array<{ total: bigint; inTime: boolean }>>(Prisma.sql`
@@ -244,6 +255,7 @@ export async function reserveMarketingLlmCall(
   const configSnapshot = marketingLlmConfigSnapshot({
     pin: pin.pin,
     adapterVersion: env.adapterVersion ?? MARKETING_LLM_ADAPTER_VERSION,
+    adapterProfile: profile,
   });
   const requestDigest = marketingLlmRequestDigest({ reservePayloadDigest: payloadDigest, configSnapshot });
   const callId = newCallId();
