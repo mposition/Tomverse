@@ -125,6 +125,18 @@ test("a result whose claim was lost is not written and is counted stale", async 
   assert.equal((await suggestions())[0].state, "claimed");
 });
 
+test("a claim that would leave less than its reserve rolls back and claims nothing", async () => {
+  await report("a");
+  const run = await startSupportTriageRun("worker");
+  // 30 seconds left, but the model call and the write need 60.
+  const late = { ...run, deadlineAt: new Date(Date.now() + 30_000) };
+  await assert.rejects(claimSupportTriageBatch(late, ["fb-w-a"], 60_000), /support_triage_deadline_passed/);
+  assert.deepEqual(await suggestions(), []);
+  // With the reserve available the same claim commits.
+  const batch = await claimSupportTriageBatch(run, ["fb-w-a"], 60_000);
+  assert.equal(batch.claimed.length, 1);
+});
+
 test("a report closed between claim and result is not written", async () => {
   await report("a");
   const run = await startSupportTriageRun("worker");

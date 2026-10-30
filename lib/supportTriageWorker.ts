@@ -172,6 +172,7 @@ const transaction = <T>(fn: (tx: Tx) => Promise<T>) =>
 export const failExpiredClaims = (run: { id: string; deadlineAt: Date }) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
+    // retry_exhausted here means "no retry is allowed", not "retries were tried".
     const exhausted = await tx.$executeRaw`
       UPDATE "SupportTriageSuggestion" s SET "state" = 'failed', "failureCode" = 'retry_exhausted'
        WHERE s."id" IN (
@@ -251,7 +252,11 @@ export type ClaimedRow = {
 export type ClaimedReport = TriageLlmInput["report"];
 
 /** Step 2: supersede, insert and claim, for the reports still eligible under lock. */
-export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, reportIds: string[]) =>
+export const claimSupportTriageBatch = (
+  run: { id: string; deadlineAt: Date },
+  reportIds: string[],
+  reserveMs = 0
+) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
     const reports = await lockEligibleReports(tx, reportIds, true);
@@ -292,7 +297,10 @@ export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, r
       RETURNING s."id", s."feedbackId", s."inputDigest"`;
     if (claimed.length + superseded > 0) {
       await audit(tx, run.id, "support_triage.worker_claim", { claimed: claimed.length, superseded });
-      await assertDeadline(tx, run.deadlineAt);
+      // The claim commits only while what follows it (the model call and the
+      // result transaction) still fits before the deadline; otherwise it rolls
+      // back and nothing is left claimed to lapse.
+      await assertDeadline(tx, new Date(run.deadlineAt.getTime() - reserveMs));
     }
     // Step 3, in memory: flag codes and a keyword lane; the report itself is
     // returned only for the LLM step, which sends it to the configured model.
@@ -449,6 +457,9 @@ export type WorkerPassResult = {
   readonly superseded: number;
 };
 
+const deadlinePassed = (error: unknown) =>
+  error instanceof Error && error.message.includes("support_triage_deadline_passed");
+
 const databaseNow = async (): Promise<Date> => {
   const [row] = await prisma.$queryRaw<{ now: Date }[]>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
@@ -464,8 +475,9 @@ export const runSupportTriageWorker = async (
   const llm = options.llm === undefined ? await supportTriageLlmFromEnv() : options.llm;
   let batchesCompleted = 0;
   let partial = false;
-  // A batch is claimed only while the model call and the result transaction
-  // still fit, so a paid answer is never dropped for want of time.
+  // What a claimed batch still needs: the model call and the result
+  // transaction. A claim commits only with this much left, so a claimed batch
+  // is always called and its paid answer always written.
   const batchReserveMs = maxGuardedBudgetMs("worker") + (llm ? SUPPORT_TRIAGE_LLM_TIMEOUT_MS : 0);
   const hasBudget = async (reserveMs = maxGuardedBudgetMs("worker")) =>
     run.deadlineAt.getTime() - (await databaseNow()).getTime() > reserveMs;
@@ -484,17 +496,20 @@ export const runSupportTriageWorker = async (
       const { candidates, last, exhausted } = await readCandidates(after, limit);
       after = last;
       if (candidates.length > 0) {
-        const batch = await claimSupportTriageBatch(run, candidates);
+        const batch = await claimSupportTriageBatch(run, candidates, batchReserveMs).catch((error: unknown) => {
+          if (deadlinePassed(error)) return null;
+          throw error;
+        });
+        if (!batch) {
+          // The claim ran past its reserve and rolled back: nothing was claimed.
+          partial = true;
+          break;
+        }
         totals.superseded += batch.superseded;
         totals.claimed += batch.claimed.length;
         if (batch.token && batch.claimed.length > 0) {
-          if (!(await hasBudget(batchReserveMs))) {
-            // Claimed but not called: the leases expire and a later pass fails them.
-            partial = true;
-            break;
-          }
-          // Once paid for, the answer is always written: the call ends within
-          // its timeout, which the reserve above already covered.
+          // The claim's reserve covers the call (it ends within its timeout)
+          // and the write, so neither is skipped for want of time.
           const answered = llm ? await runTriageLlm(llm, batch.claimed, batch.reports) : batch.claimed;
           const result = await writeSupportTriageResults(run, batch.token, answered);
           totals.ready += result.ready;
