@@ -58,13 +58,16 @@ async function readPending(): Promise<Pending | null> {
   return item ? asPending(item) : null;
 }
 
-/** A v22 publish item nobody claimed before its capability lapsed: queued,
- * no capability ever consumed, none live. */
-const lapsedWhere = () => ({ kind: "publish", state: "queued",
-  run: { card: { sourceSystem: "admin-idea-v4" } },
-  capabilities: { none: { OR: [{ consumedAt: { not: null } },
-    { unconsumedWorkItemId: { not: null }, expiresAt: { gt: new Date() } }] } },
-});
+/** A queued publish item with no live capability, which no claim can take:
+ * its capability lapsed before a round claimed it, or a claim spent it and
+ * came back proven unwritten (a refusal before the push, or a lookup that
+ * found no prior write), which needs a new one. */
+export const queuedWithoutCapabilityWhere = () => ({ kind: "publish",
+  state: "queued", capabilities: { none: {
+    unconsumedWorkItemId: { not: null }, expiresAt: { gt: new Date() } } } });
+
+const lapsedWhere = () => ({ ...queuedWithoutCapabilityWhere(),
+  run: { card: { sourceSystem: "admin-idea-v4" } } });
 
 async function readLapsed(): Promise<Lapsed | null> {
   const item = await prisma.engineeringAgentWorkItem.findFirst({
@@ -122,8 +125,8 @@ const t1Candidate = (item: Pending, stored: Stored | null) =>
     baseCommitterDate: stored.candidate.baseCommitterDate,
     imageProofDigest: stored.imageProofDigest! } : null;
 
-/** One round outside any route budget. A v22 publish item whose
- * capability lapsed before a round claimed it is judged again first:
+/** One round outside any route budget. A v22 publish item left queued
+ * without a live capability is judged again first:
  * the same verdict on the same tree gets a new capability, any other closes
  * the item so it neither holds the queue nor comes first again. Otherwise one
  * pending draft's tier: T1 opens the run's publish item with its capability,

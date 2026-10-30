@@ -3218,6 +3218,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Adds the ledger's legal-hold decision column. One AdminAuditLog mention is a restrictive foreign key; the other is the update guard's read of the decision's own audit row (action, target, recorded predecessor). No audit row is written.",
   },
   {
+    path: "prisma/migrations/20261023090000_marketing_llm_call_row_limits/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "Replaces the ledger's shape check in one ALTER so a catalog model's 1.05M window and a reservation up to the monthly cap ceiling fit. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
+  },
+  {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     table: "MarketingLlmCall",
     tableMentions: 5,

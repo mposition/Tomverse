@@ -17,11 +17,12 @@
 
 import { randomUUID } from "node:crypto";
 
-import { MARKETING_LLM_PRICE_PINS } from "../lib/marketingLlmBudgetCore.ts";
+import { marketingLlmPinProblems } from "../lib/marketingLlmBudgetCore.ts";
 import { marketingLlmBudgetHttpPort, runMarketingLlmCall } from "../lib/marketingLlmClientCore.ts";
 import { runMarketingA3Cycle } from "../lib/marketingA3CycleCore.ts";
 import {
   marketingGeneratorAppPorts,
+  marketingGeneratorPinForContext,
   marketingGeneratorWorkerConfig,
   runMarketingGeneratorCycle,
 } from "../lib/marketingGeneratorCycleCore.ts";
@@ -45,13 +46,13 @@ if (!runId || !deadlineAt) {
   process.exit(1);
 }
 
-const configured = marketingGeneratorWorkerConfig(process.env, MARKETING_LLM_PRICE_PINS);
+const configured = marketingGeneratorWorkerConfig(process.env);
 if (!configured.ok) {
-  // Not an error in the run: a worker without a pin or a key has nothing to do.
+  // Not an error in the run: a worker without its variables has nothing to do.
   console.error(`Marketing generator will not run: ${configured.reason}.`);
   process.exit(1);
 }
-const { appUrl, secret, apiKey, pin } = configured.config;
+const { appUrl, secret, apiKey } = configured.config;
 
 // Aborted a little before the deadline, so the run can say it ran out of time
 // rather than vanish when the supervisor's SIGKILL lands.
@@ -67,6 +68,17 @@ const budget = marketingLlmBudgetHttpPort({
 });
 
 const app = marketingGeneratorAppPorts({ appUrl, secret, generatorRunId: runId, fetch, signal: controller.signal });
+
+// The model is the operator's Admin Console setting, read from the context;
+// the ledger refuses any other, so a worker started before a change spends
+// nothing on the old model.
+const chosen = marketingGeneratorPinForContext(await app.readContext(), marketingLlmPinProblems);
+if (!chosen.ok) {
+  console.error(`Marketing generator will not run: ${chosen.reason}.`);
+  clearTimeout(timer);
+  process.exit(1);
+}
+const pin = chosen.pin;
 
 try {
   // A3's share is enforced, not just checked between competitors: every

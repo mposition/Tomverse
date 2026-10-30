@@ -112,7 +112,7 @@ test.describe("marketing console", () => {
     await expect(
       page.getByText(FIXTURE_MARKETING.channel.accountSlug, { exact: false }).first()
     ).toBeVisible();
-    await expect(page.getByText("approval_mode", { exact: false })).toBeVisible();
+    await expect(page.getByText("Approval mode", { exact: false }).first()).toBeVisible();
   });
 
   test("reports list the seeded period", async ({ page, signInAs }) => {

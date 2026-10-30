@@ -12,7 +12,7 @@
  *   429, a 503, a dropped connection or a timeout is an unknown outcome, and a
  *   chat completion has no idempotency key, so a second attempt could be a
  *   second charge. The ledger counts a dispatched call at its reservation
- *   whatever happens next.
+ *   until it settles with reported tokens.
  * - **Release only before dispatch.** Once a dispatch receipt exists the app
  *   cannot tell "called" from "not called", so the call is reported unknown
  *   even when the provider was never reached -- a replayed receipt included.
@@ -39,6 +39,7 @@ import {
   MARKETING_LLM_ADAPTER_PROFILE,
   MARKETING_LLM_ADAPTER_VERSION,
   MARKETING_LLM_WEB_SEARCH_PROFILE,
+  MARKETING_LLM_KEY_SCOPED_PROJECT,
   MARKETING_LLM_SERVICE_TIER,
   marketingLlmAdapterConfigDigest,
   marketingLlmBudgetSignature,
@@ -377,7 +378,8 @@ export async function runMarketingLlmCall(
       headers: {
         authorization: `Bearer ${deps.apiKey}`,
         "content-type": "application/json",
-        "openai-project": input.pin.projectId,
+        // A project key already names its project; the header is only for a named one.
+        ...(input.pin.projectId === MARKETING_LLM_KEY_SCOPED_PROJECT ? {} : { "openai-project": input.pin.projectId }),
       },
       body: JSON.stringify(
         input.webSearch
