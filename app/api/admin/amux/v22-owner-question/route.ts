@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     }
     await consumeApiRateLimit(request, session.user.id,
       "admin-amux-v22-owner-question", { minute: 5, day: 50 });
-    const body = await readLimitedJson(request, 24 * 1024, bodySchema);
+    const body = await readLimitedJson(request, 40 * 1024, bodySchema);
     const result = await answerAmuxV22OwnerQuestion({ session, request, ...body });
     return Response.json(result, { headers: noStore });
   } catch (error) {

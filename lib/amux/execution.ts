@@ -1355,7 +1355,7 @@ export async function settleAmuxV22TaskExecution(input: {
   // a `tier_pending` draft, and the publisher's round reads its tier with
   // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 42 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 43 };
   const publicationEligible = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
     patchPresent: patch !== null,
@@ -1386,11 +1386,10 @@ export async function settleAmuxV22TaskExecution(input: {
       // A run that ended with an owner question (recorded with its result)
       // is not finished: no review, no publication product, no grade
       // decision on its partial change. The Task waits for the answer.
+      const recordedQuestion = await tx.amuxV22TaskQuestion.findUnique({
+        where: { attemptId: attempt.id }, select: { id: true, state: true } });
       const ownerQuestion = input.outcome === "succeeded" ?
-        await tx.amuxV22TaskQuestion.findUnique({
-          where: { attemptId: attempt.id },
-          select: { id: true, state: true },
-        }) : null;
+        recordedQuestion : null;
       const questionPlan = amuxV22OwnerQuestionSettlementPlan(ownerQuestion);
       const settlementAssignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
@@ -1709,6 +1708,11 @@ export async function settleAmuxV22TaskExecution(input: {
             blockedReason,
           openedBy: input.worker });
       await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
+      // A question whose run this settlement does not park is closed, so it
+      // never holds the Task's one live question slot.
+      if (recordedQuestion?.state === "open" && !ownerQuestion)
+        await tx.amuxV22TaskQuestion.update({ where: { id: recordedQuestion.id },
+          data: { state: "cancelled" } });
       // The answer a resumed run read is not kept past that run.
       await tx.amuxV22TaskQuestion.updateMany({ where: {
         resumedAttemptId: attempt.id, state: "resumed",

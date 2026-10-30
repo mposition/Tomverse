@@ -64,7 +64,15 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient) 
     FROM "AmuxV22TaskQuestion" q
     JOIN "AmuxV22TaskResult" r
       ON r."attemptId" = q."attemptId" AND r."taskId" = q."taskId"
+    JOIN "AmuxExecutionAttempt" a ON a."id" = q."attemptId"
+    JOIN "AmuxWorkItem" w ON w."id" = q."taskId"
+    -- Only a question its run's settlement parked, on a Task still parked,
+    -- with a body still there: anything else is never listed, so it cannot
+    -- hold back the questions behind it.
     WHERE q."state" = 'open' AND q."localCardId" IS NULL
+      AND a."endedAt" IS NOT NULL AND a."reason" = 'owner_question'
+      AND w."status" = 'blocked' AND w."archivedAt" IS NULL
+      AND r."bodyPurgedAt" IS NULL
     ORDER BY q."createdAt", q."id"
     LIMIT ${AMUX_V22_QUESTION_SYNC_LIMIT}`;
   const closing = await tx.$queryRaw<Array<{ questionId: string; cardId: string }>>`
@@ -159,8 +167,12 @@ export async function resolveAmuxV22QuestionFromDmJudgment(
   const state = await readDecisionMakerRequestState(tx, judgment.requestId);
   const question = state ? await tx.amuxV22TaskQuestion.findFirst({
     where: { localCardId: state.binding.cardId, state: "open" },
-    select: { id: true, taskId: true } }) : null;
+    select: { id: true, taskId: true, attempt: { select: { endedAt: true } } },
+  }) : null;
   if (!question) return { resolved: null, cursor };
+  // The asking run has not settled yet: the walk waits here and asks again,
+  // rather than cancel a question that is about to be parked.
+  if (!question.attempt.endedAt) return { resolved: null, cursor: { move: "keep" } };
   const row = { questionId: question.id, taskId: question.taskId,
     requestId: judgment.requestId };
   const detail = await readDecisionMakerResultDetail(tx, row.requestId);

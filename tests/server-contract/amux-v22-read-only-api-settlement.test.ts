@@ -56,6 +56,7 @@ function makeWorld(outcome: Outcome) {
     attemptUpdateData: null as Record<string, unknown> | null,
     ownerQuestion: null as { id: string; state: string } | null,
     questionAnswerClears: 0,
+    questionCancels: 0,
     escalations: [] as Array<Record<string, unknown>>,
   };
 }
@@ -207,6 +208,7 @@ const tx = {
   amuxV22TaskQuestion: {
     findUnique: async () => world.ownerQuestion,
     updateMany: async () => { world.questionAnswerClears += 1; return { count: 0 }; },
+    update: async () => { world.questionCancels += 1; },
   },
   amuxWorkItem: { update: async (input: { data: Record<string, unknown> }) => {
     world.taskUpdates += 1;
@@ -799,4 +801,14 @@ test("a question over the limit blocks the Task for a person", async () => {
   assert.equal(world.attemptUpdateData?.reason, "owner_question_limit");
   assert.equal(world.escalations.length, 1);
   assert.equal(world.escalations[0]?.reason, "owner_question_limit");
+});
+
+test("a question whose run fails is cancelled, never left holding the Task", async () => {
+  world = makeWorld("failed");
+  world.ownerQuestion = { id: "question-failed", state: "open" };
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("failed"));
+  assert.equal(result.settled, true);
+  assert.notEqual(world.attemptUpdateData?.reason, "owner_question");
+  assert.equal(world.questionCancels, 1);
 });

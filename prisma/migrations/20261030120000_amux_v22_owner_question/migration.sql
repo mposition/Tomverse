@@ -113,6 +113,7 @@ BEGIN
   ELSIF NOT (
     (OLD."state" = 'open' AND NEW."state" IN ('answered', 'cancelled')) OR
     (OLD."state" = 'answered' AND NEW."state" = 'resumed' AND
+      NEW."answerText" IS NOT DISTINCT FROM OLD."answerText" AND
       NEW."answerSource" IS NOT DISTINCT FROM OLD."answerSource" AND
       NEW."answeredByUserId" IS NOT DISTINCT FROM OLD."answeredByUserId" AND
       NEW."answeredAt" IS NOT DISTINCT FROM OLD."answeredAt")

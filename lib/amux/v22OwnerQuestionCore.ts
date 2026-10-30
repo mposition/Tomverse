@@ -175,6 +175,7 @@ export function buildAmuxV22ResumeSection(input: {
   if (Buffer.byteLength(section, "utf8") <= budget) return section;
   const cut = "\n[The rest of this section is cut to fit the prompt. The full " +
     "question and answer are in Tomverse Admin.]\n";
+  if (budget < Buffer.byteLength(cut, "utf8")) return "";
   return `${utf8Prefix(section, budget - Buffer.byteLength(cut, "utf8"))}${cut}`;
 }
 

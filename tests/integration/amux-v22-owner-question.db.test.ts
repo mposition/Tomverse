@@ -136,6 +136,8 @@ test("the table refuses what the lifecycle does not allow", async () => {
   assert.match(String(await update({ state: "open", answerText: null,
     answerSource: null, answeredByUserId: null, answeredAt: null })),
     /cannot move from answered to open/);
+  assert.match(String(await update({ state: "resumed", resumedAttemptId: second.id,
+    answerText: "rewritten" })), /cannot move from answered to resumed/);
   await prisma.amuxV22TaskQuestion.update({ where: { id: question.id },
     data: { state: "resumed", resumedAttemptId: second.id } });
   assert.match(String(await update({ answerText: "changed" })),
