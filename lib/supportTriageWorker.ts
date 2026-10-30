@@ -2,10 +2,10 @@
  * One support-triage worker pass, suggestions only (design section 5.2 steps
  * 1 to 5 and 5.3). Groups are not formed: the model names duplicates.
  *
- * A pass starts a `worker` run row, returns expired claims to pending (or
- * fails them after three attempts), then works in batches of 10 reports, at
- * most 50 per pass, while the remaining budget exceeds the worker lane's
- * guarded budget:
+ * A pass starts a `worker` run row, fails expired claims (a lapsed claim may
+ * already have paid for its model call, so it is never handed out again),
+ * then works in batches of 10 reports, at most 50 per pass, while the
+ * remaining budget covers the model call and both transactions:
  *
  *   1. read candidates: reports awaiting an operator, not a deleted account's,
  *      that need work: an open suggestion of another input to supersede, a
@@ -38,7 +38,6 @@ import { prisma } from "@/lib/prisma";
 import {
   DELETED_ACCOUNT_MARKER,
   LANE_TIMEOUTS,
-  SUGGESTION_MAX_ATTEMPTS,
   SUGGESTION_STATES,
   SUGGESTION_TERMINAL_STATES,
   TRIAGE_ELIGIBLE_REPORT_STATUSES,
@@ -55,6 +54,7 @@ import { suggestionInputDigest } from "@/lib/supportTriageInputDigest";
 import { keywordFlagsIn } from "@/lib/supportTriageKeywords";
 import {
   DUPLICATE_CANDIDATES_MAX,
+  SUPPORT_TRIAGE_LLM_TIMEOUT_MS,
   supportTriageLlmFromEnv,
   type TriageCandidate,
   type TriageLlm,
@@ -163,31 +163,27 @@ const assertDeadline = (tx: Tx, deadlineAt: Date) =>
 const transaction = <T>(fn: (tx: Tx) => Promise<T>) =>
   prisma.$transaction(fn, { timeout: LANE_TIMEOUTS.worker.prismaTransactionTimeoutMs });
 
-/** Expired claims go back to pending, or fail after the last attempt. */
-export const reclaimExpiredSuggestions = (run: { id: string; deadlineAt: Date }) =>
+/**
+ * Expired claims fail and are not retried: the pass that held one may have
+ * paid for its model call before it stopped, and a run whose outcome is
+ * unknown is never retried (policy section 2, item 11). Failed settles the
+ * input, so the report is triaged again only when its input changes.
+ */
+export const failExpiredClaims = (run: { id: string; deadlineAt: Date }) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
-    const reclaimed = await tx.$executeRaw`
-      UPDATE "SupportTriageSuggestion" s SET "state" = 'pending'
-       WHERE s."id" IN (
-         SELECT x."id" FROM "SupportTriageSuggestion" x
-          WHERE x."state" = 'claimed' AND x."leaseExpiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC')
-            AND x."attemptCount" < ${SUGGESTION_MAX_ATTEMPTS}::integer
-          ORDER BY x."id" LIMIT ${WORKER_RECLAIM_MAX}::integer FOR UPDATE SKIP LOCKED)
-         AND s."state" = 'claimed'`;
     const exhausted = await tx.$executeRaw`
       UPDATE "SupportTriageSuggestion" s SET "state" = 'failed', "failureCode" = 'retry_exhausted'
        WHERE s."id" IN (
          SELECT x."id" FROM "SupportTriageSuggestion" x
           WHERE x."state" = 'claimed' AND x."leaseExpiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC')
-            AND x."attemptCount" >= ${SUGGESTION_MAX_ATTEMPTS}::integer
           ORDER BY x."id" LIMIT ${WORKER_RECLAIM_MAX}::integer FOR UPDATE SKIP LOCKED)
          AND s."state" = 'claimed'`;
-    if (reclaimed + exhausted > 0) {
-      await audit(tx, run.id, "support_triage.worker_reclaim", { reclaimed, exhausted });
+    if (exhausted > 0) {
+      await audit(tx, run.id, "support_triage.worker_reclaim", { reclaimed: 0, exhausted });
       await assertDeadline(tx, run.deadlineAt);
     }
-    return { reclaimed, exhausted };
+    return { exhausted };
   });
 
 /** States of a current-input row that settle the report: live or decided. */
@@ -446,7 +442,6 @@ export const writeSupportTriageResults = (
 export type WorkerPassResult = {
   readonly runId: string;
   readonly outcome: string;
-  readonly reclaimed: number;
   readonly exhausted: number;
   readonly claimed: number;
   readonly ready: number;
@@ -465,22 +460,23 @@ export const runSupportTriageWorker = async (
   options: { readonly llm?: TriageLlm | null } = {}
 ): Promise<WorkerPassResult> => {
   const run = await startSupportTriageRun("worker");
-  const totals = { reclaimed: 0, exhausted: 0, claimed: 0, ready: 0, stale: 0, superseded: 0 };
+  const totals = { exhausted: 0, claimed: 0, ready: 0, stale: 0, superseded: 0 };
   const llm = options.llm === undefined ? await supportTriageLlmFromEnv() : options.llm;
   let batchesCompleted = 0;
   let partial = false;
-  const hasBudget = async () =>
-    run.deadlineAt.getTime() - (await databaseNow()).getTime() > maxGuardedBudgetMs("worker");
+  // A batch is claimed only while the model call and the result transaction
+  // still fit, so a paid answer is never dropped for want of time.
+  const batchReserveMs = maxGuardedBudgetMs("worker") + (llm ? SUPPORT_TRIAGE_LLM_TIMEOUT_MS : 0);
+  const hasBudget = async (reserveMs = maxGuardedBudgetMs("worker")) =>
+    run.deadlineAt.getTime() - (await databaseNow()).getTime() > reserveMs;
   try {
     if (await hasBudget()) {
-      const reclaim = await reclaimExpiredSuggestions(run);
-      totals.reclaimed = reclaim.reclaimed;
-      totals.exhausted = reclaim.exhausted;
+      totals.exhausted = (await failExpiredClaims(run)).exhausted;
     }
     let after: string | null = null;
     while (totals.claimed < WORKER_PASS_MAX) {
-      // Two transactions per batch; both must fit.
-      if (!(await hasBudget())) {
+      // Two transactions and the model call per batch; all must fit.
+      if (!(await hasBudget(batchReserveMs))) {
         partial = true;
         break;
       }
@@ -492,16 +488,14 @@ export const runSupportTriageWorker = async (
         totals.superseded += batch.superseded;
         totals.claimed += batch.claimed.length;
         if (batch.token && batch.claimed.length > 0) {
-          if (!(await hasBudget())) {
-            // Claimed but not written: the leases expire and a later pass reclaims them.
+          if (!(await hasBudget(batchReserveMs))) {
+            // Claimed but not called: the leases expire and a later pass fails them.
             partial = true;
             break;
           }
+          // Once paid for, the answer is always written: the call ends within
+          // its timeout, which the reserve above already covered.
           const answered = llm ? await runTriageLlm(llm, batch.claimed, batch.reports) : batch.claimed;
-          if (!(await hasBudget())) {
-            partial = true;
-            break;
-          }
           const result = await writeSupportTriageResults(run, batch.token, answered);
           totals.ready += result.ready;
           totals.stale += result.stale;

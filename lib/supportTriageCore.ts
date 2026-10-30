@@ -333,7 +333,7 @@ export const SUGGESTION_TERMINAL_STATES: readonly SuggestionState[] = Object.fre
 export const SUGGESTION_TRANSITIONS: readonly (readonly [SuggestionState, SuggestionState])[] =
   Object.freeze([
     ["pending", "claimed"],
-    // Lease reclaim: the claim token is cleared and the attempt counted.
+    // Lease reclaim, allowed by the database; the worker fails expired claims instead.
     ["claimed", "pending"],
     ["claimed", "ready"],
     ["claimed", "failed"],
@@ -361,7 +361,7 @@ export const SUGGESTION_FAILURE_CODES = Object.freeze([
   "retry_exhausted",
 ] as const);
 
-/** Reclaims allowed before a claimed suggestion must fail as retry_exhausted. */
+/** The database bound on reclaims; the worker reclaims none (it fails expired claims). */
 export const SUGGESTION_MAX_ATTEMPTS = 3;
 
 /**
@@ -555,7 +555,7 @@ export const triageLaneFor = (input: {
 /** The worker pass (design section 5.2): claim batches of 10, at most 50 reports per pass. */
 export const WORKER_CLAIM_BATCH_SIZE = 10;
 export const WORKER_PASS_MAX = 50;
-/** Expired claims a pass returns to pending (or fails), at most. */
+/** Expired claims a pass fails, at most. */
 export const WORKER_RECLAIM_MAX = 50;
 /** Reports a pass considers: still awaiting an operator. */
 export const TRIAGE_ELIGIBLE_REPORT_STATUSES = Object.freeze(["open", "reviewing"] as const);
