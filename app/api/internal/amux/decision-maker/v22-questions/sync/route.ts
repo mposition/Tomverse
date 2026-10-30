@@ -29,7 +29,7 @@ import {
  * cursor (`after`), which answers an open question whose card a person
  * confirmed -- a read, then the answer under the audit chain lock and the
  * kill switch, or, when the answer cannot resume the Task, an escalation and
- * the cancel, each its own transaction within §9's 12 statements; then the open questions that still need a typed-ask card on the
+ * the cancel, each its own transaction within docs/policy/amux-decision-maker.md §9's 12 statements; then the open questions that still need a typed-ask card on the
  * AMUX host and the cards of questions no longer open that it should close.
  * `cursor` says where the walk goes next. The question text is opened from
  * the run's encrypted result outside the read transaction. Closed until

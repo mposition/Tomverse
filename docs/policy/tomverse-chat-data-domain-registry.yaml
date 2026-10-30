@@ -2516,6 +2516,25 @@ domains:
       User relation. The approved 90-day body clock does not settle account
       deletion or unified export; public PR publication is a separate gate.
 
+  - domain: amuxTaskOwnerQuestion
+    prismaModel: AmuxV22TaskQuestion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/development-agent-orchestration.md v22 worker owner questions, account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      A v22 worker question to the owner: its digest, state and the answer
+      (the operator's, or a confirmed Decision Maker proposal), held in plain
+      text only until the resumed run settles. The question text stays in the
+      encrypted Task result. Account deletion and unified export are not
+      verified.
+
   - domain: amuxTaskPatch
     prismaModel: AmuxV22TaskPatch
     userLinkageRole: actor

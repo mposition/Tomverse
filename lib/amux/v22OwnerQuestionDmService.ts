@@ -176,7 +176,7 @@ export type AmuxV22ResolveStep =
  * relay's cursor: six statements (switches, the confirmation, the request,
  * the open question of its card, the result detail, the bodies). Under the
  * kill switch, or when the switches cannot be read, nothing more is read and
- * the walk keeps its place (§6). A confirmation of an open v22 question card
+ * the walk keeps its place (docs/policy/amux-decision-maker.md §6). A confirmation of an open v22 question card
  * yields the text a worker would have been sent; one whose asking run has not
  * settled yet waits for it; any other confirmation is stepped past.
  */
@@ -271,7 +271,7 @@ export async function cancelAmuxV22UnanswerableQuestion(
 }
 
 /**
- * One step of the walk, each part its own transaction within §9's 12
+ * One step of the walk, each part its own transaction within docs/policy/amux-decision-maker.md §9's 12
  * statements: the read; then the answer under the audit chain lock and the
  * kill switch; or, when the answer cannot resume the Task, an escalation and
  * the cancel. What the relay is told about its cursor comes back with it.

@@ -901,6 +901,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskOwnerQuestion",
+    publicName: "amux_v22_task_owner_questions",
+    prismaModel: "AmuxV22TaskQuestion",
+    state: "unverified",
+  },
+  {
     domain: "amuxTaskPatch",
     publicName: "amux_v22_task_patches",
     prismaModel: "AmuxV22TaskPatch",
