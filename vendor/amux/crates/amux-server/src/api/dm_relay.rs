@@ -98,6 +98,9 @@ pub fn routes() -> Router<AppState> {
         .route("/answers/unknown", post(answer_unknown))
         .route("/answers/operator", post(operator_answers))
         .route("/answers/receipt", post(answer_receipt))
+        // A v22 worker's question as a typed-ask card (api/dm_relay_v22.rs).
+        .route("/v22-questions", post(super::dm_relay_v22::file))
+        .route("/v22-questions/close", post(super::dm_relay_v22::close))
 }
 
 /// At most this many markers per answer. The relay releases what it reads,
@@ -165,6 +168,29 @@ struct ReleaseBody {
 
 fn invalid() -> Response {
     refused(StatusCode::BAD_REQUEST, "dm_relay_request_invalid")
+}
+
+// The pieces api/dm_relay_v22.rs shares with this module's routes.
+pub(crate) fn admit_relay(configured: Option<&str>, headers: &HeaderMap) -> Result<(), Response> {
+    admit(configured, headers)
+}
+pub(crate) fn invalid_request() -> Response {
+    invalid()
+}
+pub(crate) fn store_unavailable() -> Response {
+    store_failed()
+}
+pub(crate) fn now_seconds() -> i64 {
+    now_secs()
+}
+pub(crate) fn configured_relay_digest() -> Option<String> {
+    configured_digest()
+}
+pub(crate) fn is_card_name(id: &str) -> bool {
+    is_card_id(id)
+}
+pub(crate) fn is_lane_name(session: &str) -> bool {
+    is_session_name(session)
 }
 
 fn store_failed() -> Response {
@@ -699,12 +725,17 @@ pub(crate) async fn check_answer_with<L: AnswerLane>(
     {
         return invalid();
     }
-    let verdict = match question_open(state, &body.card_id, body.question_revision).await {
+    // A v22 worker's question card is answered in the Tomverse app, never in a
+    // session (api/dm_relay_v22.rs).
+    let verdict = match super::dm_relay_v22::refuses_delivery(state, &body.card_id).await {
+        Err(reason) => Err(reason),
+        Ok(()) => match question_open(state, &body.card_id, body.question_revision).await {
         Ok(()) => match binding_holds(state, &body.card_id, &body.worker, &body.session, body.session_attempt).await {
             Ok(()) => lane.deliverable(state, &body.session).await,
             Err(reason) => Err(reason),
         },
         Err(reason) => Err(reason),
+        },
     };
     Json(match verdict {
         Ok(()) => json!({ "deliverable": true }),
@@ -759,6 +790,9 @@ pub(crate) async fn deliver_answer_with<L: AnswerLane + Clone + 'static>(
 }
 
 async fn deliver<L: AnswerLane>(state: &AppState, lane: &L, body: &AnswerBody, now: i64) -> Value {
+    if let Err(reason) = super::dm_relay_v22::refuses_delivery(state, &body.card_id).await {
+        return json!({ "outcome": "not_deliverable", "reason": reason });
+    }
     if let Err(reason) = question_open(state, &body.card_id, body.question_revision).await {
         return json!({ "outcome": "not_deliverable", "reason": reason });
     }
