@@ -9,6 +9,15 @@ import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
 
 const cellClass = "border-b px-2 py-1 align-top border-zinc-700";
 
+/** The result without its last line, the question shown parsed below it. */
+const withoutQuestionLine = (text: string) =>
+  text.replace(/\n?[^\n]*AMUX_OWNER_QUESTION:[^\n]*\s*$/, "").trimEnd();
+
+type WorkerQuestion = {
+  id: string; sequence: number; state: string; question: string;
+  unblocks: string; options: Array<{ id: string; label: string }>;
+};
+
 export function AmuxCardListPanel({
   rows,
   total,
@@ -24,10 +33,41 @@ export function AmuxCardListPanel({
   const [resultState, setResultState] = useState<"loading" | "missing" |
     "purged" | "unavailable" | "available" | null>(null);
   const resultRequestId = useRef(0);
+  const [question, setQuestion] = useState<WorkerQuestion | null>(null);
+  const [answer, setAnswer] = useState("");
+  const [answerState, setAnswerState] = useState<"sending" | "sent" |
+    { failed: string } | null>(null);
+  // The question on screen; an answer's response for another one is dropped.
+  const shownQuestion = useRef<string | null>(null);
+  async function sendAnswer(taskId: string, questionId: string) {
+    setAnswerState("sending");
+    const current = () => shownQuestion.current === questionId;
+    try {
+      const response = await adminFetch("/api/admin/amux/v22-owner-question", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, questionId, answer }) });
+      if (!current()) return;
+      if (response.ok) {
+        setAnswerState("sent");
+        setAnswer("");
+        setQuestion((shown) => shown && shown.id === questionId ?
+          { ...shown, state: "answered" } : shown);
+        return;
+      }
+      const body = await response.json().catch(() => null);
+      if (!current()) return;
+      setAnswerState({ failed: typeof body?.error === "string" ?
+        body.error : String(response.status) });
+    } catch { if (current()) setAnswerState({ failed: "network" }); }
+  }
   async function showResult(taskId: string) {
     const requestId = ++resultRequestId.current;
     setSelectedTaskId(taskId);
     setResultText(null);
+    setQuestion(null);
+    shownQuestion.current = null;
+    setAnswer("");
+    setAnswerState(null);
     setResultState("loading");
     try {
       const response = await adminFetch(`/api/admin/amux/v22-task-result?taskId=${encodeURIComponent(taskId)}`,
@@ -43,6 +83,10 @@ export function AmuxCardListPanel({
         setResultState("unavailable"); return;
       }
       setResultText(body.result.text);
+      const shown = body.question && typeof body.question.id === "string" ?
+        body.question as WorkerQuestion : null;
+      shownQuestion.current = shown?.id ?? null;
+      setQuestion(shown);
       setResultState("available");
     } catch {
       if (requestId === resultRequestId.current) setResultState("unavailable");
@@ -117,11 +161,46 @@ export function AmuxCardListPanel({
         <section aria-live="polite" className="rounded border p-3 border-zinc-700">
           <p className="font-mono text-xs">{selectedTaskId}</p>
           {resultState === "available" ?
-            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm">{resultText}</pre> :
+            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm">{
+              question ? withoutQuestionLine(resultText ?? "") : resultText}</pre> :
             <p className="mt-2 text-sm">{resultState === "loading" ? messages.resultLoading :
               resultState === "missing" ? messages.resultMissing :
               resultState === "purged" ? messages.resultPurged :
               messages.resultUnavailable}</p>}
+          {question && (
+            <div className="mt-3 rounded border p-3 border-amber-500" data-testid="amux-worker-question">
+              <p className="font-semibold">{messages.questionTitle(question.sequence)} · {messages.questionState(question.state)}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words">{question.question}</p>
+              <p className="mt-1 text-sm text-zinc-300">{messages.questionUnblocks}: {question.unblocks}</p>
+              {question.options.length > 0 && (
+                <>
+                <p className="mt-1 text-sm text-zinc-300">{messages.questionOptions}</p>
+                <ul className="mt-1 list-disc pl-5 text-sm">
+                  {question.options.map((option) => (
+                    <li key={option.id}><span className="font-mono">{option.id}</span>: {option.label}</li>
+                  ))}
+                </ul>
+                </>
+              )}
+              {question.state === "open" && answerState !== "sent" && (
+                <form className="mt-2 flex flex-col gap-2" onSubmit={(event) => {
+                  event.preventDefault();
+                  void sendAnswer(selectedTaskId, question.id);
+                }}>
+                  <label className="text-sm" htmlFor="amux-worker-answer">{messages.answerLabel}</label>
+                  <textarea id="amux-worker-answer" className="min-h-24 rounded border bg-transparent p-2 border-zinc-600"
+                    maxLength={8000} value={answer} onChange={(event) => setAnswer(event.target.value)} />
+                  <button type="submit" className="self-start rounded border px-3 py-1 border-zinc-500"
+                    disabled={answer.trim().length === 0 || answerState === "sending"}>
+                    {answerState === "sending" ? messages.answerSending : messages.answerSubmit}
+                  </button>
+                </form>
+              )}
+              {answerState === "sent" && <p className="mt-2 text-sm">{messages.answerSent}</p>}
+              {answerState && typeof answerState === "object" &&
+                <p className="mt-2 text-sm text-red-400">{messages.answerFailed(answerState.failed)}</p>}
+            </div>
+          )}
         </section>
       )}
     </section>
