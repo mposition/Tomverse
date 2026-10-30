@@ -100,12 +100,12 @@ test("a Task that moved on, or was parked for another reason, is not resumed", a
 test("the resume rows are those of an answered question or of this attempt's resume", async () => {
   const { task, question } = await parkedTask();
   assert.equal(await prisma.$transaction((tx) =>
-    readAmuxV22ResumeRows(tx, task.id, "next-attempt")), null,
+    readAmuxV22ResumeRows(tx, task.id)), null,
     "an open question carries nothing");
   await answer(question.id);
   // No retained result for the asking attempt: nothing to resume with.
   assert.equal(await prisma.$transaction((tx) =>
-    readAmuxV22ResumeRows(tx, task.id, "next-attempt")), null);
+    readAmuxV22ResumeRows(tx, task.id)), null);
 });
 
 test("the table refuses what the lifecycle does not allow", async () => {

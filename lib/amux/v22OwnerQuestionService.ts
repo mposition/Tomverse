@@ -140,15 +140,16 @@ const SEALED = { ideaId: true, ciphertext: true, keyId: true, keyVersion: true,
 export const AMUX_V22_RESUME_ROWS_PRISMA_CALLS = 3;
 
 /**
- * The rows a resumed delivery carries: an answered question of this Task, or
- * the one this very attempt already resumed (a delivery pulled again after an
- * unknown answer), with its run's result and patch rows. Read inside the
+ * The rows a resumed delivery carries: the Task's answer no run has settled
+ * with yet -- an answered question, or one already resumed by a pull that was
+ * pulled again or by a run that died before settling -- with the asking run's
+ * result and patch rows. Read inside the
  * caller's DB boundary; the bodies are opened outside it
  * (`openAmuxV22ResumeContext`), and the delivery transaction checks the
  * question again before it marks it resumed.
  */
 export async function readAmuxV22ResumeRows(tx: Prisma.TransactionClient,
-  taskId: string, attemptId: string) {
+  taskId: string) {
   const question = await tx.amuxV22TaskQuestion.findFirst({
     // An answered question, or a resumed one whose answer no run of the
     // Task has settled with yet (this attempt pulled again, or a resumed run

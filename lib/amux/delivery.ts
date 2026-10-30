@@ -321,7 +321,7 @@ export async function pullAmuxWorkDelivery(input: {
       // A Task answered after its owner question resumes with that question,
       // the answer and the previous change (v22OwnerQuestionCore.ts).
       const resumeRows = sealedCandidate ? await readAmuxV22ResumeRows(tx,
-        sealedCandidate.taskId, sealedCandidate.attemptId) : null;
+        sealedCandidate.taskId) : null;
       return { sealedCandidate, candidateCard, resumeRows };
     }) : { sealedCandidate: null, candidateCard: null, resumeRows: null };
   const snapshot = candidateCard?.sourceSnapshot;
