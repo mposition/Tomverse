@@ -1959,7 +1959,7 @@ function MarketingRow({
           <p className="mt-1 break-all text-xs text-zinc-500">
             {m.colEvidence}{" "}
             {evidence.map((url, index) => (
-              <span key={url}>
+              <span key={`${index}:${url}`}>
                 {index > 0 ? " / " : null}
                 {url.startsWith("https://") ? (
                   <a

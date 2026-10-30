@@ -240,7 +240,8 @@ export function readMarketingA3Discovery(
       ? "shape"
       : known.has(candidate.data.competitorId)
         ? "known"
-        : candidate.data.evidenceUrls.length === 0 || !candidate.data.evidenceUrls.every((url) => cited.has(url))
+        : // The schema already requires at least one evidence URL.
+          !candidate.data.evidenceUrls.every((url) => cited.has(url))
           ? "evidence_not_cited"
           : candidates.length >= MARKETING_COMPETITOR_MAX_CANDIDATES
             ? "over_limit"
