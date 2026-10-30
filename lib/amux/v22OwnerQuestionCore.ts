@@ -123,6 +123,20 @@ export const AMUX_V22_OWNER_QUESTION_RULES = [
   "- The Task then waits for the answer and comes back to you with the question, the answer and your previous change. It is not finished until its goal is met.",
 ].join("\n");
 
+/** The longest prefix of `text` within `maxBytes` of UTF-8, whole characters. */
+function utf8Prefix(text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  let used = 0;
+  let end = 0;
+  for (const char of text) {
+    const bytes = Buffer.byteLength(char, "utf8");
+    if (used + bytes > maxBytes) break;
+    used += bytes;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}
+
 /**
  * The section a resumed delivery starts with: what was asked, what the owner
  * answered, and the previous change when it fits under the prompt bound.
@@ -150,13 +164,18 @@ export function buildAmuxV22ResumeSection(input: {
     "resolve whatever does not apply:\n";
   const withPatch = input.previousPatch ?
     `${head}${patchIntro}${input.previousPatch}\n` : null;
-  const fits = (text: string) => input.promptBytesWithoutSection +
-    Buffer.byteLength(text, "utf8") + 2 <= AMUX_V22_RESUME_PROMPT_MAX_BYTES;
-  if (withPatch && fits(withPatch)) return withPatch;
+  // The whole prompt stays under the sidecar's bound: the patch goes first,
+  // then the section is cut, saying so, so a long answer is never refused.
+  const budget = AMUX_V22_RESUME_PROMPT_MAX_BYTES - input.promptBytesWithoutSection - 2;
+  if (withPatch && Buffer.byteLength(withPatch, "utf8") <= budget) return withPatch;
   const note = input.previousPatch ?
     "\nYour previous run's change is too long to include. Make it again, " +
     "following the answer.\n" : "\n";
-  return `${head}${note}`;
+  const section = `${head}${note}`;
+  if (Buffer.byteLength(section, "utf8") <= budget) return section;
+  const cut = "\n[The rest of this section is cut to fit the prompt. The full " +
+    "question and answer are in Tomverse Admin.]\n";
+  return `${utf8Prefix(section, budget - Buffer.byteLength(cut, "utf8"))}${cut}`;
 }
 
 /**

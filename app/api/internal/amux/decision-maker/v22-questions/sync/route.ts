@@ -1,11 +1,15 @@
 export const dynamic = "force-dynamic";
 
+import { z } from "zod";
+
+import { readLimitedJson } from "@/lib/apiSecurity";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import {
   AMUX_DB_BOUNDARIES,
   withAmuxDbBoundary,
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
+import { parseDmDeliveryCursor } from "@/lib/amux/decisionMakerDeliveryCore";
 import {
   dmInternalRoutesEnabled,
   dmRouteErrorResponse,
@@ -20,15 +24,18 @@ import {
 } from "@/lib/amux/v22OwnerQuestionDmService";
 
 /**
- * The relay's v22 question tick (operator decision 2026-10-30): first answer
- * at most one open question whose Decision Maker proposal a person confirmed,
- * then list the open questions that still need a typed-ask card on the AMUX
- * host and the cards of questions no longer open that it should close. The
- * question text is opened from the run's encrypted result outside the read
- * transaction. Closed until `TOMVERSE_AMUX_DM_ROUTING=enabled`.
+ * The relay's v22 question tick (operator decision 2026-10-30): first one
+ * step of the walk over confirmed Decision Maker proposals from the relay's
+ * cursor (`after`), which answers an open question whose card a person
+ * confirmed; then the open questions that still need a typed-ask card on the
+ * AMUX host and the cards of questions no longer open that it should close.
+ * `cursor` says where the walk goes next. The question text is opened from
+ * the run's encrypted result outside the read transaction. Closed until
+ * `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 const OPERATION = "decision_maker_v22_question_sync";
 const refused = dmRouteRefusal("synced");
+const requestSchema = z.object({ after: z.unknown().optional() }).strict();
 
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
@@ -38,9 +45,12 @@ export async function POST(request: Request) {
 
   return withAmuxRouteBudget(async () => {
     try {
+      const body = await readLimitedJson(request, 1_024, requestSchema);
+      const after = parseDmDeliveryCursor(body.after);
+      if (after === undefined) return refused(400, "invalid_request");
       const resolved = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionResolve,
-        (tx, context) => resolveAmuxV22QuestionFromDmJudgment(tx, context.dbNow));
+        (tx, context) => resolveAmuxV22QuestionFromDmJudgment(tx, context.dbNow, after));
       const rows = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
         (tx) => readAmuxV22QuestionSyncRows(tx));
@@ -48,6 +58,9 @@ export async function POST(request: Request) {
       return amuxJsonNoStore({
         synced: true,
         resolved: resolved.resolved,
+        cursor: resolved.cursor.move === "advance" ? { move: "advance",
+          judged_at_ms: resolved.cursor.judgedAtMs,
+          request_id: resolved.cursor.requestId } : { move: resolved.cursor.move },
         pending: cards,
         closing: rows.closing.map((row) => ({
           question_id: row.questionId, card_id: row.cardId })),

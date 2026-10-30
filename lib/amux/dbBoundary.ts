@@ -524,14 +524,14 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
-  // Resolve: setup + open questions + their requests + up to 8 judgments +
-  // request state + result detail + bodies + the answer (question lock, task,
-  // attempt, canonical audit 4, question, task) + fence = 24; a cancel adds
-  // its update, the task read, an escalation (lookup, task, create, audit 4)
-  // and its own audit 4.
+  // Resolve, one step of the confirmation walk: setup + switches + the next
+  // confirmation + request state + the open question of its card + result
+  // detail + bodies + the answer (question lock, task, attempt, canonical
+  // audit 4, question, task) + fence = 18; a cancel adds its update, the task
+  // read, an escalation (lookup, task, create, audit 4) and its own audit 4.
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 40,
+    prismaCallCeiling: 32,
     isolation: "mutation",
   },
   // Sync read: setup + pending + closing + fence.

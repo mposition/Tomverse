@@ -6,12 +6,14 @@ import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { readDecisionMakerBodies, readDecisionMakerResultDetail } from
   "@/lib/amux/decisionMakerBodyStore";
-import { dmDeliveryCandidate, dmDeliveryJudgmentFromRow,
-  type DmDeliveryBodies } from "@/lib/amux/decisionMakerDeliveryCore";
-import { readDecisionMakerJudgment } from
+import { dmDeliveryCandidate, type DmDeliveryBodies,
+  type DmDeliveryCursor } from "@/lib/amux/decisionMakerDeliveryCore";
+import { readNextDecisionMakerDeliveryJudgment } from
   "@/lib/amux/decisionMakerJudgmentStore";
-import { readDecisionMakerRequestState, readDecisionMakerRequestsForCards } from
+import { readDecisionMakerRequestState } from
   "@/lib/amux/decisionMakerRequestStore";
+import { readDecisionMakerSwitchesOrThrow } from
+  "@/lib/amux/decisionMakerSwitchStore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import { BoardImportError } from "./boardImportCore.ts";
 import { parseAmuxV22OwnerQuestion } from "./v22OwnerQuestionCore.ts";
@@ -38,9 +40,6 @@ const QUESTION_ID = /^[0-9a-f-]{36}$/;
 
 /** At most this many questions or cards per relay tick. */
 export const AMUX_V22_QUESTION_SYNC_LIMIT = 3;
-
-/** Open questions with a local card a resolve looks at per tick. */
-export const AMUX_V22_QUESTION_RESOLVE_SCAN = 4;
 
 /** Whether a Decision Maker request's card mirrors a v22 worker question.
  * One statement. */
@@ -128,45 +127,48 @@ export async function recordAmuxV22QuestionLocalCardClosed(
   return { recorded: true as const };
 }
 
+/** Where the relay's walk over confirmations goes next. */
+export type AmuxV22ResolveCursor =
+  | { move: "keep" } | { move: "reset" }
+  | { move: "advance"; judgedAtMs: number; requestId: string };
+
 /**
- * Answers at most one open question whose card's Decision Maker request a
- * person confirmed, with the text a worker would have been sent. A question
- * that cannot take that answer (the Task moved on, or the text is not an
- * answer) is cancelled instead, and a Task still parked by it goes to a
- * person, so one bad row never holds the others back.
+ * One step of a walk over the confirmed Decision Maker proposals, the walk
+ * the delivery read takes (`readNextDecisionMakerDeliveryJudgment`), from
+ * the relay's cursor. A confirmation whose card mirrors an open v22 question
+ * answers it with the text a worker would have been sent, which sends the
+ * Task back to the same worker. A question that cannot take that answer (the
+ * Task moved on, or the text is not an answer) is cancelled instead, and a
+ * Task still parked by it goes to a person. Any other confirmation is stepped
+ * past. Under the kill switch, or when the switches cannot be read, nothing
+ * is read or applied and the walk keeps its place (§6: no confirmed answer
+ * is read or delivered while it is on).
  */
 export async function resolveAmuxV22QuestionFromDmJudgment(
-  tx: Prisma.TransactionClient, now: Date) {
-  const open = await tx.amuxV22TaskQuestion.findMany({
-    where: { state: "open", localCardId: { not: null } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: AMUX_V22_QUESTION_RESOLVE_SCAN,
-    select: { id: true, taskId: true, localCardId: true } });
-  const requests = await readDecisionMakerRequestsForCards(tx,
-    open.map((question) => question.localCardId!));
-  let row: { questionId: string; taskId: string; requestId: string } | null = null;
-  let judgment: ReturnType<typeof dmDeliveryJudgmentFromRow> = null;
-  // At most two requests per card are read: a card has one question revision.
-  for (const request of requests.slice(0, AMUX_V22_QUESTION_RESOLVE_SCAN * 2)) {
-    const judged = await readDecisionMakerJudgment(tx, request.requestId);
-    if (judged?.kind !== "confirm" && judged?.kind !== "edit_confirm") continue;
-    const question = open.find((item) => item.localCardId === request.cardId)!;
-    row = { questionId: question.id, taskId: question.taskId,
-      requestId: request.requestId };
-    judgment = dmDeliveryJudgmentFromRow({ requestId: request.requestId,
-      kind: judged.kind, instance: judged.instance,
-      judgedAtEpochMs: Date.parse(judged.createdAt) });
-    break;
-  }
-  if (!row) return { resolved: null };
-  const state = await readDecisionMakerRequestState(tx, row.requestId);
+  tx: Prisma.TransactionClient, now: Date, after: DmDeliveryCursor | null):
+  Promise<{ resolved: null | "answered" | "cancelled"; questionId?: string;
+    cursor: AmuxV22ResolveCursor }> {
+  let killSwitch: boolean | null;
+  try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
+  catch { killSwitch = null; }
+  if (killSwitch !== false) return { resolved: null, cursor: { move: "keep" } };
+  const judgment = await readNextDecisionMakerDeliveryJudgment(tx, { after });
+  if (!judgment) return { resolved: null, cursor: { move: "reset" } };
+  const cursor: AmuxV22ResolveCursor = { move: "advance",
+    judgedAtMs: judgment.judgedAtMs, requestId: judgment.requestId };
+  const state = await readDecisionMakerRequestState(tx, judgment.requestId);
+  const question = state ? await tx.amuxV22TaskQuestion.findFirst({
+    where: { localCardId: state.binding.cardId, state: "open" },
+    select: { id: true, taskId: true } }) : null;
+  if (!question) return { resolved: null, cursor };
+  const row = { questionId: question.id, taskId: question.taskId,
+    requestId: judgment.requestId };
   const detail = await readDecisionMakerResultDetail(tx, row.requestId);
   const bodies: DmDeliveryBodies = {};
   for (const body of await readDecisionMakerBodies(tx, row.requestId))
     if (body.field === "dm_answer" || body.field === "operator_answer")
       bodies[body.field] = body.text;
-  const candidate = judgment ?
-    dmDeliveryCandidate({ judgment, state, detail, bodies }) : null;
+  const candidate = dmDeliveryCandidate({ judgment, state, detail, bodies });
   try {
     if (candidate?.status !== "ready")
       throw new BoardImportError("answer_unavailable", 409);
@@ -181,7 +183,7 @@ export async function resolveAmuxV22QuestionFromDmJudgment(
         summary: "Answered an AMUX v22 worker question with a confirmed Decision Maker proposal.",
         metadata: { taskId, source: "dm_confirmed", requestId: row.requestId } }),
     });
-    return { resolved: "answered" as const, questionId: row.questionId };
+    return { resolved: "answered", questionId: row.questionId, cursor };
   } catch (error) {
     if (!(error instanceof BoardImportError)) throw error;
     await tx.amuxV22TaskQuestion.update({ where: { id: row.questionId },
@@ -198,6 +200,6 @@ export async function resolveAmuxV22QuestionFromDmJudgment(
       summary: "Cancelled an AMUX v22 worker question its confirmed answer could not resume.",
       metadata: { taskId: row.taskId, requestId: row.requestId,
         reason: error.code } });
-    return { resolved: "cancelled" as const, questionId: row.questionId };
+    return { resolved: "cancelled", questionId: row.questionId, cursor };
   }
 }

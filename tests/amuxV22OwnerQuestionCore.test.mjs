@@ -82,10 +82,12 @@ test("the resume section carries the question, the answer and the change that fi
   assert.match(section, /git apply --3way/);
   assert.ok(section.includes(input.previousPatch));
 
+  const longPatch = `diff --git a/x b/x\n${"+x\n".repeat(1_000)}`;
   const crowded = buildAmuxV22ResumeSection({ ...input, answerSource: "operator",
-    promptBytesWithoutSection: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 200 });
+    previousPatch: longPatch,
+    promptBytesWithoutSection: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 1_000 });
   assert.match(crowded, /answered \(operator\)/);
-  assert.ok(!crowded.includes(input.previousPatch));
+  assert.ok(!crowded.includes(longPatch));
   assert.match(crowded, /too long to include/);
 
   const noPatch = buildAmuxV22ResumeSection({ ...input, previousPatch: null });
@@ -98,4 +100,17 @@ test("a settlement parks a questioning run blocked, escalating only over the lim
     { toStatus: "blocked", reason: "owner_question", openEscalation: false });
   assert.deepEqual(amuxV22OwnerQuestionSettlementPlan({ state: "cancelled" }),
     { toStatus: "blocked", reason: "owner_question_limit", openEscalation: true });
+});
+
+test("the resume section keeps the whole prompt under the sidecar's bound, saying when it is cut", () => {
+  const long = { question: `${"가".repeat(1_998)}?`, unblocks: "나".repeat(1_000),
+    options: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, label: "다".repeat(300) })) };
+  for (const base of [500, 10_000, 25_000]) {
+    const section = buildAmuxV22ResumeSection({ question: long, answer: "라".repeat(8_000),
+      answerSource: "operator", previousPatch: "diff --git a/x b/x\n",
+      promptBytesWithoutSection: base });
+    assert.ok(base + Buffer.byteLength(section, "utf8") + 2 <= AMUX_V22_RESUME_PROMPT_MAX_BYTES, String(base));
+    assert.match(section, /cut to fit the prompt/);
+    assert.ok(!section.includes("�"), "whole characters only");
+  }
 });

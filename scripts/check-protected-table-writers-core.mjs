@@ -2618,10 +2618,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequest",
-    tableMentions: 10,
+    tableMentions: 9,
     writeVerbs: 4,
     reason:
-      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in nine constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, -- since S2, 2026-10-13 -- Admin's newest requests, and -- since S2-2b4, 2026-10-18 -- the id of the one request of a (card, question revision) the operator answered directly, which the store then closes with an event, and -- since 2026-10-30 -- the requests routed for v22 worker question cards, which lib/amux/v22OwnerQuestionDmService.ts reads to answer a confirmed question) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
+      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in eight constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, -- since S2, 2026-10-13 -- Admin's newest requests, and -- since S2-2b4, 2026-10-18 -- the id of the one request of a (card, question revision) the operator answered directly, which the store then closes with an event) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
