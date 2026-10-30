@@ -281,6 +281,20 @@ test("results the model sees carry the untrusted-content statement", async () =>
   assert.equal(result.results.length, 1);
 });
 
+test("results carry the date they were searched on", async () => {
+  // A model that takes its training cutoff for today reads last year's event
+  // page as this year's. The date sits next to the results it qualifies.
+  globalThis.fetch = async () =>
+    braveResponse([
+      { title: "Festival 2024", url: "https://example.com/f", description: "x" },
+    ]);
+  const result = await run(toolFor(), { query: "festival this december" });
+  assert.equal(result.status, "ok");
+  const today = new Date().toISOString().slice(0, 10);
+  assert.ok(result.notice.startsWith(`Searched on ${today} (UTC).`), result.notice);
+  assert.match(result.notice, /publishedAt/);
+});
+
 test("an oversized or malformed response never becomes an unbounded payload", async () => {
   globalThis.fetch = async () =>
     braveResponse(
