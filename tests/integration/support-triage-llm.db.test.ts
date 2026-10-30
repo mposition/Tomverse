@@ -230,19 +230,21 @@ test("a report anonymised after the pool and the claim were read is never sent t
   await report("seen", { message: "Something only this person wrote." });
   await report("a");
   await report("b");
+  await report("c");
   const { startSupportTriageRun } = await import("@/lib/supportTriageRunStore");
   const { claimSupportTriageBatch, readDuplicateCandidates, runTriageLlm } = await import("@/lib/supportTriageWorker");
   const run = await startSupportTriageRun("worker");
   const pool = await readDuplicateCandidates();
   assert.ok(pool.some((c) => c.id === `${PREFIX}seen`));
-  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`, `${PREFIX}b`], 0);
-  assert.equal(batch.claimed.length, 2);
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`, `${PREFIX}b`, `${PREFIX}c`], 0);
+  assert.equal(batch.claimed.length, 3);
   // Both accounts are deleted after the reads and before the calls: a shown
-  // candidate, and a claimed report itself.
+  // candidate, and a claimed report itself. Another claimed report is closed.
   await prisma.feedback.updateMany({
     where: { id: { in: [`${PREFIX}seen`, `${PREFIX}b`] } },
     data: { message: "[deleted account]" },
   });
+  await prisma.feedback.update({ where: { id: `${PREFIX}c` }, data: { status: "resolved" } });
   const sent: TriageLlmInput[] = [];
   const answered = await runTriageLlm(
     async (input) => {
@@ -255,9 +257,10 @@ test("a report anonymised after the pool and the claim were read is never sent t
   );
   assert.equal(sent.length, 1);
   assert.equal(sent[0].report.message, "The answer stops halfway.");
-  assert.ok(sent[0].candidates.every((c) => c.id !== `${PREFIX}seen` && c.id !== `${PREFIX}b`));
+  assert.ok(sent[0].candidates.every((c) => ![`${PREFIX}seen`, `${PREFIX}b`, `${PREFIX}c`].includes(c.id)));
   assert.ok(!JSON.stringify(sent).includes("only this person"));
   assert.equal(answered.find((row) => row.feedbackId === `${PREFIX}b`)?.llm, undefined);
+  assert.equal(answered.find((row) => row.feedbackId === `${PREFIX}c`)?.llm, undefined);
 });
 
 test("the model may raise a money report to trust and safety, which outranks it", async () => {
