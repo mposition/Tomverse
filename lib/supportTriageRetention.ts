@@ -12,7 +12,8 @@
  * A batch cancelled by `statement_timeout` is retried smaller (500, 250, 125).
  * Two cancellations at the floor in one run move the cursor past that window
  * and count it as blocked: a row that never deletes cannot stop the step, and
- * is reported instead (`oldestOverdueAgeSeconds`).
+ * is reported instead (`oldestOverdueAgeSeconds`). When the window itself was
+ * never read, the class is left for the next run and its rows stay overdue.
  *
  * One batch deletes every class in `RETENTION_CLASSES`, one window read and
  * one delete per class, each class with its own cursor: run rows 30 days
@@ -62,6 +63,7 @@ import {
   RETENTION_BATCH_SIZES,
   RETENTION_OVERDUE_GRACE_SECONDS,
   RETENTION_CLASSES,
+  SUGGESTION_CLOSABLE_OPEN_STATES,
   SUGGESTION_STATES,
   SUGGESTION_TERMINAL_STATES,
   SUPPORT_TRIAGE_RUN_RETENTION_DAYS,
@@ -104,12 +106,15 @@ type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 const GROUP_TERMINAL_STATES = ["dismissed", "expired", "invalidated"];
 const CLOSED_REPORT_STATUSES = FEEDBACK_STATUSES.filter(isTerminalFeedbackStatus);
 const OPEN_SUGGESTION_STATES = SUGGESTION_STATES.filter((state) => !SUGGESTION_TERMINAL_STATES.includes(state));
+const CLOSABLE_SUGGESTION_STATES = [...SUGGESTION_CLOSABLE_OPEN_STATES];
 
 /**
- * Moves up to `size` open suggestions of closed reports to invalidated. The
+ * Moves up to `size` pending or ready suggestions of closed reports to
+ * invalidated. A claim is left to lapse to failed or expired, since its model
+ * call may be under way and an invalidated row would not settle its input. The
  * report is read, not locked: this write locks only suggestion rows, so an
  * account deletion holding the report waits here and never the other way.
- * The open-state condition is repeated on the updated row: a second run that
+ * The state condition is repeated on the updated row: a second run that
  * waited for the first one's lock re-reads the row and skips it, instead of
  * updating a terminal row the guard trigger refuses.
  */
@@ -117,13 +122,13 @@ export const invalidateClosedReportSuggestions = (tx: Tx, size: number) =>
   tx.$executeRaw`
     UPDATE "SupportTriageSuggestion" s
        SET "state" = 'invalidated'
-     WHERE s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+     WHERE s."state" = ANY(${CLOSABLE_SUGGESTION_STATES}::text[])
        AND s."id" IN (
        SELECT o."id"
          FROM "SupportTriageSuggestion" o
          JOIN "Feedback" f ON f."id" = o."feedbackId"
         WHERE f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
-          AND o."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+          AND o."state" = ANY(${CLOSABLE_SUGGESTION_STATES}::text[])
         ORDER BY o."id"
         LIMIT ${size}::integer)`;
 
@@ -412,9 +417,13 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
       if (floorCancellations[cls] >= 2) {
         // Move past the window that keeps cancelling; the next run starts over.
         // Count the rows actually skipped, not the batch size. A window that
-        // was never read cannot be skipped; the gate's batch cap ends the run.
+        // was never read cannot be skipped, so the class is left for the next
+        // run instead of spending this run's batches; its rows stay in
+        // overdueRemaining and the oldest overdue age, which make the run
+        // partial or not progressing.
         blocked += result.windowRows;
         if (result.window) cursors[cls] = result.window;
+        else pending = pending.filter((other) => other !== cls);
         floorCancellations[cls] = 0;
       }
     }
