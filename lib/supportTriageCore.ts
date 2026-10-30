@@ -485,6 +485,12 @@ export const DECISION_RECORD_LINKS_MAX = GROUP_MEMBER_CAP;
  */
 export const TERMINAL_SUGGESTION_RETENTION_DAYS = 30;
 export const TERMINAL_GROUP_RETENTION_DAYS = 30;
+/**
+ * A suggestion never shown to the owner (ownerQueueState not_queued) leaves
+ * promotion and becomes expired 7 days after it was created (policy section
+ * 5), whether or not its report is still open.
+ */
+export const NOT_QUEUED_SUGGESTION_EXPIRY_DAYS = 7;
 
 /** The classes one retention batch deletes, one statement pair each, in this order. */
 export const RETENTION_CLASSES = Object.freeze(["runs", "suggestions", "groups", "decisionRecords"] as const);
