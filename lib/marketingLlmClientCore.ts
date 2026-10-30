@@ -74,7 +74,8 @@ export const MARKETING_LLM_RESPONSES_URL = "https://api.openai.com/v1/responses"
 /**
  * The provider request body for a web-search call: the system message as
  * instructions, the user message as input, one search tool limited to the
- * competitor's domains, and the search cap the reservation priced. No other
+ * competitor's domains (or, given none, A3's discovery search, unfiltered),
+ * and the search cap the reservation priced. No other
  * tool, no stored response, no stream. It asks for the search's sources
  * (`web_search_call.action.sources`): a JSON-only answer often carries no
  * inline `url_citation`, so the pages the search actually returned are what a
@@ -92,7 +93,7 @@ export function marketingLlmWebSearchRequestBody(
     tools: [
       {
         type: "web_search",
-        filters: { allowed_domains: [...allowedDomains] },
+        ...(allowedDomains.length > 0 ? { filters: { allowed_domains: [...allowedDomains] } } : {}),
         search_context_size: "low",
         user_location: { type: "approximate" },
       },

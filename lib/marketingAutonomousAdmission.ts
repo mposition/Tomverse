@@ -130,7 +130,19 @@ const unreadable: ReadResult<never> = { ok: false };
  */
 export type MarketingAutonomousAdmissionReason =
   | "config_generation_unreadable"
-  | "deployment_unknown";
+  | "deployment_unknown"
+  | "disclosure_contract_not_ready";
+
+/**
+ * Whether a person has decided how a post shows it is advertising (S3 plan,
+ * S3i, decision D9): which disclosure each platform carries and when a post is
+ * refused for lacking one (docs/policy/marketing-automation.md §13: every post from a Tomverse account is
+ * advertising, AANA). Until that decision is recorded here, in a reviewed
+ * change, nothing is published -- approved or autonomous. Drafts already must
+ * say they are advertising (lib/marketingDraftIntakeCore.ts); this is what
+ * the post looks like on the platform, which is the person's call.
+ */
+export const MARKETING_DISCLOSURE_CONTRACT_READY: boolean = false;
 
 export type AutonomousAdmissionResolution = MarketingAutonomousAdmission & {
   readonly reasons: readonly (
@@ -414,15 +426,18 @@ export const resolvePublishAdmission = async (
   const autonomy =
     postMode === "autonomous" ||
     (postMode === undefined && subject.status === "autonomous_mode");
+  const disclosure: MarketingAutonomousAdmissionReason[] = MARKETING_DISCLOSURE_CONTRACT_READY
+    ? []
+    : ["disclosure_contract_not_ready"];
   if (autonomy) {
     const reasons: (
       | MarketingAutomationAccessReason
       | MarketingAutonomousAdmissionReason
-    )[] = [...decisions.autonomousPublish.reasons];
+    )[] = [...decisions.autonomousPublish.reasons, ...disclosure];
     if (generation === null) reasons.push("config_generation_unreadable");
     if (deploymentId === "") reasons.push("deployment_unknown");
     return { publish: reasons.length === 0, reasons, ...provenance };
   }
-  const reasons = [...decisions.approvalPublish.reasons];
+  const reasons = [...decisions.approvalPublish.reasons, ...disclosure];
   return { publish: reasons.length === 0, reasons, ...provenance };
 };
