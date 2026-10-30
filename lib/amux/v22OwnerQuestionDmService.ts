@@ -18,6 +18,7 @@ import { readDecisionMakerSwitchesOrThrow } from
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import { BoardImportError } from "./boardImportCore.ts";
 import { parseAmuxV22OwnerQuestion } from "./v22OwnerQuestionCore.ts";
+import { AMUX_V22_PROVIDERS, amuxV22Provider } from "./v22WorkerClaimCore.ts";
 import { answerAmuxV22OwnerQuestionInTransaction } from
   "./v22OwnerQuestionService.ts";
 import { openAmuxV22TaskResultRow, type AmuxV22SealedRow } from
@@ -41,6 +42,9 @@ const QUESTION_ID = /^[0-9a-f-]{36}$/;
 
 /** At most this many questions or cards per relay tick. */
 export const AMUX_V22_QUESTION_SYNC_LIMIT = 3;
+/** Pending questions read per tick to find those that can be opened, so a
+ * few that cannot never hide the ones behind them. */
+export const AMUX_V22_QUESTION_PENDING_SCAN = 24;
 
 /** Whether a Decision Maker request's card mirrors a v22 worker question.
  * One statement. */
@@ -53,7 +57,8 @@ export async function isAmuxV22QuestionCard(
 }
 
 type PendingRow = AmuxV22SealedRow & { questionId: string; taskId: string;
-  attemptId: string; worker: string; sequence: number; sourceSha256: string };
+  attemptId: string; worker: string; sequence: number; sourceSha256: string;
+  provider: string | null };
 
 /** Open questions with no local card yet, with their run's result rows, and
  * cards of questions no longer open that the relay has not closed. */
@@ -61,21 +66,23 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient) 
   const pending = await tx.$queryRaw<PendingRow[]>`
     SELECT q."id" AS "questionId", q."taskId", q."attemptId", q."worker",
       q."sequence", r."ideaId", r."ciphertext", r."keyId", r."keyVersion",
-      r."digest", r."digestKeyId", r."sourceSha256", r."bodyPurgedAt"
+      r."digest", r."digestKeyId", r."sourceSha256", r."bodyPurgedAt",
+      g."provider"
     FROM "AmuxV22TaskQuestion" q
     JOIN "AmuxV22TaskResult" r
       ON r."attemptId" = q."attemptId" AND r."taskId" = q."taskId"
     JOIN "AmuxExecutionAttempt" a ON a."id" = q."attemptId"
     JOIN "AmuxWorkItem" w ON w."id" = q."taskId"
+    LEFT JOIN "AmuxV22WorkerAssignment" g ON g."id" = a."v22AssignmentId"
     -- Only a question its run's settlement parked, on a Task still parked,
-    -- with a body still there. A body that exists but cannot be opened (a
-    -- key store fault) stays listed and is skipped until it can be.
+    -- with a body still there. Up to 24 are read so that a body that exists
+    -- but cannot be opened (a key store fault) is passed over, not in the way.
     WHERE q."state" = 'open' AND q."localCardId" IS NULL
       AND a."endedAt" IS NOT NULL AND a."reason" = 'owner_question'
       AND w."status" = 'blocked' AND w."archivedAt" IS NULL
       AND r."bodyPurgedAt" IS NULL
     ORDER BY q."createdAt", q."id"
-    LIMIT ${AMUX_V22_QUESTION_SYNC_LIMIT}`;
+    LIMIT ${AMUX_V22_QUESTION_PENDING_SCAN}`;
   const closing = await tx.$queryRaw<Array<{ questionId: string; cardId: string }>>`
     SELECT q."id" AS "questionId", q."localCardId" AS "cardId"
     FROM "AmuxV22TaskQuestion" q
@@ -91,6 +98,11 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient) 
 export async function openAmuxV22QuestionCards(pending: PendingRow[]) {
   const cards = [];
   for (const row of pending) {
+    if (cards.length >= AMUX_V22_QUESTION_SYNC_LIMIT) break;
+    // The provider class the Decision Maker routes by, from the asking run's
+    // assignment: a v22 worker may have no local session that names it.
+    const provider = row.provider ? amuxV22Provider(row.provider) : null;
+    if (!provider) continue;
     // One question that cannot be opened (a key store fault) is left out of
     // this tick; the others and the closing list still go.
     let text: string | null = null;
@@ -99,6 +111,7 @@ export async function openAmuxV22QuestionCards(pending: PendingRow[]) {
     const question = text ? parseAmuxV22OwnerQuestion(text) : null;
     if (!question) continue;
     cards.push({ question_id: row.questionId, worker: row.worker,
+      provider: AMUX_V22_PROVIDERS[provider].providerClass,
       title: `v22 Task ${row.taskId} question ${row.sequence}`,
       question: question.question, unblocks: question.unblocks,
       options: question.options });

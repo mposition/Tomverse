@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
@@ -14,6 +14,8 @@ import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
   parseAmuxV22OwnerQuestion, type AmuxV22OwnerAnswerSource } from
   "./v22OwnerQuestionCore.ts";
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from "./v22ExternalAuthorityCore.ts";
+import { openAmuxV22TaskPatchRow, openAmuxV22TaskResultRow } from
+  "./v22TaskResultStore.ts";
 
 /** What a resumed prompt holds beside its resume section and its brief: the
  * Task and attempt lines (bounded), the notice twice and the question rules.
@@ -22,8 +24,6 @@ import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from "./v22ExternalAuthorityCore.ts"
 const PROMPT_FIXED_BYTES = 512 +
   2 * Buffer.byteLength(AMUX_V22_WORKER_AUTHORITY_NOTICE, "utf8") +
   Buffer.byteLength(AMUX_V22_OWNER_QUESTION_RULES, "utf8");
-import { openAmuxV22TaskPatchRow, openAmuxV22TaskResultRow } from
-  "./v22TaskResultStore.ts";
 
 /** The question a Task's newest result asked, for the owner's result view. */
 export async function readAmuxV22OwnerQuestionForResult(attemptId: string,
@@ -114,6 +114,9 @@ export async function answerAmuxV22OwnerQuestion(input: { session: Session;
     throw new BoardImportError("forbidden", 403);
   return withAutoTransaction(input.taskId, OWNER_TRANSACTION_LIMITS,
     async (tx, now) => {
+      // The audit chain lock before the question row, the order every writer
+      // takes (lib/adminAudit.ts), as the Decision Maker answer does.
+      await takeAuditChainLock(tx);
       const owned = await tx.amuxV22TaskQuestion.findUnique({
         where: { id: input.questionId }, select: { taskId: true } });
       if (owned?.taskId !== input.taskId)

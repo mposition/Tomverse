@@ -9,6 +9,10 @@ import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
 
 const cellClass = "border-b px-2 py-1 align-top border-zinc-700";
 
+/** The result without its last line, the question shown parsed below it. */
+const withoutQuestionLine = (text: string) =>
+  text.replace(/\n?[^\n]*AMUX_OWNER_QUESTION:[^\n]*\s*$/, "").trimEnd();
+
 type WorkerQuestion = {
   id: string; sequence: number; state: string; question: string;
   unblocks: string; options: Array<{ id: string; label: string }>;
@@ -43,7 +47,13 @@ export function AmuxCardListPanel({
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskId, questionId, answer }) });
       if (!current()) return;
-      if (response.ok) { setAnswerState("sent"); setAnswer(""); return; }
+      if (response.ok) {
+        setAnswerState("sent");
+        setAnswer("");
+        setQuestion((shown) => shown && shown.id === questionId ?
+          { ...shown, state: "answered" } : shown);
+        return;
+      }
       const body = await response.json().catch(() => null);
       if (!current()) return;
       setAnswerState({ failed: typeof body?.error === "string" ?
@@ -151,7 +161,8 @@ export function AmuxCardListPanel({
         <section aria-live="polite" className="rounded border p-3 border-zinc-700">
           <p className="font-mono text-xs">{selectedTaskId}</p>
           {resultState === "available" ?
-            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm">{resultText}</pre> :
+            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm">{
+              question ? withoutQuestionLine(resultText ?? "") : resultText}</pre> :
             <p className="mt-2 text-sm">{resultState === "loading" ? messages.resultLoading :
               resultState === "missing" ? messages.resultMissing :
               resultState === "purged" ? messages.resultPurged :
