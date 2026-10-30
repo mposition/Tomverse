@@ -6,6 +6,7 @@ import {
   MARKETING_A3_REPORT_MARGIN_MS,
   runMarketingA3Cycle,
 } from "@/lib/marketingA3CycleCore";
+import { MARKETING_A3_ANSWER_SCHEMA, MARKETING_A3_DISCOVERY_ANSWER_SCHEMA } from "@/lib/marketingA3Core";
 import {
   MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
   marketingGeneratorReportProvenanceMatches,
@@ -64,8 +65,8 @@ const ports = (overrides = {}) => {
   let id = 0;
   const deps = {
     readContext: async () => context([poe]),
-    callLlm: async (messages, requestKey, allowedDomains) => {
-      seen.calls.push({ messages, requestKey, allowedDomains });
+    callLlm: async (messages, requestKey, allowedDomains, answerSchema) => {
+      seen.calls.push({ messages, requestKey, allowedDomains, answerSchema });
       // No domains is the run's discovery search, which finds nothing by default.
       if (allowedDomains.length === 0) return answered(requestKey, { candidates: [] }, []);
       return answered(
@@ -108,6 +109,9 @@ test("a run searches once per competitor within its official domains, and report
     stoppedAt: null,
   });
   assert.deepEqual(seen.calls[0].allowedDomains, ["poe.com"]);
+  // Each call is held to the shape its reader parses.
+  assert.deepEqual(seen.calls[0].answerSchema, MARKETING_A3_ANSWER_SCHEMA);
+  assert.deepEqual(seen.calls.at(-1).answerSchema, MARKETING_A3_DISCOVERY_ANSWER_SCHEMA);
   const data = JSON.parse(seen.calls[0].messages[1].content);
   assert.deepEqual(data.competitor, { id: "poe", name: "Poe", officialDomains: ["poe.com"] });
   const report = marketingGeneratorReportSchema.parse(seen.reports[0]);
