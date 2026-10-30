@@ -1514,8 +1514,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **S3f-R3b(경쟁사 Admin 화면)**: `/admin/marketing?tab=competitors` — `lib/marketingConsoleSections.ts`,
   `lib/marketingConsoleRead.ts`, `components/admin/AdminMarketingPanel.tsx`, `lib/adminMessages/marketing.ts`. 승인된 것이
   먼저, 최대 100건이고 화면이 그 수와, 잘렸다면 잘렸다는 사실을 말합니다. 행마다 그 행이 보여 준
-  `decisionAuditLogId`로 결정하며, 승인은 이름·host를 고쳐서 보낼 수 있습니다. A3의 근거 URL은 링크가 아니라 텍스트로
-  보입니다 — 생성기가 읽은 것은 판정할 데이터이지 따라갈 링크가 아닙니다.
+  `decisionAuditLogId`로 결정하며, 승인은 이름·host를 고쳐서 보낼 수 있습니다. A3의 근거 URL은 https만 새 탭·
+  `rel="noopener noreferrer nofollow"` 링크로 보입니다(S3f-R5c) — 사람이 근거를 열어 보고 판정합니다.
 - **S3f-R4(생성기 문맥의 등록부)**: `lib/marketingGeneratorContext.ts`의 `competitors`. `tracked`는 승인된 경쟁사와 사람이
   승인한 host이고, `knownIds`는 상태와 무관하게 등록부가 아는 id 전부이며 자르지 않습니다(거절도 답이므로 다시 제안하지 않게;
   크기는 문맥 route의 byte 상한이 자르지 않고 거절합니다).
@@ -1532,6 +1532,11 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   정하고, 출처는 공급사가 실제로 인용한 URL이면서 공식 host 위여야 합니다(query·fragment 제거). 결과를 모르는 호출이나 답이
   없는 제출은 실행 전체를 멈추고 보고서를 내지 않으며, 시간 몫(20분)을 넘기면 보고서 없이 A5로 넘어갑니다. pin이 없으면(D4)
   worker는 시작하지 않습니다.
+- **S3f-R5c(신규 경쟁사 탐색)**: 같은 파일들. 추적 경쟁사 다음에 **실행당 한 번, domain 제한 없는 웹 검색**을 같은
+  `web-search-v1` profile로 합니다(`allowedDomains`가 비면 client가 `filters`를 빼고 보냅니다). 산출물은
+  `competitorCandidates`뿐이며(`readMarketingA3Discovery()`), 후보는 근거 URL이 1~5개이고 모두 같은 응답의 인용·검색
+  출처 URL과 문자열로 같아야 하고(정규화 없음), 문맥의 `knownIds`에 있는 id는 버립니다. 앱의 후보 schema도 근거
+  1개 이상을 요구합니다(`marketingCompetitorCandidateSchema`). 이 호출이 결과를 모르면 실행 전체가 멈추고 보고서를 내지 않습니다.
 
 # 엔지니어링 Agent
 

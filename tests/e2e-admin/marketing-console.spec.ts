@@ -152,6 +152,11 @@ test.describe("marketing console", () => {
       page.getByText(FIXTURE_MARKETING.competitor.host, { exact: false }).first()
     ).toBeVisible();
     await expect(page.getByText(/Up to 100 competitors/)).toBeVisible();
+    // The evidence is a link a person opens to judge: a new tab, no referrer, no endorsement.
+    const evidence = page.getByTestId("marketing-competitor-evidence-link").first();
+    await expect(evidence).toHaveAttribute("href", `https://${FIXTURE_MARKETING.competitor.host}/pricing`);
+    await expect(evidence).toHaveAttribute("target", "_blank");
+    await expect(evidence).toHaveAttribute("rel", "noopener noreferrer nofollow");
     // A proposal can be approved or rejected, not retired: only an approval
     // has sources to take away.
     await expect(page.getByTestId("marketing-action-competitor-approve")).toBeVisible();

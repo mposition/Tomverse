@@ -80,6 +80,7 @@ export const marketingCompetitorCandidateSchema = z
     officialHosts: marketingCompetitorHostsSchema,
     evidenceUrls: z
       .array(z.string().max(500).refine((url) => url.startsWith("https://"), "evidence is an https URL"))
+      .min(1)
       .max(5),
     rationale: z.string().trim().min(1).max(400),
   })
