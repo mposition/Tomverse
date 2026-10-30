@@ -5,7 +5,9 @@
  * is caught up the next; a week already reported is left alone.
  *
  * Nothing is recorded while there is no marketing account: there is no week
- * of marketing to count, and weeks of zeros would read as one.
+ * of marketing to count, and weeks of zeros would read as one. Nothing is
+ * done at all while the marketing kill switch is on (policy §6.1: everything
+ * but reading records stops), as retention does nothing then either.
  *
  * The report is derived data, not an action, so it has no audit entry of its
  * own -- as the retention job's `retention_run` report has none.
@@ -15,6 +17,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { marketingKpiWeek, marketingWeeklyKpi } from "@/lib/marketingWeeklyKpiCore";
 import { insertMarketingReport, runMarketingTransaction } from "@/lib/marketingStore";
 
@@ -23,9 +26,18 @@ export const MARKETING_WEEKLY_KPI_SOURCE_VERSION = "marketing-weekly-kpi-v1";
 
 export type MarketingWeeklyKpiResult =
   | { readonly recorded: true; readonly weekStart: string; readonly reportId: string }
-  | { readonly recorded: false; readonly weekStart: string; readonly reason: "already_recorded" | "no_accounts" };
+  | { readonly recorded: false; readonly weekStart: string; readonly reason: "already_recorded" | "no_accounts" }
+  | { readonly recorded: false; readonly reason: "kill_switch" };
 
-export async function runMarketingWeeklyKpi(client: PrismaClient): Promise<MarketingWeeklyKpiResult> {
+export async function runMarketingWeeklyKpi(
+  client: PrismaClient,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<MarketingWeeklyKpiResult> {
+  // The same reading as every marketing gate: any non-empty value is on.
+  const killSwitch = env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
+  if (typeof killSwitch === "string" && killSwitch.trim().length > 0) {
+    return { recorded: false, reason: "kill_switch" };
+  }
   return runMarketingTransaction(
     client,
     async (tx) => {

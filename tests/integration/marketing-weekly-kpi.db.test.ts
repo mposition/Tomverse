@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { createMarketingChannel } from "@/lib/marketingStore";
 import { runMarketingWeeklyKpi } from "@/lib/marketingWeeklyKpi";
 import { marketingKpiWeek } from "@/lib/marketingWeeklyKpiCore";
@@ -102,6 +103,18 @@ test("the week that has ended is reported once, with the counts the core makes o
   const again = await runMarketingWeeklyKpi(prisma);
   assert.equal(again.recorded === false && again.reason, "already_recorded");
   assert.equal(await prisma.marketingReport.count({ where: { kind: "weekly_kpi" } }), 1);
+});
+
+test("with the marketing kill switch on nothing is recorded (policy §6.1)", async () => {
+  await channel();
+  for (const value of ["1", "on", " x "]) {
+    const result = await runMarketingWeeklyKpi(prisma, { [MARKETING_AUTOMATION_KILL_SWITCH_ENV]: value });
+    assert.deepEqual(result, { recorded: false, reason: "kill_switch" });
+  }
+  assert.equal(await prisma.marketingReport.count(), 0);
+  // An empty value is off, as at every other marketing gate.
+  const off = await runMarketingWeeklyKpi(prisma, { [MARKETING_AUTOMATION_KILL_SWITCH_ENV]: "  " });
+  assert.equal(off.recorded, true);
 });
 
 test("two runs at once record the week once", async () => {
