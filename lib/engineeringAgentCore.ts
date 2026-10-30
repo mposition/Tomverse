@@ -437,6 +437,28 @@ export const ENGINEERING_AGENT_V22_TIER_PENDING_REASON = "tier_pending";
  * it; the work item guard admits that publish item on exactly this reason. */
 export const ENGINEERING_AGENT_V22_PROMOTED_REASON = "publish_promoted";
 
+/**
+ * A T2 patch published as a draft pull request for the owner to review
+ * (owner decision 2026-10-30). Its publish item is told apart by this cause
+ * key prefix, which the work item guard never lets change, so a requeue or a
+ * lookup cannot turn it into an ordinary pull request.
+ */
+export const ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX = "publish_review:";
+/** The app's switch for it: off unless exactly `on`. */
+export const ENGINEERING_AGENT_V22_REVIEW_PR_ENV = "ENGINEERING_AGENT_V22_REVIEW_PR";
+export const engineeringAgentV22ReviewPrEnabled = (value: string | undefined) =>
+  value === "on";
+/**
+ * The header a publisher names what it can do in. A review item is claimed
+ * only by a publisher that names `review_draft`, so one deployed before this
+ * change -- which would open a ready pull request -- never receives one.
+ */
+export const ENGINEERING_PUBLISHER_FEATURES_HEADER = "x-engineering-publisher-features";
+export const ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE = "review_draft";
+export const publisherOpensReviewDrafts = (header: string | null) =>
+  (header ?? "").split(",").map((part) => part.trim())
+    .includes(ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE);
+
 /** A v22 Task has at most one publication product. A private result is not
  * misreported as a draft, and an owner draft is not misreported as a PR. */
 export const v22RunOutcomeForProduct = (input: {
