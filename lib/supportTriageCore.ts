@@ -355,6 +355,31 @@ export const SUGGESTION_TRANSITIONS: readonly (readonly [SuggestionState, Sugges
 export const isSuggestionTransitionAllowed = (from: SuggestionState, to: SuggestionState) =>
   SUGGESTION_TRANSITIONS.some(([a, b]) => a === from && b === to);
 
+/**
+ * States in which a row settles its input for the worker: live, decided, or
+ * closed after its model call may have run. A superseded or invalidated row
+ * settles it too once it was answered (it has a lane), so an input that comes
+ * back is never paid for again (policy section 2 item 11, section 6).
+ */
+export const SUGGESTION_SETTLING_STATES: readonly SuggestionState[] = Object.freeze([
+  "claimed",
+  "ready",
+  "accepted",
+  "rejected",
+  "expired",
+  "failed",
+]);
+
+export const suggestionSettlesInput = (row: { readonly state: string; readonly lane: string | null }) =>
+  SUGGESTION_SETTLING_STATES.includes(row.state as SuggestionState) || row.lane !== null;
+
+/**
+ * Open states the worker supersedes and retention invalidates. A claimed row
+ * is left to its claim: its model call may be under way, so it ends as failed
+ * when the claim lapses, which settles its input.
+ */
+export const SUGGESTION_CLOSABLE_OPEN_STATES: readonly SuggestionState[] = Object.freeze(["pending", "ready"]);
+
 export const SUGGESTION_FAILURE_CODES = Object.freeze([
   "config_error",
   "internal_error",

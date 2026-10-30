@@ -67,9 +67,11 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
 4. 사실을 약속하지 않는 **답변 초안**을 결정적 템플릿으로 만든다. 보내는 것은 사람이다.
 5. 소유자에게는 공통 Agent digest 영역의 일일 digest 하나와, 상한·만료·자동 해소가 있는 대기열만 남긴다.
 
-**LLM을 쓰지 않는다.** 신고 본문과 파생 데이터는 앱 밖의 어떤 제3자에게도 가지 않는다. 본문이 만들 수 있는
-값은 고정 키워드 목록 일치의 enum flag뿐이고, flag는 우선순위를 올리거나 사람 전용 lane으로 보내기만 한다.
-LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 없이는 불가하다.
+**LLM 우선(2026-10-19 운영자 결정, 9절).** 위 1·3·4의 lane·중복 후보·답변 초안은 신고마다 한 번의 LLM 호출이
+만든다. 고정 키워드 목록의 enum flag는 그 아래 바닥으로 남는다: flag가 정한 사람 lane은 모델이 내리지 못하고
+(`billing_human`을 `trust_safety_human`으로 올리는 것만 된다), 서버 검증 없는 `bug_verified`는 쓰지 않는다.
+그래서 신고 본문과 중복 후보의 본문은 운영자가 Admin에서 고른 모델 공급자에게 간다. 모델 선택과 triage는 기본
+꺼짐이고, 어느 하나가 꺼져 있으면 본문은 앱 밖으로 나가지 않는다. 계정 삭제되었거나 닫힌 신고는 보내지 않는다(5절).
 
 ## 2. 하지 않는 것 (절대 조건)
 
@@ -153,9 +155,16 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
   누락 검사가 실패한다. 보존·계정 삭제 fixture는 이 분류에서 파생한다.
 - 계정 삭제 transaction은 manifest의 triage 파생 데이터 전체를 지운다. 그 뒤 어떤 worker pass도 계정 삭제
   marker가 있는 신고에서 triage 행을 만들지 않는다(적격성 조건을 선택 query와 생성 쓰기의 잠금 확인에 함께 적용).
+  모델 호출 직전에 그 배치의 신고와 중복 후보를 id로 한 번 더 읽어, 그때까지 계정 삭제되었거나 닫힌 신고는
+  모델에게 보내지 않는다(2026-10-30). 그 읽기 뒤에 끝난 삭제는 호출보다 뒤의 일이고, 결과 transaction이 그 신고를
+  본 답을 버리며 삭제가 그 행을 지운다.
   삭제된 신고를 모델에게 보여 준 다른 신고의 suggestion도 지우되, 그 suggestion이 입력을 확정한 상태였으면 같은
   입력의 내용 없는 `expired` 행을 같은 transaction에 대신 남긴다(2026-10-30). 그래서 남은 신고는 같은 입력으로
   다시 유료 호출되지 않는다.
+- 답을 받은 입력(`lane`이 있는 행)은 그 행이 뒤에 `superseded`나 `invalidated`가 되어도 확정된 입력으로
+  남는다. 신고의 입력이 바뀌었다가 같은 입력으로 돌아와도, 닫혔다가 다시 열려도 그 입력으로 모델을 다시 부르지
+  않는다. 답을 받기 전에 닫힌 행만 다시 만든다. claim 중인 행은 supersede하거나 invalidate하지 않는다. 그 모델
+  호출은 진행 중일 수 있으므로 claim이 만료되어 `failed`가 되게 두고, `failed`가 입력을 확정한다(2026-10-30).
 - 파생 데이터는 아래 보존 기한을 넘기지 않고, 로그·Sentry·analytics에 남지 않는다.
 
 | 데이터 | 보존 |
@@ -211,6 +220,9 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
   통해서만 도달하고 recorder는 셋뿐이다 — 시스템 transaction(`writeSystemAuditLog` 1행), admin transaction
   (`writeAdminAuditLog({ tx })` 1행), 계정 삭제 recorder(그 transaction의 마지막 문장). 세 mode의 전이 집합은
   서로소다. 감사 테이블에 직접 쓰지 않는다. 감사 행에는 불투명 id와 결정 enum만 들어간다.
+  시스템 actor 셋은 자기 action만 쓸 수 있다: worker는 run 시작·종료와 claim·reclaim·result, retention은 run
+  시작·종료와 보존 배치(대상은 둘 다 `SupportTriageRun`), 계정 삭제는 `support_triage.account_data_deleted`
+  (`SupportTriageAccountData`) 하나다(`systemAuditActionAllowed`, 2026-10-30).
 - digest는 팀 3의 공통 `AgentDigestItem` 하나에만 들어가고 단일 writer는 팀 3 공통 계약이 정한 digest store 하나다(아직 구현되지 않았고, 그 배포가 P1 착수 조건이다).
   `kind = daily_digest`, 멱등 키 접두사 `support-triage:`, UTC 날짜당 한 항목. payload는 정수·enum·boolean과
   `date` 문자열 하나뿐이고 팀 3 공통 계약의 bounded schema 규칙을 따른다. 시점값을 넣지 않는다.
@@ -240,7 +252,8 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 
 > **2026-10-19 운영자 결정(LLM 우선 전환)이 아래 표보다 우선한다.** 신고마다 LLM을 한 번 호출해 lane·중복 후보·답변
 > 초안을 만들고 Admin 지원 인박스에 바로 보인다(`lib/supportTriageLlm.ts`, #2719). 모델은 Admin에서 고르며 기본은
-> 꺼짐이다(#2727). 돈·신뢰안전 키워드의 사람 lane과 서버 검증 없는 `bug_verified` 금지는 코드가 지킨다. 초안은
+> 꺼짐이다(#2727). 돈·신뢰안전 키워드의 사람 lane과 서버 검증 없는 `bug_verified` 금지는 코드가 지킨다. 모델은
+> 사람 lane을 내리지 못하고, `billing_human`을 더 앞선 `trust_safety_human`으로 올리는 것만 할 수 있다(2026-10-30). 초안은
 > 운영자에게만 보이고 자동 발송하지 않는다. 그룹 상향 이동·노출 승격·측정 단계는 중단했다. 켜는 데 필요한 것은
 > 운영자의 모델 선택(유료 호출)과 `SUPPORT_TRIAGE_ENABLED`뿐이며, 아래 P1의 Q15·Q16 같은 착수 조건은 더 이상
 > 켜기를 막지 않는다.

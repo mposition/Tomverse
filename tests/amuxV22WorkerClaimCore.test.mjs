@@ -143,5 +143,8 @@ test("review independence traces implementation through intermediate Task edges"
   assert.match(claim, /JOIN ancestors a ON a\."dependencyId" = d\."taskId"/);
   assert.match(claim, /w\."taskRole" = 'implement'/);
   assert.match(claim, /w\."v4TerminalAt" IS NOT NULL/);
-  assert.match(claim, /chooseAmuxV22WorkerRoute\(\{ routes: quotaRoutes,/);
+  // A Task resumed after an owner question narrows the quota routes to the
+  // worker that asked (lib/amux/v22OwnerQuestionCore.ts).
+  assert.match(claim, /quotaRoutes\.filter\(\(route\) => route\.workerName === resume\.worker\)/);
+  assert.match(claim, /chooseAmuxV22WorkerRoute\(\{ routes: resumeRoutes,/);
 });

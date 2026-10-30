@@ -427,6 +427,20 @@ test("an open suggestion of a closed report is invalidated, so it is deleted 30 
   assert.equal((batch.metadata as Record<string, unknown>).invalidated, 1);
 });
 
+test("a live claim of a closed report is not invalidated: its call may be paid, so it is left to lapse", async () => {
+  await prisma.feedback.create({ data: { id: "fb-ret-claimed", type: "bug", message: "closed", status: "resolved" } });
+  await withDisabled(
+    "SupportTriageSuggestion",
+    "SupportTriageSuggestion_guard",
+    `INSERT INTO "SupportTriageSuggestion" ("id", "feedbackId", "inputDigest", "state", "claimToken", "leaseExpiresAt")
+     VALUES ('s-claimed', 'fb-ret-claimed', '${"3".repeat(64)}', 'claimed', 'token',
+             (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes')`
+  );
+  const result = await runSupportTriageRetention();
+  assert.equal(result.deleted, 0);
+  assert.equal((await prisma.supportTriageSuggestion.findUniqueOrThrow({ where: { id: "s-claimed" } })).state, "claimed");
+});
+
 /** Inserts an open suggestion of an open report, created `age` ago, through the guard's own path where it can. */
 const seedUnqueued = async (
   id: string,

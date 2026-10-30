@@ -424,7 +424,7 @@ export const amuxSessionIntakeSystemAuditScope = (
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
-  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) &&
+  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) &&
   (actor !== AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.inspected" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&
@@ -625,4 +625,35 @@ export const MODEL_CATALOG_SNAPSHOT_RENEWED_ACTION = "model_catalog.snapshot_ren
 function modelCatalogRenewalAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
   return actor !== "model-catalog-renewal" ||
     (action === "model_catalog.snapshot_renewed" && targetType === "ModelCatalogSnapshot");
+}
+
+/**
+ * The support-triage actors write only their own run's entries, about their
+ * run row, and the account deletion one content-free entry
+ * (docs/policy/support-triage.md §7). Declared at the end of the file and
+ * joined into `systemAuditActionAllowed()` on its existing first line, so no
+ * access above it moves. Static comparisons only: this file is in the Prompt
+ * Refiner runtime closure, whose computed element access inventory is pinned.
+ */
+const SUPPORT_TRIAGE_WORKER_AUDIT_ACTIONS: readonly unknown[] = [
+  "support_triage.run_started",
+  "support_triage.run_finished",
+  "support_triage.worker_reclaim",
+  "support_triage.worker_claim",
+  "support_triage.worker_result",
+];
+const SUPPORT_TRIAGE_RETENTION_AUDIT_ACTIONS: readonly unknown[] = [
+  "support_triage.run_started",
+  "support_triage.run_finished",
+  "support_triage.retention_batch",
+];
+function supportTriageAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
+  return (
+    (actor !== "support-triage-worker" ||
+      (targetType === "SupportTriageRun" && SUPPORT_TRIAGE_WORKER_AUDIT_ACTIONS.includes(action))) &&
+    (actor !== "support-triage-retention" ||
+      (targetType === "SupportTriageRun" && SUPPORT_TRIAGE_RETENTION_AUDIT_ACTIONS.includes(action))) &&
+    (actor !== "support-triage-account-deletion" ||
+      (action === "support_triage.account_data_deleted" && targetType === "SupportTriageAccountData"))
+  );
 }

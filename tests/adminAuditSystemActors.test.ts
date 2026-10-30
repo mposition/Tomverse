@@ -562,3 +562,28 @@ test("the Auto router optimizer actor may only start a cycle and promote one", (
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",
     "auto.llm_router_guidance.promoted", "AppSettings"), false);
 });
+
+test("the support-triage actors write only their own run's entries and the deletion entry", () => {
+  for (const action of ["support_triage.run_started", "support_triage.run_finished"]) {
+    assert.equal(systemAuditActionAllowed("support-triage-worker", action, "SupportTriageRun"), true, action);
+    assert.equal(systemAuditActionAllowed("support-triage-retention", action, "SupportTriageRun"), true, action);
+  }
+  for (const action of ["support_triage.worker_reclaim", "support_triage.worker_claim", "support_triage.worker_result"]) {
+    assert.equal(systemAuditActionAllowed("support-triage-worker", action, "SupportTriageRun"), true, action);
+    assert.equal(systemAuditActionAllowed("support-triage-retention", action, "SupportTriageRun"), false, action);
+    assert.equal(systemAuditActionAllowed("support-triage-worker", action, "Feedback"), false, action);
+  }
+  assert.equal(systemAuditActionAllowed("support-triage-retention", "support_triage.retention_batch", "SupportTriageRun"), true);
+  assert.equal(systemAuditActionAllowed("support-triage-worker", "support_triage.retention_batch", "SupportTriageRun"), false);
+  assert.equal(
+    systemAuditActionAllowed("support-triage-account-deletion", "support_triage.account_data_deleted", "SupportTriageAccountData"),
+    true
+  );
+  assert.equal(
+    systemAuditActionAllowed("support-triage-account-deletion", "support_triage.run_started", "SupportTriageRun"),
+    false
+  );
+  // An Admin action is never theirs.
+  assert.equal(systemAuditActionAllowed("support-triage-worker", "support_triage.enabled_updated", "AppSettings"), false);
+  assert.equal(systemAuditActionAllowed("support-triage-worker", "admin.user.updated", "User"), false);
+});

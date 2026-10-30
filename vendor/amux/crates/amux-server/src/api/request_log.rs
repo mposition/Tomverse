@@ -1315,6 +1315,10 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     // records, and one decided delivery's records for a restarted bridge.
     RouteEntry { path: "/api/dm-relay/answers/operator", methods: &["POST"] },
     RouteEntry { path: "/api/dm-relay/answers/receipt", methods: &["POST"] },
+    // A v22 worker's question filed and closed as a typed-ask card, same token
+    // (api/dm_relay_v22.rs).
+    RouteEntry { path: "/api/dm-relay/v22-questions", methods: &["POST"] },
+    RouteEntry { path: "/api/dm-relay/v22-questions/close", methods: &["POST"] },
     RouteEntry { path: "/api/board/{id}/verifications", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/artifacts", methods: &["GET", "POST"] },
     RouteEntry { path: "/api/board/{id}/artifacts/{aid}", methods: &["PATCH", "DELETE"] },
