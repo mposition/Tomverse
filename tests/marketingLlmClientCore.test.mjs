@@ -367,6 +367,15 @@ test("a web-search request is one domain-limited search tool, capped at the pin'
   assert.equal(body.input, MESSAGES[1].content);
 });
 
+test("a web-search request given an answer schema holds the answer to it, strictly, and adds nothing else", () => {
+  const answerSchema = { name: "facts", schema: { type: "object", properties: {}, required: [], additionalProperties: false } };
+  const plain = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com"]);
+  const held = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com"], answerSchema);
+  const { text, ...rest } = held;
+  assert.deepEqual(rest, plain);
+  assert.deepEqual(text, { format: { type: "json_schema", name: "facts", strict: true, schema: answerSchema.schema } });
+});
+
 test("a web-search answer is read with the URLs it cited or its searches returned, once each, or not at all", () => {
   assert.deepEqual(readMarketingLlmWebSearchAnswer(searchAnswer()), {
     content: '{"facts":[]}',
