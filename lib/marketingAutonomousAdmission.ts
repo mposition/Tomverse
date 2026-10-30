@@ -136,7 +136,7 @@ export type MarketingAutonomousAdmissionReason =
 /**
  * Whether a person has decided how a post shows it is advertising (S3 plan,
  * S3i, decision D9): which disclosure each platform carries and when a post is
- * refused for lacking one (policy §13: every post from a Tomverse account is
+ * refused for lacking one (docs/policy/marketing-automation.md §13: every post from a Tomverse account is
  * advertising, AANA). Until that decision is recorded here, in a reviewed
  * change, nothing is published -- approved or autonomous. Drafts already must
  * say they are advertising (lib/marketingDraftIntakeCore.ts); this is what

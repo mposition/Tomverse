@@ -8,7 +8,7 @@
  *
  * Nothing is recorded while there is no marketing account: there is no week
  * of marketing to count, and weeks of zeros would read as one. Nothing is
- * done at all while the marketing kill switch is on (policy §6.1: everything
+ * done at all while the marketing kill switch is on (docs/policy/marketing-automation.md §6.1: everything
  * but reading records stops), as retention does nothing then either.
  *
  * The report is derived data, not an action, so it has no audit entry of its

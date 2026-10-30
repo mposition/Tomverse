@@ -1462,7 +1462,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   감사 행은 없습니다(`retention_run`과 같음).
 - **S3i(광고 표시 게이트)**: `lib/marketingAutonomousAdmission.ts`의 `MARKETING_DISCLOSURE_CONTRACT_READY`(지금 `false`),
   `lib/marketingDraftIntakeCore.ts`, `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingPublishAdmission.test.ts`.
-  Tomverse 계정의 게시물은 모두 광고입니다(§13, AANA). 그래서 생성기는 `advertising` 플래그를 모델과 무관하게 붙이고, 접수는
+  Tomverse 계정의 게시물은 모두 광고입니다(docs/policy/marketing-automation.md §13, AANA). 그래서 생성기는 `advertising` 플래그를 모델과 무관하게 붙이고, 접수는
   그 플래그가 없는 초안을 거절합니다. 플랫폼에서 광고임을 어떻게 보일지(계획 D9)는 사람이 정하며, 그 결정을 이 상수로 기록하기
   전에는 `resolvePublishAdmission()`이 승인·자율 게시 모두 `disclosure_contract_not_ready`로 거절합니다. 판정 모듈
   `lib/marketingAutomationAccess.ts`는 Prompt Refiner closure 안이라 고치지 않고, 그 밖의 게시 직전 판정에 둡니다.
