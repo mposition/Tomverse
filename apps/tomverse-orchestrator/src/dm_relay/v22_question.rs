@@ -40,6 +40,19 @@ pub enum V22Cursor {
     Advance(Value),
 }
 
+/// The provider of a v22 question card whose worker has no local session:
+/// the class the relay filed it with, from the card's own tags, and only on a
+/// v22 question card.
+pub fn v22_card_provider(tags: &[String]) -> Option<String> {
+    if !tags.iter().any(|tag| tag == "v22-question") {
+        return None;
+    }
+    tags.iter()
+        .filter_map(|tag| tag.strip_prefix("v22-provider-"))
+        .find(|provider| ["claude", "codex", "copilot", "cursor"].contains(provider))
+        .map(str::to_owned)
+}
+
 /// What one tick did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct V22QuestionRun {
@@ -81,6 +94,7 @@ fn card_body(entry: &Value) -> Option<Value> {
     Some(json!({
         "question_id": text(entry, "question_id")?,
         "worker": text(entry, "worker")?,
+        "provider": text(entry, "provider")?,
         "title": text(entry, "title")?,
         "question": text(entry, "question")?,
         "unblocks": text(entry, "unblocks")?,
@@ -200,7 +214,7 @@ mod tests {
     }
 
     fn pending() -> Value {
-        json!({"question_id": QUESTION, "worker": "codex-impl", "title": "v22 Task t question 1",
+        json!({"question_id": QUESTION, "worker": "codex-impl", "provider": "codex", "title": "v22 Task t question 1",
             "question": "Which copy?", "unblocks": "the copy",
             "options": [{"id": "a", "label": "Short"}], "extra": "dropped"})
     }
@@ -253,6 +267,14 @@ mod tests {
             assert_eq!(sync_v22_questions(&app, &local, None).await, V22QuestionRun::default());
             assert!(local.calls.lock().unwrap().is_empty());
         }
+    }
+
+    #[test]
+    fn a_v22_card_names_its_provider_and_no_other_card_does() {
+        let tags = |items: &[&str]| items.iter().map(|tag| tag.to_string()).collect::<Vec<_>>();
+        assert_eq!(v22_card_provider(&tags(&["v22-question", "v22-provider-codex"])), Some("codex".into()));
+        assert_eq!(v22_card_provider(&tags(&["v22-provider-codex"])), None);
+        assert_eq!(v22_card_provider(&tags(&["v22-question", "v22-provider-other"])), None);
     }
 
     #[tokio::test]

@@ -45,6 +45,13 @@ pub fn question_tag(question_id: &str) -> String {
     format!("v22q-{question_id}")
 }
 
+/// The provider classes a v22 worker runs on (the app's
+/// `AMUX_V22_PROVIDERS`), and the tag that names one on a question card: a
+/// v22 worker may have no local session for the relay's scan to read its
+/// provider from.
+pub const V22_PROVIDERS: [&str; 4] = ["claude", "codex", "copilot", "cursor"];
+pub const V22_PROVIDER_TAG_PREFIX: &str = "v22-provider-";
+
 fn is_question_id(value: &str) -> bool {
     value.len() == 36
         && value
@@ -72,6 +79,7 @@ struct OptionBody {
 pub(crate) struct FileBody {
     question_id: String,
     worker: String,
+    provider: String,
     title: String,
     question: String,
     unblocks: String,
@@ -144,6 +152,7 @@ pub(crate) async fn file_with(state: &AppState, configured: Option<&str>, header
             == body.options.len();
     if !is_question_id(&body.question_id)
         || !super::dm_relay::is_lane_name(&body.worker)
+        || !V22_PROVIDERS.contains(&body.provider.as_str())
         || !bounded(&body.title, TITLE_MAX)
         || !bounded(&body.question, QUESTION_MAX)
         || !bounded(&body.unblocks, UNBLOCKS_MAX)
@@ -187,7 +196,11 @@ pub(crate) async fn file_with(state: &AppState, configured: Option<&str>, header
                 shepherd: None,
                 gate: vec![],
                 depends_on: vec![],
-                tags: vec![V22_QUESTION_TAG.into(), question_tag(&body.question_id)],
+                tags: vec![
+                    V22_QUESTION_TAG.into(),
+                    question_tag(&body.question_id),
+                    format!("{V22_PROVIDER_TAG_PREFIX}{}", body.provider),
+                ],
                 ask_type: Some("decision".into()),
                 next_action: None,
                 acceptance_criteria: None,
@@ -310,7 +323,7 @@ mod tests {
     }
 
     fn question() -> Vec<u8> {
-        json!({"question_id": QUESTION, "worker": "codex-impl", "title": "v22 Task t question 1",
+        json!({"question_id": QUESTION, "worker": "codex-impl", "provider": "codex", "title": "v22 Task t question 1",
             "question": "Which copy?", "unblocks": "the copy",
             "options": [{"id": "a", "label": "Short"}, {"id": "b", "label": "Long"}]})
         .to_string()
@@ -353,7 +366,7 @@ mod tests {
         let digest = digest();
         let (status, _) = json_of(file_with(&state, Some(&digest), &headers("wrong"), &question()).await).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        let bad = json!({"question_id": "nope", "worker": "codex-impl", "title": "t", "question": "q?",
+        let bad = json!({"question_id": "nope", "worker": "codex-impl", "provider": "codex", "title": "t", "question": "q?",
             "unblocks": "u", "options": []}).to_string().into_bytes();
         let (status, _) = json_of(file_with(&state, Some(&digest), &headers(TOKEN), &bad).await).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);

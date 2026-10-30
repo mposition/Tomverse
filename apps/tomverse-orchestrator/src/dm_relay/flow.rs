@@ -346,14 +346,18 @@ pub async fn scan<L: DmLocal + ?Sized>(
         if card.status != "needsyou" || card.archived {
             continue;
         }
+        // A v22 worker's question card names its provider class itself: the
+        // worker may have no local session to read it from (`v22_question`).
         let Some(provider) = card
             .session
             .as_ref()
             .and_then(|session| providers.get(session))
+            .cloned()
+            .or_else(|| super::v22_question::v22_card_provider(&card.tags))
         else {
             continue;
         };
-        let Some(binding) = routing_binding(&question, &card, provider) else {
+        let Some(binding) = routing_binding(&question, &card, &provider) else {
             continue;
         };
         scan.candidate = Some(Candidate {
@@ -2075,6 +2079,32 @@ pub(crate) mod tests {
             .unwrap()
             .remove("/api/board?status=needsyou");
         assert!(super::scan(&local, &settled, None, false).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_v22_question_card_without_a_local_session_is_routed_by_its_own_provider_tag() {
+        let local = FakeLocal::default();
+        let question = json!({"card_id": "CI-9", "typed_ask": null, "latest_revision": 1, "pending": null,
+            "answer": null, "current_revision": {"question_revision": 1, "ask_type": "decision",
+            "ask_question": "Q?", "ask_unblocks": "U.", "detail": {"format": "amux-typed-ask-v1",
+            "options": [], "resolution": null, "context": "", "context_paths": []}}});
+        let detail = |tags: Value| json!({"id": "CI-9", "status": "needsyou", "title": "T", "type": "task",
+            "tags": tags, "session": "v22-only-worker", "archived": 0, "attempts": []});
+        let mut reads = BTreeMap::new();
+        reads.insert("/api/board?status=needsyou".to_owned(), LocalRead::Found(json!([{"id": "CI-9", "status": "needsyou"}])));
+        reads.insert("/api/sessions".to_owned(), LocalRead::Found(json!([{"name": "claude-impl", "provider": "claude"}])));
+        reads.insert("/api/board/CI-9/typed-ask".to_owned(), LocalRead::Found(question));
+        reads.insert("/api/board/CI-9".to_owned(),
+            LocalRead::Found(detail(json!(["v22-question", "v22-provider-codex"]))));
+        *local.reads.lock().unwrap() = reads;
+        let settled = BTreeSet::new();
+        let found = scan(&local, &settled, None, false).await.unwrap().candidate.unwrap();
+        assert_eq!(found.binding.asking_provider, "codex");
+        assert_eq!(found.binding.amux_session_id, "v22-only-worker");
+        // The same tag on a card that is not a v22 question card names nothing.
+        local.reads.lock().unwrap().insert("/api/board/CI-9".to_owned(),
+            LocalRead::Found(detail(json!(["v22-provider-codex"]))));
+        assert!(scan(&local, &settled, None, false).await.unwrap().candidate.is_none());
     }
 
     #[test]
