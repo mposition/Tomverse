@@ -9,6 +9,8 @@ import {
   expectedPublishCommit,
   publisherPrBody,
   publisherPrTitle,
+  publisherReviewPrBody,
+  publisherReviewPrTitle,
   runPublisherCycle,
 } from "../scripts/engineering-agent-publisher-core.mjs";
 import {
@@ -19,7 +21,12 @@ import {
   stoppableWorkspace,
   tokenPermissionsAllowed,
 } from "../scripts/engineering-agent-publisher.mjs";
-import { prBodyCarriesMarker, shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
+import {
+  ENGINEERING_PUBLISHER_FEATURES_HEADER,
+  prBodyCarriesMarker,
+  publisherOpensReviewDrafts,
+  shouldSendSuccessHeartbeat,
+} from "../lib/engineeringAgentCore.ts";
 
 // The publisher service's cycle (docs/policy/engineering-agent.md §7-2,
 // §8-§10) against fake ports: what it asks the app and GitHub, in what order,
@@ -152,6 +159,39 @@ test("a write claim is rebuilt, looked at last, pushed once to a new branch, and
     snapshot: { baseSha: "f".repeat(40), diffDigest: "d".repeat(64), treeId: TREE, invalidatedReviewIds: [] },
   });
   assert.deepEqual(world.tokens, { minted: 1, revoked: 1 }, "the token lives for this one item");
+  assert.equal(pr.draft, false, "an ordinary item is a ready pull request");
+});
+
+test("an owner review item opens a draft pull request that says what marking it ready does", async () => {
+  const world = fakeWorld({ work: writeWork({ ownerReview: true }) });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  const pr = world.calls.find((call) => call.path === "github:createPull").input;
+  assert.equal(pr.draft, true);
+  assert.equal(pr.title, publisherReviewPrTitle(RUN));
+  assert.equal(pr.body, publisherReviewPrBody(RUN, "card_1"));
+  assert.ok(prBodyCarriesMarker(pr.body, RUN), "a lookup still finds it by its marker");
+  assert.match(pr.body, /Owner review \(T2\)/);
+  assert.match(pr.body, /secrets/);
+  // Only `true` makes a review item: a missing or odd value is the ordinary one.
+  for (const ownerReview of [undefined, "true", 1]) {
+    const other = fakeWorld({ work: writeWork({ ownerReview }) });
+    await runPublisherCycle(other.ports);
+    const opened = other.calls.find((call) => call.path === "github:createPull").input;
+    assert.equal(opened.draft, false);
+    assert.equal(opened.title, publisherPrTitle(RUN));
+  }
+});
+
+test("a publisher names review drafts in a header the app reads; nothing else counts as naming them", () => {
+  assert.equal(publisherOpensReviewDrafts("review_draft"), true);
+  assert.equal(publisherOpensReviewDrafts("other, review_draft"), true);
+  for (const header of [null, "", "review_drafts", "Review_Draft", "x review_draft"]) {
+    assert.equal(publisherOpensReviewDrafts(header), false);
+  }
+  const source = readFileSync(new URL("../scripts/engineering-agent-publisher.mjs", import.meta.url), "utf8");
+  assert.match(source, /\[ENGINEERING_PUBLISHER_FEATURES_HEADER\]: ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE/,
+    "every call to the app names the feature");
+  assert.equal(ENGINEERING_PUBLISHER_FEATURES_HEADER, ENGINEERING_PUBLISHER_FEATURES_HEADER.toLowerCase());
 });
 
 test("nothing claimed mints nothing; a switch or halt refusal is a quiet round", async () => {

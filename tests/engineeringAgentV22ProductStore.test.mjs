@@ -55,12 +55,23 @@ test("a promotion and its one-use capability use the same transaction", async ()
   assert.equal(calls[1].usedTx, tx);
   assert.deepEqual(calls[0].request.promote, {
     expectedTreeId: candidate.expectedTreeId,
-    imageProofDigest: candidate.imageProofDigest });
+    imageProofDigest: candidate.imageProofDigest, ownerReview: false });
   assert.equal(calls[1].request.workItemId, "item-1");
   assert.deepEqual(calls[1].request.capability.commit,
     { identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
       baseCommitterDate: candidate.baseCommitterDate,
       runId: input.runId, cardRef: input.taskId });
+});
+
+test("an owner review promotion reaches the store as one, with or without gate evidence", async () => {
+  const requests = [];
+  await resolveEngineeringAgentV22Product(tx,
+    { ...input, candidate: { ...candidate, imageProofDigest: null }, ownerReview: true }, {
+      resolve: async (_tx, request) => { requests.push(request); return { publishWorkItemId: "item-3" }; },
+      issue: async () => ({ capabilityId: "cap-3", commitDigest: "d".repeat(64), expiresAt: new Date() }),
+    });
+  assert.deepEqual(requests[0].promote, { expectedTreeId: candidate.expectedTreeId,
+    imageProofDigest: null, ownerReview: true });
 });
 
 test("a kept draft issues no capability, and a failed issuer is not hidden", async () => {

@@ -4,6 +4,8 @@ import { after } from "next/server";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
+import { ENGINEERING_PUBLISHER_FEATURES_HEADER,
+  publisherOpensReviewDrafts } from "@/lib/engineeringAgentCore";
 import {
   ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
   EngineeringAgentStoreRefusedError,
@@ -30,6 +32,10 @@ import { prisma } from "@/lib/prisma";
 // After answering, the round also reads one `tier_pending` v22 draft's tier
 // (§4): GitHub reads and source analysis that no settlement budget can hold.
 // A publish item it opens is claimed by a later round.
+//
+// An owner review item (a T2 patch, opened as a draft pull request) is handed
+// for writing only to a publisher whose features header names `review_draft`:
+// one deployed before that feature would open it as a ready pull request.
 
 const requestSchema = z
   .object({
@@ -46,7 +52,10 @@ export async function POST(request: Request) {
       route: "publish/claim",
       requestKey: body.requestKey,
       body,
-      work: (tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS }),
+      work: (tx) => claimNextEngineeringAgentPublishWork(tx, {
+        leaseMs: ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
+        reviewDrafts: publisherOpensReviewDrafts(request.headers.get(ENGINEERING_PUBLISHER_FEATURES_HEADER)),
+      }),
       // A publisher that loses the answer learns which item it holds; the
       // claim's lease then passes and a lookup finds the work again (§10).
       resultRef: (work) => work?.workItemId ?? null,
