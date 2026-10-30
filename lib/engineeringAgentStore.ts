@@ -63,7 +63,10 @@ import {
   ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY,
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_V22_PROMOTED_REASON,
+  ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
+  ENGINEERING_AGENT_V22_REVIEW_PR_ENV,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
+  engineeringAgentV22ReviewPrEnabled,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
   ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
@@ -984,6 +987,8 @@ export type EngineeringAgentPublishWork =
       branch: string;
       fencingToken: bigint;
       leaseExpiresAt: Date;
+      /** An owner review item: a T2 patch the publisher opens as a draft pull request. */
+      ownerReview: boolean;
       /** The capability a write claim consumed; null when none was, and so no write was allowed. */
       consumed: { commitDigest: string; expectedTreeId: string } | null;
     }
@@ -994,6 +999,7 @@ export type EngineeringAgentPublishWork =
       branch: string;
       fencingToken: bigint;
       leaseExpiresAt: Date;
+      ownerReview: boolean;
       cardRef: string;
       baseSha: string;
       patchBody: string;
@@ -1009,10 +1015,13 @@ export type EngineeringAgentPublishWork =
  * with a live capability only while publishing is allowed. A write claim
  * returns the patch the publisher applies and the capability it must match;
  * a lookup returns only what it needs to look. Nothing to do is `null`.
+ * An owner review item is written only for a publisher that opens it as a
+ * draft (`reviewDrafts`) and only while its switch is on; its lookups go to
+ * any publisher, since a lookup writes nothing.
  */
 export async function claimNextEngineeringAgentPublishWork(
   tx: EngineeringAgentTransaction,
-  input: { leaseMs: number },
+  input: { leaseMs: number; reviewDrafts?: boolean },
 ): Promise<EngineeringAgentPublishWork | null> {
   await requireSwitch(tx, "maintenanceAllowed");
   // A claim whose lease passed -- a publisher that died, or an answer that
@@ -1033,6 +1042,9 @@ export async function claimNextEngineeringAgentPublishWork(
   const publishAllowed = switches.publishAllowed && !engineeringAgentHalted(await readEngineeringAgentHaltState(tx));
   const v22PublicationEnabled = amuxV22EngineeringPublicationEnabled(
     process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
+  const reviewWrites = input.reviewDrafts === true && engineeringAgentV22ReviewPrEnabled(
+    process.env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV]);
+  const reviewKeys = `${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX}%`;
   const now = await databaseNow(tx);
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string }>>`
     SELECT w."id", w."state"
@@ -1042,6 +1054,7 @@ export async function claimNextEngineeringAgentPublishWork(
         w."state" IN ('needs_lookup', 'outcome_unknown')
         OR (
           ${publishAllowed} AND w."state" = 'queued'
+          AND (${reviewWrites} OR w."causeKey" NOT LIKE ${reviewKeys})
           AND (${v22PublicationEnabled} OR NOT EXISTS (
             SELECT 1 FROM "EngineeringAgentRun" r
             JOIN "AmuxWorkItem" card ON card."id" = r."cardId"
@@ -1065,6 +1078,7 @@ export async function claimNextEngineeringAgentPublishWork(
   const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: candidate.id },
     select: {
+      causeKey: true,
       runId: true,
       patchBody: true,
       patchDigest: true,
@@ -1080,6 +1094,7 @@ export async function claimNextEngineeringAgentPublishWork(
     branch: engineeringBranchName(runId),
     fencingToken: claim.fencingToken,
     leaseExpiresAt: claim.leaseExpiresAt,
+    ownerReview: item.causeKey.startsWith(ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX),
   };
   if (mode === "lookup") {
     // What a lookup compares a found commit with: the capability a write
@@ -1302,14 +1317,18 @@ export async function issueEngineeringAgentCapability(
  * (§4). A T1 verdict promotes it: the draft closes as `expired` with reason
  * `publish_promoted` and the run's publish item opens with the draft's own patch,
  * which the database admits only after that draft and only while the pull
- * request queue has room. Any other verdict leaves an ordinary draft for the
- * owner, under the reason that kept it private. A draft that is no longer
- * pending, or no longer this patch, is left alone.
+ * request queue has room. A T2 verdict promoted for the owner's review
+ * (`ownerReview`, owner decision 2026-10-30) takes the same path under its
+ * own cause key, so the publisher opens it as a draft pull request. Any other
+ * verdict leaves an ordinary draft for the owner, under the reason that kept
+ * it private. A draft that is no longer pending, or no longer this patch, is
+ * left alone.
  */
 export async function resolveEngineeringAgentV22TierPendingDraft(
   tx: EngineeringAgentTransaction,
   input: { workItemId: string; patchDigest: string; baseSha: string;
-    promote: { expectedTreeId: string; imageProofDigest: string } | null;
+    promote: { expectedTreeId: string; imageProofDigest: string | null;
+      ownerReview: boolean } | null;
     reason: string },
 ): Promise<{ publishWorkItemId: string } | { kept: boolean }> {
   if (!REASON.test(input.reason) ||
@@ -1338,9 +1357,12 @@ export async function resolveEngineeringAgentV22TierPendingDraft(
   await systemAudit(tx, "engineering-agent-runner", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemExpired, "engineering_agent_work_item", item.id, {
     kind: "t2_draft", reason: ENGINEERING_AGENT_V22_PROMOTED_REASON,
     imageProofDigest: input.promote.imageProofDigest,
+    ownerReview: input.promote.ownerReview,
   });
   const opened = await openEngineeringAgentWorkItem(tx, {
-    kind: "publish", causeKey: `publish:${item.runId}`, runId: item.runId,
+    kind: "publish", causeKey: input.promote.ownerReview ?
+      `${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX}${item.runId}` :
+      `publish:${item.runId}`, runId: item.runId,
     patchBody: draft.patchBody, patchDigest: input.patchDigest,
     baseSha: input.baseSha, expectedTreeId: input.promote.expectedTreeId,
   });

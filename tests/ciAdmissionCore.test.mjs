@@ -94,6 +94,14 @@ test("the line is every open handled pull request, drafts included: stored order
   assert.deepEqual(ciAdmissionOrder(lineOf(20, 30), open.map((p) => (p.number === 20 ? { ...p, labels: [CI_ADMISSION_HOLD_LABEL] } : p))).map((p) => p.number), [30, 5, 10]);
 });
 
+test("the engineering agent's pull requests are never in the line, so admission never marks an owner review draft ready", () => {
+  const agent = pull(7, { head: "agent/engineering/123456789012" });
+  const open = [pull(30), agent, pull(8, { head: "agent/other" })];
+  assert.deepEqual(ciAdmissionOrder(lineOf(7, 30), open).map((p) => p.number), [30, 8]);
+  const evaluation = judge({ state: state(), openPulls: open, checks: checksFor(open) });
+  assert.ok(!evaluation.actions.some((action) => action.pull?.number === 7), "nothing is done to it");
+});
+
 test("the same GitHub snapshot judged again gives the same line: nothing appears and disappears", () => {
   const open = [pull(1), pull(2), pull(3), pull(4, { draft: false })];
   const first = judge({ state: state(), openPulls: open, checks: checksFor(open) });
