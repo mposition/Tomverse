@@ -2293,11 +2293,59 @@ enum V52ReviewStep {
     Findings { text: String },
 }
 
+/// The control characters the app refuses in question text (`CONTROL` of
+/// lib/amux/v22OwnerQuestionCore.ts): C0 but tab, newline and carriage
+/// return, and DEL.
+pub fn v22_question_control(c: char) -> bool {
+    matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{7f}')
+}
+
+/// Whether a v22 result ends with an owner question the app records
+/// (`parseAmuxV22OwnerQuestion` of lib/amux/v22OwnerQuestionCore.ts, the same
+/// grammar and bounds): such a run is not finished, so it is never reviewed
+/// (operator decision 2026-10-30).
+pub fn v22_result_asks_owner(text: &str) -> bool {
+    const MARKER: &str = "AMUX_OWNER_QUESTION:";
+    let Some(last) = text.lines().map(str::trim).filter(|line| !line.is_empty()).last() else {
+        return false;
+    };
+    let Some(raw) = last.strip_prefix(MARKER) else { return false };
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    // The app's boundedText exactly: the raw string's UTF-16 length, the
+    // same control set (tab, newline and carriage return allowed), not blank.
+    let bounded = |value: Option<&serde_json::Value>, max: usize| {
+        value.and_then(serde_json::Value::as_str).is_some_and(|text| {
+            !text.trim().is_empty() && text.encode_utf16().count() <= max
+                && !text.chars().any(v22_question_control)
+        })
+    };
+    if !bounded(map.get("question"), 2_000) || !bounded(map.get("unblocks"), 1_000) {
+        return false;
+    }
+    let options = match map.get("options") {
+        None | Some(serde_json::Value::Null) => return true,
+        Some(serde_json::Value::Array(items)) if items.len() <= 6 => items,
+        _ => return false,
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    options.iter().all(|option| {
+        let id = option.get("id").and_then(serde_json::Value::as_str).unwrap_or("");
+        let id_ok = id.len() <= 32 && id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+        id_ok && ids.insert(id.to_owned()) && bounded(option.get("label"), 300)
+    })
+}
+
 fn v52_review_required(
     profile: &crate::tomverse_api::V22ExecutionProfile,
     result: &V22SidecarResult,
     outcome: &str,
 ) -> bool {
+    // A run that ended with an owner question is not reviewed: the app parks
+    // it for the answer and reviews the run that finishes the Task.
+    !result.result_text.as_deref().is_some_and(v22_result_asks_owner) &&
     profile.grade_guard && profile.role == "implement" && outcome == "succeeded" &&
         (result.review_touches_contract != Some(true) ||
             profile.execution_grade.as_deref() == Some("frontier"))
@@ -4007,6 +4055,12 @@ mod tests {
         result.review_touches_contract = Some(false);
         assert!(v52_review_required(&profile, &result, "succeeded"));
         assert!(!v52_review_required(&profile, &result, "failed"));
+        let asking = V22SidecarResult {
+            result_text: Some("Partial.
+AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"a\",\"label\":\"A\"}]}".into()),
+            ..result.clone()
+        };
+        assert!(!v52_review_required(&profile, &asking, "succeeded"));
     }
 
     #[test]
@@ -6704,5 +6758,36 @@ mod tests {
         assert!(!deferral.contains("halted = true"));
         assert!(!deferral.contains("v22_sidecar_api_model_access"));
         assert!(!deferral.contains("record_once"));
+    }
+}
+
+#[cfg(test)]
+mod v22_owner_question_tests {
+    use super::v22_result_asks_owner;
+
+    #[test]
+    fn only_a_well_formed_last_line_is_an_owner_question() {
+        assert!(v22_result_asks_owner("x
+AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
+
+"));
+        // At the bound, and with C1 text the app also allows.
+        assert!(v22_result_asks_owner(&format!(
+            "AMUX_OWNER_QUESTION: {{\"question\":\"{}\",\"unblocks\":\"u\\u0085\"}}", "가".repeat(2_000))));
+        for text in [
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
+Done.",
+            "AMUX_OWNER_QUESTION: not json",
+            "AMUX_OWNER_QUESTION: {\"question\":\" \",\"unblocks\":\"u\"}",
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\"}",
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"A\",\"label\":\"x\"}]}",
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"a\",\"label\":\"x\"},{\"id\":\"a\",\"label\":\"y\"}]}",
+            "All done.",
+            // The bound is on the raw text, as the app's: padding counts.
+            &format!("AMUX_OWNER_QUESTION: {{\"question\":\"{}Q\",\"unblocks\":\"u\"}}", " ".repeat(2_000)),
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q\\u0007\",\"unblocks\":\"u\"}",
+        ] {
+            assert!(!v22_result_asks_owner(text), "{text}");
+        }
     }
 }
