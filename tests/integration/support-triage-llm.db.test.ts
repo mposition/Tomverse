@@ -173,6 +173,38 @@ test("deleting the account of a report the model was shown deletes the suggestio
   assert.equal(calls, 0);
 });
 
+test("an answered input that was superseded stays settled after the shown report's account is deleted", async () => {
+  await report("seen", { message: "Something only this person wrote." });
+  await report("a");
+  await runSupportTriageWorker({ llm: answering("other") });
+  // The input changes: the answer for input A is superseded, input B answered.
+  await prisma.feedback.update({ where: { id: `${PREFIX}a` }, data: { type: "feature" } });
+  await runSupportTriageWorker({ llm: answering("other") });
+  const { deleteSupportTriageDataForAccount } = await import("@/lib/supportTriageAccountDeletion");
+  await prisma.$transaction(async (tx) => {
+    await tx.feedback.update({ where: { id: `${PREFIX}seen` }, data: { message: "[deleted account]" } });
+    return deleteSupportTriageDataForAccount(tx, [`${PREFIX}seen`]);
+  });
+  const left = await prisma.supportTriageSuggestion.findMany({
+    where: { feedbackId: `${PREFIX}a` },
+    select: { state: true, contextFeedbackIds: true },
+  });
+  assert.deepEqual(left, [
+    { state: "expired", contextFeedbackIds: [] },
+    { state: "expired", contextFeedbackIds: [] },
+  ]);
+  // Input A comes back: neither input is sent to the model again.
+  await prisma.feedback.update({ where: { id: `${PREFIX}a` }, data: { type: "bug" } });
+  let calls = 0;
+  await runSupportTriageWorker({
+    llm: async () => {
+      calls += 1;
+      return null;
+    },
+  });
+  assert.equal(calls, 0);
+});
+
 test("an answer whose shown report was deleted before the result is written is dropped", async () => {
   await report("seen", { message: "Something only this person wrote." });
   await report("a");
