@@ -33,23 +33,29 @@ export function AmuxCardListPanel({
   const [answer, setAnswer] = useState("");
   const [answerState, setAnswerState] = useState<"sending" | "sent" |
     { failed: string } | null>(null);
+  // The question on screen; an answer's response for another one is dropped.
+  const shownQuestion = useRef<string | null>(null);
   async function sendAnswer(taskId: string, questionId: string) {
     setAnswerState("sending");
+    const current = () => shownQuestion.current === questionId;
     try {
       const response = await adminFetch("/api/admin/amux/v22-owner-question", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskId, questionId, answer }) });
+      if (!current()) return;
       if (response.ok) { setAnswerState("sent"); setAnswer(""); return; }
       const body = await response.json().catch(() => null);
+      if (!current()) return;
       setAnswerState({ failed: typeof body?.error === "string" ?
         body.error : String(response.status) });
-    } catch { setAnswerState({ failed: "network" }); }
+    } catch { if (current()) setAnswerState({ failed: "network" }); }
   }
   async function showResult(taskId: string) {
     const requestId = ++resultRequestId.current;
     setSelectedTaskId(taskId);
     setResultText(null);
     setQuestion(null);
+    shownQuestion.current = null;
     setAnswer("");
     setAnswerState(null);
     setResultState("loading");
@@ -67,8 +73,10 @@ export function AmuxCardListPanel({
         setResultState("unavailable"); return;
       }
       setResultText(body.result.text);
-      setQuestion(body.question && typeof body.question.id === "string" ?
-        body.question as WorkerQuestion : null);
+      const shown = body.question && typeof body.question.id === "string" ?
+        body.question as WorkerQuestion : null;
+      shownQuestion.current = shown?.id ?? null;
+      setQuestion(shown);
       setResultState("available");
     } catch {
       if (requestId === resultRequestId.current) setResultState("unavailable");

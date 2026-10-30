@@ -20,14 +20,16 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import {
   openAmuxV22QuestionCards,
   readAmuxV22QuestionSyncRows,
-  resolveAmuxV22QuestionFromDmJudgment,
+  runAmuxV22ResolveStep,
 } from "@/lib/amux/v22OwnerQuestionDmService";
 
 /**
  * The relay's v22 question tick (operator decision 2026-10-30): first one
  * step of the walk over confirmed Decision Maker proposals from the relay's
  * cursor (`after`), which answers an open question whose card a person
- * confirmed; then the open questions that still need a typed-ask card on the
+ * confirmed -- a read, then the answer under the audit chain lock and the
+ * kill switch, or, when the answer cannot resume the Task, an escalation and
+ * the cancel, each its own transaction within §9's 12 statements; then the open questions that still need a typed-ask card on the
  * AMUX host and the cards of questions no longer open that it should close.
  * `cursor` says where the walk goes next. The question text is opened from
  * the run's encrypted result outside the read transaction. Closed until
@@ -48,19 +50,17 @@ export async function POST(request: Request) {
       const body = await readLimitedJson(request, 1_024, requestSchema);
       const after = parseDmDeliveryCursor(body.after);
       if (after === undefined) return refused(400, "invalid_request");
-      const resolved = await withAmuxDbBoundary(
-        AMUX_DB_BOUNDARIES.decisionMakerV22QuestionResolve,
-        (tx, context) => resolveAmuxV22QuestionFromDmJudgment(tx, context.dbNow, after));
+      const { resolved: outcome, cursor } = await runAmuxV22ResolveStep(after);
       const rows = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
         (tx) => readAmuxV22QuestionSyncRows(tx));
       const cards = await openAmuxV22QuestionCards(rows.pending);
       return amuxJsonNoStore({
         synced: true,
-        resolved: resolved.resolved,
-        cursor: resolved.cursor.move === "advance" ? { move: "advance",
-          judged_at_ms: resolved.cursor.judgedAtMs,
-          request_id: resolved.cursor.requestId } : { move: resolved.cursor.move },
+        resolved: outcome,
+        cursor: cursor.move === "advance" ? { move: "advance",
+          judged_at_ms: cursor.judgedAtMs, request_id: cursor.requestId } :
+          { move: cursor.move },
         pending: cards,
         closing: rows.closing.map((row) => ({
           question_id: row.questionId, card_id: row.cardId })),

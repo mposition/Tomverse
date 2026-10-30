@@ -55,30 +55,41 @@ export async function answerAmuxV22OwnerQuestionInTransaction(
 ) {
   const answer = normalizeAmuxV22OwnerAnswer(input.answer);
   if (!answer) throw new BoardImportError("answer_invalid", 400);
+  // One statement: the question locked, its Task, and the Task's newest
+  // attempt, which must be the asking run parked by this question.
   const rows = await tx.$queryRaw<Array<{ id: string; taskId: string;
-    attemptId: string; state: string }>>`
-    SELECT "id", "taskId", "attemptId", "state" FROM "AmuxV22TaskQuestion"
-    WHERE "id" = ${input.questionId} FOR UPDATE`;
+    attemptId: string; state: string; status: string; owner: string | null;
+    claimedAt: Date | null; archivedAt: Date | null;
+    v22AssignmentId: string | null; revision: number; briefBytes: number | null;
+    parkedId: string | null; parkedToStatus: string | null;
+    parkedReason: string | null }>>`
+    SELECT q."id", q."taskId", q."attemptId", q."state", w."status", w."owner",
+      w."claimedAt", w."archivedAt", w."v22AssignmentId", w."revision",
+      octet_length(w."v4BriefCiphertext") AS "briefBytes",
+      a."id" AS "parkedId", a."toStatus" AS "parkedToStatus",
+      a."reason" AS "parkedReason"
+    FROM "AmuxV22TaskQuestion" q
+    JOIN "AmuxWorkItem" w ON w."id" = q."taskId"
+    LEFT JOIN LATERAL (
+      SELECT x."id", x."toStatus", x."reason" FROM "AmuxExecutionAttempt" x
+      WHERE x."taskId" = q."taskId"
+      ORDER BY x."startedAt" DESC, x."id" DESC LIMIT 1
+    ) a ON TRUE
+    WHERE q."id" = ${input.questionId}
+    FOR UPDATE OF q`;
   const question = rows[0];
   if (!question) throw new BoardImportError("not_found", 404);
   if (question.state !== "open")
     throw new BoardImportError("question_not_open", 409);
-  const task = await tx.amuxWorkItem.findUnique({ where: { id: question.taskId },
-    select: { status: true, owner: true, claimedAt: true, archivedAt: true,
-      v22AssignmentId: true, revision: true, v4BriefCiphertext: true } });
-  const parked = await tx.amuxExecutionAttempt.findFirst({
-    where: { taskId: question.taskId },
-    orderBy: [{ startedAt: "desc" }, { id: "desc" }],
-    select: { id: true, toStatus: true, reason: true },
-  });
-  if (!task || task.status !== "blocked" || task.owner || task.claimedAt ||
+  const task = question;
+  if (task.status !== "blocked" || task.owner || task.claimedAt ||
       task.archivedAt || task.v22AssignmentId ||
-      parked?.id !== question.attemptId || parked.toStatus !== "blocked" ||
-      parked.reason !== "owner_question")
+      task.parkedId !== question.attemptId || task.parkedToStatus !== "blocked" ||
+      task.parkedReason !== "owner_question")
     throw new BoardImportError("task_not_waiting", 409);
   // The answer goes whole into the resumed prompt; one that cannot fit beside
   // the brief is refused now, to be shortened, never cut at delivery.
-  if (PROMPT_FIXED_BYTES + (task.v4BriefCiphertext?.length ?? 0) +
+  if (PROMPT_FIXED_BYTES + Number(task.briefBytes ?? 0) +
       amuxV22ResumeMinimumBytes(answer, input.source) + 2 >
       AMUX_V22_RESUME_PROMPT_MAX_BYTES)
     throw new BoardImportError("answer_too_long_for_prompt", 409);

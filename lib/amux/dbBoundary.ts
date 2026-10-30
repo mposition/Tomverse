@@ -524,14 +524,31 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
-  // Resolve, one step of the confirmation walk: setup + switches + the next
-  // confirmation + request state + the open question of its card + result
-  // detail + bodies + the answer (question lock, task, attempt, canonical
-  // audit 4, question, task) + fence = 18; a cancel adds its update, the task
-  // read, an escalation (lookup, task, create, audit 4) and its own audit 4.
+  // Each within docs/policy/amux-decision-maker.md §9's 12 statements.
+  // Resolve read: setup + switches + the next confirmation + request state +
+  // the open question of its card + result detail + bodies + fence.
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 32,
+    prismaCallCeiling: 8,
+    isolation: "read",
+  },
+  // Answer: setup + audit chain lock + switches + the locked question, Task
+  // and newest attempt + canonical audit 4 + question + Task + fence.
+  decisionMakerV22QuestionAnswer: {
+    operation: "decision_maker_v22_question_answer",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // Escalate: setup + Task + escalation (lookup, Task, create, audit 4) + fence.
+  decisionMakerV22QuestionEscalate: {
+    operation: "decision_maker_v22_question_escalate",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // Cancel: setup + question + canonical audit 4 + fence.
+  decisionMakerV22QuestionCancel: {
+    operation: "decision_maker_v22_question_cancel",
+    prismaCallCeiling: 7,
     isolation: "mutation",
   },
   // Sync read: setup + pending + closing + fence.

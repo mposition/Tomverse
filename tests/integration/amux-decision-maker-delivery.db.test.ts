@@ -34,7 +34,7 @@ import {
   readAmuxV22QuestionSyncRows,
   recordAmuxV22QuestionLocalCard,
   recordAmuxV22QuestionLocalCardClosed,
-  resolveAmuxV22QuestionFromDmJudgment,
+  runAmuxV22ResolveStep,
 } from "@/lib/amux/v22OwnerQuestionDmService";
 import { prisma } from "@/lib/prisma";
 
@@ -635,8 +635,7 @@ const writeQuestion = <T>(work: (tx: Parameters<Parameters<typeof withAmuxDbBoun
   withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionWrite,
     (tx, context) => work(tx, context.dbNow));
 const resolveQuestion = (after: { judgedAtMs: number; requestId: string } | null = null) =>
-  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionResolve,
-    (tx, context) => resolveAmuxV22QuestionFromDmJudgment(tx, context.dbNow, after));
+  runAmuxV22ResolveStep(after);
 
 test("a v22 question card's confirmed answer resumes its Task and is never offered for delivery", async () => {
   const { task, question } = await parkedV22Question();
@@ -663,7 +662,6 @@ test("a v22 question card's confirmed answer resumes its Task and is never offer
   await setSwitch("kill_switch", "off");
   const answeredStep = await resolveQuestion();
   assert.equal(answeredStep.resolved, "answered");
-  assert.equal(answeredStep.questionId, question.id);
   assert.equal(answeredStep.cursor.move, "advance");
   const answered = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: question.id } });
   assert.equal(answered.state, "answered");
@@ -710,7 +708,6 @@ test("a v22 question whose Task moved on is cancelled by its confirmed answer, n
   await judge(requestId, "confirm");
   const cancelledStep = await resolveQuestion();
   assert.equal(cancelledStep.resolved, "cancelled");
-  assert.equal(cancelledStep.questionId, question.id);
   const cancelled = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: question.id } });
   assert.equal(cancelled.state, "cancelled");
   assert.equal(cancelled.answerText, null);

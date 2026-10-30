@@ -309,6 +309,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const resume = await tx.amuxV22TaskQuestion.findFirst({
         where: { taskId, answerText: { not: null },
           state: { in: ["answered", "resumed"] } },
+        orderBy: [{ answeredAt: "desc" }, { id: "desc" }],
         select: { worker: true } });
       const resumeRoutes = resume && approved.receipt.routes.some((route) =>
         route.workerName === resume.worker) ?
