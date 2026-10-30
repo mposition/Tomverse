@@ -355,7 +355,7 @@ export const finalLane = (row: ClaimedRow): { finalLane: TriageLane; laneSource:
 };
 
 /** Open reports a claimed report may duplicate: the newest 30 eligible ones from the last 30 days. */
-const readDuplicateCandidates = (): Promise<TriageCandidate[]> =>
+export const readDuplicateCandidates = (): Promise<TriageCandidate[]> =>
   prisma.$queryRaw<TriageCandidate[]>`
     SELECT f."id", f."type", f."message"
       FROM "Feedback" f
@@ -368,15 +368,17 @@ const readDuplicateCandidates = (): Promise<TriageCandidate[]> =>
 /**
  * The LLM step, outside any transaction: one call per claimed report, all at
  * once (a batch is at most 10). A failed or unusable answer leaves the row on
- * its keyword lane. The lease (5 minutes) outlasts the call timeout.
+ * its keyword lane. The lease (5 minutes) outlasts the call timeout. The
+ * duplicate pool is read before the claim, so nothing but the call runs
+ * between the claim and the result transaction.
  */
 export const runTriageLlm = async (
   llm: TriageLlm,
   claimed: readonly ClaimedRow[],
-  reports: ReadonlyMap<string, ClaimedReport>
-): Promise<ClaimedRow[]> => {
-  const pool = await readDuplicateCandidates();
-  return Promise.all(
+  reports: ReadonlyMap<string, ClaimedReport>,
+  pool: readonly TriageCandidate[]
+): Promise<ClaimedRow[]> =>
+  Promise.all(
     claimed.map(async (row) => {
       const report = reports.get(row.feedbackId);
       if (!report) return row;
@@ -385,7 +387,6 @@ export const runTriageLlm = async (
       return answer ? { ...row, llm: answer } : row;
     })
   );
-};
 
 /**
  * Step 4: ready only the rows still claimed with this token, for reports still
@@ -496,6 +497,7 @@ export const runSupportTriageWorker = async (
       const { candidates, last, exhausted } = await readCandidates(after, limit);
       after = last;
       if (candidates.length > 0) {
+        const pool = llm ? await readDuplicateCandidates() : [];
         const batch = await claimSupportTriageBatch(run, candidates, batchReserveMs).catch((error: unknown) => {
           if (deadlinePassed(error)) return null;
           throw error;
@@ -510,7 +512,7 @@ export const runSupportTriageWorker = async (
         if (batch.token && batch.claimed.length > 0) {
           // The claim's reserve covers the call (it ends within its timeout)
           // and the write, so neither is skipped for want of time.
-          const answered = llm ? await runTriageLlm(llm, batch.claimed, batch.reports) : batch.claimed;
+          const answered = llm ? await runTriageLlm(llm, batch.claimed, batch.reports, pool) : batch.claimed;
           const result = await writeSupportTriageResults(run, batch.token, answered);
           totals.ready += result.ready;
           totals.stale += result.stale;
