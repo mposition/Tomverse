@@ -226,6 +226,55 @@ test("an answer whose shown report was deleted before the result is written is d
   assert.equal(row.replyDraft, null);
 });
 
+test("a report anonymised after the pool and the claim were read is never sent to the model", async () => {
+  await report("seen", { message: "Something only this person wrote." });
+  await report("a");
+  await report("b");
+  const { startSupportTriageRun } = await import("@/lib/supportTriageRunStore");
+  const { claimSupportTriageBatch, readDuplicateCandidates, runTriageLlm } = await import("@/lib/supportTriageWorker");
+  const run = await startSupportTriageRun("worker");
+  const pool = await readDuplicateCandidates();
+  assert.ok(pool.some((c) => c.id === `${PREFIX}seen`));
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`, `${PREFIX}b`], 0);
+  assert.equal(batch.claimed.length, 2);
+  // Both accounts are deleted after the reads and before the calls: a shown
+  // candidate, and a claimed report itself.
+  await prisma.feedback.updateMany({
+    where: { id: { in: [`${PREFIX}seen`, `${PREFIX}b`] } },
+    data: { message: "[deleted account]" },
+  });
+  const sent: TriageLlmInput[] = [];
+  const answered = await runTriageLlm(
+    async (input) => {
+      sent.push(input);
+      return answering("other")(input);
+    },
+    batch.claimed,
+    batch.reports,
+    pool
+  );
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].report.message, "The answer stops halfway.");
+  assert.ok(sent[0].candidates.every((c) => c.id !== `${PREFIX}seen` && c.id !== `${PREFIX}b`));
+  assert.ok(!JSON.stringify(sent).includes("only this person"));
+  assert.equal(answered.find((row) => row.feedbackId === `${PREFIX}b`)?.llm, undefined);
+});
+
+test("the model may raise a money report to trust and safety, which outranks it", async () => {
+  await report("pay", { type: "other", message: "I was charged twice, please refund me." });
+  await runSupportTriageWorker({
+    llm: async (input) => ({
+      contextIds: input.candidates.map((c) => c.id),
+      lane: "trust_safety_human",
+      duplicateOf: [],
+      replyDraft: "",
+    }),
+  });
+  const [row] = await rows();
+  assert.equal(row.lane, "trust_safety_human");
+  assert.equal(row.laneSource, "llm");
+});
+
 test("the model chosen in the Admin console is saved, audited and preferred over the environment", async () => {
   const { getRuntimeModels } = await import("@/lib/modelRegistry");
   const enabled = (await getRuntimeModels()).find((model) => model.enabled && !model.catalogDeleted);
