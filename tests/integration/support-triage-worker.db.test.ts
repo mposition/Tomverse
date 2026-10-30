@@ -125,6 +125,18 @@ test("a result whose claim was lost is not written and is counted stale", async 
   assert.equal((await suggestions())[0].state, "claimed");
 });
 
+test("a claim that would leave less than its reserve rolls back and claims nothing", async () => {
+  await report("a");
+  const run = await startSupportTriageRun("worker");
+  // 30 seconds left, but the model call and the write need 60.
+  const late = { ...run, deadlineAt: new Date(Date.now() + 30_000) };
+  await assert.rejects(claimSupportTriageBatch(late, ["fb-w-a"], 60_000), /support_triage_deadline_passed/);
+  assert.deepEqual(await suggestions(), []);
+  // With the reserve available the same claim commits.
+  const batch = await claimSupportTriageBatch(run, ["fb-w-a"], 60_000);
+  assert.equal(batch.claimed.length, 1);
+});
+
 test("a report closed between claim and result is not written", async () => {
   await report("a");
   const run = await startSupportTriageRun("worker");
@@ -134,10 +146,11 @@ test("a report closed between claim and result is not written", async () => {
   assert.deepEqual({ ready, stale }, { ready: 0, stale: 1 });
 });
 
-test("expired claims return to pending and are claimed again; after the last attempt they fail", async () => {
+test("an expired claim fails and its report is not called again, whatever its attempt count", async () => {
   await report("a");
   await report("b");
   const run = await startSupportTriageRun("worker");
+  // The pass that claimed these may have paid for their model calls before it stopped.
   await claimSupportTriageBatch(run, ["fb-w-a", "fb-w-b"]);
   await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" DISABLE TRIGGER "SupportTriageSuggestion_guard"`);
   try {
@@ -148,16 +161,23 @@ test("expired claims return to pending and are claimed again; after the last att
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" ENABLE TRIGGER "SupportTriageSuggestion_guard"`);
   }
-  const result = await runSupportTriageWorker();
-  assert.equal(result.reclaimed, 1);
-  assert.equal(result.exhausted, 1);
+  let calls = 0;
+  const llm = async () => {
+    calls += 1;
+    return null;
+  };
+  const result = await runSupportTriageWorker({ llm });
+  assert.equal(result.exhausted, 2);
+  assert.equal(result.claimed, 0);
+  assert.equal(await runSupportTriageWorker({ llm }).then((next) => next.claimed), 0);
+  assert.equal(calls, 0);
   const rows = await prisma.supportTriageSuggestion.findMany({
     where: { feedbackId: { startsWith: "fb-w-" } },
     orderBy: { feedbackId: "asc" },
     select: { feedbackId: true, state: true, attemptCount: true, failureCode: true },
   });
   assert.deepEqual(rows, [
-    { feedbackId: "fb-w-a", state: "ready", attemptCount: 1, failureCode: null },
+    { feedbackId: "fb-w-a", state: "failed", attemptCount: 0, failureCode: "retry_exhausted" },
     { feedbackId: "fb-w-b", state: "failed", attemptCount: 3, failureCode: "retry_exhausted" },
   ]);
 });
@@ -184,7 +204,7 @@ test("the run route answers enabled false and writes nothing while triage is off
     env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET, SUPPORT_TRIAGE_ENABLED: "true" },
   });
   assert.equal(on.status, 200);
-  assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "reclaimed", "result", "stale", "superseded"]);
+  assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "result", "stale", "superseded"]);
   assert.equal(on.body.ready, 1);
 });
 
