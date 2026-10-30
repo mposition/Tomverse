@@ -45,8 +45,8 @@ test("only a well-formed last line is an owner question", () => {
 test("the bounds are on the raw text, the same the bridge reads", () => {
   // apps/tomverse-orchestrator v22_result_asks_owner mirrors these cases.
   assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, question: `${" ".repeat(2_000)}Q` })), null);
-  assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, question: "Q" })), null);
-  assert.ok(parseAmuxV22OwnerQuestion(line({ question: "가".repeat(2_000), unblocks: "u" })));
+  assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, question: "Q\u0007" })), null);
+  assert.ok(parseAmuxV22OwnerQuestion(line({ question: "가".repeat(2_000), unblocks: "u\u0085" })));
 });
 
 test("the digest binds the question, what it unblocks and the options", () => {
