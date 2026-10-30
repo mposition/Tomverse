@@ -2294,6 +2294,13 @@ enum V52ReviewStep {
     Findings { text: String },
 }
 
+/// The control characters the app refuses in question text (`CONTROL` of
+/// lib/amux/v22OwnerQuestionCore.ts): C0 but tab, newline and carriage
+/// return, and DEL.
+pub fn v22_question_control(c: char) -> bool {
+    matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{7f}')
+}
+
 /// Whether a v22 result ends with an owner question the app records
 /// (`parseAmuxV22OwnerQuestion` of lib/amux/v22OwnerQuestionCore.ts, the same
 /// grammar and bounds): such a run is not finished, so it is never reviewed
@@ -2307,11 +2314,12 @@ pub fn v22_result_asks_owner(text: &str) -> bool {
     let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(raw) else {
         return false;
     };
+    // The app's boundedText exactly: the raw string's UTF-16 length, the
+    // same control set (tab, newline and carriage return allowed), not blank.
     let bounded = |value: Option<&serde_json::Value>, max: usize| {
         value.and_then(serde_json::Value::as_str).is_some_and(|text| {
-            let text = text.trim();
-            !text.is_empty() && text.encode_utf16().count() <= max
-                && !text.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
+            !text.trim().is_empty() && text.encode_utf16().count() <= max
+                && !text.chars().any(v22_question_control)
         })
     };
     if !bounded(map.get("question"), 2_000) || !bounded(map.get("unblocks"), 1_000) {
@@ -7028,6 +7036,9 @@ mod v22_owner_question_tests {
 AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
 
 "));
+        // At the bound, and with C1 text the app also allows.
+        assert!(v22_result_asks_owner(&format!(
+            "AMUX_OWNER_QUESTION: {{\"question\":\"{}\",\"unblocks\":\"u\\u0085\"}}", "가".repeat(2_000))));
         for text in [
             "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
 Done.",
@@ -7037,6 +7048,9 @@ Done.",
             "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"A\",\"label\":\"x\"}]}",
             "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"a\",\"label\":\"x\"},{\"id\":\"a\",\"label\":\"y\"}]}",
             "All done.",
+            // The bound is on the raw text, as the app's: padding counts.
+            &format!("AMUX_OWNER_QUESTION: {{\"question\":\"{}Q\",\"unblocks\":\"u\"}}", " ".repeat(2_000)),
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q\\u0007\",\"unblocks\":\"u\"}",
         ] {
             assert!(!v22_result_asks_owner(text), "{text}");
         }

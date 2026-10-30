@@ -61,10 +61,13 @@ fn is_question_id(value: &str) -> bool {
 }
 
 fn bounded(value: &str, max: usize) -> bool {
-    // The app allows the same: newlines, tabs and carriage returns.
+    // The app's bounds: UTF-16 length, and its control set (C0 but tab,
+    // newline and carriage return, and DEL).
     !value.trim().is_empty()
-        && value.chars().count() <= max
-        && !value.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
+        && value.encode_utf16().count() <= max
+        && !value
+            .chars()
+            .any(|c| matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{7f}'))
 }
 
 #[derive(Deserialize)]
