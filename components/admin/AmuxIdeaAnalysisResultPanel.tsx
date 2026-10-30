@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxKoText, AmuxTranslationToggle,
+  useAmuxAnalysisTranslation } from "@/components/admin/AmuxAnalysisTranslation";
 import { AmuxIdeaResolutionPanel } from "@/components/admin/AmuxIdeaResolutionPanel";
 import { AmuxIdeaNodeRegistrationPanel } from
   "@/components/admin/AmuxIdeaNodeRegistrationPanel";
@@ -28,15 +30,19 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { parseAmuxIdeaAnalysisResultView,
   type AmuxIdeaAnalysisResultView } from "@/lib/amux/ideaAnalysisResultReadCore";
+import { amuxTranslationId } from "@/lib/amux/ideaAnalysisTranslationCore";
 
-const list = (values: string[]) => <ul className="list-disc pl-5">
-  {values.map((value, index) => <li key={`${index}:${value}`}>{value}</li>)}
+const list = (values: string[], ko?: (index: number) => ReactNode) => <ul className="list-disc pl-5">
+  {values.map((value, index) => <li key={`${index}:${value}`}>{value}{ko?.(index)}</li>)}
 </ul>;
 
 /** Owner-only page section. Model-derived text is rendered as React text,
  * never as HTML; the separate Story panel owns the gated confirmation flow. */
-export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watchToken = 0, watchChunk = 0 }: {
+export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watchToken = 0, watchChunk = 0,
+  translationAvailable = false }: {
   ideaId: string; onContinuationReady?: (chunkIndex: number) => void;
+  /** The Korean reading aid (TOMVERSE_AMUX_ADMIN_KO_TRANSLATION); off shows nothing new. */
+  translationAvailable?: boolean;
   /**
    * Counts the recorded execution approvals of this idea (one per analysis page): each new value starts a fresh
    * watch of the page `watchChunk` (lib/amux/ideaAnalysisPollCore.ts). 0 means no approval yet: nothing is watched.
@@ -65,6 +71,12 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
     setUnavailable(false);
   }
   const autoPoll = watchToken > 0;
+  const translation = useAmuxAnalysisTranslation(ideaId, chunkIndex, view);
+  const ko = (id: string) => translationAvailable ?
+    <AmuxKoText m={m} text={translation.ko(id)} /> : null;
+  const unitKo = (unitId: string, field: string) => ko(amuxTranslationId.unit(unitId, field));
+  const listKo = (unitId: string, field: string) => (index: number) =>
+    ko(amuxTranslationId.unit(unitId, field, index));
 
   // The latest approval's token: a read issued under an earlier one is answered after the watch restarted, and its
   // answer (the page that was current before the approval) must not overwrite the restarted view.
@@ -158,10 +170,14 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
       <p className="text-xs text-zinc-400">
         {view.completedAt} · {view.previewId}
       </p>
+      {translationAvailable ? <AmuxTranslationToggle m={m} shown={translation.shown}
+        state={translation.state} stale={translation.stale}
+        onToggle={() => void translation.toggle()} /> : null}
       {view.state === "partial" ? <div role="status" className="space-y-1">
         <p>{m.analysisResultPartial}</p>
         <p className="font-medium">{m.analysisResultRemaining}</p>
         <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
+        {ko(amuxTranslationId.remaining)}
         <button type="button" disabled={loading}
           onClick={() => void refresh(view.nextChunkIndex)}
           className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
@@ -171,10 +187,13 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
       {view.state === "needs_owner_input" ? <div role="status" className="space-y-1">
         <p>{m.analysisResultNeedsOwner}</p>
         <p className="whitespace-pre-wrap">{view.ownerQuestion ?? m.analysisResultScopeExpired}</p>
+        {ko(amuxTranslationId.question)}
         <p className="font-medium">{m.analysisResultRemaining}</p>
         <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
+        {ko(amuxTranslationId.remaining)}
       </div> : null}
       <p>{view.coveredScope ?? m.analysisResultScopeExpired}</p>
+      {ko(amuxTranslationId.covered)}
       {view.registrationRefusal ? <AmuxIdeaRegistrationRefusalNotice
         m={m} refusal={view.registrationRefusal} /> : null}
       {view.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
@@ -189,29 +208,36 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
           {!unit.proposal ? <p>{m.analysisResultBodyExpired}</p> : null}
           {unit.proposal?.kind === "node" ? <div className="space-y-1">
             <h4 className="font-semibold">{unit.proposal.title}</h4>
+            {unitKo(unit.id, "title")}
             <p>{unit.proposal.level} · {unit.proposal.parentRef ?? "root"}</p>
             <p className="whitespace-pre-wrap">{unit.proposal.description}</p>
+            {unitKo(unit.id, "description")}
           </div> : null}
           {unit.proposal?.kind === "card" ? <div className="space-y-2">
             <h4 className="font-semibold">{unit.proposal.title}</h4>
+            {unitKo(unit.id, "title")}
             <p>{unit.proposal.cardType} · {unit.proposal.featureRef}</p>
             <div><p className="font-medium">{m.analysisResultProblem}</p>
-              <p className="whitespace-pre-wrap">{unit.proposal.problem}</p></div>
+              <p className="whitespace-pre-wrap">{unit.proposal.problem}</p>
+              {unitKo(unit.id, "problem")}</div>
             <div><p className="font-medium">{m.analysisResultScopeIn}</p>
-              {list(unit.proposal.scopeIn)}</div>
+              {list(unit.proposal.scopeIn, listKo(unit.id, "scopeIn"))}</div>
             <div><p className="font-medium">{m.analysisResultScopeOut}</p>
-              {unit.proposal.scopeOut.length ? list(unit.proposal.scopeOut) : <p>—</p>}</div>
+              {unit.proposal.scopeOut.length ?
+                list(unit.proposal.scopeOut, listKo(unit.id, "scopeOut")) : <p>—</p>}</div>
             <div><p className="font-medium">{m.analysisResultCriteria}</p>
-              {list(unit.proposal.completionCriteria)}</div>
+              {list(unit.proposal.completionCriteria, listKo(unit.id, "criteria"))}</div>
             {unit.proposal.executionBrief ? <div>
               <p className="font-medium">{m.analysisResultExecution}</p>
               <p>{unit.proposal.taskRole} · {unit.proposal.executionGrade}</p>
               <p className="whitespace-pre-wrap">{unit.proposal.executionBrief}</p>
+              {unitKo(unit.id, "brief")}
             </div> : null}
           </div> : null}
           {unit.proposal?.kind === "evidence" ? <div className="space-y-1">
             <h4 className="font-semibold">{unit.proposal.evidenceType}</h4>
             <p className="whitespace-pre-wrap">{unit.proposal.summary}</p>
+            {unitKo(unit.id, "summary")}
             <p className="text-xs">{unit.proposal.cardRef}</p>
           </div> : null}
           {unit.proposal?.kind !== "evidence" &&
@@ -220,6 +246,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
             <p>{m.portfolioSignalHint}</p>
             <p className="break-all font-mono text-xs">{unit.bodyDigest}</p>
             <p className="whitespace-pre-wrap">{unit.proposal.portfolioSignal.rationale}</p>
+            {unitKo(unit.id, "rationale")}
             <pre className="overflow-auto whitespace-pre-wrap break-all rounded border border-zinc-800 bg-zinc-900 p-2 text-xs text-zinc-100">
               {JSON.stringify({ metrics: unit.proposal.portfolioSignal.metrics,
                 uncertainty: unit.proposal.portfolioSignal.uncertainty,
