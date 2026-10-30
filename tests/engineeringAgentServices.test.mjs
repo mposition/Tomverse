@@ -11,6 +11,7 @@ import {
   buildAgentRunnerResources,
 } from "../.railway/agent-runners.ts";
 import { RAILWAY_CRON_SERVICES, buildScheduledJobResources } from "../.railway/scheduled-jobs.ts";
+import { CAPABILITY_TTL_MS } from "../lib/engineeringAgentCapability.ts";
 import { PUBLISHER_HARD_DEADLINE_MS, PUBLISHER_VARIABLES } from "../scripts/engineering-agent-publisher.mjs";
 import { RUNNER_HARD_DEADLINE_MS, RUNNER_VARIABLES } from "../scripts/engineering-agent-runner.mjs";
 
@@ -87,6 +88,9 @@ test("no cycle outlives its schedule, and each service runs its own entry point"
   const publisher = service("engineering_agent_publisher");
   assert.ok(minutes(runner.cronSchedule) * 60_000 > RUNNER_HARD_DEADLINE_MS);
   assert.ok(minutes(publisher.cronSchedule) * 60_000 > PUBLISHER_HARD_DEADLINE_MS);
+  // A capability is issued just after one claim; the next claim, even a late
+  // one, must find it live rather than lapsed.
+  assert.ok(CAPABILITY_TTL_MS >= 2 * minutes(publisher.cronSchedule) * 60_000 + 5 * 60_000);
   assert.match(runner.startCommand, /scripts\/engineering-agent-runner\.mjs$/);
   assert.match(publisher.startCommand, /scripts\/engineering-agent-publisher\.mjs$/);
 });

@@ -829,9 +829,12 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    이 경우에만, PR 대기열에 자리가 있을 때만 받는다. 자리가 없으면 판정하지 않고 초안은
    다음 회차까지 대기로 남는다. T1이 아니거나 근거를 읽지 못하면 그 사유를 단 보통 T2
    초안으로 둔다. 판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
-   사유의 보통 T2 초안이 된다. claim되기 전에 capability가 만료된 publish 항목은 각 회차가
-   대기 초안보다 먼저 다시 판정해(§10), 같은 tree의 T1이면 새 capability를 발급하고,
-   아니면 사유를 남기고 `expired`로 닫는다(GitHub에 아무것도 쓰지 않은 항목뿐이다).
+   사유의 보통 T2 초안이 된다. 살아 있는 capability 없이 대기 중인 publish 항목(claim되기
+   전에 capability가 만료됐거나, claim이 capability를 쓴 뒤 push 전 거절 또는 "이전 쓰기
+   없음" 조회로 대기로 돌아온 항목)은 각 회차가 대기 초안보다 먼저 다시 판정해(§10), 같은
+   tree의 T1이면 새 capability를 발급하고, 아니면 사유를 남기고 `expired`로 닫는다(GitHub에
+   아무것도 쓰지 않은 항목뿐이다). capability는 발급 뒤 25분 동안 유효해 10분 주기 게시
+   서비스의 다음 두 회차를 덮는다.
    정산과 판정 사이에 develop이 움직일 수 있으므로 base는 develop head이거나 head가 포함한
    commit이면 된다(GitHub compare로 확인). 판정 규칙, capability, 게시 서비스의 검사는
    그대로이고, PR이 열리는 시점만 최대 두 회차(약 20분) 늦어진다. 정산 때 연 AMUX 검토
