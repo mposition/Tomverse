@@ -132,6 +132,12 @@ test("a link, an id the context did not offer, or a shape the intake refuses dro
   assert.equal(shape.drafts.length, 1);
 });
 
+test("the advertising disclosure is the service's flag: a draft the model left it off still carries it", () => {
+  const read = readMarketingA5Answer(answer([proposal({ disclosureFlags: [] })]), context, SCOPE);
+  assert.equal(read.drafts.length, 1);
+  assert.deepEqual(read.drafts[0].disclosureFlags, ["advertising"]);
+});
+
 test("an answer that is not the one JSON object asked for is refused whole", () => {
   assert.deepEqual(readMarketingA5Answer("Here are your posts:", context, SCOPE), {
     drafts: [],

@@ -45,7 +45,12 @@ export const marketingGeneratorDraftSchema = z
     renderedText: envelope.renderedText,
     claimIds: envelope.claimIds,
     assets: envelope.assets,
-    disclosureFlags: envelope.disclosureFlags,
+    // Every post from a Tomverse account is advertising (policy §13, AANA;
+    // S3i), so a draft that does not say so is refused rather than fixed here.
+    disclosureFlags: envelope.disclosureFlags.refine(
+      (flags) => flags.includes("advertising"),
+      "a post from a Tomverse account carries the advertising disclosure",
+    ),
   })
   .strict();
 

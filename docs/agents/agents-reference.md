@@ -1460,6 +1460,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   첫 보고서는 Tomverse 자체 표만 셉니다 — 게시는 `publishedAt`, 사람 거절·실패는 그 상태의 마지막 변경 시각, Guard 거절은 생성
   시각 기준이고 코드마다 한 번입니다. GA4·Search Console(계획 D8)은 읽기 자격증명이 필요한 다음 보고서입니다. 파생 데이터라
   감사 행은 없습니다(`retention_run`과 같음).
+- **S3i(광고 표시 게이트)**: `lib/marketingAutonomousAdmission.ts`의 `MARKETING_DISCLOSURE_CONTRACT_READY`(지금 `false`),
+  `lib/marketingDraftIntakeCore.ts`, `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingPublishAdmission.test.ts`.
+  Tomverse 계정의 게시물은 모두 광고입니다(§13, AANA). 그래서 생성기는 `advertising` 플래그를 모델과 무관하게 붙이고, 접수는
+  그 플래그가 없는 초안을 거절합니다. 플랫폼에서 광고임을 어떻게 보일지(계획 D9)는 사람이 정하며, 그 결정을 이 상수로 기록하기
+  전에는 `resolvePublishAdmission()`이 승인·자율 게시 모두 `disclosure_contract_not_ready`로 거절합니다. 판정 모듈
+  `lib/marketingAutomationAccess.ts`는 Prompt Refiner closure 안이라 고치지 않고, 그 밖의 게시 직전 판정에 둡니다.
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
   `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
   `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **예약은 최대

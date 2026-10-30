@@ -61,6 +61,15 @@ test("a submission carries words and ids, never a verdict, a status, a template 
   assert.equal(marketingDraftSubmissionSchema.safeParse({ ...signed(), decision: "x" }).success, false);
 });
 
+test("a draft that does not say it is advertising is refused: every Tomverse post is one (S3i)", () => {
+  for (const disclosureFlags of [[], ["ai_generated_asset"]]) {
+    const body = signed({ drafts: [draft({ disclosureFlags })] });
+    assert.equal(marketingDraftSubmissionSchema.safeParse(body).success, false, JSON.stringify(disclosureFlags));
+  }
+  const both = signed({ drafts: [draft({ disclosureFlags: ["advertising", "ai_generated_asset"] })] });
+  assert.equal(marketingDraftSubmissionSchema.safeParse(both).success, true);
+});
+
 test("a submission is bounded and names each draft once", () => {
   const many = Array.from({ length: MARKETING_DRAFT_INTAKE_MAX_DRAFTS + 1 }, (_, index) =>
     draft({ logicalDraftId: `d${index}` }),
