@@ -54,7 +54,10 @@ fn is_question_id(value: &str) -> bool {
 }
 
 fn bounded(value: &str, max: usize) -> bool {
-    !value.trim().is_empty() && value.chars().count() <= max && !value.chars().any(|c| c.is_control() && c != '\n')
+    // The app allows the same: newlines, tabs and carriage returns.
+    !value.trim().is_empty()
+        && value.chars().count() <= max
+        && !value.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
 }
 
 #[derive(Deserialize)]
@@ -421,8 +424,47 @@ mod tests {
     fn bounded_text_refuses_blank_long_and_control_text() {
         assert!(bounded("Which copy?", 20));
         assert!(bounded("two\nlines", 20));
+        assert!(bounded("tab\tbed\r\n", 20));
         assert!(!bounded("  ", 20));
         assert!(!bounded("bell\u{7}", 20));
         assert!(!bounded(&"x".repeat(21), 20));
+    }
+
+    #[tokio::test]
+    async fn the_routes_are_mounted_under_the_relay_and_a_local_answer_is_refused() {
+        use tower::ServiceExt;
+        let (state, _dir) = state();
+        let digest = digest();
+        let (_, filed) = json_of(file_with(&state, Some(&digest), &headers(TOKEN), &question()).await).await;
+        let card = filed["card_id"].as_str().unwrap().to_owned();
+        let router = axum::Router::new()
+            .nest("/api/board", crate::api::board::routes())
+            .nest("/api/dm-relay", super::super::dm_relay::routes())
+            .with_state(state.clone());
+        let post = |uri: String, body: Value| {
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap()
+        };
+        // Mounted: the relay's own refusal (no token configured in tests), not a 404.
+        for uri in ["/api/dm-relay/v22-questions", "/api/dm-relay/v22-questions/close"] {
+            let response = router.clone().oneshot(post(uri.to_owned(), json!({}))).await.unwrap();
+            let (status, body) = json_of(response).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
+            assert_eq!(body["reason"], "dm_relay_not_configured", "{uri}");
+        }
+        // The operator's direct answer on the local dashboard is refused: the
+        // answer belongs in Tomverse Admin.
+        let answer = router
+            .clone()
+            .oneshot(post(format!("/api/board/{card}/typed-ask/answer"), json!({"question_revision": 1})))
+            .await
+            .unwrap();
+        let (status, refused) = json_of(answer).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert_eq!(refused["reason"], REFUSAL);
     }
 }
