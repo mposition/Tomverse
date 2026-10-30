@@ -632,28 +632,28 @@ function modelCatalogRenewalAuditScope(actor: unknown, action: unknown, targetTy
  * run row, and the account deletion one content-free entry
  * (docs/policy/support-triage.md §7). Declared at the end of the file and
  * joined into `systemAuditActionAllowed()` on its existing first line, so no
- * access above it moves.
+ * access above it moves. Static comparisons only: this file is in the Prompt
+ * Refiner runtime closure, whose computed element access inventory is pinned.
  */
-const SUPPORT_TRIAGE_AUDIT_SCOPES: Readonly<Record<SupportTriageSystemAuditActor, readonly [string, readonly string[]]>> = {
-  "support-triage-worker": [
-    "SupportTriageRun",
-    [
-      "support_triage.run_started",
-      "support_triage.run_finished",
-      "support_triage.worker_reclaim",
-      "support_triage.worker_claim",
-      "support_triage.worker_result",
-    ],
-  ],
-  "support-triage-retention": [
-    "SupportTriageRun",
-    ["support_triage.run_started", "support_triage.run_finished", "support_triage.retention_batch"],
-  ],
-  "support-triage-account-deletion": ["SupportTriageAccountData", ["support_triage.account_data_deleted"]],
-};
+const SUPPORT_TRIAGE_WORKER_AUDIT_ACTIONS: readonly unknown[] = [
+  "support_triage.run_started",
+  "support_triage.run_finished",
+  "support_triage.worker_reclaim",
+  "support_triage.worker_claim",
+  "support_triage.worker_result",
+];
+const SUPPORT_TRIAGE_RETENTION_AUDIT_ACTIONS: readonly unknown[] = [
+  "support_triage.run_started",
+  "support_triage.run_finished",
+  "support_triage.retention_batch",
+];
 function supportTriageAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
-  const scope = (SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS as readonly unknown[]).includes(actor)
-    ? SUPPORT_TRIAGE_AUDIT_SCOPES[actor as SupportTriageSystemAuditActor]
-    : null;
-  return scope === null || (targetType === scope[0] && typeof action === "string" && scope[1].includes(action));
+  return (
+    (actor !== "support-triage-worker" ||
+      (targetType === "SupportTriageRun" && SUPPORT_TRIAGE_WORKER_AUDIT_ACTIONS.includes(action))) &&
+    (actor !== "support-triage-retention" ||
+      (targetType === "SupportTriageRun" && SUPPORT_TRIAGE_RETENTION_AUDIT_ACTIONS.includes(action))) &&
+    (actor !== "support-triage-account-deletion" ||
+      (action === "support_triage.account_data_deleted" && targetType === "SupportTriageAccountData"))
+  );
 }
