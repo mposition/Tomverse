@@ -315,8 +315,11 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
   const [closeTarget, setCloseTarget] = useState<{
     feedback: FeedbackRow;
     status: "resolved" | "closed";
-    /** Opened from an auto-fix reply draft: the dialog starts from it. */
-    draft?: { outcomeCode: FeedbackClosureOutcome; userReply: string };
+    /**
+     * Opened from a reply draft: the dialog starts from it. A support-triage
+     * draft carries no outcome, so the operator picks one (policy section 2).
+     */
+    draft?: { outcomeCode?: FeedbackClosureOutcome; userReply: string };
   } | null>(null);
   // A dialog holding an operator's half-written reply, or a request in
   // flight, is never interrupted by the background refresh.
@@ -662,7 +665,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                                 setCloseTarget({
                                   feedback,
                                   status: "resolved",
-                                  draft: { outcomeCode: feedback.type === "bug" ? "fixed" : "answered", userReply },
+                                  draft: { userReply },
                                 })
                         }
                       />
@@ -964,7 +967,7 @@ function FeedbackCompletionDialog({
 }: {
   feedback: FeedbackRow;
   status: "resolved" | "closed";
-  draft?: { outcomeCode: FeedbackClosureOutcome; userReply: string };
+  draft?: { outcomeCode?: FeedbackClosureOutcome; userReply: string };
   busy: boolean;
   onCancel: () => void;
   onConfirm: (closure: {
@@ -973,8 +976,9 @@ function FeedbackCompletionDialog({
     notifyReporter?: boolean;
   }) => void;
 }) {
-  const [outcomeCode, setOutcomeCode] = useState<FeedbackClosureOutcome>(
-    draft?.outcomeCode ?? (feedback.type === "bug" ? "fixed" : "answered")
+  // A draft without an outcome leaves it unchosen ("") until the operator picks one.
+  const [outcomeCode, setOutcomeCode] = useState<FeedbackClosureOutcome | "">(
+    draft ? (draft.outcomeCode ?? "") : feedback.type === "bug" ? "fixed" : "answered"
   );
   const m = useAdminMessages(adminFeedbackInboxMessages);
   const [userReply, setUserReply] = useState(
@@ -1017,13 +1021,15 @@ function FeedbackCompletionDialog({
   const alreadyCompleted = Boolean(feedback.completionSnapshot);
   const preview = useMemo(
     () =>
-      buildFeedbackLifecycleEmail("completed", {
-        reference: feedbackReferenceFromId(feedback.id),
-        type: feedback.type,
-        language: feedback.language,
-        outcomeCode,
-        userReply: userReply.trim() || null,
-      }),
+      outcomeCode === ""
+        ? null
+        : buildFeedbackLifecycleEmail("completed", {
+            reference: feedbackReferenceFromId(feedback.id),
+            type: feedback.type,
+            language: feedback.language,
+            outcomeCode,
+            userReply: userReply.trim() || null,
+          }),
     [feedback.id, feedback.language, feedback.type, outcomeCode, userReply]
   );
 
@@ -1085,6 +1091,11 @@ function FeedbackCompletionDialog({
             }
             className="mt-1.5 h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none transition focus:border-blue-500"
           >
+            {outcomeCode === "" ? (
+              <option value="" disabled>
+                {m.dialog.chooseOutcome}
+              </option>
+            ) : null}
             {FEEDBACK_CLOSURE_OUTCOMES.map((code) => (
               <option key={code} value={code}>
                 {code}
@@ -1137,7 +1148,7 @@ function FeedbackCompletionDialog({
           </label>
         ) : null}
 
-        {notifiable && !alreadyCompleted && !withholdEmail ? (
+        {preview && notifiable && !alreadyCompleted && !withholdEmail ? (
           <div
             data-testid="feedback-completion-preview"
             className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3"
@@ -1163,8 +1174,9 @@ function FeedbackCompletionDialog({
           <button
             type="button"
             data-testid="feedback-completion-confirm"
-            disabled={busy || !replyValid}
+            disabled={busy || !replyValid || outcomeCode === ""}
             onClick={() =>
+              outcomeCode !== "" &&
               onConfirm({
                 outcomeCode,
                 ...(userReply.trim() ? { userReply: userReply.trim() } : {}),

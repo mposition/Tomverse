@@ -42,6 +42,7 @@ import {
   SUGGESTION_STATES,
   SUGGESTION_TERMINAL_STATES,
   TRIAGE_ELIGIBLE_REPORT_STATUSES,
+  TRIAGE_REPORT_WINDOW_DAYS,
   WORKER_CLAIM_BATCH_SIZE,
   WORKER_PASS_MAX,
   WORKER_RECLAIM_MAX,
@@ -119,8 +120,13 @@ const digestOf = (row: ReportRow) =>
     autoFixCase: row.caseState === null ? null : { state: row.caseState, classification: row.caseClassification },
   });
 
-/** The eligible reports among `ids`, locked FOR SHARE in id order, with their evidence and case. */
-const lockEligibleReports = (tx: Tx, ids: string[]) =>
+/**
+ * The eligible reports among `ids`, locked FOR SHARE in id order, with their
+ * evidence and case. `windowed` also requires a report created within
+ * TRIAGE_REPORT_WINDOW_DAYS: the claim asks it, the result write does not, so
+ * an answer already paid for is not dropped for crossing the window mid-call.
+ */
+const lockEligibleReports = (tx: Tx, ids: string[], windowed = false) =>
   tx.$queryRaw<ReportRow[]>`
     SELECT f."id", f."message", f."type", f."language", f."status", f."errorReportVerification",
            f."traceProvenance", f."errorClassificationSource", f."clientErrorCode",
@@ -135,6 +141,8 @@ const lockEligibleReports = (tx: Tx, ids: string[]) =>
      WHERE f."id" = ANY(${ids}::text[])
        AND f."status" = ANY(${ELIGIBLE}::text[])
        AND f."message" <> ${DELETED_ACCOUNT_MARKER}
+       AND (NOT ${windowed}::boolean
+            OR f."createdAt" > (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${TRIAGE_REPORT_WINDOW_DAYS}::integer))
      ORDER BY f."id"
        FOR SHARE OF f`;
 
@@ -200,6 +208,7 @@ const readCandidates = async (after: string | null, limit: number) => {
       LEFT JOIN "FeedbackAutoFixCase" c ON c."feedbackId" = f."id"
      WHERE f."status" = ANY(${ELIGIBLE}::text[])
        AND f."message" <> ${DELETED_ACCOUNT_MARKER}
+       AND f."createdAt" > (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${TRIAGE_REPORT_WINDOW_DAYS}::integer)
        AND (${after}::text IS NULL OR f."id" > ${after}::text)
      ORDER BY f."id"
      LIMIT ${limit * 5}::integer`;
@@ -249,7 +258,7 @@ export type ClaimedReport = TriageLlmInput["report"];
 export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, reportIds: string[]) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
-    const reports = await lockEligibleReports(tx, reportIds);
+    const reports = await lockEligibleReports(tx, reportIds, true);
     if (reports.length === 0) {
       return {
         token: null as string | null,
