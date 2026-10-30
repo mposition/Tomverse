@@ -89,6 +89,7 @@ import {
 } from "@/lib/assistantKnowledgeLifecycle";
 import { processPendingKnowledgeFiles } from "@/lib/assistantKnowledgeProcessor";
 import { runMarketingRetention } from "@/lib/marketingRetention";
+import { runMarketingWeeklyKpi } from "@/lib/marketingWeeklyKpi";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
 import {
   GUEST_ATTACHMENT_PREFIX,
@@ -1070,12 +1071,18 @@ export async function cleanupExpiredData() {
     runMarketingRetention(prisma)
   );
 
+  // A1's weekly KPI report for the week that has ended, once (S3 plan, S3g).
+  const marketingWeeklyKpi = await step("marketing_weekly_kpi", () =>
+    runMarketingWeeklyKpi(prisma)
+  );
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
   // counting a failure as no work.
   return {
     marketingRetention,
+    marketingWeeklyKpi,
     accountDataExportRequests,
     contextManifestsCompacted: contextManifests?.compacted ?? null,
     // A backlog that is not shrinking is the signal the batch size is too

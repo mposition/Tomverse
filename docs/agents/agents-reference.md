@@ -1453,6 +1453,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   기준 실패 항목은 남깁니다. 세 보존 writer는 `beginMarketingRetention()` 하나에서 보존 설정을 켭니다. 결과는 기존
   `retention_run` 모양 그대로(`compactedRowCount` = 제자리에서 바뀐 행)이며, webhook fingerprint를 움직이지 않도록
   store에 최상위 계산식을 두지 않습니다. 공개 버킷 이미지는 삭제 port가 생길 때입니다.
+- **S3g(A1 주간 KPI)**: `lib/marketingWeeklyKpiCore.ts`(순수 집계), `lib/marketingWeeklyKpi.ts`, `lib/maintenance.ts`의
+  `marketing_weekly_kpi` 단계, `tests/marketingWeeklyKpiCore.test.mjs`, `tests/integration/marketing-weekly-kpi.db.test.ts`.
+  주는 Brisbane 월요일 00:00부터 다음 월요일 00:00까지이며, 일일 정리가 막 끝난 주를 `weekly_kpi` 보고서로 **한 번** 기록합니다
+  (advisory lock 뒤 같은 `periodStart`가 있으면 건너뜀). 마케팅 계정이 하나도 없으면 기록하지 않습니다. 2026-10-30 운영자의 자동 개발 지시에 따라 정한 기본값:
+  첫 보고서는 Tomverse 자체 표만 셉니다 — 게시는 `publishedAt`, 사람 거절·실패는 그 상태의 마지막 변경 시각, Guard 거절은 생성
+  시각 기준이고 코드마다 한 번입니다. GA4·Search Console(계획 D8)은 읽기 자격증명이 필요한 다음 보고서입니다. 파생 데이터라
+  감사 행은 없습니다(`retention_run`과 같음).
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
   `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
   `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **예약은 최대
