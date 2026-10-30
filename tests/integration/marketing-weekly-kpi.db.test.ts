@@ -105,7 +105,7 @@ test("the week that has ended is reported once, with the counts the core makes o
   assert.equal(await prisma.marketingReport.count({ where: { kind: "weekly_kpi" } }), 1);
 });
 
-test("with the marketing kill switch on nothing is recorded (policy §6.1)", async () => {
+test("with the marketing kill switch on nothing is recorded (docs/policy/marketing-automation.md §6.1)", async () => {
   await channel();
   for (const value of ["1", "on", " x "]) {
     const result = await runMarketingWeeklyKpi(prisma, { [MARKETING_AUTOMATION_KILL_SWITCH_ENV]: value });
