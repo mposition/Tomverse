@@ -6,7 +6,6 @@ import {
   IMAGE_EDIT_INPUT_MAX_EDGE_PX,
   IMAGE_EDIT_SOURCE_MAX_BYTES,
   IMAGE_EDIT_SOURCE_MEDIA_TYPES,
-  imageEditInputBudgetVerified,
   imageEditOutputSize,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
@@ -16,14 +15,12 @@ import { readOwnR2ObjectBytes } from "@/lib/r2";
 
 /**
  * Default off. Editing is a paid provider call with its own surcharge, so an
- * operator turns it on (IMAGE_EDIT_ENABLED=true) after the price is approved
- * -- and the switch does nothing until the image-input budget is backed by a
- * measurement (IMAGE_EDIT_INPUT_BUDGET_VERIFICATION).
+ * operator turns it on (IMAGE_EDIT_ENABLED=true) after the price is approved.
+ * Each model still edits only once its edit pricing is verified
+ * (imageModelSupportsEdit).
  */
-export const imageEditEnabled = (
-  env: Record<string, string | undefined> = process.env,
-  budgetVerified = imageEditInputBudgetVerified()
-) => env.IMAGE_EDIT_ENABLED === "true" && budgetVerified;
+export const imageEditEnabled = (env: Record<string, string | undefined> = process.env) =>
+  env.IMAGE_EDIT_ENABLED === "true";
 
 /**
  * The photo a Chat image edit changes: the first image attached to the

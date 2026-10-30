@@ -726,6 +726,7 @@ export function DesktopChatShell({
   const deepResearchSuggestion = deriveDeepResearchSuggestion({
     conversationId: currentChatId,
     turn: review?.mode === "easy" ? null : deepResearchSuggestionTurn,
+    autoSelection: isAutoMode,
     selectedModelIds: selectedModels,
     disabledModelIds: disabledPanels,
     modelStatuses,

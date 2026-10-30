@@ -56,6 +56,12 @@ async function load() {
     mock.module(mod("lib/chatImageIntent.ts"), {
       namedExports: { chatImageTriageModelId: async () => (triageOn ? "gpt-6-luna" : null) },
     });
+    mock.module(mod("lib/imageEditSource.ts"), {
+      namedExports: {
+        // A landscape photo on the question.
+        findChatImageEditSource: async () => ({ attachmentId: "att-1", size: "1536x1024" }),
+      },
+    });
     mock.module(mod("lib/imageGenerationService.ts"), {
       namedExports: {
         requestImageGeneration: async (input: Record<string, unknown>) => {
@@ -291,4 +297,21 @@ test("invalid comparison suffixes refuse before reserving images", async () => {
       imageGroupModelIds: input.imageModelIds }), "IMAGE_MODEL_SELECTION_INVALID");
     assert.equal(requests.length, 0);
   }
+});
+
+test("an edit keeps the photo's shape only where every model sells that size", async () => {
+  reset();
+  const { turn } = await load();
+  await turn.startChatImageTurn({ ...input, edit: true });
+  assert.equal(requests[0].size, "1536x1024");
+  assert.deepEqual(requests[0].editSource, { attachmentId: "att-1" });
+  // Grok Imagine sells only the 1K square, so its edit is square.
+  reset();
+  await turn.startChatImageTurn({
+    ...input,
+    assistantMessageId: "6f1c1d3e-1111-4a2b-9c3d-000000000009",
+    imageModelIds: ["grok-imagine-image-quality-20260403"],
+    edit: true,
+  });
+  assert.equal(requests[0].size, "1024x1024");
 });

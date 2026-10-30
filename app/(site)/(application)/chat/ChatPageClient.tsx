@@ -148,8 +148,7 @@ import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraf
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
-import { askChatImageIntent } from "@/lib/chatImageIntentClient";
-import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import { askChatImageTurn } from "@/lib/chatImageIntentClient";
 import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
@@ -690,6 +689,8 @@ type GlobalSubmitOptions = {
   imageIntentChecked?: boolean;
   /** Answer this send with an image in the conversation (lib/chatImageTurn.ts). */
   imageTurn?: ChatImageTurnRequest;
+  /** The image-intent answer still on its way: read just before the preflight. */
+  imageTurnDecision?: Promise<ChatImageTurnRequest | undefined>;
   imageTurnsByModel?: ReviewImageTurns;
   reviewRouteChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
@@ -5923,7 +5924,7 @@ export function ChatPageClient({
     /*
       A composer send that asks for a picture is answered with an image in
       this conversation instead of text, decided by one small model call
-      before anything is saved (lib/chatImageIntent.ts). Any failure or "no"
+      before the question is saved (lib/chatImageIntent.ts). Any failure or "no"
       falls through to the ordinary text send.
     */
     if (
@@ -5942,67 +5943,28 @@ export function ChatPageClient({
       inputValue.trim().length > 0
     ) {
       if (imageIntentCheckPendingRef.current) return;
-      const intentText = inputValue;
-      const intentScope = composerDraftConversationId;
-      const intentTicket = conversationSelectionTicketRef.current;
-      const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
-      const intentAttachmentIds = JSON.stringify(attachments.map((attachment) => attachment.id));
-      const intentAttachedPhoto = attachments.length > 0;
       imageIntentCheckPendingRef.current = true;
-      let decision: ChatImageDecision = { image: false };
-      try {
-        // The conversation lets a follow-up ("make it bluer") find the
-        // image it changes.
-        decision = await askChatImageIntent(intentText, {
-          conversationId: currentChatIdRef.current,
-          ...(intentAttachedPhoto ? { attachedPhoto: true } : {}),
-        });
-      } finally {
+      // The conversation lets a follow-up ("make it bluer") find the image it
+      // changes. Asked about the text as pressed -- the same draft the send
+      // below captures -- and never rejects.
+      const imageTurnDecision = askChatImageTurn(inputValue, {
+        conversationId: currentChatIdRef.current,
+        ...(attachments.length > 0 ? { attachedPhoto: true } : {}),
+      }).finally(() => {
         imageIntentCheckPendingRef.current = false;
-      }
-      /*
-        The answer is about the text as it was pressed. A draft edited, given
-        an attachment, or left for another conversation during the wait is a
-        different request: neither handed off (it could start a paid
-        generation for words already withdrawn, and cancel would restore the
-        stale text over the edit) nor sent from this render's stale closure.
-        The next press decides it. The identity fence comes first: after an
-        account switch the same text in the new account's draft is not this
-        request either.
-      */
-      const liveDraft = readDraft(intentScope);
-      if (
-        !identityKey ||
-        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
-        intentIdentityEpoch !== submitIdentityFenceRef.current.epoch ||
-        !activeChatIdentityIs(identityKey, intentIdentityEpoch) ||
-        submitIdentityFenceRef.current.identityKey !== identityKey ||
-        intentTicket !== conversationSelectionTicketRef.current ||
-        isImageDraftActiveRef.current ||
-        liveDraft.text !== intentText ||
-        JSON.stringify(liveDraft.attachments.map((attachment) => attachment.id)) !==
-          intentAttachmentIds
-      ) {
-        return;
-      }
-      // Re-entered through the ref so the ordinary send runs on current state.
-      // An image request is still an ordinary send -- the question is saved
-      // and the conversation created exactly as for text -- and only its
-      // answer differs: an image in the conversation, made by the triage's
-      // model and preset (owner decision 2026-10-20: Chat needs no image
-      // workspace and asks no confirmation).
+      });
+      // The send starts now, beside the question: the conversation create and
+      // the model-settings flush every answer needs run while it is out, and
+      // the send reads the answer just before the preflight, the first step
+      // that differs between a text and an image turn. An image request is
+      // still an ordinary send -- the question is saved and the conversation
+      // created exactly as for text -- and only its answer differs: an image
+      // in the conversation, made by the triage's model and preset (owner
+      // decision 2026-10-20: Chat needs no image workspace and asks no
+      // confirmation).
       return handleGlobalSubmitRef.current({
         imageIntentChecked: true,
-        ...(decision.image
-          ? {
-              imageTurn: {
-                modelIds: decision.modelId ? [decision.modelId] : [],
-                preset: decision.preset,
-                ...(decision.prompt ? { prompt: decision.prompt } : {}),
-                ...(decision.edit ? { edit: true as const } : {}),
-              },
-            }
-          : {}),
+        imageTurnDecision,
       });
     }
     const waitForCommittedAutoScope = async (
@@ -6812,6 +6774,10 @@ export function ChatPageClient({
         return true;
       };
       if (!chatSendIsCurrent()) return;
+      const imageTurn = options?.imageTurnDecision
+        ? await options.imageTurnDecision
+        : options?.imageTurn;
+      if (options?.imageTurnDecision && !chatSendIsCurrent()) return;
       /*
         An image turn never reaches /api/chat (lib/chatImageTurn.ts), so it
         takes none of the text path's preparation: the preflight would reserve
@@ -6820,7 +6786,7 @@ export function ChatPageClient({
         bundle would be prepared for a prompt no text model reads. The image
         reservation applies its own gates.
       */
-      const imageTurnSend = (Boolean(options?.imageTurn) && activeModelIds.length === 1) ||
+      const imageTurnSend = (Boolean(imageTurn) && activeModelIds.length === 1) ||
         (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
       const preflight = imageTurnSend
         ? { allowed: true as const, admissionToken: null, contextBundle: null }
@@ -7401,8 +7367,8 @@ export function ChatPageClient({
         // One answer per question: every panel named in modelIds consumes
         // this payload, and each image turn reserves its own paid group, so
         // a send made for more than one panel never carries one.
-        ...(imageTurnSend && options?.imageTurn
-          ? { imageTurn: options.imageTurn }
+        ...(imageTurnSend && imageTurn
+          ? { imageTurn }
           : {}),
         ...(imageTurnSend && options?.imageTurnsByModel
           ? { imageTurnsByModel: options.imageTurnsByModel }
