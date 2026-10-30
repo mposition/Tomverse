@@ -30,6 +30,12 @@ import {
   recordDecisionMakerTransmitIntent,
 } from "@/lib/amux/decisionMakerRequestStore";
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
+import {
+  readAmuxV22QuestionSyncRows,
+  recordAmuxV22QuestionLocalCard,
+  recordAmuxV22QuestionLocalCardClosed,
+  resolveAmuxV22QuestionFromDmJudgment,
+} from "@/lib/amux/v22OwnerQuestionDmService";
 import { prisma } from "@/lib/prisma";
 
 // AMUX Decision Maker stage S2-2b3 (docs/policy/amux-decision-maker.md §2-7,
@@ -602,4 +608,83 @@ test("each delivery route's boundary takes its operation, and one call fewer ref
     (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
   );
   assert.equal((await settle(basis.requestId, "receipt")).recorded, true);
+});
+
+// A v22 worker's owner question mirrored as a local card (operator decision
+// 2026-10-30): its confirmed answer resumes the Task in the app and is never
+// offered to the delivery walk, which types into a terminal.
+const parkedV22Question = async (status = "blocked") => {
+  const task = await prisma.amuxWorkItem.create({ data: {
+    id: `amux-v22-question-${randomUUID()}`, title: "v22 owner question fixture",
+    status, kind: "code", priority: "p2", revision: 4 } });
+  const now = new Date();
+  const attempt = await prisma.amuxExecutionAttempt.create({ data: {
+    id: randomUUID(), taskId: task.id, worker: "claude-impl",
+    workerInstanceId: "fixture-instance", workerGeneration: 1, taskRevision: 3,
+    attemptNumber: 1, heartbeatAt: now, startedAt: now, endedAt: now,
+    outcome: "succeeded", toStatus: "blocked", endedBy: "claude-impl",
+    reason: "owner_question" } });
+  const question = await prisma.amuxV22TaskQuestion.create({ data: {
+    id: randomUUID(), taskId: task.id, attemptId: attempt.id,
+    worker: "claude-impl", sequence: 1, questionSha256: "a".repeat(64) } });
+  return { task, question };
+};
+
+const writeQuestion = <T>(work: (tx: Parameters<Parameters<typeof withAmuxDbBoundary>[1]>[0],
+  now: Date) => Promise<T>) =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionWrite,
+    (tx, context) => work(tx, context.dbNow));
+const resolveQuestion = () =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionResolve,
+    (tx, context) => resolveAmuxV22QuestionFromDmJudgment(tx, context.dbNow));
+
+test("a v22 question card's confirmed answer resumes its Task and is never offered for delivery", async () => {
+  const { task, question } = await parkedV22Question();
+  const cardId = `AMUX-${randomUUID().slice(0, 8)}`;
+  await writeQuestion((tx) => recordAmuxV22QuestionLocalCard(tx, { questionId: question.id, cardId }));
+  // The same card again is a read; another card is refused.
+  await writeQuestion((tx) => recordAmuxV22QuestionLocalCard(tx, { questionId: question.id, cardId }));
+  await assert.rejects(writeQuestion((tx) => recordAmuxV22QuestionLocalCard(tx,
+    { questionId: question.id, cardId: "AMUX-other" })), /card_conflict/);
+
+  const { requestId } = await proposed(FREE_TEXT, cardId);
+  assert.deepEqual(await resolveQuestion(), { resolved: null }, "nobody confirmed it yet");
+  await judge(requestId, "confirm");
+  assert.deepEqual(await nextCandidate(), { status: "none" });
+
+  assert.deepEqual(await resolveQuestion(), { resolved: "answered", questionId: question.id });
+  const answered = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: question.id } });
+  assert.equal(answered.state, "answered");
+  assert.equal(answered.answerSource, "dm_confirmed");
+  assert.match(answered.answerText!, /Use the model id only./);
+  assert.ok(answered.answerText!.includes(DM_DELIVERY_NOT_AN_APPROVAL));
+  assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: task.id } })).status, "todo");
+  assert.deepEqual(await resolveQuestion(), { resolved: null }, "answered once");
+
+  const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
+    (tx) => readAmuxV22QuestionSyncRows(tx));
+  assert.ok(rows.closing.some((row) => row.questionId === question.id && row.cardId === cardId));
+  await writeQuestion((tx, now) => recordAmuxV22QuestionLocalCardClosed(tx,
+    { questionId: question.id, cardId, now }));
+  await writeQuestion((tx, now) => recordAmuxV22QuestionLocalCardClosed(tx,
+    { questionId: question.id, cardId, now }));
+  const after = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
+    (tx) => readAmuxV22QuestionSyncRows(tx));
+  assert.ok(!after.closing.some((row) => row.questionId === question.id));
+});
+
+test("a v22 question whose Task moved on is cancelled by its confirmed answer, not resumed", async () => {
+  const { task, question } = await parkedV22Question("todo");
+  const cardId = `AMUX-${randomUUID().slice(0, 8)}`;
+  await writeQuestion((tx) => recordAmuxV22QuestionLocalCard(tx, { questionId: question.id, cardId }));
+  await assert.rejects(writeQuestion((tx, now) => recordAmuxV22QuestionLocalCardClosed(tx,
+    { questionId: question.id, cardId, now })), /not_closable/, "an open question's card stays");
+  const { requestId } = await proposed(SELECT, cardId);
+  await judge(requestId, "confirm");
+  assert.deepEqual(await resolveQuestion(), { resolved: "cancelled", questionId: question.id });
+  const cancelled = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: question.id } });
+  assert.equal(cancelled.state, "cancelled");
+  assert.equal(cancelled.answerText, null);
+  assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: task.id } })).status, "todo");
+  assert.equal(await prisma.amuxHumanEscalation.count({ where: { taskId: task.id } }), 0);
 });

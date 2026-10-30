@@ -90,6 +90,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxV22ReadOnlyApiUsageProjection,
   recordAmuxV22ReadOnlyApiUsage } from "@/lib/amux/cliUsageLedgerStore";
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
+import { amuxV22OwnerQuestionSettlementPlan } from "@/lib/amux/v22OwnerQuestionCore";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
@@ -1354,7 +1355,7 @@ export async function settleAmuxV22TaskExecution(input: {
   // a `tier_pending` draft, and the publisher's round reads its tier with
   // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 42 };
   const publicationEligible = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
     patchPresent: patch !== null,
@@ -1382,6 +1383,15 @@ export async function settleAmuxV22TaskExecution(input: {
           task.status !== "doing" || task.owner !== input.worker ||
           task.revision !== input.taskRevision)
         return { settled: false as const, reason: "fenced_out" as const };
+      // A run that ended with an owner question (recorded with its result)
+      // is not finished: no review, no publication product, no grade
+      // decision on its partial change. The Task waits for the answer.
+      const ownerQuestion = input.outcome === "succeeded" ?
+        await tx.amuxV22TaskQuestion.findUnique({
+          where: { attemptId: attempt.id },
+          select: { id: true, state: true },
+        }) : null;
+      const questionPlan = amuxV22OwnerQuestionSettlementPlan(ownerQuestion);
       const settlementAssignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
         select: { id: true, role: true, provider: true, grade: true,
@@ -1406,10 +1416,10 @@ export async function settleAmuxV22TaskExecution(input: {
         return { settled: false as const,
           reason: "assignment_audit_unverified" as const };
       const pathDecision = gradeGuard && settlementAssignment &&
-        input.outcome !== "blocked" ?
+        input.outcome !== "blocked" && !ownerQuestion ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
           input.changedPaths, patch?.files ?? null) : "pass";
-      const reviewRequired = amuxV52ReviewRequired({ gradeGuard,
+      const reviewRequired = !ownerQuestion && amuxV52ReviewRequired({ gradeGuard,
         role: settlementAssignment?.role, outcome: input.outcome,
         pathDecision, patchPresent: patch !== null,
         changedPaths: input.changedPaths });
@@ -1585,7 +1595,7 @@ export async function settleAmuxV22TaskExecution(input: {
         where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
         select: { id: true, kind: true, patchDigest: true, baseSha: true },
       }) : null;
-      if (patch && effectivePathDecision === "pass" &&
+      if (patch && !ownerQuestion && effectivePathDecision === "pass" &&
           (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({
           where: { id: attempt.v22AssignmentId },
@@ -1628,7 +1638,8 @@ export async function settleAmuxV22TaskExecution(input: {
         });
       }
       const budget = settlementDestinationForBudget({
-        requested_status: effectivePathDecision === "escalate" ? "todo" :
+        requested_status: questionPlan ? questionPlan.toStatus :
+          effectivePathDecision === "escalate" ? "todo" :
           reviewDisposition ? reviewDisposition.status :
           input.outcome === "succeeded" ? "review" :
           input.outcome === "failed" ? "todo" : "blocked",
@@ -1642,7 +1653,8 @@ export async function settleAmuxV22TaskExecution(input: {
         budget.to_status;
       const gradeEscalated = effectivePathDecision === "escalate" &&
         next === "todo";
-      const blockedReason = effectivePathDecision === "escalate" ?
+      const blockedReason = questionPlan ? questionPlan.reason :
+        effectivePathDecision === "escalate" ?
         "attempt_budget_exhausted" :
         effectivePathDecision === "blocked" ?
           (pathDecision === "escalate" ? escalationBlockReason :
@@ -1685,8 +1697,11 @@ export async function settleAmuxV22TaskExecution(input: {
         workerName: input.worker, instanceId: input.instanceId,
         generation: input.generation, status: "busy",
       }, data: { status: "idle", dispatchReady: false } });
-      if ((next === "review" && (!reviewRequired ||
-          product?.kind !== "publish")) || next === "blocked")
+      // An open owner question waits for its answer, not for a person to
+      // recover the Task; only a question over the limit opens escalation.
+      if (((next === "review" && (!reviewRequired ||
+          product?.kind !== "publish")) || next === "blocked") &&
+          (!questionPlan || questionPlan.openEscalation))
         await openAmuxHumanEscalation(tx, { taskId: task.id,
           specialty: next === "review" ? AMUX_DEFAULT_REVIEW_SPECIALTY :
             "execution-recovery",
@@ -1694,6 +1709,10 @@ export async function settleAmuxV22TaskExecution(input: {
             blockedReason,
           openedBy: input.worker });
       await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
+      // The answer a resumed run read is not kept past that run.
+      await tx.amuxV22TaskQuestion.updateMany({ where: {
+        resumedAttemptId: attempt.id, state: "resumed",
+        answerText: { not: null } }, data: { answerText: null } });
       await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.v22.execution.settled", targetType: "AmuxWorkItem",
         targetId: task.id, summary: "Settled an assignment-bound AMUX v22 Task.",
@@ -1706,7 +1725,8 @@ export async function settleAmuxV22TaskExecution(input: {
             (gradeEscalated ? "escalate" : next === "blocked" ? "blocked" :
               effectivePathDecision) : null,
           v52ReviewJobId: reviewRecord?.jobId ?? null,
-          v52ReviewVerdict: reviewRecord?.verdict ?? null },
+          v52ReviewVerdict: reviewRecord?.verdict ?? null,
+          ownerQuestionId: ownerQuestion?.id ?? null },
       });
       if (run?.status === "active") {
         await endEngineeringAgentRun(

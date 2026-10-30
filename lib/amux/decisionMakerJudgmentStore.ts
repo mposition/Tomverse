@@ -430,6 +430,13 @@ export async function readNextDecisionMakerDeliveryJudgment(
         SELECT 1 FROM "AmuxDecisionMakerDeliveryEvent" d
         WHERE d."requestId" = j."requestId" AND d."kind" = 'deliver'
       )
+      -- A v22 worker's question card is answered in the app, never typed
+      -- into a session (lib/amux/v22OwnerQuestionDmService.ts).
+      AND NOT EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerRequest" r
+        JOIN "AmuxV22TaskQuestion" q ON q."localCardId" = r."cardId"
+        WHERE r."id" = j."requestId"
+      )
       AND (floor(extract(epoch FROM j."createdAt") * 1000)::bigint, j."requestId") > (${afterMs}::bigint, ${afterRequestId}::text)
     ORDER BY "judgedAtEpochMs", j."requestId"
     LIMIT 1
