@@ -557,6 +557,19 @@ export async function pullAmuxWorkDelivery(input: {
         reviewFeedbackJobId = prior?.verdict === "reject" ?
           prior.jobId ?? undefined : undefined;
       }
+      const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
+        `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n`;
+      const tail = `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
+        `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` +
+        AMUX_V22_WORKER_AUTHORITY_NOTICE;
+      const section = resume ? buildAmuxV22ResumeSection({
+        ...resume, promptBytesWithoutSection:
+          Buffer.byteLength(head + tail, "utf8") }) : "";
+      // A Task resumed without its answer would repeat the question or guess,
+      // so the delivery is refused instead. The answer was bounded beside the
+      // brief when it was given; only a brief that grew since gets here.
+      if (section === null) throw new Error("v22 resume answer does not fit the prompt");
+      const resumeSection = section ? `${section}\n` : "";
       // The question this delivery resumes is marked once, by the pull that
       // first carries it; a pull of the same attempt again finds it resumed.
       if (resumeRows?.question.state === "answered") {
@@ -566,14 +579,6 @@ export async function pullAmuxWorkDelivery(input: {
           resumedAttemptId: delivery.attemptId } });
         if (marked.count !== 1) throw new Error("v22 resume question changed");
       }
-      const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
-        `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n`;
-      const tail = `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
-        `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` +
-        AMUX_V22_WORKER_AUTHORITY_NOTICE;
-      const resumeSection = resume ? buildAmuxV22ResumeSection({
-        ...resume, promptBytesWithoutSection:
-          Buffer.byteLength(head + tail, "utf8") }) + "\n" : "";
       return {
         prompt: head + resumeSection + tail,
         v22Execution: { modelId: assignment.modelId, role: assignment.role,

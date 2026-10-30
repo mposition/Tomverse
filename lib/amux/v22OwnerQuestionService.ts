@@ -9,8 +9,19 @@ import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
 import { OWNER_TRANSACTION_LIMITS, withAutoTransaction } from
   "./autoPromotionService.ts";
-import { normalizeAmuxV22OwnerAnswer, parseAmuxV22OwnerQuestion,
-  type AmuxV22OwnerAnswerSource } from "./v22OwnerQuestionCore.ts";
+import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
+  amuxV22ResumeMinimumBytes, normalizeAmuxV22OwnerAnswer,
+  parseAmuxV22OwnerQuestion, type AmuxV22OwnerAnswerSource } from
+  "./v22OwnerQuestionCore.ts";
+import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from "./v22ExternalAuthorityCore.ts";
+
+/** What a resumed prompt holds beside its resume section and its brief: the
+ * Task and attempt lines (bounded), the notice twice and the question rules.
+ * The sealed brief's ciphertext length stands in for the brief: it is never
+ * shorter than the text. */
+const PROMPT_FIXED_BYTES = 512 +
+  2 * Buffer.byteLength(AMUX_V22_WORKER_AUTHORITY_NOTICE, "utf8") +
+  Buffer.byteLength(AMUX_V22_OWNER_QUESTION_RULES, "utf8");
 import { openAmuxV22TaskPatchRow, openAmuxV22TaskResultRow } from
   "./v22TaskResultStore.ts";
 
@@ -54,7 +65,7 @@ export async function answerAmuxV22OwnerQuestionInTransaction(
     throw new BoardImportError("question_not_open", 409);
   const task = await tx.amuxWorkItem.findUnique({ where: { id: question.taskId },
     select: { status: true, owner: true, claimedAt: true, archivedAt: true,
-      v22AssignmentId: true, revision: true } });
+      v22AssignmentId: true, revision: true, v4BriefCiphertext: true } });
   const parked = await tx.amuxExecutionAttempt.findFirst({
     where: { taskId: question.taskId },
     orderBy: [{ startedAt: "desc" }, { id: "desc" }],
@@ -65,6 +76,12 @@ export async function answerAmuxV22OwnerQuestionInTransaction(
       parked?.id !== question.attemptId || parked.toStatus !== "blocked" ||
       parked.reason !== "owner_question")
     throw new BoardImportError("task_not_waiting", 409);
+  // The answer goes whole into the resumed prompt; one that cannot fit beside
+  // the brief is refused now, to be shortened, never cut at delivery.
+  if (PROMPT_FIXED_BYTES + (task.v4BriefCiphertext?.length ?? 0) +
+      amuxV22ResumeMinimumBytes(answer, input.source) + 2 >
+      AMUX_V22_RESUME_PROMPT_MAX_BYTES)
+    throw new BoardImportError("answer_too_long_for_prompt", 409);
   const auditId = await input.audit(question.taskId);
   await tx.amuxV22TaskQuestion.update({ where: { id: question.id }, data: {
     state: "answered", answerText: answer, answerSource: input.source,
@@ -142,14 +159,14 @@ export async function readAmuxV22ResumeRows(tx: Prisma.TransactionClient,
     result, patch };
 }
 
-/** Opens the rows outside the DB transaction. Null when the question can no
- * longer be read: the delivery then goes without a resume section. */
+/** Opens the rows outside the DB transaction. The answer is in the row; the
+ * question text comes from the asking run's result and is null when that can
+ * no longer be read, in which case the section carries the answer alone. */
 export async function openAmuxV22ResumeContext(
   rows: NonNullable<Awaited<ReturnType<typeof readAmuxV22ResumeRows>>>) {
   const attemptId = rows.question.attemptId;
   const text = await openAmuxV22TaskResultRow(attemptId, rows.result);
   const question = text ? parseAmuxV22OwnerQuestion(text) : null;
-  if (!question) return null;
   const previousPatch = rows.patch ?
     await openAmuxV22TaskPatchRow(attemptId, rows.patch) : null;
   return { questionId: rows.question.id, question,

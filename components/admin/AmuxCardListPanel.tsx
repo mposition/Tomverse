@@ -154,11 +154,14 @@ export function AmuxCardListPanel({
               <p className="mt-1 whitespace-pre-wrap break-words">{question.question}</p>
               <p className="mt-1 text-sm text-zinc-300">{messages.questionUnblocks}: {question.unblocks}</p>
               {question.options.length > 0 && (
+                <>
+                <p className="mt-1 text-sm text-zinc-300">{messages.questionOptions}</p>
                 <ul className="mt-1 list-disc pl-5 text-sm">
                   {question.options.map((option) => (
                     <li key={option.id}><span className="font-mono">{option.id}</span>: {option.label}</li>
                   ))}
                 </ul>
+                </>
               )}
               {question.state === "open" && answerState !== "sent" && (
                 <form className="mt-2 flex flex-col gap-2" onSubmit={(event) => {

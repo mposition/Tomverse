@@ -24,6 +24,9 @@ export const AMUX_V22_OWNER_UNBLOCKS_MAX_CHARS = 1_000;
 export const AMUX_V22_OWNER_OPTION_LABEL_MAX_CHARS = 300;
 export const AMUX_V22_OWNER_OPTIONS_MAX = 6;
 export const AMUX_V22_OWNER_ANSWER_MAX_CHARS = 8_000;
+/** An answer is also bounded in UTF-8 bytes: it always goes whole into the
+ * resumed prompt, never cut. */
+export const AMUX_V22_OWNER_ANSWER_MAX_BYTES = 12 * 1_024;
 
 /** The v22 sidecar refuses a prompt over 32 KiB; the resume section keeps
  * the whole prompt under this so a long previous patch is left out instead. */
@@ -102,6 +105,7 @@ export function normalizeAmuxV22OwnerAnswer(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const text = value.replace(/\r\n/g, "\n").trim();
   return text.length > 0 && text.length <= AMUX_V22_OWNER_ANSWER_MAX_CHARS &&
+    Buffer.byteLength(text, "utf8") <= AMUX_V22_OWNER_ANSWER_MAX_BYTES &&
     !CONTROL.test(text.replace(/[\n\t]/g, " ")) ? text : null;
 }
 
@@ -123,60 +127,68 @@ export const AMUX_V22_OWNER_QUESTION_RULES = [
   "- The Task then waits for the answer and comes back to you with the question, the answer and your previous change. It is not finished until its goal is met.",
 ].join("\n");
 
-/** The longest prefix of `text` within `maxBytes` of UTF-8, whole characters. */
-function utf8Prefix(text: string, maxBytes: number): string {
-  if (maxBytes <= 0) return "";
-  let used = 0;
-  let end = 0;
-  for (const char of text) {
-    const bytes = Buffer.byteLength(char, "utf8");
-    if (used + bytes > maxBytes) break;
-    used += bytes;
-    end += char.length;
-  }
-  return text.slice(0, end);
+const answerLines = (answer: string, source: AmuxV22OwnerAnswerSource) => [
+  `The owner answered (${source === "operator" ?
+    "operator" : "Decision Maker proposal confirmed by the operator"}):`,
+  answer,
+].join("\n");
+
+const RESUME_HEAD = "Resuming this Task after an owner question.";
+const NO_QUESTION_TEXT = "Your previous run asked the owner a question; its " +
+  "text is not repeated here.";
+
+/** The fewest bytes a resume section can take: the answer whole and the
+ * line that says what it answers. An answer whose section cannot fit beside
+ * the brief is refused when it is given, never cut later. */
+export function amuxV22ResumeMinimumBytes(answer: string,
+  source: AmuxV22OwnerAnswerSource) {
+  return Buffer.byteLength([RESUME_HEAD, NO_QUESTION_TEXT,
+    answerLines(answer, source), ""].join("\n"), "utf8");
 }
 
 /**
  * The section a resumed delivery starts with: what was asked, what the owner
- * answered, and the previous change when it fits under the prompt bound.
+ * answered, and the previous change. The answer always goes whole. To stay
+ * under the prompt bound the section leaves out, in this order, the previous
+ * change, the options, what the answer unblocks, and the question text; if
+ * even the answer alone does not fit, it is null and the delivery is refused
+ * rather than resumed without the decision.
  */
 export function buildAmuxV22ResumeSection(input: {
-  question: AmuxV22OwnerQuestion;
+  question: AmuxV22OwnerQuestion | null;
   answer: string;
   answerSource: AmuxV22OwnerAnswerSource;
   previousPatch: string | null;
   promptBytesWithoutSection: number;
-}): string {
-  const options = input.question.options.length ?
-    "\nOptions you gave:\n" + input.question.options.map((option) =>
-      `- ${option.id}: ${option.label}`).join("\n") : "";
-  const head = [
-    "Resuming this Task after an owner question.",
-    `Your previous run asked: ${input.question.question}`,
-    `It said the answer unblocks: ${input.question.unblocks}${options}`,
-    `The owner answered (${input.answerSource === "operator" ?
-      "operator" : "Decision Maker proposal confirmed by the operator"}):`,
-    input.answer,
-  ].join("\n");
-  const patchIntro = "\nYour previous run's change, made on that run's base " +
-    "commit. Apply it with `git apply --3way` before you continue and " +
-    "resolve whatever does not apply:\n";
-  const withPatch = input.previousPatch ?
-    `${head}${patchIntro}${input.previousPatch}\n` : null;
-  // The whole prompt stays under the sidecar's bound: the patch goes first,
-  // then the section is cut, saying so, so a long answer is never refused.
+}): string | null {
   const budget = AMUX_V22_RESUME_PROMPT_MAX_BYTES - input.promptBytesWithoutSection - 2;
-  if (withPatch && Buffer.byteLength(withPatch, "utf8") <= budget) return withPatch;
-  const note = input.previousPatch ?
-    "\nYour previous run's change is too long to include. Make it again, " +
-    "following the answer.\n" : "\n";
-  const section = `${head}${note}`;
-  if (Buffer.byteLength(section, "utf8") <= budget) return section;
-  const cut = "\n[The rest of this section is cut to fit the prompt. The full " +
-    "question and answer are in Tomverse Admin.]\n";
-  if (budget < Buffer.byteLength(cut, "utf8")) return "";
-  return `${utf8Prefix(section, budget - Buffer.byteLength(cut, "utf8"))}${cut}`;
+  const answer = answerLines(input.answer, input.answerSource);
+  const question = input.question;
+  const options = question?.options.length ?
+    "Options you gave:\n" + question.options.map((option) =>
+      `- ${option.id}: ${option.label}`).join("\n") : null;
+  const patch = input.previousPatch ? "Your previous run's change, made on " +
+    "that run's base commit. Apply it with `git apply --3way` before you " +
+    "continue and resolve whatever does not apply:\n" + input.previousPatch : null;
+  const dropped = input.previousPatch ? "Your previous run's change is too " +
+    "long to include. Make it again, following the answer." : null;
+  const compose = (parts: Array<string | null>) =>
+    [...parts.filter((part): part is string => part !== null), ""].join("\n");
+  const asked = question ? `Your previous run asked: ${question.question}` :
+    NO_QUESTION_TEXT;
+  const unblocks = question ? `It said the answer unblocks: ${question.unblocks}` : null;
+  for (const parts of [
+    [RESUME_HEAD, asked, unblocks, options, answer, patch],
+    [RESUME_HEAD, asked, unblocks, options, answer, dropped],
+    [RESUME_HEAD, asked, unblocks, answer, dropped],
+    [RESUME_HEAD, asked, answer, dropped],
+    [RESUME_HEAD, NO_QUESTION_TEXT, answer, dropped],
+    [RESUME_HEAD, NO_QUESTION_TEXT, answer],
+  ]) {
+    const section = compose(parts);
+    if (Buffer.byteLength(section, "utf8") <= budget) return section;
+  }
+  return null;
 }
 
 /**

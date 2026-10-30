@@ -6,6 +6,7 @@ import {
   AMUX_V22_OWNER_QUESTION_MARKER,
   AMUX_V22_OWNER_QUESTION_RULES,
   AMUX_V22_RESUME_PROMPT_MAX_BYTES,
+  amuxV22ResumeMinimumBytes,
   amuxV22OwnerQuestionSettlement,
   amuxV22OwnerQuestionSettlementPlan,
   amuxV22OwnerQuestionSha256,
@@ -78,20 +79,36 @@ test("the resume section carries the question, the answer and the change that fi
   assert.match(section, /Your previous run asked: Should the starter lock/);
   assert.match(section, /- b: Keep it generic/);
   assert.match(section, /Decision Maker proposal confirmed by the operator/);
-  assert.match(section, /Keep it generic\.\n/);
   assert.match(section, /git apply --3way/);
   assert.ok(section.includes(input.previousPatch));
-
-  const longPatch = `diff --git a/x b/x\n${"+x\n".repeat(1_000)}`;
-  const crowded = buildAmuxV22ResumeSection({ ...input, answerSource: "operator",
-    previousPatch: longPatch,
-    promptBytesWithoutSection: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 1_000 });
-  assert.match(crowded, /answered \(operator\)/);
-  assert.ok(!crowded.includes(longPatch));
-  assert.match(crowded, /too long to include/);
-
   const noPatch = buildAmuxV22ResumeSection({ ...input, previousPatch: null });
   assert.ok(!/git apply|too long/.test(noPatch));
+  // A run whose result can no longer be read still resumes with the answer.
+  const unread = buildAmuxV22ResumeSection({ ...input, question: null });
+  assert.match(unread, /not repeated here/);
+  assert.match(unread, /Keep it generic./);
+});
+
+test("the answer always goes whole: the change, options, unblocks and question go first", () => {
+  const long = { question: `${"가".repeat(1_998)}?`, unblocks: "나".repeat(1_000),
+    options: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, label: "다".repeat(300) })) };
+  const answer = "라".repeat(4_000);
+  const patch = `diff --git a/x b/x${"\n+x".repeat(2_000)}\n`;
+  const at = (base) => buildAmuxV22ResumeSection({ question: long, answer,
+    answerSource: "operator", previousPatch: patch, promptBytesWithoutSection: base });
+  let previous = Infinity;
+  for (const base of [500, 4_000, 8_000, 12_000, 16_000]) {
+    const section = at(base);
+    assert.ok(section.includes(answer), String(base));
+    assert.ok(base + Buffer.byteLength(section, "utf8") + 2 <= AMUX_V22_RESUME_PROMPT_MAX_BYTES, String(base));
+    assert.ok(Buffer.byteLength(section, "utf8") <= previous);
+    previous = Buffer.byteLength(section, "utf8");
+  }
+  assert.ok(!at(500).includes(patch), "the long change goes first");
+  assert.match(at(16_000), /not repeated here/);
+  // Not even the answer fits: no section, so the delivery is refused.
+  assert.equal(at(AMUX_V22_RESUME_PROMPT_MAX_BYTES - 1_000), null);
+  assert.ok(amuxV22ResumeMinimumBytes(answer, "operator") > Buffer.byteLength(answer, "utf8"));
 });
 
 test("a settlement parks a questioning run blocked, escalating only over the limit", () => {
@@ -102,15 +119,3 @@ test("a settlement parks a questioning run blocked, escalating only over the lim
     { toStatus: "blocked", reason: "owner_question_limit", openEscalation: true });
 });
 
-test("the resume section keeps the whole prompt under the sidecar's bound, saying when it is cut", () => {
-  const long = { question: `${"가".repeat(1_998)}?`, unblocks: "나".repeat(1_000),
-    options: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, label: "다".repeat(300) })) };
-  for (const base of [500, 10_000, 25_000]) {
-    const section = buildAmuxV22ResumeSection({ question: long, answer: "라".repeat(8_000),
-      answerSource: "operator", previousPatch: "diff --git a/x b/x\n",
-      promptBytesWithoutSection: base });
-    assert.ok(base + Buffer.byteLength(section, "utf8") + 2 <= AMUX_V22_RESUME_PROMPT_MAX_BYTES, String(base));
-    assert.match(section, /cut to fit the prompt/);
-    assert.ok(!section.includes("�"), "whole characters only");
-  }
-});
