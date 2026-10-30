@@ -156,6 +156,10 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
   삭제된 신고를 모델에게 보여 준 다른 신고의 suggestion도 지우되, 그 suggestion이 입력을 확정한 상태였으면 같은
   입력의 내용 없는 `expired` 행을 같은 transaction에 대신 남긴다(2026-10-30). 그래서 남은 신고는 같은 입력으로
   다시 유료 호출되지 않는다.
+- 답을 받은 입력(`lane`이 있는 행)은 그 행이 뒤에 `superseded`나 `invalidated`가 되어도 확정된 입력으로
+  남는다. 신고의 입력이 바뀌었다가 같은 입력으로 돌아와도, 닫혔다가 다시 열려도 그 입력으로 모델을 다시 부르지
+  않는다. 답을 받기 전에 닫힌 행만 다시 만든다. claim 중인 행은 supersede하거나 invalidate하지 않는다. 그 모델
+  호출은 진행 중일 수 있으므로 claim이 만료되어 `failed`가 되게 두고, `failed`가 입력을 확정한다(2026-10-30).
 - 파생 데이터는 아래 보존 기한을 넘기지 않고, 로그·Sentry·analytics에 남지 않는다.
 
 | 데이터 | 보존 |
@@ -211,6 +215,9 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
   통해서만 도달하고 recorder는 셋뿐이다 — 시스템 transaction(`writeSystemAuditLog` 1행), admin transaction
   (`writeAdminAuditLog({ tx })` 1행), 계정 삭제 recorder(그 transaction의 마지막 문장). 세 mode의 전이 집합은
   서로소다. 감사 테이블에 직접 쓰지 않는다. 감사 행에는 불투명 id와 결정 enum만 들어간다.
+  시스템 actor 셋은 자기 action만 쓸 수 있다: worker는 run 시작·종료와 claim·reclaim·result, retention은 run
+  시작·종료와 보존 배치(대상은 둘 다 `SupportTriageRun`), 계정 삭제는 `support_triage.account_data_deleted`
+  (`SupportTriageAccountData`) 하나다(`systemAuditActionAllowed`, 2026-10-30).
 - digest는 팀 3의 공통 `AgentDigestItem` 하나에만 들어가고 단일 writer는 팀 3 공통 계약이 정한 digest store 하나다(아직 구현되지 않았고, 그 배포가 P1 착수 조건이다).
   `kind = daily_digest`, 멱등 키 접두사 `support-triage:`, UTC 날짜당 한 항목. payload는 정수·enum·boolean과
   `date` 문자열 하나뿐이고 팀 3 공통 계약의 bounded schema 규칙을 따른다. 시점값을 넣지 않는다.

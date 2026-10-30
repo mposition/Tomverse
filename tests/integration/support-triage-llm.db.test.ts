@@ -182,7 +182,7 @@ test("an answer whose shown report was deleted before the result is written is d
   );
   const run = await startSupportTriageRun("worker");
   const pool = await readDuplicateCandidates();
-  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`]);
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`], 0);
   const answered = await runTriageLlm(answering("other", "Mentions what seen wrote."), batch.claimed, batch.reports, pool);
   assert.ok(answered[0].llm?.contextIds.includes(`${PREFIX}seen`));
   // The shown report's account is deleted while the model was answering.

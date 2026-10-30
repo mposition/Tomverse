@@ -11,12 +11,15 @@
  *      that need work: an open suggestion of another input to supersede, a
  *      pending one of the current input, or no live or decided one for it
  *      (a hint; nothing is locked). A current input whose only rows are
- *      superseded or invalidated (the input came back, or the report
- *      reopened) is made again;
+ *      superseded or invalidated before they were answered (the input came
+ *      back, or the report reopened) is made again; one already answered is
+ *      not, so the same input is never paid for twice;
  *   2. claim transaction: lock those reports FOR SHARE in id order with the
  *      eligibility re-checked, recompute each input digest from the locked
- *      rows, supersede open suggestions of an older input, insert the new
- *      pending rows and claim the pending ones with this batch's token;
+ *      rows, supersede pending or ready suggestions of an older input (a
+ *      claimed one is left to its claim, which may be paying for a call),
+ *      insert the new pending rows and claim the pending ones with this
+ *      batch's token;
  *   3. compute the keyword flags and the lane outside any transaction;
  *   4. result transaction: lock the reports again with the eligibility
  *      re-checked and their input digest recomputed, and move to ready only
@@ -38,14 +41,15 @@ import { prisma } from "@/lib/prisma";
 import {
   DELETED_ACCOUNT_MARKER,
   LANE_TIMEOUTS,
-  SUGGESTION_STATES,
-  SUGGESTION_TERMINAL_STATES,
+  SUGGESTION_CLOSABLE_OPEN_STATES,
+  SUGGESTION_SETTLING_STATES,
   TRIAGE_ELIGIBLE_REPORT_STATUSES,
   TRIAGE_REPORT_WINDOW_DAYS,
   WORKER_CLAIM_BATCH_SIZE,
   WORKER_PASS_MAX,
   WORKER_RECLAIM_MAX,
   maxGuardedBudgetMs,
+  suggestionSettlesInput,
   triageLaneFor,
   type LaneSource,
   type TriageLane,
@@ -67,7 +71,7 @@ import { armSupportTriageTransaction } from "@/lib/supportTriageTransaction";
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 const ELIGIBLE = [...TRIAGE_ELIGIBLE_REPORT_STATUSES];
-const OPEN_STATES = SUGGESTION_STATES.filter((state) => !SUGGESTION_TERMINAL_STATES.includes(state));
+const CLOSABLE_STATES = [...SUGGESTION_CLOSABLE_OPEN_STATES];
 
 type ReportRow = {
   id: string;
@@ -187,9 +191,6 @@ export const failExpiredClaims = (run: { id: string; deadlineAt: Date }) =>
     return { exhausted };
   });
 
-/** States of a current-input row that settle the report: live or decided. */
-const SETTLING_STATES = new Set(["claimed", "ready", "accepted", "rejected", "expired", "failed"]);
-
 /** Up to `limit` eligible reports after `after` that need work (step 1). */
 const readCandidates = async (after: string | null, limit: number) => {
   const reports = await prisma.$queryRaw<ReportRow[]>`
@@ -213,19 +214,18 @@ const readCandidates = async (after: string | null, limit: number) => {
   const digests = new Map(reports.map((row) => [row.id, digestOf(row)]));
   const existing = await prisma.supportTriageSuggestion.findMany({
     where: { feedbackId: { in: reports.map((row) => row.id) } },
-    select: { feedbackId: true, inputDigest: true, state: true },
+    select: { feedbackId: true, inputDigest: true, state: true, lane: true },
   });
   const needsWork = (feedbackId: string) => {
     const current = digests.get(feedbackId);
     const rows = existing.filter((row) => row.feedbackId === feedbackId);
     // An open proposal for an input the report no longer has.
-    if (rows.some((row) => row.inputDigest !== current && OPEN_STATES.includes(row.state as never))) return true;
+    if (rows.some((row) => row.inputDigest !== current && CLOSABLE_STATES.includes(row.state as never))) return true;
     const mine = rows.filter((row) => row.inputDigest === current);
-    // Returned to pending by a reclaim: claim it again.
     if (mine.some((row) => row.state === "pending")) return true;
-    // Live or decided for this input: nothing to do. Only superseded or
-    // invalidated rows, or none: make one.
-    return !mine.some((row) => SETTLING_STATES.has(row.state));
+    // Live, decided or answered for this input: nothing to do. Only rows
+    // closed before an answer, or none: make one.
+    return !mine.some(suggestionSettlesInput);
   };
   const candidates: string[] = [];
   let last: string | null = null;
@@ -255,7 +255,7 @@ export type ClaimedReport = TriageLlmInput["report"];
 export const claimSupportTriageBatch = (
   run: { id: string; deadlineAt: Date },
   reportIds: string[],
-  reserveMs = 0
+  reserveMs: number
 ) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
@@ -274,20 +274,19 @@ export const claimSupportTriageBatch = (
       UPDATE "SupportTriageSuggestion" s SET "state" = 'superseded'
         FROM unnest(${feedbackIds}::text[], ${digests}::text[]) AS c("feedbackId", "inputDigest")
        WHERE s."feedbackId" = c."feedbackId" AND s."inputDigest" <> c."inputDigest"
-         AND s."state" = ANY(${OPEN_STATES}::text[])`;
+         AND s."state" = ANY(${CLOSABLE_STATES}::text[])`;
     const newIds = feedbackIds.map(() => randomUUID());
     await tx.$executeRaw`
       INSERT INTO "SupportTriageSuggestion" ("id", "feedbackId", "inputDigest")
       SELECT c."id", c."feedbackId", c."inputDigest"
         FROM unnest(${newIds}::text[], ${feedbackIds}::text[], ${digests}::text[])
              AS c("id", "feedbackId", "inputDigest")
-       -- A current input already live or decided (claimed, ready, accepted,
-       -- rejected, expired, failed) is not proposed again; only one whose
-       -- rows are all superseded or invalidated is.
+       -- A current input already live, decided or answered (suggestionSettlesInput)
+       -- is not proposed again; only one whose rows all closed unanswered is.
        WHERE NOT EXISTS (
          SELECT 1 FROM "SupportTriageSuggestion" x
           WHERE x."feedbackId" = c."feedbackId" AND x."inputDigest" = c."inputDigest"
-            AND x."state" = ANY(${[...SETTLING_STATES]}::text[]))
+            AND (x."state" = ANY(${SUGGESTION_SETTLING_STATES}::text[]) OR x."lane" IS NOT NULL))
       ON CONFLICT ("feedbackId", "inputDigest") WHERE "state" IN ('pending', 'claimed', 'ready') DO NOTHING`;
     const token = randomUUID();
     const claimed = await tx.$queryRaw<{ id: string; feedbackId: string; inputDigest: string }[]>`
@@ -478,7 +477,9 @@ export const runSupportTriageWorker = async (
   let partial = false;
   // What a claimed batch still needs: the model call and the result
   // transaction. A claim commits only with this much left, so a claimed batch
-  // is always called and its paid answer always written.
+  // is always called and its answer is not dropped for want of time. A result
+  // transaction that fails for another reason rolls back, and its claim lapses
+  // to failed without a second call (policy section 2 item 11).
   const batchReserveMs = maxGuardedBudgetMs("worker") + (llm ? SUPPORT_TRIAGE_LLM_TIMEOUT_MS : 0);
   const hasBudget = async (reserveMs = maxGuardedBudgetMs("worker")) =>
     run.deadlineAt.getTime() - (await databaseNow()).getTime() > reserveMs;
