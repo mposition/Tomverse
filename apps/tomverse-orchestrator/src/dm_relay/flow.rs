@@ -91,6 +91,13 @@ pub enum AppRoute {
     /// Stage S2-2b4: the operator answered a question directly; its request
     /// closes (§2-7).
     DirectAnswer,
+    /// A v22 worker's questions (`v22_question`): answer one confirmed, and
+    /// list the cards to file and to close.
+    V22QuestionSync,
+    /// The local card filed for a v22 question.
+    V22QuestionCard,
+    /// A v22 question's local card closed.
+    V22QuestionClosed,
 }
 
 impl AppRoute {
@@ -114,6 +121,9 @@ impl AppRoute {
                 "/api/internal/amux/decision-maker/deliveries/unsettled"
             }
             AppRoute::DirectAnswer => "/api/internal/amux/decision-maker/requests/direct-answer",
+            AppRoute::V22QuestionSync => "/api/internal/amux/decision-maker/v22-questions/sync",
+            AppRoute::V22QuestionCard => "/api/internal/amux/decision-maker/v22-questions/card",
+            AppRoute::V22QuestionClosed => "/api/internal/amux/decision-maker/v22-questions/closed",
         }
     }
 
@@ -125,6 +135,7 @@ impl AppRoute {
             AppRoute::ResultLookup => "found",
             AppRoute::DeliveriesNext => "found",
             AppRoute::DeliveriesUnsettled => "found",
+            AppRoute::V22QuestionSync => "synced",
             _ => "recorded",
         }
     }
@@ -156,6 +167,10 @@ pub enum LocalRoute {
     /// message id's reservation and the question revision's answer record --
     /// without pausing or sending anything (a read).
     AnswerReceipt,
+    /// A v22 worker's question filed as a typed-ask card (`v22_question`).
+    V22QuestionFile,
+    /// A v22 question's card closed.
+    V22QuestionClose,
 }
 
 impl LocalRoute {
@@ -168,6 +183,8 @@ impl LocalRoute {
             LocalRoute::AnswerUnknown => "/api/dm-relay/answers/unknown",
             LocalRoute::OperatorAnswers => "/api/dm-relay/answers/operator",
             LocalRoute::AnswerReceipt => "/api/dm-relay/answers/receipt",
+            LocalRoute::V22QuestionFile => "/api/dm-relay/v22-questions",
+            LocalRoute::V22QuestionClose => "/api/dm-relay/v22-questions/close",
         }
     }
 }
@@ -913,7 +930,16 @@ pub(crate) mod tests {
             app
         }
 
+        /// The routes of the question and delivery flows. The v22 question
+        /// sync runs every tick too (`v22_question`); `all_routes` keeps it.
         pub(crate) fn routes(&self) -> Vec<AppRoute> {
+            self.all_routes()
+                .into_iter()
+                .filter(|route| *route != AppRoute::V22QuestionSync)
+                .collect()
+        }
+
+        pub(crate) fn all_routes(&self) -> Vec<AppRoute> {
             self.calls
                 .lock()
                 .unwrap()
@@ -1009,7 +1035,9 @@ pub(crate) mod tests {
                 | LocalRoute::Answers
                 | LocalRoute::AnswerUnknown
                 | LocalRoute::OperatorAnswers
-                | LocalRoute::AnswerReceipt => self
+                | LocalRoute::AnswerReceipt
+                | LocalRoute::V22QuestionFile
+                | LocalRoute::V22QuestionClose => self
                     .answers
                     .lock()
                     .unwrap()
