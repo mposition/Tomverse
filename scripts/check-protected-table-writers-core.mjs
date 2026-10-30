@@ -970,6 +970,13 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "lib/adminAuditSystemActors.ts",
+    table: "SupportTriageRun",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The support-triage actors' audit scope names their run row as the audit target; it executes no SQL.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
     tableMentions: 1,
     writeVerbs: 2,
