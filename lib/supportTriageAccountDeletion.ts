@@ -19,15 +19,13 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { suggestionSettlesInput } from "@/lib/supportTriageCore";
 
 export type SupportTriageDeletionCounts = {
   readonly suggestions: number;
   readonly groups: number;
   readonly decisionRecords: number;
 };
-
-/** States that settle a report's input for the worker; shown rows in them are replaced. */
-const SETTLED_STATES = new Set(["ready", "accepted", "rejected", "expired", "failed"]);
 
 /** Models this module deletes, by manifest name. */
 export const SUPPORT_TRIAGE_ACCOUNT_DELETION_MODELS = Object.freeze([
@@ -60,10 +58,10 @@ export const deleteSupportTriageDataForAccount = async (
   const own = await tx.supportTriageSuggestion.deleteMany({ where: { feedbackId: { in: ids } } });
   // Every other report's suggestion that showed one of the account's reports
   // to the model goes too: its draft may carry what that report said.
-  const shown = await tx.$queryRaw<{ feedbackId: string; inputDigest: string; state: string }[]>`
+  const shown = await tx.$queryRaw<{ feedbackId: string; inputDigest: string; state: string; lane: string | null }[]>`
     DELETE FROM "SupportTriageSuggestion" s
      WHERE s."contextFeedbackIds" && ${ids}::text[]
-    RETURNING s."feedbackId", s."inputDigest", s."state"`;
+    RETURNING s."feedbackId", s."inputDigest", s."state", s."lane"`;
   // That report's input stays settled, though: a content-free expired row of
   // the same input takes the place of a settled one, so the worker never pays
   // for that input again. It ages out like any expired row; by then the report
@@ -71,7 +69,7 @@ export const deleteSupportTriageDataForAccount = async (
   const settled = [
     ...new Map(
       shown
-        .filter((row) => SETTLED_STATES.has(row.state))
+        .filter(suggestionSettlesInput)
         .map((row) => [JSON.stringify([row.feedbackId, row.inputDigest]), row])
     ).values(),
   ];
