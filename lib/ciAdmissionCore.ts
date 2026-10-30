@@ -42,6 +42,10 @@
  * - Stacked pull requests (base other than develop or main), forks, and pull
  *   requests labelled ci:hold are not handled: they are not in the line
  *   (owner, 2026-10-25), and runners their CI holds count as other workflows'.
+ *   Nor are the engineering agent's pull requests (head under
+ *   `agent/engineering/`, owner 2026-10-30): an owner review draft runs its
+ *   code with the repository's secrets once ready, so only a person marks it
+ *   ready, and a label would come too late -- the head is fixed on opening.
  *
  * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.
@@ -68,6 +72,8 @@ export const CI_ADMISSION_HOLD_GRACE_MS = 10 * 60 * 1000;
 export const CI_ADMISSION_UPDATE_RETRY_MS = 10 * 60 * 1000;
 /** A pull request with this label is left out of the line: admission never marks it ready. */
 export const CI_ADMISSION_HOLD_LABEL = "ci:hold";
+/** The engineering agent's branch namespace (lib/engineeringAgentCore.ts BRANCH_NAMESPACE): never in the line. */
+export const CI_ADMISSION_AGENT_HEAD_PREFIX = "agent/engineering/";
 /** How many drafts at the top of the line a round checks for conflicts and lag. */
 export const CI_ADMISSION_CHECK_LIMIT = 6;
 const MAX_EVENTS = 50;
@@ -367,7 +373,8 @@ export type CiAdmissionEvaluation = {
 export function ciAdmissionOrder(stored: readonly Pick<CiAdmissionQueueEntry, "number">[], openPulls: readonly CiAdmissionPull[]): CiAdmissionPull[] {
   const handled = new Map(
     openPulls
-      .filter((pull) => ciAdmissionUnits(pull) !== null && !(pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL))
+      .filter((pull) => ciAdmissionUnits(pull) !== null && !(pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL) &&
+        !pull.head.startsWith(CI_ADMISSION_AGENT_HEAD_PREFIX))
       .map((pull) => [pull.number, pull]),
   );
   const kept = stored.map((entry) => handled.get(entry.number)).filter((pull): pull is CiAdmissionPull => pull !== undefined);
