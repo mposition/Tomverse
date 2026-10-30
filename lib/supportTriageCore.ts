@@ -486,6 +486,14 @@ export const DECISION_RECORD_LINKS_MAX = GROUP_MEMBER_CAP;
 export const TERMINAL_SUGGESTION_RETENTION_DAYS = 30;
 export const TERMINAL_GROUP_RETENTION_DAYS = 30;
 /**
+ * The worker triages only reports created within this many days. Retention
+ * deletes a terminal suggestion no earlier than this long after it was
+ * written, and a suggestion is never older than its report, so a report
+ * whose settled row was deleted is already out of reach and is never sent to
+ * the paid model a second time for the same input.
+ */
+export const TRIAGE_REPORT_WINDOW_DAYS = TERMINAL_SUGGESTION_RETENTION_DAYS;
+/**
  * A suggestion never shown to the owner (ownerQueueState not_queued) leaves
  * promotion and becomes expired 7 days after it was created (policy section
  * 5), whether or not its report is still open.

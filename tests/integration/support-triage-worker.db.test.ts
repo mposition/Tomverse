@@ -242,3 +242,25 @@ test("an input that comes back after it was decided or failed is not proposed ag
     ]
   );
 });
+
+test("a report older than the triage window is not triaged, so a deleted settled row is never paid for again", async () => {
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
+  // Retention deletes a settled suggestion 30 days after it was written; by
+  // then its report is past the window and the worker leaves it alone.
+  await report("old", { createdAt: daysAgo(31) });
+  await report("recent", { createdAt: daysAgo(29) });
+  const result = await runSupportTriageWorker();
+  assert.equal(result.claimed, 1);
+  assert.deepEqual((await suggestions()).map((s) => s.feedbackId), ["fb-w-recent"]);
+  // The claim's own lock refuses it too.
+  const run = await startSupportTriageRun("worker");
+  assert.equal((await claimSupportTriageBatch(run, ["fb-w-old"])).claimed.length, 0);
+  // An answer already claimed is still written when its report crosses the
+  // window during the call.
+  await report("edge", { createdAt: daysAgo(29) });
+  const batch = await claimSupportTriageBatch(run, ["fb-w-edge"]);
+  assert.equal(batch.claimed.length, 1);
+  await prisma.feedback.update({ where: { id: "fb-w-edge" }, data: { createdAt: daysAgo(31) } });
+  const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
+  assert.deepEqual({ ready, stale }, { ready: 1, stale: 0 });
+});

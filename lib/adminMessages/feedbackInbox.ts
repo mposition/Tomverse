@@ -165,6 +165,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
         "The reporter opted into email updates. Confirming sends the completion email previewed below.",
       noEmail: "This report carries no address. The status changes and nothing is emailed.",
       outcome: "Outcome",
+      chooseOutcome: "Choose an outcome",
       reply: "Reply to the reporter (optional, included in the email)",
       replyInternal: "Reply (kept as an internal record -- nothing is emailed)",
       willSendTo: (address: string) =>
@@ -346,6 +347,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
         "신고자가 이메일 알림을 선택했습니다. 확인하면 아래 미리보기의 완료 이메일이 발송됩니다.",
       noEmail: "이 신고에는 주소가 없습니다. 아무것도 발송하지 않고 상태만 바뀝니다.",
       outcome: "처리 결과",
+      chooseOutcome: "처리 결과를 고르세요",
       reply: "신고자에게 보낼 답변 (선택, 이메일에 포함)",
       replyInternal: "답변 (내부 기록용 — 발송되지 않습니다)",
       willSendTo: (address: string) => `확인을 누르면 이 답변을 ${address}로 보냅니다.`,
