@@ -14,6 +14,8 @@
  */
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
@@ -23,6 +25,9 @@ export type SupportTriageDeletionCounts = {
   readonly groups: number;
   readonly decisionRecords: number;
 };
+
+/** States that settle a report's input for the worker; shown rows in them are replaced. */
+const SETTLED_STATES = new Set(["ready", "accepted", "rejected", "expired", "failed"]);
 
 /** Models this module deletes, by manifest name. */
 export const SUPPORT_TRIAGE_ACCOUNT_DELETION_MODELS = Object.freeze([
@@ -51,12 +56,39 @@ export const deleteSupportTriageDataForAccount = async (
 ): Promise<SupportTriageDeletionCounts> => {
   if (anonymisedReportIds.length === 0) return { suggestions: 0, groups: 0, decisionRecords: 0 };
   const ids = [...anonymisedReportIds];
-  // The account's own suggestions, and every other report's suggestion that
-  // showed one of the account's reports to the model: its draft may carry
-  // what that report said.
-  const suggestions = await tx.supportTriageSuggestion.deleteMany({
-    where: { OR: [{ feedbackId: { in: ids } }, { contextFeedbackIds: { hasSome: ids } }] },
-  });
+  // The account's own suggestions.
+  const own = await tx.supportTriageSuggestion.deleteMany({ where: { feedbackId: { in: ids } } });
+  // Every other report's suggestion that showed one of the account's reports
+  // to the model goes too: its draft may carry what that report said.
+  const shown = await tx.$queryRaw<{ feedbackId: string; inputDigest: string; state: string }[]>`
+    DELETE FROM "SupportTriageSuggestion" s
+     WHERE s."contextFeedbackIds" && ${ids}::text[]
+    RETURNING s."feedbackId", s."inputDigest", s."state"`;
+  // That report's input stays settled, though: a content-free expired row of
+  // the same input takes the place of a settled one, so the worker never pays
+  // for that input again. It ages out like any expired row; by then the report
+  // is past the worker's 30-day window (docs/policy/support-triage.md §5).
+  const settled = [
+    ...new Map(
+      shown
+        .filter((row) => SETTLED_STATES.has(row.state))
+        .map((row) => [JSON.stringify([row.feedbackId, row.inputDigest]), row])
+    ).values(),
+  ];
+  if (settled.length > 0) {
+    const placed = await tx.$queryRaw<{ id: string }[]>`
+      INSERT INTO "SupportTriageSuggestion" ("id", "feedbackId", "inputDigest")
+      SELECT c."id", c."feedbackId", c."inputDigest"
+        FROM unnest(${settled.map(() => randomUUID())}::text[], ${settled.map((row) => row.feedbackId)}::text[],
+                    ${settled.map((row) => row.inputDigest)}::text[]) AS c("id", "feedbackId", "inputDigest")
+      ON CONFLICT ("feedbackId", "inputDigest") WHERE "state" IN ('pending', 'claimed', 'ready') DO NOTHING
+      RETURNING "id"`;
+    if (placed.length > 0) {
+      await tx.$executeRaw`
+        UPDATE "SupportTriageSuggestion" SET "state" = 'expired' WHERE "id" = ANY(${placed.map((row) => row.id)}::text[])`;
+    }
+  }
+  const suggestions = { count: own.count + shown.length };
   // Every group the reports are in, or were in before it ended, whatever its
   // state and cooldown: no deleted report's id survives in a key, a list, a
   // membership or a signal (docs/policy/support-triage.md §5). Locked in id

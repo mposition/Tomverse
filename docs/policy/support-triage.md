@@ -153,6 +153,9 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
   누락 검사가 실패한다. 보존·계정 삭제 fixture는 이 분류에서 파생한다.
 - 계정 삭제 transaction은 manifest의 triage 파생 데이터 전체를 지운다. 그 뒤 어떤 worker pass도 계정 삭제
   marker가 있는 신고에서 triage 행을 만들지 않는다(적격성 조건을 선택 query와 생성 쓰기의 잠금 확인에 함께 적용).
+  삭제된 신고를 모델에게 보여 준 다른 신고의 suggestion도 지우되, 그 suggestion이 입력을 확정한 상태였으면 같은
+  입력의 내용 없는 `expired` 행을 같은 transaction에 대신 남긴다(2026-10-30). 그래서 남은 신고는 같은 입력으로
+  다시 유료 호출되지 않는다.
 - 파생 데이터는 아래 보존 기한을 넘기지 않고, 로그·Sentry·analytics에 남지 않는다.
 
 | 데이터 | 보존 |

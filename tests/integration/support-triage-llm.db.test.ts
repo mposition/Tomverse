@@ -149,10 +149,28 @@ test("deleting the account of a report the model was shown deletes the suggestio
   });
   assert.ok(before.contextFeedbackIds.includes(`${PREFIX}seen`));
   const { deleteSupportTriageDataForAccount } = await import("@/lib/supportTriageAccountDeletion");
-  const counts = await prisma.$transaction((tx) => deleteSupportTriageDataForAccount(tx, [`${PREFIX}seen`]));
+  // As account deletion does: anonymise the report, then delete what was derived from it.
+  const counts = await prisma.$transaction(async (tx) => {
+    await tx.feedback.update({ where: { id: `${PREFIX}seen` }, data: { message: "[deleted account]" } });
+    return deleteSupportTriageDataForAccount(tx, [`${PREFIX}seen`]);
+  });
   // Its own suggestion and the one that was shown it.
   assert.equal(counts.suggestions, 2);
-  assert.equal(await prisma.supportTriageSuggestion.count({ where: { feedbackId: `${PREFIX}a` } }), 0);
+  // In its place, a content-free expired row of the same input.
+  const left = await prisma.supportTriageSuggestion.findMany({
+    where: { feedbackId: `${PREFIX}a` },
+    select: { state: true, replyDraft: true, contextFeedbackIds: true, duplicateOfFeedbackIds: true },
+  });
+  assert.deepEqual(left, [{ state: "expired", replyDraft: null, contextFeedbackIds: [], duplicateOfFeedbackIds: [] }]);
+  // The report that remains is not sent to the model again for the same input.
+  let calls = 0;
+  await runSupportTriageWorker({
+    llm: async () => {
+      calls += 1;
+      return null;
+    },
+  });
+  assert.equal(calls, 0);
 });
 
 test("an answer whose shown report was deleted before the result is written is dropped", async () => {
