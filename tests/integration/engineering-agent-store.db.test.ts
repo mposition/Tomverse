@@ -392,6 +392,25 @@ test("a T2 draft promoted for the owner's review opens a review item only a revi
     assert.ok(work && work.mode === "write");
     assert.equal(work.workItemId, publish.id);
     assert.equal(work.ownerReview, true);
+    // Turned off after the claim, the switch still stops the push: the last look refuses.
+    const incidentKey = "amux.incidentMode";
+    const incidentBefore = await prisma.appSetting.findUnique({ where: { key: incidentKey } });
+    try {
+      await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+      await prisma.appSetting.create({ data: { key: incidentKey, value: JSON.stringify({
+        version: 1, state: "normal", transition_id: null, changed_at: new Date().toISOString(),
+        reason: "engineering agent store fixture", ticket: "TEST" }) } });
+      const look = (env: Record<string, string | undefined>) => readEngineeringAgentLastLook(prisma,
+        { workItemId: publish.id, fencingToken: work.fencingToken, commitDigest: work.commitDigest },
+        { ...process.env, ...env });
+      assert.deepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: undefined }),
+        { verdict: "refuse", reason: "review_pr_off" });
+      assert.notDeepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: "on" }),
+        { verdict: "refuse", reason: "review_pr_off" });
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+      if (incidentBefore) await prisma.appSetting.create({ data: { key: incidentKey, value: incidentBefore.value } });
+    }
     const bound = await settleAndBind(publish.id, work.fencingToken, pending.run.runId);
     await retireBinding(bound.bindingId);
   } finally {
