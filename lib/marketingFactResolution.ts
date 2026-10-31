@@ -252,20 +252,27 @@ const byRowId = (left: { rowId: string }, right: { rowId: string }) =>
 export const readMarketingAssetRegistry = async (
   db?: Pick<Prisma.TransactionClient, "$queryRaw">,
 ): Promise<LoadedAssetRegistry | null> => {
+  let file: ReturnType<typeof marketingAssetRegistrySchema.parse>;
   try {
-    const raw = JSON.parse(
-      await readFile(resolve(process.cwd(), MARKETING_ASSET_REGISTRY_PATH), "utf8"),
-    ) as unknown;
-    if (!db) return loadMarketingAssetRegistry(raw);
-    const file = marketingAssetRegistrySchema.parse(raw);
-    const stored = await readApprovedMarketingAssetRows(db);
-    const fileIds = new Set(file.assets.map((asset) => asset.id));
+    file = marketingAssetRegistrySchema.parse(
+      JSON.parse(await readFile(resolve(process.cwd(), MARKETING_ASSET_REGISTRY_PATH), "utf8")) as unknown,
+    );
+  } catch {
+    // A missing, unreadable or invalid registry makes every asset unknown.
+    return null;
+  }
+  if (!db) return loadMarketingAssetRegistry(file);
+  // Not caught: a failed read of the stored assets fails the caller's
+  // transaction where it can be seen, rather than reading as "no assets".
+  const stored = await readApprovedMarketingAssetRows(db);
+  const fileIds = new Set(file.assets.map((asset) => asset.id));
+  try {
     return loadMarketingAssetRegistry({
       version: file.version + stored.version,
       assets: [...file.assets, ...stored.assets.filter((asset) => !fileIds.has(asset.id))],
     });
   } catch {
-    // A missing, unreadable or invalid registry makes every asset unknown.
+    // A stored row the registry schema refuses: every asset unknown, as for an invalid file.
     return null;
   }
 };

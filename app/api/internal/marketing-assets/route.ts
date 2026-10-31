@@ -23,8 +23,8 @@ import { createR2UploadUrl } from "@/lib/r2";
 
 // The media CLI announces a file (operator decision 2026-10-31): the registry
 // entry it will become and what the bytes are. The answer is a short-lived URL
-// to upload the file to its one object key; the confirmation route records the
-// upload. Nothing here is trusted for a post until a person approves it in
+// for the upload key only; the confirmation route verifies the bytes there and
+// copies them to the key the asset is kept at, which no URL is signed for. Nothing here is trusted for a post until a person approves it in
 // Admin.
 
 const json = (body: Record<string, unknown>, status: number) =>
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   const parsed = marketingAssetSubmissionSchema.safeParse(parseMarketingGeneratorJson(raw));
   if (!parsed.success) return json({ code: "invalid_request" }, 400);
 
-  let stored: { assetId: string; r2Key: string; existing: boolean };
+  let stored: { assetId: string; uploadKey: string; existing: boolean };
   try {
     stored = await runMarketingTransaction(prisma, (tx) => submitMarketingAsset(tx, parsed.data), {
       maxWait: 5_000,
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     return json({ code: "outcome_unknown" }, 500);
   }
 
-  const uploadUrl = await createR2UploadUrl(stored.r2Key, parsed.data.contentType, parsed.data.bytes);
+  const uploadUrl = await createR2UploadUrl(stored.uploadKey, parsed.data.contentType, parsed.data.bytes);
   return json(
     {
       result: {

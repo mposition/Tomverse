@@ -67,9 +67,20 @@ export const MARKETING_ASSET_PREVIEW_URL_SECONDS = 300;
 /** The largest submission body, in bytes: metadata only, never the file. */
 export const MARKETING_ASSET_MAX_BODY_BYTES = 16 * 1024;
 
-/** The one object key a stored asset may have. */
+/**
+ * The one object key a stored asset is kept and served from. Only the server
+ * writes it, by copying a verified upload: no upload URL is ever signed for it.
+ */
 export const marketingAssetR2Key = (id: string, kind: MarketingAssetKind, contentType: string): string =>
   `${MARKETING_ASSET_KEY_PREFIX}${id}/original.${MARKETING_ASSET_CONTENT_TYPES[kind][contentType]}`;
+
+/**
+ * Where the media CLI uploads a file before it is verified. An upload URL is
+ * signed for this key only, so a URL still valid after the approval cannot
+ * change the bytes a person approved.
+ */
+export const marketingAssetUploadKey = (id: string, kind: MarketingAssetKind, contentType: string): string =>
+  `${MARKETING_ASSET_KEY_PREFIX}${id}/upload.${MARKETING_ASSET_CONTENT_TYPES[kind][contentType]}`;
 
 /**
  * A store refusal, carrying the status a route answers it with. Its own class

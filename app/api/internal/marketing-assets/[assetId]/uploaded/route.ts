@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// A video can be a gigabyte, and it is hashed here end to end.
+export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
 
@@ -9,13 +10,15 @@ import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationA
 import { marketingGeneratorAuthorized, marketingMediaSecret } from "@/lib/marketingGeneratorAuth";
 import { runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
-import { validateR2ObjectMetadata } from "@/lib/r2";
+import { copyR2Object, deleteR2Object, hashR2Object, validateR2ObjectMetadata } from "@/lib/r2";
 
-// The media CLI says the file is uploaded (operator decision 2026-10-31). The
-// object is measured against what was announced -- type and exact size -- and
-// an object that does not match is removed (validateR2ObjectMetadata), so the
-// CLI uploads again. Only then is the upload recorded and the asset shown to a
-// person for approval.
+// The media CLI says the file is uploaded (operator decision 2026-10-31).
+//
+// The upload is checked against what was announced -- type and exact size
+// (a mismatch is removed), then the SHA-256 of the bytes themselves -- and only
+// the version that was hashed is copied to the key the asset is kept at, which
+// no upload URL is signed for. So the bytes a person later approves are the
+// announced ones, and an upload URL still valid afterwards cannot change them.
 
 type RouteContext = { params: Promise<{ assetId: string }> };
 
@@ -36,27 +39,47 @@ export async function POST(request: Request, context: RouteContext) {
   const target = await readMarketingAssetUploadTarget(prisma, assetId);
   if (!target) return json({ code: "asset_not_submitted" }, 409);
 
-  let measured: { size: number };
-  try {
-    measured = await validateR2ObjectMetadata(target.r2Key, {
-      maxBytes: MARKETING_ASSET_MAX_BYTES[target.kind],
-      expectedContentType: target.contentType,
-      expectedSize: target.bytes,
-    });
-  } catch {
-    // Missing, or not what was announced (and now removed): upload it again.
-    return json({ code: "upload_not_found_or_invalid" }, 409);
+  if (!target.uploaded) {
+    try {
+      await validateR2ObjectMetadata(target.uploadKey, {
+        maxBytes: MARKETING_ASSET_MAX_BYTES[target.kind],
+        expectedContentType: target.contentType,
+        expectedSize: target.bytes,
+      });
+    } catch {
+      // Missing, or not the announced type and size (and now removed): upload it again.
+      return json({ code: "upload_not_found_or_invalid" }, 409);
+    }
+    let hashed: { sha256: string; size: number; etag: string | null };
+    try {
+      hashed = await hashR2Object(target.uploadKey, { maxBytes: MARKETING_ASSET_MAX_BYTES[target.kind] });
+    } catch {
+      return json({ code: "upload_not_found_or_invalid" }, 409);
+    }
+    if (hashed.sha256 !== target.sha256 || hashed.size !== target.bytes) {
+      await deleteR2Object(target.uploadKey).catch(() => undefined);
+      return json({ code: "upload_hash_mismatch" }, 409);
+    }
+    try {
+      // Only the version that was hashed: one replaced since is refused.
+      await copyR2Object(target.uploadKey, target.r2Key, { ifMatch: hashed.etag });
+    } catch {
+      return json({ code: "upload_changed_while_verified" }, 409);
+    }
   }
 
+  let result: { assetId: string; uploadedAt: string };
   try {
-    const result = await runMarketingTransaction(
+    result = await runMarketingTransaction(
       prisma,
-      (tx) => confirmMarketingAssetUpload(tx, { assetId, bytes: measured.size }),
+      (tx) => confirmMarketingAssetUpload(tx, { assetId, bytes: target.bytes }),
       { maxWait: 5_000, timeout: 15_000 },
     );
-    return json({ result }, 200);
   } catch (error) {
     if (error instanceof MarketingAssetRefusedError) return json({ code: error.code }, error.status);
     return json({ code: "outcome_unknown" }, 500);
   }
+  // The upload key has done its work; a leftover is harmless and costs a little.
+  await deleteR2Object(target.uploadKey).catch(() => undefined);
+  return json({ result }, 200);
 }

@@ -28,6 +28,7 @@ import {
   MARKETING_ASSET_ACTIONS,
   MarketingAssetRefusedError,
   marketingAssetR2Key,
+  marketingAssetUploadKey,
   type MarketingAssetKind,
   type MarketingAssetStatus,
 } from "@/lib/marketingAssetCore";
@@ -105,8 +106,9 @@ const readRow = async (db: AssetReader, id: string, lock: "share" | "update" | n
 };
 
 /**
- * Announce a file. The row is a submission with the object key it must be
- * uploaded to; the caller signs an upload URL for that key after this commits.
+ * Announce a file. The row is a submission with the key its verified copy will
+ * be kept at; the caller signs an upload URL for the upload key
+ * (`marketingAssetUploadKey`) after this commits.
  *
  * The same submission sent again -- an answer lost on the way back -- is read
  * back, so the CLI may resend it and get a fresh URL for the same key. A
@@ -116,8 +118,9 @@ const readRow = async (db: AssetReader, id: string, lock: "share" | "update" | n
 export async function submitMarketingAsset(
   tx: MarketingTransaction,
   submission: MarketingAssetSubmission,
-): Promise<{ readonly assetId: string; readonly r2Key: string; readonly existing: boolean }> {
+): Promise<{ readonly assetId: string; readonly r2Key: string; readonly uploadKey: string; readonly existing: boolean }> {
   await takeAuditChainLock(tx);
+  const uploadKey = marketingAssetUploadKey(submission.asset.id, submission.kind, submission.contentType);
   const r2Key = marketingAssetR2Key(submission.asset.id, submission.kind, submission.contentType);
   const existing = await readRow(tx, submission.asset.id, "update");
   if (existing) {
@@ -127,7 +130,7 @@ export async function submitMarketingAsset(
     if (existing.status !== "submitted" || existing.uploadedAt !== null) {
       throw new MarketingAssetRefusedError("asset_already_uploaded", 409, "That asset is already uploaded");
     }
-    return { assetId: existing.id, r2Key, existing: true };
+    return { assetId: existing.id, r2Key, uploadKey, existing: true };
   }
   const asset = submission.asset;
   await tx.$executeRaw(Prisma.sql`
@@ -156,22 +159,42 @@ export async function submitMarketingAsset(
       sha256: submission.sha256,
     },
   });
-  return { assetId: asset.id, r2Key, existing: false };
-}
-
-/** Where a submission's file must be, and what it must measure, to be confirmed. */
-export async function readMarketingAssetUploadTarget(
-  db: AssetReader,
-  id: string,
-): Promise<{ readonly r2Key: string; readonly kind: MarketingAssetKind; readonly contentType: string; readonly bytes: number; readonly uploaded: boolean } | null> {
-  const row = await readRow(db, id, null);
-  if (!row || row.status !== "submitted") return null;
-  return { r2Key: row.r2Key, kind: row.kind, contentType: row.contentType, bytes: row.bytes, uploaded: row.uploadedAt !== null };
+  return { assetId: asset.id, r2Key, uploadKey, existing: false };
 }
 
 /**
- * Record that the file is in R2. The caller measured the object against the
- * declared type and size first; this writes the time, once. A second
+ * What a submission's upload must be to be confirmed: where it was uploaded,
+ * where the verified copy is kept, and the type, size and hash announced.
+ */
+export async function readMarketingAssetUploadTarget(
+  db: AssetReader,
+  id: string,
+): Promise<{
+  readonly uploadKey: string;
+  readonly r2Key: string;
+  readonly kind: MarketingAssetKind;
+  readonly contentType: string;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly uploaded: boolean;
+} | null> {
+  const row = await readRow(db, id, null);
+  if (!row || row.status !== "submitted") return null;
+  return {
+    uploadKey: marketingAssetUploadKey(row.id, row.kind, row.contentType),
+    r2Key: row.r2Key,
+    kind: row.kind,
+    contentType: row.contentType,
+    bytes: row.bytes,
+    sha256: row.sha256,
+    uploaded: row.uploadedAt !== null,
+  };
+}
+
+/**
+ * Record that the file is in R2. The caller verified the upload against the
+ * announced type, size and SHA-256 and copied it to the asset's own key first;
+ * this writes the time, once. A second
  * confirmation of the same upload answers as the first did.
  */
 export async function confirmMarketingAssetUpload(
@@ -232,6 +255,10 @@ export async function decideMarketingAsset(
     }
     if (message.includes("marketing_asset_not_uploaded")) {
       throw new MarketingAssetRefusedError("asset_not_uploaded", 409, "The file has not been uploaded yet");
+    }
+    // An approval naming other bytes than the row's: the page showed an older file.
+    if (message.includes("marketing_asset_decision_not_a_person")) {
+      throw new MarketingAssetRefusedError("asset_decision_mismatch", 409, "The file changed since it was shown");
     }
     throw error;
   }

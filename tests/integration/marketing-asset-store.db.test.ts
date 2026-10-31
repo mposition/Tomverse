@@ -117,7 +117,13 @@ const submitAndUpload = async () => {
 
 test("a submission is stored with its object key and the media agent's audit row, and a resend is read back", async () => {
   const first = await tx((client) => submitMarketingAsset(client, submission()));
-  assert.deepEqual(first, { assetId: ID, r2Key: `marketing-assets/${ID}/original.mp4`, existing: false });
+  assert.deepEqual(first, {
+    assetId: ID,
+    r2Key: `marketing-assets/${ID}/original.mp4`,
+    // The upload URL is signed for this key only; the kept copy is the server's.
+    uploadKey: `marketing-assets/${ID}/upload.mp4`,
+    existing: false,
+  });
   const again = await tx((client) => submitMarketingAsset(client, submission()));
   assert.equal(again.existing, true);
   assert.equal(again.r2Key, first.r2Key);
@@ -151,7 +157,7 @@ test("an approval is a person's, about exactly these bytes; then the file is in 
   assert.equal(await readApprovedMarketingAssetLocation(prisma, ID), null);
 
   // Other bytes than the row's: the guard refuses.
-  await assert.rejects(decide("approved", "d".repeat(64)), refusedBy("marketing_asset_decision_not_a_person"));
+  await assert.rejects(decide("approved", "d".repeat(64)), code("asset_decision_mismatch"));
   // A system actor's audit row is not a person's.
   await assert.rejects(
     tx(async (client) => {
@@ -166,7 +172,7 @@ test("an approval is a person's, about exactly these bytes; then the file is in 
       });
       return decideMarketingAsset(client, { assetId: ID, decision: "approved", expectedDecisionAuditLogId: null, auditLogId });
     }),
-    refusedBy("marketing_asset_decision_not_a_person"),
+    code("asset_decision_mismatch"),
   );
 
   const before = await readMarketingAssetRegistry(prisma);
