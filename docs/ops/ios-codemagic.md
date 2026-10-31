@@ -312,6 +312,29 @@ update. Record remote Xcode compilation separately from a signed upload after
 Apple's advised waiting period and actual iPhone/iPad acceptance. Public App Store
 metadata does not list TestFlight-only builds or fix the prior install-data 404.
 
+## Android 1.0.21 (23) parity (2026-10-31)
+
+The signed Android candidate records source
+`f2710ebd2cf85aa2dc23d2092daa0f6f33f609ff`. Its complete mobile source and
+shared image/upload copy match develop `dce229759`. The iOS marketing version
+is 1.0.21; Codemagic assigns its increasing build number separately from 23.
+
+The refreshed bundle includes animated image-generation feedback, the actual
+result quality and standard-quality explanation, immediate composer clearing
+and a visible pending question in Chat and Review. Failure before dispatch
+restores the draft and attachments; an uncertain dispatched result requires
+readback without automatic resubmission. File/photo uploads show a modal with
+the active filename, size and completed file count, retain completed attachments
+on failure, and respect the selected language, theme and reduced motion.
+
+Attached-photo editing retains the existing server capability and
+`IMAGE_EDIT_ENABLED` gate. This iOS refresh does not enable a paid provider,
+alter image pricing or activate the Apple billing flag. The Apple update
+adapter and iOS authentication implementation are retained. Signed TestFlight
+delivery and actual installation are recorded separately from local tests;
+upload success alone cannot establish resolution of the earlier Apple
+install-data HTTP 404.
+
 ## Local verification
 
 Machine: local Windows PC. Shell: PowerShell. Directory: repository root.
