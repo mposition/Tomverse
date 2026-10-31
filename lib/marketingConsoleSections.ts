@@ -17,6 +17,7 @@ export const MARKETING_CONSOLE_SECTIONS = [
   "experiments",
   "reports",
   "competitors",
+  "assets",
   "comments",
 ] as const;
 
@@ -31,6 +32,12 @@ export const MARKETING_READ_PAGE_SIZE = 20;
  * competitor that fell off the page could not be retired from it.
  */
 export const MARKETING_COMPETITOR_READ_LIMIT = 100;
+
+/**
+ * How many stored images and videos the assets section lists: submissions
+ * first, so one waiting for a person is never past the limit behind old ones.
+ */
+export const MARKETING_ASSET_READ_LIMIT = 100;
 
 export type MarketingSectionAvailability =
   | { available: true }

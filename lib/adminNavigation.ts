@@ -567,6 +567,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "Who the market agent tracks, and which hosts a person approved as official",
       },
       {
+        id: "assets",
+        label: "Assets",
+        description: "Images and videos the media agent submitted, and which a person approved for posts",
+      },
+      {
         id: "comments",
         label: "Comments",
         description: "Comment alerts the monitor raised and nobody has answered",

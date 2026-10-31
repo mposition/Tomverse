@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -303,6 +306,62 @@ export async function writeR2Object(
         Metadata: {
           "upload-size": String(body.byteLength),
         },
+      })
+    )
+  );
+}
+
+/**
+ * The SHA-256 and size of an object someone else uploaded, streamed and never
+ * held whole -- a video can be a gigabyte. Stops and throws past `maxBytes`.
+ * Deletes nothing: the caller decides what a mismatch means.
+ */
+export async function hashR2Object(
+  key: string,
+  options: { maxBytes: number }
+): Promise<{ sha256: string; size: number; etag: string | null }> {
+  const { client, bucket } = getR2Client();
+  const abortController = new AbortController();
+  const response = await r2Call("get", () =>
+    client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
+      abortSignal: abortController.signal,
+    })
+  );
+  if (!response.Body) throw new Error("R2 object has no body.");
+  const hash = createHash("sha256");
+  let size = 0;
+  try {
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      size += chunk.byteLength;
+      if (size > options.maxBytes) {
+        abortController.abort();
+        throw new BoundedBufferError();
+      }
+      hash.update(chunk);
+    }
+  } catch (error) {
+    if (!(error instanceof BoundedBufferError)) abortController.abort();
+    throw error;
+  }
+  return { sha256: hash.digest("hex"), size, etag: response.ETag ?? null };
+}
+
+/**
+ * Copy an object to a key only the server writes, inside the bucket. For a
+ * file that was verified at its upload key: the copy is what is kept, so an
+ * upload URL still valid afterwards can change only the upload key. With
+ * `ifMatch`, only the version that was verified is copied: one replaced in
+ * between is refused rather than kept.
+ */
+export async function copyR2Object(fromKey: string, toKey: string, options: { ifMatch?: string | null } = {}) {
+  const { client, bucket } = getR2Client();
+  await r2Call("put", () =>
+    client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        Key: toKey,
+        CopySource: `${bucket}/${fromKey.split("/").map(encodeURIComponent).join("/")}`,
+        ...(options.ifMatch ? { CopySourceIfMatch: options.ifMatch } : {}),
       })
     )
   );
