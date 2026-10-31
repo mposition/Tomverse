@@ -1207,22 +1207,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The v19 registration receipt migration adds one restrictive audit foreign key and its guard reads the referenced canonical system audit. Its DDL and trigger verbs affect only AmuxIdeaSubmission; it never inserts, updates or deletes AdminAuditLog.",
   },
   {
-    path: "prisma/migrations/20261031090000_amux_v22_test_verify_roles/migration.sql",
-    table: "AmuxIdeaOperatingScopeSetting",
-    tableMentions: 1,
-    writeVerbs: 2,
-    reason:
-      "The test/verify role migration replaces the v19 registration receipt guard body; it still only reads the immutable owner-approved operating scope with SELECT FOR KEY SHARE. Its DDL verbs affect AmuxIdeaRegistrationRefusal's CHECK and the guard function only; it never writes an operating-scope row.",
-  },
-  {
-    path: "prisma/migrations/20261031090000_amux_v22_test_verify_roles/migration.sql",
-    table: "AdminAuditLog",
-    tableMentions: 1,
-    writeVerbs: 2,
-    reason:
-      "The replaced v19 registration receipt guard reads the referenced canonical system audit. Its DDL verbs affect AmuxIdeaRegistrationRefusal's CHECK and the guard function only; it never inserts, updates or deletes AdminAuditLog.",
-  },
-  {
     path: "prisma/migrations/20261016070200_amux_v19_portfolio_assessment_system_audit/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -3171,10 +3155,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingAssetStore.ts",
     table: "MarketingAsset",
-    tableMentions: 9,
+    tableMentions: 10,
     writeVerbs: 8,
     reason:
-      "The sole registered writer of the media asset store: it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups).",
+      "The sole registered writer of the media asset store: it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups, and the approved kinds the generator reads).",
   },
   {
     path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
@@ -3812,10 +3796,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "ca0497c22e80e30eb3953de9df1ac47900dedbba7904f1cdb734229ee40c1117",
+    sha256: "861675ee9982dfff9b88c8d1fe5c2f6176c09648666328c9ad6d35c3d94cb612",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. A function replacement compares the read prosrc digest with the header's prior digest and, when the header names one, the digest of the body the migration writes; the query is unchanged. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",

@@ -28,7 +28,7 @@ import { marketingTextHygiene } from "./marketingGuardNormalise.ts";
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each run, so a change to what the model is asked is a new version. */
-export const MARKETING_A5_PROMPT_VERSION = "a5-social-v1";
+export const MARKETING_A5_PROMPT_VERSION = "a5-social-v2";
 
 /** Drafts one call may propose for one account. */
 export const MARKETING_A5_MAX_DRAFTS_PER_CALL = 5;
@@ -52,6 +52,9 @@ export const marketingGeneratorContextSchema = z.object({
       altLocales: z.array(z.string()),
       claimIds: z.array(z.string()),
       validUntil: z.string(),
+      // Optional so a service deployed before the app still reads an older answer.
+      kind: z.enum(["image", "video"]).nullable().optional(),
+      alt: z.record(z.string(), z.string()).optional(),
     }),
   ),
   brief: z.unknown().nullable(),
@@ -90,6 +93,9 @@ const SYSTEM_PROMPT = [
   "Never write a URL, a domain name or a link of any kind.",
   "Name a claim id only when the post states that claim, and an asset id only when the post should carry that asset.",
   "Do not invent prices, numbers, dates, comparisons with other products, testimonials or urgency.",
+  "An asset is an image or a video; its description says what it shows. A post that carries an asset is about what that asset shows, and says nothing the description does not support.",
+  "On youtube a post carries exactly one video: its first line is the video's title, at most 100 characters, and the lines after it are the description. On tiktok a post carries one video. On instagram a post carries an image or a video.",
+  "When the platform needs a video or an image and no asset fits, return no draft rather than a post without one.",
   'Answer with one JSON object and nothing else: {"drafts":[{"renderedText":string,"claimIds":[string],"assetIds":[string],"disclosureFlags":["advertising"]}]}.',
 ].join("\n");
 
@@ -109,9 +115,15 @@ export function marketingA5Messages(
   const data = {
     task: { platform: account.channel, locale: scope.locale, posts: count },
     claims: context.claims.filter((claim) => claim.locales.includes(scope.locale)),
-    assets: context.assets.filter(
-      (asset) => asset.allowedChannels.includes(account.channel) && asset.altLocales.includes(scope.locale),
-    ),
+    assets: context.assets
+      .filter((asset) => asset.allowedChannels.includes(account.channel) && asset.altLocales.includes(scope.locale))
+      .map((asset) => ({
+        id: asset.id,
+        kind: asset.kind ?? null,
+        description: asset.alt?.[scope.locale] ?? null,
+        claimIds: asset.claimIds,
+        validUntil: asset.validUntil,
+      })),
     brief: context.brief,
     marketIntel: context.marketIntel,
   };

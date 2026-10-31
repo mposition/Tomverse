@@ -22,6 +22,7 @@ import {
   readMarketingCompetitorsForGenerator,
 } from "@/lib/marketingCompetitorStore";
 import { generatorProjection, type MarketingClaimProjection } from "@/lib/marketingClaims";
+import { readApprovedMarketingAssetKinds } from "@/lib/marketingAssetStore";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
 import {
   MARKETING_LLM_SETTINGS_KEY,
@@ -92,24 +93,31 @@ export type MarketingGeneratorCompetitors = {
   readonly knownIds: readonly string[];
 };
 
-/** An asset as the generator may see it: what to name, where, in which locales. */
+/** An asset as the generator may see it: what to name, where, in which locales, and what it shows. */
 export type MarketingGeneratorAsset = {
   readonly id: string;
   readonly allowedChannels: readonly string[];
   readonly altLocales: readonly string[];
   readonly claimIds: readonly string[];
   readonly validUntil: string;
+  /** `video` or `image` for a stored asset; null for a hand-kept one, which names no kind. */
+  readonly kind: "image" | "video" | null;
+  /** The alt text per locale: what the asset shows, so a post can be about it. */
+  readonly alt: Readonly<Record<string, string>>;
 };
 
 /**
  * The registry's assets that one of these accounts' platforms may carry, as
- * the generator may see them. No provenance, disclosure or alt prose: the
- * Guard judges an asset from the registry itself, so nothing the generator is
- * told here can stand in for that judgement.
+ * the generator may see them, with the alt text a person approved as the
+ * description of what each shows (owner direction 2026-10-31: a video post is
+ * written about its video). No provenance or disclosure: the Guard judges an
+ * asset and the post that carries it from the registry itself, so nothing the
+ * generator is told here can stand in for that judgement.
  */
 export function generatorAssetProjection(
   registry: MarketingAssetRegistry | null,
   channels: readonly string[],
+  kinds: ReadonlyMap<string, "image" | "video"> = new Map(),
 ): MarketingGeneratorAsset[] {
   if (!registry) return [];
   const platforms = new Set(channels);
@@ -121,6 +129,8 @@ export function generatorAssetProjection(
       altLocales: Object.keys(asset.alt).sort(),
       claimIds: [...asset.claimIds],
       validUntil: asset.validUntil,
+      kind: kinds.get(asset.id) ?? null,
+      alt: { ...asset.alt },
     }))
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 }
@@ -220,6 +230,7 @@ export async function readMarketingGeneratorContext(
     assets: generatorAssetProjection(
       await readMarketingAssetRegistry(db),
       channels.map((row) => row.channel),
+      await readApprovedMarketingAssetKinds(db),
     ),
     brief,
     marketIntel,
