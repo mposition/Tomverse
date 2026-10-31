@@ -1940,8 +1940,9 @@ function MarketingRow({
           </p>
         ) : null}
         {/*
-          A3's own words and the pages it cites, shown as text: they are what
-          the generator read, which is data to judge, not links to follow.
+          A3's own words are text. Its evidence is the web-search pages a
+          person opens to judge the proposal (S3f-R5c): https only, a new tab,
+          no referrer and no endorsement.
         */}
         {text(row.rationale) ? (
           <p className="mt-3 text-sm leading-6 text-zinc-300">{text(row.rationale)}</p>
@@ -1956,7 +1957,25 @@ function MarketingRow({
         ) : null}
         {evidence.length > 0 ? (
           <p className="mt-1 break-all text-xs text-zinc-500">
-            {m.colEvidence} {evidence.join(" / ")}
+            {m.colEvidence}{" "}
+            {evidence.map((url, index) => (
+              <span key={`${index}:${url}`}>
+                {index > 0 ? " / " : null}
+                {url.startsWith("https://") ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className="text-zinc-300 underline underline-offset-2 hover:text-white"
+                    data-testid="marketing-competitor-evidence-link"
+                  >
+                    {url}
+                  </a>
+                ) : (
+                  url
+                )}
+              </span>
+            ))}
           </p>
         ) : null}
       </>

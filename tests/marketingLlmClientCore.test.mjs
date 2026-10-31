@@ -337,6 +337,8 @@ const searchAnswer = (overrides = {}) => ({
 });
 
 test("a web-search request is one domain-limited search tool, capped at the pin's search count", () => {
+  // No domains is A3's discovery search: the same tool with no domain filter.
+  assert.equal("filters" in marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, []).tools[0], false);
   const body = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com", "support.claude.com"]);
   assert.deepEqual(Object.keys(body).sort(), [
     "include",
@@ -363,6 +365,15 @@ test("a web-search request is one domain-limited search tool, capped at the pin'
   ]);
   assert.equal(body.instructions, MESSAGES[0].content);
   assert.equal(body.input, MESSAGES[1].content);
+});
+
+test("a web-search request given an answer schema holds the answer to it, strictly, and adds nothing else", () => {
+  const answerSchema = { name: "facts", schema: { type: "object", properties: {}, required: [], additionalProperties: false } };
+  const plain = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com"]);
+  const held = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com"], answerSchema);
+  const { text, ...rest } = held;
+  assert.deepEqual(rest, plain);
+  assert.deepEqual(text, { format: { type: "json_schema", name: "facts", strict: true, schema: answerSchema.schema } });
 });
 
 test("a web-search answer is read with the URLs it cited or its searches returned, once each, or not at all", () => {

@@ -214,7 +214,10 @@ export function readMarketingA5Answer(
       claimIds: [...new Set(proposal.claimIds)],
       // The alt text is the registry's, per locale; the key names that locale.
       assets: [...new Set(proposal.assetIds)].map((assetId) => ({ assetId, altKey: scope.locale })),
-      disclosureFlags: [...new Set(proposal.disclosureFlags)],
+      // Advertising is the service's flag, not the model's choice: every post
+      // from a Tomverse account is one (policy §13), and the intake refuses a
+      // draft without it.
+      disclosureFlags: [...new Set(["advertising", ...proposal.disclosureFlags])],
     });
     if (!draft.success) return drop("draft_shape");
     drafts.push(draft.data);

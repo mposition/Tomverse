@@ -104,9 +104,16 @@ try {
     {
       readContext: a3App.readContext,
       // One web search per competitor, limited to its official domains.
-      callLlm: (messages, requestKey, allowedDomains) =>
+      callLlm: (messages, requestKey, allowedDomains, answerSchema) =>
         runMarketingLlmCall(
-          { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey, webSearch: { allowedDomains } },
+          {
+            pin,
+            generatorRunId: runId,
+            purpose: "market_intel",
+            messages,
+            requestKey,
+            webSearch: { allowedDomains, answerSchema },
+          },
           {
             budget: a3Budget,
             transport: fetch,
