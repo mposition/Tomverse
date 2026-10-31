@@ -41,7 +41,8 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
-import { AMUX_V22_PROVIDERS, amuxV22Provider } from "@/lib/amux/v22WorkerClaimCore";
+import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
+  amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -330,7 +331,8 @@ export async function pullAmuxWorkDelivery(input: {
       snapshot.ideaId : null;
   const candidateAssignment = candidateCard?.v22AcceptedAssignment;
   const candidateAudit = candidateAssignment?.authorizationAuditLog;
-  const needReviewKeys = candidateAssignment?.role === "implement" &&
+  const needReviewKeys = !!candidateAssignment &&
+    amuxV22TaskWritesPatch(candidateAssignment.role) &&
     candidateAudit?.action === "amux.v22.worker.assigned" &&
     candidateAudit.targetId === candidateAssignment.id &&
     !!candidateAudit.metadata && typeof candidateAudit.metadata === "object" &&
@@ -412,7 +414,7 @@ export async function pullAmuxWorkDelivery(input: {
       throw new Error("v22 delivery assignment audit is invalid");
     // Settlement accepts a patch only on the base its publication run was
     // pinned to at start, so the sidecar checks that commit out first.
-    const publicationRun = assignment.role === "implement" &&
+    const publicationRun = amuxV22TaskWritesPatch(assignment.role) &&
       amuxV22DeliveryBaseShaEnabled(process.env[AMUX_V22_DELIVERY_BASE_SHA_ENV]) ?
       await tx.engineeringAgentRun.findUnique({
         where: { amuxAttemptId: delivery.attemptId },
@@ -518,7 +520,7 @@ export async function pullAmuxWorkDelivery(input: {
         throw new Error("v22 sealed delivery digest mismatch");
       let reviewScope: string | undefined;
       let reviewFeedbackJobId: string | undefined;
-      if (gradeGuard && assignment.role === "implement") {
+      if (gradeGuard && amuxV22TaskWritesPatch(assignment.role)) {
         if (!card.v4TitleCiphertext || !card.v4TitleKeyId ||
             !card.v4TitleKeyVersion || !card.v4TitleDigest ||
             !card.v4TitleDigestKeyId || !card.v4BodyCiphertext ||
@@ -581,7 +583,9 @@ export async function pullAmuxWorkDelivery(input: {
       }
       return {
         prompt: head + resumeSection + tail,
-        v22Execution: { modelId: assignment.modelId, role: assignment.role,
+        // The sidecar runs the execution role; the assignment keeps the Task's.
+        v22Execution: { modelId: assignment.modelId,
+          role: amuxV22ExecutionRole(assignment.role),
           budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
           ...(baseSha ? { baseSha } : {}),
           ...(gradeGuard ? { gradeGuard: true as const,

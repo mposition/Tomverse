@@ -52,6 +52,26 @@ export const MARKETING_A3_SUBMIT_BACKOFF_MS = [2_000, 5_000] as const;
 export const MARKETING_A3_REPORT_MAX_FACTS = 200;
 
 /**
+ * The facts in turns: every competitor's first fact, then every one's second,
+ * and so on, each competitor's own order kept. A report cut at its limit then
+ * loses each competitor's last facts, not the last competitors' every fact.
+ */
+export function marketingA3FactsInTurn(facts: readonly MarketIntelFact[]): MarketIntelFact[] {
+  const byCompetitor = new Map<string, MarketIntelFact[]>();
+  for (const fact of facts) {
+    const list = byCompetitor.get(fact.competitorId);
+    if (list) list.push(fact);
+    else byCompetitor.set(fact.competitorId, [fact]);
+  }
+  const lists = [...byCompetitor.values()];
+  const inTurn: MarketIntelFact[] = [];
+  for (let turn = 0; inTurn.length < facts.length; turn += 1) {
+    for (const list of lists) if (turn < list.length) inTurn.push(list[turn]);
+  }
+  return inTurn;
+}
+
+/**
  * Time the report is not sent without. Past it the route would refuse the
  * report as too late, and a refused report stops the run; a report not sent
  * only means no market facts this run.
@@ -259,6 +279,7 @@ export async function runMarketingA3Cycle(
     return summary({ stage: "deadline", detail: "report_deadline_too_close" });
   }
   const periodEnd = new Date(deps.now()).toISOString();
+  facts.splice(0, facts.length, ...marketingA3FactsInTurn(facts));
   const build = (kept: number) =>
     marketingA3ReportBody(deps.secret, {
       generatorRunId: input.generatorRunId,

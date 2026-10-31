@@ -1,5 +1,6 @@
 import "server-only";
 
+import { amuxV22ExecutionRole, amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
@@ -497,7 +498,7 @@ export async function startAmuxV22TaskExecution(input: {
         return { started: false as const, reason: "cost_unverified" as const };
       }
       let publicationRunId: string | null = null;
-      if (publicationBaseSha && card.taskRole === "implement" &&
+      if (publicationBaseSha && amuxV22TaskWritesPatch(card.taskRole) &&
           (await readEngineeringAgentSwitches(tx)).publishAllowed) {
         try {
           // The engineering row is optional for Task execution. A full owner
@@ -1278,8 +1279,8 @@ export async function recordAmuxV52Review(input: {
       if (!gradeGuard || !assignmentAudit?.entryHash ||
           assignmentAudit.action !== "amux.v22.worker.assigned" ||
           assignmentAudit.targetId !== assignment?.id ||
-          assignment?.role !== "implement" ||
-          assignment.grade !== task.executionGrade ||
+          !amuxV22TaskWritesPatch(assignment?.role) ||
+          assignment!.grade !== task.executionGrade ||
           assignment.provider !== evidence.authorVendor)
         return { recorded: false as const,
           reason: "review_assignment_unverified" as const };
@@ -1419,7 +1420,9 @@ export async function settleAmuxV22TaskExecution(input: {
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
           input.changedPaths, patch?.files ?? null) : "pass";
       const reviewRequired = !ownerQuestion && amuxV52ReviewRequired({ gradeGuard,
-        role: settlementAssignment?.role, outcome: input.outcome,
+        role: settlementAssignment ?
+          amuxV22ExecutionRole(settlementAssignment.role) : null,
+        outcome: input.outcome,
         pathDecision, patchPresent: patch !== null,
         changedPaths: input.changedPaths });
       const reviewRecord = reviewRequired ?
@@ -1604,8 +1607,8 @@ export async function settleAmuxV22TaskExecution(input: {
             !["shadow", "t1"].includes(run.modeAtStart) ||
             run.cardId !== task.id || run.baseSha !== patch.baseSha ||
             patch.taskId !== task.id ||
-            assignment?.role !== "implement" ||
-            assignment.workItemId !== task.id)
+            !amuxV22TaskWritesPatch(assignment?.role) ||
+            assignment!.workItemId !== task.id)
           return { settled: false as const,
             reason: "publication_state_changed" as const };
         if (product && (product.patchDigest !== patch.sha256 ||

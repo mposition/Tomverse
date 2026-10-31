@@ -1,5 +1,6 @@
 import "server-only";
 
+import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
@@ -102,7 +103,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
           task.revision >= AMUX_MAX_EXPECTED_REVISION) {
         return { completed: false as const, reason: "task_not_in_review" as const };
       }
-      if (task.sourceSystem !== "admin-idea-v4" || task.cardType !== "task" || task.taskRole !== "implement") {
+      if (task.sourceSystem !== "admin-idea-v4" || task.cardType !== "task" || !amuxV22TaskWritesPatch(task.taskRole)) {
         return { completed: false as const, reason: "not_a_v22_implement_task" as const };
       }
       if (task.reviewPrNumber !== input.prNumber) {

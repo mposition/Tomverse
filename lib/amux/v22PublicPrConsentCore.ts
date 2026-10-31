@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { deriveAmuxIdeaUnitConfirmation,
   sameAmuxIdeaUnitConfirmation,
   type AmuxIdeaUnitConfirmationSnapshot } from
@@ -28,7 +29,7 @@ type ConsentEvidence = {
 export function amuxV22PublicPrConsentAllowed(input: ConsentEvidence): boolean {
   const { decision, audit } = input;
   if (input.sourceSystem !== "admin-idea-v4" ||
-      input.cardType !== "task" || input.taskRole !== "implement" ||
+      input.cardType !== "task" || !amuxV22TaskWritesPatch(input.taskRole) ||
       !decision || !audit || input.sourceApprovalId !== decision.id ||
       decision.action !== "register_card" || decision.state !== "consumed" ||
       decision.registeredWorkItemId !== input.cardId ||
@@ -46,7 +47,7 @@ export function amuxV22PublicPrConsentAllowed(input: ConsentEvidence): boolean {
       snapshot.decisionId !== decision.id ||
       snapshot.actorUserId !== decision.actorUserId ||
       snapshot.card?.cardType !== "task" ||
-      snapshot.card.task?.role !== "implement" ||
+      !snapshot.card.task || !amuxV22TaskWritesPatch(snapshot.card.task.role) ||
       snapshot.card.task.publicPrDisclosureApproved !== true ||
       !snapshot.duplicates) return false;
   const metadata = audit.metadata;
