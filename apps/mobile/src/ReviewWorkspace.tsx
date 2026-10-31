@@ -41,6 +41,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const [activeModel, setActiveModel] = useState(""); const [partial, setPartial] = useState<Record<string, string>>({});
   const [streaming, setStreaming] = useState(false); const [loading, setLoading] = useState(true);
   const [uncertain, setUncertain] = useState(false); const [error, setError] = useState("");
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? "review:new");
   const titleScope = useRef(0);
   useEffect(() => () => { titleScope.current++; }, [owner, transport]);
@@ -98,12 +99,13 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     } catch { if (current === request.current) setError(copy.unavailable); }
     finally { if (current === request.current) setLoading(false); }
   }
-  async function ensureConversation(modelIds: string[], epoch = request.current) {
+  async function ensureConversation(modelIds: string[], epoch = request.current, preserveDraft = true) {
     if (conversation) return conversation;
     if (!transport.createReview) throw Error("REVIEW_UNAVAILABLE");
     const item = await transport.createReview(modelIds);
     if (epoch !== request.current || abort.current?.signal.aborted) throw new DOMException("Stopped", "AbortError");
-    preserveNativeDraft(owner, item.id, draft); setConversation(item); return item;
+    if (preserveDraft) preserveNativeDraft(owner, item.id, draft);
+    setConversation(item); return item;
   }
   async function configureTools(input: ToolChange) {
     if (!transport.configureTools) throw Error("NATIVE_TOOLS_UNAVAILABLE");
@@ -119,11 +121,11 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     if (!(mode === "easy" ? providers : selected).length) { setError(c.noParticipants); return false; }
     const titleEpoch = titleScope.current;
     const current = ++request.current; const controller = new AbortController(); abort.current = controller;
-    setStreaming(true); setError(""); setPartial({});
+    setStreaming(true); setError(""); setPartial({}); setPendingQuestion(text); setDraft("");
     let item = conversation; let dispatched = false;
     try {
       if (!transport.configureReview || !transport.sendReview) throw Error("REVIEW_UNAVAILABLE");
-      item = await ensureConversation(selected, current);
+      item = await ensureConversation(selected, current, false);
       if (current !== request.current || controller.signal.aborted) return false;
       let participants = selected;
       if (mode === "easy") {
@@ -139,6 +141,8 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       if (current !== request.current) return false;
       setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? "");
       setConversation({ ...item, messages: [...item.messages, { id: "pending-review-user", role: "user", content: text }] });
+      setPendingQuestion(null); setDraft("", item.id);
+      setPartial(Object.fromEntries(item.selectedModels.map(id => [id, ""])));
       dispatched = true;
       const outcome = await transport.sendReview(item, text, files, controller.signal, (modelId, value) => {
         if (current === request.current) setPartial(previous => ({ ...previous, [modelId]: value }));
@@ -146,7 +150,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       const saved = await transport.load(item.id);
       if (current !== request.current) return;
       setConversation(saved); setPartial({}); setUncertain(saved.activeAttempt === true);
-      if (!outcome.failedModelIds.length) setDraft(""); else setError(copy.disconnected);
+      if (outcome.failedModelIds.length) setError(copy.disconnected);
       const history = await transport.listReview!();
       if (current === request.current) setChats(history);
       if (titleEpoch === titleScope.current) void transport.generateTitle?.(saved).then(title => {
@@ -157,8 +161,10 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     } catch (error) {
       const beforePersistence = (error as { questionPersisted?: boolean }).questionPersisted === false;
       if (current === request.current) { setError(mobileErrorText(error, language, copy.error)); setUncertain(dispatched && !beforePersistence); if (beforePersistence) setConversation(item); }
+      if (beforePersistence) dispatched = false;
+      if (current === request.current) setPartial(previous => Object.fromEntries(Object.entries(previous).filter(([, text]) => text)));
       if (beforePersistence || !dispatched) return false;
-    } finally { if (current === request.current) setStreaming(false); }
+    } finally { if (current === request.current) { if (!dispatched) setDraft(text, item?.id ?? "review:new"); setStreaming(false); setPendingQuestion(null); } }
   }
   const visibleModels = conversation?.selectedModels.length ? conversation.selectedModels : selected;
   const name = (id: string) => models.find(model => model.id === id)?.name ?? id;
@@ -174,7 +180,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     {error && <p role="alert" className="notice error">{error}</p>}
     {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" ? <div className="review-intro" data-testid="review-landing"><WorkspaceWelcome product="review" language={language} /></div> : <>
 
-      <div className="transcript review-transcript" aria-live="off" aria-busy={streaming} onScroll={event => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}><div className="review-context-bar"><select className="review-response-select" aria-label={c.models} value={activeModel} onChange={event => { followOutput.current = true; setActiveModel(event.target.value); }}>{visibleModels.map(id => <option value={id} key={id}>{name(id)}{streaming ? " ···" : ""}</option>)}</select></div>{conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}{messages.map(message => <article className={`message ${message.role}`} id={`review-message-${message.id}`} key={message.id}>{message.role === "assistant" && <span className="message-label">{name(message.modelId ?? activeModel)}</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} /></article>)}{partial[activeModel] !== undefined && <article className="message assistant"><span className="message-label">{name(activeModel)}</span><AnswerContent content={partial[activeModel] || copy.waiting} transport={transport} language={language} /></article>}<div ref={end} /></div>
+      <div className="transcript review-transcript" aria-live="off" aria-busy={streaming} onScroll={event => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}><div className="review-context-bar"><select className="review-response-select" aria-label={c.models} value={activeModel} onChange={event => { followOutput.current = true; setActiveModel(event.target.value); }}>{visibleModels.map(id => <option value={id} key={id}>{name(id)}{streaming ? " ···" : ""}</option>)}</select></div>{conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}{messages.map(message => <article className={`message ${message.role}`} id={`review-message-${message.id}`} key={message.id}>{message.role === "assistant" && <span className="message-label">{name(message.modelId ?? activeModel)}</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} /></article>)}{pendingQuestion !== null && <><article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article><article className="message assistant"><AnswerContent content={copy.waiting} transport={transport} language={language} /></article></>}{partial[activeModel] !== undefined && <article className="message assistant"><span className="message-label">{name(activeModel)}</span><AnswerContent content={partial[activeModel] || copy.waiting} transport={transport} language={language} /></article>}<div ref={end} /></div>
     </>}
     {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore}</button>}
     <Composer product="review" onProductChange={onProductChange} productBusy={loading || streaming || uncertain || actionBusy} productLoading={loading}
