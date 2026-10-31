@@ -190,6 +190,11 @@ test("a PR-less v4 non-code result may be approved only with verified full evide
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, displayTruncated: true }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, displayExact: false }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement" }), false);
+  // A test Task leaves a patch, so only its pull request completes it.
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "test" }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "test",
+    reviewPrNumber: 123, artifactAvailable: true, v4EvidenceVerified: false }), true);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "verify" }), true);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement",
     reviewPrNumber: 123, artifactAvailable: true,
     v4EvidenceVerified: false }), true);
