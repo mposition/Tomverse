@@ -1219,22 +1219,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The v19 registration receipt migration adds one restrictive audit foreign key and its guard reads the referenced canonical system audit. Its DDL and trigger verbs affect only AmuxIdeaSubmission; it never inserts, updates or deletes AdminAuditLog.",
   },
   {
-    path: "prisma/migrations/20261031090000_amux_v22_test_verify_roles/migration.sql",
-    table: "AmuxIdeaOperatingScopeSetting",
-    tableMentions: 1,
-    writeVerbs: 2,
-    reason:
-      "The test/verify role migration replaces the v19 registration receipt guard body; it still only reads the immutable owner-approved operating scope with SELECT FOR KEY SHARE. Its DDL verbs affect AmuxIdeaRegistrationRefusal's CHECK and the guard function only; it never writes an operating-scope row.",
-  },
-  {
-    path: "prisma/migrations/20261031090000_amux_v22_test_verify_roles/migration.sql",
-    table: "AdminAuditLog",
-    tableMentions: 1,
-    writeVerbs: 2,
-    reason:
-      "The replaced v19 registration receipt guard reads the referenced canonical system audit. Its DDL verbs affect AmuxIdeaRegistrationRefusal's CHECK and the guard function only; it never inserts, updates or deletes AdminAuditLog.",
-  },
-  {
     path: "prisma/migrations/20261016070200_amux_v19_portfolio_assessment_system_audit/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
