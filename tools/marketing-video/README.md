@@ -31,9 +31,20 @@ scenes of three kinds:
 Each scene may carry a `caption`, burned in so the video works muted. Line
 breaks in a headline are kept, and Korean and Chinese break between words.
 
-## Where it goes next
+## The daily job
 
-The job writes the scenes from the app's generator context, renders, and
-submits the video with its transcript to the asset routes (the transcript goes
-through the Guard), then submits the post text through the draft intake.
-Nothing here publishes: a person approves the asset and the post in Admin.
+`run-daily.sh` runs the Claude Code CLI on `JOB.md` once a day on the AMUX box
+(owner approval for the unattended job, 2026-10-31). It captures, renders and
+submits assets with `submit-asset.mjs`, which needs `MARKETING_APP_URL` and
+`MARKETING_MEDIA_SUBMIT_SECRET` (an env file on the box, never in git). The app
+runs the Guard over each transcript; a refusal comes back as exit 3 with the
+Guard codes and the job rewrites. Nothing here publishes: a person approves the
+asset in Admin, and the app's generator, whose calls go through the LLM cost
+ledger, writes the post that carries it for a second approval. The job does
+not submit posts: the draft intake takes only drafts backed by ledger calls.
+
+Cron on the box (07:30 Brisbane, after the generator's run):
+
+```
+30 21 * * * set -a; . /etc/tomverse/marketing-video.env; set +a; /path/to/clone/tools/marketing-video/run-daily.sh
+```
