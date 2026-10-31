@@ -283,13 +283,18 @@ export async function decideMarketingAsset(
 export async function readApprovedMarketingAssetRows(
   db: AssetReader,
 ): Promise<{ readonly assets: readonly MarketingAsset[]; readonly version: number }> {
-  const rows = await db.$queryRaw<AssetRow[]>(Prisma.sql`
-    SELECT ${ROW_COLUMNS} FROM "MarketingAsset" WHERE "status" = 'approved' ORDER BY "id" FOR SHARE
+  // The version in the same statement as the rows, so both are one snapshot.
+  const rows = await db.$queryRaw<Array<AssetRow & { registryMax: number | null }>>(Prisma.sql`
+    SELECT ${ROW_COLUMNS},
+           (SELECT max(v."registryVersion") FROM "MarketingAsset" v)::INTEGER AS "registryMax"
+      FROM "MarketingAsset" WHERE "status" = 'approved' ORDER BY "id" FOR SHARE
   `);
+  if (rows.length > 0) return { assets: rows.map(registryEntry), version: rows[0].registryMax ?? 0 };
+  // Nothing approved: the version is still every decision so far (a retirement moves it too).
   const version = await db.$queryRaw<Array<{ version: number | null }>>(Prisma.sql`
     SELECT max("registryVersion")::INTEGER AS "version" FROM "MarketingAsset"
   `);
-  return { assets: rows.map(registryEntry), version: version[0]?.version ?? 0 };
+  return { assets: [], version: version[0]?.version ?? 0 };
 }
 
 /**

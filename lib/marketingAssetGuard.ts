@@ -20,6 +20,7 @@
 
 import "server-only";
 
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { resolveMarketingFactsWithSnapshot } from "@/lib/marketingFactResolution";
 import { guardDraft, type MarketingRejectCode } from "@/lib/marketingGuardCore";
 import { resolveMarketingGuardContext } from "@/lib/marketingGuardContext";
@@ -38,6 +39,11 @@ export async function guardMarketingAssetTranscript(
   const channel = submission.asset.allowedChannels[0];
   const channelId = `asset:${submission.asset.id}`;
   const claimIds = [...submission.asset.claimIds];
+  // The audit chain lock first, before the registry's rows are held FOR SHARE:
+  // a person's decision takes the chain lock and then updates an asset row, so
+  // holding the rows and then waiting for the chain would deadlock with it. The
+  // draft intake takes the same order; the submission's own lock is re-entrant.
+  await takeAuditChainLock(tx);
   const codes = new Set<MarketingRejectCode>();
   // Every locale the file speaks or is described in: its transcript and its
   // alt text are both copy a reader gets. The alt text always has a locale, so

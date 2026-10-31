@@ -408,3 +408,39 @@ test("an image that says nothing still has its declared claims judged, through i
   );
   assert.deepEqual(stored[0].transcript, {});
 });
+
+test("a submission and a person's retirement at once both finish: the submission waits for the audit chain first", async () => {
+  // An approved asset the retirement will move, and which the submission's
+  // Guard reads FOR SHARE through the registry.
+  await submitAndUpload();
+  await decide("approved");
+  const expected = (await row()).decisionAuditLogId;
+
+  let releaseRetirement!: () => void;
+  const retirementMayWrite = new Promise<void>((resolve) => {
+    releaseRetirement = resolve;
+  });
+  let retirementHoldsChain!: () => void;
+  const chainHeld = new Promise<void>((resolve) => {
+    retirementHoldsChain = resolve;
+  });
+  // The person's retirement: the audit row (which takes the chain lock), then,
+  // once the submission is under way, the asset row's update.
+  const retirement = tx(async (client) => {
+    const auditLogId = await humanAudit(client, "retired", { previous: expected });
+    retirementHoldsChain();
+    await retirementMayWrite;
+    return decideMarketingAsset(client, { assetId: ID, decision: "retired", expectedDecisionAuditLogId: expected, auditLogId });
+  });
+  await chainHeld;
+  const other = submission({ asset: { ...submission().asset, id: "media-20261031-second" } });
+  const submitted = postSubmission(other);
+  // Give the submission time to reach its first lock before the retirement writes.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  releaseRetirement();
+
+  const [retired, answer] = await Promise.all([retirement, submitted]);
+  assert.equal(retired.status, "retired");
+  assert.equal(answer.status, 200, JSON.stringify(answer.body));
+  assert.equal((await row("media-20261031-second")).status, "submitted");
+});

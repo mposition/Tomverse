@@ -3151,7 +3151,7 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingAssetStore.ts",
     table: "MarketingAsset",
-    tableMentions: 8,
+    tableMentions: 9,
     writeVerbs: 8,
     reason:
       "The sole registered writer of the media asset store: it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups).",
