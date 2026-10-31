@@ -15,7 +15,7 @@ import {
 } from "@/lib/marketingAssetStore";
 import type { MarketingAssetSubmission } from "@/lib/marketingAssetSubmission";
 import { resolveMarketingAsset } from "@/lib/marketingAssets";
-import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
+import { readMarketingAssetRegistry, resolveMarketingFactsWithSnapshot } from "@/lib/marketingFactResolution";
 import { POST as submitRoute } from "@/app/api/internal/marketing-assets/route";
 import { runMarketingTransaction, type MarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
@@ -353,6 +353,37 @@ test("the database refuses a video with nothing said and a transcript past its l
     refusedBy("MarketingAsset_transcript_check"),
   );
   await assert.rejects(insert("media-locale", JSON.stringify({ fr: "Bonjour." })), refusedBy("MarketingAsset_transcript_check"));
+});
+
+test("a post may carry an asset only by declaring the asset's claims, which are then judged as the post's", async () => {
+  // Stored and approved directly (the route's Guard would refuse an unknown
+  // claim at submission): what matters here is the post's later judgement.
+  await tx((client) => submitMarketingAsset(client, submission({ asset: { ...submission().asset, claimIds: ["no.such.claim"] } })));
+  await tx((client) => confirmMarketingAssetUpload(client, { assetId: ID, bytes: 12_000_000 }));
+  await decide("approved");
+
+  const factsFor = (claimIds: string[]) =>
+    tx(async (client) =>
+      (
+        await resolveMarketingFactsWithSnapshot(client, {
+          claimIds,
+          assetIds: [ID],
+          channelId: "channel-1",
+          channel: "youtube",
+          locale: "en",
+        })
+      ).facts,
+    );
+  const undeclared = await factsFor([]);
+  assert.deepEqual(
+    undeclared.assets.map((asset) => [asset.assetId, asset.known]),
+    [[ID, false]],
+    "a post that does not declare the asset's claim cannot carry it",
+  );
+  const declared = await factsFor(["no.such.claim"]);
+  assert.deepEqual(declared.assets.map((asset) => [asset.assetId, asset.known]), [[ID, true]]);
+  // And the claim itself is judged with the post's: here, unknown.
+  assert.deepEqual(declared.claims.map((claim) => [claim.claimId, claim.known]), [["no.such.claim", false]]);
 });
 
 test("an image that says nothing still has its declared claims judged, through its alt text", async () => {

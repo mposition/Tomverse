@@ -557,9 +557,16 @@ async function readMarketingFacts(
           registry: assetRegistry,
         })
       : { ok: false as const };
+    // What an asset says is the post's claim too (2026-10-31): a file whose
+    // registry entry names claims is usable only by a post that declares them,
+    // so they are resolved and judged here, with the post's own, every time the
+    // Guard runs -- a claim that has since expired or lost its gate refuses the
+    // post, whatever was true when the file was approved.
+    const claimsDeclared =
+      resolution.ok && resolution.asset.claimIds.every((claimId) => request.claimIds.includes(claimId));
     return {
       assetId,
-      known: resolution.ok,
+      known: resolution.ok && claimsDeclared,
       usedBefore: usage.assets.has(assetId),
     };
   });

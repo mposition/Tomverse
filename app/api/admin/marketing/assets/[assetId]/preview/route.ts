@@ -13,7 +13,8 @@ import { createR2ReadUrl } from "@/lib/r2";
 type RouteContext = { params: Promise<{ assetId: string }> };
 
 /**
- * GET: the uploaded file, for a person deciding whether to approve it. A
+ * GET: the uploaded file, for a person deciding whether to approve it (or
+ * looking back at one decided, retired included, as the audit trail does). A
  * redirect to a short-lived signed URL; reading is ordinary admin
  * authentication, like the rest of the Marketing console.
  */

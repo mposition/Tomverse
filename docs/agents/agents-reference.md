@@ -1569,6 +1569,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   제출에는 locale별 `transcript`(영상 필수, locale당 최대 20,000자)가 있고, `lib/marketingAssetGuard.ts`가 같은 트랜잭션에서
   초안 접수와 같은 사실 검증·`guardDraft`로 검사합니다(범위 `asset:<id>`, 첫 허용 채널). reject면 422와 Guard 코드만 돌려주고
   행을 만들지 않습니다. 대본은 행에 저장되어 Admin 자산 탭에서 locale별로 보입니다.
+  자산의 `claimIds`는 그 자산을 싣는 게시물이 직접 선언해야 합니다. 선언하지 않으면 사실 검증이 그 자산을 `known: false`로
+  답해 `asset_unknown`으로 거절되고, 선언하면 게시물의 claim으로 Guard가 돌 때마다 다시 판정됩니다.
 
 # 엔지니어링 Agent
 

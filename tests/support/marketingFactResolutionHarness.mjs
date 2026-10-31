@@ -128,7 +128,7 @@ mock.module(mod("lib/marketingAssets.ts"), {
     loadMarketingAssetRegistry: () => ({ version: 73, assets: [] }),
     resolveMarketingAsset: () =>
       world.assetKnown
-        ? { ok: true, asset: {}, disclosure: "none" }
+        ? { ok: true, asset: { claimIds: [] }, disclosure: "none" }
         : { ok: false, refusal: "unknown_asset" },
   },
 });

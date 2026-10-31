@@ -78,7 +78,11 @@ export async function POST(request: Request, context: RouteContext) {
       { maxWait: 5_000, timeout: 15_000 },
     );
   } catch (error) {
-    if (error instanceof MarketingAssetRefusedError) return json({ code: error.code }, error.status);
+    if (error instanceof MarketingAssetRefusedError) {
+      // Decided while this ran: nothing will read the upload key again.
+      await deleteR2Object(target.uploadKey).catch(() => undefined);
+      return json({ code: error.code }, error.status);
+    }
     return json({ code: "outcome_unknown" }, 500);
   }
   // The upload key has done its work; a leftover is harmless and costs a little.
