@@ -2,8 +2,10 @@
 -- leaves a patch, so the unattended registrar gives it the same default public
 -- pull request consent as an implement Task (amux-intake.md v19 item 5). The
 -- system registration receipt guard counts that consent over implement and
--- test Tasks; its body changes only there.
--- baseline-check: replace-function-if-body-sha256 "amux_v19_system_registration_receipt_guard" "bb519a8550c1ffcd0f4d99b2d451a0515e282f95b23c9cb699f6d2e86e63c908"
+-- test Tasks; its body changes only there. Production already holds this body:
+-- it applied 20261031090000 before the function moved here, so the header
+-- also names the body this migration writes.
+-- baseline-check: replace-function-if-body-sha256 "amux_v19_system_registration_receipt_guard" "bb519a8550c1ffcd0f4d99b2d451a0515e282f95b23c9cb699f6d2e86e63c908" "dbeae5e141dca8fdde5517b7bd0838b49d089f2f491050baaab0c2794ed54437"
 BEGIN;
 
 CREATE OR REPLACE FUNCTION amux_v19_system_registration_receipt_guard()
