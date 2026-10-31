@@ -1,17 +1,25 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
-
 import type { MarketingChannel } from "@/lib/marketingAutomationSchema";
 import type {
   MarketingAdapterCapabilities,
   MarketingAdapterHealth,
   MarketingHealthCapability,
-  MarketingObjectStatus,
   MarketingPublishAdapter,
   MarketingPublishRequest,
   MarketingPublishResult,
 } from "@/lib/marketingPublishAdapter";
+import {
+  ZERNIO_API_BASE_URL,
+  httpsUrl,
+  zernioCall,
+  zernioPostId,
+  zernioRequestUuid,
+  zernioStatusQuery,
+  type ZernioPost,
+} from "@/lib/zernioStatusQuery";
+
+export { ZERNIO_API_BASE_URL, zernioRequestUuid };
 
 /**
  * The Zernio adapter (S2 plan, S2d2, under amendment 4).
@@ -60,32 +68,12 @@ import type {
  */
 
 /** What the constructing service supplies. Nothing here is read from the process. */
-/**
- * A post's logical key as the UUID Zernio's request headers take.
- *
- * `x-request-id` is documented as `format: uuid` and `Idempotency-Key` as "a
- * UUID per logical post"; the logical key has slashes in it. So the key is
- * mapped to a UUID the way RFC 4122 version 5 does -- SHA-1 over a fixed
- * namespace and the name -- which is deterministic: the same post always gets
- * the same id, which is the property idempotency needs. The logical key itself
- * still goes in `metadata` for a person reconciling by hand.
- */
-const ZERNIO_REQUEST_NAMESPACE = Buffer.from("8f0d3a52b1c64e7a9d2f5c7e1a4b6d90", "hex");
 
-export const zernioRequestUuid = (requestKey: string): string => {
-  const hash = createHash("sha1")
-    .update(ZERNIO_REQUEST_NAMESPACE)
-    .update(requestKey, "utf8")
-    .digest();
-  const bytes = Buffer.from(hash.subarray(0, 16));
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+export type ZernioResolvedAsset = {
+  readonly url: string;
+  readonly kind: "image" | "video";
+  readonly aiOrigin: boolean;
 };
-
-/** Zernio's API origin, from the S0 record (OpenAPI `info.version` 1.5.0). */
-export const ZERNIO_API_BASE_URL = "https://zernio.com/api";
 
 export type ZernioAdapterPorts = {
   /** `sk_` + 64 hex, or a restricted `zrk_` key. Never logged, never returned. */
@@ -93,13 +81,15 @@ export type ZernioAdapterPorts = {
   /** The API origin, so a test can point this at a fixture server. */
   readonly baseUrl: string;
   /**
-   * An asset id to a public HTTPS URL.
+   * An approved asset id to what a post needs from it: a public HTTPS URL, its
+   * kind, and whether it is of AI origin (`ai_generated` or `ai_modified`,
+   * which YouTube must be told). Null for an id that is not an approved asset.
    *
    * A port because resolving one needs the object store, and this file may not
    * hold that credential either. Zernio accepts a public HTTPS URL directly as
    * `mediaItems[].url`, so no upload happens here.
    */
-  readonly resolveAssetUrl: (assetId: string) => Promise<string | null>;
+  readonly resolveAsset: (assetId: string) => Promise<ZernioResolvedAsset | null>;
   /** Wall-clock budget for one call. The caller owns the number. */
   readonly callBudgetMs: number;
   readonly fetch?: typeof fetch;
@@ -120,6 +110,8 @@ export const ZERNIO_ERROR_CODES = [
   "provider_unreadable_response",
   "no_lookup_by_request_key",
   "asset_unresolved",
+  "youtube_needs_one_video",
+  "youtube_title_invalid",
 ] as const;
 export type ZernioErrorCode = (typeof ZERNIO_ERROR_CODES)[number];
 
@@ -164,110 +156,73 @@ const RETRACTABLE_PLATFORMS = new Set([
   "telegram",
 ]);
 
-type ZernioPlatformResult = {
-  platform?: string;
-  /** The target account, as a string or an object carrying one (as the S0 probe reads it). */
-  accountId?: string | { _id?: string; id?: string };
-  status?: string;
-  platformPostId?: string;
-  platformPostUrl?: string;
-  publishedUrl?: string;
-  error?: unknown;
-};
 
-type ZernioPost = {
-  _id?: string;
-  id?: string;
-  status?: string;
-  platforms?: ZernioPlatformResult[];
-};
+
+
+/** The longest title YouTube takes. */
+const YOUTUBE_TITLE_MAX = 100;
 
 /**
- * Zernio's own id for a post, which is what its API is asked about.
+ * What each platform needs beyond the text and the media, in the fields the S0
+ * probe sent and Zernio accepted (docs/ops/marketing-zernio-s0-plan.example.json).
+ * Refused here, before anything leaves, when the post cannot be what was approved.
  *
- * `_id` first, then `id` -- the order the S0 probe reads them in. This, and not
- * the platform's `platformPostId`, is what `GET /v1/posts/{postId}` and
- * `POST /v1/posts/{postId}/unpublish` take. The adapter used to return the
- * platform's id as `externalPostId`, and every later status query then asked
- * Zernio about an id it had never issued.
+ * - **YouTube** is one video with a title. The title is the post's first line
+ *   and the description the rest, so the approved text is the whole of what is
+ *   sent; a first line YouTube would refuse or cut is refused here instead.
+ *   `madeForKids` is always false (the policy targets people 16 and over), and
+ *   `containsSyntheticMedia` is true whenever an asset is of AI origin.
+ * - **TikTok** takes the privacy and interaction choices, and the two
+ *   attestations its posting rules ask for: the person who approved the post in
+ *   Admin saw it and agreed to publish it.
+ * - **Instagram** shares a video (a Reel) to the feed as well.
  */
-const zernioPostId = (post: ZernioPost | null | undefined): string | null => {
-  const value = post?._id ?? post?.id;
-  return typeof value === "string" && value.trim() !== "" ? value : null;
-};
-
-/**
- * Join the API origin and a path without losing the origin's path.
- *
- * `new URL("/v1/posts", "https://zernio.com/api")` is
- * `https://zernio.com/v1/posts`: an absolute path replaces the base's path, so
- * the `/api` prefix vanished and every call went to the wrong place. The test
- * fixture had no prefix to lose, which is how it hid.
- */
-const joinUrl = (baseUrl: string, path: string): URL => {
-  const base = new URL(baseUrl);
-  const prefix = base.pathname.replace(/\/+$/, "");
-  return new URL(`${prefix}${path}`, base.origin);
-};
-
-const httpsUrl = (value: unknown): string | null => {
-  if (typeof value !== "string" || value.length === 0) return null;
-  try {
-    return new URL(value).protocol === "https:" ? value : null;
-  } catch {
-    return null;
+export function zernioPlatformFields(
+  platform: string,
+  text: string,
+  mediaItems: ReadonlyArray<{ readonly type: "image" | "video" }>,
+  aiOrigin: boolean,
+):
+  | { readonly content: string; readonly data: Record<string, unknown> | null }
+  | { readonly refused: ZernioErrorCode } {
+  if (platform === "youtube") {
+    if (mediaItems.length !== 1 || mediaItems[0]?.type !== "video") return { refused: "youtube_needs_one_video" };
+    const [first, ...rest] = text.split("\n");
+    const title = (first ?? "").trim();
+    if (title === "" || title.length > YOUTUBE_TITLE_MAX || /[<>]/u.test(title)) {
+      return { refused: "youtube_title_invalid" };
+    }
+    return {
+      content: rest.join("\n").trim(),
+      data: { title, visibility: "public", madeForKids: false, containsSyntheticMedia: aiOrigin },
+    };
   }
-};
+  if (platform === "tiktok") {
+    return {
+      content: text,
+      data: {
+        privacyLevel: "PUBLIC_TO_EVERYONE",
+        allowComment: true,
+        allowDuet: false,
+        allowStitch: false,
+        contentPreviewConfirmed: true,
+        expressConsentGiven: true,
+      },
+    };
+  }
+  if (platform === "instagram" && mediaItems.some((item) => item.type === "video")) {
+    return { content: text, data: { shareToFeed: true } };
+  }
+  return { content: text, data: null };
+}
+
 
 export const zernioPublishAdapter = (
   ports: ZernioAdapterPorts,
 ): MarketingPublishAdapter => {
-  const call = async (
-    path: string,
-    init: { method: string; body?: unknown; requestKey?: string },
-  ): Promise<
-    | { readonly kind: "response"; readonly status: number; readonly body: unknown }
-    | { readonly kind: "unreachable"; readonly code: ZernioErrorCode }
-  > => {
-    const doFetch = ports.fetch ?? fetch;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), ports.callBudgetMs);
-    try {
-      const response = await doFetch(joinUrl(ports.baseUrl, path), {
-        method: init.method,
-        headers: {
-          // The only place the key appears. It is not logged and not returned.
-          Authorization: `Bearer ${ports.apiKey}`,
-          "Content-Type": "application/json",
-          // Zernio's idempotency for POST /v1/posts, and the reason the post's
-          // own logicalKey is the request key end to end. Both headers: the S0
-          // record names `x-request-id` (about five minutes); the current
-          // documentation also names `Idempotency-Key` (24 hours, taking
-          // precedence). Neither is a licence to retry -- amendment 4 still
-          // holds and nothing here re-sends -- but a key the provider honours
-          // for longer is a narrower window for an accidental second post.
-          ...(init.requestKey
-            ? {
-                "x-request-id": zernioRequestUuid(init.requestKey),
-                "Idempotency-Key": zernioRequestUuid(init.requestKey),
-              }
-            : {}),
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-        signal: controller.signal,
-      });
-      const body = await response.json().catch(() => null);
-      return { kind: "response", status: response.status, body };
-    } catch (error) {
-      // A timeout and a dropped connection are the same fact to a caller: the
-      // request may have been received. Neither is retried.
-      const aborted =
-        error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
-      return { kind: "unreachable", code: aborted ? "provider_timeout" : "provider_unavailable" };
-    } finally {
-      clearTimeout(timer);
-    }
-  };
+  const status = zernioStatusQuery(ports);
+  const call = (path: string, init: { method: string; body?: unknown; requestKey?: string }) =>
+    zernioCall(ports, path, init);
 
   /** A 4xx to a closed code. Provider prose is discarded, not forwarded. */
   const rejectionCode = (status: number): ZernioErrorCode => {
@@ -349,19 +304,31 @@ export const zernioPublishAdapter = (
       // Assets become public HTTPS URLs through the injected port. An id that
       // cannot be resolved is a refusal *before* anything leaves: a post missing
       // its image is not the post that was approved.
-      const mediaItems: Array<{ url: string }> = [];
+      const mediaItems: Array<{ type: "image" | "video"; url: string }> = [];
+      let aiOrigin = false;
       for (const assetId of request.assetIds) {
-        const url = httpsUrl(await ports.resolveAssetUrl(assetId));
-        if (!url) return { outcome: "failed", errorCode: "asset_unresolved" };
-        mediaItems.push({ url });
+        const asset = await ports.resolveAsset(assetId);
+        const url = httpsUrl(asset?.url);
+        if (!asset || !url) return { outcome: "failed", errorCode: "asset_unresolved" };
+        mediaItems.push({ type: asset.kind, url });
+        aiOrigin ||= asset.aiOrigin;
       }
+
+      const platformFields = zernioPlatformFields(platform, request.renderedText, mediaItems, aiOrigin);
+      if ("refused" in platformFields) return { outcome: "failed", errorCode: platformFields.refused };
 
       const result = await call("/v1/posts", {
         method: "POST",
         requestKey: request.requestKey,
         body: {
-          content: request.renderedText,
-          platforms: [{ platform, accountId: request.externalAccountRef }],
+          content: platformFields.content,
+          platforms: [
+            {
+              platform,
+              accountId: request.externalAccountRef,
+              ...(platformFields.data ? { platformSpecificData: platformFields.data } : {}),
+            },
+          ],
           // Without this, or a `scheduledFor`, Zernio creates a draft (S0
           // record, "예약"): a 201 that publishes nothing. With it, publishing
           // happens in this request and the response carries each platform's
@@ -438,60 +405,7 @@ export const zernioPublishAdapter = (
       return { outcome: "outcome_unknown", errorCode: "no_lookup_by_request_key" };
     },
 
-    async lookupStatus(
-      externalPostId: string,
-      externalAccountRef: string,
-    ): Promise<MarketingObjectStatus> {
-      // A different question from the one above, and one Zernio *can* answer: we
-      // know the object's own id, so we ask about it directly.
-      const result = await call(`/v1/posts/${encodeURIComponent(externalPostId)}`, {
-        method: "GET",
-      });
-      if (result.kind === "unreachable") return { state: "unknown" };
-      // **Neither a 404 nor `cancelled` says the platform removed anything,**
-      // and `removed` here is what the publisher records as
-      // `poll_removed_by_platform`. The S0 record is specific about both:
-      //
-      //   - `cancelled` is what Zernio's own row becomes after
-      //     `POST /v1/posts/{id}/unpublish` -- a retraction made through Zernio,
-      //     by us or by an operator in its dashboard. Reporting it as removal by
-      //     the platform would write our own act into the record as the
-      //     platform's.
-      //   - A 404 is Zernio no longer having its row, which says nothing about
-      //     the platform's copy.
-      //
-      // The platform's own deletion reaches Zernio as the
-      // `post.platform.deleted` webhook, on an hourly poll of its own -- the
-      // webhook slices' evidence, not a status query's. So a status query
-      // answers `live` or `unknown`, and never guesses the third.
-      if (result.status !== 200) return { state: "unknown" };
-      const post = (result.body as { post?: ZernioPost } | null)?.post ?? (result.body as ZernioPost | null);
-      // **The target this question is about, not the post's first.** A post can
-      // go to several accounts and each has its own status; the post's own
-      // status is an aggregate (`partial` when they differ). The first version
-      // read that aggregate and `platforms[0]`, so a question about the second
-      // account was answered about the first. A target whose account cannot be
-      // matched is not an answer at all.
-      const accountOf = (entry: ZernioPlatformResult) =>
-        typeof entry.accountId === "string"
-          ? entry.accountId
-          : (entry.accountId?._id ?? entry.accountId?.id ?? null);
-      const entries = post?.platforms ?? [];
-      const ref = String(externalAccountRef ?? "").trim();
-      const matching = entries.filter((entry) => ref !== "" && accountOf(entry) === ref);
-      const entry = matching.length === 1 ? matching[0] : undefined;
-      if (!entry) return { state: "unknown" };
-      if (entry.status === "published") {
-        const externalUrl = httpsUrl(entry.platformPostUrl ?? entry.publishedUrl);
-        return externalUrl ? { state: "live", externalUrl } : { state: "unknown" };
-      }
-      // Failed, or retracted through Zernio: the provider affirms this copy is
-      // not up. Still not removal by the platform -- see above.
-      if (entry.status === "failed" || entry.status === "cancelled") {
-        return { state: "not_live" };
-      }
-      return { state: "unknown" };
-    },
+    lookupStatus: status.lookupStatus,
 
     async cancel(
       externalPostId: string,

@@ -12,11 +12,11 @@ import { ZERNIO_API_BASE_URL, zernioPublishAdapter } from "@/lib/zernioPublishAd
  * publisher and the staging webhook receiver -- and each states its own call
  * budget.
  *
- * `resolveAssetUrl` answers null for every asset: the marketing image bucket
- * and its public URLs are not built, and an asset that cannot be resolved makes
- * the adapter refuse a post before anything is sent. A post with an image is
- * therefore a confirmed failure until that exists -- never a post published
- * without the image a person approved.
+ * `resolveAsset` answers null for every asset: the marketing asset store and
+ * its URLs are not wired here yet, and an asset that cannot be resolved makes
+ * the adapter refuse a post before anything is sent. A post with an image or a
+ * video is therefore a confirmed failure until that exists -- never a post
+ * published without the media a person approved.
  */
 export function buildZernioAdapterFromEnv(callBudgetMs: number): MarketingPublishAdapter | null {
   const apiKey = process.env.ZERNIO_API_KEY?.trim() ?? "";
@@ -24,7 +24,7 @@ export function buildZernioAdapterFromEnv(callBudgetMs: number): MarketingPublis
   return zernioPublishAdapter({
     apiKey,
     baseUrl: ZERNIO_API_BASE_URL,
-    resolveAssetUrl: async () => null,
+    resolveAsset: async () => null,
     callBudgetMs,
   });
 }

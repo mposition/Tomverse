@@ -51,7 +51,7 @@ export type MarketingWebhookReceiverDeps = {
   /** `ZERNIO_WEBHOOK_SECRET`, read by the route; absent means every delivery is refused. */
   readonly secret: string | undefined;
   /** For the status query a shadow report compares against; null without a key. */
-  readonly adapter: MarketingPublishAdapter | null;
+  readonly adapter: Pick<MarketingPublishAdapter, "lookupStatus"> | null;
   readonly consumeFaultArm: (eventIdDigest: string) => Promise<{ readonly consumed: boolean }>;
   /**
    * This build's webhook pipeline fingerprint. Every answer carries it, so
