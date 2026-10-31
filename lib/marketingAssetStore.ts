@@ -127,7 +127,10 @@ export async function submitMarketingAsset(
     if (!sameSubmission(existing, submission, r2Key)) {
       throw new MarketingAssetRefusedError("asset_id_taken", 409, "That asset id already names a different file");
     }
-    if (existing.status !== "submitted" || existing.uploadedAt !== null) {
+    if (existing.status !== "submitted") {
+      throw new MarketingAssetRefusedError("asset_already_decided", 409, "That asset was already approved or retired");
+    }
+    if (existing.uploadedAt !== null) {
       throw new MarketingAssetRefusedError("asset_already_uploaded", 409, "That asset is already uploaded");
     }
     return { assetId: existing.id, r2Key, uploadKey, existing: true };

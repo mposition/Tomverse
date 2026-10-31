@@ -34,7 +34,7 @@ export const marketingMediaSecret = (
   return secret && secret.length >= 32 ? secret : null;
 };
 
-export const marketingGeneratorAuthorized =(request: Request, secret: string): boolean => {
+export const marketingGeneratorAuthorized = (request: Request, secret: string): boolean => {
   const authorization = request.headers.get("authorization");
   const provided = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
   if (!provided) return false;

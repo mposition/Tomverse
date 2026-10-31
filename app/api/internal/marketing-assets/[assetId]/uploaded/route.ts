@@ -56,6 +56,8 @@ export async function POST(request: Request, context: RouteContext) {
     } catch {
       return json({ code: "upload_not_found_or_invalid" }, 409);
     }
+    // Without a version to pin the copy to, the copy could be of other bytes.
+    if (!hashed.etag) return json({ code: "upload_changed_while_verified" }, 409);
     if (hashed.sha256 !== target.sha256 || hashed.size !== target.bytes) {
       await deleteR2Object(target.uploadKey).catch(() => undefined);
       return json({ code: "upload_hash_mismatch" }, 409);
