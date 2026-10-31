@@ -233,7 +233,8 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
   AI 생성 이미지·영상으로 제품 UI를 흉내내지 않는다.
 - 승인된 자산 목록은 사람이 쓰는 `docs/marketing/asset-registry.json`과, 미디어 CLI(AMUX 박스의 Claude Code)가 제출하고
   사람이 Admin에서 승인한 `MarketingAsset` 행을 합친 것이다(2026-10-31 운영자). CLI는 파일을 R2에 올리고 제출만 하며,
-  게시 키를 갖지 않는다.
+  게시 키를 갖지 않는다. 영상·이미지가 말하는 것(locale별 대본·화면 문구)은 제출과 함께 오고, 행을 만들기 전에 초안 접수와
+  같은 Guard를 거친다. 거절이면 저장하지 않는다. 대본 표나 별도 승인 화면은 없고, 사람은 Admin에서 파일과 대본을 함께 본다.
 
 ### 7.4 항상 승인
 새 문구, 새 claim·자산의 첫 사용, 경쟁사 이름·비교, 가격·프로모션·할인·"무료", 장애·보안·사건,

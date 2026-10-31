@@ -2029,6 +2029,7 @@ function MarketingRow({
   if (section === "assets") {
     const disclosure = (row.disclosure ?? {}) as Record<string, string>;
     const alt = (row.alt ?? {}) as Record<string, string>;
+    const transcript = (row.transcript ?? {}) as Record<string, string>;
     const size = int(row.bytes);
     return (
       <>
@@ -2050,6 +2051,19 @@ function MarketingRow({
             <span className="mr-2 text-xs text-zinc-500">{locale}</span>
             {value}
           </p>
+        ))}
+        {/*
+          What the file says, per locale, so the person approving reads it
+          beside the preview. The Guard read it at submission; the words are
+          the media agent's and shown as text.
+        */}
+        {Object.entries(transcript).map(([locale, value]) => (
+          <details key={`transcript:${locale}`} className="mt-2" data-testid="marketing-asset-transcript">
+            <summary className="cursor-pointer text-xs text-zinc-400">
+              {m.colTranscript} · {locale}
+            </summary>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{value}</p>
+          </details>
         ))}
         <p className="mt-2 text-xs">
           {row.uploadedAt ? (

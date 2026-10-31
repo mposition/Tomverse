@@ -49,6 +49,9 @@ export const MARKETING_ASSET_MAX_BYTES: Readonly<Record<MarketingAssetKind, numb
   video: 1024 * 1024 * 1024,
 };
 
+/** The longest transcript per locale, in characters: an eight-minute video's narration and screen text. */
+export const MARKETING_ASSET_MAX_TRANSCRIPT_CHARS = 20_000;
+
 /** The longest video, in seconds: a YouTube long-form piece, not a stream. */
 export const MARKETING_ASSET_MAX_VIDEO_SECONDS = 3_600;
 
@@ -64,8 +67,11 @@ export const MARKETING_ASSET_KEY_PREFIX = "marketing-assets/";
 /** How long an Admin preview URL stays valid. */
 export const MARKETING_ASSET_PREVIEW_URL_SECONDS = 300;
 
-/** The largest submission body, in bytes: metadata only, never the file. */
-export const MARKETING_ASSET_MAX_BODY_BYTES = 16 * 1024;
+/**
+ * The largest submission body, in bytes: metadata and the transcript, never the
+ * file. Four locales of 20,000 characters, at three bytes a CJK character, with room.
+ */
+export const MARKETING_ASSET_MAX_BODY_BYTES = 512 * 1024;
 
 /**
  * The one object key a stored asset is kept and served from. Only the server

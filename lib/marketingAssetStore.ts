@@ -53,6 +53,7 @@ type AssetRow = {
   bytes: number;
   sha256: string;
   durationSeconds: number | null;
+  transcript: Record<string, string>;
   status: MarketingAssetStatus;
   uploadedAt: Date | null;
   registryVersion: number | null;
@@ -64,7 +65,7 @@ type AssetRow = {
 const ROW_COLUMNS = Prisma.sql`
   "id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
   to_char("validUntil", 'YYYY-MM-DD') AS "validUntil", "depictsProductInterface",
-  "r2Key", "contentType", "bytes", "sha256", "durationSeconds", "status", "uploadedAt",
+  "r2Key", "contentType", "bytes", "sha256", "durationSeconds", "transcript", "status", "uploadedAt",
   "registryVersion", "decisionAuditLogId", "decidedAt", "createdAt"`;
 
 /** A row as the registry entry it stands for. */
@@ -95,6 +96,7 @@ const sameSubmission = (row: AssetRow, submission: MarketingAssetSubmission, r2K
   row.bytes === submission.bytes &&
   row.sha256 === submission.sha256 &&
   row.durationSeconds === submission.durationSeconds &&
+  JSON.stringify(canonical(row.transcript)) === JSON.stringify(canonical(submission.transcript ?? {})) &&
   row.r2Key === r2Key;
 
 const readRow = async (db: AssetReader, id: string, lock: "share" | "update" | null): Promise<AssetRow | null> => {
@@ -140,13 +142,14 @@ export async function submitMarketingAsset(
     INSERT INTO "MarketingAsset" (
       "id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds", "validUntil",
       "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
-      "status", "updatedAt")
+      "transcript", "status", "updatedAt")
     VALUES (
       ${asset.id}, ${submission.kind}, ${asset.provenance}, ${[...asset.allowedChannels]}::TEXT[],
       ${JSON.stringify(asset.disclosure)}::jsonb, ${JSON.stringify(asset.alt)}::jsonb,
       ${[...asset.claimIds]}::TEXT[], ${asset.validUntil}::date, ${asset.depictsProductInterface},
       ${r2Key}, ${submission.contentType}, ${submission.bytes}, ${submission.sha256},
-      ${submission.durationSeconds}, 'submitted', (clock_timestamp() AT TIME ZONE 'UTC'))
+      ${submission.durationSeconds}, ${JSON.stringify(submission.transcript ?? {})}::jsonb, 'submitted',
+      (clock_timestamp() AT TIME ZONE 'UTC'))
   `);
   await writeSystemAuditLog({
     tx,

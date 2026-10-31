@@ -16,6 +16,7 @@ import {
 import type { MarketingAssetSubmission } from "@/lib/marketingAssetSubmission";
 import { resolveMarketingAsset } from "@/lib/marketingAssets";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
+import { POST as submitRoute } from "@/app/api/internal/marketing-assets/route";
 import { runMarketingTransaction, type MarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
@@ -51,6 +52,42 @@ const refusedBy = (message: string) => (error: unknown) => error instanceof Erro
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
 const SHA = "b".repeat(64);
+// Assembled: a test value, not a credential.
+const MEDIA_SECRET = ["media", "cli", "db", "test", "value", "0001", "padding"].join("-");
+const R2_ENV = {
+  MARKETING_MEDIA_SUBMIT_SECRET: MEDIA_SECRET,
+  R2_ACCOUNT_ID: "test-account",
+  R2_ACCESS_KEY_ID: "test-access",
+  R2_SECRET_ACCESS_KEY: ["test", "r2", "value"].join("-"),
+  R2_BUCKET_NAME: "test-bucket",
+} as const;
+const previousEnv: Record<string, string | undefined> = {};
+before(() => {
+  for (const [name, value] of Object.entries(R2_ENV)) {
+    previousEnv[name] = process.env[name];
+    process.env[name] = value;
+  }
+});
+after(() => {
+  for (const name of Object.keys(R2_ENV)) {
+    if (previousEnv[name] === undefined) delete process.env[name];
+    else process.env[name] = previousEnv[name];
+  }
+});
+
+/** The media CLI's request, through the route itself. */
+const postSubmission = async (body: unknown) => {
+  const response = await submitRoute(
+    new Request("https://tomverse.app/api/internal/marketing-assets", {
+      method: "POST",
+      headers: { authorization: `Bearer ${MEDIA_SECRET}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+};
+const assetCount = async () =>
+  Number((await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*) AS n FROM "MarketingAsset"`))[0].n);
 const ID = "media-20261031-compare";
 
 const submission = (overrides: Partial<MarketingAssetSubmission> = {}): MarketingAssetSubmission => ({
@@ -69,6 +106,10 @@ const submission = (overrides: Partial<MarketingAssetSubmission> = {}): Marketin
   bytes: 12_000_000,
   sha256: SHA,
   durationSeconds: 45,
+  transcript: {
+    en: "Ask three models at once and compare their answers side by side.",
+    ko: "세 모델에 한 번에 묻고 답을 나란히 비교하세요.",
+  },
   ...overrides,
 });
 
@@ -246,11 +287,70 @@ test("the database refuses what the store never sends: a changed file, an AI pic
     prisma.$executeRawUnsafe(
       `INSERT INTO "MarketingAsset" ("id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
          "validUntil", "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
-         "status", "updatedAt")
+         "transcript", "status", "updatedAt")
        VALUES ('media-ai-ui', 'image', 'ai_generated', ARRAY['x'], '{"x":"platform_label"}', '{"en":"A screen."}', ARRAY[]::TEXT[],
-         '2099-01-01', true, 'marketing-assets/media-ai-ui/original.png', 'image/png', 10, $1, NULL, 'submitted', now())`,
+         '2099-01-01', true, 'marketing-assets/media-ai-ui/original.png', 'image/png', 10, $1, NULL, '{}', 'submitted', now())`,
       SHA,
     ),
     refusedBy("MarketingAsset_interface_check"),
   );
+});
+
+test("what the video says passes the Guard before a row exists: a rejection writes nothing and names codes, not words", async () => {
+  // A claim the registry does not have: the draft intake's Guard rejects it.
+  const rejected = await postSubmission(
+    submission({ asset: { ...submission().asset, claimIds: ["no.such.claim"] } }),
+  );
+  assert.equal(rejected.status, 422);
+  assert.equal(rejected.body.code, "transcript_guard_rejected");
+  assert.ok(Array.isArray(rejected.body.guardCodes) && (rejected.body.guardCodes as string[]).includes("claim_unknown"));
+  assert.equal(JSON.stringify(rejected.body).includes("compare their answers"), false, "the words are not repeated back");
+  assert.equal(await assetCount(), 0);
+  assert.equal(await prisma.adminAuditLog.count({ where: { targetType: "MarketingAsset" } }), 0);
+});
+
+test("a transcript the Guard passes is stored with the submission, and the upload URL is for the upload key", async () => {
+  const accepted = await postSubmission(submission());
+  assert.equal(accepted.status, 200);
+  const result = accepted.body.result as { assetId: string; upload: { url: string } };
+  assert.equal(result.assetId, ID);
+  assert.match(result.upload.url, /\/upload\.mp4\?/u);
+  const stored = await prisma.$queryRawUnsafe<Array<{ transcript: Record<string, string>; status: string }>>(
+    `SELECT "transcript", "status" FROM "MarketingAsset" WHERE "id" = $1`,
+    ID,
+  );
+  assert.equal(stored[0].status, "submitted");
+  assert.deepEqual(stored[0].transcript, submission().transcript);
+
+  // A different script under the same id is a different submission.
+  const changed = await postSubmission(submission({ transcript: { en: "Another script entirely." } }));
+  assert.equal(changed.status, 409);
+  assert.equal(changed.body.code, "asset_id_taken");
+
+  // The words never change after the submission.
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`UPDATE "MarketingAsset" SET "transcript" = '{}' WHERE "id" = $1`, ID),
+    refusedBy("marketing_asset_submission_is_immutable"),
+  );
+});
+
+test("the database refuses a video with nothing said and a transcript past its length", async () => {
+  const insert = (id: string, transcript: string) =>
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "MarketingAsset" ("id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
+         "validUntil", "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
+         "transcript", "status", "updatedAt")
+       VALUES ($1, 'video', 'capture', ARRAY['x'], '{"x":"none"}', '{"en":"A screen."}', ARRAY[]::TEXT[],
+         '2099-01-01', true, 'marketing-assets/' || $1 || '/original.mp4', 'video/mp4', 10, $2, 5,
+         $3::jsonb, 'submitted', now())`,
+      id,
+      SHA,
+      transcript,
+    );
+  await assert.rejects(insert("media-silent", "{}"), refusedBy("MarketingAsset_transcript_check"));
+  await assert.rejects(
+    insert("media-long", JSON.stringify({ en: "a".repeat(20_001) })),
+    refusedBy("MarketingAsset_transcript_check"),
+  );
+  await assert.rejects(insert("media-locale", JSON.stringify({ fr: "Bonjour." })), refusedBy("MarketingAsset_transcript_check"));
 });

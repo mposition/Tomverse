@@ -12,8 +12,10 @@ import {
   MARKETING_ASSET_ID,
   MARKETING_ASSET_KINDS,
   MARKETING_ASSET_MAX_BYTES,
+  MARKETING_ASSET_MAX_TRANSCRIPT_CHARS,
   MARKETING_ASSET_MAX_VIDEO_SECONDS,
 } from "@/lib/marketingAssetCore";
+import { MARKETING_LOCALES } from "@/lib/marketingAutomationSchema";
 import { marketingAssetSchema } from "@/lib/marketingAssets";
 
 /**
@@ -28,6 +30,14 @@ export const marketingAssetSubmissionSchema = z
     bytes: z.number().int().min(1),
     sha256: z.string().regex(/^[0-9a-f]{64}$/u),
     durationSeconds: z.number().int().min(1).max(MARKETING_ASSET_MAX_VIDEO_SECONDS).nullable(),
+    /**
+     * Everything the file says, per locale: a video's narration and every
+     * on-screen line, an image's text. The Guard reads it before the row is
+     * written, and the person approving sees it beside the file.
+     */
+    transcript: z
+      .partialRecord(z.enum(MARKETING_LOCALES), z.string().trim().min(1).max(MARKETING_ASSET_MAX_TRANSCRIPT_CHARS))
+      .optional(),
   })
   .strict()
   .superRefine((submission, context) => {
@@ -42,6 +52,10 @@ export const marketingAssetSubmissionSchema = z
     }
     if ((submission.kind === "video") !== (submission.durationSeconds !== null)) {
       context.addIssue({ code: "custom", message: "a video has a duration and an image has none" });
+    }
+    // A video always says something; an image may say nothing.
+    if (submission.kind === "video" && Object.keys(submission.transcript ?? {}).length === 0) {
+      context.addIssue({ code: "custom", message: "a video needs its transcript in at least one locale" });
     }
   });
 export type MarketingAssetSubmission = z.infer<typeof marketingAssetSubmissionSchema>;

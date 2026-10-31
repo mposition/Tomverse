@@ -31,6 +31,7 @@ CREATE TABLE "MarketingAsset" (
     "bytes" INTEGER NOT NULL,
     "sha256" TEXT NOT NULL,
     "durationSeconds" INTEGER,
+    "transcript" JSONB NOT NULL,
     "status" TEXT NOT NULL,
     "uploadedAt" TIMESTAMP(3),
     "registryVersion" INTEGER,
@@ -89,6 +90,24 @@ AS $$
               FROM pg_catalog.jsonb_each("alt") AS "entry"), false)
 $$ LANGUAGE sql;
 
+-- Everything the file says, per locale (the Guard read it before the row was
+-- written): known locales, 1 to 20,000 characters each, and at least one for a
+-- video, which always says something.
+CREATE FUNCTION "marketing_asset_transcript_valid"("transcript" JSONB, "kind" TEXT)
+RETURNS boolean
+IMMUTABLE
+STRICT
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT pg_catalog.jsonb_typeof("transcript") = 'object'
+       AND ("kind" <> 'video' OR (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_object_keys("transcript")) > 0)
+       AND COALESCE((SELECT pg_catalog.bool_and(
+                  "entry".key IN ('en', 'ko', 'zh-Hant', 'zh-Hans')
+                  AND pg_catalog.jsonb_typeof("entry".value) = 'string'
+                  AND pg_catalog.length("entry".value #>> '{}') BETWEEN 1 AND 20000)
+              FROM pg_catalog.jsonb_each("transcript") AS "entry"), true)
+$$ LANGUAGE sql;
+
 ALTER TABLE "MarketingAsset" ADD CONSTRAINT "MarketingAsset_id_check"
     CHECK ("id" ~ '^media-[a-z0-9][a-z0-9-]{0,99}$');
 ALTER TABLE "MarketingAsset" ADD CONSTRAINT "MarketingAsset_kind_check"
@@ -105,6 +124,8 @@ ALTER TABLE "MarketingAsset" ADD CONSTRAINT "MarketingAsset_disclosure_check"
     CHECK ("marketing_asset_disclosure_valid"("allowedChannels", "disclosure", "provenance"));
 ALTER TABLE "MarketingAsset" ADD CONSTRAINT "MarketingAsset_alt_check"
     CHECK ("marketing_asset_alt_valid"("alt"));
+ALTER TABLE "MarketingAsset" ADD CONSTRAINT "MarketingAsset_transcript_check"
+    CHECK ("marketing_asset_transcript_valid"("transcript", "kind"));
 ALTER TABLE "MarketingAsset" ADD CONSTRAINT "MarketingAsset_claimIds_check"
     CHECK ("claimIds" IS NOT NULL AND pg_catalog.cardinality("claimIds") <= 20);
 -- A model-made picture of a screen is not a picture of the product (policy 7.3).
@@ -170,12 +191,12 @@ BEGIN
     IF pg_catalog.jsonb_build_array(OLD."id", OLD."kind", OLD."provenance", OLD."allowedChannels",
                                     OLD."disclosure", OLD."alt", OLD."claimIds", OLD."validUntil",
                                     OLD."depictsProductInterface", OLD."r2Key", OLD."contentType",
-                                    OLD."bytes", OLD."sha256", OLD."durationSeconds", OLD."createdAt")
+                                    OLD."bytes", OLD."sha256", OLD."durationSeconds", OLD."transcript", OLD."createdAt")
        IS DISTINCT FROM
        pg_catalog.jsonb_build_array(NEW."id", NEW."kind", NEW."provenance", NEW."allowedChannels",
                                     NEW."disclosure", NEW."alt", NEW."claimIds", NEW."validUntil",
                                     NEW."depictsProductInterface", NEW."r2Key", NEW."contentType",
-                                    NEW."bytes", NEW."sha256", NEW."durationSeconds", NEW."createdAt") THEN
+                                    NEW."bytes", NEW."sha256", NEW."durationSeconds", NEW."transcript", NEW."createdAt") THEN
         RAISE EXCEPTION 'marketing_asset_submission_is_immutable';
     END IF;
 

@@ -3159,10 +3159,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
     table: "MarketingAsset",
-    tableMentions: 19,
-    writeVerbs: 16,
+    tableMentions: 20,
+    writeVerbs: 17,
     reason:
-      "Creates the media asset store, its sequence, its checks, the one insert-and-update guard and the delete guard. It writes no row.",
+      "Creates the media asset store, its sequence, its checks (including the transcript's), the one insert-and-update guard and the delete guard. It writes no row.",
   },
   {
     path: "lib/adminAuditSystemActors.ts",
@@ -3206,7 +3206,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
       "Creates the media asset store. Its one AdminAuditLog mention is the write guard's read of a person's own decision audit row (action, target, actor, recorded predecessor and the approved bytes). No audit row is written.",
   },

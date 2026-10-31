@@ -23,6 +23,7 @@ const submission = (overrides = {}, asset = {}) => ({
   bytes: 12_000_000,
   sha256: SHA,
   durationSeconds: 45,
+  transcript: { en: "Ask three models at once and compare their answers side by side." },
   ...overrides,
 });
 
@@ -31,6 +32,11 @@ const parses = (value) => marketingAssetSubmissionSchema.safeParse(value).succes
 test("a capture video announced with its bytes, type and length is a submission", () => {
   assert.equal(parses(submission()), true);
   assert.equal(parses(submission({ kind: "image", contentType: "image/png", bytes: 400_000, durationSeconds: null })), true);
+  // An image may say nothing.
+  assert.equal(
+    parses(submission({ kind: "image", contentType: "image/png", bytes: 400_000, durationSeconds: null, transcript: undefined })),
+    true,
+  );
 });
 
 test("the registry's own rules hold for a stored asset: AI origin cannot show the product, and is never undisclosed", () => {
@@ -78,4 +84,13 @@ test("each asset has one object key, under its own prefix, with its type's exten
   assert.equal(marketingAssetR2Key("media-a", "video", "video/mp4"), "marketing-assets/media-a/original.mp4");
   assert.equal(marketingAssetR2Key("media-a", "video", "video/quicktime"), "marketing-assets/media-a/original.mov");
   assert.equal(marketingAssetR2Key("media-b", "image", "image/jpeg"), "marketing-assets/media-b/original.jpg");
+});
+
+test("a video says what it says in at least one locale, each at most 20,000 characters", () => {
+  assert.equal(parses(submission({ transcript: undefined })), false);
+  assert.equal(parses(submission({ transcript: {} })), false);
+  assert.equal(parses(submission({ transcript: { en: "   " } })), false);
+  assert.equal(parses(submission({ transcript: { fr: "Bonjour." } })), false);
+  assert.equal(parses(submission({ transcript: { en: "a".repeat(20_000), ko: "가".repeat(20_000) } })), true);
+  assert.equal(parses(submission({ transcript: { en: "a".repeat(20_001) } })), false);
 });

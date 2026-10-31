@@ -196,6 +196,7 @@ export const adminMarketingMessages = defineAdminMessages({
     colPreview: "Open preview",
     colChannels: "Channels and AI disclosure:",
     colFile: "File:",
+    colTranscript: "What it says",
     notUploaded: "Not uploaded yet",
     createCompetitorTitle: "Add a competitor",
     createCompetitorNote:
@@ -542,6 +543,7 @@ export const adminMarketingMessages = defineAdminMessages({
     colPreview: "미리보기 열기",
     colChannels: "채널과 AI 표시:",
     colFile: "파일:",
+    colTranscript: "대본",
     notUploaded: "아직 업로드되지 않음",
     createCompetitorTitle: "경쟁사 추가",
     createCompetitorNote: "추가하는 즉시 승인됩니다. 다음 보고서부터 이 host가 시장 사실의 출처가 됩니다.",

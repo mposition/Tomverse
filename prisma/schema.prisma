@@ -7723,6 +7723,7 @@ model MarketingAsset {
   bytes                   Int
   sha256                  String
   durationSeconds         Int?
+  transcript              Json
   status                  String
   uploadedAt              DateTime?
   registryVersion         Int?

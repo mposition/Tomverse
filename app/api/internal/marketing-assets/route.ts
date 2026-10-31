@@ -8,6 +8,7 @@ import {
   MarketingAssetRefusedError,
 } from "@/lib/marketingAssetCore";
 import { marketingAssetSubmissionSchema } from "@/lib/marketingAssetSubmission";
+import { guardMarketingAssetTranscript } from "@/lib/marketingAssetGuard";
 import { submitMarketingAsset } from "@/lib/marketingAssetStore";
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import {
@@ -24,7 +25,11 @@ import { createR2UploadUrl } from "@/lib/r2";
 // The media CLI announces a file (operator decision 2026-10-31): the registry
 // entry it will become and what the bytes are. The answer is a short-lived URL
 // for the upload key only; the confirmation route verifies the bytes there and
-// copies them to the key the asset is kept at, which no URL is signed for. Nothing here is trusted for a post until a person approves it in
+// copies them to the key the asset is kept at, which no URL is signed for.
+//
+// What the file says (its transcript, per locale) goes through the Guard first,
+// in the same transaction and by the draft intake's rules; a rejection writes
+// nothing and answers the Guard's codes, never the words. Nothing here is trusted for a post until a person approves it in
 // Admin.
 
 const json = (body: Record<string, unknown>, status: number) =>
@@ -45,12 +50,19 @@ export async function POST(request: Request) {
   const parsed = marketingAssetSubmissionSchema.safeParse(parseMarketingGeneratorJson(raw));
   if (!parsed.success) return json({ code: "invalid_request" }, 400);
 
-  let stored: { assetId: string; uploadKey: string; existing: boolean };
+  let outcome:
+    | { readonly assetId: string; readonly uploadKey: string; readonly existing: boolean }
+    | { readonly guardCodes: readonly string[] };
   try {
-    stored = await runMarketingTransaction(prisma, (tx) => submitMarketingAsset(tx, parsed.data), {
-      maxWait: 5_000,
-      timeout: 15_000,
-    });
+    outcome = await runMarketingTransaction(
+      prisma,
+      async (tx) => {
+        const verdict = await guardMarketingAssetTranscript(tx, parsed.data);
+        if (!verdict.pass) return { guardCodes: verdict.codes };
+        return submitMarketingAsset(tx, parsed.data);
+      },
+      { maxWait: 5_000, timeout: 30_000 },
+    );
   } catch (error) {
     if (error instanceof MarketingAssetRefusedError) return json({ code: error.code }, error.status);
     void reportOperationalIncident({
@@ -68,6 +80,10 @@ export async function POST(request: Request) {
     return json({ code: "outcome_unknown" }, 500);
   }
 
+  if ("guardCodes" in outcome) {
+    return json({ code: "transcript_guard_rejected", guardCodes: outcome.guardCodes }, 422);
+  }
+  const stored = outcome;
   const uploadUrl = await createR2UploadUrl(stored.uploadKey, parsed.data.contentType, parsed.data.bytes);
   return json(
     {
