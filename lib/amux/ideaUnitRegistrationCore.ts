@@ -1,6 +1,7 @@
 import { AMUX_TASK_EXPECTED_PATHS_MAX,
   type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { amuxV22TaskRoleSupported } from "./v22WorkerClaimCore.ts";
 import { classifyAmuxExecutionPath, deriveAmuxExecutionGrade,
   normalizeAmuxExecutionPath,
   type AmuxExecutionGrade } from "./executionGradeCore.ts";
@@ -81,6 +82,11 @@ export function inspectAmuxV20TaskRegistration(
   try {
     if (proposal.taskRole === "review") {
       return { ok: false, code: "task_role_review_refused" };
+    }
+    // operate (a person's step) and any role no one-shot execution runs.
+    if (typeof proposal.taskRole !== "string" ||
+        !amuxV22TaskRoleSupported(proposal.taskRole)) {
+      return { ok: false, code: "task_role_not_runnable" };
     }
     const descriptor = Object.getOwnPropertyDescriptor(proposal, "expectedPaths");
     if (!descriptor || !("value" in descriptor) || descriptor.value === undefined ||

@@ -131,8 +131,9 @@ assert.equal(calls.filter(([k]) => k === "transaction").length, 1);
 const prepares = calls.filter(([k]) => k === "prepare");
 // The Feature resolves to the node its approved node unit created.
 assert.ok(prepares.every((entry) => entry[3] === "node-feature-1"));
-// PR consent: on for the implement Task, off for the test Task and the Story.
-assert.deepEqual(prepares.map((entry) => entry[5]), [false, true, false]);
+// PR consent: on for the implement and test Tasks (a test Task writes a patch
+// since 2026-10-30), off for the Story.
+assert.deepEqual(prepares.map((entry) => entry[5]), [false, true, true]);
 assert.equal(prepares[2][6], "Different scope");
 // The admitted card is the one consumed.
 const consumes = calls.filter(([k]) => k === "consume");
@@ -140,9 +141,12 @@ assert.deepEqual(calls.filter(([k]) => k === "admit").map(([, , id]) => id), con
 // Keys: one analysis draft per unit; title and body per card, and a brief per Task.
 assert.deepEqual(calls.find(([k]) => k === "keys"), ["keys", 3, 2 + 3 + 3]);
 
-// The owner can turn an implement Task's consent off.
+// The owner can turn an implement or test Task's consent off, one at a time.
 reset();
 await run({ publicPrConsentOff: ["unit-task-01"] });
+assert.deepEqual(calls.filter(([k]) => k === "prepare").map((entry) => entry[5]), [false, false, true]);
+reset();
+await run({ publicPrConsentOff: ["unit-task-01", "unit-task-02"] });
 assert.deepEqual(calls.filter(([k]) => k === "prepare").map((entry) => entry[5]), [false, false, false]);
 
 // A refusal of any unit surfaces as itself; after the callback, an unknown outcome.
