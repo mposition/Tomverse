@@ -1560,6 +1560,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   어휘만, 나머지는 money·number·date), `MARKETING_A3_DISCOVERY_ANSWER_SCHEMA`. 저장 schema가 거절할 형식은 아예 나오지 않으므로
   dev에서 실행마다 105~200건이던 `shape` 탈락을 없애는 것이 목적이고, 출처 host·인용 대조는 그대로 코드가 합니다. 기능 설명처럼
   값이 아닌 것은 `unrepresentable`로 셉니다. 프롬프트 `a3-web-search-v2`. 요청 비용은 바뀌지 않습니다(예약은 컨텍스트 창 기준).
+  보고서 상한(200건)을 넘으면 `marketingA3FactsInTurn()`이 경쟁사를 돌아가며 하나씩 담으므로 각 경쟁사의 뒤쪽 사실이 잘리고,
+  목록 뒤쪽 경쟁사가 통째로 빠지지 않습니다(10-31 dev 실행이 처음 200건에 닿음).
 
 # 엔지니어링 Agent
 
