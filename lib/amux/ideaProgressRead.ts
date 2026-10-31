@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_IDEA_OWNER_CLOSABLE_STATE } from "@/lib/amux/ideaOwnerCloseCore";
 import { amuxIdeaProgress, type AmuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
 
 /** How many of the owner's newest ideas the Ideas tab lists. */
@@ -12,6 +13,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   ideaId: string;
   /** A session idea has no per-idea execution approval. */
   submissionOrigin?: "owner" | "session";
+  /** Waiting for the owner after analysis; the owner may close it. */
+  closable: boolean;
   requestId: string;
   submittedAt: string;
   /** The first registered card's display key, the only plaintext label an idea has. */
@@ -188,6 +191,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       ...progress,
       ideaId: idea.id,
       submissionOrigin: idea.submissionOrigin,
+      closable: idea.state === AMUX_IDEA_OWNER_CLOSABLE_STATE && !idea.cancelled,
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
