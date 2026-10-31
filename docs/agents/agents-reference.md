@@ -1584,6 +1584,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   행을 만들지 않습니다. 대본은 행에 저장되어 Admin 자산 탭에서 locale별로 보입니다.
   자산의 `claimIds`는 그 자산을 싣는 게시물이 직접 선언해야 합니다. 선언하지 않으면 사실 검증이 그 자산을 `known: false`로
   답해 `asset_unknown`으로 거절되고, 선언하면 게시물의 claim으로 Guard가 돌 때마다 다시 판정됩니다.
+- **V2 연결(영상 게시물, 운영자 2026-10-31)**: `app/api/_marketing/zernioAdapter.ts`의 `resolveAsset`은 보낼 때 승인된 저장 자산을
+  읽어 R2 읽기 URL(3시간)과 종류·AI 출처를 넘깁니다. 승인되지 않았거나 은퇴했거나 파일 등록부에만 있는 자산은 풀리지 않아 보내기 전에
+  `asset_unresolved`로 실패합니다. 생성기 문맥의 자산은 `kind`(저장 자산의 image/video, 파일 자산은 null)와 승인된 `alt`를 함께
+  싣고, A5(`a5-social-v2`)는 그 locale의 alt를 자산 설명으로 받아 그 자산이 보여 주는 것에 대해 씁니다. YouTube는 영상 하나에 첫 줄이
+  제목, TikTok은 영상 하나, Instagram은 이미지나 영상이며, 맞는 자산이 없으면 초안을 내지 않습니다. 출처·AI 표시는 생성기에 주지
+  않습니다(Guard가 등록부로 판정).
 
 # 엔지니어링 Agent
 

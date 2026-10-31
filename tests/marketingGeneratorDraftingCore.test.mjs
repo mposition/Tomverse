@@ -181,3 +181,42 @@ test("the submission is what the intake parses and verifies, with the ledger cal
   ]);
   assert.throws(() => marketingDraftSubmissionBody(SECRET, { ...body, drafts: [] }));
 });
+
+test("an asset reaches the model as its kind and what it shows in this locale, and video posts follow the platform", () => {
+  const withVideo = marketingGeneratorContextSchema.parse({
+    ...context,
+    channels: [{ id: "chn_yt", channel: "youtube", accountSlug: "tomverse", defaultLocale: "en", allowedLocales: ["en", "ko"] }],
+    assets: [
+      {
+        id: "media-20261031-compare-ko-short",
+        allowedChannels: ["youtube"],
+        altLocales: ["en", "ko"],
+        claimIds: [],
+        validUntil: "2099-12-31",
+        kind: "video",
+        alt: { en: "Three answers to one question, side by side", ko: "한 질문에 대한 세 답변을 나란히 보여 줍니다" },
+      },
+    ],
+  });
+  const [system, user] = marketingA5Messages(withVideo, { ...SCOPE, channelId: "chn_yt", locale: "ko" });
+  assert.match(system.content, /first line is the video's title/);
+  assert.match(system.content, /return no draft rather than a post without one/);
+  assert.deepEqual(JSON.parse(user.content).assets, [
+    {
+      id: "media-20261031-compare-ko-short",
+      kind: "video",
+      description: "한 질문에 대한 세 답변을 나란히 보여 줍니다",
+      claimIds: [],
+      validUntil: "2099-12-31",
+    },
+  ]);
+  // A context from an app deployed before kinds were sent still reads, with no kind or description.
+  const [, older] = marketingA5Messages(context, SCOPE);
+  assert.deepEqual(JSON.parse(older.content).assets[0], {
+    id: "asset_hero",
+    kind: null,
+    description: null,
+    claimIds: [],
+    validUntil: "2099-12-31",
+  });
+});

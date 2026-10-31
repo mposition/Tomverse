@@ -307,7 +307,14 @@ export const zernioPublishAdapter = (
       const mediaItems: Array<{ type: "image" | "video"; url: string }> = [];
       let aiOrigin = false;
       for (const assetId of request.assetIds) {
-        const asset = await ports.resolveAsset(assetId);
+        // Nothing has been sent yet, so a lookup or signing that throws is a
+        // confirmed failure of this post, not an unknown outcome to reconcile.
+        let asset: ZernioResolvedAsset | null;
+        try {
+          asset = await ports.resolveAsset(assetId);
+        } catch {
+          return { outcome: "failed", errorCode: "asset_unresolved" };
+        }
         const url = httpsUrl(asset?.url);
         if (!asset || !url) return { outcome: "failed", errorCode: "asset_unresolved" };
         mediaItems.push({ type: asset.kind, url });
