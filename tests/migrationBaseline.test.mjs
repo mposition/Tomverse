@@ -1001,6 +1001,27 @@ test("every new CHECK-only replacement migration carries complete supplemental p
   );
 });
 
+// The two sweeps above read the header and the sidecar on their own; the
+// pre-deploy guard reads them together, and a sidecar beside SQL outside its
+// grammar makes the whole migration undeclared (20261031090000 reached dev
+// that way on 2026-10-31). Ask the guard's own function about each one.
+test("the pre-deploy guard can probe every migration a sweep reaches", async () => {
+  const { pendingProbes } = await import("../scripts/baseline-presence-core.mjs");
+  const requiredFrom = "20261008130000_amux_v4_claim_owner_resolution";
+  const sidecarOf = (name) => {
+    const path = join(MIGRATIONS, name, "baseline-check.json");
+    return existsSync(path) ? readFileSync(path, "utf8") : undefined;
+  };
+  const sqlOf = (name) => readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8");
+  const reached = migrationNames().filter((name) => name >= requiredFrom &&
+    !PRESENCE_SWEEP_EXEMPT.has(name) &&
+    (needsDeclaration(sqlOf(name)) || sidecarOf(name) !== undefined));
+  const { probes, undeclared } = pendingProbes(reached, sqlOf, sidecarOf);
+  assert.deepEqual(undeclared, [], "the pre-deploy guard would refuse these migrations");
+  assert.equal(probes.length, reached.length);
+  assert.ok(reached.length >= 8, `expected the guard sweep to reach the declared migrations, reached ${reached.length}`);
+});
+
 test("the sweep's exemptions only shrink, and none is newer than the sweep", () => {
   // Deleting an entry is the intended edit, so the count is a ceiling and not an
   // equality: an earlier draft pinned it at the current size and would have
