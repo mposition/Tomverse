@@ -41,9 +41,9 @@ import { AmuxPortfolioError, writeAmuxPortfolioAssessmentInTx } from
 import { writeAmuxPortfolioScoreInTx } from "./portfolioScoreService.ts";
 import { AMUX_IDEA_PLAN_APPROVAL_TRANSACTION } from
   "./ideaRequestTimeoutsCore.ts";
-import { AmuxV4TaskCatalogApprovalError,
-  calculateCurrentApprovedAmuxV4TaskCost } from
-  "./v4TaskCostCatalogApprovalService.ts";
+import { calculateCurrentApprovedAmuxV4TaskCost,
+  readAmuxV4TaskAutoCatalog } from "./v4TaskCostCatalogApprovalService.ts";
+import { calculateV4TaskCeilingFromCatalog } from "./v4TaskCostCatalogCore.ts";
 import { AmuxV19PlanRegistrationRefusalDetected,
   AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
@@ -313,16 +313,14 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
     }
     // No priced worker for the role and grade is a recorded refusal here, not
     // an unknown outcome of the registration transaction below. A catalog
-    // that cannot be read at all still throws.
+    // that cannot be read or derived is no refusal of this Task: it throws.
     const priced = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
-      await calculateCurrentApprovedAmuxV4TaskCost(tx,
-        card.verified.proposal.taskRole!, inspected.executionGrade);
-      return true;
-    }).catch((error: unknown) => {
-      if (error instanceof AmuxV4TaskCatalogApprovalError &&
-          error.code === "evidence_unverified") return false;
-      throw error;
+      const current = await readAmuxV4TaskAutoCatalog(tx);
+      if (!current.ok) throw new AmuxV19SystemRegistrationError("integrity_unavailable");
+      return calculateV4TaskCeilingFromCatalog({ rawCatalog: current.catalog,
+        role: card.verified.proposal.taskRole!, grade: inspected.executionGrade,
+        asOfIso: new Date().toISOString() }).ok;
     });
     if (!priced) {
       throw new AmuxV20RegistrationRefusalDetected("task_route_unpriced",

@@ -37,6 +37,25 @@ test("all stable Task registration refusals clear stale duplicate state and sele
   }
 });
 
+test("a test Task shows the public PR consent box and the owner can turn it on", async () => {
+  const roleUnit = (taskRole: string): AmuxVisibleAnalysisUnit => ({ ...UNIT,
+    proposal: { ...UNIT.proposal, taskRole } as AmuxVisibleAnalysisUnit["proposal"] });
+  const consentBox = (tree: ReactNode) =>
+    propsOf(tree).find((props) => props.type === "checkbox");
+  // verify reads only and leaves no patch, so it has no box.
+  assert.equal(consentBox(mount("en", roleUnit("verify")).tree), undefined);
+  for (const taskRole of ["implement", "test"]) {
+    const panel = mount("en", roleUnit(taskRole));
+    const box = consentBox(panel.tree);
+    assert.ok(box, `${taskRole} shows the consent box`);
+    assert.equal(box.checked, false);
+    (box.onChange as (event: { target: { checked: boolean } }) => void)(
+      { target: { checked: true } });
+    await panel.flush();
+    assert.equal(consentBox(panel.tree)?.checked, true, `${taskRole} consent turns on`);
+  }
+});
+
 test("unknown and existing generic failures keep the existing fallback path", () => {
   for (const code of ["unavailable", "reconfirm", "duplicate_reason_required"]) {
     assert.equal(amuxTaskRegistrationRefusalPresentation(code), null);
@@ -96,7 +115,7 @@ const UNIT: AmuxVisibleAnalysisUnit = {
   },
 };
 
-function mount(locale: "en" | "ko" = "en") {
+function mount(locale: "en" | "ko" = "en", unit: AmuxVisibleAnalysisUnit = UNIT) {
   const internals = (React as unknown as {
     __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: { H: unknown };
   }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
@@ -122,7 +141,7 @@ function mount(locale: "en" | "ko" = "en") {
     const previous = internals.H;
     internals.H = dispatcher;
     try {
-      tree = AmuxIdeaCardRegistrationPanel({ ideaId: "idea-12345", unit: UNIT }) as typeof tree;
+      tree = AmuxIdeaCardRegistrationPanel({ ideaId: "idea-12345", unit }) as typeof tree;
     } finally {
       internals.H = previous;
     }

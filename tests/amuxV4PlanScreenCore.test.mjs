@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { amuxV4PlanMetrics, amuxV4PlanRound, amuxV4PlanScreenUnits, buildAmuxV4PlanRequest } from
+import { amuxV4PlanMetrics, amuxV4PlanRound, amuxV4PlanScreenUnits, amuxV4PlanShowsPublicPrConsent,
+  buildAmuxV4PlanRequest } from
   "../lib/amux/ideaPlanScreenCore.ts";
 
 const signal = (metrics) => ({ metrics, uncertainty: "low", rationale: "r", evidenceRefIds: ["s1"] });
@@ -60,6 +62,16 @@ test("a Task whose path leaves the plan or lacks metrics is not scored here", ()
   const outside = units.filter((u) => u.id !== "unit-init-01");
   assert.deepEqual(buildAmuxV4PlanRequest({ ideaId: "idea-0001", planRequestId: plan,
     units: amuxV4PlanScreenUnits(outside), edits: new Map(), consentOff: new Set() }).scoreTaskUnitIds, []);
+});
+
+test("the plan screen shows a consent box only for implement and test Tasks", () => {
+  for (const [kind, taskRole, shown] of [["task", "implement", true], ["task", "test", true],
+    ["task", "verify", false], ["task", "design", false], ["task", "operate", false],
+    ["story", null, false]]) {
+    assert.equal(amuxV4PlanShowsPublicPrConsent({ kind, taskRole }), shown, `${kind}/${taskRole}`);
+  }
+  const panel = readFileSync("components/admin/AmuxIdeaPlanApprovalPanel.tsx", "utf8");
+  assert.match(panel, /\{amuxV4PlanShowsPublicPrConsent\(unit\) && !later \?/);
 });
 
 test("public PR consent is turned off only for patch-writing Tasks the owner unchecked", () => {
