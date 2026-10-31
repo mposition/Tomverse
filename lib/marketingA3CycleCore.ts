@@ -21,6 +21,8 @@
  */
 
 import {
+  MARKETING_A3_ANSWER_SCHEMA,
+  MARKETING_A3_DISCOVERY_ANSWER_SCHEMA,
   marketingA3DiscoveryMessages,
   marketingA3Messages,
   marketingA3ReportBody,
@@ -35,7 +37,7 @@ import {
   MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
   type MarketingGeneratorReport,
 } from "./marketingIntelReportCore.ts";
-import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
+import type { MarketingLlmAnswerSchema, MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Time a competitor is not started without: one web-search call and the report. */
 export const MARKETING_A3_COMPETITOR_BUDGET_MS = 90_000;
@@ -68,11 +70,13 @@ export type MarketingA3CycleDeps = {
   /**
    * One ledger-accounted web-search call for the `market_intel` purpose,
    * limited to these domains; no domains is the run's unrestricted discovery search.
+   * The answer is held to the given schema.
    */
   readonly callLlm: (
     messages: readonly MarketingLlmMessage[],
     requestKey: string,
     allowedDomains: readonly string[],
+    answerSchema: MarketingLlmAnswerSchema,
   ) => Promise<MarketingLlmCallOutcome>;
   /** The report route. Throws when there is no answer. */
   readonly submitReport: (
@@ -183,11 +187,12 @@ export async function runMarketingA3Cycle(
   const ask = async (
     messages: readonly MarketingLlmMessage[],
     allowedDomains: readonly string[],
+    answerSchema: MarketingLlmAnswerSchema,
   ): Promise<{ readonly content: string; readonly citations: readonly string[] } | { readonly stop: MarketingA3CycleSummary }> => {
     calls += 1;
     let outcome: MarketingLlmCallOutcome;
     try {
-      outcome = await deps.callLlm(messages, deps.newId(), allowedDomains);
+      outcome = await deps.callLlm(messages, deps.newId(), allowedDomains, answerSchema);
     } catch {
       // Nothing says whether the provider was reached: unknown, and the run stops.
       return { stop: summary({ stage: "llm", detail: "threw" }) };
@@ -210,7 +215,7 @@ export async function runMarketingA3Cycle(
     competitors += 1;
 
     const checkedAt = new Date(deps.now()).toISOString();
-    const outcome = await ask(marketingA3Messages(competitor), competitor.officialHosts);
+    const outcome = await ask(marketingA3Messages(competitor), competitor.officialHosts, MARKETING_A3_ANSWER_SCHEMA);
     if ("stop" in outcome) return outcome.stop;
     const read = readMarketingA3Answer(outcome.content, {
       competitorId: competitor.competitorId,
@@ -238,6 +243,7 @@ export async function runMarketingA3Cycle(
       trackedNames: registry.tracked.map((row) => row.displayName),
     }),
     [],
+    MARKETING_A3_DISCOVERY_ANSWER_SCHEMA,
   );
   if ("stop" in discovery) return discovery.stop;
   const found = readMarketingA3Discovery(discovery.content, {
