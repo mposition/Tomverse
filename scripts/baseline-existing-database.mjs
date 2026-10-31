@@ -251,12 +251,13 @@ try {
             answers.set(name, checkReplacementSetAnswer(checkAnswers));
           } else {
             const { rows } = await client.query(presenceQueryFor(probe));
-            // A replacement must match the exact previous body. Other probes
-            // answer one boolean. Unknown or malformed answers fail closed.
+            // A replacement must match the exact previous body, or the exact
+            // body it writes. Other probes answer one boolean. Unknown or
+            // malformed answers fail closed.
             answers.set(
               name,
               probe.previousBodySha256 !== undefined
-                ? replacementAnswer(rows, probe.previousBodySha256)
+                ? replacementAnswer(rows, probe.previousBodySha256, probe.targetBodySha256)
                 : presenceAnswer(rows)
             );
           }
@@ -269,7 +270,7 @@ try {
       const verdict = presenceVerdict(pending, answers);
       if (verdict.proceed) {
         log(
-          "Pending migrations change nothing schema.prisma describes; every declared object is absent or every replacement has the exact prior function/CHECK definition. Letting migrate deploy apply them.",
+          "Pending migrations change nothing schema.prisma describes; every declared object is absent or every replacement has the exact prior function/CHECK definition (or already the exact function body it writes). Letting migrate deploy apply them.",
           { pending }
         );
       } else {
