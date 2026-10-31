@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MARKETING_DISCLOSURE_CONTRACT_READY, resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
+import { resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
 import type {
   MarketingAdmissionChannel,
   MarketingHealthObservation,
@@ -43,8 +43,8 @@ const database = (options: { clock?: unknown; settings?: Record<string, string> 
   return { database: fake as unknown as MarketingTransaction, seen };
 };
 
-const channel = (status: string): MarketingAdmissionChannel =>
-  ({ id: "c1", channel: "linkedin", status, connectionGeneration: 3 }) as MarketingAdmissionChannel;
+const channel = (status: string, name = "linkedin"): MarketingAdmissionChannel =>
+  ({ id: "c1", channel: name, status, connectionGeneration: 3 }) as MarketingAdmissionChannel;
 
 const health = (ageMs: number, overrides: Partial<MarketingHealthObservation> = {}) => ({
   channelId: "c1",
@@ -54,21 +54,26 @@ const health = (ageMs: number, overrides: Partial<MarketingHealthObservation> = 
   ...overrides,
 });
 
-test("in this build nothing is admitted, and the reasons say which decisions are missing", async () => {
-  // The recovery contract and the platform budget are unreadable until a person
-  // decides what makes them ready; the price-fallback alert is not wired. Each is
-  // a refusal, which is the state the plan requires before activation.
-  for (const status of ["approval_mode", "autonomous_mode"]) {
-    const { database: db } = database();
-    const answer = await resolvePublishAdmission(db, channel(status), health(1_000));
-    assert.equal(answer.publish, false, status);
-    for (const reason of [
-      "input_unreadable:recoveryContractAvailable",
-      "input_unreadable:platformBudgetAvailable",
-      "input_false:priceFallbackAlertReady",
-    ]) {
-      assert.ok(answer.reasons.includes(reason as never), `${status}: ${reason}`);
-    }
+test("an approval-mode post waits only on the price-fallback alert; the recovery contract and budget are decided (D3)", async () => {
+  // Owner 2026-10-31: in approval mode a person resolves an unknown outcome, and
+  // the platform budget is the channel's daily and weekly cap, which the claim counts.
+  for (const name of ["linkedin", "instagram", "x"]) {
+    const answer = await resolvePublishAdmission(database().database, channel("approval_mode", name), health(1_000));
+    assert.equal(answer.publish, false, name);
+    assert.deepEqual(answer.reasons, ["input_false:priceFallbackAlertReady"], name);
+  }
+});
+
+test("a channel posted by hand has no budget to publish against", async () => {
+  const answer = await resolvePublishAdmission(database().database, channel("approval_mode", "rednote"), health(1_000));
+  assert.ok(answer.reasons.includes("input_false:platformBudgetAvailable" as never));
+});
+
+test("an autonomous channel still has no recovery contract: S0 has confirmed none (policy 8.1)", async () => {
+  for (const postMode of [undefined, "autonomous", "approval"] as const) {
+    const answer = await resolvePublishAdmission(database().database, channel("autonomous_mode"), health(1_000), postMode);
+    assert.equal(answer.publish, false);
+    assert.ok(answer.reasons.includes("input_unreadable:recoveryContractAvailable" as never), String(postMode));
   }
 });
 
@@ -89,13 +94,12 @@ test("an autonomous channel is asked the autonomy question, which includes the a
   assert.ok(answer.reasons.includes("input_unreadable:recoveryContractAvailable" as never));
 });
 
-test("nothing is published until a person records how a post shows it is advertising (D9)", async () => {
-  assert.equal(MARKETING_DISCLOSURE_CONTRACT_READY, false);
+test("a post is not refused for how it shows it is advertising: the official account shows it (D9)", async () => {
+  // Owner 2026-10-31: no in-post label; drafts still carry the advertising flag.
   for (const status of ["approval_mode", "autonomous_mode"] as const) {
     for (const postMode of [undefined, "approval", "autonomous"] as const) {
       const answer = await resolvePublishAdmission(database().database, channel(status), health(1_000), postMode);
-      assert.equal(answer.publish, false);
-      assert.ok(answer.reasons.includes("disclosure_contract_not_ready" as never), `${status}/${postMode}`);
+      assert.equal(answer.reasons.some((reason) => reason.includes("disclosure")), false, `${status}/${postMode}`);
     }
   }
 });

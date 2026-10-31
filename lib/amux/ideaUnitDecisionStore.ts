@@ -100,8 +100,15 @@ async function assertCurrentProposalSource(tx: Prisma.TransactionClient,
   snapshot: AmuxIdeaUnitConfirmationSnapshot, chunkIndex: number) {
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
     where: { ideaId_chunkIndex: { ideaId: snapshot.ideaId, chunkIndex } },
-    select: { currentPreviewId: true },
+    select: { currentPreviewId: true,
+      idea: { select: { state: true, cancelledAt: true } } },
   });
+  // Every prepare and consume calls this under the audit chain lock, which an
+  // owner close also takes: a closed idea's units can no longer be decided,
+  // even with a confirmation prepared before the close.
+  if (chunk && (chunk.idea.state === "cancelled" || chunk.idea.cancelledAt !== null)) {
+    throw new AmuxV4UnitDecisionError("not_ready");
+  }
   const preview = await tx.amuxIdeaTransferPreview.findUnique({
     where: { id: snapshot.source.previewId },
     select: { ideaId: true, chunkIndex: true, state: true,

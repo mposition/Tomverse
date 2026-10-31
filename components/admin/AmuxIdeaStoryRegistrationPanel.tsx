@@ -8,6 +8,7 @@ import { amuxTaskRegistrationRefusalPresentation } from
   "@/components/admin/amuxIdeaRegistrationRefusalUi";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
+import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import type { AmuxVisibleAnalysisUnit } from
   "@/lib/amux/ideaAnalysisResultReadCore";
@@ -230,7 +231,7 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
         onChange={(event) => setReason(event.target.value)}
         className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
     </label> : null}
-    {isTask && proposal.taskRole === "implement" && !prepared && !closed ?
+    {isTask && amuxV22TaskWritesPatch(proposal.taskRole) && !prepared && !closed ?
       <label className="flex items-start gap-2 text-sm">
         <input type="checkbox" checked={publicPrDisclosureApproved}
           disabled={busy || unknown || registered}

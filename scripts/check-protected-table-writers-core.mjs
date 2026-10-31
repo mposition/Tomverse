@@ -1207,6 +1207,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The v19 registration receipt migration adds one restrictive audit foreign key and its guard reads the referenced canonical system audit. Its DDL and trigger verbs affect only AmuxIdeaSubmission; it never inserts, updates or deletes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261031090000_amux_v22_test_verify_roles/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The test/verify role migration replaces the v19 registration receipt guard body; it still only reads the immutable owner-approved operating scope with SELECT FOR KEY SHARE. Its DDL verbs affect AmuxIdeaRegistrationRefusal's CHECK and the guard function only; it never writes an operating-scope row.",
+  },
+  {
+    path: "prisma/migrations/20261031090000_amux_v22_test_verify_roles/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The replaced v19 registration receipt guard reads the referenced canonical system audit. Its DDL verbs affect AmuxIdeaRegistrationRefusal's CHECK and the guard function only; it never inserts, updates or deletes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20261016070200_amux_v19_portfolio_assessment_system_audit/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -3552,6 +3568,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 6,
     reason:
       "Six dynamic SELECTs in the v5 stage guard lock or read the fixed v4 stage, count its slots and terminal/recovery audits, and read the linked recovery and stop audit rows. Each uses TG_TABLE_SCHEMA quoted with %I, the variable stop ID is bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261031090200_amux_v22_test_prless_approval/migration.sql",
+    count: 3,
+    reason:
+      "The replaced v4 PR-less review guard keeps the same three dynamic SELECTs of the fixed task, latest retained result, and attempt; only its role list drops test. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
   },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",

@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
@@ -455,7 +456,7 @@ export function amuxV22RecoveryProofReason(input: AmuxV22RecoveryEvidenceInput,
       !input.proof.journalBound || !input.proof.socketTerminal ||
       input.reason !== "stopped_proven") return "inspection_unverified";
   if (!input.proof.externalEffectsKnown) return "external_effects_unknown";
-  if (role === "implement" && !input.proof.workspaceClean) return "workspace_unverified";
+  if (amuxV22TaskWritesPatch(role) && !input.proof.workspaceClean) return "workspace_unverified";
   return null;
 }
 

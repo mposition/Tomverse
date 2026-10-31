@@ -150,6 +150,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.equal(empty.referencePins, null);
   assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
   assert.deepEqual(empty.checkoutEvidence, []);
+  // Only an idea waiting for the owner after analysis offers the owner close.
+  assert.deepEqual([row.closable, empty.closable, damaged.closable], [true, false, false]);
 });
 
 test("a failed read is tried once more, outside a route too, except for the boundary's own deterministic refusals", () => {
