@@ -764,6 +764,10 @@ run(
     // audit row (action, row, predecessor, and an approval's exact name and
     // hosts), and only approved hosts are a source. Needs a real audit chain.
     "tests/integration/marketing-competitor-registry.db.test.ts",
+    // The media asset store (2026-10-31): the media CLI submits and uploads, a
+    // person approves exactly those bytes on their own audit row or retires,
+    // and only an approved file reaches the registry. Needs a real audit chain.
+    "tests/integration/marketing-asset-store.db.test.ts",
     // The rows a draft's price and model facts rest on, held FOR SHARE until
     // the reading transaction ends (S3a2): only two connections can show it.
     "tests/integration/marketing-fact-row-hold.db.test.ts",

@@ -1570,6 +1570,20 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   값이 아닌 것은 `unrepresentable`로 셉니다. 프롬프트 `a3-web-search-v2`. 요청 비용은 바뀌지 않습니다(예약은 컨텍스트 창 기준).
   보고서 상한(200건)을 넘으면 `marketingA3FactsInTurn()`이 경쟁사를 돌아가며 하나씩 담으므로 각 경쟁사의 뒤쪽 사실이 잘리고,
   목록 뒤쪽 경쟁사가 통째로 빠지지 않습니다(10-31 dev 실행이 처음 200건에 닿음).
+- **V1(미디어 자산 저장, 운영자 결정 2026-10-31)**: `lib/marketingAssetCore.ts`(로컬 import 없음 — Admin route sweep),
+  `lib/marketingAssetSubmission.ts`, `lib/marketingAssetStore.ts`(유일한 writer, raw SQL),
+  `prisma/migrations/20261031120000_marketing_asset_store`, `app/api/internal/marketing-assets/**`(미디어 CLI:
+  `MARKETING_MEDIA_SUBMIT_SECRET` Bearer, kill switch면 503), `app/api/admin/marketing/assets/[assetId]/{decision,preview}`,
+  `/admin/marketing?tab=assets`, `tests/integration/marketing-asset-store.db.test.ts`. 이미지·영상은 AMUX 박스의 미디어 CLI가
+  만들어 제출(`submitted`)하고 R2에 올린 뒤 확인하며(크기·형식이 다르면 객체를 지움), 사람이 Admin에서 미리보고 승인합니다.
+  승인 감사 행의 `sha256`이 행과 같아야 하고(write guard), 승인·은퇴마다 `MarketingAsset_registryVersion_seq`의 다음 값을
+  받습니다. `readMarketingAssetRegistry(db)`는 파일 등록부에 승인된 행을 합치고(같은 id면 파일 우선) 버전은 둘의 합입니다.
+  게시기가 쓸 R2 키는 `readApprovedMarketingAssetLocation()`(승인 상태일 때만).
+  제출에는 locale별 `transcript`(영상 필수, locale당 최대 20,000자)가 있고, `lib/marketingAssetGuard.ts`가 같은 트랜잭션에서
+  초안 접수와 같은 사실 검증·`guardDraft`로 검사합니다(범위 `asset:<id>`, 첫 허용 채널). reject면 422와 Guard 코드만 돌려주고
+  행을 만들지 않습니다. 대본은 행에 저장되어 Admin 자산 탭에서 locale별로 보입니다.
+  자산의 `claimIds`는 그 자산을 싣는 게시물이 직접 선언해야 합니다. 선언하지 않으면 사실 검증이 그 자산을 `known: false`로
+  답해 `asset_unknown`으로 거절되고, 선언하면 게시물의 claim으로 Guard가 돌 때마다 다시 판정됩니다.
 
 # 엔지니어링 Agent
 
