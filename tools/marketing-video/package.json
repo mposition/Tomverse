@@ -1,0 +1,25 @@
+{
+  "name": "tomverse-marketing-video",
+  "private": true,
+  "type": "module",
+  "description": "Renders marketing videos (short 9:16 and long 16:9) from one scene list. Run by the marketing video job on the AMUX box; not part of the app build or the npm workspaces.",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "node render.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.536",
+    "@remotion/cli": "4.0.536",
+    "@remotion/renderer": "4.0.536",
+    "playwright": "1.63.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.536",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.17",
+    "typescript": "6.0.3"
+  }
+}
