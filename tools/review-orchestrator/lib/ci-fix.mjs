@@ -600,14 +600,15 @@ export function installPackages(worktree, { spawn = spawnSync, timeoutMs = CI_FI
   if (problem) return problem;
   const env = {};
   for (const name of ["PATH", "HOME", "LANG", "TMPDIR"]) if (source[name] !== undefined) env[name] = source[name];
-  const hidden = npmrcFiles(worktree).map((path) => {
-    const aside = `${path}.ci-fix-aside`;
-    renameSync(path, aside);
-    return [path, aside];
-  });
+  // Made before anything is moved, and every move inside the try: whatever fails, the finally puts back what moved.
   const configs = mkdtempSync(join(tmpdir(), "ci-fix-npmrc-"));
+  const hidden = [];
   let result;
   try {
+    for (const path of npmrcFiles(worktree)) {
+      renameSync(path, `${path}.ci-fix-aside`);
+      hidden.push([path, `${path}.ci-fix-aside`]);
+    }
     writeFileSync(join(configs, "user"), "");
     writeFileSync(join(configs, "global"), "");
     const fixed = [`--registry=${NPM_REGISTRY}`, `--userconfig=${join(configs, "user")}`, `--globalconfig=${join(configs, "global")}`, "--git=/bin/false"];
