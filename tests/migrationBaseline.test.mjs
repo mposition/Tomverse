@@ -626,7 +626,8 @@ test("every replacement's target digest is the body its migration writes", async
       `CREATE OR REPLACE FUNCTION (?:public\\.)?"?${declaration.function}"?\\([\\s\\S]*?AS \\$\\$([\\s\\S]*?)\\$\\$`,
       "g",
     ))].map((match) => match[1]);
-    assert.equal(bodies.length, 1, `${name} must write ${declaration.function} exactly once`);
+    assert.equal(bodies.length, 1,
+      `${name} must write ${declaration.function} exactly once, as CREATE OR REPLACE FUNCTION ... AS $$ ... $$`);
     assert.equal(
       createHash("sha256").update(bodies[0]).digest("hex"),
       declaration.targetBodySha256,
