@@ -556,6 +556,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   - npm이 도는 동안 브랜치의 `.npmrc`는 모두 옆으로 치워 둡니다. `.npmrc`는 npm이 실행할 프로그램(`git`, `node-gyp` 등)을
     지정할 수 있는데, 명령줄 flag가 이기는 것은 그 flag가 지정한 키뿐이기 때문입니다.
   - registry, user config, global config, `git`(`/bin/false`)은 명령줄에서 고정합니다. 계정의 npm 설정과 토큰도 쓰이지 않습니다.
+    두 config는 임시 폴더의 서로 다른 빈 파일입니다. npm 9는 같은 파일(`/dev/null`)을 둘 다로 주면 거부합니다(2026-10-31).
   - npm에는 `PATH`·`HOME`·`LANG`·`TMPDIR`만 넘깁니다. GitHub 토큰, `npm_config_*`, `NODE_OPTIONS`는 넘기지 않습니다.
   - lockfile은 브랜치의 것이라 임의의 경로로 가는 링크를 만들 수 있습니다. 그래서 설치 뒤 모델 앞에서 한 번 검사합니다.
     링크가 checkout 밖을 가리키거나(`link_outside`), hard link·특수 파일이 있으면 설치한 패키지를 지웁니다.
@@ -563,7 +564,16 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   - 설치는 15분 안에 끝나야 합니다. 그래서 unit의 `TimeoutStartSec`가 65분입니다.
   결과는 ledger의 `packages`(`installed` 또는 사유)와 로그 `packages not installed: …`에 남습니다.
   켜려면 갱신된 `pr-ci-auto-fix.service`를 ④처럼 다시 설치한 뒤, `read.env`에 한 줄을 더합니다.
-  서버에 `npm`(Node 22와 함께 오는 것)이 PATH에 있어야 합니다.
+  - **npm은 10 이상이어야 합니다**(CI는 npm 10.9). Ubuntu 패키지의 npm 9.2는 이 저장소 lockfile의 workspace를
+    "package.json과 맞지 않는다"(`Missing: @tomverse/mobile-auth`)고 거부합니다. 그래서 설치 전에 `npm --version`을 읽고,
+    10 미만이면 `npm_too_old:<버전>`으로 기록한 뒤 설치하지 않습니다.
+  - unit의 PATH는 auto-fix 전용 npm(`/usr/local/lib/pr-ci-auto-fix-npm/bin`)을 맨 앞에 둡니다. 다른 계정의 npm은 바뀌지 않습니다.
+    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다.
+
+    ```bash
+    sudo npm install -g --prefix /usr/local/lib/pr-ci-auto-fix-npm --ignore-scripts --no-audit --no-fund npm@10.9.9
+    sudo -u review env PATH=/usr/local/lib/pr-ci-auto-fix-npm/bin:/usr/bin:/bin npm --version
+    ```
 
 **두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.** 상태 보고와 같은 이유입니다. 모델은 `review`
 계정으로 돌고, CI 로그와 브랜치 내용은 모델에게 그 계정이 읽을 수 있는 파일이나 프로세스 환경을

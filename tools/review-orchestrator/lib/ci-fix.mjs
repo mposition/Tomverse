@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { readJson, withLock, writeJsonAtomic } from "./fsutil.mjs";
@@ -49,6 +50,8 @@ export const CI_FIX_ANSWER_CHARS = 600;
  * TimeoutStartSec allows it on top of the model's own timeout.
  */
 export const CI_FIX_INSTALL_TIMEOUT_MS = 15 * 60_000;
+/** The oldest npm major that installs this repository's lockfile as CI does (CI: npm 10.9). */
+export const CI_FIX_NPM_MIN_MAJOR = 10;
 /**
  * The label CI admission puts on a pull request when the operator asks for
  * another try (Admin › Agent digests › CI admission, "Analyse again"): a head
@@ -578,6 +581,8 @@ export function lockfileProblem(text) {
  *   flag outranks a project .npmrc only for the keys it names, and a .npmrc
  *   could name a program (git, node-gyp, script-shell).
  * - the registry, both other configs and git are fixed on the command line.
+ *   The configs are two empty files of their own: npm 9 refuses one file
+ *   given as both, such as /dev/null (box, 2026-10-31).
  * npm gets none of this process's environment beyond what it needs to run: no
  * GitHub token, no npm_config_*. Returns null when installed, or a reason.
  */
@@ -595,19 +600,27 @@ export function installPackages(worktree, { spawn = spawnSync, timeoutMs = CI_FI
   if (problem) return problem;
   const env = {};
   for (const name of ["PATH", "HOME", "LANG", "TMPDIR"]) if (source[name] !== undefined) env[name] = source[name];
-  const hidden = npmrcFiles(worktree).map((path) => {
-    const aside = `${path}.ci-fix-aside`;
-    renameSync(path, aside);
-    return [path, aside];
-  });
+  // Made before anything is moved, and every move inside the try: whatever fails, the finally puts back what moved.
+  const configs = mkdtempSync(join(tmpdir(), "ci-fix-npmrc-"));
+  const hidden = [];
   let result;
   try {
+    for (const path of npmrcFiles(worktree)) {
+      renameSync(path, `${path}.ci-fix-aside`);
+      hidden.push([path, `${path}.ci-fix-aside`]);
+    }
+    writeFileSync(join(configs, "user"), "");
+    writeFileSync(join(configs, "global"), "");
+    const fixed = [`--registry=${NPM_REGISTRY}`, `--userconfig=${join(configs, "user")}`, `--globalconfig=${join(configs, "global")}`, "--git=/bin/false"];
+    // An older npm reads this lockfile's workspaces as out of sync (npm 9.2 on the box, 2026-10-31).
+    const version = String(spawn("npm", ["--version", ...fixed], { cwd: configs, env, encoding: "utf8", timeout: 60_000 }).stdout ?? "").trim();
+    if (!(Number.parseInt(version, 10) >= CI_FIX_NPM_MIN_MAJOR)) return `npm_too_old:${version || "unknown"}`;
     result = spawn("npm", [
-      "ci", "--ignore-scripts", "--include=dev", "--no-audit", "--no-fund", "--no-progress", "--loglevel=error",
-      `--registry=${NPM_REGISTRY}`, "--userconfig=/dev/null", "--globalconfig=/dev/null", "--git=/bin/false",
+      "ci", "--ignore-scripts", "--include=dev", "--no-audit", "--no-fund", "--no-progress", "--loglevel=error", ...fixed,
     ], { cwd: worktree, env, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
   } finally {
     for (const [path, aside] of hidden) renameSync(aside, path);
+    rmSync(configs, { recursive: true, force: true });
   }
   if (result.status === 0) return null;
   if (result.error?.code === "ETIMEDOUT") return "timeout";
