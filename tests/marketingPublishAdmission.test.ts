@@ -97,8 +97,10 @@ test("an autonomous channel is asked the autonomy question, which includes the a
 test("a post is not refused for how it shows it is advertising: the official account shows it (D9)", async () => {
   // Owner 2026-10-31: no in-post label; drafts still carry the advertising flag.
   for (const status of ["approval_mode", "autonomous_mode"] as const) {
-    const answer = await resolvePublishAdmission(database().database, channel(status), health(1_000));
-    assert.equal(answer.reasons.some((reason) => reason.includes("disclosure")), false, status);
+    for (const postMode of [undefined, "approval", "autonomous"] as const) {
+      const answer = await resolvePublishAdmission(database().database, channel(status), health(1_000), postMode);
+      assert.equal(answer.reasons.some((reason) => reason.includes("disclosure")), false, `${status}/${postMode}`);
+    }
   }
 });
 

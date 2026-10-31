@@ -207,7 +207,7 @@ const admissionDecisionsFrom = (
     // 2026-10-31, D3; docs/policy/marketing-automation.md §7.6), which the
     // claim counts in this transaction after this answer. A channel with no
     // cap is posted by hand, so it has no budget to publish against.
-    platformBudgetAvailable: { ok: true, value: MARKETING_CHANNEL_CAPS[subject.channel] !== null },
+    platformBudgetAvailable: { ok: true, value: (MARKETING_CHANNEL_CAPS[subject.channel] ?? null) !== null },
     autoPublishEnabled: {
       ok: true,
       value: marketingAutomationEnabledFromValue(
