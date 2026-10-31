@@ -584,7 +584,9 @@ function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetTyp
     (typeof action === "string" && MARKETING_GENERATOR_AUDIT_ACTIONS.includes(action) &&
       targetType === "MarketingLlmCall") ||
     (action === "marketing_report.generator_recorded" && targetType === "MarketingReport") ||
-    (action === "marketing_competitor.proposed" && targetType === "MarketingCompetitor");
+    (action === "marketing_competitor.proposed" && targetType === "MarketingCompetitor") ||
+    // The media CLI's submission of a file (2026-10-31); approving it is a person's.
+    (action === "marketing_asset.submitted" && targetType === "MarketingAsset");
 }
 
 /**

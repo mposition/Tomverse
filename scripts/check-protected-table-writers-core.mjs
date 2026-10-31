@@ -316,6 +316,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/marketing-automation.md §3",
   },
   {
+    table: "MarketingAsset",
+    delegate: "marketingAsset",
+    writers: ["lib/marketingAssetStore.ts"],
+    contract: "docs/policy/marketing-automation.md §7.3",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -3163,6 +3169,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
   {
+    path: "lib/marketingAssetStore.ts",
+    table: "MarketingAsset",
+    tableMentions: 9,
+    writeVerbs: 8,
+    reason:
+      "The sole registered writer of the media asset store: it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups).",
+  },
+  {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    table: "MarketingAsset",
+    tableMentions: 20,
+    writeVerbs: 17,
+    reason:
+      "Creates the media asset store, its sequence, its checks (including the transcript's), the one insert-and-update guard and the delete guard. It writes no row.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingAsset",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the asset submission target for marketing-generator. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
     path: "lib/marketingLlmBudgetStore.ts",
     table: "MarketingLlmCall",
     tableMentions: 23,
@@ -3191,6 +3221,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 13,
     reason:
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 17,
+    reason:
+      "Creates the media asset store. Its one AdminAuditLog mention is the write guard's read of a person's own decision audit row (action, target, actor, recorded predecessor and the approved bytes). No audit row is written.",
   },
   {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
@@ -3404,6 +3442,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 8,
     reason:
       "Triggers on SupportTriageDecisionRecord and its links, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: at commit, whether a record that still exists has a link; a link's report message FOR SHARE (no link to a deleted account's report); the record FOR UPDATE and then, as a separate statement, its link count (the fifty cap); and, after a link is deleted, a DELETE of its own record by id, so no record outlives any of its links. The functions pin search_path to pg_catalog, pg_temp. The one write deletes the record the deleted link pointed at and nothing else. The other three uses are support_triage_group_member_guard() replaced unchanged except that it now requires READ COMMITTED: the report FOR SHARE, the group FOR UPDATE, then its member count.",
+  },
+  {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    count: 1,
+    reason:
+      "One read in the asset store's decision check: the decision's own AdminAuditLog row, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is quoted with %I and the id is bound with USING. It reads and never writes.",
   },
   {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",

@@ -31,8 +31,10 @@ import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingL
 import { resetTestFixture } from "./resetTestFixture";
 
 const SECRET = "g".repeat(48);
-const PINNED_PLAIN_CALLS = 21;
-const PINNED_WITH_IDS_CALLS = 21;
+// Two of these are the asset registry's read of the approved stored assets and
+// the registry version (lib/marketingAssetStore.ts, 2026-10-31).
+const PINNED_PLAIN_CALLS = 23;
+const PINNED_WITH_IDS_CALLS = 23;
 const DIGEST = "b".repeat(64);
 
 const OPEN: MarketingDraftIntakeReaders = {

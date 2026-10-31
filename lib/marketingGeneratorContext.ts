@@ -133,7 +133,7 @@ export type MarketingGeneratorReport = {
 
 type ContextReader = Pick<
   MarketingTransaction,
-  "marketingChannel" | "marketingReport" | "marketingCompetitor" | "appSetting" | "modelRegistryEntry"
+  "marketingChannel" | "marketingReport" | "marketingCompetitor" | "appSetting" | "modelRegistryEntry" | "$queryRaw"
 >;
 
 /**
@@ -218,7 +218,7 @@ export async function readMarketingGeneratorContext(
     })),
     claims: generatorProjection(),
     assets: generatorAssetProjection(
-      await readMarketingAssetRegistry(),
+      await readMarketingAssetRegistry(db),
       channels.map((row) => row.channel),
     ),
     brief,
