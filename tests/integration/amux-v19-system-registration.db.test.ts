@@ -1136,3 +1136,22 @@ test("a Task no priced worker can take is a recorded refusal", async () => {
     await approveSyntheticTaskCatalog();
   }
 });
+
+test("a catalog with no priced worker at all is a recorded refusal, not an unknown outcome", async () => {
+  await ensureModelRegistrySeeded();
+  // Admin › Models has no entry for this model, so no worker is priced.
+  await seedAmuxWorkerCatalog([{ worker_name: "claude-contract",
+    routing_roles: ["contract"],
+    v22: { model: "claude-unlisted-model", routing_roles: ["implement"],
+      tool_capabilities: ["repo_write"] } }]);
+  try {
+    const { ideaId } = await completedSessionIdea();
+    const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+    assert.equal(result.state, "awaiting_operator");
+    if (result.state !== "awaiting_operator") throw new Error("unpriced Task registered");
+    assert.equal(result.refusal.refusalCode, "task_route_unpriced");
+    assert.equal(await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }), 0);
+  } finally {
+    await approveSyntheticTaskCatalog();
+  }
+});

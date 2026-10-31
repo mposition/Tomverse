@@ -302,6 +302,8 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
         "plan_dependency_invalid", refusalIdentity(unit));
     }
   }
+  // Read once for every Task of the plan, and only when a Task reaches it.
+  let catalog: Awaited<ReturnType<typeof readAmuxV4TaskAutoCatalog>> | undefined;
   for (const card of cards) {
     if (card.cardType !== "task") continue;
     const identity = { ideaId, draftUnitId: card.draftUnitId,
@@ -311,17 +313,17 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
       throw new AmuxV20RegistrationRefusalDetected(inspected.code, identity,
         card.verified.proposal);
     }
-    // No priced worker for the role and grade is a recorded refusal here, not
-    // an unknown outcome of the registration transaction below. A catalog
-    // that cannot be read or derived is no refusal of this Task: it throws.
-    const priced = await prisma.$transaction(async (tx) => {
+    // No priced worker for the role and grade -- including no priced worker
+    // at all (no_priced_worker) -- is a recorded refusal here, not an unknown
+    // outcome of the registration transaction below. A registry or catalog
+    // that cannot be read throws from the read: that is no refusal of a Task.
+    catalog ??= await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
-      const current = await readAmuxV4TaskAutoCatalog(tx);
-      if (!current.ok) throw new AmuxV19SystemRegistrationError("integrity_unavailable");
-      return calculateV4TaskCeilingFromCatalog({ rawCatalog: current.catalog,
-        role: card.verified.proposal.taskRole!, grade: inspected.executionGrade,
-        asOfIso: new Date().toISOString() }).ok;
+      return readAmuxV4TaskAutoCatalog(tx);
     });
+    const priced = catalog.ok && calculateV4TaskCeilingFromCatalog({
+      rawCatalog: catalog.catalog, role: card.verified.proposal.taskRole!,
+      grade: inspected.executionGrade, asOfIso: new Date().toISOString() }).ok;
     if (!priced) {
       throw new AmuxV20RegistrationRefusalDetected("task_route_unpriced",
         identity, card.verified.proposal);

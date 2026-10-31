@@ -4,6 +4,8 @@
 -- replaces the PR-less approval guard body only at its role list. No table,
 -- constraint or row changes.
 -- baseline-check: replace-function-if-body-sha256 "amux_review_v4_prless_source_guard" "590e81a6e33ad4cc412b6f60e99fb39ce118565832a41845083e38dc26ca4d9b"
+BEGIN;
+
 CREATE OR REPLACE FUNCTION amux_review_v4_prless_source_guard()
 RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp AS $$
@@ -54,3 +56,5 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+COMMIT;
