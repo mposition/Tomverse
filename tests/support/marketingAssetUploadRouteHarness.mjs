@@ -14,8 +14,10 @@ const world = {
   hashed: { sha256: SHA, size: 100, etag: '"v1"' },
   copyThrows: false,
   uploaded: false,
+  confirmRefuses: false,
   calls: [],
 };
+const { MarketingAssetRefusedError } = await import(mod("lib/marketingAssetCore.ts"));
 
 mock.module(mod("lib/r2.ts"), {
   namedExports: {
@@ -50,6 +52,7 @@ mock.module(mod("lib/marketingAssetStore.ts"), {
     }),
     confirmMarketingAssetUpload: async () => {
       world.calls.push("confirm");
+      if (world.confirmRefuses) throw new MarketingAssetRefusedError("asset_not_submitted", 409, "decided");
       return { assetId: "media-a", uploadedAt: "2026-10-31T00:00:00.000Z" };
     },
   },
@@ -69,6 +72,7 @@ const call = async (scenario, setup, { secret = SECRET, assetId = "media-a" } = 
   world.hashed = { sha256: SHA, size: 100, etag: '"v1"' };
   world.copyThrows = false;
   world.uploaded = false;
+  world.confirmRefuses = false;
   world.calls = [];
   setup?.();
   const response = await POST(
@@ -94,6 +98,9 @@ const results = [
     world.uploaded = true;
   }),
   await call("wrong secret", undefined, { secret: "x".repeat(40) }),
+  await call("decided meanwhile", () => {
+    world.confirmRefuses = true;
+  }),
 ];
 
 console.log(`MARKETING_ASSET_UPLOAD_RESULTS=${JSON.stringify(results)}`);

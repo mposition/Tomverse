@@ -65,3 +65,12 @@ test("only the media CLI's secret is accepted", () => {
   assert.equal(results["wrong secret"].status, 401);
   assert.deepEqual(results["wrong secret"].calls, []);
 });
+
+test("a confirmation refused because the asset was decided meanwhile never removes the kept file", () => {
+  // Another confirmation may have recorded the upload and a person approved it.
+  const decided = results["decided meanwhile"];
+  assert.equal(decided.status, 409);
+  assert.equal(decided.code, "asset_not_submitted");
+  assert.equal(decided.calls.includes(`delete ${KEPT}`), false);
+  assert.equal(decided.calls.at(-1), `delete ${UPLOAD}`);
+});

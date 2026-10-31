@@ -79,10 +79,10 @@ export async function POST(request: Request, context: RouteContext) {
     );
   } catch (error) {
     if (error instanceof MarketingAssetRefusedError) {
-      // Retired while this ran (only a retirement can land before an upload,
-      // an approval needs one): nothing will read either copy again.
+      // Decided while this ran. Only the upload key is removed: the kept key may
+      // already hold a file a concurrent confirmation recorded and a person
+      // approved, and a copy nothing reads costs storage, not correctness.
       await deleteR2Object(target.uploadKey).catch(() => undefined);
-      if (!target.uploaded) await deleteR2Object(target.r2Key).catch(() => undefined);
       return json({ code: error.code }, error.status);
     }
     return json({ code: "outcome_unknown" }, 500);
