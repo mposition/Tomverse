@@ -12,7 +12,7 @@ import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 const row = (checkoutEvidence: AmuxIdeaProgressRow["checkoutEvidence"]): AmuxIdeaProgressRow => ({
   ...amuxIdeaProgress({ state: "submitted", cancelled: false, chunks: [],
     proposedUnits: 0, cards: [] }),
-  ideaId: "idea-1", requestId: "11111111-1111-4111-8111-111111111111",
+  ideaId: "idea-1", closable: false, requestId: "11111111-1111-4111-8111-111111111111",
   submittedAt: "2026-10-16T00:00:00.000Z", displayKey: null,
   reviewPullRequests: [], taskRows: [], checkoutEvidence, referencePins: null,
 });
