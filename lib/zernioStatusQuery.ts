@@ -118,7 +118,7 @@ export const zernioCall = async (
   init: { method: string; body?: unknown; requestKey?: string },
 ): Promise<
   | { readonly kind: "response"; readonly status: number; readonly body: unknown }
-  | { readonly kind: "unreachable"; readonly code: ZernioErrorCode }
+  | { readonly kind: "unreachable"; readonly code: "provider_timeout" | "provider_unavailable" }
 > => {
   const doFetch = ports.fetch ?? fetch;
   const controller = new AbortController();
