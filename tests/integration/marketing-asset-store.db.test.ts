@@ -354,3 +354,26 @@ test("the database refuses a video with nothing said and a transcript past its l
   );
   await assert.rejects(insert("media-locale", JSON.stringify({ fr: "Bonjour." })), refusedBy("MarketingAsset_transcript_check"));
 });
+
+test("an image that says nothing still has its declared claims judged, through its alt text", async () => {
+  const image = submission({
+    asset: { ...submission().asset, claimIds: ["no.such.claim"] },
+    kind: "image",
+    contentType: "image/png",
+    bytes: 400_000,
+    durationSeconds: null,
+    transcript: undefined,
+  });
+  const rejected = await postSubmission(image);
+  assert.equal(rejected.status, 422);
+  assert.ok((rejected.body.guardCodes as string[]).includes("claim_unknown"));
+  assert.equal(await assetCount(), 0);
+
+  const plain = await postSubmission({ ...image, asset: { ...image.asset, claimIds: [] } });
+  assert.equal(plain.status, 200);
+  const stored = await prisma.$queryRawUnsafe<Array<{ transcript: Record<string, string> }>>(
+    `SELECT "transcript" FROM "MarketingAsset" WHERE "id" = $1`,
+    ID,
+  );
+  assert.deepEqual(stored[0].transcript, {});
+});

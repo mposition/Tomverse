@@ -84,7 +84,13 @@ export async function POST(request: Request) {
     return json({ code: "transcript_guard_rejected", guardCodes: outcome.guardCodes }, 422);
   }
   const stored = outcome;
-  const uploadUrl = await createR2UploadUrl(stored.uploadKey, parsed.data.contentType, parsed.data.bytes);
+  let uploadUrl: string;
+  try {
+    uploadUrl = await createR2UploadUrl(stored.uploadKey, parsed.data.contentType, parsed.data.bytes);
+  } catch {
+    // The row is committed; the same submission resent is read back and signed again.
+    return json({ code: "upload_url_unavailable" }, 503);
+  }
   return json(
     {
       result: {

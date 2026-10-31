@@ -4,10 +4,11 @@
  * table or approval screen, so the words inside a file go through the Guard
  * instead).
  *
- * Each locale's transcript -- the narration and every on-screen line -- is
- * judged as new copy by the draft intake's own path: the facts resolved and
- * sealed in the caller's transaction (`resolveMarketingFactsWithSnapshot`), the
- * same Guard (`guardDraft`), the same context. Only a `reject` refuses the
+ * Each locale's transcript -- the narration and every on-screen line -- and its
+ * alt text are judged together as new copy by the draft intake's own path: the
+ * facts resolved and sealed in the caller's transaction
+ * (`resolveMarketingFactsWithSnapshot`), the same Guard (`guardDraft`), the
+ * same context. Only a `reject` refuses the
  * submission; a person sees every asset before it is used anyway, so the
  * approval codes say nothing a person does not already do.
  *
@@ -38,10 +39,15 @@ export async function guardMarketingAssetTranscript(
   const channelId = `asset:${submission.asset.id}`;
   const claimIds = [...submission.asset.claimIds];
   const codes = new Set<MarketingRejectCode>();
-  for (const [locale, text] of Object.entries(submission.transcript ?? {}).sort(([left], [right]) =>
-    left < right ? -1 : 1,
-  )) {
-    if (typeof text !== "string") continue;
+  // Every locale the file speaks or is described in: its transcript and its
+  // alt text are both copy a reader gets. The alt text always has a locale, so
+  // the declared claims are judged even for an image that says nothing.
+  const transcript = (submission.transcript ?? {}) as Record<string, string | undefined>;
+  const alt = submission.asset.alt as Record<string, string | undefined>;
+  const locales = [...new Set([...Object.keys(transcript), ...Object.keys(alt)])].sort();
+  for (const locale of locales) {
+    const text = [transcript[locale], alt[locale]].filter((part): part is string => typeof part === "string").join("\n\n");
+    // Per locale: the facts are sealed for one locale, so each is resolved for its own.
     const { facts } = await resolveMarketingFactsWithSnapshot(tx, {
       claimIds,
       assetIds: [],
