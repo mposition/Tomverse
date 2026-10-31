@@ -311,6 +311,14 @@ export async function readApprovedMarketingAssetLocation(
   return { r2Key: row.r2Key, kind: row.kind, contentType: row.contentType, bytes: row.bytes, provenance: row.provenance };
 }
 
+/** Each approved asset's kind, for the generator to tell a video from an image. */
+export async function readApprovedMarketingAssetKinds(db: AssetReader): Promise<ReadonlyMap<string, MarketingAssetKind>> {
+  const rows = await db.$queryRaw<Array<{ id: string; kind: MarketingAssetKind }>>(Prisma.sql`
+    SELECT "id", "kind" FROM "MarketingAsset" WHERE "status" = 'approved'
+  `);
+  return new Map(rows.map((row) => [row.id, row.kind]));
+}
+
 /** The rows the Admin console lists: submissions first, then approved, then retired. */
 export async function readMarketingAssetsForConsole(db: AssetReader, limit: number) {
   const rows = await db.$queryRaw<AssetRow[]>(Prisma.sql`
