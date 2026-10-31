@@ -67,6 +67,9 @@ test("v4 PR-less proposal guard accepts only the latest retained non-code result
     };
     await reject(`UPDATE pg_temp."AmuxWorkItem"
       SET "taskRole" = 'implement' WHERE "id" = 'card'`);
+    // A test Task leaves a patch and completes through its PR (2026-10-30).
+    await reject(`UPDATE pg_temp."AmuxWorkItem"
+      SET "taskRole" = 'test' WHERE "id" = 'card'`);
     await reject(`UPDATE pg_temp."AmuxWorkItem"
       SET "reviewPrNumber" = 42 WHERE "id" = 'card'`);
     await reject(`UPDATE pg_temp."AmuxV22TaskResult"

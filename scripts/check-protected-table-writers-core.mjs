@@ -3603,6 +3603,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Three dynamic SELECTs in the v4 PR-less review guard read the fixed task, latest retained result, and attempt. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
   },
   {
+    path: "prisma/migrations/20261031090200_amux_v22_test_prless_approval/migration.sql",
+    count: 3,
+    reason:
+      "The replaced v4 PR-less review guard keeps the same three dynamic SELECTs of the fixed task, latest retained result, and attempt; only its role list drops test. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:
