@@ -202,6 +202,13 @@ CREATE OR REPLACE FUNCTION f_x(text, text);`),
     { kind: "function-replacement", function: "f_x", functionArgs: ["text", "text"],
       previousBodySha256: digest },
   );
+  const target = "b".repeat(64);
+  assert.deepEqual(
+    presenceDeclarationIn(`-- baseline-check: replace-function-if-body-sha256 "f_x" "${digest}" "${target}"
+CREATE OR REPLACE FUNCTION f_x();`),
+    { kind: "function-replacement", function: "f_x", previousBodySha256: digest,
+      targetBodySha256: target },
+  );
   for (const [label, sql] of [
     // SQL instead of a name: the guard asks its own fixed question, so a
     // declaration that tries to supply one is not a declaration at all.
@@ -223,6 +230,10 @@ CREATE INDEX x;`],
     ["replacement schema-qualified", `-- baseline-check: replace-function-if-body-sha256 "other.f" "${digest}"
 CREATE INDEX x;`],
     ["replacement unsafe signature", `-- baseline-check: replace-function-if-body-sha256 "f_x(text);DELETE" "${digest}"
+CREATE INDEX x;`],
+    ["replacement bad target digest", `-- baseline-check: replace-function-if-body-sha256 "f_x" "${digest}" "abc"
+CREATE INDEX x;`],
+    ["replacement three digests", `-- baseline-check: replace-function-if-body-sha256 "f_x" "${digest}" "${target}" "${target}"
 CREATE INDEX x;`],
     ["too long", `-- baseline-check: present-if-relation "${"a".repeat(64)}"
 CREATE INDEX x;`],
@@ -271,6 +282,14 @@ test("the guard asks one fixed question with the name bound, and accepts one boo
   for (const rows of [[], [[oldBody], [oldBody]], [[null]], [[false]], undefined]) {
     assert.equal(replacementAnswer(rows, oldHash), undefined, JSON.stringify(rows));
   }
+  // The body the migration writes is the state it leaves; any third body is not.
+  const newBody = "BEGIN RETURN OLD; END;";
+  const newHash = createHash("sha256").update(newBody).digest("hex");
+  assert.equal(replacementAnswer([[newBody]], oldHash, newHash), false);
+  assert.equal(replacementAnswer([[oldBody]], oldHash, newHash), false);
+  assert.equal(replacementAnswer([["changed"]], oldHash, newHash), true);
+  assert.equal(replacementAnswer([[newBody]], oldHash), true);
+  assert.equal(replacementAnswer([[null]], oldHash, newHash), undefined);
   assert.equal(presenceAnswer([[false]]), false);
   assert.equal(presenceAnswer([[true]]), true);
   for (const rows of [[], [[false], [false]], [[false, true]], [["f"]], [[null]], undefined]) {
@@ -476,7 +495,13 @@ test("the guard proceeds only when every pending migration proves absence", asyn
 CREATE FUNCTION f();`,
     r: `-- baseline-check: replace-function-if-body-sha256 "R" "${"a".repeat(64)}"
 CREATE OR REPLACE FUNCTION r();`,
+    t: `-- baseline-check: replace-function-if-body-sha256 "T" "${"a".repeat(64)}" "${"b".repeat(64)}"
+CREATE OR REPLACE FUNCTION t();`,
   };
+  assert.deepEqual(pendingProbes(["t"], (name) => sql[name]).probes, [
+    { name: "t", function: "T", previousBodySha256: "a".repeat(64),
+      targetBodySha256: "b".repeat(64) },
+  ]);
   assert.deepEqual(pendingProbes(["a", "f"], (name) => sql[name]), {
     probes: [{ name: "a", relation: "A" }, { name: "f", function: "F" }],
     undeclared: [],
@@ -504,7 +529,7 @@ test("the guard reads probes only on the refusal path, read-only and rolled back
   const probe = guard.indexOf("pendingProbes(", match);
   // The query the guard runs is the core's fixed one, never a migration's text.
   assert.ok(guard.includes("client.query(presenceQueryFor(probe))"));
-  assert.ok(guard.includes("replacementAnswer(rows, probe.previousBodySha256)"));
+  assert.ok(guard.includes("replacementAnswer(rows, probe.previousBodySha256, probe.targetBodySha256)"));
   const readOnly = guard.indexOf('"BEGIN READ ONLY"', probe);
   const repeatableRead = guard.indexOf(
     '"BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"',
@@ -1020,6 +1045,31 @@ test("the pre-deploy guard can probe every migration a sweep reaches", async () 
   assert.deepEqual(undeclared, [], "the pre-deploy guard would refuse these migrations");
   assert.equal(probes.length, reached.length);
   assert.ok(reached.length >= 8, `expected the guard sweep to reach the declared migrations, reached ${reached.length}`);
+});
+
+// A target digest lets the guard proceed on a database that already holds that
+// body, so a wrong one would wave through a function the migration never wrote.
+// Each one must be the digest of the body in its own migration's SQL.
+test("every replacement's target digest is the body its migration writes", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  let checked = 0;
+  for (const name of migrationNames()) {
+    const sql = readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8").replaceAll("\r\n", "\n");
+    const declaration = presenceDeclarationIn(sql);
+    if (declaration.kind !== "function-replacement" || declaration.targetBodySha256 === undefined) continue;
+    const bodies = [...sql.matchAll(new RegExp(
+      `CREATE OR REPLACE FUNCTION (?:public\\.)?"?${declaration.function}"?\\([\\s\\S]*?AS \\$\\$([\\s\\S]*?)\\$\\$`,
+      "g",
+    ))].map((match) => match[1]);
+    assert.equal(bodies.length, 1, `${name} must write ${declaration.function} exactly once`);
+    assert.equal(
+      createHash("sha256").update(bodies[0]).digest("hex"),
+      declaration.targetBodySha256,
+      `${name}: the target digest is not the body it writes`,
+    );
+    checked += 1;
+  }
+  assert.ok(checked >= 1, "expected 20261031090050 to declare a target digest");
 });
 
 test("the sweep's exemptions only shrink, and none is newer than the sweep", () => {

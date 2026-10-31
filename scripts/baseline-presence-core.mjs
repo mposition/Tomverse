@@ -18,7 +18,12 @@
  *     -- baseline-check: present-if-relation "Some_index_or_table_name"
  *
  * A CREATE OR REPLACE FUNCTION migration must instead pin the SHA-256 digest
- * of the existing function body. A migration that replaces CHECK constraints
+ * of the existing function body. It may add the digest of the body it writes as
+ * a second one: a database that already holds that exact body is in the state
+ * the migration leaves, and replacing a body with itself changes nothing. That
+ * happens when one environment got the same function change inside an earlier
+ * migration (production applied `20261031090000` whole before it was split and
+ * the function moved to `20261031090050`). A migration that replaces CHECK constraints
  * after its SQL checksum has already shipped cannot add a header without
  * invalidating Prisma's checksum. It may carry a `baseline-check.json` sidecar
  * that pins the canonical migration digest and every exact prior
@@ -53,7 +58,7 @@ const DECLARATION_PREFIX = /^--[ \t]*baseline-check:/;
 const DECLARATION =
   /^--[ \t]*baseline-check:[ \t]*present-if-(relation|function)[ \t]+"([^"]*)"[ \t]*$/;
 const REPLACEMENT_DECLARATION =
-  /^--[ \t]*baseline-check:[ \t]*replace-function-if-body-sha256[ \t]+"([^"]*)"[ \t]+"([0-9a-f]{64})"[ \t]*$/;
+  /^--[ \t]*baseline-check:[ \t]*replace-function-if-body-sha256[ \t]+"([^"]*)"[ \t]+"([0-9a-f]{64})"(?:[ \t]+"([0-9a-f]{64})")?[ \t]*$/;
 const TEXT_FUNCTION_SIGNATURE = /^([A-Za-z_][A-Za-z0-9_]{0,62})\((text(?:,text){0,15})\)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const SUPPLEMENTAL_KEYS = ["migrationSqlSha256", "replacedChecks", "version"];
@@ -295,6 +300,7 @@ export const presenceDeclarationIn = (sql) => {
       function: signature?.[1] ?? replacement[1],
       ...(signature ? { functionArgs: signature[2].split(",") } : {}),
       previousBodySha256: replacement[2],
+      ...(replacement[3] ? { targetBodySha256: replacement[3] } : {}),
     };
   }
   const match = DECLARATION.exec(declarations[0]);
@@ -363,15 +369,19 @@ export const presenceAnswer = (rows) => {
   return typeof row[0] === "boolean" ? row[0] : undefined;
 };
 
-/** Only the exact previous function version permits CREATE OR REPLACE. */
-export const replacementAnswer = (rows, previousBodySha256) => {
+/**
+ * Only the exact previous function version, or the exact version the migration
+ * writes, permits CREATE OR REPLACE.
+ */
+export const replacementAnswer = (rows, previousBodySha256, targetBodySha256) => {
   if (!Array.isArray(rows) || rows.length !== 1) return undefined;
   const row = rows[0];
   if (!Array.isArray(row) || row.length !== 1 || typeof row[0] !== "string") {
     return undefined;
   }
   const actual = createHash("sha256").update(row[0], "utf8").digest("hex");
-  return actual === previousBodySha256 ? false : true;
+  return actual === previousBodySha256 ||
+    (targetBodySha256 !== undefined && actual === targetBodySha256) ? false : true;
 };
 
 /** Only the exact previous CHECK definition permits DROP + ADD replacement. */
@@ -426,6 +436,8 @@ export const pendingProbes = (pending, sqlOf, supplementalOf = () => undefined) 
         function: declaration.function,
         ...(declaration.functionArgs ? { functionArgs: declaration.functionArgs } : {}),
         previousBodySha256: declaration.previousBodySha256,
+        ...(declaration.targetBodySha256
+          ? { targetBodySha256: declaration.targetBodySha256 } : {}),
       });
     }
     else undeclared.push(name);
