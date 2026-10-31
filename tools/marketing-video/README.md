@@ -36,7 +36,7 @@ breaks in a headline are kept, and Korean and Chinese break between words.
 `run-daily.sh` runs the Claude Code CLI on `JOB.md` once a day on the AMUX box
 (owner approval for the unattended job, 2026-10-31). It captures, renders and
 submits assets with `submit-asset.mjs`, which needs `MARKETING_APP_URL` and
-`MARKETING_MEDIA_SUBMIT_SECRET` (an env file on the box, never in git). The app
+`MARKETING_MEDIA_SUBMIT_SECRET` (`~/.config/tomverse/marketing-video.env` on the box, mode 600, never in git; the box user has no sudo). The app
 runs the Guard over each transcript; a refusal comes back as exit 3 with the
 Guard codes and the job rewrites. Nothing here publishes: a person approves the
 asset in Admin, and the app's generator, whose calls go through the LLM cost
@@ -46,5 +46,5 @@ not submit posts: the draft intake takes only drafts backed by ledger calls.
 Cron on the box (07:30 Brisbane, after the generator's run):
 
 ```
-30 21 * * * set -a; . /etc/tomverse/marketing-video.env; set +a; /path/to/clone/tools/marketing-video/run-daily.sh
+30 21 * * * set -a; . $HOME/.config/tomverse/marketing-video.env; set +a; PATH=$HOME/.local/bin:$PATH $HOME/marketing-video-job/tools/marketing-video/run-daily.sh
 ```

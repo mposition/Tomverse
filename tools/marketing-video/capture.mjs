@@ -27,7 +27,9 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
-const off = page.getByRole("button", { name: /turn off/i }).first();
+// The banner's decline button in each language the site serves (en, /ko, /zh), by its exact
+// name: a looser match also finds "Turn off hero motion".
+const off = page.getByRole("button", { name: /^(Turn off analytics|분석 끄기|关闭分析)$/u }).first();
 if (await off.isVisible().catch(() => false)) await off.click();
 await page.waitForTimeout(1_500);
 if (recording) {
