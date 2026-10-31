@@ -23,6 +23,13 @@ import { commitAmuxIdeaAnalysisResult } from
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
+import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
+import { consumeAmuxV4UnitRejection, prepareAmuxV4UnitRejection } from
+  "@/lib/amux/ideaUnitRejectionService";
+import { amuxV4UnitBrowserDigest } from "@/lib/amux/ideaUnitBrowserCore";
+import type { AmuxIdeaUnitConfirmationSnapshot } from "@/lib/amux/ideaUnitConfirmationCore";
+import { readVerifiedAmuxUnitProposal } from "@/lib/amux/ideaUnitProposalReadService";
 import { commitFrontierCatalogDecision } from
   "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from
@@ -64,7 +71,7 @@ import { commitIdeaTransferConfirmation } from
 import { amuxSessionPageKeyIdentities,
   commitAmuxSessionAnalysisPlanInTx, readAmuxSessionPageContextInTx } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
-import { readAmuxV4UnitDecision } from "@/lib/amux/ideaUnitDecisionStore";
+import { commitAmuxV4UnitRejection, readAmuxV4UnitDecision } from "@/lib/amux/ideaUnitDecisionStore";
 import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
 import { evaluateAmuxV4TaskReadyInTransaction, loadAmuxV4TaskReadyContext } from
   "@/lib/amux/v4TaskReadyService";
@@ -1089,4 +1096,124 @@ test("the deferred DB guard rejects a forged system actor scope", async () => {
   } });
   assert.equal((audit.metadata as { actorScope?: string }).actorScope,
     "system-unit-registration-v1");
+});
+
+test("the owner closes an idea waiting after analysis; none of its units can be decided afterwards", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId, unitIds } = await completedSessionIdea({
+    taskTitle: `Synthetic closed Task ${randomUUID()}` });
+  const before = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId },
+    select: { state: true, rawPurgeAfter: true, rawPurgedAt: true } });
+  assert.equal(before.state, "awaiting_owner");
+
+  // A rejection prepared before the close must not be consumable after it.
+  const previous = process.env.TOMVERSE_AMUX_V4_UNIT_WRITE;
+  process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = "enabled";
+  try {
+    const browserNonce = randomBytes(32).toString("base64url");
+    const prepared = await prepareAmuxV4UnitRejection({ session, request, ideaId,
+      draftUnitId: unitIds[3]!, prepareRequestId: randomUUID(),
+      reason: "Synthetic rejection prepared before close", browserNonce });
+    // Read before the close, as a consume that raced it would have.
+    const verified = await readVerifiedAmuxUnitProposal(session, ideaId, unitIds[3]!);
+    const decision = await prisma.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: prepared.decisionId } });
+    const keys = loadCurrentAmuxContentKeys(process.env);
+    const browser = amuxV4UnitBrowserDigest({ decisionId: decision.id,
+      actorUserId: session.user!.id!, authenticatedAt: session.user!.authenticatedAt,
+      nonce: browserNonce, key: keys });
+
+    const reason = "No longer needed after review";
+    const [closed] = await closeAmuxIdeasForOwner({ session, request,
+      ideaIds: [ideaId], reason });
+    assert.equal(closed!.result, "closed");
+    if (closed!.result !== "closed") throw new Error("not closed");
+
+    // The commit re-checks the idea under the audit lock: every earlier check
+    // in it answers reconfirm, so not_ready is the closed-idea guard.
+    await assert.rejects(prisma.$transaction((tx) => commitAmuxV4UnitRejection(tx, {
+      session, request,
+      snapshot: decision.confirmationSnapshot as AmuxIdeaUnitConfirmationSnapshot,
+      proposal: verified.proposal, consumeRequestId: randomUUID(), keys,
+      context: { decisionId: decision.id, ideaId, draftUnitId: unitIds[3]!,
+        actorUserId: session.user!.id!, recentOwnerStepUp: true,
+        ownerSessionDigest: browser.digest, ownerSessionDigestKeyId: browser.keyId },
+    })), { code: "not_ready" });
+    // The service paths refuse it too, before any transaction.
+    await assert.rejects(consumeAmuxV4UnitRejection({ session, request,
+      decisionId: prepared.decisionId, consumeRequestId: randomUUID(),
+      confirmationDigest: prepared.confirmationDigest, browserNonce }),
+    { code: "not_ready" });
+    await assert.rejects(prepareAmuxV4UnitRejection({ session, request, ideaId,
+      draftUnitId: unitIds[2]!, prepareRequestId: randomUUID(),
+      reason: "Synthetic rejection after close", browserNonce }),
+    { code: "not_ready" });
+    assert.equal((await prisma.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: prepared.decisionId }, select: { state: true } })).state, "prepared");
+
+    const after = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId },
+      select: { state: true, cancelledAt: true, rawPurgeAfter: true, rawPurgedAt: true } });
+    assert.equal(after.state, "cancelled");
+    assert.equal(after.cancelledAt?.toISOString(), closed!.cancelledAt);
+    assert.deepEqual([after.rawPurgeAfter, after.rawPurgedAt],
+      [before.rawPurgeAfter, before.rawPurgedAt], "the seven-day body clock is not moved");
+    assert.deepEqual(new Set((await prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId },
+      select: { state: true } })).map((unit) => unit.state)), new Set(["proposed"]),
+    "units stay and expire on their own clock");
+
+    const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: closed!.auditId } });
+    assert.deepEqual([audit.action, audit.targetType, audit.targetId, audit.actorUserId],
+      [AMUX_IDEA_OWNER_CLOSE_ACTION, "AmuxIdeaSubmission", ideaId, session.user!.id]);
+    assert.ok(audit.entryHash, "hash-chained");
+    const metadata = audit.metadata as Record<string, unknown>;
+    assert.equal(metadata.previousState, "awaiting_owner");
+    assert.match(String(metadata.reasonDigest), /^[a-f0-9]{64}$/);
+    assert.equal(JSON.stringify(audit).includes(reason), false, "only the reason's digest is kept");
+
+    await assert.rejects(commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId),
+      { code: "not_ready" }, "unattended registration refuses a closed idea");
+    assert.equal(await prisma.amuxWorkItem.count({ where: {
+      sourceSystem: "admin-idea-v4", sourceKey: { in: unitIds } } }), 0);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V4_UNIT_WRITE;
+    else process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = previous;
+  }
+});
+
+test("a batch close answers per idea and one refusal leaves the others closed", async () => {
+  const noPlan = await sessionPlannedIdea(sessionPage([], {
+    outcome: "needs_information", coverageStatus: "needs_owner_input",
+    continuationKind: "input", ownerQuestion: "Which repository owns this change?" }));
+  const second = await sessionPlannedIdea(sessionPage([], {
+    outcome: "needs_information", coverageStatus: "needs_owner_input",
+    continuationKind: "input", ownerQuestion: "Which team should review it?" }));
+  const analysing = await analysingSessionIdea();
+  const missing = `missing-${randomUUID()}`;
+  const auditsBefore = await prisma.adminAuditLog.count({ where: {
+    action: AMUX_IDEA_OWNER_CLOSE_ACTION } });
+
+  const outcomes = await closeAmuxIdeasForOwner({ session, request,
+    ideaIds: [noPlan.ideaId, analysing.ideaId, missing, second.ideaId],
+    reason: "Batch close of stale ideas" });
+  assert.deepEqual(outcomes.map((entry) => [entry.ideaId, entry.result]), [
+    [noPlan.ideaId, "closed"], [analysing.ideaId, "not_closable"],
+    [missing, "not_found"], [second.ideaId, "closed"]]);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: AMUX_IDEA_OWNER_CLOSE_ACTION } }), auditsBefore + 2, "one audit per closed idea");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: analysing.ideaId }, select: { state: true } })).state, "analyzing",
+  "an analysis still running is not closed under it");
+
+  const again = await closeAmuxIdeasForOwner({ session, request,
+    ideaIds: [noPlan.ideaId], reason: "Batch close of stale ideas" });
+  assert.deepEqual(again, [{ ideaId: noPlan.ideaId, result: "already_closed" }]);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: AMUX_IDEA_OWNER_CLOSE_ACTION } }), auditsBefore + 2, "a repeat writes nothing");
+
+  const stranger = { ...session, user: { ...session.user!, id: `stranger-${randomUUID()}`,
+    email: "amux-close-stranger@example.test" } };
+  await assert.rejects(closeAmuxIdeasForOwner({ session: stranger, request,
+    ideaIds: [second.ideaId], reason: "Not my idea" }), { code: "forbidden" });
+  await assert.rejects(closeAmuxIdeasForOwner({ session, request,
+    ideaIds: [second.ideaId], reason: "no" }), { code: "invalid" });
 });
