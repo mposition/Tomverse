@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { amuxV22ClaimCapacity, amuxV22RequiredTool, amuxV22WorkerClaimEnabled,
-  amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
-  chooseAmuxV22WorkerRoute } from
+import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
+  amuxV22WorkerClaimEnabled, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
+  amuxV22TaskRoleSupported, amuxV22TaskWritesPatch, chooseAmuxV22WorkerRoute } from
   "../lib/amux/v22WorkerClaimCore.ts";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "../lib/amux/v22TickWire.ts";
@@ -65,6 +65,24 @@ test("task role has a closed tool requirement and unknown roles hold", () => {
   assert.equal(amuxV22RequiredTool("unknown"), null);
 });
 
+test("test and verify Tasks run as implement and investigate; operate is a person's step", () => {
+  assert.equal(amuxV22ExecutionRole("test"), "implement");
+  assert.equal(amuxV22ExecutionRole("verify"), "investigate");
+  for (const role of ["design", "implement", "investigate", "review", "operate"]) {
+    assert.equal(amuxV22ExecutionRole(role), role);
+  }
+  for (const role of ["design", "implement", "test", "verify", "investigate", "review"]) {
+    assert.equal(amuxV22TaskRoleSupported(role), true, role);
+  }
+  for (const role of ["operate", "unknown", "constructor", "__proto__"]) {
+    assert.equal(amuxV22TaskRoleSupported(role), false, role);
+  }
+  // A worker profile and the sidecar still name only the four execution roles.
+  for (const role of ["test", "verify"]) assert.equal(amuxV22OneShotRoleSupported(role), false);
+  assert.deepEqual(["implement", "test", "verify", "design", "operate", null, undefined]
+    .map(amuxV22TaskWritesPatch), [true, true, false, false, false, false, false]);
+});
+
 test("claim only selects routes the environment-gated one-shot sidecar can execute", () => {
   const base = { version: 1,
     attemptId: "00000000-0000-4000-8000-000000000001",
@@ -96,7 +114,8 @@ test("claim only selects routes the environment-gated one-shot sidecar can execu
   assert.throws(() => parseAmuxV22OneShotRequest(
     { ...base, role: "implement", modelId: "gpt-6-luna" }, "worker-a"));
   const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
-  assert.match(claim, /amuxV22OneShotRoleSupported\(card\.taskRole\)/);
+  assert.match(claim, /amuxV22TaskRoleSupported\(card\.taskRole\)/);
+  assert.match(claim, /worker\.routing_roles\.includes\(executionRole\)/);
   assert.match(claim, /amuxV22OneShotRouteSupported\(route\.provider, route\.modelId\)/);
   assert.match(claim, /"one_shot_role_unavailable",[\s\S]*?\]\.includes\(error\.code\)\) continue/);
 });

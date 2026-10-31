@@ -35,8 +35,8 @@ import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
-import { amuxV22ClaimCapacity, amuxV22RequiredTool,
-  amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported, amuxV22Provider,
+import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
+  amuxV22TaskRoleSupported, amuxV22OneShotRouteSupported, amuxV22Provider,
   amuxV22WorkerClaimEnabled, chooseAmuxV22WorkerRoute,
   AMUX_V22_WORKER_CLAIM_ENV, type AmuxV22ClaimLane } from
   "./v22WorkerClaimCore.ts";
@@ -139,7 +139,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
           promotion.briefDigest !== ready.briefDigest) {
         throw new BoardImportError("task_not_ready", 409);
       }
-      if (!amuxV22OneShotRoleSupported(card.taskRole)) {
+      if (!amuxV22TaskRoleSupported(card.taskRole)) {
         throw new BoardImportError("one_shot_role_unavailable", 409);
       }
       const lane = await currentLane(tx, taskId);
@@ -228,7 +228,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
         { ok: true, receipt: approved.receipt }), !!recovery) !== "allow" && !addedRouteConsented) {
         throw new BoardImportError("cost_reconfirmation_required", 409);
       }
-      const requiredTool = amuxV22RequiredTool(card.taskRole);
+      const executionRole = amuxV22ExecutionRole(card.taskRole);
+      const requiredTool = amuxV22RequiredTool(executionRole);
       if (!requiredTool) throw new BoardImportError("role_unavailable", 409);
       const busy = new Set(occupied.map((item) => item.owner));
       const currentApiFrame = recovery?.readOnlyExecutorKind ===
@@ -246,7 +247,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
           amuxV22OneShotRouteSupported(route.provider, route.modelId) &&
           worker.provider === route.provider.toLowerCase() &&
           worker.model === route.modelId &&
-          worker.routing_roles.includes(card.taskRole!) &&
+          worker.routing_roles.includes(executionRole) &&
           (!exactGradeRouting ||
             amuxWorkerMatchesExecutionGrade(card.executionGrade,
               worker.worker_name, ceilings)) &&

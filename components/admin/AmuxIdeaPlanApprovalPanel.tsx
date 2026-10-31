@@ -13,7 +13,7 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { AMUX_IDEA_PLAN_APPROVAL_REQUEST_TIMEOUT_MS } from "@/lib/amux/ideaRequestTimeoutsCore";
 import { parseAmuxIdeaAnalysisResultView,
   type AmuxVisibleAnalysisUnit } from "@/lib/amux/ideaAnalysisResultReadCore";
-import { amuxV4PlanRound, amuxV4PlanScreenUnits,
+import { amuxV4PlanRound, amuxV4PlanScreenUnits, amuxV4PlanShowsPublicPrConsent,
   buildAmuxV4PlanRequest } from "@/lib/amux/ideaPlanScreenCore";
 import { decidePlanReadBack, planReadBackSeconds,
   type PlanReadBackOutcome } from "@/lib/amux/ideaPlanReadBackCore";
@@ -317,7 +317,7 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
           {unit.kind === "task" && !later ? <p className="mt-1 text-xs">
             {scored.has(unit.unitId) ? m.planApprovalScored : m.planApprovalNotScored}
           </p> : null}
-          {unit.kind === "task" && unit.taskRole === "implement" && !later ? <label className="mt-2 flex items-center gap-2">
+          {amuxV4PlanShowsPublicPrConsent(unit) && !later ? <label className="mt-2 flex items-center gap-2">
             <input type="checkbox" checked={!consentOff.has(unit.unitId)} disabled={state !== "idle"}
               onChange={(event) => setConsentOff((current) => {
                 const next = new Set(current);
