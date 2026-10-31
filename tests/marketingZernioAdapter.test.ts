@@ -41,7 +41,7 @@ const adapterWith = (
     apiKey: API_KEY,
     baseUrl: BASE,
     callBudgetMs: 30_000,
-    resolveAssetUrl: async (assetId) => `https://assets.test/${assetId}.jpg`,
+    resolveAsset: async (assetId) => ({ url: `https://assets.test/${assetId}.jpg`, kind: "image", aiOrigin: false }),
     fetch: (async (input: URL | RequestInfo, init?: RequestInit) => {
       const headers = Object.fromEntries(
         Object.entries((init?.headers ?? {}) as Record<string, string>),
@@ -275,7 +275,7 @@ test("a rate limit is a failure and is not retried either", async () => {
 test("an asset that cannot be resolved stops the publish before anything leaves", async () => {
   // A post missing its image is not the post that was approved.
   const { adapter, calls } = adapterWith([{ status: 201, body: created() }], {
-    resolveAssetUrl: async () => null,
+    resolveAsset: async () => null,
   });
   assert.deepEqual(await adapter.publish({ ...request, assetIds: ["asset_1"] }), {
     outcome: "failed",
@@ -286,7 +286,7 @@ test("an asset that cannot be resolved stops the publish before anything leaves"
 
 test("an asset resolved to a non-HTTPS URL is refused too", async () => {
   const { adapter, calls } = adapterWith([{ status: 201, body: created() }], {
-    resolveAssetUrl: async () => "http://assets.test/a.jpg",
+    resolveAsset: async () => ({ url: "http://assets.test/a.jpg", kind: "image", aiOrigin: false }),
   });
   assert.equal(
     (await adapter.publish({ ...request, assetIds: ["asset_1"] })).outcome,
@@ -553,4 +553,91 @@ test("the request id is a version-5 UUID, the same for the same post and differe
   assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(zernioRequestUuid(request.requestKey), uuid);
   assert.notEqual(zernioRequestUuid(request.requestKey + "x"), uuid);
+});
+
+// ---------------------------------------------------------------------------
+// video and the fields each platform needs (S0 plan, docs/ops/marketing-zernio-s0-plan.example.json)
+// ---------------------------------------------------------------------------
+
+const video = (aiOrigin = false) => ({
+  resolveAsset: async (assetId: string) => ({ url: `https://assets.test/${assetId}.mp4`, kind: "video" as const, aiOrigin }),
+});
+
+test("a YouTube post is one video titled by its first line, never for kids, marked synthetic when AI made it", async () => {
+  for (const aiOrigin of [false, true]) {
+    const { adapter, calls } = adapterWith([{ status: 201, body: created() }], video(aiOrigin));
+    await adapter.publish({
+      ...request,
+      channel: "youtube",
+      renderedText: "Three models, one prompt\n\nWe asked GPT, Claude and Gemini the same question.",
+      assetIds: ["clip-1"],
+    });
+    assert.deepEqual(calls[0]?.body, {
+      content: "We asked GPT, Claude and Gemini the same question.",
+      platforms: [
+        {
+          platform: "youtube",
+          accountId: "acct_9",
+          platformSpecificData: {
+            title: "Three models, one prompt",
+            visibility: "public",
+            madeForKids: false,
+            containsSyntheticMedia: aiOrigin,
+          },
+        },
+      ],
+      publishNow: true,
+      mediaItems: [{ type: "video", url: "https://assets.test/clip-1.mp4" }],
+      metadata: { requestKey: request.requestKey, locale: "en" },
+    });
+  }
+});
+
+test("a YouTube post that is not one video, or whose first line is no title, is refused before anything leaves", async () => {
+  const cases: Array<[Partial<MarketingPublishRequest>, Partial<ZernioAdapterPorts>, string]> = [
+    [{ assetIds: [] }, video(), "youtube_needs_one_video"],
+    [{ assetIds: ["a", "b"] }, video(), "youtube_needs_one_video"],
+    [{ assetIds: ["still"] }, {}, "youtube_needs_one_video"],
+    [{ assetIds: ["clip"], renderedText: "\nbody only" }, video(), "youtube_title_invalid"],
+    [{ assetIds: ["clip"], renderedText: `${"x".repeat(101)}\nbody` }, video(), "youtube_title_invalid"],
+    [{ assetIds: ["clip"], renderedText: "A <b> title\nbody" }, video(), "youtube_title_invalid"],
+  ];
+  for (const [change, ports, errorCode] of cases) {
+    const { adapter, calls } = adapterWith([{ status: 201, body: created() }], ports);
+    const result = await adapter.publish({ ...request, channel: "youtube", ...change });
+    assert.deepEqual(result, { outcome: "failed", errorCode });
+    assert.equal(calls.length, 0, errorCode);
+  }
+});
+
+test("TikTok carries its privacy choices and the approver's attestations; an Instagram video goes to the feed too", async () => {
+  const tiktok = adapterWith([{ status: 201, body: created() }], video());
+  await tiktok.adapter.publish({ ...request, channel: "tiktok", assetIds: ["clip"] });
+  const tiktokBody = tiktok.calls[0]?.body as { platforms: Array<{ platformSpecificData: Record<string, unknown> }> };
+  assert.deepEqual(tiktokBody.platforms[0]?.platformSpecificData, {
+    privacyLevel: "PUBLIC_TO_EVERYONE",
+    allowComment: true,
+    allowDuet: false,
+    allowStitch: false,
+    contentPreviewConfirmed: true,
+    expressConsentGiven: true,
+  });
+
+  const reel = adapterWith([{ status: 201, body: created() }], video());
+  await reel.adapter.publish({ ...request, channel: "instagram", assetIds: ["clip"] });
+  const reelBody = reel.calls[0]?.body as {
+    platforms: Array<{ platformSpecificData?: unknown }>;
+    mediaItems: unknown;
+  };
+  assert.deepEqual(reelBody.platforms[0]?.platformSpecificData, { shareToFeed: true });
+  assert.deepEqual(reelBody.mediaItems, [{ type: "video", url: "https://assets.test/clip.mp4" }]);
+
+  // An Instagram image post and an X post add nothing platform-specific.
+  for (const channel of ["instagram", "x"] as const) {
+    const plain = adapterWith([{ status: 201, body: created() }]);
+    await plain.adapter.publish({ ...request, channel, assetIds: ["still"] });
+    const body = plain.calls[0]?.body as { platforms: Array<Record<string, unknown>>; mediaItems: unknown };
+    assert.equal("platformSpecificData" in (body.platforms[0] ?? {}), false, channel);
+    assert.deepEqual(body.mediaItems, [{ type: "image", url: "https://assets.test/still.jpg" }]);
+  }
 });

@@ -618,7 +618,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * it uses or a watched column still moves it, and still re-opens verification.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "643befaf99794fbb478b6ad914996f6e1e4e6575122c88d6c2c14f35d447eb73";
+  "19e4cb5aad089abcd369ffd86a050f79f1953e09342b935418e59ab89d12144d";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
