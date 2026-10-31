@@ -16,6 +16,8 @@ approval. Owner approval for this unattended job: 2026-10-31.
   rankings, model counts, "best", "fastest", "free", comparisons with a named
   competitor, or promises. Describe what the viewer sees on screen.
 - No URL or domain name in any text; the end card says "Tomverse".
+- In Chinese, put a space after "。" when Latin letters follow ("來看。 AI Review"): the
+  Guard reads "。AI" as a web address ("AI" is a domain suffix) and refuses it.
 - Nothing aimed at people under 16; no urgency ("today only", "hurry").
 - Stop and report rather than guess if a step fails twice.
 
@@ -38,8 +40,8 @@ approval. Owner approval for this unattended job: 2026-10-31.
 
 1. Capture: `node capture.mjs <url> job/<name>.png portrait` (and `landscape`
    for the long video). Capture the page in the video's language: `https://tomverse.app/...`
-   for `en`, `https://tomverse.app/ko/...` for `ko`. The site has no Traditional Chinese
-   pages, so a `zh-Hant` video shows the English pages. Check every capture with the Read tool; retake one that
+   for `en`, `https://tomverse.app/ko/...` for `ko`, and `https://tomverse.app/zh/...` for
+   `zh-Hant` (the site has Simplified Chinese pages only; owner decision 2026-10-31). Check every capture with the Read tool; retake one that
    shows a banner, an error or a half-loaded page.
 2. Write `job/<id>.props.json` per video following `src/schema.ts`, then
    `node render.mjs job/<id>.props.json Short|Long job/<id>.mp4`. Extract two
