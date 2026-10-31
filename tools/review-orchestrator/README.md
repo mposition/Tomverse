@@ -352,7 +352,9 @@ drain 표시는 상태 폴더의 파일이라 재시작해도 남으므로, 마�
 RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
 $RO drain on
 $RO drain wait --timeout 3600        # 실행 중인 검토가 0이 되면 0으로 끝납니다. 시간 초과는 3
-sudo -u review git -C /home/review/review-orchestrator pull --ff-only
+sudo -u review git -C /home/review/review-orchestrator fetch origin main
+sudo -u review git -C /home/review/review-orchestrator checkout --detach origin/main
+sudo -u review git -C /home/review/review-orchestrator log -1 --oneline
 sudo systemctl restart review-orchestrator
 $RO drain off
 ```
@@ -656,12 +658,20 @@ sudo journalctl -u pr-ci-auto-fix-sender --since "5 min ago"     # ci-fix sender
 **④ 같은 서버 bash.** "서버 업데이트 (drain)" 절차로 checkout을 갱신한 뒤 제안 pass를 설치합니다.
 unit은 `/opt/...` 배치를 기준으로 쓰여 있으므로, 이 서버의 현재 배치(`/home/review/...`)로 경로를
 바꿉니다(`systemctl cat review-orchestrator`의 `ExecStart`·`REVIEW_ORCH_CONFIG`와 같아야 합니다).
+관리 계정은 `/home/review`를 읽지 못하므로 파일은 review 계정으로 읽습니다. 읽기가 실패해도
+`sudo tee`는 unit을 빈 파일로 덮어쓰므로(2026-10-31에 실제로 그랬습니다), 임시 파일에 먼저 만들고
+비어 있지 않고 `ExecStart`가 맞을 때만 설치합니다. `INSTALLED`가 나오지 않으면 `daemon-reload`를
+하지 않습니다. reload 전까지 systemd는 이전 unit으로 계속 돕니다. 서버에 둔 drop-in(예:
+`PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`)은 이 설치가 건드리지 않습니다.
 
 ```bash
 D=/home/review/review-orchestrator/tools/review-orchestrator/deploy
-sed -e 's#/opt/review-orchestrator#/home/review/review-orchestrator#' \
-  -e 's#/etc/review-orchestrator/config.json#/home/review/.config/review-orchestrator/config.json#' \
-  "$D/pr-ci-auto-fix.service" | sudo tee /etc/systemd/system/pr-ci-auto-fix.service > /dev/null
+T=$(mktemp)
+sudo -u review cat "$D/pr-ci-auto-fix.service" | sed -e 's#/opt/review-orchestrator#/home/review/review-orchestrator#' \
+  -e 's#/etc/review-orchestrator/config.json#/home/review/.config/review-orchestrator/config.json#' > "$T"
+test -s "$T" && grep -q '^ExecStart=/usr/bin/node /home/review/review-orchestrator/' "$T" \
+  && sudo install -m 0644 -o root -g root "$T" /etc/systemd/system/pr-ci-auto-fix.service && echo INSTALLED
+rm -f "$T"
 sudo cp "$D/pr-ci-auto-fix.timer" /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl start pr-ci-auto-fix && sudo journalctl -u pr-ci-auto-fix --since "5 min ago"
 sudo systemctl enable --now pr-ci-auto-fix.timer
