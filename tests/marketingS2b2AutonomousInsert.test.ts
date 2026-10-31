@@ -620,11 +620,12 @@ test("the switches and the budget are what the resolver actually reads", async (
   const resolved = await resolveAutonomousAdmission(settings(all), locked);
   assert.equal(resolved.configGeneration, 3);
   // False today, and the reasons say which inputs are missing rather than
-  // leaving an operator to guess. The platform budget is one of them: nothing
-  // reads it until S2d2, and an answer of true would be a claim about a
-  // capability this build does not have.
+  // leaving an operator to guess. An autonomous account has no recovery
+  // contract until S0 confirms one for its channel (D3, owner 2026-10-31); its
+  // platform budget is the channel's cap, which the claim counts.
   assert.equal(resolved.autonomousPublish, false);
-  assert.ok(resolved.reasons.includes("input_unreadable:platformBudgetAvailable"));
+  assert.ok(resolved.reasons.includes("input_unreadable:recoveryContractAvailable"));
+  assert.ok(!resolved.reasons.some((reason) => reason.includes("platformBudgetAvailable")));
   assert.ok(resolved.reasons.includes("input_unreadable:adapterHealthy"));
 
   // The switch on is the control: without it, a renamed or unread key would
