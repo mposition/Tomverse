@@ -641,3 +641,14 @@ test("TikTok carries its privacy choices and the approver's attestations; an Ins
     assert.deepEqual(body.mediaItems, [{ type: "image", url: "https://assets.test/still.jpg" }]);
   }
 });
+
+test("an asset lookup that throws fails the post before anything is sent, rather than leaving it unknown", async () => {
+  const { adapter, calls } = adapterWith([{ status: 201, body: created() }], {
+    resolveAsset: async () => {
+      throw new Error("database unavailable");
+    },
+  });
+  const result = await adapter.publish({ ...request, assetIds: ["clip"] });
+  assert.deepEqual(result, { outcome: "failed", errorCode: "asset_unresolved" });
+  assert.equal(calls.length, 0);
+});
