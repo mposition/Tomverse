@@ -60,9 +60,11 @@ import {
 import {
   loadMarketingAssetRegistry,
   MARKETING_ASSET_REGISTRY_PATH,
+  marketingAssetRegistrySchema,
   resolveMarketingAsset,
   type LoadedAssetRegistry,
 } from "@/lib/marketingAssets";
+import { readApprovedMarketingAssetRows } from "@/lib/marketingAssetStore";
 import { resolveMarketingClaimGate } from "@/lib/marketingClaimGates";
 import type {
   MarketingGuardAssetFact,
@@ -237,15 +239,31 @@ const byRowId = (left: { rowId: string }, right: { rowId: string }) =>
 /**
  * The asset registry in force, or `null` when it is missing or invalid.
  *
+ * The hand-kept file, and -- given the caller's client -- the images and
+ * videos a person approved in Admin (lib/marketingAssetStore.ts, operator
+ * decision 2026-10-31), held FOR SHARE so a retirement waits for a decision read
+ * against them. An id in both is the file's. The version is the file's plus
+ * the store's, each only ever rising, so a post records a version that moves
+ * whenever either list does.
+ *
  * Shared with the generator's context, which lists the assets a draft may
- * name from the same file the Guard judges them against.
+ * name from the same registry the Guard judges them against.
  */
-export const readMarketingAssetRegistry = async (): Promise<LoadedAssetRegistry | null> => {
+export const readMarketingAssetRegistry = async (
+  db?: Pick<Prisma.TransactionClient, "$queryRaw">,
+): Promise<LoadedAssetRegistry | null> => {
   try {
     const raw = JSON.parse(
       await readFile(resolve(process.cwd(), MARKETING_ASSET_REGISTRY_PATH), "utf8"),
     ) as unknown;
-    return loadMarketingAssetRegistry(raw);
+    if (!db) return loadMarketingAssetRegistry(raw);
+    const file = marketingAssetRegistrySchema.parse(raw);
+    const stored = await readApprovedMarketingAssetRows(db);
+    const fileIds = new Set(file.assets.map((asset) => asset.id));
+    return loadMarketingAssetRegistry({
+      version: file.version + stored.version,
+      assets: [...file.assets, ...stored.assets.filter((asset) => !fileIds.has(asset.id))],
+    });
   } catch {
     // A missing, unreadable or invalid registry makes every asset unknown.
     return null;
@@ -396,7 +414,7 @@ async function readMarketingFacts(
   }
   // Always: the registry version a post records is the one in force, whether
   // or not this draft names an asset, and the table refuses a version of 0.
-  const assetRegistry = await readMarketingAssetRegistry();
+  const assetRegistry = await readMarketingAssetRegistry(database);
 
   // What the decision rested on, collected as each claim is resolved.
   const priceRows = new Map<string, string>();

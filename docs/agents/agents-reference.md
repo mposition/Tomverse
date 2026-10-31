@@ -1557,6 +1557,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   값이 아닌 것은 `unrepresentable`로 셉니다. 프롬프트 `a3-web-search-v2`. 요청 비용은 바뀌지 않습니다(예약은 컨텍스트 창 기준).
   보고서 상한(200건)을 넘으면 `marketingA3FactsInTurn()`이 경쟁사를 돌아가며 하나씩 담으므로 각 경쟁사의 뒤쪽 사실이 잘리고,
   목록 뒤쪽 경쟁사가 통째로 빠지지 않습니다(10-31 dev 실행이 처음 200건에 닿음).
+- **V1(미디어 자산 저장, 운영자 결정 2026-10-31)**: `lib/marketingAssetCore.ts`(로컬 import 없음 — Admin route sweep),
+  `lib/marketingAssetSubmission.ts`, `lib/marketingAssetStore.ts`(유일한 writer, raw SQL),
+  `prisma/migrations/20261031120000_marketing_asset_store`, `app/api/internal/marketing-assets/**`(미디어 CLI:
+  `MARKETING_MEDIA_SUBMIT_SECRET` Bearer, kill switch면 503), `app/api/admin/marketing/assets/[assetId]/{decision,preview}`,
+  `/admin/marketing?tab=assets`, `tests/integration/marketing-asset-store.db.test.ts`. 이미지·영상은 AMUX 박스의 미디어 CLI가
+  만들어 제출(`submitted`)하고 R2에 올린 뒤 확인하며(크기·형식이 다르면 객체를 지움), 사람이 Admin에서 미리보고 승인합니다.
+  승인 감사 행의 `sha256`이 행과 같아야 하고(write guard), 승인·은퇴마다 `MarketingAsset_registryVersion_seq`의 다음 값을
+  받습니다. `readMarketingAssetRegistry(db)`는 파일 등록부에 승인된 행을 합치고(같은 id면 파일 우선) 버전은 둘의 합입니다.
+  게시기가 쓸 R2 키는 `readApprovedMarketingAssetLocation()`(승인 상태일 때만).
 
 # 엔지니어링 Agent
 

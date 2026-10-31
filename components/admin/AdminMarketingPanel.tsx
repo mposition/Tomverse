@@ -122,6 +122,8 @@ const ACCOUNT = (id: unknown, action: string) =>
   `/api/admin/marketing/accounts/${encodeURIComponent(String(id))}/${action}`;
 const COMPETITOR_DECISION = (id: unknown) =>
   `/api/admin/marketing/competitors/${encodeURIComponent(String(id))}/decision`;
+const ASSET_PATH = (id: unknown, leaf: "decision" | "preview") =>
+  `/api/admin/marketing/assets/${encodeURIComponent(String(id))}/${leaf}`;
 
 /**
  * What the person typed into a page box: one URL per line. Not split on
@@ -261,7 +263,12 @@ export function AdminMarketingPanel({
               ) : null}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-zinc-500">
-                  {(view.ordering === "by-status" ? m.showingByStatus : m.showing).replace(
+                  {(view.section === "assets"
+                    ? m.showingAssets
+                    : view.ordering === "by-status"
+                      ? m.showingByStatus
+                      : m.showing
+                  ).replace(
                     "{count}",
                     String(view.pageSize)
                   )}
@@ -431,6 +438,7 @@ const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "accent" | 
   paused: "warning",
   disconnected: "danger",
   proposed: "warning",
+  submitted: "accent",
   retired: "neutral",
 };
 
@@ -1269,6 +1277,7 @@ function rowActions(
   if (section === "published") return publishedActions(row, m);
   if (section === "accounts") return accountActions(row, m);
   if (section === "competitors") return competitorActions(row, m);
+  if (section === "assets") return assetActions(row, m);
   return [];
 }
 
@@ -1338,6 +1347,41 @@ function competitorActions(row: Row, m: Record<string, string>): MarketingAction
   }
   // Rejected or retired: a person may change their mind.
   return [approve];
+}
+
+/**
+ * An asset's decisions, each against the decision this row showed. An
+ * approval names the bytes the page showed, which the database compares: a
+ * file replaced since cannot ride on this approval.
+ */
+function assetActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  const expected = { expectedDecisionAuditLogId: text(row.decisionAuditLogId) };
+  const retire: MarketingAction = {
+    id: "asset-retire",
+    label: m.actRetireAsset,
+    path: ASSET_PATH(row.id, "decision"),
+    confirm: m.confirmRetireAsset,
+    danger: true,
+    body: () => ({ decision: "retired", ...expected }),
+  };
+  if (row.status === "submitted") {
+    return [
+      ...(row.uploadedAt
+        ? [
+            {
+              id: "asset-approve",
+              primary: true,
+              label: m.actApproveAsset,
+              path: ASSET_PATH(row.id, "decision"),
+              confirm: m.confirmApproveAsset,
+              body: () => ({ decision: "approved", ...expected, sha256: str(row.sha256) }),
+            } satisfies MarketingAction,
+          ]
+        : []),
+      retire,
+    ];
+  }
+  return row.status === "approved" ? [retire] : [];
 }
 
 /** The two values every post writer compares against. */
@@ -1978,6 +2022,50 @@ function MarketingRow({
             ))}
           </p>
         ) : null}
+      </>
+    );
+  }
+
+  if (section === "assets") {
+    const disclosure = (row.disclosure ?? {}) as Record<string, string>;
+    const alt = (row.alt ?? {}) as Record<string, string>;
+    const size = int(row.bytes);
+    return (
+      <>
+        <RowHeading title={str(row.id)} detail={`${str(row.kind)} · ${str(row.provenance)}`}>
+          <StatusTag status={row.status} m={m} />
+        </RowHeading>
+        <p className="mt-3 text-xs text-zinc-500">
+          {m.colFile} {str(row.contentType)} · {(size / (1024 * 1024)).toFixed(1)} MB
+          {row.durationSeconds ? ` · ${int(row.durationSeconds)}s` : ""} · {str(row.sha256).slice(0, 12)}…
+        </p>
+        <p className="mt-1 break-all text-xs text-zinc-500">
+          {m.colChannels}{" "}
+          {Object.entries(disclosure)
+            .map(([channel, decision]) => `${channelName(channel)} (${decision})`)
+            .join(" / ")}
+        </p>
+        {Object.entries(alt).map(([locale, value]) => (
+          <p key={locale} className="mt-1 text-sm leading-6 text-zinc-300">
+            <span className="mr-2 text-xs text-zinc-500">{locale}</span>
+            {value}
+          </p>
+        ))}
+        <p className="mt-2 text-xs">
+          {row.uploadedAt ? (
+            <a
+              href={ASSET_PATH(row.id, "preview")}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-300 underline underline-offset-2 hover:text-white"
+              data-testid="marketing-asset-preview-link"
+            >
+              {m.colPreview}
+            </a>
+          ) : (
+            <span className="text-zinc-500">{m.notUploaded}</span>
+          )}
+        </p>
       </>
     );
   }
