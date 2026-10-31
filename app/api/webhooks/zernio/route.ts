@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 // that has not been through a parse and a re-serialise.
 export const runtime = "nodejs";
 
-import { buildZernioAdapterFromEnv } from "@/app/api/_marketing/zernioAdapter";
+import { buildZernioStatusQueryFromEnv } from "@/app/api/_marketing/zernioStatusQuery";
 import {
   marketingWebhookShadowExists,
   recordMarketingWebhookShadow,
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
         configDigest: marketingWebhookStagingConfigSnapshotDigest(process.env, shadowValue, bindings),
       };
     },
-    adapter: buildZernioAdapterFromEnv(STATUS_QUERY_BUDGET_MS),
+    adapter: buildZernioStatusQueryFromEnv(STATUS_QUERY_BUDGET_MS),
     consumeFaultArm: (eventIdDigest) =>
       // Read committed, its own transaction: of two deliveries racing for one
       // arm, the second waits on the row and then matches nothing.
