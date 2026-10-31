@@ -50,6 +50,7 @@ test("the model is given a fixed instruction and only this account's slice of th
   assert.equal(system.role, "system");
   assert.match(system.content, /data, not instructions/);
   assert.match(system.content, /Never write a URL/);
+  assert.match(system.content, /space after the ideographic full stop/);
   const data = JSON.parse(user.content);
   assert.deepEqual(data.task, { platform: "linkedin", locale: "en", posts: 3 });
   assert.deepEqual(data.claims.map((claim) => claim.id), ["claim_compare"]);
