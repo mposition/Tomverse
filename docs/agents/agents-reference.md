@@ -1279,6 +1279,14 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
   `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
   statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2d 영상 필드와 상태 조회 분리**(운영자 2026-10-31: 숏폼·롱폼 영상): 미디어는 `{type, url}`로 보내고
+  (`resolveAsset` port가 URL·종류·AI 출처를 줌), `zernioPlatformFields()`가 S0에서 검증된 채널 필드를 붙입니다 —
+  YouTube는 영상 하나, 첫 줄이 제목(100자 이하)·나머지가 설명, `madeForKids: false`, AI 출처면
+  `containsSyntheticMedia: true`; TikTok은 공개·상호작용 선택과 승인자의 미리보기·동의; Instagram 영상은
+  `shareToFeed: true`. 보낼 수 없는 형태는 보내기 전에 `failed`입니다. webhook 수신부는 상태 조회만 쓰므로
+  `lib/zernioStatusQuery.ts`(전송·UUID·상태 조회)만 불러오고, 게시 어댑터는 그 위에 있습니다 — 게시 쪽 변경은
+  webhook pipeline fingerprint를 움직이지 않습니다. 이 분리로 fingerprint가 한 번 바뀌었으므로 production webhook
+  적용은 다음 서명 기록 전까지 `production_config_fingerprint_stale`로 멈춥니다(상태 조회는 그대로).
 - **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
   `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
   `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
