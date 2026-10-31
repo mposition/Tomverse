@@ -4,6 +4,7 @@ import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { AMUX_EXECUTION_GRADE_WORKER_ROLE,
   type AmuxExecutionGrade } from "./executionGradeCore.ts";
 import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
+import { amuxV22ExecutionRole } from "./v22WorkerClaimCore.ts";
 
 /**
  * The Task cost catalog, derived on every use from what Tomverse already
@@ -124,8 +125,14 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
   for (const worker of [...input.workers].sort((a, b) =>
     a.workerName.localeCompare(b.workerName))) {
     const grade = gradeOf(worker.roleCeiling);
-    const roles = AMUX_TASK_CATALOG_ROLES.filter((role) => worker.roles.includes(role));
+    // A Task role is priced on the worker that runs its execution role
+    // (test as implement, verify as investigate).
+    const roles = AMUX_TASK_CATALOG_ROLES.filter((role) =>
+      worker.roles.includes(amuxV22ExecutionRole(role)));
     if (!grade || roles.length === 0) continue;
+    // The identity keeps the profile's own roles, so a route an approved Task
+    // already holds keeps its digest.
+    const profileRoles = AMUX_TASK_CATALOG_ROLES.filter((role) => worker.roles.includes(role));
     const price = input.priceFor(worker.modelId, caps[grade].inputTokens, worker.provider);
     const uncached = microUsd(price?.inputUsdPerMillionTokens);
     const output = microUsd(price?.outputUsdPerMillionTokens);
@@ -142,7 +149,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     // One route the catalog would refuse never takes every other route with it.
     if (pricingSource.length > 160) continue;
     const identity = { workerName: worker.workerName, provider: worker.provider,
-      modelId: worker.modelId, roles, grade };
+      modelId: worker.modelId, roles: profileRoles, grade };
     routes.push({
       routeId: `v22:${worker.workerName}`,
       workerName: worker.workerName,

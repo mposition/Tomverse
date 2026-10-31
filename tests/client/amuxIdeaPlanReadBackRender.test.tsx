@@ -47,6 +47,8 @@ const TASK_REFUSALS = [
   "task_execution_grade_mismatch",
   "task_confirmation_grade_mismatch",
   "task_cost_receipt_grade_mismatch",
+  "task_role_not_runnable",
+  "task_route_unpriced",
 ] as const;
 
 test("whole-plan refusals translate every stable Task guard code without exposing it", async () => {
@@ -57,6 +59,8 @@ test("whole-plan refusals translate every stable Task guard code without exposin
       m.taskRegistrationMixedPathsRefused,
       m.taskRegistrationReviewRoleRefused,
       m.taskRegistrationGradeRefused,
+      m.taskRegistrationRoleNotRunnable,
+      m.taskRegistrationRouteUnpriced,
     ]);
     for (const code of TASK_REFUSALS) {
       const failure = await readAmuxIdeaPlanApprovalFailure(

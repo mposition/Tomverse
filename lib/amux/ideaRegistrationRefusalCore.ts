@@ -12,6 +12,8 @@ export const AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES = Object.freeze([
   "task_execution_grade_mismatch",
   "task_confirmation_grade_mismatch",
   "task_cost_receipt_grade_mismatch",
+  "task_role_not_runnable",
+  "task_route_unpriced",
 ] as const);
 
 export const AMUX_V19_PLAN_REGISTRATION_REFUSAL_CODES = Object.freeze([

@@ -193,6 +193,8 @@ test("v20 Task guard reports each path and role refusal before registration", ()
     [(value) => { value.expectedPaths = ["lib/amux/guard.ts", "src/worker.ts"]; },
       "task_expected_paths_mixed"],
     [(value) => { value.taskRole = "review"; }, "task_role_review_refused"],
+    [(value) => { value.taskRole = "operate"; }, "task_role_not_runnable"],
+    [(value) => { value.taskRole = null; }, "task_role_not_runnable"],
     [(value) => { value.executionGrade = "standard"; },
       "task_execution_grade_mismatch"],
   ]) {
@@ -268,6 +270,8 @@ test("only stable metadata-only v20 refusals survive the decision-store mapping"
     "task_execution_grade_mismatch",
     "task_confirmation_grade_mismatch",
     "task_cost_receipt_grade_mismatch",
+    "task_role_not_runnable",
+    "task_route_unpriced",
   ]);
   for (const code of AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES) {
     assert.equal(isAmuxV20TaskRegistrationRefusal(code), true);
