@@ -58,7 +58,7 @@ const getR2Config = () => {
   };
 };
 
-const getR2Client = () => {
+const getR2Client = ({ forcePathStyle }: { forcePathStyle?: boolean } = {}) => {
   const config = getR2Config();
 
   return {
@@ -67,6 +67,7 @@ const getR2Client = () => {
       region: "auto",
       endpoint: config.endpoint,
       credentials: config.credentials,
+      forcePathStyle,
     }),
   };
 };
@@ -76,7 +77,9 @@ export async function createR2UploadUrl(
   contentType: string,
   contentLength: number
 ) {
-  const { client, bucket } = getR2Client();
+  // Installed native clients allow the account's R2 host. Keep the bucket in
+  // the path rather than adding a bucket subdomain they correctly reject.
+  const { client, bucket } = getR2Client({ forcePathStyle: true });
 
   return getSignedUrl(
     client,
