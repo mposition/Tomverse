@@ -4,8 +4,11 @@ import test from "node:test";
 import {
   MARKETING_A3_COMPETITOR_BUDGET_MS,
   MARKETING_A3_REPORT_MARGIN_MS,
+  MARKETING_A3_REPORT_MAX_FACTS,
+  marketingA3FactsInTurn,
   runMarketingA3Cycle,
 } from "@/lib/marketingA3CycleCore";
+import { MARKETING_A3_ANSWER_SCHEMA, MARKETING_A3_DISCOVERY_ANSWER_SCHEMA } from "@/lib/marketingA3Core";
 import {
   MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
   marketingGeneratorReportProvenanceMatches,
@@ -64,8 +67,8 @@ const ports = (overrides = {}) => {
   let id = 0;
   const deps = {
     readContext: async () => context([poe]),
-    callLlm: async (messages, requestKey, allowedDomains) => {
-      seen.calls.push({ messages, requestKey, allowedDomains });
+    callLlm: async (messages, requestKey, allowedDomains, answerSchema) => {
+      seen.calls.push({ messages, requestKey, allowedDomains, answerSchema });
       // No domains is the run's discovery search, which finds nothing by default.
       if (allowedDomains.length === 0) return answered(requestKey, { candidates: [] }, []);
       return answered(
@@ -108,6 +111,9 @@ test("a run searches once per competitor within its official domains, and report
     stoppedAt: null,
   });
   assert.deepEqual(seen.calls[0].allowedDomains, ["poe.com"]);
+  // Each call is held to the shape its reader parses.
+  assert.deepEqual(seen.calls[0].answerSchema, MARKETING_A3_ANSWER_SCHEMA);
+  assert.deepEqual(seen.calls.at(-1).answerSchema, MARKETING_A3_DISCOVERY_ANSWER_SCHEMA);
   const data = JSON.parse(seen.calls[0].messages[1].content);
   assert.deepEqual(data.competitor, { id: "poe", name: "Poe", officialDomains: ["poe.com"] });
   const report = marketingGeneratorReportSchema.parse(seen.reports[0]);
@@ -376,4 +382,50 @@ test("an answer the ledger retained as unknown stops the run and is not used", a
   assert.deepEqual(summary.stoppedAt, { stage: "llm", detail: "retained" });
   assert.equal(summary.factsKept, 0);
   assert.equal(seen.reports.length, 0);
+});
+
+test("facts are taken in turns, one from each competitor, each competitor's own order kept", () => {
+  const fact = (competitorId, index) => ({ competitorId, factType: `f${index}` });
+  const facts = [fact("a", 0), fact("a", 1), fact("a", 2), fact("b", 0), fact("c", 0), fact("c", 1)];
+  assert.deepEqual(
+    marketingA3FactsInTurn(facts).map((item) => `${item.competitorId}${item.factType}`),
+    ["af0", "bf0", "cf0", "af1", "cf1", "af2"],
+  );
+  assert.deepEqual(marketingA3FactsInTurn([]), []);
+});
+
+test("a report past its fact limit keeps facts from every competitor, not only the first ones", async () => {
+  const competitorsList = Array.from({ length: 11 }, (_, index) => ({
+    competitorId: `c${index}`,
+    displayName: `C${index}`,
+    officialHosts: ["poe.com"],
+  }));
+  const forty = Array.from({ length: 40 }, (_, index) => ({
+    factType: `f${index}`,
+    value: { kind: "number", value: index, unit: null },
+    sourceUrl: "https://poe.com/pricing",
+  }));
+  const { deps, seen } = ports({
+    readContext: async () => context(competitorsList),
+    callLlm: async (messages, requestKey, allowedDomains) =>
+      allowedDomains.length === 0
+        ? answered(requestKey, { candidates: [] }, [])
+        : answered(requestKey, { facts: forty, unrepresentable: 0 }, ["https://poe.com/pricing"]),
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.equal(summary.stoppedAt, null);
+  const { facts, unrepresentableFactCount } = seen.reports[0].payload;
+  assert.equal(facts.length, MARKETING_A3_REPORT_MAX_FACTS);
+  assert.equal(unrepresentableFactCount, 440 - MARKETING_A3_REPORT_MAX_FACTS);
+  const perCompetitor = new Map();
+  for (const item of facts) perCompetitor.set(item.competitorId, (perCompetitor.get(item.competitorId) ?? 0) + 1);
+  assert.equal(perCompetitor.size, 11);
+  for (const [competitorId, count] of perCompetitor) {
+    assert.ok(count >= 18 && count <= 19, `${competitorId} kept ${count}`);
+  }
+  // Each competitor keeps its first facts, in its own order.
+  assert.deepEqual(
+    facts.filter((item) => item.competitorId === "c10").map((item) => item.factType),
+    forty.slice(0, perCompetitor.get("c10")).map((item) => item.factType),
+  );
 });
