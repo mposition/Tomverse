@@ -12,6 +12,10 @@
 
 import "server-only";
 
+import { launchHomepageContent } from "@/components/marketing/launchHomepageContent";
+import { infoPages } from "@/components/marketing/marketingInfoContent";
+import { getBillingPlansWithFieldSources } from "@/lib/billingConfig";
+import { MARKETING_ANALYSIS_ENABLED_KEY, marketingAnalysisEnabledFromValue } from "@/lib/marketingAnalysisCore";
 import {
   MARKETING_REPORT_PAYLOAD_SCHEMAS,
   type MarketingReportKind,
@@ -21,7 +25,13 @@ import {
   readKnownMarketingCompetitorIds,
   readMarketingCompetitorsForGenerator,
 } from "@/lib/marketingCompetitorStore";
-import { generatorProjection, type MarketingClaimProjection } from "@/lib/marketingClaims";
+import {
+  generatorProjection,
+  MARKETING_CLAIMS,
+  type MarketingClaim,
+  type MarketingClaimProjection,
+} from "@/lib/marketingClaims";
+import { resolveMarketingPageEvidence } from "@/lib/marketingEvidencePages";
 import { readApprovedMarketingAssetKinds } from "@/lib/marketingAssetStore";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
 import {
@@ -59,7 +69,7 @@ export type MarketingGeneratorContext = {
     readonly defaultLocale: string;
     readonly allowedLocales: readonly string[];
   }>;
-  readonly claims: readonly MarketingClaimProjection[];
+  readonly claims: readonly MarketingGeneratorClaim[];
   readonly assets: readonly MarketingGeneratorAsset[];
   readonly brief: MarketingGeneratorReport | null;
   readonly marketIntel: MarketingGeneratorReport | null;
@@ -71,6 +81,88 @@ export type MarketingGeneratorContext = {
    * from this pin; the ledger derives the same pin and refuses any other.
    */
   readonly llm: { readonly model: string | null; readonly pin: MarketingLlmPricePin | null };
+  /**
+   * Tomverse's own public copy and plans, for the analysis call to read
+   * (operator decision 2026-11-01). Our own pages and stored plan values: no
+   * competitor text, no URL.
+   */
+  readonly ownProduct: { readonly pages: Readonly<Record<string, unknown>>; readonly plans: readonly MarketingGeneratorPlan[] };
+  /** Whether the Admin switch lets this run spend on the analysis and brief. Off when unreadable. */
+  readonly analysis: { readonly enabled: boolean };
+};
+
+/**
+ * A claim as the generator may use it: the projection (no evidence, no fact
+ * source) and what a post that makes it has to say. For a page claim that is
+ * the page's sentence in each locale -- the Guard requires the post to carry it
+ * word for word and re-reads the page when it judges the post, so the model is
+ * told the words rather than left to reproduce them. For a price claim it is
+ * the stored plan's values the claim names. A model that knows the words is
+ * still judged against the page and the stored row, not against this.
+ */
+export type MarketingGeneratorClaim = MarketingClaimProjection & {
+  readonly statements: Readonly<Record<string, string>>;
+  readonly values: Readonly<Record<string, string | number>> | null;
+};
+
+/** A plan as the analysis reads it: the stored values, not where each came from. */
+export type MarketingGeneratorPlan = {
+  readonly id: string;
+  readonly name: string;
+  readonly monthlyPriceCents: number;
+  readonly annualPriceCents: number;
+  readonly currency: string;
+  readonly dailyMessageLimit: number;
+  readonly monthlyMessageLimit: number;
+  readonly maxModels: number;
+  readonly allowAttachments: boolean;
+  readonly allowSharing: boolean;
+  readonly allowDownloads: boolean;
+};
+
+type PlanValues = Record<string, string | number | boolean>;
+
+/** The registry's claims with what each says, for the generator. */
+export function generatorClaimContext(
+  claims: readonly MarketingClaim[],
+  plans: ReadonlyMap<string, PlanValues>,
+): MarketingGeneratorClaim[] {
+  const projections = generatorProjection(claims);
+  return claims.map((claim, index) => {
+    const statements: Record<string, string> = {};
+    if (claim.evidence?.kind === "page") {
+      for (const locale of claim.locales) {
+        const resolved = resolveMarketingPageEvidence({
+          pageRoute: claim.evidence.pageRoute,
+          localeKey: claim.evidence.localeKey,
+          locale,
+        });
+        if (resolved.ok) statements[locale] = resolved.text;
+      }
+    }
+    let values: Record<string, string | number> | null = null;
+    if (claim.factSource?.kind === "billing_plan") {
+      const plan = plans.get(claim.factSource.planId);
+      if (plan) {
+        values = {};
+        for (const field of claim.factSource.fields) {
+          const value = plan[field];
+          if (typeof value === "string" || typeof value === "number") values[field] = value;
+        }
+      }
+    }
+    return { ...projections[index], statements, values };
+  });
+}
+
+/** The homepage, About and FAQ copy in English: what Tomverse says about itself. */
+const ownPages = (): Record<string, unknown> => {
+  const home = launchHomepageContent.en;
+  return {
+    home: { hero: home.hero, adaptive: home.adaptive, review: home.review, tools: home.tools, plans: home.plans, guest: home.guest },
+    about: infoPages.about.en,
+    faq: infoPages.faq.en,
+  };
 };
 
 /**
@@ -143,7 +235,13 @@ export type MarketingGeneratorReport = {
 
 type ContextReader = Pick<
   MarketingTransaction,
-  "marketingChannel" | "marketingReport" | "marketingCompetitor" | "appSetting" | "modelRegistryEntry" | "$queryRaw"
+  | "marketingChannel"
+  | "marketingReport"
+  | "marketingCompetitor"
+  | "appSetting"
+  | "modelRegistryEntry"
+  | "billingPlan"
+  | "$queryRaw"
 >;
 
 /**
@@ -211,13 +309,30 @@ export async function readMarketingGeneratorContext(
       allowedLocales: true,
     },
   });
-  const [brief, marketIntel, tracked, knownIds, llmSetting] = await Promise.all([
+  const [brief, marketIntel, tracked, knownIds, llmSetting, analysisSetting, plans] = await Promise.all([
     latestReport(db, "brief"),
     latestReport(db, "market_intel"),
     readMarketingCompetitorsForGenerator(db),
     readKnownMarketingCompetitorIds(db),
     db.appSetting.findUnique({ where: { key: MARKETING_LLM_SETTINGS_KEY }, select: { value: true } }),
+    db.appSetting.findUnique({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, select: { value: true } }),
+    getBillingPlansWithFieldSources(db),
   ]);
+  const activePlans: MarketingGeneratorPlan[] = plans
+    .filter((entry) => entry.plan.isActive)
+    .map(({ plan }) => ({
+      id: plan.id,
+      name: plan.name,
+      monthlyPriceCents: plan.monthlyPriceCents,
+      annualPriceCents: plan.annualPriceCents,
+      currency: plan.currency,
+      dailyMessageLimit: plan.dailyMessageLimit,
+      monthlyMessageLimit: plan.monthlyMessageLimit,
+      maxModels: plan.maxModels,
+      allowAttachments: plan.allowAttachments,
+      allowSharing: plan.allowSharing,
+      allowDownloads: plan.allowDownloads,
+    }));
   return {
     channels: channels.map((row) => ({
       id: row.id,
@@ -226,7 +341,10 @@ export async function readMarketingGeneratorContext(
       defaultLocale: row.defaultLocale,
       allowedLocales: [...row.allowedLocales],
     })),
-    claims: generatorProjection(),
+    claims: generatorClaimContext(
+      MARKETING_CLAIMS,
+      new Map(activePlans.map((plan) => [plan.id, plan as unknown as PlanValues])),
+    ),
     assets: generatorAssetProjection(
       await readMarketingAssetRegistry(db),
       channels.map((row) => row.channel),
@@ -236,5 +354,7 @@ export async function readMarketingGeneratorContext(
     marketIntel,
     competitors: { tracked, knownIds },
     llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
+    ownProduct: { pages: ownPages(), plans: activePlans },
+    analysis: { enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value) },
   };
 }
