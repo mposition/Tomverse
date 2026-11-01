@@ -56,7 +56,10 @@ export type MarketingCommentClassifier = (
 
 export const MARKETING_COMMENT_BODY_MAX_CHARS = 1_000;
 export const MARKETING_COMMENT_MAX_PER_POST = 50;
-export const MARKETING_COMMENT_MONITOR_POST_LIMIT = 40;
+/** Posts one run covers. More than this and the run is incomplete rather than a sample. */
+export const MARKETING_COMMENT_MONITOR_POST_LIMIT = 200;
+/** A run looks back this far before the last complete run's start, for comments written while it ran. */
+export const MARKETING_COMMENT_MONITOR_OVERLAP_MS = 600_000;
 
 export type MarketingCommentMonitorPost = {
   readonly id: string;
@@ -73,8 +76,8 @@ export type MarketingCommentsMonitorDeps = {
   readonly fetchComments: (post: MarketingCommentMonitorPost) => Promise<ZernioCommentsResult>;
   readonly operations: {
     readonly listPosts: (limit: number) => Promise<MarketingCommentMonitorPost[]>;
-    /** The instant after which a comment is new for this post, or null for all of them. */
-    readonly alertFloor: (postId: string) => Promise<Date | null>;
+    /** When the latest run that read and classified everything began, or null if none has. */
+    readonly lastCompleteRunAt: () => Promise<Date | null>;
     readonly recordAlert: (input: {
       postId: string;
       alertCount: number;
@@ -83,6 +86,7 @@ export type MarketingCommentsMonitorDeps = {
     }) => Promise<{ recorded: boolean }>;
     /** Stops the accounts with an alert unanswered past the limit; returns how many it stopped. */
     readonly sweepUnhandled: (now: Date) => Promise<number>;
+    /** Records a whole run; `at` is when it began, so comments written during it are read again. */
     readonly recordRun: (at: Date) => Promise<void>;
   };
 };
@@ -109,9 +113,9 @@ export const marketingCommentBodiesForModel = (
   floor: Date | null,
 ): string[] =>
   comments
-    // A comment with no time is new only for a post that has never been looked at.
+    // A comment with no time cannot be placed, so it is read every run.
     .filter((comment) =>
-      floor === null ? true : comment.createdAt !== null && comment.createdAt.getTime() > floor.getTime(),
+      floor === null || comment.createdAt === null || comment.createdAt.getTime() > floor.getTime(),
     )
     .slice(0, MARKETING_COMMENT_MAX_PER_POST)
     .map((comment) => comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS));
@@ -123,12 +127,19 @@ export async function runMarketingCommentsMonitor(
   if (deps.classifier === null) return { ran: false, reason: "classifier_unavailable" };
 
   const { operations } = deps;
-  const posts = await operations.listPosts(MARKETING_COMMENT_MONITOR_POST_LIMIT);
-  let postsUnread = 0;
+  const startedAt = deps.now();
+  // New is relative to the last run that saw everything -- not to when an alert
+  // was written, which is later than the page it came from. A run that did not
+  // see everything does not move it, so what it missed is read again.
+  const lastRun = await operations.lastCompleteRunAt();
+  const floor = lastRun === null ? null : new Date(lastRun.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS);
+  const listed = await operations.listPosts(MARKETING_COMMENT_MONITOR_POST_LIMIT + 1);
+  const posts = listed.slice(0, MARKETING_COMMENT_MONITOR_POST_LIMIT);
+  // A sample is not a run: with posts left over, the health record is not moved.
+  let postsUnread = listed.length > posts.length ? 1 : 0;
   let alertsRecorded = 0;
 
   for (const post of posts) {
-    const floor = await operations.alertFloor(post.id);
     const page = await deps.fetchComments(post);
     if (page.kind !== "ok") {
       postsUnread += 1;
@@ -156,7 +167,7 @@ export async function runMarketingCommentsMonitor(
       postId: post.id,
       alertCount,
       riskCodes,
-      detectedAt: deps.now(),
+      detectedAt: startedAt,
     });
     if (outcome.recorded) alertsRecorded += 1;
   }
@@ -165,7 +176,7 @@ export async function runMarketingCommentsMonitor(
   // the monitor to be perfect before it counts against the account.
   const accountsStopped = await operations.sweepUnhandled(deps.now());
   const complete = postsUnread === 0;
-  if (complete) await operations.recordRun(deps.now());
+  if (complete) await operations.recordRun(startedAt);
   return {
     ran: true,
     postsChecked: posts.length,

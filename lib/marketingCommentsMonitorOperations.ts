@@ -3,13 +3,15 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 
 import type { MarketingCommentsMonitorDeps } from "@/lib/marketingCommentsMonitor";
-import { recordMarketingCommentsMonitorRun } from "@/lib/marketingCommentsMonitorHealth";
+import {
+  readMarketingCommentsMonitorLastRun,
+  recordMarketingCommentsMonitorRun,
+} from "@/lib/marketingCommentsMonitorHealth";
 import {
   MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
   evaluateMarketingAutoPause,
   listMarketingPostsForCommentMonitor,
   listOpenMarketingCommentAlerts,
-  readMarketingCommentAlertFloor,
   recordMarketingCommentAlert,
   runMarketingTransaction,
 } from "@/lib/marketingStore";
@@ -26,7 +28,7 @@ export const marketingCommentsMonitorOperations = (
     runMarketingTransaction(client, (tx) =>
       listMarketingPostsForCommentMonitor(tx, { now: new Date(), limit }),
     ),
-  alertFloor: (postId) => readMarketingCommentAlertFloor(client, postId),
+  lastCompleteRunAt: () => readMarketingCommentsMonitorLastRun(client),
   recordAlert: async (input) => {
     const outcome = await runMarketingTransaction(client, (tx) =>
       recordMarketingCommentAlert(tx, input),

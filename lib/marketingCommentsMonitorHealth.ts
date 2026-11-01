@@ -52,7 +52,19 @@ export async function readMarketingCommentsMonitorHealthy(
   return commentsMonitorHealthyFromValue(row?.value, now, process.env);
 }
 
-/** A whole run finished with every read answered. */
+/** The start of the latest run that read and classified everything, or null. */
+export async function readMarketingCommentsMonitorLastRun(
+  client: Pick<PrismaClient, "appSetting"> = prisma,
+): Promise<Date | null> {
+  const row = await client.appSetting.findUnique({
+    where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY },
+    select: { value: true },
+  });
+  const at = row ? new Date(row.value) : null;
+  return at && !Number.isNaN(at.getTime()) ? at : null;
+}
+
+/** A whole run finished with every read answered; `at` is when that run began. */
 export async function recordMarketingCommentsMonitorRun(
   client: Pick<PrismaClient, "appSetting">,
   at: Date,

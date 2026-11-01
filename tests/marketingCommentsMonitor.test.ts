@@ -48,13 +48,15 @@ const monitor = (
     classifier?: MarketingCommentsMonitorDeps["classifier"];
     posts?: ReturnType<typeof post>[];
     comments?: Record<string, ReturnType<typeof comment>[] | "unavailable">;
-    floors?: Record<string, Date | null>;
+    lastComplete?: Date | null;
+    manyPosts?: number;
     swept?: number;
   } = {},
 ) => {
   const calls: Calls = [];
   const classified: string[][] = [];
   const recorded: Array<{ postId: string; alertCount: number; riskCodes: readonly string[] }> = [];
+  const runs: Date[] = [];
   const deps: MarketingCommentsMonitorDeps = {
     env: options.env ?? ON,
     enabled: commentsMonitorEnabled,
@@ -74,9 +76,10 @@ const monitor = (
     operations: {
       listPosts: async () => {
         calls.push("listPosts");
+        if (options.manyPosts) return Array.from({ length: options.manyPosts }, (_, index) => post(`m${index}`));
         return options.posts ?? [post("p1")];
       },
-      alertFloor: async (postId) => options.floors?.[postId] ?? null,
+      lastCompleteRunAt: async () => options.lastComplete ?? null,
       recordAlert: async (input) => {
         calls.push("recordAlert");
         recorded.push(input);
@@ -86,12 +89,13 @@ const monitor = (
         calls.push("sweep");
         return options.swept ?? 0;
       },
-      recordRun: async () => {
+      recordRun: async (at) => {
         calls.push("recordRun");
+        runs.push(at);
       },
     },
   };
-  return { deps, calls, classified, recorded };
+  return { deps, calls, classified, recorded, runs };
 };
 
 const comment = (text: string, createdAt: string | null = "2026-11-02T08:00:00.000Z") => ({
@@ -153,8 +157,11 @@ test("the posting tool's comment page loses its authors before anything else see
   for (const forbidden of ["u1", "Handle Name", "handle", "x.example", "c1"]) {
     assert.equal(printed.includes(forbidden), false, forbidden);
   }
-  assert.deepEqual(parseZernioComments(null), []);
-  assert.deepEqual(parseZernioComments({ comments: "x" }), []);
+  // An empty list is an answer; a body that is not a page of comments is not.
+  assert.deepEqual(parseZernioComments({ comments: [] }), []);
+  assert.equal(parseZernioComments(null), null);
+  assert.equal(parseZernioComments({ comments: "x" }), null);
+  assert.equal(parseZernioComments({ error: "changed shape" }), null);
 });
 
 test("an alert carries a count and closed codes; codes outside the list are dropped", async () => {
@@ -178,16 +185,36 @@ test("a model that flags only unknown codes raises nothing", async () => {
   assert.deepEqual(recorded, []);
 });
 
-test("only comments newer than the last alert or answer are given to the model", async () => {
-  const floor = new Date("2026-11-02T08:30:00.000Z");
+test("only comments newer than the last whole run, less a margin, are given to the model; undated ones always are", async () => {
+  // The run began at 08:40; the margin is ten minutes, so 08:30 is the floor.
   const { deps, classified } = monitor({
+    lastComplete: new Date("2026-11-02T08:40:00.000Z"),
     comments: {
-      p1: [comment("old", "2026-11-02T08:00:00.000Z"), comment("new", "2026-11-02T08:45:00.000Z"), comment("undated", null)],
+      p1: [
+        comment("old", "2026-11-02T08:00:00.000Z"),
+        comment("written while that run read", "2026-11-02T08:35:00.000Z"),
+        comment("new", "2026-11-02T08:45:00.000Z"),
+        comment("undated", null),
+      ],
     },
-    floors: { p1: floor },
   });
   await runMarketingCommentsMonitor(deps);
-  assert.deepEqual(classified, [["new"]]);
+  assert.deepEqual(classified, [["written while that run read", "new", "undated"]]);
+});
+
+test("a whole run is recorded at the instant it began, so what was written during it is read again", async () => {
+  const { deps, runs } = monitor({ comments: { p1: [comment("fine")] } });
+  await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(runs, [NOW]);
+});
+
+test("more posts than a run covers is a sample, not a run: it reads what it can and records no health", async () => {
+  const { deps, calls } = monitor({ manyPosts: 201 });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.equal(result.ran && result.complete, false);
+  assert.equal(calls.filter((call) => call.startsWith("fetch:")).length, 200);
+  assert.equal(calls.includes("recordRun"), false);
+  assert.ok(calls.includes("sweep"));
 });
 
 // ---------------------------------------------------------------------------
@@ -270,6 +297,9 @@ test("the comments call asks for one account's post with the key, and anything b
   assert.deepEqual(ok, { kind: "ok", comments: [{ text: "hello", createdAt: null }] });
   assert.equal(seen[0].url, "https://zernio.example/api/v1/inbox/comments/ext%201?accountId=acct%2F1&limit=50");
   assert.equal(seen[0].headers.Authorization, "Bearer secret-key");
+  // A 200 whose body is not a page of comments is not "no comments".
+  assert.deepEqual(await make(200, { error: "changed shape" }).fetchComments("p", "a"), { kind: "unavailable" });
+  assert.deepEqual(await make(200, null).fetchComments("p", "a"), { kind: "unavailable" });
   for (const status of [401, 404, 429, 500]) {
     assert.deepEqual(await make(status, { comments: [{ message: "x" }] }).fetchComments("p", "a"), { kind: "unavailable" });
   }
@@ -281,7 +311,7 @@ test("the comments call asks for one account's post with the key, and anything b
 
 const asTransaction = (database: unknown): MarketingTransaction => database as MarketingTransaction;
 
-type ReportRow = { createdAt: Date; payload: unknown };
+type ReportRow = { id?: string; createdAt: Date; payload: unknown };
 
 const payload = (postId: string, firstDetectedAt = "2026-11-02T07:00:00.000Z") => ({
   postId,
@@ -310,7 +340,12 @@ const storeWorld = (
       return [{ now: NOW, createdAt: NOW }];
     },
     marketingReport: {
-      findMany: async () => reports,
+      // Honours the page size and the cursor, as the table does.
+      findMany: async (args: { take?: number; cursor?: { id: string }; skip?: number }) => {
+        const all = reports.map((report, index) => ({ id: report.id ?? `r${index}`, ...report }));
+        const start = args.cursor ? all.findIndex((report) => report.id === args.cursor?.id) + (args.skip ?? 0) : 0;
+        return all.slice(start, start + (args.take ?? all.length));
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         created.push(data);
         return data;
@@ -481,4 +516,20 @@ test("a forced reason without the instant its fact began stops nothing", async (
     forcedReason: "unhandled_comment_alert",
   });
   assert.deepEqual(result, { paused: false });
+});
+
+test("an unanswered alert older than the newest few hundred reports is still found", async () => {
+  const oldest = new Date("2026-10-20T00:00:00.000Z");
+  // 450 reports for other posts, newer; the one that matters is the oldest.
+  const newer = Array.from({ length: 450 }, (_, index) => ({
+    id: `n${index}`,
+    createdAt: new Date(NOW.getTime() - index * 1000),
+    payload: payload(`other-${index}`),
+  }));
+  const { database } = storeWorld({
+    reports: [...newer, { id: "oldest", createdAt: oldest, payload: payload("p-old", oldest.toISOString()) }],
+    acknowledgements: newer.map((report, index) => ({ targetId: `other-${index}`, createdAt: NOW })),
+  });
+  const open = await listOpenMarketingCommentAlerts(database as never);
+  assert.deepEqual(open.map((alert) => alert.postId), ["p-old"]);
 });

@@ -29,10 +29,15 @@ const instant = (value: unknown): Date | null => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-/** The comments in one response page. Anything unreadable is skipped, not guessed. */
-export const parseZernioComments = (body: unknown): ParsedZernioComment[] => {
+/**
+ * The comments in one response page, or null when the response is not a page of
+ * comments at all. An empty list is an answer ("no comments"); a body that is
+ * not a list is not, and the caller must not take it for one. Single items that
+ * cannot be read are skipped, not guessed.
+ */
+export const parseZernioComments = (body: unknown): ParsedZernioComment[] | null => {
   const list = (body as { comments?: unknown } | null)?.comments;
-  if (!Array.isArray(list)) return [];
+  if (!Array.isArray(list)) return null;
   const comments: ParsedZernioComment[] = [];
   for (const item of list) {
     if (typeof item !== "object" || item === null) continue;
@@ -62,6 +67,7 @@ export const zernioCommentsQuery = (ports: ZernioTransportPorts) => ({
       { method: "GET" },
     );
     if (result.kind === "unreachable" || result.status !== 200) return { kind: "unavailable" };
-    return { kind: "ok", comments: parseZernioComments(result.body) };
+    const comments = parseZernioComments(result.body);
+    return comments === null ? { kind: "unavailable" } : { kind: "ok", comments };
   },
 });

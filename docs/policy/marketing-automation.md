@@ -423,7 +423,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 `GET /v1/inbox/comments/{postId}`(게시 도구 생성 클라이언트 문서 기준, 실응답 대조는 12.1 선행 조건 이행 후)로 읽어 **본문만** 분류기에 넘기고
 (작성자·id·링크는 읽는 즉시 버린다), 저장은 `comment_alerts` 보고서(건수·닫힌 위험 코드·최초 감지·URL host)와 시스템 감사 한 줄뿐이다.
 알림은 운영자 확인 감사 항목(`marketing_comment_alert.acknowledge`)보다 오래된 동안 열려 있고, 24시간 열려 있으면 계정이 S4a 경로로 정지한다
-(재개 이전에 열린 알림은 다시 정지시키지 않는다). 모든 글을 읽고 분류까지 끝낸 실행만 `marketing_comments_monitor_last_run` 설정에 시각을
+(재개 이전에 열린 알림은 다시 정지시키지 않는다). 모든 글을 읽고 분류까지 끝낸 실행만 `marketing_comments_monitor_last_run` 설정에 **시작** 시각을(다음 실행은 그 시각 10분 전 이후의 댓글을 새 것으로 본다; 한 번에 200글까지, 넘으면 표본이라 기록하지 않는다)
 남기며, 3시간 안이면 `commentsMonitorHealthy`가 참이다(졸업 판정·자율 게시 판정 공통). **분류기는 아직 연결되지 않았다**: 분류는 마케팅
 LLM 원장·월 상한을 쓰는 생성 서비스 쪽 일이라 이 PR은 분류기 자리만 두며, 없으면 `classifier_unavailable`로 아무것도 읽지 않는다.
 

@@ -6119,8 +6119,8 @@ export const MARKETING_COMMENT_ALERT_RECORDED_ACTION = "marketing_comment_alert.
 export const MARKETING_COMMENT_ALERT_ACK_ACTION = "marketing_comment_alert.acknowledge";
 /** An alert nobody answered for this long stops the account (policy 8.3). */
 export const MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS = 86_400_000;
-/** How many alert rows the console and the sweep read: ninety days of them are kept. */
-const MARKETING_COMMENT_ALERT_READ_LIMIT = 500;
+/** Alert reports are read in pages of this size, all of them: ninety days are kept. */
+const MARKETING_COMMENT_ALERT_PAGE = 200;
 
 export type MarketingCommentAlert = {
   readonly postId: string;
@@ -6142,12 +6142,20 @@ export async function listOpenMarketingCommentAlerts(
   database: MarketingDatabase,
   options: { readonly ignoreAuditLogId?: string } = {},
 ): Promise<MarketingCommentAlert[]> {
-  const reports = await database.marketingReport.findMany({
-    where: { kind: "comment_alerts" },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: MARKETING_COMMENT_ALERT_READ_LIMIT,
-    select: { createdAt: true, payload: true },
-  });
+  // Every alert report, page by page: a safety decision made on the newest part
+  // would lose the oldest unanswered alert -- the one that matters most.
+  const reports: Array<{ id: string; createdAt: Date; payload: Prisma.JsonValue }> = [];
+  for (;;) {
+    const page = await database.marketingReport.findMany({
+      where: { kind: "comment_alerts" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: MARKETING_COMMENT_ALERT_PAGE,
+      ...(reports.length > 0 ? { cursor: { id: reports[reports.length - 1].id }, skip: 1 } : {}),
+      select: { id: true, createdAt: true, payload: true },
+    });
+    reports.push(...page);
+    if (page.length < MARKETING_COMMENT_ALERT_PAGE) break;
+  }
   const newest = new Map<string, { createdAt: Date; payload: ReturnType<typeof parseMarketingReportPayload> }>();
   for (const report of reports) {
     let payload;
@@ -6199,30 +6207,6 @@ export async function listOpenMarketingCommentAlerts(
     });
   }
   return open.sort((a, b) => b.firstDetectedAt.getTime() - a.firstDetectedAt.getTime());
-}
-
-/**
- * When the monitor last looked at a post's comments and what it needs to look
- * for: only comments newer than the later of the last alert and the last answer
- * are new, so an answered alert does not come back for the comment it was about.
- */
-export async function readMarketingCommentAlertFloor(
-  database: MarketingDatabase,
-  postId: string,
-): Promise<Date | null> {
-  const [answer, report] = await Promise.all([
-    database.adminAuditLog.findFirst({
-      where: { action: MARKETING_COMMENT_ALERT_ACK_ACTION, targetId: postId },
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true },
-    }),
-    database.adminAuditLog.findFirst({
-      where: { action: MARKETING_COMMENT_ALERT_RECORDED_ACTION, targetId: postId },
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true },
-    }),
-  ]);
-  return marketingAutoPauseWindowStart([answer?.createdAt, report?.createdAt]);
 }
 
 /**
