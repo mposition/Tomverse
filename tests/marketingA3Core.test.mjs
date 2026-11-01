@@ -89,8 +89,48 @@ test("only facts that parse and cite a URL the provider cited on an official hos
   assert.equal(readMarketingA3Answer(answer, { ...input, citations: [] }).facts.length, 0);
 
   for (const content of ["not json", "[]", "{}", '{"facts":"x"}']) {
-    assert.deepEqual(readMarketingA3Answer(content, input), { facts: [], unrepresentable: 0, unreadable: true, dropped: {} });
+    assert.deepEqual(readMarketingA3Answer(content, input), {
+      facts: [],
+      features: [],
+      unrepresentable: 0,
+      unreadable: true,
+      dropped: {},
+      featuresDropped: 0,
+    });
   }
+  // An answer from before features existed has none, and loses nothing else.
+  assert.deepEqual(readMarketingA3Answer(answer, input).features, []);
+});
+
+test("a feature name is kept only from an official page the provider retrieved, as plain words", () => {
+  const input = {
+    competitorId: "poe",
+    officialHosts: HOSTS,
+    citations: ["https://poe.com/pricing?utm_source=chatgpt.com"],
+    checkedAt: "2026-10-17T00:00:00.000Z",
+  };
+  const answer = JSON.stringify({
+    facts: [],
+    features: [
+      { name: "  Multi-bot   chat ", sourceUrl: `${PAGE}?utm_source=chatgpt.com` },
+      // The same name again, in another case.
+      { name: "multi-bot chat", sourceUrl: PAGE },
+      // Not retrieved, and not official.
+      { name: "Image generation", sourceUrl: "https://poe.com/other" },
+      { name: "File upload", sourceUrl: "https://evil.example/pricing" },
+      // Not a name: empty, too long, or carrying a control character.
+      { name: "", sourceUrl: PAGE },
+      { name: "x".repeat(121), sourceUrl: PAGE },
+      { name: `Hidden${String.fromCharCode(7)}bell`, sourceUrl: PAGE },
+      { name: 42, sourceUrl: PAGE },
+    ],
+    unrepresentable: 0,
+  });
+  const read = readMarketingA3Answer(answer, input);
+  assert.deepEqual(read.features, [{ competitorId: "poe", name: "Multi-bot chat", sourceUrl: PAGE }]);
+  assert.equal(read.featuresDropped, 7);
+  // Feature names are not facts and not counted as unrepresentable.
+  assert.equal(read.unrepresentable, 0);
 });
 
 test("the report is a signed market_intel report the app's route accepts as is", () => {

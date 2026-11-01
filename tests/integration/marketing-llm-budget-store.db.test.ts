@@ -20,6 +20,7 @@ import {
   settleMarketingLlmCall,
   type MarketingLlmBudgetEnvironment,
 } from "@/lib/marketingLlmBudgetStore";
+import { MARKETING_ANALYSIS_ENABLED_KEY } from "@/lib/marketingAnalysisCore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
@@ -41,7 +42,7 @@ beforeEach(async () => {
 });
 after(async () => {
   await reset();
-  await prisma.appSetting.deleteMany({ where: { key: MARKETING_LLM_SETTINGS_KEY } });
+  await prisma.appSetting.deleteMany({ where: { key: { in: [MARKETING_LLM_SETTINGS_KEY, MARKETING_ANALYSIS_ENABLED_KEY] } } });
   await prisma.$disconnect();
 });
 
@@ -456,4 +457,22 @@ test("the comment monitor's calls are their own purpose in the ledger, and the d
   // A purpose the list does not name is refused by the shape CHECK, whoever writes it.
   await assert.rejects(reserve(2, OPEN, { purpose: "comment_moderation" as MarketingLlmPurpose }), /MarketingLlmCall_shape_check/);
   assert.equal(await prisma.marketingLlmCall.count(), 1);
+});
+
+test("a brief reservation spends only while the operator's analysis switch is on", async () => {
+  await prisma.appSetting.deleteMany({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY } });
+  // No row, and any value but "true", is off: refused before anything is written.
+  assert.deepEqual(await reserve(1, OPEN, { purpose: "brief" }), { status: "refused", code: "purpose_disabled" });
+  await prisma.appSetting.create({ data: { key: MARKETING_ANALYSIS_ENABLED_KEY, value: "on" } });
+  assert.deepEqual(await reserve(2, OPEN, { purpose: "brief" }), { status: "refused", code: "purpose_disabled" });
+  assert.equal(await prisma.marketingLlmCall.count(), 0);
+  assert.equal(await prisma.adminAuditLog.count(), 0);
+  // A draft is another purpose and does not ask.
+  assert.equal((await reserve(3)).status, "ok");
+
+  await prisma.appSetting.update({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, data: { value: "true" } });
+  assert.equal((await reserve(4, OPEN, { purpose: "brief" })).status, "ok");
+  // Under the same cap: the switch lets the purpose spend, not more.
+  await cap("0.2");
+  assert.deepEqual(await reserve(5, OPEN, { purpose: "brief" }), { status: "refused", code: "budget_exhausted" });
 });
