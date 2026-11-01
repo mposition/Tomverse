@@ -13,8 +13,11 @@ import { prisma } from "@/lib/prisma";
  * reads what the public wrote under our posts, which needs a lawful basis, a
  * privacy assessment, the posting tool's data-processing terms and a revised
  * privacy notice first (policy 12.1). Until a person has done those and set
- * `MARKETING_COMMENTS_MONITOR_ENABLED=true` on the service that runs the
- * monitor, nothing here reads a comment and nothing calls the posting tool.
+ * `MARKETING_COMMENTS_MONITOR_ENABLED=true`, nothing here reads a comment and
+ * nothing calls the posting tool. The same variable has to be set on every service
+ * that asks whether the monitor is healthy -- the web app (console and graduation)
+ * and the publisher (autonomous admission) as well as the service that runs the
+ * monitor -- or they read it as unhealthy, which is the safe way to be wrong.
  *
  * The health is a timestamp the monitor writes when a whole run finished with
  * every read answered, kept as an app setting so the autonomous admission can

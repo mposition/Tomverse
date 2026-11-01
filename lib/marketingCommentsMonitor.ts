@@ -86,7 +86,8 @@ export type MarketingCommentsMonitorDeps = {
       alertCount: number;
       riskCodes: readonly MarketingCommentRiskCode[];
       detectedAt: Date;
-    }) => Promise<{ recorded: boolean }>;
+      answeredAtSeen: Date | null;
+    }) => Promise<{ recorded: boolean; reason?: string }>;
     /** Stops the accounts with an alert unanswered past the limit; returns how many it stopped. */
     readonly sweepUnhandled: (now: Date) => Promise<number>;
     /** Records a whole run; `at` is when it began, so comments written during it are read again. */
@@ -203,8 +204,12 @@ export async function runMarketingCommentsMonitor(
           alertCount,
           riskCodes,
           detectedAt: startedAt,
+          answeredAtSeen: answers.get(post.id) ?? null,
         });
         if (outcome.recorded) alertsRecorded += 1;
+        // The operator answered while the comments were being classified: the
+        // verdict was about handled comments, and the next run judges again.
+        else if (outcome.reason === "answer_changed") postsUnread += 1;
       } catch {
         // The fetch, the model or the write failed for this post. It is unread;
         // the rest of the run goes on.

@@ -6262,13 +6262,13 @@ async function marketingCommentAlertState(
   database: MarketingDatabase,
   postId: string,
   ignoreAuditLogId?: string,
-): Promise<{ readonly open: boolean; readonly firstDetectedAt: Date | null }> {
+): Promise<{ readonly open: boolean; readonly firstDetectedAt: Date | null; readonly answeredAt: Date | null }> {
   const report = await database.marketingReport.findFirst({
     where: { kind: "comment_alerts", payload: { path: ["postId"], equals: postId } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: { createdAt: true, payload: true },
   });
-  if (!report) return { open: false, firstDetectedAt: null };
+  if (!report) return { open: false, firstDetectedAt: null, answeredAt: null };
   const detected = new Date(
     String((report.payload as { firstDetectedAt?: unknown } | null)?.firstDetectedAt ?? ""),
   );
@@ -6285,6 +6285,7 @@ async function marketingCommentAlertState(
   return {
     open: !(answer && answer.createdAt.getTime() >= report.createdAt.getTime()),
     firstDetectedAt,
+    answeredAt: answer?.createdAt ?? null,
   };
 }
 
@@ -6303,8 +6304,13 @@ export async function recordMarketingCommentAlert(
     readonly alertCount: number;
     readonly riskCodes: readonly string[];
     readonly detectedAt: Date;
+    /** The operator's latest answer the comments were judged against; null if there was none. */
+    readonly answeredAtSeen: Date | null;
   },
-): Promise<{ readonly recorded: true } | { readonly recorded: false; readonly reason: "already_open" | "post_not_published" }> {
+): Promise<
+  | { readonly recorded: true }
+  | { readonly recorded: false; readonly reason: "already_open" | "post_not_published" | "answer_changed" }
+> {
   await takeAuditChainLock(database);
   const post = await database.marketingPost.findUnique({
     where: { id: String(rawInput.postId) },
@@ -6313,7 +6319,17 @@ export async function recordMarketingCommentAlert(
   if (!post || !post.externalUrl || (post.status !== "published" && post.status !== "verified")) {
     return { recorded: false, reason: "post_not_published" };
   }
-  if ((await marketingCommentAlertState(database, post.id)).open) return { recorded: false, reason: "already_open" };
+  const state = await marketingCommentAlertState(database, post.id);
+  if (state.open) return { recorded: false, reason: "already_open" };
+  // Under the lock, the answer the comments were judged against must still be the
+  // latest. One that came in while they were being classified makes the verdict
+  // about comments the operator has since handled, and nothing is recorded.
+  if (
+    state.answeredAt !== null &&
+    (rawInput.answeredAtSeen === null || state.answeredAt.getTime() > rawInput.answeredAtSeen.getTime())
+  ) {
+    return { recorded: false, reason: "answer_changed" };
+  }
   const detectedAt = new Date(rawInput.detectedAt.getTime());
   await insertMarketingReport(database, {
     kind: "comment_alerts",

@@ -418,7 +418,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - **선행 조건(사람):** lawful basis·DPIA 검토, 게시 도구의 처리자 지위·DPA·하위처리자·데이터 위치, 호주 APP 8 해외 이전,
   GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있고, **댓글 모니터링 없이는 졸업이 없다.**
 
-**S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다. 꺼져 있으면
+**S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다(건강 판정을 묻는 웹 앱·게시기와 모니터를 돌리는 서비스 모두에 같은 값을 둔다). 꺼져 있으면
 `runMarketingCommentsMonitor()`는 DB·게시 도구·모델 어느 것도 건드리지 않고 돌아온다. 켜진 실행은 최근 14일 안에 게시된 글의 댓글을
 `GET /v1/inbox/comments/{postId}`(게시 도구 생성 클라이언트 문서 기준, 실응답 대조는 12.1 선행 조건 이행 후)로 읽어 **본문만** 분류기에 넘기고
 (작성자·id·링크는 읽는 즉시 버린다), 저장은 `comment_alerts` 보고서(건수·닫힌 위험 코드·최초 감지·URL host)와 시스템 감사 한 줄뿐이다.

@@ -53,6 +53,7 @@ const monitor = (
     manyPosts?: number;
     truncated?: Set<string>;
     recordAlertThrows?: boolean;
+    recordAlertAnswer?: { recorded: boolean; reason?: string };
     listPostsThrows?: boolean;
     sweepThrows?: boolean;
     swept?: number;
@@ -93,7 +94,7 @@ const monitor = (
         calls.push("recordAlert");
         if (options.recordAlertThrows) throw new Error("database lost");
         recorded.push(input);
-        return { recorded: true };
+        return options.recordAlertAnswer ?? { recorded: true };
       },
       sweepUnhandled: async () => {
         calls.push("sweep");
@@ -190,7 +191,7 @@ test("an alert carries a count and closed codes; codes outside the list are drop
   });
   const result = await runMarketingCommentsMonitor(deps);
   assert.deepEqual(recorded, [
-    { postId: "p1", alertCount: 2, riskCodes: ["legal_threat", "abuse_or_harassment"], detectedAt: NOW },
+    { postId: "p1", alertCount: 2, riskCodes: ["legal_threat", "abuse_or_harassment"], detectedAt: NOW, answeredAtSeen: null },
   ]);
   assert.equal(result.ran && result.alertsRecorded, 1);
 });
@@ -454,6 +455,7 @@ test("recording an alert writes a counts-only report and its audit entry, once",
     alertCount: 2,
     riskCodes: ["legal_threat", "abuse_or_harassment"],
     detectedAt: NOW,
+    answeredAtSeen: null,
   });
   assert.deepEqual(result, { recorded: true });
   assert.equal(world.created.length, 1);
@@ -474,14 +476,14 @@ test("recording an alert writes a counts-only report and its audit entry, once",
 test("a post that already has an unanswered alert gets no second one; an unpublished post gets none", async () => {
   const open = storeWorld({ reports: [{ createdAt: NOW, payload: payload("p1") }] });
   assert.deepEqual(
-    await recordMarketingCommentAlert(asTransaction(open.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW }),
+    await recordMarketingCommentAlert(asTransaction(open.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW, answeredAtSeen: null }),
     { recorded: false, reason: "already_open" },
   );
   assert.equal(open.created.length, 0);
 
   const draft = storeWorld({ postStatus: "approved" });
   assert.deepEqual(
-    await recordMarketingCommentAlert(asTransaction(draft.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW }),
+    await recordMarketingCommentAlert(asTransaction(draft.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW, answeredAtSeen: null }),
     { recorded: false, reason: "post_not_published" },
   );
 });
@@ -739,4 +741,45 @@ test("comments an operator already answered are not classified again, undated on
   await runMarketingCommentsMonitor(deps);
   assert.deepEqual(recorded.map((alert) => alert.alertCount), [1]);
   assert.equal(classified.length, 0);
+});
+
+test("an answer that came in while the comments were being classified stops the alert being recorded", async () => {
+  const reportAt = new Date("2026-11-02T07:00:00.000Z");
+  const answeredAt = new Date("2026-11-02T08:00:00.000Z");
+  // The earlier alert was answered; the monitor judged the comments against an
+  // older reading of the answer (none), and the answer is now there.
+  const world = storeWorld({
+    reports: [{ createdAt: reportAt, payload: payload("p1") }],
+    acknowledgements: [{ targetId: "p1", createdAt: answeredAt }],
+  });
+  const stale = await recordMarketingCommentAlert(asTransaction(world.database), {
+    postId: "p1",
+    alertCount: 1,
+    riskCodes: ["legal_threat"],
+    detectedAt: NOW,
+    answeredAtSeen: null,
+  });
+  assert.deepEqual(stale, { recorded: false, reason: "answer_changed" });
+  assert.equal(world.created.length, 0);
+
+  // Judged against the answer that is there: recorded.
+  const current = await recordMarketingCommentAlert(asTransaction(world.database), {
+    postId: "p1",
+    alertCount: 1,
+    riskCodes: ["legal_threat"],
+    detectedAt: NOW,
+    answeredAtSeen: answeredAt,
+  });
+  assert.deepEqual(current, { recorded: true });
+});
+
+test("a run whose alert was refused for a changed answer is incomplete and judges again next time", async () => {
+  const { deps, calls } = monitor({
+    comments: { p1: [comment("a")] },
+    classifier: async (bodies) => bodies.map(() => ["legal_threat"]),
+    recordAlertAnswer: { recorded: false, reason: "answer_changed" },
+  });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.equal(result.ran && result.complete, false);
+  assert.equal(calls.includes("recordRun"), false);
 });

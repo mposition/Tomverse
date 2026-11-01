@@ -35,7 +35,7 @@ export const marketingCommentsMonitorOperations = (
     const outcome = await runMarketingTransaction(client, (tx) =>
       recordMarketingCommentAlert(tx, input),
     );
-    return { recorded: outcome.recorded };
+    return outcome.recorded ? { recorded: true } : { recorded: false, reason: outcome.reason };
   },
   sweepUnhandled: async (now) => {
     const open = await listOpenMarketingCommentAlerts(client);
