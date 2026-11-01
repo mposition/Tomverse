@@ -14,14 +14,22 @@
  * the type below has no field for them, so a bundle cannot reach them.
  */
 
-export type LandingExperimentLocale =
-  | "en"
-  | "ko"
-  | "zh"
-  | "fr"
-  | "de"
-  | "es"
-  | "pt";
+/**
+ * The languages an experiment can cover. A language outside this list (such as
+ * zh-Hant) always shows the default copy and never asks the experiment route
+ * anything.
+ */
+export const LANDING_EXPERIMENT_LOCALES = [
+  "en",
+  "ko",
+  "zh",
+  "fr",
+  "de",
+  "es",
+  "pt",
+] as const;
+
+export type LandingExperimentLocale = (typeof LANDING_EXPERIMENT_LOCALES)[number];
 
 export type LandingSurfaceCopy = {
   /** Two lines, like the default headline. */

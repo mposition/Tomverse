@@ -16,7 +16,10 @@
 
 import { z } from "zod";
 
-import { landingVariantLocales } from "@/components/marketing/landingExperimentBundles";
+import {
+  LANDING_EXPERIMENT_LOCALES,
+  landingVariantLocales,
+} from "@/components/marketing/landingExperimentBundles";
 
 /** The same word as `EXPERIMENT_CONTROL_ARM` in `lib/marketingRoutes.ts`; a test holds them equal. */
 const CONTROL_ARM = "control";
@@ -71,15 +74,7 @@ export const EXPERIMENT_MAX_VARIANT_RATIO = 0.5;
 export const EXPERIMENT_METRICS = ["primary_cta_click"] as const;
 export const EXPERIMENT_EVENT_KINDS = ["exposure", "conversion"] as const;
 export type ExperimentEventKind = (typeof EXPERIMENT_EVENT_KINDS)[number];
-export const EXPERIMENT_LOCALES = [
-  "en",
-  "ko",
-  "zh",
-  "fr",
-  "de",
-  "es",
-  "pt",
-] as const;
+export const EXPERIMENT_LOCALES = LANDING_EXPERIMENT_LOCALES;
 
 export const experimentIdSchema = z
   .string()

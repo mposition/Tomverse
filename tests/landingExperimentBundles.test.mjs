@@ -138,3 +138,19 @@ test("the build prerenders one route per bundle, variant and covered locale", ()
     expected.sort()
   );
 });
+
+test("the covered languages are one list, and the beacon stays silent outside it", async () => {
+  const { LANDING_EXPERIMENT_LOCALES } = await import(
+    "../components/marketing/landingExperimentBundles.ts"
+  );
+  assert.deepEqual([...LANDING_EXPERIMENT_LOCALES], [...LOCALES]);
+  // zh-Hant has no variant copy: its visitors see the default page and the
+  // experiment route (which would refuse the language) is never asked.
+  assert.ok(!LANDING_EXPERIMENT_LOCALES.includes("zh-Hant"));
+  const { readFileSync } = await import("node:fs");
+  const beacon = readFileSync(
+    new URL("../components/marketing/LandingExperimentBeacon.tsx", import.meta.url),
+    "utf8"
+  );
+  assert.match(beacon, /LANDING_EXPERIMENT_LOCALES as readonly string\[\]\)\.includes\(locale\)\) return;/);
+});

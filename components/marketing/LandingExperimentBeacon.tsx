@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { LANDING_EXPERIMENT_LOCALES } from "@/components/marketing/landingExperimentBundles";
 import { ANALYTICS_CONSENT_STORAGE_KEY } from "@/lib/productAnalyticsShared";
 import {
   EXPERIMENT_CONTROL_ARM,
@@ -142,6 +143,9 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
     };
 
     const run = async () => {
+      // A language no experiment can cover has nothing to assign or measure,
+      // and the route would refuse it: stay silent.
+      if (!(LANDING_EXPERIMENT_LOCALES as readonly string[]).includes(locale)) return;
       const cookieValue = readCookie();
       const consent = readConsent();
       const probeKey = `${PROBE_OFF_KEY}_${consent}_${locale}`;

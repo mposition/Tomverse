@@ -136,8 +136,17 @@ test.describe("marketing console", () => {
     // feature nothing writes yet.
     await expect(page.getByText("Nothing here yet.")).toHaveCount(0);
 
+  });
+
+  test("the experiments section is built, so it opens its own controls instead of a stage notice", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
     await page.goto("/admin/marketing?tab=experiments");
-    await expect(page.getByText(/stage S5/)).toBeVisible();
+
+    await expect(page.getByTestId("marketing-experiment-top")).toBeVisible();
+    await expect(page.getByText(/stage S5/)).toHaveCount(0);
   });
 
   test("the competitors section shows a proposal with its decisions, and says how many rows it lists", async ({
