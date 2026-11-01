@@ -337,7 +337,7 @@ install-data HTTP 404.
 
 ## Browser sign-in domain association (2026-11-01)
 
-The owner reported that iPad 7th generation / iPadOS 18.7.10 on TestFlight
+The owner reported that iPad 7th generation on TestFlight
 1.0.21 (6) immediately showed the browser-cancelled message without presenting
 Safari. Email-code sign-in succeeded. The production association endpoint and
 Apple's CDN both returned HTTP 404 while browser sign-in capability was enabled.
@@ -347,6 +347,10 @@ The signed app already carries `applinks:tomverse.app` and
 `/.well-known/apple-app-site-association` now returns public JSON for the existing
 signed application identifier `F9KS3F6G9F.app.tomverse.shell`. Universal links
 claim only `/auth/mobile/callback`; shared web credentials use the same app.
+The identifier was read back from `application-identifier` in the embedded
+provisioning profile of the downloaded 1.0.21 (6) IPA, rather than inferred from
+the API key or team name. Callback URLs only finish an active native sign-in;
+opening a callback link alone does not create or recover an authentication session.
 The existing claimed HTTPS callback, state check, PKCE exchange and native token
 storage remain unchanged. Production deployment and an Apple CDN readback are
 needed before this can resolve installed-device sign-in.
@@ -360,6 +364,10 @@ the app while the production endpoint or CDN still returns 404. Reinstallation
 can discard local drafts and signs the user out. A successful endpoint check is
 not proof of a native browser login: observe the consent sheet, browser, callback
 and return to the signed-in app on the actual iPad.
+
+The local Next development server returned HTTP 200 `application/json` without
+a redirect through the real proxy. The deployed production response and Apple
+CDN still require separate readback, including the effective cache headers.
 
 References: [HTTPS callback requirements](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/callback/https(host:path:)),
 [association setup and caching](https://developer.apple.com/documentation/xcode/supporting-associated-domains),
