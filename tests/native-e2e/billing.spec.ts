@@ -23,7 +23,7 @@ async function installBilling(page: Page, web = false, overlap = false, bothStor
         }
         if (method === "getProducts") {
           if (catalogFails && catalogAttempts++ === 0) throw Error("Temporary store outage");
-          return { products: (options.productIdentifiers as string[]).map((identifier) => ({ identifier, priceString: identifier === "credits" ? "A$7.49" : identifier.endsWith(":annual") ? "A$280.00" : "A$29.99" })) };
+          return { products: (options.productIdentifiers as string[]).map((identifier) => ({ identifier, currencyCode: "AUD", priceString: identifier === "credits" ? "A$7.49" : identifier.endsWith(":annual") ? "A$280.00" : "A$29.99" })) };
         }
         if (pending && method === "purchaseStoreProduct") throw { code: "20" };
         if (outcome === "cancelled" && method === "purchaseStoreProduct") throw { code: "1" };
@@ -110,7 +110,7 @@ for (const outcome of ["expired", "lost"] as const) test(`native pass redemption
 
 test("native billing shows store prices, buys credits, upgrades, restores and opens store cancellation", async ({ page }) => {
   const calls = await installBilling(page);
-  await expect(page.getByText("A$7.49", { exact: true })).toBeVisible();
+  await expect(page.getByText("AUD A$7.49", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Buy credits", exact: true }).click();
   const confirmation = page.getByRole("dialog", { name: "1,500 credits added" });
   await expect(confirmation).toBeVisible();
@@ -193,7 +193,7 @@ test("a store catalog failure retains plans and recovers prices without starting
   await expect(page.getByRole("heading", { name: "Max", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Buy credits", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Try again", exact: true }).click();
-  await expect(page.getByText("A$7.49", { exact: true })).toBeVisible();
+  await expect(page.getByText("AUD A$7.49", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Buy credits", exact: true })).toBeEnabled();
   expect(calls.filter(call => call.method === "configure")).toHaveLength(1);
   expect(calls.filter(call => call.method === "logIn").length).toBeGreaterThan(0);
@@ -274,7 +274,7 @@ for (const [language, title, choose, buy, monthly, annual] of [
   await expect(panel.getByRole("button", { name: buy, exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: monthly, exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: annual, exact: true })).toBeVisible();
-  await expect(panel.getByText("A$7.49", { exact: true })).toBeVisible();
+  await expect(panel.getByText("AUD A$7.49", { exact: true })).toBeVisible();
   if (language === "ko") await page.screenshot({ path: test.info().outputPath("plan-korean.png") });
 });
 test("overlapping web and store subscriptions both remain manageable without another purchase", async ({ page }) => {
