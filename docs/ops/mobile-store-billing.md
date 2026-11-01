@@ -202,7 +202,12 @@ mapping, while retaining the Google products and webhook.
 iOS Keychain and installation-marker namespaces now follow the selected native
 API origin. Production retains its existing namespace; staging, development and
 unconfigured origins cannot read or clear that production credential. A build
-switch requires authentication for its own server. On the Mac, the signing
+switch requires authentication for its own server. The iOS bridge controller also
+uses a separate persistent WebKit data store for staging, preserving production's
+default store. This separates local drafts, last-chat pointers and pending image
+requests; unsupported origins use nonpersistent website storage. Both the scene
+delegate and storyboard select that controller before loading the web app.
+On the Mac, the signing
 workflow compiles and runs the pure Swift namespace tests before exporting the
 IPA. Windows preparation additionally validates the selected native API and an
 Apple `appl_` SDK key when billing is enabled.
