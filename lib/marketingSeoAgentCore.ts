@@ -87,8 +87,9 @@ export const SEO_AGENT_ATTESTATION_KEY_ENV = "MARKETING_SEO_ATTESTATION_KEY";
 export const SEO_AGENT_CHECK_UID_ENV = "MARKETING_SEO_CHECK_UID";
 export const SEO_AGENT_CHECK_GID_ENV = "MARKETING_SEO_CHECK_GID";
 /**
- * "true" says the whole validate phase already runs somewhere disposable that
- * holds nothing worth reading, so the checks may share its user. An explicit
+ * "true" says the whole validate phase already runs somewhere disposable, the
+ * LLM key and the attestation key it holds included (proposed code run by the
+ * same user can read them), so the checks may share its user. An explicit
  * acknowledgement, never a default.
  */
 export const SEO_AGENT_SAME_USER_ACK_ENV = "MARKETING_SEO_CHECKS_SAME_USER_ACK";
@@ -102,13 +103,17 @@ export type SeoCheckIsolation =
 export function seoAgentCheckIsolation(
   env: Readonly<Record<string, string | undefined>>,
   platform: string,
+  /** The uid of this process, where the platform has one: a check user equal to it is not another user. */
+  ownUid?: number,
 ): SeoCheckIsolation {
   const uid = env[SEO_AGENT_CHECK_UID_ENV];
   const gid = env[SEO_AGENT_CHECK_GID_ENV];
   if (uid !== undefined || gid !== undefined) {
     const valid = (value: string | undefined) => typeof value === "string" && /^[1-9][0-9]{0,9}$/.test(value);
     // Root (0) is not a separate user, and a half-set pair is a mistake, not a default.
-    if (platform === "win32" || !valid(uid) || !valid(gid)) return { mode: "refused", reason: "check_user_invalid" };
+    if (platform === "win32" || !valid(uid) || !valid(gid) || Number(uid) === ownUid) {
+      return { mode: "refused", reason: "check_user_invalid" };
+    }
     return { mode: "separate_user", uid: Number(uid), gid: Number(gid) };
   }
   if (env[SEO_AGENT_SAME_USER_ACK_ENV] === "true") return { mode: "same_user_acknowledged" };
@@ -673,6 +678,8 @@ export async function runSeoAgentValidate(
     readonly env: Readonly<Record<string, string | undefined>>;
     /** `process.platform`. */
     readonly platform: string;
+    /** `process.getuid()` where it exists. */
+    readonly ownUid?: number;
   },
   ports: SeoValidatePorts,
 ): Promise<SeoValidateResult> {
@@ -682,7 +689,7 @@ export async function runSeoAgentValidate(
   if (wrong.length > 0) return { status: "wrong_environment", problems: wrong };
   if (seoAgentTopicSlug(input.topic) === null) return { status: "invalid_topic" };
   // The checks run the proposed code: decided before anything is cloned or spent.
-  const isolation = seoAgentCheckIsolation(input.env, input.platform);
+  const isolation = seoAgentCheckIsolation(input.env, input.platform, input.ownUid);
   if (isolation.mode === "refused") return { status: "checks_not_isolated", reason: isolation.reason };
   // Without the key the result could not be told from a forgery, so nothing is spent.
   const attestationKey = input.env[SEO_AGENT_ATTESTATION_KEY_ENV];
@@ -754,13 +761,17 @@ export type SeoPublishPorts = {
   /** git's two views of the diff between the base commit and the commit. */
   readonly diff: (baseCommit: string, commitSha: string) => Promise<{ raw: string; numstat: string }>;
   readonly lookupGraduation: () => Promise<boolean>;
+  /** Create the branch at the commit, and fail if the server already has that branch (a conditional create). */
   readonly push: (commitSha: string, branch: string) => Promise<void>;
   /** The tree hash of the commit the remote branch points at, or null when it is not the pushed commit or cannot be read. */
   /** The remote branch as it is now, or null when it cannot be read. */
   readonly remoteRef: (branch: string) => Promise<{ readonly exists: boolean; readonly sha: string | null } | null>;
   readonly remoteTree: (branch: string, commitSha: string) => Promise<string | null>;
-  /** Delete a remote branch. Called only for a branch this run created and that still points at its own commit. */
-  readonly deleteBranch: (branch: string) => Promise<void>;
+  /**
+   * Delete a remote branch, but only if the server still has `commitSha` there (a conditional update, not a
+   * lookup followed by a delete). Called only for a branch this run created.
+   */
+  readonly deleteBranch: (branch: string, commitSha: string) => Promise<void>;
   readonly createPullRequest: (input: { branch: string; title: string; body: string }) => Promise<{ url: string }>;
 };
 
@@ -831,7 +842,7 @@ export async function runSeoAgentPublish(
     // Cleanup is only for what this run made. If the branch cannot be read, or
     // no longer points at the commit pushed here, it is left alone.
     const now = await ports.remoteRef(branch).catch(() => null);
-    if (now !== null && now.exists && now.sha === record.commitSha) await ports.deleteBranch(branch).catch(() => undefined);
+    if (now !== null && now.exists && now.sha === record.commitSha) await ports.deleteBranch(branch, record.commitSha).catch(() => undefined);
     return { status: "tree_mismatch", stage: "after_push" };
   }
   if (graduated) return { status: "pushed", branch, graduated, treeHash: record.treeHash, pullRequestUrl: null };

@@ -441,6 +441,9 @@ test("the checks run as another user, or the runner is acknowledged as disposabl
     for (const [uid, gid] of [["0", "1000"], ["1000", "0"], ["1000", undefined], [undefined, "1000"], ["-1", "1"], ["abc", "1"], ["1.5", "1"], ["", ""]]) {
         assert.deepEqual(isolation({ MARKETING_SEO_CHECK_UID: uid, MARKETING_SEO_CHECK_GID: gid }), { mode: "refused", reason: "check_user_invalid" }, `${uid}/${gid}`);
     }
+    // A check user equal to this process's own user is not another user.
+    assert.deepEqual(seoAgentCheckIsolation({ MARKETING_SEO_CHECK_UID: "1000", MARKETING_SEO_CHECK_GID: "1000" }, "linux", 1000), { mode: "refused", reason: "check_user_invalid" });
+    assert.equal(seoAgentCheckIsolation({ MARKETING_SEO_CHECK_UID: "1000", MARKETING_SEO_CHECK_GID: "1000" }, "linux", 0).mode, "separate_user");
     // A uid means nothing on Windows.
     assert.equal(isolation({ MARKETING_SEO_CHECK_UID: "1000", MARKETING_SEO_CHECK_GID: "1000" }, "win32").mode, "refused");
 });

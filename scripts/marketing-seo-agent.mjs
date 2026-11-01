@@ -42,7 +42,8 @@
 //                                      must be able to switch to it, i.e. root in a disposable container). Without
 //                                      them the phase refuses to run unless
 //   MARKETING_SEO_CHECKS_SAME_USER_ACK=true
-//                                      says the whole runner is disposable and holds nothing worth reading
+//                                      says the whole runner is disposable, the LLM key and the attestation key it
+//                                      holds included: proposed code run by the same user can read them
 //   MARKETING_SEO_ATTESTATION_KEY      both phases, 32+ characters: the validate phase signs its result with it and
 //                                      the publish phase refuses anything that does not verify
 //   MARKETING_SEO_GITHUB_APP_TOKEN     publish phase only: installation token of the repository-only GitHub App
@@ -55,7 +56,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -100,7 +101,7 @@ const git = (cwd, args, extra = {}) => {
 // The LLM stage, in its own process
 // ---------------------------------------------------------------------------
 
-if (option("--stage") === "llm") {
+if (option("--stage") === "llm" && process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   // The same gate as the parent: a direct run of this stage does not spend.
   const gate = seoAgentGate(process.env);
   if (!gate.on) {
@@ -178,15 +179,26 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   if (readdirSync(outDir).length > 0) fail(new Error("--out must be an empty directory"));
   const scratch = mkdtempSync(join(tmpdir(), "seo-agent-"));
 
+  // The workspace's git directory lives beside the work tree, not in it, and is this process's:
+  // the check user owns the files and can change neither the repository's config, its hooks nor
+  // its refs. Every git command here names the directory explicitly and trusts no hook.
+  const workspace = { gitDir: join(scratch, "git"), tree: join(scratch, "wt"), hooks: join(scratch, "no-hooks") };
+  mkdirSync(workspace.hooks);
+  const wgit = (args, extra = {}) =>
+    git(workspace.tree, ["-c", `core.hooksPath=${workspace.hooks}`, ...args], {
+      env: { ...seoAgentStageEnvironment(process.env, "checks"), GIT_DIR: workspace.gitDir, GIT_WORK_TREE: workspace.tree },
+      ...extra,
+    });
+
   const identity = ["-c", "user.name=marketing-agent", "-c", "user.email=marketing-agent@users.noreply.github.com"];
 
   const ports = {
     prepareWorkspace: async (base) => {
       // A clone of its own, so the proposed code cannot reach the main clone's refs, config or hooks.
-      const dir = join(scratch, "wt");
-      git(root, ["clone", "--shared", "--no-checkout", "--quiet", root, dir]);
-      git(dir, ["remote", "remove", "origin"]);
-      git(dir, ["checkout", "--quiet", "--detach", base]);
+      const dir = workspace.tree;
+      git(root, ["clone", "--shared", "--no-checkout", "--quiet", "--separate-git-dir", workspace.gitDir, root, dir]);
+      wgit(["remote", "remove", "origin"]);
+      wgit(["checkout", "--quiet", "--detach", base]);
       symlinkSync(join(root, "node_modules"), join(dir, "node_modules"), process.platform === "win32" ? "junction" : "dir");
       return dir;
     },
@@ -224,13 +236,13 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
       for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
     },
     stagedDiff: async (dir, base) => {
-      git(dir, ["add", "-A", "--", "."]);
+      wgit(["add", "-A", "--", "."]);
       return {
-        raw: git(dir, ["diff", "--cached", "--raw", "-z", "-M", "-C", "--no-abbrev", base]),
-        numstat: git(dir, ["diff", "--cached", "--numstat", "-z", "--no-renames", base]),
+        raw: wgit(["diff", "--cached", "--raw", "-z", "-M", "-C", "--no-abbrev", base]),
+        numstat: wgit(["diff", "--cached", "--numstat", "-z", "--no-renames", base]),
       };
     },
-    indexTree: async (dir) => git(dir, ["write-tree"]).trim(),
+    indexTree: async () => wgit(["write-tree"]).trim(),
     baseTests: async (base) =>
       SEO_AGENT_POLICY_TESTS.filter((path) => spawnSync("git", ["cat-file", "-e", `${base}:${path}`], { cwd: root }).status === 0),
     runChecks: async (dir, commands, isolation) => {
@@ -241,9 +253,15 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
       // this process's /proc/<pid>/environ (the LLM key, the attestation key) or its files.
       const asUser = isolation.mode === "separate_user" ? { uid: isolation.uid, gid: isolation.gid } : {};
       if (isolation.mode === "separate_user") {
+        if (typeof process.getuid === "function" && process.getuid() === isolation.uid) {
+          throw new Error("the check user is this process's own user");
+        }
         const home = join(scratch, "check-home");
         mkdirSync(home, { recursive: true });
         env.HOME = home;
+        // The check user may walk to its work tree (execute only: it cannot list the scratch directory)
+        // and owns the files in it and its HOME. It owns nothing of the repository.
+        chmodSync(scratch, 0o711);
         const owned = spawnSync("chown", ["-R", "-h", `${isolation.uid}:${isolation.gid}`, dir, home]);
         if (owned.status !== 0) throw new Error("the workspace could not be handed to the check user");
       }
@@ -261,13 +279,13 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
       return { ok: true };
     },
     commit: async (dir, message) => {
-      git(dir, [...identity, "commit", "-q", "-m", message]);
-      return { commitSha: git(dir, ["rev-parse", "HEAD"]).trim(), treeHash: git(dir, ["rev-parse", "HEAD^{tree}"]).trim() };
+      wgit([...identity, "commit", "-q", "-m", message]);
+      return { commitSha: wgit(["rev-parse", "HEAD"]).trim(), treeHash: wgit(["rev-parse", "HEAD^{tree}"]).trim() };
     },
     exportCommit: async (dir, base, commitSha) => {
-      git(dir, ["branch", BUNDLE_REF, commitSha]);
+      wgit(["branch", BUNDLE_REF, commitSha]);
       const bundle = join(resolve(outDir), "change.bundle");
-      git(dir, ["bundle", "create", bundle, BUNDLE_REF, `^${base}`]);
+      wgit(["bundle", "create", bundle, BUNDLE_REF, `^${base}`]);
       return { bundleSha256: createHash("sha256").update(readFileSync(bundle)).digest("hex") };
     },
     cleanup: async (dir) => {
@@ -284,7 +302,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   };
 
   try {
-    const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env, platform: process.platform }, ports);
+    const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env, platform: process.platform, ownUid: process.getuid?.() }, ports);
     if (result.status === "validated") {
       writeFileSync(join(resolve(outDir), "record.json"), `${JSON.stringify(result.record, null, 2)}\n`);
       writeFileSync(
@@ -372,8 +390,10 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
       throw new Error("the surface graduation lookup is not connected");
     },
     push: async (commitSha, branch) => {
+      // The lease with an empty expected value is "the branch must not exist": the server
+      // refuses the update if it does, so a branch created since the lookup is never advanced.
       const header = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-      git(root, ["push", `https://github.com/${repository}.git`, `${commitSha}:refs/heads/${branch}`], {
+      git(root, ["push", `--force-with-lease=refs/heads/${branch}:`, `https://github.com/${repository}.git`, `${commitSha}:refs/heads/${branch}`], {
         env: {
           ...seoAgentStageEnvironment(process.env, "publish"),
           GIT_TERMINAL_PROMPT: "0",
@@ -394,8 +414,18 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
       const commit = await github("GET", `/git/commits/${commitSha}`);
       return commit.status === 200 ? (commit.body?.tree?.sha ?? null) : null;
     },
-    deleteBranch: async (branch) => {
-      await github("DELETE", `/git/refs/heads/${branch}`);
+    deleteBranch: async (branch, commitSha) => {
+      // Deleted only if the server still has this run's commit there; a branch that moved is left alone.
+      const header = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+      git(root, ["push", `--force-with-lease=refs/heads/${branch}:${commitSha}`, `https://github.com/${repository}.git`, `:refs/heads/${branch}`], {
+        env: {
+          ...seoAgentStageEnvironment(process.env, "publish"),
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+          GIT_CONFIG_VALUE_0: header,
+        },
+      });
     },
     createPullRequest: async ({ branch, title, body }) => {
       // Draft, against develop, and no merge or auto-merge call of any kind.
