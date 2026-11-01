@@ -375,8 +375,15 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 ### 10.1 유입 기록
 - 새 분석 이벤트 `marketing_touch`: 클라이언트가 랜딩 URL에서 관측한 UTM을 서버가 **수신 시각**으로 기록한다.
   이벤트 입력 route(`app/api/analytics/events/route.ts`)에서 이 이벤트만 클라이언트 시각을 무시하고,
-  properties schema(`lib/productAnalyticsShared.ts`)에 닫힌 증거 값과 `utmContent`를 추가하며, 증거 값은 서버가 덮어쓴다.
-  eventName DB CHECK 제약과 코드 enum을 함께 바꾼다.
+  properties schema(`lib/productAnalyticsShared.ts`)에 닫힌 증거 값(`touch_evidence`)과 `utm_content`를 추가하며, 증거 값은 서버가 덮어쓴다.
+  eventName DB CHECK 제약과 코드 enum을 함께 바꾼다(`20261101100000_marketing_touch_analytics_event`).
+  구현: 판정은 `lib/marketingTouchCore.ts`, 조회는 `findLatestMarketingTouch`(`lib/productAnalyticsServer.ts`),
+  클라이언트 관측은 `observeMarketingTouch`(`lib/productAnalyticsClient.ts`, 다른 이벤트와 같은 동의 규칙),
+  화면은 Admin › 제품 분석의 마케팅 유입 귀속 카드다. 귀속 스냅샷은 전환 이벤트의 `touch_*` 속성으로 복사해 고정한다.
+  동의 직후 대기열이 touch와 전환을 함께 보내 서버가 전환을 먼저 저장한 경우, 같은 브라우저의 touch가 전환 수신 앞뒤
+  30초 안에 저장되고 브라우저가 그 touch를 전환보다 먼저 관측했다면 서버가 그 전환의 스냅샷을 이 touch로 마무리한다
+  (`lateMarketingTouchRepair`). 같은 브라우저의 touch(저장+보정)와 전환(조회+저장)은 브라우저 단위 트랜잭션 잠금으로
+  직렬화한다(`recordOrderedAnalyticsEvent`). 클라이언트는 전송 순서를 맞추지 않는다.
 - 이 기록의 증거 수준은 **"클라이언트 관측, 서버 시각"**이며 서버가 랜딩 요청을 증명한 것이 아니다.
   보고서와 화면에 그대로 적는다.
 - 가입·게스트 첫 답변 이벤트 수신 시 7일 안의 마지막 touch를 귀속 스냅샷으로 고정한다.

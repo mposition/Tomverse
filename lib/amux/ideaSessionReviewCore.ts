@@ -1,5 +1,6 @@
 import {
-  AMUX_ANALYSIS_SCHEMA_FIELDS, AMUX_ANALYSIS_SCHEMA_RULES, amuxAnalysisTextSafe, type AmuxAnalysisSchemaRejectAt,
+  AMUX_ANALYSIS_SCHEMA_FIELDS, AMUX_ANALYSIS_SCHEMA_RULES, amuxAnalysisAnswerJson, amuxAnalysisTextSafe,
+  type AmuxAnalysisSchemaRejectAt,
 } from "./ideaAnalysisChunkCore.ts";
 
 /**
@@ -33,7 +34,7 @@ const QUESTION_MAX = 2_000;
 
 export function classifyAmuxSessionReviewAnswer(raw: string): AmuxSessionReview {
   let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return { reason: "not_a_plan" }; }
+  try { parsed = amuxAnalysisAnswerJson(raw); } catch { return { reason: "not_a_plan" }; }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { reason: "not_a_plan" };
   }
