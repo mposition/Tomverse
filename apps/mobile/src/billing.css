@@ -30,6 +30,7 @@
 .native-billing-plans .native-billing-price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; margin: 0; font-size: 11px; }
 .native-billing-price strong { color: var(--mobile-ink); font-size: 19px; font-weight: 700; }
 .native-billing .native-billing-price { line-height: 1.25; }
+.native-billing .native-billing-currency-note { margin: 6px 0 10px; font-size: 12px; color: var(--mobile-muted); }
 .native-billing .native-billing-benefits { margin: 0; font-size: 12px; line-height: 1.5; color: var(--mobile-muted); }
 .native-billing-plans button { width: 100%; margin-top: auto; padding: 9px 6px; border-radius: 10px; min-height: 44px; font-size: 13px; font-weight: 600; background: #2563eb; color: #fff; }
 .native-billing-plans button:disabled { background: var(--mobile-soft); color: var(--mobile-muted); opacity: .8; }

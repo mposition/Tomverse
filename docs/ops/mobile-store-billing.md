@@ -251,9 +251,20 @@ App Store Connect accepted **1.0.21 (7)**, build
 `Tomverse Internal` group was assigned and read back as `IN_BETA_TESTING`.
 This is an isolated test-server build: authenticate again using the email-code
 flow, then verify the Apple confirmation sheet and server-confirmed plan on the
-physical iPad. No physical purchase, renewal, refund or restore has yet been
-observed. Production browser domain association remains a separate server
+physical iPad. The owner subsequently reported a successful payment test in
+1.0.21 (7); this is tester confirmation, not independently inspected device logs.
+Renewal, refund and restore acceptance have not yet been reported. Production
+browser domain association remains a separate server
 deployment task; this billing build does not publish that association.
+
+Following that test, the owner requested explicit currency labeling because a
+bare dollar sign can mean USD or AUD. The native plan and credit cards now show
+the store product's `currencyCode` alongside its unchanged localized
+`priceString`. All seven app languages explain USD/AUD and ask the user to check
+the final currency and total in the store confirmation. Currency comes from the
+product, not the app language; no fixed USD label or client exchange-rate
+calculation is applied to a local-currency product. This is a presentation change
+and does not alter prices, product IDs, purchase or entitlement rules.
 
 Local verification passed 41 configuration/authentication/prebuild cases,
 20 billing core/route cases and 24 mocked WebKit/Chromium purchase UI cases,
