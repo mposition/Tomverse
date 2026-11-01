@@ -1,5 +1,5 @@
 /**
- * The marketing SEO code agent (policy §9.2, S5): pure rules and the one
+ * The marketing SEO code agent (docs/policy/marketing-automation.md §9.2, S5): pure rules and the one
  * orchestration over ports. The script (scripts/marketing-seo-agent.mjs) binds
  * the ports to git, the LLM cost ledger and GitHub; the tests bind them to
  * fakes, so no test sends a request or touches a repository.
@@ -545,8 +545,19 @@ export function seoAgentAddedLines(patch: string): string {
  * expression over the whole text, so an unterminated quote ends at its line.
  */
 export function seoAgentCodeOnly(text: string): string {
+  return seoAgentScan(text).code;
+}
+
+/**
+ * The scan behind `seoAgentCodeOnly`, which also returns the module specifiers: a string at the
+ * level of code that follows `from` or `import`. Read from the scan, not from the raw text, so a
+ * comment between the keyword and the string does not hide one and a sentence of copy that holds
+ * the word `from` is not one.
+ */
+export function seoAgentScan(text: string): { readonly code: string; readonly specifiers: readonly string[] } {
   let out = "";
   let index = 0;
+  const specifiers: string[] = [];
   // A stack of template literals that are open around a `${ }` expression: how many braces are open in each.
   const templates: number[] = [];
   const peek = () => text[index];
@@ -558,7 +569,11 @@ export function seoAgentCodeOnly(text: string): string {
     } else if (char === "/" && next === "*") {
       const end = text.indexOf("*/", index + 2);
       index = end < 0 ? text.length : end + 2;
-    } else if (char === "/" && /[(,=:[!&|?{};+\-*%<>~^]$|^$/.test(out.trimEnd().slice(-1))) {
+    } else if (
+      char === "/" &&
+      (/[(,=:[!&|?{};+\-*%<>~^]$|^$/.test(out.trimEnd().slice(-1)) ||
+        /\b(?:return|throw|typeof|case|delete|void|in|of|new|else|do|yield|await)\s*$/.test(out))
+    ) {
       // A regular expression literal (a `/` where a value can begin): its text, which may hold a quote, is not scanned as a string.
       index += 1;
       let inClass = false;
@@ -571,8 +586,10 @@ export function seoAgentCodeOnly(text: string): string {
       index += 1;
       out += "/re/";
     } else if (char === '"' || char === "'") {
+      const opensAt = index + 1;
       index += 1;
       while (index < text.length && peek() !== char && peek() !== "\n") index += peek() === "\\" ? 2 : 1;
+      if (/\b(?:from|import)\s*$/.test(out)) specifiers.push(text.slice(opensAt, index));
       index += 1;
       out += '""';
     } else if (char === "`" || (char === "}" && templates.length > 0 && templates[templates.length - 1] === 0)) {
@@ -606,17 +623,16 @@ export function seoAgentCodeOnly(text: string): string {
       index += 1;
     }
   }
-  return out;
+  return { code: out, specifiers };
 }
 
 /** Reasons the added code is refused; empty means none was found. */
 export function seoAgentCodeProblems(added: string): string[] {
   const problems = new Set<string>();
-  // Module specifiers are strings, so they are read before the strings are emptied.
-  for (const match of added.matchAll(/\b(?:from|import)\s*(["'])([^"'\n]+)\1/g)) {
-    if (!ALLOWED_SPECIFIER.test(match[2] as string)) problems.add(`import_not_allowed:${match[2]}`);
+  const { code, specifiers } = seoAgentScan(added);
+  for (const specifier of specifiers) {
+    if (!ALLOWED_SPECIFIER.test(specifier)) problems.add(`import_not_allowed:${specifier}`);
   }
-  const code = seoAgentCodeOnly(added);
   if (/\bimport\s*\(/.test(code) || /\brequire\b/.test(code) || /\bmodule\s*\./.test(code)) problems.add("dynamic_module_load");
   // `process` only for the one switch the llms.txt route reads.
   if (/\bprocess\b(?!\s*\.\s*env\s*\.\s*LLMS_TXT_ENABLED\b)/.test(code)) problems.add("process");

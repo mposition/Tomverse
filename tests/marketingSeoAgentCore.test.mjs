@@ -257,6 +257,10 @@ test("a regular expression holding a quote does not hide the code after it", () 
     for (const code of ["const r = /'/; process.exit(0);", 'x = /"/.test(y); eval("1");', "const m = /[']/.exec(b); globalThis.x = 1;"]) {
         assert.ok(seoAgentCodeProblems(code).length > 0, code);
     }
+    // After a keyword a value begins, so the slash opens a regular expression.
+    for (const code of ["function f() { return /'/; process.exit(0); //' }", "throw /\"/; eval(1);", "x = typeof /'/ ; globalThis.a = 1; //'"]) {
+        assert.ok(seoAgentCodeProblems(code).length > 0, code);
+    }
     // Division is not a regular expression, and a regex in copy is not code.
     assert.deepEqual(seoAgentCodeProblems("const half = total / 2; const other = a / b; const s = 'it\\'s';"), []);
     assert.deepEqual(seoAgentCodeProblems("const re = /[a-z]+'?/g; const t = re.test(name);"), []);
@@ -300,6 +304,15 @@ test("the routes to the test runner's own objects are closed on the lines a chan
     };
     for (const [name, code] of Object.entries(attacks)) {
         assert.ok(seoAgentCodeProblems(code).length > 0, name);
+    }
+});
+
+test("a module specifier is read from the code, not from comments or sentences", () => {
+    for (const code of ['import x from /* c */ "node:fs";', 'import x\n  from // c\n  "node:fs";', 'import "node:fs";', 'export * from "./evil";', 'import {\n a } from "fs";']) {
+        assert.ok(seoAgentCodeProblems(code).some((problem) => problem.startsWith("import_not_allowed")), code);
+    }
+    for (const code of ['// import x from "node:fs"', '/* from "evil" */ const a = 1;', 'const copy = "Import from \'next\' or from \\"fs\\" as you like";']) {
+        assert.deepEqual(seoAgentCodeProblems(code), [], code);
     }
 });
 
