@@ -779,6 +779,7 @@ test("an answer that came in while the comments were being classified stops the 
     riskCodes: ["legal_threat"],
     detectedAt: NOW,
     answeredAtSeen: answeredAt,
+    flaggedNewestAt: null,
   });
   assert.deepEqual(current, { recorded: true });
 });
@@ -859,7 +860,22 @@ test("an alert left open across a resume does not hide what is found after it", 
       riskCodes: ["legal_threat"],
       detectedAt: NOW,
       answeredAtSeen: null,
+      flaggedNewestAt: null,
     }),
     { recorded: false, reason: "already_open" },
   );
+});
+
+test("a stored URL that cannot be read does not cost the alert", async () => {
+  const world = storeWorld({ externalUrl: "not a url" });
+  const result = await recordMarketingCommentAlert(asTransaction(world.database), {
+    postId: "p1",
+    alertCount: 1,
+    riskCodes: ["legal_threat"],
+    detectedAt: NOW,
+    answeredAtSeen: null,
+    flaggedNewestAt: null,
+  });
+  assert.deepEqual(result, { recorded: true });
+  assert.equal((world.created[0].payload as { externalUrlHost: string }).externalUrlHost, "unknown.invalid");
 });

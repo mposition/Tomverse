@@ -6238,6 +6238,15 @@ export async function listOpenMarketingCommentAlerts(
   return open.sort((a, b) => a.firstDetectedAt.getTime() - b.firstDetectedAt.getTime());
 }
 
+/** The host of a stored URL, or a fixed word when it cannot be read: a bad URL must not cost an alert. */
+const marketingUrlHostOrUnknown = (value: string): string => {
+  try {
+    return new URL(value).hostname || "unknown.invalid";
+  } catch {
+    return "unknown.invalid";
+  }
+};
+
 /**
  * When an operator last answered the alert of each of these posts, by post. The
  * monitor counts a comment as handled when it is not newer than that, so the
@@ -6371,7 +6380,7 @@ export async function recordMarketingCommentAlert(
       alertCount: Math.max(1, Math.floor(rawInput.alertCount)),
       riskCodes: [...rawInput.riskCodes].slice(0, 20),
       firstDetectedAt: detectedAt.toISOString(),
-      externalUrlHost: new URL(post.externalUrl).hostname,
+      externalUrlHost: marketingUrlHostOrUnknown(post.externalUrl),
     },
   });
   await writeSystemAuditLog({
