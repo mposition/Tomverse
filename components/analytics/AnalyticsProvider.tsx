@@ -6,8 +6,14 @@ import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { useSession } from "next-auth/react";
+import {
+  GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+  ga4UserIdTransmissionAllowed,
+} from "@/lib/ga4UserIdPolicy";
 import {
   analyticsConsent,
+  applyGa4UserId,
   configureAnalyticsClient,
   consumeSignupStarted,
   disableAnalyticsClient,
@@ -630,6 +636,49 @@ export function AnalyticsProvider({
       cancelled = true;
     };
   }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
+
+  // GA4 User-ID (marketing policy §10.2): asked for only when the notice is
+  // published, the switch is on, the visitor explicitly accepted analytics and
+  // is signed in. Any of those going away -- signing out included -- clears
+  // it on the tag.
+  const { data: sessionData, status: sessionStatus } = useSession();
+  const sessionUserId =
+    sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;
+  const ga4UserIdAllowed =
+    !disabled &&
+    analyticsClientReady &&
+    ga4UserIdTransmissionAllowed({
+      noticePublished: GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+      switchValue: process.env.NEXT_PUBLIC_GA4_USER_ID_ENABLED,
+      consent: consent === "loading" ? null : consent,
+      signedIn: Boolean(sessionUserId),
+      measurementId,
+    });
+  useEffect(() => {
+    if (!ga4UserIdAllowed) {
+      applyGa4UserId(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetch("/api/analytics/user-id", {
+      method: "POST",
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          await discardResponseBody(response);
+          return null;
+        }
+        const body = (await response.json()) as { analyticsUserId?: unknown };
+        return typeof body.analyticsUserId === "string" ? body.analyticsUserId : null;
+      })
+      .then((analyticsUserId) => {
+        if (!controller.signal.aborted) applyGa4UserId(analyticsUserId);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [ga4UserIdAllowed, sessionUserId]);
 
   // `useCallback` rather than plain closures: both read the remembered opener
   // through `closePreferences`, and a ref read from a function created during

@@ -13,6 +13,7 @@ import {
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
+import { isAnalyticsUserId } from "@/lib/ga4UserIdPolicy";
 import { discardResponseBody } from "./discardResponseBody";
 
 declare global {
@@ -501,7 +502,29 @@ export const configureAnalyticsClient = ({
   return runtime;
 };
 
+/**
+ * The GA4 User-ID currently set on the tag (docs/policy/marketing-automation.md
+ * §10.2). Whether one may be set at all is lib/ga4UserIdPolicy.ts's decision,
+ * made by the caller; this only applies it. `null` clears it, which is what
+ * signing out and declining analytics do -- GA4 asks for a real `null`, not an
+ * empty string.
+ *
+ * Nothing is pushed while there is no tag, and nothing is pushed for a value
+ * that is already set, so a visitor for whom the feature is off never has a
+ * `user_id` command queued at all.
+ */
+let ga4UserId: string | null = null;
+
+export const applyGa4UserId = (value: string | null) => {
+  const next = isAnalyticsUserId(value) ? value : null;
+  if (next === ga4UserId) return;
+  if (next !== null && (!runtime?.measurementId || !window.gtag)) return;
+  ga4UserId = next;
+  window.gtag?.("set", { user_id: next });
+};
+
 export const disableAnalyticsClient = () => {
+  applyGa4UserId(null);
   applyGa4ConsentMode("denied");
   runtime = null;
   pendingEvents = [];
