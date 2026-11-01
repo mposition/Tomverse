@@ -136,6 +136,11 @@ export const experimentConfigSchema = z
         message: `an experiment runs at most ${EXPERIMENT_MAX_DURATION_DAYS} days`,
       });
     }
+    if (new Set(config.locales).size !== config.locales.length) {
+      // A repeated language would be written into the assignment cookie, which
+      // refuses it, and then no visitor could ever be served the variant.
+      context.addIssue({ code: "custom", message: "locales must be unique" });
+    }
     const covered = landingVariantLocales(config.bundleId, config.variantId);
     for (const locale of config.locales) {
       if (!covered.includes(locale)) {

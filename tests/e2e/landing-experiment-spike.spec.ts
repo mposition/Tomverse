@@ -456,12 +456,14 @@ test.describe("fixture experiment, forced variant", () => {
     expect(heroHeadline(await own.text())).toContain(VARIANT_HEADLINE_EN);
     expect(own.headers()["cache-control"]).toBe("private, no-store");
 
-    // A matching cookie for a variant that is not in this build is a missing page.
+    // A matching cookie for a variant that is not in this build gets the
+    // default page, as the rewrite does: policy 9.1, a missing target is no variant.
     const missing = await request.get("/en/lx/home-unknown-v9/b", {
       headers: { ...HTML, cookie: `tv_exp=${EXPERIMENT_ID}.home-unknown-v9.b.enko` },
       maxRedirects: 0,
     });
-    expect(missing.status()).toBe(404);
+    expect(missing.status()).toBe(307);
+    expect(new URL(missing.headers()["location"], ORIGIN).pathname).toBe("/");
   });
 
   test("(c) the rewritten variant is private and noindex, and no variant path is in the sitemap", async ({

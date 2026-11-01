@@ -166,6 +166,16 @@ const withNativeCors = <T extends NextResponse>(
   return response;
 };
 
+/** A variant path's visitor goes to the default home page it varies. */
+const variantRedirect = (request: NextRequest, home: string) => {
+  const target = request.nextUrl.clone();
+  target.pathname = home;
+  const redirect = NextResponse.redirect(target, 307);
+  redirect.headers.set("Cache-Control", "private, no-store");
+  redirect.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return redirect;
+};
+
 export function proxy(request: NextRequest) {
   // Container liveness must remain directly reachable by Railway. Readiness
   // performs database and monitoring work, so it goes through the same host
@@ -360,12 +370,7 @@ export function proxy(request: NextRequest) {
       killSwitch: process.env.MARKETING_AUTOMATION_KILL_SWITCH,
     })
   ) {
-    const target = request.nextUrl.clone();
-    target.pathname = variantHome;
-    const redirect = NextResponse.redirect(target, 307);
-    redirect.headers.set("Cache-Control", "private, no-store");
-    redirect.headers.set("X-Robots-Tag", "noindex, nofollow");
-    return redirect;
+    return variantRedirect(request, variantHome);
   }
 
   // R-05-LANG. Send a non-English visitor to their own localized page before
@@ -443,20 +448,13 @@ export function proxy(request: NextRequest) {
       : getStaticMarketingCspHashes(request.nextUrl.pathname)
     : null;
   if (
-    isExperimentVariantPathname(request.nextUrl.pathname) &&
+    variantHome &&
     process.env.NODE_ENV === "production" &&
     !staticMarketingHashes
   ) {
-    // A variant path whose HTML is not in this build is a page that does not
-    // exist, not a policy that could not be computed.
-    return new NextResponse("Not Found", {
-      status: 404,
-      headers: {
-        "Cache-Control": "private, no-store",
-        "Content-Type": "text/plain; charset=utf-8",
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
+    // A variant whose HTML is not in this build cannot be served, and policy
+    // 9.1 answers that with the default page, as the rewrite does.
+    return variantRedirect(request, variantHome);
   }
   if (
     isStaticMarketingRequest &&

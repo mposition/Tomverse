@@ -113,6 +113,9 @@ test("only home bundles whose variant has copy for every listed locale can be ac
   // The shipped example bundle has English and Korean copy only.
   assert.notDeepEqual(issues(config({ locales: ["en", "fr"] })), []);
   assert.notDeepEqual(issues(config({ locales: [] })), []);
+  // A repeated language would produce a cookie nothing accepts.
+  assert.notDeepEqual(issues(config({ locales: ["en", "en"] })), []);
+  assert.deepEqual(issues(config({ locales: ["ko", "en"] })), []);
   assert.notDeepEqual(issues(config({ variantId: "zz" })), []);
 });
 

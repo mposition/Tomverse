@@ -167,6 +167,7 @@ test("a start is refused for anything the build or the schema does not stand beh
     [{ bundleId: "home-unknown-v9" }, "experiment_config_invalid"],
     [{ variantId: "zz" }, "experiment_config_invalid"],
     [{ locales: ["en", "fr"] }, "experiment_config_invalid"],
+    [{ locales: ["en", "en"] }, "experiment_config_invalid"],
     [{ variantRatioPercent: 60 }, "experiment_config_invalid"],
     [{ bundleId: "pricing-hero-v1" }, "experiment_config_invalid"],
   ]) {
