@@ -37,6 +37,12 @@
 //   MARKETING_AUTOMATION_KILL_SWITCH   any value stops it
 //   MARKETING_APP_URL, MARKETING_GENERATOR_SUBMIT_SECRET, MARKETING_LLM_API_KEY
 //                                      validate phase only: cost ledger and provider
+//   MARKETING_SEO_CHECK_UID, MARKETING_SEO_CHECK_GID
+//                                      validate phase, POSIX: the unprivileged user the checks run as (the parent
+//                                      must be able to switch to it, i.e. root in a disposable container). Without
+//                                      them the phase refuses to run unless
+//   MARKETING_SEO_CHECKS_SAME_USER_ACK=true
+//                                      says the whole runner is disposable and holds nothing worth reading
 //   MARKETING_SEO_ATTESTATION_KEY      both phases, 32+ characters: the validate phase signs its result with it and
 //                                      the publish phase refuses anything that does not verify
 //   MARKETING_SEO_GITHUB_APP_TOKEN     publish phase only: installation token of the repository-only GitHub App
@@ -84,7 +90,8 @@ const option = (name) => {
 };
 
 const git = (cwd, args, extra = {}) => {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...extra });
+  // safe.directory: the validate workspace may be owned by the user the checks run as.
+  const result = spawnSync("git", ["-c", "safe.directory=*", ...args], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...extra });
   if (result.status !== 0) throw new Error(`git ${args[0]} failed: ${String(result.stderr).split("\n")[0]}`);
   return result.stdout;
 };
@@ -226,10 +233,20 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
     indexTree: async (dir) => git(dir, ["write-tree"]).trim(),
     baseTests: async (base) =>
       SEO_AGENT_POLICY_TESTS.filter((path) => spawnSync("git", ["cat-file", "-e", `${base}:${path}`], { cwd: root }).status === 0),
-    runChecks: async (dir, commands) => {
-      // The checks execute the proposed code: they get an allowlisted environment, not this process's.
+    runChecks: async (dir, commands, isolation) => {
+      // The checks execute the proposed code: they get an allowlisted environment, not this process's...
       const env = { ...seoAgentStageEnvironment(process.env, "checks") };
       env.NODE_OPTIONS ??= "--max-old-space-size=8192";
+      // ...and, where the operator gave a user for them, they run as that user, who cannot read
+      // this process's /proc/<pid>/environ (the LLM key, the attestation key) or its files.
+      const asUser = isolation.mode === "separate_user" ? { uid: isolation.uid, gid: isolation.gid } : {};
+      if (isolation.mode === "separate_user") {
+        const home = join(scratch, "check-home");
+        mkdirSync(home, { recursive: true });
+        env.HOME = home;
+        const owned = spawnSync("chown", ["-R", "-h", `${isolation.uid}:${isolation.gid}`, dir, home]);
+        if (owned.status !== 0) throw new Error("the workspace could not be handed to the check user");
+      }
       for (const command of commands) {
         console.log(JSON.stringify({ event: "marketing_seo_agent_check", check: command.label }));
         const result = spawnSync(command.argv[0], command.argv.slice(1), {
@@ -237,6 +254,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
           env,
           stdio: "inherit",
           shell: process.platform === "win32",
+          ...asUser,
         });
         if (result.status !== 0) return { ok: false, label: command.label };
       }
@@ -266,7 +284,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   };
 
   try {
-    const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env }, ports);
+    const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env, platform: process.platform }, ports);
     if (result.status === "validated") {
       writeFileSync(join(resolve(outDir), "record.json"), `${JSON.stringify(result.record, null, 2)}\n`);
       writeFileSync(
@@ -364,6 +382,11 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
           GIT_CONFIG_VALUE_0: header,
         },
       });
+    },
+    remoteRef: async (branch) => {
+      const ref = await github("GET", `/git/ref/heads/${branch}`);
+      if (ref.status === 404) return { exists: false, sha: null };
+      return ref.status === 200 && typeof ref.body?.object?.sha === "string" ? { exists: true, sha: ref.body.object.sha } : null;
     },
     remoteTree: async (branch, commitSha) => {
       const ref = await github("GET", `/git/ref/heads/${branch}`);

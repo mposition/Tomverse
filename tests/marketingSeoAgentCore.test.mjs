@@ -11,6 +11,7 @@ import {
     parseGitNumstat,
     parseGitRawDiff,
     SEO_AGENT_PUSH_CREDENTIAL_ENVS,
+    seoAgentCheckIsolation,
     runSeoAgentPublish,
     seoAgentAttest,
     seoAgentAttestationMatches,
@@ -371,6 +372,8 @@ const COMMIT = "e".repeat(40);
 const TREE = "d".repeat(40);
 const KEY = "k".repeat(40);
 const ON = { MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_SEO_ATTESTATION_KEY: KEY };
+// The checks may share the runner's user only by explicit acknowledgement.
+const VALIDATE_ENV = { ...ON, MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" };
 const BUNDLE = "b".repeat(64);
 
 const recorder = (table, overrides) => {
@@ -403,7 +406,8 @@ const validatePorts = (overrides = {}) =>
         },
         overrides,
     );
-const validate = (ports, env = ON, topic = "Improve hreflang") => runSeoAgentValidate({ topic, baseCommit: BASE, env }, ports);
+const validate = (ports, env = VALIDATE_ENV, topic = "Improve hreflang", platform = "linux") =>
+    runSeoAgentValidate({ topic, baseCommit: BASE, env, platform }, ports);
 
 test("validate off: nothing is prepared, nothing is called", async () => {
     for (const env of [{}, { MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_AUTOMATION_KILL_SWITCH: "1" }]) {
@@ -417,15 +421,48 @@ test("validate off: nothing is prepared, nothing is called", async () => {
 test("validate refuses to start with any credential that could push", async () => {
     for (const name of SEO_AGENT_PUSH_CREDENTIAL_ENVS) {
         const { ports, calls } = validatePorts();
-        const result = await validate(ports, { ...ON, [name]: "t" });
+        const result = await validate(ports, { ...VALIDATE_ENV, [name]: "t" });
         assert.deepEqual(result, { status: "wrong_environment", problems: [name] }, name);
         assert.deepEqual(calls, []);
     }
     assert.ok(SEO_AGENT_PUSH_CREDENTIAL_ENVS.includes("GITHUB_TOKEN") && SEO_AGENT_PUSH_CREDENTIAL_ENVS.includes("GH_TOKEN"));
 });
 
+test("the checks run as another user, or the runner is acknowledged as disposable, or the phase will not run", () => {
+    const isolation = (env, platform = "linux") => seoAgentCheckIsolation(env, platform);
+    assert.deepEqual(isolation({ MARKETING_SEO_CHECK_UID: "65534", MARKETING_SEO_CHECK_GID: "65534" }), { mode: "separate_user", uid: 65534, gid: 65534 });
+    assert.deepEqual(isolation({ MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" }), { mode: "same_user_acknowledged" });
+    // The user wins over the acknowledgement.
+    assert.equal(isolation({ MARKETING_SEO_CHECK_UID: "1000", MARKETING_SEO_CHECK_GID: "1000", MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" }).mode, "separate_user");
+    assert.deepEqual(isolation({}), { mode: "refused", reason: "check_user_required" });
+    for (const value of ["false", "1", "TRUE", ""]) {
+        assert.deepEqual(isolation({ MARKETING_SEO_CHECKS_SAME_USER_ACK: value }), { mode: "refused", reason: "check_user_required" }, value);
+    }
+    for (const [uid, gid] of [["0", "1000"], ["1000", "0"], ["1000", undefined], [undefined, "1000"], ["-1", "1"], ["abc", "1"], ["1.5", "1"], ["", ""]]) {
+        assert.deepEqual(isolation({ MARKETING_SEO_CHECK_UID: uid, MARKETING_SEO_CHECK_GID: gid }), { mode: "refused", reason: "check_user_invalid" }, `${uid}/${gid}`);
+    }
+    // A uid means nothing on Windows.
+    assert.equal(isolation({ MARKETING_SEO_CHECK_UID: "1000", MARKETING_SEO_CHECK_GID: "1000" }, "win32").mode, "refused");
+});
+
+test("validate will not clone, spend or check without an isolated or acknowledged runner", async () => {
+    const { ports, calls } = validatePorts();
+    assert.deepEqual(await validate(ports, ON), { status: "checks_not_isolated", reason: "check_user_required" });
+    assert.deepEqual(calls, []);
+    const invalid = validatePorts();
+    assert.deepEqual(await validate(invalid.ports, { ...ON, MARKETING_SEO_CHECK_UID: "0", MARKETING_SEO_CHECK_GID: "0" }), { status: "checks_not_isolated", reason: "check_user_invalid" });
+    assert.deepEqual(invalid.calls, []);
+});
+
+test("the checks are given the isolation the run decided on", async () => {
+    let seen = null;
+    const { ports } = validatePorts({ runChecks: (_dir, _commands, isolation) => { seen = isolation; return { ok: true }; } });
+    await validate(ports, { ...ON, MARKETING_SEO_CHECK_UID: "2000", MARKETING_SEO_CHECK_GID: "2001" });
+    assert.deepEqual(seen, { mode: "separate_user", uid: 2000, gid: 2001 });
+});
+
 test("validate will not spend without an attestation key", async () => {
-    for (const env of [{ MARKETING_SEO_AGENT_ENABLED: "true" }, { ...ON, MARKETING_SEO_ATTESTATION_KEY: "short" }]) {
+    for (const env of [{ MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" }, { ...VALIDATE_ENV, MARKETING_SEO_ATTESTATION_KEY: "short" }]) {
         const { ports, calls } = validatePorts();
         assert.deepEqual(await validate(ports, env), { status: "no_attestation_key" });
         assert.deepEqual(calls, []);
@@ -434,7 +471,7 @@ test("validate will not spend without an attestation key", async () => {
 
 test("a topic that is not a branch segment is refused before any clone or call", async () => {
     const { ports, calls } = validatePorts();
-    assert.deepEqual(await validate(ports, ON, "to-develop"), { status: "invalid_topic" });
+    assert.deepEqual(await validate(ports, VALIDATE_ENV, "to-develop"), { status: "invalid_topic" });
     assert.deepEqual(calls, []);
 });
 
@@ -563,6 +600,7 @@ const publishPorts = (overrides = {}) =>
             commitFacts: { tree: TREE, parent: BASE, parentCount: 1 },
             diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT },
             lookupGraduation: false,
+            remoteRef: { exists: false, sha: null },
             push: undefined,
             remoteTree: TREE,
             deleteBranch: undefined,
@@ -650,7 +688,7 @@ test("before graduation: the commit is pushed to marketing-agent/<topic> and a d
     assert.deepEqual(pushes, [[COMMIT, "marketing-agent/improve-hreflang"]]);
     assert.match(pulls[0].body, new RegExp(`Validated tree: ${TREE}`));
     assert.match(pulls[0].body, /nothing here enables auto-merge/);
-    for (const [before, after] of [["bundleSha256", "importCommit"], ["baseOnDevelop", "importCommit"], ["importCommit", "commitFacts"], ["commitFacts", "diff"], ["diff", "push"], ["push", "remoteTree"], ["remoteTree", "createPullRequest"]]) {
+    for (const [before, after] of [["bundleSha256", "importCommit"], ["baseOnDevelop", "importCommit"], ["importCommit", "commitFacts"], ["commitFacts", "diff"], ["diff", "remoteRef"], ["remoteRef", "push"], ["push", "remoteTree"], ["remoteTree", "createPullRequest"]]) {
         assert.ok(calls.indexOf(before) >= 0 && calls.indexOf(before) < calls.indexOf(after), `${before} before ${after}`);
     }
 });
@@ -692,12 +730,41 @@ test("the diff is judged again from git: a record cannot launder a commit that t
     assert.ok(!calls.includes("push"));
 });
 
-test("a remote tree that differs after the push opens no PR and removes the branch", async () => {
+test("a branch that already exists, or cannot be looked up, is never pushed over", async () => {
+    for (const ref of [{ exists: true, sha: "a".repeat(40) }, { exists: true, sha: null }, null]) {
+        const { ports, calls } = publishPorts({ remoteRef: ref });
+        assert.deepEqual(await publish(ports), { status: "branch_unavailable" });
+        assert.ok(!calls.includes("push") && !calls.includes("deleteBranch") && !calls.includes("createPullRequest"));
+    }
+});
+
+test("a remote tree that differs after the push opens no PR and removes the branch only while it is still this run's commit", async () => {
     for (const remote of ["f".repeat(40), null]) {
-        const { ports, calls } = publishPorts({ remoteTree: remote });
+        let reads = 0;
+        const { ports, calls } = publishPorts({
+            remoteTree: remote,
+            remoteRef: () => (++reads === 1 ? { exists: false, sha: null } : { exists: true, sha: COMMIT }),
+        });
         assert.deepEqual(await publish(ports), { status: "tree_mismatch", stage: "after_push" });
         assert.ok(calls.includes("deleteBranch"));
         assert.ok(!calls.includes("createPullRequest"));
+    }
+});
+
+test("the branch is kept when it moved since the push, or cannot be read", async () => {
+    const afterwards = [{ exists: true, sha: "e".repeat(39) + "0" }, { exists: false, sha: null }, null, "throws"];
+    for (const after of afterwards) {
+        let reads = 0;
+        const { ports, calls } = publishPorts({
+            remoteTree: "f".repeat(40),
+            remoteRef: () => {
+                if (++reads === 1) return { exists: false, sha: null };
+                if (after === "throws") throw new Error("down");
+                return after;
+            },
+        });
+        assert.deepEqual(await publish(ports), { status: "tree_mismatch", stage: "after_push" });
+        assert.ok(!calls.includes("deleteBranch"), JSON.stringify(after));
     }
 });
 

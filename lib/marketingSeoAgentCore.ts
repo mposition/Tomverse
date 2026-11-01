@@ -77,6 +77,44 @@ export const SEO_AGENT_GITHUB_REPOSITORY_ENV = "MARKETING_SEO_GITHUB_REPOSITORY"
  * validated with it, and the publish phase refuses anything that does not verify.
  */
 export const SEO_AGENT_ATTESTATION_KEY_ENV = "MARKETING_SEO_ATTESTATION_KEY";
+/**
+ * The checks run the proposed code. On a POSIX runner they run as another,
+ * unprivileged user, so they cannot read the parent's `/proc/<pid>/environ`
+ * (the LLM key and the attestation key) or its files. Both ids are the
+ * operator's; the parent must be allowed to switch to them (root, in a
+ * disposable container).
+ */
+export const SEO_AGENT_CHECK_UID_ENV = "MARKETING_SEO_CHECK_UID";
+export const SEO_AGENT_CHECK_GID_ENV = "MARKETING_SEO_CHECK_GID";
+/**
+ * "true" says the whole validate phase already runs somewhere disposable that
+ * holds nothing worth reading, so the checks may share its user. An explicit
+ * acknowledgement, never a default.
+ */
+export const SEO_AGENT_SAME_USER_ACK_ENV = "MARKETING_SEO_CHECKS_SAME_USER_ACK";
+
+export type SeoCheckIsolation =
+  | { readonly mode: "separate_user"; readonly uid: number; readonly gid: number }
+  | { readonly mode: "same_user_acknowledged" }
+  | { readonly mode: "refused"; readonly reason: "check_user_invalid" | "check_user_required" };
+
+/** How the checks will be isolated from the validate parent, or why they will not run. */
+export function seoAgentCheckIsolation(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: string,
+): SeoCheckIsolation {
+  const uid = env[SEO_AGENT_CHECK_UID_ENV];
+  const gid = env[SEO_AGENT_CHECK_GID_ENV];
+  if (uid !== undefined || gid !== undefined) {
+    const valid = (value: string | undefined) => typeof value === "string" && /^[1-9][0-9]{0,9}$/.test(value);
+    // Root (0) is not a separate user, and a half-set pair is a mistake, not a default.
+    if (platform === "win32" || !valid(uid) || !valid(gid)) return { mode: "refused", reason: "check_user_invalid" };
+    return { mode: "separate_user", uid: Number(uid), gid: Number(gid) };
+  }
+  if (env[SEO_AGENT_SAME_USER_ACK_ENV] === "true") return { mode: "same_user_acknowledged" };
+  return { mode: "refused", reason: "check_user_required" };
+}
+
 /** Credentials that could push to the repository. The validate phase refuses to start with any of them. */
 export const SEO_AGENT_PUSH_CREDENTIAL_ENVS = [
   SEO_AGENT_GITHUB_TOKEN_ENV,
@@ -579,7 +617,11 @@ export type SeoValidatePorts = {
   readonly indexTree: (dir: string) => Promise<string>;
   /** Policy tests that exist in the base commit. */
   readonly baseTests: (baseCommit: string) => Promise<readonly string[]>;
-  readonly runChecks: (dir: string, commands: readonly SeoCheckCommand[]) => Promise<{ ok: true } | { ok: false; label: string }>;
+  readonly runChecks: (
+    dir: string,
+    commands: readonly SeoCheckCommand[],
+    isolation: Exclude<SeoCheckIsolation, { mode: "refused" }>,
+  ) => Promise<{ ok: true } | { ok: false; label: string }>;
   /** Commit the staged change and return the commit and its tree hash. */
   readonly commit: (dir: string, message: string) => Promise<{ commitSha: string; treeHash: string }>;
   /** Write the commit (objects only) where the publish phase will read it, and return the sha256 of those bytes. */
@@ -600,6 +642,7 @@ export type SeoValidateResult =
   /** The staged tree at the three moments it is read -- before the checks, after them, and as committed -- was not one tree. */
   | { readonly status: "tree_changed"; readonly stage: "during_checks" | "at_commit" }
   | { readonly status: "no_attestation_key" }
+  | { readonly status: "checks_not_isolated"; readonly reason: "check_user_invalid" | "check_user_required" }
   | { readonly status: "validated"; readonly record: SeoAgentRecord; readonly bundleSha256: string; readonly attestation: string };
 
 export function seoAgentCommitMessage(summary: string, topic: string): string {
@@ -628,6 +671,8 @@ export async function runSeoAgentValidate(
     readonly topic: string;
     readonly baseCommit: string;
     readonly env: Readonly<Record<string, string | undefined>>;
+    /** `process.platform`. */
+    readonly platform: string;
   },
   ports: SeoValidatePorts,
 ): Promise<SeoValidateResult> {
@@ -636,6 +681,9 @@ export async function runSeoAgentValidate(
   const wrong = seoAgentPhaseEnvProblems(input.env, "validate");
   if (wrong.length > 0) return { status: "wrong_environment", problems: wrong };
   if (seoAgentTopicSlug(input.topic) === null) return { status: "invalid_topic" };
+  // The checks run the proposed code: decided before anything is cloned or spent.
+  const isolation = seoAgentCheckIsolation(input.env, input.platform);
+  if (isolation.mode === "refused") return { status: "checks_not_isolated", reason: isolation.reason };
   // Without the key the result could not be told from a forgery, so nothing is spent.
   const attestationKey = input.env[SEO_AGENT_ATTESTATION_KEY_ENV];
   if (typeof attestationKey !== "string" || attestationKey.length < 32) return { status: "no_attestation_key" };
@@ -664,7 +712,7 @@ export async function runSeoAgentValidate(
     const tests = await ports.baseTests(input.baseCommit);
     // Fail closed: `node --test` with no file list would discover whatever is in the tree.
     if (!SEO_AGENT_POLICY_TESTS.some((path) => tests.includes(path))) return { status: "no_policy_tests" };
-    const checks = await ports.runChecks(dir, seoAgentCheckCommands(tests, validation.paths));
+    const checks = await ports.runChecks(dir, seoAgentCheckCommands(tests, validation.paths), isolation);
     if (!checks.ok) return { status: "checks_failed", label: checks.label };
 
     const after = await ports.stagedDiff(dir, input.baseCommit);
@@ -708,7 +756,10 @@ export type SeoPublishPorts = {
   readonly lookupGraduation: () => Promise<boolean>;
   readonly push: (commitSha: string, branch: string) => Promise<void>;
   /** The tree hash of the commit the remote branch points at, or null when it is not the pushed commit or cannot be read. */
+  /** The remote branch as it is now, or null when it cannot be read. */
+  readonly remoteRef: (branch: string) => Promise<{ readonly exists: boolean; readonly sha: string | null } | null>;
   readonly remoteTree: (branch: string, commitSha: string) => Promise<string | null>;
+  /** Delete a remote branch. Called only for a branch this run created and that still points at its own commit. */
   readonly deleteBranch: (branch: string) => Promise<void>;
   readonly createPullRequest: (input: { branch: string; title: string; body: string }) => Promise<{ url: string }>;
 };
@@ -719,6 +770,8 @@ export type SeoPublishResult =
   | { readonly status: "invalid_record" }
   | { readonly status: "attestation_invalid" }
   | { readonly status: "base_not_on_develop" }
+  /** The branch name is taken, or the lookup failed: nothing is pushed over someone else's branch. */
+  | { readonly status: "branch_unavailable" }
   | { readonly status: "validation_failed"; readonly problems: readonly SeoValidationProblem[] }
   | { readonly status: "tree_mismatch"; readonly stage: "before_push" | "after_push" }
   | {
@@ -768,9 +821,17 @@ export async function runSeoAgentPublish(
   const branch = seoAgentBranchName(record.topic, graduated);
   if (branch === null) return { status: "invalid_record" };
 
+  // A branch that already exists is someone's: it is never pushed over, and a
+  // lookup that fails is treated as "exists".
+  const existing = await ports.remoteRef(branch);
+  if (existing === null || existing.exists) return { status: "branch_unavailable" };
+
   await ports.push(record.commitSha, branch);
   if ((await ports.remoteTree(branch, record.commitSha)) !== record.treeHash) {
-    await ports.deleteBranch(branch).catch(() => undefined);
+    // Cleanup is only for what this run made. If the branch cannot be read, or
+    // no longer points at the commit pushed here, it is left alone.
+    const now = await ports.remoteRef(branch).catch(() => null);
+    if (now !== null && now.exists && now.sha === record.commitSha) await ports.deleteBranch(branch).catch(() => undefined);
     return { status: "tree_mismatch", stage: "after_push" };
   }
   if (graduated) return { status: "pushed", branch, graduated, treeHash: record.treeHash, pullRequestUrl: null };
