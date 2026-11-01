@@ -46,10 +46,10 @@ export type MobileAuthBridge = {
   unlockDevice(options?: { reason?: string }): Promise<void>;
   /** Opens system-browser PKCE sign-in. Credentials stay in the native layer. */
   signIn(): Promise<void>;
-  /** Sends an existing-account email code. Returns no credential. */
+  /** Sends an email code without disclosing account existence or a credential. */
   requestEmailCode(options: { email: string; language: string }): Promise<void>;
   /** Native verification stores the session without returning it to JS. */
-  verifyEmailCode(options: { email: string; code: string }): Promise<void>;
+  verifyEmailCode(options: { email: string; code: string; intent?: "signup"; termsAccepted?: boolean }): Promise<void>;
   /** A usable access token, refreshing behind the bridge if that is needed. */
   getAccessToken(options?: { rejectedAccessToken?: string }): Promise<MobileAccessGrant>;
   /** Whether the device holds a session at all. Never says what it holds. */

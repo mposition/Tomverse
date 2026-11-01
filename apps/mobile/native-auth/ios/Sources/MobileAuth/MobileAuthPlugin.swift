@@ -153,7 +153,7 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     private func refusalCode(_ status: Int, _ body: [String: Any]) -> String {
         if status == 429 { return "MOBILE_RATE_LIMITED" }
         let code = body["code"] as? String ?? ""
-        if ["EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED"].contains(code) { return code }
+        if ["EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_SIGNUP_UNAVAILABLE", "MOBILE_SIGNUP_TERMS_REQUIRED", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED"].contains(code) { return code }
         return status == 404 || status == 503 || code == "INVALID_REQUEST_ORIGIN" ? "MOBILE_LOGIN_UNAVAILABLE" : "MOBILE_LOGIN_FAILED"
     }
     private func validateOrigin() throws {
@@ -223,11 +223,12 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
             } catch { call.reject("Sign-in is not available on this server", "MOBILE_LOGIN_UNAVAILABLE") }
         }
     }
-    private func requireEmailSupport() throws {
+    private func requireEmailSupport(signup: Bool = false) throws {
         do {
             let support = try request("/api/auth/mobile/email", nil)
             guard support["ok"] as? Bool == true, support["emailCode"] as? Bool == true else { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
-        } catch Failure.refused { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
+            if signup && support["emailSignup"] as? Bool != true { throw Failure.refused("MOBILE_SIGNUP_UNAVAILABLE") }
+        } catch Failure.refused(let code) { throw Failure.refused(code) }
         catch Failure.invalid { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
     }
     @objc public func requestEmailCode(_ call: CAPPluginCall) {
@@ -246,8 +247,14 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         runSignIn(call, generation: generation) { [self] in
             do {
                 guard let email = call.getString("email"), email.count <= 320, let code = call.getString("code"), code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { throw Failure.refused("EMAIL_CODE_INVALID") }
+                var body: [String: Any] = ["action": "verify", "email": email, "code": code, "platform": "ios", "deviceLabel": UIDevice.current.model]
+                if let intent = call.getString("intent") {
+                    guard intent == "signup", call.getBool("termsAccepted") == true else { throw Failure.refused("MOBILE_SIGNUP_TERMS_REQUIRED") }
+                    try requireEmailSupport(signup: true)
+                    body["intent"] = "signup"; body["termsAccepted"] = true
+                }
                 try clear()
-                try acceptSignIn(post("/api/auth/mobile/email", ["action": "verify", "email": email, "code": code, "platform": "ios", "deviceLabel": UIDevice.current.model]), generation: generation)
+                try acceptSignIn(post("/api/auth/mobile/email", body), generation: generation)
                 call.resolve()
             } catch Failure.refused(let code) { try? clear(); call.reject("Could not verify sign-in code", code) }
             catch { try? clear(); call.reject("Could not verify sign-in code", "MOBILE_LOGIN_FAILED") }
