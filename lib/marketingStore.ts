@@ -5628,6 +5628,29 @@ export const marketingGuardRejectionTripped = (
     .filter((status) => status === "guard_rejected").length >=
   MARKETING_AUTO_PAUSE_GUARD_REJECTED_LIMIT;
 
+/**
+ * One outcome per attempt, newest first, from history entries newest first.
+ *
+ * A person who settles an unknown outcome as a failure adds a second entry for
+ * the same attempt (`resolveMarketingPostOutcomeUnknown`), so counting entries
+ * would count that attempt twice and could hide three real failures behind an
+ * `outcome_unknown` that has since been answered. The newest entry of an
+ * attempt is its last word.
+ */
+export const marketingFinalAttemptOutcomes = (
+  entriesNewestFirst: ReadonlyArray<{ postId: string; attempt: number; outcome: string }>,
+): string[] => {
+  const seen: string[] = [];
+  const outcomes: string[] = [];
+  for (const entry of entriesNewestFirst) {
+    const key = entry.postId + "#" + String(entry.attempt);
+    if (seen.includes(key)) continue;
+    seen.push(key);
+    outcomes.push(entry.outcome);
+  }
+  return outcomes;
+};
+
 export const marketingConsecutiveFailuresTripped = (
   recentAttemptOutcomesNewestFirst: readonly string[],
 ): boolean => {
@@ -5739,18 +5762,24 @@ export async function evaluateMarketingAutoPause(
     const removedPostCount = await database.marketingPost.count({
       where: { channelId, status: "removed_by_platform", updatedAt: { gt: since } },
     });
-    let attempts: Array<{ outcome: string }> = [];
+    let attempts: Array<{ postId: string; attempt: number; outcome: string }> = [];
     let drafts: Array<{ status: string }> = [];
     if (removedPostCount === 0) {
-      // The newest attempts across the account's posts, a post can hold several.
-      attempts = await database.$queryRaw<Array<{ outcome: string }>>(Prisma.sql`
-        SELECT entry->>'outcome' AS "outcome"
+      // The newest history entries of kind attempt across the account's posts.
+      // An attempt can hold two (an unknown outcome and, once a person has
+      // settled it, the confirmed failure), so six entries always cover the
+      // newest three attempts, and the pure reducer keeps the last word of each.
+      attempts = await database.$queryRaw<
+        Array<{ postId: string; attempt: number; outcome: string }>
+      >(Prisma.sql`
+        SELECT post."id" AS "postId", (entry->>'attempt')::int AS "attempt",
+          entry->>'outcome' AS "outcome"
         FROM "MarketingPost" AS post, jsonb_array_elements(post."history") AS entry
         WHERE post."channelId" = ${channelId}
           AND entry->>'type' = 'attempt'
           AND (entry->>'at')::timestamptz > ${since}::timestamptz
         ORDER BY (entry->>'at')::timestamptz DESC, (entry->>'attempt')::int DESC
-        LIMIT ${MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES}
+        LIMIT ${2 * MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES}
       `);
       drafts = await database.marketingPost.findMany({
         where: { channelId, createdAt: { gt: since } },
@@ -5759,7 +5788,7 @@ export async function evaluateMarketingAutoPause(
         select: { status: true },
       });
     }
-    const recentAttemptOutcomes = attempts.map((attempt) => attempt.outcome);
+    const recentAttemptOutcomes = marketingFinalAttemptOutcomes(attempts);
     const recentDraftStatuses = drafts.map((draft) => draft.status);
     reasonCode = decideMarketingAutoPause({
       removedPostCount,

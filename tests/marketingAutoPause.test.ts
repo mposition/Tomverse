@@ -15,6 +15,7 @@ import {
   decideMarketingAutoPause,
   marketingAutoPauseWindowStart,
   marketingConsecutiveFailuresTripped,
+  marketingFinalAttemptOutcomes,
   marketingGuardRejectionTripped,
 } from "@/lib/marketingStore";
 import { runMarketingPublisherBatch } from "@/lib/marketingPublisherBatch";
@@ -71,6 +72,41 @@ test("three consecutive failures trip; anything else in the newest three does no
   // An unknown outcome is the S2d2 path and does not count as a plain failure.
   assert.equal(
     marketingConsecutiveFailuresTripped(["failed", "failed", "outcome_unknown"]),
+    false,
+  );
+});
+
+test("a settled unknown outcome counts once, as its last word", () => {
+  // Attempt 2 of the post was unknown and a person then confirmed it failed:
+  // two entries, one attempt. Three real failures must still trip.
+  const entries = [
+    { postId: "p1", attempt: 3, outcome: "failed" },
+    { postId: "p1", attempt: 2, outcome: "failed" },
+    { postId: "p1", attempt: 2, outcome: "outcome_unknown" },
+    { postId: "p1", attempt: 1, outcome: "failed" },
+  ];
+  assert.deepEqual(marketingFinalAttemptOutcomes(entries), ["failed", "failed", "failed"]);
+  assert.equal(
+    marketingConsecutiveFailuresTripped(marketingFinalAttemptOutcomes(entries)),
+    true,
+  );
+  // The same attempt number on another post is another attempt.
+  assert.deepEqual(
+    marketingFinalAttemptOutcomes([
+      { postId: "p1", attempt: 1, outcome: "failed" },
+      { postId: "p2", attempt: 1, outcome: "failed" },
+    ]),
+    ["failed", "failed"],
+  );
+  // An unknown outcome nobody has settled is still the newest word.
+  assert.equal(
+    marketingConsecutiveFailuresTripped(
+      marketingFinalAttemptOutcomes([
+        { postId: "p1", attempt: 3, outcome: "outcome_unknown" },
+        { postId: "p1", attempt: 2, outcome: "failed" },
+        { postId: "p1", attempt: 1, outcome: "failed" },
+      ]),
+    ),
     false,
   );
 });
@@ -181,7 +217,7 @@ const world = (options: World = {}) => {
         seen.reads.push("attempts");
         seen.rawValues.push([...((query as { values?: unknown[] }).values ?? [])]);
         if (failOn === "attempts") throw new Error("injected: attempts read lost");
-        return attempts.map((outcome) => ({ outcome }));
+        return attempts.map((outcome, index) => ({ postId: `post-${index}`, attempt: 1, outcome }));
       }
       if (sql.includes("FOR UPDATE")) {
         seen.reads.push("lock");
