@@ -138,10 +138,10 @@ test("weekly_kpi shows the counts, guard codes and per-account totals", () => {
 
 test("any other kind is indented JSON", () => {
   const tree = MarketingReportBody({
-    report: { id: "r", kind: "brief", competitorNames: {}, payload: { topicIds: ["t1"], claimIds: [], sourceDigests: [] } },
+    report: { id: "r", kind: "experiment_result", competitorNames: {}, payload: { experimentId: "e1", variantId: "v1", exposures: 10, conversions: 2 } },
     m,
   });
   const pre = byTestId(tree, "marketing-report-json");
   assert.equal(pre.length, 1);
-  assert.equal(textOf(pre[0] as ReactNode), JSON.stringify({ topicIds: ["t1"], claimIds: [], sourceDigests: [] }, null, 2));
+  assert.equal(textOf(pre[0] as ReactNode), JSON.stringify({ experimentId: "e1", variantId: "v1", exposures: 10, conversions: 2 }, null, 2));
 });

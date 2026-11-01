@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
 import { POST } from "@/app/api/internal/marketing-drafts/route";
+import { MARKETING_ANALYSIS_ENABLED_KEY } from "@/lib/marketingAnalysisCore";
 import { MARKETING_DRAFTS_KEY } from "@/lib/marketingAutomationAccess";
 import {
   marketingDraftProvenance,
@@ -610,6 +611,12 @@ test("a call that is missing, another run's, not a draft's or still open is refu
   const row = await approvedChannel();
   await draftsOn();
   await ledgerCall(2, { run: "run-2" });
+  // The ledger reserves a brief call only while the analysis switch is on.
+  await prisma.appSetting.upsert({
+    where: { key: MARKETING_ANALYSIS_ENABLED_KEY },
+    create: { key: MARKETING_ANALYSIS_ENABLED_KEY, value: "true" },
+    update: { value: "true" },
+  });
   await ledgerCall(3, { purpose: "brief" });
   await ledgerCall(4, { until: "dispatched" });
   await ledgerCall(5, { until: "reserved" });

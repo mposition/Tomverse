@@ -15,6 +15,7 @@ import {
   MARKETING_GENERATOR_REPORT_ACTION,
   marketingGeneratorReportProvenance,
 } from "@/lib/marketingIntelReportCore";
+import { readMarketingReportForConsole } from "@/lib/marketingReportRead";
 import { runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
@@ -25,7 +26,10 @@ const DIGEST = "b".repeat(64);
 // The registry starts empty in each test (the reset clears the migration's
 // proposals too), so no competitor is approved unless a test approves it.
 const reset = () =>
-  resetTestFixture(prisma, `TRUNCATE TABLE "MarketingReport", "MarketingCompetitor" RESTART IDENTITY CASCADE`);
+  resetTestFixture(
+    prisma,
+    `TRUNCATE TABLE "MarketingReport", "MarketingCompetitor", "MarketingAnalysis" RESTART IDENTITY CASCADE`,
+  );
 
 beforeEach(reset);
 after(async () => {
@@ -240,6 +244,94 @@ test("a brief is kept as sent, and a brief resting on a claim the registry lacks
     ).json()) as { result: Record<string, unknown> };
     assert.deepEqual(unknown.result, { status: "refused", reasons: ["report_claim_unknown"] });
     assert.equal(await prisma.marketingReport.count(), 1);
+  }));
+
+const ANALYSIS = {
+  promptVersion: "analysis-v1",
+  self: {
+    summary: "Tomverse puts several AI models' answers to one question side by side.",
+    strengths: ["Reads up to three answers together."],
+    weaknesses: ["No team plan."],
+    audiences: ["Students"],
+  },
+  competitive: {
+    pricePosition: "Pro costs US$15 a month.",
+    ahead: [{ point: "Cheaper entry plan.", sources: ["https://poe.com/pricing", "https://made-up.example/x"] }],
+    behind: [],
+    weeklyMessage: "Stress reading answers side by side.",
+  },
+  topicId: "side-by-side-answers",
+  claimIds: ["claim.review-three-models"],
+  competitorIds: ["poe"],
+  factCount: 1,
+  featureCount: 0,
+};
+
+const analysisCount = async () =>
+  Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS n FROM "MarketingAnalysis"`)[0].n);
+
+test("a brief carries its analysis into its own table in the same record, and the console reads it back", () =>
+  withSecret(async () => {
+    await approve("poe", "Poe", ["poe.com"]);
+    const report = brief({
+      reportId: "brief-analysis",
+      payload: { topicIds: ["side-by-side-answers"], claimIds: ["claim.review-three-models"], sourceDigests: [DIGEST] },
+      analysis: ANALYSIS,
+    });
+    const kept = (await (await call(sign(report))).json()) as { result: { status: string; reportRowId: string } };
+    assert.equal(kept.result.status, "recorded");
+    const stored = await prisma.$queryRaw<
+      Array<{ briefReportId: string; payload: unknown; createdAt: Date; retentionUntil: Date }>
+    >`SELECT "briefReportId", "payload", "createdAt", "retentionUntil" FROM "MarketingAnalysis"`;
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].briefReportId, kept.result.reportRowId);
+    assert.deepEqual(stored[0].payload, ANALYSIS);
+    // The database dates it, 24 months on.
+    const expected = new Date(stored[0].createdAt);
+    expected.setUTCMonth(expected.getUTCMonth() + 24);
+    assert.equal(stored[0].retentionUntil.toISOString(), expected.toISOString());
+    const [audit] = await auditsFor([kept.result.reportRowId]);
+    assert.equal((audit.metadata as Record<string, unknown>).analysis, true);
+
+    // A resend is read back; it writes no second analysis.
+    const again = (await (await call(sign(report))).json()) as { result: { existing: boolean } };
+    assert.equal(again.result.existing, true);
+    assert.equal(await analysisCount(), 1);
+
+    // The console shows it with each source judged: the approved host is a
+    // link, the made-up page is text.
+    const read = await readMarketingReportForConsole(prisma, kept.result.reportRowId);
+    assert.equal(read.kind, "found");
+    if (read.kind !== "found") return;
+    assert.deepEqual(read.report.analysis?.competitive.ahead[0].sources, [
+      { url: "https://poe.com/pricing", linkable: true },
+      { url: "https://made-up.example/x", linkable: false },
+    ]);
+
+    // A row never changes, and only retention deletes one.
+    await assert.rejects(prisma.$executeRaw`UPDATE "MarketingAnalysis" SET "sourceVersion" = 'x'`, /immutable/u);
+    await assert.rejects(prisma.$executeRaw`DELETE FROM "MarketingAnalysis"`, /only deleted by retention/u);
+  }));
+
+test("a brief whose claim the registry lacks is refused with its analysis, and an older brief shows none", () =>
+  withSecret(async () => {
+    const refused = (await (
+      await call(
+        sign(
+          brief({
+            reportId: "brief-unknown",
+            payload: { topicIds: ["side-by-side-answers"], claimIds: ["claim.made-up"], sourceDigests: [DIGEST] },
+            analysis: { ...ANALYSIS, claimIds: ["claim.made-up"] },
+          }),
+        ),
+      )
+    ).json()) as { result: Record<string, unknown> };
+    assert.deepEqual(refused.result, { status: "refused", reasons: ["report_claim_unknown"] });
+    assert.equal(await analysisCount(), 0);
+
+    const older = (await (await call(sign(brief()))).json()) as { result: { reportRowId: string } };
+    const read = await readMarketingReportForConsole(prisma, older.result.reportRowId);
+    assert.equal(read.kind === "found" && read.report.analysis, null);
   }));
 
 test("an AI-exposure measurement is kept as sent, audited, and refused when its window runs backwards", () =>
