@@ -4883,6 +4883,12 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 
 export const RETENTION_SETTING_ALLOWLIST = [
   {
+    path: "lib/marketingAnalysisStore.ts",
+    count: 2,
+    reason:
+      "The marketing analysis table's retention writer (2026-11-01): it imports the setting's constant and sets it for its own transaction before deleting analyses past their 24 months, each with its audit row. The table's delete trigger is the shared marketing_retained_row_delete_is_bounded, which still refuses a row before its retentionUntil.",
+  },
+  {
     path: "lib/marketingLlmBudgetStore.ts",
     count: 2,
     reason:

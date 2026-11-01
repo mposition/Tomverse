@@ -204,6 +204,7 @@ const world = (options: World = {}) => {
         return drafts.map((draftStatus) => ({ status: draftStatus }));
       },
     },
+    marketingReport: { findFirst: async () => ({ createdAt: NOW, payload: { firstDetectedAt: NOW.toISOString() } }) },
     marketingChannel: {
       updateMany: async (input: Updated) => {
         seen.channelUpdates.push(input);
@@ -325,6 +326,8 @@ test("a forced reason stops the account without reading evidence", async () => {
   const result = await evaluateMarketingAutoPause(asTransaction(database), {
     channelId: CHANNEL_ID,
     forcedReason: "unhandled_comment_alert",
+    forcedAlerts: [{ postId: "p1", firstDetectedAt: NOW }],
+    forcedOverdueBefore: NOW,
   });
   assert.equal(result.paused && result.reasonCode, "unhandled_comment_alert");
   assert.equal(seen.reads.includes("count"), false);

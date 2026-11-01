@@ -5685,12 +5685,51 @@ export const marketingAutoPauseWindowStart = (
  * The trigger writes `pausedFromMode` and `pausedAt` from the transition; this
  * sets only the status and the reason. A resume needs nothing from the reason.
  */
+/**
+ * The instant an account last started fresh: the later of its approval period
+ * beginning (the database sets it on a reconnect and on a resume to approval)
+ * and the latest automatic stop or resume entry for it. The resume entries are
+ * written before the resume itself, which is the right side of the line.
+ */
+async function marketingAccountFreshStart(
+  database: MarketingDatabase,
+  channelId: string,
+  approvalStartedAt: Date | null,
+): Promise<Date | null> {
+  const entry = await database.adminAuditLog.findFirst({
+    where: {
+      targetType: MARKETING_AUTO_PAUSE_TARGET_TYPE,
+      targetId: channelId,
+      action: {
+        in: [
+          MARKETING_AUTO_PAUSE_ACTION,
+          MARKETING_S2B1_ACTIONS.accountResumeApproval,
+          MARKETING_RESUME_AUTONOMOUS_ACTION,
+        ],
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return marketingAutoPauseWindowStart([approvalStartedAt, entry?.createdAt]);
+}
+
 export async function evaluateMarketingAutoPause(
   database: MarketingTransaction,
   rawInput: {
     readonly channelId: string;
     /** A fact another module established; the stop is this path. */
     readonly forcedReason?: Extract<MarketingAutoPauseReasonCode, "unhandled_comment_alert">;
+    /**
+     * The unanswered comment alerts behind a forced stop. One of them has to
+     * have begun after the account's last fresh start (an alert already open
+     * when the operator resumed the account is not a new reason to stop it) and
+     * still be unanswered now, under the lock: an operator's acknowledgement
+     * that committed after the list was read is respected.
+     */
+    readonly forcedAlerts?: ReadonlyArray<{ readonly postId: string; readonly firstDetectedAt: Date }>;
+    /** An alert counts only if it began at or before this instant (a day before now), checked under the lock. */
+    readonly forcedOverdueBefore?: Date;
   },
 ): Promise<
   | { readonly paused: false }
@@ -5709,28 +5748,29 @@ export async function evaluateMarketingAutoPause(
   const pausedFromMode = channel.status as MarketingPausableMode;
 
   // Evidence counts from the account's last fresh start, so a resumed account is
-  // not stopped again by the entries that stopped it. The resume entries are
-  // written before the resume itself, which is the right side of the line.
-  const lastFreshStart = await database.adminAuditLog.findFirst({
-    where: {
-      targetType: MARKETING_AUTO_PAUSE_TARGET_TYPE,
-      targetId: channelId,
-      action: {
-        in: [
-          MARKETING_AUTO_PAUSE_ACTION,
-          MARKETING_S2B1_ACTIONS.accountResumeApproval,
-          MARKETING_RESUME_AUTONOMOUS_ACTION,
-        ],
-      },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  const windowStart = marketingAutoPauseWindowStart([
-    channel.approvalStartedAt,
-    lastFreshStart?.createdAt,
-  ]);
+  // not stopped again by the entries that stopped it.
+  const windowStart = await marketingAccountFreshStart(database, channelId, channel.approvalStartedAt);
   const since = windowStart ?? new Date(0);
+  if (rawInput.forcedReason !== undefined) {
+    let warranted = false;
+    for (const alert of rawInput.forcedAlerts ?? []) {
+      // The same alert, still unanswered, old enough: a fresh alert on the same
+      // post, written after the list was read, is a different one.
+      const state = await marketingCommentAlertState(database, alert.postId);
+      if (
+        state.open &&
+        state.firstDetectedAt !== null &&
+        state.firstDetectedAt.getTime() === alert.firstDetectedAt.getTime() &&
+        state.firstDetectedAt.getTime() > since.getTime() &&
+        rawInput.forcedOverdueBefore !== undefined &&
+        state.firstDetectedAt.getTime() <= rawInput.forcedOverdueBefore.getTime()
+      ) {
+        warranted = true;
+        break;
+      }
+    }
+    if (!warranted) return { paused: false };
+  }
 
   let reasonCode: MarketingAutoPauseReasonCode | null = rawInput.forcedReason ?? null;
   let evidence: Record<string, number> = {};
@@ -5826,6 +5866,613 @@ export async function evaluateMarketingAutoPause(
     },
   });
   return { paused: true, reasonCode, pausedFromMode };
+}
+
+// ---------------------------------------------------------------------------
+// Graduation (S4b, policy O3 and section 8.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The operator's one confirmation, and the audit action that records it. The
+ * route writes the entry first (permission and a recent sign-in are checked
+ * there); `graduateMarketingChannel()` verifies it before it changes anything.
+ */
+export const MARKETING_GRADUATE_ACTION = "marketing_account.graduate";
+
+/** Policy O3: seven days after the first success, three approvals, a third of edits. */
+export const MARKETING_GRADUATION_MIN_APPROVALS = 3;
+export const MARKETING_GRADUATION_MIN_DAYS_AFTER_FIRST_SUCCESS = 7;
+
+/** Why an account cannot graduate yet. Closed; the console shows one line for each. */
+export const MARKETING_GRADUATION_UNMET_CODES = [
+  "not_in_approval_mode",
+  "channel_never_graduates",
+  "first_success_missing",
+  "first_success_too_recent",
+  "approvals_below_minimum",
+  "edit_rate_above_limit",
+  "comments_monitor_unhealthy",
+] as const;
+export type MarketingGraduationUnmetCode = (typeof MARKETING_GRADUATION_UNMET_CODES)[number];
+
+/** What the account's current approval period has produced. Counts, never text. */
+export type MarketingGraduationMetrics = {
+  /** When the approval period began (the database sets it on every fresh start). */
+  readonly observedFromAt: Date | null;
+  /** The earliest `publishedAt` in the period; the database's clock wrote it. */
+  readonly firstSuccessAt: Date | null;
+  readonly approvedPostCount: number;
+  readonly operatorRejectedCount: number;
+  /** Approved posts whose text a person changed before approving. */
+  readonly editedApprovedCount: number;
+  readonly draftCount: number;
+  readonly guardRejectedCount: number;
+};
+
+/**
+ * The O3 test, as a pure function of counts: every condition at once, none
+ * short-circuited, so a person sees all that is missing. The edit rate is
+ * edited approvals over approvals plus the operator's rejections (a rejection
+ * is in the denominator), and has to be at most a third.
+ */
+export const evaluateMarketingGraduation = (input: {
+  readonly status: string;
+  readonly channel: string;
+  readonly metrics: MarketingGraduationMetrics;
+  readonly now: Date;
+  readonly commentsMonitorHealthy: boolean;
+}): {
+  readonly eligible: boolean;
+  readonly unmet: MarketingGraduationUnmetCode[];
+  readonly operatorEditRate: number;
+  readonly guardRejectionRate: number;
+} => {
+  const { metrics } = input;
+  const decided = metrics.approvedPostCount + metrics.operatorRejectedCount;
+  const operatorEditRate = decided === 0 ? 0 : metrics.editedApprovedCount / decided;
+  const guardRejectionRate =
+    metrics.draftCount === 0 ? 0 : metrics.guardRejectedCount / metrics.draftCount;
+  const unmet: MarketingGraduationUnmetCode[] = [];
+  if (input.status !== "approval_mode") unmet.push("not_in_approval_mode");
+  if ((MARKETING_NO_AUTONOMY_CHANNELS as readonly string[]).includes(input.channel)) {
+    unmet.push("channel_never_graduates");
+  }
+  if (metrics.firstSuccessAt === null) {
+    unmet.push("first_success_missing");
+  } else if (
+    input.now.getTime() - metrics.firstSuccessAt.getTime() <
+    MARKETING_GRADUATION_MIN_DAYS_AFTER_FIRST_SUCCESS * 24 * 60 * 60 * 1000
+  ) {
+    unmet.push("first_success_too_recent");
+  }
+  if (metrics.approvedPostCount < MARKETING_GRADUATION_MIN_APPROVALS) {
+    unmet.push("approvals_below_minimum");
+  }
+  if (metrics.editedApprovedCount * 3 > decided) unmet.push("edit_rate_above_limit");
+  if (!input.commentsMonitorHealthy) unmet.push("comments_monitor_unhealthy");
+  return { eligible: unmet.length === 0, unmet, operatorEditRate, guardRejectionRate };
+};
+
+const MARKETING_GRADUATION_PAGE = 200;
+
+async function measureMarketingGraduation(
+  database: MarketingDatabase,
+  channelId: string,
+  observedFromAt: Date | null,
+): Promise<MarketingGraduationMetrics> {
+  // Posts made in this approval period. A fresh start (reconnect, scope or
+  // policy change) opens a new period, so earlier work never counts.
+  const since = observedFromAt ?? new Date(0);
+  // Every post of the period, page by page: a count over part of it would let
+  // the first posts decide for all the rest.
+  const posts: Array<{
+    id: string;
+    status: string;
+    approvedAt: Date | null;
+    publishedAt: Date | null;
+    history: Prisma.JsonValue;
+  }> = [];
+  for (;;) {
+    const page = await database.marketingPost.findMany({
+      where: { channelId, createdAt: { gte: since } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: MARKETING_GRADUATION_PAGE,
+      ...(posts.length > 0 ? { cursor: { id: posts[posts.length - 1].id }, skip: 1 } : {}),
+      select: { id: true, status: true, approvedAt: true, publishedAt: true, history: true },
+    });
+    posts.push(...page);
+    if (page.length < MARKETING_GRADUATION_PAGE) break;
+  }
+  let firstSuccessAt: Date | null = null;
+  let approvedPostCount = 0;
+  let operatorRejectedCount = 0;
+  let editedApprovedCount = 0;
+  let guardRejectedCount = 0;
+  for (const post of posts) {
+    if (post.status === "guard_rejected") guardRejectedCount += 1;
+    if (post.status === "rejected") operatorRejectedCount += 1;
+    if (post.publishedAt && (firstSuccessAt === null || post.publishedAt < firstSuccessAt)) {
+      firstSuccessAt = post.publishedAt;
+    }
+    if (post.approvedAt) {
+      approvedPostCount += 1;
+      const history = Array.isArray(post.history) ? post.history : [];
+      if (
+        history.some(
+          (entry) =>
+            typeof entry === "object" &&
+            entry !== null &&
+            !Array.isArray(entry) &&
+            entry.type === "edit_revision",
+        )
+      ) {
+        editedApprovedCount += 1;
+      }
+    }
+  }
+  return {
+    observedFromAt,
+    firstSuccessAt,
+    approvedPostCount,
+    operatorRejectedCount,
+    editedApprovedCount,
+    draftCount: posts.length,
+    guardRejectedCount,
+  };
+}
+
+/**
+ * Where an account stands against O3, for the console and for the graduation
+ * itself. Read only; the graduation repeats it under the account's row lock.
+ */
+export async function readMarketingGraduation(
+  database: MarketingDatabase,
+  channelId: string,
+  commentsMonitorHealthy: boolean,
+) {
+  const channel = await database.marketingChannel.findUnique({
+    where: { id: channelId },
+    select: { channel: true, status: true, approvalStartedAt: true },
+  });
+  if (!channel) {
+    throw new MarketingStoreRefusedError("channel_not_found", "The marketing account does not exist");
+  }
+  const now = await marketingDatabaseNow(database);
+  const metrics = await measureMarketingGraduation(database, channelId, channel.approvalStartedAt);
+  return {
+    ...evaluateMarketingGraduation({
+      status: channel.status,
+      channel: channel.channel,
+      metrics,
+      now,
+      commentsMonitorHealthy,
+    }),
+    metrics,
+  };
+}
+
+/**
+ * Open autonomous publishing for an account: `approval_mode -> autonomous_mode`
+ * with the snapshot that shows why. The only path that does it.
+ *
+ * Under the account's row lock it checks the operator's confirmation (a
+ * chain-valid human entry for this account, written after the approval period
+ * began, saying which graduation epoch it was for), repeats O3 on the counts,
+ * and compares-and-sets on the epoch. The snapshot keeps counts and rates only.
+ * Instagram and TikTok never graduate (O15); the database refuses it too.
+ * `commentsMonitorHealthy` is a fact the caller establishes; the monitor itself
+ * is not this module's.
+ */
+export async function graduateMarketingChannel(
+  database: MarketingTransaction,
+  rawInput: {
+    id: string;
+    auditLogId: string;
+    expectedGraduationEpoch: number;
+    commentsMonitorHealthy: boolean;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    auditLogId: String(rawInput.auditLogId),
+    expectedGraduationEpoch: Number(rawInput.expectedGraduationEpoch),
+    commentsMonitorHealthy: rawInput.commentsMonitorHealthy === true,
+  };
+  const row = await lockMarketingChannel(database, input.id);
+  if (row.graduationEpoch !== input.expectedGraduationEpoch) {
+    throw new MarketingStoreRefusedError(
+      "channel_changed_under_us",
+      "The account started a new approval period since the page was read",
+    );
+  }
+  const verdict = await verifyMarketingAuditEvidence(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_GRADUATE_ACTION,
+    targetId: input.id,
+    metadata: { graduationEpoch: input.expectedGraduationEpoch },
+    notBefore: row.approvalStartedAt ?? undefined,
+  });
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `audit_evidence_${verdict.problem}`,
+      `The audit entry for this graduation is not evidence of it: ${verdict.problem}`,
+    );
+  }
+  const now = await marketingDatabaseNow(database);
+  const metrics = await measureMarketingGraduation(database, input.id, row.approvalStartedAt);
+  const decision = evaluateMarketingGraduation({
+    status: row.status,
+    channel: row.channel,
+    metrics,
+    now,
+    commentsMonitorHealthy: input.commentsMonitorHealthy,
+  });
+  // Not a thrown refusal: the conditions are the answer the caller shows, all of
+  // them at once, and a caller that throws on it rolls back the confirmation too.
+  if (!decision.eligible) return { graduated: false as const, unmet: decision.unmet };
+  const snapshot = marketingGraduationSnapshotSchema.parse({
+    graduationEpoch: row.graduationEpoch,
+    approvedPostCount: metrics.approvedPostCount,
+    guardRejectionRate: decision.guardRejectionRate,
+    operatorEditRate: decision.operatorEditRate,
+    observedFromAt: (metrics.observedFromAt ?? new Date(0)).toISOString(),
+    observedUntilAt: now.toISOString(),
+    approvalAuditLogId: input.auditLogId,
+    policyVersion: row.policyVersion,
+  });
+  const graduated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "approval_mode",
+      graduationEpoch: row.graduationEpoch,
+      policyVersion: row.policyVersion,
+    },
+    data: { status: "autonomous_mode", graduatedAt: now, graduationSnapshot: asJson(snapshot) },
+  });
+  requireOne(
+    graduated.count,
+    "channel_changed_under_us",
+    "The account changed between the checks and the graduation",
+  );
+  return { graduated: true as const, snapshot };
+}
+
+// ---------------------------------------------------------------------------
+// Comment alerts (S4c, policy 12.1)
+// ---------------------------------------------------------------------------
+
+/** A risky comment was found under a post: a report row, and this entry beside it. */
+export const MARKETING_COMMENT_ALERT_RECORDED_ACTION = "marketing_comment_alert.recorded";
+/** The operator answered the alert. Written by the admin route, read here as the end of the alert. */
+export const MARKETING_COMMENT_ALERT_ACK_ACTION = "marketing_comment_alert.acknowledge";
+/** An alert nobody answered for this long stops the account (policy 8.3). */
+export const MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS = 86_400_000;
+/** Alert reports are read in pages of this size, all of them: ninety days are kept. */
+const MARKETING_COMMENT_ALERT_PAGE = 200;
+
+export type MarketingCommentAlert = {
+  readonly postId: string;
+  readonly channelId: string | null;
+  readonly alertCount: number;
+  readonly riskCodes: readonly string[];
+  readonly firstDetectedAt: Date;
+  readonly externalUrlHost: string;
+};
+
+/**
+ * The alerts nobody has answered, oldest first.
+ *
+ * An alert is the newest report of its post, and it is open until an operator's
+ * acknowledgement entry for that post is newer than it. A report is never
+ * changed after it is written, so the answer is a later row, not an edit.
+ */
+export async function listOpenMarketingCommentAlerts(
+  database: MarketingDatabase,
+  options: { readonly ignoreAuditLogId?: string } = {},
+): Promise<MarketingCommentAlert[]> {
+  // Every alert report, page by page: a safety decision made on the newest part
+  // would lose the oldest unanswered alert -- the one that matters most.
+  const reports: Array<{ id: string; createdAt: Date; payload: Prisma.JsonValue }> = [];
+  for (;;) {
+    const page = await database.marketingReport.findMany({
+      where: { kind: "comment_alerts" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: MARKETING_COMMENT_ALERT_PAGE,
+      ...(reports.length > 0 ? { cursor: { id: reports[reports.length - 1].id }, skip: 1 } : {}),
+      select: { id: true, createdAt: true, payload: true },
+    });
+    reports.push(...page);
+    if (page.length < MARKETING_COMMENT_ALERT_PAGE) break;
+  }
+  const newest = new Map<string, { createdAt: Date; payload: ReturnType<typeof parseMarketingReportPayload> }>();
+  for (const report of reports) {
+    let payload;
+    try {
+      payload = parseMarketingReportPayload("comment_alerts", report.payload);
+    } catch {
+      continue;
+    }
+    const postId = (payload as { postId: string }).postId;
+    if (!newest.has(postId)) newest.set(postId, { createdAt: report.createdAt, payload });
+  }
+  if (newest.size === 0) return [];
+  const postIds = [...newest.keys()];
+  const acknowledgements = await database.adminAuditLog.findMany({
+    where: {
+      action: MARKETING_COMMENT_ALERT_ACK_ACTION,
+      targetId: { in: postIds },
+      ...(options.ignoreAuditLogId ? { id: { not: options.ignoreAuditLogId } } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true, createdAt: true },
+  });
+  const answeredAt = new Map<string, Date>();
+  for (const entry of acknowledgements) {
+    if (entry.targetId && !answeredAt.has(entry.targetId)) answeredAt.set(entry.targetId, entry.createdAt);
+  }
+  const posts = await database.marketingPost.findMany({
+    where: { id: { in: postIds } },
+    select: { id: true, channelId: true },
+  });
+  const channelOf = new Map(posts.map((post) => [post.id, post.channelId]));
+  const open: MarketingCommentAlert[] = [];
+  for (const [postId, { createdAt, payload }] of newest) {
+    const answered = answeredAt.get(postId);
+    if (answered && answered.getTime() >= createdAt.getTime()) continue;
+    const alert = payload as {
+      alertCount: number;
+      riskCodes: string[];
+      firstDetectedAt: string;
+      externalUrlHost: string;
+    };
+    open.push({
+      postId,
+      channelId: channelOf.get(postId) ?? null,
+      alertCount: alert.alertCount,
+      riskCodes: alert.riskCodes,
+      firstDetectedAt: new Date(alert.firstDetectedAt),
+      externalUrlHost: alert.externalUrlHost,
+    });
+  }
+  // Oldest first: the alert closest to stopping its account is the one to show.
+  return open.sort((a, b) => a.firstDetectedAt.getTime() - b.firstDetectedAt.getTime());
+}
+
+/** The host of a stored URL, or a fixed word when it cannot be read: a bad URL must not cost an alert. */
+const marketingUrlHostOrUnknown = (value: string): string => {
+  try {
+    return new URL(value).hostname || "unknown.invalid";
+  } catch {
+    return "unknown.invalid";
+  }
+};
+
+/**
+ * When an operator last answered the alert of each of these posts, by post. The
+ * monitor counts a comment as handled when it is not newer than that, so the
+ * comments an alert was about do not raise it again when they are read again.
+ */
+export async function readMarketingCommentAlertAnswers(
+  database: MarketingDatabase,
+  postIds: readonly string[],
+): Promise<Map<string, Date>> {
+  const answers = new Map<string, Date>();
+  if (postIds.length === 0) return answers;
+  const rows = await database.adminAuditLog.findMany({
+    where: { action: MARKETING_COMMENT_ALERT_ACK_ACTION, targetId: { in: [...postIds] } },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true, createdAt: true },
+  });
+  for (const row of rows) {
+    if (row.targetId && !answers.has(row.targetId)) answers.set(row.targetId, row.createdAt);
+  }
+  return answers;
+}
+
+/**
+ * Where one post's alert stands: open when its newest report is newer than its
+ * newest acknowledgement, with the instant that report says it began. Two reads
+ * for one post -- the report read narrows by kind and then by the post inside the
+ * ninety days of alert reports that are kept, which is small -- rather than the
+ * scan of every alert that listing them all would be under the audit lock.
+ * `ignoreAuditLogId`
+ * leaves out the entry a request has just written for itself.
+ */
+async function marketingCommentAlertState(
+  database: MarketingDatabase,
+  postId: string,
+  ignoreAuditLogId?: string,
+): Promise<{ readonly open: boolean; readonly firstDetectedAt: Date | null; readonly answeredAt: Date | null }> {
+  const report = await database.marketingReport.findFirst({
+    where: { kind: "comment_alerts", payload: { path: ["postId"], equals: postId } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { createdAt: true, payload: true },
+  });
+  if (!report) return { open: false, firstDetectedAt: null, answeredAt: null };
+  const detected = new Date(
+    String((report.payload as { firstDetectedAt?: unknown } | null)?.firstDetectedAt ?? ""),
+  );
+  const firstDetectedAt = Number.isNaN(detected.getTime()) ? null : detected;
+  const answer = await database.adminAuditLog.findFirst({
+    where: {
+      action: MARKETING_COMMENT_ALERT_ACK_ACTION,
+      targetId: postId,
+      ...(ignoreAuditLogId ? { id: { not: ignoreAuditLogId } } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return {
+    open: !(answer && answer.createdAt.getTime() >= report.createdAt.getTime()),
+    firstDetectedAt,
+    answeredAt: answer?.createdAt ?? null,
+  };
+}
+
+/**
+ * Record one alert: a counts-and-codes report and its system audit entry, in one
+ * transaction. Nothing of the comments themselves is kept -- not the text, not
+ * who wrote it, not where it is.
+ *
+ * Refused as `already_open` when an unanswered alert for the post exists, so a
+ * monitor run every hour does not stack rows for one problem.
+ */
+export async function recordMarketingCommentAlert(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly postId: string;
+    readonly alertCount: number;
+    readonly riskCodes: readonly string[];
+    readonly detectedAt: Date;
+    /** The operator's latest answer the comments were judged against; null if there was none. */
+    readonly answeredAtSeen: Date | null;
+    /** The newest time among the flagged comments; null when none of them has a time. */
+    readonly flaggedNewestAt: Date | null;
+  },
+): Promise<
+  | { readonly recorded: true }
+  | { readonly recorded: false; readonly reason: "already_open" | "post_not_published" | "answer_changed" }
+> {
+  await takeAuditChainLock(database);
+  const post = await database.marketingPost.findUnique({
+    where: { id: String(rawInput.postId) },
+    select: { id: true, externalUrl: true, status: true, channelId: true, channel: { select: { approvalStartedAt: true } } },
+  });
+  if (!post || !post.externalUrl || (post.status !== "published" && post.status !== "verified")) {
+    return { recorded: false, reason: "post_not_published" };
+  }
+  const state = await marketingCommentAlertState(database, post.id);
+  // An alert already open is one alert, unless the account started fresh after it
+  // began: an operator who resumed the account without answering it has not seen
+  // what is found now, and the stop for an alert nobody answers must be able to
+  // count it. The newest report is then the one that matters.
+  const freshStart = state.open
+    ? await marketingAccountFreshStart(database, post.channelId, post.channel.approvalStartedAt)
+    : null;
+  // ...and only on evidence that something new was found: a flagged comment
+  // written after the account started fresh. The same old comment, read again
+  // because the account was resumed, is not that.
+  const supersedes =
+    state.open &&
+    freshStart !== null &&
+    state.firstDetectedAt !== null &&
+    state.firstDetectedAt.getTime() <= freshStart.getTime() &&
+    rawInput.flaggedNewestAt !== null &&
+    rawInput.flaggedNewestAt.getTime() > freshStart.getTime();
+  if (state.open && !supersedes) return { recorded: false, reason: "already_open" };
+  // Under the lock, the answer the comments were judged against must still be the
+  // latest. One that came in while they were being classified makes the verdict
+  // about comments the operator has since handled, and nothing is recorded.
+  if (
+    state.answeredAt !== null &&
+    (rawInput.answeredAtSeen === null || state.answeredAt.getTime() > rawInput.answeredAtSeen.getTime())
+  ) {
+    return { recorded: false, reason: "answer_changed" };
+  }
+  const detectedAt = new Date(rawInput.detectedAt.getTime());
+  await insertMarketingReport(database, {
+    kind: "comment_alerts",
+    periodStart: detectedAt,
+    periodEnd: detectedAt,
+    sourceVersion: "comment-monitor-1",
+    payload: {
+      postId: post.id,
+      alertCount: Math.max(1, Math.floor(rawInput.alertCount)),
+      riskCodes: [...rawInput.riskCodes].slice(0, 20),
+      firstDetectedAt: detectedAt.toISOString(),
+      externalUrlHost: marketingUrlHostOrUnknown(post.externalUrl),
+    },
+  });
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_COMMENT_ALERT_RECORDED_ACTION,
+    targetType: MARKETING_POST_AUDIT_TARGET_TYPE,
+    targetId: post.id,
+    summary: "The comment monitor raised an alert on a published post.",
+    metadata: { alertCount: Math.max(1, Math.floor(rawInput.alertCount)), riskCodes: [...rawInput.riskCodes].slice(0, 20) },
+  });
+  return { recorded: true };
+}
+
+/**
+ * The operator's answer. The admin route has already written the human entry
+ * (that entry *is* the answer); this only checks there was something to
+ * answer, so an acknowledgement of nothing rolls its entry back.
+ */
+export async function requireOpenMarketingCommentAlert(
+  database: MarketingDatabase,
+  postId: string,
+  auditLogId: string,
+): Promise<void> {
+  // Without the entry this very request wrote: the wrapper writes the human
+  // entry first, and that entry would otherwise answer the alert before it was
+  // checked to exist.
+  if (!(await marketingCommentAlertState(database, postId, auditLogId)).open) {
+    throw new MarketingStoreRefusedError(
+      "post_not_found",
+      "There is no unanswered comment alert for that post",
+    );
+  }
+}
+
+/**
+ * The published posts whose comments the monitor reads: live in the last two
+ * weeks, on an account that is connected (paused ones too), with the ids Zernio
+ * is asked about. A disconnected account's posts are not read.
+ * Newest first, bounded.
+ */
+export async function listMarketingPostsForCommentMonitor(
+  database: MarketingDatabase,
+  input: { readonly now: Date; readonly limit: number },
+): Promise<
+  Array<{
+    id: string;
+    channelId: string;
+    externalPostId: string;
+    externalAccountRef: string;
+    /** When the account's approval period began; a reconnect or a resume moves it. */
+    channelApprovalStartedAt: Date | null;
+  }>
+> {
+  const rows = await database.marketingPost.findMany({
+    where: {
+      status: { in: ["published", "verified"] },
+      externalPostId: { not: null },
+      publishedAt: { gte: new Date(input.now.getTime() - 14 * 24 * 60 * 60 * 1000) },
+      // A paused account is read too: the run's time moves for every account at
+      // once, so comments written while one was stopped would otherwise be
+      // older than the next run's floor and never classified.
+      channel: { status: { in: ["approval_mode", "autonomous_mode", "paused"] }, externalAccountRef: { not: null } },
+    },
+    orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
+    take: Math.max(1, Math.floor(input.limit)),
+    select: {
+      id: true,
+      channelId: true,
+      externalPostId: true,
+      channel: { select: { externalAccountRef: true, approvalStartedAt: true } },
+    },
+  });
+  const posts: Array<{
+    id: string;
+    channelId: string;
+    externalPostId: string;
+    externalAccountRef: string;
+    channelApprovalStartedAt: Date | null;
+  }> = [];
+  for (const row of rows) {
+    if (row.externalPostId && row.channel.externalAccountRef) {
+      posts.push({
+        id: row.id,
+        channelId: row.channelId,
+        externalPostId: row.externalPostId,
+        externalAccountRef: row.channel.externalAccountRef,
+        channelApprovalStartedAt: row.channel.approvalStartedAt,
+      });
+    }
+  }
+  return posts;
 }
 
 /** Unused by this module, exported so a caller can narrow a paused mode. */

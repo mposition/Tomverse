@@ -124,18 +124,16 @@ test.describe("marketing console", () => {
     ).toBeVisible();
   });
 
-  test("a section a later stage owns says so instead of looking empty", async ({
+  test("comments are built in S4, so their section no longer says a later stage owns it", async ({
     page,
     signInAs,
   }) => {
     await signInAs("owner");
 
     await page.goto("/admin/marketing?tab=comments");
-    await expect(page.getByText(/stage S4/)).toBeVisible();
-    // Not the empty state: "nothing is waiting" would be a false claim about a
-    // feature nothing writes yet.
-    await expect(page.getByText("Nothing here yet.")).toHaveCount(0);
-
+    // The monitor writes this section now, so an empty one is a true empty.
+    await expect(page.getByText("Nothing here yet.")).toBeVisible();
+    await expect(page.getByText(/stage S4/)).toHaveCount(0);
   });
 
   test("the experiments section is built, so it opens its own controls instead of a stage notice", async ({

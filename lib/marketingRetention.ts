@@ -8,7 +8,8 @@
  * cleanup; a table with more due than one batch finishes on later days.
  *
  * The LLM cost ledger (S3c3c) is the fourth table: closed calls past their 24
- * months and not on legal hold, through the ledger's own writer.
+ * months and not on legal hold, through the ledger's own writer. The analysis
+ * behind a brief (2026-11-01) is the fifth, through its own writer too.
  *
  * Posts that are kept have two more rules (S3h2), each its own step: content
  * purged twenty-four months after publication, and attempt and webhook entries
@@ -29,6 +30,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { purgeExpiredMarketingAnalyses } from "@/lib/marketingAnalysisStore";
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { purgeExpiredMarketingLlmCalls } from "@/lib/marketingLlmBudgetStore";
 import {
@@ -48,6 +50,7 @@ const TABLES: readonly MarketingRetentionTable[] = [
 type MarketingRetentionStep =
   | MarketingRetentionTable
   | "MarketingLlmCall"
+  | "MarketingAnalysis"
   | "MarketingPostContent"
   | "MarketingPostHistory";
 
@@ -84,6 +87,11 @@ export async function runMarketingRetention(
     timeout: 60_000,
   });
   purged.MarketingLlmCall = ledger.purged;
+  const analyses = await client.$transaction((tx) => purgeExpiredMarketingAnalyses(tx), {
+    maxWait: 5_000,
+    timeout: 60_000,
+  });
+  purged.MarketingAnalysis = analyses.purged;
   const content = await runMarketingTransaction(
     client,
     (tx) => purgeExpiredMarketingPostContent(tx),

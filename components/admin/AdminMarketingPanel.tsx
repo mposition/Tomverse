@@ -11,6 +11,7 @@ import {
   localDateTimeValue,
   type MarketingAction,
 } from "@/components/admin/MarketingActions";
+import { MarketingAnalysisSwitch, MarketingBriefReport } from "@/components/admin/MarketingAnalysis";
 import { MarketingWebhookProduction } from "@/components/admin/MarketingWebhookProduction";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -50,7 +51,7 @@ type Row = Record<string, unknown>;
 export type MarketingConsoleView = {
   section: MarketingConsoleSection;
   availability: Availability;
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
@@ -279,7 +280,9 @@ export function AdminMarketingPanel({
                     ? m.showingAssets
                     : view.ordering === "by-status"
                       ? m.showingByStatus
-                      : m.showing
+                      : view.ordering === "oldest"
+                        ? m.showingOldest
+                        : m.showing
                   ).replace(
                     "{count}",
                     String(view.pageSize)
@@ -354,6 +357,7 @@ export function AdminMarketingPanel({
             onDone={done}
             m={m}
           />
+          <MarketingAnalysisSwitch section={view.section} canWrite={view.canWrite} />
           {view.webhookStaging || view.canWrite ? (
             <div data-testid="marketing-webhook-card" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
               <div className="flex items-start justify-between gap-2">
@@ -1400,6 +1404,17 @@ function rowActions(
   if (section === "competitors") return competitorActions(row, m);
   if (section === "experiments") return experimentActions(row, m);
   if (section === "assets") return assetActions(row, m);
+  if (section === "comments") {
+    return [
+      {
+        id: "acknowledge-alert",
+        primary: true,
+        label: m.actAcknowledgeAlert,
+        path: `/api/admin/marketing/alerts/${encodeURIComponent(String(row.id))}/acknowledge`,
+        body: () => ({}),
+      },
+    ];
+  }
   return [];
 }
 
@@ -1755,6 +1770,26 @@ function publishedActions(row: Row, m: Record<string, string>): MarketingAction[
   return actions;
 }
 
+const GRADUATION_UNMET_MESSAGE: Record<string, string> = {
+  not_in_approval_mode: "graduateUnmetNotInApprovalMode",
+  channel_never_graduates: "graduateUnmetChannelNeverGraduates",
+  first_success_missing: "graduateUnmetFirstSuccessMissing",
+  first_success_too_recent: "graduateUnmetFirstSuccessTooRecent",
+  approvals_below_minimum: "graduateUnmetApprovalsBelowMinimum",
+  edit_rate_above_limit: "graduateUnmetEditRateAboveLimit",
+  comments_monitor_unhealthy: "graduateUnmetCommentsMonitorUnhealthy",
+};
+
+/** Why graduation is not offered yet, or undefined when the server's reading says it may be. The server decides again on the click. */
+function graduationUnavailable(graduation: unknown, m: Record<string, string>): string | undefined {
+  if (typeof graduation !== "object" || graduation === null) return m.graduateUnreadable;
+  const reading = graduation as { eligible?: unknown; unmet?: unknown };
+  if (reading.eligible === true) return undefined;
+  const unmet = Array.isArray(reading.unmet) ? reading.unmet : [];
+  const reasons = unmet.map((code) => m[GRADUATION_UNMET_MESSAGE[String(code)] ?? ""] ?? String(code));
+  return [m.graduateUnmetPrefix, reasons.join(" / ")].join(" ").trim();
+}
+
 function accountActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];
   const status = str(row.status);
@@ -1864,6 +1899,17 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
         },
       ],
       body: (values) => ({ ...identityCas, policyVersion: Number(values.policyVersion) }),
+    });
+  }
+
+  if (status === "approval_mode") {
+    actions.push({
+      id: "graduate",
+      label: m.actGraduate,
+      path: ACCOUNT(row.id, "graduate"),
+      confirm: m.confirmGraduate,
+      unavailable: graduationUnavailable(row.graduation, m),
+      body: () => ({ expectedGraduationEpoch: int(row.graduationEpoch) }),
     });
   }
 
@@ -2181,6 +2227,24 @@ function MarketingRow({
     );
   }
 
+  if (section === "comments") {
+    const codes = Array.isArray(row.riskCodes) ? (row.riskCodes as string[]) : [];
+    return (
+      <>
+        <RowHeading title={str(row.externalUrlHost)} detail={str(row.id)}>
+          <MarketingTag tone={row.overdue === true ? "danger" : "warning"}>
+            {row.overdue === true ? m.alertOverdue : m.alertOpen}
+          </MarketingTag>
+        </RowHeading>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <Field label={m.colAlertCount} value={String(row.alertCount ?? 0)} />
+          <Field label={m.colRiskCodes} value={codes.join(", ") || m.none} />
+          <Field label={m.colFirstDetected} value={stamp(row.firstDetectedAt) || m.none} />
+        </div>
+      </>
+    );
+  }
+
   if (section === "competitors") {
     const hosts = Array.isArray(row.officialHosts) ? (row.officialHosts as string[]) : [];
     const evidence = Array.isArray(row.evidenceUrls) ? (row.evidenceUrls as string[]) : [];
@@ -2395,6 +2459,8 @@ const TABLE_CELL = "py-1 pr-4 text-[13px] text-zinc-200";
 
 /** What a report says, by kind: market facts by competitor, the weekly numbers, or the JSON. */
 export function MarketingReportBody({ report, m }: { report: ReportDetail; m: Record<string, string> }) {
+  if (report.kind === "brief") return <MarketingBriefReport report={report} />;
+
   if (report.kind === "market_intel") {
     const payload = report.payload as { facts: MarketIntelFactView[]; unrepresentableFactCount: number };
     const groups = groupMarketIntelFacts(payload.facts, report.competitorNames);
