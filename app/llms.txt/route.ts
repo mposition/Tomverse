@@ -2,7 +2,7 @@ import { SITE_ORIGIN, reviewSeoCopy } from "@/lib/seo";
 
 /**
  * `/llms.txt`: a plain-text map of the public pages for AI assistants
- * (marketing policy §9.2, the AEO decision that it is an optional experiment).
+ * (`docs/policy/marketing-automation.md §9.2`, the AEO decision that it is an optional experiment).
  *
  * Off by default. The file is served only while `LLMS_TXT_ENABLED` is exactly
  * `true`; anything else, including an unset variable, answers 404 as if the
