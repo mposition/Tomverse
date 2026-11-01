@@ -171,7 +171,7 @@ test("an attempt made before the account's last fresh start is not evidence, how
   assert.deepEqual(await evaluate(row.id), { paused: false });
 });
 
-test("a post that retention has thinned is judged on the attempts it still holds, so a success on it breaks the run", async () => {
+test("a thinned post whose summary lies far before the attempts is judged on the attempts it still holds", async () => {
   const row = await approvalChannel();
   await prisma.$executeRawUnsafe(
     `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
@@ -220,6 +220,58 @@ test("a post that retention has thinned is judged on the attempts it still holds
   // failed, failed, published (on the thinned post), failed: the success is among the newest three.
   await postWithAttempts(row.id, [{ at: at(1), attempt: 1, outcome: "failed" }]);
   await postWithAttempts(row.id, [{ at: at(2), attempt: 1, outcome: "failed" }]);
+  await postWithAttempts(row.id, [{ at: at(4), attempt: 1, outcome: "failed" }]);
+  assert.deepEqual(await evaluate(row.id), { paused: false });
+});
+
+test("three failures are not concluded from history that a retention summary reaches into", async () => {
+  const row = await approvalChannel();
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
+  );
+  try {
+    await prisma.marketingPost.create({
+      data: {
+        channelId: row.id,
+        locale: "en",
+        kind: "social",
+        logicalKey: "thinned-reaching",
+        envelope,
+        envelopeDigest: DIGEST,
+        rendererVersion: "r1",
+        claimIds: [],
+        assetIds: [],
+        claimRegistryVersion: 1,
+        assetRegistryVersion: 1,
+        factSnapshot: { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] },
+        factsDigest: DIGEST,
+        guardDecision: "pass",
+        guardCodes: [],
+        guardRuleIds: [],
+        status: "published",
+        mode: "approval",
+        history: [
+          { at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST },
+          // Summarised successes that fell between the failures below.
+          {
+            at: new Date().toISOString(),
+            type: "retention_summary",
+            summarises: "attempt",
+            count: 1,
+            firstAt: at(2).toISOString(),
+            lastAt: at(2).toISOString(),
+          },
+        ],
+        historyVersion: 0,
+      },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`,
+    );
+  }
+  await postWithAttempts(row.id, [{ at: at(1), attempt: 1, outcome: "failed" }]);
+  await postWithAttempts(row.id, [{ at: at(3), attempt: 1, outcome: "failed" }]);
   await postWithAttempts(row.id, [{ at: at(4), attempt: 1, outcome: "failed" }]);
   assert.deepEqual(await evaluate(row.id), { paused: false });
 });

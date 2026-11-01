@@ -5749,27 +5749,40 @@ export async function evaluateMarketingAutoPause(
       // as a failure adds a second entry for the same attempt, with the time of
       // the settling, and that time says nothing about when the attempt was made.
       // Retention keeps what is older than ninety days only in part (successes
-      // become summaries, a last failure stays), so incomplete history is never
-      // judged: the look-back stops at sixty days, where every entry is intact.
-      // The one case left is an unknown outcome older than ninety days settled
-      // inside the look-back; it is placed at the settling and counts as a
-      // failure then, which stops an account rather than lets one run.
-      attempts = await database.$queryRaw<Array<{ outcome: string }>>(Prisma.sql`
-        SELECT "outcome" FROM (
+      // become summaries, a last failure stays). The newest three attempts are
+      // judged only when no summary of attempts reaches back into the span they
+      // cover; otherwise the history between them may be missing and the run
+      // could be an illusion, so nothing is concluded from it.
+      const found = await database.$queryRaw<Array<{ outcome: string; thinned: boolean }>>(
+        Prisma.sql`
+        WITH made AS (
           SELECT post."id" AS "postId", (entry->>'attempt')::int AS "attempt",
             (array_agg(entry->>'outcome' ORDER BY (entry->>'at')::timestamptz DESC))[1] AS "outcome",
             min((entry->>'at')::timestamptz) AS "madeAt"
           FROM "MarketingPost" AS post, jsonb_array_elements(post."history") AS entry
           WHERE post."channelId" = ${channelId} AND entry->>'type' = 'attempt'
           GROUP BY post."id", (entry->>'attempt')::int
-        ) AS attempts
-        WHERE "madeAt" > GREATEST(${since}::timestamptz, clock_timestamp() - interval '60 days')
-        ORDER BY "madeAt" DESC, "postId" DESC, "attempt" DESC
-        LIMIT ${MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES}
-      `);
+        ), newest AS (
+          SELECT * FROM made
+          WHERE "madeAt" > ${since}::timestamptz
+          ORDER BY "madeAt" DESC, "postId" DESC, "attempt" DESC
+          LIMIT ${MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES}
+        )
+        SELECT newest."outcome" AS "outcome",
+          EXISTS (
+            SELECT 1
+            FROM "MarketingPost" AS thin, jsonb_array_elements(thin."history") AS summary
+            WHERE thin."channelId" = ${channelId}
+              AND summary->>'type' = 'retention_summary' AND summary->>'summarises' = 'attempt'
+              AND (summary->>'lastAt')::timestamptz >= (SELECT min("madeAt") FROM newest)
+          ) AS "thinned"
+        FROM newest ORDER BY newest."madeAt" DESC, newest."postId" DESC, newest."attempt" DESC
+      `,
+      );
+      attempts = found.some((row) => row.thinned) ? [] : found;
       drafts = await database.marketingPost.findMany({
         where: { channelId, createdAt: { gt: since } },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: MARKETING_AUTO_PAUSE_GUARD_WINDOW,
         select: { status: true },
       });
