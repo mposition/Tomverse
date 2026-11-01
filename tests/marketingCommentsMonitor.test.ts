@@ -1,0 +1,484 @@
+// The comment monitor (S4c; policy 12.1 and 8.3).
+//
+// The sentence this file is about: **off means off.** With the switch not set
+// nothing is read, nothing is asked of the posting tool, no model is given a
+// word. Past that, a comment's body is the only thing that ever reaches the
+// classifier, and what is kept is a count, closed codes and a host.
+
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  commentsMonitorEnabled,
+  commentsMonitorHealthyFromValue,
+  MARKETING_COMMENTS_MONITOR_ENV,
+  MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS,
+} from "@/lib/marketingCommentsMonitorHealth";
+import {
+  MARKETING_COMMENT_BODY_MAX_CHARS,
+  runMarketingCommentsMonitor,
+  type MarketingCommentsMonitorDeps,
+} from "@/lib/marketingCommentsMonitor";
+import { parseZernioComments, zernioCommentsQuery } from "@/lib/zernioCommentsQuery";
+import {
+  MARKETING_COMMENT_ALERT_ACK_ACTION,
+  evaluateMarketingAutoPause,
+  listOpenMarketingCommentAlerts,
+  recordMarketingCommentAlert,
+  requireOpenMarketingCommentAlert,
+  MarketingStoreRefusedError,
+  type MarketingTransaction,
+} from "@/lib/marketingStore";
+
+const NOW = new Date("2026-11-02T09:00:00.000Z");
+const ON = { [MARKETING_COMMENTS_MONITOR_ENV]: "true" };
+
+const post = (id: string) => ({
+  id,
+  channelId: `chn-${id}`,
+  externalPostId: `ext-${id}`,
+  externalAccountRef: "acct",
+});
+
+type Calls = string[];
+
+const monitor = (
+  options: {
+    env?: Record<string, string | undefined>;
+    classifier?: MarketingCommentsMonitorDeps["classifier"];
+    posts?: ReturnType<typeof post>[];
+    comments?: Record<string, ReturnType<typeof comment>[] | "unavailable">;
+    floors?: Record<string, Date | null>;
+    swept?: number;
+  } = {},
+) => {
+  const calls: Calls = [];
+  const classified: string[][] = [];
+  const recorded: Array<{ postId: string; alertCount: number; riskCodes: readonly string[] }> = [];
+  const deps: MarketingCommentsMonitorDeps = {
+    env: options.env ?? ON,
+    enabled: commentsMonitorEnabled,
+    classifier:
+      options.classifier === undefined
+        ? async (bodies) => {
+            classified.push([...bodies]);
+            return bodies.map(() => []);
+          }
+        : options.classifier,
+    now: () => NOW,
+    fetchComments: async (target) => {
+      calls.push(`fetch:${target.id}`);
+      const answer = options.comments?.[target.id] ?? [];
+      return answer === "unavailable" ? { kind: "unavailable" } : { kind: "ok", comments: answer };
+    },
+    operations: {
+      listPosts: async () => {
+        calls.push("listPosts");
+        return options.posts ?? [post("p1")];
+      },
+      alertFloor: async (postId) => options.floors?.[postId] ?? null,
+      recordAlert: async (input) => {
+        calls.push("recordAlert");
+        recorded.push(input);
+        return { recorded: true };
+      },
+      sweepUnhandled: async () => {
+        calls.push("sweep");
+        return options.swept ?? 0;
+      },
+      recordRun: async () => {
+        calls.push("recordRun");
+      },
+    },
+  };
+  return { deps, calls, classified, recorded };
+};
+
+const comment = (text: string, createdAt: string | null = "2026-11-02T08:00:00.000Z") => ({
+  text,
+  createdAt: createdAt === null ? null : new Date(createdAt),
+});
+
+// ---------------------------------------------------------------------------
+// Off means off
+// ---------------------------------------------------------------------------
+
+test("with the switch not set, no dependency is touched", async () => {
+  for (const env of [{}, { [MARKETING_COMMENTS_MONITOR_ENV]: "false" }, { [MARKETING_COMMENTS_MONITOR_ENV]: "1" }, { [MARKETING_COMMENTS_MONITOR_ENV]: "" }]) {
+    const { deps, calls } = monitor({ env });
+    assert.deepEqual(await runMarketingCommentsMonitor(deps), { ran: false, reason: "switch_off" });
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("with no classifier the monitor does not run, and does not read a comment to find out", async () => {
+  const { deps, calls } = monitor({ classifier: null });
+  assert.deepEqual(await runMarketingCommentsMonitor(deps), { ran: false, reason: "classifier_unavailable" });
+  assert.deepEqual(calls, []);
+});
+
+test("the switch is the exact word true, in any case", () => {
+  assert.equal(commentsMonitorEnabled({ [MARKETING_COMMENTS_MONITOR_ENV]: " TRUE " }), true);
+  assert.equal(commentsMonitorEnabled({ [MARKETING_COMMENTS_MONITOR_ENV]: "yes" }), false);
+  assert.equal(commentsMonitorEnabled({}), false);
+});
+
+// ---------------------------------------------------------------------------
+// What the model sees and what is kept
+// ---------------------------------------------------------------------------
+
+test("a model is given comment bodies and nothing else, bounded", async () => {
+  const long = "x".repeat(MARKETING_COMMENT_BODY_MAX_CHARS + 500);
+  const { deps, classified } = monitor({ comments: { p1: [comment("first"), comment(long)] } });
+  await runMarketingCommentsMonitor(deps);
+  assert.equal(classified.length, 1);
+  assert.deepEqual(classified[0], ["first", "x".repeat(MARKETING_COMMENT_BODY_MAX_CHARS)]);
+});
+
+test("the posting tool's comment page loses its authors before anything else sees it", () => {
+  const parsed = parseZernioComments({
+    comments: [
+      { id: "c1", message: "this is a threat", created_time: "2026-11-02T08:00:00Z", from: { id: "u1", name: "Handle Name", username: "handle" }, url: "https://x.example/c1" },
+      { id: "c2", text: "variant spelling", createdTime: "2026-11-02T08:10:00Z" },
+      { id: "c3", message: "hidden by the owner", is_hidden: true },
+      { id: "c4" },
+      "nonsense",
+    ],
+  });
+  assert.deepEqual(
+    parsed.map((entry) => entry.text),
+    ["this is a threat", "variant spelling"],
+  );
+  const printed = JSON.stringify(parsed);
+  for (const forbidden of ["u1", "Handle Name", "handle", "x.example", "c1"]) {
+    assert.equal(printed.includes(forbidden), false, forbidden);
+  }
+  assert.deepEqual(parseZernioComments(null), []);
+  assert.deepEqual(parseZernioComments({ comments: "x" }), []);
+});
+
+test("an alert carries a count and closed codes; codes outside the list are dropped", async () => {
+  const { deps, recorded } = monitor({
+    comments: { p1: [comment("a"), comment("b"), comment("c")] },
+    classifier: async () => [["legal_threat"], ["not_a_code", "abuse_or_harassment"], []],
+  });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(recorded, [
+    { postId: "p1", alertCount: 2, riskCodes: ["legal_threat", "abuse_or_harassment"], detectedAt: NOW },
+  ]);
+  assert.equal(result.ran && result.alertsRecorded, 1);
+});
+
+test("a model that flags only unknown codes raises nothing", async () => {
+  const { deps, recorded } = monitor({
+    comments: { p1: [comment("a")] },
+    classifier: async () => [["made_up"]],
+  });
+  await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(recorded, []);
+});
+
+test("only comments newer than the last alert or answer are given to the model", async () => {
+  const floor = new Date("2026-11-02T08:30:00.000Z");
+  const { deps, classified } = monitor({
+    comments: {
+      p1: [comment("old", "2026-11-02T08:00:00.000Z"), comment("new", "2026-11-02T08:45:00.000Z"), comment("undated", null)],
+    },
+    floors: { p1: floor },
+  });
+  await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(classified, [["new"]]);
+});
+
+// ---------------------------------------------------------------------------
+// Failure injection: the health record is only for a whole run
+// ---------------------------------------------------------------------------
+
+test("a complete run records its health", async () => {
+  const { deps, calls } = monitor({ comments: { p1: [comment("fine")] } });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.equal(result.ran && result.complete, true);
+  assert.ok(calls.includes("recordRun"));
+});
+
+test("a comment page that cannot be read makes the run incomplete, still sweeps, and records no health", async () => {
+  const { deps, calls } = monitor({ posts: [post("p1"), post("p2")], comments: { p1: "unavailable", p2: [comment("fine")] } });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(result.ran && [result.postsUnread, result.complete], [1, false]);
+  assert.ok(calls.includes("sweep"));
+  assert.equal(calls.includes("recordRun"), false);
+  // The other post was still read.
+  assert.ok(calls.includes("fetch:p2"));
+});
+
+test("a classifier that throws, or answers the wrong shape, leaves the post unread and the run incomplete", async () => {
+  for (const classifier of [
+    async () => {
+      throw new Error("model lost");
+    },
+    async () => [[]],
+    async () => "nonsense" as never,
+  ]) {
+    const { deps, calls, recorded } = monitor({ comments: { p1: [comment("a"), comment("b")] }, classifier });
+    const result = await runMarketingCommentsMonitor(deps);
+    assert.equal(result.ran && result.complete, false);
+    assert.equal(calls.includes("recordRun"), false);
+    assert.deepEqual(recorded, []);
+  }
+});
+
+test("the unanswered-alert sweep runs even when nothing could be read", async () => {
+  const { deps, calls } = monitor({ comments: { p1: "unavailable" }, swept: 2 });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.ok(calls.includes("sweep"));
+  assert.equal(result.ran && result.accountsStopped, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+test("health needs the switch on and a run inside the window", () => {
+  const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
+  assert.equal(commentsMonitorHealthyFromValue(ago(60_000), NOW, ON), true);
+  assert.equal(commentsMonitorHealthyFromValue(ago(MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS), NOW, ON), true);
+  assert.equal(commentsMonitorHealthyFromValue(ago(MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS + 1), NOW, ON), false);
+  assert.equal(commentsMonitorHealthyFromValue(ago(60_000), NOW, {}), false);
+  assert.equal(commentsMonitorHealthyFromValue(undefined, NOW, ON), false);
+  assert.equal(commentsMonitorHealthyFromValue("garbage", NOW, ON), false);
+  // A record from the future is not evidence of a run.
+  assert.equal(commentsMonitorHealthyFromValue(new Date(NOW.getTime() + 60_000).toISOString(), NOW, ON), false);
+});
+
+// ---------------------------------------------------------------------------
+// The posting tool call
+// ---------------------------------------------------------------------------
+
+test("the comments call asks for one account's post with the key, and anything but 200 is unavailable", async () => {
+  const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+  const make = (status: number, body: unknown) =>
+    zernioCommentsQuery({
+      apiKey: "secret-key",
+      baseUrl: "https://zernio.example/api",
+      callBudgetMs: 1_000,
+      fetch: (async (url: URL, init: { headers: Record<string, string> }) => {
+        seen.push({ url: String(url), headers: init.headers });
+        return { status, json: async () => body };
+      }) as unknown as typeof fetch,
+    });
+  const ok = await make(200, { comments: [{ message: "hello" }] }).fetchComments("ext 1", "acct/1");
+  assert.deepEqual(ok, { kind: "ok", comments: [{ text: "hello", createdAt: null }] });
+  assert.equal(seen[0].url, "https://zernio.example/api/v1/inbox/comments/ext%201?accountId=acct%2F1&limit=50");
+  assert.equal(seen[0].headers.Authorization, "Bearer secret-key");
+  for (const status of [401, 404, 429, 500]) {
+    assert.deepEqual(await make(status, { comments: [{ message: "x" }] }).fetchComments("p", "a"), { kind: "unavailable" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The store
+// ---------------------------------------------------------------------------
+
+const asTransaction = (database: unknown): MarketingTransaction => database as MarketingTransaction;
+
+type ReportRow = { createdAt: Date; payload: unknown };
+
+const payload = (postId: string, firstDetectedAt = "2026-11-02T07:00:00.000Z") => ({
+  postId,
+  alertCount: 2,
+  riskCodes: ["legal_threat"],
+  firstDetectedAt,
+  externalUrlHost: "www.linkedin.com",
+});
+
+const storeWorld = (
+  options: {
+    reports?: ReportRow[];
+    acknowledgements?: Array<{ id?: string; targetId: string; createdAt: Date }>;
+    postStatus?: string;
+    externalUrl?: string | null;
+  } = {},
+) => {
+  const created: Array<Record<string, unknown>> = [];
+  const audits: Array<Record<string, unknown>> = [];
+  const { reports = [], acknowledgements = [], postStatus = "published", externalUrl = "https://www.linkedin.com/feed/update/1" } = options;
+  const database = {
+    async $executeRaw() {
+      return 0;
+    },
+    async $queryRaw() {
+      return [{ now: NOW, createdAt: NOW }];
+    },
+    marketingReport: {
+      findMany: async () => reports,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        created.push(data);
+        return data;
+      },
+    },
+    marketingPost: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id, channelId: `chn-${id}` })),
+      findUnique: async () => ({ id: "p1", externalUrl, status: postStatus }),
+    },
+    adminAuditLog: {
+      findMany: async ({ where }: { where: { id?: { not: string } } }) =>
+        acknowledgements.filter((entry) => where.id === undefined || entry.id !== where.id.not),
+      findFirst: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        audits.push(data);
+        return data;
+      },
+    },
+  };
+  return { database, created, audits };
+};
+
+test("an alert is open until an acknowledgement newer than it exists", async () => {
+  const reportAt = new Date("2026-11-02T07:00:00.000Z");
+  const open = storeWorld({ reports: [{ createdAt: reportAt, payload: payload("p1") }] });
+  assert.deepEqual((await listOpenMarketingCommentAlerts(open.database as never)).map((alert) => alert.postId), ["p1"]);
+
+  const answered = storeWorld({
+    reports: [{ createdAt: reportAt, payload: payload("p1") }],
+    acknowledgements: [{ targetId: "p1", createdAt: new Date(reportAt.getTime() + 1_000) }],
+  });
+  assert.deepEqual(await listOpenMarketingCommentAlerts(answered.database as never), []);
+
+  // An answer older than the newest report does not answer it: the alert came back.
+  const returned = storeWorld({
+    reports: [{ createdAt: new Date(reportAt.getTime() + 5_000), payload: payload("p1") }],
+    acknowledgements: [{ targetId: "p1", createdAt: reportAt }],
+  });
+  assert.equal((await listOpenMarketingCommentAlerts(returned.database as never)).length, 1);
+});
+
+test("an unreadable report is skipped rather than guessed at", async () => {
+  const { database } = storeWorld({
+    reports: [{ createdAt: NOW, payload: { postId: "p1", unexpected: true } }],
+  });
+  assert.deepEqual(await listOpenMarketingCommentAlerts(database as never), []);
+});
+
+test("acknowledging needs an open alert, and does not count its own entry as the answer", async () => {
+  const reportAt = new Date("2026-11-02T07:00:00.000Z");
+  const world = storeWorld({
+    reports: [{ createdAt: reportAt, payload: payload("p1") }],
+    // The entry this very request wrote: newer than the report, and ignored.
+    acknowledgements: [{ id: "this-request", targetId: "p1", createdAt: new Date(reportAt.getTime() + 1_000) }],
+  });
+  await requireOpenMarketingCommentAlert(world.database as never, "p1", "this-request");
+
+  const none = storeWorld();
+  await assert.rejects(
+    requireOpenMarketingCommentAlert(none.database as never, "p1", "this-request"),
+    (error) => error instanceof MarketingStoreRefusedError && error.code === "post_not_found",
+  );
+  assert.equal(MARKETING_COMMENT_ALERT_ACK_ACTION, "marketing_comment_alert.acknowledge");
+});
+
+test("recording an alert writes a counts-only report and its audit entry, once", async () => {
+  const world = storeWorld();
+  const result = await recordMarketingCommentAlert(asTransaction(world.database), {
+    postId: "p1",
+    alertCount: 2,
+    riskCodes: ["legal_threat", "abuse_or_harassment"],
+    detectedAt: NOW,
+  });
+  assert.deepEqual(result, { recorded: true });
+  assert.equal(world.created.length, 1);
+  assert.equal(world.created[0].kind, "comment_alerts");
+  assert.deepEqual(world.created[0].payload, {
+    postId: "p1",
+    alertCount: 2,
+    riskCodes: ["legal_threat", "abuse_or_harassment"],
+    firstDetectedAt: NOW.toISOString(),
+    externalUrlHost: "www.linkedin.com",
+  });
+  assert.equal(world.audits.length, 1);
+  assert.equal(world.audits[0].action, "marketing_comment_alert.recorded");
+  // Nothing of the comments: no text, no author, no link.
+  assert.equal(JSON.stringify([world.created, world.audits]).includes("linkedin.com/feed"), false);
+});
+
+test("a post that already has an unanswered alert gets no second one; an unpublished post gets none", async () => {
+  const open = storeWorld({ reports: [{ createdAt: NOW, payload: payload("p1") }] });
+  assert.deepEqual(
+    await recordMarketingCommentAlert(asTransaction(open.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW }),
+    { recorded: false, reason: "already_open" },
+  );
+  assert.equal(open.created.length, 0);
+
+  const draft = storeWorld({ postStatus: "approved" });
+  assert.deepEqual(
+    await recordMarketingCommentAlert(asTransaction(draft.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW }),
+    { recorded: false, reason: "post_not_published" },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The stop for an alert nobody answered
+// ---------------------------------------------------------------------------
+
+const pauseWorld = (approvalStartedAt: Date) => {
+  const updates: Array<Record<string, unknown>> = [];
+  const audits: Array<Record<string, unknown>> = [];
+  const database = {
+    async $executeRaw() {
+      return 0;
+    },
+    async $queryRaw(query: unknown) {
+      const sql = ((query as { strings?: readonly string[] }).strings ?? []).join("?");
+      if (sql.includes("clock_timestamp")) return [{ now: NOW, createdAt: NOW }];
+      return [{ id: "chn-1", channel: "linkedin", status: "approval_mode", approvalStartedAt }];
+    },
+    marketingChannel: {
+      updateMany: async (input: Record<string, unknown>) => {
+        updates.push(input);
+        return { count: 1 };
+      },
+    },
+    adminAuditLog: {
+      findFirst: async (args?: { where?: { action?: unknown } }) =>
+        args?.where?.action && typeof args.where.action === "object" ? null : null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        audits.push(data);
+        return data;
+      },
+    },
+  };
+  return { database, updates, audits };
+};
+
+test("an alert that began after the account's last fresh start stops the account", async () => {
+  const world = pauseWorld(new Date("2026-10-30T00:00:00.000Z"));
+  const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
+    channelId: "chn-1",
+    forcedReason: "unhandled_comment_alert",
+    forcedFactAt: new Date("2026-11-01T00:00:00.000Z"),
+  });
+  assert.equal(result.paused && result.reasonCode, "unhandled_comment_alert");
+  assert.equal(world.updates.length, 1);
+  assert.equal(world.audits.length, 1);
+});
+
+test("an alert that was already open when the account was resumed does not stop it again", async () => {
+  const world = pauseWorld(new Date("2026-11-01T12:00:00.000Z"));
+  const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
+    channelId: "chn-1",
+    forcedReason: "unhandled_comment_alert",
+    forcedFactAt: new Date("2026-11-01T00:00:00.000Z"),
+  });
+  assert.deepEqual(result, { paused: false });
+  assert.equal(world.updates.length, 0);
+  assert.equal(world.audits.length, 0);
+});
+
+test("a forced reason without the instant its fact began stops nothing", async () => {
+  const world = pauseWorld(new Date("2026-10-30T00:00:00.000Z"));
+  const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
+    channelId: "chn-1",
+    forcedReason: "unhandled_comment_alert",
+  });
+  assert.deepEqual(result, { paused: false });
+});

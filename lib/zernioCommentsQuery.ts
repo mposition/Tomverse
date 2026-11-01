@@ -1,0 +1,67 @@
+import "server-only";
+
+import { zernioCall, type ZernioTransportPorts } from "@/lib/zernioStatusQuery";
+
+/**
+ * Zernio's comments on one post, for the comment monitor (policy 12.1).
+ *
+ * `GET /v1/inbox/comments/{postId}?accountId=...` -- read from the vendor's
+ * generated client documentation, not from a call we have made: the field names
+ * below are the ones that documentation lists (`message`, `created_time`,
+ * `is_hidden`, `from`) and the parser accepts the spelling variants a generated
+ * client tends to produce. The monitor is off until a person has done the legal
+ * steps in 12.1, which is also when the first real response should be compared
+ * with this reading.
+ *
+ * What this module will not do: keep an author. The author object is never read,
+ * so no handle or id can leave this function. Comment bodies are returned to the
+ * caller's memory and nowhere else; nothing here logs.
+ */
+
+export type ParsedZernioComment = { readonly text: string; readonly createdAt: Date | null };
+
+const text = (value: unknown): string | null =>
+  typeof value === "string" && value.trim() !== "" ? value : null;
+
+const instant = (value: unknown): Date | null => {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+/** The comments in one response page. Anything unreadable is skipped, not guessed. */
+export const parseZernioComments = (body: unknown): ParsedZernioComment[] => {
+  const list = (body as { comments?: unknown } | null)?.comments;
+  if (!Array.isArray(list)) return [];
+  const comments: ParsedZernioComment[] = [];
+  for (const item of list) {
+    if (typeof item !== "object" || item === null) continue;
+    const record = item as Record<string, unknown>;
+    // A comment the page owner already hid is not a new risk.
+    if (record.is_hidden === true || record.isHidden === true) continue;
+    const body = text(record.message) ?? text(record.text) ?? text(record.content);
+    if (body === null) continue;
+    comments.push({
+      text: body,
+      createdAt: instant(record.created_time ?? record.createdTime ?? record.createdAt),
+    });
+  }
+  return comments;
+};
+
+export type ZernioCommentsResult =
+  | { readonly kind: "ok"; readonly comments: ParsedZernioComment[] }
+  | { readonly kind: "unavailable" };
+
+/** One page of the newest comments. A page is enough for an hourly look at a young post. */
+export const zernioCommentsQuery = (ports: ZernioTransportPorts) => ({
+  async fetchComments(externalPostId: string, externalAccountRef: string): Promise<ZernioCommentsResult> {
+    const result = await zernioCall(
+      ports,
+      `/v1/inbox/comments/${encodeURIComponent(externalPostId)}?accountId=${encodeURIComponent(externalAccountRef)}&limit=50`,
+      { method: "GET" },
+    );
+    if (result.kind === "unreachable" || result.status !== 200) return { kind: "unavailable" };
+    return { kind: "ok", comments: parseZernioComments(result.body) };
+  },
+});

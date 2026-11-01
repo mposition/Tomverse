@@ -325,6 +325,7 @@ test("a forced reason stops the account without reading evidence", async () => {
   const result = await evaluateMarketingAutoPause(asTransaction(database), {
     channelId: CHANNEL_ID,
     forcedReason: "unhandled_comment_alert",
+    forcedFactAt: NOW,
   });
   assert.equal(result.paused && result.reasonCode, "unhandled_comment_alert");
   assert.equal(seen.reads.includes("count"), false);

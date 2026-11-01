@@ -19,7 +19,11 @@ import {
 } from "@/lib/marketingWebhookCore";
 import { readMarketingAssetsForConsole } from "@/lib/marketingAssetStore";
 import { readMarketingCommentsMonitorHealthy } from "@/lib/marketingCommentsMonitorHealth";
-import { readMarketingGraduation } from "@/lib/marketingStore";
+import {
+  MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
+  listOpenMarketingCommentAlerts,
+  readMarketingGraduation,
+} from "@/lib/marketingStore";
 import {
   MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
@@ -647,6 +651,35 @@ export async function readMarketingConsole(
         ...competitor,
         decidedAt: competitor.decidedAt?.toISOString() ?? null,
         createdAt: competitor.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  if (section === "comments") {
+    // The alerts nobody has answered. Counts, codes and a host: the comments
+    // themselves are not kept anywhere, so there is nothing more to show.
+    const open = await listOpenMarketingCommentAlerts(prisma);
+    const now = Date.now();
+    return {
+      section,
+      availability,
+      ordering: "newest",
+      pageSize: MARKETING_READ_PAGE_SIZE,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      truncated: open.length > MARKETING_READ_PAGE_SIZE,
+      rows: open.slice(0, MARKETING_READ_PAGE_SIZE).map((alert) => ({
+        id: alert.postId,
+        channelId: alert.channelId,
+        alertCount: alert.alertCount,
+        riskCodes: [...alert.riskCodes],
+        externalUrlHost: alert.externalUrlHost,
+        firstDetectedAt: alert.firstDetectedAt.toISOString(),
+        overdue: now - alert.firstDetectedAt.getTime() >= MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
       })),
     };
   }

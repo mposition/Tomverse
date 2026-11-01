@@ -53,7 +53,6 @@ export type MarketingSectionAvailability =
 export function marketingSectionAvailability(
   section: MarketingConsoleSection
 ): MarketingSectionAvailability {
-  if (section === "comments") return { available: false, stage: "S4" };
   if (section === "experiments") return { available: false, stage: "S5" };
   return { available: true };
 }

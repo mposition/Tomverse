@@ -5691,6 +5691,12 @@ export async function evaluateMarketingAutoPause(
     readonly channelId: string;
     /** A fact another module established; the stop is this path. */
     readonly forcedReason?: Extract<MarketingAutoPauseReasonCode, "unhandled_comment_alert">;
+    /**
+     * When that fact began. It stops the account only if it began after the
+     * account's last fresh start: an alert that was already open when the
+     * operator resumed the account is not a new reason to stop it.
+     */
+    readonly forcedFactAt?: Date;
   },
 ): Promise<
   | { readonly paused: false }
@@ -5731,6 +5737,12 @@ export async function evaluateMarketingAutoPause(
     lastFreshStart?.createdAt,
   ]);
   const since = windowStart ?? new Date(0);
+  if (
+    rawInput.forcedReason !== undefined &&
+    (rawInput.forcedFactAt === undefined || rawInput.forcedFactAt.getTime() <= since.getTime())
+  ) {
+    return { paused: false };
+  }
 
   let reasonCode: MarketingAutoPauseReasonCode | null = rawInput.forcedReason ?? null;
   let evidence: Record<string, number> = {};
@@ -6095,6 +6107,238 @@ export async function graduateMarketingChannel(
     "The account changed between the checks and the graduation",
   );
   return { graduated: true as const, snapshot };
+}
+
+// ---------------------------------------------------------------------------
+// Comment alerts (S4c, policy 12.1)
+// ---------------------------------------------------------------------------
+
+/** A risky comment was found under a post: a report row, and this entry beside it. */
+export const MARKETING_COMMENT_ALERT_RECORDED_ACTION = "marketing_comment_alert.recorded";
+/** The operator answered the alert. Written by the admin route, read here as the end of the alert. */
+export const MARKETING_COMMENT_ALERT_ACK_ACTION = "marketing_comment_alert.acknowledge";
+/** An alert nobody answered for this long stops the account (policy 8.3). */
+export const MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS = 86_400_000;
+/** How many alert rows the console and the sweep read: ninety days of them are kept. */
+const MARKETING_COMMENT_ALERT_READ_LIMIT = 500;
+
+export type MarketingCommentAlert = {
+  readonly postId: string;
+  readonly channelId: string | null;
+  readonly alertCount: number;
+  readonly riskCodes: readonly string[];
+  readonly firstDetectedAt: Date;
+  readonly externalUrlHost: string;
+};
+
+/**
+ * The alerts nobody has answered, newest first.
+ *
+ * An alert is the newest report of its post, and it is open until an operator's
+ * acknowledgement entry for that post is newer than it. A report is never
+ * changed after it is written, so the answer is a later row, not an edit.
+ */
+export async function listOpenMarketingCommentAlerts(
+  database: MarketingDatabase,
+  options: { readonly ignoreAuditLogId?: string } = {},
+): Promise<MarketingCommentAlert[]> {
+  const reports = await database.marketingReport.findMany({
+    where: { kind: "comment_alerts" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: MARKETING_COMMENT_ALERT_READ_LIMIT,
+    select: { createdAt: true, payload: true },
+  });
+  const newest = new Map<string, { createdAt: Date; payload: ReturnType<typeof parseMarketingReportPayload> }>();
+  for (const report of reports) {
+    let payload;
+    try {
+      payload = parseMarketingReportPayload("comment_alerts", report.payload);
+    } catch {
+      continue;
+    }
+    const postId = (payload as { postId: string }).postId;
+    if (!newest.has(postId)) newest.set(postId, { createdAt: report.createdAt, payload });
+  }
+  if (newest.size === 0) return [];
+  const postIds = [...newest.keys()];
+  const acknowledgements = await database.adminAuditLog.findMany({
+    where: {
+      action: MARKETING_COMMENT_ALERT_ACK_ACTION,
+      targetId: { in: postIds },
+      ...(options.ignoreAuditLogId ? { id: { not: options.ignoreAuditLogId } } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true, createdAt: true },
+  });
+  const answeredAt = new Map<string, Date>();
+  for (const entry of acknowledgements) {
+    if (entry.targetId && !answeredAt.has(entry.targetId)) answeredAt.set(entry.targetId, entry.createdAt);
+  }
+  const posts = await database.marketingPost.findMany({
+    where: { id: { in: postIds } },
+    select: { id: true, channelId: true },
+  });
+  const channelOf = new Map(posts.map((post) => [post.id, post.channelId]));
+  const open: MarketingCommentAlert[] = [];
+  for (const [postId, { createdAt, payload }] of newest) {
+    const answered = answeredAt.get(postId);
+    if (answered && answered.getTime() >= createdAt.getTime()) continue;
+    const alert = payload as {
+      alertCount: number;
+      riskCodes: string[];
+      firstDetectedAt: string;
+      externalUrlHost: string;
+    };
+    open.push({
+      postId,
+      channelId: channelOf.get(postId) ?? null,
+      alertCount: alert.alertCount,
+      riskCodes: alert.riskCodes,
+      firstDetectedAt: new Date(alert.firstDetectedAt),
+      externalUrlHost: alert.externalUrlHost,
+    });
+  }
+  return open.sort((a, b) => b.firstDetectedAt.getTime() - a.firstDetectedAt.getTime());
+}
+
+/**
+ * When the monitor last looked at a post's comments and what it needs to look
+ * for: only comments newer than the later of the last alert and the last answer
+ * are new, so an answered alert does not come back for the comment it was about.
+ */
+export async function readMarketingCommentAlertFloor(
+  database: MarketingDatabase,
+  postId: string,
+): Promise<Date | null> {
+  const [answer, report] = await Promise.all([
+    database.adminAuditLog.findFirst({
+      where: { action: MARKETING_COMMENT_ALERT_ACK_ACTION, targetId: postId },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+    database.adminAuditLog.findFirst({
+      where: { action: MARKETING_COMMENT_ALERT_RECORDED_ACTION, targetId: postId },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  return marketingAutoPauseWindowStart([answer?.createdAt, report?.createdAt]);
+}
+
+/**
+ * Record one alert: a counts-and-codes report and its system audit entry, in one
+ * transaction. Nothing of the comments themselves is kept -- not the text, not
+ * who wrote it, not where it is.
+ *
+ * Refused as `already_open` when an unanswered alert for the post exists, so a
+ * monitor run every hour does not stack rows for one problem.
+ */
+export async function recordMarketingCommentAlert(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly postId: string;
+    readonly alertCount: number;
+    readonly riskCodes: readonly string[];
+    readonly detectedAt: Date;
+  },
+): Promise<{ readonly recorded: true } | { readonly recorded: false; readonly reason: "already_open" | "post_not_published" }> {
+  await takeAuditChainLock(database);
+  const post = await database.marketingPost.findUnique({
+    where: { id: String(rawInput.postId) },
+    select: { id: true, externalUrl: true, status: true },
+  });
+  if (!post || !post.externalUrl || (post.status !== "published" && post.status !== "verified")) {
+    return { recorded: false, reason: "post_not_published" };
+  }
+  const open = await listOpenMarketingCommentAlerts(database);
+  if (open.some((alert) => alert.postId === post.id)) return { recorded: false, reason: "already_open" };
+  const detectedAt = new Date(rawInput.detectedAt.getTime());
+  await insertMarketingReport(database, {
+    kind: "comment_alerts",
+    periodStart: detectedAt,
+    periodEnd: detectedAt,
+    sourceVersion: "comment-monitor-1",
+    payload: {
+      postId: post.id,
+      alertCount: Math.max(1, Math.floor(rawInput.alertCount)),
+      riskCodes: [...rawInput.riskCodes].slice(0, 20),
+      firstDetectedAt: detectedAt.toISOString(),
+      externalUrlHost: new URL(post.externalUrl).hostname,
+    },
+  });
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_COMMENT_ALERT_RECORDED_ACTION,
+    targetType: MARKETING_POST_AUDIT_TARGET_TYPE,
+    targetId: post.id,
+    summary: "The comment monitor raised an alert on a published post.",
+    metadata: { alertCount: Math.max(1, Math.floor(rawInput.alertCount)), riskCodes: [...rawInput.riskCodes].slice(0, 20) },
+  });
+  return { recorded: true };
+}
+
+/**
+ * The operator's answer. The admin route has already written the human entry
+ * (that entry *is* the answer); this only checks there was something to
+ * answer, so an acknowledgement of nothing rolls its entry back.
+ */
+export async function requireOpenMarketingCommentAlert(
+  database: MarketingDatabase,
+  postId: string,
+  auditLogId: string,
+): Promise<void> {
+  // Without the entry this very request wrote: the wrapper writes the human
+  // entry first, and that entry would otherwise answer the alert before it was
+  // checked to exist.
+  const open = await listOpenMarketingCommentAlerts(database, { ignoreAuditLogId: auditLogId });
+  if (!open.some((alert) => alert.postId === postId)) {
+    throw new MarketingStoreRefusedError(
+      "post_not_found",
+      "There is no unanswered comment alert for that post",
+    );
+  }
+}
+
+/**
+ * The published posts whose comments the monitor reads: live in the last two
+ * weeks, on an account that is publishing, with the ids Zernio is asked about.
+ * Newest first, bounded.
+ */
+export async function listMarketingPostsForCommentMonitor(
+  database: MarketingDatabase,
+  input: { readonly now: Date; readonly limit: number },
+): Promise<
+  Array<{ id: string; channelId: string; externalPostId: string; externalAccountRef: string }>
+> {
+  const rows = await database.marketingPost.findMany({
+    where: {
+      status: { in: ["published", "verified"] },
+      externalPostId: { not: null },
+      publishedAt: { gte: new Date(input.now.getTime() - 14 * 24 * 60 * 60 * 1000) },
+      channel: { status: { in: ["approval_mode", "autonomous_mode"] }, externalAccountRef: { not: null } },
+    },
+    orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
+    take: Math.max(1, Math.floor(input.limit)),
+    select: {
+      id: true,
+      channelId: true,
+      externalPostId: true,
+      channel: { select: { externalAccountRef: true } },
+    },
+  });
+  const posts: Array<{ id: string; channelId: string; externalPostId: string; externalAccountRef: string }> = [];
+  for (const row of rows) {
+    if (row.externalPostId && row.channel.externalAccountRef) {
+      posts.push({
+        id: row.id,
+        channelId: row.channelId,
+        externalPostId: row.externalPostId,
+        externalAccountRef: row.channel.externalAccountRef,
+      });
+    }
+  }
+  return posts;
 }
 
 /** Unused by this module, exported so a caller can narrow a paused mode. */
