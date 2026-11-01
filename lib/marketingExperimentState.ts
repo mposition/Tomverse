@@ -9,14 +9,16 @@ import {
   MARKETING_EXPERIMENT_CONFIG_KEY,
   MARKETING_EXPERIMENT_COUNTER_PREFIX,
   MARKETING_EXPERIMENT_SPIKE,
+  type ExperimentConfig,
+  type ExperimentEventKind,
+} from "@/lib/marketingExperimentContract";
+import {
   experimentCountsFromRows,
   experimentCounterKey,
   parseExperimentConfig,
   resolveActiveExperiment,
   type ActiveExperimentResolution,
-  type ExperimentConfig,
   type ExperimentCounts,
-  type ExperimentEventKind,
 } from "@/lib/marketingExperimentCore";
 import { prisma } from "@/lib/prisma";
 

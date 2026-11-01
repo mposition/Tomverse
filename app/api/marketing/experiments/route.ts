@@ -13,9 +13,11 @@ import { getAnonymousClientKey } from "@/lib/clientIp";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   EXPERIMENT_LOCALES,
+  experimentVariantIdSchema,
+} from "@/lib/marketingExperimentContract";
+import {
   experimentAnalyticsActive,
   experimentCookieMaxAgeSeconds,
-  experimentVariantIdSchema,
   pickExperimentArm,
 } from "@/lib/marketingExperimentCore";
 import {

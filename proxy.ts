@@ -415,6 +415,22 @@ export function proxy(request: NextRequest) {
       : getStaticMarketingCspHashes(request.nextUrl.pathname)
     : null;
   if (
+    isExperimentVariantPathname(request.nextUrl.pathname) &&
+    process.env.NODE_ENV === "production" &&
+    !staticMarketingHashes
+  ) {
+    // A well-formed variant path whose HTML is not in this build is a page
+    // that does not exist, not a policy that could not be computed.
+    return new NextResponse("Not Found", {
+      status: 404,
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+  if (
     isStaticMarketingRequest &&
     process.env.NODE_ENV === "production" &&
     process.env.CSP_MODE === "enforce" &&

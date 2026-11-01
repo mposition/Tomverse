@@ -18,6 +18,8 @@ import {
   parseMarketingWebhookFaultArm,
 } from "@/lib/marketingWebhookCore";
 import { readMarketingAssetsForConsole } from "@/lib/marketingAssetStore";
+import { readExperimentSnapshot } from "@/lib/marketingExperimentState";
+import { buildExperimentsConsole, type ExperimentsConsoleView } from "@/lib/marketingExperimentView";
 import {
   MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
@@ -184,6 +186,8 @@ export type MarketingConsolePayload = {
    * screen cannot act on, and stating the cap alone would not say it was hit.
    */
   truncated?: boolean;
+  /** The experiments section only: what the start form and the stop control need. */
+  experiments?: ExperimentsConsoleView;
 };
 
 const state = (
@@ -637,6 +641,26 @@ export async function readMarketingConsole(
         decidedAt: competitor.decidedAt?.toISOString() ?? null,
         createdAt: competitor.createdAt.toISOString(),
       })),
+    };
+  }
+
+  if (section === "experiments") {
+    // One row: the current experiment, or the last one. Earlier runs are in
+    // the reports tab (`experiment_result`) and in the audit log.
+    const built = buildExperimentsConsole(await readExperimentSnapshot(prisma), new Date());
+    return {
+      section,
+      availability,
+      ordering: "newest",
+      pageSize: 1,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      rows: built.rows,
+      experiments: built.experiments,
     };
   }
 

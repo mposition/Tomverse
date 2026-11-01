@@ -3,11 +3,14 @@ import { existsSync } from "node:fs";
 import test from "node:test";
 
 import {
-  EMPTY_EXPERIMENT_COUNTS,
   EXPERIMENT_MAX_DURATION_DAYS,
   MARKETING_EXPERIMENT_SPIKE,
-  experimentAnalyticsActive,
   experimentConfigSchema,
+} from "../lib/marketingExperimentContract.ts";
+import { EXPERIMENT_CONTROL_ARM } from "../lib/marketingRoutes.ts";
+import {
+  EMPTY_EXPERIMENT_COUNTS,
+  experimentAnalyticsActive,
   experimentCookieMaxAgeSeconds,
   experimentCounterKey,
   experimentCountsFromRows,
@@ -224,4 +227,29 @@ test("the recorded spike points at a spec that exists", () => {
     existsSync(new URL(`../${MARKETING_EXPERIMENT_SPIKE.e2eSpec}`, import.meta.url)),
     "the spike's E2E spec is missing, so the record of it passing is unsupported"
   );
+});
+
+test("the contract module and the request boundary agree on the control arm's name", () => {
+  // The contract module is kept free of local imports, so it spells the word
+  // itself; the proxy's routing rules spell it too. They must stay one word.
+  assert.equal(EXPERIMENT_CONTROL_ARM, "control");
+  const bad = experimentConfigSchema.safeParse({
+    version: 1,
+    experimentId: "spring-hero",
+    bundleId: "home-hero-v1",
+    variantId: EXPERIMENT_CONTROL_ARM,
+    locales: ["en"],
+    variantRatio: 0.2,
+    startsAt: "2026-11-10T00:00:00Z",
+    endsAt: "2026-11-24T00:00:00Z",
+    preregistration: {
+      hypothesis: "A plainer headline raises primary call-to-action clicks.",
+      primaryMetric: "primary_cta_click",
+      minExposuresPerArm: 500,
+      stopRule: { relativeDropPercent: 30, afterExposuresPerArm: 100 },
+    },
+    status: "running",
+    stoppedAt: null,
+  });
+  assert.equal(bad.success, false);
 });
