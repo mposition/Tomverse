@@ -11,6 +11,7 @@ import {
   localDateTimeValue,
   type MarketingAction,
 } from "@/components/admin/MarketingActions";
+import { MarketingAnalysisSwitch, MarketingBriefReport } from "@/components/admin/MarketingAnalysis";
 import { MarketingWebhookProduction } from "@/components/admin/MarketingWebhookProduction";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -348,6 +349,7 @@ export function AdminMarketingPanel({
             onDone={done}
             m={m}
           />
+          <MarketingAnalysisSwitch section={view.section} canWrite={view.canWrite} />
           {view.webhookStaging || view.canWrite ? (
             <div data-testid="marketing-webhook-card" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
               <div className="flex items-start justify-between gap-2">
@@ -2222,6 +2224,8 @@ const TABLE_CELL = "py-1 pr-4 text-[13px] text-zinc-200";
 
 /** What a report says, by kind: market facts by competitor, the weekly numbers, or the JSON. */
 export function MarketingReportBody({ report, m }: { report: ReportDetail; m: Record<string, string> }) {
+  if (report.kind === "brief") return <MarketingBriefReport report={report} />;
+
   if (report.kind === "market_intel") {
     const payload = report.payload as { facts: MarketIntelFactView[]; unrepresentableFactCount: number };
     const groups = groupMarketIntelFacts(payload.facts, report.competitorNames);

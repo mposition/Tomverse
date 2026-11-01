@@ -1,4 +1,6 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
+
+import { marketingAnalysisView, type MarketingAnalysisView } from "@/lib/marketingAnalysisCore";
 import {
   MARKETING_REPORT_KINDS,
   parseMarketingReportPayload,
@@ -30,6 +32,12 @@ export type MarketingReportDetail = {
   payload: unknown;
   /** market_intel only: competitor id to display name. Empty for other kinds. */
   competitorNames: Record<string, string>;
+  /**
+   * brief only: the analysis it was chosen from, with each cited source marked
+   * linkable or not; null when the brief has none (an older brief) or it no
+   * longer parses. Absent for other kinds.
+   */
+  analysis?: MarketingAnalysisView | null;
 };
 
 export type MarketingReportReadResult =
@@ -37,8 +45,8 @@ export type MarketingReportReadResult =
   | { kind: "unreadable" }
   | { kind: "found"; report: MarketingReportDetail };
 
-/** The two tables this read touches, so a caller may pass the client or a transaction. */
-export type MarketingReportReader = Pick<PrismaClient, "marketingReport" | "marketingCompetitor">;
+/** The tables this read touches, so a caller may pass the client or a transaction. */
+export type MarketingReportReader = Pick<PrismaClient, "marketingReport" | "marketingCompetitor" | "$queryRaw">;
 
 const isReportKind = (value: string): value is MarketingReportKind =>
   (MARKETING_REPORT_KINDS as readonly string[]).includes(value);
@@ -92,6 +100,25 @@ export async function readMarketingReportForConsole(
     }
   }
 
+  // A brief's analysis (lib/marketingAnalysisStore.ts writes it with the
+  // brief), its sources judged against the hosts a person has approved now.
+  let analysis: MarketingAnalysisView | null | undefined;
+  if (row.kind === "brief") {
+    const stored = await db.$queryRaw<Array<{ payload: unknown }>>(Prisma.sql`
+      SELECT "payload" FROM "MarketingAnalysis" WHERE "briefReportId" = ${row.id}
+    `);
+    if (stored.length === 0) {
+      analysis = null;
+    } else {
+      const approved = await db.marketingCompetitor.findMany({
+        where: { status: "approved" },
+        select: { officialHosts: true },
+      });
+      const hosts = new Set(approved.flatMap((entry) => entry.officialHosts.map((host) => host.toLowerCase())));
+      analysis = marketingAnalysisView(stored[0].payload, hosts);
+    }
+  }
+
   return {
     kind: "found",
     report: {
@@ -103,6 +130,7 @@ export async function readMarketingReportForConsole(
       createdAt: row.createdAt.toISOString(),
       payload,
       competitorNames,
+      ...(analysis === undefined ? {} : { analysis }),
     },
   };
 }
