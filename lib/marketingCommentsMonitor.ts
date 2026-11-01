@@ -271,8 +271,9 @@ export async function collectMarketingCommentBodies(
   const timeCut = now.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS;
   const firstTimed = sorted.find((comment) => comment.createdAt !== null);
   // Cut by the cap before the first instant there is, the cut would hand over
-  // nothing and no later run could do better: that is not a cut. (Cut by time
-  // instead, the rest waits an hour for the overlap to pass it.)
+  // no timed comment (at most the ones with no time, read every run) and no
+  // later run could do better: that is not a cut, and the run stays unwhole.
+  // (Cut by time instead, the rest waits an hour for the overlap to pass it.)
   if (!Number.isFinite(capCut) || (capCut <= timeCut && firstTimed !== undefined && at(firstTimed) === overflow)) {
     return { ran: true, bodies: [...all].slice(0, MARKETING_COMMENT_COLLECT_MAX_BODIES), reading: { until: now, backlog: false } };
   }
