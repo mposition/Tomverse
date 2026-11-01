@@ -305,16 +305,18 @@ const consentCopy: Record<
  * §10.1 marketing touch: the current URL's UTM values, reported once per
  * distinct link per tab -- on a full load and on a client navigation that
  * changes only the query. Consent is applied inside the client exactly as for
- * every other event: declined sends nothing, undecided waits. Behind its own
+ * every other event: declined sends nothing, undecided waits. A change of
+ * consent re-observes too, so a visitor who had declined and allows analytics
+ * on the page they landed on is not missing that link. Behind its own
  * Suspense boundary so reading the query never opts the page out of static
  * rendering.
  */
-function MarketingTouchObserver() {
+function MarketingTouchObserver({ consent }: { consent: string }) {
   const pathname = usePathname();
   const search = useSearchParams()?.toString() ?? "";
   useEffect(() => {
     observeMarketingTouch();
-  }, [pathname, search]);
+  }, [pathname, search, consent]);
   return null;
 }
 
@@ -824,7 +826,7 @@ export function AnalyticsProvider({
         {children}
         {disabled ? null : (
           <Suspense fallback={null}>
-            <MarketingTouchObserver />
+            <MarketingTouchObserver consent={consent} />
           </Suspense>
         )}
         {analyticsEnabled && analyticsClientReady && measurementId ? (

@@ -393,6 +393,9 @@ const deliverInternalAnalyticsEvent = (
 // has been answered (or given up on); everything else goes out at once.
 let touchDeliveries: Promise<void> = Promise.resolve();
 const TOUCH_ORDERING_MAX_WAIT_MS = 10_000;
+// Bumped by disableAnalyticsClient; a waiting conversion from an earlier
+// generation is dropped.
+let deliveryGeneration = 0;
 const TOUCH_ATTRIBUTED_EVENTS = new Set<ProductAnalyticsEventName>([
   "signup_completed",
   "first_response_completed",
@@ -409,13 +412,25 @@ const deliverInOrder = (
   }
   if (TOUCH_ATTRIBUTED_EVENTS.has(eventName)) {
     // Bounded: a touch request that never settles must not hold the
-    // conversion for ever.
+    // conversion for ever. And withdrawable: declining analytics while it
+    // waits (disableAnalyticsClient) cancels it -- nothing decided before the
+    // withdrawal goes out after it.
+    const generation = deliveryGeneration;
     void Promise.race([
       touchDeliveries,
       new Promise<void>((resolve) =>
         window.setTimeout(resolve, TOUCH_ORDERING_MAX_WAIT_MS)
       ),
-    ]).then(() => deliverInternalAnalyticsEvent(payload));
+    ]).then(() => {
+      if (
+        generation !== deliveryGeneration ||
+        !runtime ||
+        analyticsConsent() === "declined"
+      ) {
+        return;
+      }
+      return deliverInternalAnalyticsEvent(payload);
+    });
     return;
   }
   void deliverInternalAnalyticsEvent(payload);
@@ -584,6 +599,7 @@ export const disableAnalyticsClient = () => {
   runtime = null;
   pendingEvents = [];
   pendingOnceKeys.clear();
+  deliveryGeneration += 1;
   window.localStorage.removeItem(CONTEXT_STORAGE_KEY);
   window.localStorage.removeItem(SIGNUP_STORAGE_KEY);
   window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);

@@ -171,6 +171,51 @@ test("a conversion released with a touch is sent only after the touch was answer
   }
 });
 
+test("declining analytics while a conversion waits for a touch cancels the conversion", async () => {
+  reset();
+  let release;
+  answerTouch = () => new Promise((resolve) => {
+    release = () => resolve(accepted());
+  });
+  try {
+    land(LINK);
+    client.observeMarketingTouch();
+    client.trackProductEventOnce("signup_completed", "signup_completed", 0, {
+      method: "google",
+    });
+    client.setAnalyticsConsent("accepted");
+    configure();
+    await flush();
+    client.setAnalyticsConsent("declined");
+    client.disableAnalyticsClient();
+    release();
+    await flush();
+    assert.ok(
+      !requests.some((request) => request.body.event_name === "signup_completed"),
+      "nothing decided before the withdrawal goes out after it",
+    );
+  } finally {
+    answerTouch = () => Promise.resolve(accepted());
+  }
+});
+
+test("a visitor who had declined and then allows analytics on the landing page keeps the link", async () => {
+  reset();
+  client.setAnalyticsConsent("declined");
+  land(LINK);
+  client.observeMarketingTouch();
+  assert.equal(pendingTouches().length, 0);
+
+  // Allowing analytics re-runs the observer (it follows consent) before the
+  // provider configures the client.
+  client.setAnalyticsConsent("accepted");
+  client.observeMarketingTouch();
+  configure();
+  await flush();
+  assert.equal(touches().length, 1);
+  assert.equal(touches()[0].body.utm_campaign, "launch");
+});
+
 test("with no touch in flight a conversion goes out without waiting", async () => {
   reset();
   client.setAnalyticsConsent("accepted");
