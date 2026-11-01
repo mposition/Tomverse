@@ -71,7 +71,7 @@ export type ZernioCommentsResult =
 
 const PAGE_SIZE = 50;
 /** Pages followed per post and run. A thread longer than this is cut short, and says so. */
-export const ZERNIO_COMMENTS_MAX_PAGES = 5;
+export const ZERNIO_COMMENTS_MAX_PAGES = 20;
 
 /** `more` is null when the response does not say either way. */
 const nextCursor = (body: unknown): { more: boolean | null; cursor: string | null } => {

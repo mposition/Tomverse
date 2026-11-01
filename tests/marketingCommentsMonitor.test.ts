@@ -351,6 +351,7 @@ const storeWorld = (
     acknowledgements?: Array<{ id?: string; targetId: string; createdAt: Date }>;
     postStatus?: string;
     externalUrl?: string | null;
+    approvalStartedAt?: Date | null;
   } = {},
 ) => {
   const created: Array<Record<string, unknown>> = [];
@@ -385,7 +386,13 @@ const storeWorld = (
     marketingPost: {
       findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
         where.id.in.map((id) => ({ id, channelId: `chn-${id}` })),
-      findUnique: async () => ({ id: "p1", externalUrl, status: postStatus }),
+      findUnique: async () => ({
+        id: "p1",
+        externalUrl,
+        status: postStatus,
+        channelId: "chn-p1",
+        channel: { approvalStartedAt: options.approvalStartedAt ?? null },
+      }),
     },
     adminAuditLog: {
       findMany: async ({ where }: { where: { id?: { not: string } } }) =>
@@ -697,7 +704,7 @@ test("the comments call follows pages to the end, assumes no order, and says whe
   // Pages forever: stops at the cap and says so.
   const forever = await run([page(50, { pagination: { hasMore: true, cursor: "again" } })]);
   assert.equal(forever.result.kind === "ok" && forever.result.truncated, true);
-  assert.equal(forever.urls.length, 5);
+  assert.equal(forever.urls.length, 20);
 });
 
 
@@ -804,4 +811,39 @@ test("an account reconnected since the last whole run has all its comments read 
   });
   await runMarketingCommentsMonitor(second.deps);
   assert.deepEqual(second.classified, [["new"]]);
+});
+
+test("an alert left open across a resume does not hide what is found after it", async () => {
+  const began = new Date("2026-11-01T00:00:00.000Z");
+  const resumed = new Date("2026-11-01T12:00:00.000Z");
+  // Open since 00:00; the account started fresh at 12:00 (a resume to approval
+  // sets the approval period's start) without anyone answering it.
+  const after = storeWorld({
+    reports: [{ createdAt: began, payload: payload("p1", began.toISOString()) }],
+    approvalStartedAt: resumed,
+  });
+  const result = await recordMarketingCommentAlert(asTransaction(after.database), {
+    postId: "p1",
+    alertCount: 1,
+    riskCodes: ["legal_threat"],
+    detectedAt: NOW,
+    answeredAtSeen: null,
+  });
+  assert.deepEqual(result, { recorded: true });
+
+  // An alert that began after the fresh start is still one alert.
+  const same = storeWorld({
+    reports: [{ createdAt: resumed, payload: payload("p1", new Date(resumed.getTime() + 60_000).toISOString()) }],
+    approvalStartedAt: resumed,
+  });
+  assert.deepEqual(
+    await recordMarketingCommentAlert(asTransaction(same.database), {
+      postId: "p1",
+      alertCount: 1,
+      riskCodes: ["legal_threat"],
+      detectedAt: NOW,
+      answeredAtSeen: null,
+    }),
+    { recorded: false, reason: "already_open" },
+  );
 });

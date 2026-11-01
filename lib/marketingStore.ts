@@ -5685,6 +5685,35 @@ export const marketingAutoPauseWindowStart = (
  * The trigger writes `pausedFromMode` and `pausedAt` from the transition; this
  * sets only the status and the reason. A resume needs nothing from the reason.
  */
+/**
+ * The instant an account last started fresh: the later of its approval period
+ * beginning (the database sets it on a reconnect and on a resume to approval)
+ * and the latest automatic stop or resume entry for it. The resume entries are
+ * written before the resume itself, which is the right side of the line.
+ */
+async function marketingAccountFreshStart(
+  database: MarketingDatabase,
+  channelId: string,
+  approvalStartedAt: Date | null,
+): Promise<Date | null> {
+  const entry = await database.adminAuditLog.findFirst({
+    where: {
+      targetType: MARKETING_AUTO_PAUSE_TARGET_TYPE,
+      targetId: channelId,
+      action: {
+        in: [
+          MARKETING_AUTO_PAUSE_ACTION,
+          MARKETING_S2B1_ACTIONS.accountResumeApproval,
+          MARKETING_RESUME_AUTONOMOUS_ACTION,
+        ],
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return marketingAutoPauseWindowStart([approvalStartedAt, entry?.createdAt]);
+}
+
 export async function evaluateMarketingAutoPause(
   database: MarketingTransaction,
   rawInput: {
@@ -5719,27 +5748,8 @@ export async function evaluateMarketingAutoPause(
   const pausedFromMode = channel.status as MarketingPausableMode;
 
   // Evidence counts from the account's last fresh start, so a resumed account is
-  // not stopped again by the entries that stopped it. The resume entries are
-  // written before the resume itself, which is the right side of the line.
-  const lastFreshStart = await database.adminAuditLog.findFirst({
-    where: {
-      targetType: MARKETING_AUTO_PAUSE_TARGET_TYPE,
-      targetId: channelId,
-      action: {
-        in: [
-          MARKETING_AUTO_PAUSE_ACTION,
-          MARKETING_S2B1_ACTIONS.accountResumeApproval,
-          MARKETING_RESUME_AUTONOMOUS_ACTION,
-        ],
-      },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  const windowStart = marketingAutoPauseWindowStart([
-    channel.approvalStartedAt,
-    lastFreshStart?.createdAt,
-  ]);
+  // not stopped again by the entries that stopped it.
+  const windowStart = await marketingAccountFreshStart(database, channelId, channel.approvalStartedAt);
   const since = windowStart ?? new Date(0);
   if (rawInput.forcedReason !== undefined) {
     let warranted = false;
@@ -6315,13 +6325,25 @@ export async function recordMarketingCommentAlert(
   await takeAuditChainLock(database);
   const post = await database.marketingPost.findUnique({
     where: { id: String(rawInput.postId) },
-    select: { id: true, externalUrl: true, status: true },
+    select: { id: true, externalUrl: true, status: true, channelId: true, channel: { select: { approvalStartedAt: true } } },
   });
   if (!post || !post.externalUrl || (post.status !== "published" && post.status !== "verified")) {
     return { recorded: false, reason: "post_not_published" };
   }
   const state = await marketingCommentAlertState(database, post.id);
-  if (state.open) return { recorded: false, reason: "already_open" };
+  // An alert already open is one alert, unless the account started fresh after it
+  // began: an operator who resumed the account without answering it has not seen
+  // what is found now, and the stop for an alert nobody answers must be able to
+  // count it. The newest report is then the one that matters.
+  const freshStart = state.open
+    ? await marketingAccountFreshStart(database, post.channelId, post.channel.approvalStartedAt)
+    : null;
+  const supersedes =
+    state.open &&
+    freshStart !== null &&
+    state.firstDetectedAt !== null &&
+    state.firstDetectedAt.getTime() <= freshStart.getTime();
+  if (state.open && !supersedes) return { recorded: false, reason: "already_open" };
   // Under the lock, the answer the comments were judged against must still be the
   // latest. One that came in while they were being classified makes the verdict
   // about comments the operator has since handled, and nothing is recorded.
