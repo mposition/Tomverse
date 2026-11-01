@@ -6150,7 +6150,7 @@ export type MarketingCommentAlert = {
 };
 
 /**
- * The alerts nobody has answered, newest first.
+ * The alerts nobody has answered, oldest first.
  *
  * An alert is the newest report of its post, and it is open until an operator's
  * acknowledgement entry for that post is newer than it. A report is never
@@ -6224,7 +6224,8 @@ export async function listOpenMarketingCommentAlerts(
       externalUrlHost: alert.externalUrlHost,
     });
   }
-  return open.sort((a, b) => b.firstDetectedAt.getTime() - a.firstDetectedAt.getTime());
+  // Oldest first: the alert closest to stopping its account is the one to show.
+  return open.sort((a, b) => a.firstDetectedAt.getTime() - b.firstDetectedAt.getTime());
 }
 
 /**
@@ -6379,7 +6380,8 @@ export async function requireOpenMarketingCommentAlert(
 
 /**
  * The published posts whose comments the monitor reads: live in the last two
- * weeks, on an account that is publishing, with the ids Zernio is asked about.
+ * weeks, on an account that is connected (paused ones too), with the ids Zernio
+ * is asked about. A disconnected account's posts are not read.
  * Newest first, bounded.
  */
 export async function listMarketingPostsForCommentMonitor(
@@ -6393,7 +6395,10 @@ export async function listMarketingPostsForCommentMonitor(
       status: { in: ["published", "verified"] },
       externalPostId: { not: null },
       publishedAt: { gte: new Date(input.now.getTime() - 14 * 24 * 60 * 60 * 1000) },
-      channel: { status: { in: ["approval_mode", "autonomous_mode"] }, externalAccountRef: { not: null } },
+      // A paused account is read too: the run's time moves for every account at
+      // once, so comments written while one was stopped would otherwise be
+      // older than the next run's floor and never classified.
+      channel: { status: { in: ["approval_mode", "autonomous_mode", "paused"] }, externalAccountRef: { not: null } },
     },
     orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
     take: Math.max(1, Math.floor(input.limit)),
