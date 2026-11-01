@@ -546,8 +546,10 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   - 지운 토큰이 속성·메서드 이름(`x.toText`의 `toText`)이 아닙니다. 변수, literal, 정규식, 주석, 구두점,
     `assert`·`expect`로 시작하는 체인의 이름(`assert.strict.equal`의 `equal`, `expect(x).toEqual`의 `toEqual`), `test`·`it`·`describe`는
     지울 수 없습니다(`test_edit_removed`).
-  - 더한 토큰이 제어 흐름을 바꾸지 않는 이름, `.`·`(`·`)`·`,`, 따옴표 문자열 중 하나가 아닙니다. 주석, `return`·`if`·`throw`,
-    `skip`·`todo`·`only`·`not`, `!`·`||`, `true`·`false`, `[`·`]`, 객체 literal은 더할 수 없습니다(`test_edit_added`).
+  - 더한 토큰이 제어 흐름을 바꾸지 않는 이름, `.`·`(`·`)`, 따옴표 문자열 중 하나가 아닙니다. 주석, `return`·`if`·`throw`,
+    `skip`·`todo`·`only`·`not`, `!`·`||`, `true`·`false`, `,`·`[`·`]`, 객체 literal은 더할 수 없습니다(`test_edit_added`).
+  - 호출되는 쪽(`assert.equal(`, `expect(…).toBe(`, `test(`)에 무엇이 끼어들었거나(`test.bind(`), 그 호출의 인자 개수가 바뀌었습니다
+    (`assert.ok((x, message))`). 인자 안의 식은 고칠 수 있습니다. API를 바꾸는 곳이 거기이기 때문입니다(`test_edit_added`).
 
   예: `const text = document.toText();` → `const text = (await document.to("text")).value;`와 콜백에 `async`를 붙이는 것은 통과합니다.
   값을 함수로 감싸는 식의 약화까지 모두 막지는 못하므로, 사람이 병합 전에 diff를 봅니다.

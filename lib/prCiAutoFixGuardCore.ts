@@ -77,7 +77,7 @@ const ADDED_WORDS_REFUSED = new Set([
   "break", "continue", "delete", "skip", "todo", "only", "true", "false", "null", "undefined", "not",
 ]);
 /** Punctuation an edited test line may gain: enough to wrap a call, `(await x.to("text")).value`. */
-const ADDED_PUNCTUATION = new Set([".", "(", ")", ","]);
+const ADDED_PUNCTUATION = new Set([".", "(", ")"]);
 /**
  * Names an edited test line may not lose, nor any name in a member chain
  * that starts from one (`assert.strict.equal`, `expect(x).not.toBe`): what
@@ -110,6 +110,48 @@ function chainRoot(list: readonly string[], dot: number): string | null {
 }
 const QUOTED = /^(["']).*\1$/s;
 const REGEX_MAY_FOLLOW = new Set(["", "(", ",", "=", ":", "[", "!", "&&", "||", "??", "?", "{", "}", ";", "=>", "return"]);
+
+/**
+ * Which tokens of a line call a test or an assertion: every chain from
+ * assert, expect, test, ... up to its calls' parentheses (`assert.equal(`,
+ * `expect(` `).not.toBe(`), not what those calls are given. An edit may
+ * rewrite the arguments -- that is the API change -- but may add nothing to
+ * what is called, so `test.bind(` or `assert.equal.bind(` cannot stop the
+ * call from running. The shape is each call's name and how many arguments
+ * it is given, which must not change: `assert.ok((x, message))` gives one.
+ * Whether rewritten arguments read the same value is for the person who
+ * merges the update.
+ */
+function callees(list: readonly string[]): { mark: boolean[]; shape: string } {
+  const mark = new Array<boolean>(list.length).fill(false);
+  const shape: string[] = [];
+  list.forEach((token, root) => {
+    if (!REMOVED_WORDS_REFUSED.has(token) || list[root - 1] === ".") return;
+    mark[root] = true;
+    shape.push(token);
+    for (let i = root + 1; i < list.length; ) {
+      if (list[i] === "." && IDENTIFIER.test(list[i + 1] ?? "")) {
+        mark[i] = mark[i + 1] = true;
+        shape.push(`.${list[i + 1]}`);
+        i += 2;
+      } else if (list[i] === "(") {
+        mark[i] = true;
+        let depth = 0;
+        let commas = 0;
+        for (; i < list.length; i += 1) {
+          if (list[i] === "(" || list[i] === "[" || list[i] === "{") depth += 1;
+          else if ((list[i] === ")" || list[i] === "]" || list[i] === "}") && --depth === 0) break;
+          else if (list[i] === "," && depth === 1) commas += 1;
+        }
+        if (i < list.length) mark[i] = true;
+        shape.push(`(${commas})`);
+        i += 1;
+      } else break;
+    }
+    shape.push(";");
+  });
+  return { mark, shape: shape.join("") };
+}
 
 /** A line's tokens: comments, strings, templates and regular expressions each one token. */
 function tokens(line: string): string[] {
@@ -210,10 +252,14 @@ export function testEditProblems(patch: string, paths: ReadonlySet<string>): str
           const assertionName = member && (root === null || REMOVED_WORDS_REFUSED.has(root));
           if (!IDENTIFIER.test(token) || !member || REMOVED_WORDS_REFUSED.has(token) || assertionName) problems.add("test_edit_removed");
         });
+        const called = callees(after);
+        if (called.shape !== callees(before).shape) problems.add("test_edit_added");
         after.forEach((token, j) => {
           if (keep.b[j]) return;
           const allowed = ADDED_PUNCTUATION.has(token) || QUOTED.test(token) || (IDENTIFIER.test(token) && !ADDED_WORDS_REFUSED.has(token));
-          if (!allowed) problems.add("test_edit_added");
+          // `foo.test(` makes a test or an assertion a member of something else.
+          const demotes = token === "." && REMOVED_WORDS_REFUSED.has(after[j + 1] ?? "");
+          if (!allowed || called.mark[j] || demotes) problems.add("test_edit_added");
         });
       });
     }

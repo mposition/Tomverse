@@ -144,6 +144,13 @@ test("with the switch on, a Dependabot fix may move an existing test to a change
     ["    .toBe(1);", "    .toBeGreaterThan(1);", "test_edit_removed"],
     ["  )).toEqual([]);", "  )).toBeTruthy([]);", "test_edit_removed"],
     ["    rows].length, 3);", "    rows].size, 3);", "test_edit_removed"],
+    // Review r-20261101-022453-3fb249: a name put into what is called, so the call never runs.
+    ["test(\"reads\", async () => {", "test.bind(\"reads\", async () => {", "test_edit_added"],
+    ["  assert.equal(actual, expected);", "  assert.equal.bind(actual, expected);", "test_edit_added"],
+    ["  await expect(page).toHaveURL(\"/a\");", "  await expect(page).toHaveURL.bind(\"/a\");", "test_edit_added"],
+    ["  assert.equal(actual, expected);", "  noop.assert.equal(actual, expected);", "test_edit_added"],
+    // ... or the arguments it is given folded into one.
+    ["  assert.ok(found, \"the row is there\");", "  assert.ok((found, \"the row is there\"));", "test_edit_added"],
   ]) {
     const verdict = judge(hunk([removed], [added]));
     assert.equal(verdict.push, false, added);
