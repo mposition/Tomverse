@@ -76,6 +76,15 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   for (const path of ["PrivacyInfo.xcprivacy", "public", "capacitor.config.json"]) {
     assert.ok(resources.includes(path), `Xcode Resources does not include ${path}.`);
   }
+  const sources = target.buildPhases.flatMap(phase => objects.PBXSourcesBuildPhase?.[phase.value]?.files ?? [])
+    .map(file => objects.PBXFileReference[objects.PBXBuildFile[file.value]?.fileRef])
+    .filter(Boolean).map(file => unquote(file.path));
+  assert.ok(sources.includes("SceneDelegate.swift"), "The isolated WebKit controller must be compiled in the App target.");
+  const controller = read(root, `${native}/SceneDelegate.swift`);
+  assert.match(controller, /rootViewController\s*=\s*MobileBridgeViewController\(\)/, "Scene startup must select the isolated WebKit controller.");
+  const storyboard = await parseStringPromise(read(root, `${native}/Base.lproj/Main.storyboard`));
+  const initialController = storyboard.document.scenes[0].scene[0].objects[0].viewController[0].$;
+  assert.equal(initialController.customClass, "MobileBridgeViewController", "Storyboard startup must select the isolated WebKit controller.");
   const scheme = await parseStringPromise(read(root, `${projectPath}/xcshareddata/xcschemes/App.xcscheme`));
   const buildable = scheme.Scheme.BuildAction?.[0].BuildActionEntries?.[0].BuildActionEntry?.[0].BuildableReference?.[0].$;
   assert.equal(buildable?.BlueprintIdentifier, targetId, "Shared App scheme does not build the App target.");
