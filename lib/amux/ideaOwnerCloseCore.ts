@@ -2,8 +2,9 @@
  * Owner closing of AMUX ideas that wait for the owner: after analysis
  * (`awaiting_owner`), or an owner-entered idea still waiting for its
  * execution approval (`submitted`). Nothing moves either on unless the owner
- * acts. Closing marks the idea cancelled; its rows, body and units stay and
- * leave by the existing retention rules (docs/policy/amux-intake.md).
+ * acts. Closing marks the idea cancelled; its rows and units stay and units
+ * expire on their own clock. The body keeps its purge time after analysis, and
+ * is due for purge at the close before it (docs/policy/amux-intake.md).
  */
 
 export const AMUX_IDEA_OWNER_CLOSE_ACTION = "amux.idea.owner_closed";
