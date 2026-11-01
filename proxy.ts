@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import {
+  EXPERIMENT_COOKIE_NAME,
+  isExperimentVariantPathname,
   isStaticMarketingPathname,
   localizedMarketingRedirect,
+  resolveExperimentRewrite,
 } from "@/lib/marketingRoutes";
 import { getStaticMarketingCspHashes } from "@/lib/staticMarketingCsp";
 import {
@@ -383,8 +386,33 @@ export function proxy(request: NextRequest) {
   }
 
   const isStaticMarketingRequest = marketing.staticMarketing;
+  // Landing experiments (policy 9.1). A home document load whose assignment
+  // cookie names a variant is answered from that variant's prerendered path.
+  // The CSP hashes are those of the path that will be served, and a variant
+  // whose HTML is not in this build is not served at all: the visitor gets the
+  // default page, which is the safe answer to every doubt here.
+  const experimentTarget = isStaticMarketingRequest
+    ? resolveExperimentRewrite({
+        pathname: request.nextUrl.pathname,
+        method: request.method,
+        accept: request.headers.get("accept"),
+        rscHeader: request.headers.get("rsc"),
+        cookie: request.cookies.get(EXPERIMENT_COOKIE_NAME)?.value,
+        killSwitch: process.env.MARKETING_AUTOMATION_KILL_SWITCH,
+      })
+    : null;
+  const experimentHashes = experimentTarget
+    ? getStaticMarketingCspHashes(experimentTarget)
+    : null;
+  const rewriteTarget =
+    experimentTarget &&
+    (experimentHashes || process.env.NODE_ENV !== "production")
+      ? experimentTarget
+      : null;
   const staticMarketingHashes = isStaticMarketingRequest
-    ? getStaticMarketingCspHashes(request.nextUrl.pathname)
+    ? rewriteTarget
+      ? experimentHashes
+      : getStaticMarketingCspHashes(request.nextUrl.pathname)
     : null;
   if (
     isStaticMarketingRequest &&
@@ -448,10 +476,26 @@ export function proxy(request: NextRequest) {
   if (nonce) requestHeaders.set("x-nonce", nonce);
   requestHeaders.set(policyHeader, csp);
 
-  const response = NextResponse.next({
-    request: { headers: requestHeaders },
-  });
-  if (isStaticMarketingRequest) {
+  let response: NextResponse;
+  if (rewriteTarget) {
+    // The browser's URL stays what it asked for, with its query string; only
+    // the route that answers changes.
+    const target = request.nextUrl.clone();
+    target.pathname = rewriteTarget;
+    response = NextResponse.rewrite(target, {
+      request: { headers: requestHeaders },
+    });
+  } else {
+    response = NextResponse.next({
+      request: { headers: requestHeaders },
+    });
+  }
+  if (rewriteTarget || isExperimentVariantPathname(request.nextUrl.pathname)) {
+    // A variant is for one visitor's assignment, never for a shared cache, and
+    // never for a search index.
+    response.headers.set("Cache-Control", "private, no-store");
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  } else if (isStaticMarketingRequest) {
     response.headers.set(
       "Cache-Control",
       "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"

@@ -341,6 +341,15 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 - 사전 등록(가설·주 지표·최소 표본·고정 기간·중단 규칙) 없이는 시작하지 않는다. 승자의 영구 반영은 PR.
 - 구현 전 캐시·CSP·rewrite 스파이크를 E2E로 통과해야 하며, 실패하면 실험은 연기한다.
 
+**현재 구현 (2026-11-01, 운영자 지시로 정함 — 구현 설명이며 위 구속 조건을 바꾸지 않는다)**
+- 스파이크: `tests/e2e/landing-experiment-spike.spec.ts`(동의 없음→기본 문구·쿠키 없음, 동의+배정→변형, 사용자 간 캐시 혼입 0건, CSP 해시·위반 0건). 통과 기록은 `lib/marketingExperimentCore.ts`의 `MARKETING_EXPERIMENT_SPIKE`이고, 시험이 그 E2E 파일의 존재를 확인한다.
+- proxy는 DB를 읽지 않는다. 배정 쿠키(`tv_exp=<실험id>.<번들id>.<arm>`)가 rewrite의 유일한 근거이며, 쿠키는 배정 route가 분석 동의(동의 provider와 같은 규칙: 수락, 또는 미결정이면서 notice_opt_out 국가)와 활성 실험을 확인했을 때만 발급한다. 문서 요청(`Accept: text/html`, Flight 요청 제외)의 홈(`/`, `/{locale}`)만 rewrite하고, 대상 HTML이 이 빌드에 없으면 기본 페이지를 낸다. 규칙은 `lib/marketingRoutes.ts`에 있다(proxy가 새 로컬 import를 얻으면 Prompt Refiner 실행 closure가 커지기 때문).
+- 모든 랜딩 화면의 beacon(`components/marketing/LandingExperimentBeacon.tsx`)이 쿠키를 다시 확인한다. 실험이 멈췄거나 동의가 사라졌거나 다른 실험의 쿠키면 route가 쿠키를 지우고 변형 화면은 한 번 다시 불러 기본 문구로 돌아간다. 즉 중단·동의 철회는 방문자의 **다음 랜딩 화면**에서 효력이 생기고, kill switch 환경변수는 proxy에서 즉시 rewrite를 끈다.
+- 첫 화면은 어느 arm이든 기본 문구이며 집계하지 않는다(대조군만 집계하면 대조군에 유리해진다). 노출은 쿠키가 이미 있던 화면에서, 렌더된 arm이 쿠키의 arm과 같을 때만 브라우저 세션당 한 번 센다. 전환은 주 CTA 클릭 한 번(세션당)이다. 집계는 `AppSetting`의 원자적 증가 행이며 페이지 세션 수이지 방문자 수가 아니다.
+- 사전 등록의 중단 규칙은 집계에서 평가한다(조건 충족 시 실험은 비활성으로 읽힌다). 쓰기 없이 평가하므로 감사 기록이 필요한 자동 쓰기가 없다.
+- 시작·중단은 Admin(`marketing:write`+step-up)이며 사람 감사 기록을 같은 트랜잭션에 남긴다. 중단은 두 arm의 `experiment_result` 보고서를 쓴다. 한 번에 실험 하나, 실험 id 재사용 금지.
+- 캐시: 변형 응답은 `private, no-store`와 `X-Robots-Tag: noindex`다(Next가 `Vary`를 자기 값으로 덮어쓰므로 `Vary: Cookie`에 기대지 않는다). 공유 캐시(Cloudflare)에서 `tv_exp` 쿠키가 있는 `/`·`/{locale}` 요청을 캐시 우회하는 규칙은 코드 밖 설정이며, 실험을 켜기 전 운영자가 적용해야 한다(없으면 쿠키 방문자도 캐시된 기본 페이지를 받을 뿐 변형이 섞이지는 않는다).
+
 ### 9.2 SEO 코드
 - LLM 단계: 저장소 읽기 권한과 LLM 키만, 도구는 읽기·편집만, 저장소 설정·MCP·hook 미로드, 버전·무결성 고정, 턴·예산 상한.
   이 줄은 SEO 코드 단계에만 적용한다. 이미지·영상을 만드는 미디어 CLI는 플러그인과 MCP를 쓸 수 있고, 결과는 §7.3의 제출과 사람 승인을 거친다(2026-10-31 운영자).

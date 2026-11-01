@@ -135,6 +135,27 @@ export default defineConfig({
       // company: `isE2EAssistantKnowledgeEnabled()` additionally requires
       // loopback and both short-circuits above.
       E2E_ASSISTANT_KNOWLEDGE_ENABLED: "true",
+      // The landing experiment fixture (lib/marketingExperimentState.ts). It
+      // is read only for a request carrying `x-e2e-marketing-experiment`, so no
+      // other spec ever sees an active experiment.
+      E2E_MARKETING_EXPERIMENT: JSON.stringify({
+        version: 1,
+        experimentId: "e2e-home-hero",
+        bundleId: "home-hero-v1",
+        variantId: "b",
+        locales: ["en", "ko"],
+        variantRatio: 0.5,
+        startsAt: "2026-01-01T00:00:00Z",
+        endsAt: "2026-02-01T00:00:00Z",
+        preregistration: {
+          hypothesis: "A plainer headline raises primary call-to-action clicks.",
+          primaryMetric: "primary_cta_click",
+          minExposuresPerArm: 100,
+          stopRule: { relativeDropPercent: 30, afterExposuresPerArm: 50 },
+        },
+        status: "running",
+        stoppedAt: null,
+      }),
       // The deterministic search backend. Without it this server holds no
       // credential, `resolveWebSearchBackendReadiness()` reports nothing
       // reachable, and every Google model renders as unable to search -- which

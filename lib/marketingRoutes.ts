@@ -64,9 +64,114 @@ const normalizePathname = (pathname: string) => {
   return pathname.replace(/\/+$/, "") || "/";
 };
 
+/**
+ * Landing experiments (docs/policy/marketing-automation.md section 9.1).
+ *
+ * Everything the request boundary needs lives here and nowhere else: the
+ * proxy imports this module already, and a new local import in `proxy.ts`
+ * would grow the Prompt Refiner runtime source closure, which a database
+ * constraint pins. So the cookie shape, the variant path and the rewrite
+ * decision are plain functions of strings, with no import and no computed
+ * property access.
+ *
+ * The proxy never reads the database. The cookie is the whole authority for a
+ * rewrite: it exists only because the assignment route saw analytics consent
+ * and an active experiment, it names a bundle that must exist as prerendered
+ * HTML (the proxy falls back to the default page when it does not), and the
+ * beacon on every landing view re-validates it and clears it when the
+ * experiment has stopped or consent is gone.
+ */
+export const EXPERIMENT_COOKIE_NAME = "tv_exp";
+export const EXPERIMENT_CONTROL_ARM = "control";
+export const EXPERIMENT_VARIANT_SEGMENT = "lx";
+const EXPERIMENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,47}$/;
+/** A variant id may be as short as `b`. */
+const EXPERIMENT_ARM_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
+const EXPERIMENT_HOME_BUNDLE_PREFIX = "home-";
+
+export type ExperimentAssignment = {
+  experimentId: string;
+  bundleId: string;
+  /** `control`, or the variant id the bundle defines. */
+  arm: string;
+};
+
+export const parseExperimentCookie = (
+  value: string | null | undefined
+): ExperimentAssignment | null => {
+  if (!value || value.length > 160) return null;
+  const parts = value.split(".");
+  if (parts.length !== 3) return null;
+  const [experimentId, bundleId, arm] = parts;
+  if (
+    !EXPERIMENT_ID_PATTERN.test(experimentId) ||
+    !EXPERIMENT_ID_PATTERN.test(bundleId) ||
+    !EXPERIMENT_ARM_PATTERN.test(arm)
+  ) {
+    return null;
+  }
+  return { experimentId, bundleId, arm };
+};
+
+export const formatExperimentCookie = (assignment: ExperimentAssignment) =>
+  `${assignment.experimentId}.${assignment.bundleId}.${assignment.arm}`;
+
+export const experimentVariantPathname = (
+  locale: string,
+  bundleId: string,
+  variantId: string
+) => `/${locale}/${EXPERIMENT_VARIANT_SEGMENT}/${bundleId}/${variantId}`;
+
+const experimentLocales = new Set(["en", "ko", "zh", "fr", "de", "es", "pt"]);
+
+/** `/{locale}/lx/{bundle}/{variant}`, prerendered at build time and noindex. */
+export const isExperimentVariantPathname = (pathname: string) => {
+  const segments = normalizePathname(pathname).split("/").filter(Boolean);
+  if (segments.length !== 4) return false;
+  const [locale, marker, bundleId, variantId] = segments;
+  return (
+    experimentLocales.has(locale) &&
+    marker === EXPERIMENT_VARIANT_SEGMENT &&
+    EXPERIMENT_ID_PATTERN.test(bundleId) &&
+    EXPERIMENT_ARM_PATTERN.test(variantId)
+  );
+};
+
+/**
+ * The prerendered path a request should be served from instead of its own, or
+ * null to serve the page that was asked for.
+ *
+ * Only document loads of a home page are rewritten. A client navigation asks
+ * for a Flight payload (`RSC` header, no `text/html` in `Accept`), and
+ * answering that with another route's payload is not something this feature
+ * is entitled to do.
+ */
+export const resolveExperimentRewrite = (input: Readonly<{
+  pathname: string;
+  method: string;
+  accept: string | null;
+  rscHeader: string | null;
+  cookie: string | null | undefined;
+  killSwitch: string | undefined;
+}>): string | null => {
+  if (input.method !== "GET" && input.method !== "HEAD") return null;
+  if (input.rscHeader) return null;
+  if (!(input.accept ?? "").includes("text/html")) return null;
+  if ((input.killSwitch ?? "").trim() !== "") return null;
+  const assignment = parseExperimentCookie(input.cookie);
+  if (!assignment || assignment.arm === EXPERIMENT_CONTROL_ARM) return null;
+  if (!assignment.bundleId.startsWith(EXPERIMENT_HOME_BUNDLE_PREFIX)) return null;
+
+  const normalized = normalizePathname(input.pathname);
+  const locale = normalized === "/" ? "en" : normalized.slice(1);
+  if (!experimentLocales.has(locale)) return null;
+  return experimentVariantPathname(locale, assignment.bundleId, assignment.arm);
+};
+
 export const isStaticMarketingPathname = (pathname: string) => {
   const normalized = normalizePathname(pathname);
   if (exactMarketingPaths.has(normalized)) return true;
+  if (isExperimentVariantPathname(normalized)) return true;
 
   const segments = normalized.split("/").filter(Boolean);
   if (!localizedMarketingLocales.has(segments[0] || "")) return false;
