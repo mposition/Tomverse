@@ -75,6 +75,7 @@ const TEST_CODE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 const ADDED_WORDS_REFUSED = new Set([
   "return", "if", "else", "throw", "try", "catch", "finally", "void", "while", "for", "do", "switch", "case",
   "break", "continue", "delete", "skip", "todo", "only", "true", "false", "null", "undefined", "not",
+  "typeof", "instanceof", "in", "of", "new", "yield", "function", "class", "var", "let", "const", "this",
 ]);
 /** Punctuation an edited test line may gain: enough to wrap a call, `(await x.to("text")).value`. */
 const ADDED_PUNCTUATION = new Set([".", "(", ")"]);
@@ -138,13 +139,15 @@ function callees(list: readonly string[]): { mark: boolean[]; shape: string } {
         mark[i] = true;
         let depth = 0;
         let commas = 0;
+        const open = i;
         for (; i < list.length; i += 1) {
           if (list[i] === "(" || list[i] === "[" || list[i] === "{") depth += 1;
           else if ((list[i] === ")" || list[i] === "]" || list[i] === "}") && --depth === 0) break;
           else if (list[i] === "," && depth === 1) commas += 1;
         }
         if (i < list.length) mark[i] = true;
-        shape.push(`(${commas})`);
+        // `()` gives none; otherwise one more than its top-level commas.
+        shape.push(`(${i === open + 1 ? 0 : commas + 1})`);
         i += 1;
       } else break;
     }
