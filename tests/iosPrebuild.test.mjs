@@ -14,6 +14,7 @@ function fixture(t) {
   const write = (path, text) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); };
   const edit = (path, transform) => write(path, transform(readFileSync(join(root, path), "utf8")));
   for (const path of [`${native}/Info.plist`, `${native}/PrivacyInfo.xcprivacy`, `${project}/project.pbxproj`,
+    `${native}/SceneDelegate.swift`, `${native}/Base.lproj/Main.storyboard`,
     `${project}/xcshareddata/xcschemes/App.xcscheme`, "apps/mobile/native-auth/Package.swift",
     "apps/mobile/native-auth/ios/Sources/MobileAuth/PrivacyInfo.xcprivacy", "apps/mobile/ios/App/CapApp-SPM/Package.swift"]) {
     write(path, readFileSync(join(repositoryRoot, path)));
@@ -24,7 +25,7 @@ function fixture(t) {
     if (!existsSync(join(root, target))) write(target, "// fixture dependency");
   }
   cpSync(join(repositoryRoot, native, "Assets.xcassets/AppIcon.appiconset"), join(root, native, "Assets.xcassets/AppIcon.appiconset"), { recursive: true });
-  write(`${native}/capacitor.config.json`, JSON.stringify({ appId: "app.tomverse.shell", loggingBehavior: "none",
+  write(`${native}/capacitor.config.json`, JSON.stringify({ appId: "app.tomverse.shell", loggingBehavior: "none", plugins: { MobileAuth: { apiOrigin: "https://tomverse.app" } },
     packageClassList: ["MobileAuthPlugin", "MobileFilesPlugin", "MobileUpdatesPlugin", "PurchasesPlugin", "CAPBrowserPlugin", "GeolocationPlugin"] }));
   write("apps/mobile/dist/index.html", "<html>fixture</html>");
   write(`${native}/public/index.html`, "<html>fixture</html>");
@@ -53,6 +54,14 @@ test("the Purchases Swift SDK requires a compatible target language version", as
   const f = fixture(t);
   f.edit(`${project}/project.pbxproj`, text => text.replaceAll("SWIFT_VERSION = 5.0", "SWIFT_VERSION = 4.0"));
   await assert.rejects(checkIosPrebuild(f.root), /RevenueCat requires Swift 5/);
+});
+
+test("both iOS launch paths require the controller that isolates sandbox website data", async t => {
+  for (const path of [`${native}/SceneDelegate.swift`, `${native}/Base.lproj/Main.storyboard`]) {
+    const f = fixture(t);
+    f.edit(path, source => source.replaceAll("MobileBridgeViewController", "CAPBridgeViewController"));
+    await assert.rejects(checkIosPrebuild(f.root), /startup must select the isolated WebKit controller/);
+  }
 });
 
 test("UserDefaults requires a valid privacy reason in the native plugin resource", async t => {

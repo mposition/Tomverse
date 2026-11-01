@@ -8,12 +8,13 @@ type Request = { action: string; store: string; productId?: string; attemptId?: 
 type Attempt = { id: string; store: string; productId: string; startedAt: string };
 
 async function appleBilling(page: Page, outcome: "success" | "pending" | "cancelled" = "success", web = false,
-  passOutcome?: "success" | "expired" | "lost", language: MobileLanguage = "en") {
+  passOutcome?: "success" | "expired" | "lost", language: MobileLanguage = "en",
+  prices = { currencyCode: "AUD", monthly: "A$19.99", annual: "A$199.99", credits: "A$7.49" }) {
   const calls: Call[] = [];
   const requests: Request[] = [];
   const passRequests: Record<string, unknown>[] = [];
   await page.exposeFunction("iosBillingCall", (call: Call) => { calls.push(call); });
-  await page.addInitScript(({ outcome, language }) => {
+  await page.addInitScript(({ outcome, language, prices }) => {
     localStorage.setItem("tomverse-language", language);
     localStorage.setItem("tomverse-native-location-consent-v1", JSON.stringify({ offered: true, unclaimedGrant: false, accounts: {} }));
     const device = window as unknown as { webkit: object; Capacitor: object; iosBillingCall: (call: Call) => Promise<void> };
@@ -31,13 +32,14 @@ async function appleBilling(page: Page, outcome: "success" | "pending" | "cancel
           ? { signedIn: true } : { accessToken: "ios-fixture-access", expiresAt: Date.now() + 600000 };
         if (method === "getProducts") return { products: (options.productIdentifiers as string[]).map(identifier => ({
           identifier,
-          priceString: identifier.includes("credits") ? "A$7.49" : identifier.endsWith("annual") ? "A$199.99" : "A$19.99",
+          currencyCode: prices.currencyCode,
+          priceString: identifier.includes("credits") ? prices.credits : identifier.endsWith("annual") ? prices.annual : prices.monthly,
         })) };
         if (method === "purchaseStoreProduct" && outcome !== "success") throw { code: outcome === "pending" ? "20" : "1" };
         return {};
       },
     };
-  }, { outcome, language });
+  }, { outcome, language, prices });
 
   let purchasedCredits = 500;
   let plan = passOutcome ? "Free" : "Pro";
@@ -147,10 +149,28 @@ test("iOS configures the Apple SDK with the server identity and loads both produ
 test("annual plans show the full localized annual charge and period", async ({ page }) => {
   await appleBilling(page);
   await page.getByRole("button", { name: "Annual", exact: true }).click();
-  await expect(page.getByText("A$199.99 / year", { exact: true })).toHaveCount(2);
-  await expect(page.getByText("A$19.99 / month", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("AUD A$199.99 / year", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("AUD A$19.99 / month", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/Subscriptions renew automatically/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Terms of Use", exact: true })).toHaveAttribute("href", "https://tomverse.app/terms");
+});
+
+for (const prices of [
+  { currencyCode: "USD", monthly: "$15.00", annual: "$143.99", credits: "$5.00" },
+  { currencyCode: "AUD", monthly: "$25.00", annual: "$229.99", credits: "$7.49" },
+]) test(`iPad identifies ${prices.currencyCode} dollar prices before opening Apple's payment sheet`, async ({ page }) => {
+  await page.setViewportSize({ width: 810, height: 1080 });
+  const { calls } = await appleBilling(page, "success", false, undefined, "ko", prices);
+  const copy = mobileBillingCopy("ko");
+  const panel = page.getByTestId("native-billing");
+  await expect(panel.getByText(`${prices.currencyCode} ${prices.monthly} / 월`, { exact: true })).toHaveCount(2);
+  await expect(panel.getByText(`${prices.currencyCode} ${prices.credits}`, { exact: true })).toBeVisible();
+  await expect(panel.getByText(formatMobileBillingCopy(copy.currencyNotice, { store: "App Store" }), { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: copy.annual, exact: true }).click();
+  await expect(panel.getByText(`${prices.currencyCode} ${prices.annual} / 년`, { exact: true })).toHaveCount(2);
+  expect(calls.filter(call => call.method === "purchaseStoreProduct")).toHaveLength(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath(`ipad-currency-${prices.currencyCode}.png`), fullPage: true });
 });
 
 test("an Apple SDK success cannot grant credits before the server verifies payment", async ({ page }) => {

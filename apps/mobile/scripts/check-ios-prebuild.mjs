@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { iosApiOrigin } from "./configure-ios-api-origin.mjs";
 
 export const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
 // Use the parsers already supplied by the declared Capacitor CLI dependency.
@@ -38,6 +39,8 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   const projectPath = `${mobile}/ios/App/App.xcodeproj`;
   const config = JSON.parse(read(root, `${native}/capacitor.config.json`));
   assert.equal(config.loggingBehavior, "none", "Synced native bridge logging must stay disabled.");
+  assert.ok(typeof config.plugins?.MobileAuth?.apiOrigin === "string", "Synced native authentication API origin is missing.");
+  const apiOrigin = iosApiOrigin(config.plugins.MobileAuth.apiOrigin);
   for (const option of ["url", "cleartext", "allowNavigation"]) {
     assert.ok(config.server?.[option] === undefined, `Remove production server.${option}.`);
   }
@@ -73,6 +76,15 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   for (const path of ["PrivacyInfo.xcprivacy", "public", "capacitor.config.json"]) {
     assert.ok(resources.includes(path), `Xcode Resources does not include ${path}.`);
   }
+  const sources = target.buildPhases.flatMap(phase => objects.PBXSourcesBuildPhase?.[phase.value]?.files ?? [])
+    .map(file => objects.PBXFileReference[objects.PBXBuildFile[file.value]?.fileRef])
+    .filter(Boolean).map(file => unquote(file.path));
+  assert.ok(sources.includes("SceneDelegate.swift"), "The isolated WebKit controller must be compiled in the App target.");
+  const controller = read(root, `${native}/SceneDelegate.swift`);
+  assert.match(controller, /rootViewController\s*=\s*MobileBridgeViewController\(\)/, "Scene startup must select the isolated WebKit controller.");
+  const storyboard = await parseStringPromise(read(root, `${native}/Base.lproj/Main.storyboard`));
+  const initialController = storyboard.document.scenes[0].scene[0].objects[0].viewController[0].$;
+  assert.equal(initialController.customClass, "MobileBridgeViewController", "Storyboard startup must select the isolated WebKit controller.");
   const scheme = await parseStringPromise(read(root, `${projectPath}/xcshareddata/xcschemes/App.xcscheme`));
   const buildable = scheme.Scheme.BuildAction?.[0].BuildActionEntries?.[0].BuildActionEntry?.[0].BuildableReference?.[0].$;
   assert.equal(buildable?.BlueprintIdentifier, targetId, "Shared App scheme does not build the App target.");
@@ -101,7 +113,7 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   }
   return {
     status: "ready-for-remote-mac-build", iosMinimum: "17.4", capacitorVersion: iosVersion,
-    appId: config.appId, pluginClasses: requiredPlugins, bundledFiles: files.length,
+    appId: config.appId, apiOrigin, pluginClasses: requiredPlugins, bundledFiles: files.length,
     swiftCompilation: "not-run", signing: "not-configured-by-preparation",
     note: "The first unsigned simulator build needs no Apple signing identity. Device signing and HTTPS browser-login associations require the real Apple Team and Bundle ID later.",
   };
