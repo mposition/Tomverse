@@ -109,7 +109,7 @@ function chainRoot(list: readonly string[], dot: number): string | null {
     i -= 2;
   }
 }
-const QUOTED = /^(["']).*\1$/s;
+const QUOTED = /^(["'])[\s\S]*\1$/;
 const REGEX_MAY_FOLLOW = new Set(["", "(", ",", "=", ":", "[", "!", "&&", "||", "??", "?", "{", "}", ";", "=>", "return"]);
 
 /**
