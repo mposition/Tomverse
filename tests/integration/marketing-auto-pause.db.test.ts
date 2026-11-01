@@ -51,7 +51,13 @@ async function approvalChannel() {
 type Attempt = { at: Date; attempt: number; outcome: "published" | "failed" | "outcome_unknown" };
 
 /** A post whose history already holds the given attempt entries (the insert trigger is off for it). */
-async function postWithAttempts(channelId: string, attempts: Attempt[], status = "failed") {
+async function postWithAttempts(
+  channelId: string,
+  attempts: Attempt[],
+  status = "failed",
+  extraHistory: Array<Record<string, unknown>> = [],
+) {
+  const key = `post-${Math.random().toString(36).slice(2)}`;
   await prisma.$executeRawUnsafe(
     `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
   );
@@ -61,7 +67,20 @@ async function postWithAttempts(channelId: string, attempts: Attempt[], status =
         channelId,
         locale: "en",
         kind: "social",
-        logicalKey: `post-${Math.random().toString(36).slice(2)}`,
+        logicalKey: key,
+        // A post that was sent carries the key it was sent under (a CHECK).
+        providerRequestKey: key,
+        publishAttempt: attempts.length,
+        ...(status === "published"
+          ? {
+              publishedAt: new Date(),
+              externalPostId: `ext-${key}`,
+              externalUrl: "https://www.linkedin.com/feed/update/1",
+              approvalAuditLogId: `audit-${key}`,
+              approvedDigest: DIGEST,
+              approvedAt: new Date(),
+            }
+          : {}),
         envelope,
         envelopeDigest: DIGEST,
         rendererVersion: "r1",
@@ -71,13 +90,14 @@ async function postWithAttempts(channelId: string, attempts: Attempt[], status =
         assetRegistryVersion: 1,
         factSnapshot: { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] },
         factsDigest: DIGEST,
-        guardDecision: "pass",
+        guardDecision: "approval_required",
         guardCodes: [],
         guardRuleIds: [],
         status,
         mode: "approval",
         history: [
           { at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST },
+          ...extraHistory,
           ...attempts.map((entry) => ({
             at: entry.at.toISOString(),
             type: "attempt",
@@ -171,53 +191,21 @@ test("an attempt made before the account's last fresh start is not evidence, how
   assert.deepEqual(await evaluate(row.id), { paused: false });
 });
 
+
 test("a thinned post whose summary lies far before the attempts is judged on the attempts it still holds", async () => {
   const row = await approvalChannel();
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
-  );
-  try {
-    await prisma.marketingPost.create({
-      data: {
-        channelId: row.id,
-        locale: "en",
-        kind: "social",
-        logicalKey: "compacted-1",
-        envelope,
-        envelopeDigest: DIGEST,
-        rendererVersion: "r1",
-        claimIds: [],
-        assetIds: [],
-        claimRegistryVersion: 1,
-        assetRegistryVersion: 1,
-        factSnapshot: { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] },
-        factsDigest: DIGEST,
-        guardDecision: "pass",
-        guardCodes: [],
-        guardRuleIds: [],
-        status: "published",
-        mode: "approval",
-        history: [
-          { at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST },
-          {
-            at: new Date().toISOString(),
-            type: "retention_summary",
-            summarises: "attempt",
-            count: 2,
-            firstAt: at(-9000).toISOString(),
-            lastAt: at(-8000).toISOString(),
-          },
-          { at: at(3).toISOString(), type: "attempt", attempt: 3, outcome: "published", errorCode: null },
-        ],
-        historyVersion: 0,
-      },
-    });
-  } finally {
-    await prisma.$executeRawUnsafe(
-      `ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`,
-    );
-  }
-  // failed, failed, published (on the thinned post), failed: the success is among the newest three.
+  // failed, failed, published (on a post whose old attempts retention summarised), failed:
+  // the success is among the newest three.
+  await postWithAttempts(row.id, [{ at: at(3), attempt: 3, outcome: "published" }], "published", [
+    {
+      at: new Date().toISOString(),
+      type: "retention_summary",
+      summarises: "attempt",
+      count: 2,
+      firstAt: at(-9000).toISOString(),
+      lastAt: at(-8000).toISOString(),
+    },
+  ]);
   await postWithAttempts(row.id, [{ at: at(1), attempt: 1, outcome: "failed" }]);
   await postWithAttempts(row.id, [{ at: at(2), attempt: 1, outcome: "failed" }]);
   await postWithAttempts(row.id, [{ at: at(4), attempt: 1, outcome: "failed" }]);
@@ -226,52 +214,20 @@ test("a thinned post whose summary lies far before the attempts is judged on the
 
 test("three failures are not concluded from history that a retention summary reaches into", async () => {
   const row = await approvalChannel();
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
-  );
-  try {
-    await prisma.marketingPost.create({
-      data: {
-        channelId: row.id,
-        locale: "en",
-        kind: "social",
-        logicalKey: "thinned-reaching",
-        envelope,
-        envelopeDigest: DIGEST,
-        rendererVersion: "r1",
-        claimIds: [],
-        assetIds: [],
-        claimRegistryVersion: 1,
-        assetRegistryVersion: 1,
-        factSnapshot: { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] },
-        factsDigest: DIGEST,
-        guardDecision: "pass",
-        guardCodes: [],
-        guardRuleIds: [],
-        status: "published",
-        mode: "approval",
-        history: [
-          { at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST },
-          // Summarised successes that fell between the failures below.
-          {
-            at: new Date().toISOString(),
-            type: "retention_summary",
-            summarises: "attempt",
-            count: 1,
-            firstAt: at(2).toISOString(),
-            lastAt: at(2).toISOString(),
-          },
-        ],
-        historyVersion: 0,
-      },
-    });
-  } finally {
-    await prisma.$executeRawUnsafe(
-      `ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`,
-    );
-  }
-  await postWithAttempts(row.id, [{ at: at(1), attempt: 1, outcome: "failed" }]);
+  // The newest three attempts all failed -- but a summary of attempts retention removed
+  // reaches into their span (its last entry is later than the oldest of the three), so
+  // what lay between them is not known and nothing is concluded.
   await postWithAttempts(row.id, [{ at: at(3), attempt: 1, outcome: "failed" }]);
   await postWithAttempts(row.id, [{ at: at(4), attempt: 1, outcome: "failed" }]);
+  await postWithAttempts(row.id, [{ at: at(6), attempt: 2, outcome: "failed" }], "failed", [
+    {
+      at: new Date().toISOString(),
+      type: "retention_summary",
+      summarises: "attempt",
+      count: 1,
+      firstAt: at(3.5).toISOString(),
+      lastAt: at(3.5).toISOString(),
+    },
+  ]);
   assert.deepEqual(await evaluate(row.id), { paused: false });
 });
