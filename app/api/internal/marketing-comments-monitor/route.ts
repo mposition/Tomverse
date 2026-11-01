@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
-// Longer than the comments service's whole run: it is the service that stops a
-// run, not the platform.
+// Longer than the three minutes the comments service keeps for a judge, the
+// longer of the two steps: it is the service that gives up on a step, not the
+// platform.
 export const maxDuration = 300;
 
 import { NextResponse } from "next/server";

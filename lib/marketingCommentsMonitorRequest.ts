@@ -3,9 +3,10 @@
  * docs/policy/marketing-automation.md §12.1; lib/marketingCommentsMonitor.ts,
  * "Two steps").
  *
- * `collect` returns the new comment bodies a run beginning now would ask about,
- * each with its id (the SHA-256 of the body), and the `readAt` the run begins
- * at. `judge` takes back a verdict per id and runs the whole monitor here:
+ * `collect` returns the new comment bodies a run would ask about, each with its
+ * id (the SHA-256 of the body), and the `readAt` its reading covers up to --
+ * now, or for a backlog past the cap an earlier instant the next run carries on
+ * from. `judge` takes back a verdict per id and runs the whole monitor here:
  * it reads the comments again, asks the verdicts in place of a model, records
  * the alerts, counts unanswered ones against their accounts and records the run
  * only if it was whole. The service that sends the verdicts is authenticated,
@@ -31,8 +32,13 @@ import {
 /** A judge carries at most a verdict per collected body, under 300 bytes even with every code. */
 export const MARKETING_COMMENTS_MONITOR_MAX_BODY_BYTES = 512 * 1024;
 
-/** How old a collect's `readAt` may be when its verdicts come back: the service's deadline, and some. */
-export const MARKETING_COMMENTS_READ_AT_MAX_AGE_MS = 30 * 60 * 1000;
+/**
+ * How old a `readAt` may be: older than any comment the monitor reads, which
+ * are all under posts of the last fourteen days. A backlog cut is legitimately
+ * old (lib/marketingCommentsMonitor.ts, `collectMarketingCommentBodies`); a
+ * verdict is about a body, not a moment, so its age does not matter.
+ */
+export const MARKETING_COMMENTS_READ_AT_MAX_AGE_MS = 15 * 24 * 60 * 60 * 1000;
 
 /** A body's id in both steps. */
 export const marketingCommentBodyId = (body: string): string =>
@@ -53,7 +59,9 @@ export const marketingCommentsMonitorRequestSchema = z.discriminatedUnion("actio
             })
             .strict(),
         )
-        .max(MARKETING_COMMENT_COLLECT_MAX_BODIES),
+        .max(MARKETING_COMMENT_COLLECT_MAX_BODIES)
+        // One verdict per body: a second would silently replace the first.
+        .refine((verdicts) => new Set(verdicts.map((verdict) => verdict.id)).size === verdicts.length),
     })
     .strict(),
 ]);
@@ -77,14 +85,15 @@ export async function answerMarketingCommentsMonitorRequest(
       status: 200,
       body: {
         status: "ok",
-        readAt: now.toISOString(),
+        readAt: collected.readAt.toISOString(),
         capped: collected.capped,
         items: collected.bodies.map((body) => ({ id: marketingCommentBodyId(body), body })),
       },
     };
   }
-  // The run begins when its comments were read. Not later than now, and not so
-  // long ago that the verdicts could be from another run's reading.
+  // What the run's reading covers up to, as collect set it. Never later than
+  // now. Earlier only makes the recorded run older, which is the safe way to
+  // be wrong: what was not covered is read again.
   const readAt = new Date(request.readAt);
   const age = now.getTime() - readAt.getTime();
   if (!(age >= 0 && age <= MARKETING_COMMENTS_READ_AT_MAX_AGE_MS)) {

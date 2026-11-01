@@ -58,7 +58,7 @@ const app = (options: { env?: Record<string, string>; comments: Record<string, C
         calls.push("listPosts");
         return Object.keys(options.comments).map(post);
       },
-      lastCompleteRunAt: async () => null,
+      lastCompleteRunAt: async () => runs.at(-1) ?? null,
       alertAnswers: async () => new Map(),
       recordAlert: async (input) => {
         calls.push("recordAlert");
@@ -124,18 +124,51 @@ test("collect hands over distinct, bounded bodies with their ids and nothing els
   assert.deepEqual(world.calls.filter((call) => !call.startsWith("fetch:") && call !== "listPosts"), []);
 });
 
-test("a whole round trip records the alerts and the run, begun when the comments were read", async () => {
+test("a whole round trip records the alerts when found and the run as begun when the comments were read", async () => {
   const world = app({ comments: { p1: [comment("fine"), comment("! see you in court")], p2: [comment("nice")] } });
   const collected = (await collect(world.deps)).body as Collected;
-  world.advance(5 * 60 * 1000);
+  const judgedAt = world.advance(5 * 60 * 1000);
   const answer = await judge(world.deps, collected.readAt, classify(collected.items));
   assert.equal(answer.status, 200);
   const result = (answer.body as { result: { complete: boolean; alertsRecorded: number } }).result;
   assert.equal(result.complete, true);
   assert.equal(result.alertsRecorded, 1);
   assert.deepEqual(world.alerts.map((alert) => [alert.postId, alert.alertCount, alert.riskCodes]), [["p1", 1, ["legal_threat"]]]);
-  assert.deepEqual(world.alerts[0].detectedAt, NOW);
+  assert.deepEqual(world.alerts[0].detectedAt, judgedAt);
   assert.deepEqual(world.runs, [NOW]);
+});
+
+test("a backlog past the cap is worked through run by run, oldest first, and alerts are dated when found", async () => {
+  // One comment a minute for longer than the cap, the oldest days ago; one risky comment past the first cut.
+  const start = NOW.getTime() - 3 * 24 * 60 * 60 * 1000;
+  const total = MARKETING_COMMENT_COLLECT_MAX_BODIES + 100;
+  const risky = MARKETING_COMMENT_COLLECT_MAX_BODIES + 50;
+  const minute = (n: number) => new Date(start + n * 60_000).toISOString();
+  const backlog = Array.from({ length: total }, (_, n) => comment(n === risky ? `! complaint ${n}` : `c${n}`, minute(n)));
+  const world = app({ comments: { p1: backlog } });
+
+  // First run: the oldest comments up to the cap, cut just before the next one's minute.
+  const first = (await collect(world.deps)).body as Collected;
+  assert.equal(first.capped, true);
+  assert.equal(first.items.length, MARKETING_COMMENT_COLLECT_MAX_BODIES);
+  assert.equal(first.readAt, new Date(Date.parse(minute(MARKETING_COMMENT_COLLECT_MAX_BODIES)) - 1).toISOString());
+  const firstResult = (await judge(world.deps, first.readAt, classify(first.items))).body as { result: { complete: boolean } };
+  assert.equal(firstResult.result.complete, true);
+  assert.deepEqual(world.runs, [new Date(first.readAt)]);
+  assert.equal(world.alerts.length, 0);
+
+  // Second run carries on from there (the ten-minute overlap read again) and catches up to now.
+  const second = (await collect(world.deps)).body as Collected;
+  assert.equal(second.capped, false);
+  assert.equal(second.readAt, NOW.toISOString());
+  assert.ok(second.items.some((item) => item.body === `c${MARKETING_COMMENT_COLLECT_MAX_BODIES}`));
+  assert.ok(second.items.length < 200);
+  const judgedAt = world.advance(60_000);
+  const secondResult = (await judge(world.deps, second.readAt, classify(second.items))).body as { result: { complete: boolean } };
+  assert.equal(secondResult.result.complete, true);
+  assert.deepEqual(world.runs, [new Date(first.readAt), NOW]);
+  // Found now, though written days ago: the alert is not born a day old.
+  assert.deepEqual(world.alerts.map((alert) => [alert.postId, alert.detectedAt]), [["p1", judgedAt]]);
 });
 
 test("a body with no verdict leaves its post unread, and the verdicts that came still raise their alert", async () => {
@@ -174,12 +207,16 @@ test("a read time in the future or too long ago is refused before anything is re
   assert.deepEqual(world.calls, []);
 });
 
-test("collect stops at its cap and says so", async () => {
+test("more than the cap in one instant cannot be cut: up to the cap goes over, and the run cannot be whole", async () => {
   const many = Array.from({ length: MARKETING_COMMENT_COLLECT_MAX_BODIES + 5 }, (_, n) => comment(`c${n}`));
   const world = app({ comments: { p1: many } });
   const body = (await collect(world.deps)).body as Collected;
   assert.equal(body.items.length, MARKETING_COMMENT_COLLECT_MAX_BODIES);
   assert.equal(body.capped, true);
+  assert.equal(body.readAt, NOW.toISOString());
+  const result = (await judge(world.deps, body.readAt, classify(body.items))).body as { result: { complete: boolean } };
+  assert.equal(result.result.complete, false);
+  assert.deepEqual(world.runs, []);
 });
 
 test("a judge carries closed codes under body ids, and nothing else", () => {
@@ -192,7 +229,8 @@ test("a judge carries closed codes under body ids, and nothing else", () => {
     { ...ok, verdicts: [{ id: "a".repeat(64), codes: [], postId: "p1" }] },
     { ...ok, complete: true },
     { ...ok, readAt: "2026-11-02T10:00:00+10:00" },
-    { ...ok, verdicts: Array.from({ length: MARKETING_COMMENT_COLLECT_MAX_BODIES + 1 }, () => ok.verdicts[0]) },
+    { ...ok, verdicts: Array.from({ length: MARKETING_COMMENT_COLLECT_MAX_BODIES + 1 }, (_, n) => ({ id: n.toString(16).padStart(64, "0"), codes: [] })) },
+    { ...ok, verdicts: [ok.verdicts[0], { id: "a".repeat(64), codes: [] }] },
     { action: "collect", readAt: NOW.toISOString() },
     { action: "close" },
   ]) {

@@ -29,7 +29,7 @@
  * tool's key and the database. So a run is two requests to the app:
  * `collectMarketingCommentBodies()` reads what a run at `readAt` would ask about
  * and hands over the bodies alone, and the whole run then happens here with the
- * service's verdicts as the classifier and `readAt` as its start. The second
+ * service's verdicts as the classifier and `readAt` as the start it records. The second
  * step reads the comments again rather than trust anything the service sends
  * back but verdicts: what was read, whether the run was whole and when it began
  * are all the app's own. A comment written after `readAt` is left to the next
@@ -92,9 +92,10 @@ export type MarketingCommentsMonitorDeps = {
   readonly classifier: MarketingCommentClassifier | null;
   readonly now: () => Date;
   /**
-   * When the comments were read for the classifier, in a two-step run: the run
-   * begins then, and leaves anything written later to the next run. Absent, the
-   * run reads and classifies in one pass and begins at `now()`.
+   * In a two-step run, the instant the first step's reading covers up to: the
+   * run reads no comment written after it and, if whole, is recorded as begun
+   * then. Its alerts are still detected at `now()`. Absent, the run reads and
+   * classifies in one pass and begins at `now()`.
    */
   readonly readAt?: Date;
   readonly fetchComments: (post: MarketingCommentMonitorPost) => Promise<ZernioCommentsResult>;
@@ -202,38 +203,65 @@ const readPostComments = async (
   return { fresh: marketingNewComments(page.comments, postFloor, answeredAt, readAt), truncated: page.truncated };
 };
 
-/** Bodies one collect hands over at most. Past it the run cannot be whole, and says so. */
+/** Distinct bodies one collect hands over at most. More, and the run covers the oldest and the next run the rest. */
 export const MARKETING_COMMENT_COLLECT_MAX_BODIES = 1_000;
 
 export type MarketingCommentsCollectResult =
   | { readonly ran: false; readonly reason: "switch_off" }
-  | { readonly ran: true; readonly bodies: string[]; readonly capped: boolean };
+  | { readonly ran: true; readonly bodies: string[]; readonly readAt: Date; readonly capped: boolean };
 
 /**
- * The first step of a two-step run: the distinct bodies a run beginning at
- * `readAt` would ask the model about, and nothing else -- no post, author, time
- * or link -- with nothing written. A page that cannot be read is left out; the
- * second step reads again and finds that out for itself.
+ * The first step of a two-step run: the distinct bodies a run would ask the
+ * model about, and nothing else -- no post, author, time or link -- with nothing
+ * written, and the `readAt` the run is to begin at. A page that cannot be read
+ * is left out; the second step reads again and finds that out for itself.
+ *
+ * Past the cap the run is cut, oldest first, at an instant: every comment
+ * written before it is handed over, none at or after it, and `readAt` is just
+ * before it. A whole run is then recorded as begun there and the next run's
+ * floor is below it, so a backlog is worked through run by run rather than
+ * read from the same start each hour. What cannot be cut -- more comments with
+ * no time, or written in one instant, than the cap -- stays unwhole run after
+ * run, which keeps the monitor unhealthy: the safe way to be stuck.
  */
 export async function collectMarketingCommentBodies(
   deps: MarketingCommentsReadDeps & Pick<MarketingCommentsMonitorDeps, "env" | "enabled">,
-  readAt: Date,
+  now: Date,
 ): Promise<MarketingCommentsCollectResult> {
   if (!deps.enabled(deps.env)) return { ran: false, reason: "switch_off" };
   const scope = await readMonitorScope(deps);
-  const bodies = new Set<string>();
-  let capped = false;
+  const fresh: ParsedZernioComment[] = [];
   for (const post of scope.posts) {
-    const read = await readPostComments(deps, post, scope.floor, scope.answers.get(post.id) ?? null, readAt).catch(
+    const read = await readPostComments(deps, post, scope.floor, scope.answers.get(post.id) ?? null, now).catch(
       () => null,
     );
-    for (const comment of read?.fresh ?? []) {
-      const body = comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS);
-      if (bodies.size < MARKETING_COMMENT_COLLECT_MAX_BODIES || bodies.has(body)) bodies.add(body);
-      else capped = true;
-    }
+    fresh.push(...(read?.fresh ?? []));
   }
-  return { ran: true, bodies: [...bodies], capped };
+  // Oldest first; a comment with no time is read every run, so it goes first.
+  const at = (comment: ParsedZernioComment) => comment.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  fresh.sort((left, right) => at(left) - at(right));
+  const bodies = new Set<string>();
+  for (let from = 0; from < fresh.length; ) {
+    // One instant at a time: a run reads all of an instant's comments or none.
+    let to = from;
+    const instant = new Set<string>();
+    while (to < fresh.length && at(fresh[to] as ParsedZernioComment) === at(fresh[from] as ParsedZernioComment)) {
+      instant.add((fresh[to] as ParsedZernioComment).text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS));
+      to += 1;
+    }
+    const added = [...instant].filter((body) => !bodies.has(body));
+    if (bodies.size + added.length > MARKETING_COMMENT_COLLECT_MAX_BODIES) {
+      const cutAt = at(fresh[from] as ParsedZernioComment);
+      if (bodies.size > 0 && Number.isFinite(cutAt)) {
+        return { ran: true, bodies: [...bodies], readAt: new Date(cutAt - 1), capped: true };
+      }
+      for (const body of added.slice(0, MARKETING_COMMENT_COLLECT_MAX_BODIES - bodies.size)) bodies.add(body);
+      return { ran: true, bodies: [...bodies], readAt: now, capped: true };
+    }
+    for (const body of added) bodies.add(body);
+    from = to;
+  }
+  return { ran: true, bodies: [...bodies], readAt: now, capped: false };
 }
 
 export async function runMarketingCommentsMonitor(
@@ -244,8 +272,11 @@ export async function runMarketingCommentsMonitor(
   if (classifier === null) return { ran: false, reason: "classifier_unavailable" };
 
   const { operations } = deps;
+  // An alert is detected when this run finds it. The run is recorded as begun
+  // when its comments were read -- in a two-step run that can be earlier, and
+  // for a backlog much earlier, which must not age the alerts it raises.
+  const startedAt = deps.now();
   const readAt = deps.readAt ?? null;
-  const startedAt = readAt ?? deps.now();
   let postsChecked = 0;
   let postsUnread = 0;
   let alertsRecorded = 0;
@@ -347,7 +378,7 @@ export async function runMarketingCommentsMonitor(
   let complete = postsUnread === 0;
   if (complete) {
     try {
-      await operations.recordRun(startedAt);
+      await operations.recordRun(readAt ?? startedAt);
     } catch {
       complete = false;
     }
