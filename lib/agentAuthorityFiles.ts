@@ -101,8 +101,8 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // host is a person's decision about content.
   "lib/marketingIntelReportCore.ts",
   // The marketing SEO code agent's allowlist, validation and publishing rules
-  // (marketing policy §9.2) and the tests that pin them: an agent changing
-  // them could widen what it may edit or where it may push.
+  // (docs/policy/marketing-automation.md §9.2) and the tests that pin them: an
+  // agent changing them could widen what it may edit or where it may push.
   "lib/marketingSeoAgentCore.ts",
   "tests/marketingSeoAgentCore.test.mjs",
   "tests/marketingSeoBranchPolicy.test.mjs",
