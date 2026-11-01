@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export function iosApiOrigin(value = "https://tomverse.app") {
-  assert.ok(["https://tomverse.app", "https://staging.tomverse.app"].includes(value), "iOS builds require the production or isolated staging API origin.");
+  assert.ok(value === "https://tomverse.app" || value === "https://staging.tomverse.app", "iOS builds require the production or isolated staging API origin.");
   return value;
 }
 
