@@ -3,17 +3,17 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import { AMUX_IDEA_OWNER_CLOSABLE_STATE } from "@/lib/amux/ideaOwnerCloseCore";
+import { amuxIdeaOwnerClosableState } from "@/lib/amux/ideaOwnerCloseCore";
 import { amuxIdeaProgress, type AmuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
 
-/** How many of the owner's newest ideas the Ideas tab lists. */
+/** How many of the owner's newest open ideas the Ideas tab lists. */
 export const AMUX_IDEA_PROGRESS_LIMIT = 20;
 
 export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   ideaId: string;
   /** A session idea has no per-idea execution approval. */
   submissionOrigin?: "owner" | "session";
-  /** Waiting for the owner after analysis; the owner may close it. */
+  /** Waiting for the owner (after analysis, or before execution approval); the owner may close it. */
   closable: boolean;
   requestId: string;
   submittedAt: string;
@@ -110,7 +110,9 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
         "submissionAuditLogId"
       FROM "AmuxIdeaSubmission"
-      WHERE "actorUserId" = ${actorUserId}
+      -- A closed or cancelled idea leaves the list, so the bound is spent on
+      -- ideas still in progress.
+      WHERE "actorUserId" = ${actorUserId} AND "cancelledAt" IS NULL
       ORDER BY "submittedAt" DESC, "id" ASC
       LIMIT ${AMUX_IDEA_PROGRESS_LIMIT}
     )
@@ -191,7 +193,10 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       ...progress,
       ideaId: idea.id,
       submissionOrigin: idea.submissionOrigin,
-      closable: idea.state === AMUX_IDEA_OWNER_CLOSABLE_STATE && !idea.cancelled,
+      // A submitted idea counts only while its execution approval is still
+      // open: once a preview is confirmed or a budget held, it is analysis.
+      closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
+        (idea.state !== "submitted" || progress.waitingFor === "execution_approval"),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,

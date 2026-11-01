@@ -12,6 +12,7 @@ type Result = "closed" | "already_closed" | "not_closable" | "not_found" | "outc
 type Outcome = { ideaId: string; result: Result };
 type Phase = "idle" | "sending" | "done" | "refused" | "unknown";
 
+const IDEAS_HREF = "/admin/amux-backlog?tab=ideas";
 const RESULTS = new Set<string>(["closed", "already_closed", "not_closable", "not_found",
   "outcome_unknown"]);
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300";
@@ -23,8 +24,9 @@ const QUIET = `inline-flex min-h-11 items-center rounded-lg border border-zinc-6
  * detail and opens its reason field on a first click (the second click
  * confirms); `selection` is the Ideas list bar, whose reason field opens once
  * something is ticked. One request answers per idea; anything closed or
- * unknown refreshes the server list, which is the read-back. The request is
- * never resent on its own.
+ * unknown refreshes the server list, which is the read-back and no longer
+ * shows a closed idea (a closed idea's detail returns to the list). The
+ * request is never resent on its own.
  */
 export function AmuxIdeaClosePanel({ ideaIds, mode, labelFor, onSelectAll, onClear, onSent }: {
   ideaIds: string[];
@@ -41,6 +43,8 @@ export function AmuxIdeaClosePanel({ ideaIds, mode, labelFor, onSelectAll, onCle
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
+  // Labels as they were when sent: a closed idea leaves the list on refresh.
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
   const inFlight = useRef(false);
   const single = mode === "single";
@@ -54,6 +58,7 @@ export function AmuxIdeaClosePanel({ ideaIds, mode, labelFor, onSelectAll, onCle
     // The detail's second click is the confirmation; a batch asks once more.
     if (!single && !window.confirm(m.confirm(ideaIds.length))) return;
     inFlight.current = true;
+    setLabels(Object.fromEntries(ideaIds.map((id) => [id, labelFor?.(id) ?? id.slice(0, 8)])));
     setPhase("sending");
     setError(null);
     setNeedsReauthentication(false);
@@ -74,7 +79,11 @@ export function AmuxIdeaClosePanel({ ideaIds, mode, labelFor, onSelectAll, onCle
       if (listed) {
         setOutcomes(listed);
         setPhase("done");
-        if (listed.some((entry) => entry.result !== "not_found")) {
+        const gone = listed.some((entry) =>
+          entry.result === "closed" || entry.result === "already_closed");
+        // A closed idea leaves the list, and its detail with it: go back to the list.
+        if (single && gone) router.replace(IDEAS_HREF);
+        else if (listed.some((entry) => entry.result !== "not_found")) {
           setReason("");
           router.refresh();
         }
@@ -130,7 +139,7 @@ export function AmuxIdeaClosePanel({ ideaIds, mode, labelFor, onSelectAll, onCle
           <li key={entry.ideaId} data-result={entry.result}
             className={entry.result === "closed" || entry.result === "already_closed"
               ? "text-zinc-100" : "text-amber-200"}>
-            {labelFor ? `${labelFor(entry.ideaId)} · ` : ""}{m.results[entry.result]}
+            {labelFor ? `${labels[entry.ideaId] ?? entry.ideaId.slice(0, 8)} · ` : ""}{m.results[entry.result]}
           </li>
         ))}
       </ul>
@@ -138,7 +147,7 @@ export function AmuxIdeaClosePanel({ ideaIds, mode, labelFor, onSelectAll, onCle
     {phase === "refused" ? <p role="alert" className="text-amber-200">{m.refused}</p> : null}
     {phase === "unknown" ? <p role="alert" className="text-amber-200">{m.unknown}</p> : null}
     {needsReauthentication ? <a className="underline text-blue-200"
-      href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>
+      href={adminRecentAuthenticationHref(IDEAS_HREF)}>
       {m.reauthenticate}</a> : null}
   </section>;
 }
