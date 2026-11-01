@@ -39,11 +39,9 @@
 //                                      validate phase only: cost ledger and provider
 //   MARKETING_SEO_CHECK_UID, MARKETING_SEO_CHECK_GID
 //                                      validate phase, POSIX: the unprivileged user the checks run as (the parent
-//                                      must be able to switch to it, i.e. root in a disposable container). Without
-//                                      them the phase refuses to run unless
-//   MARKETING_SEO_CHECKS_SAME_USER_ACK=true
-//                                      says the whole runner is disposable, the LLM key and the attestation key it
-//                                      holds included: proposed code run by the same user can read them
+//                                      must be able to switch to it, i.e. root in a disposable container). A result
+//                                      the publish phase accepts comes only from checks run as this user; without
+//                                      it the phase refuses, except for --dry-run
 //   MARKETING_SEO_ATTESTATION_KEY      both phases, 32+ characters: the validate phase signs its result with it and
 //                                      the publish phase refuses anything that does not verify
 //   MARKETING_SEO_GITHUB_APP_TOKEN     publish phase only: installation token of the repository-only GitHub App
@@ -51,7 +49,9 @@
 //   MARKETING_SEO_AUTO_PR              repository variable; "true" only after graduation
 //
 // `--proposal-file` replaces the LLM call with a saved answer, for trying the
-// validation without spending anything.
+// validation without spending anything. `--dry-run` (validate only) runs the whole
+// validation as this user, holds no attestation key, and writes nothing to --out: it
+// shows what the validation says and produces nothing that can be published.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -174,13 +174,16 @@ const phase = option("--phase");
 
 if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate") {
   const topic = option("--topic");
+  const dryRun = process.argv.includes("--dry-run");
   const outDir = option("--out");
-  if (!topic || !outDir) fail(new Error("--topic and --out are required"));
+  if (!topic || (!outDir && !dryRun)) fail(new Error("--topic and --out are required (--out is not used by --dry-run)"));
   const proposalFile = option("--proposal-file");
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"]).trim();
   const baseCommit = git(root, ["rev-parse", "--verify", "--end-of-options", `${option("--base") ?? "origin/develop"}^{commit}`]).trim();
-  mkdirSync(outDir, { recursive: true });
-  if (readdirSync(outDir).length > 0) fail(new Error("--out must be an empty directory"));
+  if (outDir) {
+    mkdirSync(outDir, { recursive: true });
+    if (readdirSync(outDir).length > 0) fail(new Error("--out must be an empty directory"));
+  }
   const scratch = mkdtempSync(join(tmpdir(), "seo-agent-"));
   // Removed on every exit path, a refusal or a throw included.
   process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
@@ -228,7 +231,8 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
         child.stdout.on("data", (chunk) => (out += chunk));
         const killer = setTimeout(() => child.kill("SIGKILL"), LLM_STAGE_TIMEOUT_MS);
         child.on("error", () => resolveOutcome(unreadable));
-        child.on("exit", () => {
+        // 'close', not 'exit': stdout is complete only when its stream has ended.
+        child.on("close", () => {
           clearTimeout(killer);
           try {
             resolveOutcome(JSON.parse(out.trim().split("\n").pop()));
@@ -266,6 +270,11 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
             } catch {
               // Nothing of the group is left.
             }
+            // A process that started a new session left the group. As the check user, kill(-1) ends every
+            // process that user owns -- the user is the operator's and is used for nothing else.
+            if (isolation.mode === "separate_user") {
+              spawnSync("kill", ["-9", "-1"], { uid: isolation.uid, gid: isolation.gid, stdio: "ignore" });
+            }
           };
           const timer = setTimeout(() => {
             timedOut = true;
@@ -277,7 +286,8 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
           });
           child.on("exit", (code) => {
             clearTimeout(timer);
-            killTree();
+            // Only the user-wide kill after a normal exit: a group id could have been reused by then.
+            if (isolation.mode === "separate_user") killTree();
             resolveRun(timedOut ? 124 : (code ?? 1));
           });
         });
@@ -318,7 +328,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
     },
     exportCommit: async (dir, base, commitSha) => {
       wgit(["branch", BUNDLE_REF, commitSha]);
-      const bundle = join(resolve(outDir), "change.bundle");
+      const bundle = join(resolve(outDir ?? scratch), "change.bundle");
       wgit(["bundle", "create", bundle, BUNDLE_REF, `^${base}`]);
       return { bundleSha256: createHash("sha256").update(readFileSync(bundle)).digest("hex") };
     },
@@ -336,8 +346,8 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   };
 
   try {
-    const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env, platform: process.platform, ownUid: process.getuid?.() }, ports);
-    if (result.status === "validated") {
+    const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env, platform: process.platform, ownUid: process.getuid?.(), dryRun }, ports);
+    if (result.status === "validated" && outDir) {
       writeFileSync(join(resolve(outDir), "record.json"), `${JSON.stringify(result.record, null, 2)}\n`);
       writeFileSync(
         join(resolve(outDir), "attestation.json"),
@@ -347,7 +357,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
     // The signature stays in the artifact; the log carries the outcome and the tree.
     const loggable = { ...result };
     delete loggable.attestation;
-    printAndExit("marketing_seo_agent_validate", loggable, ["validated", "off"]);
+    printAndExit("marketing_seo_agent_validate", loggable, ["validated", "validated_dry_run", "off"]);
   } catch (error) {
     fail(error);
   }

@@ -373,8 +373,8 @@ const COMMIT = "e".repeat(40);
 const TREE = "d".repeat(40);
 const KEY = "k".repeat(40);
 const ON = { MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_SEO_ATTESTATION_KEY: KEY };
-// The checks may share the runner's user only by explicit acknowledgement.
-const VALIDATE_ENV = { ...ON, MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" };
+// A publishable result comes only from checks run as another user.
+const VALIDATE_ENV = { ...ON, MARKETING_SEO_CHECK_UID: "2000", MARKETING_SEO_CHECK_GID: "2000" };
 const BUNDLE = "b".repeat(64);
 
 const recorder = (table, overrides) => {
@@ -429,16 +429,13 @@ test("validate refuses to start with any credential that could push", async () =
     assert.ok(SEO_AGENT_PUSH_CREDENTIAL_ENVS.includes("GITHUB_TOKEN") && SEO_AGENT_PUSH_CREDENTIAL_ENVS.includes("GH_TOKEN"));
 });
 
-test("the checks run as another user, or the runner is acknowledged as disposable, or the phase will not run", () => {
+test("the checks run as another user, or the phase will not run", () => {
     const isolation = (env, platform = "linux") => seoAgentCheckIsolation(env, platform);
     assert.deepEqual(isolation({ MARKETING_SEO_CHECK_UID: "65534", MARKETING_SEO_CHECK_GID: "65534" }), { mode: "separate_user", uid: 65534, gid: 65534 });
-    assert.deepEqual(isolation({ MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" }), { mode: "same_user_acknowledged" });
+    // There is no acknowledgement that stands in for a user.
+    assert.deepEqual(isolation({ MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" }), { mode: "refused", reason: "check_user_required" });
     // The user wins over the acknowledgement.
-    assert.equal(isolation({ MARKETING_SEO_CHECK_UID: "1000", MARKETING_SEO_CHECK_GID: "1000", MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" }).mode, "separate_user");
     assert.deepEqual(isolation({}), { mode: "refused", reason: "check_user_required" });
-    for (const value of ["false", "1", "TRUE", ""]) {
-        assert.deepEqual(isolation({ MARKETING_SEO_CHECKS_SAME_USER_ACK: value }), { mode: "refused", reason: "check_user_required" }, value);
-    }
     for (const [uid, gid] of [["0", "1000"], ["1000", "0"], ["1000", undefined], [undefined, "1000"], ["-1", "1"], ["abc", "1"], ["1.5", "1"], ["", ""], ["4294967295", "1"], ["9999999999", "1"], ["1", "4294967296"]]) {
         assert.deepEqual(isolation({ MARKETING_SEO_CHECK_UID: uid, MARKETING_SEO_CHECK_GID: gid }), { mode: "refused", reason: "check_user_invalid" }, `${uid}/${gid}`);
     }
@@ -449,7 +446,7 @@ test("the checks run as another user, or the runner is acknowledged as disposabl
     assert.equal(isolation({ MARKETING_SEO_CHECK_UID: "1000", MARKETING_SEO_CHECK_GID: "1000" }, "win32").mode, "refused");
 });
 
-test("validate will not clone, spend or check without an isolated or acknowledged runner", async () => {
+test("validate will not clone, spend or check without a check user", async () => {
     const { ports, calls } = validatePorts();
     assert.deepEqual(await validate(ports, ON), { status: "checks_not_isolated", reason: "check_user_required" });
     assert.deepEqual(calls, []);
@@ -465,8 +462,30 @@ test("the checks are given the isolation the run decided on", async () => {
     assert.deepEqual(seen, { mode: "separate_user", uid: 2000, gid: 2001 });
 });
 
+test("a dry run shows the validation and produces nothing that can be published", async () => {
+    const { ports, calls } = validatePorts();
+    let seen = null;
+    ports.runChecks = async (_dir, _commands, isolation) => { calls.push("runChecks"); seen = isolation; return { ok: true }; };
+    const dry = { MARKETING_SEO_AGENT_ENABLED: "true" };
+    const result = await runSeoAgentValidate({ topic: "Improve hreflang", baseCommit: BASE, env: dry, platform: "linux", dryRun: true }, ports);
+    assert.equal(result.status, "validated_dry_run");
+    assert.deepEqual(seen, { mode: "same_user_dry_run" });
+    assert.equal(result.record.treeHash, TREE);
+    assert.ok(!("attestation" in result) && !("bundleSha256" in result));
+    assert.ok(!calls.includes("exportCommit"), "nothing is exported");
+    // It holds no signing key: one in its environment is a mistake, not a convenience.
+    const withKey = validatePorts();
+    const refused = await runSeoAgentValidate({ topic: "x", baseCommit: BASE, env: { ...dry, MARKETING_SEO_ATTESTATION_KEY: KEY }, platform: "linux", dryRun: true }, withKey.ports);
+    assert.deepEqual(refused, { status: "wrong_environment", problems: ["MARKETING_SEO_ATTESTATION_KEY"] });
+    assert.deepEqual(withKey.calls, []);
+    // A dry run still honours the switch and refuses to hold a push credential.
+    assert.equal((await runSeoAgentValidate({ topic: "x", baseCommit: BASE, env: {}, platform: "linux", dryRun: true }, validatePorts().ports)).status, "off");
+    const tokened = await runSeoAgentValidate({ topic: "x", baseCommit: BASE, env: { ...dry, GH_TOKEN: "t" }, platform: "linux", dryRun: true }, validatePorts().ports);
+    assert.equal(tokened.status, "wrong_environment");
+});
+
 test("validate will not spend without an attestation key", async () => {
-    for (const env of [{ MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_SEO_CHECKS_SAME_USER_ACK: "true" }, { ...VALIDATE_ENV, MARKETING_SEO_ATTESTATION_KEY: "short" }]) {
+    for (const env of [{ MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_SEO_CHECK_UID: "2000", MARKETING_SEO_CHECK_GID: "2000" }, { ...VALIDATE_ENV, MARKETING_SEO_ATTESTATION_KEY: "short" }]) {
         const { ports, calls } = validatePorts();
         assert.deepEqual(await validate(ports, env), { status: "no_attestation_key" });
         assert.deepEqual(calls, []);
@@ -806,6 +825,8 @@ test("the check user can write only the tools' outputs, and every check has a de
     assert.match(source, /setTimeout\(\(\) => \{\s*timedOut = true;\s*killTree\(\);\s*\}, CHECK_TIMEOUT_MS\)/);
     // The whole process group goes at the deadline and when the check ends, not only the direct child.
     assert.match(source, /process\.kill\(-child\.pid, "SIGKILL"\)/);
+    // A process that left the group by starting a new session is ended with the user's own kill(-1).
+    assert.match(source, /spawnSync\("kill", \["-9", "-1"\], \{ uid: isolation\.uid, gid: isolation\.gid/);
     assert.doesNotMatch(source, /spawnSync\(command\.argv/);
     assert.match(source, /signal: AbortSignal\.timeout\(GITHUB_TIMEOUT_MS\)/);
     assert.match(source, /"--end-of-options"/);

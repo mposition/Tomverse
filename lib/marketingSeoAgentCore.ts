@@ -82,21 +82,19 @@ export const SEO_AGENT_ATTESTATION_KEY_ENV = "MARKETING_SEO_ATTESTATION_KEY";
  * unprivileged user, so they cannot read the parent's `/proc/<pid>/environ`
  * (the LLM key and the attestation key) or its files. Both ids are the
  * operator's; the parent must be allowed to switch to them (root, in a
- * disposable container).
+ * disposable container). It is the only isolation a publishable result can
+ * come from: a run without it is a dry run (`--dry-run`) and writes nothing
+ * the publish phase would accept.
  */
 export const SEO_AGENT_CHECK_UID_ENV = "MARKETING_SEO_CHECK_UID";
 export const SEO_AGENT_CHECK_GID_ENV = "MARKETING_SEO_CHECK_GID";
-/**
- * "true" says the whole validate phase already runs somewhere disposable, the
- * LLM key and the attestation key it holds included (proposed code run by the
- * same user can read them), so the checks may share its user. An explicit
- * acknowledgement, never a default.
- */
-export const SEO_AGENT_SAME_USER_ACK_ENV = "MARKETING_SEO_CHECKS_SAME_USER_ACK";
-
 export type SeoCheckIsolation =
   | { readonly mode: "separate_user"; readonly uid: number; readonly gid: number }
-  | { readonly mode: "same_user_acknowledged" }
+  /**
+   * A dry run, to see what the validation says. It produces no bundle and no attestation, so nothing
+   * it does can be published; the checks share this process's user, and it holds no signing key.
+   */
+  | { readonly mode: "same_user_dry_run" }
   | { readonly mode: "refused"; readonly reason: "check_user_invalid" | "check_user_required" };
 
 /** How the checks will be isolated from the validate parent, or why they will not run. */
@@ -118,7 +116,6 @@ export function seoAgentCheckIsolation(
     }
     return { mode: "separate_user", uid: Number(uid), gid: Number(gid) };
   }
-  if (env[SEO_AGENT_SAME_USER_ACK_ENV] === "true") return { mode: "same_user_acknowledged" };
   return { mode: "refused", reason: "check_user_required" };
 }
 
@@ -650,7 +647,9 @@ export type SeoValidateResult =
   | { readonly status: "tree_changed"; readonly stage: "during_checks" | "at_commit" }
   | { readonly status: "no_attestation_key" }
   | { readonly status: "checks_not_isolated"; readonly reason: "check_user_invalid" | "check_user_required" }
-  | { readonly status: "validated"; readonly record: SeoAgentRecord; readonly bundleSha256: string; readonly attestation: string };
+  | { readonly status: "validated"; readonly record: SeoAgentRecord; readonly bundleSha256: string; readonly attestation: string }
+  /** A dry run: the same validation, nothing exported, nothing signed, nothing publishable. */
+  | { readonly status: "validated_dry_run"; readonly record: SeoAgentRecord };
 
 export function seoAgentCommitMessage(summary: string, topic: string): string {
   const subject = `seo(marketing-agent): ${summary.replace(/\s+/g, " ").trim()}`.slice(0, 100);
@@ -682,6 +681,8 @@ export async function runSeoAgentValidate(
     readonly platform: string;
     /** `process.getuid()` where it exists. */
     readonly ownUid?: number;
+    /** See `SeoCheckIsolation`'s `same_user_dry_run`. */
+    readonly dryRun?: boolean;
   },
   ports: SeoValidatePorts,
 ): Promise<SeoValidateResult> {
@@ -691,11 +692,16 @@ export async function runSeoAgentValidate(
   if (wrong.length > 0) return { status: "wrong_environment", problems: wrong };
   if (seoAgentTopicSlug(input.topic) === null) return { status: "invalid_topic" };
   // The checks run the proposed code: decided before anything is cloned or spent.
-  const isolation = seoAgentCheckIsolation(input.env, input.platform, input.ownUid);
+  const dryRun = input.dryRun === true;
+  const isolation: SeoCheckIsolation = dryRun
+    ? { mode: "same_user_dry_run" }
+    : seoAgentCheckIsolation(input.env, input.platform, input.ownUid);
   if (isolation.mode === "refused") return { status: "checks_not_isolated", reason: isolation.reason };
   // Without the key the result could not be told from a forgery, so nothing is spent.
+  // A dry run signs nothing and so holds no key.
   const attestationKey = input.env[SEO_AGENT_ATTESTATION_KEY_ENV];
-  if (typeof attestationKey !== "string" || attestationKey.length < 32) return { status: "no_attestation_key" };
+  if (!dryRun && (typeof attestationKey !== "string" || attestationKey.length < 32)) return { status: "no_attestation_key" };
+  if (dryRun && typeof attestationKey === "string" && attestationKey.length > 0) return { status: "wrong_environment", problems: [SEO_AGENT_ATTESTATION_KEY_ENV] };
 
   const dir = await ports.prepareWorkspace(input.baseCommit);
   try {
@@ -735,7 +741,6 @@ export async function runSeoAgentValidate(
     const committed = validateSeoChanges(seoGitChanges(committedDiff.raw, committedDiff.numstat));
     if (!committed.ok) return { status: "validation_failed", problems: committed.problems };
 
-    const { bundleSha256 } = await ports.exportCommit(dir, input.baseCommit, commitSha);
     const record: SeoAgentRecord = {
       topic: String(input.topic).slice(0, 300),
       summary: applied.summary,
@@ -745,7 +750,9 @@ export async function runSeoAgentValidate(
       paths: committed.paths as SeoAgentRecord["paths"],
       changedLines: committed.changedLines,
     };
-    return { status: "validated", record, bundleSha256, attestation: seoAgentAttest(attestationKey, record, bundleSha256) };
+    if (dryRun) return { status: "validated_dry_run", record };
+    const { bundleSha256 } = await ports.exportCommit(dir, input.baseCommit, commitSha);
+    return { status: "validated", record, bundleSha256, attestation: seoAgentAttest(attestationKey as string, record, bundleSha256) };
   } finally {
     await ports.cleanup(dir).catch(() => undefined);
   }
