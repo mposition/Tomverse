@@ -169,7 +169,6 @@ test("a touch stored after its sign-up repairs that sign-up only", async () => {
   const touchReceivedAt = new Date();
   const repaired = await repairLateMarketingTouchSnapshots({
     clientId,
-    userId: null,
     touch: {
       utmSource: "linkedin",
       utmMedium: "social",
@@ -335,5 +334,38 @@ test("a touch that takes the lock before an earlier-arrived sign-up still attrib
   assert.equal(
     (row?.properties as Record<string, unknown>).touch_utm_campaign,
     "took-the-lock-first"
+  );
+});
+
+test("a sign-up stored first is finished by the touch that follows, whatever the session time zone", async () => {
+  const zone = await prisma.$queryRaw<Array<{ zone: string }>>`SELECT current_setting('TimeZone') AS zone`;
+  // Locally this runs in Australia/Brisbane; the stored times must not depend on it.
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  await recordOrderedAnalyticsEvent(
+    orderedInput({ eventName: "signup_completed", clientId, userId: user.id, observedAt: signedUpAt })
+  );
+  await recordOrderedAnalyticsEvent(
+    orderedInput({
+      eventName: "marketing_touch",
+      clientId,
+      userId: null,
+      campaign: "after",
+      observedAt: new Date(signedUpAt.getTime() - 1_000),
+    })
+  );
+  const row = await prisma.productAnalyticsEvent.findFirst({
+    where: { eventName: "signup_completed", userId: user.id },
+    select: { properties: true, createdAt: true },
+  });
+  assert.equal(
+    (row?.properties as Record<string, unknown>).touch_utm_campaign,
+    "after",
+    `session TimeZone ${zone[0]?.zone}`
+  );
+  assert.ok(
+    Math.abs((row?.createdAt.getTime() ?? 0) - Date.now()) < 60_000,
+    "createdAt is the real time, not a zone-shifted wall clock"
   );
 });

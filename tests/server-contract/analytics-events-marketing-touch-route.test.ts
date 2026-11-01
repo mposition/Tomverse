@@ -174,6 +174,11 @@ test("a marketing touch is recorded at the server's receipt, never the client's 
     "the client said an hour ago; the server must record now"
   );
   assert.equal(created[0].eventName, "marketing_touch");
+  assert.equal(
+    (created[0].createdAt as Date).getTime(),
+    occurredAt,
+    "createdAt is written from the same clock, never left to a zone-dependent default"
+  );
   assert.equal(created[0].utmSource, "linkedin");
   assert.deepEqual(
     {
@@ -338,7 +343,8 @@ test("a touch stored just after its conversion finishes that conversion's snapsh
   const where = repairQueries[0].where as Row;
   const window = where.createdAt as { gte: Date; lte: Date };
   assert.equal(window.lte.getTime() - window.gte.getTime(), 60_000, "thirty seconds either side");
-  assert.equal((where.OR as Row[]).length, 1, "a guest touch matches its browser only");
+  assert.equal(where.OR, undefined, "a repair matches the browser only, never the account");
+  assert.equal(typeof where.anonymousIdHash, "string");
 
   assert.equal(updates.length, 1, "a signed-in first answer is not a lead and is left alone");
   assert.deepEqual(updates[0].where, { id: "conversion-1" });

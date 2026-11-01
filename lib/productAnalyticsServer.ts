@@ -255,13 +255,17 @@ export async function findLatestMarketingTouch(input: {
 
 /**
  * Finishes the snapshot of a conversion a just-stored touch belongs to
- * (`lateMarketingTouchRepair`): the same browser's or account's sign-up or
- * guest first answer received within thirty seconds of the touch. Returns how
- * many it repaired.
+ * (`lateMarketingTouchRepair`): the same browser's sign-up or guest first
+ * answer received within thirty seconds of the touch. Returns how many it
+ * repaired.
+ *
+ * The same browser only, never "the same account from another browser": the
+ * repair's guard compares the time the browser observed the touch with the
+ * time it reported the conversion, and two browsers' clocks cannot be put in
+ * one order. (The ordinary lookup at the conversion still matches the account.)
  */
 export async function repairLateMarketingTouchSnapshots(input: {
   clientId: string;
-  userId: string | null;
   touch: MarketingTouchRow;
   touchObservedAt: Date;
   db?: AnalyticsEventDb;
@@ -276,10 +280,7 @@ export async function repairLateMarketingTouchSnapshots(input: {
         gte: new Date(receivedAt - MARKETING_TOUCH_LATE_ARRIVAL_MS),
         lte: new Date(receivedAt + MARKETING_TOUCH_LATE_ARRIVAL_MS),
       },
-      OR: [
-        { anonymousIdHash },
-        ...(input.userId ? [{ userId: input.userId }] : []),
-      ],
+      anonymousIdHash,
     },
     select: {
       id: true,
@@ -385,15 +386,18 @@ export async function recordOrderedAnalyticsEvent(
     };
     // ON CONFLICT DO NOTHING rather than catching a unique violation: an error
     // would abort the transaction the repair below still needs.
+    // createdAt is the same clock, set here rather than left to a column
+    // default: the repair compares a conversion's createdAt with a touch's
+    // time, and two clocks -- or a default evaluated in the session's zone --
+    // would put a just-stored conversion outside its thirty seconds.
     const { count } = await db.productAnalyticsEvent.createMany({
-      data: [analyticsEventData(event)],
+      data: [{ ...analyticsEventData(event), createdAt: receivedAt }],
       skipDuplicates: true,
     });
     if (count !== 1) return false;
     if (isTouch) {
       await repairLateMarketingTouchSnapshots({
         clientId,
-        userId,
         touch: {
           utmSource: input.attribution.utm_source,
           utmMedium: input.attribution.utm_medium,
