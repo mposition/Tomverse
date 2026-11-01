@@ -80,7 +80,7 @@ test("a refused first page names the plan writer's own failed check, never answe
   assert.deepEqual(detailOf(firstPage()), { detail: "draft_refused" },
     "a page the inspection accepts was refused later, when its draft was stored");
   assert.deepEqual(detailOf(firstPage({ units: [...units, task()] })), { detail: "draft_refused" });
-  assert.deepEqual(detailOf("```json\n{}\n```"),
+  assert.deepEqual(detailOf("```json\n{not json}\n```"),
     { detail: "chunk_schema_rejected", at: { rule: "json_fenced" } });
   assert.deepEqual(detailOf("not json"), { detail: "chunk_schema_rejected", at: { rule: "json_unparsable" } });
   assert.deepEqual(detailOf(firstPage({ previewId: "other" })),
@@ -93,6 +93,20 @@ test("a refused first page names the plan writer's own failed check, never answe
   for (const raw of [firstPage(), "not json", firstPage({ units: [] })]) {
     assert.ok(AMUX_SESSION_REVIEW_DETAILS.includes(detailOf(raw).detail));
   }
+});
+
+test("a plan wrapped in a sentence or a code fence is read, and still fully checked", () => {
+  for (const raw of [`I read the files. Here is the plan:\n${firstPage()}`,
+    "```json\n" + firstPage() + "\n```", `${firstPage()}\n\nI assumed the badge lives on the list page.`,
+    "Plan below.\n```\n" + firstPage() + "\n```\nDone."]) {
+    assert.deepEqual(detailOf(raw), { detail: "draft_refused" }, raw.slice(0, 30));
+  }
+  assert.deepEqual(detailOf(`Here:\n${firstPage({ previewId: "other" })}`),
+    { detail: "chunk_schema_rejected", at: { rule: "header_mismatch", field: "previewId" } });
+  assert.deepEqual(detailOf("Here is { half a plan"),
+    { detail: "chunk_schema_rejected", at: { rule: "json_unparsable" } });
+  assert.deepEqual(classifyAmuxSessionReviewAnswer(`One question first:\n${answer({})}`),
+    { reason: "owner_question", question: "Should the badge live in the idea list or the detail page?" });
 });
 
 test("a schema refusal names the rule, the schema field and the unit position", () => {
