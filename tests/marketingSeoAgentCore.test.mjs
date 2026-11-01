@@ -10,7 +10,10 @@ import {
     applySeoProposal,
     parseGitNumstat,
     parseGitRawDiff,
+    SEO_AGENT_PUSH_CREDENTIAL_ENVS,
     runSeoAgentPublish,
+    seoAgentAttest,
+    seoAgentAttestationMatches,
     runSeoAgentValidate,
     seoAgentPhaseEnvProblems,
     seoAgentRecordSchema,
@@ -74,7 +77,10 @@ test("each stage holds its own secrets and not the other's", () => {
     for (const name of Object.keys(env).filter((key) => key !== "PATH")) {
         assert.equal(checks[name], undefined, `checks (which run proposed code) must not hold ${name}`);
     }
-    const publish = seoAgentStageEnvironment(env, "publish");
+    const publish = seoAgentStageEnvironment({ ...env, MARKETING_SEO_ATTESTATION_KEY: "key" }, "publish");
+    assert.equal(publish.MARKETING_SEO_ATTESTATION_KEY, "key");
+    assert.equal(seoAgentStageEnvironment({ MARKETING_SEO_ATTESTATION_KEY: "key" }, "llm").MARKETING_SEO_ATTESTATION_KEY, undefined);
+    assert.equal(seoAgentStageEnvironment({ MARKETING_SEO_ATTESTATION_KEY: "key" }, "checks").MARKETING_SEO_ATTESTATION_KEY, undefined);
     assert.equal(publish.MARKETING_SEO_GITHUB_APP_TOKEN, "gh-token");
     for (const name of ["MARKETING_LLM_API_KEY", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_APP_URL", "DATABASE_URL", "RAILWAY_TOKEN"]) {
         assert.equal(publish[name], undefined, `publish stage must not hold ${name}`);
@@ -363,7 +369,9 @@ const GOOD_NUMSTAT = "3\t1\tlib/seo.ts\0";
 const BASE = "c".repeat(40);
 const COMMIT = "e".repeat(40);
 const TREE = "d".repeat(40);
-const ON = { MARKETING_SEO_AGENT_ENABLED: "true" };
+const KEY = "k".repeat(40);
+const ON = { MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_SEO_ATTESTATION_KEY: KEY };
+const BUNDLE = "b".repeat(64);
 
 const recorder = (table, overrides) => {
     const calls = [];
@@ -390,7 +398,7 @@ const validatePorts = (overrides = {}) =>
             baseTests: ["tests/seoHreflang.test.mjs"],
             runChecks: { ok: true },
             commit: { commitSha: COMMIT, treeHash: TREE },
-            exportCommit: undefined,
+            exportCommit: { bundleSha256: BUNDLE },
             cleanup: undefined,
         },
         overrides,
@@ -406,11 +414,22 @@ test("validate off: nothing is prepared, nothing is called", async () => {
     }
 });
 
-test("validate refuses to start with the GitHub token in its environment", async () => {
-    const { ports, calls } = validatePorts();
-    const result = await validate(ports, { ...ON, MARKETING_SEO_GITHUB_APP_TOKEN: "t" });
-    assert.deepEqual(result, { status: "wrong_environment", problems: ["MARKETING_SEO_GITHUB_APP_TOKEN"] });
-    assert.deepEqual(calls, []);
+test("validate refuses to start with any credential that could push", async () => {
+    for (const name of SEO_AGENT_PUSH_CREDENTIAL_ENVS) {
+        const { ports, calls } = validatePorts();
+        const result = await validate(ports, { ...ON, [name]: "t" });
+        assert.deepEqual(result, { status: "wrong_environment", problems: [name] }, name);
+        assert.deepEqual(calls, []);
+    }
+    assert.ok(SEO_AGENT_PUSH_CREDENTIAL_ENVS.includes("GITHUB_TOKEN") && SEO_AGENT_PUSH_CREDENTIAL_ENVS.includes("GH_TOKEN"));
+});
+
+test("validate will not spend without an attestation key", async () => {
+    for (const env of [{ MARKETING_SEO_AGENT_ENABLED: "true" }, { ...ON, MARKETING_SEO_ATTESTATION_KEY: "short" }]) {
+        const { ports, calls } = validatePorts();
+        assert.deepEqual(await validate(ports, env), { status: "no_attestation_key" });
+        assert.deepEqual(calls, []);
+    }
 });
 
 test("a topic that is not a branch segment is refused before any clone or call", async () => {
@@ -423,6 +442,8 @@ test("a validated change becomes a record, in the policy's order, with one paid 
     const { ports, calls } = validatePorts();
     const result = await validate(ports);
     assert.equal(result.status, "validated");
+    assert.equal(result.bundleSha256, BUNDLE);
+    assert.equal(result.attestation, seoAgentAttest(KEY, result.record, BUNDLE));
     assert.deepEqual(result.record, {
         topic: "Improve hreflang", summary: "Tidy constants", baseCommit: BASE, commitSha: COMMIT, treeHash: TREE,
         paths: ["lib/seo.ts"], changedLines: 4,
@@ -531,10 +552,13 @@ const RECORD = {
     paths: ["lib/seo.ts"], changedLines: 4,
 };
 const PUBLISH_ENV = { ...ON, MARKETING_SEO_GITHUB_APP_TOKEN: "t", MARKETING_SEO_GITHUB_REPOSITORY: "o/r" };
+const ATTESTATION = seoAgentAttest(KEY, RECORD, BUNDLE);
 
 const publishPorts = (overrides = {}) =>
     recorder(
         {
+            bundleSha256: BUNDLE,
+            baseOnDevelop: true,
             importCommit: undefined,
             commitFacts: { tree: TREE, parent: BASE, parentCount: 1 },
             diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT },
@@ -546,7 +570,8 @@ const publishPorts = (overrides = {}) =>
         },
         overrides,
     );
-const publish = (ports, record = RECORD, env = PUBLISH_ENV) => runSeoAgentPublish({ record, env }, ports);
+const publish = (ports, record = RECORD, env = PUBLISH_ENV, attestation = ATTESTATION) =>
+    runSeoAgentPublish({ record, attestation, env }, ports);
 
 test("publish off, or with an LLM variable in its environment, touches nothing", async () => {
     for (const env of [{}, { ...PUBLISH_ENV, MARKETING_AUTOMATION_KILL_SWITCH: "1" }]) {
@@ -564,9 +589,42 @@ test("publish off, or with an LLM variable in its environment, touches nothing",
 
 test("the phase checks name the other phase's secrets", () => {
     assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_SEO_GITHUB_APP_TOKEN: "t" }, "validate"), ["MARKETING_SEO_GITHUB_APP_TOKEN"]);
+    assert.deepEqual(seoAgentPhaseEnvProblems({ GITHUB_TOKEN: "t", GH_TOKEN: "t" }, "validate"), ["GITHUB_TOKEN", "GH_TOKEN"]);
     assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_LLM_API_KEY: "k" }, "validate"), []);
     assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_SEO_GITHUB_APP_TOKEN: "t" }, "publish"), []);
     assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_LLM_API_KEY: "" }, "publish"), []);
+});
+
+test("a record or bundle that was not signed by the validate phase is refused before anything is imported", async () => {
+    const tamperedRecord = { ...RECORD, commitSha: "1".repeat(40), treeHash: "2".repeat(40) };
+    const cases = [
+        ["record replaced", tamperedRecord, ATTESTATION, BUNDLE],
+        ["bundle replaced", RECORD, ATTESTATION, "9".repeat(64)],
+        ["no attestation", RECORD, null, BUNDLE],
+        ["attestation of another key", RECORD, seoAgentAttest("z".repeat(40), RECORD, BUNDLE), BUNDLE],
+        ["attestation not hex", RECORD, "nothex", BUNDLE],
+    ];
+    for (const [label, record, attestation, bundle] of cases) {
+        const { ports, calls } = publishPorts({ bundleSha256: bundle });
+        assert.deepEqual(await publish(ports, record, PUBLISH_ENV, attestation), { status: "attestation_invalid" }, label);
+        assert.ok(!calls.includes("importCommit") && !calls.includes("push"), label);
+    }
+    // No key on this side means nothing can verify.
+    const { ports, calls } = publishPorts();
+    const noKey = { ...PUBLISH_ENV };
+    delete noKey.MARKETING_SEO_ATTESTATION_KEY;
+    assert.deepEqual(await publish(ports, RECORD, noKey), { status: "attestation_invalid" });
+    assert.ok(!calls.includes("importCommit"));
+    assert.equal(seoAgentAttestationMatches(KEY, RECORD, BUNDLE, ATTESTATION), true);
+    assert.equal(seoAgentAttestationMatches("short", RECORD, BUNDLE, seoAgentAttest("short", RECORD, BUNDLE)), false);
+});
+
+test("the base commit must be on the real develop", async () => {
+    const { ports, calls } = publishPorts({ baseOnDevelop: false });
+    assert.deepEqual(await publish(ports), { status: "base_not_on_develop" });
+    assert.ok(!calls.includes("importCommit") && !calls.includes("push"));
+    const lookupFails = publishPorts({ baseOnDevelop: () => false });
+    assert.equal((await publish(lookupFails.ports)).status, "base_not_on_develop");
 });
 
 test("a record that does not parse is refused before anything is imported", async () => {
@@ -592,7 +650,7 @@ test("before graduation: the commit is pushed to marketing-agent/<topic> and a d
     assert.deepEqual(pushes, [[COMMIT, "marketing-agent/improve-hreflang"]]);
     assert.match(pulls[0].body, new RegExp(`Validated tree: ${TREE}`));
     assert.match(pulls[0].body, /nothing here enables auto-merge/);
-    for (const [before, after] of [["importCommit", "commitFacts"], ["commitFacts", "diff"], ["diff", "push"], ["push", "remoteTree"], ["remoteTree", "createPullRequest"]]) {
+    for (const [before, after] of [["bundleSha256", "importCommit"], ["baseOnDevelop", "importCommit"], ["importCommit", "commitFacts"], ["commitFacts", "diff"], ["diff", "push"], ["push", "remoteTree"], ["remoteTree", "createPullRequest"]]) {
         assert.ok(calls.indexOf(before) >= 0 && calls.indexOf(before) < calls.indexOf(after), `${before} before ${after}`);
     }
 });

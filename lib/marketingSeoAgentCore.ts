@@ -44,7 +44,7 @@
  * it with `--experimental-strip-types`.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import { z } from "zod";
 
@@ -72,6 +72,19 @@ export const SEO_AGENT_GRADUATED_VARIABLE_ENV = "MARKETING_SEO_AUTO_PR";
 /** The repository-scoped GitHub App installation token. The App itself is the operator's. */
 export const SEO_AGENT_GITHUB_TOKEN_ENV = "MARKETING_SEO_GITHUB_APP_TOKEN";
 export const SEO_AGENT_GITHUB_REPOSITORY_ENV = "MARKETING_SEO_GITHUB_REPOSITORY";
+/**
+ * Shared by the two phases and by nothing else: the validate phase signs what it
+ * validated with it, and the publish phase refuses anything that does not verify.
+ */
+export const SEO_AGENT_ATTESTATION_KEY_ENV = "MARKETING_SEO_ATTESTATION_KEY";
+/** Credentials that could push to the repository. The validate phase refuses to start with any of them. */
+export const SEO_AGENT_PUSH_CREDENTIAL_ENVS = [
+  SEO_AGENT_GITHUB_TOKEN_ENV,
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITHUB_PAT",
+  "GH_AUTOMATION_PAT",
+] as const;
 
 /**
  * Tests that judge a change. They are people's files, read at the base commit.
@@ -126,7 +139,7 @@ const STAGE_VARIABLES: Readonly<Record<SeoAgentStage, readonly string[]>> = {
   // Runs the proposed code: an allowlist of what Node needs, so no other variable of the parent is there to read.
   checks: ["NODE_OPTIONS", "CI"],
   // The GitHub App token and nothing of the LLM's.
-  publish: [SEO_AGENT_GITHUB_TOKEN_ENV, SEO_AGENT_GITHUB_REPOSITORY_ENV],
+  publish: [SEO_AGENT_GITHUB_TOKEN_ENV, SEO_AGENT_GITHUB_REPOSITORY_ENV, SEO_AGENT_ATTESTATION_KEY_ENV],
 };
 
 /** The environment a stage's process is started with: its own variables and what Node needs. */
@@ -514,11 +527,43 @@ export function seoAgentPhaseEnvProblems(
   env: Readonly<Record<string, string | undefined>>,
   phase: SeoPhase,
 ): string[] {
-  const forbidden =
+  const forbidden: readonly string[] =
     phase === "validate"
-      ? [SEO_AGENT_GITHUB_TOKEN_ENV]
+      ? SEO_AGENT_PUSH_CREDENTIAL_ENVS
       : ["MARKETING_LLM_API_KEY", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_APP_URL"];
   return forbidden.filter((name) => typeof env[name] === "string" && (env[name] as string).length > 0);
+}
+
+/** What the attestation covers: the record and the exact bytes of the bundle. */
+const attestationBytes = (record: SeoAgentRecord, bundleSha256: string): string =>
+  JSON.stringify({
+    domain: "marketing-seo-agent-attestation-v1",
+    topic: record.topic,
+    summary: record.summary,
+    baseCommit: record.baseCommit,
+    commitSha: record.commitSha,
+    treeHash: record.treeHash,
+    paths: record.paths,
+    changedLines: record.changedLines,
+    bundleSha256,
+  });
+
+/** HMAC-SHA256 under the attestation key. */
+export const seoAgentAttest = (key: string, record: SeoAgentRecord, bundleSha256: string): string =>
+  createHmac("sha256", key).update(attestationBytes(record, bundleSha256), "utf8").digest("hex");
+
+export function seoAgentAttestationMatches(
+  key: string | undefined,
+  record: SeoAgentRecord,
+  bundleSha256: string,
+  attestation: unknown,
+): boolean {
+  if (typeof key !== "string" || key.length < 32 || typeof attestation !== "string" || !/^[0-9a-f]{64}$/.test(attestation)) {
+    return false;
+  }
+  const expected = Buffer.from(seoAgentAttest(key, record, bundleSha256), "hex");
+  const given = Buffer.from(attestation, "hex");
+  return expected.length === given.length && timingSafeEqual(expected, given);
 }
 
 export type SeoValidatePorts = {
@@ -537,8 +582,8 @@ export type SeoValidatePorts = {
   readonly runChecks: (dir: string, commands: readonly SeoCheckCommand[]) => Promise<{ ok: true } | { ok: false; label: string }>;
   /** Commit the staged change and return the commit and its tree hash. */
   readonly commit: (dir: string, message: string) => Promise<{ commitSha: string; treeHash: string }>;
-  /** Write the commit (objects only) where the publish phase will read it. */
-  readonly exportCommit: (dir: string, baseCommit: string, commitSha: string) => Promise<void>;
+  /** Write the commit (objects only) where the publish phase will read it, and return the sha256 of those bytes. */
+  readonly exportCommit: (dir: string, baseCommit: string, commitSha: string) => Promise<{ bundleSha256: string }>;
   readonly cleanup: (dir: string) => Promise<void>;
 };
 
@@ -554,7 +599,8 @@ export type SeoValidateResult =
   | { readonly status: "checks_failed"; readonly label: string }
   /** The staged tree at the three moments it is read -- before the checks, after them, and as committed -- was not one tree. */
   | { readonly status: "tree_changed"; readonly stage: "during_checks" | "at_commit" }
-  | { readonly status: "validated"; readonly record: SeoAgentRecord };
+  | { readonly status: "no_attestation_key" }
+  | { readonly status: "validated"; readonly record: SeoAgentRecord; readonly bundleSha256: string; readonly attestation: string };
 
 export function seoAgentCommitMessage(summary: string, topic: string): string {
   const subject = `seo(marketing-agent): ${summary.replace(/\s+/g, " ").trim()}`.slice(0, 100);
@@ -590,6 +636,9 @@ export async function runSeoAgentValidate(
   const wrong = seoAgentPhaseEnvProblems(input.env, "validate");
   if (wrong.length > 0) return { status: "wrong_environment", problems: wrong };
   if (seoAgentTopicSlug(input.topic) === null) return { status: "invalid_topic" };
+  // Without the key the result could not be told from a forgery, so nothing is spent.
+  const attestationKey = input.env[SEO_AGENT_ATTESTATION_KEY_ENV];
+  if (typeof attestationKey !== "string" || attestationKey.length < 32) return { status: "no_attestation_key" };
 
   const dir = await ports.prepareWorkspace(input.baseCommit);
   try {
@@ -629,25 +678,27 @@ export async function runSeoAgentValidate(
     const committed = validateSeoChanges(seoGitChanges(committedDiff.raw, committedDiff.numstat));
     if (!committed.ok) return { status: "validation_failed", problems: committed.problems };
 
-    await ports.exportCommit(dir, input.baseCommit, commitSha);
-    return {
-      status: "validated",
-      record: {
-        topic: String(input.topic).slice(0, 300),
-        summary: applied.summary,
-        baseCommit: input.baseCommit,
-        commitSha,
-        treeHash,
-        paths: committed.paths as SeoAgentRecord["paths"],
-        changedLines: committed.changedLines,
-      },
+    const { bundleSha256 } = await ports.exportCommit(dir, input.baseCommit, commitSha);
+    const record: SeoAgentRecord = {
+      topic: String(input.topic).slice(0, 300),
+      summary: applied.summary,
+      baseCommit: input.baseCommit,
+      commitSha,
+      treeHash,
+      paths: committed.paths as SeoAgentRecord["paths"],
+      changedLines: committed.changedLines,
     };
+    return { status: "validated", record, bundleSha256, attestation: seoAgentAttest(attestationKey, record, bundleSha256) };
   } finally {
     await ports.cleanup(dir).catch(() => undefined);
   }
 }
 
 export type SeoPublishPorts = {
+  /** The sha256 of the bundle's bytes as they are now. */
+  readonly bundleSha256: () => Promise<string>;
+  /** Whether the base commit is the remote develop head or one of its ancestors. A failed lookup is false. */
+  readonly baseOnDevelop: (baseCommit: string) => Promise<boolean>;
   /** Take the exported commit into the trusted clone. Throws when the commit is not in the bundle. */
   readonly importCommit: (record: SeoAgentRecord) => Promise<void>;
   /** Read from git, in the trusted clone: the commit's tree and parent. */
@@ -666,6 +717,8 @@ export type SeoPublishResult =
   | { readonly status: "off"; readonly reason: string }
   | { readonly status: "wrong_environment"; readonly problems: readonly string[] }
   | { readonly status: "invalid_record" }
+  | { readonly status: "attestation_invalid" }
+  | { readonly status: "base_not_on_develop" }
   | { readonly status: "validation_failed"; readonly problems: readonly SeoValidationProblem[] }
   | { readonly status: "tree_mismatch"; readonly stage: "before_push" | "after_push" }
   | {
@@ -678,7 +731,12 @@ export type SeoPublishResult =
     };
 
 export async function runSeoAgentPublish(
-  input: { readonly record: unknown; readonly env: Readonly<Record<string, string | undefined>> },
+  input: {
+    readonly record: unknown;
+    /** What the validate phase wrote beside the record. */
+    readonly attestation: unknown;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  },
   ports: SeoPublishPorts,
 ): Promise<SeoPublishResult> {
   const gate = seoAgentGate(input.env);
@@ -688,6 +746,13 @@ export async function runSeoAgentPublish(
   const parsed = seoAgentRecordSchema.safeParse(input.record);
   if (!parsed.success) return { status: "invalid_record" };
   const record = parsed.data;
+
+  // Nothing is taken from the artifacts before they verify, and nothing in them
+  // is trusted after: the record names a commit, and git is asked about it.
+  if (!seoAgentAttestationMatches(input.env[SEO_AGENT_ATTESTATION_KEY_ENV], record, await ports.bundleSha256(), input.attestation)) {
+    return { status: "attestation_invalid" };
+  }
+  if (!(await ports.baseOnDevelop(record.baseCommit))) return { status: "base_not_on_develop" };
 
   await ports.importCommit(record);
   // Everything the push relies on is read from git here, not from the record.

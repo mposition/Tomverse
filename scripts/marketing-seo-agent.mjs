@@ -19,8 +19,11 @@
 // publish phase refuses to start with any LLM variable, takes only a commit and
 // a record from the first phase, and recomputes the commit's tree, parent and
 // diff from git before it pushes anything. Run the validate phase on a
-// disposable runner with no other credentials: the shared node_modules the
-// checks use is the one thing this script cannot isolate.
+// disposable runner with no other credentials, and the publish phase on a
+// different machine from a trusted checkout of develop with its own
+// dependencies, taking only the three files of --out from the first: the shared
+// node_modules the checks use is the one thing this script cannot isolate, so
+// it must not be one the publish phase also uses.
 //
 // The rules live in lib/marketingSeoAgentCore.ts; this file binds them to git,
 // the marketing LLM cost ledger and GitHub. The paid call runs in a child
@@ -34,6 +37,8 @@
 //   MARKETING_AUTOMATION_KILL_SWITCH   any value stops it
 //   MARKETING_APP_URL, MARKETING_GENERATOR_SUBMIT_SECRET, MARKETING_LLM_API_KEY
 //                                      validate phase only: cost ledger and provider
+//   MARKETING_SEO_ATTESTATION_KEY      both phases, 32+ characters: the validate phase signs its result with it and
+//                                      the publish phase refuses anything that does not verify
 //   MARKETING_SEO_GITHUB_APP_TOKEN     publish phase only: installation token of the repository-only GitHub App
 //   MARKETING_SEO_GITHUB_REPOSITORY    publish phase only: owner/name
 //   MARKETING_SEO_AUTO_PR              repository variable; "true" only after graduation
@@ -42,7 +47,7 @@
 // validation without spending anything.
 
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
@@ -243,7 +248,9 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
     },
     exportCommit: async (dir, base, commitSha) => {
       git(dir, ["branch", BUNDLE_REF, commitSha]);
-      git(dir, ["bundle", "create", join(resolve(outDir), "change.bundle"), BUNDLE_REF, `^${base}`]);
+      const bundle = join(resolve(outDir), "change.bundle");
+      git(dir, ["bundle", "create", bundle, BUNDLE_REF, `^${base}`]);
+      return { bundleSha256: createHash("sha256").update(readFileSync(bundle)).digest("hex") };
     },
     cleanup: async (dir) => {
       for (const unlink of [unlinkSync, rmdirSync]) {
@@ -260,8 +267,17 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
 
   try {
     const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env }, ports);
-    if (result.status === "validated") writeFileSync(join(resolve(outDir), "record.json"), `${JSON.stringify(result.record, null, 2)}\n`);
-    printAndExit("marketing_seo_agent_validate", result, ["validated", "off"]);
+    if (result.status === "validated") {
+      writeFileSync(join(resolve(outDir), "record.json"), `${JSON.stringify(result.record, null, 2)}\n`);
+      writeFileSync(
+        join(resolve(outDir), "attestation.json"),
+        `${JSON.stringify({ bundleSha256: result.bundleSha256, attestation: result.attestation })}\n`,
+      );
+    }
+    // The signature stays in the artifact; the log carries the outcome and the tree.
+    const loggable = { ...result };
+    delete loggable.attestation;
+    printAndExit("marketing_seo_agent_validate", loggable, ["validated", "off"]);
   } catch (error) {
     fail(error);
   }
@@ -281,12 +297,20 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
   if (gate.on && (!token || !/^[\w.-]+\/[\w.-]+$/.test(repository ?? ""))) {
     fail(new Error(`${SEO_AGENT_GITHUB_TOKEN_ENV} and ${SEO_AGENT_GITHUB_REPOSITORY_ENV} (owner/name) are required to publish`));
   }
-  let record = null;
-  try {
-    record = JSON.parse(readFileSync(join(resolve(outDir), "record.json"), "utf8"));
-  } catch {
-    // The core refuses an unreadable record; an off switch needs none.
+  // Exactly the three files the validate phase writes; anything else in the directory is refused.
+  const artifacts = existsSync(outDir) ? readdirSync(outDir).sort() : [];
+  if (gate.on && artifacts.join(",") !== "attestation.json,change.bundle,record.json") {
+    fail(new Error("--out must hold exactly attestation.json, change.bundle and record.json"));
   }
+  const readArtifact = (name) => {
+    try {
+      return JSON.parse(readFileSync(join(resolve(outDir), name), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const record = readArtifact("record.json");
+  const attestationFile = readArtifact("attestation.json");
 
   const github = async (method, path, body) => {
     const response = await fetch(`https://api.github.com/repos/${repository}${path}`, {
@@ -303,6 +327,12 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
   };
 
   const ports = {
+    bundleSha256: async () => createHash("sha256").update(readFileSync(join(resolve(outDir), "change.bundle"))).digest("hex"),
+    baseOnDevelop: async (base) => {
+      // The base must be a commit of the real develop, not one the artifacts invented.
+      const compared = await github("GET", `/compare/develop...${base}`);
+      return compared.status === 200 && ["behind", "identical"].includes(compared.body?.status);
+    },
     importCommit: async (rec) => {
       // Objects only, into the trusted clone: the bundle carries no config, hook or ref this clone uses.
       git(root, ["fetch", "--quiet", join(resolve(outDir), "change.bundle"), BUNDLE_REF]);
@@ -355,7 +385,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
   };
 
   try {
-    printAndExit("marketing_seo_agent_publish", await runSeoAgentPublish({ record, env: process.env }, ports), ["pushed", "off"]);
+    printAndExit("marketing_seo_agent_publish", await runSeoAgentPublish({ record, attestation: attestationFile?.attestation, env: process.env }, ports), ["pushed", "off"]);
   } catch (error) {
     fail(error);
   }

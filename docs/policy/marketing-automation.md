@@ -353,11 +353,15 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
   (`scripts/auto-pr-branch-policy.mjs`). auto-merge는 어느 쪽도 켜지 않으며(버전 4 제안), 병합은 merge train
   (`npm run merge-train`) 또는 사람이 한다. develop까지만.
 - 구현(2026-11-01 운영자 결정, 정책 버전 변경 없음): 실행기 `scripts/marketing-seo-agent.mjs`와 순수 규칙 `lib/marketingSeoAgentCore.ts`.
-  기본 꺼짐(`MARKETING_SEO_AGENT_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). LLM 단계는 도구 없는 텍스트 호출 1회로
-  마케팅 비용 원장을 그대로 쓰며(목적 `brief`, 새 유료 경로 없음) 수정안을 find/replace로만 내고, 파일은 실행기가 임시 worktree(base 커밋)에 적용한다.
-  LLM 단계 프로세스는 원장 변수 셋만, 게시 단계는 GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)만 가진다.
-  검증은 git의 diff로 하고(허용 4개 정확 일치, rename·삭제·binary·symlink·mode 거부, 500줄) 판정 시험은 base 커밋의 고정 목록이다.
+  기본 꺼짐(`MARKETING_SEO_AGENT_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). **두 단계는 서로 다른 프로세스이자 서로 다른 기계(컨테이너)에서 돌린다.**
+  검증 단계(`--phase validate`)는 격리된 clone(base 커밋)에서 도구 없는 텍스트 LLM 호출 1회(마케팅 비용 원장 그대로, 목적 `brief`, 새 유료 경로 없음)의 find/replace 수정안을 적용하고
+  git의 diff로 판정한다(허용 4개 정확 일치, rename·삭제·binary·symlink·mode 거부, 500줄). 판정 시험은 base 커밋의 고정 목록이며 없으면 실패로 닫는다.
+  검사가 제안 코드를 실행하므로 이 단계는 게시 자격증명이 없는 일회용 러너에서만 돌리고(GitHub 토큰 변수가 있으면 시작을 거부), 검사는 허용 목록 환경으로만 돈다.
+  스테이징된 tree를 검사 전에 고정해 검사 후·커밋의 tree가 같아야 하며, 끝에 commit bundle과 기록에 서명(`MARKETING_SEO_ATTESTATION_KEY`)한다.
+  게시 단계(`--phase publish`)는 신뢰된 checkout과 자기 의존성에서 돌고, GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)과 서명 키만 가지며 LLM 변수가 있으면 시작을 거부한다.
+  서명이 맞고, base가 원격 develop의 조상이며, 부모가 base이고, tree·diff를 git에서 다시 계산해 일치할 때만 push하고, push 뒤 원격 tree를 다시 읽어 일치할 때만 PR(draft)을 연다.
   졸업 상태 조회가 연결되기 전에는 항상 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
+- robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
 - 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.
 
