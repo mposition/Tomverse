@@ -104,11 +104,13 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   }, {
     // An idea with no chunk and no card comes back with SQL NULL aggregates.
     id: "idea-2", requestId: "22222222-2222-4222-8222-222222222222", state: "submitted",
+    submissionOrigin: "owner",
     submittedAtMs: Date.parse("2026-10-14T00:00:00Z"), cancelled: false, proposedUnits: 0, chunks: null, cards: null,
     checkoutEvidence: null, referencePins: null,
     referencePinAuditStatus: "legacy",
   }, {
     id: "idea-3", requestId: "33333333-3333-4333-8333-333333333333", state: "submitted",
+    submissionOrigin: "session",
     submittedAtMs: Date.parse("2026-10-13T00:00:00Z"), cancelled: false,
     proposedUnits: 0, chunks: null, cards: null,
     checkoutEvidence: null, referencePins: null,
@@ -151,8 +153,9 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.equal(empty.referencePins, null);
   assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
   assert.deepEqual(empty.checkoutEvidence, []);
-  // Only an idea waiting for the owner after analysis offers the owner close.
-  assert.deepEqual([row.closable, empty.closable, damaged.closable], [true, false, false]);
+  // After analysis, or an owner idea waiting for its execution approval; a
+  // queued session idea keeps its own cancel.
+  assert.deepEqual([row.closable, empty.closable, damaged.closable], [true, true, false]);
 });
 
 test("a failed read is tried once more, outside a route too, except for the boundary's own deterministic refusals", () => {

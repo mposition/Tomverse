@@ -96,7 +96,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
       reauthenticate: "Sign in again",
     },
     close: {
-      hint: "If this idea goes no further, close it. Its record and audit stay; stored content is deleted on its usual schedule. Cards already registered stay.",
+      hint: "If this idea goes no further, close it. Its record and audit stay, and cards already registered stay. Its stored text is deleted on its usual schedule; an idea closed before its execution approval is deleted soon after.",
       open: "Close idea",
       reasonLabel: "Reason for closing (3 to 500 characters)",
       confirmSingle: "Confirm close",
@@ -231,7 +231,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
       reauthenticate: "다시 로그인",
     },
     close: {
-      hint: "더 진행하지 않을 아이디어라면 닫으세요. 기록과 감사 로그는 남고, 저장된 내용은 원래 보존 기한에 지워집니다. 이미 등록된 카드는 그대로 남습니다.",
+      hint: "더 진행하지 않을 아이디어라면 닫으세요. 기록과 감사 로그, 이미 등록된 카드는 그대로 남습니다. 저장된 원문은 원래 보존 기한에 지워지고, 실행 승인 전에 닫은 아이디어는 닫은 직후 지워집니다.",
       open: "아이디어 닫기",
       reasonLabel: "닫는 사유 (3~500자)",
       confirmSingle: "닫기 확인",
