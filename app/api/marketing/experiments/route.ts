@@ -103,6 +103,16 @@ const makeResponder = (request: Request) => (
   return response;
 };
 
+// The state could not be read. That is not "the experiment ended": the cookie
+// stays, so a visitor is not re-rolled into the other arm once storage
+// recovers, and nothing is counted meanwhile. 503 is what the beacon reads as
+// "show the default copy"; a failed count is a 500 and does not.
+const unreadable = () =>
+  NextResponse.json(
+    { status: "error" },
+    { status: 503, headers: { "Cache-Control": "private, no-store" } }
+  );
+
 export async function POST(request: Request) {
   const respond = makeResponder(request);
   try {
@@ -117,27 +127,28 @@ export async function POST(request: Request) {
     }
 
     if (!isE2EDatabaseDisabled()) {
-      await consumeApiRateLimit(
-        request,
-        `anonymous:${getAnonymousClientKey(request)}`,
-        "marketing-experiment",
-        { minute: 60, day: 2_000 }
-      );
+      try {
+        await consumeApiRateLimit(
+          request,
+          `anonymous:${getAnonymousClientKey(request)}`,
+          "marketing-experiment",
+          { minute: 60, day: 2_000 }
+        );
+      } catch (error) {
+        // A refusal (rate limit, origin) is the security layer's answer. Anything
+        // else is the same database the state is read from being down, which is
+        // an unreadable state like the one below: the beacon puts the default
+        // copy on a variant page for it.
+        if (apiSecurityResponse(error)) throw error;
+        return unreadable();
+      }
     }
 
     // No `now` passed: the read answers for the present and may be served from
     // its short per-instance cache, which a named time would bypass.
     const now = new Date();
     const read = await readActiveMarketingExperiment({ headers: request.headers });
-    if (!read.ok) {
-      // The state could not be read. That is not "the experiment ended": the
-      // cookie stays, so a visitor is not re-rolled into the other arm once
-      // storage recovers, and nothing is counted meanwhile.
-      return NextResponse.json(
-        { status: "error" },
-        { status: 503, headers: { "Cache-Control": "private, no-store" } }
-      );
-    }
+    if (!read.ok) return unreadable();
     if (!read.active) {
       return respond({ status: "off" }, { clearCookie: true });
     }

@@ -241,7 +241,10 @@ test("a storage failure never deletes an assignment: the visitor keeps their arm
   const before = {
     bypass: process.env.E2E_AUTH_BYPASS,
     database: process.env.E2E_DISABLE_DATABASE,
+    secret: process.env.NEXTAUTH_SECRET,
   };
+  // With the secret set the rate limit gets as far as the database.
+  process.env.NEXTAUTH_SECRET = "route-test-secret";
   process.env.E2E_AUTH_BYPASS = "false";
   process.env.E2E_DISABLE_DATABASE = "false";
   try {
@@ -249,11 +252,17 @@ test("a storage failure never deletes an assignment: the visitor keeps their arm
       { action: "exposure", consent: "accepted", locale: "en", renderedArm: "b" },
       { cookie: `tv_exp=${VARIANT}` }
     );
-    assert.ok(result.status >= 500, `expected an error status, saw ${result.status}`);
+    // The first thing to fail here is the rate limit's database call, and that
+    // is an unreadable state like any other: 503, which the beacon answers with
+    // the default copy, not a 500, which it does not.
+    assert.equal(result.status, 503);
+    assert.equal(result.json.status, "error");
     assert.notEqual(result.json.status, "off");
     assert.equal(result.setCookie, "");
   } finally {
     process.env.E2E_AUTH_BYPASS = before.bypass;
     process.env.E2E_DISABLE_DATABASE = before.database;
+    if (before.secret === undefined) delete process.env.NEXTAUTH_SECRET;
+    else process.env.NEXTAUTH_SECRET = before.secret;
   }
 });
