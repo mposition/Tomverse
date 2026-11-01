@@ -28,8 +28,10 @@ import { prepareGuestPage } from "./support/app-fixtures";
 
 const EXPERIMENT_ID = "e2e-home-hero";
 const BUNDLE_ID = "home-hero-v1";
-const VARIANT_COOKIE = `${EXPERIMENT_ID}.${BUNDLE_ID}.b`;
-const CONTROL_COOKIE = `${EXPERIMENT_ID}.${BUNDLE_ID}.control`;
+// The last part is the languages the assignment was registered for, sorted and
+// run together; the fixture experiment covers English and Korean.
+const VARIANT_COOKIE = `${EXPERIMENT_ID}.${BUNDLE_ID}.b.enko`;
+const CONTROL_COOKIE = `${EXPERIMENT_ID}.${BUNDLE_ID}.control.enko`;
 const DEFAULT_HEADLINE_EN = "Which AI should you use?";
 const VARIANT_HEADLINE_EN = "Several AI answers.";
 const VARIANT_HEADLINE_KO = "AI 답변은 여럿.";
@@ -247,7 +249,7 @@ test.describe("fixture experiment, forced variant", () => {
     await context.addCookies([
       {
         name: "tv_exp",
-        value: `finished-experiment.${BUNDLE_ID}.b`,
+        value: `finished-experiment.${BUNDLE_ID}.b.enko`,
         url: ORIGIN,
       },
     ]);
@@ -317,6 +319,24 @@ test.describe("fixture experiment, forced variant", () => {
     expect(defaultResponses).toBeGreaterThan(0);
   });
 
+  test("(c) the variant stays inside the languages the assignment was registered for", async ({
+    request,
+  }) => {
+    const english = `tv_exp=${EXPERIMENT_ID}.${BUNDLE_ID}.b.en`;
+    // Registered for English: the English home is the variant, the Korean one is not,
+    // although the bundle has Korean copy -- and the Korean variant path is not theirs.
+    const en = await request.get("/", { headers: { ...HTML, cookie: english } });
+    expect(heroHeadline(await en.text())).toContain(VARIANT_HEADLINE_EN);
+    const ko = await request.get("/ko", { headers: { ...HTML, cookie: english } });
+    expect(ko.status()).toBe(200);
+    expect(heroHeadline(await ko.text())).not.toContain(VARIANT_HEADLINE_KO);
+    const direct = await request.get(`/ko/lx/${BUNDLE_ID}/b`, {
+      headers: { ...HTML, cookie: english },
+      maxRedirects: 0,
+    });
+    expect(direct.status()).toBe(307);
+  });
+
   test("(c) only document loads are rewritten, and only to a variant that exists", async ({
     request,
   }) => {
@@ -335,11 +355,14 @@ test.describe("fixture experiment, forced variant", () => {
 
     // A forged or unknown bundle is no variant at all.
     for (const forged of [
-      `${EXPERIMENT_ID}.home-unknown-v9.b`,
-      `${EXPERIMENT_ID}.pricing-hero-v1.b`,
-      `${EXPERIMENT_ID}.${BUNDLE_ID}.zz`,
+      `${EXPERIMENT_ID}.home-unknown-v9.b.enko`,
+      `${EXPERIMENT_ID}.pricing-hero-v1.b.enko`,
+      `${EXPERIMENT_ID}.${BUNDLE_ID}.zz.enko`,
+      // The three-part shape from before the scope travelled in the cookie.
+      `${EXPERIMENT_ID}.${BUNDLE_ID}.b`,
+      `${EXPERIMENT_ID}.${BUNDLE_ID}.b.xx`,
       "not-a-cookie",
-      `${EXPERIMENT_ID}.${BUNDLE_ID}.b.extra`,
+      `${EXPERIMENT_ID}.${BUNDLE_ID}.b.enko.extra`,
     ]) {
       const response = await request.get("/", {
         headers: { ...HTML, cookie: `tv_exp=${forged}` },
@@ -365,7 +388,7 @@ test.describe("fixture experiment, forced variant", () => {
     const strangers: Array<string | undefined> = [
       undefined,
       `tv_exp=${CONTROL_COOKIE}`,
-      `tv_exp=${EXPERIMENT_ID}.home-other-v1.b`,
+      `tv_exp=${EXPERIMENT_ID}.home-other-v1.b.enko`,
       "tv_exp=garbage",
     ];
     for (const [path, home] of [
@@ -400,7 +423,7 @@ test.describe("fixture experiment, forced variant", () => {
 
     // A matching cookie for a variant that is not in this build is a missing page.
     const missing = await request.get("/en/lx/home-unknown-v9/b", {
-      headers: { ...HTML, cookie: `tv_exp=${EXPERIMENT_ID}.home-unknown-v9.b` },
+      headers: { ...HTML, cookie: `tv_exp=${EXPERIMENT_ID}.home-unknown-v9.b.enko` },
       maxRedirects: 0,
     });
     expect(missing.status()).toBe(404);

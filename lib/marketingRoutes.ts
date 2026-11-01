@@ -94,27 +94,46 @@ export type ExperimentAssignment = {
   bundleId: string;
   /** `control`, or the variant id the bundle defines. */
   arm: string;
+  /**
+   * The languages the experiment was pre-registered for, as of the
+   * assignment. The proxy reads no configuration, so the scope travels in the
+   * cookie: a variant is rewritten into only for a language listed here.
+   */
+  locales: string[];
 };
 
 export const parseExperimentCookie = (
   value: string | null | undefined
 ): ExperimentAssignment | null => {
-  if (!value || value.length > 160) return null;
+  if (!value || value.length > 200) return null;
   const parts = value.split(".");
-  if (parts.length !== 3) return null;
-  const [experimentId, bundleId, arm] = parts;
+  if (parts.length !== 4) return null;
+  const [experimentId, bundleId, arm, localeCodes] = parts;
   if (
     !EXPERIMENT_ID_PATTERN.test(experimentId) ||
     !EXPERIMENT_ID_PATTERN.test(bundleId) ||
-    !EXPERIMENT_ARM_PATTERN.test(arm)
+    !EXPERIMENT_ARM_PATTERN.test(arm) ||
+    !/^(?:[a-z]{2}){1,7}$/.test(localeCodes)
   ) {
     return null;
   }
-  return { experimentId, bundleId, arm };
+  // Two-letter codes run together: `enko`.
+  const locales = localeCodes.match(/../g) ?? [];
+  if (
+    new Set(locales).size !== locales.length ||
+    !locales.every((locale) => experimentLocales.has(locale))
+  ) {
+    return null;
+  }
+  return { experimentId, bundleId, arm, locales };
 };
 
 export const formatExperimentCookie = (assignment: ExperimentAssignment) =>
-  `${assignment.experimentId}.${assignment.bundleId}.${assignment.arm}`;
+  `${assignment.experimentId}.${assignment.bundleId}.${assignment.arm}.${[
+    ...assignment.locales,
+  ]
+    .sort()
+    .join("")}`;
 
 export const experimentVariantPathname = (
   locale: string,
@@ -165,6 +184,9 @@ export const resolveExperimentRewrite = (input: Readonly<{
   const normalized = normalizePathname(input.pathname);
   const locale = normalized === "/" ? "en" : normalized.slice(1);
   if (!experimentLocales.has(locale)) return null;
+  // Only the languages the experiment was registered for: a visitor assigned
+  // in English who opens the Korean home page is outside it.
+  if (!assignment.locales.includes(locale)) return null;
   return experimentVariantPathname(locale, assignment.bundleId, assignment.arm);
 };
 
@@ -197,10 +219,14 @@ export const experimentCookieMatchesVariantPath = (input: Readonly<{
   if (!isExperimentVariantPathname(input.pathname)) return false;
   const assignment = parseExperimentCookie(input.cookie);
   if (!assignment || assignment.arm === EXPERIMENT_CONTROL_ARM) return false;
-  const [, , bundleId, variantId] = normalizePathname(input.pathname)
+  const [locale, , bundleId, variantId] = normalizePathname(input.pathname)
     .split("/")
     .filter(Boolean);
-  return assignment.bundleId === bundleId && assignment.arm === variantId;
+  return (
+    assignment.bundleId === bundleId &&
+    assignment.arm === variantId &&
+    assignment.locales.includes(locale)
+  );
 };
 
 export const isStaticMarketingPathname = (pathname: string) => {

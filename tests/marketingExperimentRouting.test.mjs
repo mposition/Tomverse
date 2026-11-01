@@ -16,7 +16,7 @@ import {
   resolveExperimentRewrite,
 } from "../lib/marketingRoutes.ts";
 
-const COOKIE = "spring-hero.home-hero-v1.b";
+const COOKIE = "spring-hero.home-hero-v1.b.enko";
 const rewrite = (overrides = {}) =>
   resolveExperimentRewrite({
     pathname: "/",
@@ -34,7 +34,13 @@ test("the cookie round-trips and rejects anything that is not exactly three well
     experimentId: "spring-hero",
     bundleId: "home-hero-v1",
     arm: "b",
+    locales: ["en", "ko"],
   });
+  // The languages are written sorted, whatever order they were given in.
+  assert.equal(
+    formatExperimentCookie({ ...assignment, locales: ["ko", "en"] }),
+    COOKIE
+  );
   assert.equal(formatExperimentCookie(assignment), COOKIE);
   assert.equal(EXPERIMENT_COOKIE_NAME, "tv_exp");
 
@@ -43,7 +49,15 @@ test("the cookie round-trips and rejects anything that is not exactly three well
     null,
     undefined,
     "spring-hero.home-hero-v1",
+    // The pre-scope shape, three parts, is no assignment any more.
+    "spring-hero.home-hero-v1.b",
     "spring-hero.home-hero-v1.b.extra",
+    "spring-hero.home-hero-v1.b.xx",
+    "spring-hero.home-hero-v1.b.enen",
+    "spring-hero.home-hero-v1.b.e",
+    "spring-hero.home-hero-v1.b.EN",
+    "spring-hero.home-hero-v1.b.enkozhfrdeespt01",
+    "spring-hero.home-hero-v1.b.enko.more",
     "Spring-Hero.home-hero-v1.b",
     "spring-hero.home-hero-v1.b/../x",
     "sp.home-hero-v1.b",
@@ -65,7 +79,7 @@ test("a home document load with a variant cookie is rewritten to the variant pat
 
 test("everything that is not a variant document load on a home page is left alone", () => {
   // The control arm and the absence of a cookie are the default page.
-  assert.equal(rewrite({ cookie: `spring-hero.home-hero-v1.${EXPERIMENT_CONTROL_ARM}` }), null);
+  assert.equal(rewrite({ cookie: `spring-hero.home-hero-v1.${EXPERIMENT_CONTROL_ARM}.enko` }), null);
   assert.equal(rewrite({ cookie: undefined }), null);
   assert.equal(rewrite({ cookie: "garbage" }), null);
   // Only the safe document methods.
@@ -89,7 +103,12 @@ test("everything that is not a variant document load on a home page is left alon
     assert.equal(rewrite({ pathname }), null, pathname);
   }
   // A bundle for another surface is never routed as a home variant.
-  assert.equal(rewrite({ cookie: "spring-hero.pricing-hero-v1.b" }), null);
+  assert.equal(rewrite({ cookie: "spring-hero.pricing-hero-v1.b.enko" }), null);
+  // The rewrite stays inside the languages the assignment was registered for.
+  assert.equal(rewrite({ pathname: "/", cookie: "spring-hero.home-hero-v1.b.en" }), "/en/lx/home-hero-v1/b");
+  assert.equal(rewrite({ pathname: "/ko", cookie: "spring-hero.home-hero-v1.b.en" }), null);
+  assert.equal(rewrite({ pathname: "/", cookie: "spring-hero.home-hero-v1.b.ko" }), null);
+  assert.equal(rewrite({ pathname: "/fr", cookie: COOKIE }), null);
 });
 
 test("variant paths are recognised exactly and are never a page of their own", () => {
@@ -131,7 +150,7 @@ test("a variant path is served only to the cookie that assigns exactly that vari
   const matches = (overrides = {}) =>
     experimentCookieMatchesVariantPath({
       pathname: path,
-      cookie: "spring-hero.home-hero-v1.b",
+      cookie: "spring-hero.home-hero-v1.b.enko",
       killSwitch: undefined,
       ...overrides,
     });
@@ -141,9 +160,11 @@ test("a variant path is served only to the cookie that assigns exactly that vari
   for (const overrides of [
     { cookie: undefined },
     { cookie: "garbage" },
-    { cookie: "spring-hero.home-hero-v1.control" },
-    { cookie: "spring-hero.home-hero-v1.c" },
-    { cookie: "spring-hero.home-other-v1.b" },
+    { cookie: "spring-hero.home-hero-v1.control.enko" },
+    { cookie: "spring-hero.home-hero-v1.c.enko" },
+    { cookie: "spring-hero.home-other-v1.b.enko" },
+    // Assigned for English only: the Korean variant path is not theirs.
+    { cookie: "spring-hero.home-hero-v1.b.en" },
     { pathname: "/ko/lx/home-hero-v1/c" },
     { pathname: "/ko/pricing" },
     { pathname: "/ko" },

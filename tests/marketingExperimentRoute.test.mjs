@@ -31,8 +31,8 @@ process.env.E2E_MARKETING_EXPERIMENT = JSON.stringify({
 const { POST } = await import("../app/api/marketing/experiments/route.ts");
 const { e2eForcedRoll } = await import("../lib/marketingExperimentState.ts");
 
-const VARIANT = "fixture-run.home-hero-v1.b";
-const CONTROL = "fixture-run.home-hero-v1.control";
+const VARIANT = "fixture-run.home-hero-v1.b.enko";
+const CONTROL = "fixture-run.home-hero-v1.control.enko";
 
 const call = async (body, headers = {}) => {
   const response = await POST(
@@ -182,9 +182,14 @@ test("exposure and conversion count only when the rendered arm is the assigned a
 
 test("a cookie from another experiment or a forged one is deleted and counts nothing", async () => {
   for (const cookie of [
-    "old-run.home-hero-v1.b",
-    "fixture-run.home-other-v1.b",
-    "fixture-run.home-hero-v1.zz",
+    "old-run.home-hero-v1.b.enko",
+    "fixture-run.home-other-v1.b.enko",
+    "fixture-run.home-hero-v1.zz.enko",
+    // Assigned for other languages than the ones registered now.
+    "fixture-run.home-hero-v1.b.en",
+    "fixture-run.home-hero-v1.b.enfr",
+    // The three-part shape from before the scope travelled in the cookie.
+    "fixture-run.home-hero-v1.b",
     "garbage",
   ]) {
     const result = await call(
@@ -226,5 +231,29 @@ test("the kill switch turns every answer into off", async () => {
     assert.ok(!result.setCookie.includes(VARIANT));
   } finally {
     delete process.env.MARKETING_AUTOMATION_KILL_SWITCH;
+  }
+});
+
+test("a storage failure never deletes an assignment: the visitor keeps their arm for when it recovers", async () => {
+  // Fixture mode off, so the route reaches for the database, which here is a
+  // port nothing listens on. Whatever fails first, the answer is an error and
+  // the cookie is neither set nor deleted.
+  const before = {
+    bypass: process.env.E2E_AUTH_BYPASS,
+    database: process.env.E2E_DISABLE_DATABASE,
+  };
+  process.env.E2E_AUTH_BYPASS = "false";
+  process.env.E2E_DISABLE_DATABASE = "false";
+  try {
+    const result = await call(
+      { action: "exposure", consent: "accepted", locale: "en", renderedArm: "b" },
+      { cookie: `tv_exp=${VARIANT}` }
+    );
+    assert.ok(result.status >= 500, `expected an error status, saw ${result.status}`);
+    assert.notEqual(result.json.status, "off");
+    assert.equal(result.setCookie, "");
+  } finally {
+    process.env.E2E_AUTH_BYPASS = before.bypass;
+    process.env.E2E_DISABLE_DATABASE = before.database;
   }
 });

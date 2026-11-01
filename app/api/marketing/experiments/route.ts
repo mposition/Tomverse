@@ -130,7 +130,16 @@ export async function POST(request: Request) {
       headers: request.headers,
       now,
     });
-    if (!read.ok || !read.active) {
+    if (!read.ok) {
+      // The state could not be read. That is not "the experiment ended": the
+      // cookie stays, so a visitor is not re-rolled into the other arm once
+      // storage recovers, and nothing is counted meanwhile.
+      return NextResponse.json(
+        { status: "error" },
+        { status: 503, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
+    if (!read.active) {
       return respond({ status: "off" }, { clearCookie: true });
     }
     const { config } = read;
@@ -147,7 +156,9 @@ export async function POST(request: Request) {
       current !== null &&
       current.experimentId === config.experimentId &&
       current.bundleId === config.bundleId &&
-      (current.arm === EXPERIMENT_CONTROL_ARM || current.arm === config.variantId);
+      (current.arm === EXPERIMENT_CONTROL_ARM || current.arm === config.variantId) &&
+      // The languages in the cookie are the registered ones, exactly.
+      [...current.locales].sort().join(",") === [...config.locales].sort().join(",");
 
     if (body.action === "assign") {
       if (currentIsValid) {
@@ -170,6 +181,7 @@ export async function POST(request: Request) {
               experimentId: config.experimentId,
               bundleId: config.bundleId,
               arm,
+              locales: [...config.locales],
             }),
             maxAge: experimentCookieMaxAgeSeconds(config, now),
           },
