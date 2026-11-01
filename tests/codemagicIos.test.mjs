@@ -4,7 +4,7 @@ import test from "node:test";
 import { parseDocument } from "yaml";
 import { iosBuildPlan } from "../apps/mobile/scripts/build-ios.mjs";
 
-const document = parseDocument(readFileSync(new URL("../codemagic.yaml", import.meta.url), "utf8"), { uniqueKeys: true });
+const document = parseDocument(readFileSync(new URL("../codemagic.yaml", import.meta.url), "utf8"), { uniqueKeys: true, merge: true });
 const config = document.toJS();
 const workflow = config.workflows["ios-simulator"];
 const scripts = workflow.scripts.map(step => step.script);
@@ -103,4 +103,16 @@ test("signed builds verify the bundle before signing and assign an explicit CI b
   assert.ok(steps[version].includes('agvtool new-version -all "$PROJECT_BUILD_NUMBER"'));
   const plist = readFileSync(new URL("../apps/mobile/ios/App/App/Info.plist", import.meta.url), "utf8");
   assert.match(plist, /<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
+});
+
+test("StoreKit TestFlight testing uses the isolated API and explicit Apple billing group", () => {
+  const sandbox = config.workflows["ios-testflight-sandbox"];
+  assert.equal(sandbox.triggering, undefined);
+  assert.equal(sandbox.environment.vars.VITE_TOMVERSE_API_ORIGIN, "https://staging.tomverse.app");
+  assert.equal(sandbox.environment.vars.VITE_NATIVE_BILLING_ENABLED, "true");
+  assert.deepEqual(sandbox.environment.groups, ["ios_store_billing"]);
+  assert.deepEqual(sandbox.environment.ios_signing, config.workflows["ios-testflight"].environment.ios_signing);
+  assert.deepEqual(sandbox.publishing, config.workflows["ios-testflight"].publishing);
+  assert.ok(sandbox.scripts.some(step => step.script.includes("MobileSessionNamespaceTests.swift")));
+  assert.equal(config.workflows["ios-testflight"].environment.vars.VITE_NATIVE_BILLING_ENABLED, undefined);
 });
