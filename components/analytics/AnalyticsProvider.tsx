@@ -6,12 +6,18 @@ import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { useSession } from "next-auth/react";
+import {
+  GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+  ga4UserIdTransmissionAllowed,
+} from "@/lib/ga4UserIdPolicy";
 import {
   analyticsConsent,
   configureAnalyticsClient,
   consumeSignupStarted,
   disableAnalyticsClient,
   setAnalyticsConsent,
+  syncGa4UserId,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
 import {
@@ -332,6 +338,9 @@ export function AnalyticsProvider({
         : null
     );
   const [analyticsClientReady, setAnalyticsClientReady] = useState(false);
+  // Counts configureAnalyticsClient runs. Each one clears the GA4 User-ID
+  // before its page_view, so the User-ID effect re-runs after every one.
+  const [analyticsConfigureCount, setAnalyticsConfigureCount] = useState(0);
   const [showPreferences, setShowPreferences] = useState(false);
   const [chatConsentReady, setChatConsentReady] = useState(false);
   const [isMobileChatTextEntryActive, setIsMobileChatTextEntryActive] =
@@ -590,7 +599,9 @@ export function AnalyticsProvider({
       plan: initialPlan,
     });
     queueMicrotask(() => {
-      if (!cancelled) setAnalyticsClientReady(true);
+      if (cancelled) return;
+      setAnalyticsClientReady(true);
+      setAnalyticsConfigureCount((count) => count + 1);
     });
     if (!lifecycleCheckedRef.current) {
       lifecycleCheckedRef.current = true;
@@ -630,6 +641,31 @@ export function AnalyticsProvider({
       cancelled = true;
     };
   }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
+
+  // GA4 User-ID (docs/policy/marketing-automation.md §10.2): asked for only
+  // when the notice is published, the switch is on, the visitor explicitly
+  // accepted analytics and is signed in. Any of those going away -- signing
+  // out included -- clears it on the tag.
+  const { data: sessionData, status: sessionStatus } = useSession();
+  const sessionUserId =
+    sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;
+  const ga4UserIdAllowed =
+    !disabled &&
+    analyticsClientReady &&
+    ga4UserIdTransmissionAllowed({
+      noticePublished: GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+      switchValue: process.env.NEXT_PUBLIC_GA4_USER_ID_ENABLED,
+      consent: consent === "loading" ? null : consent,
+      signedIn: Boolean(sessionUserId),
+      measurementId,
+    });
+  // Re-run on an account change -- the previous account's id is cleared before
+  // the next one is asked for (syncGa4UserId) -- and after every analytics
+  // (re)configuration, which clears it itself before its page_view.
+  useEffect(
+    () => syncGa4UserId(ga4UserIdAllowed),
+    [ga4UserIdAllowed, sessionUserId, analyticsConfigureCount]
+  );
 
   // `useCallback` rather than plain closures: both read the remembered opener
   // through `closePreferences`, and a ref read from a function created during
