@@ -130,14 +130,23 @@ test.describe("marketing console", () => {
   }) => {
     await signInAs("owner");
 
-    await page.goto("/admin/marketing?tab=comments");
-    await expect(page.getByText(/stage S4/)).toBeVisible();
+    await page.goto("/admin/marketing?tab=experiments");
+    await expect(page.getByText(/stage S5/)).toBeVisible();
     // Not the empty state: "nothing is waiting" would be a false claim about a
     // feature nothing writes yet.
     await expect(page.getByText("Nothing here yet.")).toHaveCount(0);
+  });
 
-    await page.goto("/admin/marketing?tab=experiments");
-    await expect(page.getByText(/stage S5/)).toBeVisible();
+  test("comments are built in S4, so their section no longer says a later stage owns it", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+
+    await page.goto("/admin/marketing?tab=comments");
+    // The monitor writes this section now, so an empty one is a true empty.
+    await expect(page.getByText("Nothing here yet.")).toBeVisible();
+    await expect(page.getByText(/stage S4/)).toHaveCount(0);
   });
 
   test("the competitors section shows a proposal with its decisions, and says how many rows it lists", async ({

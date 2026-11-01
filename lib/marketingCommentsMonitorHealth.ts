@@ -1,14 +1,87 @@
 import "server-only";
 
+import type { PrismaClient } from "@prisma/client";
+
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
+import { prisma } from "@/lib/prisma";
+
 /**
- * Whether the comment monitor has recently worked (policy 12.1: no graduation
- * without it, and the autonomous admission asks the same question).
+ * Whether the comment monitor is switched on and has recently worked (policy
+ * 12.1: no graduation without it, and the autonomous admission asks the same
+ * question).
  *
- * The monitor is S4c. Until it exists nothing can have worked, and the honest
- * answer is no: graduation stays unavailable for every account, and the console
- * says why. S4c replaces this body with a read of the monitor's last successful
- * run; the callers do not change.
+ * **The switch is an environment variable and it is off.** Comment monitoring
+ * reads what the public wrote under our posts, which needs a lawful basis, a
+ * privacy assessment, the posting tool's data-processing terms and a revised
+ * privacy notice first (policy 12.1). Until a person has done those and set
+ * `MARKETING_COMMENTS_MONITOR_ENABLED=true`, nothing here reads a comment and
+ * nothing calls the posting tool. The same variable has to be set on every service
+ * that asks whether the monitor is healthy -- the web app (console and graduation)
+ * and the publisher (autonomous admission) as well as the service that runs the
+ * monitor -- or they read it as unhealthy, which is the safe way to be wrong.
+ *
+ * The health is a timestamp the monitor writes when a whole run finished with
+ * every read answered, kept as an app setting so the autonomous admission can
+ * read it in the statement that reads its other settings.
  */
-export async function readMarketingCommentsMonitorHealthy(): Promise<boolean> {
-  return false;
+export const MARKETING_COMMENTS_MONITOR_ENV = "MARKETING_COMMENTS_MONITOR_ENABLED";
+export const MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY = "marketing_comments_monitor_last_run";
+/** Working while the latest finished run is younger than this (the monitor runs hourly). */
+export const MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * On only when its own switch says true and the global kill switch is clear: the
+ * kill switch stops everything but reading the record (policy 6.1), and a
+ * monitor that kept calling the posting tool under it would not be stopped.
+ */
+export const commentsMonitorEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
+  (env[MARKETING_COMMENTS_MONITOR_ENV] ?? "").trim().toLowerCase() === "true" &&
+  (env[MARKETING_AUTOMATION_KILL_SWITCH_ENV] ?? "").trim() === "";
+
+/** The pure judgement, shared by the console, the graduation and the admission. */
+export const commentsMonitorHealthyFromValue = (
+  lastRunValue: string | undefined,
+  now: Date,
+  env: Readonly<Record<string, string | undefined>>,
+): boolean => {
+  if (!commentsMonitorEnabled(env) || lastRunValue === undefined) return false;
+  const lastRun = new Date(lastRunValue);
+  const age = now.getTime() - lastRun.getTime();
+  return Number.isFinite(age) && age >= 0 && age <= MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS;
+};
+
+export async function readMarketingCommentsMonitorHealthy(
+  client: Pick<PrismaClient, "appSetting"> = prisma,
+  now: Date = new Date(),
+): Promise<boolean> {
+  if (!commentsMonitorEnabled(process.env)) return false;
+  const row = await client.appSetting.findUnique({
+    where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY },
+    select: { value: true },
+  });
+  return commentsMonitorHealthyFromValue(row?.value, now, process.env);
+}
+
+/** The start of the latest run that read and classified everything, or null. */
+export async function readMarketingCommentsMonitorLastRun(
+  client: Pick<PrismaClient, "appSetting"> = prisma,
+): Promise<Date | null> {
+  const row = await client.appSetting.findUnique({
+    where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY },
+    select: { value: true },
+  });
+  const at = row ? new Date(row.value) : null;
+  return at && !Number.isNaN(at.getTime()) ? at : null;
+}
+
+/** A whole run finished with every read answered; `at` is when that run began. */
+export async function recordMarketingCommentsMonitorRun(
+  client: Pick<PrismaClient, "appSetting">,
+  at: Date,
+): Promise<void> {
+  await client.appSetting.upsert({
+    where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY },
+    create: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY, value: at.toISOString() },
+    update: { value: at.toISOString() },
+  });
 }

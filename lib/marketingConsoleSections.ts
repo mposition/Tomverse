@@ -46,14 +46,13 @@ export type MarketingSectionAvailability =
 /**
  * Stage ownership, from policy §14's stage table.
  *
- * Comment monitoring is S4 and landing experiments are S5, so their sections
- * render as future-stage affordances rather than as queues that are always
- * empty.
+ * Landing experiments are S5, so their section renders as a future-stage
+ * affordance rather than as a queue that is always empty. Comment monitoring
+ * (S4) writes its section and renders like any other.
  */
 export function marketingSectionAvailability(
   section: MarketingConsoleSection
 ): MarketingSectionAvailability {
-  if (section === "comments") return { available: false, stage: "S4" };
   if (section === "experiments") return { available: false, stage: "S5" };
   return { available: true };
 }
