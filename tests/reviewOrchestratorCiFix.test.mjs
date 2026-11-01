@@ -156,6 +156,23 @@ test("a Dependabot prompt names only root files the guard allows it", () => {
   assert.match(prompt, /never change the package versions/);
 });
 
+test("only a Dependabot prompt with the switch on lets the model move a test to a changed API", () => {
+  const fenced = /do not edit or delete any test file, fixture or snapshot/;
+  const opened = /You may edit an existing \*\.test\.\* or \*\.spec\.\* file only where it calls an API the update removed or renamed/;
+  const prompt = (headBranch, dependabotTests) => ciFixPrompt({ workflows: ["PR Fast Gate"], logFile: "/x/ci.log", headBranch, dependabotTests });
+  for (const [headBranch, on] of [["dependabot/npm_and_yarn/develop/g", false], ["claude/to-develop/x", true], ["codex/to-develop/x", true]]) {
+    assert.match(prompt(headBranch, on), fenced, headBranch);
+    assert.doesNotMatch(prompt(headBranch, on), opened, headBranch);
+  }
+  const text = prompt("dependabot/npm_and_yarn/develop/g", true);
+  assert.doesNotMatch(text, fenced);
+  assert.match(text, opened);
+  // What the guard refuses is named, so the model does not spend the attempt on it.
+  assert.match(text, /do not add, rename or delete a test file, and do not edit a fixture or snapshot/);
+  assert.match(text, /rewrite those lines in place without adding or removing a line or a comment, keep every test, every assertion and every expected value, skip nothing/);
+  assert.match(text, /AGENTS\.md or docs\/policy\/qa-release-agent\.md/);
+});
+
 test("what the proposing half writes is exactly what the sender accepts, and the inputs are the workflow's", () => {
   const dir = mkdtempSync(join(tmpdir(), "ci-fix-outbox-"));
   try {
@@ -307,11 +324,13 @@ test("settings: the sender needs its token and absolute paths; the proposing hal
   const mine = { [READ_TOKEN_ENV]: TOKEN, PR_CI_AUTO_FIX_REPO: "o/r", PR_CI_AUTO_FIX_OUTBOX: "/var/lib/fix/outbox",
     PR_CI_AUTO_FIX_WORK: "/var/lib/fix/work", HOME: "/home/review" };
   assert.deepEqual(ciFixSettings(mine, config), { token: TOKEN, repo: "o/r", outbox: "/var/lib/fix/outbox",
-    workDir: "/var/lib/fix/work", home: "/home/review", model: "sonnet", minRemainingPercent: 30, conflicts: false, install: false });
+    workDir: "/var/lib/fix/work", home: "/home/review", model: "sonnet", minRemainingPercent: 30, conflicts: false, install: false, dependabotTests: false });
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "on" }, config).conflicts, true, "conflicts only when switched on");
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "true" }, config).conflicts, false);
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_INSTALL: "on" }, config).install, true, "packages only when switched on");
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_INSTALL: "1" }, config).install, false);
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_DEPENDABOT_TESTS: "on" }, config).dependabotTests, true, "test edits only when switched on");
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_DEPENDABOT_TESTS: "true" }, config).dependabotTests, false);
   assert.match(ciFixSettings({ ...mine, [DISPATCH_TOKEN_ENV]: TOKEN }, config).error, /sender's account/);
   assert.match(ciFixSettings(mine, { ...config, providers: [{ id: "claude", passEnv: [READ_TOKEN_ENV] }] }).error, /passEnv must not carry/);
   // The model is denied these, so its checkout must lie outside them.
@@ -1068,6 +1087,30 @@ test("a Dependabot pass reads the installed packages and queues only the applica
     assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[f.sha].packages, "installed");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("the test-edit switch reaches a Dependabot head's prompt and nothing else", async () => {
+  const quota = async () => ({ state: "available", remainingPercent: 80 });
+  const opened = /You may edit an existing \*\.test\.\* or \*\.spec\.\* file/;
+  for (const [options, dependabotTests, expected] of [
+    [{ branch: "dependabot/npm_and_yarn/develop/x", author: "dependabot[bot]" }, true, true],
+    [{ branch: "dependabot/npm_and_yarn/develop/x", author: "dependabot[bot]" }, false, false],
+    [{}, true, false],
+  ]) {
+    const f = passFixture(options);
+    try {
+      const prompts = [];
+      await runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0, quota, dependabotTests, clock: () => 1, log: () => {},
+        claude: ({ prompt }) => {
+          prompts.push(prompt);
+          return { ok: true, timedOut: false, tail: "RESULT: not_found" };
+        } });
+      assert.equal(prompts.length, 1);
+      assert.equal(opened.test(prompts[0]), expected, JSON.stringify(options));
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
   }
 });
 
