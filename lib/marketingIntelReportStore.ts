@@ -154,7 +154,9 @@ export async function recordMarketingGeneratorReport(
     summary:
       report.kind === "brief"
         ? "Recorded the marketing generator's brief."
-        : "Recorded the market facts the marketing generator found.",
+        : report.kind === "measurement_120d"
+          ? "Recorded an AI-exposure measurement of the marketing generator."
+          : "Recorded the market facts the marketing generator found.",
     metadata: {
       reportKey,
       reportDigest,

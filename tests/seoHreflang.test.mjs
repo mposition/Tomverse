@@ -29,6 +29,7 @@ const EXPECTED_HREFLANG = {
   en: "en",
   ko: "ko",
   zh: "zh-Hans",
+  "zh-Hant": "zh-Hant",
   fr: "fr",
   de: "de",
   es: "es",
@@ -40,6 +41,14 @@ test("the Chinese alternate is zh-Hans and points at the /zh URL", () => {
     const languages = localizedLanguageAlternates(basePath);
     assert.equal(languages["zh-Hans"], `${SITE_ORIGIN}${localizedPath("zh", basePath)}`);
     assert.equal(languages["zh-CN"], undefined, `${basePath} still names zh-CN`);
+  }
+});
+
+test("the Traditional Chinese alternate is zh-Hant and points at the /zh-Hant URL", () => {
+  for (const basePath of LOCALIZED_SEO_PATHS) {
+    const languages = localizedLanguageAlternates(basePath);
+    assert.equal(languages["zh-Hant"], `${SITE_ORIGIN}${localizedPath("zh-Hant", basePath)}`);
+    assert.ok(languages["zh-Hant"].includes("/zh-Hant"), `${basePath} has no /zh-Hant URL`);
   }
 });
 

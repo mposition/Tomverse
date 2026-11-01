@@ -24,6 +24,13 @@ export const imageGenerationFeedbackCopy: Record<Language, typeof en> = {
     upgradeHint: "如需更高画质，请发送“以高画质重新生成这张图片”。",
     costHint: "重新生成会消耗积分，并可能需要更长时间。",
   },
+  "zh-Hant": {
+    generating: "正在產生圖片",
+    workingHint: "圖片完成後會顯示在這則回覆中。",
+    low: "草稿畫質", medium: "標準畫質", high: "高畫質",
+    upgradeHint: "如需更高畫質，請傳送「以高畫質重新產生這張圖片」。",
+    costHint: "重新產生會消耗點數，並可能需要更長時間。",
+  },
   de: {
     generating: "Dein Bild wird erstellt",
     workingHint: "Das fertige Bild erscheint in dieser Antwort.",

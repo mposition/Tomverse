@@ -5,17 +5,17 @@ import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LOCALIZED_SEO_PATHS,
-  SEO_LOCALES,
   localizedPath,
 } from "@/lib/seo";
 import {
   getLocaleLaunchPolicy,
   localeLaunchPolicy,
 } from "@/lib/localeLaunchPolicy";
+import { languageFromSegment } from "@/lib/language";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { MARKETING_LOCALE_NOTICE_ID } from "./LocaleSupportNotice";
 
-const languageOptions: Language[] = ["ko", "en", "zh", "fr", "de", "es", "pt"];
+const languageOptions: Language[] = ["ko", "en", "zh", "zh-Hant", "fr", "de", "es", "pt"];
 
 export function MarketingLanguageSwitcher() {
   const { lang, setLang, t } = useLanguage();
@@ -30,7 +30,7 @@ export function MarketingLanguageSwitcher() {
     const segments = pathname.split("/").filter(Boolean);
     if (
       segments.length >= 1 &&
-      SEO_LOCALES.includes(segments[0] as Language)
+      languageFromSegment(segments[0])
     ) {
       const remainder = segments.length === 1 ? "/" : `/${segments.slice(1).join("/")}`;
       if (LOCALIZED_SEO_PATHS.includes(remainder as (typeof LOCALIZED_SEO_PATHS)[number])) {

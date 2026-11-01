@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
-import { SUPPORTED_LANGUAGES } from "@/lib/language";
+import { ANALYTICS_LANGUAGES, SUPPORTED_LANGUAGES } from "@/lib/language";
 import { EXTERNAL_IMPORT_PROVIDERS } from "@/lib/externalImportProviders";
 
 export const PRODUCT_ANALYTICS_EVENT_NAMES = [
@@ -712,7 +712,7 @@ export const analyticsAttributionSchema = z
     utm_source: z.string().trim().min(1).max(100),
     utm_medium: z.string().trim().min(1).max(100),
     utm_campaign: z.string().trim().min(1).max(100),
-    language: z.enum(["en", "ko", "zh", "fr", "de", "es", "pt"]),
+    language: z.enum(ANALYTICS_LANGUAGES),
     country: z.string().regex(/^[A-Z]{2}$/),
   })
   .strict();

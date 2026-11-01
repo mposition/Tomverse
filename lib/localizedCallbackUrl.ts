@@ -1,10 +1,8 @@
-import type { Language } from "@/components/LanguageProvider";
+import { isLanguage, type Language } from "@/lib/language";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 
-const APP_LANGUAGES = new Set(["ko", "en", "zh", "fr", "de", "es", "pt"]);
-
 export function isAppLanguage(value: unknown): value is Language {
-    return typeof value === "string" && APP_LANGUAGES.has(value);
+    return isLanguage(value);
 }
 
 export function withChatLanguage(callbackUrl: string | null | undefined, lang: Language) {

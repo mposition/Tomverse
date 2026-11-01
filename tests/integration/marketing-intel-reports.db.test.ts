@@ -69,6 +69,20 @@ const brief = (overrides: Unsigned = {}): Unsigned =>
     ...overrides,
   });
 
+const measurement = (overrides: Unsigned = {}): Unsigned =>
+  intel({
+    reportId: "aiv-mention-ko",
+    kind: "measurement_120d",
+    payload: {
+      metricId: "ai_visibility.mention_rate.ko",
+      value: 0.3333,
+      sampleSize: 3,
+      observedFromAt: "2026-10-09T00:00:00.000Z",
+      observedUntilAt: "2026-10-16T00:00:00.000Z",
+    },
+    ...overrides,
+  });
+
 // One signed deadline per test, so a resend is the same report byte for byte,
 // and one run id per test: the audit chain outlives the reset, and a key it
 // already holds from an earlier run is that run's report.
@@ -125,7 +139,7 @@ const auditsFor = async (ids: string[]) =>
     select: { targetType: true, targetId: true, metadata: true },
   });
 
-test("only the generator's secret, a signed body and the two generator kinds are answered", () =>
+test("only the generator's secret, a signed body and the generator kinds are answered", () =>
   withSecret(async () => {
     assert.equal((await call(sign(intel()), null)).status, 401);
     assert.equal((await call(sign(intel()), "x".repeat(48))).status, 401);
@@ -318,6 +332,37 @@ test("a brief whose claim the registry lacks is refused with its analysis, and a
     const older = (await (await call(sign(brief()))).json()) as { result: { reportRowId: string } };
     const read = await readMarketingReportForConsole(prisma, older.result.reportRowId);
     assert.equal(read.kind === "found" && read.report.analysis, null);
+  }));
+
+test("an AI-exposure measurement is kept as sent, audited, and refused when its window runs backwards", () =>
+  withSecret(async () => {
+    const kept = (await (await call(sign(measurement()))).json()) as { result: { status: string; reportRowId: string } };
+    assert.equal(kept.result.status, "recorded");
+    const row = await prisma.marketingReport.findUniqueOrThrow({ where: { id: kept.result.reportRowId } });
+    assert.equal(row.kind, "measurement_120d");
+    assert.deepEqual(row.payload, {
+      metricId: "ai_visibility.mention_rate.ko",
+      value: 0.3333,
+      sampleSize: 3,
+      observedFromAt: "2026-10-09T00:00:00.000Z",
+      observedUntilAt: "2026-10-16T00:00:00.000Z",
+    });
+    const audits = await auditsFor([kept.result.reportRowId]);
+    assert.equal(audits.length, 1);
+    assert.equal((audits[0].metadata as { kind?: unknown }).kind, "measurement_120d");
+
+    const backwards = measurement({
+      reportId: "aiv-mention-en",
+      payload: {
+        metricId: "ai_visibility.mention_rate.en",
+        value: 0.5,
+        sampleSize: 2,
+        observedFromAt: "2026-10-16T00:00:00.000Z",
+        observedUntilAt: "2026-10-09T00:00:00.000Z",
+      },
+    });
+    assert.equal((await call(sign(backwards))).status, 400);
+    assert.equal(await prisma.marketingReport.count(), 1);
   }));
 
 test("a report with too little time before the service's deadline is not started", () =>

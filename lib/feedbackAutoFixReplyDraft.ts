@@ -27,6 +27,7 @@ const DRAFTS: Record<Language, string> = {
   en: "Thank you for reporting this error. We found the cause, fixed it, and the fix is now live. If you still see the problem, reply to this email and we will look again.",
   ko: "오류를 알려 주셔서 감사합니다. 원인을 확인해 수정했고, 수정 사항이 지금 서비스에 반영되었습니다. 같은 문제가 계속되면 이 메일에 회신해 주세요. 다시 살펴보겠습니다.",
   zh: "感谢您报告此错误。我们已查明原因并完成修复，修复现已上线。如果问题仍然存在，请回复此邮件，我们会再次检查。",
+  "zh-Hant": "感謝您回報這個錯誤。我們已找出原因並完成修正，修正現已上線。如果問題仍然存在，請回覆這封郵件，我們會再次檢查。",
   fr: "Merci d'avoir signalé cette erreur. Nous en avons trouvé la cause et l'avons corrigée, et le correctif est maintenant en ligne. Si le problème persiste, répondez à cet e-mail et nous examinerons à nouveau.",
   de: "Vielen Dank, dass Sie diesen Fehler gemeldet haben. Wir haben die Ursache gefunden und behoben, die Korrektur ist jetzt live. Falls das Problem weiterhin auftritt, antworten Sie auf diese E-Mail, und wir sehen es uns erneut an.",
   es: "Gracias por informar de este error. Encontramos la causa y la corregimos, y la corrección ya está disponible. Si el problema continúa, responde a este correo y lo revisaremos de nuevo.",
