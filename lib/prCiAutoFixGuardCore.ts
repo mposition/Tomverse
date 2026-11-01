@@ -74,14 +74,35 @@ const TEST_CODE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 /** Words an edited test line may not gain: each changes what runs, or whether it runs. */
 const ADDED_WORDS_REFUSED = new Set([
   "return", "if", "else", "throw", "try", "catch", "finally", "void", "while", "for", "do", "switch", "case",
-  "break", "continue", "delete", "skip", "todo", "only", "true", "false", "null", "undefined",
+  "break", "continue", "delete", "skip", "todo", "only", "true", "false", "null", "undefined", "not",
 ]);
 /** Punctuation an edited test line may gain: enough to wrap a call, `(await x.to("text")).value`. */
 const ADDED_PUNCTUATION = new Set([".", "(", ")", ","]);
-/** Names an edited test line may not lose, nor the name after `assert.`: what the test checks. */
+/**
+ * Names an edited test line may not lose, nor any name in a member chain
+ * that starts from one (`assert.strict.equal`, `expect(x).not.toBe`): what
+ * the test checks.
+ */
 const REMOVED_WORDS_REFUSED = new Set(["assert", "expect", "test", "it", "describe", "suite", "t", "strict"]);
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/** The name the member chain ending at the `.` at `dot` starts from, through calls: `expect` for `expect(x).not.`. */
+function chainRoot(list: readonly string[], dot: number): string {
+  let i = dot - 1;
+  for (;;) {
+    if (list[i] === ")") {
+      for (let depth = 0; i >= 0; i -= 1) {
+        if (list[i] === ")") depth += 1;
+        else if (list[i] === "(" && --depth === 0) break;
+      }
+      i -= 1;
+    }
+    if (i < 0 || !IDENTIFIER.test(list[i])) return "";
+    if (list[i - 1] !== ".") return list[i];
+    i -= 2;
+  }
+}
 const QUOTED = /^(["']).*\1$/s;
 const REGEX_MAY_FOLLOW = new Set(["", "(", ",", "=", ":", "[", "!", "&&", "||", "??", "?", "{", "}", ";", "=>", "return"]);
 
@@ -180,7 +201,7 @@ export function testEditProblems(patch: string, paths: ReadonlySet<string>): str
         before.forEach((token, i) => {
           if (keep.a[i]) return;
           const member = before[i - 1] === ".";
-          const assertionName = member && REMOVED_WORDS_REFUSED.has(before[i - 2] ?? "");
+          const assertionName = member && REMOVED_WORDS_REFUSED.has(chainRoot(before, i - 1));
           if (!IDENTIFIER.test(token) || !member || REMOVED_WORDS_REFUSED.has(token) || assertionName) problems.add("test_edit_removed");
         });
         after.forEach((token, j) => {

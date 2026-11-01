@@ -134,6 +134,12 @@ test("with the switch on, a Dependabot fix may move an existing test to a change
     ["test(\"reads the words\", async () => {", "test.skip(\"reads the words\", async () => {", "test_edit_added"],
     ["test(\"reads the words\", async () => {", "test(\"reads the words\", { skip: true }, async () => {", "test_edit_added"],
     ["test(\"reads the words\", async () => {", "{", "test_edit_removed"],
+    // Review r-20261101-021735-beed8a: an expect matcher swapped or negated, through the chain.
+    ["  expect(posts).toEqual([]);", "  expect(posts).toBeTruthy([]);", "test_edit_removed"],
+    ["  expect(status).toBe(200);", "  expect(status).not.toBe(200);", "test_edit_added"],
+    ["  await expect(page.getByRole(\"button\")).toBeVisible();", "  await expect(page.getByRole(\"button\")).toBeAttached();", "test_edit_removed"],
+    ["  assert.strict.equal(a, b);", "  assert.strict.ok(a, b);", "test_edit_removed"],
+    ["  t.assert.deepEqual(a, b);", "  t.assert.ok(a, b);", "test_edit_removed"],
   ]) {
     const verdict = judge(hunk([removed], [added]));
     assert.equal(verdict.push, false, added);
@@ -142,6 +148,9 @@ test("with the switch on, a Dependabot fix may move an existing test to a change
   // A line added or dropped, rather than one rewritten, is refused.
   assert.deepEqual(judge(hunk(["  const text = document.toText();"], ["  return;", "  const text = document.toText();"])),
     { push: false, reasons: ["test_edit_shape"] });
+  // A renamed API inside what an expect checks is still a rewrite; the matcher is kept.
+  assert.deepEqual(judge(hunk(["  await expect(page.getByLabelText(\"Name\")).toBeVisible();"],
+    ["  await expect(page.getByLabel(\"Name\")).toBeVisible();"])), { push: true });
   // Making a callback async to await the new API is a rewrite.
   assert.deepEqual(judge(hunk(["test(\"reads\", () => {", "  const text = document.toText();"],
     ["test(\"reads\", async () => {", "  const text = (await document.to(\"text\")).value;"])), { push: true });
