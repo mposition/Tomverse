@@ -317,7 +317,13 @@ export async function runMarketingPublisherBatch(
       }
     }
 
-    const health = await observePublishHealth(adapter, channel, room.now);
+    // Stamped after the evaluation, which may have waited on a lock: an
+    // observation is never older than the moment the question was asked.
+    const health = await observePublishHealth(
+      adapter,
+      channel,
+      operations.evaluateAutoPause ? await deps.databaseNow() : room.now,
+    );
     const claim = await operations.claim({ channelId: channel.id, claimToken, health });
     if (!claim.claimed) {
       count(result.refused, `claim:${claim.reason}`);
