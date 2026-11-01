@@ -56,6 +56,7 @@ export const marketingCommentsMonitorOperations = (
           channelId,
           forcedReason: "unhandled_comment_alert",
           forcedAlerts,
+          forcedOverdueBefore: new Date(now.getTime() - MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS),
         }),
       );
       if (result.paused) stopped += 1;

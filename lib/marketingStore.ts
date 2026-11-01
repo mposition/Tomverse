@@ -5699,6 +5699,8 @@ export async function evaluateMarketingAutoPause(
      * that committed after the list was read is respected.
      */
     readonly forcedAlerts?: ReadonlyArray<{ readonly postId: string; readonly firstDetectedAt: Date }>;
+    /** An alert counts only if it began at or before this instant (a day before now), checked under the lock. */
+    readonly forcedOverdueBefore?: Date;
   },
 ): Promise<
   | { readonly paused: false }
@@ -5742,9 +5744,16 @@ export async function evaluateMarketingAutoPause(
   if (rawInput.forcedReason !== undefined) {
     let warranted = false;
     for (const alert of rawInput.forcedAlerts ?? []) {
+      // The same alert, still unanswered, old enough: a fresh alert on the same
+      // post, written after the list was read, is a different one.
+      const state = await marketingCommentAlertState(database, alert.postId);
       if (
-        alert.firstDetectedAt.getTime() > since.getTime() &&
-        (await marketingCommentAlertIsOpen(database, alert.postId))
+        state.open &&
+        state.firstDetectedAt !== null &&
+        state.firstDetectedAt.getTime() === alert.firstDetectedAt.getTime() &&
+        state.firstDetectedAt.getTime() > since.getTime() &&
+        rawInput.forcedOverdueBefore !== undefined &&
+        state.firstDetectedAt.getTime() <= rawInput.forcedOverdueBefore.getTime()
       ) {
         warranted = true;
         break;
@@ -6219,22 +6228,26 @@ export async function listOpenMarketingCommentAlerts(
 }
 
 /**
- * Whether one post has an unanswered alert: its newest report is newer than its
- * newest acknowledgement. Two indexed reads for one post, so the transaction
+ * Where one post's alert stands: open when its newest report is newer than its
+ * newest acknowledgement, with the instant that report says it began. Two indexed reads for one post, so the transaction
  * that holds the audit chain lock does not scan the table. `ignoreAuditLogId`
  * leaves out the entry a request has just written for itself.
  */
-async function marketingCommentAlertIsOpen(
+async function marketingCommentAlertState(
   database: MarketingDatabase,
   postId: string,
   ignoreAuditLogId?: string,
-): Promise<boolean> {
+): Promise<{ readonly open: boolean; readonly firstDetectedAt: Date | null }> {
   const report = await database.marketingReport.findFirst({
     where: { kind: "comment_alerts", payload: { path: ["postId"], equals: postId } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { createdAt: true },
+    select: { createdAt: true, payload: true },
   });
-  if (!report) return false;
+  if (!report) return { open: false, firstDetectedAt: null };
+  const detected = new Date(
+    String((report.payload as { firstDetectedAt?: unknown } | null)?.firstDetectedAt ?? ""),
+  );
+  const firstDetectedAt = Number.isNaN(detected.getTime()) ? null : detected;
   const answer = await database.adminAuditLog.findFirst({
     where: {
       action: MARKETING_COMMENT_ALERT_ACK_ACTION,
@@ -6244,7 +6257,10 @@ async function marketingCommentAlertIsOpen(
     orderBy: { createdAt: "desc" },
     select: { createdAt: true },
   });
-  return !(answer && answer.createdAt.getTime() >= report.createdAt.getTime());
+  return {
+    open: !(answer && answer.createdAt.getTime() >= report.createdAt.getTime()),
+    firstDetectedAt,
+  };
 }
 
 /**
@@ -6272,7 +6288,7 @@ export async function recordMarketingCommentAlert(
   if (!post || !post.externalUrl || (post.status !== "published" && post.status !== "verified")) {
     return { recorded: false, reason: "post_not_published" };
   }
-  if (await marketingCommentAlertIsOpen(database, post.id)) return { recorded: false, reason: "already_open" };
+  if ((await marketingCommentAlertState(database, post.id)).open) return { recorded: false, reason: "already_open" };
   const detectedAt = new Date(rawInput.detectedAt.getTime());
   await insertMarketingReport(database, {
     kind: "comment_alerts",
@@ -6312,7 +6328,7 @@ export async function requireOpenMarketingCommentAlert(
   // Without the entry this very request wrote: the wrapper writes the human
   // entry first, and that entry would otherwise answer the alert before it was
   // checked to exist.
-  if (!(await marketingCommentAlertIsOpen(database, postId, auditLogId))) {
+  if (!(await marketingCommentAlertState(database, postId, auditLogId)).open) {
     throw new MarketingStoreRefusedError(
       "post_not_found",
       "There is no unanswered comment alert for that post",

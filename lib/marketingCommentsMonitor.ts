@@ -152,10 +152,14 @@ export async function runMarketingCommentsMonitor(
     for (const post of posts) {
       try {
         const page = await deps.fetchComments(post);
-        if (page.kind !== "ok" || page.truncated) {
+        if (page.kind !== "ok") {
           postsUnread += 1;
           continue;
         }
+        // A thread longer than the pages read is not a whole read, so the run is
+        // not recorded as one -- but what was read is still classified and still
+        // raises its alerts: an unread part is no reason to ignore the read part.
+        if (page.truncated) postsUnread += 1;
         const bodies = marketingCommentBodiesForModel(page.comments, floor);
         if (bodies.length === 0) continue;
         const flagged: MarketingCommentRiskCode[][] = [];

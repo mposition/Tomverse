@@ -484,7 +484,10 @@ test("a post that already has an unanswered alert gets no second one; an unpubli
 // The stop for an alert nobody answered
 // ---------------------------------------------------------------------------
 
-const pauseWorld = (approvalStartedAt: Date, options: { answered?: boolean } = {}) => {
+const pauseWorld = (
+  approvalStartedAt: Date,
+  options: { answered?: boolean; reportFirstDetectedAt?: string } = {},
+) => {
   const updates: Array<Record<string, unknown>> = [];
   const audits: Array<Record<string, unknown>> = [];
   const database = {
@@ -503,7 +506,10 @@ const pauseWorld = (approvalStartedAt: Date, options: { answered?: boolean } = {
       },
     },
     marketingReport: {
-      findFirst: async () => ({ createdAt: new Date("2026-11-01T01:00:00.000Z") }),
+      findFirst: async () => ({
+        createdAt: new Date("2026-11-01T01:00:00.000Z"),
+        payload: { firstDetectedAt: options.reportFirstDetectedAt ?? "2026-11-01T00:00:00.000Z" },
+      }),
     },
     adminAuditLog: {
       findFirst: async (args?: { where?: { action?: unknown } }) =>
@@ -525,6 +531,7 @@ test("an alert that began after the account's last fresh start stops the account
     channelId: "chn-1",
     forcedReason: "unhandled_comment_alert",
     forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
+    forcedOverdueBefore: new Date("2026-11-01T09:00:00.000Z"),
   });
   assert.equal(result.paused && result.reasonCode, "unhandled_comment_alert");
   assert.equal(world.updates.length, 1);
@@ -537,6 +544,7 @@ test("an alert that was already open when the account was resumed does not stop 
     channelId: "chn-1",
     forcedReason: "unhandled_comment_alert",
     forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
+    forcedOverdueBefore: new Date("2026-11-01T09:00:00.000Z"),
   });
   assert.deepEqual(result, { paused: false });
   assert.equal(world.updates.length, 0);
@@ -549,6 +557,7 @@ test("an alert the operator answered after the list was read does not stop the a
     channelId: "chn-1",
     forcedReason: "unhandled_comment_alert",
     forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
+    forcedOverdueBefore: new Date("2026-11-01T09:00:00.000Z"),
   });
   assert.deepEqual(result, { paused: false });
   assert.equal(world.updates.length, 0);
@@ -579,7 +588,7 @@ test("an unanswered alert older than the newest few hundred reports is still fou
   assert.deepEqual(open.map((alert) => alert.postId), ["p-old"]);
 });
 
-test("a read cut short by paging is not a whole read: no health, and the rest still goes on", async () => {
+test("a read cut short by paging is not a whole read: no health, but what was read still raises alerts", async () => {
   const { deps, calls, classified } = monitor({
     posts: [post("p1"), post("p2")],
     comments: { p1: [comment("a")], p2: [comment("b")] },
@@ -588,8 +597,8 @@ test("a read cut short by paging is not a whole read: no health, and the rest st
   const result = await runMarketingCommentsMonitor(deps);
   assert.equal(result.ran && result.complete, false);
   assert.equal(calls.includes("recordRun"), false);
-  // The cut-short post was not classified on a part of its comments; the other was.
-  assert.deepEqual(classified, [["b"]]);
+  // What was read of the cut-short post is still classified.
+  assert.deepEqual(classified, [["a"], ["b"]]);
 });
 
 test("an alert that cannot be written leaves its post unread, the run goes on, and the sweep still runs", async () => {
@@ -662,3 +671,28 @@ test("the comments call follows pages to the end, assumes no order, and says whe
 });
 
 
+
+test("a newer alert on the same post is not the overdue one the list showed", async () => {
+  // The list saw the alert of 2026-11-01T00:00; the operator answered it and a
+  // new one began at 08:00 -- under a day old, and not the alert asked about.
+  const world = pauseWorld(new Date("2026-10-30T00:00:00.000Z"), { reportFirstDetectedAt: "2026-11-01T08:00:00.000Z" });
+  const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
+    channelId: "chn-1",
+    forcedReason: "unhandled_comment_alert",
+    forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
+    forcedOverdueBefore: new Date("2026-11-01T09:00:00.000Z"),
+  });
+  assert.deepEqual(result, { paused: false });
+  assert.equal(world.updates.length, 0);
+});
+
+test("an alert that is not yet a day old is not overdue, whatever the list said", async () => {
+  const world = pauseWorld(new Date("2026-10-30T00:00:00.000Z"));
+  const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
+    channelId: "chn-1",
+    forcedReason: "unhandled_comment_alert",
+    forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
+    forcedOverdueBefore: new Date("2026-10-31T23:00:00.000Z"),
+  });
+  assert.deepEqual(result, { paused: false });
+});
