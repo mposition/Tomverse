@@ -225,7 +225,6 @@ const orderedInput = (input: {
       input.eventName === "marketing_touch"
         ? `client:${randomUUID()}`
         : `singleton:signup_completed:${input.userId}`,
-    receivedAt,
     touchObservedAt: input.observedAt,
   };
 };
@@ -266,7 +265,7 @@ test("a touch and its sign-up sent at the same moment always end attributed", as
   }
 });
 
-test("two touches racing to finish one sign-up leave the later-received one", async () => {
+test("two touches racing to finish one sign-up leave the one the server received last", async () => {
   const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
   const clientId = randomUUID();
   const signedUpAt = new Date();
@@ -288,12 +287,53 @@ test("two touches racing to finish one sign-up leave the later-received one", as
     campaign: "later",
     observedAt: new Date(signedUpAt.getTime() - 1_000),
   });
-  // The later-received one is submitted first, so a last-write-wins update
-  // would leave "earlier".
+  // "Received" is the server's time under the per-browser lock, so whichever
+  // touch is processed second is the later one -- and it must be the one left,
+  // whatever order the two repairs would have written in without the lock.
   await Promise.all([recordOrderedAnalyticsEvent(later), recordOrderedAnalyticsEvent(earlier)]);
+  const touches = await prisma.productAnalyticsEvent.findMany({
+    where: { eventName: "marketing_touch", utmCampaign: { in: ["earlier", "later"] } },
+    orderBy: { occurredAt: "desc" },
+    select: { utmCampaign: true, occurredAt: true },
+  });
+  assert.equal(touches.length, 2);
   const signup = await prisma.productAnalyticsEvent.findFirst({
     where: { eventName: "signup_completed", userId: user.id },
     select: { properties: true },
   });
-  assert.equal((signup?.properties as Record<string, unknown>).touch_utm_campaign, "later");
+  const properties = signup?.properties as Record<string, unknown>;
+  assert.equal(properties.touch_utm_campaign, touches[0].utmCampaign);
+  assert.equal(properties.touch_received_at, touches[0].occurredAt.toISOString());
+});
+
+test("a touch that takes the lock before an earlier-arrived sign-up still attributes it", async () => {
+  // The sign-up's request is built (arrives) first; the touch's request is
+  // built after it but is processed to completion before the sign-up is.
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  const signup = orderedInput({
+    eventName: "signup_completed",
+    clientId,
+    userId: user.id,
+    observedAt: signedUpAt,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const touch = orderedInput({
+    eventName: "marketing_touch",
+    clientId,
+    userId: null,
+    campaign: "took-the-lock-first",
+    observedAt: new Date(signedUpAt.getTime() - 1_000),
+  });
+  await recordOrderedAnalyticsEvent(touch);
+  await recordOrderedAnalyticsEvent(signup);
+  const row = await prisma.productAnalyticsEvent.findFirst({
+    where: { eventName: "signup_completed", userId: user.id },
+    select: { properties: true },
+  });
+  assert.equal(
+    (row?.properties as Record<string, unknown>).touch_utm_campaign,
+    "took-the-lock-first"
+  );
 });

@@ -106,6 +106,10 @@ mock.module(mod("lib/prisma.ts"), {
               lockKeys.push(...values);
               return 1;
             },
+            $queryRaw: async () => {
+              note("clock");
+              return [{ epochMs: Date.now() }];
+            },
             productAnalyticsEvent,
           });
         } finally {
@@ -379,8 +383,8 @@ test("a touch and a conversion each run whole inside the same per-browser lock",
   await POST(event("signup_completed", { method: "google" }));
   await POST(event("landing_view"));
   assert.deepEqual(transactions, [
-    ["lock", "insert", "repair-read"],
-    ["lock", "lookup", "insert"],
+    ["lock", "clock", "insert", "repair-read"],
+    ["lock", "clock", "lookup", "insert"],
   ], "the touch inserts then repairs; the conversion looks then inserts; landing_view takes no lock");
   assert.equal(lockKeys.length, 2);
   assert.equal(lockKeys[0], lockKeys[1], "one key per browser");

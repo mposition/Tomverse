@@ -70,7 +70,8 @@ export async function POST(req: Request) {
     // A marketing touch is timed by the server's receipt and nothing else
     // (docs/policy/marketing-automation.md §10.1): its whole evidence value is
     // "client-observed, server-timed", and a client clock would make it
-    // neither.
+    // neither. (recordOrderedAnalyticsEvent records it at the database time
+    // it was processed in order, which is later than this by the lock wait.)
     const occurredAt =
       !isMarketingTouch &&
       occurredAtCandidate.getTime() <= now.getTime() + 5 * 60 * 1000 &&
@@ -112,7 +113,6 @@ export async function POST(req: Request) {
       properties,
       occurredAt,
       dedupeKey,
-      receivedAt: now,
       touchObservedAt: occurredAtCandidate,
     });
 

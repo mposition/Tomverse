@@ -338,7 +338,6 @@ export async function repairLateMarketingTouchSnapshots(input: {
  */
 export async function recordOrderedAnalyticsEvent(
   input: RecordProductAnalyticsEventInput & {
-    receivedAt: Date;
     touchObservedAt: Date;
   }
 ): Promise<boolean> {
@@ -351,20 +350,39 @@ export async function recordOrderedAnalyticsEvent(
   const lockKey = `marketing-touch:${privateDigest("client", clientId)}`;
   return prisma.$transaction(async (db) => {
     await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    // "Received" means received in this order: the database clock read under
+    // the lock, not the moment the request arrived. Requests can take the lock
+    // in a different order from the one they arrived in; reading the time here
+    // makes the two orders the same, so a touch that took the lock first is
+    // always earlier than the conversion that follows it, and a touch that
+    // follows a conversion is always the later one its repair looks for.
+    //
+    // Read as epoch milliseconds, not as a timestamp: a timestamptz comes back
+    // through the driver shifted by the session time zone when that is not
+    // UTC (observed on a local database set to Australia/Brisbane), and a
+    // number has no zone to get wrong.
+    const [{ epochMs }] = await db.$queryRaw<Array<{ epochMs: number }>>`
+      SELECT (extract(epoch FROM clock_timestamp()) * 1000)::float8 AS "epochMs"`;
+    const receivedAt = new Date(Math.floor(Number(epochMs)));
     let properties = input.properties || {};
     if (snapshot) {
       const touch = await findLatestMarketingTouch({
         clientId,
         userId,
-        receivedAt: input.receivedAt,
+        receivedAt,
         db,
       });
       properties = {
         ...properties,
-        ...marketingTouchSnapshot(touch, input.receivedAt),
+        ...marketingTouchSnapshot(touch, receivedAt),
       };
     }
-    const event = { ...input, properties };
+    const event = {
+      ...input,
+      properties,
+      // A touch's own time is its receipt (§10.1), so it is this time too.
+      ...(isTouch ? { occurredAt: receivedAt } : {}),
+    };
     // ON CONFLICT DO NOTHING rather than catching a unique violation: an error
     // would abort the transaction the repair below still needs.
     const { count } = await db.productAnalyticsEvent.createMany({
@@ -381,7 +399,7 @@ export async function recordOrderedAnalyticsEvent(
           utmMedium: input.attribution.utm_medium,
           utmCampaign: input.attribution.utm_campaign,
           utmContent: properties.utm_content ?? null,
-          occurredAt: input.occurredAt || input.receivedAt,
+          occurredAt: receivedAt,
         },
         touchObservedAt: input.touchObservedAt,
         db,
