@@ -92,7 +92,8 @@ export type SeoCheckIsolation =
   | { readonly mode: "separate_user"; readonly uid: number; readonly gid: number }
   /**
    * A dry run, to see what the validation says. It produces no bundle and no attestation, so nothing
-   * it does can be published; the checks share this process's user, and it holds no signing key.
+   * it does can be published; the checks share this process's user, so it holds no signing key and no
+   * LLM credential.
    */
   | { readonly mode: "same_user_dry_run" }
   | { readonly mode: "refused"; readonly reason: "check_user_invalid" | "check_user_required" };
@@ -510,7 +511,8 @@ export function seoAgentCheckCommands(
   // `node --test` with no files discovers whatever is in the tree; a list that is empty is an error, not "all".
   if (tests.length === 0) throw new Error("no policy test exists at the base commit");
   return [
-    { label: "lint", argv: ["npx", "eslint", ...changedPaths] },
+    // The installed eslint, run directly: `npx` could resolve one from the registry.
+    { label: "lint", argv: ["node", "node_modules/eslint/bin/eslint.js", ...changedPaths] },
     { label: "typecheck", argv: ["npm", "run", "typecheck"] },
     {
       label: "policy tests",
@@ -701,7 +703,14 @@ export async function runSeoAgentValidate(
   // A dry run signs nothing and so holds no key.
   const attestationKey = input.env[SEO_AGENT_ATTESTATION_KEY_ENV];
   if (!dryRun && (typeof attestationKey !== "string" || attestationKey.length < 32)) return { status: "no_attestation_key" };
-  if (dryRun && typeof attestationKey === "string" && attestationKey.length > 0) return { status: "wrong_environment", problems: [SEO_AGENT_ATTESTATION_KEY_ENV] };
+  // The checks of a dry run share this process's user, which can read its environment: it holds
+  // no signing key and no LLM credential (a dry run replays a saved proposal).
+  if (dryRun) {
+    const held = [SEO_AGENT_ATTESTATION_KEY_ENV, ...seoAgentPhaseEnvProblems(input.env, "publish")].filter(
+      (name) => typeof input.env[name] === "string" && (input.env[name] as string).length > 0,
+    );
+    if (held.length > 0) return { status: "wrong_environment", problems: held };
+  }
 
   const dir = await ports.prepareWorkspace(input.baseCommit);
   try {

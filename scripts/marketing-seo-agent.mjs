@@ -51,7 +51,7 @@
 // `--proposal-file` replaces the LLM call with a saved answer, for trying the
 // validation without spending anything. `--dry-run` (validate only) runs the whole
 // validation as this user, holds no attestation key, and writes nothing to --out: it
-// shows what the validation says and produces nothing that can be published.
+// shows what the validation says for a saved --proposal-file, and produces nothing that can be published.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -177,6 +177,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   const dryRun = process.argv.includes("--dry-run");
   const outDir = option("--out");
   if (!topic || (!outDir && !dryRun)) fail(new Error("--topic and --out are required (--out is not used by --dry-run)"));
+  if (dryRun && !option("--proposal-file")) fail(new Error("--dry-run replays a saved proposal: give --proposal-file (it holds no LLM credential)"));
   const proposalFile = option("--proposal-file");
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"]).trim();
   const baseCommit = git(root, ["rev-parse", "--verify", "--end-of-options", `${option("--base") ?? "origin/develop"}^{commit}`]).trim();
@@ -273,7 +274,13 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
             // A process that started a new session left the group. As the check user, kill(-1) ends every
             // process that user owns -- the user is the operator's and is used for nothing else.
             if (isolation.mode === "separate_user") {
-              spawnSync("kill", ["-9", "-1"], { uid: isolation.uid, gid: isolation.gid, stdio: "ignore" });
+              // With no secret in its environment: it runs as the user whose processes may be reading it.
+              spawnSync("kill", ["-9", "-1"], {
+                uid: isolation.uid,
+                gid: isolation.gid,
+                stdio: "ignore",
+                env: seoAgentStageEnvironment({ PATH: process.env.PATH }, "checks"),
+              });
             }
           };
           const timer = setTimeout(() => {

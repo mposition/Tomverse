@@ -350,7 +350,7 @@ test("the checks run lint on the changed files and only fixed policy tests that 
         ["lib/seo.ts"],
     );
     assert.deepEqual(commands.map((c) => c.label), ["lint", "typecheck", "policy tests"]);
-    assert.deepEqual(commands[0].argv, ["npx", "eslint", "lib/seo.ts"]);
+    assert.deepEqual(commands[0].argv, ["node", "node_modules/eslint/bin/eslint.js", "lib/seo.ts"]);
     const testRun = commands[2].argv;
     assert.deepEqual(testRun.slice(testRun.indexOf("--test") + 1), ["tests/sitemapLastModified.test.mjs", "tests/seoHreflang.test.mjs"].sort((a, b) => SEO_AGENT_POLICY_TESTS.indexOf(a) - SEO_AGENT_POLICY_TESTS.indexOf(b)));
     assert.ok(!testRun.includes("tests/mine.test.mjs"));
@@ -473,7 +473,13 @@ test("a dry run shows the validation and produces nothing that can be published"
     assert.equal(result.record.treeHash, TREE);
     assert.ok(!("attestation" in result) && !("bundleSha256" in result));
     assert.ok(!calls.includes("exportCommit"), "nothing is exported");
-    // It holds no signing key: one in its environment is a mistake, not a convenience.
+    // It holds no signing key and no LLM credential: the checks can read its environment.
+    for (const name of ["MARKETING_LLM_API_KEY", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_APP_URL"]) {
+        const held = validatePorts();
+        const result = await runSeoAgentValidate({ topic: "x", baseCommit: BASE, env: { ...dry, [name]: "v" }, platform: "linux", dryRun: true }, held.ports);
+        assert.deepEqual(result, { status: "wrong_environment", problems: [name] }, name);
+        assert.deepEqual(held.calls, []);
+    }
     const withKey = validatePorts();
     const refused = await runSeoAgentValidate({ topic: "x", baseCommit: BASE, env: { ...dry, MARKETING_SEO_ATTESTATION_KEY: KEY }, platform: "linux", dryRun: true }, withKey.ports);
     assert.deepEqual(refused, { status: "wrong_environment", problems: ["MARKETING_SEO_ATTESTATION_KEY"] });
@@ -825,8 +831,10 @@ test("the check user can write only the tools' outputs, and every check has a de
     assert.match(source, /setTimeout\(\(\) => \{\s*timedOut = true;\s*killTree\(\);\s*\}, CHECK_TIMEOUT_MS\)/);
     // The whole process group goes at the deadline and when the check ends, not only the direct child.
     assert.match(source, /process\.kill\(-child\.pid, "SIGKILL"\)/);
+    // The cleanup runs as the check user with no secret in its environment.
+    assert.match(source, /env: seoAgentStageEnvironment\(\{ PATH: process\.env\.PATH \}, "checks"\)/);
     // A process that left the group by starting a new session is ended with the user's own kill(-1).
-    assert.match(source, /spawnSync\("kill", \["-9", "-1"\], \{ uid: isolation\.uid, gid: isolation\.gid/);
+    assert.match(source, /spawnSync\("kill", \["-9", "-1"\], \{\s*uid: isolation\.uid,\s*gid: isolation\.gid/);
     assert.doesNotMatch(source, /spawnSync\(command\.argv/);
     assert.match(source, /signal: AbortSignal\.timeout\(GITHUB_TIMEOUT_MS\)/);
     assert.match(source, /"--end-of-options"/);
