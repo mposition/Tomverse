@@ -84,6 +84,10 @@ import {
 /** One LLM call; the ledger's own reservation expiry bounds it further. */
 const LLM_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const BUNDLE_REF = "seo-agent-change";
+/** One check, lint or typecheck or the policy tests. */
+const CHECK_TIMEOUT_MS = 20 * 60 * 1000;
+/** One GitHub API request. */
+const GITHUB_TIMEOUT_MS = 30 * 1000;
 
 const option = (name) => {
   const index = process.argv.indexOf(name);
@@ -174,7 +178,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   if (!topic || !outDir) fail(new Error("--topic and --out are required"));
   const proposalFile = option("--proposal-file");
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"]).trim();
-  const baseCommit = git(root, ["rev-parse", "--verify", `${option("--base") ?? "origin/develop"}^{commit}`]).trim();
+  const baseCommit = git(root, ["rev-parse", "--verify", "--end-of-options", `${option("--base") ?? "origin/develop"}^{commit}`]).trim();
   mkdirSync(outDir, { recursive: true });
   if (readdirSync(outDir).length > 0) fail(new Error("--out must be an empty directory"));
   const scratch = mkdtempSync(join(tmpdir(), "seo-agent-"));
@@ -247,8 +251,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
       SEO_AGENT_POLICY_TESTS.filter((path) => spawnSync("git", ["cat-file", "-e", `${base}:${path}`], { cwd: root }).status === 0),
     runChecks: async (dir, commands, isolation) => {
       // The checks execute the proposed code: they get an allowlisted environment, not this process's...
-      const env = { ...seoAgentStageEnvironment(process.env, "checks") };
-      env.NODE_OPTIONS ??= "--max-old-space-size=8192";
+      const env = { ...seoAgentStageEnvironment(process.env, "checks"), NODE_OPTIONS: "--max-old-space-size=8192" };
       // ...and, where the operator gave a user for them, they run as that user, who cannot read
       // this process's /proc/<pid>/environ (the LLM key, the attestation key) or its files.
       const asUser = isolation.mode === "separate_user" ? { uid: isolation.uid, gid: isolation.gid } : {};
@@ -259,10 +262,15 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
         const home = join(scratch, "check-home");
         mkdirSync(home, { recursive: true });
         env.HOME = home;
-        // The check user may walk to its work tree (execute only: it cannot list the scratch directory)
-        // and owns the files in it and its HOME. It owns nothing of the repository.
+        // The check user may walk to the work tree (execute only: it cannot list the scratch directory),
+        // and it can read all of it, but it can write only what the tools emit -- `.next`,
+        // `next-env.d.ts` (both ignored by git) -- and its HOME. The tests, the configuration and the
+        // proposed files are this process's, so proposed code cannot weaken the tests that judge it,
+        // not even for as long as the checks run.
         chmodSync(scratch, 0o711);
-        const owned = spawnSync("chown", ["-R", "-h", `${isolation.uid}:${isolation.gid}`, dir, home]);
+        mkdirSync(join(dir, ".next"), { recursive: true });
+        if (!existsSync(join(dir, "next-env.d.ts"))) writeFileSync(join(dir, "next-env.d.ts"), "");
+        const owned = spawnSync("chown", ["-R", "-h", `${isolation.uid}:${isolation.gid}`, join(dir, ".next"), join(dir, "next-env.d.ts"), home]);
         if (owned.status !== 0) throw new Error("the workspace could not be handed to the check user");
       }
       for (const command of commands) {
@@ -272,6 +280,9 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
           env,
           stdio: "inherit",
           shell: process.platform === "win32",
+          // Proposed code can loop forever; a check that outlives its time has failed.
+          timeout: CHECK_TIMEOUT_MS,
+          killSignal: "SIGKILL",
           ...asUser,
         });
         if (result.status !== 0) return { ok: false, label: command.label };
@@ -302,6 +313,8 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   };
 
   try {
+    // A clone that fails half-way never reaches the core's cleanup, so the scratch is removed here too.
+    process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
     const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env, platform: process.platform, ownUid: process.getuid?.() }, ports);
     if (result.status === "validated") {
       writeFileSync(join(resolve(outDir), "record.json"), `${JSON.stringify(result.record, null, 2)}\n`);
@@ -358,6 +371,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
         ...(body ? { "content-type": "application/json" } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
     });
     return { status: response.status, body: await response.json().catch(() => null) };
   };

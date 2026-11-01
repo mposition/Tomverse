@@ -73,7 +73,8 @@ test("each stage holds its own secrets and not the other's", () => {
         assert.equal(llm[name], undefined, `llm stage must not hold ${name}`);
     }
     const checks = seoAgentStageEnvironment({ ...env, NODE_OPTIONS: "--max-old-space-size=8192" }, "checks");
-    assert.equal(checks.NODE_OPTIONS, "--max-old-space-size=8192");
+    // Not even Node's flags are inherited: the runner sets its own.
+    assert.equal(checks.NODE_OPTIONS, undefined);
     assert.equal(checks.PATH, "/bin");
     for (const name of Object.keys(env).filter((key) => key !== "PATH")) {
         assert.equal(checks[name], undefined, `checks (which run proposed code) must not hold ${name}`);
@@ -795,6 +796,16 @@ test("the runner reads no robots policy, workflow or test file into the prompt",
     const source = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
     assert.doesNotMatch(source, /robotsPolicyCore/);
     assert.match(source, /SEO_AGENT_ALLOWED_FILES\.map/);
+});
+
+test("the check user can write only the tools' outputs, and every check has a deadline", () => {
+    const source = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
+    // The chown names the outputs and the HOME; there is no recursive handover of the work tree.
+    assert.doesNotMatch(source, /chown",\s*\["-R",\s*"-h",[^\]]*\bdir\b\s*,\s*home/);
+    assert.match(source, /join\(dir, "\.next"\), join\(dir, "next-env\.d\.ts"\), home/);
+    assert.match(source, /timeout: CHECK_TIMEOUT_MS/);
+    assert.match(source, /signal: AbortSignal\.timeout\(GITHUB_TIMEOUT_MS\)/);
+    assert.match(source, /"--end-of-options"/);
 });
 
 test("the runner starts the checks with the allowlisted environment, not its own", () => {

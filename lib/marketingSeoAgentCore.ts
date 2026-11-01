@@ -180,7 +180,7 @@ const STAGE_VARIABLES: Readonly<Record<SeoAgentStage, readonly string[]>> = {
     SEO_AGENT_SWITCH_ENV, SEO_AGENT_KILL_SWITCH_ENV,
   ],
   // Runs the proposed code: an allowlist of what Node needs, so no other variable of the parent is there to read.
-  checks: ["NODE_OPTIONS", "CI"],
+  checks: ["CI"],
   // The GitHub App token and nothing of the LLM's.
   publish: [SEO_AGENT_GITHUB_TOKEN_ENV, SEO_AGENT_GITHUB_REPOSITORY_ENV, SEO_AGENT_ATTESTATION_KEY_ENV],
 };
