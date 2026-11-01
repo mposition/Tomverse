@@ -19,8 +19,8 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Forty minutes: A3's twenty-minute share (about thirteen tracked competitors
- * at its ninety-second budget), then nine A5 accounts at the cycle's
- * ninety-second call budget, and room to spare. The ledger's reservation
+ * at its ninety-second budget), the analysis and brief's five, then nine A5
+ * accounts at the cycle's ninety-second call budget, and room to spare. The ledger's reservation
  * lives fifteen minutes and its dispatch an hour, each call's own, so a run
  * this long does not outlive them.
  */

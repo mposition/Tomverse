@@ -98,19 +98,26 @@ const ports = (overrides = {}) => {
 
 test("a run searches once per competitor within its official domains, and reports one signed market_intel report", async () => {
   const { deps, seen } = ports();
-  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  const kept = [];
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, { ...deps, keep: (value) => kept.push(value) });
   assert.deepEqual(summary, {
     competitors: 1,
     calls: 2,
     factsKept: 1,
     unrepresentable: 2,
     dropped: { source_not_retrieved: 1 },
+    featuresKept: 0,
+    featuresDropped: 0,
     candidatesKept: 0,
     candidatesDropped: {},
     report: { httpStatus: 200, status: "recorded" },
     stoppedAt: null,
   });
   assert.deepEqual(seen.calls[0].allowedDomains, ["poe.com"]);
+  // The kept facts reach the same run's analysis once, in memory; the summary holds counts.
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].facts.length, 1);
+  assert.deepEqual(kept[0].features, []);
   // Each call is held to the shape its reader parses.
   assert.deepEqual(seen.calls[0].answerSchema, MARKETING_A3_ANSWER_SCHEMA);
   assert.deepEqual(seen.calls.at(-1).answerSchema, MARKETING_A3_DISCOVERY_ANSWER_SCHEMA);
