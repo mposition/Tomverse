@@ -61,7 +61,7 @@ async function approvalChannel(channel = "linkedin") {
 }
 
 /** A post a person approved and the platform published `publishedDaysAgo` days ago. */
-async function approvedPost(channelId: string, publishedDaysAgo: number, history: Array<Record<string, unknown>> = []) {
+async function approvedPost(channelId: string, publishedDaysAgo: number, history: Array<Record<string, string | number | boolean | null>> = []) {
   const key = `post-${Math.random().toString(36).slice(2)}`;
   await prisma.$executeRawUnsafe(
     `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
