@@ -6,6 +6,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import type { AmuxAnalysisSchemaRejectAt } from "@/lib/amux/ideaAnalysisChunkCore";
 import { readAmuxSessionReviewReply, type AmuxSessionReview, type AmuxSessionReviewDetail } from
   "@/lib/amux/ideaSessionReviewCore";
 
@@ -16,6 +17,12 @@ function detailCheck(detail: AmuxSessionReviewDetail): DetailCheck {
   if (detail.startsWith("history_")) return "history";
   if (detail.startsWith("cursor_")) return "cursor";
   return detail as DetailCheck;
+}
+
+/** Schema words only, e.g. "units[3] (card) · taskRole · value_not_allowed". */
+function schemaPlace(at: AmuxAnalysisSchemaRejectAt): string {
+  return [at.unit === undefined ? null : `units[${at.unit}]${at.kind ? ` (${at.kind})` : ""}`,
+    at.field ?? null, at.rule].filter((part) => part !== null).join(" · ");
 }
 
 type State = { kind: "loading" } | { kind: "ready"; review: AmuxSessionReview } |
@@ -66,6 +73,11 @@ export function AmuxSessionReviewPanel({ ideaId }: { ideaId: string }) {
         <p className="text-zinc-300" data-testid="amux-session-review-detail">
           {m.sessionReviewNotAPlanDetail(m.sessionReviewDetailChecks[detailCheck(state.review.detail)],
             state.review.detail)}
+        </p>
+      ) : null}
+      {state.kind === "ready" && state.review.reason === "not_a_plan" && state.review.at ? (
+        <p className="text-zinc-300" data-testid="amux-session-review-at">
+          {m.sessionReviewNotAPlanAt(schemaPlace(state.review.at))}
         </p>
       ) : null}
       {state.kind === "gone" ? <p className="text-zinc-400">{m.sessionReviewGone}</p> : null}
