@@ -13,6 +13,7 @@ import {
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
+import { isAnalyticsUserId } from "@/lib/ga4UserIdPolicy";
 import { discardResponseBody } from "./discardResponseBody";
 
 declare global {
@@ -426,6 +427,13 @@ export const configureAnalyticsClient = ({
   measurementId: string | null;
   plan: AnalyticsRuntime["plan"];
 }) => {
+  // A (re)configuration sends a page_view and flushes queued events. Whoever's
+  // User-ID was on the tag may not be who is signed in now -- the account can
+  // change in the same render that re-runs this -- so it is cleared before any
+  // of that goes out. The caller asks for the current account's id afterwards
+  // (AnalyticsProvider, syncGa4UserId). A lookup still in flight for the
+  // previous account is cancelled with it.
+  clearGa4UserId();
   const now = new Date();
   const stored = readStoredContext();
   const preConsentAttribution = capturePreConsentAttribution();
@@ -501,7 +509,75 @@ export const configureAnalyticsClient = ({
   return runtime;
 };
 
+/**
+ * The GA4 User-ID currently set on the tag (docs/policy/marketing-automation.md
+ * §10.2). Whether one may be set at all is lib/ga4UserIdPolicy.ts's decision,
+ * made by the caller; this only applies it. `null` clears it, which is what
+ * signing out and declining analytics do -- GA4 asks for a real `null`, not an
+ * empty string.
+ *
+ * Nothing is pushed while there is no tag, and nothing is pushed for a value
+ * that is already set, so a visitor for whom the feature is off never has a
+ * `user_id` command queued at all.
+ */
+let ga4UserId: string | null = null;
+
+export const applyGa4UserId = (value: string | null) => {
+  const next = isAnalyticsUserId(value) ? value : null;
+  if (next === ga4UserId) return;
+  if (next !== null && (!runtime?.measurementId || !window.gtag)) return;
+  ga4UserId = next;
+  window.gtag?.("set", { user_id: next });
+};
+
+const requestAnalyticsUserId = async (signal: AbortSignal) => {
+  const response = await fetch("/api/analytics/user-id", {
+    method: "POST",
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) {
+    await discardResponseBody(response);
+    return null;
+  }
+  const body = (await response.json()) as { analyticsUserId?: unknown };
+  return typeof body.analyticsUserId === "string" ? body.analyticsUserId : null;
+};
+
+/**
+ * Brings the tag's User-ID in line with who is signed in now. Whatever was set
+ * is cleared first, before anything is asked: when the session moves from one
+ * account to another, the first account's id must not label a single event of
+ * the second's -- not while the lookup runs, and not after it fails. Only a
+ * lookup that finishes un-cancelled sets a new one. Returns the cancel.
+ */
+let ga4UserIdLookup: AbortController | null = null;
+
+/** Clears the tag's User-ID and cancels any lookup still in flight. */
+const clearGa4UserId = () => {
+  ga4UserIdLookup?.abort();
+  ga4UserIdLookup = null;
+  applyGa4UserId(null);
+};
+
+export const syncGa4UserId = (
+  allowed: boolean,
+  requestId: (signal: AbortSignal) => Promise<string | null> = requestAnalyticsUserId
+) => {
+  clearGa4UserId();
+  if (!allowed) return () => {};
+  const controller = new AbortController();
+  ga4UserIdLookup = controller;
+  requestId(controller.signal)
+    .then((analyticsUserId) => {
+      if (!controller.signal.aborted) applyGa4UserId(analyticsUserId);
+    })
+    .catch(() => {});
+  return () => controller.abort();
+};
+
 export const disableAnalyticsClient = () => {
+  clearGa4UserId();
   applyGa4ConsentMode("denied");
   runtime = null;
   pendingEvents = [];
