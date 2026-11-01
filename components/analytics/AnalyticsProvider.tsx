@@ -338,6 +338,9 @@ export function AnalyticsProvider({
         : null
     );
   const [analyticsClientReady, setAnalyticsClientReady] = useState(false);
+  // Counts configureAnalyticsClient runs. Each one clears the GA4 User-ID
+  // before its page_view, so the User-ID effect re-runs after every one.
+  const [analyticsConfigureCount, setAnalyticsConfigureCount] = useState(0);
   const [showPreferences, setShowPreferences] = useState(false);
   const [chatConsentReady, setChatConsentReady] = useState(false);
   const [isMobileChatTextEntryActive, setIsMobileChatTextEntryActive] =
@@ -596,7 +599,9 @@ export function AnalyticsProvider({
       plan: initialPlan,
     });
     queueMicrotask(() => {
-      if (!cancelled) setAnalyticsClientReady(true);
+      if (cancelled) return;
+      setAnalyticsClientReady(true);
+      setAnalyticsConfigureCount((count) => count + 1);
     });
     if (!lifecycleCheckedRef.current) {
       lifecycleCheckedRef.current = true;
@@ -654,11 +659,12 @@ export function AnalyticsProvider({
       signedIn: Boolean(sessionUserId),
       measurementId,
     });
-  // Re-run on an account change as well: the previous account's id is
-  // cleared before the next one is asked for (syncGa4UserId).
+  // Re-run on an account change -- the previous account's id is cleared before
+  // the next one is asked for (syncGa4UserId) -- and after every analytics
+  // (re)configuration, which clears it itself before its page_view.
   useEffect(
     () => syncGa4UserId(ga4UserIdAllowed),
-    [ga4UserIdAllowed, sessionUserId]
+    [ga4UserIdAllowed, sessionUserId, analyticsConfigureCount]
   );
 
   // `useCallback` rather than plain closures: both read the remembered opener

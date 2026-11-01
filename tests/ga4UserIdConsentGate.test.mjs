@@ -201,6 +201,35 @@ test("a lookup that finishes after its account left is never applied", async () 
   assert.deepEqual(userIdCommands(), []);
 });
 
+test("a re-configuration clears the id before its page_view and cancels a lookup in flight", async () => {
+  client.disableAnalyticsClient();
+  win.dataLayer = [];
+  configure("G-TEST1234");
+  const first = deferred();
+  client.syncGa4UserId(true, () => first.promise);
+  first.resolve(ID);
+  await flush();
+  assert.deepEqual(userIdCommands(), [ID]);
+
+  // The account changes and the provider re-runs configuration in the same
+  // render, before the User-ID effect: the page_view it sends must not carry A.
+  const before = win.dataLayer.length;
+  configure("G-TEST1234");
+  const commands = win.dataLayer.slice(before).map((entry) => Array.from(entry));
+  const cleared = commands.findIndex(
+    ([command, value]) => command === "set" && value && value.user_id === null,
+  );
+  const config = commands.findIndex(([command]) => command === "config");
+  assert.ok(cleared !== -1 && config !== -1 && cleared < config, JSON.stringify(commands));
+
+  const inFlight = deferred();
+  client.syncGa4UserId(true, () => inFlight.promise);
+  configure("G-TEST1234");
+  inFlight.resolve(ID);
+  await flush();
+  assert.deepEqual(userIdCommands(), [ID, null], "the cancelled lookup is never applied");
+});
+
 test("signing out or declining analytics clears it with a real null", () => {
   client.disableAnalyticsClient();
   win.dataLayer = [];

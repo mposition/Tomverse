@@ -427,6 +427,13 @@ export const configureAnalyticsClient = ({
   measurementId: string | null;
   plan: AnalyticsRuntime["plan"];
 }) => {
+  // A (re)configuration sends a page_view and flushes queued events. Whoever's
+  // User-ID was on the tag may not be who is signed in now -- the account can
+  // change in the same render that re-runs this -- so it is cleared before any
+  // of that goes out. The caller asks for the current account's id afterwards
+  // (AnalyticsProvider, syncGa4UserId). A lookup still in flight for the
+  // previous account is cancelled with it.
+  clearGa4UserId();
   const now = new Date();
   const stored = readStoredContext();
   const preConsentAttribution = capturePreConsentAttribution();
@@ -544,13 +551,23 @@ const requestAnalyticsUserId = async (signal: AbortSignal) => {
  * the second's -- not while the lookup runs, and not after it fails. Only a
  * lookup that finishes un-cancelled sets a new one. Returns the cancel.
  */
+let ga4UserIdLookup: AbortController | null = null;
+
+/** Clears the tag's User-ID and cancels any lookup still in flight. */
+const clearGa4UserId = () => {
+  ga4UserIdLookup?.abort();
+  ga4UserIdLookup = null;
+  applyGa4UserId(null);
+};
+
 export const syncGa4UserId = (
   allowed: boolean,
   requestId: (signal: AbortSignal) => Promise<string | null> = requestAnalyticsUserId
 ) => {
-  applyGa4UserId(null);
+  clearGa4UserId();
   if (!allowed) return () => {};
   const controller = new AbortController();
+  ga4UserIdLookup = controller;
   requestId(controller.signal)
     .then((analyticsUserId) => {
       if (!controller.signal.aborted) applyGa4UserId(analyticsUserId);
@@ -560,7 +577,7 @@ export const syncGa4UserId = (
 };
 
 export const disableAnalyticsClient = () => {
-  applyGa4UserId(null);
+  clearGa4UserId();
   applyGa4ConsentMode("denied");
   runtime = null;
   pendingEvents = [];
