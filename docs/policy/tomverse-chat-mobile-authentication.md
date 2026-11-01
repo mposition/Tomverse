@@ -94,6 +94,24 @@ threshold with lockout, and Turnstile above the threshold; the mobile path
 exchanges a verified code for a token family instead of setting a cookie. No
 password is introduced anywhere.
 
+The owner requested in-app email registration on 2026-11-01. Ordinary native
+verification remains `signin` and never creates an account. Once that proof
+returns `EMAIL_ACCOUNT_NOT_FOUND`, the app offers a separate free-account step
+with unchecked terms acceptance and links to the existing terms/privacy pages.
+An explicit `signup` verification reuses the web flow's expiring, single-use
+email-code hold through `verifyEmailLoginCode`; wrong, expired, replayed or
+disabled email proof cannot create an account. The existing active-account
+checks and native-only session storage apply after signup as well.
+
+`TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED` defaults off on the API server. The
+capability probe reports `emailSignup`; new native clients refuse signup payloads
+to an older/disabled server. This switch does not change the code-delivery lane,
+rate limits, lockout, browser origin refusal, web signup or store reviewer
+exception. Registration collects no optional product-news consent and creates
+no `notice_shown` evidence for a notice the app did not show. Any later marketing
+choice follows the existing consent flow. Activation follows independent review
+and the target environment's normal deployment lane.
+
 ### Store review is the exception, and is bounded
 
 Reviewers cannot read the dedicated account's mailbox, so a submission-scoped
