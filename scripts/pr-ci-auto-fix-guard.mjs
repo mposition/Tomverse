@@ -6,7 +6,10 @@
 //   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs conflict <checkout-dir> <resolution.json> [<head-branch>]
 //
 // `diff` takes the head branch the target job read from GitHub; without it no
-// root file is allowed.
+// root file is allowed. With PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED=true in the
+// environment (the repository variable) a Dependabot head's fix may edit a test
+// file, judged by its patch and by the tests the merge lane leaves to a person,
+// which this reads from its own trusted checkout.
 //
 // `target` reads the pull request and its commits as `gh api --paginate
 // --slurp` returned them; `diff` reads the diff against HEAD of another
@@ -19,8 +22,21 @@
 import { execFileSync } from "node:child_process";
 import { closeSync, constants, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { judgePrCiAutoFixConflict, judgePrCiAutoFixDiff, judgePrCiAutoFixTarget } from "../lib/prCiAutoFixGuardCore.ts";
+import { isQaReleasePolicyDocument, qaReleasePolicyTestPaths } from "../lib/qaReleaseMergeLanePolicyInputsCore.ts";
+
+/** The tests the merge lane leaves to a person, named in its policy documents in this trusted checkout; null when unread. */
+function trustedPolicyTestPaths() {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  try {
+    const documents = execFileSync("git", ["-C", root, "ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(isQaReleasePolicyDocument);
+    return documents.length === 0 ? null : qaReleasePolicyTestPaths(documents.map((path) => readFileSync(join(root, path), "utf8")));
+  } catch {
+    return null;
+  }
+}
 
 const [mode, ...args] = process.argv.slice(2);
 let verdict;
@@ -44,10 +60,14 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const [checkoutDir, headBranch] = args;
   const git = (gitArgs) => execFileSync("git", ["-C", checkoutDir, ...gitArgs], { encoding: "utf8" });
   git(["add", "--intent-to-add", "--all"]);
+  const dependabotTests = process.env.PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED === "true";
   verdict = judgePrCiAutoFixDiff({
     nameStatus: git(["diff", "--name-status", "-M", "HEAD"]),
     numstat: git(["diff", "--numstat", "-M", "HEAD"]),
     headBranch,
+    dependabotTests,
+    policyTestPaths: dependabotTests ? trustedPolicyTestPaths() : [],
+    patch: dependabotTests ? git(["diff", "-U0", "-M", "--no-color", "--no-ext-diff", "HEAD"]) : undefined,
   });
 } else if (mode === "conflict" && (args.length === 2 || args.length === 3)) {
   const [checkoutDir, resolutionPath, headBranch] = args;
