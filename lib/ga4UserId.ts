@@ -7,16 +7,17 @@ import {
 } from "@/lib/ga4UserIdPolicy";
 
 /**
- * The analytics-only User-ID for an account (§10.2): HMAC-SHA256 of the
- * account id under a key used for nothing else, cut to 128 bits.
+ * The analytics-only User-ID for an account
+ * (docs/policy/marketing-automation.md §10.2): HMAC-SHA256 of the account id
+ * under a key used for nothing else, cut to 128 bits.
  *
  * Derived, not stored. Storing a random value would need a new column on a
  * Prompt Refiner closure file (prisma/schema.prisma); a keyed derivation gives
  * the property the policy asks for -- GA4 receives a value it cannot turn back
  * into the account id -- with nothing to delete beyond the GA4 deletion
- * request itself (§12.2). The account deletion path derives the same value
- * once more, while the account id still exists, and asks GA4 to delete it
- * (lib/ga4UserDeletion.ts).
+ * request itself (docs/policy/marketing-automation.md §12.2). The account
+ * deletion path derives the same value once more, while the account id still
+ * exists, and asks GA4 to delete it (lib/ga4UserDeletion.ts).
  *
  * **Do not rotate `GA4_USER_ID_KEY`.** Every id already sent was derived
  * under it; after a rotation a deleted account's old id could no longer be

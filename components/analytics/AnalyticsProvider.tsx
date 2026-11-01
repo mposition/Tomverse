@@ -642,10 +642,10 @@ export function AnalyticsProvider({
     };
   }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
 
-  // GA4 User-ID (marketing policy §10.2): asked for only when the notice is
-  // published, the switch is on, the visitor explicitly accepted analytics and
-  // is signed in. Any of those going away -- signing out included -- clears
-  // it on the tag.
+  // GA4 User-ID (docs/policy/marketing-automation.md §10.2): asked for only
+  // when the notice is published, the switch is on, the visitor explicitly
+  // accepted analytics and is signed in. Any of those going away -- signing
+  // out included -- clears it on the tag.
   const { data: sessionData, status: sessionStatus } = useSession();
   const sessionUserId =
     sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;

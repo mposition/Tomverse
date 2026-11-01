@@ -4,8 +4,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeEach, mock, test } from "node:test";
 
-// The GA4 deletion request an account deletion makes (marketing policy §10.2,
-// §12.2), against a fake fetch: never a real call. It names the same
+// The GA4 deletion request an account deletion makes
+// (docs/policy/marketing-automation.md §10.2, §12.2), against a fake fetch: never a real call. It names the same
 // pseudonymous id the browser was given, never the account id; it is one
 // attempt; and a failure is reported without the id and never thrown.
 

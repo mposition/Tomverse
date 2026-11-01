@@ -3,8 +3,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeEach, mock, test } from "node:test";
 
-// The GA4 User-ID route (marketing policy §10.2) with the notice treated as
-// published, so the remaining server gates can be exercised one at a time.
+// The GA4 User-ID route (docs/policy/marketing-automation.md §10.2) with the
+// notice treated as published, so the remaining server gates can be exercised
+// one at a time.
 // That the shipped notice flag keeps the route closed is covered in
 // tests/ga4UserIdConsentGate.test.mjs.
 

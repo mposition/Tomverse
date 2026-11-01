@@ -4,9 +4,10 @@ import { pathToFileURL } from "node:url";
 import { beforeEach, mock, test } from "node:test";
 
 // The GA4 deletion request is a follow-up to an account deletion, never part
-// of it (marketing policy §10.2, §12.2): it runs after the transaction commits,
-// it does not run when the transaction fails, and nothing it does -- not even
-// throwing -- can turn a completed deletion into a failed one.
+// of it (docs/policy/marketing-automation.md §10.2, §12.2): it runs after the
+// transaction commits, it does not run when the transaction fails, and nothing
+// it does -- not even throwing -- can turn a completed deletion into a failed
+// one.
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
