@@ -245,6 +245,27 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "web_search_suggestion_dismiss",
   "web_search_retry_success",
   "web_search_retry_error",
+  // A marketing link was landed on (docs/policy/marketing-automation.md
+  // §10.1). The client reports the UTM parameters it saw in the landing URL;
+  // the server records the event at the moment it *received* it, ignoring the
+  // client's clock, and stamps the closed evidence value itself. The evidence
+  // is "client-observed, server-timed": the server never saw the landing
+  // request, so this proves a browser said so, not that the visit happened.
+  //
+  // Content-free by schema: the four UTM values Tomverse's own links carry
+  // (lib/marketingLinks.ts) and nothing else. Not sent to GA4 as a custom
+  // event -- GA4 attributes its own sessions, and this exists to be the
+  // first-party record a sign-up is attributed against.
+  "marketing_touch",
+] as const;
+
+/**
+ * How much a `marketing_touch` row proves (§10.1). One value today, closed so
+ * a stronger claim has to be added here -- with whatever makes it true --
+ * rather than typed into a property by a client.
+ */
+export const MARKETING_TOUCH_EVIDENCE_LEVELS = [
+  "client_observed_server_time",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -252,7 +273,7 @@ export type ProductAnalyticsEventName =
 
 export const shouldSendCustomProductEventToGa4 = (
   eventName: ProductAnalyticsEventName
-) => eventName !== "purchase_completed";
+) => eventName !== "purchase_completed" && eventName !== "marketing_touch";
 
 export const isGa4DebugModeEnabled = (value: unknown) =>
   typeof value === "string" && value.trim().toLowerCase() === "true";
@@ -533,6 +554,23 @@ export const analyticsPropertiesSchema = z
         "verificationNeeded",
       ])
       .optional(),
+    // The fourth UTM value. Tomverse's own marketing links put the posting
+    // account's slug here (lib/marketingLinks.ts), which is what lets §10.3
+    // report per account rather than per channel.
+    utm_content: z.string().trim().min(1).max(100).optional(),
+    // Server-written only (lib/marketingTouchCore.ts strips every one of these
+    // from a client payload before the server sets its own). The evidence
+    // level of a touch, and on a sign-up or a guest's first answer the touch
+    // it was attributed to: the last one in the seven days before the server
+    // received the conversion, copied rather than referenced so retention on
+    // the touch row cannot rewrite an attribution after the fact.
+    touch_evidence: z.enum(MARKETING_TOUCH_EVIDENCE_LEVELS).optional(),
+    touch_attribution: z.enum(["attributed", "unattributed"]).optional(),
+    touch_utm_source: z.string().trim().min(1).max(100).optional(),
+    touch_utm_medium: z.string().trim().min(1).max(100).optional(),
+    touch_utm_campaign: z.string().trim().min(1).max(100).optional(),
+    touch_utm_content: z.string().trim().min(1).max(100).optional(),
+    touch_received_at: z.string().datetime().optional(),
   })
   .strict()
   .superRefine((properties, context) => {

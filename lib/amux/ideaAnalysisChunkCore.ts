@@ -31,6 +31,21 @@ const LOCAL_ID = /^c(0|[1-9][0-9]*):(node|card|evidence)-(0|[1-9][0-9]{0,3})$/;
 const SPOOFING_CHAR = /[\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u034F\u180B-\u180D\u180E\u180F\u17B4\u17B5\u2800\uFE00-\uFE0F\u{E0100}-\u{E01EF}]|(?![\t\n])\p{Cc}/u;
 const byteLength = (value: string) => Buffer.byteLength(value, "utf8");
 
+/** The JSON object of a model answer. The stored answer is the CLI's final
+ * message, and after reading files a model sometimes wraps the object in a code
+ * fence or a sentence despite the prompt (idea e3925f9b, 2026-11-01). Only the
+ * wrapping is dropped; every schema check still applies. Throws when no
+ * candidate parses. */
+export function amuxAnalysisAnswerJson(raw: string): unknown {
+  const fence = /```[A-Za-z]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/.exec(raw);
+  const candidates = [raw, ...(fence ? [fence[1]!] : []),
+    raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)];
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate); } catch { /* next candidate */ }
+  }
+  throw new SyntaxError("no JSON object in the answer");
+}
+
 export const AMUX_TASK_ROLE_PROPOSALS = [
   "design", "implement", "test", "review", "verify", "investigate", "operate",
 ] as const;
@@ -645,7 +660,7 @@ export function inspectAmuxAnalysisChunk(
   if (byteLength(raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES) return { ok: false, code: "too_large" };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = amuxAnalysisAnswerJson(raw);
   } catch {
     return { ok: false, code: "schema_rejected",
       at: { rule: raw.trimStart().startsWith("```") ? "json_fenced" : "json_unparsable" } };
