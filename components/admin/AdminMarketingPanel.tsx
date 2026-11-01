@@ -50,7 +50,7 @@ type Row = Record<string, unknown>;
 export type MarketingConsoleView = {
   section: MarketingConsoleSection;
   availability: Availability;
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
@@ -274,7 +274,9 @@ export function AdminMarketingPanel({
                     ? m.showingAssets
                     : view.ordering === "by-status"
                       ? m.showingByStatus
-                      : m.showing
+                      : view.ordering === "oldest"
+                        ? m.showingOldest
+                        : m.showing
                   ).replace(
                     "{count}",
                     String(view.pageSize)
@@ -1282,6 +1284,17 @@ function rowActions(
   if (section === "accounts") return accountActions(row, m);
   if (section === "competitors") return competitorActions(row, m);
   if (section === "assets") return assetActions(row, m);
+  if (section === "comments") {
+    return [
+      {
+        id: "acknowledge-alert",
+        primary: true,
+        label: m.actAcknowledgeAlert,
+        path: `/api/admin/marketing/alerts/${encodeURIComponent(String(row.id))}/acknowledge`,
+        body: () => ({}),
+      },
+    ];
+  }
   return [];
 }
 
@@ -2036,6 +2049,24 @@ function MarketingRow({
             label={m.colIdentity}
             value={`v${row.policyVersion} / e${row.graduationEpoch} / c${row.connectionGeneration}`}
           />
+        </div>
+      </>
+    );
+  }
+
+  if (section === "comments") {
+    const codes = Array.isArray(row.riskCodes) ? (row.riskCodes as string[]) : [];
+    return (
+      <>
+        <RowHeading title={str(row.externalUrlHost)} detail={str(row.id)}>
+          <MarketingTag tone={row.overdue === true ? "danger" : "warning"}>
+            {row.overdue === true ? m.alertOverdue : m.alertOpen}
+          </MarketingTag>
+        </RowHeading>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <Field label={m.colAlertCount} value={String(row.alertCount ?? 0)} />
+          <Field label={m.colRiskCodes} value={codes.join(", ") || m.none} />
+          <Field label={m.colFirstDetected} value={stamp(row.firstDetectedAt) || m.none} />
         </div>
       </>
     );

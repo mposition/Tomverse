@@ -752,6 +752,7 @@ run(
     // real PostgreSQL 17 can show.
     "tests/integration/marketing-draft-intake.db.test.ts",
     "tests/integration/marketing-auto-pause.db.test.ts",
+    "tests/integration/marketing-comment-alerts.db.test.ts",
     "tests/integration/marketing-graduation.db.test.ts",
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.

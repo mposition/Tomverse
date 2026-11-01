@@ -90,7 +90,7 @@ test("an approval-mode channel is asked the approval question, not the autonomy 
 test("an autonomous channel is asked the autonomy question, which includes the approval one", async () => {
   const { database: db } = database();
   const answer = await resolvePublishAdmission(db, channel("autonomous_mode"), health(1_000));
-  assert.ok(answer.reasons.includes("input_unreadable:commentsMonitorHealthy" as never));
+  assert.ok(answer.reasons.includes("input_false:commentsMonitorHealthy" as never));
   assert.ok(answer.reasons.includes("input_unreadable:recoveryContractAvailable" as never));
 });
 
@@ -172,7 +172,7 @@ test("the post's own mode picks the question at dispatch", async () => {
     "autonomous",
   );
   assert.ok(autonomous.reasons.includes("input_invalid:channelMode" as never));
-  assert.ok(autonomous.reasons.includes("input_unreadable:commentsMonitorHealthy" as never));
+  assert.ok(autonomous.reasons.includes("input_false:commentsMonitorHealthy" as never));
 });
 
 test("the answer carries the clock it was judged at and the provenance to compare", async () => {
