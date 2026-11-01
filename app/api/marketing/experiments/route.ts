@@ -21,7 +21,7 @@ import {
   pickExperimentArm,
 } from "@/lib/marketingExperimentCore";
 import {
-  E2E_EXPERIMENT_HEADER,
+  e2eForcedRoll,
   incrementExperimentCounter,
   readActiveMarketingExperiment,
 } from "@/lib/marketingExperimentState";
@@ -103,14 +103,6 @@ const makeResponder = (request: Request) => (
   return response;
 };
 
-const forcedRoll = (request: Request) => {
-  // Fixture servers only: the activation reader refuses the header elsewhere.
-  const forced = request.headers.get(E2E_EXPERIMENT_HEADER);
-  if (forced === "variant") return 0;
-  if (forced === "control") return 0.999999;
-  return null;
-};
-
 export async function POST(request: Request) {
   const respond = makeResponder(request);
   try {
@@ -142,9 +134,7 @@ export async function POST(request: Request) {
       return respond({ status: "off" }, { clearCookie: true });
     }
     const { config } = read;
-    if (!config.locales.includes(body.locale)) {
-      return respond({ status: "off" }, { clearCookie: true });
-    }
+    const localeCovered = config.locales.includes(body.locale);
 
     const cookieHeader = request.headers.get("cookie") ?? "";
     const cookieValue = cookieHeader
@@ -163,9 +153,14 @@ export async function POST(request: Request) {
       if (currentIsValid) {
         return respond({ status: "assigned", arm: current.arm });
       }
+      if (!localeCovered) {
+        // Nothing to draw for a language the variant has no copy in; a cookie
+        // that does not belong to this experiment is dropped as usual.
+        return respond({ status: "off" }, { clearCookie: cookieValue !== undefined });
+      }
       const arm = pickExperimentArm(
         config,
-        forcedRoll(request) ?? randomInt(0, 1_000_000) / 1_000_000
+        e2eForcedRoll(request.headers) ?? randomInt(0, 1_000_000) / 1_000_000
       );
       return respond(
         { status: "assigned", arm },
@@ -187,7 +182,10 @@ export async function POST(request: Request) {
       // A cookie from another experiment or a forged one: drop it, count nothing.
       return respond({ status: "off" }, { clearCookie: true });
     }
-    if (body.renderedArm !== current.arm) {
+    // A valid assignment viewed in a language the experiment does not cover is
+    // not a measurement, and not a reason to delete the assignment either: the
+    // same visitor may come back to a covered language and must keep their arm.
+    if (!localeCovered || body.renderedArm !== current.arm) {
       return respond({ status: "ignored", arm: current.arm });
     }
     if (body.action === "conversion" || body.record !== false) {

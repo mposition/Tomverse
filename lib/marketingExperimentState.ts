@@ -94,6 +94,19 @@ export type ActiveExperimentRead =
  */
 export const E2E_EXPERIMENT_HEADER = "x-e2e-marketing-experiment";
 
+/**
+ * A forced roll for the Playwright fixture: `variant` always draws the
+ * variant, `control` always the control. Fixture servers only. In production
+ * the header is ignored, and a visitor cannot choose their own arm.
+ */
+export const e2eForcedRoll = (headers: Headers) => {
+  if (!isE2EFixtureMode()) return null;
+  const forced = headers.get(E2E_EXPERIMENT_HEADER);
+  if (forced === "variant") return 0;
+  if (forced === "control") return 0.999999;
+  return null;
+};
+
 const e2eFixtureExperiment = (headers: Headers | undefined, now: Date) => {
   if (!headers || !isE2EFixtureMode()) return null;
   if (!headers.get(E2E_EXPERIMENT_HEADER)) return null;

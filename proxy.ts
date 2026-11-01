@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import {
   EXPERIMENT_COOKIE_NAME,
+  experimentCookieMatchesVariantPath,
+  experimentVariantHomePathname,
   isExperimentVariantPathname,
   isStaticMarketingPathname,
   localizedMarketingRedirect,
@@ -340,6 +342,32 @@ export function proxy(request: NextRequest) {
     );
   }
 
+  // Landing experiments (policy 9.1). This function runs again on the path a
+  // rewrite lands on, so a variant path reaches here both ways: rewritten for
+  // an assigned visitor, or named directly. Either is served only to a visitor
+  // whose cookie assigns them to exactly this variant; anyone else is sent to
+  // the home page it varies, because visitors without an assignment always get
+  // the default copy.
+  const variantHome =
+    request.method === "GET" || request.method === "HEAD"
+      ? experimentVariantHomePathname(request.nextUrl.pathname)
+      : null;
+  if (
+    variantHome &&
+    !experimentCookieMatchesVariantPath({
+      pathname: request.nextUrl.pathname,
+      cookie: request.cookies.get(EXPERIMENT_COOKIE_NAME)?.value,
+      killSwitch: process.env.MARKETING_AUTOMATION_KILL_SWITCH,
+    })
+  ) {
+    const target = request.nextUrl.clone();
+    target.pathname = variantHome;
+    const redirect = NextResponse.redirect(target, 307);
+    redirect.headers.set("Cache-Control", "private, no-store");
+    redirect.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return redirect;
+  }
+
   // R-05-LANG. Send a non-English visitor to their own localized page before
   // anything renders, rather than serving English HTML that the client rewrites
   // after first paint. See `localizedMarketingRedirect` for the measurements.
@@ -419,8 +447,8 @@ export function proxy(request: NextRequest) {
     process.env.NODE_ENV === "production" &&
     !staticMarketingHashes
   ) {
-    // A well-formed variant path whose HTML is not in this build is a page
-    // that does not exist, not a policy that could not be computed.
+    // A variant path whose HTML is not in this build is a page that does not
+    // exist, not a policy that could not be computed.
     return new NextResponse("Not Found", {
       status: 404,
       headers: {

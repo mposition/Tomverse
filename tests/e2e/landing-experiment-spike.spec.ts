@@ -356,17 +356,65 @@ test.describe("fixture experiment, forced variant", () => {
     expect(await pricing.text()).not.toContain(VARIANT_HEADLINE_EN);
   });
 
-  test("(c) a variant path is private, noindex and absent from the sitemap", async ({
+  test("(a) a variant path named directly is served only to the assignment that matches it", async ({
     request,
   }) => {
-    const direct = await request.get(`/en/lx/${BUNDLE_ID}/b`, { headers: HTML });
-    expect(direct.status()).toBe(200);
-    expect(direct.headers()["cache-control"]).toBe("private, no-store");
-    expect(direct.headers()["x-robots-tag"]).toContain("noindex");
-    const body = await direct.text();
-    expect(body).toMatch(/<meta name="robots" content="[^"]*noindex/);
+    // Without an assignment, with the control's, with another experiment's
+    // bundle, and for a variant this build does not have: never the variant
+    // copy, never a page of its own -- the visitor is sent to the default home.
+    const strangers: Array<string | undefined> = [
+      undefined,
+      `tv_exp=${CONTROL_COOKIE}`,
+      `tv_exp=${EXPERIMENT_ID}.home-other-v1.b`,
+      "tv_exp=garbage",
+    ];
+    for (const [path, home] of [
+      [`/en/lx/${BUNDLE_ID}/b`, "/"],
+      [`/ko/lx/${BUNDLE_ID}/b`, "/ko"],
+      ["/en/lx/home-unknown-v9/b", "/"],
+    ] as const) {
+      for (const cookie of strangers) {
+        const response = await request.get(path, {
+          headers: { ...HTML, ...(cookie ? { cookie } : {}) },
+          maxRedirects: 0,
+        });
+        expect(response.status(), `${path} ${cookie ?? "no cookie"}`).toBe(307);
+        expect(new URL(response.headers()["location"], ORIGIN).pathname).toBe(home);
+        expect(response.headers()["cache-control"]).toBe("private, no-store");
+        expect(response.headers()["x-robots-tag"]).toContain("noindex");
+      }
+    }
+    // Followed to the end, the default copy is what arrives.
+    const followed = await request.get(`/en/lx/${BUNDLE_ID}/b`, { headers: HTML });
+    expect(followed.status()).toBe(200);
+    expect(heroHeadline(await followed.text())).toContain(DEFAULT_HEADLINE_EN);
 
-    expect((await request.get("/en/lx/home-unknown-v9/b")).status()).toBe(404);
+    // The matching assignment is the same visitor the rewrite serves.
+    const own = await request.get(`/en/lx/${BUNDLE_ID}/b`, {
+      headers: { ...HTML, cookie: `tv_exp=${VARIANT_COOKIE}` },
+      maxRedirects: 0,
+    });
+    expect(own.status()).toBe(200);
+    expect(heroHeadline(await own.text())).toContain(VARIANT_HEADLINE_EN);
+    expect(own.headers()["cache-control"]).toBe("private, no-store");
+
+    // A matching cookie for a variant that is not in this build is a missing page.
+    const missing = await request.get("/en/lx/home-unknown-v9/b", {
+      headers: { ...HTML, cookie: `tv_exp=${EXPERIMENT_ID}.home-unknown-v9.b` },
+      maxRedirects: 0,
+    });
+    expect(missing.status()).toBe(404);
+  });
+
+  test("(c) the rewritten variant is private and noindex, and no variant path is in the sitemap", async ({
+    request,
+  }) => {
+    const served = await request.get("/", {
+      headers: { ...HTML, cookie: `tv_exp=${VARIANT_COOKIE}` },
+    });
+    expect(served.headers()["cache-control"]).toBe("private, no-store");
+    expect(served.headers()["x-robots-tag"]).toContain("noindex");
+    expect(await served.text()).toMatch(/<meta name="robots" content="[^"]*noindex/);
 
     const sitemap = await (await request.get("/sitemap.xml")).text();
     expect(sitemap).not.toContain("/lx/");

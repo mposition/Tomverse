@@ -127,7 +127,8 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
 
       if (!cookieValue) {
         const assigned = await post("assign");
-        if (assigned?.status !== "assigned") session.set(probeKey, "1");
+        // Only a definite "off" is remembered; a failed request is retried.
+        if (assigned?.status === "off") session.set(probeKey, "1");
         return;
       }
 

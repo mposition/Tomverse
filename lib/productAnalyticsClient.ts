@@ -13,6 +13,7 @@ import {
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
+import { EXPERIMENT_COOKIE_NAME } from "@/lib/marketingRoutes";
 import { discardResponseBody } from "./discardResponseBody";
 
 declare global {
@@ -511,6 +512,10 @@ export const disableAnalyticsClient = () => {
   window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);
   window.sessionStorage.removeItem(PENDING_EVENTS_STORAGE_KEY);
   window.sessionStorage.removeItem(PRECONSENT_ATTRIBUTION_STORAGE_KEY);
+  // Landing experiments: an assignment exists only under analytics consent
+  // (docs/policy/marketing-automation.md 9.1), so withdrawing it takes the
+  // cookie with it and the next landing load is the default copy.
+  document.cookie = `${EXPERIMENT_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
   for (const cookie of document.cookie.split(";")) {
     const name = cookie.split("=")[0]?.trim();
     if (name === "_ga" || name?.startsWith("_ga_")) {

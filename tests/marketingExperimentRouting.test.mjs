@@ -6,6 +6,8 @@ import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "../lib/marketingAutomation
 import {
   EXPERIMENT_CONTROL_ARM,
   EXPERIMENT_COOKIE_NAME,
+  experimentCookieMatchesVariantPath,
+  experimentVariantHomePathname,
   experimentVariantPathname,
   formatExperimentCookie,
   isExperimentVariantPathname,
@@ -90,7 +92,7 @@ test("everything that is not a variant document load on a home page is left alon
   assert.equal(rewrite({ cookie: "spring-hero.pricing-hero-v1.b" }), null);
 });
 
-test("variant paths are recognised exactly and are served as static marketing", () => {
+test("variant paths are recognised exactly and are never a page of their own", () => {
   assert.equal(
     experimentVariantPathname("ko", "home-hero-v1", "b"),
     "/ko/lx/home-hero-v1/b"
@@ -109,11 +111,51 @@ test("variant paths are recognised exactly and are served as static marketing", 
   ]) {
     assert.equal(isExperimentVariantPathname(pathname), false, pathname);
   }
-  // Static, so the proxy computes hashes for it instead of minting a nonce
-  // the prerendered HTML cannot carry.
+  // Static marketing, so the proxy computes hashes for the prerendered HTML
+  // (it runs again on the path a rewrite lands on) instead of minting a nonce
+  // that HTML cannot carry. A well-formed path is static; a malformed one is not.
   assert.equal(isStaticMarketingPathname("/ko/lx/home-hero-v1/b"), true);
   assert.equal(isStaticMarketingPathname("/ko/lx/Home/b"), false);
   assert.equal(isStaticMarketingPathname("/ko/unknown"), false);
+  assert.equal(experimentVariantHomePathname("/en/lx/home-hero-v1/b"), "/");
+  assert.equal(experimentVariantHomePathname("/ko/lx/home-hero-v1/b"), "/ko");
+  assert.equal(experimentVariantHomePathname("/ko/lx/home-hero-v1/b/"), "/ko");
+  // A path that only looks like a variant is not redirected as one.
+  for (const pathname of ["/", "/ko", "/ko/lx/Home/b", "/xx/lx/home-hero-v1/b", "/ko/pricing"]) {
+    assert.equal(experimentVariantHomePathname(pathname), null, pathname);
+  }
+});
+
+test("a variant path is served only to the cookie that assigns exactly that variant", () => {
+  const path = "/ko/lx/home-hero-v1/b";
+  const matches = (overrides = {}) =>
+    experimentCookieMatchesVariantPath({
+      pathname: path,
+      cookie: "spring-hero.home-hero-v1.b",
+      killSwitch: undefined,
+      ...overrides,
+    });
+  assert.equal(matches(), true);
+  assert.equal(matches({ pathname: "/ko/lx/home-hero-v1/b/" }), true);
+  // Any other holder is sent home.
+  for (const overrides of [
+    { cookie: undefined },
+    { cookie: "garbage" },
+    { cookie: "spring-hero.home-hero-v1.control" },
+    { cookie: "spring-hero.home-hero-v1.c" },
+    { cookie: "spring-hero.home-other-v1.b" },
+    { pathname: "/ko/lx/home-hero-v1/c" },
+    { pathname: "/ko/pricing" },
+    { pathname: "/ko" },
+    { killSwitch: "1" },
+  ]) {
+    assert.equal(matches(overrides), false, JSON.stringify(overrides));
+  }
+  // The rewrite lands on the same path the check accepts for that cookie.
+  assert.equal(
+    rewrite({ pathname: "/ko" }),
+    path
+  );
 });
 
 test("the request boundary keeps the Prompt Refiner closure unchanged", () => {

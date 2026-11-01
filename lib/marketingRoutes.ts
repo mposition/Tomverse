@@ -168,6 +168,41 @@ export const resolveExperimentRewrite = (input: Readonly<{
   return experimentVariantPathname(locale, assignment.bundleId, assignment.arm);
 };
 
+/**
+ * Where a request for a variant path is sent instead: the home page it varies.
+ * A variant belongs to one visitor's assignment, so a request that names the
+ * path without that assignment -- a leaked link, a crawler -- gets the default
+ * copy (policy 9.1: no assignment, no variant).
+ */
+export const experimentVariantHomePathname = (pathname: string): string | null => {
+  if (!isExperimentVariantPathname(pathname)) return null;
+  const [locale] = normalizePathname(pathname).split("/").filter(Boolean);
+  return locale === "en" ? "/" : `/${locale}`;
+};
+
+/**
+ * Whether the cookie assigns its holder to exactly the variant this path
+ * serves. The proxy runs again on the path a rewrite lands on, so this is the
+ * test applied on both passes: the rewritten request and a direct one are the
+ * same request as far as the visitor's entitlement goes, and either is served
+ * the variant only with the matching assignment (and never under the kill
+ * switch).
+ */
+export const experimentCookieMatchesVariantPath = (input: Readonly<{
+  pathname: string;
+  cookie: string | null | undefined;
+  killSwitch: string | undefined;
+}>): boolean => {
+  if ((input.killSwitch ?? "").trim() !== "") return false;
+  if (!isExperimentVariantPathname(input.pathname)) return false;
+  const assignment = parseExperimentCookie(input.cookie);
+  if (!assignment || assignment.arm === EXPERIMENT_CONTROL_ARM) return false;
+  const [, , bundleId, variantId] = normalizePathname(input.pathname)
+    .split("/")
+    .filter(Boolean);
+  return assignment.bundleId === bundleId && assignment.arm === variantId;
+};
+
 export const isStaticMarketingPathname = (pathname: string) => {
   const normalized = normalizePathname(pathname);
   if (exactMarketingPaths.has(normalized)) return true;

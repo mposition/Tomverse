@@ -29,6 +29,7 @@ process.env.E2E_MARKETING_EXPERIMENT = JSON.stringify({
 });
 
 const { POST } = await import("../app/api/marketing/experiments/route.ts");
+const { e2eForcedRoll } = await import("../lib/marketingExperimentState.ts");
 
 const VARIANT = "fixture-run.home-hero-v1.b";
 const CONTROL = "fixture-run.home-hero-v1.control";
@@ -105,10 +106,50 @@ test("consent decides first: nothing is assigned or counted without analytics", 
   assert.equal(germany.json.status, "off");
 });
 
-test("a language the experiment does not cover is left on the default copy", async () => {
+test("a language the experiment does not cover is left on the default copy and costs no assignment", async () => {
   const result = await call({ ...base, locale: "fr" });
   assert.equal(result.json.status, "off");
-  assert.match(result.setCookie, /Max-Age=0/i);
+  // Nothing to delete and nothing to draw.
+  assert.equal(result.setCookie, "");
+});
+
+test("a valid assignment seen in an uncovered language is kept, and not counted", async () => {
+  const assign = await call({ ...base, locale: "fr" }, { cookie: `tv_exp=${VARIANT}` });
+  assert.equal(assign.json.status, "assigned");
+  assert.equal(assign.json.arm, "b");
+  assert.equal(assign.setCookie, "");
+
+  for (const action of ["exposure", "conversion"]) {
+    const result = await call(
+      { action, consent: "accepted", locale: "fr", renderedArm: "control" },
+      { cookie: `tv_exp=${CONTROL}` }
+    );
+    assert.equal(result.json.status, "ignored", action);
+    assert.equal(result.json.arm, "control");
+    assert.equal(result.setCookie, "", `${action} must not delete a valid assignment`);
+  }
+});
+
+test("a visitor cannot choose their own arm: the forced roll exists on fixture servers only", () => {
+  const variant = new Headers({ "x-e2e-marketing-experiment": "variant" });
+  const control = new Headers({ "x-e2e-marketing-experiment": "control" });
+  assert.equal(e2eForcedRoll(variant), 0);
+  assert.equal(e2eForcedRoll(control), 0.999999);
+  assert.equal(e2eForcedRoll(new Headers({ "x-e2e-marketing-experiment": "on" })), null);
+  assert.equal(e2eForcedRoll(new Headers()), null);
+
+  const before = process.env.E2E_AUTH_BYPASS;
+  try {
+    // Any one missing leg of the fixture mode and the header means nothing.
+    process.env.E2E_AUTH_BYPASS = "false";
+    assert.equal(e2eForcedRoll(variant), null);
+    process.env.E2E_AUTH_BYPASS = "true";
+    process.env.NEXTAUTH_URL = "https://tomverse.app";
+    assert.equal(e2eForcedRoll(variant), null);
+  } finally {
+    process.env.E2E_AUTH_BYPASS = before;
+    process.env.NEXTAUTH_URL = "http://127.0.0.1:3100";
+  }
 });
 
 test("exposure and conversion count only when the rendered arm is the assigned arm", async () => {
