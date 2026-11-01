@@ -6,8 +6,17 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
-import { readAmuxSessionReviewReply, type AmuxSessionReview } from
+import { readAmuxSessionReviewReply, type AmuxSessionReview, type AmuxSessionReviewDetail } from
   "@/lib/amux/ideaSessionReviewCore";
+
+type DetailCheck = keyof typeof adminAmuxIdeaProgressMessages.en.sessionReviewDetailChecks;
+
+/** History and cursor codes share one plain sentence; the code itself is shown beside it. */
+function detailCheck(detail: AmuxSessionReviewDetail): DetailCheck {
+  if (detail.startsWith("history_")) return "history";
+  if (detail.startsWith("cursor_")) return "cursor";
+  return detail as DetailCheck;
+}
 
 type State = { kind: "loading" } | { kind: "ready"; review: AmuxSessionReview } |
   { kind: "gone" } | { kind: "reauth" } | { kind: "unavailable" };
@@ -53,6 +62,12 @@ export function AmuxSessionReviewPanel({ ideaId }: { ideaId: string }) {
       ) : null}
       {state.kind === "ready" && state.review.reason === "not_a_plan" ?
         <p className="text-zinc-300">{m.sessionReviewNotAPlan}</p> : null}
+      {state.kind === "ready" && state.review.reason === "not_a_plan" && state.review.detail ? (
+        <p className="text-zinc-300" data-testid="amux-session-review-detail">
+          {m.sessionReviewNotAPlanDetail(m.sessionReviewDetailChecks[detailCheck(state.review.detail)],
+            state.review.detail)}
+        </p>
+      ) : null}
       {state.kind === "gone" ? <p className="text-zinc-400">{m.sessionReviewGone}</p> : null}
       {state.kind === "unavailable" ? <p role="alert" className="text-red-200">{m.sessionReviewUnavailable}</p> : null}
       {state.kind === "reauth" ? (
