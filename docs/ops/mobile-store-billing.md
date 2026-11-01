@@ -169,7 +169,7 @@ The initial catalog uses standard recurring base plans without introductory,
 trial or installment offers. Add those offers only with their complete pricing
 phase disclosures and device validation.
 
-## iOS activation preparation (2026-11-01)
+## iOS TestFlight plan activation (2026-11-01)
 
 The owner requested iOS plan purchases and approved these initial App Store
 subscription prices, using USA as the base territory and Apple's equalized
@@ -207,15 +207,59 @@ uses a separate persistent WebKit data store for staging, preserving production'
 default store. This separates local drafts, last-chat pointers and pending image
 requests; unsupported origins use nonpersistent website storage. Both the scene
 delegate and storyboard select that controller before loading the web app.
-On the Mac, the signing workflow compiles and runs the pure Swift namespace tests before exporting the
-IPA. Windows preparation additionally validates the selected native API and an
+On the Mac, the signing workflow compiles and runs the pure Swift namespace
+tests before exporting the IPA. Windows preparation validates the native API and an
 Apple `appl_` SDK key when billing is enabled.
 
-This section records preparation and the owner's pricing decision. Verify the
-actual saved App Store prices/availability, server mapping, webhook delivery,
-signed build and device purchase/readback before reporting activation complete.
+Readback on 2026-11-01 confirmed all four subscriptions have the approved USA
+price and Apple's matching price points and availability in all 175 territories
+(700 price records). `UPFRONT` means the ordinary monthly/annual period price;
+no monthly installment commitment was enabled. Apple still reports
+`MISSING_METADATA` for public review preparation. Sandbox testing does not
+require prior App Review; pricing and localizations are present. Allow up to one
+hour for changed product information to reach Apple's sandbox.
+
+Staging deployment `a6c4ade0-0c32-42be-820f-58fb67a74c7d` succeeded with the four
+Apple subscriptions added beside the unchanged seven Google mappings. Production
+retains PRODUCTION billing and its original seven Google mappings. The separate
+Apple-only RevenueCat webhook `whintgrb781c0b46d` uses
+`https://staging.tomverse.app/api/webhooks/revenuecat?source=app_store`, Sandbox
+only, and all event types. The query distinguishes the URL from the existing
+Google webhook; it does not change the authenticated handler.
+
+RevenueCat's dashboard TEST delivery reached staging with HTTP 200, but its
+synthetic PLAY_STORE payload was correctly ignored for the Apple app. A separate
+authenticated APP_STORE/SANDBOX TEST request returned `{ "received": true }`;
+PRODUCTION was ignored and missing authentication returned 401. TEST requests
+never grant a plan or credits. These checks establish routing and guards, not
+physical StoreKit purchase acceptance. Verify the signed build and device
+purchase/readback before reporting the full payment integration operational.
 The three draft Apple credit packs remain outside this plan-subscription
 activation until their store pricing is configured separately.
+
+Codemagic run `6ae70fd4efa74786046fb4a5` finished successfully from source
+`2f907db2297d073046c0c42f5334337fb4d54b50`. Xcode archived/exported the signed
+device IPA, and the Swift namespace test executed successfully. Readback of the
+downloaded IPA confirmed staging authentication/API, the actual Apple public SDK
+key and enabled purchase entry, all 26 prepared web files byte-identical,
+compiled staging WebKit storage, arm64, iPhone/iPad support, minimum iOS 17.4 and
+the existing App Store distribution profile. The IPA SHA-256 is
+`61bd147a238fa66e78f05f30aba83c01eb23004b05560cc6a673f7d6fe9b380c`.
+
+App Store Connect accepted **1.0.21 (7)**, build
+`0fd8beff-4ee4-4279-ae03-ae74c973f469`, as `VALID` / `INTERNAL_ONLY`. The existing
+`Tomverse Internal` group was assigned and read back as `IN_BETA_TESTING`.
+This is an isolated test-server build: authenticate again using the email-code
+flow, then verify the Apple confirmation sheet and server-confirmed plan on the
+physical iPad. No physical purchase, renewal, refund or restore has yet been
+observed. Production browser domain association remains a separate server
+deployment task; this billing build does not publish that association.
+
+Local verification passed 41 configuration/authentication/prebuild cases,
+20 billing core/route cases and 24 mocked WebKit/Chromium purchase UI cases,
+plus scoped ESLint and real bundle preparation. Independent reviews
+`r-20261101-094903-1e71fc` and `r-20261101-095205-1787f1` accepted the changes.
+Production was not merged/deployed and no public App Store release was submitted.
 
 ## Verification
 
