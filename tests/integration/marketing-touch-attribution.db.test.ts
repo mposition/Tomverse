@@ -5,6 +5,7 @@ import { after, beforeEach, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import {
   findLatestMarketingTouch,
+  recordOrderedAnalyticsEvent,
   recordProductAnalyticsEvent,
   repairLateMarketingTouchSnapshots,
 } from "@/lib/productAnalyticsServer";
@@ -190,4 +191,109 @@ test("a touch stored after its sign-up repairs that sign-up only", async () => {
   assert.equal(byUser.get(mine.id)?.touch_received_at, touchReceivedAt.toISOString());
   assert.equal(byUser.get(mine.id)?.method, "google");
   assert.equal(byUser.get(theirs.id)?.touch_attribution, "unattributed", "another browser is untouched");
+});
+
+const orderedInput = (input: {
+  eventName: "marketing_touch" | "signup_completed";
+  clientId: string;
+  userId: string | null;
+  campaign?: string;
+  observedAt: Date;
+}) => {
+  const receivedAt = new Date();
+  return {
+    eventName: input.eventName,
+    source: "client" as const,
+    userId: input.userId,
+    attribution: {
+      client_id: input.clientId,
+      session_id: "1761955200000",
+      utm_source: input.eventName === "marketing_touch" ? "linkedin" : "(direct)",
+      utm_medium: input.eventName === "marketing_touch" ? "social" : "(none)",
+      utm_campaign: input.campaign ?? "(not set)",
+      language: "en" as const,
+      country: "AU",
+    },
+    modelCount: 0,
+    plan: input.userId ? "Free" : "Guest",
+    properties:
+      input.eventName === "marketing_touch"
+        ? { utm_content: "linkedin-1", touch_evidence: "client_observed_server_time" as const }
+        : { method: "google" },
+    occurredAt: input.eventName === "marketing_touch" ? receivedAt : input.observedAt,
+    dedupeKey:
+      input.eventName === "marketing_touch"
+        ? `client:${randomUUID()}`
+        : `singleton:signup_completed:${input.userId}`,
+    receivedAt,
+    touchObservedAt: input.observedAt,
+  };
+};
+
+test("a touch and its sign-up sent at the same moment always end attributed", async () => {
+  for (let round = 0; round < 12; round += 1) {
+    const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+    const clientId = randomUUID();
+    const signedUpAt = new Date();
+    const pair = [
+      orderedInput({
+        eventName: "marketing_touch",
+        clientId,
+        userId: null,
+        campaign: `round-${round}`,
+        observedAt: new Date(signedUpAt.getTime() - 1_000),
+      }),
+      orderedInput({
+        eventName: "signup_completed",
+        clientId,
+        userId: user.id,
+        observedAt: signedUpAt,
+      }),
+    ];
+    // Alternate which request starts first.
+    const [first, second] = round % 2 === 0 ? pair : [pair[1], pair[0]];
+    await Promise.all([
+      recordOrderedAnalyticsEvent(first),
+      recordOrderedAnalyticsEvent(second),
+    ]);
+    const signup = await prisma.productAnalyticsEvent.findFirst({
+      where: { eventName: "signup_completed", userId: user.id },
+      select: { properties: true },
+    });
+    const properties = signup?.properties as Record<string, unknown>;
+    assert.equal(properties.touch_attribution, "attributed", `round ${round}`);
+    assert.equal(properties.touch_utm_campaign, `round-${round}`, `round ${round}`);
+  }
+});
+
+test("two touches racing to finish one sign-up leave the later-received one", async () => {
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  await recordOrderedAnalyticsEvent(
+    orderedInput({ eventName: "signup_completed", clientId, userId: user.id, observedAt: signedUpAt })
+  );
+  const earlier = orderedInput({
+    eventName: "marketing_touch",
+    clientId,
+    userId: null,
+    campaign: "earlier",
+    observedAt: new Date(signedUpAt.getTime() - 2_000),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const later = orderedInput({
+    eventName: "marketing_touch",
+    clientId,
+    userId: null,
+    campaign: "later",
+    observedAt: new Date(signedUpAt.getTime() - 1_000),
+  });
+  // The later-received one is submitted first, so a last-write-wins update
+  // would leave "earlier".
+  await Promise.all([recordOrderedAnalyticsEvent(later), recordOrderedAnalyticsEvent(earlier)]);
+  const signup = await prisma.productAnalyticsEvent.findFirst({
+    where: { eventName: "signup_completed", userId: user.id },
+    select: { properties: true },
+  });
+  assert.equal((signup?.properties as Record<string, unknown>).touch_utm_campaign, "later");
 });

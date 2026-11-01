@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeEach, mock, test } from "node:test";
+import { NextResponse } from "next/server";
 
 // docs/policy/marketing-automation.md §10.1, on the real route handler: a
 // marketing touch is timed by the server and stamped with the server's own
@@ -51,30 +52,65 @@ mock.module(mod("lib/clientIp.ts"), {
 mock.module(mod("lib/operationalMonitoring.ts"), {
   namedExports: { reportOperationalIncident: async () => {} },
 });
+// The route reports a failure from `after()`, which needs a request scope this
+// harness does not have; run the callback inline instead.
+mock.module("next/server", {
+  namedExports: { NextResponse, after: (callback: () => unknown) => callback() },
+});
+// Which statements ran inside the per-browser lock, in order.
+const transactions: string[][] = [];
+let current: string[] | null = null;
+const note = (step: string) => current?.push(step);
+const productAnalyticsEvent = {
+  create: async ({ data }: { data: Row }) => {
+    created.push(data);
+    return data;
+  },
+  createMany: async ({ data }: { data: Row[]; skipDuplicates: boolean }) => {
+    note("insert");
+    created.push(...data);
+    return { count: data.length };
+  },
+  findFirst: async (query: Row) => {
+    note("lookup");
+    touchQueries.push(query);
+    return touchRow;
+  },
+  findMany: async (query: Row) => {
+    note("repair-read");
+    repairQueries.push(query);
+    if (repairFails) throw new Error("database unavailable");
+    return recentConversions;
+  },
+  update: async (args: { where: Row; data: Row }) => {
+    note("repair-write");
+    updates.push(args);
+    return args.data;
+  },
+};
+const lockKeys: unknown[] = [];
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
     prisma: {
       user: {
         findUnique: async () => (session ? { plan: "Free" } : null),
       },
-      productAnalyticsEvent: {
-        create: async ({ data }: { data: Row }) => {
-          created.push(data);
-          return data;
-        },
-        findFirst: async (query: Row) => {
-          touchQueries.push(query);
-          return touchRow;
-        },
-        findMany: async (query: Row) => {
-          repairQueries.push(query);
-          if (repairFails) throw new Error("database unavailable");
-          return recentConversions;
-        },
-        update: async (args: { where: Row; data: Row }) => {
-          updates.push(args);
-          return args.data;
-        },
+      productAnalyticsEvent,
+      $transaction: async (work: (db: unknown) => Promise<unknown>) => {
+        current = [];
+        transactions.push(current);
+        try {
+          return await work({
+            $executeRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+              note("lock");
+              lockKeys.push(...values);
+              return 1;
+            },
+            productAnalyticsEvent,
+          });
+        } finally {
+          current = null;
+        }
       },
     },
   },
@@ -118,6 +154,8 @@ beforeEach(() => {
   recentConversions = [];
   updates.length = 0;
   repairFails = false;
+  transactions.length = 0;
+  lockKeys.length = 0;
 });
 
 test("a marketing touch is recorded at the server's receipt, never the client's clock", async () => {
@@ -329,11 +367,24 @@ test("a touch the browser observed after the conversion repairs nothing", async 
   assert.equal(updates.length, 0);
 });
 
-test("a failed repair still answers the stored touch as accepted", async () => {
+test("a failed repair fails the touch's transaction, so the browser sends it again", async () => {
   repairFails = true;
   const response = await POST(event("marketing_touch"));
-  assert.equal(response.status, 202);
-  assert.equal(created.length, 1);
+  assert.ok(response.status >= 500, "a retryable answer; the touch insert rolls back with it");
+});
+
+test("a touch and a conversion each run whole inside the same per-browser lock", async () => {
+  await POST(event("marketing_touch"));
+  session = { user: { id: "user-1" } };
+  await POST(event("signup_completed", { method: "google" }));
+  await POST(event("landing_view"));
+  assert.deepEqual(transactions, [
+    ["lock", "insert", "repair-read"],
+    ["lock", "lookup", "insert"],
+  ], "the touch inserts then repairs; the conversion looks then inserts; landing_view takes no lock");
+  assert.equal(lockKeys.length, 2);
+  assert.equal(lockKeys[0], lockKeys[1], "one key per browser");
+  assert.ok(!String(lockKeys[0]).includes(clientId), "keyed on the digest, never the raw client id");
 });
 
 test("conversions and other events never start a repair", async () => {

@@ -15,15 +15,11 @@ import { prisma } from "@/lib/prisma";
 import { analyticsClientEventSchema } from "@/lib/productAnalyticsShared";
 import {
   analyticsCountryFromHeaders,
-  findLatestMarketingTouch,
-  recordProductAnalyticsEvent,
-  repairLateMarketingTouchSnapshots,
+  recordOrderedAnalyticsEvent,
 } from "@/lib/productAnalyticsServer";
 import {
   MARKETING_TOUCH_EVENT,
   MARKETING_TOUCH_EVIDENCE,
-  marketingTouchSnapshot,
-  shouldSnapshotMarketingTouch,
   stripServerOnlyTouchProperties,
 } from "@/lib/marketingTouchCore";
 import {
@@ -87,22 +83,18 @@ export async function POST(req: Request) {
       : `client:${body.event_id}`;
 
     // Evidence and attribution are the server's to write. Whatever a client
-    // sent under those keys is dropped first, then the server sets its own.
-    let properties = stripServerOnlyTouchProperties(body.properties);
-    if (isMarketingTouch) {
-      properties = { ...properties, touch_evidence: MARKETING_TOUCH_EVIDENCE };
-    } else if (shouldSnapshotMarketingTouch(body.event_name, userId)) {
-      stage = "touch-attribution";
-      const touch = await findLatestMarketingTouch({
-        clientId: body.client_id,
-        userId,
-        receivedAt: now,
-      });
-      properties = { ...properties, ...marketingTouchSnapshot(touch, now) };
-    }
+    // sent under those keys is dropped first; the touch's evidence is stamped
+    // here and a conversion's attribution is fixed while it is recorded.
+    const clientProperties = stripServerOnlyTouchProperties(body.properties);
+    const properties = isMarketingTouch
+      ? { ...clientProperties, touch_evidence: MARKETING_TOUCH_EVIDENCE }
+      : clientProperties;
 
     stage = "event-write";
-    const recorded = await recordProductAnalyticsEvent({
+    // A touch and a conversion are ordered per browser, and a touch stored just
+    // after its conversion finishes that conversion's snapshot
+    // (recordOrderedAnalyticsEvent). Every other event is recorded as before.
+    await recordOrderedAnalyticsEvent({
       eventName: body.event_name,
       source: "client",
       userId,
@@ -120,32 +112,9 @@ export async function POST(req: Request) {
       properties,
       occurredAt,
       dedupeKey,
+      receivedAt: now,
+      touchObservedAt: occurredAtCandidate,
     });
-
-    // A touch stored just after the conversion it belongs to finishes that
-    // conversion's snapshot (lib/marketingTouchCore.ts,
-    // lateMarketingTouchRepair). The touch itself is already recorded, so a
-    // failure here is reported and the touch still answered as accepted.
-    if (isMarketingTouch && recorded) {
-      stage = "touch-repair";
-      await repairLateMarketingTouchSnapshots({
-        clientId: body.client_id,
-        userId,
-        touch: {
-          utmSource: body.utm_source,
-          utmMedium: body.utm_medium,
-          utmCampaign: body.utm_campaign,
-          utmContent: properties.utm_content ?? null,
-          occurredAt,
-        },
-        touchObservedAt: occurredAtCandidate,
-      }).catch((error: unknown) => {
-        console.warn("Marketing touch snapshot repair failed.", {
-          errorName: error instanceof Error ? error.name : "UnknownError",
-          traceId,
-        });
-      });
-    }
 
     return new NextResponse(null, {
       status: 202,

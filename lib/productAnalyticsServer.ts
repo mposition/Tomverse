@@ -20,7 +20,9 @@ import {
   MARKETING_TOUCH_EVENT,
   MARKETING_TOUCH_LATE_ARRIVAL_MS,
   lateMarketingTouchRepair,
+  marketingTouchSnapshot,
   marketingTouchWindow,
+  shouldSnapshotMarketingTouch,
   type MarketingTouchRow,
 } from "@/lib/marketingTouchCore";
 import {
@@ -153,38 +155,31 @@ const sendGa4ServerEvent = async (
   }
 };
 
+const analyticsEventData = (input: RecordProductAnalyticsEventInput) => ({
+  dedupeKey: privateDigest("dedupe", input.dedupeKey),
+  eventName: input.eventName,
+  source: input.source,
+  userId: input.userId || null,
+  anonymousIdHash: privateDigest("client", input.attribution.client_id),
+  sessionIdHash: privateDigest("session", input.attribution.session_id),
+  utmSource: input.attribution.utm_source,
+  utmMedium: input.attribution.utm_medium,
+  utmCampaign: input.attribution.utm_campaign,
+  language: input.attribution.language,
+  country: input.attribution.country,
+  modelCount: Math.max(0, Math.min(3, Math.trunc(input.modelCount))),
+  plan: normalizeAnalyticsPlan(input.plan),
+  properties: analyticsPropertiesForInput(input) as Prisma.InputJsonValue,
+  occurredAt: input.occurredAt || new Date(),
+});
+
 export async function recordProductAnalyticsEvent(
   input: RecordProductAnalyticsEventInput
 ) {
-  const properties = analyticsPropertiesForInput(input);
-  const occurredAt = input.occurredAt || new Date();
-
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await prisma.productAnalyticsEvent.create({
-        data: {
-          dedupeKey: privateDigest("dedupe", input.dedupeKey),
-          eventName: input.eventName,
-          source: input.source,
-          userId: input.userId || null,
-          anonymousIdHash: privateDigest(
-            "client",
-            input.attribution.client_id
-          ),
-          sessionIdHash: privateDigest(
-            "session",
-            input.attribution.session_id
-          ),
-          utmSource: input.attribution.utm_source,
-          utmMedium: input.attribution.utm_medium,
-          utmCampaign: input.attribution.utm_campaign,
-          language: input.attribution.language,
-          country: input.attribution.country,
-          modelCount: Math.max(0, Math.min(3, Math.trunc(input.modelCount))),
-          plan: normalizeAnalyticsPlan(input.plan),
-          properties: properties as Prisma.InputJsonValue,
-          occurredAt,
-        },
+        data: analyticsEventData(input),
       });
       break;
     } catch (error) {
@@ -208,6 +203,9 @@ export async function recordProductAnalyticsEvent(
   return true;
 }
 
+/** The client a marketing lookup or repair runs on: the shared one, or a transaction. */
+type AnalyticsEventDb = Pick<Prisma.TransactionClient, "productAnalyticsEvent">;
+
 /**
  * The last `marketing_touch` the same browser -- or, once signed in, the same
  * account -- sent in the seven days before `receivedAt` (§10.1). Matched on the
@@ -218,9 +216,10 @@ export async function findLatestMarketingTouch(input: {
   clientId: string;
   userId: string | null;
   receivedAt: Date;
+  db?: AnalyticsEventDb;
 }): Promise<MarketingTouchRow | null> {
   const anonymousIdHash = privateDigest("client", input.clientId);
-  const row = await prisma.productAnalyticsEvent.findFirst({
+  const row = await (input.db ?? prisma).productAnalyticsEvent.findFirst({
     where: {
       eventName: MARKETING_TOUCH_EVENT,
       occurredAt: marketingTouchWindow(input.receivedAt),
@@ -265,10 +264,12 @@ export async function repairLateMarketingTouchSnapshots(input: {
   userId: string | null;
   touch: MarketingTouchRow;
   touchObservedAt: Date;
+  db?: AnalyticsEventDb;
 }) {
+  const db = input.db ?? prisma;
   const anonymousIdHash = privateDigest("client", input.clientId);
   const receivedAt = input.touch.occurredAt.getTime();
-  const rows = await prisma.productAnalyticsEvent.findMany({
+  const rows = await db.productAnalyticsEvent.findMany({
     where: {
       eventName: { in: ["signup_completed", "first_response_completed"] },
       createdAt: {
@@ -301,7 +302,7 @@ export async function repairLateMarketingTouchSnapshots(input: {
       touchObservedAt: input.touchObservedAt,
     });
     if (!properties) continue;
-    await prisma.productAnalyticsEvent.update({
+    await db.productAnalyticsEvent.update({
       where: { id: row.id },
       data: {
         properties: analyticsPropertiesSchema.parse(
@@ -312,6 +313,82 @@ export async function repairLateMarketingTouchSnapshots(input: {
     repaired += 1;
   }
   return repaired;
+}
+
+/**
+ * Records an event, putting one browser's touches and conversions in a single
+ * order (§10.1).
+ *
+ * A touch and a conversion from the same browser, sent together when consent
+ * releases the queue, can interleave: the conversion looks for a touch and
+ * finds none, the touch is stored and looks for a conversion to finish and
+ * finds none, and then the conversion is stored -- unattributed for good. So
+ * both take the same per-browser transaction lock (keyed on the stored digest
+ * of the client id, never the raw id) around their whole read-then-write: a
+ * conversion's lookup and insert, a touch's insert and repair. Whichever goes
+ * second sees the first committed. Two touches finishing the same conversion
+ * are serialised the same way, so the repair always reads the latest snapshot.
+ *
+ * A conversion matched through the account rather than the browser is not
+ * serialised against a touch from another browser; that pairing is the rare
+ * one and is left to the ordinary lookup.
+ *
+ * Every other event is recorded as before. Returns whether a row was written
+ * (false for a duplicate).
+ */
+export async function recordOrderedAnalyticsEvent(
+  input: RecordProductAnalyticsEventInput & {
+    receivedAt: Date;
+    touchObservedAt: Date;
+  }
+): Promise<boolean> {
+  const userId = input.userId || null;
+  const isTouch = input.eventName === MARKETING_TOUCH_EVENT;
+  const snapshot = shouldSnapshotMarketingTouch(input.eventName, userId);
+  if (!isTouch && !snapshot) return recordProductAnalyticsEvent(input);
+
+  const clientId = input.attribution.client_id;
+  const lockKey = `marketing-touch:${privateDigest("client", clientId)}`;
+  return prisma.$transaction(async (db) => {
+    await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    let properties = input.properties || {};
+    if (snapshot) {
+      const touch = await findLatestMarketingTouch({
+        clientId,
+        userId,
+        receivedAt: input.receivedAt,
+        db,
+      });
+      properties = {
+        ...properties,
+        ...marketingTouchSnapshot(touch, input.receivedAt),
+      };
+    }
+    const event = { ...input, properties };
+    // ON CONFLICT DO NOTHING rather than catching a unique violation: an error
+    // would abort the transaction the repair below still needs.
+    const { count } = await db.productAnalyticsEvent.createMany({
+      data: [analyticsEventData(event)],
+      skipDuplicates: true,
+    });
+    if (count !== 1) return false;
+    if (isTouch) {
+      await repairLateMarketingTouchSnapshots({
+        clientId,
+        userId,
+        touch: {
+          utmSource: input.attribution.utm_source,
+          utmMedium: input.attribution.utm_medium,
+          utmCampaign: input.attribution.utm_campaign,
+          utmContent: properties.utm_content ?? null,
+          occurredAt: input.occurredAt || input.receivedAt,
+        },
+        touchObservedAt: input.touchObservedAt,
+        db,
+      });
+    }
+    return true;
+  });
 }
 
 export const analyticsCountryFromHeaders = (headers: Headers) => {
