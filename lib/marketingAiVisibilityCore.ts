@@ -45,7 +45,7 @@ export const MARKETING_AI_VISIBILITY_SWITCH_ENV = "MARKETING_AI_VISIBILITY_ENABL
 /** The marketing kill switch every marketing feature honours (lib/marketingAutomationAccess.ts). */
 export const MARKETING_AI_VISIBILITY_KILL_SWITCH_ENV = "MARKETING_AUTOMATION_KILL_SWITCH";
 
-/** Recorded in the metric id's family, so a change to the questions or the prompts is a new series. */
+/** Part of every metric id, so a change to the questions or the prompts is a new series, not a continuation. */
 export const MARKETING_AI_VISIBILITY_PROMPT_SET_VERSION = "aiv-2026-11-v1";
 
 /** Tomverse's own host: a cited page counts as ours only on it or a subdomain of it. */
@@ -185,9 +185,9 @@ export type MarketingAiVisibilityResult = {
 export const MARKETING_AI_VISIBILITY_METRICS = ["mention_rate", "own_citation_rate"] as const;
 type Metric = (typeof MARKETING_AI_VISIBILITY_METRICS)[number];
 
-/** `ai_visibility.<metric>.<locale>`, the registry-safe id the report kind carries. */
+/** `ai_visibility.<metric>.<locale>.<prompt set version>`, the registry-safe id the report kind carries. */
 export const marketingAiVisibilityMetricId = (metric: Metric, locale: MarketingAiVisibilityLocale): string =>
-  `ai_visibility.${metric}.${locale}`;
+  `ai_visibility.${metric}.${locale}.${MARKETING_AI_VISIBILITY_PROMPT_SET_VERSION}`;
 
 const reportId = (metric: Metric, locale: MarketingAiVisibilityLocale): string =>
   `aiv-${metric === "mention_rate" ? "mention" : "own-cite"}-${locale}`;

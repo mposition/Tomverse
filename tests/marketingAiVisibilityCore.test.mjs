@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  MARKETING_AI_VISIBILITY_PROMPT_SET_VERSION,
   MARKETING_AI_VISIBILITY_QUESTIONS,
   MARKETING_AI_VISIBILITY_QUESTION_BUDGET_MS,
   marketingAiVisibilityAnswerMessages,
@@ -132,11 +133,16 @@ test("the report is a signed measurement_120d the app's own schema accepts", () 
     observedFromAt: "2026-11-02T21:00:00.000Z", observedUntilAt: "2026-11-02T21:20:00.000Z", deadlineAt: DEADLINE,
   });
   assert.equal(report.kind, "measurement_120d");
-  assert.equal(report.payload.metricId, "ai_visibility.mention_rate.zh-Hant");
+  assert.equal(report.payload.metricId, "ai_visibility.mention_rate.zh-Hant.aiv-2026-11-v1");
   assert.equal(report.reportId, "aiv-mention-zh-Hant");
   assert.equal(marketingGeneratorReportSchema.safeParse(report).success, true);
   assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
-  assert.equal(marketingAiVisibilityMetricId("own_citation_rate", "en"), "ai_visibility.own_citation_rate.en");
+  assert.equal(
+    marketingAiVisibilityMetricId("own_citation_rate", "en"),
+    `ai_visibility.own_citation_rate.en.${MARKETING_AI_VISIBILITY_PROMPT_SET_VERSION}`,
+  );
+  // A new question or prompt set is a new series: the version is in the id, not beside it.
+  assert.match(MARKETING_AI_VISIBILITY_PROMPT_SET_VERSION, /^[A-Za-z0-9._:-]+$/);
   // Numbers and ids only: nothing of an answer can be in it.
   assert.deepEqual(Object.keys(report.payload).sort(), ["metricId", "observedFromAt", "observedUntilAt", "sampleSize", "value"]);
 });
@@ -205,10 +211,10 @@ test("a full run asks every question, judges every answer and reports one rate p
   assert.deepEqual(calls.slice(0, 4), ["answer", "judge", "answer", "judge"]);
   assert.deepEqual(calls.slice(18), ["submit", "submit", "submit", "submit", "submit", "submit"]);
   assert.deepEqual(submitted.map((report) => report.payload.metricId).sort(), [
-    "ai_visibility.mention_rate.en", "ai_visibility.mention_rate.ko", "ai_visibility.mention_rate.zh-Hant",
-    "ai_visibility.own_citation_rate.en", "ai_visibility.own_citation_rate.ko", "ai_visibility.own_citation_rate.zh-Hant",
+    "ai_visibility.mention_rate.en.aiv-2026-11-v1", "ai_visibility.mention_rate.ko.aiv-2026-11-v1", "ai_visibility.mention_rate.zh-Hant.aiv-2026-11-v1",
+    "ai_visibility.own_citation_rate.en.aiv-2026-11-v1", "ai_visibility.own_citation_rate.ko.aiv-2026-11-v1", "ai_visibility.own_citation_rate.zh-Hant.aiv-2026-11-v1",
   ]);
-  const mentionKo = submitted.find((report) => report.payload.metricId === "ai_visibility.mention_rate.ko");
+  const mentionKo = submitted.find((report) => report.payload.metricId === "ai_visibility.mention_rate.ko.aiv-2026-11-v1");
   assert.equal(mentionKo.payload.sampleSize, 3);
   assert.equal(mentionKo.payload.value, 0.3333);
   for (const report of submitted) {
