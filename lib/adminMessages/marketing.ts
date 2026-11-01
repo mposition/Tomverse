@@ -264,7 +264,6 @@ export const adminMarketingMessages = defineAdminMessages({
     colExpStopRule: "Stop rule",
     colExpControl: "Control",
     colExpVariant: "Variant",
-    colExpHypothesis: "Hypothesis",
     expStopRuleValue: "variant {drop}% behind after {after} per arm",
     expArmValue: "{exposures} exposures · {conversions} clicks · {rate}",
     expEvidenceNote:
@@ -685,7 +684,6 @@ export const adminMarketingMessages = defineAdminMessages({
     colExpStopRule: "중단 규칙",
     colExpControl: "대조군",
     colExpVariant: "변형",
-    colExpHypothesis: "가설",
     expStopRuleValue: "arm당 {after} 노출 뒤 변형이 {drop}% 뒤처지면",
     expArmValue: "노출 {exposures} · 클릭 {conversions} · {rate}",
     expEvidenceNote:

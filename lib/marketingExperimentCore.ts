@@ -16,6 +16,7 @@
 import {
   EXPERIMENT_MAX_DURATION_DAYS,
   MARKETING_EXPERIMENT_COUNTER_PREFIX,
+  MARKETING_EXPERIMENT_TRIPPED_PREFIX,
   experimentConfigSchema,
   type ExperimentConfig,
   type ExperimentEventKind,
@@ -48,6 +49,9 @@ export const EMPTY_EXPERIMENT_COUNTS: ExperimentCounts = Object.freeze({
   variantExposures: 0,
   variantConversions: 0,
 });
+
+export const experimentTrippedKey = (experimentId: string) =>
+  `${MARKETING_EXPERIMENT_TRIPPED_PREFIX}${experimentId}`;
 
 export const experimentCounterKey = (
   experimentId: string,
@@ -85,9 +89,10 @@ export const experimentRates = (counts: ExperimentCounts) => ({
 });
 
 /**
- * The pre-registered stop rule, evaluated on the counters. It stops nothing by
- * itself: `resolveActiveExperiment` treats a triggered rule as a stopped
- * experiment, so no unaudited write is needed to honour it.
+ * The pre-registered stop rule, evaluated on the counters. A rule that is met
+ * stays met: the counting route records the first time it is observed
+ * (`experimentTrippedKey`), and `resolveActiveExperiment` treats that record,
+ * or the counters themselves, as a stopped experiment.
  */
 export const experimentStopRuleTriggered = (
   preregistration: ExperimentPreregistration,
@@ -115,7 +120,9 @@ export type ActiveExperimentResolution =
 export const resolveActiveExperiment = (
   config: ExperimentConfig,
   counts: ExperimentCounts,
-  now: Date
+  now: Date,
+  /** The stop rule was met at some earlier point and recorded. */
+  tripped = false
 ): ActiveExperimentResolution => {
   if (config.status !== "running") return { active: false, reason: "stopped" };
   const time = now.getTime();
@@ -123,7 +130,7 @@ export const resolveActiveExperiment = (
     return { active: false, reason: "not_started" };
   }
   if (time >= Date.parse(config.endsAt)) return { active: false, reason: "ended" };
-  if (experimentStopRuleTriggered(config.preregistration, counts)) {
+  if (tripped || experimentStopRuleTriggered(config.preregistration, counts)) {
     return { active: false, reason: "stop_rule" };
   }
   return { active: true, config };

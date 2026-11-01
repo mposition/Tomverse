@@ -93,6 +93,20 @@ test("the row says what visitors actually get, not only what is stored", () => {
   });
   assert.equal(ruled.rows[0].state, "stop_rule");
   assert.equal(ruled.experiments.hasRunning, true);
+  // A recorded trip keeps it inactive even when the counters have recovered.
+  const tripped = buildExperimentsConsole(
+    {
+      ...snapshot({}, {
+        controlExposures: 600,
+        controlConversions: 60,
+        variantExposures: 600,
+        variantConversions: 60,
+      }),
+      tripped: true,
+    },
+    new Date(start + DAY)
+  );
+  assert.equal(tripped.rows[0].state, "stop_rule");
   // Stopped is a record and frees the section for another start.
   const stopped = at(2 * DAY, { status: "stopped", stoppedAt: new Date(start + DAY).toISOString() });
   assert.equal(stopped.rows[0].state, "stopped");

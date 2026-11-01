@@ -69,6 +69,21 @@ test("an experiment id's permanent record is written once, by the start, and rea
   ]);
 });
 
+test("a met stop rule is recorded once, insert-if-absent, and read only by the experiment's own modules", () => {
+  assert.deepEqual(filesMentioning("MARKETING_EXPERIMENT_TRIPPED_PREFIX"), [
+    "lib/marketingExperimentContract.ts",
+    "lib/marketingExperimentCore.ts",
+  ]);
+  assert.deepEqual(filesMentioning("experimentTrippedKey"), [
+    "lib/marketingExperimentCore.ts",
+    "lib/marketingExperimentState.ts",
+  ]);
+  const state = sources.find((source) => source.path === "lib/marketingExperimentState.ts").text;
+  // Never updated or deleted: the only statement that names the key is a
+  // do-nothing-on-conflict insert.
+  assert.match(state, /ON CONFLICT \("key"\) DO NOTHING/);
+});
+
 test("experiment counters are incremented in one place, with one statement", () => {
   assert.deepEqual(filesMentioning("incrementExperimentCounter"), [
     // The writer, and the public route that calls it for a consented,
@@ -87,7 +102,8 @@ test("experiment counters are incremented in one place, with one statement", () 
   const state = sources.find((source) => source.path === "lib/marketingExperimentState.ts").text;
   // An atomic increment, not a read followed by a write.
   assert.match(state, /ON CONFLICT \("key"\) DO UPDATE/);
-  assert.equal((state.match(/\$executeRaw/g) ?? []).length, 1);
+  // The increment and the stop-rule record: two statements, both inserts.
+  assert.equal((state.match(/\$executeRaw/g) ?? []).length, 2);
 });
 
 test("the experiments switch has no writer in this feature", () => {

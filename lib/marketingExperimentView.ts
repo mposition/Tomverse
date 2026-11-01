@@ -70,6 +70,8 @@ export function buildExperimentsConsole(
     version: string | null;
     config: ExperimentConfig | null;
     counts: ExperimentCounts | null;
+    /** The stop rule was met at some point and recorded. */
+    tripped?: boolean;
   },
   now: Date
 ): { rows: ExperimentRowView[]; experiments: ExperimentsConsoleView } {
@@ -91,7 +93,7 @@ export function buildExperimentsConsole(
     return { rows: [], experiments: { ...base, hasRunning: false } };
   }
 
-  const resolution = resolveActiveExperiment(config, counts, now);
+  const resolution = resolveActiveExperiment(config, counts, now, snapshot.tripped === true);
   const rates = experimentRates(counts);
   const minimum = config.preregistration.minExposuresPerArm;
   return {

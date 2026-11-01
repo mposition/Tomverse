@@ -28,6 +28,18 @@ export const MARKETING_EXPERIMENT_COUNTER_PREFIX =
   "marketingAutomation.experimentCount.";
 
 /**
+ * One row per experiment whose pre-registered stop rule has been met, written
+ * once (`ON CONFLICT DO NOTHING`) by the counting route and never changed. The
+ * rule is evaluated on counters that keep moving, so on its own it could stop
+ * an experiment and then, after a late click is counted, let it resume; this
+ * row is what makes a met stop rule stay met. It is the same kind of record as
+ * the counters (a fact derived from them, with no operator decision in it);
+ * the person's Stop is still what writes the audit entry and the reports.
+ */
+export const MARKETING_EXPERIMENT_TRIPPED_PREFIX =
+  "marketingAutomation.experimentTripped.";
+
+/**
  * One row per experiment id ever started, never deleted. The stored
  * configuration holds only the latest run and the counters can be absent for
  * a run nobody saw, so neither can say that an id was used; this row can. An

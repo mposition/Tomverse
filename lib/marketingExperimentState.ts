@@ -15,6 +15,8 @@ import {
 import {
   experimentCountsFromRows,
   experimentCounterKey,
+  experimentStopRuleTriggered,
+  experimentTrippedKey,
   parseExperimentConfig,
   resolveActiveExperiment,
   type ActiveExperimentResolution,
@@ -39,32 +41,47 @@ export type ExperimentSnapshot = {
   version: string | null;
   config: ExperimentConfig | null;
   counts: ExperimentCounts | null;
+  /** The pre-registered stop rule was met and recorded. */
+  tripped: boolean;
 };
 
+/**
+ * Two reads, both scoped to the experiment that is stored: the configuration
+ * row, then that experiment's counters and its stop-rule record. Counter rows
+ * of earlier experiments are permanent and are never scanned.
+ */
 export const readExperimentSnapshot = async (
   client: Pick<PrismaClient, "appSetting">
 ): Promise<ExperimentSnapshot> => {
-  const rows = await client.appSetting.findMany({
-    where: {
-      OR: [
-        { key: MARKETING_EXPERIMENT_CONFIG_KEY },
-        { key: { startsWith: MARKETING_EXPERIMENT_COUNTER_PREFIX } },
-      ],
-    },
-    select: { key: true, value: true, updatedAt: true },
+  const configRow = await client.appSetting.findUnique({
+    where: { key: MARKETING_EXPERIMENT_CONFIG_KEY },
+    select: { value: true, updatedAt: true },
   });
-  const configRow = rows.find((row) => row.key === MARKETING_EXPERIMENT_CONFIG_KEY);
   const config = parseExperimentConfig(configRow?.value);
-  return {
+  const base = {
     configRaw: configRow?.value ?? null,
     version: configRow ? configRow.updatedAt.toISOString() : null,
     config,
-    counts: config
-      ? experimentCountsFromRows(
-          config,
-          new Map(rows.map((row) => [row.key, row.value]))
-        )
-      : null,
+  };
+  if (!config) return { ...base, counts: null, tripped: false };
+
+  const trippedKey = experimentTrippedKey(config.experimentId);
+  const rows = await client.appSetting.findMany({
+    where: {
+      OR: [
+        { key: { startsWith: `${MARKETING_EXPERIMENT_COUNTER_PREFIX}${config.experimentId}.` } },
+        { key: trippedKey },
+      ],
+    },
+    select: { key: true, value: true },
+  });
+  return {
+    ...base,
+    counts: experimentCountsFromRows(
+      config,
+      new Map(rows.map((row) => [row.key, row.value]))
+    ),
+    tripped: rows.some((row) => row.key === trippedKey),
   };
 };
 
@@ -156,7 +173,8 @@ export async function readActiveMarketingExperiment(options: {
     const resolution = resolveActiveExperiment(
       snapshot.config,
       snapshot.counts,
-      now
+      now,
+      snapshot.tripped
     );
     return resolution.active
       ? { ok: true, active: true, config: resolution.config }
@@ -172,17 +190,46 @@ export async function readActiveMarketingExperiment(options: {
  * an `AppSetting` string would.
  */
 export async function incrementExperimentCounter(
-  experimentId: string,
+  config: Pick<ExperimentConfig, "experimentId" | "variantId" | "preregistration">,
   arm: string,
   kind: ExperimentEventKind
 ) {
   if (isE2EFixtureMode()) return;
-  const key = experimentCounterKey(experimentId, arm, kind);
+  const key = experimentCounterKey(config.experimentId, arm, kind);
   await prisma.$executeRaw`
     INSERT INTO "AppSetting" ("key", "value", "createdAt", "updatedAt")
     VALUES (${key}, '1', NOW(), NOW())
     ON CONFLICT ("key") DO UPDATE
     SET "value" = (("AppSetting"."value")::bigint + 1)::text,
         "updatedAt" = NOW()
+  `;
+  await recordStopRuleTrip(config);
+}
+
+/**
+ * The first time the pre-registered stop rule is seen to be met, write one row
+ * saying so. Insert-if-absent, so racing requests write it once and nothing
+ * ever changes or deletes it; reading it is what keeps the experiment stopped
+ * after a late request moves the counters back under the line.
+ */
+async function recordStopRuleTrip(
+  config: Pick<ExperimentConfig, "experimentId" | "variantId" | "preregistration">
+) {
+  const rows = await prisma.appSetting.findMany({
+    where: {
+      key: { startsWith: `${MARKETING_EXPERIMENT_COUNTER_PREFIX}${config.experimentId}.` },
+    },
+    select: { key: true, value: true },
+  });
+  const counts = experimentCountsFromRows(
+    config,
+    new Map(rows.map((row) => [row.key, row.value]))
+  );
+  if (!experimentStopRuleTriggered(config.preregistration, counts)) return;
+  const trippedKey = experimentTrippedKey(config.experimentId);
+  await prisma.$executeRaw`
+    INSERT INTO "AppSetting" ("key", "value", "createdAt", "updatedAt")
+    VALUES (${trippedKey}, ${new Date().toISOString()}, NOW(), NOW())
+    ON CONFLICT ("key") DO NOTHING
   `;
 }

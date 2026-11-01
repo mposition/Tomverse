@@ -16,6 +16,7 @@ import {
   experimentCountsFromRows,
   experimentRates,
   experimentStopRuleTriggered,
+  experimentTrippedKey,
   parseExperimentConfig,
   pickExperimentArm,
   resolveActiveExperiment,
@@ -192,6 +193,27 @@ test("an experiment is active only inside its window, while running, and until i
     active: false,
     reason: "stop_rule",
   });
+});
+
+test("a stop rule that has been met stays met, even when later counts move back under the line", () => {
+  const value = config();
+  const at = new Date(start + DAY);
+  // 50 control exposures at 20% against 49 variant exposures at 14%: not enough
+  // exposures yet, nothing tripped.
+  const before = counts(50, 10, 49, 7);
+  assert.equal(resolveActiveExperiment(value, before, at).active, true);
+  // Met: a variant exposure arrives and the drop is over the line.
+  const met = counts(100, 20, 100, 10);
+  assert.equal(resolveActiveExperiment(value, met, at).active, false);
+  // A late click is counted and the rate recovers above the line. Without a
+  // record the experiment would be active again; with it, it is not.
+  const recovered = counts(100, 20, 100, 17);
+  assert.equal(resolveActiveExperiment(value, recovered, at).active, true);
+  assert.deepEqual(resolveActiveExperiment(value, recovered, at, true), {
+    active: false,
+    reason: "stop_rule",
+  });
+  assert.equal(experimentTrippedKey("spring-hero"), "marketingAutomation.experimentTripped.spring-hero");
 });
 
 test("the share decides the arm, and a roll equal to the share is the control", () => {

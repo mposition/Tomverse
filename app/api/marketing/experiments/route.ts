@@ -204,11 +204,7 @@ export async function POST(request: Request) {
       return respond({ status: "ignored", arm: current.arm });
     }
     if (body.action === "conversion" || body.record !== false) {
-      await incrementExperimentCounter(
-        config.experimentId,
-        current.arm,
-        body.action
-      );
+      await incrementExperimentCounter(config, current.arm, body.action);
     }
     return respond({ status: "recorded", arm: current.arm });
   } catch (error) {
