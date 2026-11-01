@@ -29,6 +29,8 @@ const SESSION_STORAGE_KEY = "tomverse_analytics_session_v1";
 const PRECONSENT_ATTRIBUTION_STORAGE_KEY =
   "tomverse_analytics_preconsent_attribution_v1";
 const PENDING_EVENTS_STORAGE_KEY = "tomverse_analytics_pending_events_v1";
+const TOUCH_SEEN_STORAGE_KEY = "tomverse_analytics_touch_seen_v1";
+const MAX_TOUCHES_SEEN = 20;
 const MODEL_FINDER_VARIANT_STORAGE_KEY = "tomverse_model_finder_variant_v1";
 const MAX_PENDING_EVENTS = 100;
 const ATTRIBUTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -45,6 +47,12 @@ type AnalyticsRuntime = {
   sentOnce: Set<string>;
 };
 
+type IntentAttribution = {
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+};
+
 type EventIntent = {
   eventId: string;
   eventName: ProductAnalyticsEventName;
@@ -52,6 +60,10 @@ type EventIntent = {
   modelCount: number;
   properties: ProductAnalyticsProperties;
   onceKey?: string;
+  // The UTM values this event itself observed, sent in place of the
+  // session's. Only a marketing touch carries one: it reports the landing URL
+  // it saw, which a later landing in the same session must not overwrite.
+  attribution?: IntentAttribution;
 };
 
 type StoredContext = {
@@ -239,7 +251,16 @@ const readPendingEvents = (): EventIntent[] => {
         if (!candidate || typeof candidate !== "object") return null;
         const event = candidate as Partial<EventIntent>;
         const properties = analyticsPropertiesSchema.safeParse(event.properties);
+        const attribution = event.attribution;
+        const attributionValid =
+          attribution === undefined ||
+          (Boolean(attribution) &&
+            typeof attribution === "object" &&
+            typeof attribution.utmSource === "string" &&
+            typeof attribution.utmMedium === "string" &&
+            typeof attribution.utmCampaign === "string");
         if (
+          !attributionValid ||
           !isUuid(event.eventId) ||
           typeof event.eventName !== "string" ||
           !PRODUCT_ANALYTICS_EVENT_NAMES.includes(
@@ -260,6 +281,15 @@ const readPendingEvents = (): EventIntent[] => {
           modelCount: event.modelCount,
           properties: properties.data,
           ...(event.onceKey ? { onceKey: event.onceKey.slice(0, 100) } : {}),
+          ...(attribution
+            ? {
+                attribution: {
+                  utmSource: limited(attribution.utmSource, "(direct)"),
+                  utmMedium: limited(attribution.utmMedium, "(none)"),
+                  utmCampaign: limited(attribution.utmCampaign, "(not set)"),
+                },
+              }
+            : {}),
         };
       })
       .filter((event): event is EventIntent => Boolean(event))
@@ -368,6 +398,13 @@ const sendIntent = (intent: EventIntent) => {
       ...localeMarketingAnalyticsProperties(runtime.attribution.language),
     },
     ...runtime.attribution,
+    ...(intent.attribution
+      ? {
+          utm_source: intent.attribution.utmSource,
+          utm_medium: intent.attribution.utmMedium,
+          utm_campaign: intent.attribution.utmCampaign,
+        }
+      : {}),
   });
 
   if (shouldSendCustomProductEventToGa4(intent.eventName)) {
@@ -511,6 +548,7 @@ export const disableAnalyticsClient = () => {
   window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);
   window.sessionStorage.removeItem(PENDING_EVENTS_STORAGE_KEY);
   window.sessionStorage.removeItem(PRECONSENT_ATTRIBUTION_STORAGE_KEY);
+  window.sessionStorage.removeItem(TOUCH_SEEN_STORAGE_KEY);
   for (const cookie of document.cookie.split(";")) {
     const name = cookie.split("=")[0]?.trim();
     if (name === "_ga" || name?.startsWith("_ga_")) {
@@ -579,6 +617,73 @@ export function trackProductEventOnce(
   writeStoredContext(runtime);
   sendIntent(intent);
 }
+
+/**
+ * Report the UTM parameters in the current URL as a `marketing_touch`
+ * (docs/policy/marketing-automation.md §10.1).
+ *
+ * Under the same consent rule as every other event: nothing when analytics was
+ * declined, held in this tab's pending queue until the visitor's choice allows
+ * analytics, and dropped with that queue if it never does. The server times
+ * the touch by its receipt, so a touch that waited for consent is recorded
+ * when consent was given, not when the page loaded -- which is what
+ * "client-observed, server-timed" says.
+ *
+ * Once per distinct set of values per tab session: a reload of the same
+ * landing URL is not a second touch, a different link is.
+ */
+export const observeMarketingTouch = () => {
+  if (typeof window === "undefined") return;
+  if (analyticsConsent() === "declined") return;
+  const params = new URLSearchParams(window.location.search);
+  const keys = ["utm_source", "utm_medium", "utm_campaign", "utm_content"];
+  if (!keys.some((key) => params.has(key))) return;
+  const attribution: IntentAttribution = {
+    utmSource: limited(params.get("utm_source"), "(direct)"),
+    utmMedium: limited(params.get("utm_medium"), "(none)"),
+    utmCampaign: limited(params.get("utm_campaign"), "(not set)"),
+  };
+  const utmContent = params.get("utm_content")?.trim().slice(0, 100) || null;
+  const seenKey = JSON.stringify([
+    attribution.utmSource,
+    attribution.utmMedium,
+    attribution.utmCampaign,
+    utmContent,
+  ]);
+  let seen: string[] = [];
+  try {
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(TOUCH_SEEN_STORAGE_KEY) || "[]"
+    ) as unknown;
+    if (Array.isArray(parsed)) {
+      seen = parsed.filter((item): item is string => typeof item === "string");
+    }
+  } catch {
+    seen = [];
+  }
+  if (seen.includes(seenKey)) return;
+  const properties = analyticsPropertiesSchema.safeParse(
+    utmContent ? { utm_content: utmContent } : {}
+  );
+  if (!properties.success) return;
+  window.sessionStorage.setItem(
+    TOUCH_SEEN_STORAGE_KEY,
+    JSON.stringify([...seen, seenKey].slice(-MAX_TOUCHES_SEEN))
+  );
+  const intent: EventIntent = {
+    eventId: crypto.randomUUID(),
+    eventName: "marketing_touch",
+    occurredAt: new Date().toISOString(),
+    modelCount: 0,
+    properties: properties.data,
+    attribution,
+  };
+  if (!runtime) {
+    queuePendingIntent(intent);
+    return;
+  }
+  sendIntent(intent);
+};
 
 export const markSignupStarted = (method: string) => {
   if (analyticsConsent() === "declined") return;

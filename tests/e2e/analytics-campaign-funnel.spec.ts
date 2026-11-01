@@ -124,9 +124,14 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   await page.reload();
   await page.getByRole("button", { name: "Allow analytics" }).click();
 
+  // The UTM landing is also reported as a marketing touch (marketing policy
+  // §10.1), held with the other events until consent and carrying the
+  // landing URL's values -- the loop at the end checks those.
   await expect
     .poll(() => capturedEvents.map((event) => event.event_name))
-    .toEqual(expect.arrayContaining(["landing_view", "cta_start_click"]));
+    .toEqual(
+      expect.arrayContaining(["landing_view", "cta_start_click", "marketing_touch"])
+    );
 
   await sendChatMessage(page, testInfo, "Validate campaign funnel");
   // The guest default is 3 comparison panels, and the mock responds

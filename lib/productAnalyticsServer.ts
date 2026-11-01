@@ -17,6 +17,11 @@ import {
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
 import {
+  MARKETING_TOUCH_EVENT,
+  marketingTouchWindow,
+  type MarketingTouchRow,
+} from "@/lib/marketingTouchCore";
+import {
   isRetryableDatabaseError,
   isUniqueConstraintDatabaseError,
 } from "@/lib/databaseError";
@@ -199,6 +204,52 @@ export async function recordProductAnalyticsEvent(
     });
   }
   return true;
+}
+
+/**
+ * The last `marketing_touch` the same browser -- or, once signed in, the same
+ * account -- sent in the seven days before `receivedAt` (§10.1). Matched on the
+ * keyed digest of the client id, the same one the event rows store, so the raw
+ * id is never compared or kept.
+ */
+export async function findLatestMarketingTouch(input: {
+  clientId: string;
+  userId: string | null;
+  receivedAt: Date;
+}): Promise<MarketingTouchRow | null> {
+  const anonymousIdHash = privateDigest("client", input.clientId);
+  const row = await prisma.productAnalyticsEvent.findFirst({
+    where: {
+      eventName: MARKETING_TOUCH_EVENT,
+      occurredAt: marketingTouchWindow(input.receivedAt),
+      OR: [
+        { anonymousIdHash },
+        ...(input.userId ? [{ userId: input.userId }] : []),
+      ],
+    },
+    orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+    select: {
+      utmSource: true,
+      utmMedium: true,
+      utmCampaign: true,
+      properties: true,
+      occurredAt: true,
+    },
+  });
+  if (!row) return null;
+  const content =
+    row.properties &&
+    typeof row.properties === "object" &&
+    !Array.isArray(row.properties)
+      ? (row.properties as Record<string, unknown>).utm_content
+      : undefined;
+  return {
+    utmSource: row.utmSource,
+    utmMedium: row.utmMedium,
+    utmCampaign: row.utmCampaign,
+    utmContent: typeof content === "string" && content ? content : null,
+    occurredAt: row.occurredAt,
+  };
 }
 
 export const analyticsCountryFromHeaders = (headers: Headers) => {

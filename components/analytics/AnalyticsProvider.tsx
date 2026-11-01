@@ -11,6 +11,7 @@ import {
   configureAnalyticsClient,
   consumeSignupStarted,
   disableAnalyticsClient,
+  observeMarketingTouch,
   setAnalyticsConsent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
@@ -573,6 +574,14 @@ export function AnalyticsProvider({
       );
     };
   }, [disabled, openPreferencesFrom]);
+
+  // §10.1 marketing touch: the landing URL's UTM values, reported once per
+  // distinct link per tab. Consent is applied inside the client exactly as for
+  // every other event -- declined sends nothing, undecided waits.
+  useEffect(() => {
+    if (disabled) return;
+    observeMarketingTouch();
+  }, [disabled, pathname]);
 
   const analyticsEnabled = Boolean(
     resolvedPolicy &&
