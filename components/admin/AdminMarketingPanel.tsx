@@ -1490,6 +1490,14 @@ const MARKETING_STOPPED_ACCOUNT_STATUSES = new Set([
   "connect_pending",
 ]);
 
+// Every post is approved by a person in these states, which is where the store
+// accepts a language change. Compared with the store's list by a test: this is
+// a client component and cannot import it.
+const MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES = new Set([
+  "connect_pending",
+  "approval_mode",
+]);
+
 function publishedActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];
   const status = str(row.status);
@@ -1651,6 +1659,42 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
       label: m.actReconnect,
       path: ACCOUNT(row.id, "reconnect"),
       body: () => ({ expectedConnectionGeneration: generation }),
+    });
+  }
+
+  if (MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES.has(status)) {
+    const allowedLocales = Array.isArray(row.allowedLocales)
+      ? row.allowedLocales.map((locale) => str(locale))
+      : [];
+    actions.push({
+      id: "locales",
+      label: m.actChangeLocales,
+      path: ACCOUNT(row.id, "locales"),
+      fields: [
+        {
+          name: "defaultLocale",
+          label: m.fieldDefaultLocale,
+          kind: "select",
+          options: MARKETING_LOCALES,
+          initial: str(row.defaultLocale),
+        },
+        {
+          name: "allowedLocales",
+          label: m.fieldAllowedLocales,
+          kind: "text",
+          initial: allowedLocales.join(", "),
+          hint: m.hintLocalesChange,
+        },
+      ],
+      body: (values) => ({
+        expectedDefaultLocale: str(row.defaultLocale),
+        expectedAllowedLocales: allowedLocales,
+        defaultLocale: values.defaultLocale,
+        allowedLocales: values.allowedLocales
+          .split(",")
+          .map((locale) => locale.trim())
+          .filter((locale) => locale !== ""),
+      }),
     });
   }
 

@@ -18,7 +18,9 @@ import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
   applyMarketingWebhookEvent,
   approveMarketingPost,
+  changeMarketingChannelLocales,
   claimDueMarketingPost,
+  MarketingChannelLocalesRefusedError,
   releaseMarketingPostClaim,
   marketingSerializationFailure,
   createMarketingChannel,
@@ -468,6 +470,79 @@ test("a post cannot be in a language its account does not publish in", async () 
   await refused(
     post(linkedin.id, { locale: "zh-Hans" }),
     /the account does not publish in it/,
+  );
+});
+
+const refusedLocales = async (operation: Promise<unknown>, expectedCode: string) => {
+  await assert.rejects(operation, (error: Error) => {
+    assert.ok(error instanceof MarketingChannelLocalesRefusedError);
+    assert.equal(error.code, expectedCode);
+    return true;
+  });
+};
+
+test("a language change narrows an account once no post in a dropped language can go out", async () => {
+  // The production case: one Instagram account registered with three
+  // languages, narrowed to one after an account per language was registered.
+  const three = ["ko", "en", "zh-Hant"] as const;
+  const instagram = () =>
+    approvedChannel({
+      channel: "instagram",
+      defaultLocale: "en",
+      allowedLocales: [...three],
+    });
+  const narrow = (id: string, expected: readonly string[]) =>
+    runMarketingTransaction(prisma, (tx) =>
+      changeMarketingChannelLocales(tx, {
+        id,
+        expectedDefaultLocale: "en",
+        expectedAllowedLocales: expected as never,
+        defaultLocale: "en",
+        allowedLocales: ["en"],
+      }),
+    );
+
+  // A draft in a dropped language could still be approved and published by
+  // status-only moves the post trigger does not look at.
+  const busy = await instagram();
+  await post(busy.id, { locale: "zh-Hant" });
+  await refusedLocales(narrow(busy.id, three), "locales_change_has_unfinished_posts");
+
+  // A stale view of the languages loses.
+  await refusedLocales(narrow(busy.id, ["en", "ko"]), "locales_change_conflict");
+
+  // Refused drafts can never go out, so they do not hold the change back.
+  const account = await instagram();
+  await post(account.id, { locale: "zh-Hant", status: "guard_rejected", guardDecision: "reject" });
+  await post(account.id, { locale: "en" });
+  const result = await narrow(account.id, ["zh-Hant", "en", "ko"]);
+  assert.deepEqual([...result.droppedLocales].sort(), ["ko", "zh-Hant"]);
+
+  const changed = await prisma.marketingChannel.findUniqueOrThrow({ where: { id: account.id } });
+  assert.equal(changed.defaultLocale, "en");
+  assert.deepEqual(changed.allowedLocales, ["en"]);
+  assert.equal(changed.status, "approval_mode");
+  assert.equal(changed.graduationEpoch, account.graduationEpoch);
+  await refused(post(account.id, { locale: "ko" }), /the account does not publish in it/);
+});
+
+test("a language change is refused outside the human-approved states", async () => {
+  const account = await approvedChannel({ allowedLocales: ["en", "ko"] });
+  await prisma.marketingChannel.update({
+    where: { id: account.id },
+    data: { status: "paused" },
+  });
+  await refusedLocales(
+    runMarketingTransaction(prisma, (tx) =>
+      changeMarketingChannelLocales(tx, {
+        id: account.id,
+        expectedDefaultLocale: "en",
+        expectedAllowedLocales: ["en", "ko"],
+        defaultLocale: "en",
+        allowedLocales: ["en"],
+      }),
+    ),
+    "locales_change_needs_approval_mode",
   );
 });
 
