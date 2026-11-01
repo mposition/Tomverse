@@ -199,6 +199,68 @@ test("declining analytics while a conversion waits for a touch cancels the conve
   }
 });
 
+test("a touch waiting to be retried is not sent again after analytics is declined", async () => {
+  reset();
+  const timers = [];
+  const originalSetTimeout = win.setTimeout;
+  win.setTimeout = (callback) => {
+    timers.push(callback);
+    return timers.length;
+  };
+  answerTouch = () =>
+    Promise.resolve({ ok: false, status: 503, body: null, text: async () => "" });
+  try {
+    client.setAnalyticsConsent("accepted");
+    land(LINK);
+    configure();
+    client.observeMarketingTouch();
+    await flush();
+    assert.equal(touches().length, 1);
+    assert.ok(timers.length > 0, "a 503 schedules a retry");
+
+    client.setAnalyticsConsent("declined");
+    client.disableAnalyticsClient();
+    for (const callback of timers.splice(0)) callback();
+    await flush();
+    for (const callback of timers.splice(0)) callback();
+    await flush();
+    assert.equal(touches().length, 1, "the retry after the withdrawal is dropped");
+  } finally {
+    win.setTimeout = originalSetTimeout;
+    answerTouch = () => Promise.resolve(accepted());
+  }
+});
+
+test("without a withdrawal a transient failure is still retried", async () => {
+  reset();
+  const timers = [];
+  const originalSetTimeout = win.setTimeout;
+  win.setTimeout = (callback) => {
+    timers.push(callback);
+    return timers.length;
+  };
+  let failures = 1;
+  answerTouch = () =>
+    Promise.resolve(
+      failures-- > 0
+        ? { ok: false, status: 503, body: null, text: async () => "" }
+        : accepted(),
+    );
+  try {
+    client.setAnalyticsConsent("accepted");
+    land(LINK);
+    configure();
+    client.observeMarketingTouch();
+    await flush();
+    for (const callback of timers.splice(0)) callback();
+    await flush();
+    assert.equal(touches().length, 2);
+  } finally {
+    win.setTimeout = originalSetTimeout;
+    answerTouch = () => Promise.resolve(accepted());
+  }
+});
+
 test("a visitor who had declined and then allows analytics on the landing page keeps the link", async () => {
   reset();
   client.setAnalyticsConsent("declined");

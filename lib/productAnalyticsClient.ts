@@ -346,20 +346,33 @@ const RETRYABLE_INTERNAL_DELIVERY_STATUSES = new Set([
   504,
 ]);
 
+// Bumped by disableAnalyticsClient. A retry, or a conversion waiting for a
+// touch, that began in an earlier generation is dropped.
+let deliveryGeneration = 0;
+
 /**
  * Delivers one event, retrying a transient failure. Settles -- never rejects
  * -- once the server has answered or the retries are spent, which is what lets
- * a conversion wait for a touch below.
+ * a conversion wait for a touch below. A retry is dropped if analytics was
+ * declined after the first attempt: nothing sent before a withdrawal is sent
+ * again after it.
  */
 const deliverInternalAnalyticsEvent = (
   payload: ReturnType<typeof analyticsClientEventSchema.parse>,
-  attempt = 0
+  attempt = 0,
+  generation = deliveryGeneration
 ): Promise<void> => {
+  const withdrawn = () =>
+    generation !== deliveryGeneration || analyticsConsent() === "declined";
   const retry = () =>
-    attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length
+    attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length && !withdrawn()
       ? new Promise<void>((resolve) =>
           window.setTimeout(resolve, INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt])
-        ).then(() => deliverInternalAnalyticsEvent(payload, attempt + 1))
+        ).then(() =>
+          withdrawn()
+            ? undefined
+            : deliverInternalAnalyticsEvent(payload, attempt + 1, generation)
+        )
       : undefined;
   return fetch("/api/analytics/events", {
     method: "POST",
@@ -393,9 +406,6 @@ const deliverInternalAnalyticsEvent = (
 // has been answered (or given up on); everything else goes out at once.
 let touchDeliveries: Promise<void> = Promise.resolve();
 const TOUCH_ORDERING_MAX_WAIT_MS = 10_000;
-// Bumped by disableAnalyticsClient; a waiting conversion from an earlier
-// generation is dropped.
-let deliveryGeneration = 0;
 const TOUCH_ATTRIBUTED_EVENTS = new Set<ProductAnalyticsEventName>([
   "signup_completed",
   "first_response_completed",
