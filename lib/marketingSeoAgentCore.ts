@@ -645,7 +645,12 @@ export function seoAgentCodeProblems(added: string): string[] {
       problems.add(name);
     }
   }
-  if (/\bconstructor\s*\.\s*constructor\b/.test(code) || /\[\s*["']constructor["']\s*\]/.test(added)) problems.add("constructor_chain");
+  // Any member named `constructor` reaches the Function constructor in one hop, and a subscript made of a
+  // string (`x["a"+"b"]`, `x["assert"]`) names a member the deny-list cannot read. SEO code uses neither.
+  // (A subscript follows a value with no space; `["a", "b"]` after `=`, `(` or `return ` is an array.)
+  if (/\.\s*constructor\b/.test(code) || /\bconstructor\s*\[/.test(code) || /(?<=[\w$)\]])\[\s*(?:""|`)/.test(code)) {
+    problems.add("constructor_or_computed_member");
+  }
   return [...problems].sort();
 }
 

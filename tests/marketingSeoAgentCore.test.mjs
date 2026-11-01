@@ -294,7 +294,11 @@ test("the routes to the test runner's own objects are closed on the lines a chan
         "eval": 'eval("1")',
         "Function": 'new Function("return 1")()',
         "constructor chain": '(() => {}).constructor.constructor("return process")()',
+        "constructor one hop": '(() => {}).constructor("return process")()',
         "constructor index": '(() => {})["constructor"]',
+        "computed member": 'Object["define" + "Property"](a, "b", {});',
+        "computed member by string": 'x["assert"].equal = () => {};',
+        "computed member by template": "x[`assert`]",
         "eval in a template": "const s = `${eval('1')}`;",
         "relative import": 'import x from "./evil";',
         "node import": 'import { readFileSync } from "fs";',
@@ -325,6 +329,7 @@ test("ordinary SEO code and copy that merely uses the words are not findings", (
         'import type { Metadata } from "next";\nimport { SITE_ORIGIN } from "@/lib/seo";\nimport { NextResponse } from "next/server";',
         'import {\n  a,\n  b,\n} from "@/lib/seo";',
         "export default function sitemap() { return SEO_LOCALES.map((locale) => ({ url: locale })); }",
+        "const value = byLocale[locale]; const first = list[0]; const last = list[list.length - 1];",
     ];
     for (const code of fine) assert.deepEqual(seoAgentCodeProblems(code), [], code);
     // Only the one environment variable the llms.txt route reads.
