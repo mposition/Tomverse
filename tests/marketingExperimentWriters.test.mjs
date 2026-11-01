@@ -102,8 +102,23 @@ test("experiment counters are incremented in one place, with one statement", () 
   const state = sources.find((source) => source.path === "lib/marketingExperimentState.ts").text;
   // An atomic increment, not a read followed by a write.
   assert.match(state, /ON CONFLICT \("key"\) DO UPDATE/);
-  // The increment and the stop-rule record: two statements, both inserts.
-  assert.equal((state.match(/\$executeRaw/g) ?? []).length, 2);
+  // The lock, the increment and the stop-rule record: three statements.
+  assert.equal((state.match(/\$executeRaw/g) ?? []).length, 3);
+  // The increment and the judgement of the counters it leaves are one
+  // transaction under one per-experiment lock, in that order: a counter change
+  // that is judged on a later, different state can miss the moment the rule
+  // was met. (No database is available to this test, so the structure is what
+  // it can hold; the order is what makes the judgement exact.)
+  const body = state.slice(state.indexOf("export async function incrementExperimentCounter"));
+  const at = (needle) => body.indexOf(needle);
+  assert.ok(at("prisma.$transaction(") > 0, "increment runs in a transaction");
+  assert.ok(at("pg_advisory_xact_lock(hashtext(") > at("prisma.$transaction("));
+  assert.ok(at('ON CONFLICT ("key") DO UPDATE') > at("pg_advisory_xact_lock("));
+  assert.ok(at("await recordStopRuleTrip(tx, config)") > at('ON CONFLICT ("key") DO UPDATE'));
+  assert.ok(
+    !/prisma\.(?:appSetting|\$executeRaw)/.test(body.slice(body.indexOf("async function recordStopRuleTrip"))),
+    "the judgement reads through the transaction, not around it"
+  );
 });
 
 test("the experiments switch has no writer in this feature", () => {

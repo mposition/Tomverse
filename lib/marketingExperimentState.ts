@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
@@ -214,9 +214,19 @@ export async function readActiveMarketingExperiment(options: {
 }
 
 /**
- * One atomic increment per event. A single `INSERT ... ON CONFLICT` so two
- * visitors counted at once cannot lose an update, which a read-then-write on
- * an `AppSetting` string would.
+ * One event counted, and the stop rule judged on the counters it leaves, in
+ * one transaction that holds a per-experiment advisory lock for its length.
+ *
+ * Without the lock the two steps interleave. Two requests each increment and
+ * then each read; a third increments between the increments and the reads; the
+ * rule was true after the second request's write and false by the time any of
+ * them looked, so no one records it. With it, every counter change is followed
+ * by a judgement of exactly the state that change produced, one event at a
+ * time. The increment is still a single `INSERT ... ON CONFLICT` statement, so
+ * it cannot lose an update on its own either. The lock is held for a few
+ * statements and only against events of the same experiment; the audit chain
+ * lock is never taken here, so it cannot form a cycle with an Admin start or
+ * stop (which take the audit chain first and never this one).
  */
 export async function incrementExperimentCounter(
   config: Pick<ExperimentConfig, "experimentId" | "variantId" | "preregistration">,
@@ -225,14 +235,20 @@ export async function incrementExperimentCounter(
 ) {
   if (isE2EFixtureMode()) return;
   const key = experimentCounterKey(config.experimentId, arm, kind);
-  await prisma.$executeRaw`
-    INSERT INTO "AppSetting" ("key", "value", "createdAt", "updatedAt")
-    VALUES (${key}, '1', NOW(), NOW())
-    ON CONFLICT ("key") DO UPDATE
-    SET "value" = (("AppSetting"."value")::bigint + 1)::text,
-        "updatedAt" = NOW()
-  `;
-  await recordStopRuleTrip(config);
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`marketing-experiment-counters:${config.experimentId}`}))`;
+      await tx.$executeRaw`
+        INSERT INTO "AppSetting" ("key", "value", "createdAt", "updatedAt")
+        VALUES (${key}, '1', NOW(), NOW())
+        ON CONFLICT ("key") DO UPDATE
+        SET "value" = (("AppSetting"."value")::bigint + 1)::text,
+            "updatedAt" = NOW()
+      `;
+      await recordStopRuleTrip(tx, config);
+    },
+    { maxWait: 5_000, timeout: 10_000 }
+  );
 }
 
 /**
@@ -242,9 +258,10 @@ export async function incrementExperimentCounter(
  * after a late request moves the counters back under the line.
  */
 async function recordStopRuleTrip(
+  tx: Prisma.TransactionClient,
   config: Pick<ExperimentConfig, "experimentId" | "variantId" | "preregistration">
 ) {
-  const rows = await prisma.appSetting.findMany({
+  const rows = await tx.appSetting.findMany({
     where: {
       key: { startsWith: `${MARKETING_EXPERIMENT_COUNTER_PREFIX}${config.experimentId}.` },
     },
@@ -256,7 +273,7 @@ async function recordStopRuleTrip(
   );
   if (!experimentStopRuleTriggered(config.preregistration, counts)) return;
   const trippedKey = experimentTrippedKey(config.experimentId);
-  await prisma.$executeRaw`
+  await tx.$executeRaw`
     INSERT INTO "AppSetting" ("key", "value", "createdAt", "updatedAt")
     VALUES (${trippedKey}, ${new Date().toISOString()}, NOW(), NOW())
     ON CONFLICT ("key") DO NOTHING

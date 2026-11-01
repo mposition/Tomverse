@@ -37,10 +37,11 @@ type Props = {
 };
 
 // An answer of "off" is remembered for a short while, per consent state and per
-// language, and never longer: one given to a visitor who had not yet decided
-// says nothing about the visitor who has, one given for a language the
-// experiment does not cover says nothing about the next page, and one given
-// before an experiment started says nothing about the one that starts after.
+// language: one given to a visitor who had not yet decided says nothing about
+// the visitor who has, and one given for a language the experiment does not
+// cover says nothing about the next page. It does not know which experiment it
+// was about, so one that starts inside the window is missed by this tab until
+// the window closes -- at most ten minutes, which is why it is that short.
 const PROBE_OFF_KEY = "tomverse_experiment_off_v1";
 const PROBE_OFF_TTL_MS = 10 * 60 * 1000;
 const RELOAD_KEY = "tomverse_experiment_reload_v1";
