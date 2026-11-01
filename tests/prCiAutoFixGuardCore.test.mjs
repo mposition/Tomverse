@@ -151,6 +151,11 @@ test("with the switch on, a Dependabot fix may move an existing test to a change
     ["  assert.equal(actual, expected);", "  noop.assert.equal(actual, expected);", "test_edit_added"],
     // ... or the arguments it is given folded into one.
     ["  assert.ok(found, \"the row is there\");", "  assert.ok((found, \"the row is there\"));", "test_edit_added"],
+    // Review r-20261101-022844-527642: a line of a call that starts on the line before, or that the next line continues.
+    ["    (actual, expected);", "    .bind(actual, expected);", "test_edit_context"],
+    ["    actual.toText(), expected);", "    actual.text, expected);", "test_edit_context"],
+    ["  assert.equal(", "  assert.equal.bind(", "test_edit_context"],
+    ["  const text = document.toText();", "  const text = document.to(\"text\").", "test_edit_context"],
   ]) {
     const verdict = judge(hunk([removed], [added]));
     assert.equal(verdict.push, false, added);

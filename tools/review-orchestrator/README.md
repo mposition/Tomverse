@@ -543,6 +543,9 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   `*.test.*`·`*.spec.*` 파일에서 그 호출만 새 API로 바꿀 수 있습니다. workflow guard(`testEditProblems`)는 그 파일의 diff를
   줄 단위로 짝지어 토큰을 비교하고, 다음 중 하나라도 있으면 거부합니다.
   - 지운 줄 수와 더한 줄 수가 다릅니다. 줄을 끼워 넣거나 뺄 수 없습니다(`test_edit_shape`).
+  - 고친 줄이 그 자체로 완결된 문장이 아닙니다. 이름으로 시작하지 않거나(앞 줄의 호출을 잇는 `(…)`, `.toBe(…)`),
+    여는 괄호를 닫지 않거나(블록을 여는 `{`로 끝나는 줄은 예외), 첫 토큰이나 마지막 토큰이 바뀌었습니다(`test_edit_context`).
+    한 줄만 보고 판정하기 때문에, 여러 줄에 걸친 호출의 가운데 줄은 고칠 수 없습니다.
   - 지운 토큰이 속성·메서드 이름(`x.toText`의 `toText`)이 아닙니다. 변수, literal, 정규식, 주석, 구두점,
     `assert`·`expect`로 시작하는 체인의 이름(`assert.strict.equal`의 `equal`, `expect(x).toEqual`의 `toEqual`), `test`·`it`·`describe`는
     지울 수 없습니다(`test_edit_removed`).

@@ -153,6 +153,24 @@ function callees(list: readonly string[]): { mark: boolean[]; shape: string } {
   return { mark, shape: shape.join("") };
 }
 
+/**
+ * Whether a line is a statement of its own: it starts with a name (not `.`,
+ * `(` or `,`, which would continue the line before) and closes every bracket
+ * it opens, unless it ends by opening a block (`test("x", async () => {`,
+ * which leaves the call open around the block): what follows is then a
+ * statement of its own.
+ */
+function complete(list: readonly string[]): boolean {
+  if (list.length === 0 || !IDENTIFIER.test(list[0])) return false;
+  let depth = 0;
+  for (const token of list) {
+    if (token === "(" || token === "[" || token === "{") depth += 1;
+    else if (token === ")" || token === "]" || token === "}") depth -= 1;
+    if (depth < 0) return false;
+  }
+  return depth === 0 || list.at(-1) === "{";
+}
+
 /** A line's tokens: comments, strings, templates and regular expressions each one token. */
 function tokens(line: string): string[] {
   const out: string[] = [];
@@ -252,6 +270,8 @@ export function testEditProblems(patch: string, paths: ReadonlySet<string>): str
           const assertionName = member && (root === null || REMOVED_WORDS_REFUSED.has(root));
           if (!IDENTIFIER.test(token) || !member || REMOVED_WORDS_REFUSED.has(token) || assertionName) problems.add("test_edit_removed");
         });
+        // A line that continues another, or that the next could continue, is judged without what it joins.
+        if (!complete(before) || before[0] !== after[0] || before.at(-1) !== after.at(-1)) problems.add("test_edit_context");
         const called = callees(after);
         if (called.shape !== callees(before).shape) problems.add("test_edit_added");
         after.forEach((token, j) => {
