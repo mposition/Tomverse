@@ -592,10 +592,13 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
     "package.json과 맞지 않는다"(`Missing: @tomverse/mobile-auth`)고 거부합니다. 그래서 설치 전에 `npm --version`을 읽고,
     10 미만이면 `npm_too_old:<버전>`으로 기록한 뒤 설치하지 않습니다.
   - unit의 PATH는 auto-fix 전용 npm(`/usr/local/lib/pr-ci-auto-fix-npm/bin`)을 맨 앞에 둡니다. 다른 계정의 npm은 바뀌지 않습니다.
-    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다.
+    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다. 관리 계정의 umask가 077이면
+    폴더가 root만 읽는 `drwx------`로 생기고, review 계정은 그것을 건너뛰어 9.2를 씁니다(2026-11-02). 그래서
+    `chmod`로 읽기와 실행만 엽니다. 확인 줄은 `10.9.9`여야 합니다.
 
     ```bash
     sudo npm install -g --prefix /usr/local/lib/pr-ci-auto-fix-npm --ignore-scripts --no-audit --no-fund npm@10.9.9
+    sudo chmod -R go+rX,go-w /usr/local/lib/pr-ci-auto-fix-npm
     sudo -u review env PATH=/usr/local/lib/pr-ci-auto-fix-npm/bin:/usr/bin:/bin npm --version
     ```
 
