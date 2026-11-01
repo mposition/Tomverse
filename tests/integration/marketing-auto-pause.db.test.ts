@@ -55,7 +55,7 @@ async function postWithAttempts(
   channelId: string,
   attempts: Attempt[],
   status = "failed",
-  extraHistory: Array<Record<string, unknown>> = [],
+  extraHistory: Array<Record<string, string | number | boolean | null>> = [],
 ) {
   const key = `post-${Math.random().toString(36).slice(2)}`;
   await prisma.$executeRawUnsafe(
