@@ -9,6 +9,7 @@ export const SEO_LOCALES: readonly Language[] = [
   "en",
   "ko",
   "zh",
+  "zh-Hant",
   "fr",
   "de",
   "es",
@@ -29,6 +30,7 @@ const hreflangByLocale: Record<Language, string> = {
   en: "en",
   ko: "ko",
   zh: "zh-Hans",
+  "zh-Hant": "zh-Hant",
   fr: "fr",
   de: "de",
   es: "es",
@@ -50,6 +52,8 @@ const openGraphLocaleByLanguage: Record<Language, string> = {
   en: "en_AU",
   ko: "ko_KR",
   zh: "zh_CN",
+  // Taiwan is the primary Traditional Chinese market (Hong Kong second).
+  "zh-Hant": "zh_TW",
   fr: "fr_FR",
   de: "de_DE",
   es: "es_ES",
@@ -60,6 +64,7 @@ const socialImageAlt: Record<Language, string> = {
   en: "Tomverse — Chat and Review with GPT, Claude, and Gemini in one place",
   ko: "Tomverse — GPT, Claude, Gemini를 한곳에서 사용하는 Chat과 Review",
   zh: "Tomverse — 在一个地方使用 GPT、Claude 和 Gemini 的 Chat 与 Review",
+  "zh-Hant": "Tomverse — 在同一個地方使用 GPT、Claude 和 Gemini 的 Chat 與 Review",
   fr: "Tomverse — Chat et Review avec GPT, Claude et Gemini au même endroit",
   de: "Tomverse — Chat und Review mit GPT, Claude und Gemini an einem Ort",
   es: "Tomverse — Chat y Review con GPT, Claude y Gemini en un solo lugar",
@@ -67,7 +72,7 @@ const socialImageAlt: Record<Language, string> = {
 };
 
 export const isSeoLocale = (value: string): value is Language =>
-  SEO_LOCALES.includes(value.toLowerCase() as Language);
+  (SEO_LOCALES as readonly string[]).includes(value);
 
 export const localizedPath = (locale: Language, basePath: string) =>
   basePath === "/" ? `/${locale}` : `/${locale}${basePath}`;
@@ -190,6 +195,11 @@ export const reviewSeoCopy: Record<
     description:
       "一次向多个 AI 提问、比较回答，并用 AI Review 整理共识、矛盾与遗漏；需要核实的说法可用网页搜索和 Deep Research 查证。",
   },
+  "zh-Hant": {
+    title: "比較多個 AI 回答並交叉審查遺漏",
+    description:
+      "一次向多個 AI 提問、比較回答，並用 AI Review 整理共識、矛盾與遺漏；需要查核的說法可用網頁搜尋和 Deep Research 查證。",
+  },
   fr: {
     title: "Comparez les réponses IA et examinez leurs omissions",
     description:
@@ -231,6 +241,11 @@ export const reviewOgCopy: Record<
     description:
       "同一个问题，可能得到不同回答。在 Tomverse Review 中并排阅读最多三个模型的回答，再用 AI Review 结合引文查看共识、差异与遗漏条件。由你决定重点阅读哪个回答、接下来问什么。",
   },
+  "zh-Hant": {
+    title: "Tomverse Review | 多 AI 比較與審查",
+    description:
+      "同一個問題，可能得到不同的回答。在 Tomverse Review 中並排閱讀最多三個模型的回答，再用 AI Review 搭配引文查看共識、差異與遺漏的條件。由你決定要細讀哪個回答、接下來問什麼。",
+  },
   fr: {
     title: "Tomverse Review | Comparaison et revue multi-IA",
     description:
@@ -266,6 +281,10 @@ export const homeSeoCopy: Record<Language, { title: string; description: string 
     title: "该用哪个 AI，让 Tomverse 帮你选。| Chat & Review",
     description: "在一个地方使用GPT、Claude和Gemini。Smart Adaptive结合功能、费用与质量帮助选模型，提问建议由你决定是否采用。Review结合引文比较差异与遗漏。Chat和Review均可访客体验。",
   },
+  "zh-Hant": {
+    title: "該用哪個 AI，讓 Tomverse 幫你選。| Chat & Review",
+    description: "在同一個地方使用GPT、Claude和Gemini。Smart Adaptive綜合功能、費用與品質協助挑選模型，提問建議由你決定是否採用。Review搭配引文比較差異與遺漏。Chat和Review皆可用訪客身分體驗。",
+  },
   fr: {
     title: "Quelle IA choisir ? | Tomverse Chat & Review",
     description: "Retrouvez GPT, Claude et Gemini au même endroit. Smart Adaptive aide à choisir selon les fonctions, le coût et la qualité ; vous décidez des reformulations. Comparez différences et omissions avec citations dans Review. Essayez Chat et Review sans compte.",
@@ -295,6 +314,7 @@ const homeReviewEntryDescription: Record<Language, string> = {
   en: "Use GPT, Claude and Gemini in one place. Explore Smart Adaptive model selection and question suggestions you control in Chat; compare answer differences and omissions with quotes in Review. Try Review as a guest; Chat access depends on availability.",
   ko: "GPT, Claude, Gemini를 한곳에서. Chat의 Smart Adaptive 모델 선택과 직접 확인하는 질문 제안을 알아보고, Review에서 답변의 차이·누락을 인용으로 비교하세요. Review는 비회원으로 체험할 수 있고 Chat은 현재 제공 범위에 따라 이용합니다.",
   zh: "在一个地方使用GPT、Claude和Gemini。了解Chat的Smart Adaptive模型选择与由你决定的提问建议，在Review中结合引文比较差异与遗漏。Review可访客体验，Chat使用取决于当前提供范围。",
+  "zh-Hant": "在同一個地方使用GPT、Claude和Gemini。了解Chat的Smart Adaptive模型選擇與由你決定的提問建議，在Review中搭配引文比較差異與遺漏。Review可用訪客身分體驗，Chat的使用取決於目前的提供範圍。",
   fr: "Retrouvez GPT, Claude et Gemini au même endroit. Découvrez le choix Smart Adaptive et les reformulations que vous contrôlez dans Chat ; comparez différences et omissions avec citations dans Review. Review est accessible sans compte ; l’accès à Chat dépend de sa disponibilité.",
   de: "Nutzen Sie GPT, Claude und Gemini an einem Ort. Entdecken Sie Smart Adaptive und Fragenvorschläge unter Ihrer Kontrolle in Chat; vergleichen Sie Unterschiede und Lücken mit Zitaten in Review. Review ist ohne Konto testbar; Chat hängt von der Verfügbarkeit ab.",
   es: "Usa GPT, Claude y Gemini en un lugar. Conoce Smart Adaptive y las sugerencias que tú controlas en Chat; compara diferencias y omisiones con citas en Review. Prueba Review como invitado; el acceso a Chat depende de su disponibilidad.",

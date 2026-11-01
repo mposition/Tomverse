@@ -1,5 +1,5 @@
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
-import { isLanguage, type Language } from "@/lib/language";
+import { emailCopyLanguage, isLanguage, type EmailCopyLanguage } from "@/lib/language";
 import { normalizeTomverseMarketingUrl } from "@/lib/marketingEmailLayout";
 
 /**
@@ -84,7 +84,7 @@ type Copy = {
   reason: string;
 };
 
-const COPY: Record<Language, Copy> = {
+const COPY: Record<EmailCopyLanguage, Copy> = {
   en: {
     subject: (model) => `${model} is now on Tomverse`,
     lead: (model, plans) => `${model} is available from today on the ${plans} plans.`,
@@ -150,7 +150,8 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const resolve = (value: string): Language => (isLanguage(value) ? value : "en");
+const resolve = (value: string): EmailCopyLanguage =>
+  isLanguage(value) ? emailCopyLanguage(value) : "en";
 
 /**
  * Pure and deterministic, like every template the standard lane renders: the

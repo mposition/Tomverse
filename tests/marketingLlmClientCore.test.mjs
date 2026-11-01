@@ -384,6 +384,8 @@ test("a web-search answer is read with the URLs it cited or its searches returne
       "https://support.claude.com/plans",
       "https://claude.com/max",
     ],
+    // Only what the answer text cites; the search results and the opened page are not here.
+    answerCitations: ["https://claude.com/pricing?utm_source=chatgpt.com"],
     model: PIN.model,
     serviceTier: "default",
     inputTokens: 9_000,
@@ -413,6 +415,7 @@ test("a web-search call reserves under its own profile, calls the Responses API 
     "https://support.claude.com/plans",
     "https://claude.com/max",
   ]);
+  assert.deepEqual(outcome.answerCitations, ["https://claude.com/pricing?utm_source=chatgpt.com"]);
   assert.deepEqual(b.actions(), ["reserve", "dispatch", "settle"]);
   assert.equal(b.calls[0].fields.adapterProfile, "web-search-v1");
   assert.equal(

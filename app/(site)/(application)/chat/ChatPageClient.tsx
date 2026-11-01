@@ -457,6 +457,7 @@ const isLanguage = (value: unknown): value is Language =>
   value === "en" ||
   value === "ko" ||
   value === "zh" ||
+  value === "zh-Hant" ||
   value === "fr" ||
   value === "de" ||
   value === "es" ||
@@ -483,6 +484,12 @@ const guestTrialCopy: Record<
     body: "创建免费账户即可解锁更广泛的模型库、保存对话记录，并使用登录专属功能。",
     action: "创建免费账户",
     cancel: "以访客身份继续",
+  },
+  "zh-Hant": {
+    title: "想要更多模型選擇和儲存功能嗎？",
+    body: "建立免費帳戶即可解鎖更廣泛的模型庫、儲存對話紀錄，並使用登入專屬功能。",
+    action: "建立免費帳戶",
+    cancel: "以訪客身分繼續",
   },
   fr: {
     title: "Envie de plus de modèles et de sauvegarder votre travail ?",

@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { LanguageProvider, type Language } from "@/components/LanguageProvider";
+import { LanguageProvider } from "@/components/LanguageProvider";
+import { MARKETING_LOCALE_ALIASES, marketingLocaleFor } from "@/lib/marketingLocale";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
-import { SEO_LOCALES, createPageMetadata, isSeoLocale, localizedPath, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
+import { SEO_LOCALES, createPageMetadata, localizedPath, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
 
-const localeAliases: Record<string, Language> = { kr: "ko", cn: "zh" };
+const localeAliases = MARKETING_LOCALE_ALIASES;
 type LocalizedReviewProductProps = { params: Promise<{ locale: string }> };
 
 export const dynamicParams = false;
@@ -16,8 +17,8 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: LocalizedReviewProductProps): Promise<Metadata> {
   const { locale } = await params;
-  const normalizedLocale = localeAliases[locale.toLowerCase()] || locale.toLowerCase();
-  if (!isSeoLocale(normalizedLocale)) return {};
+  const normalizedLocale = marketingLocaleFor(locale);
+  if (!normalizedLocale) return {};
   return createPageMetadata({
     title: reviewSeoCopy[normalizedLocale].title,
     description: reviewSeoCopy[normalizedLocale].description,
@@ -32,9 +33,9 @@ export async function generateMetadata({ params }: LocalizedReviewProductProps):
 export default async function LocalizedReviewProductPage({ params }: LocalizedReviewProductProps) {
   const { locale } = await params;
   const loweredLocale = locale.toLowerCase();
-  const normalizedLocale = localeAliases[loweredLocale] || loweredLocale;
-  if (!isSeoLocale(normalizedLocale)) notFound();
-  if (localeAliases[loweredLocale]) redirect(localizedPath(normalizedLocale, REVIEW_PRODUCT_PATH));
+  const normalizedLocale = marketingLocaleFor(locale);
+  if (!normalizedLocale) notFound();
+  if (localeAliases[loweredLocale] || locale !== normalizedLocale) redirect(localizedPath(normalizedLocale, REVIEW_PRODUCT_PATH));
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>

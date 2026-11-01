@@ -22,10 +22,11 @@ import { prisma } from "@/lib/prisma";
 
 // The generator's internal reports (S3 plan, S3f; docs/policy/marketing-automation.md §4).
 //
-// The same secret as the draft intake, and only the two kinds a generator
-// writes: a brief, and the market facts A3 found. Every other report kind --
-// weekly KPIs, measurements, retention runs, webhook shadows -- is written by
-// something else and cannot be written with this secret. A market fact is kept
+// The same secret as the draft intake, and only the three kinds a generator
+// writes: a brief, the market facts A3 found, and one aggregate rate of the
+// weekly AI-exposure measurement (`measurement_120d`, numbers only). Every
+// other report kind -- weekly KPIs, retention runs, webhook shadows -- is
+// written by something else and cannot be written with this secret. A market fact is kept
 // only when its source is one of the app's own official hosts for that
 // competitor; the rest are counted, not stored.
 

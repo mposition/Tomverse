@@ -8,7 +8,7 @@ import {
   FEEDBACK_CLOSURE_OUTCOMES,
   FEEDBACK_LIFECYCLE_STAGE,
 } from "../lib/feedbackLifecycleCore.ts";
-import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
+import { EMAIL_COPY_LANGUAGES } from "../lib/language.ts";
 
 // The submitter-facing lifecycle emails. What must hold:
 //
@@ -37,7 +37,7 @@ const build = (stage, overrides = {}) =>
 // --- coverage ----------------------------------------------------------------
 
 test("every supported language renders every stage with subject, text and html", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     for (const stage of STAGES) {
       for (const type of ["bug", "feature"]) {
         const message = build(stage, {
@@ -75,7 +75,7 @@ test("every supported language renders every stage with subject, text and html",
 });
 
 test("every closure outcome renders in every supported language", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     for (const outcomeCode of FEEDBACK_CLOSURE_OUTCOMES) {
       const message = build("completed", { language, outcomeCode });
       assert.ok(message.subject.length > 0);
@@ -103,7 +103,7 @@ const COMPLETION_CLAIMS = {
 };
 
 test("only fixed and shipped may claim a fix or a release", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const claims = COMPLETION_CLAIMS[language];
     assert.ok(claims, `no claim list for ${language}`);
     for (const outcomeCode of FEEDBACK_CLOSURE_OUTCOMES) {
