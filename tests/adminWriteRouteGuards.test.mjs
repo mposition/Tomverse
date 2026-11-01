@@ -178,8 +178,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // Re-pinned with the source-scope digests above for the same ideaKeyStore change.
 // v22 test/verify roles add two Task refusal codes to ideaRegistrationRefusalCore
 // (2026-10-31); no import, writer or outbound call. Same 17-file closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "eca3b5f8c8563ffeb58f6c05b882d98c33be807d67adf24809086abe73876228";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "8b8ad2981a37dca0a34011736f75189680dd5258b3939bedef6fcf390fa52eef";
+// ideaAnalysisChunkCore names the schema rule of a refusal (2026-11-01); pure
+// parsing, no import, writer or outbound call. Same 17-file closure.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "5ee6ba80300442442a30b698e019be080b8af80f84a93615217146e5b25fdc70";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "443aba6e2114f913cbef63f63057e23deadaacc8a8829eb185966bf2d2239e56";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

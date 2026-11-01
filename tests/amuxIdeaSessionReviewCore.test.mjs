@@ -99,7 +99,8 @@ test("a schema refusal names the rule, the schema field and the unit position", 
   const at = (raw) => detailOf(raw).at;
   assert.deepEqual(at(firstPage({ units: [...units, task({ taskRole: "plan" })] })),
     { rule: "value_not_allowed", field: "taskRole", unit: 4, kind: "card" });
-  const { expectedPaths: _paths, ...pathless } = task();
+  const pathless = task();
+  delete pathless.expectedPaths;
   assert.deepEqual(at(firstPage({ units: [...units, pathless] })),
     { rule: "task_expected_paths_missing", field: "expectedPaths", unit: 4, kind: "card" });
   assert.deepEqual(at(firstPage({ units: [...units, task({ taskRole: "review" })] })),

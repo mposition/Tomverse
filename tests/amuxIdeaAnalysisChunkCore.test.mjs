@@ -10,7 +10,11 @@ import {
 
 const sourceRef = "idea:sha256_opaque";
 // The verdict alone; where a schema refusal happened is checked by its own test.
-const verdict = ({ at: _at, ...result }) => result;
+const verdict = (result) => {
+  const copy = { ...result };
+  delete copy.at;
+  return copy;
+};
 const inspect = (value, overrides = {}) => verdict(inspectAmuxAnalysisChunk({
   raw: JSON.stringify(value),
   expectedPreviewId: "preview-01",
