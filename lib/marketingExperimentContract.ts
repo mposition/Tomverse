@@ -27,6 +27,16 @@ export const MARKETING_EXPERIMENT_CONFIG_KEY =
 export const MARKETING_EXPERIMENT_COUNTER_PREFIX =
   "marketingAutomation.experimentCount.";
 
+/**
+ * One row per experiment id ever started, never deleted. The stored
+ * configuration holds only the latest run and the counters can be absent for
+ * a run nobody saw, so neither can say that an id was used; this row can. An
+ * id is never reused because an assignment cookie from the earlier run would
+ * otherwise be a valid assignment in the new one.
+ */
+export const MARKETING_EXPERIMENT_USED_PREFIX =
+  "marketingAutomation.experimentUsed.";
+
 export const MARKETING_EXPERIMENT_START_ACTION = "marketing_experiment.started";
 export const MARKETING_EXPERIMENT_STOP_ACTION = "marketing_experiment.stopped";
 export const MARKETING_EXPERIMENT_REPORT_SOURCE_VERSION =

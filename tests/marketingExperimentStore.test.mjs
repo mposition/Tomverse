@@ -313,3 +313,32 @@ test("the report payloads keep the period well-ordered even when the stop preced
   );
   assert.equal(control.endedAt, config.startsAt);
 });
+
+test("an id stays used after later runs replace the stored configuration", async () => {
+  const tx = makeTx(on);
+  const versionOf = () => tx.rows.get(MARKETING_EXPERIMENT_CONFIG_KEY).updatedAt.toISOString();
+
+  // Run A, stopped without a single count: no counter rows exist for it.
+  const a = await startMarketingExperiment(tx, body(), NOW);
+  await stopMarketingExperiment(tx, { expectedVersion: a.version }, NOW);
+  assert.ok(tx.rows.has("marketingAutomation.experimentUsed.spring-hero"));
+
+  // Run B overwrites the stored configuration and is stopped too.
+  const b = await startMarketingExperiment(
+    tx,
+    body({ experimentId: "second-run", expectedVersion: versionOf() }),
+    NOW
+  );
+  await stopMarketingExperiment(tx, { expectedVersion: b.version }, NOW);
+
+  // A's configuration is gone and it left no counters, yet A cannot start again:
+  // a cookie from its first run would otherwise count as an assignment in this one.
+  const again = await refusal(
+    startMarketingExperiment(tx, body({ expectedVersion: versionOf() }), NOW)
+  );
+  assert.equal(again.code, "experiment_id_used");
+  assert.equal(
+    [...tx.rows.keys()].filter((key) => key.startsWith("marketingAutomation.experimentUsed.")).length,
+    2
+  );
+});

@@ -16,6 +16,7 @@ import {
   MARKETING_EXPERIMENT_REFUSAL_STATUS,
   MARKETING_EXPERIMENT_REPORT_SOURCE_VERSION,
   MARKETING_EXPERIMENT_SPIKE,
+  MARKETING_EXPERIMENT_USED_PREFIX,
   experimentConfigSchema,
   experimentStartBodySchema,
   experimentStopBodySchema,
@@ -98,6 +99,20 @@ const experimentActivationDecision = (switchValue: string | undefined) =>
     webhookProductionConfig: unreadable,
   }).experimentActivate;
 
+/**
+ * The experiments switch, read and nothing else. Its own declaration on
+ * purpose: `tests/appSettingWriters.test.mjs` counts a key as written when one
+ * declaration both names it and writes some row, and this feature has no
+ * writer for the switch (policy 9.1: turning experiments on is an operator step).
+ */
+const readExperimentsSwitchValue = async (tx: MarketingTransaction) =>
+  (
+    await tx.appSetting.findUnique({
+      where: { key: MARKETING_EXPERIMENTS_KEY },
+      select: { value: true },
+    })
+  )?.value;
+
 const readConfigRow = async (tx: MarketingTransaction) => {
   const row = await tx.appSetting.findUnique({
     where: { key: MARKETING_EXPERIMENT_CONFIG_KEY },
@@ -115,11 +130,7 @@ export async function startMarketingExperiment(
   body: ExperimentStartBody,
   now: Date = new Date(),
 ): Promise<{ config: ExperimentConfig; version: string | null }> {
-  const switchRow = await tx.appSetting.findUnique({
-    where: { key: MARKETING_EXPERIMENTS_KEY },
-    select: { value: true },
-  });
-  const decision = experimentActivationDecision(switchRow?.value);
+  const decision = experimentActivationDecision(await readExperimentsSwitchValue(tx));
   if (!decision.enabled) {
     throw new MarketingExperimentRefusedError(
       "experiment_not_admitted",
@@ -169,17 +180,28 @@ export async function startMarketingExperiment(
       "An experiment is already running; stop it first",
     );
   }
-  const used = await tx.appSetting.count({
+  const usedMarker = `${MARKETING_EXPERIMENT_USED_PREFIX}${body.experimentId}`;
+  const counted = await tx.appSetting.count({
     where: {
       key: { startsWith: `${MARKETING_EXPERIMENT_COUNTER_PREFIX}${body.experimentId}.` },
     },
   });
-  if (used > 0 || existing?.experimentId === body.experimentId) {
+  const marked = await tx.appSetting.findUnique({
+    where: { key: usedMarker },
+    select: { value: true },
+  });
+  if (counted > 0 || marked || existing?.experimentId === body.experimentId) {
     throw new MarketingExperimentRefusedError(
       "experiment_id_used",
       "That experiment id was used before; a new run needs a new id",
     );
   }
+
+  // The permanent record that this id was used. A racing start with the same
+  // id fails on the unique key and rolls back with its audit row.
+  await tx.appSetting.create({
+    data: { key: usedMarker, value: parsed.data.startsAt },
+  });
 
   const value = JSON.stringify(parsed.data);
   if (!row) {

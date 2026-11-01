@@ -129,6 +129,37 @@ test.describe("fixture experiment, forced variant", () => {
     );
   });
 
+  test("(a) a visitor who decides later is assigned from the next view, not shut out for the session", async ({
+    page,
+    context,
+  }) => {
+    await prepareGuestPage(page, "en");
+    const undecided = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/marketing/experiments") &&
+        response.request().method() === "POST"
+    );
+    await page.goto("/");
+    // No consent yet in an opt-in region: the route answers off, no cookie.
+    expect((await (await undecided).json()).status).toBe("off");
+    expect(
+      (await context.cookies()).find((cookie) => cookie.name === "tv_exp")
+    ).toBeUndefined();
+
+    // The visitor now allows analytics, as the consent provider records it, and
+    // the next view of the same tab session must not reuse the earlier "off".
+    await page.evaluate((key) => {
+      window.localStorage.setItem(key, "accepted");
+    }, CONSENT_KEY);
+    await page.reload();
+    await expect
+      .poll(async () =>
+        (await context.cookies()).find((cookie) => cookie.name === "tv_exp")
+          ?.value
+      )
+      .toBe(VARIANT_COOKIE);
+  });
+
   test("(a) declining after an assignment returns the visitor to the default copy", async ({
     page,
     context,

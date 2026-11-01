@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "../lib/marketingAutomationAccess.ts";
 import {
   EXPERIMENT_CONTROL_ARM,
   EXPERIMENT_COOKIE_NAME,
@@ -131,5 +132,14 @@ test("the request boundary keeps the Prompt Refiner closure unchanged", () => {
   assert.ok(
     !/process\.env\[/.test(proxy) && !/process\.env\[/.test(routes),
     "no computed environment access in closure files"
+  );
+});
+
+test("the proxy reads the kill switch under the name the access module defines", () => {
+  // proxy.ts cannot import the constant (closure), so it spells the variable.
+  const proxy = readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
+  assert.ok(
+    proxy.includes(`process.env.${MARKETING_AUTOMATION_KILL_SWITCH_ENV}`),
+    "proxy.ts spells a different kill switch variable than lib/marketingAutomationAccess.ts"
   );
 });

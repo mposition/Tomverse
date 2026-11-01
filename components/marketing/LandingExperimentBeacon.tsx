@@ -36,6 +36,8 @@ type Props = {
   locale: string;
 };
 
+// Remembered per consent state, never across one: an answer of "off" given to a
+// visitor who had not yet decided says nothing about the visitor who has.
 const PROBE_OFF_KEY = "tomverse_experiment_off_v1";
 const RELOAD_KEY = "tomverse_experiment_reload_v1";
 
@@ -112,18 +114,20 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
 
     const run = async () => {
       const cookieValue = readCookie();
-      if (readConsent() === "declined") {
+      const consent = readConsent();
+      const probeKey = `${PROBE_OFF_KEY}_${consent}`;
+      if (consent === "declined") {
         if (cookieValue) {
           clearCookie();
           leaveVariant(renderedArm);
         }
         return;
       }
-      if (!cookieValue && session.get(PROBE_OFF_KEY)) return;
+      if (!cookieValue && session.get(probeKey)) return;
 
       if (!cookieValue) {
         const assigned = await post("assign");
-        if (assigned?.status !== "assigned") session.set(PROBE_OFF_KEY, "1");
+        if (assigned?.status !== "assigned") session.set(probeKey, "1");
         return;
       }
 
@@ -135,7 +139,7 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
       if (cancelled) return;
       if (!result || result.status === "error") return;
       if (result.status === "off") {
-        session.set(PROBE_OFF_KEY, "1");
+        session.set(probeKey, "1");
         clearCookie();
         leaveVariant(renderedArm);
         return;
