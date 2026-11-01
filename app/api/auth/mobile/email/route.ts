@@ -15,14 +15,15 @@ import { requestMobileStoreReviewCode, verifyMobileStoreReviewCode } from "@/lib
 const email = z.string().trim().toLowerCase().max(MAX_LOGIN_EMAIL_LENGTH).refine(isValidLoginEmail);
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("request"), email, turnstileToken: z.string().trim().min(1).max(2048).optional() }).strict(),
-  z.object({ action: z.literal("verify"), email, code: z.string().regex(/^\d{6}$/), platform: z.enum(MOBILE_DEVICE_PLATFORMS), deviceLabel: z.string().trim().min(1).max(64).optional() }).strict(),
+  z.object({ action: z.literal("verify"), email, code: z.string().regex(/^\d{6}$/), platform: z.enum(MOBILE_DEVICE_PLATFORMS), deviceLabel: z.string().trim().min(1).max(64).optional(), intent: z.enum(["signin", "signup"]).default("signin"), termsAccepted: z.boolean().optional() }).strict(),
 ]);
 const reply = (body: object, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const ready = () => process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" && mobileAuthReady();
+const signupEnabled = () => process.env.TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED === "true";
 
 /** Public capability probe: never opens a missing browser page or sends mail. */
 export function GET() {
-  return ready() ? reply({ ok: true, emailCode: true, browserSignIn: true })
+  return ready() ? reply({ ok: true, emailCode: true, emailSignup: signupEnabled(), browserSignIn: true })
     : reply({ ok: false, code: "MOBILE_LOGIN_UNAVAILABLE" }, 503);
 }
 
@@ -51,10 +52,16 @@ export async function POST(request: Request) {
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
-    const proof = await verifyMobileStoreReviewCode(request, { ...body, appId: request.headers.get("x-tomverse-app-id") ?? undefined, buildNumber: Number(request.headers.get("x-tomverse-build")) }) ?? await verifyEmailLoginCode(request, body.email, body.code, "signin");
+    if (body.intent === "signup") {
+      if (!signupEnabled()) return reply({ ok: false, code: "MOBILE_SIGNUP_UNAVAILABLE" }, 503);
+      if (body.termsAccepted !== true) return reply({ ok: false, code: "MOBILE_SIGNUP_TERMS_REQUIRED" }, 400);
+    }
+    // Reuse the web flow's verified, expiring, single-use signup hold. Merely
+    // requesting a code or verifying a sign-in still cannot create an account.
+    const proof = await verifyMobileStoreReviewCode(request, { ...body, appId: request.headers.get("x-tomverse-app-id") ?? undefined, buildNumber: Number(request.headers.get("x-tomverse-build")) }) ?? await verifyEmailLoginCode(request, body.email, body.code, body.intent);
     if (!proof.ok) return reply({ ok: false, code: proof.reason === "account_not_found" ? "EMAIL_ACCOUNT_NOT_FOUND" : proof.reason === "locked" ? "EMAIL_CODE_LOCKED" : "EMAIL_CODE_INVALID" }, 401);
     // The web sign-in callback also enforces account state. Never bypass it
-    // simply because mailbox control was proven. Signup remains its own flow.
+    // simply because mailbox control was proven, including after signup.
     const select = { accountStatus: true, accountSuspendedUntil: true } as const;
     let account = await prisma.user.findUnique({ where: { id: proof.userId }, select });
     const now = new Date();

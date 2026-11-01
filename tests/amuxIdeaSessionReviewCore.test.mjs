@@ -69,24 +69,78 @@ const firstPage = (overrides = {}) => JSON.stringify({ schemaVersion: 5, preview
       executionBrief: null, sourceRefIds: ["operator_idea"], portfolioSignal: signal }],
   ...overrides });
 
+const units = JSON.parse(firstPage()).units;
+const task = (overrides = {}) => ({ ...units[3], localId: "c0:card-1", cardType: "task", storyKind: null,
+  taskRole: "implement", executionGrade: "routine", executionBrief: "Change it.",
+  portfolioSignal: { ...signal, metrics: { contribution: 3, urgency: 2, dependencyUnlock: 1,
+    workerCoverage: 4, effort: 2, deliveryRisk: 1 } }, expectedPaths: ["lib/x.ts"], ...overrides });
+const detailOf = (raw) => amuxSessionReviewFirstPageDetail(raw, claimId);
+
 test("a refused first page names the plan writer's own failed check, never answer text", () => {
-  assert.equal(amuxSessionReviewFirstPageDetail(firstPage(), claimId), "draft_refused",
+  assert.deepEqual(detailOf(firstPage()), { detail: "draft_refused" },
     "a page the inspection accepts was refused later, when its draft was stored");
-  assert.equal(amuxSessionReviewFirstPageDetail("```json\n{}\n```", claimId), "chunk_schema_rejected");
-  assert.equal(amuxSessionReviewFirstPageDetail(firstPage({ previewId: "other" }), claimId),
-    "chunk_schema_rejected", "the claim is the preview id");
-  assert.equal(amuxSessionReviewFirstPageDetail(firstPage({ extra: true }), claimId), "chunk_schema_rejected");
-  assert.equal(amuxSessionReviewFirstPageDetail(firstPage({ coveredScope: "" }), claimId),
-    "chunk_metadata_incomplete");
-  assert.equal(amuxSessionReviewFirstPageDetail("x".repeat(65_537), claimId), "chunk_too_large");
+  assert.deepEqual(detailOf(firstPage({ units: [...units, task()] })), { detail: "draft_refused" });
+  assert.deepEqual(detailOf("```json\n{not json}\n```"),
+    { detail: "chunk_schema_rejected", at: { rule: "json_fenced" } });
+  assert.deepEqual(detailOf("not json"), { detail: "chunk_schema_rejected", at: { rule: "json_unparsable" } });
+  assert.deepEqual(detailOf(firstPage({ previewId: "other" })),
+    { detail: "chunk_schema_rejected", at: { rule: "header_mismatch", field: "previewId" } },
+    "the claim is the preview id");
+  assert.deepEqual(detailOf(firstPage({ extra: true })),
+    { detail: "chunk_schema_rejected", at: { rule: "key_extra", field: "chunk" } });
+  assert.deepEqual(detailOf(firstPage({ coveredScope: "" })), { detail: "chunk_metadata_incomplete" });
+  assert.deepEqual(detailOf("x".repeat(65_537)), { detail: "chunk_too_large" });
   for (const raw of [firstPage(), "not json", firstPage({ units: [] })]) {
-    assert.ok(AMUX_SESSION_REVIEW_DETAILS.includes(amuxSessionReviewFirstPageDetail(raw, claimId)));
+    assert.ok(AMUX_SESSION_REVIEW_DETAILS.includes(detailOf(raw).detail));
   }
+});
+
+test("a plan wrapped in a sentence or a code fence is read, and still fully checked", () => {
+  for (const raw of [`I read the files. Here is the plan:\n${firstPage()}`,
+    "```json\n" + firstPage() + "\n```", `${firstPage()}\n\nI assumed the badge lives on the list page.`,
+    "Plan below.\n```\n" + firstPage() + "\n```\nDone."]) {
+    assert.deepEqual(detailOf(raw), { detail: "draft_refused" }, raw.slice(0, 30));
+  }
+  assert.deepEqual(detailOf(`Here:\n${firstPage({ previewId: "other" })}`),
+    { detail: "chunk_schema_rejected", at: { rule: "header_mismatch", field: "previewId" } });
+  assert.deepEqual(detailOf("Here is { half a plan"),
+    { detail: "chunk_schema_rejected", at: { rule: "json_unparsable" } });
+  assert.deepEqual(classifyAmuxSessionReviewAnswer(`One question first:\n${answer({})}`),
+    { reason: "owner_question", question: "Should the badge live in the idea list or the detail page?" });
+});
+
+test("a schema refusal names the rule, the schema field and the unit position", () => {
+  const at = (raw) => detailOf(raw).at;
+  assert.deepEqual(at(firstPage({ units: [...units, task({ taskRole: "plan" })] })),
+    { rule: "value_not_allowed", field: "taskRole", unit: 4, kind: "card" });
+  const pathless = task();
+  delete pathless.expectedPaths;
+  assert.deepEqual(at(firstPage({ units: [...units, pathless] })),
+    { rule: "task_expected_paths_missing", field: "expectedPaths", unit: 4, kind: "card" });
+  assert.deepEqual(at(firstPage({ units: [...units, task({ taskRole: "review" })] })),
+    { rule: "task_review_role", field: "taskRole", unit: 4, kind: "card" });
+  assert.deepEqual(at(firstPage({ units: [...units.slice(0, 3), { ...units[3], dependencyRefs: ["c0:card-1"] },
+    task()] })), { rule: "story_dependency", field: "dependencyRefs", unit: 3, kind: "card" });
+  assert.deepEqual(at(firstPage({ units: [{ ...units[0], portfolioSignal: { ...signal, metrics: { impact: 3 } } },
+    ...units.slice(1)] })), { rule: "key_missing", field: "value", unit: 0, kind: "node" });
+  assert.deepEqual(at(firstPage({ units: [...units, task({ dependencyRefs: ["c0:card-0"] })] })),
+    { rule: "dependency_ref_kind", field: "dependencyRefs", unit: 4, kind: "card" });
+  assert.deepEqual(at(firstPage({ outcome: "reject" })), { rule: "outcome_combination", field: "outcome" });
 });
 
 test("a not-a-plan reply may carry only a closed detail code", () => {
   assert.deepEqual(readAmuxSessionReviewReply({ review: { reason: "not_a_plan", detail: "chunk_too_large" } }),
     { reason: "not_a_plan", detail: "chunk_too_large" });
+  const at = { rule: "value_not_allowed", field: "taskRole", unit: 4, kind: "card" };
+  assert.deepEqual(readAmuxSessionReviewReply({ review: { reason: "not_a_plan", detail: "chunk_schema_rejected",
+    at } }), { reason: "not_a_plan", detail: "chunk_schema_rejected", at });
+  for (const bad of [{ ...at, rule: "model text" }, { ...at, field: "made_up" }, { ...at, unit: -1 },
+    { rule: "key_extra", kind: "card" }, { ...at, extra: 1 }, "key_extra"]) {
+    assert.equal(readAmuxSessionReviewReply({ review: { reason: "not_a_plan", detail: "chunk_schema_rejected",
+      at: bad } }), null, JSON.stringify(bad));
+  }
+  assert.equal(readAmuxSessionReviewReply({ review: { reason: "not_a_plan", detail: "chunk_too_large", at } }),
+    null, "only a schema refusal carries a place");
   for (const detail of ["model text", "", null, "chunk_", 3]) {
     assert.equal(readAmuxSessionReviewReply({ review: { reason: "not_a_plan", detail } }), null, String(detail));
   }

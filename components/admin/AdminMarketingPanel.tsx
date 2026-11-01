@@ -689,22 +689,18 @@ function MarketingSwitchStrip({
       // broken rather than misaddressed.
       method: "PATCH",
       checked: state === "on",
-      // Two switches the writer is certain to refuse, each drawn disabled with
-      // its reason rather than hidden: someone looking for a switch should
-      // find out why it is not theirs to move, and a control whose only
-      // outcome is a 409 teaches them that this screen's buttons are guesses.
-      //
-      // Publishing cannot go on before the publisher exists (S2c); the writer
-      // answers `publisher_capability_unavailable`. Autonomous cannot go on
-      // while drafts or publishing are off; the writer answers
+      // A switch the writer is certain to refuse is drawn disabled with its
+      // reason rather than hidden: someone looking for a switch should find out
+      // why it is not theirs to move, and a control whose only outcome is a 409
+      // teaches them that this screen's buttons are guesses. Autonomous cannot
+      // go on while drafts or publishing are off; the writer answers
       // `autonomous_needs_drafts_and_publish`.
-      unavailable: !turningOn
-        ? undefined
-        : control.name === "publish"
-          ? m.switchPublishUnavailable
-          : control.name === "autonomous" && (switches.drafts !== "on" || switches.publish !== "on")
-            ? m.switchAutonomousNeedsBoth
-            : undefined,
+      unavailable:
+        turningOn &&
+        control.name === "autonomous" &&
+        (switches.drafts !== "on" || switches.publish !== "on")
+          ? m.switchAutonomousNeedsBoth
+          : undefined,
       confirm: turningOn ? m.switchConfirmOn : undefined,
       body: () => ({
         switch: control.name,

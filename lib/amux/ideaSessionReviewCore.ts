@@ -1,4 +1,7 @@
-import { amuxAnalysisTextSafe } from "./ideaAnalysisChunkCore.ts";
+import {
+  AMUX_ANALYSIS_SCHEMA_FIELDS, AMUX_ANALYSIS_SCHEMA_RULES, amuxAnalysisAnswerJson, amuxAnalysisTextSafe,
+  type AmuxAnalysisSchemaRejectAt,
+} from "./ideaAnalysisChunkCore.ts";
 
 /**
  * Why a session analysis answer became no plan, read back for the owner from
@@ -25,13 +28,13 @@ export type AmuxSessionReviewDetail = (typeof AMUX_SESSION_REVIEW_DETAILS)[numbe
 
 export type AmuxSessionReview =
   | { reason: "owner_question"; question: string }
-  | { reason: "not_a_plan"; detail?: AmuxSessionReviewDetail };
+  | { reason: "not_a_plan"; detail?: AmuxSessionReviewDetail; at?: AmuxAnalysisSchemaRejectAt };
 
 const QUESTION_MAX = 2_000;
 
 export function classifyAmuxSessionReviewAnswer(raw: string): AmuxSessionReview {
   let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return { reason: "not_a_plan" }; }
+  try { parsed = amuxAnalysisAnswerJson(raw); } catch { return { reason: "not_a_plan" }; }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { reason: "not_a_plan" };
   }
@@ -44,6 +47,22 @@ export function classifyAmuxSessionReviewAnswer(raw: string): AmuxSessionReview 
   return { reason: "owner_question", question };
 }
 
+const UNIT_KINDS: readonly unknown[] = ["node", "card", "evidence"];
+
+/** A schema rule's location, exactly as the inspection names it. */
+const readAt = (value: unknown): AmuxAnalysisSchemaRejectAt | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const at = value as Record<string, unknown>;
+  const keys = Object.keys(at);
+  if (!keys.every((key) => ["rule", "field", "unit", "kind"].includes(key)) ||
+      !(AMUX_ANALYSIS_SCHEMA_RULES as readonly unknown[]).includes(at.rule) ||
+      (at.field !== undefined && !(AMUX_ANALYSIS_SCHEMA_FIELDS as readonly unknown[]).includes(at.field)) ||
+      (at.unit !== undefined && !(Number.isSafeInteger(at.unit) && (at.unit as number) >= 0 &&
+        (at.unit as number) < 1_000)) ||
+      (at.kind !== undefined && (at.unit === undefined || !UNIT_KINDS.includes(at.kind)))) return null;
+  return at as AmuxAnalysisSchemaRejectAt;
+};
+
 /** The Admin screen trusts only an exact reply of the review route. */
 export function readAmuxSessionReviewReply(body: unknown): AmuxSessionReview | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
@@ -54,6 +73,11 @@ export function readAmuxSessionReviewReply(body: unknown): AmuxSessionReview | n
   if (row.reason === "not_a_plan" && Object.keys(row).length === 2 &&
       (AMUX_SESSION_REVIEW_DETAILS as readonly unknown[]).includes(row.detail)) {
     return { reason: "not_a_plan", detail: row.detail as AmuxSessionReviewDetail };
+  }
+  // Only a schema refusal names the rule and place that refused it.
+  if (row.reason === "not_a_plan" && Object.keys(row).length === 3 && row.detail === "chunk_schema_rejected") {
+    const at = readAt(row.at);
+    if (at) return { reason: "not_a_plan", detail: "chunk_schema_rejected", at };
   }
   if (row.reason === "owner_question" && Object.keys(row).length === 2 &&
       typeof row.question === "string" && row.question.length > 0 &&
