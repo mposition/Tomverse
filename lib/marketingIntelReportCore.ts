@@ -31,7 +31,7 @@ export const MARKETING_INTEL_REPORT_MAX_BODY_BYTES = 128 * 1024;
 /**
  * The report kinds the generator's secret may write, and no other. The third,
  * `measurement_120d`, carries one aggregate rate of the weekly AI-exposure
- * measurement (docs/policy/marketing-automation.md §9.2, S5): numbers only, no
+ * measurement (docs/policy/marketing-automation.md §10.4, S5): numbers only, no
  * answer text and no URL.
  */
 export const MARKETING_GENERATOR_REPORT_KINDS = ["brief", "market_intel", "measurement_120d"] as const;

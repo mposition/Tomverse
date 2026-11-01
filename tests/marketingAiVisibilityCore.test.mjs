@@ -145,8 +145,9 @@ test("the report is a signed measurement_120d the app's own schema accepts", () 
 // One run, over fakes
 // ---------------------------------------------------------------------------
 
-const answered = (content, citations = []) => ({
-  status: "answered", callId: "c", requestKey: "k", content, citations, ledgerState: "settled",
+// `citations` is everything the provider saw; `answerCitations` only what the answer text cites.
+const answered = (content, citations = [], answerCitations = citations) => ({
+  status: "answered", callId: "c", requestKey: "k", content, citations, answerCitations, ledgerState: "settled",
 });
 
 /**
@@ -215,6 +216,32 @@ test("a full run asks every question, judges every answer and reports one rate p
     assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
     assert.equal(report.deadlineAt, DEADLINE);
   }
+});
+
+test("a page that only the searches returned is not a citation of the answer", async () => {
+  const { deps, submitted } = fakeDeps({
+    // tomverse.app was in the search results and opened, but the answer's text does not cite it.
+    callAnswer: async () => answered("NO-MENTION", ["https://tomverse.app/", "https://other.example/"], ["https://other.example/"]),
+  });
+  await run(deps);
+  const rates = submitted.filter((report) => report.payload.metricId.includes("own_citation_rate"));
+  assert.equal(rates.length, 3);
+  for (const report of rates) assert.equal(report.payload.value, 0, report.payload.metricId);
+});
+
+test("an answer outcome without answerCitations counts no citation rather than guessing", async () => {
+  const { deps, submitted } = fakeDeps({
+    callAnswer: async () => ({ status: "answered", callId: "c", requestKey: "k", content: "NO-MENTION", citations: ["https://tomverse.app/"], ledgerState: "settled" }),
+  });
+  await run(deps);
+  for (const report of submitted.filter((r) => r.payload.metricId.includes("own_citation_rate"))) assert.equal(report.payload.value, 0);
+});
+
+test("a deadline that is not a time stops the run before it spends", async () => {
+  const { deps, calls } = fakeDeps();
+  const summary = await runMarketingAiVisibilityCycle({ generatorRunId: "run-1", deadlineAt: "soon", env: ON }, deps);
+  assert.deepEqual(summary.stoppedAt, { stage: "deadline", detail: "deadline_unreadable" });
+  assert.deepEqual(calls, []);
 });
 
 test("the judge is shown the answer and not the citations, and the answer text goes nowhere else", async () => {

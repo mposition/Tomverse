@@ -388,7 +388,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 - 기본 꺼짐(`MARKETING_AI_VISIBILITY_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). 월요일(UTC)에만, 생성기 서비스가 깨끗하게 끝난 뒤 두 번째 감독 worker로 돈다
   (`scripts/marketing-ai-visibility-worker.mjs`, `lib/marketingAiVisibilityCore.ts`). 스위치가 꺼져 있으면 예약·호출이 0건이다.
 - 질문 목록(ko/en/zh-Hant 각 3개, Tomverse를 이름으로 부르지 않는 초안)을 웹 검색이 되는 LLM에 묻고(답변 호출), 그 답변에 Tomverse가 제품으로 언급됐는지는 **두 번째 LLM 호출이 JSON 불리언으로 판정**한다.
-  문자열 검색·정규식·단어 목록으로 답변을 읽지 않는다. 구조적인 것은 공급사가 인용한 URL의 호스트가 `tomverse.app`(또는 하위)인지, 비율 계산, 보고서 모양뿐이다.
+  문자열 검색·정규식·단어 목록으로 답변을 읽지 않는다. 구조적인 것은 답변 본문이 인용한 URL(검색 결과에만 있던 페이지는 인용이 아니다)의 호스트가 `tomverse.app`(또는 하위)인지, 비율 계산, 보고서 모양뿐이다.
 - 모든 호출은 마케팅 LLM 비용 원장(목적 `market_intel`, 운영자가 정한 모델과 월 상한, 호출 전 예약)을 거치며 새 유료 경로는 없다. 답변 본문은 판정 직후 버리고 저장·로그·제출하지 않는다.
 - 저장은 기존 보고서 kind `measurement_120d`(생성기 보고 route와 서명을 그대로 사용, kind만 허용 목록에 추가)이고, locale별로 `ai_visibility.mention_rate.<locale>`·`ai_visibility.own_citation_rate.<locale>`
   한 건씩, 값은 비율(0–1)과 표본 수뿐이다. 판정이 JSON이 아니면 표본에서 빼고 세며 추측하지 않는다. 호출 하나라도 결과를 모르면 그 주는 아무것도 보고하지 않는다(부분 주는 비율이 아니다).

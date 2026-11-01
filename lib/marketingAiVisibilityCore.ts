@@ -1,5 +1,5 @@
 /**
- * The weekly AI-exposure measurement (marketing policy §9.2, S5): does an AI
+ * The weekly AI-exposure measurement (marketing policy §10.4, S5): does an AI
  * assistant with web search name Tomverse when it is asked the questions a
  * person who needs Tomverse would ask?
  *
@@ -8,7 +8,8 @@
  * before every call), and no new paid path:
  *
  * 1. the *answer*: a web-search call that answers the question as an assistant
- *    would, which returns the pages the provider cited;
+ *    would, which returns the pages its text cites (`answerCitations`; the pages
+ *    the searches merely returned are not citations and are not counted);
  * 2. the *judgement*: a text call that is shown that answer and says whether it
  *    names Tomverse, as one JSON boolean. There is no string search, regular
  *    expression or word list over the answer anywhere in this file.
@@ -302,6 +303,8 @@ export async function runMarketingAiVisibilityCycle(
   if (!gate.on) return summary({ stage: "off", detail: gate.reason });
 
   const deadline = Date.parse(input.deadlineAt);
+  // A deadline that is not a time would make every budget check false.
+  if (Number.isNaN(deadline)) return summary({ stage: "deadline", detail: "deadline_unreadable" });
   const startedAt = new Date(deps.now()).toISOString();
   const results: MarketingAiVisibilityResult[] = [];
 
@@ -323,7 +326,7 @@ export async function runMarketingAiVisibilityCycle(
       continue;
     }
     judged += 1;
-    results.push({ locale: question.locale, mentioned, citedOwnHost: marketingAiVisibilityCitesOwnHost(answer.citations) });
+    results.push({ locale: question.locale, mentioned, citedOwnHost: marketingAiVisibilityCitesOwnHost(answer.answerCitations ?? []) });
   }
 
   const rates = marketingAiVisibilityRates(results);

@@ -1,5 +1,5 @@
 // The weekly AI-exposure measurement worker: one run, then exit (marketing S5,
-// policy 9.2; lib/marketingAiVisibilityCore.ts).
+// policy 10.4; lib/marketingAiVisibilityCore.ts).
 //
 // Started by scripts/marketing-generator-service.mjs after a clean generator
 // run, on the measurement weekday, and only while MARKETING_AI_VISIBILITY_ENABLED
