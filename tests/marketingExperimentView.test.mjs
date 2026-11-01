@@ -141,3 +141,27 @@ test("rates are percentages of exposures and the minimum sample is per arm", () 
   assert.equal(reached.sampleReached, true);
   assert.equal(reached.controlRatePercent, 0);
 });
+
+test("the row says not served when the switch is off or the kill switch is set, whatever the configuration says", () => {
+  const running = snapshot();
+  const at = new Date(start + DAY);
+  assert.equal(buildExperimentsConsole(running, at).rows[0].state, "active");
+  assert.equal(
+    buildExperimentsConsole(running, at, { switchOn: false, killSwitch: false }).rows[0].state,
+    "switch_off"
+  );
+  assert.equal(
+    buildExperimentsConsole(running, at, { switchOn: true, killSwitch: true }).rows[0].state,
+    "kill_switch"
+  );
+  // The kill switch is the stronger statement.
+  assert.equal(
+    buildExperimentsConsole(running, at, { switchOn: false, killSwitch: true }).rows[0].state,
+    "kill_switch"
+  );
+  // A stored status is still reported as stored.
+  assert.equal(
+    buildExperimentsConsole(running, at, { switchOn: false, killSwitch: false }).rows[0].status,
+    "running"
+  );
+});

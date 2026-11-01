@@ -138,6 +138,16 @@ const e2eFixtureExperiment = (headers: Headers | undefined, now: Date) => {
   };
 };
 
+/**
+ * The answer from the database, kept for a few seconds per instance. Every
+ * landing page view of an assigned visitor asks, and each ask is several
+ * reads; an Admin stop, a kill-switch-free switch change or a recorded stop
+ * rule reaches a visitor within this long. Only a successful read is kept: a
+ * failure is asked again at once.
+ */
+const ACTIVE_READ_TTL_MS = 15_000;
+let activeReadCache: { at: number; value: ActiveExperimentRead } | null = null;
+
 export async function readActiveMarketingExperiment(options: {
   headers?: Headers;
   now?: Date;
@@ -160,25 +170,44 @@ export async function readActiveMarketingExperiment(options: {
     return { ok: true, active: false, reason: "no_configuration" };
   }
 
+  // A caller that names the time (a test) is asking about that time.
+  const cacheable = options.now === undefined;
+  if (
+    cacheable &&
+    activeReadCache &&
+    Date.now() - activeReadCache.at < ACTIVE_READ_TTL_MS &&
+    // The window can close inside the cache's life.
+    (!activeReadCache.value.ok ||
+      !activeReadCache.value.active ||
+      now.getTime() < Date.parse(activeReadCache.value.config.endsAt))
+  ) {
+    return activeReadCache.value;
+  }
+
   try {
     const settings = await readMarketingAutomationSettings();
     if (!settings.experimentsEnabled.ok) return { ok: false };
+    let value: ActiveExperimentRead;
     if (!settings.experimentsEnabled.value) {
-      return { ok: true, active: false, reason: "switch_off" };
+      value = { ok: true, active: false, reason: "switch_off" };
+    } else {
+      const snapshot = await readExperimentSnapshot(prisma);
+      if (!snapshot.config || !snapshot.counts) {
+        value = { ok: true, active: false, reason: "no_configuration" };
+      } else {
+        const resolution = resolveActiveExperiment(
+          snapshot.config,
+          snapshot.counts,
+          now,
+          snapshot.tripped
+        );
+        value = resolution.active
+          ? { ok: true, active: true, config: resolution.config }
+          : { ok: true, active: false, reason: resolution.reason };
+      }
     }
-    const snapshot = await readExperimentSnapshot(prisma);
-    if (!snapshot.config || !snapshot.counts) {
-      return { ok: true, active: false, reason: "no_configuration" };
-    }
-    const resolution = resolveActiveExperiment(
-      snapshot.config,
-      snapshot.counts,
-      now,
-      snapshot.tripped
-    );
-    return resolution.active
-      ? { ok: true, active: true, config: resolution.config }
-      : { ok: true, active: false, reason: resolution.reason };
+    if (cacheable) activeReadCache = { at: Date.now(), value };
+    return value;
   } catch {
     return { ok: false };
   }

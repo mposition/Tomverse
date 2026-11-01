@@ -258,6 +258,64 @@ test.describe("fixture experiment, forced variant", () => {
     release();
   });
 
+  test("(b) a click is counted once per session even when the page is gone before the answer", async ({
+    page,
+    context,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await context.addCookies([
+      { name: "tv_exp", value: VARIANT_COOKIE, url: ORIGIN },
+    ]);
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, "accepted");
+    }, CONSENT_KEY);
+
+    // The conversion answer never arrives while the page that asked is alive,
+    // as when the call to action takes the visitor to another document.
+    await page.route("**/api/marketing/experiments", async (route) => {
+      if (route.request().postDataJSON()?.action === "conversion") {
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+      }
+      await route.continue().catch(() => undefined);
+    });
+    const conversions: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.url().includes("/api/marketing/experiments") &&
+        request.postDataJSON()?.action === "conversion"
+      ) {
+        conversions.push(request.url());
+      }
+    });
+    const exposureSent = (index: number) => async () => {
+      let seen = 0;
+      await page.waitForRequest((request) => {
+        if (
+          request.url().includes("/api/marketing/experiments") &&
+          request.postDataJSON()?.action === "exposure"
+        ) {
+          seen += 1;
+        }
+        return seen >= index;
+      });
+    };
+
+    const firstExposure = exposureSent(1)();
+    await page.goto("/");
+    await firstExposure;
+    await page.locator("#landing-hero-primary").click({ noWaitAfter: true });
+    await expect.poll(() => conversions.length).toBe(1);
+
+    // Back on the home page in the same tab session, click again: the first
+    // click is remembered although its answer never ran any callback.
+    await page.goto("/");
+    await page.locator("#landing-hero-primary").waitFor();
+    await page.waitForLoadState("networkidle");
+    await page.locator("#landing-hero-primary").click({ noWaitAfter: true });
+    await page.waitForTimeout(800);
+    expect(conversions.length).toBe(1);
+  });
+
   test("(b) the Korean home page has its own variant copy", async ({
     page,
     context,

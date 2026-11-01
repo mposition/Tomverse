@@ -81,6 +81,13 @@ const session = {
       // Without session storage the browser simply counts more than once.
     }
   },
+  remove: (key: string) => {
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch {
+      // Nothing was stored, so nothing needs removing.
+    }
+  },
 };
 
 const probeIsOff = (key: string) => {
@@ -175,12 +182,18 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
           ) {
             return;
           }
-          // Remembered once the server has it, so a click lost to a bad
-          // connection is counted by the next one instead of never.
+          // Remembered when the request goes out and never taken back. The call
+          // to action leaves this document: the request is kept alive and the
+          // server counts it, but the promise in this document is rejected as
+          // it unloads, which is indistinguishable here from a failed request.
+          // Treating that as a failure would let the next visit's click count
+          // a second time, in one arm more than the other. A click lost to a
+          // bad connection is the smaller error, and it is said to be one:
+          // the figures are page sessions counted in the browser.
           converting = true;
-          void post("conversion").then((answer) => {
+          session.set(conversionKey, "1");
+          void post("conversion").then(() => {
             converting = false;
-            if (answer?.status === "recorded") session.set(conversionKey, "1");
           });
         };
         document.addEventListener("click", onClick, true);
@@ -190,17 +203,32 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
         onClick = null;
       };
 
-      const alreadyCounted = assignment
-        ? session.get(`tomverse_experiment_exposed_${assignment.experimentId}`)
+      // The same rule for the exposure: remembered when it is sent, so a page
+      // that goes away with the request in flight does not count again on the
+      // next view. Taken back only when an answer arrives and says the visit
+      // was not counted; no answer proves nothing, as above.
+      const exposedKey = assignment
+        ? `tomverse_experiment_exposed_${assignment.experimentId}`
         : null;
+      const alreadyCounted = exposedKey ? session.get(exposedKey) : null;
+      if (exposedKey && !alreadyCounted) session.set(exposedKey, "1");
+      const retract = () => {
+        if (exposedKey && !alreadyCounted) session.remove(exposedKey);
+      };
       const result = await post("exposure", { record: !alreadyCounted });
       if (cancelled) return;
       if (withdrawn(experimentId)) {
+        retract();
         detachClick();
         return;
       }
-      if (!result || result.status === "error") return;
+      if (!result) return;
+      if (result.status === "error") {
+        retract();
+        return;
+      }
       if (result.status === "off") {
+        retract();
         detachClick();
         session.set(probeKey, String(Date.now()));
         clearCookie();
@@ -208,10 +236,9 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
         return;
       }
       if (result.status !== "recorded" || !assignment) {
+        retract();
         detachClick();
-        return;
       }
-      session.set(`tomverse_experiment_exposed_${assignment.experimentId}`, "1");
     };
 
     void run();

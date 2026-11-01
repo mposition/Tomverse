@@ -647,7 +647,10 @@ export async function readMarketingConsole(
   if (section === "experiments") {
     // One row: the current experiment, or the last one. Earlier runs are in
     // the reports tab (`experiment_result`) and in the audit log.
-    const built = buildExperimentsConsole(await readExperimentSnapshot(prisma), new Date());
+    const built = buildExperimentsConsole(await readExperimentSnapshot(prisma), new Date(), {
+      switchOn: switches.experiments === "on",
+      killSwitch: (process.env.MARKETING_AUTOMATION_KILL_SWITCH ?? "").trim() !== "",
+    });
     return {
       section,
       availability,

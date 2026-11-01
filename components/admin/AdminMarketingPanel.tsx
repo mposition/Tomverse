@@ -2140,6 +2140,8 @@ function MarketingRow({
       ended: m.expStateEnded,
       stopped: m.expStateStopped,
       stop_rule: m.expStateStopRule,
+      switch_off: m.expStateSwitchOff,
+      kill_switch: m.expStateKillSwitch,
     };
     const arm = (exposures: number, conversions: number, rate: number | null) =>
       m.expArmValue

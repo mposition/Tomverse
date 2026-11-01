@@ -20,7 +20,11 @@ export type ExperimentDerivedState =
   | "not_started"
   | "ended"
   | "stopped"
-  | "stop_rule";
+  | "stop_rule"
+  /** Everything else says running, but the experiments switch is off. */
+  | "switch_off"
+  /** Everything else says running, but the kill switch is set. */
+  | "kill_switch";
 
 export type ExperimentRowView = {
   id: string;
@@ -73,7 +77,9 @@ export function buildExperimentsConsole(
     /** The stop rule was met at some point and recorded. */
     tripped?: boolean;
   },
-  now: Date
+  now: Date,
+  /** What the visitor-facing read also checks before it serves anything. */
+  gates: { switchOn: boolean; killSwitch: boolean } = { switchOn: true, killSwitch: false }
 ): { rows: ExperimentRowView[]; experiments: ExperimentsConsoleView } {
   const bundles = LANDING_EXPERIMENT_BUNDLES.flatMap((bundle) =>
     Object.entries(bundle.variants).map(([variantId, locales]) => ({
@@ -101,7 +107,15 @@ export function buildExperimentsConsole(
       {
         id: config.experimentId,
         status: config.status,
-        state: resolution.active ? "active" : resolution.reason,
+        // The same order the visitor-facing read applies: the kill switch,
+        // then the switch, then the configuration.
+        state: gates.killSwitch
+          ? "kill_switch"
+          : !gates.switchOn
+            ? "switch_off"
+            : resolution.active
+              ? "active"
+              : resolution.reason,
         bundleId: config.bundleId,
         variantId: config.variantId,
         locales: config.locales,
