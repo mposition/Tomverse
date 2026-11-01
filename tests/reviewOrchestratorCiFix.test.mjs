@@ -169,7 +169,7 @@ test("only a Dependabot prompt with the switch on lets the model move a test to 
   assert.match(text, opened);
   // What the guard refuses is named, so the model does not spend the attempt on it.
   assert.match(text, /do not add, rename or delete a test file, and do not edit a fixture or snapshot/);
-  assert.match(text, /keep every test, every assertion and every expected value, skip nothing/);
+  assert.match(text, /rewrite those lines in place without adding or removing a line or a comment, keep every test, every assertion and every expected value, skip nothing/);
   assert.match(text, /AGENTS\.md or docs\/policy\/qa-release-agent\.md/);
 });
 

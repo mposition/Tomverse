@@ -116,22 +116,38 @@ test("with the switch on, a Dependabot fix may move an existing test to a change
   // A test the merge lane leaves to a person stays fenced.
   assert.deepEqual(judge(officeparser, { policyTestPaths: [path] }), { push: false, reasons: ["policy_test"] });
 
-  // What the edit may not take away.
+  // What the edit may not do: each of these weakens, skips or loosens a check.
   for (const [removed, added, reason] of [
-    ["  assert.equal(text, \"a\");", "  void text;", "test_assertion_removed"],
-    ["  assert.equal(text, \"a\");", "  assert.equal(text, \"b\");", "test_value_changed"],
-    ["  assert.equal(count, 3);", "  assert.equal(count, 4);", "test_value_changed"],
-    ['test("reads the words", async () => {', 'test.skip("reads the words", async () => {', "test_skipped"],
-    ['test("reads the words", async () => {', 'test("reads the words", { skip: true }, async () => {', "test_skipped"],
-    ['test("reads the words", async () => {', "{", "test_case_removed"],
+    ["  assert.equal(text, \"a\");", "  void text;", "test_edit_removed"],
+    ["  assert.equal(text, \"a\");", "  assert.equal(text, \"b\");", "test_edit_removed"],
+    ["  assert.equal(count, 3);", "  assert.equal(count, 4);", "test_edit_removed"],
+    ["  assert.deepEqual(rows, expected);", "  assert.equal(rows, expected);", "test_edit_removed"],
+    ["  assert.equal(rows, expected);", "  assert.equal(rows, rows);", "test_edit_removed"],
+    // Review r-20261101-020811-97785e: a comment, an early return and a looser regular expression.
+    ["  assert.match(text, /매출 보고/);", "  // assert.match(text, /매출 보고/);", "test_edit_added"],
+    ["  assert.match(text, /매출 보고/);", "  /* assert.match(text, /매출 보고/); */", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "test(\"reads the words\", async () => { return;", "test_edit_added"],
+    ["  assert.match(text, /매출 보고/);", "  assert.match(text, /.*/);", "test_edit_removed"],
+    ["  assert.ok(found);", "  assert.ok(!found);", "test_edit_added"],
+    ["  assert.ok(found);", "  assert.ok(found || true);", "test_edit_added"],
+    ["  assert.ok(found);", "  assert.ok([found]);", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "test.skip(\"reads the words\", async () => {", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "test(\"reads the words\", { skip: true }, async () => {", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "{", "test_edit_removed"],
   ]) {
     const verdict = judge(hunk([removed], [added]));
     assert.equal(verdict.push, false, added);
     assert.ok(verdict.reasons.includes(reason), `${added}: ${verdict.reasons}`);
   }
+  // A line added or dropped, rather than one rewritten, is refused.
+  assert.deepEqual(judge(hunk(["  const text = document.toText();"], ["  return;", "  const text = document.toText();"])),
+    { push: false, reasons: ["test_edit_shape"] });
+  // Making a callback async to await the new API is a rewrite.
+  assert.deepEqual(judge(hunk(["test(\"reads\", () => {", "  const text = document.toText();"],
+    ["test(\"reads\", async () => {", "  const text = (await document.to(\"text\")).value;"])), { push: true });
   // An edited test the patch does not show was not read.
   assert.deepEqual(judge(""), { push: false, reasons: ["test_patch_unread"] });
-  // Lines that only look like a diff header inside a hunk are still counted.
+  // Lines that only look like a diff header inside a hunk are still judged.
   assert.equal(judge(hunk(["-- assert.ok(x);"], ["-- x;"])).push, false);
 
   // Only an existing test file is opened: a new, renamed, deleted file, a fixture or a snapshot stays fenced.

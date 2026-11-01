@@ -347,7 +347,7 @@ export const autoFixAttempts = (commits, prefix = CI_FIX_COMMIT_PREFIX) =>
 export function ciFixPrompt({ workflows, logFile, headBranch = "", packagesInstalled = false, dependabotTests = false }) {
   const dependabot = CI_FIX_DEPENDABOT_BRANCH.test(headBranch);
   const tests = dependabot && dependabotTests
-    ? "do not add, rename or delete a test file, and do not edit a fixture or snapshot. You may edit an existing *.test.* or *.spec.* file only where it calls an API the update removed or renamed, to call the replacement instead: keep every test, every assertion and every expected value, skip nothing, and leave the tests AGENTS.md or docs/policy/qa-release-agent.md names unedited"
+    ? "do not add, rename or delete a test file, and do not edit a fixture or snapshot. You may edit an existing *.test.* or *.spec.* file only where it calls an API the update removed or renamed, to call the replacement instead: rewrite those lines in place without adding or removing a line or a comment, keep every test, every assertion and every expected value, skip nothing, and leave the tests AGENTS.md or docs/policy/qa-release-agent.md names unedited"
     : "do not edit or delete any test file, fixture or snapshot";
   const packages = packagesInstalled
     ? " The updated packages are installed in node_modules (no install script ran): read their type definitions (.d.ts), CHANGELOG and migration notes there to learn the new API, and do not guess an import path or option name you cannot find there."

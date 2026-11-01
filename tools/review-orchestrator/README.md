@@ -541,10 +541,15 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 - **테스트의 API 호출 수정(기본 꺼짐, 운영자 결정 2026-11-01).** 업데이트가 API를 없애거나 이름을 바꾸면
   그 API를 부르는 테스트도 깨집니다(#3192: officeparser 8이 `toText()`를 없앰). 이 스위치가 켜지면 모델은 이미 있는
   `*.test.*`·`*.spec.*` 파일에서 그 호출만 새 API로 바꿀 수 있습니다. workflow guard(`testEditProblems`)는 그 파일의 diff를
-  보고 다음 중 하나라도 있으면 거부합니다.
-  - assertion(`assert…(`, `expect(`)이나 test 선언(`test(`, `it(`, `describe(`)이 줄었습니다.
-  - 지운 줄의 문자열·숫자 literal이 더해진 줄에 다시 나오지 않습니다. 기대값을 바꾼 것으로 봅니다.
-  - `skip`·`todo`·`only`가 늘었습니다.
+  줄 단위로 짝지어 토큰을 비교하고, 다음 중 하나라도 있으면 거부합니다.
+  - 지운 줄 수와 더한 줄 수가 다릅니다. 줄을 끼워 넣거나 뺄 수 없습니다(`test_edit_shape`).
+  - 지운 토큰이 속성·메서드 이름(`x.toText`의 `toText`)이 아닙니다. 변수, literal, 정규식, 주석, 구두점,
+    `assert.`·`expect` 뒤의 assertion 이름, `test`·`it`·`describe`는 지울 수 없습니다(`test_edit_removed`).
+  - 더한 토큰이 제어 흐름을 바꾸지 않는 이름, `.`·`(`·`)`·`,`, 따옴표 문자열 중 하나가 아닙니다. 주석, `return`·`if`·`throw`,
+    `skip`·`todo`·`only`, `!`·`||`, `true`·`false`, `[`·`]`, 객체 literal은 더할 수 없습니다(`test_edit_added`).
+
+  예: `const text = document.toText();` → `const text = (await document.to("text")).value;`와 콜백에 `async`를 붙이는 것은 통과합니다.
+  값을 함수로 감싸는 식의 약화까지 모두 막지는 못하므로, 사람이 병합 전에 diff를 봅니다.
 
   새 테스트 파일, 이름 바꾸기, 삭제, fixture·snapshot은 계속 막힙니다. merge lane이 사람에게 남기는 정책 테스트(AGENTS.md,
   CLAUDE.md, `docs/policy/qa-release-agent.md`가 이름을 대는 테스트)도 막히는데, 2026-11-01 현재 그 목록은 비어 있습니다.

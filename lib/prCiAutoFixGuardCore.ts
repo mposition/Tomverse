@@ -67,58 +67,128 @@ const PACKAGE_FILE = /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.js
  * `toText()`). With the repository variable PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED
  * a fix to a Dependabot head may edit an existing test file to call the new
  * API -- never a fixture or snapshot, nor a test the merge lane leaves to a
- * person -- and the edit may take no test, assertion or expected value away
- * and may skip none (testEditProblems).
+ * person. testEditProblems holds the edit to exactly that.
  */
 const TEST_CODE = /\.(test|spec)\.[cm]?[jt]sx?$/;
-const ASSERTION = /\b(?:assert(?:\.\w+)*|expect)\s*\(/g;
-const TEST_CASE = /\b(?:test|it|describe|suite)(?:\.\w+)*\s*\(/g;
-const SKIP = /\.(?:skip|todo|only)\b|\b(?:skip|todo|only)\s*:/g;
-/** String and number literals: an expected value is one of these. */
-const LITERAL = /(["'`])(?:\\.|(?!\1)[^\\\n])*\1|(?<![\w.$])\d+(?:\.\d+)?(?![\w.])/g;
 
-const count = (pattern: RegExp, lines: readonly string[]) => lines.reduce((sum, line) => sum + [...line.matchAll(pattern)].length, 0);
+/** Words an edited test line may not gain: each changes what runs, or whether it runs. */
+const ADDED_WORDS_REFUSED = new Set([
+  "return", "if", "else", "throw", "try", "catch", "finally", "void", "while", "for", "do", "switch", "case",
+  "break", "continue", "delete", "skip", "todo", "only", "true", "false", "null", "undefined",
+]);
+/** Punctuation an edited test line may gain: enough to wrap a call, `(await x.to("text")).value`. */
+const ADDED_PUNCTUATION = new Set([".", "(", ")", ","]);
+/** Names an edited test line may not lose, nor the name after `assert.`: what the test checks. */
+const REMOVED_WORDS_REFUSED = new Set(["assert", "expect", "test", "it", "describe", "suite", "t", "strict"]);
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+const QUOTED = /^(["']).*\1$/s;
+const REGEX_MAY_FOLLOW = new Set(["", "(", ",", "=", ":", "[", "!", "&&", "||", "??", "?", "{", "}", ";", "=>", "return"]);
+
+/** A line's tokens: comments, strings, templates and regular expressions each one token. */
+function tokens(line: string): string[] {
+  const out: string[] = [];
+  let at = 0;
+  const take = (pattern: RegExp) => {
+    pattern.lastIndex = at;
+    const match = pattern.exec(line);
+    if (!match) return false;
+    out.push(match[0]);
+    at = pattern.lastIndex;
+    return true;
+  };
+  while (at < line.length) {
+    if (/\s/.test(line[at])) {
+      at += 1;
+      continue;
+    }
+    if (take(/\/\/.*|\/\*[\s\S]*?(?:\*\/|$)/y)) continue;
+    if (take(/(["'`])(?:\\.|(?!\1)[^\\])*(?:\1|$)/y)) continue;
+    if (line[at] === "/" && REGEX_MAY_FOLLOW.has(out.at(-1) ?? "")
+      && take(/\/(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n[])+\/[A-Za-z]*/y)) continue;
+    if (take(/[A-Za-z_$][\w$]*|\d[\w.]*|=>|\?\?|\?\.|&&|\|\||[=!]==?|\.\.\./y)) continue;
+    out.push(line[at]);
+    at += 1;
+  }
+  return out;
+}
+
+/** Which tokens of a and of b a longest common subsequence keeps. */
+function kept(a: readonly string[], b: readonly string[]): { a: boolean[]; b: boolean[] } {
+  const table = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      table[i][j] = a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  const keepA = new Array<boolean>(a.length).fill(false);
+  const keepB = new Array<boolean>(b.length).fill(false);
+  for (let i = 0, j = 0; i < a.length && j < b.length; ) {
+    if (a[i] === b[j]) {
+      keepA[i] = true;
+      keepB[j] = true;
+      i += 1;
+      j += 1;
+    } else if (table[i + 1][j] >= table[i][j + 1]) i += 1;
+    else j += 1;
+  }
+  return { a: keepA, b: keepB };
+}
 
 /**
- * What an edit of the named test files takes away, from `git diff -U0 HEAD`.
- * A file the patch does not show is a problem: its edit was not read.
+ * Whether the edit of the named test files only moves calls to another API,
+ * from `git diff -U0 HEAD`. Each hunk replaces as many lines as it removes,
+ * paired in order; a pair may lose only a property or method name (never an
+ * assertion's, a variable, a literal, a regular expression, a comment or
+ * punctuation) and may gain only names that change no control flow, `.(),`
+ * and quoted strings. So
+ * no assertion is commented out, weakened or loosened, no test is skipped
+ * and no line is added or dropped. A file the patch does not show was not read.
  */
 export function testEditProblems(patch: string, paths: ReadonlySet<string>): string[] {
-  const files = new Map<string, { removed: string[]; added: string[] }>();
-  let current: { removed: string[]; added: string[] } | null = null;
-  let inHunk = false;
+  const files = new Map<string, { removed: string[]; added: string[] }[]>();
+  let hunks: { removed: string[]; added: string[] }[] | null = null;
   for (const line of patch.split("\n")) {
     const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
     if (header) {
-      current = paths.has(header[2]) && header[1] === header[2] ? { removed: [], added: [] } : null;
-      if (current) files.set(header[2], current);
-      inHunk = false;
-    } else if (line.startsWith("@@")) {
-      inHunk = true;
-    } else if (current && inHunk && line.startsWith("-")) {
-      current.removed.push(line.slice(1));
-    } else if (current && inHunk && line.startsWith("+")) {
-      current.added.push(line.slice(1));
+      hunks = paths.has(header[2]) && header[1] === header[2] ? [] : null;
+      if (hunks) files.set(header[2], hunks);
+    } else if (hunks && line.startsWith("@@")) {
+      hunks.push({ removed: [], added: [] });
+    } else if (hunks && hunks.length > 0 && line.startsWith("-")) {
+      hunks.at(-1)!.removed.push(line.slice(1));
+    } else if (hunks && hunks.length > 0 && line.startsWith("+")) {
+      hunks.at(-1)!.added.push(line.slice(1));
     }
   }
   const problems = new Set<string>();
   for (const path of paths) {
     const file = files.get(path);
-    if (!file) {
+    if (!file || file.length === 0) {
       problems.add("test_patch_unread");
       continue;
     }
-    if (count(ASSERTION, file.added) < count(ASSERTION, file.removed)) problems.add("test_assertion_removed");
-    if (count(TEST_CASE, file.added) < count(TEST_CASE, file.removed)) problems.add("test_case_removed");
-    if (count(SKIP, file.added) > count(SKIP, file.removed)) problems.add("test_skipped");
-    const kept = new Map<string, number>();
-    for (const line of file.added) for (const [literal] of line.matchAll(LITERAL)) kept.set(literal, (kept.get(literal) ?? 0) + 1);
-    for (const line of file.removed) {
-      for (const [literal] of line.matchAll(LITERAL)) {
-        const left = kept.get(literal) ?? 0;
-        if (left === 0) problems.add("test_value_changed");
-        else kept.set(literal, left - 1);
+    for (const hunk of file) {
+      if (hunk.removed.length !== hunk.added.length) {
+        problems.add("test_edit_shape");
+        continue;
       }
+      hunk.removed.forEach((removedLine, index) => {
+        const before = tokens(removedLine);
+        const after = tokens(hunk.added[index]);
+        const keep = kept(before, after);
+        before.forEach((token, i) => {
+          if (keep.a[i]) return;
+          const member = before[i - 1] === ".";
+          const assertionName = member && REMOVED_WORDS_REFUSED.has(before[i - 2] ?? "");
+          if (!IDENTIFIER.test(token) || !member || REMOVED_WORDS_REFUSED.has(token) || assertionName) problems.add("test_edit_removed");
+        });
+        after.forEach((token, j) => {
+          if (keep.b[j]) return;
+          const allowed = ADDED_PUNCTUATION.has(token) || QUOTED.test(token) || (IDENTIFIER.test(token) && !ADDED_WORDS_REFUSED.has(token));
+          if (!allowed) problems.add("test_edit_added");
+        });
+      });
     }
   }
   return [...problems];
