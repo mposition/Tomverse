@@ -55,19 +55,66 @@ export const parseZernioComments = (body: unknown): ParsedZernioComment[] | null
 };
 
 export type ZernioCommentsResult =
-  | { readonly kind: "ok"; readonly comments: ParsedZernioComment[] }
+  | {
+      readonly kind: "ok";
+      readonly comments: ParsedZernioComment[];
+      /** True when more comments exist than were read: the caller must not call that a whole read. */
+      readonly truncated: boolean;
+    }
   | { readonly kind: "unavailable" };
 
-/** One page of the newest comments. A page is enough for an hourly look at a young post. */
+const PAGE_SIZE = 50;
+/** Pages followed per post and run. A post with more new comments than this is cut short, and says so. */
+export const ZERNIO_COMMENTS_MAX_PAGES = 5;
+
+const nextCursor = (body: unknown): { more: boolean; cursor: string | null } => {
+  const pagination = (body as { pagination?: { hasMore?: unknown; cursor?: unknown } } | null)?.pagination;
+  const cursor = typeof pagination?.cursor === "string" && pagination.cursor !== "" ? pagination.cursor : null;
+  return { more: pagination?.hasMore === true, cursor };
+};
+
+/**
+ * The newest comments of a post, page by page until one is not newer than
+ * `readDownTo` (the caller's floor) or the pages run out. Stopping early because
+ * of the page cap, or because a full page names no way to the next, is reported
+ * as `truncated`: a read that left comments unread is not a whole read.
+ */
 export const zernioCommentsQuery = (ports: ZernioTransportPorts) => ({
-  async fetchComments(externalPostId: string, externalAccountRef: string): Promise<ZernioCommentsResult> {
-    const result = await zernioCall(
-      ports,
-      `/v1/inbox/comments/${encodeURIComponent(externalPostId)}?accountId=${encodeURIComponent(externalAccountRef)}&limit=50`,
-      { method: "GET" },
-    );
-    if (result.kind === "unreachable" || result.status !== 200) return { kind: "unavailable" };
-    const comments = parseZernioComments(result.body);
-    return comments === null ? { kind: "unavailable" } : { kind: "ok", comments };
+  async fetchComments(
+    externalPostId: string,
+    externalAccountRef: string,
+    readDownTo: Date | null = null,
+  ): Promise<ZernioCommentsResult> {
+    const comments: ParsedZernioComment[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < ZERNIO_COMMENTS_MAX_PAGES; page += 1) {
+      const result = await zernioCall(
+        ports,
+        `/v1/inbox/comments/${encodeURIComponent(externalPostId)}?accountId=${encodeURIComponent(externalAccountRef)}&limit=${PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        { method: "GET" },
+      );
+      if (result.kind === "unreachable" || result.status !== 200) return { kind: "unavailable" };
+      const parsed = parseZernioComments(result.body);
+      if (parsed === null) return { kind: "unavailable" };
+      comments.push(...parsed);
+      const next = nextCursor(result.body);
+      // Reached what was already read: older pages are not new.
+      const oldest = parsed.reduce<Date | null>(
+        (known, comment) =>
+          comment.createdAt && (known === null || comment.createdAt < known) ? comment.createdAt : known,
+        null,
+      );
+      if (readDownTo && oldest && oldest.getTime() <= readDownTo.getTime()) {
+        return { kind: "ok", comments, truncated: false };
+      }
+      if (!next.more) {
+        // A short page is the end. A full page that does not say it has more is
+        // not known to be the end, and nothing here guesses.
+        return { kind: "ok", comments, truncated: parsed.length >= PAGE_SIZE };
+      }
+      if (next.cursor === null) return { kind: "ok", comments, truncated: true };
+      cursor = next.cursor;
+    }
+    return { kind: "ok", comments, truncated: true };
   },
 });

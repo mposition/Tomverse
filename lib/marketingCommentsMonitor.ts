@@ -73,7 +73,11 @@ export type MarketingCommentsMonitorDeps = {
   readonly enabled: (env: Readonly<Record<string, string | undefined>>) => boolean;
   readonly classifier: MarketingCommentClassifier | null;
   readonly now: () => Date;
-  readonly fetchComments: (post: MarketingCommentMonitorPost) => Promise<ZernioCommentsResult>;
+  /** `readDownTo`: comments older than this are already read, so paging can stop there. */
+  readonly fetchComments: (
+    post: MarketingCommentMonitorPost,
+    readDownTo: Date | null,
+  ) => Promise<ZernioCommentsResult>;
   readonly operations: {
     readonly listPosts: (limit: number) => Promise<MarketingCommentMonitorPost[]>;
     /** When the latest run that read and classified everything began, or null if none has. */
@@ -124,62 +128,93 @@ export async function runMarketingCommentsMonitor(
   deps: MarketingCommentsMonitorDeps,
 ): Promise<MarketingCommentsMonitorResult> {
   if (!deps.enabled(deps.env)) return { ran: false, reason: "switch_off" };
-  if (deps.classifier === null) return { ran: false, reason: "classifier_unavailable" };
+  const classifier = deps.classifier;
+  if (classifier === null) return { ran: false, reason: "classifier_unavailable" };
 
   const { operations } = deps;
   const startedAt = deps.now();
-  // New is relative to the last run that saw everything -- not to when an alert
-  // was written, which is later than the page it came from. A run that did not
-  // see everything does not move it, so what it missed is read again.
-  const lastRun = await operations.lastCompleteRunAt();
-  const floor = lastRun === null ? null : new Date(lastRun.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS);
-  const listed = await operations.listPosts(MARKETING_COMMENT_MONITOR_POST_LIMIT + 1);
-  const posts = listed.slice(0, MARKETING_COMMENT_MONITOR_POST_LIMIT);
-  // A sample is not a run: with posts left over, the health record is not moved.
-  let postsUnread = listed.length > posts.length ? 1 : 0;
+  let postsChecked = 0;
+  let postsUnread = 0;
   let alertsRecorded = 0;
+  let accountsStopped = 0;
 
-  for (const post of posts) {
-    const page = await deps.fetchComments(post);
-    if (page.kind !== "ok") {
-      postsUnread += 1;
-      continue;
+  // The reads and the alerts. Whatever goes wrong in here makes the run
+  // incomplete -- and cannot stop the check below that an unanswered alert
+  // counts against its account.
+  try {
+    // New is relative to the last run that saw everything -- not to when an
+    // alert was written, which is later than the page it came from. A run that
+    // did not see everything does not move it, so what it missed is read again.
+    const lastRun = await operations.lastCompleteRunAt();
+    const floor = lastRun === null ? null : new Date(lastRun.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS);
+    const listed = await operations.listPosts(MARKETING_COMMENT_MONITOR_POST_LIMIT + 1);
+    const posts = listed.slice(0, MARKETING_COMMENT_MONITOR_POST_LIMIT);
+    postsChecked = posts.length;
+    // A sample is not a run: with posts left over, the health record is not moved.
+    if (listed.length > posts.length) postsUnread += 1;
+
+    for (const post of posts) {
+      try {
+        const page = await deps.fetchComments(post, floor);
+        if (page.kind !== "ok" || page.truncated) {
+          postsUnread += 1;
+          continue;
+        }
+        const bodies = marketingCommentBodiesForModel(page.comments, floor);
+        if (bodies.length === 0) continue;
+        const verdicts = await classifier(bodies);
+        // An answer of the wrong shape -- the list, or any entry in it -- is no
+        // answer: nothing is concluded from it, and a missing verdict is never
+        // read as a safe comment.
+        if (
+          !Array.isArray(verdicts) ||
+          verdicts.length !== bodies.length ||
+          verdicts.some((codes) => !Array.isArray(codes) || codes.some((code) => typeof code !== "string"))
+        ) {
+          postsUnread += 1;
+          continue;
+        }
+        const flagged = verdicts.map((codes) => knownCodes(codes));
+        const alertCount = flagged.filter((codes) => codes.length > 0).length;
+        if (alertCount === 0) continue;
+        const riskCodes = MARKETING_COMMENT_RISK_CODES.filter((code) =>
+          flagged.some((codes) => codes.includes(code)),
+        );
+        const outcome = await operations.recordAlert({
+          postId: post.id,
+          alertCount,
+          riskCodes,
+          detectedAt: startedAt,
+        });
+        if (outcome.recorded) alertsRecorded += 1;
+      } catch {
+        // The fetch, the model or the write failed for this post. It is unread;
+        // the rest of the run goes on.
+        postsUnread += 1;
+      }
     }
-    const bodies = marketingCommentBodiesForModel(page.comments, floor);
-    if (bodies.length === 0) continue;
-    let verdicts: ReadonlyArray<ReadonlyArray<string>>;
-    try {
-      verdicts = await deps.classifier(bodies);
-    } catch {
-      postsUnread += 1;
-      continue;
-    }
-    // An answer of the wrong shape is no answer: nothing is concluded from it.
-    if (!Array.isArray(verdicts) || verdicts.length !== bodies.length) {
-      postsUnread += 1;
-      continue;
-    }
-    const flagged = verdicts.map((codes) => knownCodes(Array.isArray(codes) ? codes : []));
-    const alertCount = flagged.filter((codes) => codes.length > 0).length;
-    if (alertCount === 0) continue;
-    const riskCodes = MARKETING_COMMENT_RISK_CODES.filter((code) => flagged.some((codes) => codes.includes(code)));
-    const outcome = await operations.recordAlert({
-      postId: post.id,
-      alertCount,
-      riskCodes,
-      detectedAt: startedAt,
-    });
-    if (outcome.recorded) alertsRecorded += 1;
+  } catch {
+    postsUnread += 1;
   }
 
   // Whether or not every post was read: an alert already open does not wait for
   // the monitor to be perfect before it counts against the account.
-  const accountsStopped = await operations.sweepUnhandled(deps.now());
-  const complete = postsUnread === 0;
-  if (complete) await operations.recordRun(startedAt);
+  try {
+    accountsStopped = await operations.sweepUnhandled(deps.now());
+  } catch {
+    postsUnread += 1;
+  }
+  let complete = postsUnread === 0;
+  if (complete) {
+    try {
+      await operations.recordRun(startedAt);
+    } catch {
+      complete = false;
+    }
+  }
   return {
     ran: true,
-    postsChecked: posts.length,
+    postsChecked,
     postsUnread,
     alertsRecorded,
     accountsStopped,

@@ -6210,6 +6210,35 @@ export async function listOpenMarketingCommentAlerts(
 }
 
 /**
+ * Whether one post has an unanswered alert: its newest report is newer than its
+ * newest acknowledgement. Two indexed reads for one post, so the transaction
+ * that holds the audit chain lock does not scan the table. `ignoreAuditLogId`
+ * leaves out the entry a request has just written for itself.
+ */
+async function marketingCommentAlertIsOpen(
+  database: MarketingDatabase,
+  postId: string,
+  ignoreAuditLogId?: string,
+): Promise<boolean> {
+  const report = await database.marketingReport.findFirst({
+    where: { kind: "comment_alerts", payload: { path: ["postId"], equals: postId } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { createdAt: true },
+  });
+  if (!report) return false;
+  const answer = await database.adminAuditLog.findFirst({
+    where: {
+      action: MARKETING_COMMENT_ALERT_ACK_ACTION,
+      targetId: postId,
+      ...(ignoreAuditLogId ? { id: { not: ignoreAuditLogId } } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return !(answer && answer.createdAt.getTime() >= report.createdAt.getTime());
+}
+
+/**
  * Record one alert: a counts-and-codes report and its system audit entry, in one
  * transaction. Nothing of the comments themselves is kept -- not the text, not
  * who wrote it, not where it is.
@@ -6234,8 +6263,7 @@ export async function recordMarketingCommentAlert(
   if (!post || !post.externalUrl || (post.status !== "published" && post.status !== "verified")) {
     return { recorded: false, reason: "post_not_published" };
   }
-  const open = await listOpenMarketingCommentAlerts(database);
-  if (open.some((alert) => alert.postId === post.id)) return { recorded: false, reason: "already_open" };
+  if (await marketingCommentAlertIsOpen(database, post.id)) return { recorded: false, reason: "already_open" };
   const detectedAt = new Date(rawInput.detectedAt.getTime());
   await insertMarketingReport(database, {
     kind: "comment_alerts",
@@ -6275,8 +6303,7 @@ export async function requireOpenMarketingCommentAlert(
   // Without the entry this very request wrote: the wrapper writes the human
   // entry first, and that entry would otherwise answer the alert before it was
   // checked to exist.
-  const open = await listOpenMarketingCommentAlerts(database, { ignoreAuditLogId: auditLogId });
-  if (!open.some((alert) => alert.postId === postId)) {
+  if (!(await marketingCommentAlertIsOpen(database, postId, auditLogId))) {
     throw new MarketingStoreRefusedError(
       "post_not_found",
       "There is no unanswered comment alert for that post",

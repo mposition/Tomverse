@@ -50,6 +50,8 @@ const monitor = (
     comments?: Record<string, ReturnType<typeof comment>[] | "unavailable">;
     lastComplete?: Date | null;
     manyPosts?: number;
+    truncated?: Set<string>;
+    recordAlertThrows?: boolean;
     swept?: number;
   } = {},
 ) => {
@@ -71,7 +73,9 @@ const monitor = (
     fetchComments: async (target) => {
       calls.push(`fetch:${target.id}`);
       const answer = options.comments?.[target.id] ?? [];
-      return answer === "unavailable" ? { kind: "unavailable" } : { kind: "ok", comments: answer };
+      return answer === "unavailable"
+        ? { kind: "unavailable" }
+        : { kind: "ok", comments: answer, truncated: options.truncated?.has(target.id) ?? false };
     },
     operations: {
       listPosts: async () => {
@@ -82,6 +86,7 @@ const monitor = (
       lastCompleteRunAt: async () => options.lastComplete ?? null,
       recordAlert: async (input) => {
         calls.push("recordAlert");
+        if (options.recordAlertThrows) throw new Error("database lost");
         recorded.push(input);
         return { recorded: true };
       },
@@ -245,6 +250,9 @@ test("a classifier that throws, or answers the wrong shape, leaves the post unre
     },
     async () => [[]],
     async () => "nonsense" as never,
+    // An entry that is not a list of codes is a failed classification, not a safe comment.
+    async (bodies: readonly string[]) => bodies.map(() => null as never),
+    async (bodies: readonly string[]) => bodies.map(() => [42 as never]),
   ]) {
     const { deps, calls, recorded } = monitor({ comments: { p1: [comment("a"), comment("b")] }, classifier });
     const result = await runMarketingCommentsMonitor(deps);
@@ -294,7 +302,7 @@ test("the comments call asks for one account's post with the key, and anything b
       }) as unknown as typeof fetch,
     });
   const ok = await make(200, { comments: [{ message: "hello" }] }).fetchComments("ext 1", "acct/1");
-  assert.deepEqual(ok, { kind: "ok", comments: [{ text: "hello", createdAt: null }] });
+  assert.deepEqual(ok, { kind: "ok", comments: [{ text: "hello", createdAt: null }], truncated: false });
   assert.equal(seen[0].url, "https://zernio.example/api/v1/inbox/comments/ext%201?accountId=acct%2F1&limit=50");
   assert.equal(seen[0].headers.Authorization, "Bearer secret-key");
   // A 200 whose body is not a page of comments is not "no comments".
@@ -340,6 +348,13 @@ const storeWorld = (
       return [{ now: NOW, createdAt: NOW }];
     },
     marketingReport: {
+      findFirst: async ({ where }: { where: { payload: { equals: string } } }) => {
+        const mine = reports.filter(
+          (report) => (report.payload as { postId?: string }).postId === where.payload.equals,
+        );
+        mine.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return mine[0] ?? null;
+      },
       // Honours the page size and the cursor, as the table does.
       findMany: async (args: { take?: number; cursor?: { id: string }; skip?: number }) => {
         const all = reports.map((report, index) => ({ id: report.id ?? `r${index}`, ...report }));
@@ -359,7 +374,13 @@ const storeWorld = (
     adminAuditLog: {
       findMany: async ({ where }: { where: { id?: { not: string } } }) =>
         acknowledgements.filter((entry) => where.id === undefined || entry.id !== where.id.not),
-      findFirst: async () => null,
+      findFirst: async (args?: { where?: { targetId?: string; id?: { not: string } } }) => {
+        const mine = acknowledgements
+          .filter((entry) => entry.targetId === args?.where?.targetId)
+          .filter((entry) => args?.where?.id === undefined || entry.id !== args.where.id.not)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return mine[0] ?? null;
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         audits.push(data);
         return data;
@@ -532,4 +553,94 @@ test("an unanswered alert older than the newest few hundred reports is still fou
   });
   const open = await listOpenMarketingCommentAlerts(database as never);
   assert.deepEqual(open.map((alert) => alert.postId), ["p-old"]);
+});
+
+test("a read cut short by paging is not a whole read: no health, and the rest still goes on", async () => {
+  const { deps, calls, classified } = monitor({
+    posts: [post("p1"), post("p2")],
+    comments: { p1: [comment("a")], p2: [comment("b")] },
+    truncated: new Set(["p1"]),
+  });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.equal(result.ran && result.complete, false);
+  assert.equal(calls.includes("recordRun"), false);
+  // The cut-short post was not classified on a part of its comments; the other was.
+  assert.deepEqual(classified, [["b"]]);
+});
+
+test("an alert that cannot be written leaves its post unread, the run goes on, and the sweep still runs", async () => {
+  const { deps, calls } = monitor({
+    posts: [post("p1"), post("p2")],
+    comments: { p1: [comment("a")], p2: [comment("b")] },
+    classifier: async (bodies) => bodies.map(() => ["legal_threat"]),
+    recordAlertThrows: true,
+    swept: 1,
+  });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.equal(result.ran && result.complete, false);
+  assert.equal(result.ran && result.postsUnread, 2);
+  assert.ok(calls.includes("fetch:p2"));
+  assert.ok(calls.includes("sweep"));
+  assert.equal(calls.includes("recordRun"), false);
+});
+
+test("a failure to list the posts, or to sweep, is an incomplete run and never a thrown one", async () => {
+  const listing = monitor();
+  listing.deps.operations.listPosts = async () => {
+    throw new Error("database lost");
+  };
+  const first = await runMarketingCommentsMonitor(listing.deps);
+  assert.equal(first.ran && first.complete, false);
+  assert.ok(listing.calls.includes("sweep"));
+
+  const sweeping = monitor({ comments: { p1: [comment("fine")] } });
+  sweeping.deps.operations.sweepUnhandled = async () => {
+    throw new Error("database lost");
+  };
+  const second = await runMarketingCommentsMonitor(sweeping.deps);
+  assert.equal(second.ran && second.complete, false);
+  assert.equal(sweeping.calls.includes("recordRun"), false);
+});
+
+test("the comments call follows pages until the floor, and says when it stopped short", async () => {
+  const page = (n: number, extra: Record<string, unknown>) => ({
+    comments: Array.from({ length: n }, (_, index) => ({ message: `c${index}`, created_time: "2026-11-02T08:00:00Z" })),
+    ...extra,
+  });
+  const run = async (pages: unknown[], readDownTo: Date | null = null) => {
+    let call = 0;
+    const urls: string[] = [];
+    const result = await zernioCommentsQuery({
+      apiKey: "k",
+      baseUrl: "https://zernio.example/api",
+      callBudgetMs: 1_000,
+      fetch: (async (url: URL) => {
+        urls.push(String(url));
+        return { status: 200, json: async () => pages[Math.min(call++, pages.length - 1)] };
+      }) as unknown as typeof fetch,
+    }).fetchComments("p", "a", readDownTo);
+    return { result, urls };
+  };
+
+  const two = await run([page(50, { pagination: { hasMore: true, cursor: "c2" } }), page(3, { pagination: { hasMore: false } })]);
+  assert.equal(two.result.kind === "ok" && two.result.comments.length, 53);
+  assert.equal(two.result.kind === "ok" && two.result.truncated, false);
+  assert.match(two.urls[1], /cursor=c2/);
+
+  // A full page that names no way on is not known to be the end.
+  const unclear = await run([page(50, {})]);
+  assert.equal(unclear.result.kind === "ok" && unclear.result.truncated, true);
+
+  // Pages forever: stops at the cap and says so.
+  const forever = await run([page(50, { pagination: { hasMore: true, cursor: "again" } })]);
+  assert.equal(forever.result.kind === "ok" && forever.result.truncated, true);
+  assert.equal(forever.urls.length, 5);
+
+  // Reaching comments already read ends the paging, untruncated.
+  const caughtUp = await run(
+    [page(50, { pagination: { hasMore: true, cursor: "c2" } })],
+    new Date("2026-11-02T09:00:00.000Z"),
+  );
+  assert.equal(caughtUp.result.kind === "ok" && caughtUp.result.truncated, false);
+  assert.equal(caughtUp.urls.length, 1);
 });
