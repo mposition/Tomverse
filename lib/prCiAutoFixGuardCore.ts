@@ -5,7 +5,8 @@
  * Refused: any path the merge lane leaves to a person (gate files, policy and
  * contract documents, auth, package manifests -- the same judgement, so the
  * two cannot drift), any test file (a fix that edits the test it failed is
- * not a fix), any deletion, an empty diff and a diff above the size cap.
+ * not a fix; a Dependabot head's API change is the one switchable exception,
+ * testEditProblems), any deletion, an empty diff and a diff above the size cap.
  * Pure: the caller passes `git diff --name-status` and `--numstat` output.
  */
 import { judgeQaReleaseMergeLaneExclusion } from "./qaReleaseMergeLaneExclusionCore.ts";
@@ -60,26 +61,104 @@ const CONTRACT_DOCUMENT = /^docs\/(policy|ui-contracts|release-gates)\//;
 const AUTO_FIX_FENCE = /^(\.github|scripts)\//;
 const PACKAGE_FILE = /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|\.npmrc)$/i;
 
+/**
+ * A dependency update that removes or renames an API breaks the tests that
+ * call it as well as the app (owner 2026-11-01, #3192: officeparser 8 dropped
+ * `toText()`). With the repository variable PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED
+ * a fix to a Dependabot head may edit an existing test file to call the new
+ * API -- never a fixture or snapshot, nor a test the merge lane leaves to a
+ * person -- and the edit may take no test, assertion or expected value away
+ * and may skip none (testEditProblems).
+ */
+const TEST_CODE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+const ASSERTION = /\b(?:assert(?:\.\w+)*|expect)\s*\(/g;
+const TEST_CASE = /\b(?:test|it|describe|suite)(?:\.\w+)*\s*\(/g;
+const SKIP = /\.(?:skip|todo|only)\b|\b(?:skip|todo|only)\s*:/g;
+/** String and number literals: an expected value is one of these. */
+const LITERAL = /(["'`])(?:\\.|(?!\1)[^\\\n])*\1|(?<![\w.$])\d+(?:\.\d+)?(?![\w.])/g;
+
+const count = (pattern: RegExp, lines: readonly string[]) => lines.reduce((sum, line) => sum + [...line.matchAll(pattern)].length, 0);
+
+/**
+ * What an edit of the named test files takes away, from `git diff -U0 HEAD`.
+ * A file the patch does not show is a problem: its edit was not read.
+ */
+export function testEditProblems(patch: string, paths: ReadonlySet<string>): string[] {
+  const files = new Map<string, { removed: string[]; added: string[] }>();
+  let current: { removed: string[]; added: string[] } | null = null;
+  let inHunk = false;
+  for (const line of patch.split("\n")) {
+    const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    if (header) {
+      current = paths.has(header[2]) && header[1] === header[2] ? { removed: [], added: [] } : null;
+      if (current) files.set(header[2], current);
+      inHunk = false;
+    } else if (line.startsWith("@@")) {
+      inHunk = true;
+    } else if (current && inHunk && line.startsWith("-")) {
+      current.removed.push(line.slice(1));
+    } else if (current && inHunk && line.startsWith("+")) {
+      current.added.push(line.slice(1));
+    }
+  }
+  const problems = new Set<string>();
+  for (const path of paths) {
+    const file = files.get(path);
+    if (!file) {
+      problems.add("test_patch_unread");
+      continue;
+    }
+    if (count(ASSERTION, file.added) < count(ASSERTION, file.removed)) problems.add("test_assertion_removed");
+    if (count(TEST_CASE, file.added) < count(TEST_CASE, file.removed)) problems.add("test_case_removed");
+    if (count(SKIP, file.added) > count(SKIP, file.removed)) problems.add("test_skipped");
+    const kept = new Map<string, number>();
+    for (const line of file.added) for (const [literal] of line.matchAll(LITERAL)) kept.set(literal, (kept.get(literal) ?? 0) + 1);
+    for (const line of file.removed) {
+      for (const [literal] of line.matchAll(LITERAL)) {
+        const left = kept.get(literal) ?? 0;
+        if (left === 0) problems.add("test_value_changed");
+        else kept.set(literal, left - 1);
+      }
+    }
+  }
+  return [...problems];
+}
+
 export function judgePrCiAutoFixDiff(input: {
   nameStatus: string;
   numstat: string;
   /** The pull request's head branch; without it no root file is allowed. */
   headBranch?: string;
+  /** The repository variable PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED is "true". */
+  dependabotTests?: boolean;
+  /** The tests the merge lane leaves to a person, from the trusted checkout; null when unread. */
+  policyTestPaths?: readonly string[] | null;
+  /** `git diff -U0 HEAD`, which an edited test is judged by. */
+  patch?: string;
 }): PrCiAutoFixVerdict {
   const dependabot = PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.test(input.headBranch ?? "");
   const fencedRoot = (path: string) => !path.includes("/") && !(dependabot && PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES.test(path));
+  const testsEditable = dependabot && input.dependabotTests === true && Array.isArray(input.policyTestPaths)
+    && typeof input.patch === "string";
+  const policyTests = new Set(input.policyTestPaths ?? []);
   const reasons = new Set<string>();
   const changedFiles: { path: string; previousPath?: string }[] = [];
+  const modified = new Set<string>();
   for (const line of input.nameStatus.split("\n").filter((l) => l.trim() !== "")) {
     const [status, ...paths] = line.split("\t");
     if (status.startsWith("D")) reasons.add("deletion");
     if (status.startsWith("R") || status.startsWith("C")) changedFiles.push({ previousPath: paths[0], path: paths[1] });
     else changedFiles.push({ path: paths[0] });
+    if (status === "M") modified.add(paths[0]);
   }
   if (changedFiles.length === 0) reasons.add("no_change");
+  const editedTests = new Set<string>();
   for (const file of changedFiles) {
     for (const path of [file.path, file.previousPath]) {
-      if (path && TEST_PATH.test(path)) reasons.add("test_file");
+      if (path && TEST_PATH.test(path)) {
+        if (testsEditable && modified.has(path) && TEST_CODE.test(path) && !policyTests.has(path)) editedTests.add(path);
+        else reasons.add(testsEditable && policyTests.has(path) ? "policy_test" : "test_file");
+      }
       // Contract documents stay off-limits to the model even though the merge
       // lane may merge one a person wrote (owner 2026-10-23): a model fixing
       // CI must not rewrite another feature's policy to make its change pass.
@@ -95,6 +174,7 @@ export function judgePrCiAutoFixDiff(input: {
     agentOwnPatterns: [],
   });
   if (lane.excluded) for (const reason of lane.reasons) if (reason !== "changed_files_empty") reasons.add(reason);
+  if (editedTests.size > 0) for (const problem of testEditProblems(input.patch ?? "", editedTests)) reasons.add(problem);
 
   let lines = 0;
   for (const line of input.numstat.split("\n").filter((l) => l.trim() !== "")) {

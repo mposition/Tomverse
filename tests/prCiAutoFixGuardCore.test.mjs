@@ -92,3 +92,57 @@ test("a Dependabot fix may change the app's own build and instrumentation config
   assert.equal(judgePrCiAutoFixDiff({ nameStatus: "R100\ttsconfig.json\tnext.config.ts", numstat: "0\t0\tnext.config.ts",
     headBranch: dependabot }).push, false);
 });
+
+test("with the switch on, a Dependabot fix may move an existing test to a changed API and take nothing away", () => {
+  const dependabot = "dependabot/npm_and_yarn/develop/officeparser-8.4.0";
+  const path = "tests/generatedArtifactDocx.test.mjs";
+  const hunk = (removed, added) =>
+    `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -74 +74 @@\n${removed.map((l) => `-${l}`).join("\n")}\n${added.map((l) => `+${l}`).join("\n")}\n`;
+  const officeparser = hunk(
+    ["  const text = document.toText();", '  assert.match(parsed.toText(), /매출 보고/);'],
+    ['  const text = (await document.to("text")).value;', '  assert.match((await parsed.to("text")).value, /매출 보고/);'],
+  );
+  const judge = (patch, overrides = {}) => judgePrCiAutoFixDiff({
+    nameStatus: `M\t${path}\nM\tlib/officeSecurity.ts`, numstat: `2\t2\t${path}\n1\t1\tlib/officeSecurity.ts`,
+    headBranch: dependabot, dependabotTests: true, policyTestPaths: ["tests/prCiAutoFixGuardCore.test.mjs"], patch, ...overrides,
+  });
+  assert.deepEqual(judge(officeparser), { push: true });
+
+  // Off, on an agent branch, or without the policy tests or the patch read: the old fence.
+  for (const overrides of [{ dependabotTests: false }, { dependabotTests: undefined }, { headBranch: "claude/to-develop/x" },
+    { policyTestPaths: null }, { patch: undefined }]) {
+    assert.deepEqual(judge(officeparser, overrides), { push: false, reasons: ["test_file"] }, JSON.stringify(overrides));
+  }
+  // A test the merge lane leaves to a person stays fenced.
+  assert.deepEqual(judge(officeparser, { policyTestPaths: [path] }), { push: false, reasons: ["policy_test"] });
+
+  // What the edit may not take away.
+  for (const [removed, added, reason] of [
+    ["  assert.equal(text, \"a\");", "  void text;", "test_assertion_removed"],
+    ["  assert.equal(text, \"a\");", "  assert.equal(text, \"b\");", "test_value_changed"],
+    ["  assert.equal(count, 3);", "  assert.equal(count, 4);", "test_value_changed"],
+    ['test("reads the words", async () => {', 'test.skip("reads the words", async () => {', "test_skipped"],
+    ['test("reads the words", async () => {', 'test("reads the words", { skip: true }, async () => {', "test_skipped"],
+    ['test("reads the words", async () => {', "{", "test_case_removed"],
+  ]) {
+    const verdict = judge(hunk([removed], [added]));
+    assert.equal(verdict.push, false, added);
+    assert.ok(verdict.reasons.includes(reason), `${added}: ${verdict.reasons}`);
+  }
+  // An edited test the patch does not show was not read.
+  assert.deepEqual(judge(""), { push: false, reasons: ["test_patch_unread"] });
+  // Lines that only look like a diff header inside a hunk are still counted.
+  assert.equal(judge(hunk(["-- assert.ok(x);"], ["-- x;"])).push, false);
+
+  // Only an existing test file is opened: a new, renamed, deleted file, a fixture or a snapshot stays fenced.
+  for (const [nameStatus, numstat] of [
+    ["A\ttests/new.test.mjs", "3\t0\ttests/new.test.mjs"],
+    ["R090\ttests/a.test.mjs\ttests/b.test.mjs", "1\t1\ttests/b.test.mjs"],
+    ["M\ttests/fixtures/report.json", "1\t1\ttests/fixtures/report.json"],
+    ["M\ttests/__snapshots__/a.snap", "1\t1\ttests/__snapshots__/a.snap"],
+  ]) {
+    const verdict = judge(officeparser, { nameStatus, numstat });
+    assert.equal(verdict.push, false, nameStatus);
+    assert.ok(verdict.reasons.includes("test_file"), nameStatus);
+  }
+});
