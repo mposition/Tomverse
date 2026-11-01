@@ -152,6 +152,10 @@ export function ciRunnerCount(need: number, owner: Pick<CiRunnerOwner, "running"
  * - anything else: no. From develop or main it would merge one deploy branch
  *   into another; a hand-made `release/**` or `hotfix/**` may be the commit
  *   staging verified -- the operator's merge and deploy, never admission's.
+ *   A Dependabot branch is not updated either (owner 2026-11-01): one commit
+ *   by anyone else stops Dependabot rebasing it for good, which left #2969,
+ *   #2971 and #2976 in conflict. It is released behind instead
+ *   (ciAdmissionReleasesBehind).
  */
 export function ciAdmissionUpdatesBranchOf(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
   if (pull.fork) return false;
@@ -161,8 +165,18 @@ export function ciAdmissionUpdatesBranchOf(pull: Pick<CiAdmissionPull, "base" | 
     pull.head !== "develop" &&
     pull.head !== "main" &&
     !pull.head.startsWith("release/") &&
-    !pull.head.startsWith("hotfix/")
+    !pull.head.startsWith("hotfix/") &&
+    !ciAdmissionReleasesBehind(pull)
   );
+}
+
+/**
+ * A Dependabot update into develop runs its CI behind develop: a pull_request
+ * run tests the merge with the base, and Dependabot rebases its own branch
+ * when it conflicts. Whoever merges it brings it up to date first.
+ */
+export function ciAdmissionReleasesBehind(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
+  return !pull.fork && pull.base === "develop" && pull.head.startsWith("dependabot/");
 }
 
 /** What GitHub says about a draft before it is marked ready; null where it could not tell. */
@@ -532,7 +546,7 @@ export function evaluateCiAdmission(input: {
       status.set(pull.number, "conflict");
       continue;
     }
-    if (check.behind === true) {
+    if (check.behind === true && !ciAdmissionReleasesBehind(pull)) {
       const asked = updating.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
       const updates = input.updateBranches !== false && ciAdmissionUpdatesBranchOf(pull);
       if (updates && !asked) {
