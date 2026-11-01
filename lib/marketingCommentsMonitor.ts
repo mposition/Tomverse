@@ -89,6 +89,8 @@ export type MarketingCommentsMonitorDeps = {
       riskCodes: readonly MarketingCommentRiskCode[];
       detectedAt: Date;
       answeredAtSeen: Date | null;
+      /** The newest time among the flagged comments; null when none of them has one. */
+      flaggedNewestAt: Date | null;
     }) => Promise<{ recorded: boolean; reason?: string }>;
     /** Stops the accounts with an alert unanswered past the limit; returns how many it stopped. */
     readonly sweepUnhandled: (now: Date) => Promise<number>;
@@ -113,12 +115,12 @@ const knownCodes = (codes: ReadonlyArray<string>): MarketingCommentRiskCode[] =>
     (MARKETING_COMMENT_RISK_CODES as readonly string[]).includes(code),
   );
 
-/** The bodies a model may see: new ones, text only, bounded. */
-export const marketingCommentBodiesForModel = (
+/** The comments a model is asked about: the new ones, none already answered. */
+export const marketingNewComments = (
   comments: readonly ParsedZernioComment[],
   floor: Date | null,
   answeredAt: Date | null = null,
-): string[] =>
+): ParsedZernioComment[] =>
   comments
     // What an operator has answered is handled. A comment with no time cannot be
     // shown to be newer than the answer, so it is not read again after one.
@@ -128,8 +130,17 @@ export const marketingCommentBodiesForModel = (
     // A comment with no time cannot be placed, so it is read every run.
     .filter((comment) =>
       floor === null || comment.createdAt === null || comment.createdAt.getTime() > floor.getTime(),
-    )
-    .map((comment) => comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS));
+    );
+
+/** The bodies a model may see: text only, bounded. */
+export const marketingCommentBodiesForModel = (
+  comments: readonly ParsedZernioComment[],
+  floor: Date | null,
+  answeredAt: Date | null = null,
+): string[] =>
+  marketingNewComments(comments, floor, answeredAt).map((comment) =>
+    comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS),
+  );
 
 export async function runMarketingCommentsMonitor(
   deps: MarketingCommentsMonitorDeps,
@@ -181,7 +192,8 @@ export async function runMarketingCommentsMonitor(
           post.channelApprovalStartedAt.getTime() > floor.getTime()
             ? null
             : floor;
-        const bodies = marketingCommentBodiesForModel(page.comments, postFloor, answers.get(post.id) ?? null);
+        const fresh = marketingNewComments(page.comments, postFloor, answers.get(post.id) ?? null);
+        const bodies = fresh.map((comment) => comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS));
         if (bodies.length === 0) continue;
         const flagged: MarketingCommentRiskCode[][] = [];
         let wellFormed = true;
@@ -216,6 +228,10 @@ export async function runMarketingCommentsMonitor(
           riskCodes,
           detectedAt: startedAt,
           answeredAtSeen: answers.get(post.id) ?? null,
+          flaggedNewestAt: flagged.reduce<Date | null>((newest, codes, index) => {
+            const at = codes.length > 0 ? fresh[index]?.createdAt ?? null : null;
+            return at !== null && (newest === null || at > newest) ? at : newest;
+          }, null),
         });
         if (outcome.recorded) alertsRecorded += 1;
         // The operator answered while the comments were being classified: the

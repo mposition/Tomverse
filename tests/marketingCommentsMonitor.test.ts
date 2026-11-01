@@ -192,7 +192,7 @@ test("an alert carries a count and closed codes; codes outside the list are drop
   });
   const result = await runMarketingCommentsMonitor(deps);
   assert.deepEqual(recorded, [
-    { postId: "p1", alertCount: 2, riskCodes: ["legal_threat", "abuse_or_harassment"], detectedAt: NOW, answeredAtSeen: null },
+    { postId: "p1", alertCount: 2, riskCodes: ["legal_threat", "abuse_or_harassment"], detectedAt: NOW, answeredAtSeen: null, flaggedNewestAt: new Date("2026-11-02T08:00:00.000Z") },
   ]);
   assert.equal(result.ran && result.alertsRecorded, 1);
 });
@@ -464,6 +464,7 @@ test("recording an alert writes a counts-only report and its audit entry, once",
     riskCodes: ["legal_threat", "abuse_or_harassment"],
     detectedAt: NOW,
     answeredAtSeen: null,
+    flaggedNewestAt: null,
   });
   assert.deepEqual(result, { recorded: true });
   assert.equal(world.created.length, 1);
@@ -484,14 +485,14 @@ test("recording an alert writes a counts-only report and its audit entry, once",
 test("a post that already has an unanswered alert gets no second one; an unpublished post gets none", async () => {
   const open = storeWorld({ reports: [{ createdAt: NOW, payload: payload("p1") }] });
   assert.deepEqual(
-    await recordMarketingCommentAlert(asTransaction(open.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW, answeredAtSeen: null }),
+    await recordMarketingCommentAlert(asTransaction(open.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW, answeredAtSeen: null, flaggedNewestAt: null }),
     { recorded: false, reason: "already_open" },
   );
   assert.equal(open.created.length, 0);
 
   const draft = storeWorld({ postStatus: "approved" });
   assert.deepEqual(
-    await recordMarketingCommentAlert(asTransaction(draft.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW, answeredAtSeen: null }),
+    await recordMarketingCommentAlert(asTransaction(draft.database), { postId: "p1", alertCount: 1, riskCodes: ["legal_threat"], detectedAt: NOW, answeredAtSeen: null, flaggedNewestAt: null }),
     { recorded: false, reason: "post_not_published" },
   );
 });
@@ -766,6 +767,7 @@ test("an answer that came in while the comments were being classified stops the 
     riskCodes: ["legal_threat"],
     detectedAt: NOW,
     answeredAtSeen: null,
+    flaggedNewestAt: null,
   });
   assert.deepEqual(stale, { recorded: false, reason: "answer_changed" });
   assert.equal(world.created.length, 0);
@@ -828,8 +830,22 @@ test("an alert left open across a resume does not hide what is found after it", 
     riskCodes: ["legal_threat"],
     detectedAt: NOW,
     answeredAtSeen: null,
+    flaggedNewestAt: new Date("2026-11-01T13:00:00.000Z"),
   });
   assert.deepEqual(result, { recorded: true });
+
+  // The same old comment read again because the account was resumed is not new.
+  assert.deepEqual(
+    await recordMarketingCommentAlert(asTransaction(after.database), {
+      postId: "p1",
+      alertCount: 1,
+      riskCodes: ["legal_threat"],
+      detectedAt: NOW,
+      answeredAtSeen: null,
+      flaggedNewestAt: new Date("2026-10-31T10:00:00.000Z"),
+    }),
+    { recorded: false, reason: "already_open" },
+  );
 
   // An alert that began after the fresh start is still one alert.
   const same = storeWorld({

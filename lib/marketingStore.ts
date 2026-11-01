@@ -6317,6 +6317,8 @@ export async function recordMarketingCommentAlert(
     readonly detectedAt: Date;
     /** The operator's latest answer the comments were judged against; null if there was none. */
     readonly answeredAtSeen: Date | null;
+    /** The newest time among the flagged comments; null when none of them has a time. */
+    readonly flaggedNewestAt: Date | null;
   },
 ): Promise<
   | { readonly recorded: true }
@@ -6338,11 +6340,16 @@ export async function recordMarketingCommentAlert(
   const freshStart = state.open
     ? await marketingAccountFreshStart(database, post.channelId, post.channel.approvalStartedAt)
     : null;
+  // ...and only on evidence that something new was found: a flagged comment
+  // written after the account started fresh. The same old comment, read again
+  // because the account was resumed, is not that.
   const supersedes =
     state.open &&
     freshStart !== null &&
     state.firstDetectedAt !== null &&
-    state.firstDetectedAt.getTime() <= freshStart.getTime();
+    state.firstDetectedAt.getTime() <= freshStart.getTime() &&
+    rawInput.flaggedNewestAt !== null &&
+    rawInput.flaggedNewestAt.getTime() > freshStart.getTime();
   if (state.open && !supersedes) return { recorded: false, reason: "already_open" };
   // Under the lock, the answer the comments were judged against must still be the
   // latest. One that came in while they were being classified makes the verdict
