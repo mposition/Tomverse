@@ -244,6 +244,24 @@ test("the same path listed twice is refused", () => {
 // The code a change adds
 // ---------------------------------------------------------------------------
 
+test("a line whose text begins with ++ is added code, not a file header", () => {
+    const patch = "diff --git a/lib/seo.ts b/lib/seo.ts\n--- a/lib/seo.ts\n+++ b/lib/seo.ts\n@@ -1 +1,2 @@\n+++counter; process.exit(0);\n+const ok = 1;\n";
+    assert.equal(seoAgentAddedLines(patch), "++counter; process.exit(0);\nconst ok = 1;");
+    assert.deepEqual(seoAgentCodeProblems(seoAgentAddedLines(patch)), ["process"]);
+    // Two files: the second header is not content either.
+    const two = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n+one\ndiff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n+two\n";
+    assert.equal(seoAgentAddedLines(two), "one\ntwo");
+});
+
+test("a regular expression holding a quote does not hide the code after it", () => {
+    for (const code of ["const r = /'/; process.exit(0);", 'x = /"/.test(y); eval("1");', "const m = /[']/.exec(b); globalThis.x = 1;"]) {
+        assert.ok(seoAgentCodeProblems(code).length > 0, code);
+    }
+    // Division is not a regular expression, and a regex in copy is not code.
+    assert.deepEqual(seoAgentCodeProblems("const half = total / 2; const other = a / b; const s = 'it\\'s';"), []);
+    assert.deepEqual(seoAgentCodeProblems("const re = /[a-z]+'?/g; const t = re.test(name);"), []);
+});
+
 test("added lines are the + lines of a patch, without the file headers", () => {
     assert.equal(seoAgentAddedLines("--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n-old\n+new\n+more\n context\n"), "new\nmore");
     assert.equal(seoAgentAddedLines(""), "");
@@ -311,14 +329,14 @@ test("the files the agent may edit pass the code check as they are in this repos
 test("one judgement of a diff: git's status and counts, then the code it adds", () => {
     const view = (patch) => ({ raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch });
     assert.equal(judgeSeoDiff(view(GOOD_PATCH)).ok, true);
-    const bad = judgeSeoDiff(view("+++ b/lib/seo.ts\n+process.exit(0);\n"));
+    const bad = judgeSeoDiff(view("+++ b/lib/seo.ts\n@@ -1 +1 @@\n+process.exit(0);\n"));
     assert.deepEqual(bad, { ok: false, problems: ["forbidden_code"] });
     // A path problem is reported before the code is read.
     assert.deepEqual(judgeSeoDiff({ raw: "", numstat: "", patch: "+process.exit(0);" }), { ok: false, problems: ["no_change"] });
 });
 
 test("a change that adds forbidden code is refused before the checks and again by the publish phase", async () => {
-    const hostile = "+++ b/lib/seo.ts\n+import assert from \"node:assert/strict\";\n";
+    const hostile = "+++ b/lib/seo.ts\n@@ -1 +1 @@\n+import assert from \"node:assert/strict\";\n";
     const validateSide = validatePorts({ stagedDiff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: hostile } });
     assert.deepEqual(await validate(validateSide.ports), { status: "validation_failed", problems: ["forbidden_code"] });
     assert.ok(!validateSide.calls.includes("runChecks") && !validateSide.calls.includes("commit"));

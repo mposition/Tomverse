@@ -52,6 +52,8 @@
 // validation without spending anything. `--dry-run` (validate only) runs the whole
 // validation as this user, holds no attestation key, and writes nothing to --out: it
 // shows what the validation says for a saved --proposal-file, and produces nothing that can be published.
+// It runs the proposal's code as your own user with your files and your network: use it only on a
+// proposal you trust, or on a disposable machine.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";

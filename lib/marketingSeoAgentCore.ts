@@ -523,13 +523,20 @@ export function validateSeoChanges(changes: readonly SeoGitChange[]): SeoValidat
 /** The module specifiers an added line may import: the framework, React and this repository's own libraries. */
 const ALLOWED_SPECIFIER = /^(?:next(?:\/[\w./-]+)?|react(?:\/[\w./-]+)?|server-only|@\/(?:lib|components|app)\/[\w./-]+)$/;
 
-/** The text of the lines a unified diff adds (`git diff -U0`), without the file headers. */
+/**
+ * The text of the lines a unified diff adds (`git diff -U0`). A file's header ends at its first
+ * `@@`; after that every `+` line is content, including one whose text begins with `++`
+ * (which a diff renders as `+++...`, no different by prefix from a file header).
+ */
 export function seoAgentAddedLines(patch: string): string {
-  return patch
-    .split("\n")
-    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-    .map((line) => line.slice(1))
-    .join("\n");
+  const added: string[] = [];
+  let inHeader = true;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ")) inHeader = true;
+    else if (line.startsWith("@@")) inHeader = false;
+    else if (!inHeader && line.startsWith("+")) added.push(line.slice(1));
+  }
+  return added.join("\n");
 }
 
 /**
@@ -551,6 +558,18 @@ export function seoAgentCodeOnly(text: string): string {
     } else if (char === "/" && next === "*") {
       const end = text.indexOf("*/", index + 2);
       index = end < 0 ? text.length : end + 2;
+    } else if (char === "/" && /[(,=:[!&|?{};+\-*%<>~^]$|^$/.test(out.trimEnd().slice(-1))) {
+      // A regular expression literal (a `/` where a value can begin): its text, which may hold a quote, is not scanned as a string.
+      index += 1;
+      let inClass = false;
+      while (index < text.length && peek() !== "\n" && (inClass || peek() !== "/")) {
+        if (peek() === "\\") index += 1;
+        else if (peek() === "[") inClass = true;
+        else if (peek() === "]") inClass = false;
+        index += 1;
+      }
+      index += 1;
+      out += "/re/";
     } else if (char === '"' || char === "'") {
       index += 1;
       while (index < text.length && peek() !== char && peek() !== "\n") index += peek() === "\\" ? 2 : 1;
