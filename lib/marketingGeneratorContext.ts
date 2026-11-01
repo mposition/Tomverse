@@ -106,14 +106,16 @@ export type MarketingGeneratorClaim = MarketingClaimProjection & {
 };
 
 /**
- * A plan as the analysis reads it. `pricesStored` says whether an operator
- * saved its price and currency; when not, the values are the code's built-in
- * defaults (lib/billingPlanDefaults.ts), which the analysis is told not to
- * treat as what the site charges.
+ * A plan as the analysis reads it. `monthlyPriceStored` and
+ * `annualPriceStored` say whether an operator saved that price (and the
+ * currency); when not, it is the code's built-in default
+ * (lib/billingPlanDefaults.ts) or, for the annual price, computed from the
+ * monthly one, and the analysis is told not to state it as a current price.
  */
 export type MarketingGeneratorPlan = {
   readonly id: string;
-  readonly pricesStored: boolean;
+  readonly monthlyPriceStored: boolean;
+  readonly annualPriceStored: boolean;
   readonly name: string;
   readonly monthlyPriceCents: number;
   readonly annualPriceCents: number;
@@ -336,7 +338,8 @@ export async function readMarketingGeneratorContext(
   const active = plans.filter((entry) => entry.plan.isActive);
   const activePlans: MarketingGeneratorPlan[] = active.map(({ plan, sources }) => ({
     id: plan.id,
-    pricesStored: sources.monthlyPriceCents === "stored" && sources.currency === "stored",
+    monthlyPriceStored: sources.monthlyPriceCents === "stored" && sources.currency === "stored",
+    annualPriceStored: sources.annualPriceCents === "stored" && sources.currency === "stored",
     name: plan.name,
     monthlyPriceCents: plan.monthlyPriceCents,
     annualPriceCents: plan.annualPriceCents,
