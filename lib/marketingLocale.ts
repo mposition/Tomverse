@@ -1,5 +1,5 @@
 import { isSeoLocale } from "@/lib/seo";
-import type { Language } from "@/lib/language";
+import { languageFromSegment, type Language } from "@/lib/language";
 
 /**
  * The `/{locale}` path segments the localized marketing routes answer to.
@@ -26,5 +26,6 @@ export const marketingLocaleFor = (segment: string): Language | null => {
   if (lowered in MARKETING_LOCALE_ALIASES) {
     return MARKETING_LOCALE_ALIASES[lowered];
   }
-  return isSeoLocale(lowered) ? (lowered as Language) : null;
+  const language = languageFromSegment(lowered);
+  return language && isSeoLocale(language) ? language : null;
 };

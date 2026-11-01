@@ -526,6 +526,157 @@ const guideCopy: Record<Language, GuideCopy> = {
       }
     ]
   },
+  "zh-Hant": {
+    "jumpLabel": "本指南內容",
+    "scopeEyebrow": "模型與範例範圍",
+    "scopeTitle": "相同問題，相同標準",
+    "reviewedLabel": "關於本示範",
+    "reviewedDate": "虛構的編輯範例 · 並非模型測試",
+    "modelsLabel": "預設比較中的模型",
+    "scopeNote": "GPT-5.4 mini 與 Claude Haiku 4.5 是本指南比較連結中預設的模型。下文不是即時回答或效能測量，請在模型目錄查看目前的權限與基礎點數。",
+    "resultsTitle": "對兩個模型使用同一份清單",
+    "resultsBody": "先明確問題的目的，不要預設品牌風格。將下列標準同樣套用於兩個模型。",
+    "taskHeader": "使用情境",
+    "gptHeader": "GPT 的檢查標準",
+    "claudeHeader": "Claude 的檢查標準",
+    "decisionHeader": "需要核對的內容",
+    "resultTitle": "附原文的虛構讀書會範例",
+    "resultBody": "這裡同時提供原文與相同問題。下方兩個輸出是將同一條件以不同格式整理的編輯範例，並非任何模型的真實回答。",
+    "samplePromptLabel": "相同問題與虛構原文",
+    "resultTakeaway": "清單：保留11月7日下午2點、一本書與筆記、11月3日的回覆期限。地點未定，不添加原文沒有的年份、星期或地址。",
+    "resultDisclaimer": "這些是為說明而撰寫的虛構輸出，不代表模型執行、驗證日期或效能結果。下方連結會將問題與原文預先放入輸入框，由你決定是否傳送。",
+    "methodTitle": "自行比較的步驟",
+    "methodBody": "除了提供相同資料外，還要先決定檢查內容，避免只被自信的語氣影響。",
+    "screenTitle": "在 Tomverse Review 中閱讀",
+    "screenBody": "將回答放在同一問題旁，與原文條件核對。也可以使用 AI Review 查看已完成回答的差異與遺漏。",
+    "screenCaption": "這是說明比較方式的重現畫面。兩個輸出是根據上述虛構原文撰寫，並非真實模型結果。",
+    "promptsTitle": "換成自己資料的問題",
+    "promptsBody": "把括號換成自己的資料。不要求補足缺少的資訊，並對兩個模型使用相同條件。",
+    "fitTitle": "為自己的問題選擇回答",
+    "faqTitle": "比較常見問題",
+    "relatedTitle": "繼續閱讀這些指南",
+    "ctaEyebrow": "自行比較相同輸入",
+    "ctaTitle": "準備比較 GPT-5.4 mini 與 Claude Haiku 4.5",
+    "ctaBody": "此連結會在 Review 中預先準備兩個所選模型、問題與虛構原文。此預設比較連結需登入後開啟；傳送前請查看基礎點數與目前的模型權限。",
+    "ctaLabel": "準備相同輸入的比較",
+    "signInNote": "登入後會返回預設比較。這是此連結的條件，並不代表所有訪客的 Review 體驗都必須登入。",
+    "jumpLinks": [
+      {
+        "href": "#task-comparison",
+        "label": "對兩個模型使用同一份清單"
+      },
+      {
+        "href": "#methodology",
+        "label": "自行比較的步驟"
+      },
+      {
+        "href": "#prompt-examples",
+        "label": "換成自己資料的問題"
+      },
+      {
+        "href": "#comparison-faq",
+        "label": "比較常見問題"
+      }
+    ],
+    "tasks": [
+      {
+        "task": "學習解釋",
+        "gpt": "範例是否符合概念，能否自行複述",
+        "claude": "範例是否符合概念，能否自行複述",
+        "decision": "與教材核對核心概念"
+      },
+      {
+        "task": "潤色訊息",
+        "gpt": "語氣變溫和後，是否保留原意與拒絕條件",
+        "claude": "語氣變溫和後，是否保留原意與拒絕條件",
+        "decision": "與原草稿核對意圖"
+      },
+      {
+        "task": "文件摘要",
+        "gpt": "日期、數字、準備物品與未定事項是否忠於原文",
+        "claude": "日期、數字、準備物品與未定事項是否忠於原文",
+        "decision": "逐項核對通知原文"
+      }
+    ],
+    "samplePrompt": "請把下方虛構社團通知中的行程與準備物品整理為最多三條。保留原日期與時間，不添加通知中沒有的資訊。\n\n虛構通知：讀書會於11月7日下午2點開始。請攜帶一本讀過的書與筆記。請於11月3日前確認是否參加。地點稍後通知。",
+    "gptResult": "• 活動：11月7日下午2點；地點稍後通知。\n• 準備：一本讀過的書與筆記。\n• 11月3日前確認參加。",
+    "claudeResult": "• 讀書會於11月7日下午2點開始；地點尚未公布。\n• 攜帶一本讀過的書與筆記。\n• 11月3日前回覆是否參加。",
+    "methodSteps": [
+      "使用相同問題、原文、語言與附件。",
+      "先寫明須保留的事實與格式。",
+      "將完整回答與引文和原文核對，重要資訊另行驗證。",
+      "實際執行時記錄模型名稱、日期與條件，並重複有代表性的任務。"
+    ],
+    "screenPrompt": "請把下方虛構社團通知中的行程與準備物品整理為最多三條。保留原日期與時間，不添加通知中沒有的資訊。\n\n虛構通知：讀書會於11月7日下午2點開始。請攜帶一本讀過的書與筆記。請於11月3日前確認是否參加。地點稍後通知。",
+    "promptExamples": [
+      {
+        "label": "學習解釋",
+        "prompt": "用日常例子解釋[概念]，保留關鍵術語，並加上一個理解檢查問題。"
+      },
+      {
+        "label": "溫和拒絕",
+        "prompt": "把[草稿]改寫成傳給朋友的最多三句訊息。保留拒絕的意思，不添加新的承諾。"
+      },
+      {
+        "label": "文件擷取",
+        "prompt": "只擷取[文件]中實際存在的日期、物品與回覆期限，逐項引用依據，缺少的資訊標為未定。"
+      },
+      {
+        "label": "程式碼審查",
+        "prompt": "依嚴重程度審查[程式碼]，建議最小修正與測試；若沒有執行，請說明。"
+      }
+    ],
+    "fitCards": [
+      {
+        "title": "保留原有條件",
+        "body": "先看哪個回答保留了日期、目標與意圖。"
+      },
+      {
+        "title": "未知就明確標註",
+        "body": "檢查是否明確標註原文沒有的資訊。"
+      },
+      {
+        "title": "找出須修改之處",
+        "body": "比較引文、遺漏與含糊的條件，不只看語氣。"
+      }
+    ],
+    "faqs": [
+      {
+        "question": "ChatGPT 與 Claude 哪個比較好？",
+        "answer": "沒有適用於所有任務的贏家。請對具體的模型版本與實際問題使用相同標準。"
+      },
+      {
+        "question": "相同問題就完全公平嗎？",
+        "answer": "有助於對齊輸入，但供應商的指令、工具、上下文處理與更新可能不同。"
+      },
+      {
+        "question": "AI Review 會選出正確答案嗎？",
+        "answer": "它會比較所提供回答的共識、差異與遺漏，不會瀏覽或獨立查證；重要資訊請與原文和來源核對。"
+      },
+      {
+        "question": "Is Tomverse affiliated with OpenAI or Anthropic?",
+        "answer": "No. Tomverse is an independent multi-model workspace and is not affiliated with or endorsed by OpenAI or Anthropic."
+      }
+    ],
+    "independentNotice": "Tomverse is an independent service. ChatGPT, GPT, Claude, OpenAI, and Anthropic names and trademarks belong to their respective owners.",
+    "relatedLinks": [
+      {
+        "href": "/zh-Hant/compare-ai-models",
+        "label": "AI 模型比較",
+        "body": "對更多模型使用相同標準"
+      },
+      {
+        "href": "/zh-Hant/ai-for-file-analysis",
+        "label": "AI 文件分析",
+        "body": "從文件找出條件與依據"
+      },
+      {
+        "href": "/zh-Hant/models",
+        "label": "模型目錄",
+        "body": "查看基礎點數、權限與狀態"
+      }
+    ]
+  },
   "fr": {
     "jumpLabel": "Dans ce guide",
     "scopeEyebrow": "Modèles et portée de l’exemple",
