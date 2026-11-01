@@ -496,26 +496,43 @@ export function validateSeoChanges(changes: readonly SeoGitChange[]): SeoValidat
 // The checks
 // ---------------------------------------------------------------------------
 
-export type SeoCheckCommand = { readonly label: string; readonly argv: readonly string[] };
+/** Stands for the report file a policy test writes; the runner puts a path of its own there. */
+export const SEO_AGENT_JUNIT_PLACEHOLDER = "@junit@";
+
+export type SeoCheckCommand = {
+  readonly label: string;
+  readonly argv: readonly string[];
+  /** A policy test: passing is not an exit code but a report that shows its tests ran. */
+  readonly policyTest?: { readonly path: string; readonly minTests: number };
+};
 
 /**
- * The commands that judge a validated change, in order. `existingTests` are the
- * policy tests present at the base commit; the list is a fixed one, so a change
- * cannot add a test of its own to be judged by.
+ * How many tests a policy test file declares at the top of its source, counted at the base
+ * commit: lines that begin a `test(` or `it(`. A test written inside a loop is indented
+ * and counted once, so the number is a floor, never above what really runs.
+ */
+export function seoAgentExpectedTestCount(source: string): number {
+  return (source.match(/^[ \t]*(?:test|it)(?:\.[A-Za-z]+)?\(/gm) ?? []).length;
+}
+
+/**
+ * The commands that judge a validated change, in order. `testSources` is the text of each policy
+ * test at the base commit; the list of files is a fixed one, so a change cannot add a test of its
+ * own to be judged by. Each policy test runs alone and reports to a file.
  */
 export function seoAgentCheckCommands(
-  existingTests: readonly string[],
+  testSources: Readonly<Record<string, string>>,
   changedPaths: readonly string[],
 ): SeoCheckCommand[] {
-  const tests = SEO_AGENT_POLICY_TESTS.filter((path) => existingTests.includes(path));
+  const tests = SEO_AGENT_POLICY_TESTS.filter((path) => typeof testSources[path] === "string");
   // `node --test` with no files discovers whatever is in the tree; a list that is empty is an error, not "all".
   if (tests.length === 0) throw new Error("no policy test exists at the base commit");
   return [
     // The installed eslint, run directly: `npx` could resolve one from the registry.
     { label: "lint", argv: ["node", "node_modules/eslint/bin/eslint.js", ...changedPaths] },
     { label: "typecheck", argv: ["npm", "run", "typecheck"] },
-    {
-      label: "policy tests",
+    ...tests.map((path) => ({
+      label: `policy test ${path}`,
       argv: [
         "node",
         "--conditions=react-server",
@@ -524,10 +541,39 @@ export function seoAgentCheckCommands(
         "--import",
         "tsx",
         "--test",
-        ...tests,
+        "--test-reporter=junit",
+        `--test-reporter-destination=${SEO_AGENT_JUNIT_PLACEHOLDER}`,
+        path,
       ],
-    },
+      policyTest: { path, minTests: Math.max(1, seoAgentExpectedTestCount(testSources[path] as string)) },
+    })),
   ];
+}
+
+export type SeoJunitVerdict =
+  | { readonly ok: true; readonly tests: number }
+  | { readonly ok: false; readonly reason: "unreadable" | "failed" | "file_as_test" | "too_few_tests" };
+
+const unescapeXml = (text: string) =>
+  text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+
+/**
+ * Whether a policy test's own report shows that its tests ran and passed. The exit code is not
+ * evidence: a module the test imports can end the process with 0 before one assertion runs, and
+ * node then reports the *file* as a single passing test. So the report must hold no failure, no
+ * test named after the file itself, and at least as many tests as the file declares at the base.
+ */
+export function seoAgentJunitVerdict(xml: string, path: string, minTests: number): SeoJunitVerdict {
+  if (!xml.includes("<testsuites")) return { ok: false, reason: "unreadable" };
+  // A test name may hold a bare `>` (node escapes `<` and not `>`), so attributes are read quote-aware.
+  const cases = [...xml.matchAll(/<testcase\b((?:"[^"]*"|'[^']*'|[^>"'])*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)].map((match) => ({
+    name: unescapeXml(/\bname="([^"]*)"/.exec(match[1] as string)?.[1] ?? "").replace(/\\/g, "/"),
+    body: match[2] ?? "",
+  }));
+  if (cases.some((testCase) => /<(?:failure|error)\b/.test(testCase.body))) return { ok: false, reason: "failed" };
+  if (cases.some((testCase) => testCase.name.endsWith(path))) return { ok: false, reason: "file_as_test" };
+  if (cases.length < minTests) return { ok: false, reason: "too_few_tests" };
+  return { ok: true, tests: cases.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -621,8 +667,8 @@ export type SeoValidatePorts = {
   readonly stagedDiff: (dir: string, baseCommit: string) => Promise<{ raw: string; numstat: string }>;
   /** The tree hash of what is staged (`git write-tree`). */
   readonly indexTree: (dir: string) => Promise<string>;
-  /** Policy tests that exist in the base commit. */
-  readonly baseTests: (baseCommit: string) => Promise<readonly string[]>;
+  /** The text of each policy test that exists in the base commit, by path. */
+  readonly baseTestSources: (baseCommit: string) => Promise<Readonly<Record<string, string>>>;
   readonly runChecks: (
     dir: string,
     commands: readonly SeoCheckCommand[],
@@ -717,6 +763,11 @@ export async function runSeoAgentValidate(
     const original = await ports.readFiles(dir);
     if (seoAgentInputChars(original) > SEO_AGENT_MAX_INPUT_CHARS) return { status: "input_too_large" };
 
+    // Before anything is spent: with no policy test at the base there is nothing to judge by. A
+    // missing list would make `node --test` discover whatever is in the tree.
+    const testSources = await ports.baseTestSources(input.baseCommit);
+    if (!SEO_AGENT_POLICY_TESTS.some((path) => typeof testSources[path] === "string")) return { status: "no_policy_tests" };
+
     const outcome = await ports.propose(seoAgentMessages(input.topic, original));
     if (outcome.status !== "answered") {
       return { status: "llm_stopped", detail: outcome.status === "refused" ? `${outcome.stage}:${outcome.code}` : outcome.status };
@@ -733,10 +784,7 @@ export async function runSeoAgentValidate(
     // proposed code, so what they leave behind is read again and must be this tree.
     const fixedTree = await ports.indexTree(dir);
 
-    const tests = await ports.baseTests(input.baseCommit);
-    // Fail closed: `node --test` with no file list would discover whatever is in the tree.
-    if (!SEO_AGENT_POLICY_TESTS.some((path) => tests.includes(path))) return { status: "no_policy_tests" };
-    const checks = await ports.runChecks(dir, seoAgentCheckCommands(tests, validation.paths), isolation);
+    const checks = await ports.runChecks(dir, seoAgentCheckCommands(testSources, validation.paths), isolation);
     if (!checks.ok) return { status: "checks_failed", label: checks.label };
 
     const after = await ports.stagedDiff(dir, input.baseCommit);

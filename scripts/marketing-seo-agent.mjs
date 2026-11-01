@@ -74,10 +74,12 @@ import {
   SEO_AGENT_GITHUB_REPOSITORY_ENV,
   SEO_AGENT_GITHUB_TOKEN_ENV,
   SEO_AGENT_GRADUATED_VARIABLE_ENV,
+  SEO_AGENT_JUNIT_PLACEHOLDER,
   SEO_AGENT_POLICY_TESTS,
   runSeoAgentPublish,
   runSeoAgentValidate,
   seoAgentGate,
+  seoAgentJunitVerdict,
   seoAgentStageEnvironment,
 } from "../lib/marketingSeoAgentCore.ts";
 
@@ -181,7 +183,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   const proposalFile = option("--proposal-file");
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"]).trim();
   const baseCommit = git(root, ["rev-parse", "--verify", "--end-of-options", `${option("--base") ?? "origin/develop"}^{commit}`]).trim();
-  if (outDir) {
+  if (outDir && !dryRun) {
     mkdirSync(outDir, { recursive: true });
     if (readdirSync(outDir).length > 0) fail(new Error("--out must be an empty directory"));
   }
@@ -254,8 +256,14 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
       };
     },
     indexTree: async () => wgit(["write-tree"]).trim(),
-    baseTests: async (base) =>
-      SEO_AGENT_POLICY_TESTS.filter((path) => spawnSync("git", ["cat-file", "-e", `${base}:${path}`], { cwd: root }).status === 0),
+    baseTestSources: async (base) => {
+      const sources = {};
+      for (const path of SEO_AGENT_POLICY_TESTS) {
+        const shown = spawnSync("git", ["show", `${base}:${path}`], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+        if (shown.status === 0) sources[path] = shown.stdout;
+      }
+      return sources;
+    },
     runChecks: async (dir, commands, isolation) => {
       // One check, with every process it starts. spawnSync's timeout ends only the direct child, so the
       // check leads its own process group (a job on Windows is taskkill /T) and the whole group is killed
@@ -271,6 +279,9 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
             } catch {
               // Nothing of the group is left.
             }
+            killLeftovers();
+          };
+          const killLeftovers = () => {
             // A process that started a new session left the group. As the check user, kill(-1) ends every
             // process that user owns -- the user is the operator's and is used for nothing else.
             if (isolation.mode === "separate_user") {
@@ -293,8 +304,9 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
           });
           child.on("exit", (code) => {
             clearTimeout(timer);
-            // Only the user-wide kill after a normal exit: a group id could have been reused by then.
-            if (isolation.mode === "separate_user") killTree();
+            // After a normal exit only the user-wide kill runs (inside killTree, for the check user): the
+            // group id could have been reused by then, so the group is not signalled again.
+            if (isolation.mode === "separate_user") killLeftovers();
             resolveRun(timedOut ? 124 : (code ?? 1));
           });
         });
@@ -321,11 +333,31 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
         const owned = spawnSync("chown", ["-R", "-h", `${isolation.uid}:${isolation.gid}`, join(dir, ".next"), join(dir, "next-env.d.ts"), home]);
         if (owned.status !== 0) throw new Error("the workspace could not be handed to the check user");
       }
-      for (const command of commands) {
+      // A policy test's report goes where the check user can write; it is read after the check and its processes are gone.
+      const reports = join(scratch, "check-home");
+      mkdirSync(reports, { recursive: true });
+      let reportNumber = 0;
+      for (const rawCommand of commands) {
+        const reportPath = join(reports, `policy-test-${(reportNumber += 1)}.xml`);
+        const command = rawCommand.policyTest
+          ? { ...rawCommand, argv: rawCommand.argv.map((arg) => arg.replace(SEO_AGENT_JUNIT_PLACEHOLDER, reportPath)) }
+          : rawCommand;
+        rmSync(reportPath, { force: true });
         console.log(JSON.stringify({ event: "marketing_seo_agent_check", check: command.label }));
         // Proposed code can loop forever or leave processes behind; a check that outlives its time has failed.
         const status = await runOne(command, { cwd: dir, env, stdio: "inherit", shell: process.platform === "win32", ...asUser });
         if (status !== 0) return { ok: false, label: command.label };
+        if (command.policyTest) {
+          // The exit code is not evidence that the tests ran: the report is.
+          let xml = "";
+          try {
+            xml = readFileSync(reportPath, "utf8");
+          } catch {
+            // No report is no evidence.
+          }
+          const verdict = seoAgentJunitVerdict(xml, command.policyTest.path, command.policyTest.minTests);
+          if (!verdict.ok) return { ok: false, label: `${command.label} (${verdict.reason})` };
+        }
       }
       return { ok: true };
     },

@@ -18,7 +18,10 @@ import {
     runSeoAgentValidate,
     seoAgentPhaseEnvProblems,
     seoAgentRecordSchema,
+    SEO_AGENT_JUNIT_PLACEHOLDER,
     seoAgentCheckCommands,
+    seoAgentExpectedTestCount,
+    seoAgentJunitVerdict,
     seoAgentGate,
     seoAgentIsGraduated,
     seoAgentMessages,
@@ -344,16 +347,65 @@ test("the prompt carries the four files as data and a fixed instruction", () => 
 // The checks
 // ---------------------------------------------------------------------------
 
-test("the checks run lint on the changed files and only fixed policy tests that exist at the base", () => {
-    const commands = seoAgentCheckCommands(
-        ["tests/seoHreflang.test.mjs", "tests/mine.test.mjs", "tests/sitemapLastModified.test.mjs"],
-        ["lib/seo.ts"],
-    );
-    assert.deepEqual(commands.map((c) => c.label), ["lint", "typecheck", "policy tests"]);
+const SOURCES = {
+    "tests/seoHreflang.test.mjs": 'test("a", () => {});\ntest("b", () => {});\n',
+    "tests/mine.test.mjs": 'test("mine", () => {});\n',
+    "tests/sitemapLastModified.test.mjs": 'test.skip("s", () => {});\n  test("indented in a loop", () => {});\n',
+};
+
+test("the checks run lint on the changed files, then each fixed policy test that exists at the base, alone and reporting to a file", () => {
+    const commands = seoAgentCheckCommands(SOURCES, ["lib/seo.ts"]);
+    assert.deepEqual(commands.map((c) => c.label), [
+        "lint", "typecheck", "policy test tests/seoHreflang.test.mjs", "policy test tests/sitemapLastModified.test.mjs",
+    ]);
     assert.deepEqual(commands[0].argv, ["node", "node_modules/eslint/bin/eslint.js", "lib/seo.ts"]);
-    const testRun = commands[2].argv;
-    assert.deepEqual(testRun.slice(testRun.indexOf("--test") + 1), ["tests/sitemapLastModified.test.mjs", "tests/seoHreflang.test.mjs"].sort((a, b) => SEO_AGENT_POLICY_TESTS.indexOf(a) - SEO_AGENT_POLICY_TESTS.indexOf(b)));
-    assert.ok(!testRun.includes("tests/mine.test.mjs"));
+    for (const command of commands.slice(2)) {
+        const argv = command.argv;
+        assert.equal(argv.filter((arg) => arg === "--test").length, 1);
+        assert.equal(argv.at(-1), command.policyTest.path, "exactly one file per run");
+        assert.ok(argv.includes("--test-reporter=junit"));
+        assert.ok(argv.includes(`--test-reporter-destination=${SEO_AGENT_JUNIT_PLACEHOLDER}`));
+    }
+    assert.deepEqual(commands.map((c) => c.policyTest?.path).filter(Boolean).includes("tests/mine.test.mjs"), false);
+    assert.equal(commands[2].policyTest.minTests, 2);
+    assert.equal(commands[3].policyTest.minTests, 2);
+});
+
+test("the number of tests a file declares is counted at its top level and is a floor", () => {
+    assert.equal(seoAgentExpectedTestCount('test("a", () => {});\ntest("b", () => {});\n'), 2);
+    assert.equal(seoAgentExpectedTestCount('it("a", () => {});\n  it("b", () => {});\ntest.skip("c", () => {});\n// test("d")\n'), 3);
+    assert.equal(seoAgentExpectedTestCount(""), 0);
+    assert.equal(seoAgentExpectedTestCount("const attest = 1; contest(2);"), 0);
+});
+
+const junit = (cases) => `<?xml version="1.0" encoding="utf-8"?>\n<testsuites>\n${cases.join("\n")}\n</testsuites>\n`;
+const pass = (name) => `\t<testcase name="${name}" time="0.1" classname="test"/>`;
+const fail = (name) => `\t<testcase name="${name}" time="0.1" classname="test"><failure type="testCodeFailure" message="boom">x</failure></testcase>`;
+
+test("a policy test counts as passed only when its report shows its tests ran", () => {
+    const path = "tests/seoHreflang.test.mjs";
+    assert.deepEqual(seoAgentJunitVerdict(junit([pass("a"), pass("b")]), path, 2), { ok: true, tests: 2 });
+    assert.deepEqual(seoAgentJunitVerdict(junit([pass("a"), pass("b"), pass("c")]), path, 2), { ok: true, tests: 3 });
+    assert.equal(seoAgentJunitVerdict(junit([pass("a"), fail("b")]), path, 2).reason, "failed");
+    assert.equal(seoAgentJunitVerdict(junit([pass("a"), `\t<testcase name="x"><error message="e"/></testcase>`]), path, 2).reason, "failed");
+    // A module that ends the process with 0 before a test runs: node reports the file itself as one passing test.
+    for (const named of [path, `C:\\repo\\${path.replace("/", "\\")}`, `/work/${path}`]) {
+        assert.equal(seoAgentJunitVerdict(junit([pass(named)]), path, 1).reason, "file_as_test", named);
+        assert.equal(seoAgentJunitVerdict(junit([pass("a"), pass(named)]), path, 1).reason, "file_as_test", named);
+    }
+    // Fewer tests than the file declares: the rest never ran.
+    assert.equal(seoAgentJunitVerdict(junit([pass("a")]), path, 2).reason, "too_few_tests");
+    assert.equal(seoAgentJunitVerdict(junit([]), path, 1).reason, "too_few_tests");
+    for (const bad of ["", "not xml", "<html></html>"]) assert.equal(seoAgentJunitVerdict(bad, path, 1).reason, "unreadable", bad);
+    // A bare > in a test's name (node escapes < and not >) does not end the element early.
+    assert.deepEqual(seoAgentJunitVerdict(junit([pass("marketing-agent/&lt;topic> is not a target"), pass("b")]), path, 2), { ok: true, tests: 2 });
+    assert.equal(seoAgentJunitVerdict(junit([fail("a > b"), pass("c")]), path, 2).reason, "failed");
+    // An unterminated quote cannot make the parse run away.
+    const started = Date.now();
+    seoAgentJunitVerdict(junit([`\t<testcase name="oops time="0.1"/>`.repeat(2_000)]), path, 1);
+    assert.ok(Date.now() - started < 2_000);
+    // XML escapes in a test's name do not hide it.
+    assert.deepEqual(seoAgentJunitVerdict(junit([pass("a &lt;b&gt; &amp; c")]), path, 1), { ok: true, tests: 1 });
 });
 
 test("every policy test that is listed and exists in this repository is a real file", () => {
@@ -399,7 +451,7 @@ const validatePorts = (overrides = {}) =>
             writeFiles: undefined,
             stagedDiff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT },
             indexTree: TREE,
-            baseTests: ["tests/seoHreflang.test.mjs"],
+            baseTestSources: { "tests/seoHreflang.test.mjs": 'test("a", () => {});\n' },
             runChecks: { ok: true },
             commit: { commitSha: COMMIT, treeHash: TREE },
             exportCommit: { bundleSha256: BUNDLE },
@@ -557,13 +609,13 @@ test("git's diff decides: a change outside the list is refused even when the pro
     assert.ok(!calls.includes("runChecks") && !calls.includes("commit"));
 });
 
-test("no policy test at the base commit fails closed instead of running every test", async () => {
-    for (const tests of [[], ["tests/mine.test.mjs"]]) {
-        const { ports, calls } = validatePorts({ baseTests: tests });
+test("no policy test at the base commit fails closed, before the paid call", async () => {
+    for (const tests of [{}, { "tests/mine.test.mjs": 'test("m", () => {});\n' }]) {
+        const { ports, calls } = validatePorts({ baseTestSources: tests });
         assert.deepEqual(await validate(ports), { status: "no_policy_tests" });
-        assert.ok(!calls.includes("runChecks") && !calls.includes("commit"));
+        assert.ok(!calls.includes("propose") && !calls.includes("runChecks") && !calls.includes("commit"));
     }
-    assert.throws(() => seoAgentCheckCommands([], ["lib/seo.ts"]), /no policy test/);
+    assert.throws(() => seoAgentCheckCommands({}, ["lib/seo.ts"]), /no policy test/);
 });
 
 test("a failed check stops the run before the commit", async () => {
