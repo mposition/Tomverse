@@ -300,6 +300,7 @@ test("the Railway service gives the worker exactly its variables, never on dev",
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/marketing-generator-service.mjs");
   assert.deepEqual(Object.keys(runner.environments).sort(), ["production", "staging"]);
   for (const variables of Object.values(runner.environments)) {
-    assert.deepEqual([...variables].sort(), [...MARKETING_GENERATOR_WORKER_VARIABLES].sort());
+    // The worker's three, and the AI-exposure measurement's switch (off unless "true").
+    assert.deepEqual([...variables].sort(), [...MARKETING_GENERATOR_WORKER_VARIABLES, "MARKETING_AI_VISIBILITY_ENABLED"].sort());
   }
 });
