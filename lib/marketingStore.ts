@@ -983,6 +983,7 @@ type LockedMarketingChannel = {
   lastResumeAuditLogId: string | null;
   dailyCapOverride: number | null;
   weeklyCapOverride: number | null;
+  approvalStartedAt: Date | null;
 };
 
 /** S2b1 lifecycle writers always take the row lock before deciding. */
@@ -995,7 +996,8 @@ async function lockMarketingChannel(
       "id", "channel", "status", "connectionGeneration", "scopesDigest",
       "policyVersion", "graduationEpoch", "graduatedAt", "graduationSnapshot",
       "pausedAt", "pausedFromMode", "pauseReasonCode", "lastResumeAuditLogId",
-      "dailyCapOverride", "weeklyCapOverride", "externalAccountRef"
+      "dailyCapOverride", "weeklyCapOverride", "externalAccountRef",
+      "approvalStartedAt"
     FROM "MarketingChannel"
     WHERE "id" = ${id}
     FOR UPDATE
@@ -5245,7 +5247,7 @@ async function recordMarketingPostOutcome(
           tx: database,
           systemActor: "marketing-publisher",
           action: MARKETING_S2D2_ACTIONS.accountOutcomeUnknownPaused,
-          targetType: "MarketingChannel",
+          targetType: MARKETING_AUTO_PAUSE_TARGET_TYPE,
           targetId: post.channelId,
           summary:
             "Stopped an autonomous account because a post's outcome is unknown.",
@@ -5546,6 +5548,284 @@ export async function recordMarketingPostPollRemovedByPlatform(
   });
 
   return { recorded: true, from };
+}
+
+/**
+ * When the system stops a brand account by itself (docs/policy/marketing-automation.md
+ * section 8.3, S4a).
+ *
+ * The thresholds, the closed reason codes and the decision from evidence to a
+ * reason are plain values and functions, written before the transaction that uses
+ * them (`evaluateMarketingAutoPause()`, below). They are declared in this module
+ * and not imported on purpose: a new import here changes the module load order,
+ * which is part of the webhook pipeline fingerprint, and a new reason code is
+ * not a reason to ask the operator to sign the production webhook record again.
+ * Top-level initialisers stay literals for the same reason (a call would be a load
+ * effect).
+ *
+ * ## The decisions (operator, 2026-11-01)
+ *
+ * - Guard rejection rate: among the account's 20 most recent drafts, 7 or more
+ *   rejected by the Guard (more than 30%). Fewer than 20 drafts still divide by
+ *   20, so the first few drafts of a new account cannot trip it.
+ * - Consecutive failures: the account's three most recent publish attempts all
+ *   `failed`. An `outcome_unknown` is the S2d2 path, not this one.
+ * - Platform removal: one post the platform took down.
+ * - Unhandled comment alert: a risk alert nobody handled within 24 hours (S4c
+ *   supplies the fact; the stop is this path).
+ *
+ * Both modes are stopped. A pause is undone by an operator's resume, so a
+ * wrong stop costs one click, where a wrong continue on a bad account does not
+ * come back. `outcome_unknown` keeps its own rule (autonomous only): a person
+ * is already looking at every post in approval mode.
+ *
+ * ## The evidence window
+ *
+ * Evidence counts only from the account's last "fresh start": the latest of the
+ * approval mode start (set by the database on every reconnect and every resume
+ * to approval) and the most recent auto pause or resume entry in the audit
+ * chain. Without it a resumed account would be stopped again by the very
+ * drafts that stopped it the first time.
+ */
+
+/** Why the system stopped an account. Closed; the column is free text, so this list is the contract. */
+export const MARKETING_AUTO_PAUSE_REASON_CODES = [
+  "platform_removal",
+  "consecutive_publish_failures",
+  "guard_rejection_rate",
+  "unhandled_comment_alert",
+] as const;
+export type MarketingAutoPauseReasonCode = (typeof MARKETING_AUTO_PAUSE_REASON_CODES)[number];
+
+/** What the audit entry of an automatic stop is about. */
+export const MARKETING_AUTO_PAUSE_TARGET_TYPE = "MarketingChannel";
+
+/** The audit action of an automatic stop. */
+export const MARKETING_AUTO_PAUSE_ACTION = "marketing_account.auto_paused";
+
+/** The modes an automatic stop applies to. */
+export const MARKETING_AUTO_PAUSEABLE_MODES = ["approval_mode", "autonomous_mode"] as const;
+
+export const MARKETING_AUTO_PAUSE_GUARD_WINDOW = 20;
+/** More than 30% of the window. */
+export const MARKETING_AUTO_PAUSE_GUARD_REJECTED_LIMIT = 7;
+export const MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES = 3;
+
+export type MarketingAutoPauseEvidence = {
+  /** Posts the platform removed since the window started. */
+  readonly removedPostCount: number;
+  /** Publish attempt outcomes since the window started, newest first. */
+  readonly recentAttemptOutcomes: readonly string[];
+  /** Statuses of the account's drafts since the window started, newest first. */
+  readonly recentDraftStatuses: readonly string[];
+};
+
+export const marketingGuardRejectionTripped = (
+  recentDraftStatusesNewestFirst: readonly string[],
+): boolean =>
+  recentDraftStatusesNewestFirst
+    .slice(0, MARKETING_AUTO_PAUSE_GUARD_WINDOW)
+    .filter((status) => status === "guard_rejected").length >=
+  MARKETING_AUTO_PAUSE_GUARD_REJECTED_LIMIT;
+
+export const marketingConsecutiveFailuresTripped = (
+  recentAttemptOutcomesNewestFirst: readonly string[],
+): boolean => {
+  const latest = recentAttemptOutcomesNewestFirst.slice(
+    0,
+    MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES,
+  );
+  return (
+    latest.length === MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES &&
+    latest.every((outcome) => outcome === "failed")
+  );
+};
+
+/** The reason an account should stop on this evidence, or null. The most severe fact wins. */
+export const decideMarketingAutoPause = (
+  evidence: MarketingAutoPauseEvidence,
+): Exclude<MarketingAutoPauseReasonCode, "unhandled_comment_alert"> | null => {
+  if (evidence.removedPostCount > 0) return "platform_removal";
+  if (marketingConsecutiveFailuresTripped(evidence.recentAttemptOutcomes)) {
+    return "consecutive_publish_failures";
+  }
+  if (marketingGuardRejectionTripped(evidence.recentDraftStatuses)) {
+    return "guard_rejection_rate";
+  }
+  return null;
+};
+
+/** The latest of the instants that are present; null when none is. */
+export const marketingAutoPauseWindowStart = (
+  instants: ReadonlyArray<Date | null | undefined>,
+): Date | null => {
+  let latest: Date | null = null;
+  for (const instant of instants) {
+    if (instant && (latest === null || instant.getTime() > latest.getTime())) latest = instant;
+  }
+  return latest;
+};
+
+/**
+ * Stop an account because a safety limit was crossed (S4a, section 8.3).
+ *
+ * One transaction: the audit chain lock, the account's row lock, the evidence,
+ * the status change, the audit entry. The chain lock comes first, the order the
+ * outcome writers and the admin routes (which write their audit entry before the
+ * store call) use. A writer that still takes the channel first could deadlock
+ * with this one; Postgres aborts one of them, and the publisher treats an
+ * evaluation that did not finish as undecided and skips the account for the run.
+ *
+ * Idempotent and cheap to call: an account that is not in a live mode, or whose
+ * evidence crosses no limit, is left untouched and the answer is
+ * `paused: false`. The caller is the publisher before it claims for an account,
+ * the draft intake after it rejects a draft, and (S4c) the comment monitor with
+ * `forcedReason`.
+ *
+ * The trigger writes `pausedFromMode` and `pausedAt` from the transition; this
+ * sets only the status and the reason. A resume needs nothing from the reason.
+ */
+export async function evaluateMarketingAutoPause(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly channelId: string;
+    /** A fact another module established; the stop is this path. */
+    readonly forcedReason?: Extract<MarketingAutoPauseReasonCode, "unhandled_comment_alert">;
+  },
+): Promise<
+  | { readonly paused: false }
+  | {
+      readonly paused: true;
+      readonly reasonCode: MarketingAutoPauseReasonCode;
+      readonly pausedFromMode: MarketingPausableMode;
+    }
+> {
+  const channelId = String(rawInput.channelId);
+  await takeAuditChainLock(database);
+  const channel = await lockMarketingChannel(database, channelId);
+  if (!(MARKETING_AUTO_PAUSEABLE_MODES as readonly string[]).includes(channel.status)) {
+    return { paused: false };
+  }
+  const pausedFromMode = channel.status as MarketingPausableMode;
+
+  // Evidence counts from the account's last fresh start, so a resumed account is
+  // not stopped again by the entries that stopped it. The resume entries are
+  // written before the resume itself, which is the right side of the line.
+  const lastFreshStart = await database.adminAuditLog.findFirst({
+    where: {
+      targetType: MARKETING_AUTO_PAUSE_TARGET_TYPE,
+      targetId: channelId,
+      action: {
+        in: [
+          MARKETING_AUTO_PAUSE_ACTION,
+          MARKETING_S2B1_ACTIONS.accountResumeApproval,
+          MARKETING_RESUME_AUTONOMOUS_ACTION,
+        ],
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  const windowStart = marketingAutoPauseWindowStart([
+    channel.approvalStartedAt,
+    lastFreshStart?.createdAt,
+  ]);
+  const since = windowStart ?? new Date(0);
+
+  let reasonCode: MarketingAutoPauseReasonCode | null = rawInput.forcedReason ?? null;
+  let evidence: Record<string, number> = {};
+  if (reasonCode === null) {
+    // `updatedAt` stands for the instant of the removal, which no column holds.
+    // A later touch of a removed post can only make this stop an account that
+    // had been resumed, which is the safe direction and one click to undo.
+    const removedPostCount = await database.marketingPost.count({
+      where: { channelId, status: "removed_by_platform", updatedAt: { gt: since } },
+    });
+    let attempts: Array<{ outcome: string }> = [];
+    let drafts: Array<{ status: string }> = [];
+    if (removedPostCount === 0) {
+      // One row per attempt, newest first. An attempt is placed at its first
+      // entry and carries its last word: a person who settles an unknown outcome
+      // as a failure adds a second entry for the same attempt, with the time of
+      // the settling, and that time says nothing about when the attempt was made.
+      // Retention keeps what is older than ninety days only in part (successes
+      // become summaries, a last failure stays). The newest three attempts are
+      // judged only when no summary of attempts reaches back into the span they
+      // cover; otherwise the history between them may be missing and the run
+      // could be an illusion, so nothing is concluded from it.
+      const found = await database.$queryRaw<Array<{ outcome: string; thinned: boolean }>>(
+        Prisma.sql`
+        WITH made AS (
+          SELECT post."id" AS "postId", (entry->>'attempt')::int AS "attempt",
+            (array_agg(entry->>'outcome' ORDER BY (entry->>'at')::timestamptz DESC))[1] AS "outcome",
+            min((entry->>'at')::timestamptz) AS "madeAt"
+          FROM "MarketingPost" AS post, jsonb_array_elements(post."history") AS entry
+          WHERE post."channelId" = ${channelId} AND entry->>'type' = 'attempt'
+          GROUP BY post."id", (entry->>'attempt')::int
+        ), newest AS (
+          SELECT * FROM made
+          WHERE "madeAt" > ${since}::timestamptz
+          ORDER BY "madeAt" DESC, "postId" DESC, "attempt" DESC
+          LIMIT ${MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES}
+        )
+        SELECT newest."outcome" AS "outcome",
+          EXISTS (
+            SELECT 1
+            FROM "MarketingPost" AS thin, jsonb_array_elements(thin."history") AS summary
+            WHERE thin."channelId" = ${channelId}
+              AND summary->>'type' = 'retention_summary' AND summary->>'summarises' = 'attempt'
+              AND (summary->>'lastAt')::timestamptz >= (SELECT min("madeAt") FROM newest)
+          ) AS "thinned"
+        FROM newest ORDER BY newest."madeAt" DESC, newest."postId" DESC, newest."attempt" DESC
+      `,
+      );
+      attempts = found.some((row) => row.thinned) ? [] : found;
+      drafts = await database.marketingPost.findMany({
+        where: { channelId, createdAt: { gt: since } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: MARKETING_AUTO_PAUSE_GUARD_WINDOW,
+        select: { status: true },
+      });
+    }
+    const recentAttemptOutcomes = attempts.map((attempt) => attempt.outcome);
+    const recentDraftStatuses = drafts.map((draft) => draft.status);
+    reasonCode = decideMarketingAutoPause({
+      removedPostCount,
+      recentAttemptOutcomes,
+      recentDraftStatuses,
+    });
+    evidence = {
+      removedPostCount,
+      attemptsConsidered: recentAttemptOutcomes.length,
+      attemptsFailed: recentAttemptOutcomes.filter((outcome) => outcome === "failed").length,
+      draftsConsidered: recentDraftStatuses.length,
+      draftsGuardRejected: recentDraftStatuses.filter((status) => status === "guard_rejected")
+        .length,
+    };
+  }
+  if (reasonCode === null) return { paused: false };
+
+  const stopped = await database.marketingChannel.updateMany({
+    where: { id: channelId, status: channel.status },
+    data: { status: "paused", pauseReasonCode: reasonCode },
+  });
+  if (stopped.count !== 1) return { paused: false };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_AUTO_PAUSE_ACTION,
+    targetType: MARKETING_AUTO_PAUSE_TARGET_TYPE,
+    targetId: channelId,
+    summary: "Stopped an account because a safety limit was crossed.",
+    metadata: {
+      reasonCode,
+      pausedFromMode,
+      windowStart: windowStart ? windowStart.toISOString() : null,
+      ...evidence,
+    },
+  });
+  return { paused: true, reasonCode, pausedFromMode };
 }
 
 /** Unused by this module, exported so a caller can narrow a paused mode. */
