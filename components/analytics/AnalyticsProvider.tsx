@@ -13,11 +13,11 @@ import {
 } from "@/lib/ga4UserIdPolicy";
 import {
   analyticsConsent,
-  applyGa4UserId,
   configureAnalyticsClient,
   consumeSignupStarted,
   disableAnalyticsClient,
   setAnalyticsConsent,
+  syncGa4UserId,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
 import {
@@ -654,31 +654,12 @@ export function AnalyticsProvider({
       signedIn: Boolean(sessionUserId),
       measurementId,
     });
-  useEffect(() => {
-    if (!ga4UserIdAllowed) {
-      applyGa4UserId(null);
-      return;
-    }
-    const controller = new AbortController();
-    fetch("/api/analytics/user-id", {
-      method: "POST",
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          await discardResponseBody(response);
-          return null;
-        }
-        const body = (await response.json()) as { analyticsUserId?: unknown };
-        return typeof body.analyticsUserId === "string" ? body.analyticsUserId : null;
-      })
-      .then((analyticsUserId) => {
-        if (!controller.signal.aborted) applyGa4UserId(analyticsUserId);
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, [ga4UserIdAllowed, sessionUserId]);
+  // Re-run on an account change as well: the previous account's id is
+  // cleared before the next one is asked for (syncGa4UserId).
+  useEffect(
+    () => syncGa4UserId(ga4UserIdAllowed),
+    [ga4UserIdAllowed, sessionUserId]
+  );
 
   // `useCallback` rather than plain closures: both read the remembered opener
   // through `closePreferences`, and a ref read from a function created during

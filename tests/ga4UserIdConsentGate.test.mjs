@@ -147,6 +147,60 @@ test("an id is set only on a configured tag, and only if it is an analytics id",
   assert.deepEqual(userIdCommands(), [ID], "set once");
 });
 
+const ID_B = "fedcba9876543210fedcba9876543210";
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test("switching accounts clears the first id before the second is asked for", async () => {
+  client.disableAnalyticsClient();
+  win.dataLayer = [];
+  configure("G-TEST1234");
+
+  const first = deferred();
+  const cancelA = client.syncGa4UserId(true, () => first.promise);
+  first.resolve(ID);
+  await flush();
+  assert.deepEqual(userIdCommands(), [ID]);
+
+  // The session moves to account B: the effect cancels A's run and starts B's.
+  cancelA();
+  const second = deferred();
+  const cancelB = client.syncGa4UserId(true, () => second.promise);
+  assert.deepEqual(userIdCommands(), [ID, null], "A is cleared before B's lookup returns");
+
+  second.reject(new Error("network"));
+  await flush();
+  assert.deepEqual(userIdCommands(), [ID, null], "a failed lookup leaves it cleared");
+  cancelB();
+
+  const third = deferred();
+  client.syncGa4UserId(true, () => third.promise);
+  third.resolve(ID_B);
+  await flush();
+  assert.deepEqual(userIdCommands(), [ID, null, ID_B]);
+});
+
+test("a lookup that finishes after its account left is never applied", async () => {
+  client.disableAnalyticsClient();
+  win.dataLayer = [];
+  configure("G-TEST1234");
+  const late = deferred();
+  const cancel = client.syncGa4UserId(true, () => late.promise);
+  cancel();
+  client.syncGa4UserId(false);
+  late.resolve(ID);
+  await flush();
+  assert.deepEqual(userIdCommands(), []);
+});
+
 test("signing out or declining analytics clears it with a real null", () => {
   client.disableAnalyticsClient();
   win.dataLayer = [];

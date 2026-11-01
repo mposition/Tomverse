@@ -523,6 +523,42 @@ export const applyGa4UserId = (value: string | null) => {
   window.gtag?.("set", { user_id: next });
 };
 
+const requestAnalyticsUserId = async (signal: AbortSignal) => {
+  const response = await fetch("/api/analytics/user-id", {
+    method: "POST",
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) {
+    await discardResponseBody(response);
+    return null;
+  }
+  const body = (await response.json()) as { analyticsUserId?: unknown };
+  return typeof body.analyticsUserId === "string" ? body.analyticsUserId : null;
+};
+
+/**
+ * Brings the tag's User-ID in line with who is signed in now. Whatever was set
+ * is cleared first, before anything is asked: when the session moves from one
+ * account to another, the first account's id must not label a single event of
+ * the second's -- not while the lookup runs, and not after it fails. Only a
+ * lookup that finishes un-cancelled sets a new one. Returns the cancel.
+ */
+export const syncGa4UserId = (
+  allowed: boolean,
+  requestId: (signal: AbortSignal) => Promise<string | null> = requestAnalyticsUserId
+) => {
+  applyGa4UserId(null);
+  if (!allowed) return () => {};
+  const controller = new AbortController();
+  requestId(controller.signal)
+    .then((analyticsUserId) => {
+      if (!controller.signal.aborted) applyGa4UserId(analyticsUserId);
+    })
+    .catch(() => {});
+  return () => controller.abort();
+};
+
 export const disableAnalyticsClient = () => {
   applyGa4UserId(null);
   applyGa4ConsentMode("denied");

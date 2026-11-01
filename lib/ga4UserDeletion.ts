@@ -1,7 +1,13 @@
 import "server-only";
 
 import { sign } from "node:crypto";
-import { analyticsUserIdFor, ga4UserIdKey, type Ga4Env } from "@/lib/ga4UserId";
+import {
+  analyticsUserIdFor,
+  ga4UserIdKey,
+  ga4UserIdMayHaveBeenSent,
+  type Ga4Env,
+} from "@/lib/ga4UserId";
+import { GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED } from "@/lib/ga4UserIdPolicy";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 /**
@@ -46,6 +52,8 @@ type Deps = {
   fetch: typeof fetch;
   env: Ga4Env;
   now: () => Date;
+  /** The published-notice flag; a parameter only so a test can open it. */
+  noticePublished?: boolean;
 };
 
 const defaultDeps = (): Deps => ({ fetch, env: process.env, now: () => new Date() });
@@ -164,14 +172,23 @@ export async function submitGa4UserDeletion(
 
 /**
  * The account-deletion step: derive the account's User-ID while its id still
- * exists and ask GA4 to delete it. Silent when no User-ID could ever have been
- * sent (no derivation key); an incident when one could have been and the
- * request was not submitted. Never throws.
+ * exists and ask GA4 to delete it. Silent, and nothing leaves Tomverse, unless
+ * a User-ID can have been sent at all (`ga4UserIdMayHaveBeenSent`: notice
+ * published, key present, switch on now or previously). An incident when one
+ * could have been sent and the request was not submitted. Never throws.
  */
 export async function requestGa4UserDeletionForAccount(
   userId: string,
   deps: Deps = defaultDeps()
 ): Promise<Ga4UserDeletionOutcome> {
+  if (
+    !ga4UserIdMayHaveBeenSent(
+      deps.env,
+      deps.noticePublished ?? GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED
+    )
+  ) {
+    return { status: "not_configured" };
+  }
   const analyticsUserId = analyticsUserIdFor(userId, ga4UserIdKey(deps.env));
   if (!analyticsUserId) return { status: "not_configured" };
   const outcome = await submitGa4UserDeletion(analyticsUserId, deps).catch(

@@ -38,6 +38,7 @@ const KEY = "k".repeat(48);
 const ACCOUNT = "cmh-deleted-account";
 const configuredEnv = (): Ga4Env => ({
   GA4_USER_ID_KEY: KEY,
+  NEXT_PUBLIC_GA4_USER_ID_ENABLED: "true",
   GA4_PROPERTY_ID: "123456789",
   GA4_USER_DELETION_SERVICE_ACCOUNT_JSON: JSON.stringify({
     client_email: "deleter@tomverse-test.iam.gserviceaccount.com",
@@ -63,6 +64,9 @@ const json = (status: number, body: unknown) =>
     headers: { "Content-Type": "application/json" },
   });
 const now = () => new Date("2026-11-01T00:00:00.000Z");
+// The notice treated as published: every case below is about what happens once
+// a User-ID could exist. The shipped flag is the subject of its own test.
+const opened = { now, noticePublished: true };
 
 beforeEach(() => {
   incidents.length = 0;
@@ -75,6 +79,20 @@ test("no derivation key means no User-ID was ever sent: nothing to ask, nothing 
   const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
     fetch: fn,
     env: {},
+    ...opened,
+  });
+  assert.deepEqual(outcome, { status: "not_configured" });
+  assert.equal(calls.length, 0);
+  assert.equal(incidents.length, 0);
+});
+
+test("pre-provisioned credentials send nothing before the notice is published", async () => {
+  const { deletion } = await load();
+  const { fn, calls } = fakeFetch([]);
+  // The shipped flag, with everything else in place -- the switch included.
+  const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
+    fetch: fn,
+    env: configuredEnv(),
     now,
   });
   assert.deepEqual(outcome, { status: "not_configured" });
@@ -82,13 +100,48 @@ test("no derivation key means no User-ID was ever sent: nothing to ask, nothing 
   assert.equal(incidents.length, 0);
 });
 
+test("a feature never switched on sends nothing, even with the notice and credentials", async () => {
+  const { deletion } = await load();
+  for (const value of [undefined, "false"]) {
+    const { fn, calls } = fakeFetch([]);
+    const env = { ...configuredEnv(), NEXT_PUBLIC_GA4_USER_ID_ENABLED: value };
+    const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
+      fetch: fn,
+      env,
+      ...opened,
+    });
+    assert.deepEqual(outcome, { status: "not_configured" }, String(value));
+    assert.equal(calls.length, 0, String(value));
+  }
+  assert.equal(incidents.length, 0);
+});
+
+test("switched off after use, deletions of what was sent continue", async () => {
+  const { deletion } = await load();
+  const { fn, calls } = fakeFetch([
+    json(200, { access_token: "token-1" }),
+    json(200, { deletionRequestTime: "2026-11-01T00:00:01Z" }),
+  ]);
+  const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
+    fetch: fn,
+    env: {
+      ...configuredEnv(),
+      NEXT_PUBLIC_GA4_USER_ID_ENABLED: "false",
+      GA4_USER_ID_PREVIOUSLY_ENABLED: "true",
+    },
+    ...opened,
+  });
+  assert.equal(outcome.status, "submitted");
+  assert.equal(calls.length, 2);
+});
+
 test("a key without deletion credentials is reported, and nothing is called", async () => {
   const { deletion } = await load();
   const { fn, calls } = fakeFetch([]);
   const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
     fetch: fn,
-    env: { GA4_USER_ID_KEY: KEY },
-    now,
+    env: { GA4_USER_ID_KEY: KEY, NEXT_PUBLIC_GA4_USER_ID_ENABLED: "true" },
+    ...opened,
   });
   assert.deepEqual(outcome, { status: "not_configured" });
   assert.equal(calls.length, 0);
@@ -104,7 +157,7 @@ test("a configured deletion names the pseudonymous id under the analytics.edit s
   const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
     fetch: fn,
     env: configuredEnv(),
-    now,
+    ...opened,
   });
   assert.deepEqual(outcome, {
     status: "submitted",
@@ -140,7 +193,7 @@ test("a refusal is one attempt, reported without the id", async () => {
   const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
     fetch: fn,
     env: configuredEnv(),
-    now,
+    ...opened,
   });
   assert.deepEqual(outcome, { status: "refused", stage: "deletion", httpStatus: 403 });
   assert.equal(calls.length, 2, "no retry");
@@ -161,7 +214,7 @@ test("an unknown outcome is not retried and nothing throws, even if reporting fa
   const outcome = await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
     fetch: fn,
     env: configuredEnv(),
-    now,
+    ...opened,
   });
   assert.deepEqual(outcome, { status: "unknown", stage: "deletion" });
   assert.equal(calls.length, 2);
@@ -171,7 +224,7 @@ test("an unknown outcome is not retried and nothing throws, even if reporting fa
     await deletion.requestGa4UserDeletionForAccount(ACCOUNT, {
       fetch: tokenFailure.fn,
       env: configuredEnv(),
-      now,
+      ...opened,
     }),
     { status: "refused", stage: "token", httpStatus: 401 }
   );
