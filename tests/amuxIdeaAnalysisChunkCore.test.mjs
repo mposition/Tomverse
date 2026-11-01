@@ -9,7 +9,13 @@ import {
 } from "../lib/amux/ideaAnalysisChunkCore.ts";
 
 const sourceRef = "idea:sha256_opaque";
-const inspect = (value, overrides = {}) => inspectAmuxAnalysisChunk({
+// The verdict alone; where a schema refusal happened is checked by its own test.
+const verdict = (result) => {
+  const copy = { ...result };
+  delete copy.at;
+  return copy;
+};
+const inspect = (value, overrides = {}) => verdict(inspectAmuxAnalysisChunk({
   raw: JSON.stringify(value),
   expectedPreviewId: "preview-01",
   expectedChunkIndex: 0,
@@ -19,7 +25,7 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisChunk({
   permittedTargetRefs: [{ ref: "feature_existing_01", kind: "node", level: "feature" }],
   requiredSchemaVersion: null,
   ...overrides,
-});
+}));
 
 const node = (localId = "c0:node-1") => ({
   kind: "node",

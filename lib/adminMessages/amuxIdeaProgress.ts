@@ -21,6 +21,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     sessionReviewQuestionHint: "Add the answer to the idea and submit it again; the new idea is analysed on its own.",
     sessionReviewNotAPlan: "The answer was not a plan: it was malformed or could not continue the previous page.",
     sessionReviewNotAPlanDetail: (check: string, code: string) => `The check that refused it: ${check} (${code}).`,
+    sessionReviewNotAPlanAt: (place: string) => `Schema rule and place: ${place}.`,
     sessionReviewDetailChecks: {
       chunk_schema_rejected: "the JSON or its keys do not match the plan schema",
       chunk_too_large: "the answer or one of its fields is over the size limit",
@@ -169,6 +170,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     sessionReviewQuestionHint: "답을 아이디어에 보태 다시 접수하세요. 새 아이디어로 다시 분석합니다.",
     sessionReviewNotAPlan: "답이 계획 형식이 아니었거나 이전 페이지를 이어 갈 수 없었습니다.",
     sessionReviewNotAPlanDetail: (check: string, code: string) => `막힌 검사: ${check} (${code}).`,
+    sessionReviewNotAPlanAt: (place: string) => `어긴 스키마 규칙과 위치: ${place}.`,
     sessionReviewDetailChecks: {
       chunk_schema_rejected: "JSON 형식이나 키가 계획 스키마와 맞지 않습니다",
       chunk_too_large: "답 전체나 한 항목이 크기 한도를 넘었습니다",
