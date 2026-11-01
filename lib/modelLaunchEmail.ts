@@ -1,5 +1,5 @@
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
-import { emailCopyLanguage, isLanguage, type EmailCopyLanguage, type Language } from "@/lib/language";
+import { emailCopyLanguage, isLanguage, type EmailCopyLanguage } from "@/lib/language";
 import { normalizeTomverseMarketingUrl } from "@/lib/marketingEmailLayout";
 
 /**
@@ -150,7 +150,8 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const resolve = (value: string): Language => (isLanguage(value) ? value : "en");
+const resolve = (value: string): EmailCopyLanguage =>
+  isLanguage(value) ? emailCopyLanguage(value) : "en";
 
 /**
  * Pure and deterministic, like every template the standard lane renders: the
@@ -163,7 +164,7 @@ export function buildModelLaunchEmail(
   language: string
 ) {
   const payload = parseModelLaunchPayload(raw);
-  const copy = COPY[emailCopyLanguage(resolve(language))];
+  const copy = COPY[resolve(language)];
   const lines = [...payload.highlights, payload.creditLine];
 
   const text = [

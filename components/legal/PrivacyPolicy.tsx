@@ -225,7 +225,7 @@ const sections = [
 
 export function PrivacyPolicy() {
     const { t, lang } = useLanguage();
-    const localizedContentAvailable = lang === "en" || lang === "ko" || lang === "zh" || lang === "zh-Hant";
+    const localizedContentAvailable = lang === "en" || lang === "ko" || lang === "zh";
     const destinations = disclosableDataDestinations();
     const showProviderTable =
         destinations.length > 0 &&

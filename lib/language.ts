@@ -57,3 +57,7 @@ export type EmailCopyLanguage = Exclude<Language, "zh-Hant">;
 
 export const emailCopyLanguage = (language: Language): EmailCopyLanguage =>
   language === "zh-Hant" ? "zh" : language;
+
+export const EMAIL_COPY_LANGUAGES = SUPPORTED_LANGUAGES.filter(
+  (language): language is EmailCopyLanguage => language !== "zh-Hant"
+);
