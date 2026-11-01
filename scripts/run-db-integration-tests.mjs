@@ -946,7 +946,8 @@ run(
     "tests/integration/account-data-export.db.test.ts",
     "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/account-anonymisation.db.test.ts",
-    // Marketing §10.1: the event-name check admits marketing_touch, and the
+    // docs/policy/marketing-automation.md §10.1: the event-name check admits
+    // marketing_touch, and the
     // attribution query's seven-day window is inclusive at both ends.
     "tests/integration/marketing-touch-attribution.db.test.ts",
     // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.

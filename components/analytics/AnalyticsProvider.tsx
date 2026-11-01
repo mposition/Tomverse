@@ -302,7 +302,8 @@ const consentCopy: Record<
 };
 
 /**
- * §10.1 marketing touch: the current URL's UTM values, reported once per
+ * Marketing touch (docs/policy/marketing-automation.md §10.1): the current
+ * URL's UTM values, reported once per
  * distinct link per tab -- on a full load and on a client navigation that
  * changes only the query. Consent is applied inside the client exactly as for
  * every other event: declined sends nothing, undecided waits. A change of

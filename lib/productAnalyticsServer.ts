@@ -208,7 +208,8 @@ type AnalyticsEventDb = Pick<Prisma.TransactionClient, "productAnalyticsEvent">;
 
 /**
  * The last `marketing_touch` the same browser -- or, once signed in, the same
- * account -- sent in the seven days before `receivedAt` (§10.1). Matched on the
+ * account -- sent in the seven days before `receivedAt`
+ * (docs/policy/marketing-automation.md §10.1). Matched on the
  * keyed digest of the client id, the same one the event rows store, so the raw
  * id is never compared or kept.
  */
@@ -318,7 +319,7 @@ export async function repairLateMarketingTouchSnapshots(input: {
 
 /**
  * Records an event, putting one browser's touches and conversions in a single
- * order (§10.1).
+ * order (docs/policy/marketing-automation.md §10.1).
  *
  * A touch and a conversion from the same browser, sent together when consent
  * releases the queue, can interleave: the conversion looks for a touch and
@@ -381,7 +382,8 @@ export async function recordOrderedAnalyticsEvent(
     const event = {
       ...input,
       properties,
-      // A touch's own time is its receipt (§10.1), so it is this time too.
+      // A touch's own time is its receipt (docs/policy/marketing-automation.md
+      // §10.1), so it is this time too.
       ...(isTouch ? { occurredAt: receivedAt } : {}),
     };
     // ON CONFLICT DO NOTHING rather than catching a unique violation: an error

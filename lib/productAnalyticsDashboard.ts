@@ -64,7 +64,8 @@ export type ProductAnalyticsDashboard = {
     campaign: string;
     landingViews: number;
   }>;
-  // §10.1 / §10.3: sign-ups and guest leads attributed to the last marketing
+  // docs/policy/marketing-automation.md §10.1 / §10.3: sign-ups and guest
+  // leads attributed to the last marketing
   // touch in the seven days before them. Evidence is client-observed and
   // server-timed, and every surface that shows these numbers says so.
   touchAttribution30d: {
