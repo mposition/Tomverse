@@ -125,11 +125,10 @@ export async function POST(request: Request) {
       );
     }
 
+    // No `now` passed: the read answers for the present and may be served from
+    // its short per-instance cache, which a named time would bypass.
     const now = new Date();
-    const read = await readActiveMarketingExperiment({
-      headers: request.headers,
-      now,
-    });
+    const read = await readActiveMarketingExperiment({ headers: request.headers });
     if (!read.ok) {
       // The state could not be read. That is not "the experiment ended": the
       // cookie stays, so a visitor is not re-rolled into the other arm once

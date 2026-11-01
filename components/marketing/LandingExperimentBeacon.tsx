@@ -164,12 +164,22 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
       const assignment = parseExperimentCookie(cookieValue);
       const experimentId = assignment?.experimentId ?? null;
 
+      // Only a page that can be measured is measured: it shows the arm the
+      // visitor was assigned, in a language the assignment was registered for.
+      // Anything else still asks the route to validate the cookie, but sets no
+      // listener and no flag -- a click there is not a conversion, and a flag
+      // for it would swallow the one that is, on the next measurable page.
+      const measurable =
+        assignment !== null &&
+        assignment.arm === renderedArm &&
+        assignment.locales.includes(locale);
+
       // The click listener goes up before the exposure request goes out. The
       // answer can take as long as a database read, and a visitor who clicks
       // the call to action in that time is gone from this page before it
       // arrives. The route validates the cookie and the rendered arm itself,
       // so nothing needs the exposure to have been confirmed first.
-      if (assignment && assignment.arm === renderedArm) {
+      if (assignment && measurable) {
         const conversionKey = `tomverse_experiment_converted_${assignment.experimentId}`;
         let converting = false;
         onClick = (event) => {
@@ -207,15 +217,16 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
       // that goes away with the request in flight does not count again on the
       // next view. Taken back only when an answer arrives and says the visit
       // was not counted; no answer proves nothing, as above.
-      const exposedKey = assignment
-        ? `tomverse_experiment_exposed_${assignment.experimentId}`
-        : null;
+      const exposedKey =
+        assignment && measurable
+          ? `tomverse_experiment_exposed_${assignment.experimentId}`
+          : null;
       const alreadyCounted = exposedKey ? session.get(exposedKey) : null;
       if (exposedKey && !alreadyCounted) session.set(exposedKey, "1");
       const retract = () => {
         if (exposedKey && !alreadyCounted) session.remove(exposedKey);
       };
-      const result = await post("exposure", { record: !alreadyCounted });
+      const result = await post("exposure", { record: measurable && !alreadyCounted });
       if (cancelled) return;
       if (withdrawn(experimentId)) {
         retract();
@@ -230,7 +241,9 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
       if (result.status === "off") {
         retract();
         detachClick();
-        session.set(probeKey, String(Date.now()));
+        // No memo here: this "off" may only mean the cookie was stale, and the
+        // visitor is owed a fresh assignment on the next view if an experiment
+        // is running. The next view's assign answer is what gets remembered.
         clearCookie();
         leaveVariant(renderedArm, experimentId);
         return;

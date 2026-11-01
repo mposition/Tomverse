@@ -48,6 +48,19 @@ const heroHeadline = (html: string) => {
   return match![1].replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 };
 
+/**
+ * Keeps the visitor on the page when the call to action is clicked. The link
+ * leads into the chat app, whose analytics provider is switched off on the E2E
+ * server and deletes the experiment cookie as it starts -- which would end a
+ * test that is about what the landing page does next.
+ */
+const stayOnPage = (page: Page) =>
+  page.evaluate(() => {
+    document
+      .querySelector("#landing-hero-primary")
+      ?.addEventListener("click", (event) => event.preventDefault());
+  });
+
 test.beforeEach(({}, testInfo) => {
   test.skip(
     testInfo.project.name !== "desktop-chromium",
@@ -303,17 +316,66 @@ test.describe("fixture experiment, forced variant", () => {
     const firstExposure = exposureSent(1)();
     await page.goto("/");
     await firstExposure;
+    await stayOnPage(page);
     await page.locator("#landing-hero-primary").click({ noWaitAfter: true });
     await expect.poll(() => conversions.length).toBe(1);
 
-    // Back on the home page in the same tab session, click again: the first
-    // click is remembered although its answer never ran any callback.
+    // The document goes away with the answer still held (a reload stands in for
+    // the visitor leaving and coming back). In the same tab session, click again:
+    // the first click is remembered although its answer never ran any callback.
     await page.goto("/");
     await page.locator("#landing-hero-primary").waitFor();
     await page.waitForLoadState("networkidle");
+    await stayOnPage(page);
     await page.locator("#landing-hero-primary").click({ noWaitAfter: true });
     await page.waitForTimeout(800);
     expect(conversions.length).toBe(1);
+  });
+
+  test("(b) a click on a page the experiment does not measure is not remembered as a conversion", async ({
+    page,
+    context,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await context.addCookies([
+      { name: "tv_exp", value: CONTROL_COOKIE, url: ORIGIN },
+    ]);
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, "accepted");
+    }, CONSENT_KEY);
+    const conversions: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.url().includes("/api/marketing/experiments") &&
+        request.postDataJSON()?.action === "conversion"
+      ) {
+        conversions.push(request.postDataJSON().locale);
+      }
+    });
+    const exposure = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/marketing/experiments") &&
+        response.request().postDataJSON()?.action === "exposure"
+    );
+
+    // French is outside the registered languages: the route ignores the view,
+    // the page sets no listener, and a click is no conversion.
+    await page.goto("/fr");
+    expect((await (await exposure).json()).status).toBe("ignored");
+    await stayOnPage(page);
+    await page.locator("#landing-hero-primary").click({ noWaitAfter: true });
+    await page.waitForTimeout(600);
+    expect(conversions).toEqual([]);
+
+    // The English home page is measured, and its click still counts: the click
+    // in French left no flag behind. (`/en`, because the French visit stored a
+    // language choice that sends `/` back to `/fr`.)
+    await page.goto("/en");
+    await page.locator("#landing-hero-primary").waitFor();
+    await page.waitForLoadState("networkidle");
+    await stayOnPage(page);
+    await page.locator("#landing-hero-primary").click({ noWaitAfter: true });
+    await expect.poll(() => conversions).toEqual(["en"]);
   });
 
   test("(b) the Korean home page has its own variant copy", async ({
@@ -353,11 +415,14 @@ test.describe("fixture experiment, forced variant", () => {
     await expect(page.getByTestId("landing-hero-title")).toContainText(
       DEFAULT_HEADLINE_EN
     );
+    // The earlier experiment's assignment is gone, and the visitor is offered
+    // the running experiment's instead, from the view after this one.
     await expect
       .poll(async () =>
         (await context.cookies()).find((cookie) => cookie.name === "tv_exp")
+          ?.value
       )
-      .toBeUndefined();
+      .toBe(VARIANT_COOKIE);
   });
 
   test("(c) variant and default responses never mix, in any order", async ({
