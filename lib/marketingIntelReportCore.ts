@@ -28,8 +28,13 @@ import {
 /** The largest body read; the route abandons the stream at the first byte over. */
 export const MARKETING_INTEL_REPORT_MAX_BODY_BYTES = 128 * 1024;
 
-/** The two report kinds the generator's secret may write, and no other. */
-export const MARKETING_GENERATOR_REPORT_KINDS = ["brief", "market_intel"] as const;
+/**
+ * The report kinds the generator's secret may write, and no other. The third,
+ * `measurement_120d`, carries one aggregate rate of the weekly AI-exposure
+ * measurement (docs/policy/marketing-automation.md §10.4, S5): numbers only, no
+ * answer text and no URL.
+ */
+export const MARKETING_GENERATOR_REPORT_KINDS = ["brief", "market_intel", "measurement_120d"] as const;
 export type MarketingGeneratorReportKind = (typeof MARKETING_GENERATOR_REPORT_KINDS)[number];
 
 /** The audit action of a recorded report (docs/policy/marketing-automation.md §6). */
@@ -59,7 +64,15 @@ type MarketIntelPayload = {
   }>;
   unrepresentableFactCount: number;
 };
+type MeasurementPayload = {
+  metricId: string;
+  value: number;
+  sampleSize: number;
+  observedFromAt: string;
+  observedUntilAt: string;
+};
 const briefPayload = MARKETING_REPORT_PAYLOAD_SCHEMAS.brief as z.ZodType<BriefPayload>;
+const measurementPayload = MARKETING_REPORT_PAYLOAD_SCHEMAS.measurement_120d as z.ZodType<MeasurementPayload>;
 const marketIntelPayload = MARKETING_REPORT_PAYLOAD_SCHEMAS.market_intel as z.ZodType<MarketIntelPayload>;
 
 const base = {
@@ -103,6 +116,7 @@ const canonicalCandidate = z.custom<MarketingCompetitorCandidate>((value) => {
 export const marketingGeneratorReportSchema = z
   .discriminatedUnion("kind", [
     z.object({ ...base, kind: z.literal("brief"), payload: briefPayload }).strict(),
+    z.object({ ...base, kind: z.literal("measurement_120d"), payload: measurementPayload }).strict(),
     z
       .object({
         ...base,
@@ -122,6 +136,12 @@ export const marketingGeneratorReportSchema = z
   .superRefine((value, context) => {
     if (Date.parse(value.periodStart) > Date.parse(value.periodEnd)) {
       context.addIssue({ code: "custom", message: "A report period ends no earlier than it starts" });
+    }
+    if (value.kind === "measurement_120d") {
+      const { observedFromAt, observedUntilAt } = value.payload;
+      if (Date.parse(observedFromAt) > Date.parse(observedUntilAt)) {
+        context.addIssue({ code: "custom", message: "A measurement is observed from no later than it is observed until" });
+      }
     }
     if (value.kind === "market_intel" && value.competitorCandidates) {
       const ids = value.competitorCandidates.map((candidate) => candidate.competitorId);
@@ -240,7 +260,7 @@ export function marketingGeneratorReportStoredPayload(
   report: MarketingGeneratorReport,
   hosts: MarketingCompetitorSourceHosts,
 ): { readonly payload: MarketingGeneratorReport["payload"]; readonly droppedFactCount: number } {
-  if (report.kind === "brief") return { payload: report.payload, droppedFactCount: 0 };
+  if (report.kind !== "market_intel") return { payload: report.payload, droppedFactCount: 0 };
   const kept = report.payload.facts.filter((fact) => marketIntelSourceAllowed(fact, hosts));
   const dropped = report.payload.facts.length - kept.length;
   return {
