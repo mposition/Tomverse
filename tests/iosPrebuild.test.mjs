@@ -24,7 +24,7 @@ function fixture(t) {
     if (!existsSync(join(root, target))) write(target, "// fixture dependency");
   }
   cpSync(join(repositoryRoot, native, "Assets.xcassets/AppIcon.appiconset"), join(root, native, "Assets.xcassets/AppIcon.appiconset"), { recursive: true });
-  write(`${native}/capacitor.config.json`, JSON.stringify({ appId: "app.tomverse.shell", loggingBehavior: "none",
+  write(`${native}/capacitor.config.json`, JSON.stringify({ appId: "app.tomverse.shell", loggingBehavior: "none", plugins: { MobileAuth: { apiOrigin: "https://tomverse.app" } },
     packageClassList: ["MobileAuthPlugin", "MobileFilesPlugin", "MobileUpdatesPlugin", "PurchasesPlugin", "CAPBrowserPlugin", "GeolocationPlugin"] }));
   write("apps/mobile/dist/index.html", "<html>fixture</html>");
   write(`${native}/public/index.html`, "<html>fixture</html>");

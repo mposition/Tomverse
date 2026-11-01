@@ -22,7 +22,7 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         CAPPluginMethod(name: "unlockDevice", returnType: CAPPluginReturnPromise)
     ]
     private let queue = DispatchQueue(label: "app.tomverse.mobile.session")
-    private let service = "app.tomverse.mobile.session.v1"
+    private var service: String { MobileSessionNamespace.service(for: origin) }
     private var origin = "https://tomverse.app"
     private var accessToken: String?
     private var expiresAt: Double = 0

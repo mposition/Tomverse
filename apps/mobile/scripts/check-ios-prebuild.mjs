@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { iosApiOrigin } from "./configure-ios-api-origin.mjs";
 
 export const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
 // Use the parsers already supplied by the declared Capacitor CLI dependency.
@@ -38,6 +39,8 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   const projectPath = `${mobile}/ios/App/App.xcodeproj`;
   const config = JSON.parse(read(root, `${native}/capacitor.config.json`));
   assert.equal(config.loggingBehavior, "none", "Synced native bridge logging must stay disabled.");
+  assert.ok(typeof config.plugins?.MobileAuth?.apiOrigin === "string", "Synced native authentication API origin is missing.");
+  const apiOrigin = iosApiOrigin(config.plugins.MobileAuth.apiOrigin);
   for (const option of ["url", "cleartext", "allowNavigation"]) {
     assert.ok(config.server?.[option] === undefined, `Remove production server.${option}.`);
   }
@@ -101,7 +104,7 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   }
   return {
     status: "ready-for-remote-mac-build", iosMinimum: "17.4", capacitorVersion: iosVersion,
-    appId: config.appId, pluginClasses: requiredPlugins, bundledFiles: files.length,
+    appId: config.appId, apiOrigin, pluginClasses: requiredPlugins, bundledFiles: files.length,
     swiftCompilation: "not-run", signing: "not-configured-by-preparation",
     note: "The first unsigned simulator build needs no Apple signing identity. Device signing and HTTPS browser-login associations require the real Apple Team and Bundle ID later.",
   };

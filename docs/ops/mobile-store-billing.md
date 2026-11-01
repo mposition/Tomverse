@@ -169,6 +169,50 @@ The initial catalog uses standard recurring base plans without introductory,
 trial or installment offers. Add those offers only with their complete pricing
 phase disclosures and device validation.
 
+## iOS activation preparation (2026-11-01)
+
+The owner requested iOS plan purchases and approved these initial App Store
+subscription prices, using USA as the base territory and Apple's equalized
+local-currency prices in other available territories:
+
+| Product | USD price |
+| --- | --- |
+| app.tomverse.pro.monthly | 15.00 |
+| app.tomverse.pro.annual | 143.99 |
+| app.tomverse.max.monthly | 25.00 |
+| app.tomverse.max.annual | 239.99 |
+
+The annual values were explicitly approved after confirming that Apple's price
+points cannot represent 144.00 and 240.00 exactly. These initial subscription
+prices do not change the web catalog or introduce trial/installment offers.
+Use Apple's price-point equalizations rather than a locally calculated exchange
+rate. Apple does not automatically revise subscription retail prices for every
+future tax or exchange-rate change; reassess those through the normal pricing
+decision rather than promising continuous conversion.
+
+The manual `ios-testflight-sandbox` Codemagic workflow enables the existing plan
+screen with the Apple public SDK key from `ios_store_billing`. It uses
+`https://staging.tomverse.app` for both product requests and native authentication.
+The existing staging API is configured for SANDBOX billing and uses a different
+database endpoint and ownership key from production. Test purchases grant test
+account access in that isolated environment. RevenueCat notifications must bind
+the existing Apple app `appaefd8126bd` to the sandbox endpoint and exact product
+mapping, while retaining the Google products and webhook.
+
+iOS Keychain and installation-marker namespaces now follow the selected native
+API origin. Production retains its existing namespace; staging, development and
+unconfigured origins cannot read or clear that production credential. A build
+switch requires authentication for its own server. On the Mac, the signing
+workflow compiles and runs the pure Swift namespace tests before exporting the
+IPA. Windows preparation additionally validates the selected native API and an
+Apple `appl_` SDK key when billing is enabled.
+
+This section records preparation and the owner's pricing decision. Verify the
+actual saved App Store prices/availability, server mapping, webhook delivery,
+signed build and device purchase/readback before reporting activation complete.
+The three draft Apple credit packs remain outside this plan-subscription
+activation until their store pricing is configured separately.
+
 ## Verification
 
 Local PC / PowerShell / repository root. These commands use mocked stores or an
