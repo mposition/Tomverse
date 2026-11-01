@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { SUPPORTED_LANGUAGES, type Language } from "@/lib/language";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import type Stripe from "stripe";
@@ -90,7 +91,7 @@ const checkoutSchema = z
   .object({
     planId: z.enum(["pro", "max"]),
     billingInterval: z.enum(["monthly", "annual"]).default("monthly"),
-    language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
+    language: z.enum(SUPPORTED_LANGUAGES).optional(),
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
     analytics: analyticsAttributionSchema.optional(),
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
@@ -141,7 +142,7 @@ const billingSuccessUrl = (
   origin: string,
   planId: BillingPlanId,
   billingInterval: "monthly" | "annual",
-  language?: "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt",
+  language?: Language,
   accessType?: "founding-tester-pass"
 ) =>
   `${origin}${PRODUCT_SURFACE_PATH.review}?billing=success&plan=${encodeURIComponent(

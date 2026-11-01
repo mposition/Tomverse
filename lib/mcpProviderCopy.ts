@@ -33,6 +33,16 @@ export const mcpProviderCopy: Record<Language, Copy> = {
     localHelp: "此插件在本地运行或未公开远程 MCP 地址。Tomverse Chat 不运行本地进程、hook 或 skill。",
     categories: { productivity: "工作与沟通", design: "设计与媒体", development: "开发", data: "数据与搜索", monitoring: "监控", security: "安全", finance: "金融与商务", other: "其他" },
   },
+  "zh-Hant": {
+    adapter: "需要其他傳輸支援", adapterHelp: "此供應商使用 Chat 尚未支援的傳輸方式，需要單獨的傳輸適配器。",
+    category: "分類", any: "所有分類", source: "目錄", anySource: "所有目錄", more: "顯示更多", details: "詳情",
+    remote: "遠端 MCP", managed: "託管應用程式", local: "本機外掛程式", docs: "供應商文件", profiles: "連線設定檔",
+    catalogNotice: "目錄收錄不代表已連線。伺服器設定後才能連線，工具和讀寫權限取決於服務及帳戶。",
+    remoteHelp: "此供應商公開了遠端 MCP 位址。完成伺服器設定與授權後才能在 Chat 中使用。",
+    managedHelp: "此應用程式由其他平台管理，其應用程式識別碼和登入不能重複用於 Tomverse，需要單獨的適配器。",
+    localHelp: "此外掛程式在本機執行或未公開遠端 MCP 位址。Tomverse Chat 不執行本機程序、hook 或 skill。",
+    categories: { productivity: "工作與溝通", design: "設計與媒體", development: "開發", data: "資料與搜尋", monitoring: "監控", security: "安全", finance: "金融與商務", other: "其他" },
+  },
   fr: {
     adapter: "Transport supplémentaire requis", adapterHelp: "Ce fournisseur utilise un transport non pris en charge par Chat. Un adaptateur de transport distinct est nécessaire.",
     category: "Catégorie", any: "Toutes les catégories", source: "Annuaire", anySource: "Tous les annuaires", more: "Afficher plus", details: "Détails",

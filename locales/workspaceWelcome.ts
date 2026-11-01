@@ -174,6 +174,64 @@ export const workspaceWelcomeCopy = {
         },
     },
   },
+  "zh-Hant": {
+    greeting: "歡迎回來，有什麼可以幫你的？",
+    starter: {
+        title: "在這裡可以做什麼",
+        hint: "選擇一張卡片即可填入下方輸入框。在你按下傳送之前不會發出任何內容。",
+        lockedSignIn: "登入後可使用",
+        lockedPlan: "需要 {plan} 方案",
+        lockedSignInShort: "需要登入",
+        lockedPlanShort: "需要 {plan}",
+        cards: {
+            compareAnswers: {
+                label: "並排比較三個回答",
+                outcome: "提出一個問題，並排閱讀三個模型的回答",
+                seed: "用淺顯的語言解釋向量資料庫用來解決什麼問題，大約 200 字。",
+            },
+            documentQuestions: {
+                label: "就一份 PDF 詢問多個模型",
+                outcome: "上傳一份 18 頁的 PDF，向多個模型提出同一個問題",
+                seed: "我上傳了一份文件。請摘要它要我做出什麼決定，並列出其中提到的所有截止日期。",
+            },
+            sourcedAnswer: {
+                label: "取得附帶來源的回答",
+                outcome: "取得一份附帶來源連結的回答",
+                seed: "今年歐盟人工智慧法案的執行有哪些變化？請附上你使用的來源。",
+            },
+            debugStackTrace: {
+                label: "從堆疊追蹤找出出錯的行",
+                outcome: "貼上一段堆疊追蹤，取得出錯的那一行與可嘗試的修正",
+                seed: "這是我建置時的堆疊追蹤。請告訴我哪一行出錯，以及應該改什麼。",
+            },
+            spreadsheetFromAnswer: {
+                label: "產生 .xlsx 檔案",
+                outcome: "把回答變成可下載的 .xlsx 檔案",
+                seed: "幫我建立一份月度預算表，包含類別、計畫金額和實際金額，並儲存為試算表檔案。",
+            },
+            readAScreenshot: {
+                label: "詢問截圖中的錯誤",
+                outcome: "上傳一張截圖，詢問上面的錯誤是什麼意思",
+                seed: "我上傳了一張錯誤對話框的截圖。請告訴我它是什麼意思，以及接下來該怎麼做。",
+            },
+            translateAndCompare: {
+                label: "並排比較兩份譯文",
+                outcome: "翻譯一段草稿，並排比較兩個模型的版本",
+                seed: "把下面的文字翻譯成英文，保持正式的語氣：",
+            },
+            compareImageModels: {
+                label: "比較圖像模型",
+                outcome: "把同一句話傳給多個圖像模型，比較各自的結果",
+                seed: "清晨安靜的閱覽室，暖光從高窗照入，攝影風格。",
+            },
+            speakAQuestion: {
+                label: "用語音提問，再改文字",
+                outcome: "用語音說出較長的問題，在傳送前再修改文字",
+                seed: "把我接下來說的話整理成一份簡短清楚的操作說明。",
+            },
+        },
+    },
+  },
   de: {
     greeting: "Schön, dich wiederzusehen. Womit kann ich helfen?",
     starter: {

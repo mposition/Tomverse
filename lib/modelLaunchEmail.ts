@@ -1,5 +1,5 @@
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
-import { isLanguage, type Language } from "@/lib/language";
+import { emailCopyLanguage, isLanguage, type EmailCopyLanguage, type Language } from "@/lib/language";
 import { normalizeTomverseMarketingUrl } from "@/lib/marketingEmailLayout";
 
 /**
@@ -84,7 +84,7 @@ type Copy = {
   reason: string;
 };
 
-const COPY: Record<Language, Copy> = {
+const COPY: Record<EmailCopyLanguage, Copy> = {
   en: {
     subject: (model) => `${model} is now on Tomverse`,
     lead: (model, plans) => `${model} is available from today on the ${plans} plans.`,
@@ -163,7 +163,7 @@ export function buildModelLaunchEmail(
   language: string
 ) {
   const payload = parseModelLaunchPayload(raw);
-  const copy = COPY[resolve(language)];
+  const copy = COPY[emailCopyLanguage(resolve(language))];
   const lines = [...payload.highlights, payload.creditLine];
 
   const text = [

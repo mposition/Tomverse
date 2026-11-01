@@ -226,6 +226,24 @@ const consentCopy: Record<
     turnOff: "关闭分析",
     turnOffShort: "关闭",
   },
+  "zh-Hant": {
+    title: "保護隱私的產品分析",
+    body: "經您同意，Tomverse 會衡量產品使用與活動歸因。絕不會收集提示詞、回覆、檔案名稱或檔案內容。",
+    mobileBody: "協助改進 Tomverse。絕不收集提示詞和檔案內容。",
+    accept: "允許分析",
+    acceptShort: "允許",
+    decline: "拒絕",
+    declineShort: "拒絕",
+    privacy: "隱私權政策",
+    settings: "分析設定",
+    noticeTitle: "隱私保護分析已開啟",
+    noticeBody: "在此地區，Tomverse 會啟動資料最小化的產品分析，並提供明確的退出選項。絕不會包含提示詞、回覆、檔案名稱或檔案內容，廣告儲存仍保持關閉。",
+    noticeMobileBody: "分析已開啟。不會收集提示詞或檔案。",
+    keepOn: "保持開啟",
+    keepOnShort: "開啟",
+    turnOff: "關閉分析",
+    turnOffShort: "關閉",
+  },
   fr: {
     title: "Analyse produit respectueuse de la vie privée",
     body: "Avec votre accord, Tomverse mesure l’usage du produit et l’attribution des campagnes. Les prompts, réponses, noms et contenus de fichiers ne sont jamais inclus.",
@@ -585,7 +603,7 @@ export function AnalyticsProvider({
     let cancelled = false;
     const runtime = configureAnalyticsClient({
       country: resolvedPolicy.country,
-      language: lang,
+      language: lang === "zh-Hant" ? "zh" : lang,
       measurementId,
       plan: initialPlan,
     });

@@ -54,6 +54,23 @@ test("Accept-Language is read in quality order, not header order", () => {
   );
 });
 
+test("Traditional Chinese browsers and paths resolve to zh-Hant", () => {
+  for (const acceptLanguage of ["zh-TW,zh;q=0.9", "zh-HK", "zh-Hant", "zh-Hant-TW", "zh-MO"]) {
+    assert.equal(resolveDocumentLanguage({ acceptLanguage }).language, "zh-Hant", acceptLanguage);
+  }
+  // Mainland and bare `zh` stay on Simplified.
+  assert.equal(resolveDocumentLanguage({ acceptLanguage: "zh-CN" }).language, "zh");
+  assert.equal(resolveDocumentLanguage({ acceptLanguage: "zh" }).language, "zh");
+  assert.deepEqual(resolveDocumentLanguage({ pathname: "/zh-Hant" }), {
+    language: "zh-Hant",
+    source: "path",
+  });
+  assert.equal(resolveDocumentLanguage({ pathname: "/zh-hant/pricing" }).language, "zh-Hant");
+  assert.equal(resolveDocumentLanguage({ searchLanguage: "zh-Hant" }).language, "zh-Hant");
+  // `/zh-tw` is not a route, so the path does not decide.
+  assert.equal(resolveDocumentLanguage({ pathname: "/zh-tw" }).source, "default");
+});
+
 test("unsupported and malformed inputs fall back to English", () => {
   assert.deepEqual(resolveDocumentLanguage({}), { language: "en", source: "default" });
   assert.equal(
