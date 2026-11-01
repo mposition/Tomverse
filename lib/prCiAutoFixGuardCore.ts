@@ -110,7 +110,7 @@ function chainRoot(list: readonly string[], dot: number): string | null {
   }
 }
 const QUOTED = /^(["'])[\s\S]*\1$/;
-const REGEX_MAY_FOLLOW = new Set(["", "(", ",", "=", ":", "[", "!", "&&", "||", "??", "?", "{", "}", ";", "=>", "return"]);
+const REGEX_MAY_FOLLOW = new Set(["", "(", ",", "=", ":", "[", "!", "&&", "||", "\x3f\x3f", "?", "{", "}", ";", "=>", "return"]);
 
 /**
  * Which tokens of a line call a test or an assertion: every chain from
