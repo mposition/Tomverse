@@ -170,6 +170,12 @@ export type MarketingLlmCallOutcome =
       readonly content: string;
       /** The URLs the provider cited in a web-search answer; empty for a text call. */
       readonly citations: readonly string[];
+      /**
+       * Only the URLs the answer text itself cites (`url_citation`), a subset of
+       * `citations`, which also holds every page the searches returned or opened.
+       * Absent for a text call.
+       */
+      readonly answerCitations?: readonly string[];
       /** Always `settled`: any other ledger state comes back as `retained`. */
       readonly ledgerState: "settled";
     }
@@ -205,6 +211,7 @@ export type MarketingLlmCallOutcome =
 type ProviderAnswer = {
   readonly content: string;
   readonly citations: readonly string[];
+  readonly answerCitations?: readonly string[];
   readonly model: string;
   readonly serviceTier: string;
   readonly inputTokens: number;
@@ -286,7 +293,10 @@ export function readMarketingLlmWebSearchAnswer(body: unknown): ProviderAnswer |
   ) {
     return null;
   }
-  return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
+  const served = () => {
+    return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
+  };
+  return { ...served(), answerCitations: [...new Set(cited)] } as ProviderAnswer;
 }
 
 const ok = (answer: MarketingLlmBudgetAnswer) => answer.httpStatus === 200 && answer.body.status === "ok";
@@ -422,7 +432,15 @@ export async function runMarketingLlmCall(
     if (!ok(settled)) return stop("settle", callId, answer.content);
     const ledgerState = String(settled.body.state ?? "");
     if (ledgerState !== "settled") return { status: "retained", callId, requestKey, ledgerState };
-    return { status: "answered", callId, requestKey, content: answer.content, citations: answer.citations, ledgerState: "settled" };
+    return {
+      status: "answered",
+      callId,
+      requestKey,
+      content: answer.content,
+      citations: answer.citations,
+      ...(answer.answerCitations ? { answerCitations: answer.answerCitations } : {}),
+      ledgerState: "settled",
+    };
   } catch {
     return stop("settle", callId, answer.content);
   }

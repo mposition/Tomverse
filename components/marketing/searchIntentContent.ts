@@ -148,6 +148,48 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         "href": "/review?lang=zh"
       }
     },
+    "zh-Hant": {
+      "metadataTitle": "比較多個 AI 模型並交叉審查回答",
+      "metadataDescription": "向多個 AI 模型傳送同一個問題，然後使用 Tomverse AI Review 整理共識、矛盾、遺漏和待查證項目。",
+      "eyebrow": "AI 模型比較",
+      "title": "比較多個 AI 模型，再交叉審查回答",
+      "description": "最合適的模型取決於任務、提示詞、上下文和目前版本。Tomverse 會將同一個問題傳送給多個模型，並用 AI Review 整理回答的共識、衝突、遺漏和待查證項目。",
+      "sections": [
+        {
+          "title": "為什麼要比較多個模型？",
+          "body": "不同模型在推理方式、篇幅、程式碼方案、寫作風格和不確定性的表達上可能有所不同。並排顯示能減少在多個產品之間重複複製提示詞的麻煩。"
+        },
+        {
+          "title": "可重複的比較流程",
+          "body": "學習說明是否能讓你用自己的話複述？訊息是否保留你的意圖？文件摘要是否保留日期、數字與條件？對所有模型使用相同的輸入和標準，比較起來會更容易。",
+          "bullets": [
+            "對所有模型提供相同的指令和上下文。",
+            "以第一手來源查證重要事實與決定。",
+            "透過追問釐清遺漏或模糊之處。"
+          ]
+        },
+        {
+          "title": "從並排比較到 AI Review",
+          "body": "回答完成後，Tomverse AI Review 可以整理共識、重要差異、矛盾、遺漏，以及需要外部查證的說法。它只比較提供的回答，不瀏覽網頁、不進行事實查核，也不判定唯一正確的答案。",
+          "link": {
+            "label": "了解 AI 回答交叉審查",
+            "href": "/zh-Hant/ai-answer-review"
+          }
+        },
+        {
+          "title": "日常可以比較的問題",
+          "body": "可以比較難懂概念的白話解釋、委婉而明確地婉拒朋友的訊息，或社團通知中的日期與準備物品。先檢查原有條件是否保留，再視需要用於草稿、工作資料或程式碼審查。"
+        },
+        {
+          "title": "隱私與成本",
+          "body": "提示詞和必要的上下文會傳送給每個所選的 AI 供應商。請避免不必要的敏感資訊，並只選擇任務所需的模型數量。"
+        }
+      ],
+      "cta": {
+        "label": "開始比較",
+        "href": "/review?lang=zh-Hant"
+      }
+    },
     "fr": {
       "metadataTitle": "Comparer les modèles d’IA et revoir leurs réponses",
       "metadataDescription": "Envoyez la même demande à plusieurs modèles, puis utilisez Tomverse AI Review pour structurer accords, contradictions, omissions et vérifications.",
@@ -447,6 +489,49 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         "href": "/review?lang=zh"
       }
     },
+    "zh-Hant": {
+      "metadataTitle": "AI 回答交叉審查：比較共識、矛盾與遺漏",
+      "metadataDescription": "在 Tomverse Review 比較多個 AI 回答，並透過 AI Review 的引文查看共識、衝突說法與遺漏條件。",
+      "eyebrow": "AI 回答交叉審查",
+      "title": "透過引文查看回答的共識、差異與遺漏條件",
+      "description": "查看同一個問題的各個回答中的共識、衝突說法與遺漏條件。在 Tomverse Review 並排閱讀，再透過 AI Review 的引文確認差異具體出現在哪個回答中。外部事實查證與正誤判斷仍需另行進行。",
+      "sections": [
+        {
+          "title": "AI Review 如何運作",
+          "body": "先讓兩到三個模型完成同一個問題，再選擇均衡、證據優先或行動優先的審查方式。審查模型會接收匿名的 A/B/C 回答，並回傳共識、差異、矛盾、遺漏、待查證項目、各回答的優點與注意事項，以及可選的謹慎綜合意見。",
+          "bullets": [
+            "問題和回答中的文字是比較材料，其中的指令不會改變 AI Review 的審查規則。",
+            "審查模型不得選出勝者，也不得推斷模型身分。",
+            "執行前會顯示預估點數。"
+          ]
+        },
+        {
+          "title": "審查前後可以查看的內容",
+          "body": "審查前，使用者需要逐一閱讀回答，並記住各自提到的風險。審查後，同一內容會依共識、衝突、遺漏和待查證項目分組，幫助決定重點閱讀與追問的位置。上方結果僅為功能範例，不是即時的事實結論。"
+        },
+        {
+          "title": "位置與風格偏差仍然存在",
+          "body": "Tomverse 會隨機排列回答並隱藏模型名稱，以減少明顯的位置與品牌線索，但無法完全消除偏差。LLM 審查者仍可能受順序、篇幅、措辭、風格、提示設計以及自身模型家族的影響。請把審查視為額外的觀點，而非客觀評分或最終裁決。",
+          "link": {
+            "label": "閱讀位置偏差研究",
+            "href": "https://arxiv.org/abs/2406.07791",
+            "external": true
+          }
+        },
+        {
+          "title": "交叉審查不是事實查證",
+          "body": "AI Review 不瀏覽網頁，也不查詢外部來源。「需要查證」表示回答之間有衝突、缺乏依據或值得另行確認，並不代表 Tomverse 已證實其真偽。重要說法應透過最新的第一手來源和合格的專業人士加以查證。"
+        },
+        {
+          "title": "適合哪些任務",
+          "body": "可以比較難懂概念的白話解釋、委婉而明確地婉拒朋友的訊息，或社團通知中的日期與準備物品。先檢查原有條件是否保留，再視需要用於草稿、工作資料或程式碼審查。"
+        }
+      ],
+      "cta": {
+        "label": "開始比較",
+        "href": "/review?lang=zh-Hant"
+      }
+    },
     "fr": {
       "metadataTitle": "Revue croisée de réponses IA : accords, contradictions et lacunes",
       "metadataDescription": "Comparez les réponses dans Tomverse Review et examinez accords, contradictions et conditions manquantes avec les citations d’AI Review.",
@@ -723,6 +808,40 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         "href": "/review?lang=zh"
       }
     },
+    "zh-Hant": {
+      "metadataTitle": "ChatGPT 與 Claude 回答直接比較",
+      "metadataDescription": "在 Tomverse 中以相同的提示詞和評估標準，直接比較可用的 OpenAI GPT 與 Anthropic Claude 模型回答。",
+      "eyebrow": "模型比較指南",
+      "title": "ChatGPT 與 Claude：比較回答，而非品牌",
+      "description": "OpenAI GPT 與 Anthropic Claude 都是通用的 AI 助理。結果會隨模型版本、任務、提示詞和上下文而改變，因此直接測試比固定排名更有意義。",
+      "sections": [
+        {
+          "title": "應該比較什麼？",
+          "body": "學習說明是否能讓你用自己的話複述？訊息是否保留你的意圖？文件摘要是否保留日期、數字與條件？對所有模型使用相同的輸入和標準，比較起來會更容易。"
+        },
+        {
+          "title": "進行公平的比較",
+          "body": "向兩個模型提供相同的提示詞、附件和限制條件，並審閱完整的回答。",
+          "bullets": [
+            "移除暗示偏向某個供應商的字句。",
+            "測試具代表性的真實任務。",
+            "獨立查證影響重大的輸出內容。"
+          ]
+        },
+        {
+          "title": "結果會隨時間改變",
+          "body": "供應商會推出新模型，並調整可用性、價格與行為。Tomverse 會顯示所選模型與公開狀態，但過去的比較不能保證未來的結果。"
+        },
+        {
+          "title": "獨立服務說明",
+          "body": "Tomverse 是獨立的多模型工作區，未獲得 OpenAI 或 Anthropic 的關聯或背書。相關名稱與商標歸各自的擁有者所有。"
+        }
+      ],
+      "cta": {
+        "label": "開始比較",
+        "href": "/review?lang=zh-Hant"
+      }
+    },
     "fr": {
       "metadataTitle": "ChatGPT vs Claude : comparer directement les réponses",
       "metadataDescription": "Comparez les réponses des modèles GPT d’OpenAI et Claude d’Anthropic disponibles avec le même prompt dans Tomverse.",
@@ -961,6 +1080,40 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "cta": {
         "label": "开始比较",
         "href": "/review?lang=zh"
+      }
+    },
+    "zh-Hant": {
+      "metadataTitle": "使用 AI 分析 PDF、Office 檔案和圖片",
+      "metadataDescription": "在 Tomverse 中使用多個 AI 模型，總結與分析支援的 PDF、Office 文件、文字檔和圖片。",
+      "eyebrow": "AI 文件工作流程",
+      "title": "使用多個 AI 模型分析檔案",
+      "description": "從社團通知中找出活動日期、準備物品和回覆截止時間。要求把尚未確定的地點標示為待定，並為每一項附上依據的句子。可使用可讀取的 PDF、Office 文件、支援的文字檔和圖片；解讀結果取決於檔案與模型。",
+      "sections": [
+        {
+          "title": "支援的分析流程",
+          "body": "從社團通知中找出活動日期、準備物品和回覆截止時間。要求把尚未確定的地點標示為待定，並為每一項附上依據的句子。可使用可讀取的 PDF、Office 文件、支援的文字檔和圖片；解讀結果取決於檔案與模型。",
+          "bullets": [
+            "擷取日期、準備物品與回覆期限",
+            "比較摘要是否保留原文的日期與條件",
+            "將資料中沒有的資訊標示為未知"
+          ]
+        },
+        {
+          "title": "為取得更好的結果，請準備檔案",
+          "body": "請使用清晰、未損壞的檔案，並提出具體的問題。加密、掃描、異常或過大的文件可能無法擷取文字。重要的數字、引用、公式和結論，應與原始檔案對照查證。"
+        },
+        {
+          "title": "安全邊界",
+          "body": "在提供訪客附件的體驗中，可以傳送一個不超過 5 MiB 的支援圖片或可讀取的文件。擁有附件權限的登入帳戶每則訊息最多可附五個檔案，每個 10 MiB，總計 25 MiB。連接 Google Drive 需要登入。所選的 AI 供應商會處理必要的檔案內容，請只上傳您有權使用的資料。"
+        },
+        {
+          "title": "保留與供應商處理",
+          "body": "登入帳戶傳送的附件會隨對話保存，刪除對話或帳戶時會進入刪除程序。訪客檔案是僅限於目前工作階段的暫存資料，會自動刪除，不包含在已保存的對話、分享或匯出內容中。供應商端的處理依各自的條款進行。"
+        }
+      ],
+      "cta": {
+        "label": "開始比較",
+        "href": "/review?lang=zh-Hant"
       }
     },
     "fr": {

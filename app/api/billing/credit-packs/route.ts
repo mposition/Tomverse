@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { SUPPORTED_LANGUAGES } from "@/lib/language";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -43,7 +44,7 @@ import { buildCreditPackReturnUrls } from "@/lib/purchaseIntent";
 const inputSchema = z
   .object({
     packId: z.string().max(32),
-    language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
+    language: z.enum(SUPPORTED_LANGUAGES).optional(),
     analytics: analyticsAttributionSchema.optional(),
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
     currency: z.enum(BILLING_CURRENCIES).optional(),

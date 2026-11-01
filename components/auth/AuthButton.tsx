@@ -1635,6 +1635,7 @@ export function AuthButton({
                                                 >
                                                     <option className="bg-white text-zinc-900" value="en">{t("auth.languageEnglish")}</option>
                                                     <option className="bg-white text-zinc-900" value="zh">{t("auth.languageChinese")}</option>
+                                                    <option className="bg-white text-zinc-900" value="zh-Hant">{t("auth.languageTraditionalChinese")}</option>
                                                     <option className="bg-white text-zinc-900" value="ko">{t("auth.languageKorean")}</option>
                                                     <option className="bg-white text-zinc-900" value="fr">{t("auth.languageFrench")}</option>
                                                     <option className="bg-white text-zinc-900" value="de">{t("auth.languageGerman")}</option>
@@ -2489,7 +2490,7 @@ export function AuthButton({
           onChange={(event) => setGlobalLang(event.target.value as Language)}
           className="min-w-0 flex-1 cursor-pointer bg-transparent text-xs font-semibold outline-none"
         >
-          {(["en", "ko", "zh", "fr", "de", "es", "pt"] as Language[]).map(
+          {(["en", "ko", "zh", "zh-Hant", "fr", "de", "es", "pt"] as Language[]).map(
             (language) => (
               <option
                 key={language}

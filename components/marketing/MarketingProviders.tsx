@@ -11,26 +11,12 @@ import {
   type Language,
 } from "@/components/LanguageProvider";
 import { isAppLanguage } from "@/lib/localizedCallbackUrl";
+import { marketingLocaleFor } from "@/lib/marketingLocale";
 import { ModelCatalogProvider } from "@/components/ModelCatalogProvider";
 
-const localeAliases: Record<string, Language> = { kr: "ko", cn: "zh" };
-const supportedLocales = new Set<Language>([
-  "en",
-  "ko",
-  "zh",
-  "fr",
-  "de",
-  "es",
-  "pt",
-]);
-
 const pathnameLanguage = (pathname: string): Language | null => {
-  const candidate = pathname.split("/").filter(Boolean)[0]?.toLowerCase();
-  if (!candidate) return null;
-  if (candidate in localeAliases) return localeAliases[candidate];
-  return supportedLocales.has(candidate as Language)
-    ? (candidate as Language)
-    : null;
+  const candidate = pathname.split("/").filter(Boolean)[0];
+  return candidate ? marketingLocaleFor(candidate) : null;
 };
 
 const normalizePlan = (

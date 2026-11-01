@@ -1,5 +1,5 @@
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
-import { isLanguage, type Language } from "@/lib/language";
+import { emailCopyLanguage, isLanguage, type EmailCopyLanguage, type Language } from "@/lib/language";
 import {
   feedbackEmailCategory,
   isFeedbackClosureOutcome,
@@ -97,7 +97,7 @@ type LifecycleCopy = {
   };
 };
 
-const COPY: Record<Language, LifecycleCopy> = {
+const COPY: Record<EmailCopyLanguage, LifecycleCopy> = {
   ko: {
     supportLabel: "Tomverse 지원",
     category: { bug: "오류 신고", feedback: "피드백" },
@@ -618,7 +618,7 @@ export function buildFeedbackLifecycleEmail(
   input: FeedbackLifecycleEmailInput
 ): { subject: string; text: string; html: string } {
   const language = normalizeFeedbackEmailLanguage(input.language);
-  const copy = COPY[language];
+  const copy = COPY[emailCopyLanguage(language)];
   const category = feedbackEmailCategory(input.type);
   const categoryName = copy.category[category];
   const reference = input.reference.trim();

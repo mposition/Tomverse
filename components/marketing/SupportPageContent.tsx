@@ -248,6 +248,68 @@ const copy: Record<Language, SupportCopy> = {
     "appCta": "打开 Review",
     "messageExample": "例如：在 Review 附加 PDF 后没有收到回答。请提供大致时间、模型、文件格式与大小以及屏幕追踪ID。不要发送密码或银行卡号。"
   },
+  "zh-Hant": {
+    "eyebrow": "支援",
+    "title": "我們可以如何協助您？",
+    "description": "登入、付款、模型回答或檔案使用遇到問題時，請告訴我們。請透過下方表單或電子郵件提交問題，並提供排查所需的資訊。支援透過表單和電子郵件提供，一般回覆時間請見下方。",
+    "emailLabel": "支援信箱",
+    "emailValue": "support@tomverse.app",
+    "responseLabel": "一般回覆時間",
+    "responseValue": "1-2 個工作天",
+    "noPhoneLabel": "支援管道",
+    "noPhoneValue": "僅限電子郵件和表單",
+    "cards": [
+      {
+        "title": "帳戶與帳單",
+        "body": "取得登入、方案變更、取消訂閱、退款申請和 Stripe 結帳相關的協助。",
+        "bullets": [
+          "請附上帳戶的電子郵件",
+          "說明相關的方案",
+          "如果知道，請提供結帳或退款的時間"
+        ]
+      },
+      {
+        "title": "模型與檔案問題",
+        "body": "回報模型無法使用、空白回覆、不支援的檔案、PDF 問題和附件錯誤。",
+        "bullets": [
+          "如有追蹤 ID，請一併提供",
+          "包含模型名稱",
+          "說明檔案類型和大致大小"
+        ]
+      },
+      {
+        "title": "產品回饋",
+        "body": "請告訴我們使用上的困難、需要的功能或翻譯錯誤，並說明所在的頁面與想完成的操作。",
+        "bullets": [
+          "說明頁面或裝置",
+          "描述預期的行為",
+          "必要時請提供截圖"
+        ]
+      }
+    ],
+    "formTitle": "聯絡支援",
+    "formDescription": "提交後由支援團隊處理。選擇電子郵件狀態更新後，該信箱會收到受理編號和進度說明。",
+    "typeLabel": "請求類型",
+    "types": {
+      "support": "一般支援",
+      "bug": "問題或錯誤",
+      "billing": "帳單",
+      "feature": "功能建議",
+      "other": "其他"
+    },
+    "emailInput": "電子郵件地址",
+    "emailUpdatesLabel": "透過電子郵件接收此請求的處理狀態",
+    "emailUpdatesNote": "受理回執和處理狀態會寄送到此信箱。不需要時請取消勾選。",
+    "traceInput": "追蹤 ID 或參考編號，選填",
+    "messageInput": "請說明發生了什麼事，以及您期望的結果。",
+    "submit": "送出請求",
+    "sending": "傳送中...",
+    "success": "支援請求已送出。",
+    "failed": "無法送出支援請求。",
+    "helpCta": "查看說明中心",
+    "appCta": "開啟 Review",
+    "messageExample": "例如：在 Review 附加 PDF 後沒有收到回答。請提供大約的時間、模型、檔案格式與大小，以及畫面上的追蹤 ID。請勿傳送密碼或卡號。"
+  },
   "fr": {
     "eyebrow": "Support",
     "title": "Comment pouvons-nous vous aider ?",
