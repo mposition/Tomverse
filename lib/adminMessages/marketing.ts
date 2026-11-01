@@ -94,7 +94,6 @@ export const adminMarketingMessages = defineAdminMessages({
     switchConfirmOn: "Turn this on?",
     switchNoGeneration:
       "The configuration version could not be read, so no switch can be changed from here right now.",
-    switchPublishUnavailable: "Cannot be turned on until the publisher is ready.",
     switchAutonomousNeedsBoth: "Needs drafts and publishing both on first.",
     capsManualChannel:
       "This channel is posted by hand, so there is no publisher cap to lower.",
@@ -470,7 +469,6 @@ export const adminMarketingMessages = defineAdminMessages({
     switchConfirmOn: "켤까요?",
     switchNoGeneration:
       "설정 버전을 읽지 못해 지금은 여기서 스위치를 바꿀 수 없습니다.",
-    switchPublishUnavailable: "게시기가 준비되기 전에는 켤 수 없습니다.",
     switchAutonomousNeedsBoth: "초안 접수와 게시가 모두 켜져야 켤 수 있습니다.",
     capsManualChannel:
       "이 채널은 사람이 직접 올리므로 내릴 publisher 상한이 없습니다.",
