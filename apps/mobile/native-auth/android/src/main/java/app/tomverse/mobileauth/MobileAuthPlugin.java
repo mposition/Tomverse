@@ -138,7 +138,7 @@ public class MobileAuthPlugin extends Plugin {
     private String refusalCode(int status, JSONObject body) {
         if (status == 429) return "MOBILE_RATE_LIMITED";
         String code = body.optString("code");
-        if (Arrays.asList("EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED").contains(code)) return code;
+        if (Arrays.asList("EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_SIGNUP_UNAVAILABLE", "MOBILE_SIGNUP_TERMS_REQUIRED", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED").contains(code)) return code;
         return status == 404 || status == 503 || "INVALID_REQUEST_ORIGIN".equals(code) ? "MOBILE_LOGIN_UNAVAILABLE" : "MOBILE_LOGIN_FAILED";
     }
     private JSONObject post(String path, JSONObject body) throws Exception { return request(path, body, null); }
@@ -260,10 +260,14 @@ public class MobileAuthPlugin extends Plugin {
         if (call != null) call.reject("Browser sign-in could not finish", code);
     }
     private void requireEmailSupport() throws Exception {
+        requireEmailSupport(false);
+    }
+    private void requireEmailSupport(boolean signup) throws Exception {
         try {
             JSONObject support = request("/api/auth/mobile/email", null, null);
             if (!support.optBoolean("ok") || !support.optBoolean("emailCode")) throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE");
-        } catch (AuthFailure unsupported) { throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE"); }
+            if (signup && !support.optBoolean("emailSignup")) throw new AuthFailure("MOBILE_SIGNUP_UNAVAILABLE");
+        } catch (AuthFailure unsupported) { throw unsupported; }
     }
     @PluginMethod public void requestEmailCode(PluginCall call) {
         queue.execute(() -> {
@@ -284,8 +288,15 @@ public class MobileAuthPlugin extends Plugin {
             try {
                 String email = call.getString("email"); String code = call.getString("code");
                 if (email == null || email.length() > 320 || code == null || !code.matches("[0-9]{6}")) throw new AuthFailure("EMAIL_CODE_INVALID");
+                JSONObject body = new JSONObject().put("action", "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL);
+                String intent = call.getString("intent");
+                if (intent != null) {
+                    if (!"signup".equals(intent) || !Boolean.TRUE.equals(call.getBoolean("termsAccepted"))) throw new AuthFailure("MOBILE_SIGNUP_TERMS_REQUIRED");
+                    requireEmailSupport(true);
+                    body.put("intent", "signup").put("termsAccepted", true);
+                }
                 clear();
-                acceptSignIn(post("/api/auth/mobile/email", new JSONObject().put("action", "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL)), generation);
+                acceptSignIn(post("/api/auth/mobile/email", body), generation);
                 call.resolve();
             } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Could not verify sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });

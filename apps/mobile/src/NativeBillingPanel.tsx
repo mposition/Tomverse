@@ -15,6 +15,8 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
   const c = mobileBillingCopy(language);
   const number = (value: number | undefined) => (value ?? 0).toLocaleString(language);
   const date = (value: string) => new Date(value).toLocaleDateString(language);
+  const storePrice = (product?: PurchasesStoreProduct) => product
+    ? [product.currencyCode, product.priceString].filter(Boolean).join(" ") : c.unavailable;
   const [state, setState] = useState<MobileBillingState | null>(null);
   const [products, setProducts] = useState<PurchasesStoreProduct[]>([]);
   const [busy, setBusy] = useState(() => Capacitor.isNativePlatform());
@@ -150,6 +152,7 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
       {state.active && state.subscriptionStore !== store && <p>{c.originalProvider}</p>}
       {state.active && state.cancelAtPeriodEnd && <p>{c.cancelledRenewal}</p>}
       <h3 className="native-billing-plan-heading">{c.choose}</h3>
+      <p className="native-billing-currency-note">{formatMobileBillingCopy(c.currencyNotice, { store: storeName })}</p>
       <div role="group" aria-label={c.billingPeriod} className="native-billing-interval">
         <button type="button" aria-pressed={interval === "monthly"} onClick={() => setInterval("monthly")} disabled={busy}>{c.monthly}</button>
         <button type="button" aria-pressed={interval === "annual"} onClick={() => setInterval("annual")} disabled={busy}>{c.annual}</button>
@@ -158,7 +161,7 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
         if (item.kind !== "subscription") return null;
         const product = products.find((p) => p.identifier === item.productId);
         return <article key={item.productId} data-featured={item.plan === "Max" || undefined}><h4>{item.plan}</h4>
-          <p className="native-billing-price"><strong>{product?.priceString || c.unavailable}</strong><span> / {interval === "annual" ? c.priceYear : c.priceMonth}</span></p>
+          <p className="native-billing-price"><strong>{storePrice(product)}</strong><span> / {interval === "annual" ? c.priceYear : c.priceMonth}</span></p>
           <p className="native-billing-benefits">{formatMobileBillingCopy(c.planBenefitCompact, { credits: number(item.monthlyCredits), models: number(item.maxModels) })}</p>
           <button type="button" disabled={busy || !product || !canPurchaseMobileProduct(state, item, store)} onClick={() => { void purchase(product!); }}>
             {item.kind === "subscription" && state.active && state.plan === item.plan ? c.currentPlanButton : state.active ? c.changePlan : c.subscribe}
@@ -179,7 +182,7 @@ export function NativeBillingPanel({ language, onClose }: { language: MobileLang
       <h3>{c.additionalCredits}</h3><p className="native-billing-credit-terms">{c.creditTerms}</p>
       <div className="native-billing-products native-billing-credit-list">{state.products.filter((p) => p.kind === "credits").map((item) => {
         const product = products.find((p) => p.identifier === item.productId);
-        return <article key={item.productId}><Coins size={20} aria-hidden="true" /><div className="native-billing-credit-copy"><h4>{formatMobileBillingCopy(c.creditPack, { credits: number(item.credits) })}</h4><p>{product?.priceString || c.unavailable}</p></div>
+        return <article key={item.productId}><Coins size={20} aria-hidden="true" /><div className="native-billing-credit-copy"><h4>{formatMobileBillingCopy(c.creditPack, { credits: number(item.credits) })}</h4><p>{storePrice(product)}</p></div>
           <button type="button" disabled={busy || !product || !canPurchaseMobileProduct(state, item, store)} onClick={() => { void purchase(product!); }}>{c.buyCredits}</button></article>;
       })}</div>
       <div className="native-billing-management">

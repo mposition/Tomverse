@@ -66,10 +66,11 @@ export type MarketingAction = {
    * Why this cannot be done yet, when that is a fact rather than a refusal.
    *
    * A control the server is certain to refuse is not a control. Turning
-   * publishing on is the case: the publisher capability arrives in S2c, so the
-   * writer answers `publisher_capability_unavailable` every time. It is drawn
-   * disabled with this sentence instead of being hidden, because an operator
-   * looking for the switch should find out why rather than find nothing.
+   * autonomous publishing on while drafts or publishing are off is the case:
+   * the writer answers `autonomous_needs_drafts_and_publish` every time. It is
+   * drawn disabled with this sentence instead of being hidden, because an
+   * operator looking for the switch should find out why rather than find
+   * nothing.
    */
   unavailable?: string;
   /** Turns a successful result into a sentence, when the result says something. */

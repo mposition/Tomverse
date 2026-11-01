@@ -42,7 +42,8 @@ export type AmuxAnalysisContinuationInspection =
   | { ok: false; stage: "owner_input"; reason: "new_source_plan_required";
       parsed: Extract<AmuxAnalysisChunkInspection, { ok: true }> }
   | { ok: false; stage: "history"; reason: "history_invalid" | "history_closed" }
-  | { ok: false; stage: "chunk"; code: Extract<AmuxAnalysisChunkInspection, { ok: false }>["code"] }
+  | { ok: false; stage: "chunk"; code: Extract<AmuxAnalysisChunkInspection, { ok: false }>["code"];
+      at?: Extract<AmuxAnalysisChunkInspection, { ok: false }>["at"] }
   | { ok: false; stage: "cursor"; reason: Extract<AmuxOutputCursorDecision, { decision: "hold" }>["reason"] };
 
 const PAGE_KEYS = ["chunkIndex", "coveredStartOrdinal", "coveredEndOrdinal",
@@ -147,7 +148,10 @@ export function inspectAmuxAnalysisContinuation(
     permittedTargetRefs: fields.permittedTargetRefs,
     requiredSchemaVersion,
   });
-  if (!parsed.ok) return { ok: false, stage: "chunk", code: parsed.code };
+  if (!parsed.ok) {
+    return parsed.at ? { ok: false, stage: "chunk", code: parsed.code, at: parsed.at } :
+      { ok: false, stage: "chunk", code: parsed.code };
+  }
 
   const { continuationKind, coverageStatus } = parsed.chunk;
   // A human question closes this source-plan run rather than producing an

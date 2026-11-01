@@ -387,7 +387,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     session: async () => { const active = (await bridge.hasSession()).signedIn; if (!active) clearSessionState(); return active; },
     signIn: async () => { clearSessionState(); await bridge.signIn(); },
     requestEmailCode: (email, language) => bridge.requestEmailCode({ email, language }),
-    verifyEmailCode: (email, code) => { clearSessionState(); return bridge.verifyEmailCode({ email, code }); },
+    verifyEmailCode: (email, code, signup) => { clearSessionState(); return bridge.verifyEmailCode({ email, code, ...signup }); },
     signOut: () => { clearSessionState(); return bridge.signOut(); },
     list: async () => {
       const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean; productKey?: string | null }>>("/api/conversations", { headers: displayTimeZoneHeaders() });
