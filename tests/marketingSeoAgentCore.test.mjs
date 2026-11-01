@@ -439,7 +439,7 @@ test("the checks run as another user, or the runner is acknowledged as disposabl
     for (const value of ["false", "1", "TRUE", ""]) {
         assert.deepEqual(isolation({ MARKETING_SEO_CHECKS_SAME_USER_ACK: value }), { mode: "refused", reason: "check_user_required" }, value);
     }
-    for (const [uid, gid] of [["0", "1000"], ["1000", "0"], ["1000", undefined], [undefined, "1000"], ["-1", "1"], ["abc", "1"], ["1.5", "1"], ["", ""]]) {
+    for (const [uid, gid] of [["0", "1000"], ["1000", "0"], ["1000", undefined], [undefined, "1000"], ["-1", "1"], ["abc", "1"], ["1.5", "1"], ["", ""], ["4294967295", "1"], ["9999999999", "1"], ["1", "4294967296"]]) {
         assert.deepEqual(isolation({ MARKETING_SEO_CHECK_UID: uid, MARKETING_SEO_CHECK_GID: gid }), { mode: "refused", reason: "check_user_invalid" }, `${uid}/${gid}`);
     }
     // A check user equal to this process's own user is not another user.
@@ -803,7 +803,10 @@ test("the check user can write only the tools' outputs, and every check has a de
     // The chown names the outputs and the HOME; there is no recursive handover of the work tree.
     assert.doesNotMatch(source, /chown",\s*\["-R",\s*"-h",[^\]]*\bdir\b\s*,\s*home/);
     assert.match(source, /join\(dir, "\.next"\), join\(dir, "next-env\.d\.ts"\), home/);
-    assert.match(source, /timeout: CHECK_TIMEOUT_MS/);
+    assert.match(source, /setTimeout\(\(\) => \{\s*timedOut = true;\s*killTree\(\);\s*\}, CHECK_TIMEOUT_MS\)/);
+    // The whole process group goes at the deadline and when the check ends, not only the direct child.
+    assert.match(source, /process\.kill\(-child\.pid, "SIGKILL"\)/);
+    assert.doesNotMatch(source, /spawnSync\(command\.argv/);
     assert.match(source, /signal: AbortSignal\.timeout\(GITHUB_TIMEOUT_MS\)/);
     assert.match(source, /"--end-of-options"/);
 });

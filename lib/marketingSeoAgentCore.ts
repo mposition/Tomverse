@@ -109,7 +109,9 @@ export function seoAgentCheckIsolation(
   const uid = env[SEO_AGENT_CHECK_UID_ENV];
   const gid = env[SEO_AGENT_CHECK_GID_ENV];
   if (uid !== undefined || gid !== undefined) {
-    const valid = (value: string | undefined) => typeof value === "string" && /^[1-9][0-9]{0,9}$/.test(value);
+    // 1 to 4294967294: what a uid or gid can be (4294967295 is "no id").
+    const valid = (value: string | undefined) =>
+      typeof value === "string" && /^[1-9][0-9]{0,9}$/.test(value) && Number(value) <= 4_294_967_294;
     // Root (0) is not a separate user, and a half-set pair is a mistake, not a default.
     if (platform === "win32" || !valid(uid) || !valid(gid) || Number(uid) === ownUid) {
       return { mode: "refused", reason: "check_user_invalid" };

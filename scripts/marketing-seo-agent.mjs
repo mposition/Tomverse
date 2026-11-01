@@ -182,6 +182,8 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   mkdirSync(outDir, { recursive: true });
   if (readdirSync(outDir).length > 0) fail(new Error("--out must be an empty directory"));
   const scratch = mkdtempSync(join(tmpdir(), "seo-agent-"));
+  // Removed on every exit path, a refusal or a throw included.
+  process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
 
   // The workspace's git directory lives beside the work tree, not in it, and is this process's:
   // the check user owns the files and can change neither the repository's config, its hooks nor
@@ -250,6 +252,35 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
     baseTests: async (base) =>
       SEO_AGENT_POLICY_TESTS.filter((path) => spawnSync("git", ["cat-file", "-e", `${base}:${path}`], { cwd: root }).status === 0),
     runChecks: async (dir, commands, isolation) => {
+      // One check, with every process it starts. spawnSync's timeout ends only the direct child, so the
+      // check leads its own process group (a job on Windows is taskkill /T) and the whole group is killed
+      // at the deadline and again when the check ends, whatever it left running.
+      const runOne = (command, options) =>
+        new Promise((resolveRun) => {
+          const child = spawn(command.argv[0], command.argv.slice(1), { ...options, detached: process.platform !== "win32" });
+          let timedOut = false;
+          const killTree = () => {
+            try {
+              if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)]);
+              else process.kill(-child.pid, "SIGKILL");
+            } catch {
+              // Nothing of the group is left.
+            }
+          };
+          const timer = setTimeout(() => {
+            timedOut = true;
+            killTree();
+          }, CHECK_TIMEOUT_MS);
+          child.on("error", () => {
+            clearTimeout(timer);
+            resolveRun(1);
+          });
+          child.on("exit", (code) => {
+            clearTimeout(timer);
+            killTree();
+            resolveRun(timedOut ? 124 : (code ?? 1));
+          });
+        });
       // The checks execute the proposed code: they get an allowlisted environment, not this process's...
       const env = { ...seoAgentStageEnvironment(process.env, "checks"), NODE_OPTIONS: "--max-old-space-size=8192" };
       // ...and, where the operator gave a user for them, they run as that user, who cannot read
@@ -275,17 +306,9 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
       }
       for (const command of commands) {
         console.log(JSON.stringify({ event: "marketing_seo_agent_check", check: command.label }));
-        const result = spawnSync(command.argv[0], command.argv.slice(1), {
-          cwd: dir,
-          env,
-          stdio: "inherit",
-          shell: process.platform === "win32",
-          // Proposed code can loop forever; a check that outlives its time has failed.
-          timeout: CHECK_TIMEOUT_MS,
-          killSignal: "SIGKILL",
-          ...asUser,
-        });
-        if (result.status !== 0) return { ok: false, label: command.label };
+        // Proposed code can loop forever or leave processes behind; a check that outlives its time has failed.
+        const status = await runOne(command, { cwd: dir, env, stdio: "inherit", shell: process.platform === "win32", ...asUser });
+        if (status !== 0) return { ok: false, label: command.label };
       }
       return { ok: true };
     },
@@ -313,8 +336,6 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
   };
 
   try {
-    // A clone that fails half-way never reaches the core's cleanup, so the scratch is removed here too.
-    process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
     const result = await runSeoAgentValidate({ topic, baseCommit, env: process.env, platform: process.platform, ownUid: process.getuid?.() }, ports);
     if (result.status === "validated") {
       writeFileSync(join(resolve(outDir), "record.json"), `${JSON.stringify(result.record, null, 2)}\n`);
