@@ -111,7 +111,7 @@ test("off, or stopped by the kill switch: answered before anything is read", asy
   for (const env of [{}, { MARKETING_COMMENTS_MONITOR_ENABLED: "true", MARKETING_AUTOMATION_KILL_SWITCH: "1" }]) {
     reset(env);
     assert.deepEqual(await call({ action: "collect" }), { status: 200, body: { status: "off" } });
-    assert.deepEqual(await call({ action: "judge", readAt: new Date().toISOString(), verdicts: [] }), {
+    assert.deepEqual(await call({ action: "judge", readAt: new Date().toISOString(), backlog: false, verdicts: [] }), {
       status: 200,
       body: { status: "off" },
     });

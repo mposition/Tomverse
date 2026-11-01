@@ -4,9 +4,9 @@
  * "Two steps").
  *
  * `collect` returns the new comment bodies a run would ask about, each with its
- * id (the SHA-256 of the body), and the `readAt` its reading covers up to --
- * now, or for a backlog past the cap an earlier instant the next run carries on
- * from. `judge` takes back a verdict per id and runs the whole monitor here:
+ * id (the SHA-256 of the body), the `readAt` its reading covers up to -- now,
+ * or for a backlog past the cap an earlier instant -- and `backlog` for such a
+ * cut. `judge` takes both back with a verdict per id and runs the whole monitor here:
  * it reads the comments again, asks the verdicts in place of a model, records
  * the alerts, counts unanswered ones against their accounts and records the run
  * only if it was whole. The service that sends the verdicts is authenticated,
@@ -22,6 +22,7 @@ import { z } from "zod";
 
 import {
   MARKETING_COMMENT_COLLECT_MAX_BODIES,
+  MARKETING_COMMENT_MONITOR_OVERLAP_MS,
   MARKETING_COMMENT_RISK_CODES,
   collectMarketingCommentBodies,
   runMarketingCommentsMonitor,
@@ -50,6 +51,7 @@ export const marketingCommentsMonitorRequestSchema = z.discriminatedUnion("actio
     .object({
       action: z.literal("judge"),
       readAt: z.string().datetime({ offset: false }),
+      backlog: z.boolean(),
       verdicts: z
         .array(
           z
@@ -75,7 +77,7 @@ export const marketingCommentVerdictClassifier =
 
 export async function answerMarketingCommentsMonitorRequest(
   request: MarketingCommentsMonitorRequest,
-  deps: Omit<MarketingCommentsMonitorDeps, "classifier" | "readAt">,
+  deps: Omit<MarketingCommentsMonitorDeps, "classifier" | "reading">,
 ): Promise<{ readonly status: number; readonly body: Record<string, unknown> }> {
   const now = deps.now();
   if (request.action === "collect") {
@@ -85,24 +87,30 @@ export async function answerMarketingCommentsMonitorRequest(
       status: 200,
       body: {
         status: "ok",
-        readAt: collected.readAt.toISOString(),
-        capped: collected.capped,
+        readAt: collected.reading.until.toISOString(),
+        backlog: collected.reading.backlog,
         items: collected.bodies.map((body) => ({ id: marketingCommentBodyId(body), body })),
       },
     };
   }
   // What the run's reading covers up to, as collect set it. Never later than
-  // now. Earlier only makes the recorded run older, which is the safe way to
-  // be wrong: what was not covered is read again.
+  // now -- and a backlog cut never later than one overlap before now, so the
+  // run it records is not later than now either. Earlier only makes the
+  // recorded run older, the safe way to be wrong: what was not covered is read
+  // again. A `backlog` the service made up spares the next run its overlap,
+  // and nothing more: every comment up to `readAt` still needs its verdict.
   const readAt = new Date(request.readAt);
   const age = now.getTime() - readAt.getTime();
-  if (!(age >= 0 && age <= MARKETING_COMMENTS_READ_AT_MAX_AGE_MS)) {
+  if (
+    !(age >= 0 && age <= MARKETING_COMMENTS_READ_AT_MAX_AGE_MS) ||
+    (request.backlog && age < MARKETING_COMMENT_MONITOR_OVERLAP_MS)
+  ) {
     return { status: 400, body: { code: "read_at_out_of_range" } };
   }
   const result = await runMarketingCommentsMonitor({
     ...deps,
     classifier: marketingCommentVerdictClassifier(new Map(request.verdicts.map((verdict) => [verdict.id, verdict.codes]))),
-    readAt,
+    reading: { until: readAt, backlog: request.backlog },
   });
   if (!result.ran) return { status: 200, body: { status: "off" } };
   return { status: 200, body: { status: "ok", result } };

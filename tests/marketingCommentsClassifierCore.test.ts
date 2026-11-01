@@ -148,7 +148,7 @@ const cycle = (
   const deps: MarketingCommentsCycleDeps = {
     collect:
       options.collect ??
-      (async () => ({ httpStatus: 200, body: { status: "ok", readAt: READ_AT, capped: false, items: options.items ?? [] } })),
+      (async () => ({ httpStatus: 200, body: { status: "ok", readAt: READ_AT, backlog: false, items: options.items ?? [] } })),
     judge: async (input) => {
       judged.push(input);
       if (options.judgeAnswer instanceof Error) throw options.judgeAnswer;
@@ -179,7 +179,7 @@ test("no new comments: no model, no call, and the app still judges the run", asy
   const { deps, judged, modelAsked } = cycle({ items: [] });
   const summary = await runMarketingCommentsClassifyCycle({ deadlineAt: DEADLINE }, deps);
   assert.equal(modelAsked(), 0);
-  assert.deepEqual(judged, [{ readAt: READ_AT, verdicts: [] }]);
+  assert.deepEqual(judged, [{ readAt: READ_AT, backlog: false, verdicts: [] }]);
   assert.deepEqual(summary.result, { ran: true, complete: true });
   assert.equal(summary.stoppedAt, null);
 });
@@ -274,7 +274,7 @@ test("a collect with no answer, or not one the service can read, judges nothing"
       throw new Error("lost");
     },
     async () => ({ httpStatus: 503, body: { code: "no_credential" } }),
-    async () => ({ httpStatus: 200, body: { status: "ok", readAt: READ_AT, capped: false, items: [{ id: "x", body: "y" }] } }),
+    async () => ({ httpStatus: 200, body: { status: "ok", readAt: READ_AT, backlog: false, items: [{ id: "x", body: "y" }] } }),
   ]) {
     const { deps, judged, modelAsked } = cycle({ collect });
     const summary = await runMarketingCommentsClassifyCycle({ deadlineAt: DEADLINE }, deps);

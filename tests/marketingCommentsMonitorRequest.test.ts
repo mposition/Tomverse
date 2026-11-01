@@ -12,6 +12,7 @@ import test from "node:test";
 import {
   MARKETING_COMMENT_BODY_MAX_CHARS,
   MARKETING_COMMENT_COLLECT_MAX_BODIES,
+  MARKETING_COMMENT_MONITOR_OVERLAP_MS,
   type MarketingCommentsMonitorDeps,
 } from "@/lib/marketingCommentsMonitor";
 import { commentsMonitorEnabled, MARKETING_COMMENTS_MONITOR_ENV } from "@/lib/marketingCommentsMonitorHealth";
@@ -85,17 +86,27 @@ const judge = (
   deps: Parameters<typeof answerMarketingCommentsMonitorRequest>[1],
   readAt: string,
   verdicts: Array<{ id: string; codes: string[] }>,
+  backlog = false,
 ) =>
   answerMarketingCommentsMonitorRequest(
-    { action: "judge", readAt, verdicts } as MarketingCommentsMonitorRequest,
+    { action: "judge", readAt, backlog, verdicts } as MarketingCommentsMonitorRequest,
     deps,
   );
 
-type Collected = { status: string; readAt: string; capped: boolean; items: Array<{ id: string; body: string }> };
+type Collected = { status: string; readAt: string; backlog: boolean; items: Array<{ id: string; body: string }> };
 
 /** The service's part, faked: a body that starts with "!" is a legal threat. */
 const classify = (items: Collected["items"]) =>
   items.map((item) => ({ id: item.id, codes: item.body.startsWith("!") ? ["legal_threat"] : [] }));
+
+/** One two-step run with the faked service: what collect said, and whether the run was whole. */
+const roundTrip = async (deps: Parameters<typeof answerMarketingCommentsMonitorRequest>[1]) => {
+  const collected = (await collect(deps)).body as Collected;
+  const judged = (await judge(deps, collected.readAt, classify(collected.items), collected.backlog)).body as {
+    result: { complete: boolean };
+  };
+  return { collected, complete: judged.result.complete };
+};
 
 test("off: neither step reads anything", async () => {
   for (const env of [{}, { [MARKETING_COMMENTS_MONITOR_ENV]: "false" }] as Array<Record<string, string>>) {
@@ -112,9 +123,9 @@ test("collect hands over distinct, bounded bodies with their ids and nothing els
   const answer = await collect(world.deps);
   assert.equal(answer.status, 200);
   const body = answer.body as Collected;
-  assert.deepEqual(Object.keys(body).sort(), ["capped", "items", "readAt", "status"]);
+  assert.deepEqual(Object.keys(body).sort(), ["backlog", "items", "readAt", "status"]);
   assert.equal(body.readAt, NOW.toISOString());
-  assert.equal(body.capped, false);
+  assert.equal(body.backlog, false);
   const bodies = ["same", long.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS)];
   assert.deepEqual(
     body.items,
@@ -143,32 +154,64 @@ test("a backlog past the cap is worked through run by run, oldest first, and ale
   const start = NOW.getTime() - 3 * 24 * 60 * 60 * 1000;
   const total = MARKETING_COMMENT_COLLECT_MAX_BODIES + 100;
   const risky = MARKETING_COMMENT_COLLECT_MAX_BODIES + 50;
-  const minute = (n: number) => new Date(start + n * 60_000).toISOString();
-  const backlog = Array.from({ length: total }, (_, n) => comment(n === risky ? `! complaint ${n}` : `c${n}`, minute(n)));
+  const minute = (n: number) => start + n * 60_000;
+  const backlog = Array.from({ length: total }, (_, n) =>
+    comment(n === risky ? `! complaint ${n}` : `c${n}`, new Date(minute(n)).toISOString()),
+  );
   const world = app({ comments: { p1: backlog } });
 
   // First run: the oldest comments up to the cap, cut just before the next one's minute.
-  const first = (await collect(world.deps)).body as Collected;
-  assert.equal(first.capped, true);
-  assert.equal(first.items.length, MARKETING_COMMENT_COLLECT_MAX_BODIES);
-  assert.equal(first.readAt, new Date(Date.parse(minute(MARKETING_COMMENT_COLLECT_MAX_BODIES)) - 1).toISOString());
-  const firstResult = (await judge(world.deps, first.readAt, classify(first.items))).body as { result: { complete: boolean } };
-  assert.equal(firstResult.result.complete, true);
-  assert.deepEqual(world.runs, [new Date(first.readAt)]);
+  const cut = minute(MARKETING_COMMENT_COLLECT_MAX_BODIES) - 1;
+  const first = await roundTrip(world.deps);
+  assert.equal(first.collected.backlog, true);
+  assert.equal(first.collected.items.length, MARKETING_COMMENT_COLLECT_MAX_BODIES);
+  assert.equal(first.collected.readAt, new Date(cut).toISOString());
+  assert.equal(first.complete, true);
+  // Recorded one overlap after the cut, so the next run's floor is the cut itself.
+  assert.deepEqual(world.runs, [new Date(cut + MARKETING_COMMENT_MONITOR_OVERLAP_MS)]);
   assert.equal(world.alerts.length, 0);
 
-  // Second run carries on from there (the ten-minute overlap read again) and catches up to now.
-  const second = (await collect(world.deps)).body as Collected;
-  assert.equal(second.capped, false);
-  assert.equal(second.readAt, NOW.toISOString());
-  assert.ok(second.items.some((item) => item.body === `c${MARKETING_COMMENT_COLLECT_MAX_BODIES}`));
-  assert.ok(second.items.length < 200);
+  // Second run carries on with exactly what is left, and catches up to now.
   const judgedAt = world.advance(60_000);
-  const secondResult = (await judge(world.deps, second.readAt, classify(second.items))).body as { result: { complete: boolean } };
-  assert.equal(secondResult.result.complete, true);
-  assert.deepEqual(world.runs, [new Date(first.readAt), NOW]);
+  const second = await roundTrip(world.deps);
+  assert.equal(second.collected.backlog, false);
+  assert.equal(second.collected.readAt, judgedAt.toISOString());
+  assert.equal(second.collected.items.length, total - MARKETING_COMMENT_COLLECT_MAX_BODIES);
+  assert.equal(second.complete, true);
+  assert.deepEqual(world.runs.at(-1), judgedAt);
   // Found now, though written days ago: the alert is not born a day old.
   assert.deepEqual(world.alerts.map((alert) => [alert.postId, alert.detectedAt]), [["p1", judgedAt]]);
+});
+
+test("a burst past the cap inside the overlap waits for the overlap to pass it, then is worked through", async () => {
+  // 1,100 comments 200 ms apart across two posts, the last a minute ago; one risky near the end, on p2.
+  const total = MARKETING_COMMENT_COLLECT_MAX_BODIES + 100;
+  const risky = total - 3;
+  const at = (n: number) => NOW.getTime() - 60_000 - (total - 1 - n) * 200;
+  const burst = Array.from({ length: total }, (_, n) =>
+    comment(n === risky ? `! late threat ${n}` : `b${n}`, new Date(at(n)).toISOString()),
+  );
+  const world = app({ comments: { p1: burst.filter((_, n) => n % 2 === 0), p2: burst.filter((_, n) => n % 2 === 1) } });
+
+  // Hour one: none of it is an overlap old, so none of it is handed over yet.
+  const first = await roundTrip(world.deps);
+  assert.equal(first.collected.backlog, true);
+  assert.equal(first.collected.items.length, 0);
+  assert.equal(first.complete, true);
+
+  // Hour two: the oldest up to the cap. Hour three: the rest -- not the same thousand again.
+  world.advance(60 * 60_000);
+  const second = await roundTrip(world.deps);
+  assert.equal(second.collected.items.length, MARKETING_COMMENT_COLLECT_MAX_BODIES);
+  assert.equal(second.complete, true);
+  world.advance(60 * 60_000);
+  const third = await roundTrip(world.deps);
+  assert.equal(third.collected.backlog, false);
+  assert.equal(third.collected.items.length, total - MARKETING_COMMENT_COLLECT_MAX_BODIES);
+  const done = new Set(second.collected.items.map((item) => item.id));
+  assert.equal(third.collected.items.some((item) => done.has(item.id)), false);
+  assert.equal(third.complete, true);
+  assert.deepEqual(world.alerts.map((alert) => alert.postId), [risky % 2 === 0 ? "p1" : "p2"]);
 });
 
 test("a body with no verdict leaves its post unread, and the verdicts that came still raise their alert", async () => {
@@ -207,24 +250,38 @@ test("a read time in the future or too long ago is refused before anything is re
   assert.deepEqual(world.calls, []);
 });
 
-test("more than the cap in one instant cannot be cut: up to the cap goes over, and the run cannot be whole", async () => {
+test("more than the cap in one instant cannot be cut: up to the cap goes over, and no run is whole", async () => {
   const many = Array.from({ length: MARKETING_COMMENT_COLLECT_MAX_BODIES + 5 }, (_, n) => comment(`c${n}`));
   const world = app({ comments: { p1: many } });
-  const body = (await collect(world.deps)).body as Collected;
-  assert.equal(body.items.length, MARKETING_COMMENT_COLLECT_MAX_BODIES);
-  assert.equal(body.capped, true);
-  assert.equal(body.readAt, NOW.toISOString());
-  const result = (await judge(world.deps, body.readAt, classify(body.items))).body as { result: { complete: boolean } };
-  assert.equal(result.result.complete, false);
+  for (let hour = 0; hour < 2; hour += 1) {
+    const run = await roundTrip(world.deps);
+    assert.equal(run.collected.items.length, MARKETING_COMMENT_COLLECT_MAX_BODIES);
+    assert.equal(run.collected.backlog, false);
+    assert.equal(run.complete, false);
+    world.advance(60 * 60_000);
+  }
   assert.deepEqual(world.runs, []);
 });
 
+test("a backlog cut must be an overlap old: a younger one is refused before anything is read", async () => {
+  const world = app({ comments: { p1: [comment("x")] } });
+  const young = new Date(NOW.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS + 1_000).toISOString();
+  assert.deepEqual(await judge(world.deps, young, [], true), { status: 400, body: { code: "read_at_out_of_range" } });
+  assert.deepEqual(world.calls, []);
+});
+
 test("a judge carries closed codes under body ids, and nothing else", () => {
-  const ok = { action: "judge", readAt: NOW.toISOString(), verdicts: [{ id: "a".repeat(64), codes: ["legal_threat"] }] };
+  const ok = {
+    action: "judge",
+    readAt: NOW.toISOString(),
+    backlog: false,
+    verdicts: [{ id: "a".repeat(64), codes: ["legal_threat"] }],
+  };
   assert.equal(marketingCommentsMonitorRequestSchema.safeParse(ok).success, true);
   assert.equal(marketingCommentsMonitorRequestSchema.safeParse({ action: "collect" }).success, true);
   for (const bad of [
     { ...ok, verdicts: [{ id: "a".repeat(64), codes: ["close_alert"] }] },
+    { action: "judge", readAt: ok.readAt, verdicts: ok.verdicts },
     { ...ok, verdicts: [{ id: "A".repeat(64), codes: [] }] },
     { ...ok, verdicts: [{ id: "a".repeat(64), codes: [], postId: "p1" }] },
     { ...ok, complete: true },

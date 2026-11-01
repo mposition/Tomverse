@@ -144,7 +144,11 @@ export type MarketingCommentsCycleDeps = {
   /** The app's collect step. Throws when there is no answer. */
   readonly collect: () => Promise<AppAnswer>;
   /** The app's judge step. Throws when there is no answer. */
-  readonly judge: (input: { readonly readAt: string; readonly verdicts: readonly Verdict[] }) => Promise<AppAnswer>;
+  readonly judge: (input: {
+    readonly readAt: string;
+    readonly backlog: boolean;
+    readonly verdicts: readonly Verdict[];
+  }) => Promise<AppAnswer>;
   /**
    * The model, asked for only when there is something to classify: one
    * ledger-accounted text call (purpose `comment_triage`, the verdict schema),
@@ -165,7 +169,8 @@ export type MarketingCommentsCycleSummary = {
   /** False when the app's switch is off: nothing was read. */
   readonly ran: boolean;
   readonly bodies: number;
-  readonly capped: boolean;
+  /** The app cut a backlog: the rest is the next run's. */
+  readonly backlog: boolean;
   readonly calls: number;
   readonly classified: number;
   readonly malformed: number;
@@ -184,7 +189,7 @@ const collectedSchema = z.union([
     .object({
       status: z.literal("ok"),
       readAt: z.string().datetime({ offset: false }),
-      capped: z.boolean(),
+      backlog: z.boolean(),
       items: z.array(itemSchema),
     })
     .strict(),
@@ -197,7 +202,7 @@ export async function runMarketingCommentsClassifyCycle(
   input: { readonly deadlineAt: string },
   deps: MarketingCommentsCycleDeps,
 ): Promise<MarketingCommentsCycleSummary> {
-  const summary = { ran: false, bodies: 0, capped: false, calls: 0, classified: 0, malformed: 0, result: null };
+  const summary = { ran: false, bodies: 0, backlog: false, calls: 0, classified: 0, malformed: 0, result: null };
   let collected: AppAnswer;
   try {
     collected = await deps.collect();
@@ -209,7 +214,7 @@ export async function runMarketingCommentsClassifyCycle(
     return { ...summary, stoppedAt: { stage: "collect", detail: `http_${collected.httpStatus}:${String(collected.body.code ?? "")}` } };
   }
   if (parsed.data.status === "off") return { ...summary, stoppedAt: null };
-  const { readAt, capped, items } = parsed.data;
+  const { readAt, backlog, items } = parsed.data;
 
   const verdicts: Verdict[] = [];
   let calls = 0;
@@ -251,10 +256,10 @@ export async function runMarketingCommentsClassifyCycle(
   // Always judged, whatever stopped the classifying: the app records what was
   // found, counts unanswered alerts against their accounts, and decides itself
   // whether the run was whole.
-  const counts = { ran: true, bodies: items.length, capped, calls, classified: verdicts.length, malformed };
+  const counts = { ran: true, bodies: items.length, backlog, calls, classified: verdicts.length, malformed };
   let judged: AppAnswer;
   try {
-    judged = await deps.judge({ readAt, verdicts });
+    judged = await deps.judge({ readAt, backlog, verdicts });
   } catch {
     return { ...counts, result: null, stoppedAt: stoppedAt ?? { stage: "judge", detail: "no_answer" } };
   }
@@ -288,6 +293,6 @@ export function marketingCommentsAppPorts(input: {
   };
   return {
     collect: () => post({ action: "collect" }),
-    judge: ({ readAt, verdicts }) => post({ action: "judge", readAt, verdicts }),
+    judge: ({ readAt, backlog, verdicts }) => post({ action: "judge", readAt, backlog, verdicts }),
   };
 }

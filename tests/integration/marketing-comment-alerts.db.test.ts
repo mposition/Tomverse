@@ -276,6 +276,7 @@ test("the two steps against the real store: collect writes nothing, judge record
       {
         action: "judge",
         readAt: readAt.toISOString(),
+        backlog: false,
         verdicts: [
           { id: marketingCommentBodyId("Love this"), codes: [] },
           { id: marketingCommentBodyId("My lawyer will be in touch"), codes: ["legal_threat"] },

@@ -27,13 +27,13 @@
  * The model is asked by the comments service, which holds the marketing LLM key
  * and spends through the ledger and its monthly cap; the app holds the posting
  * tool's key and the database. So a run is two requests to the app:
- * `collectMarketingCommentBodies()` reads what a run at `readAt` would ask about
- * and hands over the bodies alone, and the whole run then happens here with the
- * service's verdicts as the classifier and `readAt` as the start it records. The second
- * step reads the comments again rather than trust anything the service sends
- * back but verdicts: what was read, whether the run was whole and when it began
- * are all the app's own. A comment written after `readAt` is left to the next
- * run, whose floor is below it.
+ * `collectMarketingCommentBodies()` reads what a run would ask about and hands
+ * over the bodies alone with what its reading covers, and the whole run then
+ * happens here with the service's verdicts as the classifier, reading no
+ * comment written after that. The second step reads the comments again rather
+ * than trust anything the service sends back but verdicts: what was read and
+ * whether the run was whole are the app's own. A comment written after the
+ * reading is left to the next run, whose floor is below it.
  *
  * The service loads this file with `--experimental-strip-types` (through
  * lib/marketingCommentsClassifierCore.ts), so its imports stay type-only.
@@ -92,12 +92,13 @@ export type MarketingCommentsMonitorDeps = {
   readonly classifier: MarketingCommentClassifier | null;
   readonly now: () => Date;
   /**
-   * In a two-step run, the instant the first step's reading covers up to: the
-   * run reads no comment written after it and, if whole, is recorded as begun
-   * then. Its alerts are still detected at `now()`. Absent, the run reads and
-   * classifies in one pass and begins at `now()`.
+   * In a two-step run, what the first step's reading covers: comments written
+   * up to `until`; the run reads none written later. `backlog` when the first
+   * step cut a backlog there (`collectMarketingCommentBodies`). Its alerts are
+   * still detected at `now()`. Absent, the run reads and classifies in one pass
+   * and begins at `now()`.
    */
-  readonly readAt?: Date;
+  readonly reading?: { readonly until: Date; readonly backlog: boolean };
   readonly fetchComments: (post: MarketingCommentMonitorPost) => Promise<ZernioCommentsResult>;
   readonly operations: {
     readonly listPosts: (limit: number) => Promise<MarketingCommentMonitorPost[]>;
@@ -208,21 +209,29 @@ export const MARKETING_COMMENT_COLLECT_MAX_BODIES = 1_000;
 
 export type MarketingCommentsCollectResult =
   | { readonly ran: false; readonly reason: "switch_off" }
-  | { readonly ran: true; readonly bodies: string[]; readonly readAt: Date; readonly capped: boolean };
+  | {
+      readonly ran: true;
+      readonly bodies: string[];
+      /** What the reading covers: comments written up to `until`, and whether that is a backlog cut. */
+      readonly reading: { readonly until: Date; readonly backlog: boolean };
+    };
 
 /**
  * The first step of a two-step run: the distinct bodies a run would ask the
  * model about, and nothing else -- no post, author, time or link -- with nothing
- * written, and the `readAt` the run is to begin at. A page that cannot be read
- * is left out; the second step reads again and finds that out for itself.
+ * written, and what the reading covers. A page that cannot be read is left
+ * out; the second step reads again and finds that out for itself.
  *
- * Past the cap the run is cut, oldest first, at an instant: every comment
- * written before it is handed over, none at or after it, and `readAt` is just
- * before it. A whole run is then recorded as begun there and the next run's
- * floor is below it, so a backlog is worked through run by run rather than
- * read from the same start each hour. What cannot be cut -- more comments with
- * no time, or written in one instant, than the cap -- stays unwhole run after
- * run, which keeps the monitor unhealthy: the safe way to be stuck.
+ * Past the cap a backlog is cut, oldest first, at an instant `until`: every
+ * comment written up to it is handed over, none after it. The cut is never
+ * later than the overlap before now, so everything up to it was in view for at
+ * least the overlap -- the margin a whole run's overlap exists to give -- and a
+ * whole run after a cut is recorded as begun one overlap later than `until`
+ * (never later than now): the next run's floor is then `until` itself, and it
+ * carries on with what is left rather than reading the same backlog again.
+ * What cannot be cut -- more comments with no time, or written in one instant,
+ * than the cap -- stays unwhole run after run, which keeps the monitor
+ * unhealthy: the safe way to be stuck.
  */
 export async function collectMarketingCommentBodies(
   deps: MarketingCommentsReadDeps & Pick<MarketingCommentsMonitorDeps, "env" | "enabled">,
@@ -237,31 +246,39 @@ export async function collectMarketingCommentBodies(
     );
     fresh.push(...(read?.fresh ?? []));
   }
-  // Oldest first; a comment with no time is read every run, so it goes first.
-  const at = (comment: ParsedZernioComment) => comment.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  fresh.sort((left, right) => at(left) - at(right));
-  const bodies = new Set<string>();
-  for (let from = 0; from < fresh.length; ) {
-    // One instant at a time: a run reads all of an instant's comments or none.
-    let to = from;
-    const instant = new Set<string>();
-    while (to < fresh.length && at(fresh[to] as ParsedZernioComment) === at(fresh[from] as ParsedZernioComment)) {
-      instant.add((fresh[to] as ParsedZernioComment).text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS));
-      to += 1;
-    }
-    const added = [...instant].filter((body) => !bodies.has(body));
-    if (bodies.size + added.length > MARKETING_COMMENT_COLLECT_MAX_BODIES) {
-      const cutAt = at(fresh[from] as ParsedZernioComment);
-      if (bodies.size > 0 && Number.isFinite(cutAt)) {
-        return { ran: true, bodies: [...bodies], readAt: new Date(cutAt - 1), capped: true };
-      }
-      for (const body of added.slice(0, MARKETING_COMMENT_COLLECT_MAX_BODIES - bodies.size)) bodies.add(body);
-      return { ran: true, bodies: [...bodies], readAt: now, capped: true };
-    }
-    for (const body of added) bodies.add(body);
-    from = to;
+  const body = (comment: ParsedZernioComment) => comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS);
+  const all = new Set(fresh.map(body));
+  if (all.size <= MARKETING_COMMENT_COLLECT_MAX_BODIES) {
+    return { ran: true, bodies: [...all], reading: { until: now, backlog: false } };
   }
-  return { ran: true, bodies: [...bodies], readAt: now, capped: false };
+  // Oldest first, an instant at a time: a run reads all of an instant's
+  // comments or none. A comment with no time is read every run, so it is first.
+  const at = (comment: ParsedZernioComment) => comment.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const sorted = [...fresh].sort((left, right) => at(left) - at(right));
+  const counted = new Set<string>();
+  let overflow = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < sorted.length; index += 1) {
+    const comment = sorted[index] as ParsedZernioComment;
+    counted.add(body(comment));
+    // Judged at the end of each instant, so an instant is never split.
+    const instantEnds = index + 1 === sorted.length || at(sorted[index + 1] as ParsedZernioComment) !== at(comment);
+    if (instantEnds && counted.size > MARKETING_COMMENT_COLLECT_MAX_BODIES) {
+      overflow = at(comment);
+      break;
+    }
+  }
+  const capCut = overflow - 1;
+  const timeCut = now.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS;
+  const firstTimed = sorted.find((comment) => comment.createdAt !== null);
+  // Cut by the cap before the first instant there is, the cut would hand over
+  // nothing and no later run could do better: that is not a cut. (Cut by time
+  // instead, the rest waits an hour for the overlap to pass it.)
+  if (!Number.isFinite(capCut) || (capCut <= timeCut && firstTimed !== undefined && at(firstTimed) === overflow)) {
+    return { ran: true, bodies: [...all].slice(0, MARKETING_COMMENT_COLLECT_MAX_BODIES), reading: { until: now, backlog: false } };
+  }
+  const until = Math.min(capCut, timeCut);
+  const bodies = new Set(fresh.filter((comment) => at(comment) <= until).map(body));
+  return { ran: true, bodies: [...bodies], reading: { until: new Date(until), backlog: true } };
 }
 
 export async function runMarketingCommentsMonitor(
@@ -276,7 +293,13 @@ export async function runMarketingCommentsMonitor(
   // when its comments were read -- in a two-step run that can be earlier, and
   // for a backlog much earlier, which must not age the alerts it raises.
   const startedAt = deps.now();
-  const readAt = deps.readAt ?? null;
+  const readAt = deps.reading?.until ?? null;
+  // After a backlog cut the next run carries on from the cut itself (see
+  // `collectMarketingCommentBodies`); otherwise the run is recorded as begun
+  // when its comments were read.
+  const recordAt = deps.reading
+    ? new Date(deps.reading.until.getTime() + (deps.reading.backlog ? MARKETING_COMMENT_MONITOR_OVERLAP_MS : 0))
+    : startedAt;
   let postsChecked = 0;
   let postsUnread = 0;
   let alertsRecorded = 0;
@@ -378,7 +401,7 @@ export async function runMarketingCommentsMonitor(
   let complete = postsUnread === 0;
   if (complete) {
     try {
-      await operations.recordRun(readAt ?? startedAt);
+      await operations.recordRun(recordAt);
     } catch {
       complete = false;
     }
