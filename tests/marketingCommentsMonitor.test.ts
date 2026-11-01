@@ -49,9 +49,12 @@ const monitor = (
     posts?: ReturnType<typeof post>[];
     comments?: Record<string, ReturnType<typeof comment>[] | "unavailable">;
     lastComplete?: Date | null;
+    answers?: Record<string, Date>;
     manyPosts?: number;
     truncated?: Set<string>;
     recordAlertThrows?: boolean;
+    listPostsThrows?: boolean;
+    sweepThrows?: boolean;
     swept?: number;
   } = {},
 ) => {
@@ -80,10 +83,12 @@ const monitor = (
     operations: {
       listPosts: async () => {
         calls.push("listPosts");
+        if (options.listPostsThrows) throw new Error("database lost");
         if (options.manyPosts) return Array.from({ length: options.manyPosts }, (_, index) => post(`m${index}`));
         return options.posts ?? [post("p1")];
       },
       lastCompleteRunAt: async () => options.lastComplete ?? null,
+      alertAnswers: async () => new Map(Object.entries(options.answers ?? {})),
       recordAlert: async (input) => {
         calls.push("recordAlert");
         if (options.recordAlertThrows) throw new Error("database lost");
@@ -92,6 +97,7 @@ const monitor = (
       },
       sweepUnhandled: async () => {
         calls.push("sweep");
+        if (options.sweepThrows) throw new Error("database lost");
         return options.swept ?? 0;
       },
       recordRun: async (at) => {
@@ -163,7 +169,7 @@ test("the posting tool's comment page loses its authors before anything else see
     ],
   });
   assert.deepEqual(
-    parsed.map((entry) => entry.text),
+    parsed?.map((entry) => entry.text),
     ["this is a threat", "variant spelling"],
   );
   const printed = JSON.stringify(parsed);
@@ -618,18 +624,12 @@ test("an alert that cannot be written leaves its post unread, the run goes on, a
 });
 
 test("a failure to list the posts, or to sweep, is an incomplete run and never a thrown one", async () => {
-  const listing = monitor();
-  listing.deps.operations.listPosts = async () => {
-    throw new Error("database lost");
-  };
+  const listing = monitor({ listPostsThrows: true });
   const first = await runMarketingCommentsMonitor(listing.deps);
   assert.equal(first.ran && first.complete, false);
   assert.ok(listing.calls.includes("sweep"));
 
-  const sweeping = monitor({ comments: { p1: [comment("fine")] } });
-  sweeping.deps.operations.sweepUnhandled = async () => {
-    throw new Error("database lost");
-  };
+  const sweeping = monitor({ comments: { p1: [comment("fine")] }, sweepThrows: true });
   const second = await runMarketingCommentsMonitor(sweeping.deps);
   assert.equal(second.ran && second.complete, false);
   assert.equal(sweeping.calls.includes("recordRun"), false);
@@ -722,4 +722,21 @@ test("an alert that is not yet a day old is not overdue, whatever the list said"
     forcedOverdueBefore: new Date("2026-10-31T23:00:00.000Z"),
   });
   assert.deepEqual(result, { paused: false });
+});
+
+test("comments an operator already answered are not classified again, undated ones included", async () => {
+  const { deps, classified, recorded } = monitor({
+    answers: { p1: new Date("2026-11-02T08:30:00.000Z") },
+    comments: {
+      p1: [
+        comment("the one the alert was about", "2026-11-02T08:00:00.000Z"),
+        comment("undated, cannot be shown newer", null),
+        comment("written after the answer", "2026-11-02T08:45:00.000Z"),
+      ],
+    },
+    classifier: async (bodies) => bodies.map(() => ["legal_threat"]),
+  });
+  await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(recorded.map((alert) => alert.alertCount), [1]);
+  assert.equal(classified.length, 0);
 });

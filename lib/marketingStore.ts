@@ -6228,6 +6228,28 @@ export async function listOpenMarketingCommentAlerts(
 }
 
 /**
+ * When an operator last answered the alert of each of these posts, by post. The
+ * monitor counts a comment as handled when it is not newer than that, so the
+ * comments an alert was about do not raise it again when they are read again.
+ */
+export async function readMarketingCommentAlertAnswers(
+  database: MarketingDatabase,
+  postIds: readonly string[],
+): Promise<Map<string, Date>> {
+  const answers = new Map<string, Date>();
+  if (postIds.length === 0) return answers;
+  const rows = await database.adminAuditLog.findMany({
+    where: { action: MARKETING_COMMENT_ALERT_ACK_ACTION, targetId: { in: [...postIds] } },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true, createdAt: true },
+  });
+  for (const row of rows) {
+    if (row.targetId && !answers.has(row.targetId)) answers.set(row.targetId, row.createdAt);
+  }
+  return answers;
+}
+
+/**
  * Where one post's alert stands: open when its newest report is newer than its
  * newest acknowledgement, with the instant that report says it began. Two reads
  * for one post -- the report read narrows by kind and then by the post inside the

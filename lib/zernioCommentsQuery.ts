@@ -101,12 +101,13 @@ export const zernioCommentsQuery = (ports: ZernioTransportPorts) => ({
       );
       // A later page that fails keeps what was read: the comments already in hand
       // are still classified, and the read is reported as cut short.
-      const page = result.kind === "response" && result.status === 200 ? readZernioCommentsPage(result.body) : null;
+      const body: unknown = result.kind === "response" && result.status === 200 ? result.body : undefined;
+      const page = body === undefined ? null : readZernioCommentsPage(body);
       if (page === null) {
         return comments.length > 0 ? { kind: "ok", comments, truncated: true } : { kind: "unavailable" };
       }
       comments.push(...page.comments);
-      const next = nextCursor(result.body);
+      const next = nextCursor(body);
       // The end is something the response says (`hasMore: false`), or a page
       // shorter than asked for -- counted before hidden items were dropped. A full
       // page that says nothing is not known to be the end, and nothing guesses.

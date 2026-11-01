@@ -12,6 +12,7 @@ import {
   evaluateMarketingAutoPause,
   listMarketingPostsForCommentMonitor,
   listOpenMarketingCommentAlerts,
+  readMarketingCommentAlertAnswers,
   recordMarketingCommentAlert,
   runMarketingTransaction,
 } from "@/lib/marketingStore";
@@ -29,6 +30,7 @@ export const marketingCommentsMonitorOperations = (
       listMarketingPostsForCommentMonitor(tx, { now: new Date(), limit }),
     ),
   lastCompleteRunAt: () => readMarketingCommentsMonitorLastRun(client),
+  alertAnswers: (postIds) => readMarketingCommentAlertAnswers(client, postIds),
   recordAlert: async (input) => {
     const outcome = await runMarketingTransaction(client, (tx) =>
       recordMarketingCommentAlert(tx, input),

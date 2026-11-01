@@ -79,6 +79,8 @@ export type MarketingCommentsMonitorDeps = {
     readonly listPosts: (limit: number) => Promise<MarketingCommentMonitorPost[]>;
     /** When the latest run that read and classified everything began, or null if none has. */
     readonly lastCompleteRunAt: () => Promise<Date | null>;
+    /** When an operator last answered each post's alert. Comments up to then are handled. */
+    readonly alertAnswers: (postIds: readonly string[]) => Promise<Map<string, Date>>;
     readonly recordAlert: (input: {
       postId: string;
       alertCount: number;
@@ -112,8 +114,14 @@ const knownCodes = (codes: ReadonlyArray<string>): MarketingCommentRiskCode[] =>
 export const marketingCommentBodiesForModel = (
   comments: readonly ParsedZernioComment[],
   floor: Date | null,
+  answeredAt: Date | null = null,
 ): string[] =>
   comments
+    // What an operator has answered is handled. A comment with no time cannot be
+    // shown to be newer than the answer, so it is not read again after one.
+    .filter((comment) =>
+      answeredAt === null || (comment.createdAt !== null && comment.createdAt.getTime() > answeredAt.getTime()),
+    )
     // A comment with no time cannot be placed, so it is read every run.
     .filter((comment) =>
       floor === null || comment.createdAt === null || comment.createdAt.getTime() > floor.getTime(),
@@ -146,6 +154,7 @@ export async function runMarketingCommentsMonitor(
     const listed = await operations.listPosts(MARKETING_COMMENT_MONITOR_POST_LIMIT + 1);
     const posts = listed.slice(0, MARKETING_COMMENT_MONITOR_POST_LIMIT);
     postsChecked = posts.length;
+    const answers = await operations.alertAnswers(posts.map((post) => post.id));
     // A sample is not a run: with posts left over, the health record is not moved.
     if (listed.length > posts.length) postsUnread += 1;
 
@@ -160,7 +169,7 @@ export async function runMarketingCommentsMonitor(
         // not recorded as one -- but what was read is still classified and still
         // raises its alerts: an unread part is no reason to ignore the read part.
         if (page.truncated) postsUnread += 1;
-        const bodies = marketingCommentBodiesForModel(page.comments, floor);
+        const bodies = marketingCommentBodiesForModel(page.comments, floor, answers.get(post.id) ?? null);
         if (bodies.length === 0) continue;
         const flagged: MarketingCommentRiskCode[][] = [];
         let wellFormed = true;
