@@ -43,7 +43,13 @@ const chunk = (chunkIndex, overrides = {}) => ({
   ...overrides,
 });
 
-const inspect = (value, overrides = {}) => inspectAmuxAnalysisContinuation({
+// The verdict alone; where a schema refusal happened is checked by its own test.
+const verdict = (result) => {
+  const copy = { ...result };
+  delete copy.at;
+  return copy;
+};
+const inspect = (value, overrides = {}) => verdict(inspectAmuxAnalysisContinuation({
   raw: JSON.stringify(value),
   expectedPreviewId: value.previewId,
   expectedChunkIndex: value.chunkIndex,
@@ -56,7 +62,7 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisContinuation({
   history: [],
   templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
   ...overrides,
-});
+}));
 
 test("output remainder stays on the same source ordinal and advances a server-derived part", () => {
   const first = inspect(chunk(0, {

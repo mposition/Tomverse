@@ -70,7 +70,7 @@ export async function readAmuxSessionReviewForOwner(actorUserId: string,
     const review = classifyAmuxSessionReviewAnswer(raw);
     // A first page parks with no source plan; only its inspection is replayable.
     return review.reason === "not_a_plan" && result.idea.currentSourcePlanRevisionId === null
-      ? { reason: "not_a_plan", detail: amuxSessionReviewFirstPageDetail(raw, result.claimId) }
+      ? { reason: "not_a_plan", ...amuxSessionReviewFirstPageDetail(raw, result.claimId) }
       : review;
   } finally { plain.fill(0); }
 }
