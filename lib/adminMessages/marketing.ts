@@ -114,6 +114,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actReconnect: "Reconnect",
     actPause: "Pause",
     actChangeScopes: "Change scopes",
+    actChangeLocales: "Change languages",
     actChangePolicyVersion: "Change policy version",
     actResumeApproval: "Resume into approval mode",
     actResumeAutonomous: "Resume into autonomous mode",
@@ -159,6 +160,8 @@ export const adminMarketingMessages = defineAdminMessages({
     hintCapEmpty: "Leave empty for the policy default. Caps may only go down.",
     hintOptional: "Optional.",
     hintCommaSeparated: "Comma separated.",
+    hintLocalesChange:
+      "Comma separated, from en, ko, zh-Hant, zh-Hans. Removing a language is refused while a post in it can still go out; reject those first.",
     hintDigest: "64 hexadecimal characters.",
     createAccountTitle: "Register a brand account",
     createAccountNote:
@@ -465,6 +468,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actReconnect: "재연결",
     actPause: "정지",
     actChangeScopes: "scope 변경",
+    actChangeLocales: "언어 변경",
     actChangePolicyVersion: "정책 버전 변경",
     actResumeApproval: "승인 모드로 재개",
     actResumeAutonomous: "자율 모드로 재개",
@@ -510,6 +514,8 @@ export const adminMarketingMessages = defineAdminMessages({
     hintCapEmpty: "비우면 정책 기본값입니다. 상한은 내리는 방향으로만 바꿀 수 있습니다.",
     hintOptional: "선택 사항입니다.",
     hintCommaSeparated: "쉼표로 구분합니다.",
+    hintLocalesChange:
+      "en, ko, zh-Hant, zh-Hans 중에서 쉼표로 구분합니다. 빼는 언어로 아직 나갈 수 있는 게시물이 있으면 거절되니, 그 게시물을 먼저 반려하세요.",
     hintDigest: "16진수 64자.",
     createAccountTitle: "브랜드 계정 등록",
     createAccountNote:

@@ -1362,6 +1362,181 @@ export async function changeMarketingChannelPolicyVersion(
   requireOne(updated.count, "policy_change_conflict", "The account changed before policy update");
 }
 
+/**
+ * The audit action for a change of an account's languages (operator decision
+ * 2026-11-01: Instagram is one account per language, and the first account was
+ * registered with three).
+ *
+ * Its own constant, as the S2b2 action is, and its refusals carry their own
+ * status: `MARKETING_S2B1_ACTIONS` and `MARKETING_REFUSAL_STATUS` are reached by
+ * the webhook modules, so a new entry in either moves the webhook pipeline
+ * fingerprint and makes the signed production verification stale for a
+ * change that decides no webhook event.
+ */
+export const MARKETING_ACCOUNT_LOCALES_ACTION = "marketing_account.locales_changed";
+
+export class MarketingChannelLocalesRefusedError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = "MarketingChannelLocalesRefusedError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
+ * The account states a language change is accepted in.
+ *
+ * Both have a person approving every post, so the change decides what may be
+ * drafted next and nothing that is already trusted to go out alone. An
+ * autonomous account carries a graduation earned in the old languages; it is
+ * paused first.
+ */
+const MARKETING_LOCALE_CHANGE_STATUSES = ["connect_pending", "approval_mode"] as const;
+
+/**
+ * Post states that can still reach the platform.
+ *
+ * The post trigger checks a post's locale against its account only when the
+ * locale, mode or account is written, and every move from here towards
+ * `published` writes the status alone. A post in a language the account no
+ * longer has would still go out, so the operator rejects these first.
+ */
+const MARKETING_UNFINISHED_POST_STATUSES: readonly MarketingPostStatus[] = [
+  "drafted",
+  "pending_approval",
+  "approved",
+  "scheduled",
+  "publishing",
+  "failed",
+  "outcome_unknown",
+];
+
+const sameLocaleSet = (left: readonly string[], right: readonly string[]): boolean => {
+  const a = [...new Set(left)].sort();
+  const b = [...new Set(right)].sort();
+  return a.length === b.length && a.every((locale, index) => locale === b[index]);
+};
+
+export async function changeMarketingChannelLocales(
+  database: MarketingTransaction,
+  rawInput: {
+    id: string;
+    expectedDefaultLocale: MarketingLocale;
+    expectedAllowedLocales: readonly MarketingLocale[];
+    defaultLocale: MarketingLocale;
+    allowedLocales: readonly MarketingLocale[];
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedDefaultLocale: rawInput.expectedDefaultLocale,
+    expectedAllowedLocales: [...rawInput.expectedAllowedLocales],
+    defaultLocale: rawInput.defaultLocale,
+    allowedLocales: [...new Set(rawInput.allowedLocales)],
+  };
+  if (!input.allowedLocales.includes(input.defaultLocale)) {
+    throw new MarketingChannelLocalesRefusedError(
+      "default_locale_not_allowed",
+      400,
+      "A channel's default locale must be one of its allowed locales",
+    );
+  }
+  if (
+    input.defaultLocale === input.expectedDefaultLocale &&
+    sameLocaleSet(input.allowedLocales, input.expectedAllowedLocales)
+  ) {
+    throw new MarketingChannelLocalesRefusedError(
+      "locales_unchanged",
+      400,
+      "A language change needs different languages",
+    );
+  }
+
+  const row = await database.marketingChannel.findUnique({
+    where: { id: input.id },
+    select: { status: true, defaultLocale: true, allowedLocales: true },
+  });
+  if (!row) {
+    throw new MarketingChannelLocalesRefusedError(
+      "channel_not_found",
+      404,
+      "The marketing account does not exist",
+    );
+  }
+  if (
+    row.defaultLocale !== input.expectedDefaultLocale ||
+    !sameLocaleSet(row.allowedLocales, input.expectedAllowedLocales)
+  ) {
+    throw new MarketingChannelLocalesRefusedError(
+      "locales_change_conflict",
+      409,
+      "The account's languages changed before this change was saved",
+    );
+  }
+  if (!MARKETING_LOCALE_CHANGE_STATUSES.some((status) => status === row.status)) {
+    throw new MarketingChannelLocalesRefusedError(
+      "locales_change_needs_approval_mode",
+      409,
+      "Languages change only while a person approves every post; pause or reconnect the account first",
+    );
+  }
+
+  // The write comes before the post count on purpose. It takes the channel
+  // row's lock, and a post being created reads that row FOR SHARE in its
+  // trigger -- so from here no post in a dropped language can appear, and the
+  // count below sees every one that already did. A refusal after it rolls the
+  // write back with the rest of the transaction.
+  const changed = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: row.status,
+      defaultLocale: row.defaultLocale,
+      allowedLocales: { equals: row.allowedLocales },
+    },
+    data: {
+      defaultLocale: input.defaultLocale,
+      allowedLocales: input.allowedLocales,
+    },
+  });
+  if (changed.count !== 1) {
+    throw new MarketingChannelLocalesRefusedError(
+      "locales_change_conflict",
+      409,
+      "The account changed before its languages were saved",
+    );
+  }
+
+  const dropped = row.allowedLocales.filter(
+    (locale) => !input.allowedLocales.some((kept) => kept === locale),
+  );
+  if (dropped.length > 0) {
+    const unfinished = await database.marketingPost.count({
+      where: {
+        channelId: input.id,
+        locale: { in: dropped },
+        status: { in: [...MARKETING_UNFINISHED_POST_STATUSES] },
+      },
+    });
+    if (unfinished > 0) {
+      throw new MarketingChannelLocalesRefusedError(
+        "locales_change_has_unfinished_posts",
+        409,
+        `${unfinished} post(s) in a language being removed can still go out; reject them first`,
+      );
+    }
+  }
+
+  return {
+    defaultLocale: input.defaultLocale,
+    allowedLocales: input.allowedLocales,
+    droppedLocales: dropped,
+  };
+}
+
 export async function pauseMarketingChannel(
   database: MarketingDatabase,
   rawInput: {
