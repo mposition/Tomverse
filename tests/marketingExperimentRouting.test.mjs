@@ -6,6 +6,8 @@ import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "../lib/marketingAutomation
 import {
   EXPERIMENT_CONTROL_ARM,
   EXPERIMENT_COOKIE_NAME,
+  EXPERIMENT_HOLD_COOKIE_NAME,
+  EXPERIMENT_HOLD_SECONDS,
   experimentCookieMatchesVariantPath,
   experimentVariantHomePathname,
   experimentVariantPathname,
@@ -204,5 +206,31 @@ test("the proxy reads the kill switch under the name the access module defines",
   assert.ok(
     proxy.includes(`process.env.${MARKETING_AUTOMATION_KILL_SWITCH_ENV}`),
     "proxy.ts spells a different kill switch variable than lib/marketingAutomationAccess.ts"
+  );
+});
+
+test("a hold cookie shows the default page and keeps the assignment, and only the value 1 holds", () => {
+  assert.equal(EXPERIMENT_HOLD_COOKIE_NAME, "tv_exp_hold");
+  assert.equal(EXPERIMENT_HOLD_SECONDS, 300);
+  assert.equal(rewrite({ hold: "1" }), null);
+  // Anything but the exact value is not a hold.
+  for (const hold of [undefined, null, "", "0", "true", "11"]) {
+    assert.equal(rewrite({ hold }), "/en/lx/home-hero-v1/b", String(hold));
+  }
+  const matches = (hold) =>
+    experimentCookieMatchesVariantPath({
+      pathname: "/ko/lx/home-hero-v1/b",
+      cookie: "spring-hero.home-hero-v1.b.enko",
+      hold,
+      killSwitch: undefined,
+    });
+  assert.equal(matches(undefined), true);
+  // A held visitor who names the variant path directly is sent home too.
+  assert.equal(matches("1"), false);
+  // The proxy hands both checks the hold cookie.
+  const proxy = readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
+  assert.equal(
+    proxy.split("hold: request.cookies.get(EXPERIMENT_HOLD_COOKIE_NAME)?.value").length - 1,
+    2
   );
 });

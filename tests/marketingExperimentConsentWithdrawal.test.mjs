@@ -28,7 +28,7 @@ globalThis.document = {
 };
 
 const { disableAnalyticsClient } = await import("../lib/productAnalyticsClient.ts");
-const { EXPERIMENT_COOKIE_NAME } = await import("../lib/marketingRoutes.ts");
+const { EXPERIMENT_COOKIE_NAME, EXPERIMENT_HOLD_COOKIE_NAME } = await import("../lib/marketingRoutes.ts");
 
 test("declining analytics deletes the experiment assignment cookie immediately", () => {
   writes.length = 0;
@@ -39,6 +39,13 @@ test("declining analytics deletes the experiment assignment cookie immediately",
         write.startsWith(`${EXPERIMENT_COOKIE_NAME}=;`) && /Max-Age=0/.test(write)
     ),
     `no deletion of ${EXPERIMENT_COOKIE_NAME} among: ${writes.join(" | ")}`
+  );
+  assert.ok(
+    writes.some(
+      (write) =>
+        write.startsWith(`${EXPERIMENT_HOLD_COOKIE_NAME}=;`) && /Max-Age=0/.test(write)
+    ),
+    "the short hold cookie goes with the assignment"
   );
   // The existing behaviour is intact: the analytics cookie goes too, and an
   // unrelated cookie is left alone.

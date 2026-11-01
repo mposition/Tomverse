@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import {
   EXPERIMENT_COOKIE_NAME,
+  EXPERIMENT_HOLD_COOKIE_NAME,
   experimentCookieMatchesVariantPath,
   experimentVariantHomePathname,
   isExperimentVariantPathname,
@@ -367,6 +368,7 @@ export function proxy(request: NextRequest) {
     !experimentCookieMatchesVariantPath({
       pathname: request.nextUrl.pathname,
       cookie: request.cookies.get(EXPERIMENT_COOKIE_NAME)?.value,
+      hold: request.cookies.get(EXPERIMENT_HOLD_COOKIE_NAME)?.value,
       killSwitch: process.env.MARKETING_AUTOMATION_KILL_SWITCH,
     })
   ) {
@@ -431,6 +433,7 @@ export function proxy(request: NextRequest) {
         accept: request.headers.get("accept"),
         rscHeader: request.headers.get("rsc"),
         cookie: request.cookies.get(EXPERIMENT_COOKIE_NAME)?.value,
+        hold: request.cookies.get(EXPERIMENT_HOLD_COOKIE_NAME)?.value,
         killSwitch: process.env.MARKETING_AUTOMATION_KILL_SWITCH,
       })
     : null;

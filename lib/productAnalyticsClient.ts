@@ -13,7 +13,7 @@ import {
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
-import { EXPERIMENT_COOKIE_NAME } from "@/lib/marketingRoutes";
+import { EXPERIMENT_COOKIE_NAME, EXPERIMENT_HOLD_COOKIE_NAME } from "@/lib/marketingRoutes";
 import { isAnalyticsUserId } from "@/lib/ga4UserIdPolicy";
 import { discardResponseBody } from "./discardResponseBody";
 
@@ -645,6 +645,7 @@ export const disableAnalyticsClient = () => {
   // (docs/policy/marketing-automation.md 9.1), so withdrawing it takes the
   // cookie with it and the next landing load is the default copy.
   document.cookie = `${EXPERIMENT_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
+  document.cookie = `${EXPERIMENT_HOLD_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
   window.sessionStorage.removeItem(TOUCH_SEEN_STORAGE_KEY);
   for (const cookie of document.cookie.split(";")) {
     const name = cookie.split("=")[0]?.trim();

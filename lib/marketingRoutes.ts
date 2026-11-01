@@ -84,6 +84,16 @@ const normalizePathname = (pathname: string) => {
  */
 export const EXPERIMENT_COOKIE_NAME = "tv_exp";
 export const EXPERIMENT_CONTROL_ARM = "control";
+/**
+ * Set by the browser, for a few minutes, when the experiment state could not
+ * be read while a variant was showing (policy 9.1: a failed read shows the
+ * default copy). The assignment cookie stays, so the visitor keeps their arm
+ * once storage recovers; while this one is present the proxy serves the
+ * default page and never a variant.
+ */
+export const EXPERIMENT_HOLD_COOKIE_NAME = "tv_exp_hold";
+export const EXPERIMENT_HOLD_SECONDS = 300;
+const experimentHoldActive = (hold: string | null | undefined) => hold === "1";
 export const EXPERIMENT_VARIANT_SEGMENT = "lx";
 const EXPERIMENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,47}$/;
 /** A variant id may be as short as `b`. */
@@ -172,9 +182,11 @@ export const resolveExperimentRewrite = (input: Readonly<{
   accept: string | null;
   rscHeader: string | null;
   cookie: string | null | undefined;
+  hold?: string | null | undefined;
   killSwitch: string | undefined;
 }>): string | null => {
   if (input.method !== "GET" && input.method !== "HEAD") return null;
+  if (experimentHoldActive(input.hold)) return null;
   if (input.rscHeader) return null;
   if (!(input.accept ?? "").includes("text/html")) return null;
   if ((input.killSwitch ?? "").trim() !== "") return null;
@@ -214,9 +226,11 @@ export const experimentVariantHomePathname = (pathname: string): string | null =
 export const experimentCookieMatchesVariantPath = (input: Readonly<{
   pathname: string;
   cookie: string | null | undefined;
+  hold?: string | null | undefined;
   killSwitch: string | undefined;
 }>): boolean => {
   if ((input.killSwitch ?? "").trim() !== "") return false;
+  if (experimentHoldActive(input.hold)) return false;
   if (!isExperimentVariantPathname(input.pathname)) return false;
   const assignment = parseExperimentCookie(input.cookie);
   if (!assignment || assignment.arm === EXPERIMENT_CONTROL_ARM) return false;

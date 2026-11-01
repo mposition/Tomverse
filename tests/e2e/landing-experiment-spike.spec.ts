@@ -666,6 +666,46 @@ test.describe("fixture experiment, forced variant", () => {
     });
     await expect.poll(() => read(page)).not.toEqual([]);
   });
+
+  test("(c) a state read that fails while a variant shows puts the default copy on, and keeps the assignment", async ({
+    page,
+    context,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await context.addCookies([
+      { name: "tv_exp", value: VARIANT_COOKIE, url: ORIGIN },
+    ]);
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, "accepted");
+    }, CONSENT_KEY);
+    // The exposure call is answered as the route answers an unreadable state.
+    await page.route("**/api/marketing/experiments", async (route) => {
+      if (route.request().postDataJSON()?.action === "exposure") {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ status: "error" }),
+        });
+        return;
+      }
+      await route.continue().catch(() => undefined);
+    });
+
+    await page.goto("/");
+    // The variant is shown first (the cookie said so); the beacon then holds it
+    // and reloads once, and the reload is the default page.
+    await expect(page.getByTestId("landing-hero-title")).toContainText(
+      DEFAULT_HEADLINE_EN
+    );
+    await expect(page.getByTestId("landing-hero-title")).not.toContainText(
+      VARIANT_HEADLINE_EN
+    );
+    const cookies = await context.cookies(ORIGIN);
+    expect(cookies.find((cookie) => cookie.name === "tv_exp")?.value).toBe(
+      VARIANT_COOKIE
+    );
+    expect(cookies.find((cookie) => cookie.name === "tv_exp_hold")?.value).toBe("1");
+  });
 });
 
 test.describe("fixture experiment, forced control", () => {

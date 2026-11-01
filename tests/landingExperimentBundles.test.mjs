@@ -154,3 +154,22 @@ test("the covered languages are one list, and the beacon stays silent outside it
   );
   assert.match(beacon, /LANDING_EXPERIMENT_LOCALES as readonly string\[\]\)\.includes\(locale\)\) return;/);
 });
+
+test("the beacon tells a refused count from one that got no answer, and holds a variant on an unreadable state", async () => {
+  const { readFileSync } = await import("node:fs");
+  const beacon = readFileSync(
+    new URL("../components/marketing/LandingExperimentBeacon.tsx", import.meta.url),
+    "utf8"
+  );
+  // A non-ok response is a definite refusal, carried with its status.
+  assert.match(beacon, /response\.ok \? response\.json\(\) : \{ status: "error", http: response\.status \}/);
+  // Only a 503 (the route's answer to an unreadable state) holds a variant, and
+  // the assignment cookie is never touched on that path.
+  assert.match(beacon, /if \(result\.http === 503\) \{[^}]*holdVariant\(renderedArm\)/s);
+  const hold = beacon.slice(beacon.indexOf("const holdVariant"), beacon.indexOf("export function"));
+  assert.ok(!hold.includes("clearCookie("), "a hold does not delete the assignment");
+  assert.match(hold, /EXPERIMENT_HOLD_COOKIE_NAME/);
+  // Both counts are taken back on a definite refusal.
+  assert.match(beacon, /answer\?\.status === "error"\) session\.remove\(conversionKey\)/);
+  assert.match(beacon, /result\.status === "error"\) \{\s*retract\(\);/);
+});

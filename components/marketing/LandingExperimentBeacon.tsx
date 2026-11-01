@@ -6,6 +6,8 @@ import { ANALYTICS_CONSENT_STORAGE_KEY } from "@/lib/productAnalyticsShared";
 import {
   EXPERIMENT_CONTROL_ARM,
   EXPERIMENT_COOKIE_NAME,
+  EXPERIMENT_HOLD_COOKIE_NAME,
+  EXPERIMENT_HOLD_SECONDS,
   parseExperimentCookie,
 } from "@/lib/marketingRoutes";
 
@@ -46,6 +48,7 @@ type Props = {
 const PROBE_OFF_KEY = "tomverse_experiment_off_v1";
 const PROBE_OFF_TTL_MS = 10 * 60 * 1000;
 const RELOAD_KEY = "tomverse_experiment_reload_v1";
+const HOLD_RELOAD_KEY = "tomverse_experiment_hold_reload_v1";
 
 const readConsent = (): "accepted" | "declined" | "unset" => {
   try {
@@ -66,6 +69,7 @@ const readCookie = () => {
 
 const clearCookie = () => {
   document.cookie = `${EXPERIMENT_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
+  document.cookie = `${EXPERIMENT_HOLD_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
 };
 
 const session = {
@@ -107,6 +111,26 @@ const leaveVariant = (renderedArm: string, experimentId: string | null) => {
   window.location.reload();
 };
 
+// The experiment state could not be read while a variant is showing. Policy 9.1
+// answers a failed read with the default copy, and the assignment cookie must
+// stay (a visitor is not re-rolled once storage recovers), so the cookie is
+// left alone and a short hold cookie tells the proxy to serve the default page.
+// One reload per hold window: the hold outlives it, so no loop is possible.
+const holdVariant = (renderedArm: string) => {
+  if (renderedArm === EXPERIMENT_CONTROL_ARM) return;
+  document.cookie = `${EXPERIMENT_HOLD_COOKIE_NAME}=1; Max-Age=${EXPERIMENT_HOLD_SECONDS}; Path=/; SameSite=Lax`;
+  const stored = Number(session.get(HOLD_RELOAD_KEY));
+  if (
+    Number.isFinite(stored) &&
+    stored > 0 &&
+    Date.now() - stored < EXPERIMENT_HOLD_SECONDS * 1000
+  ) {
+    return;
+  }
+  session.set(HOLD_RELOAD_KEY, String(Date.now()));
+  window.location.reload();
+};
+
 export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
   useEffect(() => {
     let cancelled = false;
@@ -129,8 +153,17 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
           ...extra,
         }),
       })
-        .then((response) => (response.ok ? response.json() : null))
-        .catch(() => null) as Promise<{ status?: string; arm?: string } | null>;
+        // A refusal the server wrote (unreadable state, a failed count, a rate
+        // limit) is a definite "not counted" and says so; only a request that
+        // got no answer at all is unknown, and is null.
+        .then((response) =>
+          response.ok ? response.json() : { status: "error", http: response.status }
+        )
+        .catch(() => null) as Promise<{
+        status?: string;
+        arm?: string;
+        http?: number;
+      } | null>;
 
     // A visitor can decline while a request is in flight, and the answer's
     // Set-Cookie is applied when it arrives -- after the decline deleted the
@@ -197,18 +230,21 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
           ) {
             return;
           }
-          // Remembered when the request goes out and never taken back. The call
-          // to action leaves this document: the request is kept alive and the
-          // server counts it, but the promise in this document is rejected as
-          // it unloads, which is indistinguishable here from a failed request.
+          // Remembered when the request goes out, and taken back only for an
+          // answer that says it was not counted. The call to action leaves
+          // this document: the request is kept alive and the server counts
+          // it, but the promise in this document is rejected as it unloads,
+          // which is indistinguishable here from a request that got no answer.
           // Treating that as a failure would let the next visit's click count
           // a second time, in one arm more than the other. A click lost to a
           // bad connection is the smaller error, and it is said to be one:
           // the figures are page sessions counted in the browser.
           converting = true;
           session.set(conversionKey, "1");
-          void post("conversion").then(() => {
+          void post("conversion").then((answer) => {
             converting = false;
+            // Taken back only for an answer that says it was not counted.
+            if (answer?.status === "error") session.remove(conversionKey);
           });
         };
         document.addEventListener("click", onClick, true);
@@ -241,6 +277,10 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
       if (!result) return;
       if (result.status === "error") {
         retract();
+        if (result.http === 503) {
+          detachClick();
+          holdVariant(renderedArm);
+        }
         return;
       }
       if (result.status === "off") {
