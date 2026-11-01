@@ -5670,9 +5670,11 @@ export const marketingAutoPauseWindowStart = (
  * Stop an account because a safety limit was crossed (S4a, section 8.3).
  *
  * One transaction: the audit chain lock, the account's row lock, the evidence,
- * the status change, the audit entry. The chain lock comes first because every
- * other writer here takes chain, then post, then channel; a channel lock taken
- * before the chain lock is the other half of a deadlock.
+ * the status change, the audit entry. The chain lock comes first, the order the
+ * outcome writers and the admin routes (which write their audit entry before the
+ * store call) use. A writer that still takes the channel first could deadlock
+ * with this one; Postgres aborts one of them, and the publisher treats an
+ * evaluation that did not finish as undecided and skips the account for the run.
  *
  * Idempotent and cheap to call: an account that is not in a live mode, or whose
  * evidence crosses no limit, is left untouched and the answer is
@@ -5747,9 +5749,11 @@ export async function evaluateMarketingAutoPause(
       // as a failure adds a second entry for the same attempt, with the time of
       // the settling, and that time says nothing about when the attempt was made.
       // Retention keeps what is older than ninety days only in part (successes
-      // become summaries, a last failure stays), so history that is incomplete
-      // is never judged: the look-back stops at sixty days, and a post that has
-      // lost attempts to a summary is left out whole.
+      // become summaries, a last failure stays), so incomplete history is never
+      // judged: the look-back stops at sixty days, where every entry is intact.
+      // The one case left is an unknown outcome older than ninety days settled
+      // inside the look-back; it is placed at the settling and counts as a
+      // failure then, which stops an account rather than lets one run.
       attempts = await database.$queryRaw<Array<{ outcome: string }>>(Prisma.sql`
         SELECT "outcome" FROM (
           SELECT post."id" AS "postId", (entry->>'attempt')::int AS "attempt",
@@ -5757,7 +5761,6 @@ export async function evaluateMarketingAutoPause(
             min((entry->>'at')::timestamptz) AS "madeAt"
           FROM "MarketingPost" AS post, jsonb_array_elements(post."history") AS entry
           WHERE post."channelId" = ${channelId} AND entry->>'type' = 'attempt'
-            AND NOT (post."history" @> '[{"type":"retention_summary","summarises":"attempt"}]'::jsonb)
           GROUP BY post."id", (entry->>'attempt')::int
         ) AS attempts
         WHERE "madeAt" > GREATEST(${since}::timestamptz, clock_timestamp() - interval '60 days')

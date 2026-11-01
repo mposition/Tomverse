@@ -171,7 +171,7 @@ test("an attempt made before the account's last fresh start is not evidence, how
   assert.deepEqual(await evaluate(row.id), { paused: false });
 });
 
-test("a post whose attempts retention has summarised is not judged, so failures that were not consecutive do not become so", async () => {
+test("a post that retention has thinned is judged on the attempts it still holds, so a success on it breaks the run", async () => {
   const row = await approvalChannel();
   await prisma.$executeRawUnsafe(
     `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
@@ -195,7 +195,7 @@ test("a post whose attempts retention has summarised is not judged, so failures 
         guardDecision: "pass",
         guardCodes: [],
         guardRuleIds: [],
-        status: "failed",
+        status: "published",
         mode: "approval",
         history: [
           { at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST },
@@ -204,10 +204,10 @@ test("a post whose attempts retention has summarised is not judged, so failures 
             type: "retention_summary",
             summarises: "attempt",
             count: 2,
-            firstAt: at(0).toISOString(),
-            lastAt: at(1).toISOString(),
+            firstAt: at(-9000).toISOString(),
+            lastAt: at(-8000).toISOString(),
           },
-          { at: at(3).toISOString(), type: "attempt", attempt: 3, outcome: "failed", errorCode: "zernio_rejected" },
+          { at: at(3).toISOString(), type: "attempt", attempt: 3, outcome: "published", errorCode: null },
         ],
         historyVersion: 0,
       },
@@ -217,7 +217,9 @@ test("a post whose attempts retention has summarised is not judged, so failures 
       `ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`,
     );
   }
+  // failed, failed, published (on the thinned post), failed: the success is among the newest three.
+  await postWithAttempts(row.id, [{ at: at(1), attempt: 1, outcome: "failed" }]);
+  await postWithAttempts(row.id, [{ at: at(2), attempt: 1, outcome: "failed" }]);
   await postWithAttempts(row.id, [{ at: at(4), attempt: 1, outcome: "failed" }]);
-  await postWithAttempts(row.id, [{ at: at(5), attempt: 1, outcome: "failed" }]);
   assert.deepEqual(await evaluate(row.id), { paused: false });
 });
