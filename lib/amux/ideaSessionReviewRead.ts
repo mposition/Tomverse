@@ -5,6 +5,7 @@ import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { classifyAmuxSessionReviewAnswer, type AmuxSessionReview } from
   "./ideaSessionReviewCore.ts";
+import { amuxSessionReviewFirstPageDetail } from "./ideaSessionReviewDetailCore.ts";
 
 /** The answer stays readable for seven days after intake, or while an active
  * legal hold covers the idea; the retention worker's lag never extends it. */
@@ -39,7 +40,8 @@ export async function readAmuxSessionReviewForOwner(actorUserId: string,
       state: "awaiting_owner", cancelledAt: null } },
     orderBy: { createdAt: "desc" },
     select: { claimId: true, ciphertext: true, keyId: true, keyVersion: true,
-      digest: true, digestKeyId: true },
+      digest: true, digestKeyId: true,
+      idea: { select: { currentSourcePlanRevisionId: true } } },
   });
   if (!result || !await ownerMayReadAnswer(actorUserId, ideaId, result.claimId)) return null;
   if (!result.ciphertext || !result.keyId || !result.keyVersion) {
@@ -64,6 +66,11 @@ export async function readAmuxSessionReviewForOwner(actorUserId: string,
     }
     // Key retrieval and decryption can cross the deadline or a hold release.
     if (!await ownerMayReadAnswer(actorUserId, ideaId, result.claimId)) return null;
-    return classifyAmuxSessionReviewAnswer(plain.toString("utf8"));
+    const raw = plain.toString("utf8");
+    const review = classifyAmuxSessionReviewAnswer(raw);
+    // A first page parks with no source plan; only its inspection is replayable.
+    return review.reason === "not_a_plan" && result.idea.currentSourcePlanRevisionId === null
+      ? { reason: "not_a_plan", detail: amuxSessionReviewFirstPageDetail(raw, result.claimId) }
+      : review;
   } finally { plain.fill(0); }
 }
