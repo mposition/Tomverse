@@ -214,7 +214,12 @@ const world = (
       throw new Error(`unexpected raw statement: ${sql}`);
     },
     marketingPost: {
-      findMany: async () => posts.map((post) => ({ ...post })),
+      // Honours the page size and the cursor, as the real table does.
+      findMany: async (args: { take?: number; cursor?: { id: string }; skip?: number }) => {
+        const all = posts.map((post, index) => ({ id: `post-${index}`, ...post }));
+        const start = args.cursor ? all.findIndex((post) => post.id === args.cursor?.id) + (args.skip ?? 0) : 0;
+        return all.slice(start, start + (args.take ?? all.length));
+      },
     },
     marketingChannel: {
       updateMany: async (input: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
@@ -325,7 +330,7 @@ test("only posts of the current approval period were read, and its start is the 
   const original = (database as unknown as { marketingPost: { findMany: (args: unknown) => Promise<unknown> } }).marketingPost;
   const findMany = original.findMany;
   original.findMany = async (args: unknown) => {
-    observed = args;
+    observed ??= args;
     return findMany(args);
   };
   await graduate(database);
@@ -333,4 +338,20 @@ test("only posts of the current approval period were read, and its start is the 
     channelId: CHANNEL_ID,
     createdAt: { gte: STARTED },
   });
+});
+
+test("every post of the period is counted, however many there are: late edits past the first pages still count", async () => {
+  // 600 approved posts, the first 400 untouched and the last 200 edited: 200 of
+  // 600 is exactly a third and is allowed, one more edit is not. Counting only
+  // the first page or the first 500 would have said 0 and 100 edits.
+  const untouched = Array.from({ length: 400 }, () => approvedPost());
+  const edited = (n: number) => Array.from({ length: n }, () => approvedPost({ history: [{ type: "edit_revision" }] }));
+  const allowed = world({ posts: [...untouched, ...edited(200)] });
+  const ok = await graduate(allowed.database);
+  assert.equal(ok.graduated, true);
+  if (ok.graduated) assert.equal(ok.snapshot.approvedPostCount, 600);
+
+  const over = world({ posts: [...untouched, ...edited(201)] });
+  const refused = await graduate(over.database);
+  assert.deepEqual(refused, { graduated: false, unmet: ["edit_rate_above_limit"] });
 });

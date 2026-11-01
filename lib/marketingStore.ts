@@ -5913,7 +5913,7 @@ export const evaluateMarketingGraduation = (input: {
   return { eligible: unmet.length === 0, unmet, operatorEditRate, guardRejectionRate };
 };
 
-const MARKETING_GRADUATION_HISTORY_READ = 500;
+const MARKETING_GRADUATION_PAGE = 200;
 
 async function measureMarketingGraduation(
   database: MarketingDatabase,
@@ -5923,12 +5923,26 @@ async function measureMarketingGraduation(
   // Posts made in this approval period. A fresh start (reconnect, scope or
   // policy change) opens a new period, so earlier work never counts.
   const since = observedFromAt ?? new Date(0);
-  const posts = await database.marketingPost.findMany({
-    where: { channelId, createdAt: { gte: since } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: MARKETING_GRADUATION_HISTORY_READ,
-    select: { status: true, approvedAt: true, publishedAt: true, history: true },
-  });
+  // Every post of the period, page by page: a count over part of it would let
+  // the first posts decide for all the rest.
+  const posts: Array<{
+    id: string;
+    status: string;
+    approvedAt: Date | null;
+    publishedAt: Date | null;
+    history: Prisma.JsonValue;
+  }> = [];
+  for (;;) {
+    const page = await database.marketingPost.findMany({
+      where: { channelId, createdAt: { gte: since } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: MARKETING_GRADUATION_PAGE,
+      ...(posts.length > 0 ? { cursor: { id: posts[posts.length - 1].id }, skip: 1 } : {}),
+      select: { id: true, status: true, approvedAt: true, publishedAt: true, history: true },
+    });
+    posts.push(...page);
+    if (page.length < MARKETING_GRADUATION_PAGE) break;
+  }
   let firstSuccessAt: Date | null = null;
   let approvedPostCount = 0;
   let operatorRejectedCount = 0;
