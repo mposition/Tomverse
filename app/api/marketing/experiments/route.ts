@@ -161,6 +161,9 @@ export async function POST(request: Request) {
       [...current.locales].sort().join(",") === [...config.locales].sort().join(",");
 
     if (body.action === "assign") {
+      // A valid assignment is kept whatever language this page is in: the same
+      // visitor may open a covered language next and must keep their arm. It is
+      // exposure and conversion that stay out of an uncovered language, below.
       if (currentIsValid) {
         return respond({ status: "assigned", arm: current.arm });
       }

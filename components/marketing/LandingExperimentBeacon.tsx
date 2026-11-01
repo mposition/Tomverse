@@ -88,11 +88,13 @@ const probeIsOff = (key: string) => {
   return Number.isFinite(stored) && stored > 0 && Date.now() - stored < PROBE_OFF_TTL_MS;
 };
 
-const leaveVariant = (renderedArm: string) => {
+const leaveVariant = (renderedArm: string, experimentId: string | null) => {
   if (renderedArm === EXPERIMENT_CONTROL_ARM) return;
-  // Once per session: a cookie the route could not delete must not loop.
-  if (session.get(RELOAD_KEY)) return;
-  session.set(RELOAD_KEY, "1");
+  // Once per assignment: a cookie the route could not delete must not loop, and
+  // a tab that already left one experiment must still be able to leave the next.
+  const key = `${RELOAD_KEY}_${experimentId ?? "unknown"}`;
+  if (session.get(key)) return;
+  session.set(key, "1");
   window.location.reload();
 };
 
@@ -124,10 +126,10 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
     // A visitor can decline while a request is in flight, and the answer's
     // Set-Cookie is applied when it arrives -- after the decline deleted the
     // cookie. So every answer is followed by a look at the consent as it is now.
-    const withdrawn = () => {
+    const withdrawn = (experimentId: string | null) => {
       if (readConsent() !== "declined") return false;
       clearCookie();
-      leaveVariant(renderedArm);
+      leaveVariant(renderedArm, experimentId);
       return true;
     };
 
@@ -138,7 +140,7 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
       if (consent === "declined") {
         if (cookieValue) {
           clearCookie();
-          leaveVariant(renderedArm);
+          leaveVariant(renderedArm, parseExperimentCookie(cookieValue)?.experimentId ?? null);
         }
         return;
       }
@@ -146,50 +148,70 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
 
       if (!cookieValue) {
         const assigned = await post("assign");
-        if (withdrawn()) return;
+        if (withdrawn(null)) return;
         // Only a definite "off" is remembered; a failed request is retried.
         if (assigned?.status === "off") session.set(probeKey, String(Date.now()));
         return;
       }
 
       const assignment = parseExperimentCookie(cookieValue);
+      const experimentId = assignment?.experimentId ?? null;
+
+      // The click listener goes up before the exposure request goes out. The
+      // answer can take as long as a database read, and a visitor who clicks
+      // the call to action in that time is gone from this page before it
+      // arrives. The route validates the cookie and the rendered arm itself,
+      // so nothing needs the exposure to have been confirmed first.
+      if (assignment && assignment.arm === renderedArm) {
+        const conversionKey = `tomverse_experiment_converted_${assignment.experimentId}`;
+        let converting = false;
+        onClick = (event) => {
+          const target = event.target;
+          if (
+            !(target instanceof Element) ||
+            !target.closest("#landing-hero-primary") ||
+            converting ||
+            session.get(conversionKey)
+          ) {
+            return;
+          }
+          // Remembered once the server has it, so a click lost to a bad
+          // connection is counted by the next one instead of never.
+          converting = true;
+          void post("conversion").then((answer) => {
+            converting = false;
+            if (answer?.status === "recorded") session.set(conversionKey, "1");
+          });
+        };
+        document.addEventListener("click", onClick, true);
+      }
+      const detachClick = () => {
+        if (onClick) document.removeEventListener("click", onClick, true);
+        onClick = null;
+      };
+
       const alreadyCounted = assignment
         ? session.get(`tomverse_experiment_exposed_${assignment.experimentId}`)
         : null;
       const result = await post("exposure", { record: !alreadyCounted });
       if (cancelled) return;
-      if (withdrawn()) return;
-      if (!result || result.status === "error") return;
-      if (result.status === "off") {
-        session.set(probeKey, String(Date.now()));
-        clearCookie();
-        leaveVariant(renderedArm);
+      if (withdrawn(experimentId)) {
+        detachClick();
         return;
       }
-      if (result.status !== "recorded" || !assignment) return;
-
+      if (!result || result.status === "error") return;
+      if (result.status === "off") {
+        detachClick();
+        session.set(probeKey, String(Date.now()));
+        clearCookie();
+        leaveVariant(renderedArm, experimentId);
+        return;
+      }
+      if (result.status !== "recorded" || !assignment) {
+        detachClick();
+        return;
+      }
       session.set(`tomverse_experiment_exposed_${assignment.experimentId}`, "1");
-      const conversionKey = `tomverse_experiment_converted_${assignment.experimentId}`;
-      let converting = false;
-      onClick = (event) => {
-        const target = event.target;
-        if (
-          !(target instanceof Element) ||
-          !target.closest("#landing-hero-primary") ||
-          converting ||
-          session.get(conversionKey)
-        ) {
-          return;
-        }
-        // Remembered once the server has it, so a click lost to a bad
-        // connection is counted by the next one instead of never.
-        converting = true;
-        void post("conversion").then((answer) => {
-          converting = false;
-          if (answer?.status === "recorded") session.set(conversionKey, "1");
-        });
-      };
-      document.addEventListener("click", onClick, true);
     };
 
     void run();

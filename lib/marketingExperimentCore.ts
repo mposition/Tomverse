@@ -55,14 +55,18 @@ export const experimentCounterKey = (
   kind: ExperimentEventKind
 ) => `${MARKETING_EXPERIMENT_COUNTER_PREFIX}${experimentId}.${arm}.${kind}`;
 
-/** Counter rows -> the four numbers. A malformed value reads as zero, never as a guess. */
+/**
+ * Counter rows -> the four numbers. A malformed value reads as zero, never as
+ * a guess. Up to fifteen digits, which is below 2^53, so a counter that large
+ * (not reachable by a landing page) would still read exactly.
+ */
 export const experimentCountsFromRows = (
   config: Pick<ExperimentConfig, "experimentId" | "variantId">,
   rows: ReadonlyMap<string, string>
 ): ExperimentCounts => {
   const read = (arm: string, kind: ExperimentEventKind) => {
     const value = rows.get(experimentCounterKey(config.experimentId, arm, kind));
-    return value && /^\d{1,12}$/.test(value) ? Number(value) : 0;
+    return value && /^\d{1,15}$/.test(value) ? Number(value) : 0;
   };
   return {
     controlExposures: read(EXPERIMENT_CONTROL_ARM, "exposure"),

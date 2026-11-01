@@ -223,6 +223,41 @@ test.describe("fixture experiment, forced variant", () => {
     expect((await (await exposure).json()).status).toBe("recorded");
   });
 
+  test("(b) a click on the call to action before the exposure answer arrives is still counted", async ({
+    page,
+    context,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await context.addCookies([
+      { name: "tv_exp", value: VARIANT_COOKIE, url: ORIGIN },
+    ]);
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, "accepted");
+    }, CONSENT_KEY);
+
+    // Hold the exposure answer, as a slow database read would.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/marketing/experiments", async (route) => {
+      if (route.request().postDataJSON()?.action === "exposure") await held;
+      await route.continue().catch(() => undefined);
+    });
+    const isCall = (action: string) => (request: import("@playwright/test").Request) =>
+      request.url().includes("/api/marketing/experiments") &&
+      request.postDataJSON()?.action === action;
+
+    const exposureSent = page.waitForRequest(isCall("exposure"));
+    const conversionSent = page.waitForRequest(isCall("conversion"));
+    await page.goto("/");
+    await exposureSent;
+    // The page is hydrated: the exposure request is only sent from its effect.
+    await page.locator("#landing-hero-primary").click({ noWaitAfter: true });
+    await conversionSent;
+    release();
+  });
+
   test("(b) the Korean home page has its own variant copy", async ({
     page,
     context,
