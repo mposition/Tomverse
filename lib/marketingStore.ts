@@ -6229,8 +6229,11 @@ export async function listOpenMarketingCommentAlerts(
 
 /**
  * Where one post's alert stands: open when its newest report is newer than its
- * newest acknowledgement, with the instant that report says it began. Two indexed reads for one post, so the transaction
- * that holds the audit chain lock does not scan the table. `ignoreAuditLogId`
+ * newest acknowledgement, with the instant that report says it began. Two reads
+ * for one post -- the report read narrows by kind and then by the post inside the
+ * ninety days of alert reports that are kept, which is small -- rather than the
+ * scan of every alert that listing them all would be under the audit lock.
+ * `ignoreAuditLogId`
  * leaves out the entry a request has just written for itself.
  */
 async function marketingCommentAlertState(

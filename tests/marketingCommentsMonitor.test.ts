@@ -660,9 +660,36 @@ test("the comments call follows pages to the end, assumes no order, and says whe
   assert.equal(two.result.kind === "ok" && two.result.truncated, false);
   assert.match(two.urls[1], /cursor=c2/);
 
-  // A full page that names no way on is not known to be the end.
+  // A full page that names no way on is not known to be the end -- also when
+  // some of its items were hidden or unreadable and so are not in the result.
   const unclear = await run([page(50, {})]);
   assert.equal(unclear.result.kind === "ok" && unclear.result.truncated, true);
+  const withHidden = await run([
+    { comments: [...page(49, {}).comments, { message: "hidden", is_hidden: true }] },
+  ]);
+  assert.equal(withHidden.result.kind === "ok" && withHidden.result.truncated, true);
+  // The response saying it is the end is the end, however full the page.
+  const saysEnd = await run([page(50, { pagination: { hasMore: false } })]);
+  assert.equal(saysEnd.result.kind === "ok" && saysEnd.result.truncated, false);
+  // A short page without pagination information is the end.
+  const short = await run([page(3, {})]);
+  assert.equal(short.result.kind === "ok" && short.result.truncated, false);
+
+  // A later page that fails keeps what the first gave and says it was cut short.
+  let call = 0;
+  const failing = await zernioCommentsQuery({
+    apiKey: "k",
+    baseUrl: "https://zernio.example/api",
+    callBudgetMs: 1_000,
+    fetch: (async () => {
+      call += 1;
+      return call === 1
+        ? { status: 200, json: async () => page(50, { pagination: { hasMore: true, cursor: "c2" } }) }
+        : { status: 500, json: async () => null };
+    }) as unknown as typeof fetch,
+  }).fetchComments("p", "a");
+  assert.equal(failing.kind === "ok" && failing.comments.length, 50);
+  assert.equal(failing.kind === "ok" && failing.truncated, true);
 
   // Pages forever: stops at the cap and says so.
   const forever = await run([page(50, { pagination: { hasMore: true, cursor: "again" } })]);

@@ -35,7 +35,13 @@ const instant = (value: unknown): Date | null => {
  * not a list is not, and the caller must not take it for one. Single items that
  * cannot be read are skipped, not guessed.
  */
-export const parseZernioComments = (body: unknown): ParsedZernioComment[] | null => {
+export const parseZernioComments = (body: unknown): ParsedZernioComment[] | null =>
+  readZernioCommentsPage(body)?.comments ?? null;
+
+/** A page with the size it arrived at, before unreadable and hidden items were dropped. */
+export const readZernioCommentsPage = (
+  body: unknown,
+): { comments: ParsedZernioComment[]; rawCount: number } | null => {
   const list = (body as { comments?: unknown } | null)?.comments;
   if (!Array.isArray(list)) return null;
   const comments: ParsedZernioComment[] = [];
@@ -51,7 +57,7 @@ export const parseZernioComments = (body: unknown): ParsedZernioComment[] | null
       createdAt: instant(record.created_time ?? record.createdTime ?? record.createdAt),
     });
   }
-  return comments;
+  return { comments, rawCount: list.length };
 };
 
 export type ZernioCommentsResult =
@@ -67,10 +73,14 @@ const PAGE_SIZE = 50;
 /** Pages followed per post and run. A thread longer than this is cut short, and says so. */
 export const ZERNIO_COMMENTS_MAX_PAGES = 5;
 
-const nextCursor = (body: unknown): { more: boolean; cursor: string | null } => {
+/** `more` is null when the response does not say either way. */
+const nextCursor = (body: unknown): { more: boolean | null; cursor: string | null } => {
   const pagination = (body as { pagination?: { hasMore?: unknown; cursor?: unknown } } | null)?.pagination;
   const cursor = typeof pagination?.cursor === "string" && pagination.cursor !== "" ? pagination.cursor : null;
-  return { more: pagination?.hasMore === true, cursor };
+  return {
+    more: typeof pagination?.hasMore === "boolean" ? pagination.hasMore : null,
+    cursor,
+  };
 };
 
 /**
@@ -89,17 +99,21 @@ export const zernioCommentsQuery = (ports: ZernioTransportPorts) => ({
         `/v1/inbox/comments/${encodeURIComponent(externalPostId)}?accountId=${encodeURIComponent(externalAccountRef)}&limit=${PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
         { method: "GET" },
       );
-      if (result.kind === "unreachable" || result.status !== 200) return { kind: "unavailable" };
-      const parsed = parseZernioComments(result.body);
-      if (parsed === null) return { kind: "unavailable" };
-      comments.push(...parsed);
-      const next = nextCursor(result.body);
-      if (!next.more) {
-        // A short page is the end. A full page that does not say it has more is
-        // not known to be the end, and nothing here guesses.
-        return { kind: "ok", comments, truncated: parsed.length >= PAGE_SIZE };
+      // A later page that fails keeps what was read: the comments already in hand
+      // are still classified, and the read is reported as cut short.
+      const page = result.kind === "response" && result.status === 200 ? readZernioCommentsPage(result.body) : null;
+      if (page === null) {
+        return comments.length > 0 ? { kind: "ok", comments, truncated: true } : { kind: "unavailable" };
       }
-      if (next.cursor === null) return { kind: "ok", comments, truncated: true };
+      comments.push(...page.comments);
+      const next = nextCursor(result.body);
+      // The end is something the response says (`hasMore: false`), or a page
+      // shorter than asked for -- counted before hidden items were dropped. A full
+      // page that says nothing is not known to be the end, and nothing guesses.
+      if (next.more === false || (next.more === null && page.rawCount < PAGE_SIZE)) {
+        return { kind: "ok", comments, truncated: false };
+      }
+      if (next.more === null || next.cursor === null) return { kind: "ok", comments, truncated: true };
       cursor = next.cursor;
     }
     return { kind: "ok", comments, truncated: true };
