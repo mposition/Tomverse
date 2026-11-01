@@ -19,6 +19,10 @@ import {
     seoAgentPhaseEnvProblems,
     seoAgentRecordSchema,
     SEO_AGENT_JUNIT_PLACEHOLDER,
+    judgeSeoDiff,
+    seoAgentAddedLines,
+    seoAgentCodeOnly,
+    seoAgentCodeProblems,
     seoAgentCheckCommands,
     seoAgentExpectedTestCount,
     seoAgentJunitVerdict,
@@ -237,6 +241,93 @@ test("the same path listed twice is refused", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The code a change adds
+// ---------------------------------------------------------------------------
+
+test("added lines are the + lines of a patch, without the file headers", () => {
+    assert.equal(seoAgentAddedLines("--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n-old\n+new\n+more\n context\n"), "new\nmore");
+    assert.equal(seoAgentAddedLines(""), "");
+});
+
+test("comments and the text of strings are not code; the expressions inside a template are", () => {
+    assert.equal(seoAgentCodeOnly('a "process" b // eval\nc'), 'a "" b \nc');
+    assert.equal(seoAgentCodeOnly("a /* assert */ b"), "a  b");
+    assert.match(seoAgentCodeOnly("`copy about the process ${eval(1)} end`"), /eval/);
+    assert.doesNotMatch(seoAgentCodeOnly("`copy about the process ${locale} end`"), /process|copy/);
+    // An unterminated quote ends at its line; it does not swallow the rest.
+    assert.match(seoAgentCodeOnly('const a = "oops\neval(1)'), /eval/);
+});
+
+test("the routes to the test runner's own objects are closed on the lines a change adds", () => {
+    const attacks = {
+        "import assert": 'import assert from "node:assert/strict";',
+        "use assert": "const a = assert; a.equal = () => {};",
+        "end the process": "process.exit(0);",
+        "alias process": "const p = process; p.exit(0);",
+        "test context": "if (process.env.NODE_TEST_CONTEXT) process.exit(0);",
+        "dynamic import": 'await import("node:assert");',
+        "require": 'const x = require("fs");',
+        "builtin": 'process.getBuiltinModule("node:assert");',
+        "globalThis": "globalThis.x = 1;",
+        "eval": 'eval("1")',
+        "Function": 'new Function("return 1")()',
+        "constructor chain": '(() => {}).constructor.constructor("return process")()',
+        "constructor index": '(() => {})["constructor"]',
+        "eval in a template": "const s = `${eval('1')}`;",
+        "relative import": 'import x from "./evil";',
+        "node import": 'import { readFileSync } from "fs";',
+        "prototype": "Object.setPrototypeOf(a, b);",
+        "proxy": "new Proxy({}, {});",
+        "defineProperty": "Object.defineProperty(a, 'b', {});",
+    };
+    for (const [name, code] of Object.entries(attacks)) {
+        assert.ok(seoAgentCodeProblems(code).length > 0, name);
+    }
+});
+
+test("ordinary SEO code and copy that merely uses the words are not findings", () => {
+    const fine = [
+        'description: "A global process for teams; assert your preferences. Use self-serve, then eval and Function it"',
+        "// process.exit(0) and eval are only words here\n/* assert */ const a = 1;",
+        "const t = `Use ${locale} copy about the process`;",
+        'if (process.env.LLMS_TXT_ENABLED !== "true") return new Response("Not found", { status: 404 });',
+        'import type { Metadata } from "next";\nimport { SITE_ORIGIN } from "@/lib/seo";\nimport { NextResponse } from "next/server";',
+        'import {\n  a,\n  b,\n} from "@/lib/seo";',
+        "export default function sitemap() { return SEO_LOCALES.map((locale) => ({ url: locale })); }",
+    ];
+    for (const code of fine) assert.deepEqual(seoAgentCodeProblems(code), [], code);
+    // Only the one environment variable the llms.txt route reads.
+    assert.deepEqual(seoAgentCodeProblems("const k = process.env.DATABASE_URL;"), ["process"]);
+    assert.deepEqual(seoAgentCodeProblems('import a from "@/lib/seo";\nimport b from "@/lib/prismaX/secret";'), []);
+});
+
+test("the files the agent may edit pass the code check as they are in this repository", () => {
+    for (const path of ["lib/seo.ts", "components/seo/StructuredData.tsx", "app/sitemap.ts"]) {
+        const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+        assert.deepEqual(seoAgentCodeProblems(source), [], path);
+    }
+});
+
+test("one judgement of a diff: git's status and counts, then the code it adds", () => {
+    const view = (patch) => ({ raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch });
+    assert.equal(judgeSeoDiff(view(GOOD_PATCH)).ok, true);
+    const bad = judgeSeoDiff(view("+++ b/lib/seo.ts\n+process.exit(0);\n"));
+    assert.deepEqual(bad, { ok: false, problems: ["forbidden_code"] });
+    // A path problem is reported before the code is read.
+    assert.deepEqual(judgeSeoDiff({ raw: "", numstat: "", patch: "+process.exit(0);" }), { ok: false, problems: ["no_change"] });
+});
+
+test("a change that adds forbidden code is refused before the checks and again by the publish phase", async () => {
+    const hostile = "+++ b/lib/seo.ts\n+import assert from \"node:assert/strict\";\n";
+    const validateSide = validatePorts({ stagedDiff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: hostile } });
+    assert.deepEqual(await validate(validateSide.ports), { status: "validation_failed", problems: ["forbidden_code"] });
+    assert.ok(!validateSide.calls.includes("runChecks") && !validateSide.calls.includes("commit"));
+    const publishSide = publishPorts({ diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: hostile } });
+    assert.deepEqual(await publish(publishSide.ports), { status: "validation_failed", problems: ["forbidden_code"] });
+    assert.ok(!publishSide.calls.includes("push"));
+});
+
+// ---------------------------------------------------------------------------
 // Reading git's account
 // ---------------------------------------------------------------------------
 
@@ -420,6 +511,7 @@ test("every policy test that is listed and exists in this repository is a real f
 
 const GOOD_RAW = `:100644 100644 ${sha} ${sha2} M\0lib/seo.ts\0`;
 const GOOD_NUMSTAT = "3\t1\tlib/seo.ts\0";
+const GOOD_PATCH = "--- a/lib/seo.ts\n+++ b/lib/seo.ts\n@@ -1 +1,3 @@\n+/** The brand name used in page titles. */\n+export const SITE_NAME = \"Tomverse\";\n";
 const BASE = "c".repeat(40);
 const COMMIT = "e".repeat(40);
 const TREE = "d".repeat(40);
@@ -449,7 +541,7 @@ const validatePorts = (overrides = {}) =>
                 content: proposal([{ path: "lib/seo.ts", find: "A = 1", replace: "A = 2" }]),
             },
             writeFiles: undefined,
-            stagedDiff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT },
+            stagedDiff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: GOOD_PATCH },
             indexTree: TREE,
             baseTestSources: { "tests/seoHreflang.test.mjs": 'test("a", () => {});\n' },
             runChecks: { ok: true },
@@ -604,7 +696,7 @@ test("a refused proposal writes nothing", async () => {
 test("git's diff decides: a change outside the list is refused even when the proposal looked clean", async () => {
     const raw = GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0tests/llmsTxtRoute.test.mjs\0`;
     const numstat = GOOD_NUMSTAT + "1\t1\ttests/llmsTxtRoute.test.mjs\0";
-    const { ports, calls } = validatePorts({ stagedDiff: { raw, numstat } });
+    const { ports, calls } = validatePorts({ stagedDiff: { raw, numstat, patch: GOOD_PATCH } });
     assert.deepEqual(await validate(ports), { status: "validation_failed", problems: ["path_outside_allowlist"] });
     assert.ok(!calls.includes("runChecks") && !calls.includes("commit"));
 });
@@ -644,8 +736,8 @@ test("a diff that gained a file while the checks ran is judged again", async () 
         stagedDiff: () => {
             views += 1;
             return views === 1
-                ? { raw: GOOD_RAW, numstat: GOOD_NUMSTAT }
-                : { raw: GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0package.json\0`, numstat: GOOD_NUMSTAT + "1\t0\tpackage.json\0" };
+                ? { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: GOOD_PATCH }
+                : { raw: GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0package.json\0`, numstat: GOOD_NUMSTAT + "1\t0\tpackage.json\0", patch: GOOD_PATCH };
         },
     });
     assert.equal((await validate(ports)).status, "validation_failed");
@@ -679,7 +771,7 @@ const publishPorts = (overrides = {}) =>
             baseOnDevelop: true,
             importCommit: undefined,
             commitFacts: { tree: TREE, parent: BASE, parentCount: 1 },
-            diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT },
+            diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: GOOD_PATCH },
             lookupGraduation: false,
             remoteRef: { exists: false, sha: null },
             push: undefined,
@@ -806,7 +898,7 @@ test("the publish phase reads the commit's tree and parent from git and pushes n
 test("the diff is judged again from git: a record cannot launder a commit that touches another file", async () => {
     const raw = GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0.github/workflows/auto-pr-to-develop.yml\0`;
     const numstat = GOOD_NUMSTAT + "1\t1\t.github/workflows/auto-pr-to-develop.yml\0";
-    const { ports, calls } = publishPorts({ diff: { raw, numstat } });
+    const { ports, calls } = publishPorts({ diff: { raw, numstat, patch: GOOD_PATCH } });
     assert.deepEqual(await publish(ports), { status: "validation_failed", problems: ["path_outside_allowlist"] });
     assert.ok(!calls.includes("push"));
 });

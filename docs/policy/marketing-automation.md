@@ -359,6 +359,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
   검사가 제안 코드를 실행하므로 이 단계는 게시 자격증명이 없는 일회용 러너에서만 돌리고(GitHub 토큰 변수가 있으면 시작을 거부), 검사는 허용 목록 환경으로, POSIX에서는 운영자가 정한 별도 비특권 사용자(`MARKETING_SEO_CHECK_UID`·`_GID`)로 돌린다. 그 사용자는 작업 트리를 읽기만 하고 도구 산출물(`.next`, `next-env.d.ts`)과 자기 HOME에만 쓸 수 있어, 제안 코드가 판정 시험·설정을 바꿀 수 없고 검사마다 시간 제한이 있다.
   게시할 수 있는 결과는 이 사용자로 돌린 검사에서만 나오며, 사용자가 없으면 복제도 호출도 하지 않는다(서명 키 없이 같은 사용자로 돌려 보기만 하는 `--dry-run`은 산출물을 만들지 않는다). 검사가 남긴 프로세스는 새 세션을 만든 것까지 그 사용자의 `kill(-1)`로 끝낸다. 게시 단계는 이미 있는 원격 브랜치 위에 push하지 않고, 정리 삭제는 이번 실행이 만든 브랜치가 아직 자기 commit일 때만 한다.
   스테이징된 tree를 검사 전에 고정해 검사 후·커밋의 tree가 같아야 하며, 끝에 commit bundle과 기록에 서명(`MARKETING_SEO_ATTESTATION_KEY`)한다.
+  시험은 제안 코드와 같은 프로세스에서 돌아 악의적인 코드를 원리상 막지 못한다(시험 안의 `assert`를 바꾸는 코드 등). 그래서 추가되는 줄에서 그 길을 닫는 심층 방어를 둔다 — 허용 import(`next`·`react`·`@/lib|components|app`)만, `process`(`LLMS_TXT_ENABLED` 하나만 예외)·`assert`·`eval`·`Function`·`globalThis`·동적 로드·constructor 사슬 거부, 주석과 문자열 내용은 코드가 아니다 — 이는 증명이 아니다. 악의적 코드에 대한 권위 있는 방어는 draft PR, 저장소 CI, 사람의 diff 검토다.
   게시 단계(`--phase publish`)는 신뢰된 checkout과 자기 의존성에서 돌고, GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)과 서명 키만 가지며 LLM 변수가 있으면 시작을 거부한다.
   서명이 맞고, base가 원격 develop의 조상이며, 부모가 base이고, tree·diff를 git에서 다시 계산해 일치할 때만 push하고, push 뒤 원격 tree를 다시 읽어 일치할 때만 PR(draft)을 연다.
   졸업 상태 조회가 연결되기 전에는 항상 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.

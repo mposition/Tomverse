@@ -440,7 +440,18 @@ export type SeoValidationProblem =
   | "submodule"
   | "mode_change"
   | "executable_mode"
-  | "too_many_lines";
+  | "too_many_lines"
+  | "forbidden_code";
+
+/** git's three views of one diff: the status of each path, the line counts, and the added text. */
+export type SeoDiffView = { readonly raw: string; readonly numstat: string; readonly patch: string };
+
+/** The validator and the code check, applied to what git says. The one judgement every site uses. */
+export function judgeSeoDiff(view: SeoDiffView): SeoValidation {
+  const verdict = validateSeoChanges(seoGitChanges(view.raw, view.numstat));
+  if (!verdict.ok) return verdict;
+  return seoAgentCodeProblems(seoAgentAddedLines(view.patch)).length > 0 ? { ok: false, problems: ["forbidden_code"] } : verdict;
+}
 
 export type SeoValidation =
   | { readonly ok: true; readonly paths: readonly string[]; readonly changedLines: number }
@@ -490,6 +501,117 @@ export function validateSeoChanges(changes: readonly SeoGitChange[]): SeoValidat
   if (changedLines > SEO_AGENT_MAX_CHANGED_LINES) problems.add("too_many_lines");
   if (problems.size > 0) return { ok: false, problems: [...problems] };
   return { ok: true, paths: changes.map((change) => change.path), changedLines };
+}
+
+// ---------------------------------------------------------------------------
+// The code a change adds
+// ---------------------------------------------------------------------------
+//
+// The policy tests run in the same process as the code they test, so code the
+// model adds could reach the test runner's own objects -- replace `assert`,
+// end the process, load a module the SEO files have no need of. Nothing can make
+// that impossible in this design (the authoritative gates for hostile code are
+// the draft PR, the repository's CI and a person's review of the diff), but the
+// routes to it are closed here, on the lines the change *adds*: the four files
+// are page metadata, structured data, a sitemap and a text route, and need very
+// little of the language.
+//
+// A deny-list over code is not a proof, and is not offered as one. It is read
+// from comments and string contents with those removed, so page copy that says
+// "process" or "global" is not a finding.
+
+/** The module specifiers an added line may import: the framework, React and this repository's own libraries. */
+const ALLOWED_SPECIFIER = /^(?:next(?:\/[\w./-]+)?|react(?:\/[\w./-]+)?|server-only|@\/(?:lib|components|app)\/[\w./-]+)$/;
+
+/** The text of the lines a unified diff adds (`git diff -U0`), without the file headers. */
+export function seoAgentAddedLines(patch: string): string {
+  return patch
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1))
+    .join("\n");
+}
+
+/**
+ * The code with comments removed and the text of every string emptied. A template
+ * literal keeps its `${ }` expressions, which are code. One scan, no regular
+ * expression over the whole text, so an unterminated quote ends at its line.
+ */
+export function seoAgentCodeOnly(text: string): string {
+  let out = "";
+  let index = 0;
+  // A stack of template literals that are open around a `${ }` expression: how many braces are open in each.
+  const templates: number[] = [];
+  const peek = () => text[index];
+  while (index < text.length) {
+    const char = text[index] as string;
+    const next = text[index + 1];
+    if (char === "/" && next === "/") {
+      while (index < text.length && peek() !== "\n") index += 1;
+    } else if (char === "/" && next === "*") {
+      const end = text.indexOf("*/", index + 2);
+      index = end < 0 ? text.length : end + 2;
+    } else if (char === '"' || char === "'") {
+      index += 1;
+      while (index < text.length && peek() !== char && peek() !== "\n") index += peek() === "\\" ? 2 : 1;
+      index += 1;
+      out += '""';
+    } else if (char === "`" || (char === "}" && templates.length > 0 && templates[templates.length - 1] === 0)) {
+      // The start of a template, or the `}` that closes an expression and resumes one.
+      if (char === "}") templates.pop();
+      index += 1;
+      let opened = false;
+      while (index < text.length) {
+        const here = text[index] as string;
+        if (here === "\\") {
+          index += 2;
+        } else if (here === "`") {
+          index += 1;
+          break;
+        } else if (here === "$" && text[index + 1] === "{") {
+          index += 2;
+          templates.push(0);
+          opened = true;
+          break;
+        } else {
+          index += 1;
+        }
+      }
+      out += opened ? '"" ' : '""';
+    } else {
+      if (templates.length > 0) {
+        if (char === "{") templates[templates.length - 1] = (templates[templates.length - 1] as number) + 1;
+        if (char === "}") templates[templates.length - 1] = (templates[templates.length - 1] as number) - 1;
+      }
+      out += char;
+      index += 1;
+    }
+  }
+  return out;
+}
+
+/** Reasons the added code is refused; empty means none was found. */
+export function seoAgentCodeProblems(added: string): string[] {
+  const problems = new Set<string>();
+  // Module specifiers are strings, so they are read before the strings are emptied.
+  for (const match of added.matchAll(/\b(?:from|import)\s*(["'])([^"'\n]+)\1/g)) {
+    if (!ALLOWED_SPECIFIER.test(match[2] as string)) problems.add(`import_not_allowed:${match[2]}`);
+  }
+  const code = seoAgentCodeOnly(added);
+  if (/\bimport\s*\(/.test(code) || /\brequire\b/.test(code) || /\bmodule\s*\./.test(code)) problems.add("dynamic_module_load");
+  // `process` only for the one switch the llms.txt route reads.
+  if (/\bprocess\b(?!\s*\.\s*env\s*\.\s*LLMS_TXT_ENABLED\b)/.test(code)) problems.add("process");
+  const names = [
+    "eval", "Function", "globalThis", "global", "window", "self", "Reflect", "Proxy", "__proto__", "defineProperty",
+    "defineProperties", "setPrototypeOf", "getBuiltinModule", "child_process", "assert", "node:test",
+  ];
+  for (const name of names) {
+    if (new RegExp(`(?<![\\w$.])${name}(?![\\w$])`).test(code) || new RegExp(`\\.\\s*${name}(?![\\w$])`).test(code)) {
+      problems.add(name);
+    }
+  }
+  if (/\bconstructor\s*\.\s*constructor\b/.test(code) || /\[\s*["']constructor["']\s*\]/.test(added)) problems.add("constructor_chain");
+  return [...problems].sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -664,7 +786,7 @@ export type SeoValidatePorts = {
   readonly propose: (messages: readonly MarketingLlmMessage[]) => Promise<MarketingLlmCallOutcome>;
   readonly writeFiles: (dir: string, files: Readonly<Record<string, string>>) => Promise<void>;
   /** Stage every change in the workspace and return git's two views of the staged diff against the base commit. */
-  readonly stagedDiff: (dir: string, baseCommit: string) => Promise<{ raw: string; numstat: string }>;
+  readonly stagedDiff: (dir: string, baseCommit: string) => Promise<SeoDiffView>;
   /** The tree hash of what is staged (`git write-tree`). */
   readonly indexTree: (dir: string) => Promise<string>;
   /** The text of each policy test that exists in the base commit, by path. */
@@ -777,7 +899,7 @@ export async function runSeoAgentValidate(
 
     await ports.writeFiles(dir, applied.files);
     const diff = await ports.stagedDiff(dir, input.baseCommit);
-    const validation = validateSeoChanges(seoGitChanges(diff.raw, diff.numstat));
+    const validation = judgeSeoDiff(diff);
     if (!validation.ok) return { status: "validation_failed", problems: validation.problems };
 
     // The tree is fixed here, before any check runs. The checks execute the
@@ -788,14 +910,14 @@ export async function runSeoAgentValidate(
     if (!checks.ok) return { status: "checks_failed", label: checks.label };
 
     const after = await ports.stagedDiff(dir, input.baseCommit);
-    const revalidation = validateSeoChanges(seoGitChanges(after.raw, after.numstat));
+    const revalidation = judgeSeoDiff(after);
     if (!revalidation.ok) return { status: "validation_failed", problems: revalidation.problems };
     if ((await ports.indexTree(dir)) !== fixedTree) return { status: "tree_changed", stage: "during_checks" };
 
     const { commitSha, treeHash } = await ports.commit(dir, seoAgentCommitMessage(applied.summary, input.topic));
     if (treeHash !== fixedTree) return { status: "tree_changed", stage: "at_commit" };
     const committedDiff = await ports.stagedDiff(dir, input.baseCommit);
-    const committed = validateSeoChanges(seoGitChanges(committedDiff.raw, committedDiff.numstat));
+    const committed = judgeSeoDiff(committedDiff);
     if (!committed.ok) return { status: "validation_failed", problems: committed.problems };
 
     const record: SeoAgentRecord = {
@@ -825,7 +947,7 @@ export type SeoPublishPorts = {
   /** Read from git, in the trusted clone: the commit's tree and parent. */
   readonly commitFacts: (commitSha: string) => Promise<{ tree: string; parent: string | null; parentCount: number }>;
   /** git's two views of the diff between the base commit and the commit. */
-  readonly diff: (baseCommit: string, commitSha: string) => Promise<{ raw: string; numstat: string }>;
+  readonly diff: (baseCommit: string, commitSha: string) => Promise<SeoDiffView>;
   readonly lookupGraduation: () => Promise<boolean>;
   /** Create the branch at the commit, and fail if the server already has that branch (a conditional create). */
   readonly push: (commitSha: string, branch: string) => Promise<void>;
@@ -891,7 +1013,7 @@ export async function runSeoAgentPublish(
     return { status: "tree_mismatch", stage: "before_push" };
   }
   const diff = await ports.diff(record.baseCommit, record.commitSha);
-  const validation = validateSeoChanges(seoGitChanges(diff.raw, diff.numstat));
+  const validation = judgeSeoDiff(diff);
   if (!validation.ok) return { status: "validation_failed", problems: validation.problems };
 
   const graduated = await seoAgentIsGraduated(ports.lookupGraduation);

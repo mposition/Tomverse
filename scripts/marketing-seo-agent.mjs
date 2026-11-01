@@ -253,6 +253,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
       return {
         raw: wgit(["diff", "--cached", "--raw", "-z", "-M", "-C", "--no-abbrev", base]),
         numstat: wgit(["diff", "--cached", "--numstat", "-z", "--no-renames", base]),
+        patch: wgit(["diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", base]),
       };
     },
     indexTree: async () => wgit(["write-tree"]).trim(),
@@ -465,6 +466,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
     diff: async (base, commitSha) => ({
       raw: git(root, ["diff", "--raw", "-z", "-M", "-C", "--no-abbrev", base, commitSha]),
       numstat: git(root, ["diff", "--numstat", "-z", "--no-renames", base, commitSha]),
+      patch: git(root, ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", base, commitSha]),
     }),
     lookupGraduation: async () => {
       // The surface graduation read belongs to S4 (graduation) and does not exist
