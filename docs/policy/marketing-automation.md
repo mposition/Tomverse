@@ -365,7 +365,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
   구현: 판정은 `lib/marketingTouchCore.ts`, 조회는 `findLatestMarketingTouch`(`lib/productAnalyticsServer.ts`),
   클라이언트 관측은 `observeMarketingTouch`(`lib/productAnalyticsClient.ts`, 다른 이벤트와 같은 동의 규칙),
   화면은 Admin › 제품 분석의 마케팅 유입 귀속 카드다. 귀속 스냅샷은 전환 이벤트의 `touch_*` 속성으로 복사해 고정한다.
-  동의 직후 대기열이 touch와 전환을 함께 보내 서버가 전환을 먼저 저장한 경우, 같은 브라우저(또는 계정)의 touch가 전환 수신 앞뒤
+  동의 직후 대기열이 touch와 전환을 함께 보내 서버가 전환을 먼저 저장한 경우, 같은 브라우저의 touch가 전환 수신 앞뒤
   30초 안에 저장되고 브라우저가 그 touch를 전환보다 먼저 관측했다면 서버가 그 전환의 스냅샷을 이 touch로 마무리한다
   (`lateMarketingTouchRepair`). 같은 브라우저의 touch(저장+보정)와 전환(조회+저장)은 브라우저 단위 트랜잭션 잠금으로
   직렬화한다(`recordOrderedAnalyticsEvent`). 클라이언트는 전송 순서를 맞추지 않는다.
