@@ -5828,6 +5828,261 @@ export async function evaluateMarketingAutoPause(
   return { paused: true, reasonCode, pausedFromMode };
 }
 
+// ---------------------------------------------------------------------------
+// Graduation (S4b, policy O3 and section 8.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The operator's one confirmation, and the audit action that records it. The
+ * route writes the entry first (permission and a recent sign-in are checked
+ * there); `graduateMarketingChannel()` verifies it before it changes anything.
+ */
+export const MARKETING_GRADUATE_ACTION = "marketing_account.graduate";
+
+/** Policy O3: seven days after the first success, three approvals, a third of edits. */
+export const MARKETING_GRADUATION_MIN_APPROVALS = 3;
+export const MARKETING_GRADUATION_MIN_DAYS_AFTER_FIRST_SUCCESS = 7;
+
+/** Why an account cannot graduate yet. Closed; the console shows one line for each. */
+export const MARKETING_GRADUATION_UNMET_CODES = [
+  "not_in_approval_mode",
+  "channel_never_graduates",
+  "first_success_missing",
+  "first_success_too_recent",
+  "approvals_below_minimum",
+  "edit_rate_above_limit",
+  "comments_monitor_unhealthy",
+] as const;
+export type MarketingGraduationUnmetCode = (typeof MARKETING_GRADUATION_UNMET_CODES)[number];
+
+/** What the account's current approval period has produced. Counts, never text. */
+export type MarketingGraduationMetrics = {
+  /** When the approval period began (the database sets it on every fresh start). */
+  readonly observedFromAt: Date | null;
+  /** The earliest `publishedAt` in the period; the database's clock wrote it. */
+  readonly firstSuccessAt: Date | null;
+  readonly approvedPostCount: number;
+  readonly operatorRejectedCount: number;
+  /** Approved posts whose text a person changed before approving. */
+  readonly editedApprovedCount: number;
+  readonly draftCount: number;
+  readonly guardRejectedCount: number;
+};
+
+/**
+ * The O3 test, as a pure function of counts: every condition at once, none
+ * short-circuited, so a person sees all that is missing. The edit rate is
+ * edited approvals over approvals plus the operator's rejections (a rejection
+ * is in the denominator), and has to be at most a third.
+ */
+export const evaluateMarketingGraduation = (input: {
+  readonly status: string;
+  readonly channel: string;
+  readonly metrics: MarketingGraduationMetrics;
+  readonly now: Date;
+  readonly commentsMonitorHealthy: boolean;
+}): {
+  readonly eligible: boolean;
+  readonly unmet: MarketingGraduationUnmetCode[];
+  readonly operatorEditRate: number;
+  readonly guardRejectionRate: number;
+} => {
+  const { metrics } = input;
+  const decided = metrics.approvedPostCount + metrics.operatorRejectedCount;
+  const operatorEditRate = decided === 0 ? 0 : metrics.editedApprovedCount / decided;
+  const guardRejectionRate =
+    metrics.draftCount === 0 ? 0 : metrics.guardRejectedCount / metrics.draftCount;
+  const unmet: MarketingGraduationUnmetCode[] = [];
+  if (input.status !== "approval_mode") unmet.push("not_in_approval_mode");
+  if ((MARKETING_NO_AUTONOMY_CHANNELS as readonly string[]).includes(input.channel)) {
+    unmet.push("channel_never_graduates");
+  }
+  if (metrics.firstSuccessAt === null) {
+    unmet.push("first_success_missing");
+  } else if (
+    input.now.getTime() - metrics.firstSuccessAt.getTime() <
+    MARKETING_GRADUATION_MIN_DAYS_AFTER_FIRST_SUCCESS * 24 * 60 * 60 * 1000
+  ) {
+    unmet.push("first_success_too_recent");
+  }
+  if (metrics.approvedPostCount < MARKETING_GRADUATION_MIN_APPROVALS) {
+    unmet.push("approvals_below_minimum");
+  }
+  if (metrics.editedApprovedCount * 3 > decided) unmet.push("edit_rate_above_limit");
+  if (!input.commentsMonitorHealthy) unmet.push("comments_monitor_unhealthy");
+  return { eligible: unmet.length === 0, unmet, operatorEditRate, guardRejectionRate };
+};
+
+const MARKETING_GRADUATION_HISTORY_READ = 500;
+
+async function measureMarketingGraduation(
+  database: MarketingDatabase,
+  channelId: string,
+  observedFromAt: Date | null,
+): Promise<MarketingGraduationMetrics> {
+  // Posts made in this approval period. A fresh start (reconnect, scope or
+  // policy change) opens a new period, so earlier work never counts.
+  const since = observedFromAt ?? new Date(0);
+  const posts = await database.marketingPost.findMany({
+    where: { channelId, createdAt: { gte: since } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: MARKETING_GRADUATION_HISTORY_READ,
+    select: { status: true, approvedAt: true, publishedAt: true, history: true },
+  });
+  let firstSuccessAt: Date | null = null;
+  let approvedPostCount = 0;
+  let operatorRejectedCount = 0;
+  let editedApprovedCount = 0;
+  let guardRejectedCount = 0;
+  for (const post of posts) {
+    if (post.status === "guard_rejected") guardRejectedCount += 1;
+    if (post.status === "rejected") operatorRejectedCount += 1;
+    if (post.publishedAt && (firstSuccessAt === null || post.publishedAt < firstSuccessAt)) {
+      firstSuccessAt = post.publishedAt;
+    }
+    if (post.approvedAt) {
+      approvedPostCount += 1;
+      const history = Array.isArray(post.history) ? post.history : [];
+      if (
+        history.some(
+          (entry) =>
+            typeof entry === "object" &&
+            entry !== null &&
+            !Array.isArray(entry) &&
+            entry.type === "edit_revision",
+        )
+      ) {
+        editedApprovedCount += 1;
+      }
+    }
+  }
+  return {
+    observedFromAt,
+    firstSuccessAt,
+    approvedPostCount,
+    operatorRejectedCount,
+    editedApprovedCount,
+    draftCount: posts.length,
+    guardRejectedCount,
+  };
+}
+
+/**
+ * Where an account stands against O3, for the console and for the graduation
+ * itself. Read only; the graduation repeats it under the account's row lock.
+ */
+export async function readMarketingGraduation(
+  database: MarketingDatabase,
+  channelId: string,
+  commentsMonitorHealthy: boolean,
+) {
+  const channel = await database.marketingChannel.findUnique({
+    where: { id: channelId },
+    select: { channel: true, status: true, approvalStartedAt: true },
+  });
+  if (!channel) {
+    throw new MarketingStoreRefusedError("channel_not_found", "The marketing account does not exist");
+  }
+  const now = await marketingDatabaseNow(database);
+  const metrics = await measureMarketingGraduation(database, channelId, channel.approvalStartedAt);
+  return {
+    ...evaluateMarketingGraduation({
+      status: channel.status,
+      channel: channel.channel,
+      metrics,
+      now,
+      commentsMonitorHealthy,
+    }),
+    metrics,
+  };
+}
+
+/**
+ * Open autonomous publishing for an account: `approval_mode -> autonomous_mode`
+ * with the snapshot that shows why. The only path that does it.
+ *
+ * Under the account's row lock it checks the operator's confirmation (a
+ * chain-valid human entry for this account, written after the approval period
+ * began, saying which graduation epoch it was for), repeats O3 on the counts,
+ * and compares-and-sets on the epoch. The snapshot keeps counts and rates only.
+ * Instagram and TikTok never graduate (O15); the database refuses it too.
+ * `commentsMonitorHealthy` is a fact the caller establishes; the monitor itself
+ * is not this module's.
+ */
+export async function graduateMarketingChannel(
+  database: MarketingTransaction,
+  rawInput: {
+    id: string;
+    auditLogId: string;
+    expectedGraduationEpoch: number;
+    commentsMonitorHealthy: boolean;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    auditLogId: String(rawInput.auditLogId),
+    expectedGraduationEpoch: Number(rawInput.expectedGraduationEpoch),
+    commentsMonitorHealthy: rawInput.commentsMonitorHealthy === true,
+  };
+  const row = await lockMarketingChannel(database, input.id);
+  if (row.graduationEpoch !== input.expectedGraduationEpoch) {
+    throw new MarketingStoreRefusedError(
+      "channel_changed_under_us",
+      "The account started a new approval period since the page was read",
+    );
+  }
+  const verdict = await verifyMarketingAuditEvidence(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_GRADUATE_ACTION,
+    targetId: input.id,
+    metadata: { graduationEpoch: input.expectedGraduationEpoch },
+    notBefore: row.approvalStartedAt ?? undefined,
+  });
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `audit_evidence_${verdict.problem}`,
+      `The audit entry for this graduation is not evidence of it: ${verdict.problem}`,
+    );
+  }
+  const now = await marketingDatabaseNow(database);
+  const metrics = await measureMarketingGraduation(database, input.id, row.approvalStartedAt);
+  const decision = evaluateMarketingGraduation({
+    status: row.status,
+    channel: row.channel,
+    metrics,
+    now,
+    commentsMonitorHealthy: input.commentsMonitorHealthy,
+  });
+  // Not a thrown refusal: the conditions are the answer the caller shows, all of
+  // them at once, and a caller that throws on it rolls back the confirmation too.
+  if (!decision.eligible) return { graduated: false as const, unmet: decision.unmet };
+  const snapshot = marketingGraduationSnapshotSchema.parse({
+    graduationEpoch: row.graduationEpoch,
+    approvedPostCount: metrics.approvedPostCount,
+    guardRejectionRate: decision.guardRejectionRate,
+    operatorEditRate: decision.operatorEditRate,
+    observedFromAt: (metrics.observedFromAt ?? new Date(0)).toISOString(),
+    observedUntilAt: now.toISOString(),
+    approvalAuditLogId: input.auditLogId,
+    policyVersion: row.policyVersion,
+  });
+  const graduated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "approval_mode",
+      graduationEpoch: row.graduationEpoch,
+      policyVersion: row.policyVersion,
+    },
+    data: { status: "autonomous_mode", graduatedAt: now, graduationSnapshot: asJson(snapshot) },
+  });
+  requireOne(
+    graduated.count,
+    "channel_changed_under_us",
+    "The account changed between the checks and the graduation",
+  );
+  return { graduated: true as const, snapshot };
+}
+
 /** Unused by this module, exported so a caller can narrow a paused mode. */
 export type { MarketingPausableMode };
 
