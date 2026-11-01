@@ -15,8 +15,13 @@ import { prisma } from "@/lib/prisma";
 import { analyticsClientEventSchema } from "@/lib/productAnalyticsShared";
 import {
   analyticsCountryFromHeaders,
-  recordProductAnalyticsEvent,
+  recordOrderedAnalyticsEvent,
 } from "@/lib/productAnalyticsServer";
+import {
+  MARKETING_TOUCH_EVENT,
+  MARKETING_TOUCH_EVIDENCE,
+  stripServerOnlyTouchProperties,
+} from "@/lib/marketingTouchCore";
 import {
   databaseErrorMetadata,
   isRetryableDatabaseError,
@@ -61,7 +66,14 @@ export async function POST(req: Request) {
     const trustedCountry = analyticsCountryFromHeaders(req.headers);
     const occurredAtCandidate = new Date(body.occurred_at);
     const now = new Date();
+    const isMarketingTouch = body.event_name === MARKETING_TOUCH_EVENT;
+    // A marketing touch is timed by the server's receipt and nothing else
+    // (docs/policy/marketing-automation.md §10.1): its whole evidence value is
+    // "client-observed, server-timed", and a client clock would make it
+    // neither. (recordOrderedAnalyticsEvent records it at the database time
+    // it was processed in order, which is later than this by the lock wait.)
     const occurredAt =
+      !isMarketingTouch &&
       occurredAtCandidate.getTime() <= now.getTime() + 5 * 60 * 1000 &&
       occurredAtCandidate.getTime() >= now.getTime() - 72 * 60 * 60 * 1000
         ? occurredAtCandidate
@@ -71,8 +83,19 @@ export async function POST(req: Request) {
       ? `singleton:${body.event_name}:${actorKey}`
       : `client:${body.event_id}`;
 
+    // Evidence and attribution are the server's to write. Whatever a client
+    // sent under those keys is dropped first; the touch's evidence is stamped
+    // here and a conversion's attribution is fixed while it is recorded.
+    const clientProperties = stripServerOnlyTouchProperties(body.properties);
+    const properties = isMarketingTouch
+      ? { ...clientProperties, touch_evidence: MARKETING_TOUCH_EVIDENCE }
+      : clientProperties;
+
     stage = "event-write";
-    await recordProductAnalyticsEvent({
+    // A touch and a conversion are ordered per browser, and a touch stored just
+    // after its conversion finishes that conversion's snapshot
+    // (recordOrderedAnalyticsEvent). Every other event is recorded as before.
+    await recordOrderedAnalyticsEvent({
       eventName: body.event_name,
       source: "client",
       userId,
@@ -87,9 +110,10 @@ export async function POST(req: Request) {
       },
       modelCount: body.model_count,
       plan: user?.plan || "Guest",
-      properties: body.properties,
+      properties,
       occurredAt,
       dedupeKey,
+      touchObservedAt: occurredAtCandidate,
     });
 
     return new NextResponse(null, {

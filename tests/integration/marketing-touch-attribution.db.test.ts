@@ -1,0 +1,371 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { after, beforeEach, test } from "node:test";
+
+import { prisma } from "@/lib/prisma";
+import {
+  findLatestMarketingTouch,
+  recordOrderedAnalyticsEvent,
+  recordProductAnalyticsEvent,
+  repairLateMarketingTouchSnapshots,
+} from "@/lib/productAnalyticsServer";
+import { MARKETING_TOUCH_WINDOW_MS } from "@/lib/marketingTouchCore";
+
+// docs/policy/marketing-automation.md §10.1 against PostgreSQL: the event-name
+// CHECK admits `marketing_touch` and still refuses a name the application does
+// not know, and the attribution query picks the last touch of the same browser
+// (or account) inside the seven days before receipt -- both ends inclusive.
+
+const reset = () =>
+  prisma.$executeRawUnsafe(
+    `TRUNCATE TABLE "ProductAnalyticsEvent", "User" RESTART IDENTITY CASCADE`
+  );
+
+beforeEach(reset);
+after(async () => {
+  await reset();
+  await prisma.$disconnect();
+});
+
+const receivedAt = new Date("2026-11-01T00:00:00.000Z");
+
+const recordTouch = (input: {
+  clientId: string;
+  occurredAt: Date;
+  campaign: string;
+  userId?: string | null;
+}) =>
+  recordProductAnalyticsEvent({
+    eventName: "marketing_touch",
+    source: "client",
+    userId: input.userId ?? null,
+    attribution: {
+      client_id: input.clientId,
+      session_id: "1761955200000",
+      utm_source: "linkedin",
+      utm_medium: "social",
+      utm_campaign: input.campaign,
+      language: "en",
+      country: "AU",
+    },
+    modelCount: 0,
+    plan: "Guest",
+    properties: {
+      utm_content: "linkedin-1",
+      touch_evidence: "client_observed_server_time",
+    },
+    occurredAt: input.occurredAt,
+    dedupeKey: `client:${randomUUID()}`,
+  });
+
+test("the event-name check admits marketing_touch and refuses an unknown name", async () => {
+  const clientId = randomUUID();
+  assert.equal(
+    await recordTouch({ clientId, occurredAt: receivedAt, campaign: "launch" }),
+    true
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "ProductAnalyticsEvent"
+         ("id", "dedupeKey", "eventName", "source", "anonymousIdHash", "sessionIdHash",
+          "utmSource", "utmMedium", "utmCampaign", "language", "country", "modelCount", "plan")
+       VALUES ('forged', 'forged', 'marketing_touch_forged', 'client', 'a', 'b',
+          'x', 'y', 'z', 'en', 'AU', 0, 'Guest')`
+    ),
+    /ProductAnalyticsEvent_name_check/
+  );
+});
+
+test("the last touch inside the window wins; the boundaries and other browsers do not", async () => {
+  const clientId = randomUUID();
+  const otherClient = randomUUID();
+  const exactlySevenDays = new Date(receivedAt.getTime() - MARKETING_TOUCH_WINDOW_MS);
+  await recordTouch({ clientId, occurredAt: exactlySevenDays, campaign: "edge" });
+  await recordTouch({
+    clientId,
+    occurredAt: new Date(exactlySevenDays.getTime() - 1),
+    campaign: "stale",
+  });
+  await recordTouch({
+    clientId,
+    occurredAt: new Date(receivedAt.getTime() + 1),
+    campaign: "future",
+  });
+  await recordTouch({
+    clientId: otherClient,
+    occurredAt: new Date(receivedAt.getTime() - 60_000),
+    campaign: "someone-else",
+  });
+
+  const edge = await findLatestMarketingTouch({ clientId, userId: null, receivedAt });
+  assert.equal(edge?.utmCampaign, "edge", "exactly seven days before receipt is inside");
+  assert.equal(edge?.utmContent, "linkedin-1");
+  assert.equal(edge?.occurredAt.getTime(), exactlySevenDays.getTime());
+
+  await recordTouch({
+    clientId,
+    occurredAt: new Date(receivedAt.getTime() - 2 * 24 * 60 * 60 * 1000),
+    campaign: "recent",
+  });
+  const recent = await findLatestMarketingTouch({ clientId, userId: null, receivedAt });
+  assert.equal(recent?.utmCampaign, "recent");
+
+  assert.equal(
+    await findLatestMarketingTouch({ clientId: randomUUID(), userId: null, receivedAt }),
+    null,
+    "a browser with no touch is unattributed"
+  );
+});
+
+test("a signed-in conversion also finds the account's own touch from another browser", async () => {
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  await recordTouch({
+    clientId: randomUUID(),
+    userId: user.id,
+    occurredAt: new Date(receivedAt.getTime() - 60_000),
+    campaign: "account-touch",
+  });
+  const found = await findLatestMarketingTouch({
+    clientId: randomUUID(),
+    userId: user.id,
+    receivedAt,
+  });
+  assert.equal(found?.utmCampaign, "account-touch");
+  assert.equal(
+    await findLatestMarketingTouch({ clientId: randomUUID(), userId: null, receivedAt }),
+    null
+  );
+});
+
+const recordSignup = (input: { clientId: string; userId: string; occurredAt: Date }) =>
+  recordProductAnalyticsEvent({
+    eventName: "signup_completed",
+    source: "client",
+    userId: input.userId,
+    attribution: {
+      client_id: input.clientId,
+      session_id: "1761955200000",
+      utm_source: "(direct)",
+      utm_medium: "(none)",
+      utm_campaign: "(not set)",
+      language: "en",
+      country: "AU",
+    },
+    modelCount: 0,
+    plan: "Free",
+    properties: { method: "google", touch_attribution: "unattributed" },
+    occurredAt: input.occurredAt,
+    dedupeKey: `singleton:signup_completed:${input.userId}`,
+  });
+
+test("a touch stored after its sign-up repairs that sign-up only", async () => {
+  const mine = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const theirs = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  await recordSignup({ clientId, userId: mine.id, occurredAt: signedUpAt });
+  await recordSignup({ clientId: randomUUID(), userId: theirs.id, occurredAt: signedUpAt });
+
+  const touchReceivedAt = new Date();
+  const repaired = await repairLateMarketingTouchSnapshots({
+    clientId,
+    touch: {
+      utmSource: "linkedin",
+      utmMedium: "social",
+      utmCampaign: "launch",
+      utmContent: "linkedin-1",
+      occurredAt: touchReceivedAt,
+    },
+    touchObservedAt: new Date(signedUpAt.getTime() - 60_000),
+  });
+  assert.equal(repaired, 1);
+
+  const rows = await prisma.productAnalyticsEvent.findMany({
+    where: { eventName: "signup_completed" },
+    select: { userId: true, properties: true },
+  });
+  const byUser = new Map(rows.map((row) => [row.userId, row.properties as Record<string, unknown>]));
+  assert.equal(byUser.get(mine.id)?.touch_attribution, "attributed");
+  assert.equal(byUser.get(mine.id)?.touch_utm_content, "linkedin-1");
+  assert.equal(byUser.get(mine.id)?.touch_received_at, touchReceivedAt.toISOString());
+  assert.equal(byUser.get(mine.id)?.method, "google");
+  assert.equal(byUser.get(theirs.id)?.touch_attribution, "unattributed", "another browser is untouched");
+});
+
+const orderedInput = (input: {
+  eventName: "marketing_touch" | "signup_completed";
+  clientId: string;
+  userId: string | null;
+  campaign?: string;
+  observedAt: Date;
+}) => {
+  const receivedAt = new Date();
+  return {
+    eventName: input.eventName,
+    source: "client" as const,
+    userId: input.userId,
+    attribution: {
+      client_id: input.clientId,
+      session_id: "1761955200000",
+      utm_source: input.eventName === "marketing_touch" ? "linkedin" : "(direct)",
+      utm_medium: input.eventName === "marketing_touch" ? "social" : "(none)",
+      utm_campaign: input.campaign ?? "(not set)",
+      language: "en" as const,
+      country: "AU",
+    },
+    modelCount: 0,
+    plan: input.userId ? "Free" : "Guest",
+    properties:
+      input.eventName === "marketing_touch"
+        ? { utm_content: "linkedin-1", touch_evidence: "client_observed_server_time" as const }
+        : { method: "google" },
+    occurredAt: input.eventName === "marketing_touch" ? receivedAt : input.observedAt,
+    dedupeKey:
+      input.eventName === "marketing_touch"
+        ? `client:${randomUUID()}`
+        : `singleton:signup_completed:${input.userId}`,
+    touchObservedAt: input.observedAt,
+  };
+};
+
+test("a touch and its sign-up sent at the same moment always end attributed", async () => {
+  for (let round = 0; round < 12; round += 1) {
+    const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+    const clientId = randomUUID();
+    const signedUpAt = new Date();
+    const pair = [
+      orderedInput({
+        eventName: "marketing_touch",
+        clientId,
+        userId: null,
+        campaign: `round-${round}`,
+        observedAt: new Date(signedUpAt.getTime() - 1_000),
+      }),
+      orderedInput({
+        eventName: "signup_completed",
+        clientId,
+        userId: user.id,
+        observedAt: signedUpAt,
+      }),
+    ];
+    // Alternate which request starts first.
+    const [first, second] = round % 2 === 0 ? pair : [pair[1], pair[0]];
+    await Promise.all([
+      recordOrderedAnalyticsEvent(first),
+      recordOrderedAnalyticsEvent(second),
+    ]);
+    const signup = await prisma.productAnalyticsEvent.findFirst({
+      where: { eventName: "signup_completed", userId: user.id },
+      select: { properties: true },
+    });
+    const properties = signup?.properties as Record<string, unknown>;
+    assert.equal(properties.touch_attribution, "attributed", `round ${round}`);
+    assert.equal(properties.touch_utm_campaign, `round-${round}`, `round ${round}`);
+  }
+});
+
+test("two touches racing to finish one sign-up leave the one the server received last", async () => {
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  await recordOrderedAnalyticsEvent(
+    orderedInput({ eventName: "signup_completed", clientId, userId: user.id, observedAt: signedUpAt })
+  );
+  const earlier = orderedInput({
+    eventName: "marketing_touch",
+    clientId,
+    userId: null,
+    campaign: "earlier",
+    observedAt: new Date(signedUpAt.getTime() - 2_000),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const later = orderedInput({
+    eventName: "marketing_touch",
+    clientId,
+    userId: null,
+    campaign: "later",
+    observedAt: new Date(signedUpAt.getTime() - 1_000),
+  });
+  // "Received" is the server's time under the per-browser lock, so whichever
+  // touch is processed second is the later one -- and it must be the one left,
+  // whatever order the two repairs would have written in without the lock.
+  await Promise.all([recordOrderedAnalyticsEvent(later), recordOrderedAnalyticsEvent(earlier)]);
+  const touches = await prisma.productAnalyticsEvent.findMany({
+    where: { eventName: "marketing_touch", utmCampaign: { in: ["earlier", "later"] } },
+    orderBy: { occurredAt: "desc" },
+    select: { utmCampaign: true, occurredAt: true },
+  });
+  assert.equal(touches.length, 2);
+  const signup = await prisma.productAnalyticsEvent.findFirst({
+    where: { eventName: "signup_completed", userId: user.id },
+    select: { properties: true },
+  });
+  const properties = signup?.properties as Record<string, unknown>;
+  assert.equal(properties.touch_utm_campaign, touches[0].utmCampaign);
+  assert.equal(properties.touch_received_at, touches[0].occurredAt.toISOString());
+});
+
+test("a touch that takes the lock before an earlier-arrived sign-up still attributes it", async () => {
+  // The sign-up's request is built (arrives) first; the touch's request is
+  // built after it but is processed to completion before the sign-up is.
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  const signup = orderedInput({
+    eventName: "signup_completed",
+    clientId,
+    userId: user.id,
+    observedAt: signedUpAt,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const touch = orderedInput({
+    eventName: "marketing_touch",
+    clientId,
+    userId: null,
+    campaign: "took-the-lock-first",
+    observedAt: new Date(signedUpAt.getTime() - 1_000),
+  });
+  await recordOrderedAnalyticsEvent(touch);
+  await recordOrderedAnalyticsEvent(signup);
+  const row = await prisma.productAnalyticsEvent.findFirst({
+    where: { eventName: "signup_completed", userId: user.id },
+    select: { properties: true },
+  });
+  assert.equal(
+    (row?.properties as Record<string, unknown>).touch_utm_campaign,
+    "took-the-lock-first"
+  );
+});
+
+test("a sign-up stored first is finished by the touch that follows, whatever the session time zone", async () => {
+  const zone = await prisma.$queryRaw<Array<{ zone: string }>>`SELECT current_setting('TimeZone') AS zone`;
+  // Locally this runs in Australia/Brisbane; the stored times must not depend on it.
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  await recordOrderedAnalyticsEvent(
+    orderedInput({ eventName: "signup_completed", clientId, userId: user.id, observedAt: signedUpAt })
+  );
+  await recordOrderedAnalyticsEvent(
+    orderedInput({
+      eventName: "marketing_touch",
+      clientId,
+      userId: null,
+      campaign: "after",
+      observedAt: new Date(signedUpAt.getTime() - 1_000),
+    })
+  );
+  const row = await prisma.productAnalyticsEvent.findFirst({
+    where: { eventName: "signup_completed", userId: user.id },
+    select: { properties: true, createdAt: true },
+  });
+  assert.equal(
+    (row?.properties as Record<string, unknown>).touch_utm_campaign,
+    "after",
+    `session TimeZone ${zone[0]?.zone}`
+  );
+  assert.ok(
+    Math.abs((row?.createdAt.getTime() ?? 0) - Date.now()) < 60_000,
+    "createdAt is the real time, not a zone-shifted wall clock"
+  );
+});
