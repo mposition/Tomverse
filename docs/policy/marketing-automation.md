@@ -362,6 +362,21 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 분석 전용 무작위 식별자, 동의·고지 조건에서만 전송, 로그아웃 시 해제, 계정 삭제 시 GA4 삭제 요청.
 **개인정보 고지 개정 배포 전에는 전송하지 않는다.**
 
+구현(S6, 기본 꺼짐):
+- 식별자는 저장하지 않고 계정 id를 전용 키 `GA4_USER_ID_KEY`로 HMAC-SHA256한 128비트 값이다(`lib/ga4UserId.ts`).
+  키 없이는 계정 id로 되돌릴 수 없어 GA4에는 무작위 값과 같고, 저장된 값이 없으므로 계정 삭제 시 지울 행이 없으며
+  GA4 삭제 요청만 남는다. 무작위 값을 저장하려면 `prisma/schema.prisma`(Prompt Refiner closure 파일) 변경이 필요해 택하지 않았다.
+  키는 바꾸지 않는다 — 바꾸면 이미 보낸 id를 삭제 요청에서 부를 수 없다.
+- 전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
+  고지 개정 PR에서만 바꾼다) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
+  로그인 · GA4 측정 id. 서버는 여기에 키 존재를 더한다(`app/api/analytics/user-id/route.ts`). 브라우저의 gtag `user_id`로만
+  보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃과 분석 거절은 `user_id`를 `null`로 해제한다.
+- 계정 삭제(`lib/accountDeletion.ts`)는 트랜잭션 커밋 뒤 GA4 Admin API `submitUserDeletion`을 한 번 요청한다
+  (`lib/ga4UserDeletion.ts`, `GA4_PROPERTY_ID`, `GA4_USER_DELETION_SERVICE_ACCOUNT_JSON`). 실패는 id 없이 운영 incident로 남기고
+  재시도하지 않으며 삭제를 막지 않는다. User-ID가 한 번이라도 나갈 수 있었던 경우에만 요청한다 — 고지 상수 `true`, 키 존재,
+  스위치가 지금 켜져 있거나 `GA4_USER_ID_PREVIOUSLY_ENABLED=true`(스위치를 끌 때 운영자가 설정해 이미 보낸 id의 삭제를 계속한다).
+  미리 넣어 둔 자격증명만으로는 아무것도 보내지 않는다.
+
 ### 10.3 120일 측정
 모든 지표를 승인·자율 모드와 계정별로 나눈다.
 

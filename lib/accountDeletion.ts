@@ -8,6 +8,7 @@ import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { requestGa4UserDeletionForAccount } from "@/lib/ga4UserDeletion";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
@@ -307,6 +308,12 @@ export async function deleteTomverseAccount(
     // whole transaction.
     await flushSupportTriageDeletionAudit(tx, supportTriageDeleted);
   });
+
+  // A follow-up to the deletion, never a part of it
+  // (docs/policy/marketing-automation.md §10.2, §12.2): after the commit, so a rolled-back deletion never asks GA4 to drop
+  // a live account's data, and unable to fail it -- the request reports its
+  // own failure and never throws, and the catch is the second guarantee.
+  await requestGa4UserDeletionForAccount(user.id).catch(() => undefined);
 
   return { deleted: true as const, email: user.email };
 }
