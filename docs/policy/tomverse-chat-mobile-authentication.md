@@ -97,13 +97,12 @@ password is introduced anywhere.
 Native email signup uses the same verified-address creation and one-time signup
 hold as the web. It is separately default-off behind
 `TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED=true`; the email capability probe advertises
-signup and the current consent-copy version only when enabled. A verified new
-address is shown an explicit signup step in the app. The existing signup consent
-devices and finalizer bind only the choice actually presented to the newly
-created account and its spent email-login row. Existing accounts never consume
-that choice, and store-review credentials cannot create accounts. Tokens still
-terminate in the native secure store. An incomplete signup is recovered with a
-fresh code, without replaying an account-creation request.
+signup only when enabled. A verified new address is shown an explicit signup
+step in the app. This native entry collects no marketing permission and writes
+no signup-consent evidence; marketing choices remain in the existing web flows.
+It does not infer consent from registration. Store-review credentials cannot
+create accounts. Tokens still terminate in the native secure store. A failed
+signup is recovered with a fresh code, without replaying account creation.
 
 ### Store review is the exception, and is bounded
 

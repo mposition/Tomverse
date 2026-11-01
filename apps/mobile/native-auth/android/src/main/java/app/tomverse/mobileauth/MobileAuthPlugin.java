@@ -276,8 +276,7 @@ public class MobileAuthPlugin extends Plugin {
                 JSONObject support = requireEmailSupport();
                 request("/api/auth/mobile/email", new JSONObject().put("action", "request").put("email", email), call.getString("language"));
                 JSObject result = new JSObject();
-                JSONObject signup = support.optJSONObject("emailSignup");
-                if (signup != null) result.put("signup", new JSObject().put("consentEnabled", signup.optBoolean("consentEnabled")).put("copyVersion", signup.optString("copyVersion")));
+                if (support.optBoolean("emailSignup")) result.put("signup", true);
                 call.resolve(result);
             } catch (Exception e) { call.reject("Could not send sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });
@@ -289,10 +288,8 @@ public class MobileAuthPlugin extends Plugin {
                 String email = call.getString("email"); String code = call.getString("code");
                 if (email == null || email.length() > 320 || code == null || !code.matches("[0-9]{6}")) throw new AuthFailure("EMAIL_CODE_INVALID");
                 clear();
-                JSObject signup = call.getObject("signup");
-                JSONObject body = new JSONObject().put("action", signup == null ? "verify" : "signup").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL);
-                if (signup != null) body.put("signupConsent", signup);
-                acceptSignIn(post("/api/auth/mobile/email", body), generation);
+                boolean signup = Boolean.TRUE.equals(call.getBoolean("signup"));
+                acceptSignIn(post("/api/auth/mobile/email", new JSONObject().put("action", signup ? "signup" : "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL)), generation);
                 call.resolve();
             } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Could not verify sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });

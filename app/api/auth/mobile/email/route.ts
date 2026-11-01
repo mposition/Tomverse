@@ -11,26 +11,21 @@ import { MOBILE_DEVICE_PLATFORMS } from "@/lib/mobileAuthContract";
 import { prisma } from "@/lib/prisma";
 import { POST as requestExistingEmailCode } from "@/app/api/auth/email-login/request/route";
 import { requestMobileStoreReviewCode, verifyMobileStoreReviewCode } from "@/lib/mobileStoreReview";
-import { CURRENT_CONSENT_COPY_VERSION, CONSENT_COPY_LANGUAGES } from "@/lib/emailConsentCopy";
-import { signupConsentAvailable, issueSignupConsentAttempt, finalizeSignupConsentAttempt } from "@/lib/signupConsent";
-import { addressProofForSignIn } from "@/lib/emailPreferenceCore";
 
 const email = z.string().trim().toLowerCase().max(MAX_LOGIN_EMAIL_LENGTH).refine(isValidLoginEmail);
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("request"), email, turnstileToken: z.string().trim().min(1).max(2048).optional() }).strict(),
   z.object({ action: z.literal("verify"), email, code: z.string().regex(/^\d{6}$/), platform: z.enum(MOBILE_DEVICE_PLATFORMS), deviceLabel: z.string().trim().min(1).max(64).optional() }).strict(),
-  z.object({ action: z.literal("signup"), email, code: z.string().regex(/^\d{6}$/), platform: z.enum(MOBILE_DEVICE_PLATFORMS), deviceLabel: z.string().trim().min(1).max(64).optional(), signupConsent: z.object({ shown: z.boolean(), optIn: z.boolean(), objected: z.boolean(), copyVersion: z.string().max(64), language: z.enum(CONSENT_COPY_LANGUAGES) }).strict() }).strict(),
+  z.object({ action: z.literal("signup"), email, code: z.string().regex(/^\d{6}$/), platform: z.enum(MOBILE_DEVICE_PLATFORMS), deviceLabel: z.string().trim().min(1).max(64).optional() }).strict(),
 ]);
 const reply = (body: object, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const ready = () => process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" && mobileAuthReady();
 const signupEnabled = () => process.env.TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED === "true";
 
 /** Public capability probe: never opens a missing browser page or sends mail. */
-export async function GET(request: Request) {
-  if (!ready()) return reply({ ok: false, code: "MOBILE_LOGIN_UNAVAILABLE" }, 503);
-  return reply({ ok: true, emailCode: true, browserSignIn: true, ...(signupEnabled() ? { emailSignup: {
-    consentEnabled: await signupConsentAvailable(request.headers.get("cf-ipcountry")), copyVersion: CURRENT_CONSENT_COPY_VERSION,
-  } } : {}) });
+export function GET() {
+  return ready() ? reply({ ok: true, emailCode: true, browserSignIn: true, ...(signupEnabled() ? { emailSignup: true } : {}) })
+    : reply({ ok: false, code: "MOBILE_LOGIN_UNAVAILABLE" }, 503);
 }
 
 /** Body proof only. No ambient session is accepted on this exact native path. */
@@ -58,23 +53,12 @@ export async function POST(request: Request) {
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
-    let signupAttempt: Awaited<ReturnType<typeof issueSignupConsentAttempt>> | null = null;
-    if (body.action === "signup") {
-      if (!signupEnabled()) return reply({ ok: false, code: "EMAIL_SIGNUP_UNAVAILABLE" }, 503);
-      const choice = body.signupConsent;
-      const shown = await signupConsentAvailable(request.headers.get("cf-ipcountry"));
-      if (choice.copyVersion !== CURRENT_CONSENT_COPY_VERSION || choice.shown !== shown || (choice.optIn && choice.objected) || (!choice.shown && (choice.optIn || choice.objected))) {
-        return reply({ ok: false, code: "EMAIL_SIGNUP_OPTIONS_CHANGED" }, 409);
-      }
-      if (shown) {
-        signupAttempt = await issueSignupConsentAttempt({ channel: "email_code", email: body.email, expressOptInRequested: choice.optIn, objected: choice.objected, language: choice.language, ipCountry: request.headers.get("cf-ipcountry") });
-        if (!signupAttempt.ok) return reply({ ok: false, code: "EMAIL_SIGNUP_OPTIONS_CHANGED" }, 409);
-      }
-    }
-    // A signup is an explicit action after mailbox verification; the held code
-    // can only create one new account. Store-review credentials never enter it.
-    const signupProof = body.action === "signup" ? await verifyEmailLoginCode(request, body.email, body.code, "signup") : null;
-    const proof = signupProof ?? await verifyMobileStoreReviewCode(request, { ...body, appId: request.headers.get("x-tomverse-app-id") ?? undefined, buildNumber: Number(request.headers.get("x-tomverse-build")) }) ?? await verifyEmailLoginCode(request, body.email, body.code, "signin");
+    if (body.action === "signup" && !signupEnabled()) return reply({ ok: false, code: "EMAIL_SIGNUP_UNAVAILABLE" }, 503);
+    // Signup is an explicit second step for a verified new address. Reuse the
+    // web's one-time signup hold; a store-review credential cannot create users.
+    const proof = body.action === "signup"
+      ? await verifyEmailLoginCode(request, body.email, body.code, "signup")
+      : await verifyMobileStoreReviewCode(request, { ...body, appId: request.headers.get("x-tomverse-app-id") ?? undefined, buildNumber: Number(request.headers.get("x-tomverse-build")) }) ?? await verifyEmailLoginCode(request, body.email, body.code, "signin");
     if (!proof.ok) return reply({ ok: false, code: proof.reason === "account_not_found" ? "EMAIL_ACCOUNT_NOT_FOUND" : proof.reason === "locked" ? "EMAIL_CODE_LOCKED" : "EMAIL_CODE_INVALID" }, 401);
     // The web sign-in callback also enforces account state. Never bypass it
     // simply because mailbox control was proven.
@@ -91,12 +75,6 @@ export async function POST(request: Request) {
       account = await prisma.user.findUnique({ where: { id: proof.userId }, select });
     }
     if (account?.accountStatus !== "active") return reply({ ok: false, code: "MOBILE_LOGIN_REFUSED" }, 403);
-    if (signupProof?.ok && signupProof.isNewUser && signupAttempt?.ok) {
-      const consent = await finalizeSignupConsentAttempt({ userId: signupProof.userId, createdBySignIn: true, emailLoginAttemptId: signupProof.emailLoginAttemptId, addressProof: addressProofForSignIn({ provider: "email-code", profile: null, userEmail: body.email, now: new Date() }), attemptId: signupAttempt.attemptId, nonce: signupAttempt.nonce });
-      // The account already exists. Do not claim completion or replay its OTP
-      // if the optional consent lane failed; a fresh code can sign it in.
-      if (!consent.ok) return reply({ ok: false, code: "EMAIL_SIGNUP_INCOMPLETE" }, 503);
-    }
     const issued = await issueMobileSession({ request, userId: proof.userId, platform: body.platform, deviceLabel: body.deviceLabel ?? "Mobile" });
     return reply({ ok: true, ...issued.tokens });
   } catch (error) {

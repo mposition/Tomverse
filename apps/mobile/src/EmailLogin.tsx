@@ -4,8 +4,6 @@ import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import type { ChatTransport } from "./chatTransport";
 import { Sheet } from "./Sheet";
 import { mobileSignupCopy } from "../../../locales/mobileSignup";
-import { consentCopy, CURRENT_CONSENT_COPY_VERSION } from "../../../lib/emailConsentCopy";
-import type { EmailSignupOptions } from "./authBridgeContract";
 
 export function EmailLogin({ transport, language, onClose, onComplete }: {
   transport: ChatTransport; language: MobileLanguage; onClose: () => void; onComplete: () => Promise<void>;
@@ -18,10 +16,8 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [cooldown, setCooldown] = useState(0);
-  const [signupOptions, setSignupOptions] = useState<EmailSignupOptions>();
+  const [signupAllowed, setSignupAllowed] = useState(false);
   const [signup, setSignup] = useState(false);
-  const [optIn, setOptIn] = useState(false);
-  const [objected, setObjected] = useState(false);
   const active = useRef(true);
   const inFlight = useRef(false);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -34,23 +30,19 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
         await transport.signIn();
         if (active.current) await onComplete();
       } else if (verify) {
-        await transport.verifyEmailCode!(email.trim(), code, signup && signupOptions ? {
-          shown: signupOptions.consentEnabled, optIn, objected, copyVersion: CURRENT_CONSENT_COPY_VERSION, language,
-        } : undefined);
+        await transport.verifyEmailCode!(email.trim(), code, signup || undefined);
         if (active.current) await onComplete();
       } else {
         const result = await transport.requestEmailCode!(email.trim(), language);
-        if (active.current) { setSignupOptions(result?.signup); setSignup(false); setOptIn(false); setObjected(false); setSent(true); setCode(""); setCooldown(60); }
+        if (active.current) { setSignupAllowed(result?.signup === true); setSignup(false); setSent(true); setCode(""); setCooldown(60); }
       }
     } catch (failure) {
       if (active.current) {
         const reason = (failure as { code?: string })?.code;
-        if (reason === "EMAIL_ACCOUNT_NOT_FOUND" && signupOptions && !signup) {
-          if (signupOptions.copyVersion === CURRENT_CONSENT_COPY_VERSION) { setSignup(true); setError(""); }
-          else { setError(signupCopy.updateRequired); setCode(""); }
-        } else {
-          setError(reason === "EMAIL_SIGNUP_OPTIONS_CHANGED" || reason === "EMAIL_SIGNUP_UNAVAILABLE" ? signupCopy.optionsChanged : reason === "EMAIL_SIGNUP_INCOMPLETE" ? signupCopy.incomplete : mobileLoginError(failure, language, verify === "browser" ? "browser" : verify ? "verify" : "request"));
-          setCode(""); setSignup(false); setOptIn(false); setObjected(false);
+        if (reason === "EMAIL_ACCOUNT_NOT_FOUND" && signupAllowed && !signup) { setSignup(true); setError(""); }
+        else {
+          setError(reason === "EMAIL_SIGNUP_UNAVAILABLE" ? signupCopy.unavailable : mobileLoginError(failure, language, verify === "browser" ? "browser" : verify ? "verify" : "request"));
+          setCode(""); setSignup(false);
         }
       }
     } finally { inFlight.current = false; if (active.current) setBusy(false); }
@@ -60,14 +52,9 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
       <p>{signup ? signupCopy.verified : sent ? copy.sent : signupCopy.intro}</p>
       <label>{copy.email}<input type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} required maxLength={254} value={email} readOnly={sent} disabled={busy} onChange={(event) => setEmail(event.target.value)} /></label>
       {sent && !signup && <label>{copy.code}<input className="email-code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required maxLength={6} value={code} disabled={busy} onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ""))} /></label>}
-      {signup && signupOptions?.consentEnabled && <fieldset className="email-signup-consent" disabled={busy}>
-        <label><input type="checkbox" checked={optIn} onChange={(event) => { setOptIn(event.target.checked); if (event.target.checked) setObjected(false); }} />{consentCopy("signupOptIn", language)}</label>
-        <p>{consentCopy("signupNotice", language)}</p>
-        <label><input type="checkbox" checked={objected} onChange={(event) => { setObjected(event.target.checked); if (event.target.checked) setOptIn(false); }} />{consentCopy("signupRefuse", language)}</label>
-      </fieldset>}
       {error && <p role="alert" className="login-error">{error}</p>}
       <button className="primary" type="submit" disabled={busy || (sent && code.length !== 6)}>{busy ? mobileCopy[language].loading : signup ? signupCopy.create : sent ? copy.verify : copy.send}</button>
-      {sent && <div className="login-actions"><button type="button" disabled={busy} onClick={() => { setSent(false); setCode(""); setError(""); setSignup(false); setSignupOptions(undefined); setOptIn(false); setObjected(false); }}>{copy.change}</button><button type="button" disabled={busy || cooldown > 0} onClick={() => void submit(false)}>{copy.resend}{cooldown > 0 && ` (${cooldown})`}</button></div>}
+      {sent && <div className="login-actions"><button type="button" disabled={busy} onClick={() => { setSent(false); setCode(""); setError(""); setSignup(false); setSignupAllowed(false); }}>{copy.change}</button><button type="button" disabled={busy || cooldown > 0} onClick={() => void submit(false)}>{copy.resend}{cooldown > 0 && ` (${cooldown})`}</button></div>}
       <button type="button" disabled={busy} onClick={() => void submit("browser")}>{copy.otherSignIn}</button>
     </form>
   </Sheet>;
