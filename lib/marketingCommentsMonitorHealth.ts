@@ -2,6 +2,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -28,8 +29,14 @@ export const MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY = "marketing_comments_monit
 /** Working while the latest finished run is younger than this (the monitor runs hourly). */
 export const MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS = 3 * 60 * 60 * 1000;
 
+/**
+ * On only when its own switch says true and the global kill switch is clear: the
+ * kill switch stops everything but reading the record (policy 6.1), and a
+ * monitor that kept calling the posting tool under it would not be stopped.
+ */
 export const commentsMonitorEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  (env[MARKETING_COMMENTS_MONITOR_ENV] ?? "").trim().toLowerCase() === "true";
+  (env[MARKETING_COMMENTS_MONITOR_ENV] ?? "").trim().toLowerCase() === "true" &&
+  (env[MARKETING_AUTOMATION_KILL_SWITCH_ENV] ?? "").trim() === "";
 
 /** The pure judgement, shared by the console, the graduation and the admission. */
 export const commentsMonitorHealthyFromValue = (

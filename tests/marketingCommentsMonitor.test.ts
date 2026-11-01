@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import {
   commentsMonitorEnabled,
   commentsMonitorHealthyFromValue,
@@ -898,4 +899,13 @@ test("a batch that fails keeps what the earlier batches found: the alert is rais
     assert.equal(result.ran && result.complete, false, failure);
     assert.equal(calls.includes("recordRun"), false, failure);
   }
+});
+
+test("the global kill switch stops the monitor before anything is touched, and reads as unhealthy", async () => {
+  const env = { ...ON, [MARKETING_AUTOMATION_KILL_SWITCH_ENV]: "1" };
+  const { deps, calls } = monitor({ env });
+  assert.deepEqual(await runMarketingCommentsMonitor(deps), { ran: false, reason: "switch_off" });
+  assert.deepEqual(calls, []);
+  assert.equal(commentsMonitorHealthyFromValue(new Date(NOW.getTime() - 60_000).toISOString(), NOW, env), false);
+  assert.equal(commentsMonitorEnabled({ ...ON, [MARKETING_AUTOMATION_KILL_SWITCH_ENV]: "  " }), true);
 });
