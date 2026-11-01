@@ -43,13 +43,13 @@ workflows:
       - .tmp/codemagic/xcodebuild.log
       - .tmp/codemagic/tomverse-ios-simulator.zip
 
-  ios-testflight:
+  ios-testflight: &ios_testflight
     name: Tomverse iOS TestFlight Internal
     instance_type: mac_mini_m2
     max_build_duration: 45
     integrations:
       app_store_connect: Tomverse Codemagic Signing
-    environment:
+    environment: &ios_testflight_environment
       node: "22.22.2"
       xcode: "26.6"
       ios_signing:
@@ -57,7 +57,7 @@ workflows:
           - tomverse-app-store
         certificates:
           - tomverse-apple-distribution
-      vars:
+      vars: &ios_testflight_variables
         XCODE_PROJECT: apps/mobile/ios/App/App.xcodeproj
         XCODE_SCHEME: App
     scripts:
@@ -84,6 +84,14 @@ workflows:
           [[ "$PROJECT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid project build number" >&2; exit 1; }
           cd apps/mobile/ios/App
           agvtool new-version -all "$PROJECT_BUILD_NUMBER"
+      - name: Verify isolated native session storage
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          swiftc apps/mobile/native-auth/ios/Sources/MobileAuth/MobileSessionNamespace.swift \
+            apps/mobile/native-auth/ios/Tests/MobileSessionNamespaceTests.swift \
+            -o .tmp/codemagic/session-namespace-tests
+          .tmp/codemagic/session-namespace-tests
       - name: Apply the internal TestFlight signing profile
         script: |
           #!/usr/bin/env bash
@@ -125,3 +133,15 @@ workflows:
         # account action. Internal-only builds cannot be released to customers.
         submit_to_testflight: false
         submit_to_app_store: false
+
+  ios-testflight-sandbox:
+    <<: *ios_testflight
+    name: Tomverse iOS StoreKit Sandbox
+    environment:
+      <<: *ios_testflight_environment
+      groups:
+        - ios_store_billing
+      vars:
+        <<: *ios_testflight_variables
+        VITE_TOMVERSE_API_ORIGIN: https://staging.tomverse.app
+        VITE_NATIVE_BILLING_ENABLED: "true"
