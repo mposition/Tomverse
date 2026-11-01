@@ -125,7 +125,7 @@ const countingClient = (postStatus: string, shape: Shape = {}) => {
     if (sql.includes("count(*) FILTER")) return [{ today: BigInt(0), week: BigInt(0) }];
     if (sql.includes("SKIP LOCKED")) return [{ id: "p1", historyVersion: 4, slotDay: null }];
     if (sql.includes("jsonb_array_elements")) {
-      return shape.attemptsFailed ? [3, 2, 1].map((attempt) => ({ postId: "p1", attempt, outcome: "failed" })) : [];
+      return shape.attemptsFailed ? [1, 2, 3].map(() => ({ outcome: "failed" })) : [];
     }
     if (sql.includes("logicalKey")) {
       return [
