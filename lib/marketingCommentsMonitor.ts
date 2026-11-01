@@ -67,6 +67,8 @@ export type MarketingCommentMonitorPost = {
   readonly channelId: string;
   readonly externalPostId: string;
   readonly externalAccountRef: string;
+  /** When the account's approval period began: a reconnect or a resume moves it. */
+  readonly channelApprovalStartedAt: Date | null;
 };
 
 export type MarketingCommentsMonitorDeps = {
@@ -170,7 +172,16 @@ export async function runMarketingCommentsMonitor(
         // not recorded as one -- but what was read is still classified and still
         // raises its alerts: an unread part is no reason to ignore the read part.
         if (page.truncated) postsUnread += 1;
-        const bodies = marketingCommentBodiesForModel(page.comments, floor, answers.get(post.id) ?? null);
+        // An account that was reconnected or resumed since the last whole run was not
+        // read in between, so the run's time says nothing about its comments: all
+        // of them are read once.
+        const postFloor =
+          floor !== null &&
+          post.channelApprovalStartedAt !== null &&
+          post.channelApprovalStartedAt.getTime() > floor.getTime()
+            ? null
+            : floor;
+        const bodies = marketingCommentBodiesForModel(page.comments, postFloor, answers.get(post.id) ?? null);
         if (bodies.length === 0) continue;
         const flagged: MarketingCommentRiskCode[][] = [];
         let wellFormed = true;

@@ -38,6 +38,7 @@ const post = (id: string) => ({
   channelId: `chn-${id}`,
   externalPostId: `ext-${id}`,
   externalAccountRef: "acct",
+  channelApprovalStartedAt: null as Date | null,
 });
 
 type Calls = string[];
@@ -782,4 +783,25 @@ test("a run whose alert was refused for a changed answer is incomplete and judge
   const result = await runMarketingCommentsMonitor(deps);
   assert.equal(result.ran && result.complete, false);
   assert.equal(calls.includes("recordRun"), false);
+});
+
+test("an account reconnected since the last whole run has all its comments read once", async () => {
+  const reconnected = { ...post("p1"), channelApprovalStartedAt: new Date("2026-11-02T08:50:00.000Z") };
+  const { deps, classified } = monitor({
+    posts: [reconnected],
+    lastComplete: new Date("2026-11-02T08:40:00.000Z"),
+    comments: { p1: [comment("written while it was disconnected", "2026-11-02T06:00:00.000Z"), comment("new", "2026-11-02T08:55:00.000Z")] },
+  });
+  await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(classified, [["written while it was disconnected", "new"]]);
+
+  // Connected before the last whole run: the run's time is a fair floor.
+  const steady = { ...post("p1"), channelApprovalStartedAt: new Date("2026-11-01T00:00:00.000Z") };
+  const second = monitor({
+    posts: [steady],
+    lastComplete: new Date("2026-11-02T08:40:00.000Z"),
+    comments: { p1: [comment("old", "2026-11-02T06:00:00.000Z"), comment("new", "2026-11-02T08:55:00.000Z")] },
+  });
+  await runMarketingCommentsMonitor(second.deps);
+  assert.deepEqual(second.classified, [["new"]]);
 });

@@ -149,7 +149,7 @@ export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
   /** How the listed rows were chosen, so the screen can say it exactly. */
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Record<string, unknown>[];
   switches: MarketingSwitchStates;
@@ -663,7 +663,7 @@ export async function readMarketingConsole(
     return {
       section,
       availability,
-      ordering: "newest",
+      ordering: "oldest",
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,

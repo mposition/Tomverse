@@ -6388,7 +6388,14 @@ export async function listMarketingPostsForCommentMonitor(
   database: MarketingDatabase,
   input: { readonly now: Date; readonly limit: number },
 ): Promise<
-  Array<{ id: string; channelId: string; externalPostId: string; externalAccountRef: string }>
+  Array<{
+    id: string;
+    channelId: string;
+    externalPostId: string;
+    externalAccountRef: string;
+    /** When the account's approval period began; a reconnect or a resume moves it. */
+    channelApprovalStartedAt: Date | null;
+  }>
 > {
   const rows = await database.marketingPost.findMany({
     where: {
@@ -6406,10 +6413,16 @@ export async function listMarketingPostsForCommentMonitor(
       id: true,
       channelId: true,
       externalPostId: true,
-      channel: { select: { externalAccountRef: true } },
+      channel: { select: { externalAccountRef: true, approvalStartedAt: true } },
     },
   });
-  const posts: Array<{ id: string; channelId: string; externalPostId: string; externalAccountRef: string }> = [];
+  const posts: Array<{
+    id: string;
+    channelId: string;
+    externalPostId: string;
+    externalAccountRef: string;
+    channelApprovalStartedAt: Date | null;
+  }> = [];
   for (const row of rows) {
     if (row.externalPostId && row.channel.externalAccountRef) {
       posts.push({
@@ -6417,6 +6430,7 @@ export async function listMarketingPostsForCommentMonitor(
         channelId: row.channelId,
         externalPostId: row.externalPostId,
         externalAccountRef: row.channel.externalAccountRef,
+        channelApprovalStartedAt: row.channel.approvalStartedAt,
       });
     }
   }

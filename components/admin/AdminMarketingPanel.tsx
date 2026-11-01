@@ -49,7 +49,7 @@ type Row = Record<string, unknown>;
 export type MarketingConsoleView = {
   section: MarketingConsoleSection;
   availability: Availability;
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
@@ -273,7 +273,9 @@ export function AdminMarketingPanel({
                     ? m.showingAssets
                     : view.ordering === "by-status"
                       ? m.showingByStatus
-                      : m.showing
+                      : view.ordering === "oldest"
+                        ? m.showingOldest
+                        : m.showing
                   ).replace(
                     "{count}",
                     String(view.pageSize)
