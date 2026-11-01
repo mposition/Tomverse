@@ -174,6 +174,10 @@ test("a session answer that made no plan says so and why nothing was registered"
     assert.ok(locale.sessionReviewQuestionTitle && locale.sessionReviewQuestionHint &&
       locale.sessionReviewNotAPlan && locale.sessionReviewGone && locale.sessionReviewUnavailable);
   }
+  for (const locale of [adminAmuxIdeaProgressMessages.en, adminAmuxIdeaProgressMessages.ko]) {
+    const place = "units[4] (card) · taskRole · value_not_allowed";
+    assert.ok(locale.sessionReviewNotAPlanAt(place).includes(place), "the schema place is shown as it is");
+  }
   const source = fs.readFileSync("components/admin/AmuxSessionReviewPanel.tsx", "utf8");
   assert.ok(source.includes("/api/admin/amux/ideas/session-review?"));
   assert.ok(source.includes("readAmuxSessionReviewReply"), "only an exact reply is shown");
