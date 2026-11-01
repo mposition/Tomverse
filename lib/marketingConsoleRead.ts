@@ -18,6 +18,8 @@ import {
   parseMarketingWebhookFaultArm,
 } from "@/lib/marketingWebhookCore";
 import { readMarketingAssetsForConsole } from "@/lib/marketingAssetStore";
+import { readMarketingCommentsMonitorHealthy } from "@/lib/marketingCommentsMonitorHealth";
+import { readMarketingGraduation } from "@/lib/marketingStore";
 import {
   MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
@@ -548,6 +550,7 @@ export async function readMarketingConsole(
   }
 
   if (section === "accounts") {
+    const commentsMonitorHealthy = await readMarketingCommentsMonitorHealthy();
     const channels = await prisma.marketingChannel.findMany({
       orderBy: { createdAt: "desc" },
       take: MARKETING_READ_PAGE_SIZE,
@@ -586,12 +589,20 @@ export async function readMarketingConsole(
       overview,
       webhookStaging,
       canWrite,
-      rows: channels.map((channel) => ({
-        ...channel,
-        approvalStartedAt: channel.approvalStartedAt?.toISOString() ?? null,
-        graduatedAt: channel.graduatedAt?.toISOString() ?? null,
-        pausedAt: channel.pausedAt?.toISOString() ?? null,
-      })),
+      rows: await Promise.all(
+        channels.map(async (channel) => ({
+          ...channel,
+          approvalStartedAt: channel.approvalStartedAt?.toISOString() ?? null,
+          graduatedAt: channel.graduatedAt?.toISOString() ?? null,
+          pausedAt: channel.pausedAt?.toISOString() ?? null,
+          // Where the account stands against the graduation conditions, for an
+          // account that could graduate. The server repeats the test on the click.
+          graduation:
+            channel.status === "approval_mode"
+              ? await marketingGraduationForConsole(channel.id, commentsMonitorHealthy)
+              : null,
+        })),
+      ),
     };
   }
 
@@ -691,4 +702,20 @@ export async function readMarketingConsole(
       createdAt: report.createdAt.toISOString(),
     })),
   };
+}
+
+/** The graduation reading of one account, or null when it cannot be read: the page then offers no graduation. */
+async function marketingGraduationForConsole(channelId: string, commentsMonitorHealthy: boolean) {
+  try {
+    const reading = await readMarketingGraduation(prisma, channelId, commentsMonitorHealthy);
+    return {
+      eligible: reading.eligible,
+      unmet: reading.unmet,
+      approvedPostCount: reading.metrics.approvedPostCount,
+      operatorEditRate: reading.operatorEditRate,
+      firstSuccessAt: reading.metrics.firstSuccessAt?.toISOString() ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
