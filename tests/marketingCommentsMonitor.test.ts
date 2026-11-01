@@ -879,3 +879,23 @@ test("a stored URL that cannot be read does not cost the alert", async () => {
   assert.deepEqual(result, { recorded: true });
   assert.equal((world.created[0].payload as { externalUrlHost: string }).externalUrlHost, "unknown.invalid");
 });
+
+test("a batch that fails keeps what the earlier batches found: the alert is raised, the run is not whole", async () => {
+  const many = Array.from({ length: 51 }, (_, index) => comment(`c${index}`));
+  for (const failure of ["throws", "malformed"] as const) {
+    let call = 0;
+    const { deps, recorded, calls } = monitor({
+      comments: { p1: many },
+      classifier: async (bodies) => {
+        call += 1;
+        if (call === 1) return bodies.map((_, index) => (index === 0 ? ["legal_threat"] : []));
+        if (failure === "throws") throw new Error("model lost");
+        return [[null as never]];
+      },
+    });
+    const result = await runMarketingCommentsMonitor(deps);
+    assert.deepEqual(recorded.map((alert) => [alert.alertCount, alert.riskCodes]), [[1, ["legal_threat"]]], failure);
+    assert.equal(result.ran && result.complete, false, failure);
+    assert.equal(calls.includes("recordRun"), false, failure);
+  }
+});

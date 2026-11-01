@@ -199,7 +199,13 @@ export async function runMarketingCommentsMonitor(
         let wellFormed = true;
         for (let from = 0; from < bodies.length && wellFormed; from += MARKETING_COMMENT_CLASSIFIER_BATCH) {
           const batch = bodies.slice(from, from + MARKETING_COMMENT_CLASSIFIER_BATCH);
-          const verdicts = await classifier(batch);
+          let verdicts: ReadonlyArray<ReadonlyArray<string>>;
+          try {
+            verdicts = await classifier(batch);
+          } catch {
+            wellFormed = false;
+            break;
+          }
           // An answer of the wrong shape -- the list, or any entry in it -- is no
           // answer: nothing is concluded from it, and a missing verdict is never
           // read as a safe comment.
@@ -213,10 +219,9 @@ export async function runMarketingCommentsMonitor(
           }
           flagged.push(...verdicts.map((codes) => knownCodes(codes)));
         }
-        if (!wellFormed) {
-          postsUnread += 1;
-          continue;
-        }
+        // A batch that failed leaves the post unread -- the run is not whole -- but
+        // what the earlier batches found is real, and is still raised below.
+        if (!wellFormed) postsUnread += 1;
         const alertCount = flagged.filter((codes) => codes.length > 0).length;
         if (alertCount === 0) continue;
         const riskCodes = MARKETING_COMMENT_RISK_CODES.filter((code) =>
