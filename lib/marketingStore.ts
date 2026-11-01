@@ -5692,11 +5692,13 @@ export async function evaluateMarketingAutoPause(
     /** A fact another module established; the stop is this path. */
     readonly forcedReason?: Extract<MarketingAutoPauseReasonCode, "unhandled_comment_alert">;
     /**
-     * When that fact began. It stops the account only if it began after the
-     * account's last fresh start: an alert that was already open when the
-     * operator resumed the account is not a new reason to stop it.
+     * The unanswered comment alerts behind a forced stop. One of them has to
+     * have begun after the account's last fresh start (an alert already open
+     * when the operator resumed the account is not a new reason to stop it) and
+     * still be unanswered now, under the lock: an operator's acknowledgement
+     * that committed after the list was read is respected.
      */
-    readonly forcedFactAt?: Date;
+    readonly forcedAlerts?: ReadonlyArray<{ readonly postId: string; readonly firstDetectedAt: Date }>;
   },
 ): Promise<
   | { readonly paused: false }
@@ -5737,11 +5739,18 @@ export async function evaluateMarketingAutoPause(
     lastFreshStart?.createdAt,
   ]);
   const since = windowStart ?? new Date(0);
-  if (
-    rawInput.forcedReason !== undefined &&
-    (rawInput.forcedFactAt === undefined || rawInput.forcedFactAt.getTime() <= since.getTime())
-  ) {
-    return { paused: false };
+  if (rawInput.forcedReason !== undefined) {
+    let warranted = false;
+    for (const alert of rawInput.forcedAlerts ?? []) {
+      if (
+        alert.firstDetectedAt.getTime() > since.getTime() &&
+        (await marketingCommentAlertIsOpen(database, alert.postId))
+      ) {
+        warranted = true;
+        break;
+      }
+    }
+    if (!warranted) return { paused: false };
   }
 
   let reasonCode: MarketingAutoPauseReasonCode | null = rawInput.forcedReason ?? null;

@@ -64,7 +64,7 @@ export type ZernioCommentsResult =
   | { readonly kind: "unavailable" };
 
 const PAGE_SIZE = 50;
-/** Pages followed per post and run. A post with more new comments than this is cut short, and says so. */
+/** Pages followed per post and run. A thread longer than this is cut short, and says so. */
 export const ZERNIO_COMMENTS_MAX_PAGES = 5;
 
 const nextCursor = (body: unknown): { more: boolean; cursor: string | null } => {
@@ -74,17 +74,13 @@ const nextCursor = (body: unknown): { more: boolean; cursor: string | null } => 
 };
 
 /**
- * The newest comments of a post, page by page until one is not newer than
- * `readDownTo` (the caller's floor) or the pages run out. Stopping early because
- * of the page cap, or because a full page names no way to the next, is reported
- * as `truncated`: a read that left comments unread is not a whole read.
+ * The comments of a post, page by page to the end of the thread. Stopping early
+ * because of the page cap, or because a full page names no way to the next, is
+ * reported as `truncated`: a read that left comments unread is not a whole read.
+ * Nothing here assumes the vendor's order -- no page is skipped for looking old.
  */
 export const zernioCommentsQuery = (ports: ZernioTransportPorts) => ({
-  async fetchComments(
-    externalPostId: string,
-    externalAccountRef: string,
-    readDownTo: Date | null = null,
-  ): Promise<ZernioCommentsResult> {
+  async fetchComments(externalPostId: string, externalAccountRef: string): Promise<ZernioCommentsResult> {
     const comments: ParsedZernioComment[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < ZERNIO_COMMENTS_MAX_PAGES; page += 1) {
@@ -98,15 +94,6 @@ export const zernioCommentsQuery = (ports: ZernioTransportPorts) => ({
       if (parsed === null) return { kind: "unavailable" };
       comments.push(...parsed);
       const next = nextCursor(result.body);
-      // Reached what was already read: older pages are not new.
-      const oldest = parsed.reduce<Date | null>(
-        (known, comment) =>
-          comment.createdAt && (known === null || comment.createdAt < known) ? comment.createdAt : known,
-        null,
-      );
-      if (readDownTo && oldest && oldest.getTime() <= readDownTo.getTime()) {
-        return { kind: "ok", comments, truncated: false };
-      }
       if (!next.more) {
         // A short page is the end. A full page that does not say it has more is
         // not known to be the end, and nothing here guesses.

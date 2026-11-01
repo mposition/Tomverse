@@ -136,6 +136,14 @@ test("the switch is the exact word true, in any case", () => {
 // What the model sees and what is kept
 // ---------------------------------------------------------------------------
 
+test("every new comment is classified, in batches, however many there are", async () => {
+  const many = Array.from({ length: 120 }, (_, index) => comment(`c${index}`));
+  const { deps, classified } = monitor({ comments: { p1: many } });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.deepEqual(classified.map((batch) => batch.length), [50, 50, 20]);
+  assert.equal(result.ran && result.complete, true);
+});
+
 test("a model is given comment bodies and nothing else, bounded", async () => {
   const long = "x".repeat(MARKETING_COMMENT_BODY_MAX_CHARS + 500);
   const { deps, classified } = monitor({ comments: { p1: [comment("first"), comment(long)] } });
@@ -476,7 +484,7 @@ test("a post that already has an unanswered alert gets no second one; an unpubli
 // The stop for an alert nobody answered
 // ---------------------------------------------------------------------------
 
-const pauseWorld = (approvalStartedAt: Date) => {
+const pauseWorld = (approvalStartedAt: Date, options: { answered?: boolean } = {}) => {
   const updates: Array<Record<string, unknown>> = [];
   const audits: Array<Record<string, unknown>> = [];
   const database = {
@@ -494,9 +502,14 @@ const pauseWorld = (approvalStartedAt: Date) => {
         return { count: 1 };
       },
     },
+    marketingReport: {
+      findFirst: async () => ({ createdAt: new Date("2026-11-01T01:00:00.000Z") }),
+    },
     adminAuditLog: {
       findFirst: async (args?: { where?: { action?: unknown } }) =>
-        args?.where?.action && typeof args.where.action === "object" ? null : null,
+        args?.where?.action === "marketing_comment_alert.acknowledge" && options.answered
+          ? { createdAt: new Date("2026-11-01T02:00:00.000Z") }
+          : null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         audits.push(data);
         return data;
@@ -511,7 +524,7 @@ test("an alert that began after the account's last fresh start stops the account
   const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
     channelId: "chn-1",
     forcedReason: "unhandled_comment_alert",
-    forcedFactAt: new Date("2026-11-01T00:00:00.000Z"),
+    forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
   });
   assert.equal(result.paused && result.reasonCode, "unhandled_comment_alert");
   assert.equal(world.updates.length, 1);
@@ -523,11 +536,22 @@ test("an alert that was already open when the account was resumed does not stop 
   const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
     channelId: "chn-1",
     forcedReason: "unhandled_comment_alert",
-    forcedFactAt: new Date("2026-11-01T00:00:00.000Z"),
+    forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
   });
   assert.deepEqual(result, { paused: false });
   assert.equal(world.updates.length, 0);
   assert.equal(world.audits.length, 0);
+});
+
+test("an alert the operator answered after the list was read does not stop the account", async () => {
+  const world = pauseWorld(new Date("2026-10-30T00:00:00.000Z"), { answered: true });
+  const result = await evaluateMarketingAutoPause(asTransaction(world.database), {
+    channelId: "chn-1",
+    forcedReason: "unhandled_comment_alert",
+    forcedAlerts: [{ postId: "p1", firstDetectedAt: new Date("2026-11-01T00:00:00.000Z") }],
+  });
+  assert.deepEqual(result, { paused: false });
+  assert.equal(world.updates.length, 0);
 });
 
 test("a forced reason without the instant its fact began stops nothing", async () => {
@@ -602,12 +626,12 @@ test("a failure to list the posts, or to sweep, is an incomplete run and never a
   assert.equal(sweeping.calls.includes("recordRun"), false);
 });
 
-test("the comments call follows pages until the floor, and says when it stopped short", async () => {
+test("the comments call follows pages to the end, assumes no order, and says when it stopped short", async () => {
   const page = (n: number, extra: Record<string, unknown>) => ({
     comments: Array.from({ length: n }, (_, index) => ({ message: `c${index}`, created_time: "2026-11-02T08:00:00Z" })),
     ...extra,
   });
-  const run = async (pages: unknown[], readDownTo: Date | null = null) => {
+  const run = async (pages: unknown[]) => {
     let call = 0;
     const urls: string[] = [];
     const result = await zernioCommentsQuery({
@@ -618,7 +642,7 @@ test("the comments call follows pages until the floor, and says when it stopped 
         urls.push(String(url));
         return { status: 200, json: async () => pages[Math.min(call++, pages.length - 1)] };
       }) as unknown as typeof fetch,
-    }).fetchComments("p", "a", readDownTo);
+    }).fetchComments("p", "a");
     return { result, urls };
   };
 
@@ -635,12 +659,6 @@ test("the comments call follows pages until the floor, and says when it stopped 
   const forever = await run([page(50, { pagination: { hasMore: true, cursor: "again" } })]);
   assert.equal(forever.result.kind === "ok" && forever.result.truncated, true);
   assert.equal(forever.urls.length, 5);
-
-  // Reaching comments already read ends the paging, untruncated.
-  const caughtUp = await run(
-    [page(50, { pagination: { hasMore: true, cursor: "c2" } })],
-    new Date("2026-11-02T09:00:00.000Z"),
-  );
-  assert.equal(caughtUp.result.kind === "ok" && caughtUp.result.truncated, false);
-  assert.equal(caughtUp.urls.length, 1);
 });
+
+

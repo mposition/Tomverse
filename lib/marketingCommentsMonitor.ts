@@ -55,7 +55,8 @@ export type MarketingCommentClassifier = (
 ) => Promise<ReadonlyArray<ReadonlyArray<string>>>;
 
 export const MARKETING_COMMENT_BODY_MAX_CHARS = 1_000;
-export const MARKETING_COMMENT_MAX_PER_POST = 50;
+/** Bodies per classifier call. Every new comment is classified, in as many calls as it takes. */
+export const MARKETING_COMMENT_CLASSIFIER_BATCH = 50;
 /** Posts one run covers. More than this and the run is incomplete rather than a sample. */
 export const MARKETING_COMMENT_MONITOR_POST_LIMIT = 200;
 /** A run looks back this far before the last complete run's start, for comments written while it ran. */
@@ -73,11 +74,7 @@ export type MarketingCommentsMonitorDeps = {
   readonly enabled: (env: Readonly<Record<string, string | undefined>>) => boolean;
   readonly classifier: MarketingCommentClassifier | null;
   readonly now: () => Date;
-  /** `readDownTo`: comments older than this are already read, so paging can stop there. */
-  readonly fetchComments: (
-    post: MarketingCommentMonitorPost,
-    readDownTo: Date | null,
-  ) => Promise<ZernioCommentsResult>;
+  readonly fetchComments: (post: MarketingCommentMonitorPost) => Promise<ZernioCommentsResult>;
   readonly operations: {
     readonly listPosts: (limit: number) => Promise<MarketingCommentMonitorPost[]>;
     /** When the latest run that read and classified everything began, or null if none has. */
@@ -121,7 +118,6 @@ export const marketingCommentBodiesForModel = (
     .filter((comment) =>
       floor === null || comment.createdAt === null || comment.createdAt.getTime() > floor.getTime(),
     )
-    .slice(0, MARKETING_COMMENT_MAX_PER_POST)
     .map((comment) => comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS));
 
 export async function runMarketingCommentsMonitor(
@@ -155,26 +151,35 @@ export async function runMarketingCommentsMonitor(
 
     for (const post of posts) {
       try {
-        const page = await deps.fetchComments(post, floor);
+        const page = await deps.fetchComments(post);
         if (page.kind !== "ok" || page.truncated) {
           postsUnread += 1;
           continue;
         }
         const bodies = marketingCommentBodiesForModel(page.comments, floor);
         if (bodies.length === 0) continue;
-        const verdicts = await classifier(bodies);
-        // An answer of the wrong shape -- the list, or any entry in it -- is no
-        // answer: nothing is concluded from it, and a missing verdict is never
-        // read as a safe comment.
-        if (
-          !Array.isArray(verdicts) ||
-          verdicts.length !== bodies.length ||
-          verdicts.some((codes) => !Array.isArray(codes) || codes.some((code) => typeof code !== "string"))
-        ) {
+        const flagged: MarketingCommentRiskCode[][] = [];
+        let wellFormed = true;
+        for (let from = 0; from < bodies.length && wellFormed; from += MARKETING_COMMENT_CLASSIFIER_BATCH) {
+          const batch = bodies.slice(from, from + MARKETING_COMMENT_CLASSIFIER_BATCH);
+          const verdicts = await classifier(batch);
+          // An answer of the wrong shape -- the list, or any entry in it -- is no
+          // answer: nothing is concluded from it, and a missing verdict is never
+          // read as a safe comment.
+          if (
+            !Array.isArray(verdicts) ||
+            verdicts.length !== batch.length ||
+            verdicts.some((codes) => !Array.isArray(codes) || codes.some((code) => typeof code !== "string"))
+          ) {
+            wellFormed = false;
+            break;
+          }
+          flagged.push(...verdicts.map((codes) => knownCodes(codes)));
+        }
+        if (!wellFormed) {
           postsUnread += 1;
           continue;
         }
-        const flagged = verdicts.map((codes) => knownCodes(codes));
         const alertCount = flagged.filter((codes) => codes.length > 0).length;
         if (alertCount === 0) continue;
         const riskCodes = MARKETING_COMMENT_RISK_CODES.filter((code) =>

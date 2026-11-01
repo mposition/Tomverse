@@ -37,27 +37,25 @@ export const marketingCommentsMonitorOperations = (
   },
   sweepUnhandled: async (now) => {
     const open = await listOpenMarketingCommentAlerts(client);
-    // Per account, the newest overdue alert: the stop needs one that began after
-    // the account's last fresh start, and the store decides that under the lock.
-    const overdue = new Map<string, Date>();
+    // The overdue alerts of each account. The stop re-checks them under the lock.
+    const overdue = new Map<string, Array<{ postId: string; firstDetectedAt: Date }>>();
     for (const alert of open) {
       if (
         alert.channelId !== null &&
         now.getTime() - alert.firstDetectedAt.getTime() >= MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS
       ) {
-        const known = overdue.get(alert.channelId);
-        if (!known || known.getTime() < alert.firstDetectedAt.getTime()) {
-          overdue.set(alert.channelId, alert.firstDetectedAt);
-        }
+        const list = overdue.get(alert.channelId) ?? [];
+        list.push({ postId: alert.postId, firstDetectedAt: alert.firstDetectedAt });
+        overdue.set(alert.channelId, list);
       }
     }
     let stopped = 0;
-    for (const [channelId, forcedFactAt] of overdue) {
+    for (const [channelId, forcedAlerts] of overdue) {
       const result = await runMarketingTransaction(client, (tx) =>
         evaluateMarketingAutoPause(tx, {
           channelId,
           forcedReason: "unhandled_comment_alert",
-          forcedFactAt,
+          forcedAlerts,
         }),
       );
       if (result.paused) stopped += 1;
