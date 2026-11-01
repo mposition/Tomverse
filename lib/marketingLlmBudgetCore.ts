@@ -29,7 +29,12 @@ export const MARKETING_LLM_SERVICE_TIER = "default";
 /** The adapter release the app expects; a reservation stores it in its snapshot. */
 export const MARKETING_LLM_ADAPTER_VERSION = "1";
 
-export const MARKETING_LLM_PURPOSES = ["draft", "market_intel", "brief"] as const;
+/**
+ * What a call is for. The ledger's shape CHECK holds the same list
+ * (prisma/migrations/20261102090000_marketing_llm_comment_triage_purpose);
+ * `comment_triage` is the comment monitor's classifier (S4d).
+ */
+export const MARKETING_LLM_PURPOSES = ["draft", "market_intel", "brief", "comment_triage"] as const;
 export type MarketingLlmPurpose = (typeof MARKETING_LLM_PURPOSES)[number];
 
 export const MARKETING_LLM_CALL_STATES = [
