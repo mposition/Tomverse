@@ -1,7 +1,14 @@
 import type { MobileLanguage } from "./mobile";
 const en = {
   "title": "Sign in to Tomverse",
-  "intro": "Use your account email. Enter the code here to stay in the app.",
+  "intro": "Enter your email to sign in or create a free account. Verify the code here to stay in the app.",
+  "signupTitle": "Create your Tomverse account",
+  "signupIntro": "Your email is verified. Create a free account with this address to continue in the app.",
+  "signup": "Create free account",
+  "acceptTerms": "I agree to the Terms of Use and acknowledge the Privacy Policy.",
+  "terms": "Terms of Use", "privacy": "Privacy Policy",
+  "signupUnavailable": "Account creation is not available on this server yet. Please try again after the service update.",
+  "termsRequired": "Review and accept the Terms of Use and Privacy Policy before creating your account.",
   "email": "Email address",
   "send": "Send sign-in code",
   "code": "6-digit code",
@@ -26,13 +33,20 @@ const en = {
   "requestFailed": "Could not request a sign-in code. Please try again later.",
   "deliveryFailed": "The email service could not send the code. Please try again later.",
   "challenge": "Additional verification is required. Sign in on the Tomverse website, or try again later.",
-  "account": "No account was found for this verified email. Create an account on the Tomverse website first.",
+  "account": "Your email is verified. You can create a free account with this address in the app.",
   "refused": "This account cannot sign in right now. Check your account on the Tomverse website."
 };
 export const mobileLoginCopy: Record<MobileLanguage, typeof en> = {
  en, ko: {
   "title": "Tomverse에 로그인",
-  "intro": "계정 이메일로 받은 인증 코드를 앱에서 입력하세요.",
+  "intro": "이메일을 입력하고 인증 코드를 확인하세요. 기존 계정은 로그인되고, 새 이메일은 앱에서 무료로 가입할 수 있어요.",
+  "signupTitle": "Tomverse 계정 만들기",
+  "signupIntro": "이메일 인증이 완료됐어요. 이 주소로 무료 계정을 만들고 앱에서 계속 이용하세요.",
+  "signup": "무료 계정 만들기",
+  "acceptTerms": "이용약관에 동의하고 개인정보 처리방침을 확인했습니다.",
+  "terms": "이용약관", "privacy": "개인정보 처리방침",
+  "signupUnavailable": "이 서버는 아직 앱 회원가입을 지원하지 않습니다. 서비스 업데이트 후 다시 시도해 주세요.",
+  "termsRequired": "계정을 만들기 전에 이용약관과 개인정보 처리방침을 확인하고 동의해 주세요.",
   "email": "이메일 주소",
   "send": "인증 코드 받기",
   "code": "6자리 인증 코드",
@@ -57,7 +71,7 @@ export const mobileLoginCopy: Record<MobileLanguage, typeof en> = {
   "requestFailed": "인증 코드를 요청하지 못했습니다. 잠시 후 다시 시도해 주세요.",
   "deliveryFailed": "메일 서비스에서 인증 코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
   "challenge": "추가 인증이 필요합니다. Tomverse 웹사이트에서 로그인하거나 잠시 후 다시 시도해 주세요.",
-  "account": "인증한 이메일의 계정이 없습니다. 먼저 Tomverse 웹사이트에서 계정을 만들어 주세요.",
+  "account": "이메일 인증이 완료됐어요. 이 주소로 앱에서 무료 계정을 만들 수 있습니다.",
   "refused": "현재 이 계정으로 로그인할 수 없습니다. Tomverse 웹사이트에서 계정 상태를 확인해 주세요."
 },
  // English fallback until the initial email flow's other translations are ready.
@@ -74,6 +88,8 @@ export function mobileLoginError(error: unknown, language: MobileLanguage, phase
  if (phase === "browser" && code === "LOGIN_EXPIRED") return copy.browserExpired;
  if (code === "EMAIL_CODE_INVALID") return copy.invalid;
  if (code === "EMAIL_ACCOUNT_NOT_FOUND") return copy.account;
+ if (code === "MOBILE_SIGNUP_UNAVAILABLE") return copy.signupUnavailable;
+ if (code === "MOBILE_SIGNUP_TERMS_REQUIRED") return copy.termsRequired;
  if (code === "MOBILE_LOGIN_REFUSED") return copy.refused;
  if (code === "EMAIL_CODE_LOCKED" || code.includes("RATE_LIMITED")) return copy.limited;
  if (code.startsWith("TURNSTILE_")) return copy.challenge;
