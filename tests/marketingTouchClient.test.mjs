@@ -171,6 +171,78 @@ test("a conversion released with a touch is sent only after the touch was answer
   }
 });
 
+test("a conversion still waiting when the page goes away is sent by the next page", async () => {
+  reset();
+  answerTouch = () => new Promise(() => {});
+  try {
+    land(LINK);
+    client.observeMarketingTouch();
+    client.trackProductEventOnce("signup_completed", "signup_completed", 0, {
+      method: "google",
+    });
+    client.setAnalyticsConsent("accepted");
+    configure();
+    await flush();
+    const names = () => requests.map((request) => request.body.event_name);
+    assert.ok(!names().includes("signup_completed"));
+    const waiting = JSON.parse(
+      win.sessionStorage.getItem("tomverse_analytics_waiting_conversions_v1") || "[]",
+    );
+    assert.deepEqual(
+      waiting.map((payload) => payload.event_name),
+      ["signup_completed"],
+      "while it waits it is in the tab's storage, not only in this page's memory",
+    );
+
+    // The next page in the tab: a fresh client holds nothing in memory and
+    // finds the conversion in storage. Reproduced here by a page that left one
+    // behind (this module instance is still holding its own).
+    const leftBehind = { ...waiting[0], event_id: crypto.randomUUID() };
+    win.sessionStorage.setItem(
+      "tomverse_analytics_waiting_conversions_v1",
+      JSON.stringify([leftBehind]),
+    );
+    land("?after=reload");
+    configure();
+    await flush();
+    const resent = requests.filter((request) => request.body.event_id === leftBehind.event_id);
+    assert.equal(resent.length, 1, "the next configuration sends what was left behind");
+    assert.equal(
+      win.sessionStorage.getItem("tomverse_analytics_waiting_conversions_v1"),
+      null,
+      "sent once, then off the list",
+    );
+  } finally {
+    answerTouch = () => Promise.resolve(accepted());
+  }
+});
+
+test("a configuration on the same page does not jump a conversion it is still holding", async () => {
+  reset();
+  let release;
+  answerTouch = () => new Promise((resolve) => {
+    release = () => resolve(accepted());
+  });
+  try {
+    land(LINK);
+    client.observeMarketingTouch();
+    client.trackProductEventOnce("signup_completed", "signup_completed", 0, {
+      method: "google",
+    });
+    client.setAnalyticsConsent("accepted");
+    configure();
+    configure();
+    await flush();
+    const names = () => requests.map((request) => request.body.event_name);
+    assert.ok(!names().includes("signup_completed"));
+    release();
+    await flush();
+    assert.equal(names().filter((name) => name === "signup_completed").length, 1);
+  } finally {
+    answerTouch = () => Promise.resolve(accepted());
+  }
+});
+
 test("declining analytics while a conversion waits for a touch cancels the conversion", async () => {
   reset();
   let release;
