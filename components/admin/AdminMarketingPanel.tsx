@@ -1637,6 +1637,26 @@ function publishedActions(row: Row, m: Record<string, string>): MarketingAction[
   return actions;
 }
 
+const GRADUATION_UNMET_MESSAGE: Record<string, string> = {
+  not_in_approval_mode: "graduateUnmetNotInApprovalMode",
+  channel_never_graduates: "graduateUnmetChannelNeverGraduates",
+  first_success_missing: "graduateUnmetFirstSuccessMissing",
+  first_success_too_recent: "graduateUnmetFirstSuccessTooRecent",
+  approvals_below_minimum: "graduateUnmetApprovalsBelowMinimum",
+  edit_rate_above_limit: "graduateUnmetEditRateAboveLimit",
+  comments_monitor_unhealthy: "graduateUnmetCommentsMonitorUnhealthy",
+};
+
+/** Why graduation is not offered yet, or undefined when the server's reading says it may be. The server decides again on the click. */
+function graduationUnavailable(graduation: unknown, m: Record<string, string>): string | undefined {
+  if (typeof graduation !== "object" || graduation === null) return m.graduateUnreadable;
+  const reading = graduation as { eligible?: unknown; unmet?: unknown };
+  if (reading.eligible === true) return undefined;
+  const unmet = Array.isArray(reading.unmet) ? reading.unmet : [];
+  const reasons = unmet.map((code) => m[GRADUATION_UNMET_MESSAGE[String(code)] ?? ""] ?? String(code));
+  return [m.graduateUnmetPrefix, reasons.join(" / ")].join(" ").trim();
+}
+
 function accountActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];
   const status = str(row.status);
@@ -1746,6 +1766,17 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
         },
       ],
       body: (values) => ({ ...identityCas, policyVersion: Number(values.policyVersion) }),
+    });
+  }
+
+  if (status === "approval_mode") {
+    actions.push({
+      id: "graduate",
+      label: m.actGraduate,
+      path: ACCOUNT(row.id, "graduate"),
+      confirm: m.confirmGraduate,
+      unavailable: graduationUnavailable(row.graduation, m),
+      body: () => ({ expectedGraduationEpoch: int(row.graduationEpoch) }),
     });
   }
 
