@@ -313,7 +313,7 @@
     "check:shared-packages": "node scripts/check-shared-packages.mjs",
     "check:capacitor-local-bundle": "node scripts/check-capacitor-local-bundle.mjs",
     "build:mobile-shell": "npm run build --workspace @tomverse/mobile",
-    "prepare:ios": "npm --workspace @tomverse/mobile run typecheck && npm run build:mobile-shell && npm run check:capacitor-local-bundle && npm run check:native-token-boundary && npm --workspace @tomverse/mobile run cap:sync:ios && npm run check:ios-prebuild",
+    "prepare:ios": "npm --workspace @tomverse/mobile run typecheck && npm run build:mobile-shell && npm run check:capacitor-local-bundle && npm run check:native-token-boundary && npm --workspace @tomverse/mobile run cap:sync:ios && node apps/mobile/scripts/configure-ios-api-origin.mjs && npm run check:ios-prebuild",
     "check:ios-prebuild": "node apps/mobile/scripts/check-ios-prebuild.mjs",
     "build:ios": "node apps/mobile/scripts/build-ios.mjs",
     "test:ios-prebuild": "node --test tests/iosPrebuild.test.mjs",
