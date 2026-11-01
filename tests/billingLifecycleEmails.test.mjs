@@ -12,7 +12,7 @@ import {
   buildAdminPlanChangedEmail,
   buildFoundingTesterPassEmail,
 } from "../lib/billingEmails.ts";
-import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
+import { EMAIL_COPY_LANGUAGES } from "../lib/language.ts";
 import {
   ADMIN_PLAN_CHANGED_TEMPLATE,
   FOUNDING_TESTER_PASS_ENDED_TEMPLATE,
@@ -34,7 +34,7 @@ const PERIOD_END = "2026-10-21T00:00:00.000Z";
 test("each pass notice renders in all seven languages with a distinct subject", () => {
   for (const phase of PASS_PHASES) {
     const subjects = new Set();
-    for (const language of SUPPORTED_LANGUAGES) {
+    for (const language of EMAIL_COPY_LANGUAGES) {
       const email = buildFoundingTesterPassEmail(phase, {
         periodEnd: PERIOD_END,
         language,
@@ -46,7 +46,7 @@ test("each pass notice renders in all seven languages with a distinct subject", 
     // failure a per-language assertion cannot see.
     assert.equal(
       subjects.size,
-      SUPPORTED_LANGUAGES.length,
+      EMAIL_COPY_LANGUAGES.length,
       `${phase}: languages share a subject, so one is falling back`
     );
   }
@@ -65,7 +65,7 @@ test("the three phases are three different messages", () => {
 
 test("the started and reminder notices quote the date they are about", () => {
   for (const phase of ["started", "reminder"]) {
-    for (const language of SUPPORTED_LANGUAGES) {
+    for (const language of EMAIL_COPY_LANGUAGES) {
       const { text } = buildFoundingTesterPassEmail(phase, {
         periodEnd: PERIOD_END,
         language,
@@ -82,7 +82,7 @@ test("the started and reminder notices quote the date they are about", () => {
 });
 
 test("a missing period end renders the locale's own placeholder, not a crash", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const { text, subject } = buildFoundingTesterPassEmail("reminder", {
       periodEnd: null,
       language,

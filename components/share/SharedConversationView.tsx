@@ -28,6 +28,7 @@ const languageOptions: Array<{ value: Language; label: string }> = [
   { value: "ko", label: localeLaunchPolicy.ko.selectorLabel },
   { value: "en", label: localeLaunchPolicy.en.selectorLabel },
   { value: "zh", label: localeLaunchPolicy.zh.selectorLabel },
+  { value: "zh-Hant", label: localeLaunchPolicy["zh-Hant"].selectorLabel },
   { value: "fr", label: localeLaunchPolicy.fr.selectorLabel },
   { value: "de", label: localeLaunchPolicy.de.selectorLabel },
   { value: "es", label: localeLaunchPolicy.es.selectorLabel },

@@ -68,7 +68,7 @@ function unlocalizedPath(pathname: string): string {
   return pathname;
 }
 
-async function selectLanguage(page: Page, lang: "ko" | "en" | "zh") {
+async function selectLanguage(page: Page, lang: "ko" | "en" | "zh" | "zh-Hant") {
   const select = page.getByTestId("marketing-language-switcher");
   if ((await select.inputValue()) === lang) {
     // WebKit can finish the document load before the next/font face has
@@ -193,6 +193,25 @@ test.describe("font system: locale families", () => {
     if (!testInfo.project.name.includes("chromium")) return;
     const used = await renderedFonts(page, "[data-testid='landing-hero-title']");
     expect(used.some((font) => font.startsWith("Noto Sans SC"))).toBe(true);
+    expect(used).not.toContain("Arial");
+  });
+
+  test("Traditional Chinese UI renders in Noto Sans TC", async ({ page }, testInfo) => {
+    await page.goto("/");
+    await selectLanguage(page, "zh-Hant");
+
+    const declared = await declaredFontFamily(
+      page.getByTestId("landing-hero-title")
+    );
+    // `:lang(zh)` also matches zh-Hant; the Traditional stack has to win.
+    expect(declared).toMatch(/^Noto Sans TC\b/);
+    expect(declared).toMatch(/PingFang TC/);
+    expect(declared).toMatch(/Microsoft JhengHei/);
+    expect(declared).not.toMatch(/Noto Sans SC/);
+
+    if (!testInfo.project.name.includes("chromium")) return;
+    const used = await renderedFonts(page, "[data-testid='landing-hero-title']");
+    expect(used.some((font) => font.startsWith("Noto Sans TC"))).toBe(true);
     expect(used).not.toContain("Arial");
   });
 

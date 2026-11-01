@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chatWorkspaceGuideContent } from "../components/marketing/chatWorkspaceGuideContent.ts";
 
-const languages = ["en", "ko", "zh", "fr", "de", "es", "pt"];
+const languages = ["en", "ko", "zh", "zh-Hant", "fr", "de", "es", "pt"];
 
 test("chat workspace guide is complete in every supported language", () => {
   assert.deepEqual(Object.keys(chatWorkspaceGuideContent).sort(), languages.sort());

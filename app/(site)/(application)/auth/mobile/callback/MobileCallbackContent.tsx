@@ -7,5 +7,5 @@ import { mobileCopy } from "@/locales/mobile";
 export function MobileCallbackContent() {
   const { lang } = useLanguage();
   useEffect(() => { history.replaceState(null, "", location.pathname); }, []);
-  return <main className="mx-auto max-w-md p-8"><h1 className="text-xl font-semibold">Tomverse</h1><p>{mobileCopy[lang].native}</p></main>;
+  return <main className="mx-auto max-w-md p-8"><h1 className="text-xl font-semibold">Tomverse</h1><p>{mobileCopy[lang === "zh-Hant" ? "zh" : lang].native}</p></main>;
 }

@@ -74,6 +74,19 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
     },
     compactLabel: (activeCount) => `${activeCount} 个模型`,
   },
+  "zh-Hant": {
+    openPicker: "開啟模型選擇器",
+    accessibleName: ({ primaryModelName, extraActiveCount, activeCount, pausedCount }) => {
+      if (!primaryModelName) return "未選擇模型。開啟模型選擇器。";
+      const selection =
+        extraActiveCount > 0
+          ? `已選擇 ${primaryModelName} 等 ${extraActiveCount + 1} 個模型。`
+          : `已選擇 ${primaryModelName}。`;
+      const paused = pausedCount > 0 ? ` 已暫停 ${pausedCount} 個。` : "";
+      return `${selection}目前啟用的模型共 ${activeCount} 個。${paused}開啟模型選擇器。`;
+    },
+    compactLabel: (activeCount) => `${activeCount} 個模型`,
+  },
   fr: {
     openPicker: "Ouvrir le sélecteur de modèles",
     accessibleName: ({ primaryModelName, extraActiveCount, activeCount, pausedCount }) => {

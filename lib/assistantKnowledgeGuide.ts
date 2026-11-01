@@ -30,6 +30,8 @@ export const assistantKnowledgeGuideContentLanguage = (
   language: Language
 ): AssistantKnowledgeGuideContentLanguage => {
   if (language === "ko" || language === "zh") return language;
+  // No Traditional Chinese captures yet; the Simplified ones show the same UI.
+  if (language === "zh-Hant") return "zh";
   return "en";
 };
 
