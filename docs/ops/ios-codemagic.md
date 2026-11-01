@@ -335,6 +335,36 @@ delivery and actual installation are recorded separately from local tests;
 upload success alone cannot establish resolution of the earlier Apple
 install-data HTTP 404.
 
+## Browser sign-in domain association (2026-11-01)
+
+The owner reported that iPad 7th generation / iPadOS 18.7.10 on TestFlight
+1.0.21 (6) immediately showed the browser-cancelled message without presenting
+Safari. Email-code sign-in succeeded. The production association endpoint and
+Apple's CDN both returned HTTP 404 while browser sign-in capability was enabled.
+The signed app already carries `applinks:tomverse.app` and
+`webcredentials:tomverse.app`, but the corresponding website proof was missing.
+
+`/.well-known/apple-app-site-association` now returns public JSON for the existing
+signed application identifier `F9KS3F6G9F.app.tomverse.shell`. Universal links
+claim only `/auth/mobile/callback`; shared web credentials use the same app.
+The existing claimed HTTPS callback, state check, PKCE exchange and native token
+storage remain unchanged. Production deployment and an Apple CDN readback are
+needed before this can resolve installed-device sign-in.
+
+After deployment, verify direct HTTP 200 JSON without a redirect at the origin
+and at `https://app-site-association.cdn-apple.com/a/v1/tomverse.app`. Apple's CDN
+can retain a failed association, and installed devices can retain their previous
+result. Once the CDN serves the correct association, updating the app or
+reinstalling it refreshes the device association; do not ask the owner to delete
+the app while the production endpoint or CDN still returns 404. Reinstallation
+can discard local drafts and signs the user out. A successful endpoint check is
+not proof of a native browser login: observe the consent sheet, browser, callback
+and return to the signed-in app on the actual iPad.
+
+References: [HTTPS callback requirements](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/callback/https(host:path:)),
+[association setup and caching](https://developer.apple.com/documentation/xcode/supporting-associated-domains),
+[Apple's association troubleshooting](https://developer.apple.com/documentation/technotes/tn3155-debugging-universal-links).
+
 ## Local verification
 
 Machine: local Windows PC. Shell: PowerShell. Directory: repository root.
