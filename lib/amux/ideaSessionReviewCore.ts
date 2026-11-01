@@ -8,9 +8,24 @@ import { amuxAnalysisTextSafe } from "./ideaAnalysisChunkCore.ts";
  * else is the closed "not a plan" word. Nothing here changes what the writer
  * decided.
  */
+/** Where a not-a-plan answer of a first page failed the plan writer's own
+ * inspection: a closed, content-free code read again from the kept answer.
+ * A later page carries none, since its inspection depends on stored history. */
+export const AMUX_SESSION_REVIEW_DETAILS = [
+  "chunk_schema_rejected", "chunk_too_large", "chunk_content_refused",
+  "chunk_source_ref_unapproved", "chunk_target_ref_unapproved",
+  "chunk_metadata_incomplete", "history_invalid", "history_closed",
+  "cursor_metadata_incomplete", "cursor_history_invalid",
+  "cursor_chunk_index_mismatch", "cursor_output_part_mismatch",
+  "cursor_output_cursor_mismatch", "cursor_remaining_mismatch",
+  "cursor_owner_input_required", "cursor_source_invalid",
+  "owner_question_unreadable", "draft_refused",
+] as const;
+export type AmuxSessionReviewDetail = (typeof AMUX_SESSION_REVIEW_DETAILS)[number];
+
 export type AmuxSessionReview =
   | { reason: "owner_question"; question: string }
-  | { reason: "not_a_plan" };
+  | { reason: "not_a_plan"; detail?: AmuxSessionReviewDetail };
 
 const QUESTION_MAX = 2_000;
 
@@ -36,6 +51,10 @@ export function readAmuxSessionReviewReply(body: unknown): AmuxSessionReview | n
   if (!review || typeof review !== "object" || Array.isArray(review)) return null;
   const row = review as Record<string, unknown>;
   if (row.reason === "not_a_plan" && Object.keys(row).length === 1) return { reason: "not_a_plan" };
+  if (row.reason === "not_a_plan" && Object.keys(row).length === 2 &&
+      (AMUX_SESSION_REVIEW_DETAILS as readonly unknown[]).includes(row.detail)) {
+    return { reason: "not_a_plan", detail: row.detail as AmuxSessionReviewDetail };
+  }
   if (row.reason === "owner_question" && Object.keys(row).length === 2 &&
       typeof row.question === "string" && row.question.length > 0 &&
       row.question.length <= QUESTION_MAX) {
