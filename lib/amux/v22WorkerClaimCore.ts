@@ -15,10 +15,26 @@ export const amuxV22RequiredTool = (role: string) => ROLE_TOOL[role] ?? null;
 
 /** The environment-gated A15 one-shot path only has these capabilities.
  * Do not claim a Task that the local sidecar will refuse after execution
- * start; test/verify need a separately approved isolated test runner. */
+ * start. A worker profile names these roles only. */
 const ONE_SHOT_ROLES = new Set(["design", "implement", "review", "investigate"]);
 export const amuxV22OneShotRoleSupported = (role: string) =>
   ONE_SHOT_ROLES.has(role);
+
+/** Owner decision 2026-10-30: a test Task runs as an implement execution (it
+ * writes tests; the pull request's CI runs them) and a verify Task as an
+ * investigate execution (read-only). Running tests inside the worker still
+ * needs a separately approved isolated test runner, so the sidecar sees only
+ * the four roles above. operate stays a person's step. */
+const EXECUTION_ROLE: Readonly<Record<string, string>> = Object.freeze({
+  test: "implement", verify: "investigate",
+});
+export const amuxV22ExecutionRole = (taskRole: string) =>
+  Object.hasOwn(EXECUTION_ROLE, taskRole) ? EXECUTION_ROLE[taskRole]! : taskRole;
+export const amuxV22TaskRoleSupported = (taskRole: string) =>
+  amuxV22OneShotRoleSupported(amuxV22ExecutionRole(taskRole));
+/** A Task whose run leaves a patch to publish: implement, and test. */
+export const amuxV22TaskWritesPatch = (taskRole: string | null | undefined) =>
+  typeof taskRole === "string" && amuxV22ExecutionRole(taskRole) === "implement";
 
 /**
  * The one-shot providers, keyed by the v19 CLI channel names (owner decision

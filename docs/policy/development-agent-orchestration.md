@@ -1734,7 +1734,7 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
   - 모델(1~160자).
   - 역할 태그(지금 카탈로그의 태그 문법, 1~64개).
   - 도구(0~16개).
-  - 선택 항목인 v22 one-shot 프로필(모델, 역할, 도구). v22 프로필 규칙은 지금 `parseAmuxV22WorkerCatalog()`의 규칙 그대로다. 지원 역할과 역할마다 필요한 도구가 그 규칙이다. 공급사는 등록된 네 종류(anthropic, openai, github-copilot, cursor) 모두이고, Claude worker만 `claude-*` 모델이어야 한다. Claude 외 공급사의 프로필은 `TOMVERSE_AMUX_V22_MULTI_PROVIDER`가 `enabled`인 동안만 배정 카탈로그에 든다. Cursor는 쓰기를 허용하면 셸을 막을 수 없으므로 읽기 역할만 맡고, 작업 폴더·홈·설정 폴더에 MCP 설정 파일이 있으면 실행하지 않는다. review는 지금처럼 verified 공급사(claude, codex)만 맡으므로 Cursor와 Copilot의 읽기 역할은 design과 investigate다. Codex는 셸로만 파일을 읽으므로, 그 셸은 Codex 자체 OS sandbox 안에서만 돈다(읽기 역할은 읽기 전용, implement는 작업 폴더만 쓰기이고 `/tmp`·추가 쓰기 경로·네트워크는 차단, 브라우저·컴퓨터 조작·앱·웹 검색·MCP는 끔. 2026-10-26 runner에서 모델 호출 없이 실측). 이는 Claude 경로의 셸 금지보다 넓은 경계이고, 운영자가 2026-10-26에 채팅으로 승인했다.
+  - 선택 항목인 v22 one-shot 프로필(모델, 역할, 도구). v22 프로필 규칙은 지금 `parseAmuxV22WorkerCatalog()`의 규칙 그대로다. 지원 역할과 역할마다 필요한 도구가 그 규칙이다. 카드의 Task 역할 `test`와 `verify`는 프로필 역할이 아니라 실행 역할로 대응한다(운영자 결정 2026-10-30). `test`는 `implement` 실행(테스트 작성, 실행은 PR CI)이고 `verify`는 `investigate` 실행(읽기 전용)이며, 가격 산정·배정·sidecar 전달이 모두 그 실행 역할을 쓴다. worker 안에서 테스트를 직접 돌리는 격리 실행기는 여전히 별도 승인 사항이고, `operate`는 사람 단계다. 공급사는 등록된 네 종류(anthropic, openai, github-copilot, cursor) 모두이고, Claude worker만 `claude-*` 모델이어야 한다. Claude 외 공급사의 프로필은 `TOMVERSE_AMUX_V22_MULTI_PROVIDER`가 `enabled`인 동안만 배정 카탈로그에 든다. Cursor는 쓰기를 허용하면 셸을 막을 수 없으므로 읽기 역할만 맡고, 작업 폴더·홈·설정 폴더에 MCP 설정 파일이 있으면 실행하지 않는다. review는 지금처럼 verified 공급사(claude, codex)만 맡으므로 Cursor와 Copilot의 읽기 역할은 design과 investigate다. Codex는 셸로만 파일을 읽으므로, 그 셸은 Codex 자체 OS sandbox 안에서만 돈다(읽기 역할은 읽기 전용, implement는 작업 폴더만 쓰기이고 `/tmp`·추가 쓰기 경로·네트워크는 차단, 브라우저·컴퓨터 조작·앱·웹 검색·MCP는 끔. 2026-10-26 runner에서 모델 호출 없이 실측). 이는 Claude 경로의 셸 금지보다 넓은 경계이고, 운영자가 2026-10-26에 채팅으로 승인했다.
 - **누가 쓰는가.** owner만 Admin에서 최근 step-up을 거쳐 쓴다. 같은 트랜잭션에 사람 감사 `amux.worker.capability`가 있어야 하며, 트리거가 강제한다. 시스템은 쓰지 않는다.
 - **등록부 사건과 표를 나누는 이유.** 원하는 상태의 변경 규칙과 능력 변경의 규칙이 다르기 때문이다. 원하는 상태는 퇴역과 역할 확대 규칙을 따른다(활성화의 시험 증거 요구는 2026-10-20 운영자 결정으로 없앴다). 능력은 owner의 운영 행위다. 대신 능력은 역할 상한을 넘지 못한다.
 - **역할 상한과 태그의 대응.** 배정 경로는 카드의 `requiredRoutingRole`이 worker의 태그에 들어 있는지만 본다. 그러므로 태그가 곧 권한이며, 다음 표로 묶는다. 태그와 v22 역할은 닫힌 목록이고, 목록 밖의 값은 받지 않는다. 목록을 늘리는 것은 검토를 거치는 코드 변경이다.
@@ -2737,8 +2737,9 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
   시각으로 기록한다. 이 경로에서 v22 §3의 "운영자 완료 판정"은 그 GitHub 승인 review다.
   Admin의 별도 승인 클릭은 없다. stale-approval dismissal, 승인자 대조, 병합 주체의 관측
   기록, runner 자기 보고 불인정은 공통 기반 원칙 12 그대로다.
-- **PR 없이 끝나는 역할**(design·test·review·verify·investigate·operate)은 지금처럼 Admin의
-  사람 승인으로 `done`이 된다. 이 버전은 그 경로를 바꾸지 않는다.
+- **PR 없이 끝나는 역할**(design·review·verify·investigate·operate)은 지금처럼 Admin의
+  사람 승인으로 `done`이 된다. 이 버전은 그 경로를 바꾸지 않는다. `test` Task는 2026-10-30부터
+  `implement` 실행으로 patch를 남기므로 `implement`와 같은 PR 경로를 따른다.
 - **바뀌지 않는 것**: 비용 상한과 예약, 정지와 incident, worker 용량, 의존 관계, 1회 승인의
   결속, 결과 불명은 멈추고 사람에게 넘긴다는 원칙, 에이전트는 PR을 승인·병합하지 않고
   auto-merge를 켜지 않는다는 원칙.

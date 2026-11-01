@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import "server-only";
 
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
@@ -64,7 +65,7 @@ async function readSnapshot(attemptId: string): Promise<Snapshot> {
       !attempt || attempt.endedAt !== null || !attempt.v22AssignmentId ||
       !task || run.cardId !== task.id ||
       task.sourceSystem !== "admin-idea-v4" ||
-      task.taskRole !== "implement" || task.status !== "doing" ||
+      !amuxV22TaskWritesPatch(task.taskRole) || task.status !== "doing" ||
       task.owner !== attempt.worker ||
       task.v22AssignmentId !== attempt.v22AssignmentId)
     return null;

@@ -46,7 +46,7 @@ import {
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
 import { marketingPriceAlertReadyInput } from "@/lib/marketingPriceAlertCore";
-import { MARKETING_NO_AUTONOMY_CHANNELS } from "@/lib/marketingAutomationSchema";
+import { MARKETING_CHANNEL_CAPS, MARKETING_NO_AUTONOMY_CHANNELS } from "@/lib/marketingAutomationSchema";
 import {
   insertAutonomousScheduledMarketingPost,
   marketingHealthIsFresh,
@@ -130,19 +130,7 @@ const unreadable: ReadResult<never> = { ok: false };
  */
 export type MarketingAutonomousAdmissionReason =
   | "config_generation_unreadable"
-  | "deployment_unknown"
-  | "disclosure_contract_not_ready";
-
-/**
- * Whether a person has decided how a post shows it is advertising (S3 plan,
- * S3i, decision D9): which disclosure each platform carries and when a post is
- * refused for lacking one (docs/policy/marketing-automation.md §13: every post from a Tomverse account is
- * advertising, AANA). Until that decision is recorded here, in a reviewed
- * change, nothing is published -- approved or autonomous. Drafts already must
- * say they are advertising (lib/marketingDraftIntakeCore.ts); this is what
- * the post looks like on the platform, which is the person's call.
- */
-export const MARKETING_DISCLOSURE_CONTRACT_READY: boolean = false;
+  | "deployment_unknown";
 
 export type AutonomousAdmissionResolution = MarketingAutonomousAdmission & {
   readonly reasons: readonly (
@@ -207,9 +195,19 @@ const admissionDecisionsFrom = (
     },
     channelMode: { ok: true, value: subject.status },
     adapterHealthy: health === null ? unreadable : { ok: true, value: healthy },
-    // S2d2 writes the recovery mapping and the platform budget.
-    recoveryContractAvailable: unreadable,
-    platformBudgetAvailable: unreadable,
+    // The recovery contract (owner, 2026-10-31, decision D3): in approval mode
+    // a post whose outcome is unknown is resolved by a person, and the account
+    // keeps running -- Zernio cannot be asked about our request key
+    // (lib/zernioPublishAdapter.ts, amendment 4). Autonomous posting needs the
+    // per-channel contract S0 confirms (docs/policy/marketing-automation.md
+    // §8.1), which no channel has yet, so it stays unreadable there.
+    recoveryContractAvailable:
+      subject.status === "approval_mode" ? { ok: true, value: true } : unreadable,
+    // The platform budget is the channel's daily and weekly cap (owner,
+    // 2026-10-31, D3; docs/policy/marketing-automation.md §7.6), which the
+    // claim counts in this transaction after this answer. A channel with no
+    // cap is posted by hand, so it has no budget to publish against.
+    platformBudgetAvailable: { ok: true, value: (MARKETING_CHANNEL_CAPS[subject.channel] ?? null) !== null },
     autoPublishEnabled: {
       ok: true,
       value: marketingAutomationEnabledFromValue(
@@ -426,18 +424,15 @@ export const resolvePublishAdmission = async (
   const autonomy =
     postMode === "autonomous" ||
     (postMode === undefined && subject.status === "autonomous_mode");
-  const disclosure: MarketingAutonomousAdmissionReason[] = MARKETING_DISCLOSURE_CONTRACT_READY
-    ? []
-    : ["disclosure_contract_not_ready"];
   if (autonomy) {
     const reasons: (
       | MarketingAutomationAccessReason
       | MarketingAutonomousAdmissionReason
-    )[] = [...decisions.autonomousPublish.reasons, ...disclosure];
+    )[] = [...decisions.autonomousPublish.reasons];
     if (generation === null) reasons.push("config_generation_unreadable");
     if (deploymentId === "") reasons.push("deployment_unknown");
     return { publish: reasons.length === 0, reasons, ...provenance };
   }
-  const reasons = [...decisions.approvalPublish.reasons, ...disclosure];
+  const reasons = [...decisions.approvalPublish.reasons];
   return { publish: reasons.length === 0, reasons, ...provenance };
 };

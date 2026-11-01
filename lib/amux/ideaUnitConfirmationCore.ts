@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
@@ -287,7 +288,7 @@ const semanticShapeValid = (
       if ((v20 && c.task.proposedGrade === undefined) ||
           (!v20 && c.task.proposedGrade !== undefined)) return false;
       if (c.task.publicPrDisclosureApproved === true &&
-          c.task.role !== "implement") return false;
+          !amuxV22TaskWritesPatch(c.task.role)) return false;
       if (currentTaskCost?.ok !== true) return false;
       const currentReceipt = costReceipt.safeParse(currentTaskCost.receipt);
       if (!currentReceipt.success) return false;

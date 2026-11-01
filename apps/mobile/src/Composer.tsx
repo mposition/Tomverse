@@ -12,6 +12,7 @@ import { ComposerTools, type ToolChange, type ComposerAction } from "./ComposerT
 import { WorkspaceNavigation, type MobileProduct } from "./WorkspaceNavigation";
 import { useCompactBottomDock, useVisibleViewportHeight } from "../../../components/chat/useVisualViewport";
 import { mobileComposerCopy } from "../../../locales/mobileComposer";
+import { UploadProgressDialog, type UploadProgress } from "./UploadProgressDialog";
 
 type Props = {
   locationIdentity?: string | null;
@@ -29,7 +30,8 @@ export function Composer({ locationIdentity = null, copy, language, transport, d
   const visibleHeight = useVisibleViewportHeight();
   const compact = shortViewport || (visibleHeight > 0 && visibleHeight < 640);
   const [files, setFiles] = useState<MobileAttachment[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [upload, setUpload] = useState<UploadProgress | null>(null);
+  const uploading = upload !== null;
   const [error, setError] = useState("");
   const picker = useRef<HTMLInputElement>(null);
   const photos = useRef<HTMLInputElement>(null);
@@ -58,16 +60,18 @@ export function Composer({ locationIdentity = null, copy, language, transport, d
   });
   const voiceBusy = isVoiceRecorderBusy(voice.state);
   async function attach(selected: FileList | null) {
-    if (disabled || offline || streaming || !selected?.length) return;
+    if (disabled || offline || streaming || uploading || !selected?.length) return;
     if (files.length + selected.length > 5) { setError(copy.fileLimit); return; }
-    setUploading(true); setError("");
+    const pending = Array.from(selected);
+    setUpload({ file: pending[0], completed: 0, total: pending.length }); setError("");
     try {
-      for (const file of Array.from(selected)) {
+      for (const [completed, file] of pending.entries()) {
+        setUpload({ file, completed, total: pending.length });
         const uploaded = await transport.upload(file);
         setFiles((previous) => [...previous, uploaded]);
       }
     } catch (error) { setError(mobileErrorText(error, language, parityCopy.uploadFailed)); }
-    finally { setUploading(false); if (picker.current) picker.current.value = ""; if (photos.current) photos.current.value = ""; }
+    finally { setUpload(null); if (picker.current) picker.current.value = ""; if (photos.current) photos.current.value = ""; }
   }
   function submit() {
     if (disabled || offline || streaming || uploading || voiceBusy || composing.current || (!draft.trim() && files.length === 0)) return;
@@ -99,7 +103,7 @@ export function Composer({ locationIdentity = null, copy, language, transport, d
     </form>
     {voiceBusy && <p className="voice-privacy">{mobileVoicePrivacy(language)}</p>}
     {!voiceBusy && voice.elapsedSeconds > 0 && draft && <p className="composer-progress">{copy.voiceReview}</p>}
-    {uploading && <p role="status" className="composer-progress">{copy.loading}</p>}
+    {upload && <UploadProgressDialog progress={upload} language={language} />}
     {tools && <ComposerTools locationIdentity={locationIdentity} extraTools={extraTools} transport={transport} language={language} conversation={conversation} onChange={onConfigureTools} onClose={() => setTools(false)} onFiles={() => { setTools(false); picker.current?.click(); }} onPhotos={() => { setTools(false); photos.current?.click(); }} />}
   </div>;
 }

@@ -54,21 +54,35 @@ test("the derived catalog passes the catalog and grade checks", () => {
   assert.deepEqual(inspectV52TaskCatalogGrades(result.catalog, ceilings), { ok: true });
   assert.deepEqual(result.catalog.routes.map((route) =>
     [route.workerName, route.grades, route.roles]), [
-    ["claude-chore", ["routine"], ["investigate"]],
-    ["claude-contract", ["frontier"], ["design", "implement", "investigate"]],
-    ["claude-impl", ["advanced"], ["implement", "investigate"]]]);
+    ["claude-chore", ["routine"], ["verify", "investigate"]],
+    ["claude-contract", ["frontier"], ["design", "implement", "test", "verify", "investigate"]],
+    ["claude-impl", ["advanced"], ["implement", "test", "verify", "investigate"]]]);
   assert.match(result.catalogId, /^registry:[a-f0-9]{32}$/);
   assert.equal(result.catalogId, `registry:${result.catalogDigest.slice(0, 32)}`);
 });
 
-test("only the Task roles a worker's profile runs get a ceiling", () => {
+test("a Task role gets a ceiling only where a worker's profile runs its execution role", () => {
   const { catalog } = derive();
-  assert.equal(ceiling(catalog, "implement", "advanced").ok, true);
-  assert.equal(ceiling(catalog, "investigate", "routine").ok, true);
-  for (const [role, grade] of [["test", "advanced"], ["implement", "routine"],
-    ["review", "advanced"], ["verify", "frontier"]]) {
+  // test runs as implement and verify as investigate (owner decision 2026-10-30).
+  for (const [role, grade] of [["implement", "advanced"], ["investigate", "routine"],
+    ["test", "advanced"], ["verify", "routine"], ["verify", "frontier"]]) {
+    assert.equal(ceiling(catalog, role, grade).ok, true, `${role}/${grade} has a worker`);
+  }
+  for (const [role, grade] of [["test", "routine"], ["implement", "routine"],
+    ["review", "advanced"], ["operate", "frontier"]]) {
     assert.equal(ceiling(catalog, role, grade).ok, false, `${role}/${grade} has no worker`);
   }
+});
+
+test("a route keeps its policy digest when test and verify are priced on it", () => {
+  const only = (roles) => deriveAmuxV4TaskAutoCatalog({ priceFor,
+    workers: [{ ...workers[1], roles }] }).catalog.routes[0];
+  const route = only(["implement", "investigate", "review"]);
+  assert.deepEqual(route.roles, ["implement", "test", "verify", "investigate"]);
+  // The digest follows the profile's own roles only.
+  assert.notEqual(route.routePolicyDigest, only(["implement"]).routePolicyDigest);
+  assert.equal(route.routePolicyDigest,
+    only(["implement", "investigate", "review"]).routePolicyDigest);
 });
 
 test("each price is asked for at the input cap of the worker's grade", () => {

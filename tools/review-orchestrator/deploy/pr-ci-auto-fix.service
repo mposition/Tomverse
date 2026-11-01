@@ -9,7 +9,8 @@ Type=oneshot
 # review daemon. It holds a read-only GitHub token and no dispatch token.
 User=review
 Environment=REVIEW_ORCH_CONFIG=/etc/review-orchestrator/config.json
-Environment=PATH=/home/review/.local/bin:/usr/local/bin:/usr/bin:/bin
+# The auto-fix's own npm first (README, "패키지 설치"): the distribution's npm 9 cannot install the lockfile.
+Environment=PATH=/usr/local/lib/pr-ci-auto-fix-npm/bin:/home/review/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Read by systemd as root (root-owned, mode 600): PR_CI_AUTO_FIX_READ_TOKEN,
 # a token with Actions read and Pull requests read only.
 EnvironmentFile=/etc/pr-ci-auto-fix/read.env

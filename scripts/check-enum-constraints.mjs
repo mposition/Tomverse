@@ -2118,6 +2118,27 @@ const REGISTRY = {
     reason:
       "Which aggregate a report row is. It is also the key into MARKETING_REPORT_PAYLOAD_SCHEMAS and into the retention periods of docs/policy/marketing-automation.md §12.2, so a kind the list does not know would be a row with no schema to parse it and no date to delete it by -- which is why MarketingReport_retentionUntil_check's CASE has no ELSE.",
   },
+  MarketingAsset_kind_check: {
+    owner: "list",
+    module: "lib/marketingAssetCore.ts",
+    list: "MARKETING_ASSET_KINDS",
+    reason:
+      "Whether a stored file is a picture or a video. It decides the content types, the size limit and whether a duration is required (MarketingAsset_file_check), so a kind the list did not know would be a file no rule measured.",
+  },
+  MarketingAsset_provenance_check: {
+    owner: "list",
+    module: "lib/marketingAssets.ts",
+    list: "MARKETING_ASSET_PROVENANCES",
+    reason:
+      "Where a file came from, in the hand-kept registry's terms. The AI-origin values forbid a product-interface asset and a `none` disclosure, so the list is the one the registry schema checks.",
+  },
+  MarketingAsset_status_check: {
+    owner: "list",
+    module: "lib/marketingAssetCore.ts",
+    list: "MARKETING_ASSET_STATUSES",
+    reason:
+      "Where a file stands. Only `approved` reaches the registry the Guard and the publisher read, and MarketingAsset_write_guard checks each decision against the person's audit action 'marketing_asset.' || status, so a status the list did not know is one no audit action could prove.",
+  },
   MarketingCompetitor_status_check: {
     owner: "list",
     module: "lib/marketingCompetitorCore.ts",

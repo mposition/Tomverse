@@ -1,3 +1,5 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
+
 /** Pure ordering for the card part of the plan approval batch
  * (amux-intake.md v18 item 3). */
 
@@ -52,8 +54,9 @@ export function amuxV4CardPlanRound<T>(ordered: readonly T[]): { round: T[]; rem
   return { round, remaining: ordered.length - round.length };
 }
 
-/** v18: an implement Task's public PR consent is on unless the owner turned it off. */
+/** v18: an implement (or test) Task's public PR consent is on unless the owner turned it off. */
 export function amuxV4PlanPublicPrConsent(unit: { draftUnitId: string; cardType: "story" | "task";
   taskRole: string | null }, consentOff: ReadonlySet<string>): boolean {
-  return unit.cardType === "task" && unit.taskRole === "implement" && !consentOff.has(unit.draftUnitId);
+  return unit.cardType === "task" && amuxV22TaskWritesPatch(unit.taskRole) &&
+    !consentOff.has(unit.draftUnitId);
 }

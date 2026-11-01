@@ -94,6 +94,7 @@ test("image quotes require fresh consent after a price change and never run auto
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
   await signIn(page); await selectProduct(page, "review");
+  await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeVisible();
   await page.getByRole("textbox").fill("Synthetic image prompt");
   await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
   await page.getByLabel("이미지 설명").fill("Synthetic prompt");

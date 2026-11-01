@@ -45,5 +45,6 @@
   // .railway/railway.ts imports the Railway SDK, which lives in its own
   // .railway/node_modules and is installed only by an operator about to plan
   // (npm run railway:iac:install). The data table beside it stays checked.
-  "exclude": ["node_modules", "apps", ".railway/railway.ts", ".railway/node_modules"]
+  // tools/marketing-video is its own package (Remotion), installed only where videos are rendered.
+  "exclude": ["node_modules", "apps", ".railway/railway.ts", ".railway/node_modules", "tools/marketing-video"]
 }

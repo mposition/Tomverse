@@ -352,7 +352,9 @@ drain 표시는 상태 폴더의 파일이라 재시작해도 남으므로, 마�
 RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
 $RO drain on
 $RO drain wait --timeout 3600        # 실행 중인 검토가 0이 되면 0으로 끝납니다. 시간 초과는 3
-sudo -u review git -C /home/review/review-orchestrator pull --ff-only
+sudo -u review git -C /home/review/review-orchestrator fetch origin main
+sudo -u review git -C /home/review/review-orchestrator checkout --detach origin/main
+sudo -u review git -C /home/review/review-orchestrator log -1 --oneline
 sudo systemctl restart review-orchestrator
 $RO drain off
 ```
@@ -554,6 +556,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   - npm이 도는 동안 브랜치의 `.npmrc`는 모두 옆으로 치워 둡니다. `.npmrc`는 npm이 실행할 프로그램(`git`, `node-gyp` 등)을
     지정할 수 있는데, 명령줄 flag가 이기는 것은 그 flag가 지정한 키뿐이기 때문입니다.
   - registry, user config, global config, `git`(`/bin/false`)은 명령줄에서 고정합니다. 계정의 npm 설정과 토큰도 쓰이지 않습니다.
+    두 config는 임시 폴더의 서로 다른 빈 파일입니다. npm 9는 같은 파일(`/dev/null`)을 둘 다로 주면 거부합니다(2026-10-31).
   - npm에는 `PATH`·`HOME`·`LANG`·`TMPDIR`만 넘깁니다. GitHub 토큰, `npm_config_*`, `NODE_OPTIONS`는 넘기지 않습니다.
   - lockfile은 브랜치의 것이라 임의의 경로로 가는 링크를 만들 수 있습니다. 그래서 설치 뒤 모델 앞에서 한 번 검사합니다.
     링크가 checkout 밖을 가리키거나(`link_outside`), hard link·특수 파일이 있으면 설치한 패키지를 지웁니다.
@@ -561,7 +564,16 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   - 설치는 15분 안에 끝나야 합니다. 그래서 unit의 `TimeoutStartSec`가 65분입니다.
   결과는 ledger의 `packages`(`installed` 또는 사유)와 로그 `packages not installed: …`에 남습니다.
   켜려면 갱신된 `pr-ci-auto-fix.service`를 ④처럼 다시 설치한 뒤, `read.env`에 한 줄을 더합니다.
-  서버에 `npm`(Node 22와 함께 오는 것)이 PATH에 있어야 합니다.
+  - **npm은 10 이상이어야 합니다**(CI는 npm 10.9). Ubuntu 패키지의 npm 9.2는 이 저장소 lockfile의 workspace를
+    "package.json과 맞지 않는다"(`Missing: @tomverse/mobile-auth`)고 거부합니다. 그래서 설치 전에 `npm --version`을 읽고,
+    10 미만이면 `npm_too_old:<버전>`으로 기록한 뒤 설치하지 않습니다.
+  - unit의 PATH는 auto-fix 전용 npm(`/usr/local/lib/pr-ci-auto-fix-npm/bin`)을 맨 앞에 둡니다. 다른 계정의 npm은 바뀌지 않습니다.
+    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다.
+
+    ```bash
+    sudo npm install -g --prefix /usr/local/lib/pr-ci-auto-fix-npm --ignore-scripts --no-audit --no-fund npm@10.9.9
+    sudo -u review env PATH=/usr/local/lib/pr-ci-auto-fix-npm/bin:/usr/bin:/bin npm --version
+    ```
 
 **두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.** 상태 보고와 같은 이유입니다. 모델은 `review`
 계정으로 돌고, CI 로그와 브랜치 내용은 모델에게 그 계정이 읽을 수 있는 파일이나 프로세스 환경을
@@ -656,12 +668,20 @@ sudo journalctl -u pr-ci-auto-fix-sender --since "5 min ago"     # ci-fix sender
 **④ 같은 서버 bash.** "서버 업데이트 (drain)" 절차로 checkout을 갱신한 뒤 제안 pass를 설치합니다.
 unit은 `/opt/...` 배치를 기준으로 쓰여 있으므로, 이 서버의 현재 배치(`/home/review/...`)로 경로를
 바꿉니다(`systemctl cat review-orchestrator`의 `ExecStart`·`REVIEW_ORCH_CONFIG`와 같아야 합니다).
+관리 계정은 `/home/review`를 읽지 못하므로 파일은 review 계정으로 읽습니다. 읽기가 실패해도
+`sudo tee`는 unit을 빈 파일로 덮어쓰므로(2026-10-31에 실제로 그랬습니다), 임시 파일에 먼저 만들고
+비어 있지 않고 `ExecStart`가 맞을 때만 설치합니다. `INSTALLED`가 나오지 않으면 `daemon-reload`를
+하지 않습니다. reload 전까지 systemd는 이전 unit으로 계속 돕니다. 서버에 둔 drop-in(예:
+`PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`)은 이 설치가 건드리지 않습니다.
 
 ```bash
 D=/home/review/review-orchestrator/tools/review-orchestrator/deploy
-sed -e 's#/opt/review-orchestrator#/home/review/review-orchestrator#' \
-  -e 's#/etc/review-orchestrator/config.json#/home/review/.config/review-orchestrator/config.json#' \
-  "$D/pr-ci-auto-fix.service" | sudo tee /etc/systemd/system/pr-ci-auto-fix.service > /dev/null
+T=$(mktemp)
+sudo -u review cat "$D/pr-ci-auto-fix.service" | sed -e 's#/opt/review-orchestrator#/home/review/review-orchestrator#' \
+  -e 's#/etc/review-orchestrator/config.json#/home/review/.config/review-orchestrator/config.json#' > "$T"
+test -s "$T" && grep -q '^ExecStart=/usr/bin/node /home/review/review-orchestrator/' "$T" \
+  && sudo install -m 0644 -o root -g root "$T" /etc/systemd/system/pr-ci-auto-fix.service && echo INSTALLED
+rm -f "$T"
 sudo cp "$D/pr-ci-auto-fix.timer" /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl start pr-ci-auto-fix && sudo journalctl -u pr-ci-auto-fix --since "5 min ago"
 sudo systemctl enable --now pr-ci-auto-fix.timer

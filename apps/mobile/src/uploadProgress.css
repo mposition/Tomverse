@@ -1,0 +1,29 @@
+.upload-progress-dialog {
+  width: min(342px, calc(100% - 48px));
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 26px 24px 24px;
+  overflow-y: auto;
+  color: var(--mobile-ink);
+  background: var(--mobile-paper);
+  border: 1px solid var(--mobile-border);
+  border-radius: 16px;
+  text-align: center;
+}
+.upload-progress-dialog::backdrop { background: rgb(21 35 59 / .46); }
+.upload-progress-spinner { display: block; margin: 0 auto 18px; color: var(--mobile-action); animation: upload-progress-spin 1.2s linear infinite; }
+.upload-progress-dialog h2 { margin: 0 0 20px; font-size: 1.25rem; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; outline: none; }
+.upload-progress-file { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-radius: 8px; background: var(--mobile-soft); text-align: left; }
+.upload-progress-file > svg { flex-shrink: 0; color: var(--mobile-muted); }
+.upload-progress-file > div { min-width: 0; }
+.upload-progress-name { margin: 0; color: var(--mobile-ink); font-size: 1rem; line-height: 1.5; overflow-wrap: anywhere; }
+.upload-progress-size { margin: 2px 0 0; color: var(--mobile-muted); font-size: .875rem; line-height: 1.4; }
+.upload-progress-track { height: 8px; margin-top: 16px; overflow: hidden; border-radius: 999px; background: var(--mobile-soft); }
+.upload-progress-track > span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--mobile-action); animation: upload-progress-sweep 1.6s ease-in-out infinite alternate; }
+.upload-progress-count { margin: 5px 0 0; color: var(--mobile-muted); font-size: .875rem; text-align: right; font-variant-numeric: tabular-nums; }
+.upload-progress-note { margin: 24px 0 0; color: var(--mobile-muted); font-size: .8125rem; line-height: 1.6; }
+@keyframes upload-progress-spin { to { transform: rotate(360deg); } }
+@keyframes upload-progress-sweep { from { transform: translateX(-20%); } to { transform: translateX(170%); } }
+@media (prefers-reduced-motion: reduce) {
+  .upload-progress-spinner, .upload-progress-track > span { animation: none; }
+}

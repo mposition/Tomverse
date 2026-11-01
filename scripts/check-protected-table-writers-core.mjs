@@ -328,6 +328,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/marketing-automation.md §3",
   },
   {
+    table: "MarketingAsset",
+    delegate: "marketingAsset",
+    writers: ["lib/marketingAssetStore.ts"],
+    contract: "docs/policy/marketing-automation.md §7.3",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -3143,6 +3149,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
   {
+    path: "lib/marketingAssetStore.ts",
+    table: "MarketingAsset",
+    tableMentions: 10,
+    writeVerbs: 8,
+    reason:
+      "The sole registered writer of the media asset store: it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups, and the approved kinds the generator reads).",
+  },
+  {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    table: "MarketingAsset",
+    tableMentions: 20,
+    writeVerbs: 17,
+    reason:
+      "Creates the media asset store, its sequence, its checks (including the transcript's), the one insert-and-update guard and the delete guard. It writes no row.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingAsset",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the asset submission target for marketing-generator. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
     path: "lib/marketingLlmBudgetStore.ts",
     table: "MarketingLlmCall",
     tableMentions: 23,
@@ -3171,6 +3201,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 13,
     reason:
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 17,
+    reason:
+      "Creates the media asset store. Its one AdminAuditLog mention is the write guard's read of a person's own decision audit row (action, target, actor, recorded predecessor and the approved bytes). No audit row is written.",
   },
   {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
@@ -3467,6 +3505,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    count: 1,
+    reason:
+      "One read in the asset store's decision check: the decision's own AdminAuditLog row, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is quoted with %I and the id is bound with USING. It reads and never writes.",
+  },
+  {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
     count: 1,
     reason:
@@ -3585,6 +3629,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "Three dynamic SELECTs in the v4 PR-less review guard read the fixed task, latest retained result, and attempt. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261031090200_amux_v22_test_prless_approval/migration.sql",
+    count: 3,
+    reason:
+      "The replaced v4 PR-less review guard keeps the same three dynamic SELECTs of the fixed task, latest retained result, and attempt; only its role list drops test. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
   },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
@@ -3823,10 +3873,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "d6221d28efaf5d8a47e79d0587a56b8e093863937c460ea94b8692fa339bfca2",
+    sha256: "102cf9de0f1bb1c294b1336d3c8aaa86c08f95479694f69192fceb9c068dc6f9",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. A function replacement compares the read prosrc digest with the header's prior digest and, when the header names one, the digest of the body the migration writes; the query is unchanged. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",

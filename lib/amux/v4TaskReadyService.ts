@@ -1,3 +1,4 @@
+import { amuxV22ExecutionRole } from "./v22WorkerClaimCore.ts";
 import "server-only";
 
 import { Prisma } from "@prisma/client";
@@ -295,6 +296,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
     let workerNames: string[] = [];
     if (snapshot?.card?.task && card.taskRole && card.executionGrade) {
       const role = card.taskRole;
+      const executionRole = amuxV22ExecutionRole(role);
       try {
         const current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
           role, card.executionGrade);
@@ -322,7 +324,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
               worker.worker_name === route.workerName &&
               worker.provider === route.provider.toLowerCase() &&
               worker.model === route.modelId &&
-              worker.routing_roles.includes(role) &&
+              worker.routing_roles.includes(executionRole) &&
               (!exactGradeRouting ||
                 amuxWorkerMatchesExecutionGrade(card.executionGrade,
                   worker.worker_name, ceilings)) &&

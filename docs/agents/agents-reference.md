@@ -1279,6 +1279,14 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
   `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
   statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2d 영상 필드와 상태 조회 분리**(운영자 2026-10-31: 숏폼·롱폼 영상): 미디어는 `{type, url}`로 보내고
+  (`resolveAsset` port가 URL·종류·AI 출처를 줌), `zernioPlatformFields()`가 S0에서 검증된 채널 필드를 붙입니다 —
+  YouTube는 영상 하나, 첫 줄이 제목(100자 이하)·나머지가 설명, `madeForKids: false`, AI 출처면
+  `containsSyntheticMedia: true`; TikTok은 공개·상호작용 선택과 승인자의 미리보기·동의; Instagram 영상은
+  `shareToFeed: true`. 보낼 수 없는 형태는 보내기 전에 `failed`입니다. webhook 수신부는 상태 조회만 쓰므로
+  `lib/zernioStatusQuery.ts`(전송·UUID·상태 조회)만 불러오고, 게시 어댑터는 그 위에 있습니다 — 게시 쪽 변경은
+  webhook pipeline fingerprint를 움직이지 않습니다. 이 분리로 fingerprint가 한 번 바뀌었으므로 production webhook
+  적용은 다음 서명 기록 전까지 `production_config_fingerprint_stale`로 멈춥니다(상태 조회는 그대로).
 - **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
   `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
   `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
@@ -1460,12 +1468,17 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   첫 보고서는 Tomverse 자체 표만 셉니다 — 게시는 `publishedAt`, 사람 거절·실패는 그 상태의 마지막 변경 시각, Guard 거절은 생성
   시각 기준이고 코드마다 한 번입니다. GA4·Search Console(계획 D8)은 읽기 자격증명이 필요한 다음 보고서입니다. 파생 데이터라
   감사 행은 없습니다(`retention_run`과 같음).
-- **S3i(광고 표시 게이트)**: `lib/marketingAutonomousAdmission.ts`의 `MARKETING_DISCLOSURE_CONTRACT_READY`(지금 `false`),
-  `lib/marketingDraftIntakeCore.ts`, `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingPublishAdmission.test.ts`.
+- **S3i(광고 표시)**: `lib/marketingDraftIntakeCore.ts`, `lib/marketingGeneratorDraftingCore.ts`.
   Tomverse 계정의 게시물은 모두 광고입니다(docs/policy/marketing-automation.md §13, AANA). 그래서 생성기는 `advertising` 플래그를 모델과 무관하게 붙이고, 접수는
-  그 플래그가 없는 초안을 거절합니다. 플랫폼에서 광고임을 어떻게 보일지(계획 D9)는 사람이 정하며, 그 결정을 이 상수로 기록하기
-  전에는 `resolvePublishAdmission()`이 승인·자율 게시 모두 `disclosure_contract_not_ready`로 거절합니다. 판정 모듈
-  `lib/marketingAutomationAccess.ts`는 Prompt Refiner closure 안이라 고치지 않고, 그 밖의 게시 직전 판정에 둡니다.
+  그 플래그가 없는 초안을 거절합니다(내부 기록). 플랫폼에서 광고임을 어떻게 보일지(계획 D9)는 **공식 계정 자체로 충분하고 본문에
+  표시를 붙이지 않습니다**(운영자 2026-10-31). 그래서 게시 직전 판정에 광고 표시 게이트는 없습니다.
+- **S3j(승인 게시의 복구 계약과 플랫폼 예산, 계획 D3)**: `lib/marketingAutonomousAdmission.ts`,
+  `tests/marketingPublishAdmission.test.ts`(운영자 2026-10-31). 승인 모드 계정의 `recoveryContractAvailable`은 참입니다 — 결과를
+  모르는 게시물은 `outcome_unknown`으로 남아 사람이 해결하고, 승인 모드 계정은 멈추지 않습니다(Zernio는 우리 요청 키로 조회할 수
+  없음, amendment 4). 자율 모드는 S0가 채널별 계약을 확정하기 전까지 그대로 읽을 수 없음입니다(docs/policy/marketing-automation.md §8.1). `platformBudgetAvailable`은
+  채널에 §7.6 일/주 상한이 있는지이고, 실제 개수는 claim이 같은 트랜잭션에서 셉니다. 상한이 없는 채널(RedNote)은 사람이 올립니다.
+  승인 게시에 남은 조건은 Admin 게시 스위치(기본 꺼짐)와 가격 대체 알림 수신처(`priceFallbackAlertReady`)입니다.
+  판정 모듈 `lib/marketingAutomationAccess.ts`는 Prompt Refiner closure 안이라 고치지 않고, 입력만 이 파일에서 채웁니다.
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
   `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
   `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **예약은 최대
@@ -1550,6 +1563,33 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `competitorCandidates`뿐이며(`readMarketingA3Discovery()`), 후보는 근거 URL이 1~5개이고 모두 같은 응답의 인용·검색
   출처 URL과 문자열로 같아야 하고(정규화 없음), 문맥의 `knownIds`에 있는 id는 버립니다. 앱의 후보 schema도 근거
   1개 이상을 요구합니다(`marketingCompetitorCandidateSchema`). 이 호출이 결과를 모르면 실행 전체가 멈추고 보고서를 내지 않습니다.
+- **S3f-R5d(답 형식은 공급사가 지킴)**: 같은 파일들과 `lib/marketingLlmClientCore.ts`. 두 호출 모두 답을 strict Structured
+  Outputs(`text.format` json_schema)로 묶습니다 — `MARKETING_A3_ANSWER_SCHEMA`(토큰은 factType별 `MARKET_INTEL_FACT_TOKENS`
+  어휘만, 나머지는 money·number·date), `MARKETING_A3_DISCOVERY_ANSWER_SCHEMA`. 저장 schema가 거절할 형식은 아예 나오지 않으므로
+  dev에서 실행마다 105~200건이던 `shape` 탈락을 없애는 것이 목적이고, 출처 host·인용 대조는 그대로 코드가 합니다. 기능 설명처럼
+  값이 아닌 것은 `unrepresentable`로 셉니다. 프롬프트 `a3-web-search-v2`. 요청 비용은 바뀌지 않습니다(예약은 컨텍스트 창 기준).
+  보고서 상한(200건)을 넘으면 `marketingA3FactsInTurn()`이 경쟁사를 돌아가며 하나씩 담으므로 각 경쟁사의 뒤쪽 사실이 잘리고,
+  목록 뒤쪽 경쟁사가 통째로 빠지지 않습니다(10-31 dev 실행이 처음 200건에 닿음).
+- **V1(미디어 자산 저장, 운영자 결정 2026-10-31)**: `lib/marketingAssetCore.ts`(로컬 import 없음 — Admin route sweep),
+  `lib/marketingAssetSubmission.ts`, `lib/marketingAssetStore.ts`(유일한 writer, raw SQL),
+  `prisma/migrations/20261031120000_marketing_asset_store`, `app/api/internal/marketing-assets/**`(미디어 CLI:
+  `MARKETING_MEDIA_SUBMIT_SECRET` Bearer, kill switch면 503), `app/api/admin/marketing/assets/[assetId]/{decision,preview}`,
+  `/admin/marketing?tab=assets`, `tests/integration/marketing-asset-store.db.test.ts`. 이미지·영상은 AMUX 박스의 미디어 CLI가
+  만들어 제출(`submitted`)하고 R2에 올린 뒤 확인하며(크기·형식이 다르면 객체를 지움), 사람이 Admin에서 미리보고 승인합니다.
+  승인 감사 행의 `sha256`이 행과 같아야 하고(write guard), 승인·은퇴마다 `MarketingAsset_registryVersion_seq`의 다음 값을
+  받습니다. `readMarketingAssetRegistry(db)`는 파일 등록부에 승인된 행을 합치고(같은 id면 파일 우선) 버전은 둘의 합입니다.
+  게시기가 쓸 R2 키는 `readApprovedMarketingAssetLocation()`(승인 상태일 때만).
+  제출에는 locale별 `transcript`(영상 필수, locale당 최대 20,000자)가 있고, `lib/marketingAssetGuard.ts`가 같은 트랜잭션에서
+  초안 접수와 같은 사실 검증·`guardDraft`로 검사합니다(범위 `asset:<id>`, 첫 허용 채널). reject면 422와 Guard 코드만 돌려주고
+  행을 만들지 않습니다. 대본은 행에 저장되어 Admin 자산 탭에서 locale별로 보입니다.
+  자산의 `claimIds`는 그 자산을 싣는 게시물이 직접 선언해야 합니다. 선언하지 않으면 사실 검증이 그 자산을 `known: false`로
+  답해 `asset_unknown`으로 거절되고, 선언하면 게시물의 claim으로 Guard가 돌 때마다 다시 판정됩니다.
+- **V2 연결(영상 게시물, 운영자 2026-10-31)**: `app/api/_marketing/zernioAdapter.ts`의 `resolveAsset`은 보낼 때 승인된 저장 자산을
+  읽어 R2 읽기 URL(3시간)과 종류·AI 출처를 넘깁니다. 승인되지 않았거나 은퇴했거나 파일 등록부에만 있는 자산은 풀리지 않아 보내기 전에
+  `asset_unresolved`로 실패합니다. 생성기 문맥의 자산은 `kind`(저장 자산의 image/video, 파일 자산은 null)와 승인된 `alt`를 함께
+  싣고, A5(`a5-social-v2`)는 그 locale의 alt를 자산 설명으로 받아 그 자산이 보여 주는 것에 대해 씁니다. YouTube는 영상 하나에 첫 줄이
+  제목, TikTok은 영상 하나, Instagram은 이미지나 영상이며, 맞는 자산이 없으면 초안을 내지 않습니다. 출처·AI 표시는 생성기에 주지
+  않습니다(Guard가 등록부로 판정).
 
 # 엔지니어링 Agent
 

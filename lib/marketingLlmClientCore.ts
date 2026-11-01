@@ -27,7 +27,10 @@
  * - **Web search is one more allowlist.** A call given `webSearch` goes to the
  *   Responses API with one `web_search` tool limited to the given domains and
  *   `max_tool_calls` set to the pin's search cap, which the reservation priced;
- *   its answer comes back with the URLs the provider cited.
+ *   its answer comes back with the URLs the provider cited. A caller may add
+ *   the JSON schema its answer must follow (strict Structured Outputs), so a
+ *   malformed answer is the provider's refusal to produce, not a fact dropped
+ *   after it was paid for.
  *
  * Imports only node built-ins and the ledger's own core, so the service can
  * load it with `--experimental-strip-types` from a clone of this repository.
@@ -52,6 +55,9 @@ import {
 export const MARKETING_LLM_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 
 export type MarketingLlmMessage = { readonly role: "system" | "user"; readonly content: string };
+
+/** The JSON schema a web-search answer is held to (`text.format`, strict). */
+export type MarketingLlmAnswerSchema = { readonly name: string; readonly schema: Readonly<Record<string, unknown>> };
 
 /** The provider request body: the allowlist of S3 plan §2, and nothing else. */
 export function marketingLlmRequestBody(
@@ -85,6 +91,7 @@ export function marketingLlmWebSearchRequestBody(
   pin: MarketingLlmPricePin,
   messages: readonly MarketingLlmMessage[],
   allowedDomains: readonly string[],
+  answerSchema?: MarketingLlmAnswerSchema,
 ): Record<string, unknown> {
   return {
     model: pin.model,
@@ -99,6 +106,9 @@ export function marketingLlmWebSearchRequestBody(
       },
     ],
     include: ["web_search_call.action.sources"],
+    ...(answerSchema
+      ? { text: { format: { type: "json_schema", name: answerSchema.name, strict: true, schema: answerSchema.schema } } }
+      : {}),
     max_tool_calls: pin.maxWebSearchCalls,
     max_output_tokens: pin.maxOutputTokens,
     service_tier: MARKETING_LLM_SERVICE_TIER,
@@ -290,7 +300,7 @@ export async function runMarketingLlmCall(
     readonly purpose: MarketingLlmPurpose;
     readonly messages: readonly MarketingLlmMessage[];
     /** Run the provider's web search, limited to these domains (the web-search profile). */
-    readonly webSearch?: { readonly allowedDomains: readonly string[] };
+    readonly webSearch?: { readonly allowedDomains: readonly string[]; readonly answerSchema?: MarketingLlmAnswerSchema };
     /** A key chosen by the caller makes a resend of the same call the same reservation. */
     readonly requestKey?: string;
   },
@@ -384,7 +394,7 @@ export async function runMarketingLlmCall(
       },
       body: JSON.stringify(
         input.webSearch
-          ? marketingLlmWebSearchRequestBody(input.pin, input.messages, input.webSearch.allowedDomains)
+          ? marketingLlmWebSearchRequestBody(input.pin, input.messages, input.webSearch.allowedDomains, input.webSearch.answerSchema)
           : marketingLlmRequestBody(input.pin, input.messages),
       ),
       signal: deps.signal,

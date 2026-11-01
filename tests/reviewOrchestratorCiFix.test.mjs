@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import {
   CI_FIX_BRANCH,
@@ -919,19 +919,29 @@ test("a Dependabot head's packages are installed with no script, no token and no
     writeFileSync(join(root, "apps", "mobile", ".npmrc"), "node-gyp=./evil.sh\n");
     const calls = [];
     const spawn = (command, args, options) => {
-      calls.push({ command, args, options, npmrc: [existsSync(join(root, ".npmrc")), existsSync(join(root, "apps", "mobile", ".npmrc"))] });
-      return { status: 0, stdout: "", stderr: "" };
+      const config = (name) => args.find((arg) => arg.startsWith(`--${name}=`)).slice(name.length + 3);
+      calls.push({ command, args, options, npmrc: [existsSync(join(root, ".npmrc")), existsSync(join(root, "apps", "mobile", ".npmrc"))],
+        configs: [config("userconfig"), config("globalconfig")].map((path) => ({ path, text: existsSync(path) ? readFileSync(path, "utf8") : null })) });
+      return { status: 0, stdout: args[0] === "--version" ? "10.9.9\n" : "", stderr: "" };
     };
+    // npm ci answers with this, and npm --version with CI's npm.
+    const npmCi = (result) => (command, args) => (args[0] === "--version" ? { status: 0, stdout: "10.9.9\n" } : result);
     const source = { PATH: "/usr/bin", HOME: "/home/review", PR_CI_AUTO_FIX_READ_TOKEN: "x".repeat(40),
       NODE_ENV: "production", NODE_OPTIONS: "--require ./evil.js", npm_config_registry: "https://evil.example/" };
     assert.equal(installPackages(root, { spawn, source }), null);
-    const [{ command, args, options, npmrc }] = calls;
+    const [version, { command, args, options, npmrc, configs }] = calls;
+    assert.equal(version.args[0], "--version");
+    assert.equal(version.options.cwd, dirname(version.configs[0].path), "the version is read away from the checkout");
     assert.equal(command, "npm");
     assert.equal(args[0], "ci");
-    for (const flag of ["--ignore-scripts", "--include=dev", "--registry=https://registry.npmjs.org/",
-      "--userconfig=/dev/null", "--globalconfig=/dev/null", "--git=/bin/false"]) {
+    for (const flag of ["--ignore-scripts", "--include=dev", "--registry=https://registry.npmjs.org/", "--git=/bin/false"]) {
       assert.ok(args.includes(flag), flag);
     }
+    // npm 9 refuses one file as both configs ("double-loading config"), so each is its own empty file.
+    assert.notEqual(configs[0].path, configs[1].path);
+    assert.deepEqual(configs.map((c) => c.text), ["", ""], "both configs exist and are empty while npm runs");
+    assert.ok(configs.every((c) => !c.path.startsWith(root)), "outside the checkout");
+    assert.ok(configs.every((c) => !existsSync(c.path)), "and are gone afterwards");
     assert.deepEqual(npmrc, [false, false], "the branch's .npmrc files are aside while npm runs");
     assert.equal(readFileSync(join(root, ".npmrc"), "utf8"), "git=./evil.sh\n", "and back afterwards");
     assert.equal(existsSync(join(root, "apps", "mobile", ".npmrc")), true);
@@ -939,9 +949,15 @@ test("a Dependabot head's packages are installed with no script, no token and no
     assert.equal(options.timeout, CI_FIX_INSTALL_TIMEOUT_MS);
     assert.deepEqual(options.env, { PATH: "/usr/bin", HOME: "/home/review" }, "no token, no npm_config_*, no NODE_*");
 
-    assert.equal(installPackages(root, { spawn: () => ({ status: 1, stderr: "npm error\ncode ERESOLVE\n" }), source }), "npm error code ERESOLVE");
-    assert.equal(installPackages(root, { spawn: () => ({ status: null, error: { code: "ETIMEDOUT" } }), source }), "timeout");
-    assert.equal(installPackages(root, { spawn: () => ({ status: 2, stderr: "" }), source }), "exit_2");
+    assert.equal(installPackages(root, { spawn: npmCi({ status: 1, stderr: "npm error\ncode ERESOLVE\n" }), source }), "npm error code ERESOLVE");
+    assert.equal(installPackages(root, { spawn: npmCi({ status: null, error: { code: "ETIMEDOUT" } }), source }), "timeout");
+    assert.equal(installPackages(root, { spawn: npmCi({ status: 2, stderr: "" }), source }), "exit_2");
+    // npm 9.2 reads this lockfile's workspaces as out of sync; it never gets to npm ci.
+    let ran = false;
+    const old = (found) => (command, args) => (args[0] === "--version" ? { status: 0, stdout: found } : ((ran = true), { status: 0 }));
+    assert.equal(installPackages(root, { spawn: old("9.2.0\n"), source }), "npm_too_old:9.2.0");
+    assert.equal(installPackages(root, { spawn: old(""), source }), "npm_too_old:unknown");
+    assert.equal(ran, false);
     assert.equal(existsSync(join(root, ".npmrc")), true, "restored after a failure too");
 
     writeFileSync(join(root, "package-lock.json"), LOCK({ "node_modules/y": { version: "git+ssh://git@github.com/x/y.git" } }));

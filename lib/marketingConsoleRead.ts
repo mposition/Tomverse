@@ -17,7 +17,9 @@ import {
   marketingWebhookIsStaging,
   parseMarketingWebhookFaultArm,
 } from "@/lib/marketingWebhookCore";
+import { readMarketingAssetsForConsole } from "@/lib/marketingAssetStore";
 import {
+  MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
   MARKETING_READ_PAGE_SIZE,
   marketingSectionAvailability,
@@ -635,6 +637,27 @@ export async function readMarketingConsole(
         decidedAt: competitor.decidedAt?.toISOString() ?? null,
         createdAt: competitor.createdAt.toISOString(),
       })),
+    };
+  }
+
+  if (section === "assets") {
+    // Submissions waiting for a person first, then approved, then retired.
+    // Every value a decision compares against travels with the row: the
+    // decision the page showed and the bytes it showed.
+    const assets = await readMarketingAssetsForConsole(prisma, MARKETING_ASSET_READ_LIMIT);
+    return {
+      section,
+      availability,
+      ordering: "by-status",
+      pageSize: MARKETING_ASSET_READ_LIMIT,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      truncated: assets.truncated,
+      rows: assets.rows,
     };
   }
 

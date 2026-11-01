@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { MARKET_INTEL_FACT_TOKENS } from "@/lib/marketingAutomationSchema";
 import {
+  MARKETING_A3_ANSWER_SCHEMA,
+  MARKETING_A3_DISCOVERY_ANSWER_SCHEMA,
   marketingA3Messages,
   marketingA3ReportBody,
   marketingA3SourceUrl,
   readMarketingA3Answer,
+  readMarketingA3Discovery,
 } from "@/lib/marketingA3Core";
 import {
   marketingGeneratorReportProvenanceMatches,
@@ -108,3 +112,87 @@ test("the report is a signed market_intel report the app's route accepts as is",
   assert.equal(marketingGeneratorReportProvenanceMatches("t".repeat(48), parsed.data), false);
 });
 
+
+/** Every object a strict Structured Outputs schema holds must list all its keys as required and allow no others. */
+function strictProblems(node, path = "$") {
+  if (!node || typeof node !== "object") return [];
+  const problems = [];
+  if (node.type === "object") {
+    const keys = Object.keys(node.properties ?? {});
+    if (node.additionalProperties !== false) problems.push(`${path}: additionalProperties is not false`);
+    if (JSON.stringify([...(node.required ?? [])].sort()) !== JSON.stringify([...keys].sort())) {
+      problems.push(`${path}: required is not every property`);
+    }
+  }
+  for (const [key, child] of Object.entries(node)) {
+    if (Array.isArray(child)) child.forEach((item, index) => problems.push(...strictProblems(item, `${path}.${key}[${index}]`)));
+    else if (child && typeof child === "object") problems.push(...strictProblems(child, `${path}.${key}`));
+  }
+  return problems;
+}
+
+test("both answer schemas are valid strict Structured Outputs schemas", () => {
+  assert.deepEqual(strictProblems(MARKETING_A3_ANSWER_SCHEMA.schema), []);
+  assert.deepEqual(strictProblems(MARKETING_A3_DISCOVERY_ANSWER_SCHEMA.schema), []);
+  // A strict schema's root is an object, not a union.
+  assert.equal(MARKETING_A3_ANSWER_SCHEMA.schema.type, "object");
+  assert.equal(MARKETING_A3_DISCOVERY_ANSWER_SCHEMA.schema.type, "object");
+});
+
+test("a token fact the provider can produce is exactly a stored vocabulary, by fact type", () => {
+  const branches = MARKETING_A3_ANSWER_SCHEMA.schema.properties.facts.items.anyOf;
+  const tokenBranches = Object.fromEntries(
+    branches
+      .filter((branch) => branch.properties.factType.enum)
+      .map((branch) => [branch.properties.factType.enum[0], branch.properties.value.properties.value.enum]),
+  );
+  assert.deepEqual(tokenBranches, MARKET_INTEL_FACT_TOKENS);
+  // The open branch has no token kind: a token outside a vocabulary cannot be produced.
+  const open = branches.find((branch) => !branch.properties.factType.enum);
+  const kinds = open.properties.value.anyOf.map((value) => value.properties.kind.enum[0]);
+  assert.deepEqual(kinds.sort(), ["date", "money", "number"]);
+});
+
+test("an answer in the schema's shape is kept whole: no fact the provider can produce is dropped for its shape", () => {
+  const checkedAt = "2026-10-30T00:00:00.000Z";
+  const tokenFacts = Object.entries(MARKET_INTEL_FACT_TOKENS).flatMap(([factType, tokens]) =>
+    tokens.map((token) => ({ factType, value: { kind: "token", value: token }, sourceUrl: PAGE })),
+  );
+  const facts = [
+    ...tokenFacts.slice(0, 30),
+    { factType: "plan_price_monthly_pro", value: { kind: "money", amountMinor: 1999, currency: "USD" }, sourceUrl: PAGE },
+    { factType: "plan_price_annual_pro", value: { kind: "money", amountMinor: 19900, currency: "EUR" }, sourceUrl: PAGE },
+    { factType: "message_limit_daily_free", value: { kind: "number", value: 50, unit: "messages_per_day" }, sourceUrl: PAGE },
+    { factType: "model_count", value: { kind: "number", value: 40, unit: null }, sourceUrl: PAGE },
+    { factType: "launch_date", value: { kind: "date", value: "2026-09-01" }, sourceUrl: PAGE },
+  ];
+  const read = readMarketingA3Answer(JSON.stringify({ facts, unrepresentable: 2 }), {
+    competitorId: "poe",
+    officialHosts: HOSTS,
+    citations: [PAGE],
+    checkedAt,
+  });
+  assert.deepEqual(read.dropped, {});
+  assert.equal(read.facts.length, facts.length);
+  assert.equal(read.unrepresentable, 2);
+});
+
+test("a discovery answer in the schema's shape parses as a candidate", () => {
+  const evidence = "https://www.typingmind.com/";
+  const read = readMarketingA3Discovery(
+    JSON.stringify({
+      candidates: [
+        {
+          competitorId: "typingmind",
+          displayName: "TypingMind",
+          officialHosts: ["typingmind.com"],
+          evidenceUrls: [evidence],
+          rationale: "One chat front end for many model providers.",
+        },
+      ],
+    }),
+    { knownIds: [], citations: [evidence] },
+  );
+  assert.deepEqual(read.dropped, {});
+  assert.equal(read.candidates.length, 1);
+});

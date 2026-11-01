@@ -76,6 +76,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [partial, setPartial] = useState<string | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [owner, setOwner] = useState<string | null>(null);
   const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? null);
@@ -119,7 +120,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }, [transport, signedIn, conversation]);
   useEffect(() => transport.onSessionLost?.(() => {
     epoch.current++; requestEpoch.current++; abort.current?.abort();
-    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setReportFor(null);
+    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setPendingQuestion(null); setReportFor(null);
     setUncertain(false); setStreaming(false); setModelPicker(false); setSettings(false); setAccountOpen(false); setProduct("chat");
     localStorage.removeItem(LAST_CHAT); setLoading(false);
   }), [transport]);
@@ -170,7 +171,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }
   async function signOut() {
     epoch.current++; requestEpoch.current++; abort.current?.abort();
-    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setReportFor(null);
+    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setPendingQuestion(null); setReportFor(null);
     setUncertain(false); setStreaming(false); localStorage.removeItem(LAST_CHAT); setSettings(false); setModelPicker(false); setProduct("chat");
     try { await transport.signOut(); return true; } catch { setError(mobileCompletionCopy(language).logoutUnconfirmed); return false; }
   }
@@ -220,18 +221,21 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     } catch (error) { if (current === requestEpoch.current) { setUncertain(true); setError(mobileErrorText(error, language, copy.error)); } throw error; }
   }
   async function send(text: string, files: MobileAttachment[], fromVoice = false) {
-    if (streaming || uncertain) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return; }
+    if (streaming || uncertain) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return false; }
     const current = ++requestEpoch.current;
     const titleEpoch = epoch.current;
     const controller = new AbortController(); abort.current = controller;
-    setStreaming(true); setError(""); setPartial("");
-    let item = conversation;
+    setStreaming(true); setError(""); setPartial(""); setPendingQuestion(text); setDraft("");
+    let item = conversation; let dispatched = false;
     try {
       item ??= await transport.create((text.trim() || files[0]?.name || copy.newChat).slice(0, 30));
       if (current !== requestEpoch.current) return;
+      if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
       setConversation({ ...item, messages: [...item.messages, { id: "pending-user", role: "user", content: text }] });
+      setPendingQuestion(null);
       localStorage.setItem(LAST_CHAT, item.id);
-      setDraft("");
+      setDraft("", item.id);
+      dispatched = true;
       const receipt = fromVoice ? await transport.sendVoice!(item, text, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
       }) : await transport.send(item, text, files, controller.signal, (value) => {
@@ -251,9 +255,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     } catch (error) {
       if (current !== requestEpoch.current) return;
       setPartial(value => value || null);
-      setUncertain(Boolean(item)); setError(mobileErrorText(error, language, item ? copy.disconnected : copy.error));
+      if (!dispatched) setDraft(text);
+      setUncertain(dispatched); setError(mobileErrorText(error, language, dispatched ? copy.disconnected : copy.error));
       if (fromVoice) throw error;
-    } finally { if (current === requestEpoch.current) setStreaming(false); }
+      if (!dispatched) return false;
+    } finally { if (current === requestEpoch.current) { setStreaming(false); setPendingQuestion(null); } }
   }
 
   function newConversation() {
@@ -322,6 +328,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         {/* A continuation is never a blank new chat: its original is its start. */}
         {conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}
         {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <WorkspaceWelcome product="chat" language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} />}
+        {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
         {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
@@ -330,7 +337,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
       <Composer product="chat" onProductChange={switchProduct} productBusy={streaming || loading || uncertain} productLoading={loading}
         selectionControl={<button type="button" className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><span>{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : getModel(conversation?.selectedModels[0] ?? "")?.name ?? workspaceCopy.model}</span><span aria-hidden="true">⌄</span></button>}
-        locationIdentity={owner} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(() => undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
+        locationIdentity={owner} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(result => result === false ? false : undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
     {accountOpen && <Sheet title={mobileSettingsCopy(language).accountData} closeLabel={copy.close} onClose={() => setAccountOpen(false)} exitLabel={navigationCopy.returnToChat} onExit={returnToWorkspace}><button type="button" className="settings-detail-back" onClick={() => { setAccountOpen(false); openSettings("data"); }}><span aria-hidden="true">← </span>{mobileSettingsCopy(language).back}</button><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}

@@ -124,12 +124,19 @@ mock.module(mod("lib/modelRegistry.ts"), {
 mock.module(mod("lib/marketingAssets.ts"), {
   namedExports: {
     MARKETING_ASSET_REGISTRY_PATH: "docs/marketing/asset-registry.json",
+    marketingAssetRegistrySchema: { parse: (raw) => raw },
     loadMarketingAssetRegistry: () => ({ version: 73, assets: [] }),
     resolveMarketingAsset: () =>
       world.assetKnown
-        ? { ok: true, asset: {}, disclosure: "none" }
+        ? { ok: true, asset: { claimIds: [] }, disclosure: "none" }
         : { ok: false, refusal: "unknown_asset" },
   },
+});
+
+// The stored assets a person approved (lib/marketingAssetStore.ts): none here,
+// so the registry is the file's, as before.
+mock.module(mod("lib/marketingAssetStore.ts"), {
+  namedExports: { readApprovedMarketingAssetRows: async () => ({ assets: [], version: 0 }) },
 });
 
 const { resolveMarketingFacts } = await import(
