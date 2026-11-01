@@ -346,11 +346,22 @@ const RETRYABLE_INTERNAL_DELIVERY_STATUSES = new Set([
   504,
 ]);
 
+/**
+ * Delivers one event, retrying a transient failure. Settles -- never rejects
+ * -- once the server has answered or the retries are spent, which is what lets
+ * a conversion wait for a touch below.
+ */
 const deliverInternalAnalyticsEvent = (
   payload: ReturnType<typeof analyticsClientEventSchema.parse>,
   attempt = 0
-) => {
-  void fetch("/api/analytics/events", {
+): Promise<void> => {
+  const retry = () =>
+    attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length
+      ? new Promise<void>((resolve) =>
+          window.setTimeout(resolve, INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt])
+        ).then(() => deliverInternalAnalyticsEvent(payload, attempt + 1))
+      : undefined;
+  return fetch("/api/analytics/events", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -361,23 +372,53 @@ const deliverInternalAnalyticsEvent = (
       await discardResponseBody(response);
       if (
         !response.ok &&
-        RETRYABLE_INTERNAL_DELIVERY_STATUSES.has(response.status) &&
-        attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length
+        RETRYABLE_INTERNAL_DELIVERY_STATUSES.has(response.status)
       ) {
-        window.setTimeout(
-          () => deliverInternalAnalyticsEvent(payload, attempt + 1),
-          INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt]
-        );
+        return retry();
       }
     })
-    .catch(() => {
-      if (attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length) {
-        window.setTimeout(
-          () => deliverInternalAnalyticsEvent(payload, attempt + 1),
-          INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt]
-        );
-      }
-    });
+    .catch(() => retry())
+    .then(
+      () => undefined,
+      () => undefined
+    );
+};
+
+// Marketing touches still being delivered (§10.1). The server attributes a
+// sign-up or a guest's first answer to the last touch it has *stored*, and
+// both are singletons it will not record twice -- so a conversion sent while
+// a touch from the same page is still in flight could be fixed to no touch, or
+// an older one, for good. That happens whenever consent releases the queue
+// holding both. A conversion therefore waits until every touch sent before it
+// has been answered (or given up on); everything else goes out at once.
+let touchDeliveries: Promise<void> = Promise.resolve();
+const TOUCH_ORDERING_MAX_WAIT_MS = 10_000;
+const TOUCH_ATTRIBUTED_EVENTS = new Set<ProductAnalyticsEventName>([
+  "signup_completed",
+  "first_response_completed",
+]);
+
+const deliverInOrder = (
+  eventName: ProductAnalyticsEventName,
+  payload: ReturnType<typeof analyticsClientEventSchema.parse>
+) => {
+  if (eventName === "marketing_touch") {
+    const delivery = deliverInternalAnalyticsEvent(payload);
+    touchDeliveries = Promise.all([touchDeliveries, delivery]).then(() => undefined);
+    return;
+  }
+  if (TOUCH_ATTRIBUTED_EVENTS.has(eventName)) {
+    // Bounded: a touch request that never settles must not hold the
+    // conversion for ever.
+    void Promise.race([
+      touchDeliveries,
+      new Promise<void>((resolve) =>
+        window.setTimeout(resolve, TOUCH_ORDERING_MAX_WAIT_MS)
+      ),
+    ]).then(() => deliverInternalAnalyticsEvent(payload));
+    return;
+  }
+  void deliverInternalAnalyticsEvent(payload);
 };
 
 const sendIntent = (intent: EventIntent) => {
@@ -440,7 +481,7 @@ const sendIntent = (intent: EventIntent) => {
     });
   }
 
-  deliverInternalAnalyticsEvent(payload);
+  deliverInOrder(intent.eventName, payload);
 };
 
 export const analyticsConsent = () =>
@@ -666,10 +707,6 @@ export const observeMarketingTouch = () => {
     utmContent ? { utm_content: utmContent } : {}
   );
   if (!properties.success) return;
-  window.sessionStorage.setItem(
-    TOUCH_SEEN_STORAGE_KEY,
-    JSON.stringify([...seen, seenKey].slice(-MAX_TOUCHES_SEEN))
-  );
   const intent: EventIntent = {
     eventId: crypto.randomUUID(),
     eventName: "marketing_touch",
@@ -678,11 +715,13 @@ export const observeMarketingTouch = () => {
     properties: properties.data,
     attribution,
   };
-  if (!runtime) {
-    queuePendingIntent(intent);
-    return;
-  }
-  sendIntent(intent);
+  if (runtime) sendIntent(intent);
+  else queuePendingIntent(intent);
+  // Marked seen only once it has been sent or queued.
+  window.sessionStorage.setItem(
+    TOUCH_SEEN_STORAGE_KEY,
+    JSON.stringify([...seen, seenKey].slice(-MAX_TOUCHES_SEEN))
+  );
 };
 
 export const markSignupStarted = (method: string) => {

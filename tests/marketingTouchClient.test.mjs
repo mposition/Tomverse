@@ -26,9 +26,19 @@ const win = {
 };
 globalThis.window = win;
 globalThis.document = { cookie: "" };
+const accepted = () => ({ ok: true, status: 202, body: null, text: async () => "" });
+// Per test: what the server answers a marketing_touch with. Everything else
+// is answered at once.
+let answerTouch = () => Promise.resolve(accepted());
 globalThis.fetch = (url, init) => {
-  requests.push({ url, body: JSON.parse(init.body) });
-  return Promise.resolve({ ok: true, status: 202, body: null });
+  const body = JSON.parse(init.body);
+  requests.push({ url, body });
+  return body.event_name === "marketing_touch" ? answerTouch() : Promise.resolve(accepted());
+};
+const flush = async () => {
+  for (let index = 0; index < 5; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 };
 
 const client = await import("../lib/productAnalyticsClient.ts");
@@ -126,6 +136,49 @@ test("one touch per link per tab; a different link is a new touch with its own v
   assert.equal(second.utm_source, "x");
   assert.equal(second.utm_campaign, "autumn");
   assert.equal(second.properties.utm_content, "x-1");
+});
+
+test("a conversion released with a touch is sent only after the touch was answered", async () => {
+  reset();
+  let release;
+  answerTouch = () => new Promise((resolve) => {
+    release = () => resolve(accepted());
+  });
+  try {
+    land(LINK);
+    client.observeMarketingTouch();
+    client.trackProductEventOnce("signup_completed", "signup_completed", 0, {
+      method: "google",
+    });
+    client.trackProductEvent("landing_view");
+    client.setAnalyticsConsent("accepted");
+    configure();
+    await flush();
+    const names = () => requests.map((request) => request.body.event_name);
+    assert.ok(names().includes("marketing_touch"));
+    assert.ok(names().includes("landing_view"), "events that are not attributed do not wait");
+    assert.ok(
+      !names().includes("signup_completed"),
+      "the server would look for the touch before storing it",
+    );
+
+    release();
+    await flush();
+    assert.ok(names().includes("signup_completed"));
+    assert.ok(names().indexOf("marketing_touch") < names().indexOf("signup_completed"));
+  } finally {
+    answerTouch = () => Promise.resolve(accepted());
+  }
+});
+
+test("with no touch in flight a conversion goes out without waiting", async () => {
+  reset();
+  client.setAnalyticsConsent("accepted");
+  land("?ref=none");
+  configure();
+  client.trackProductEventOnce("first_response_completed", "first_response_completed", 1, {});
+  await flush();
+  assert.ok(requests.some((request) => request.body.event_name === "first_response_completed"));
 });
 
 test("a URL without UTM parameters is not a touch", () => {

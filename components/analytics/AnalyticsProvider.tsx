@@ -2,8 +2,8 @@
 
 import Script from "next/script";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { createContext, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import {
@@ -301,6 +301,23 @@ const consentCopy: Record<
   },
 };
 
+/**
+ * §10.1 marketing touch: the current URL's UTM values, reported once per
+ * distinct link per tab -- on a full load and on a client navigation that
+ * changes only the query. Consent is applied inside the client exactly as for
+ * every other event: declined sends nothing, undecided waits. Behind its own
+ * Suspense boundary so reading the query never opts the page out of static
+ * rendering.
+ */
+function MarketingTouchObserver() {
+  const pathname = usePathname();
+  const search = useSearchParams()?.toString() ?? "";
+  useEffect(() => {
+    observeMarketingTouch();
+  }, [pathname, search]);
+  return null;
+}
+
 export function AnalyticsProvider({
   children,
   country,
@@ -575,14 +592,6 @@ export function AnalyticsProvider({
     };
   }, [disabled, openPreferencesFrom]);
 
-  // §10.1 marketing touch: the landing URL's UTM values, reported once per
-  // distinct link per tab. Consent is applied inside the client exactly as for
-  // every other event -- declined sends nothing, undecided waits.
-  useEffect(() => {
-    if (disabled) return;
-    observeMarketingTouch();
-  }, [disabled, pathname]);
-
   const analyticsEnabled = Boolean(
     resolvedPolicy &&
       (consent === "accepted" ||
@@ -813,6 +822,11 @@ export function AnalyticsProvider({
       <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
         <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
         {children}
+        {disabled ? null : (
+          <Suspense fallback={null}>
+            <MarketingTouchObserver />
+          </Suspense>
+        )}
         {analyticsEnabled && analyticsClientReady && measurementId ? (
           <Script
             id="tomverse-ga4"
