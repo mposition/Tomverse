@@ -34,7 +34,10 @@ const SECRET = "g".repeat(48);
 // Two of these are the asset registry's read of the approved stored assets and
 // the registry version (lib/marketingAssetStore.ts, 2026-10-31).
 const PINNED_PLAIN_CALLS = 23;
-const PINNED_WITH_IDS_CALLS = 23;
+// The rejected draft also asks whether the account crossed a stop limit (S4a):
+// the chain lock, the channel lock, the window marker, the removal count, the
+// attempt read and the draft read.
+const PINNED_WITH_IDS_CALLS = 29;
 const DIGEST = "b".repeat(64);
 
 const OPEN: MarketingDraftIntakeReaders = {
@@ -711,4 +714,41 @@ test("without a long enough secret the route refuses everything", async () => {
     if (previous === undefined) delete process.env.MARKETING_GENERATOR_SUBMIT_SECRET;
     else process.env.MARKETING_GENERATOR_SUBMIT_SECRET = previous;
   }
+});
+
+// ---------------------------------------------------------------------------
+// S4a: the account stops in the transaction of the draft that crosses the limit
+// ---------------------------------------------------------------------------
+
+test("the seventh rejected draft stops the account in its own transaction; the sixth does not", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const rejectedDraft = (n: number) =>
+    draft(row.id, { logicalDraftId: `rejected-${n}`, claimIds: ["claim_1"] });
+  for (let n = 1; n <= 6; n += 1) {
+    if (n > 1) await ledgerCall(n);
+    const outcome = await intake(rejectedDraft(n), OPEN, {
+      submissionId: `sub-reject-${n}`,
+      llmCallRequestKeys: [callKey(n)],
+    });
+    assert.equal(outcome.status, "rejected");
+  }
+  assert.equal((await prisma.marketingChannel.findUniqueOrThrow({ where: { id: row.id } })).status, "approval_mode");
+
+  await ledgerCall(7);
+  const seventh = await intake(rejectedDraft(7), OPEN, {
+    submissionId: "sub-reject-7",
+    llmCallRequestKeys: [callKey(7)],
+  });
+  assert.equal(seventh.status, "rejected");
+  const stopped = await prisma.marketingChannel.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(stopped.status, "paused");
+  assert.equal(stopped.pauseReasonCode, "guard_rejection_rate");
+  // The trigger, not the caller, recorded where the pause came from.
+  assert.equal(stopped.pausedFromMode, "approval_mode");
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: "marketing_account.auto_paused", targetId: row.id },
+    select: { metadata: true },
+  });
+  assert.equal(audits.length, 1);
 });
