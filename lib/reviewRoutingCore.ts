@@ -6,6 +6,14 @@ import { canUseModelWithPlan, getModelUsageProfile, modelSupportsImageInput, typ
 
 export type ReviewMode = "easy" | "professional";
 export const REVIEW_MAX_PROVIDERS = 3;
+/**
+ * The Review router prompt carries image and research criteria plus a
+ * candidate list per provider and returns structured output, so Chat's 5 s
+ * deadline cut off every production call (2026-10-31: 503 at 5.1-5.3 s).
+ */
+export const REVIEW_ROUTER_TIMEOUT_MS = 12_000;
+/** Above the server deadline, so the client never abandons a routed answer. */
+export const REVIEW_ROUTER_CLIENT_TIMEOUT_MS = REVIEW_ROUTER_TIMEOUT_MS + 3_000;
 export type ReviewRouteChoice = { provider: string; modelId: string | null };
 export type ReviewRouteDecision = {
   kind: "text" | "image";
