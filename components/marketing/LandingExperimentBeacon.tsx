@@ -180,6 +180,15 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
       // and the route would refuse it: stay silent.
       if (!(LANDING_EXPERIMENT_LOCALES as readonly string[]).includes(locale)) return;
       const cookieValue = readCookie();
+      // A variant on screen with no assignment behind it: the cookie expired
+      // (its life ends with the experiment) or was removed between the request
+      // and now. Nobody is entitled to the variant then, so the page goes back
+      // to the default copy before anything else is asked of the route. The
+      // reload is the proxy's answer to a variant path without a cookie.
+      if (!cookieValue && renderedArm !== EXPERIMENT_CONTROL_ARM) {
+        leaveVariant(renderedArm, null);
+        return;
+      }
       const consent = readConsent();
       const probeKey = `${PROBE_OFF_KEY}_${consent}_${locale}`;
       if (consent === "declined") {

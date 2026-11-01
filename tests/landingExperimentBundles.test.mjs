@@ -173,3 +173,19 @@ test("the beacon tells a refused count from one that got no answer, and holds a 
   assert.match(beacon, /answer\?\.status === "error"\) session\.remove\(conversionKey\)/);
   assert.match(beacon, /result\.status === "error"\) \{\s*retract\(\);/);
 });
+
+test("a variant on screen without an assignment cookie goes back to the default copy before the route is asked", async () => {
+  const { readFileSync } = await import("node:fs");
+  const beacon = readFileSync(
+    new URL("../components/marketing/LandingExperimentBeacon.tsx", import.meta.url),
+    "utf8"
+  );
+  const run = beacon.slice(beacon.indexOf("const run = async"));
+  const at = (needle) => run.indexOf(needle);
+  const guard = at("if (!cookieValue && renderedArm !== EXPERIMENT_CONTROL_ARM) {");
+  assert.ok(guard > 0, "the guard exists");
+  // It comes before the assign request and before the remembered "off" answer.
+  assert.ok(guard < at('await post("assign")'));
+  assert.ok(guard < at("probeIsOff(probeKey)"));
+  assert.ok(run.slice(guard, guard + 200).includes("leaveVariant(renderedArm, null);"));
+});
