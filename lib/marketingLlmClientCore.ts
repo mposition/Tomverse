@@ -293,15 +293,10 @@ export function readMarketingLlmWebSearchAnswer(body: unknown): ProviderAnswer |
   ) {
     return null;
   }
-  return {
-    content,
-    citations,
-    answerCitations: [...new Set(cited)],
-    model: root.model,
-    serviceTier: root.service_tier,
-    inputTokens,
-    outputTokens,
+  const served = () => {
+    return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
   };
+  return { ...served(), answerCitations: [...new Set(cited)] } as ProviderAnswer;
 }
 
 const ok = (answer: MarketingLlmBudgetAnswer) => answer.httpStatus === 200 && answer.body.status === "ok";
