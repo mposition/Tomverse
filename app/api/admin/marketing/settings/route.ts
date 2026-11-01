@@ -34,7 +34,6 @@ const ACTION = {
 const REFUSAL_STATUS: Record<string, number> = {
   switch_conflict: 409,
   switch_change_is_noop: 409,
-  publisher_capability_unavailable: 409,
   autonomous_needs_drafts_and_publish: 409,
   config_generation_unreadable: 500,
 };
