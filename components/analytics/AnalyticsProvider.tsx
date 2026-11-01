@@ -2,8 +2,8 @@
 
 import Script from "next/script";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { createContext, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { useSession } from "next-auth/react";
@@ -16,6 +16,7 @@ import {
   configureAnalyticsClient,
   consumeSignupStarted,
   disableAnalyticsClient,
+  observeMarketingTouch,
   setAnalyticsConsent,
   syncGa4UserId,
   trackProductEventOnce,
@@ -305,6 +306,26 @@ const consentCopy: Record<
     turnOffShort: "Desativar",
   },
 };
+
+/**
+ * Marketing touch (docs/policy/marketing-automation.md §10.1): the current
+ * URL's UTM values, reported once per
+ * distinct link per tab -- on a full load and on a client navigation that
+ * changes only the query. Consent is applied inside the client exactly as for
+ * every other event: declined sends nothing, undecided waits. A change of
+ * consent re-observes too, so a visitor who had declined and allows analytics
+ * on the page they landed on is not missing that link. Behind its own
+ * Suspense boundary so reading the query never opts the page out of static
+ * rendering.
+ */
+function MarketingTouchObserver({ consent }: { consent: string }) {
+  const pathname = usePathname();
+  const search = useSearchParams()?.toString() ?? "";
+  useEffect(() => {
+    observeMarketingTouch();
+  }, [pathname, search, consent]);
+  return null;
+}
 
 export function AnalyticsProvider({
   children,
@@ -840,6 +861,11 @@ export function AnalyticsProvider({
       <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
         <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
         {children}
+        {disabled ? null : (
+          <Suspense fallback={null}>
+            <MarketingTouchObserver consent={consent} />
+          </Suspense>
+        )}
         {analyticsEnabled && analyticsClientReady && measurementId ? (
           <Script
             id="tomverse-ga4"
