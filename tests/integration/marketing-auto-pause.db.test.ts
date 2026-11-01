@@ -170,3 +170,54 @@ test("an attempt made before the account's last fresh start is not evidence, how
   // Only two of the three were made after the start.
   assert.deepEqual(await evaluate(row.id), { paused: false });
 });
+
+test("a post whose attempts retention has summarised is not judged, so failures that were not consecutive do not become so", async () => {
+  const row = await approvalChannel();
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
+  );
+  try {
+    await prisma.marketingPost.create({
+      data: {
+        channelId: row.id,
+        locale: "en",
+        kind: "social",
+        logicalKey: "compacted-1",
+        envelope,
+        envelopeDigest: DIGEST,
+        rendererVersion: "r1",
+        claimIds: [],
+        assetIds: [],
+        claimRegistryVersion: 1,
+        assetRegistryVersion: 1,
+        factSnapshot: { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] },
+        factsDigest: DIGEST,
+        guardDecision: "pass",
+        guardCodes: [],
+        guardRuleIds: [],
+        status: "failed",
+        mode: "approval",
+        history: [
+          { at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST },
+          {
+            at: new Date().toISOString(),
+            type: "retention_summary",
+            summarises: "attempt",
+            count: 2,
+            firstAt: at(0).toISOString(),
+            lastAt: at(1).toISOString(),
+          },
+          { at: at(3).toISOString(), type: "attempt", attempt: 3, outcome: "failed", errorCode: "zernio_rejected" },
+        ],
+        historyVersion: 0,
+      },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`,
+    );
+  }
+  await postWithAttempts(row.id, [{ at: at(4), attempt: 1, outcome: "failed" }]);
+  await postWithAttempts(row.id, [{ at: at(5), attempt: 1, outcome: "failed" }]);
+  assert.deepEqual(await evaluate(row.id), { paused: false });
+});

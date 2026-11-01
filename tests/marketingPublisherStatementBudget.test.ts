@@ -121,12 +121,12 @@ const countingClient = (postStatus: string, shape: Shape = {}) => {
     if (sql.includes("current_setting('transaction_timeout')")) return [{ value: "0" }];
     if (sql.includes("set_config")) return [{ set_config: "" }];
     if (sql.includes("transaction_isolation")) return [{ level: "serializable" }];
-    if (sql.includes("clock_timestamp")) return [{ now: NOW, createdAt: NOW, day: "2026-09-23" }];
-    if (sql.includes("count(*) FILTER")) return [{ today: BigInt(0), week: BigInt(0) }];
-    if (sql.includes("SKIP LOCKED")) return [{ id: "p1", historyVersion: 4, slotDay: null }];
     if (sql.includes("jsonb_array_elements")) {
       return shape.attemptsFailed ? [1, 2, 3].map(() => ({ outcome: "failed" })) : [];
     }
+    if (sql.includes("clock_timestamp")) return [{ now: NOW, createdAt: NOW, day: "2026-09-23" }];
+    if (sql.includes("count(*) FILTER")) return [{ today: BigInt(0), week: BigInt(0) }];
+    if (sql.includes("SKIP LOCKED")) return [{ id: "p1", historyVersion: 4, slotDay: null }];
     if (sql.includes("logicalKey")) {
       return [
         {

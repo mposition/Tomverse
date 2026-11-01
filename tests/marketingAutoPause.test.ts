@@ -176,13 +176,13 @@ const world = (options: World = {}) => {
     },
     async $queryRaw(query: unknown) {
       const sql = statementText(query);
-      if (sql.includes("clock_timestamp")) return [{ now: NOW, createdAt: NOW }];
       if (sql.includes("jsonb_array_elements")) {
         seen.reads.push("attempts");
         seen.rawValues.push([...((query as { values?: unknown[] }).values ?? [])]);
         if (failOn === "attempts") throw new Error("injected: attempts read lost");
         return attempts.map((outcome) => ({ outcome }));
       }
+      if (sql.includes("clock_timestamp")) return [{ now: NOW, createdAt: NOW }];
       if (sql.includes("FOR UPDATE")) {
         seen.reads.push("lock");
         if (failOn === "lock") throw new Error("injected: lock lost");

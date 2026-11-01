@@ -5746,6 +5746,10 @@ export async function evaluateMarketingAutoPause(
       // entry and carries its last word: a person who settles an unknown outcome
       // as a failure adds a second entry for the same attempt, with the time of
       // the settling, and that time says nothing about when the attempt was made.
+      // Retention keeps what is older than ninety days only in part (successes
+      // become summaries, a last failure stays), so history that is incomplete
+      // is never judged: the look-back stops at sixty days, and a post that has
+      // lost attempts to a summary is left out whole.
       attempts = await database.$queryRaw<Array<{ outcome: string }>>(Prisma.sql`
         SELECT "outcome" FROM (
           SELECT post."id" AS "postId", (entry->>'attempt')::int AS "attempt",
@@ -5753,10 +5757,11 @@ export async function evaluateMarketingAutoPause(
             min((entry->>'at')::timestamptz) AS "madeAt"
           FROM "MarketingPost" AS post, jsonb_array_elements(post."history") AS entry
           WHERE post."channelId" = ${channelId} AND entry->>'type' = 'attempt'
+            AND NOT (post."history" @> '[{"type":"retention_summary","summarises":"attempt"}]'::jsonb)
           GROUP BY post."id", (entry->>'attempt')::int
         ) AS attempts
-        WHERE "madeAt" > ${since}::timestamptz
-        ORDER BY "madeAt" DESC, "attempt" DESC
+        WHERE "madeAt" > GREATEST(${since}::timestamptz, clock_timestamp() - interval '60 days')
+        ORDER BY "madeAt" DESC, "postId" DESC, "attempt" DESC
         LIMIT ${MARKETING_AUTO_PAUSE_CONSECUTIVE_FAILURES}
       `);
       drafts = await database.marketingPost.findMany({
