@@ -61,3 +61,11 @@ export const emailCopyLanguage = (language: Language): EmailCopyLanguage =>
 export const EMAIL_COPY_LANGUAGES = SUPPORTED_LANGUAGES.filter(
   (language): language is EmailCopyLanguage => language !== "zh-Hant"
 );
+
+/**
+ * Languages product analytics records. `ProductAnalyticsEvent_language_check`
+ * holds exactly these, so a `zh-Hant` visitor reports as `zh` (see
+ * AnalyticsProvider) rather than adding a locale to the stored enum.
+ */
+export const ANALYTICS_LANGUAGES = ["en", "ko", "zh", "fr", "de", "es", "pt"] as const satisfies
+  readonly EmailCopyLanguage[];
