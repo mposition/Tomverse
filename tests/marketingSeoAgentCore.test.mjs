@@ -10,7 +10,10 @@ import {
     applySeoProposal,
     parseGitNumstat,
     parseGitRawDiff,
-    runSeoAgent,
+    runSeoAgentPublish,
+    runSeoAgentValidate,
+    seoAgentPhaseEnvProblems,
+    seoAgentRecordSchema,
     seoAgentCheckCommands,
     seoAgentGate,
     seoAgentIsGraduated,
@@ -58,8 +61,18 @@ test("each stage holds its own secrets and not the other's", () => {
     const llm = seoAgentStageEnvironment(env, "llm");
     assert.equal(llm.MARKETING_LLM_API_KEY, "llm-key");
     assert.equal(llm.PATH, "/bin");
+    // The LLM child checks the gate itself, so it is given the switch and the kill switch.
+    const gated = seoAgentStageEnvironment({ ...env, MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_AUTOMATION_KILL_SWITCH: "1" }, "llm");
+    assert.equal(gated.MARKETING_SEO_AGENT_ENABLED, "true");
+    assert.equal(gated.MARKETING_AUTOMATION_KILL_SWITCH, "1");
     for (const name of ["MARKETING_SEO_GITHUB_APP_TOKEN", "MARKETING_SEO_GITHUB_REPOSITORY", "DATABASE_URL", "RAILWAY_TOKEN"]) {
         assert.equal(llm[name], undefined, `llm stage must not hold ${name}`);
+    }
+    const checks = seoAgentStageEnvironment({ ...env, NODE_OPTIONS: "--max-old-space-size=8192" }, "checks");
+    assert.equal(checks.NODE_OPTIONS, "--max-old-space-size=8192");
+    assert.equal(checks.PATH, "/bin");
+    for (const name of Object.keys(env).filter((key) => key !== "PATH")) {
+        assert.equal(checks[name], undefined, `checks (which run proposed code) must not hold ${name}`);
     }
     const publish = seoAgentStageEnvironment(env, "publish");
     assert.equal(publish.MARKETING_SEO_GITHUB_APP_TOKEN, "gh-token");
@@ -342,100 +355,86 @@ test("every policy test that is listed and exists in this repository is a real f
 });
 
 // ---------------------------------------------------------------------------
-// The whole run, over fake ports
+// Phase 1 (validate), over fake ports
 // ---------------------------------------------------------------------------
 
 const GOOD_RAW = `:100644 100644 ${sha} ${sha2} M\0lib/seo.ts\0`;
 const GOOD_NUMSTAT = "3\t1\tlib/seo.ts\0";
 const BASE = "c".repeat(40);
+const COMMIT = "e".repeat(40);
 const TREE = "d".repeat(40);
 const ON = { MARKETING_SEO_AGENT_ENABLED: "true" };
 
-const fakePorts = (overrides = {}) => {
+const recorder = (table, overrides) => {
     const calls = [];
-    const record = (name, value) => async (...args) => {
+    const wrap = (name, value) => async (...args) => {
         calls.push(name);
         return typeof value === "function" ? value(...args) : value;
     };
-    const ports = {
-        prepareWorktree: record("prepareWorktree", "/tmp/wt"),
-        readFiles: record("readFiles", files),
-        propose: record("propose", {
-            status: "answered", callId: "c", requestKey: "k", citations: [], ledgerState: "settled",
-            content: proposal([{ path: "lib/seo.ts", find: "A = 1", replace: "A = 2" }]),
-        }),
-        writeFiles: record("writeFiles", undefined),
-        stagedDiff: record("stagedDiff", { raw: GOOD_RAW, numstat: GOOD_NUMSTAT }),
-        baseTests: record("baseTests", ["tests/seoHreflang.test.mjs"]),
-        runChecks: record("runChecks", { ok: true }),
-        commit: record("commit", { commitSha: "e".repeat(40), treeHash: TREE }),
-        treeOf: record("treeOf", TREE),
-        lookupGraduation: record("lookupGraduation", false),
-        push: record("push", undefined),
-        remoteTree: record("remoteTree", TREE),
-        deleteBranch: record("deleteBranch", undefined),
-        createPullRequest: record("createPullRequest", { url: "https://github.com/o/r/pull/1" }),
-        cleanup: record("cleanup", undefined),
-        ...Object.fromEntries(Object.entries(overrides).map(([name, value]) => [name, record(name, value)])),
-    };
+    const ports = Object.fromEntries(Object.entries({ ...table, ...overrides }).map(([name, value]) => [name, wrap(name, value)]));
     return { ports, calls };
 };
-const run = (ports, env = ON, topic = "Improve hreflang") => runSeoAgent({ topic, baseCommit: BASE, env }, ports);
 
-test("off: nothing is prepared, nothing is called", async () => {
+const validatePorts = (overrides = {}) =>
+    recorder(
+        {
+            prepareWorkspace: "/tmp/wt",
+            readFiles: files,
+            propose: {
+                status: "answered", callId: "c", requestKey: "k", citations: [], ledgerState: "settled",
+                content: proposal([{ path: "lib/seo.ts", find: "A = 1", replace: "A = 2" }]),
+            },
+            writeFiles: undefined,
+            stagedDiff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT },
+            indexTree: TREE,
+            baseTests: ["tests/seoHreflang.test.mjs"],
+            runChecks: { ok: true },
+            commit: { commitSha: COMMIT, treeHash: TREE },
+            exportCommit: undefined,
+            cleanup: undefined,
+        },
+        overrides,
+    );
+const validate = (ports, env = ON, topic = "Improve hreflang") => runSeoAgentValidate({ topic, baseCommit: BASE, env }, ports);
+
+test("validate off: nothing is prepared, nothing is called", async () => {
     for (const env of [{}, { MARKETING_SEO_AGENT_ENABLED: "true", MARKETING_AUTOMATION_KILL_SWITCH: "1" }]) {
-        const { ports, calls } = fakePorts();
-        const result = await run(ports, env);
+        const { ports, calls } = validatePorts();
+        const result = await validate(ports, env);
         assert.equal(result.status, "off");
         assert.deepEqual(calls, []);
     }
 });
 
-test("a topic that is not a branch segment is refused before any worktree or call", async () => {
-    const { ports, calls } = fakePorts();
-    assert.deepEqual(await run(ports, ON, "to-develop"), { status: "invalid_topic" });
+test("validate refuses to start with the GitHub token in its environment", async () => {
+    const { ports, calls } = validatePorts();
+    const result = await validate(ports, { ...ON, MARKETING_SEO_GITHUB_APP_TOKEN: "t" });
+    assert.deepEqual(result, { status: "wrong_environment", problems: ["MARKETING_SEO_GITHUB_APP_TOKEN"] });
     assert.deepEqual(calls, []);
 });
 
-test("before graduation: a validated change is pushed to marketing-agent/<topic> and a draft PR is opened", async () => {
-    const pushes = [];
-    const pulls = [];
-    const { ports, calls } = fakePorts({
-        push: (_dir, commit, branch) => pushes.push([commit, branch]),
-        createPullRequest: (input) => { pulls.push(input); return { url: "https://github.com/o/r/pull/9" }; },
+test("a topic that is not a branch segment is refused before any clone or call", async () => {
+    const { ports, calls } = validatePorts();
+    assert.deepEqual(await validate(ports, ON, "to-develop"), { status: "invalid_topic" });
+    assert.deepEqual(calls, []);
+});
+
+test("a validated change becomes a record, in the policy's order, with one paid call", async () => {
+    const { ports, calls } = validatePorts();
+    const result = await validate(ports);
+    assert.equal(result.status, "validated");
+    assert.deepEqual(result.record, {
+        topic: "Improve hreflang", summary: "Tidy constants", baseCommit: BASE, commitSha: COMMIT, treeHash: TREE,
+        paths: ["lib/seo.ts"], changedLines: 4,
     });
-    const result = await run(ports);
-    assert.deepEqual(result, {
-        status: "pushed", branch: "marketing-agent/improve-hreflang", graduated: false, treeHash: TREE,
-        pullRequestUrl: "https://github.com/o/r/pull/9",
-    });
-    assert.deepEqual(pushes, [["e".repeat(40), "marketing-agent/improve-hreflang"]]);
-    assert.equal(pulls.length, 1);
-    assert.match(pulls[0].body, new RegExp(`Validated tree: ${TREE}`));
-    assert.match(pulls[0].body, /nothing here enables auto-merge/);
-    // The order is the policy's: propose, validate, check, commit, only then push.
-    for (const [before, after] of [["propose", "writeFiles"], ["writeFiles", "stagedDiff"], ["stagedDiff", "runChecks"], ["runChecks", "commit"], ["commit", "push"], ["push", "remoteTree"], ["remoteTree", "createPullRequest"]]) {
+    assert.equal(seoAgentRecordSchema.safeParse(result.record).success, true);
+    for (const [before, after] of [["propose", "writeFiles"], ["writeFiles", "stagedDiff"], ["stagedDiff", "indexTree"], ["indexTree", "runChecks"], ["runChecks", "commit"], ["commit", "exportCommit"]]) {
         assert.ok(calls.indexOf(before) >= 0 && calls.indexOf(before) < calls.lastIndexOf(after), `${before} before ${after}`);
     }
     assert.equal(calls.at(-1), "cleanup");
-    assert.equal(calls.filter((name) => name === "propose").length, 1, "one paid call");
-});
-
-test("after graduation: the branch carries to-develop and the workflow, not this agent, opens the PR", async () => {
-    const { ports, calls } = fakePorts({ lookupGraduation: true });
-    const result = await run(ports);
-    assert.equal(result.status, "pushed");
-    assert.equal(result.branch, "marketing-agent/to-develop/improve-hreflang");
-    assert.equal(result.graduated, true);
-    assert.equal(result.pullRequestUrl, null);
-    assert.ok(!calls.includes("createPullRequest"));
-});
-
-test("a graduation lookup that fails is not graduated", async () => {
-    const { ports } = fakePorts({ lookupGraduation: () => { throw new Error("unreachable"); } });
-    const result = await run(ports);
-    assert.equal(result.branch, "marketing-agent/improve-hreflang");
-    assert.equal(result.graduated, false);
+    assert.equal(calls.filter((name) => name === "propose").length, 1);
+    // The validate ports have no way to reach GitHub.
+    assert.deepEqual(Object.keys(ports).filter((name) => /push|pull|branch|remote|graduat/i.test(name)), []);
 });
 
 test("a stopped, refused or unknown LLM call ends the run with nothing written", async () => {
@@ -445,43 +444,64 @@ test("a stopped, refused or unknown LLM call ends the run with nothing written",
         { status: "stopped", stage: "settle", callId: "c", requestKey: "k", content: proposal([{ path: "lib/seo.ts", find: "A = 1", replace: "A = 2" }]) },
         { status: "retained", callId: "c", requestKey: "k", ledgerState: "unknown_retained" },
     ]) {
-        const { ports, calls } = fakePorts({ propose: outcome });
-        const result = await run(ports);
-        assert.equal(result.status, "llm_stopped");
-        assert.ok(!calls.includes("writeFiles") && !calls.includes("push"));
+        const { ports, calls } = validatePorts({ propose: outcome });
+        assert.equal((await validate(ports)).status, "llm_stopped");
+        assert.ok(!calls.includes("writeFiles") && !calls.includes("commit"));
     }
 });
 
 test("an input over the size limit is refused before the paid call", async () => {
-    const { ports, calls } = fakePorts({ readFiles: { ...files, "lib/seo.ts": "x".repeat(SEO_AGENT_MAX_INPUT_CHARS + 1) } });
-    assert.deepEqual(await run(ports), { status: "input_too_large" });
+    const { ports, calls } = validatePorts({ readFiles: { ...files, "lib/seo.ts": "x".repeat(SEO_AGENT_MAX_INPUT_CHARS + 1) } });
+    assert.deepEqual(await validate(ports), { status: "input_too_large" });
     assert.ok(!calls.includes("propose"));
 });
 
 test("a refused proposal writes nothing", async () => {
-    const { ports, calls } = fakePorts({ propose: { status: "answered", callId: "c", requestKey: "k", citations: [], ledgerState: "settled", content: proposal([{ path: "package.json", find: "a", replace: "b" }]) } });
-    assert.deepEqual(await run(ports), { status: "proposal_refused", refusal: "path_outside_allowlist" });
+    const { ports, calls } = validatePorts({ propose: { status: "answered", callId: "c", requestKey: "k", citations: [], ledgerState: "settled", content: proposal([{ path: "package.json", find: "a", replace: "b" }]) } });
+    assert.deepEqual(await validate(ports), { status: "proposal_refused", refusal: "path_outside_allowlist" });
     assert.ok(!calls.includes("writeFiles"));
 });
 
 test("git's diff decides: a change outside the list is refused even when the proposal looked clean", async () => {
     const raw = GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0tests/llmsTxtRoute.test.mjs\0`;
     const numstat = GOOD_NUMSTAT + "1\t1\ttests/llmsTxtRoute.test.mjs\0";
-    const { ports, calls } = fakePorts({ stagedDiff: { raw, numstat } });
-    const result = await run(ports);
-    assert.deepEqual(result, { status: "validation_failed", problems: ["path_outside_allowlist"] });
-    assert.ok(!calls.includes("runChecks") && !calls.includes("commit") && !calls.includes("push"));
+    const { ports, calls } = validatePorts({ stagedDiff: { raw, numstat } });
+    assert.deepEqual(await validate(ports), { status: "validation_failed", problems: ["path_outside_allowlist"] });
+    assert.ok(!calls.includes("runChecks") && !calls.includes("commit"));
 });
 
-test("the checks run before the commit, and a failed check stops the run", async () => {
-    const { ports, calls } = fakePorts({ runChecks: { ok: false, label: "policy tests" } });
-    assert.deepEqual(await run(ports), { status: "checks_failed", label: "policy tests" });
-    assert.ok(!calls.includes("commit") && !calls.includes("push"));
+test("no policy test at the base commit fails closed instead of running every test", async () => {
+    for (const tests of [[], ["tests/mine.test.mjs"]]) {
+        const { ports, calls } = validatePorts({ baseTests: tests });
+        assert.deepEqual(await validate(ports), { status: "no_policy_tests" });
+        assert.ok(!calls.includes("runChecks") && !calls.includes("commit"));
+    }
+    assert.throws(() => seoAgentCheckCommands([], ["lib/seo.ts"]), /no policy test/);
 });
 
-test("a diff that changed while the checks ran is judged again", async () => {
+test("a failed check stops the run before the commit", async () => {
+    const { ports, calls } = validatePorts({ runChecks: { ok: false, label: "policy tests" } });
+    assert.deepEqual(await validate(ports), { status: "checks_failed", label: "policy tests" });
+    assert.ok(!calls.includes("commit") && !calls.includes("exportCommit"));
+});
+
+test("the tree is fixed before the checks: a check that rewrites an allowed file is caught", async () => {
+    // Same allowed path, same line counts -- only the content differs, so only the tree can tell.
+    let reads = 0;
+    const { ports, calls } = validatePorts({ indexTree: () => (++reads === 1 ? TREE : "9".repeat(40)) });
+    assert.deepEqual(await validate(ports), { status: "tree_changed", stage: "during_checks" });
+    assert.ok(!calls.includes("commit") && !calls.includes("exportCommit"));
+});
+
+test("a commit whose tree is not the fixed tree is refused", async () => {
+    const { ports, calls } = validatePorts({ commit: { commitSha: COMMIT, treeHash: "9".repeat(40) } });
+    assert.deepEqual(await validate(ports), { status: "tree_changed", stage: "at_commit" });
+    assert.ok(!calls.includes("exportCommit"));
+});
+
+test("a diff that gained a file while the checks ran is judged again", async () => {
     let views = 0;
-    const { ports, calls } = fakePorts({
+    const { ports, calls } = validatePorts({
         stagedDiff: () => {
             views += 1;
             return views === 1
@@ -489,31 +509,144 @@ test("a diff that changed while the checks ran is judged again", async () => {
                 : { raw: GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0package.json\0`, numstat: GOOD_NUMSTAT + "1\t0\tpackage.json\0" };
         },
     });
-    const result = await run(ports);
-    assert.equal(result.status, "validation_failed");
+    assert.equal((await validate(ports)).status, "validation_failed");
     assert.ok(!calls.includes("commit"));
 });
 
-test("a tree hash that differs before the push stops the run before the push", async () => {
-    const { ports, calls } = fakePorts({ treeOf: "f".repeat(40) });
-    assert.deepEqual(await run(ports), { status: "tree_mismatch", stage: "before_push" });
-    assert.ok(!calls.includes("push") && !calls.includes("createPullRequest"));
+test("the clone is cleaned up whether the run succeeds, is refused or throws", async () => {
+    const thrown = validatePorts({ runChecks: () => { throw new Error("boom"); } });
+    await assert.rejects(validate(thrown.ports), /boom/);
+    assert.equal(thrown.calls.at(-1), "cleanup");
+    const refused = validatePorts({ runChecks: { ok: false, label: "lint" } });
+    await validate(refused.ports);
+    assert.equal(refused.calls.at(-1), "cleanup");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 (publish), over fake ports
+// ---------------------------------------------------------------------------
+
+const RECORD = {
+    topic: "Improve hreflang", summary: "Tidy constants", baseCommit: BASE, commitSha: COMMIT, treeHash: TREE,
+    paths: ["lib/seo.ts"], changedLines: 4,
+};
+const PUBLISH_ENV = { ...ON, MARKETING_SEO_GITHUB_APP_TOKEN: "t", MARKETING_SEO_GITHUB_REPOSITORY: "o/r" };
+
+const publishPorts = (overrides = {}) =>
+    recorder(
+        {
+            importCommit: undefined,
+            commitFacts: { tree: TREE, parent: BASE, parentCount: 1 },
+            diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT },
+            lookupGraduation: false,
+            push: undefined,
+            remoteTree: TREE,
+            deleteBranch: undefined,
+            createPullRequest: { url: "https://github.com/o/r/pull/1" },
+        },
+        overrides,
+    );
+const publish = (ports, record = RECORD, env = PUBLISH_ENV) => runSeoAgentPublish({ record, env }, ports);
+
+test("publish off, or with an LLM variable in its environment, touches nothing", async () => {
+    for (const env of [{}, { ...PUBLISH_ENV, MARKETING_AUTOMATION_KILL_SWITCH: "1" }]) {
+        const { ports, calls } = publishPorts();
+        assert.equal((await publish(ports, RECORD, env)).status, "off");
+        assert.deepEqual(calls, []);
+    }
+    for (const name of ["MARKETING_LLM_API_KEY", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_APP_URL"]) {
+        const { ports, calls } = publishPorts();
+        const result = await publish(ports, RECORD, { ...PUBLISH_ENV, [name]: "x" });
+        assert.deepEqual(result, { status: "wrong_environment", problems: [name] });
+        assert.deepEqual(calls, []);
+    }
+});
+
+test("the phase checks name the other phase's secrets", () => {
+    assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_SEO_GITHUB_APP_TOKEN: "t" }, "validate"), ["MARKETING_SEO_GITHUB_APP_TOKEN"]);
+    assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_LLM_API_KEY: "k" }, "validate"), []);
+    assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_SEO_GITHUB_APP_TOKEN: "t" }, "publish"), []);
+    assert.deepEqual(seoAgentPhaseEnvProblems({ MARKETING_LLM_API_KEY: "" }, "publish"), []);
+});
+
+test("a record that does not parse is refused before anything is imported", async () => {
+    for (const record of [null, {}, { ...RECORD, commitSha: "xyz" }, { ...RECORD, paths: ["package.json"] }, { ...RECORD, paths: [] },
+        { ...RECORD, changedLines: 501 }, { ...RECORD, extra: 1 }, { ...RECORD, treeHash: TREE.toUpperCase() }]) {
+        const { ports, calls } = publishPorts();
+        assert.deepEqual(await publish(ports, record), { status: "invalid_record" }, JSON.stringify(record));
+        assert.deepEqual(calls, []);
+    }
+});
+
+test("before graduation: the commit is pushed to marketing-agent/<topic> and a draft PR is opened", async () => {
+    const pushes = [];
+    const pulls = [];
+    const { ports, calls } = publishPorts({
+        push: (commit, branch) => pushes.push([commit, branch]),
+        createPullRequest: (input) => { pulls.push(input); return { url: "https://github.com/o/r/pull/9" }; },
+    });
+    assert.deepEqual(await publish(ports), {
+        status: "pushed", branch: "marketing-agent/improve-hreflang", graduated: false, treeHash: TREE,
+        pullRequestUrl: "https://github.com/o/r/pull/9",
+    });
+    assert.deepEqual(pushes, [[COMMIT, "marketing-agent/improve-hreflang"]]);
+    assert.match(pulls[0].body, new RegExp(`Validated tree: ${TREE}`));
+    assert.match(pulls[0].body, /nothing here enables auto-merge/);
+    for (const [before, after] of [["importCommit", "commitFacts"], ["commitFacts", "diff"], ["diff", "push"], ["push", "remoteTree"], ["remoteTree", "createPullRequest"]]) {
+        assert.ok(calls.indexOf(before) >= 0 && calls.indexOf(before) < calls.indexOf(after), `${before} before ${after}`);
+    }
+});
+
+test("after graduation: the branch carries to-develop and the workflow, not this agent, opens the PR", async () => {
+    const { ports, calls } = publishPorts({ lookupGraduation: true });
+    const result = await publish(ports);
+    assert.equal(result.branch, "marketing-agent/to-develop/improve-hreflang");
+    assert.equal(result.graduated, true);
+    assert.equal(result.pullRequestUrl, null);
+    assert.ok(!calls.includes("createPullRequest"));
+});
+
+test("a graduation lookup that fails is not graduated", async () => {
+    const { ports } = publishPorts({ lookupGraduation: () => { throw new Error("unreachable"); } });
+    const result = await publish(ports);
+    assert.equal(result.branch, "marketing-agent/improve-hreflang");
+    assert.equal(result.graduated, false);
+});
+
+test("the publish phase reads the commit's tree and parent from git and pushes nothing that differs from the record", async () => {
+    for (const facts of [
+        { tree: "f".repeat(40), parent: BASE, parentCount: 1 },
+        { tree: TREE, parent: "f".repeat(40), parentCount: 1 },
+        { tree: TREE, parent: BASE, parentCount: 2 },
+        { tree: TREE, parent: null, parentCount: 0 },
+    ]) {
+        const { ports, calls } = publishPorts({ commitFacts: facts });
+        assert.deepEqual(await publish(ports), { status: "tree_mismatch", stage: "before_push" });
+        assert.ok(!calls.includes("push") && !calls.includes("createPullRequest"));
+    }
+});
+
+test("the diff is judged again from git: a record cannot launder a commit that touches another file", async () => {
+    const raw = GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0.github/workflows/auto-pr-to-develop.yml\0`;
+    const numstat = GOOD_NUMSTAT + "1\t1\t.github/workflows/auto-pr-to-develop.yml\0";
+    const { ports, calls } = publishPorts({ diff: { raw, numstat } });
+    assert.deepEqual(await publish(ports), { status: "validation_failed", problems: ["path_outside_allowlist"] });
+    assert.ok(!calls.includes("push"));
 });
 
 test("a remote tree that differs after the push opens no PR and removes the branch", async () => {
     for (const remote of ["f".repeat(40), null]) {
-        const { ports, calls } = fakePorts({ remoteTree: remote });
-        assert.deepEqual(await run(ports), { status: "tree_mismatch", stage: "after_push" });
+        const { ports, calls } = publishPorts({ remoteTree: remote });
+        assert.deepEqual(await publish(ports), { status: "tree_mismatch", stage: "after_push" });
         assert.ok(calls.includes("deleteBranch"));
         assert.ok(!calls.includes("createPullRequest"));
-        assert.equal(calls.at(-1), "cleanup");
     }
 });
 
-test("the worktree is cleaned up whether the run succeeds, is refused or throws", async () => {
-    const thrown = fakePorts({ runChecks: () => { throw new Error("boom"); } });
-    await assert.rejects(run(thrown.ports), /boom/);
-    assert.equal(thrown.calls.at(-1), "cleanup");
+test("an import that fails stops the run before a push", async () => {
+    const { ports, calls } = publishPorts({ importCommit: () => { throw new Error("not in the bundle"); } });
+    await assert.rejects(publish(ports), /not in the bundle/);
+    assert.ok(!calls.includes("push"));
 });
 
 // ---------------------------------------------------------------------------
@@ -525,12 +658,20 @@ test("neither the core nor the runner has any merge or auto-merge call", () => {
         const source = readFileSync(new URL(path, import.meta.url), "utf8");
         assert.doesNotMatch(source, /enablePullRequestAutoMerge|auto_merge|merge_method|pulls\/\$\{[^}]*\}\/merge|\/merge["'`]|gh pr merge|mergePullRequest/i, path);
     }
-    const { ports } = fakePorts();
-    assert.deepEqual(Object.keys(ports).filter((name) => /merge/i.test(name)), []);
+    for (const { ports } of [validatePorts(), publishPorts()]) {
+        assert.deepEqual(Object.keys(ports).filter((name) => /merge/i.test(name)), []);
+    }
 });
 
 test("the runner reads no robots policy, workflow or test file into the prompt", () => {
     const source = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
     assert.doesNotMatch(source, /robotsPolicyCore/);
     assert.match(source, /SEO_AGENT_ALLOWED_FILES\.map/);
+});
+
+test("the runner starts the checks with the allowlisted environment, not its own", () => {
+    const source = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
+    assert.match(source, /seoAgentStageEnvironment\(process\.env, "checks"\)/);
+    assert.doesNotMatch(source, /spawn(Sync)?\([^)]*env:\s*process\.env/s);
+    assert.doesNotMatch(source, /\.\.\.process\.env/);
 });

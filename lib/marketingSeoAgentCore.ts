@@ -8,22 +8,27 @@
  *
  * 1. **A default-off switch.** `MARKETING_SEO_AGENT_ENABLED` must be exactly
  *    `true` and the marketing kill switch must be empty. Off, nothing below
- *    runs: no worktree, no LLM call.
+ *    runs: no clone, no LLM call. The LLM child checks the same gate itself.
  * 2. **An LLM stage that can only propose.** One text call through the
  *    marketing cost ledger (no tools, no repository write, no GitHub token).
  *    The model returns find/replace edits for the four allowed files. It never
  *    edits a file itself.
- * 3. **A validation stage that does not trust the proposal.** The edits are
- *    applied in an isolated worktree at the base commit, and the resulting
- *    diff -- as git reports it, not as the proposal describes it -- is judged
- *    by `validateSeoChanges`: exactly the four allowed paths, no rename,
- *    delete, copy, type change, binary, symlink, submodule or mode change, and
- *    at most 500 changed lines. Then lint, typecheck and the policy tests
- *    **as they are at the base commit**: the tests are human-owned, are not in
- *    the allowed list, and the validator refuses any diff that touches them.
- * 4. **A tree hash that is carried, not re-derived.** The validated commit's
- *    tree hash is recorded and compared again right before the push and again
- *    against what the remote holds after it. A PR is opened only on a match.
+ * 3. **A validation phase that does not trust the proposal.** The edits are
+ *    applied in an isolated clone at the base commit, and the resulting diff
+ *    -- as git reports it, not as the proposal describes it -- is judged by
+ *    `validateSeoChanges`: exactly the four allowed paths, no rename, delete,
+ *    copy, type change, binary, symlink, submodule or mode change, and at most
+ *    500 changed lines. The staged tree is fixed *before* the checks (lint,
+ *    typecheck and the policy tests **as they are at the base commit**), read
+ *    again after them, and the commit must carry that same tree. The tests are
+ *    human-owned, are not in the allowed list, and the validator refuses any
+ *    diff that touches them. This phase holds no GitHub token: the checks
+ *    execute the proposed code.
+ * 4. **A publish phase that re-derives instead of trusting.** It holds the
+ *    GitHub token and no LLM variable. From the validation phase it takes only
+ *    a commit and a record; the commit's tree, parent and diff are read from
+ *    git again, and the push goes out only if they are the validated ones. The
+ *    remote is read back after the push; a PR is opened only on a match.
  * 5. **No merge authority.** There is no auto-merge call anywhere in this
  *    file. Before graduation the branch is `marketing-agent/<topic>`, which no
  *    workflow acts on, and the agent opens a draft PR for a person to merge.
@@ -103,13 +108,23 @@ export function seoAgentGate(env: Readonly<Record<string, string | undefined>>):
 // What each stage may hold
 // ---------------------------------------------------------------------------
 
-export type SeoAgentStage = "llm" | "publish";
+export type SeoAgentStage = "llm" | "checks" | "publish";
 
-const BASE_VARIABLES = ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE"] as const;
+/** What Node, git and npm need to start, and nothing that is a credential. */
+const BASE_VARIABLES = [
+  "PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "windir", "ComSpec", "COMSPEC",
+  "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "LANG",
+] as const;
 
 const STAGE_VARIABLES: Readonly<Record<SeoAgentStage, readonly string[]>> = {
   // The cost ledger's app, its secret, and the provider key. No repository or GitHub credential.
-  llm: ["MARKETING_APP_URL", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_LLM_API_KEY"],
+  // The switch and kill switch go too, so the child checks the gate itself.
+  llm: [
+    "MARKETING_APP_URL", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_LLM_API_KEY",
+    SEO_AGENT_SWITCH_ENV, SEO_AGENT_KILL_SWITCH_ENV,
+  ],
+  // Runs the proposed code: an allowlist of what Node needs, so no other variable of the parent is there to read.
+  checks: ["NODE_OPTIONS", "CI"],
   // The GitHub App token and nothing of the LLM's.
   publish: [SEO_AGENT_GITHUB_TOKEN_ENV, SEO_AGENT_GITHUB_REPOSITORY_ENV],
 };
@@ -437,6 +452,8 @@ export function seoAgentCheckCommands(
   changedPaths: readonly string[],
 ): SeoCheckCommand[] {
   const tests = SEO_AGENT_POLICY_TESTS.filter((path) => existingTests.includes(path));
+  // `node --test` with no files discovers whatever is in the tree; a list that is empty is an error, not "all".
+  if (tests.length === 0) throw new Error("no policy test exists at the base commit");
   return [
     { label: "lint", argv: ["npx", "eslint", ...changedPaths] },
     { label: "typecheck", argv: ["npm", "run", "typecheck"] },
@@ -457,51 +474,87 @@ export function seoAgentCheckCommands(
 }
 
 // ---------------------------------------------------------------------------
-// Orchestration
+// Orchestration, in two phases
 // ---------------------------------------------------------------------------
+//
+// Validation executes code the model proposed (the policy tests import
+// lib/seo.ts and app/sitemap.ts), so it must not run where a push credential
+// is. The work is therefore two phases that never share a process or an
+// environment:
+//
+//   validate  holds the ledger variables (for the LLM child) and no GitHub
+//             token. It ends with a commit, a bundle of it and a record.
+//   publish   holds the GitHub token and no LLM variable. It reads the record
+//             and the bundle, takes the commit into the trusted clone, and
+//             re-derives everything it relies on from git before pushing.
+//
+// The record is a claim, not an authority: `runSeoAgentPublish` recomputes the
+// commit's tree and diff itself and refuses on any difference.
 
-export type SeoAgentPorts = {
-  /** Detached worktree at `baseCommit`, with dependencies linked. Returns its directory. */
-  readonly prepareWorktree: (baseCommit: string) => Promise<string>;
+const SHA1 = /^[0-9a-f]{40}$/;
+
+export const seoAgentRecordSchema = z
+  .object({
+    topic: z.string().min(1).max(300),
+    summary: z.string().min(1).max(200),
+    baseCommit: z.string().regex(SHA1),
+    commitSha: z.string().regex(SHA1),
+    treeHash: z.string().regex(SHA1),
+    paths: z.array(z.enum(SEO_AGENT_ALLOWED_FILES)).min(1).max(SEO_AGENT_ALLOWED_FILES.length),
+    changedLines: z.number().int().min(1).max(SEO_AGENT_MAX_CHANGED_LINES),
+  })
+  .strict();
+
+export type SeoAgentRecord = z.infer<typeof seoAgentRecordSchema>;
+
+export type SeoPhase = "validate" | "publish";
+
+/** Variables a phase must not be started with. A phase that finds one refuses to run. */
+export function seoAgentPhaseEnvProblems(
+  env: Readonly<Record<string, string | undefined>>,
+  phase: SeoPhase,
+): string[] {
+  const forbidden =
+    phase === "validate"
+      ? [SEO_AGENT_GITHUB_TOKEN_ENV]
+      : ["MARKETING_LLM_API_KEY", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_APP_URL"];
+  return forbidden.filter((name) => typeof env[name] === "string" && (env[name] as string).length > 0);
+}
+
+export type SeoValidatePorts = {
+  /** A clone of the repository, detached at `baseCommit`, with dependencies linked. Returns its directory. */
+  readonly prepareWorkspace: (baseCommit: string) => Promise<string>;
   readonly readFiles: (dir: string) => Promise<Record<string, string | null>>;
   /** The one paid call. Never given a repository or GitHub credential. */
   readonly propose: (messages: readonly MarketingLlmMessage[]) => Promise<MarketingLlmCallOutcome>;
   readonly writeFiles: (dir: string, files: Readonly<Record<string, string>>) => Promise<void>;
-  /** Stage every change in the worktree and return git's two views of the diff against the base commit. */
+  /** Stage every change in the workspace and return git's two views of the staged diff against the base commit. */
   readonly stagedDiff: (dir: string, baseCommit: string) => Promise<{ raw: string; numstat: string }>;
+  /** The tree hash of what is staged (`git write-tree`). */
+  readonly indexTree: (dir: string) => Promise<string>;
   /** Policy tests that exist in the base commit. */
   readonly baseTests: (baseCommit: string) => Promise<readonly string[]>;
   readonly runChecks: (dir: string, commands: readonly SeoCheckCommand[]) => Promise<{ ok: true } | { ok: false; label: string }>;
   /** Commit the staged change and return the commit and its tree hash. */
   readonly commit: (dir: string, message: string) => Promise<{ commitSha: string; treeHash: string }>;
-  /** Tree hash of a commit in the worktree. */
-  readonly treeOf: (dir: string, commitSha: string) => Promise<string>;
-  readonly lookupGraduation: () => Promise<boolean>;
-  readonly push: (dir: string, commitSha: string, branch: string) => Promise<void>;
-  /** The tree hash of the commit the remote branch now points at, or null when it cannot be read. */
-  readonly remoteTree: (branch: string) => Promise<string | null>;
-  readonly deleteBranch: (branch: string) => Promise<void>;
-  readonly createPullRequest: (input: { branch: string; title: string; body: string }) => Promise<{ url: string }>;
+  /** Write the commit (objects only) where the publish phase will read it. */
+  readonly exportCommit: (dir: string, baseCommit: string, commitSha: string) => Promise<void>;
   readonly cleanup: (dir: string) => Promise<void>;
 };
 
-export type SeoAgentResult =
+export type SeoValidateResult =
   | { readonly status: "off"; readonly reason: string }
+  | { readonly status: "wrong_environment"; readonly problems: readonly string[] }
   | { readonly status: "invalid_topic" }
   | { readonly status: "input_too_large" }
   | { readonly status: "llm_stopped"; readonly detail: string }
   | { readonly status: "proposal_refused"; readonly refusal: SeoProposalRefusal }
   | { readonly status: "validation_failed"; readonly problems: readonly SeoValidationProblem[] }
+  | { readonly status: "no_policy_tests" }
   | { readonly status: "checks_failed"; readonly label: string }
-  | { readonly status: "tree_mismatch"; readonly stage: "before_push" | "after_push" }
-  | {
-      readonly status: "pushed";
-      readonly branch: string;
-      readonly graduated: boolean;
-      readonly treeHash: string;
-      /** Set before graduation, when this agent opened the draft PR. After graduation the workflow opens it. */
-      readonly pullRequestUrl: string | null;
-    };
+  /** The staged tree at the three moments it is read -- before the checks, after them, and as committed -- was not one tree. */
+  | { readonly status: "tree_changed"; readonly stage: "during_checks" | "at_commit" }
+  | { readonly status: "validated"; readonly record: SeoAgentRecord };
 
 export function seoAgentCommitMessage(summary: string, topic: string): string {
   const subject = `seo(marketing-agent): ${summary.replace(/\s+/g, " ").trim()}`.slice(0, 100);
@@ -510,40 +563,35 @@ export function seoAgentCommitMessage(summary: string, topic: string): string {
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
-export function seoAgentPullRequestBody(input: {
-  readonly summary: string;
-  readonly topic: string;
-  readonly baseCommit: string;
-  readonly treeHash: string;
-  readonly changedLines: number;
-  readonly paths: readonly string[];
-}): string {
+export function seoAgentPullRequestBody(record: SeoAgentRecord): string {
   return [
     "Opened by the marketing SEO code agent (policy 9.2). A person merges this; nothing here enables auto-merge.",
     "",
-    `- Summary: ${input.summary.replace(/\s+/g, " ").trim().slice(0, 200)}`,
-    `- Topic digest: ${sha256(input.topic).slice(0, 16)}`,
-    `- Base commit: ${input.baseCommit}`,
-    `- Validated tree: ${input.treeHash}`,
-    `- Changed lines: ${input.changedLines} (limit ${SEO_AGENT_MAX_CHANGED_LINES})`,
-    `- Files: ${input.paths.join(", ")}`,
-    "- Checks passed before this push: lint, typecheck, the policy tests as they are at the base commit.",
+    `- Summary: ${record.summary.replace(/\s+/g, " ").trim().slice(0, 200)}`,
+    `- Topic digest: ${sha256(record.topic).slice(0, 16)}`,
+    `- Base commit: ${record.baseCommit}`,
+    `- Validated tree: ${record.treeHash}`,
+    `- Changed lines: ${record.changedLines} (limit ${SEO_AGENT_MAX_CHANGED_LINES})`,
+    `- Files: ${record.paths.join(", ")}`,
+    "- Checks passed before this commit: lint, typecheck, the policy tests as they are at the base commit.",
   ].join("\n");
 }
 
-export async function runSeoAgent(
+export async function runSeoAgentValidate(
   input: {
     readonly topic: string;
     readonly baseCommit: string;
     readonly env: Readonly<Record<string, string | undefined>>;
   },
-  ports: SeoAgentPorts,
-): Promise<SeoAgentResult> {
+  ports: SeoValidatePorts,
+): Promise<SeoValidateResult> {
   const gate = seoAgentGate(input.env);
   if (!gate.on) return { status: "off", reason: gate.reason };
+  const wrong = seoAgentPhaseEnvProblems(input.env, "validate");
+  if (wrong.length > 0) return { status: "wrong_environment", problems: wrong };
   if (seoAgentTopicSlug(input.topic) === null) return { status: "invalid_topic" };
 
-  const dir = await ports.prepareWorktree(input.baseCommit);
+  const dir = await ports.prepareWorkspace(input.baseCommit);
   try {
     const original = await ports.readFiles(dir);
     if (seoAgentInputChars(original) > SEO_AGENT_MAX_INPUT_CHARS) return { status: "input_too_large" };
@@ -560,48 +608,112 @@ export async function runSeoAgent(
     const validation = validateSeoChanges(seoGitChanges(diff.raw, diff.numstat));
     if (!validation.ok) return { status: "validation_failed", problems: validation.problems };
 
-    const checks = await ports.runChecks(
-      dir,
-      seoAgentCheckCommands(await ports.baseTests(input.baseCommit), validation.paths),
-    );
+    // The tree is fixed here, before any check runs. The checks execute the
+    // proposed code, so what they leave behind is read again and must be this tree.
+    const fixedTree = await ports.indexTree(dir);
+
+    const tests = await ports.baseTests(input.baseCommit);
+    // Fail closed: `node --test` with no file list would discover whatever is in the tree.
+    if (!SEO_AGENT_POLICY_TESTS.some((path) => tests.includes(path))) return { status: "no_policy_tests" };
+    const checks = await ports.runChecks(dir, seoAgentCheckCommands(tests, validation.paths));
     if (!checks.ok) return { status: "checks_failed", label: checks.label };
 
-    // The checks ran code in the worktree; the change that is committed is judged again.
     const after = await ports.stagedDiff(dir, input.baseCommit);
     const revalidation = validateSeoChanges(seoGitChanges(after.raw, after.numstat));
     if (!revalidation.ok) return { status: "validation_failed", problems: revalidation.problems };
+    if ((await ports.indexTree(dir)) !== fixedTree) return { status: "tree_changed", stage: "during_checks" };
 
     const { commitSha, treeHash } = await ports.commit(dir, seoAgentCommitMessage(applied.summary, input.topic));
+    if (treeHash !== fixedTree) return { status: "tree_changed", stage: "at_commit" };
     const committedDiff = await ports.stagedDiff(dir, input.baseCommit);
     const committed = validateSeoChanges(seoGitChanges(committedDiff.raw, committedDiff.numstat));
     if (!committed.ok) return { status: "validation_failed", problems: committed.problems };
 
-    const graduated = await seoAgentIsGraduated(ports.lookupGraduation);
-    const branch = seoAgentBranchName(input.topic, graduated);
-    if (branch === null) return { status: "invalid_topic" };
-
-    if ((await ports.treeOf(dir, commitSha)) !== treeHash) return { status: "tree_mismatch", stage: "before_push" };
-    await ports.push(dir, commitSha, branch);
-    if ((await ports.remoteTree(branch)) !== treeHash) {
-      await ports.deleteBranch(branch).catch(() => undefined);
-      return { status: "tree_mismatch", stage: "after_push" };
-    }
-    if (graduated) return { status: "pushed", branch, graduated, treeHash, pullRequestUrl: null };
-
-    const pullRequest = await ports.createPullRequest({
-      branch,
-      title: seoAgentCommitMessage(applied.summary, input.topic).split("\n")[0] as string,
-      body: seoAgentPullRequestBody({
+    await ports.exportCommit(dir, input.baseCommit, commitSha);
+    return {
+      status: "validated",
+      record: {
+        topic: String(input.topic).slice(0, 300),
         summary: applied.summary,
-        topic: input.topic,
         baseCommit: input.baseCommit,
+        commitSha,
         treeHash,
+        paths: committed.paths as SeoAgentRecord["paths"],
         changedLines: committed.changedLines,
-        paths: committed.paths,
-      }),
-    });
-    return { status: "pushed", branch, graduated, treeHash, pullRequestUrl: pullRequest.url };
+      },
+    };
   } finally {
     await ports.cleanup(dir).catch(() => undefined);
   }
+}
+
+export type SeoPublishPorts = {
+  /** Take the exported commit into the trusted clone. Throws when the commit is not in the bundle. */
+  readonly importCommit: (record: SeoAgentRecord) => Promise<void>;
+  /** Read from git, in the trusted clone: the commit's tree and parent. */
+  readonly commitFacts: (commitSha: string) => Promise<{ tree: string; parent: string | null; parentCount: number }>;
+  /** git's two views of the diff between the base commit and the commit. */
+  readonly diff: (baseCommit: string, commitSha: string) => Promise<{ raw: string; numstat: string }>;
+  readonly lookupGraduation: () => Promise<boolean>;
+  readonly push: (commitSha: string, branch: string) => Promise<void>;
+  /** The tree hash of the commit the remote branch points at, or null when it is not the pushed commit or cannot be read. */
+  readonly remoteTree: (branch: string, commitSha: string) => Promise<string | null>;
+  readonly deleteBranch: (branch: string) => Promise<void>;
+  readonly createPullRequest: (input: { branch: string; title: string; body: string }) => Promise<{ url: string }>;
+};
+
+export type SeoPublishResult =
+  | { readonly status: "off"; readonly reason: string }
+  | { readonly status: "wrong_environment"; readonly problems: readonly string[] }
+  | { readonly status: "invalid_record" }
+  | { readonly status: "validation_failed"; readonly problems: readonly SeoValidationProblem[] }
+  | { readonly status: "tree_mismatch"; readonly stage: "before_push" | "after_push" }
+  | {
+      readonly status: "pushed";
+      readonly branch: string;
+      readonly graduated: boolean;
+      readonly treeHash: string;
+      /** Set before graduation, when this agent opened the draft PR. After graduation the workflow opens it. */
+      readonly pullRequestUrl: string | null;
+    };
+
+export async function runSeoAgentPublish(
+  input: { readonly record: unknown; readonly env: Readonly<Record<string, string | undefined>> },
+  ports: SeoPublishPorts,
+): Promise<SeoPublishResult> {
+  const gate = seoAgentGate(input.env);
+  if (!gate.on) return { status: "off", reason: gate.reason };
+  const wrong = seoAgentPhaseEnvProblems(input.env, "publish");
+  if (wrong.length > 0) return { status: "wrong_environment", problems: wrong };
+  const parsed = seoAgentRecordSchema.safeParse(input.record);
+  if (!parsed.success) return { status: "invalid_record" };
+  const record = parsed.data;
+
+  await ports.importCommit(record);
+  // Everything the push relies on is read from git here, not from the record.
+  const facts = await ports.commitFacts(record.commitSha);
+  if (facts.tree !== record.treeHash || facts.parentCount !== 1 || facts.parent !== record.baseCommit) {
+    return { status: "tree_mismatch", stage: "before_push" };
+  }
+  const diff = await ports.diff(record.baseCommit, record.commitSha);
+  const validation = validateSeoChanges(seoGitChanges(diff.raw, diff.numstat));
+  if (!validation.ok) return { status: "validation_failed", problems: validation.problems };
+
+  const graduated = await seoAgentIsGraduated(ports.lookupGraduation);
+  const branch = seoAgentBranchName(record.topic, graduated);
+  if (branch === null) return { status: "invalid_record" };
+
+  await ports.push(record.commitSha, branch);
+  if ((await ports.remoteTree(branch, record.commitSha)) !== record.treeHash) {
+    await ports.deleteBranch(branch).catch(() => undefined);
+    return { status: "tree_mismatch", stage: "after_push" };
+  }
+  if (graduated) return { status: "pushed", branch, graduated, treeHash: record.treeHash, pullRequestUrl: null };
+
+  const pullRequest = await ports.createPullRequest({
+    branch,
+    title: seoAgentCommitMessage(record.summary, record.topic).split("\n")[0] as string,
+    body: seoAgentPullRequestBody(record),
+  });
+  return { status: "pushed", branch, graduated, treeHash: record.treeHash, pullRequestUrl: pullRequest.url };
 }
