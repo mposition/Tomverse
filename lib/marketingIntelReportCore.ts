@@ -17,6 +17,7 @@ import { z } from "zod";
 
 // Relative imports, so the generator service can load this with
 // --experimental-strip-types and sign its reports with the same bytes.
+import { marketingAnalysisPayloadSchema } from "./marketingAnalysisCore.ts";
 import { MARKETING_REPORT_PAYLOAD_SCHEMAS } from "./marketingAutomationSchema.ts";
 import {
   MARKETING_COMPETITOR_MAX_CANDIDATES,
@@ -115,7 +116,22 @@ const canonicalCandidate = z.custom<MarketingCompetitorCandidate>((value) => {
 
 export const marketingGeneratorReportSchema = z
   .discriminatedUnion("kind", [
-    z.object({ ...base, kind: z.literal("brief"), payload: briefPayload }).strict(),
+    z
+      .object({
+        ...base,
+        kind: z.literal("brief"),
+        payload: briefPayload,
+        /**
+         * The analysis the brief was chosen from (operator decision
+         * 2026-11-01), for a person to read; A5 is given the brief, never
+         * this. Beside the payload for the reason the candidates are: the
+         * payload schema is the schema module's, which the webhook
+         * fingerprint and the admission manifest watch. Stored in its own
+         * table (lib/marketingAnalysisStore.ts).
+         */
+        analysis: marketingAnalysisPayloadSchema.optional(),
+      })
+      .strict(),
     z.object({ ...base, kind: z.literal("measurement_120d"), payload: measurementPayload }).strict(),
     z
       .object({
@@ -177,6 +193,8 @@ const reportBytes = (report: Omit<MarketingGeneratorReport, "provenance">): stri
         report.kind === "market_intel"
           ? (report as { readonly competitorCandidates?: unknown }).competitorCandidates
           : undefined,
+      // Absent for a brief without one, so its bytes are what they were.
+      analysis: report.kind === "brief" ? (report as { readonly analysis?: unknown }).analysis : undefined,
     }),
   );
 

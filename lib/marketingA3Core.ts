@@ -24,7 +24,9 @@
  *   again against the registry.
  *
  * Search results are external text (docs/policy/marketing-automation.md §3).
- * They reach this extraction and nothing else: no post, no prompt of A5's, no log.
+ * They reach this extraction and, as the structured facts and feature names
+ * it keeps, the same run's analysis call (lib/marketingAnalysisCore.ts) --
+ * nothing else: no post, no prompt of A5's, no log.
  *
  * Imports relative modules only, so the service loads it with
  * `--experimental-strip-types`.
@@ -43,10 +45,16 @@ import {
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each run, so a change to what the model is asked is a new version. */
-export const MARKETING_A3_PROMPT_VERSION = "a3-web-search-v2";
+export const MARKETING_A3_PROMPT_VERSION = "a3-web-search-v3";
 
 /** Facts one call may propose; the rest are counted, not kept. */
 export const MARKETING_A3_MAX_FACTS_PER_CALL = 40;
+
+/** Feature names one call may propose; the rest are dropped and counted. */
+export const MARKETING_A3_MAX_FEATURES_PER_CALL = 30;
+
+/** The longest feature name kept: a name, not a description. */
+export const MARKETING_A3_FEATURE_NAME_MAX = 120;
 
 const SYSTEM_PROMPT = [
   "You research one competitor of Tomverse with web search, limited to that competitor's own official domains.",
@@ -55,7 +63,8 @@ const SYSTEM_PROMPT = [
   "Report only what a page states plainly. Do not infer, estimate or combine. Each fact names the page it came from by its URL, exactly as you cited it.",
   "A value is money (amountMinor is an integer in the currency's minor unit: US$19.99 is 1999 with currency USD), a number with a unit (lower case words joined by underscores, such as messages_per_day, or null), a date (YYYY-MM-DD), or a token, which only the factTypes the answer format lists may use.",
   "factType is lower case letters, digits and underscores. A fact about one plan names the plan at the end: plan_price_monthly_pro, message_limit_daily_free, plan_price_annual_team.",
-  "A feature, a description, or anything else that is not one of these values is not a fact here: count it in unrepresentable instead.",
+  "A capability or feature the product offers is not a fact: list it in features as a short name of at most twelve words, with the page it came from by its URL, exactly as you cited it.",
+  "A description, a claim about quality, or anything else that is neither a fact nor a feature counts in unrepresentable.",
 ].join("\n");
 
 const strictObject = (properties: Record<string, unknown>) => ({
@@ -111,6 +120,11 @@ export const MARKETING_A3_ANSWER_SCHEMA = {
         ],
       },
     },
+    features: {
+      type: "array",
+      maxItems: MARKETING_A3_MAX_FEATURES_PER_CALL,
+      items: strictObject({ name: { type: "string" }, sourceUrl: { type: "string" } }),
+    },
     unrepresentable: { type: "integer" },
   }),
 } as const;
@@ -133,6 +147,22 @@ export function marketingA3Messages(competitor: {
 
 /** Why a proposed fact was not kept. */
 export type MarketingA3DropReason = "source_not_official_host" | "shape" | "source_not_retrieved" | "over_limit";
+
+/**
+ * A feature a competitor's official page names (operator decision
+ * 2026-11-01: these were counted as unrepresentable and lost). Not stored with
+ * the facts -- the `market_intel` payload is the schema module's -- but handed,
+ * in memory, to the same run's analysis call as data. Never to A5, never to a
+ * log.
+ */
+export type MarketIntelFeature = {
+  competitorId: string;
+  name: string;
+  sourceUrl: string;
+};
+
+/** Control and format characters: a feature name is plain words. */
+const INVISIBLE = /[\p{Cc}\p{Cf}]/u;
 
 /** A market fact as the report payload holds it. */
 export type MarketIntelFact = {
@@ -186,22 +216,26 @@ export function readMarketingA3Answer(
   },
 ): {
   readonly facts: MarketIntelFact[];
+  /** Feature names on an official, retrieved page; at most the per-call limit. */
+  readonly features: MarketIntelFeature[];
   readonly unrepresentable: number;
   readonly unreadable: boolean;
   /** Why each proposed fact was not kept, by reason: counts only, no URL or value. */
   readonly dropped: Partial<Record<MarketingA3DropReason, number>>;
+  /** Feature names not kept, counted apart from the facts. */
+  readonly featuresDropped: number;
 } {
   const dropped: Partial<Record<MarketingA3DropReason, number>> = {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(content.trim().replace(/^```(?:json)?\s*|\s*```$/gu, ""));
   } catch {
-    return { facts: [], unrepresentable: 0, unreadable: true, dropped };
+    return { facts: [], features: [], unrepresentable: 0, unreadable: true, dropped, featuresDropped: 0 };
   }
   if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { facts?: unknown }).facts)) {
-    return { facts: [], unrepresentable: 0, unreadable: true, dropped };
+    return { facts: [], features: [], unrepresentable: 0, unreadable: true, dropped, featuresDropped: 0 };
   }
-  const answer = parsed as { facts: unknown[]; unrepresentable?: unknown };
+  const answer = parsed as { facts: unknown[]; features?: unknown; unrepresentable?: unknown };
   const reported = answer.unrepresentable;
   let unrepresentable =
     typeof reported === "number" && Number.isInteger(reported) && reported >= 0 ? Math.min(reported, 1_000) : 0;
@@ -238,7 +272,33 @@ export function readMarketingA3Answer(
     }
     facts.push(fact.data);
   }
-  return { facts, unrepresentable, unreadable: false, dropped };
+
+  // The same source rule as a fact: an official host, and a page this
+  // response cited or retrieved. An answer from before features existed has none.
+  const features: MarketIntelFeature[] = [];
+  const seen = new Set<string>();
+  let featuresDropped = 0;
+  for (const item of Array.isArray(answer.features) ? answer.features : []) {
+    const proposal = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const name = typeof proposal.name === "string" ? proposal.name.trim().replace(/\s+/gu, " ") : "";
+    const sourceUrl =
+      typeof proposal.sourceUrl === "string" ? marketingA3SourceUrl(proposal.sourceUrl, input.officialHosts) : null;
+    if (
+      name.length === 0 ||
+      name.length > MARKETING_A3_FEATURE_NAME_MAX ||
+      INVISIBLE.test(name) ||
+      sourceUrl === null ||
+      !cited.has(sourceUrl) ||
+      seen.has(name.toLowerCase()) ||
+      features.length >= MARKETING_A3_MAX_FEATURES_PER_CALL
+    ) {
+      featuresDropped += 1;
+      continue;
+    }
+    seen.add(name.toLowerCase());
+    features.push({ competitorId: input.competitorId, name, sourceUrl });
+  }
+  return { facts, features, unrepresentable, unreadable: false, dropped, featuresDropped };
 }
 
 const DISCOVERY_PROMPT = [
