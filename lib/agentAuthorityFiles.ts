@@ -100,6 +100,12 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The official hosts a market fact may cite (S3f): which competitor and which
   // host is a person's decision about content.
   "lib/marketingIntelReportCore.ts",
+  // The marketing SEO code agent's allowlist, validation and publishing rules
+  // (marketing policy §9.2) and the tests that pin them: an agent changing
+  // them could widen what it may edit or where it may push.
+  "lib/marketingSeoAgentCore.ts",
+  "tests/marketingSeoAgentCore.test.mjs",
+  "tests/marketingSeoBranchPolicy.test.mjs",
   "docs/release-gates/**",
   "prisma/**",
   // §4-2: the execution environment. Root files and root dot-directories are
