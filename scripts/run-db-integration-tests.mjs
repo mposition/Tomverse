@@ -790,6 +790,9 @@ run(
     // one writer, compare-and-set on the row, only a pinned model, the cap
     // within its ceiling, and a refused save that writes nothing.
     "tests/integration/marketing-llm-settings.db.test.ts",
+    // The marketing analysis and brief switch (2026-11-01): default off, one
+    // writer, compare-and-set on the row, and a save that changes nothing refused.
+    "tests/integration/marketing-analysis-setting.db.test.ts",
     // The Scout's spending stop: a call reserved against the model and cap as
     // they are under the ledger lock, so turning the model off or lowering the
     // cap stops every later call, and racing reservations stay within the cap.

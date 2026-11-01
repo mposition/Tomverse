@@ -196,6 +196,8 @@ test("the brief is a signed report the app's route accepts as is, with the analy
     false,
   );
   assert.equal(marketingAnalysisPayloadSchema.safeParse({ ...ANALYSIS, extra: true }).success, false);
+  // The stored topic is held to the reader's length too.
+  assert.equal(marketingAnalysisPayloadSchema.safeParse({ ...ANALYSIS, topicId: "a".repeat(65) }).success, false);
 });
 
 test("a brief without an analysis signs the bytes it always did", () => {

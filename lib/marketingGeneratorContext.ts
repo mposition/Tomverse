@@ -105,9 +105,15 @@ export type MarketingGeneratorClaim = MarketingClaimProjection & {
   readonly values: Readonly<Record<string, string | number>> | null;
 };
 
-/** A plan as the analysis reads it: the stored values, not where each came from. */
+/**
+ * A plan as the analysis reads it. `pricesStored` says whether an operator
+ * saved its price and currency; when not, the values are the code's built-in
+ * defaults (lib/billingPlanDefaults.ts), which the analysis is told not to
+ * treat as what the site charges.
+ */
 export type MarketingGeneratorPlan = {
   readonly id: string;
+  readonly pricesStored: boolean;
   readonly name: string;
   readonly monthlyPriceCents: number;
   readonly annualPriceCents: number;
@@ -120,12 +126,21 @@ export type MarketingGeneratorPlan = {
   readonly allowDownloads: boolean;
 };
 
-type PlanValues = Record<string, string | number | boolean>;
+/** A plan's values and which of them an operator saved (the rest are compiled defaults). */
+export type MarketingGeneratorPlanFacts = {
+  readonly values: Readonly<Record<string, unknown>>;
+  readonly storedFields: ReadonlySet<string>;
+};
 
-/** The registry's claims with what each says, for the generator. */
+/**
+ * The registry's claims with what each says, for the generator. A price
+ * claim's values are given only when every field it names is stored: the
+ * Guard refuses a price resting on a compiled default, so a default handed to
+ * A5 could only become a draft that is refused (review 2026-11-01).
+ */
 export function generatorClaimContext(
   claims: readonly MarketingClaim[],
-  plans: ReadonlyMap<string, PlanValues>,
+  plans: ReadonlyMap<string, MarketingGeneratorPlanFacts>,
 ): MarketingGeneratorClaim[] {
   const projections = generatorProjection(claims);
   return claims.map((claim, index) => {
@@ -143,10 +158,10 @@ export function generatorClaimContext(
     let values: Record<string, string | number> | null = null;
     if (claim.factSource?.kind === "billing_plan") {
       const plan = plans.get(claim.factSource.planId);
-      if (plan) {
+      if (plan && claim.factSource.fields.every((field) => plan.storedFields.has(field))) {
         values = {};
         for (const field of claim.factSource.fields) {
-          const value = plan[field];
+          const value = plan.values[field];
           if (typeof value === "string" || typeof value === "number") values[field] = value;
         }
       }
@@ -318,21 +333,21 @@ export async function readMarketingGeneratorContext(
     db.appSetting.findUnique({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, select: { value: true } }),
     getBillingPlansWithFieldSources(db),
   ]);
-  const activePlans: MarketingGeneratorPlan[] = plans
-    .filter((entry) => entry.plan.isActive)
-    .map(({ plan }) => ({
-      id: plan.id,
-      name: plan.name,
-      monthlyPriceCents: plan.monthlyPriceCents,
-      annualPriceCents: plan.annualPriceCents,
-      currency: plan.currency,
-      dailyMessageLimit: plan.dailyMessageLimit,
-      monthlyMessageLimit: plan.monthlyMessageLimit,
-      maxModels: plan.maxModels,
-      allowAttachments: plan.allowAttachments,
-      allowSharing: plan.allowSharing,
-      allowDownloads: plan.allowDownloads,
-    }));
+  const active = plans.filter((entry) => entry.plan.isActive);
+  const activePlans: MarketingGeneratorPlan[] = active.map(({ plan, sources }) => ({
+    id: plan.id,
+    pricesStored: sources.monthlyPriceCents === "stored" && sources.currency === "stored",
+    name: plan.name,
+    monthlyPriceCents: plan.monthlyPriceCents,
+    annualPriceCents: plan.annualPriceCents,
+    currency: plan.currency,
+    dailyMessageLimit: plan.dailyMessageLimit,
+    monthlyMessageLimit: plan.monthlyMessageLimit,
+    maxModels: plan.maxModels,
+    allowAttachments: plan.allowAttachments,
+    allowSharing: plan.allowSharing,
+    allowDownloads: plan.allowDownloads,
+  }));
   return {
     channels: channels.map((row) => ({
       id: row.id,
@@ -343,7 +358,15 @@ export async function readMarketingGeneratorContext(
     })),
     claims: generatorClaimContext(
       MARKETING_CLAIMS,
-      new Map(activePlans.map((plan) => [plan.id, plan as unknown as PlanValues])),
+      new Map(
+        active.map(({ plan, sources }) => [
+          plan.id,
+          {
+            values: plan,
+            storedFields: new Set(Object.keys(sources).filter((field) => sources[field as keyof typeof sources] === "stored")),
+          },
+        ]),
+      ),
     ),
     assets: generatorAssetProjection(
       await readMarketingAssetRegistry(db),
