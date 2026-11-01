@@ -141,7 +141,8 @@ export type MarketingPublisherBatchDeps = {
     | "recordFailed"
     | "recordOutcomeUnknown"
     | "recordVerified"
-  >;
+  > &
+    Partial<Pick<MarketingPublisherOperations, "evaluateAutoPause">>;
   readonly adapter: MarketingPublishAdapter;
   /** The database's clock, read outside any transaction this run holds. */
   readonly databaseNow: () => Promise<Date>;
@@ -297,6 +298,23 @@ export async function runMarketingPublisherBatch(
     if (!room.enough) {
       result.stopped = "deadline";
       return result;
+    }
+
+    // A limit crossed since the last run stops the account before it is asked
+    // anything. A decision that cannot be made is not a reason to publish: the
+    // account is skipped this run and the next one decides again.
+    if (operations.evaluateAutoPause) {
+      let stopped: boolean;
+      try {
+        stopped = (await operations.evaluateAutoPause(channel.id)).paused;
+      } catch {
+        count(result.refused, "auto_pause:undecided");
+        continue;
+      }
+      if (stopped) {
+        count(result.refused, "auto_pause:paused");
+        continue;
+      }
     }
 
     const health = await observePublishHealth(adapter, channel, room.now);

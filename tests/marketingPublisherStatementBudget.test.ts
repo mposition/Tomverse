@@ -28,6 +28,7 @@ import { runBoundedMarketingTransaction } from "@/lib/marketingPublisherRun";
 import { MARKETING_PUBLISHER_MAX_STATEMENTS } from "@/lib/marketingPublisherRunCore";
 import {
   claimDueMarketingPost,
+  evaluateMarketingAutoPause,
   listMarketingPostsPublishingPastLease,
   recordMarketingPostFailed,
   recordMarketingPostOutcomeUnknown,
@@ -101,6 +102,8 @@ type Shape = {
   mode?: "approval" | "autonomous";
   /** Answers for successive `marketingPost.updateMany` calls; then 1. */
   postUpdates?: number[];
+  /** The account's newest attempts all failed, so the automatic stop takes its longest path. */
+  attemptsFailed?: boolean;
 };
 
 const PROVENANCE = {
@@ -121,6 +124,9 @@ const countingClient = (postStatus: string, shape: Shape = {}) => {
     if (sql.includes("clock_timestamp")) return [{ now: NOW, createdAt: NOW, day: "2026-09-23" }];
     if (sql.includes("count(*) FILTER")) return [{ today: BigInt(0), week: BigInt(0) }];
     if (sql.includes("SKIP LOCKED")) return [{ id: "p1", historyVersion: 4, slotDay: null }];
+    if (sql.includes("jsonb_array_elements")) {
+      return shape.attemptsFailed ? [{ outcome: "failed" }, { outcome: "failed" }, { outcome: "failed" }] : [];
+    }
     if (sql.includes("logicalKey")) {
       return [
         {
@@ -180,6 +186,7 @@ const countingClient = (postStatus: string, shape: Shape = {}) => {
     marketingPost: {
       updateMany: () => ({ count: postUpdates.length > 0 ? postUpdates.shift() : 1 }),
       findMany: () => [],
+      count: () => 0,
     },
     adminAuditLog: {
       // The chain's own tail lookup answers null; the dispatch reading back an
@@ -257,7 +264,7 @@ const measure = async (
   // shorter path, and pinning its count would pin the wrong number.
   const succeeded =
     Array.isArray(result) ||
-    ["claimed", "released", "started", "recorded"].some((key) => result[key] === true);
+    ["claimed", "released", "started", "recorded", "paused"].some((key) => result[key] === true);
   assert.ok(succeeded, `the operation took a refusal path: ${JSON.stringify(result)}`);
   return { calls, result };
 };
@@ -412,6 +419,15 @@ const OPERATIONS: ReadonlyArray<{
         expectedHistoryVersion: 4,
         verificationMethod: "status_query",
       }),
+  },
+  {
+    // The longest automatic stop: no removal, three failed attempts, then the
+    // compare-and-set and its audit entry. Run before an account is claimed.
+    name: "auto pause evaluation (stops the account)",
+    expected: 11,
+    postStatus: "published",
+    shape: { attemptsFailed: true },
+    run: (tx) => evaluateMarketingAutoPause(tx, { channelId: "c1" }),
   },
   {
     name: "poll removed by platform",
