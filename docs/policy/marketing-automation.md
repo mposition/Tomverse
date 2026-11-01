@@ -352,8 +352,14 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
   `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다
   (`scripts/auto-pr-branch-policy.mjs`). auto-merge는 어느 쪽도 켜지 않으며(버전 4 제안), 병합은 merge train
   (`npm run merge-train`) 또는 사람이 한다. develop까지만.
-- robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
+- 구현(2026-11-01 운영자 결정, 정책 버전 변경 없음): 실행기 `scripts/marketing-seo-agent.mjs`와 순수 규칙 `lib/marketingSeoAgentCore.ts`.
+  기본 꺼짐(`MARKETING_SEO_AGENT_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). LLM 단계는 도구 없는 텍스트 호출 1회로
+  마케팅 비용 원장을 그대로 쓰며(목적 `brief`, 새 유료 경로 없음) 수정안을 find/replace로만 내고, 파일은 실행기가 임시 worktree(base 커밋)에 적용한다.
+  LLM 단계 프로세스는 원장 변수 셋만, 게시 단계는 GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)만 가진다.
+  검증은 git의 diff로 하고(허용 4개 정확 일치, rename·삭제·binary·symlink·mode 거부, 500줄) 판정 시험은 base 커밋의 고정 목록이다.
+  졸업 상태 조회가 연결되기 전에는 항상 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
+- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.
 
 ## 10. 측정
 
