@@ -17,6 +17,7 @@ import {
   analyticsCountryFromHeaders,
   findLatestMarketingTouch,
   recordProductAnalyticsEvent,
+  repairLateMarketingTouchSnapshots,
 } from "@/lib/productAnalyticsServer";
 import {
   MARKETING_TOUCH_EVENT,
@@ -101,7 +102,7 @@ export async function POST(req: Request) {
     }
 
     stage = "event-write";
-    await recordProductAnalyticsEvent({
+    const recorded = await recordProductAnalyticsEvent({
       eventName: body.event_name,
       source: "client",
       userId,
@@ -120,6 +121,31 @@ export async function POST(req: Request) {
       occurredAt,
       dedupeKey,
     });
+
+    // A touch stored just after the conversion it belongs to finishes that
+    // conversion's snapshot (lib/marketingTouchCore.ts,
+    // lateMarketingTouchRepair). The touch itself is already recorded, so a
+    // failure here is reported and the touch still answered as accepted.
+    if (isMarketingTouch && recorded) {
+      stage = "touch-repair";
+      await repairLateMarketingTouchSnapshots({
+        clientId: body.client_id,
+        userId,
+        touch: {
+          utmSource: body.utm_source,
+          utmMedium: body.utm_medium,
+          utmCampaign: body.utm_campaign,
+          utmContent: properties.utm_content ?? null,
+          occurredAt,
+        },
+        touchObservedAt: occurredAtCandidate,
+      }).catch((error: unknown) => {
+        console.warn("Marketing touch snapshot repair failed.", {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          traceId,
+        });
+      });
+    }
 
     return new NextResponse(null, {
       status: 202,

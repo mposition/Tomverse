@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   MARKETING_TOUCH_EVIDENCE,
   MARKETING_TOUCH_SERVER_PROPERTY_KEYS,
+  MARKETING_TOUCH_LATE_ARRIVAL_MS,
   MARKETING_TOUCH_WINDOW_MS,
   isWithinMarketingTouchWindow,
+  lateMarketingTouchRepair,
   marketingTouchSnapshot,
   marketingTouchWindow,
   shouldSnapshotMarketingTouch,
@@ -153,4 +155,102 @@ test("a link with ten attributed sign-ups is no longer held", () => {
   const [channel] = summarizeMarketingTouchAttribution({ conversions, unobserved: 0 }).channels;
   assert.equal(channel.count, 10);
   assert.equal(channel.held, false);
+});
+
+// The server-side ordering repair: a touch the browser observed first but the
+// server stored just after the conversion finishes the conversion's snapshot.
+const conversionAt = new Date("2026-11-01T00:00:00.000Z");
+const conversion = (overrides = {}) => ({
+  eventName: "signup_completed",
+  userId: "user-1",
+  occurredAt: new Date(conversionAt.getTime() - 50),
+  createdAt: conversionAt,
+  properties: { method: "google", touch_attribution: "unattributed" },
+  ...overrides,
+});
+const lateTouch = (afterMs, overrides = {}) =>
+  touch(new Date(conversionAt.getTime() + afterMs), overrides);
+const observedBefore = new Date(conversionAt.getTime() - 100);
+
+test("a touch stored just after an unattributed conversion it preceded attributes it", () => {
+  const repaired = lateMarketingTouchRepair({
+    conversion: conversion(),
+    touch: lateTouch(200),
+    touchObservedAt: observedBefore,
+  });
+  assert.equal(repaired.touch_attribution, "attributed");
+  assert.equal(repaired.touch_utm_campaign, "launch");
+  assert.equal(repaired.method, "google", "the conversion's own properties survive");
+  assert.equal(
+    repaired.touch_received_at,
+    new Date(conversionAt.getTime() + 200).toISOString(),
+    "the repaired snapshot still says when the server received the touch",
+  );
+  assert.equal(analyticsPropertiesSchema.safeParse(repaired).success, true);
+});
+
+test("an older attributed touch is replaced by the newer one, never the other way", () => {
+  const older = marketingTouchSnapshot(
+    touch(new Date(conversionAt.getTime() - 60_000), { utmCampaign: "older" }),
+    conversionAt,
+  );
+  const repaired = lateMarketingTouchRepair({
+    conversion: conversion({ properties: { method: "google", ...older } }),
+    touch: lateTouch(200),
+    touchObservedAt: observedBefore,
+  });
+  assert.equal(repaired.touch_utm_campaign, "launch");
+
+  const newer = marketingTouchSnapshot(
+    touch(new Date(conversionAt.getTime() + 500), { utmCampaign: "newer" }),
+    new Date(conversionAt.getTime() + 500),
+  );
+  assert.equal(
+    lateMarketingTouchRepair({
+      conversion: conversion({ properties: { ...newer } }),
+      touch: lateTouch(200),
+      touchObservedAt: observedBefore,
+    }),
+    null,
+  );
+});
+
+test("no repair outside thirty seconds, for a touch observed after the conversion, or for a non-lead", () => {
+  const cases = [
+    ["too late", { touch: lateTouch(MARKETING_TOUCH_LATE_ARRIVAL_MS + 1) }],
+    ["too early", { touch: lateTouch(-MARKETING_TOUCH_LATE_ARRIVAL_MS - 1) }],
+    [
+      "observed after the conversion",
+      { touchObservedAt: new Date(conversionAt.getTime() + 10) },
+    ],
+    [
+      "a signed-in first answer is not a lead",
+      { conversion: conversion({ eventName: "first_response_completed" }) },
+    ],
+    [
+      "a conversion with no snapshot at all",
+      { conversion: conversion({ properties: { method: "google" } }) },
+    ],
+  ];
+  for (const [label, override] of cases) {
+    assert.equal(
+      lateMarketingTouchRepair({
+        conversion: conversion(),
+        touch: lateTouch(200),
+        touchObservedAt: observedBefore,
+        ...override,
+      }),
+      null,
+      label,
+    );
+  }
+  assert.notEqual(
+    lateMarketingTouchRepair({
+      conversion: conversion({ eventName: "first_response_completed", userId: null }),
+      touch: lateTouch(-200),
+      touchObservedAt: observedBefore,
+    }),
+    null,
+    "a guest's first answer, and a touch stored a moment before the conversion looked",
+  );
 });

@@ -18,6 +18,8 @@ import {
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
 import {
   MARKETING_TOUCH_EVENT,
+  MARKETING_TOUCH_LATE_ARRIVAL_MS,
+  lateMarketingTouchRepair,
   marketingTouchWindow,
   type MarketingTouchRow,
 } from "@/lib/marketingTouchCore";
@@ -250,6 +252,66 @@ export async function findLatestMarketingTouch(input: {
     utmContent: typeof content === "string" && content ? content : null,
     occurredAt: row.occurredAt,
   };
+}
+
+/**
+ * Finishes the snapshot of a conversion a just-stored touch belongs to
+ * (`lateMarketingTouchRepair`): the same browser's or account's sign-up or
+ * guest first answer received within thirty seconds of the touch. Returns how
+ * many it repaired.
+ */
+export async function repairLateMarketingTouchSnapshots(input: {
+  clientId: string;
+  userId: string | null;
+  touch: MarketingTouchRow;
+  touchObservedAt: Date;
+}) {
+  const anonymousIdHash = privateDigest("client", input.clientId);
+  const receivedAt = input.touch.occurredAt.getTime();
+  const rows = await prisma.productAnalyticsEvent.findMany({
+    where: {
+      eventName: { in: ["signup_completed", "first_response_completed"] },
+      createdAt: {
+        gte: new Date(receivedAt - MARKETING_TOUCH_LATE_ARRIVAL_MS),
+        lte: new Date(receivedAt + MARKETING_TOUCH_LATE_ARRIVAL_MS),
+      },
+      OR: [
+        { anonymousIdHash },
+        ...(input.userId ? [{ userId: input.userId }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      eventName: true,
+      userId: true,
+      occurredAt: true,
+      createdAt: true,
+      properties: true,
+    },
+    take: 10,
+  });
+  let repaired = 0;
+  for (const row of rows) {
+    const properties = lateMarketingTouchRepair({
+      conversion: {
+        ...row,
+        eventName: row.eventName as ProductAnalyticsEventName,
+      },
+      touch: input.touch,
+      touchObservedAt: input.touchObservedAt,
+    });
+    if (!properties) continue;
+    await prisma.productAnalyticsEvent.update({
+      where: { id: row.id },
+      data: {
+        properties: analyticsPropertiesSchema.parse(
+          properties
+        ) as Prisma.InputJsonValue,
+      },
+    });
+    repaired += 1;
+  }
+  return repaired;
 }
 
 export const analyticsCountryFromHeaders = (headers: Headers) => {

@@ -138,40 +138,7 @@ test("one touch per link per tab; a different link is a new touch with its own v
   assert.equal(second.properties.utm_content, "x-1");
 });
 
-test("a conversion released with a touch is sent only after the touch was answered", async () => {
-  reset();
-  let release;
-  answerTouch = () => new Promise((resolve) => {
-    release = () => resolve(accepted());
-  });
-  try {
-    land(LINK);
-    client.observeMarketingTouch();
-    client.trackProductEventOnce("signup_completed", "signup_completed", 0, {
-      method: "google",
-    });
-    client.trackProductEvent("landing_view");
-    client.setAnalyticsConsent("accepted");
-    configure();
-    await flush();
-    const names = () => requests.map((request) => request.body.event_name);
-    assert.ok(names().includes("marketing_touch"));
-    assert.ok(names().includes("landing_view"), "events that are not attributed do not wait");
-    assert.ok(
-      !names().includes("signup_completed"),
-      "the server would look for the touch before storing it",
-    );
-
-    release();
-    await flush();
-    assert.ok(names().includes("signup_completed"));
-    assert.ok(names().indexOf("marketing_touch") < names().indexOf("signup_completed"));
-  } finally {
-    answerTouch = () => Promise.resolve(accepted());
-  }
-});
-
-test("a conversion still waiting when the page goes away is sent by the next page", async () => {
+test("a conversion is never held back by a touch still in flight", async () => {
   reset();
   answerTouch = () => new Promise(() => {});
   try {
@@ -183,94 +150,15 @@ test("a conversion still waiting when the page goes away is sent by the next pag
     client.setAnalyticsConsent("accepted");
     configure();
     await flush();
-    const names = () => requests.map((request) => request.body.event_name);
-    assert.ok(!names().includes("signup_completed"));
-    const waiting = JSON.parse(
-      win.sessionStorage.getItem("tomverse_analytics_waiting_conversions_v1") || "[]",
-    );
-    assert.deepEqual(
-      waiting.map((payload) => payload.event_name),
-      ["signup_completed"],
-      "while it waits it is in the tab's storage, not only in this page's memory",
-    );
-
-    // The next page in the tab: a fresh client holds nothing in memory and
-    // finds the conversion in storage. Reproduced here by a page that left one
-    // behind (this module instance is still holding its own).
-    const leftBehind = { ...waiting[0], event_id: crypto.randomUUID() };
-    win.sessionStorage.setItem(
-      "tomverse_analytics_waiting_conversions_v1",
-      JSON.stringify([leftBehind]),
-    );
-    land("?after=reload");
-    configure();
-    await flush();
-    const resent = requests.filter((request) => request.body.event_id === leftBehind.event_id);
-    assert.equal(resent.length, 1, "the next configuration sends what was left behind");
-    assert.equal(
-      win.sessionStorage.getItem("tomverse_analytics_waiting_conversions_v1"),
-      null,
-      "sent once, then off the list",
-    );
+    // The server, not the browser, puts the two in order: a touch stored just
+    // after the conversion finishes its snapshot (lateMarketingTouchRepair).
+    const names = requests.map((request) => request.body.event_name);
+    assert.ok(names.includes("marketing_touch"));
+    assert.ok(names.includes("signup_completed"));
   } finally {
     answerTouch = () => Promise.resolve(accepted());
   }
 });
-
-test("a configuration on the same page does not jump a conversion it is still holding", async () => {
-  reset();
-  let release;
-  answerTouch = () => new Promise((resolve) => {
-    release = () => resolve(accepted());
-  });
-  try {
-    land(LINK);
-    client.observeMarketingTouch();
-    client.trackProductEventOnce("signup_completed", "signup_completed", 0, {
-      method: "google",
-    });
-    client.setAnalyticsConsent("accepted");
-    configure();
-    configure();
-    await flush();
-    const names = () => requests.map((request) => request.body.event_name);
-    assert.ok(!names().includes("signup_completed"));
-    release();
-    await flush();
-    assert.equal(names().filter((name) => name === "signup_completed").length, 1);
-  } finally {
-    answerTouch = () => Promise.resolve(accepted());
-  }
-});
-
-test("declining analytics while a conversion waits for a touch cancels the conversion", async () => {
-  reset();
-  let release;
-  answerTouch = () => new Promise((resolve) => {
-    release = () => resolve(accepted());
-  });
-  try {
-    land(LINK);
-    client.observeMarketingTouch();
-    client.trackProductEventOnce("signup_completed", "signup_completed", 0, {
-      method: "google",
-    });
-    client.setAnalyticsConsent("accepted");
-    configure();
-    await flush();
-    client.setAnalyticsConsent("declined");
-    client.disableAnalyticsClient();
-    release();
-    await flush();
-    assert.ok(
-      !requests.some((request) => request.body.event_name === "signup_completed"),
-      "nothing decided before the withdrawal goes out after it",
-    );
-  } finally {
-    answerTouch = () => Promise.resolve(accepted());
-  }
-});
-
 test("a touch waiting to be retried is not sent again after analytics is declined", async () => {
   reset();
   const timers = [];
@@ -348,16 +236,6 @@ test("a visitor who had declined and then allows analytics on the landing page k
   await flush();
   assert.equal(touches().length, 1);
   assert.equal(touches()[0].body.utm_campaign, "launch");
-});
-
-test("with no touch in flight a conversion goes out without waiting", async () => {
-  reset();
-  client.setAnalyticsConsent("accepted");
-  land("?ref=none");
-  configure();
-  client.trackProductEventOnce("first_response_completed", "first_response_completed", 1, {});
-  await flush();
-  assert.ok(requests.some((request) => request.body.event_name === "first_response_completed"));
 });
 
 test("a URL without UTM parameters is not a touch", () => {

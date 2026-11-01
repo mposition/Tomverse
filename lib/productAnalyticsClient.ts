@@ -31,9 +31,6 @@ const PRECONSENT_ATTRIBUTION_STORAGE_KEY =
 const PENDING_EVENTS_STORAGE_KEY = "tomverse_analytics_pending_events_v1";
 const TOUCH_SEEN_STORAGE_KEY = "tomverse_analytics_touch_seen_v1";
 const MAX_TOUCHES_SEEN = 20;
-const WAITING_CONVERSIONS_STORAGE_KEY =
-  "tomverse_analytics_waiting_conversions_v1";
-const MAX_WAITING_CONVERSIONS = 20;
 const MODEL_FINDER_VARIANT_STORAGE_KEY = "tomverse_model_finder_variant_v1";
 const MAX_PENDING_EVENTS = 100;
 const ATTRIBUTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -349,16 +346,14 @@ const RETRYABLE_INTERNAL_DELIVERY_STATUSES = new Set([
   504,
 ]);
 
-// Bumped by disableAnalyticsClient. A retry, or a conversion waiting for a
-// touch, that began in an earlier generation is dropped.
+// Bumped by disableAnalyticsClient. A retry that began in an earlier
+// generation is dropped.
 let deliveryGeneration = 0;
 
 /**
- * Delivers one event, retrying a transient failure. Settles -- never rejects
- * -- once the server has answered or the retries are spent, which is what lets
- * a conversion wait for a touch below. A retry is dropped if analytics was
- * declined after the first attempt: nothing sent before a withdrawal is sent
- * again after it.
+ * Delivers one event, retrying a transient failure. A retry is dropped if
+ * analytics was declined after the first attempt: nothing sent before a
+ * withdrawal is sent again after it.
  */
 const deliverInternalAnalyticsEvent = (
   payload: ReturnType<typeof analyticsClientEventSchema.parse>,
@@ -398,119 +393,6 @@ const deliverInternalAnalyticsEvent = (
       () => undefined,
       () => undefined
     );
-};
-
-// Marketing touches still being delivered (§10.1). The server attributes a
-// sign-up or a guest's first answer to the last touch it has *stored*, and
-// both are singletons it will not record twice -- so a conversion sent while
-// a touch from the same page is still in flight could be fixed to no touch, or
-// an older one, for good. That happens whenever consent releases the queue
-// holding both. A conversion therefore waits until every touch sent before it
-// has been answered (or given up on); everything else goes out at once.
-let touchDeliveries: Promise<void> = Promise.resolve();
-const TOUCH_ORDERING_MAX_WAIT_MS = 10_000;
-const TOUCH_ATTRIBUTED_EVENTS = new Set<ProductAnalyticsEventName>([
-  "signup_completed",
-  "first_response_completed",
-]);
-
-const deliverInOrder = (
-  eventName: ProductAnalyticsEventName,
-  payload: ReturnType<typeof analyticsClientEventSchema.parse>
-) => {
-  if (eventName === "marketing_touch") {
-    const delivery = deliverInternalAnalyticsEvent(payload);
-    touchDeliveries = Promise.all([touchDeliveries, delivery]).then(() => undefined);
-    return;
-  }
-  if (TOUCH_ATTRIBUTED_EVENTS.has(eventName)) {
-    // Bounded: a touch request that never settles must not hold the
-    // conversion for ever. Withdrawable: declining analytics while it waits
-    // (disableAnalyticsClient) cancels it -- nothing decided before the
-    // withdrawal goes out after it. And durable: while it waits it is also in
-    // this tab's storage, so a reload or a navigation in the meantime does
-    // not lose it -- the next configuration sends it (the server keeps one of
-    // each singleton, so a conversion that did get out is not counted twice).
-    const generation = deliveryGeneration;
-    waitingHere.add(payload.event_id);
-    writeWaitingConversions([
-      ...readWaitingConversions().filter((item) => item.event_id !== payload.event_id),
-      payload,
-    ]);
-    void Promise.race([
-      touchDeliveries,
-      new Promise<void>((resolve) =>
-        window.setTimeout(resolve, TOUCH_ORDERING_MAX_WAIT_MS)
-      ),
-    ]).then(async () => {
-      if (
-        generation !== deliveryGeneration ||
-        !runtime ||
-        analyticsConsent() === "declined"
-      ) {
-        waitingHere.delete(payload.event_id);
-        return;
-      }
-      // Off the list only once the server has answered (or the retries are
-      // spent). A page that goes away mid-request leaves it listed, and the
-      // next page sends it again -- harmless, the server keeps one per actor.
-      await deliverInternalAnalyticsEvent(payload);
-      waitingHere.delete(payload.event_id);
-      removeWaitingConversion(payload.event_id);
-    });
-    return;
-  }
-  void deliverInternalAnalyticsEvent(payload);
-};
-
-// Conversions this page is holding for a touch. A configuration resends only
-// the waiting conversions this page is *not* holding -- the ones a previous
-// page left behind.
-const waitingHere = new Set<string>();
-type DeliveryPayload = ReturnType<typeof analyticsClientEventSchema.parse>;
-
-const readWaitingConversions = (): DeliveryPayload[] => {
-  try {
-    const parsed = JSON.parse(
-      window.sessionStorage.getItem(WAITING_CONVERSIONS_STORAGE_KEY) || "[]"
-    ) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item) => {
-      const payload = analyticsClientEventSchema.safeParse(item);
-      return payload.success && TOUCH_ATTRIBUTED_EVENTS.has(payload.data.event_name)
-        ? [payload.data]
-        : [];
-    });
-  } catch {
-    return [];
-  }
-};
-
-const writeWaitingConversions = (payloads: DeliveryPayload[]) => {
-  if (payloads.length === 0) {
-    window.sessionStorage.removeItem(WAITING_CONVERSIONS_STORAGE_KEY);
-    return;
-  }
-  window.sessionStorage.setItem(
-    WAITING_CONVERSIONS_STORAGE_KEY,
-    JSON.stringify(payloads.slice(-MAX_WAITING_CONVERSIONS))
-  );
-};
-
-const removeWaitingConversion = (eventId: string) =>
-  writeWaitingConversions(
-    readWaitingConversions().filter((item) => item.event_id !== eventId)
-  );
-
-const resendLeftBehindConversions = () => {
-  for (const payload of readWaitingConversions()) {
-    if (waitingHere.has(payload.event_id)) continue;
-    waitingHere.add(payload.event_id);
-    void deliverInternalAnalyticsEvent(payload).then(() => {
-      waitingHere.delete(payload.event_id);
-      removeWaitingConversion(payload.event_id);
-    });
-  }
 };
 
 const sendIntent = (intent: EventIntent) => {
@@ -573,7 +455,7 @@ const sendIntent = (intent: EventIntent) => {
     });
   }
 
-  deliverInOrder(intent.eventName, payload);
+  void deliverInternalAnalyticsEvent(payload);
 };
 
 export const analyticsConsent = () =>
@@ -666,7 +548,6 @@ export const configureAnalyticsClient = ({
     if (intent.onceKey) runtime.sentOnce.add(intent.onceKey);
     sendIntent(intent);
   }
-  resendLeftBehindConversions();
   pendingOnceKeys.clear();
   writeStoredContext(runtime);
   return runtime;
@@ -678,15 +559,12 @@ export const disableAnalyticsClient = () => {
   pendingEvents = [];
   pendingOnceKeys.clear();
   deliveryGeneration += 1;
-  touchDeliveries = Promise.resolve();
   window.localStorage.removeItem(CONTEXT_STORAGE_KEY);
   window.localStorage.removeItem(SIGNUP_STORAGE_KEY);
   window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);
   window.sessionStorage.removeItem(PENDING_EVENTS_STORAGE_KEY);
   window.sessionStorage.removeItem(PRECONSENT_ATTRIBUTION_STORAGE_KEY);
   window.sessionStorage.removeItem(TOUCH_SEEN_STORAGE_KEY);
-  window.sessionStorage.removeItem(WAITING_CONVERSIONS_STORAGE_KEY);
-  waitingHere.clear();
   for (const cookie of document.cookie.split(";")) {
     const name = cookie.split("=")[0]?.trim();
     if (name === "_ga" || name?.startsWith("_ga_")) {

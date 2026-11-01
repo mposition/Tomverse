@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   findLatestMarketingTouch,
   recordProductAnalyticsEvent,
+  repairLateMarketingTouchSnapshots,
 } from "@/lib/productAnalyticsServer";
 import { MARKETING_TOUCH_WINDOW_MS } from "@/lib/marketingTouchCore";
 
@@ -133,4 +134,60 @@ test("a signed-in conversion also finds the account's own touch from another bro
     await findLatestMarketingTouch({ clientId: randomUUID(), userId: null, receivedAt }),
     null
   );
+});
+
+const recordSignup = (input: { clientId: string; userId: string; occurredAt: Date }) =>
+  recordProductAnalyticsEvent({
+    eventName: "signup_completed",
+    source: "client",
+    userId: input.userId,
+    attribution: {
+      client_id: input.clientId,
+      session_id: "1761955200000",
+      utm_source: "(direct)",
+      utm_medium: "(none)",
+      utm_campaign: "(not set)",
+      language: "en",
+      country: "AU",
+    },
+    modelCount: 0,
+    plan: "Free",
+    properties: { method: "google", touch_attribution: "unattributed" },
+    occurredAt: input.occurredAt,
+    dedupeKey: `singleton:signup_completed:${input.userId}`,
+  });
+
+test("a touch stored after its sign-up repairs that sign-up only", async () => {
+  const mine = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const theirs = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
+  const clientId = randomUUID();
+  const signedUpAt = new Date();
+  await recordSignup({ clientId, userId: mine.id, occurredAt: signedUpAt });
+  await recordSignup({ clientId: randomUUID(), userId: theirs.id, occurredAt: signedUpAt });
+
+  const touchReceivedAt = new Date();
+  const repaired = await repairLateMarketingTouchSnapshots({
+    clientId,
+    userId: null,
+    touch: {
+      utmSource: "linkedin",
+      utmMedium: "social",
+      utmCampaign: "launch",
+      utmContent: "linkedin-1",
+      occurredAt: touchReceivedAt,
+    },
+    touchObservedAt: new Date(signedUpAt.getTime() - 60_000),
+  });
+  assert.equal(repaired, 1);
+
+  const rows = await prisma.productAnalyticsEvent.findMany({
+    where: { eventName: "signup_completed" },
+    select: { userId: true, properties: true },
+  });
+  const byUser = new Map(rows.map((row) => [row.userId, row.properties as Record<string, unknown>]));
+  assert.equal(byUser.get(mine.id)?.touch_attribution, "attributed");
+  assert.equal(byUser.get(mine.id)?.touch_utm_content, "linkedin-1");
+  assert.equal(byUser.get(mine.id)?.touch_received_at, touchReceivedAt.toISOString());
+  assert.equal(byUser.get(mine.id)?.method, "google");
+  assert.equal(byUser.get(theirs.id)?.touch_attribution, "unattributed", "another browser is untouched");
 });

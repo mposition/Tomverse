@@ -95,21 +95,80 @@ export type MarketingTouchRow = {
  * treated as no touch, so a caller that passes a stale row cannot attribute
  * with it.
  */
+const recordValue = (properties: unknown, key: string) =>
+  properties && typeof properties === "object" && !Array.isArray(properties)
+    ? (properties as Record<string, unknown>)[key]
+    : undefined;
+
+const attributedTo = (touch: MarketingTouchRow): ProductAnalyticsProperties => ({
+  touch_attribution: "attributed",
+  touch_evidence: MARKETING_TOUCH_EVIDENCE,
+  touch_utm_source: touch.utmSource.slice(0, 100),
+  touch_utm_medium: touch.utmMedium.slice(0, 100),
+  touch_utm_campaign: touch.utmCampaign.slice(0, 100),
+  ...(touch.utmContent ? { touch_utm_content: touch.utmContent.slice(0, 100) } : {}),
+  touch_received_at: touch.occurredAt.toISOString(),
+});
+
 export const marketingTouchSnapshot = (
   touch: MarketingTouchRow | null,
   receivedAt: Date
-): ProductAnalyticsProperties => {
-  if (!touch || !isWithinMarketingTouchWindow(touch.occurredAt, receivedAt)) {
-    return { touch_attribution: "unattributed" };
+): ProductAnalyticsProperties =>
+  touch && isWithinMarketingTouchWindow(touch.occurredAt, receivedAt)
+    ? attributedTo(touch)
+    : { touch_attribution: "unattributed" };
+
+/**
+ * A touch that arrives just after the conversion it belongs to.
+ *
+ * A browser that has just been given consent sends its queued touch and its
+ * queued sign-up (or first answer) together, and the server can receive the
+ * conversion first -- or receive the touch first but store it only after the
+ * conversion has looked. Both conversions are singletons, so the snapshot taken
+ * at the conversion's receipt would otherwise stay wrong for good. The server
+ * therefore finishes the snapshot when such a touch is stored: within thirty
+ * seconds either side of the conversion's receipt (two clocks, the
+ * application's and the database's, are compared), from the same browser or
+ * account, and only for a touch the browser itself observed no later than the
+ * conversion (both times from that one browser's clock). The repaired snapshot
+ * still records when the server received the touch. Nothing is ever repaired
+ * to an earlier touch than the one it has.
+ */
+export const MARKETING_TOUCH_LATE_ARRIVAL_MS = 30_000;
+
+export type MarketingConversionForRepair = {
+  eventName: ProductAnalyticsEventName;
+  userId: string | null;
+  /** The conversion's own client-reported time, as stored. */
+  occurredAt: Date;
+  /** When the server received the conversion. */
+  createdAt: Date;
+  properties: unknown;
+};
+
+/** The conversion's repaired properties, or null when it must stay as it is. */
+export const lateMarketingTouchRepair = (input: {
+  conversion: MarketingConversionForRepair;
+  touch: MarketingTouchRow;
+  touchObservedAt: Date;
+}): ProductAnalyticsProperties | null => {
+  const { conversion, touch, touchObservedAt } = input;
+  if (!shouldSnapshotMarketingTouch(conversion.eventName, conversion.userId)) return null;
+  const apart = Math.abs(touch.occurredAt.getTime() - conversion.createdAt.getTime());
+  if (apart > MARKETING_TOUCH_LATE_ARRIVAL_MS) return null;
+  if (touchObservedAt.getTime() > conversion.occurredAt.getTime()) return null;
+  const attribution = recordValue(conversion.properties, "touch_attribution");
+  if (attribution === "attributed") {
+    const previous = Date.parse(String(recordValue(conversion.properties, "touch_received_at")));
+    if (Number.isFinite(previous) && previous >= touch.occurredAt.getTime()) return null;
+  } else if (attribution !== "unattributed") {
+    return null;
   }
   return {
-    touch_attribution: "attributed",
-    touch_evidence: MARKETING_TOUCH_EVIDENCE,
-    touch_utm_source: touch.utmSource.slice(0, 100),
-    touch_utm_medium: touch.utmMedium.slice(0, 100),
-    touch_utm_campaign: touch.utmCampaign.slice(0, 100),
-    ...(touch.utmContent ? { touch_utm_content: touch.utmContent.slice(0, 100) } : {}),
-    touch_received_at: touch.occurredAt.toISOString(),
+    ...stripServerOnlyTouchProperties(
+      conversion.properties as ProductAnalyticsProperties
+    ),
+    ...attributedTo(touch),
   };
 };
 
@@ -117,11 +176,6 @@ export const marketingTouchSnapshot = (
 export type MarketingConversionRow = {
   properties: unknown;
 };
-
-const recordValue = (properties: unknown, key: string) =>
-  properties && typeof properties === "object" && !Array.isArray(properties)
-    ? (properties as Record<string, unknown>)[key]
-    : undefined;
 
 export type MarketingTouchChannelCount = {
   source: string;

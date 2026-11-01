@@ -18,6 +18,10 @@ type Row = Record<string, unknown>;
 const created: Row[] = [];
 const touchQueries: Row[] = [];
 let touchRow: Row | null = null;
+const repairQueries: Row[] = [];
+let recentConversions: Row[] = [];
+const updates: Array<{ where: Row; data: Row }> = [];
+let repairFails = false;
 
 class FakeSecurityError extends Error {}
 
@@ -62,6 +66,15 @@ mock.module(mod("lib/prisma.ts"), {
           touchQueries.push(query);
           return touchRow;
         },
+        findMany: async (query: Row) => {
+          repairQueries.push(query);
+          if (repairFails) throw new Error("database unavailable");
+          return recentConversions;
+        },
+        update: async (args: { where: Row; data: Row }) => {
+          updates.push(args);
+          return args.data;
+        },
       },
     },
   },
@@ -101,6 +114,10 @@ beforeEach(() => {
   created.length = 0;
   touchQueries.length = 0;
   touchRow = null;
+  repairQueries.length = 0;
+  recentConversions = [];
+  updates.length = 0;
+  repairFails = false;
 });
 
 test("a marketing touch is recorded at the server's receipt, never the client's clock", async () => {
@@ -248,4 +265,80 @@ test("a guest's first answer is a lead; a signed-in first answer is not", async 
   await POST(event("first_response_completed", { model_id: "gpt-6-luna" }));
   assert.equal(touchQueries.length, 1, "no lookup for a signed-in first answer");
   assert.equal((created[1].properties as Row).touch_attribution, undefined);
+});
+
+test("a touch stored just after its conversion finishes that conversion's snapshot", async () => {
+  // The browser observed the touch an hour ago (the event's client time) and
+  // its sign-up a moment ago; the server stored the sign-up first.
+  const conversionReceived = new Date(Date.now() - 500);
+  recentConversions = [
+    {
+      id: "conversion-1",
+      eventName: "signup_completed",
+      userId: "user-1",
+      occurredAt: new Date(Date.now() - 1_000),
+      createdAt: conversionReceived,
+      properties: { method: "google", touch_attribution: "unattributed" },
+    },
+    {
+      id: "conversion-2",
+      eventName: "first_response_completed",
+      userId: "user-1",
+      occurredAt: new Date(Date.now() - 1_000),
+      createdAt: conversionReceived,
+      properties: { model_id: "gpt-6-luna" },
+    },
+  ];
+  const response = await POST(event("marketing_touch", { utm_content: "linkedin-1" }));
+  assert.equal(response.status, 202);
+
+  assert.equal(repairQueries.length, 1);
+  const where = repairQueries[0].where as Row;
+  const window = where.createdAt as { gte: Date; lte: Date };
+  assert.equal(window.lte.getTime() - window.gte.getTime(), 60_000, "thirty seconds either side");
+  assert.equal((where.OR as Row[]).length, 1, "a guest touch matches its browser only");
+
+  assert.equal(updates.length, 1, "a signed-in first answer is not a lead and is left alone");
+  assert.deepEqual(updates[0].where, { id: "conversion-1" });
+  const repaired = updates[0].data.properties as Row;
+  assert.equal(repaired.method, "google");
+  assert.equal(repaired.touch_attribution, "attributed");
+  assert.equal(repaired.touch_utm_source, "linkedin");
+  assert.equal(repaired.touch_utm_content, "linkedin-1");
+  assert.equal(repaired.touch_evidence, "client_observed_server_time");
+  assert.equal(
+    repaired.touch_received_at,
+    (created[0].occurredAt as Date).toISOString(),
+    "the repair records the touch's server time"
+  );
+});
+
+test("a touch the browser observed after the conversion repairs nothing", async () => {
+  recentConversions = [
+    {
+      id: "conversion-1",
+      eventName: "signup_completed",
+      userId: "user-1",
+      // The conversion's own client time is earlier than the touch's.
+      occurredAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      createdAt: new Date(Date.now() - 500),
+      properties: { touch_attribution: "unattributed" },
+    },
+  ];
+  await POST(event("marketing_touch"));
+  assert.equal(updates.length, 0);
+});
+
+test("a failed repair still answers the stored touch as accepted", async () => {
+  repairFails = true;
+  const response = await POST(event("marketing_touch"));
+  assert.equal(response.status, 202);
+  assert.equal(created.length, 1);
+});
+
+test("conversions and other events never start a repair", async () => {
+  session = { user: { id: "user-1" } };
+  await POST(event("signup_completed", { method: "google" }));
+  await POST(event("landing_view"));
+  assert.equal(repairQueries.length, 0);
 });
