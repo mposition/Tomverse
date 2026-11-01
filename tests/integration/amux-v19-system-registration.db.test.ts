@@ -25,6 +25,7 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
 import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { consumeAmuxV4UnitRejection, prepareAmuxV4UnitRejection } from
   "@/lib/amux/ideaUnitRejectionService";
 import { amuxV4UnitBrowserDigest } from "@/lib/amux/ideaUnitBrowserCore";
@@ -1203,6 +1204,10 @@ test("a batch close answers per idea and one refusal leaves the others closed", 
   assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: analysing.ideaId }, select: { state: true } })).state, "analyzing",
   "an analysis still running is not closed under it");
+  const listed = new Set((await readAmuxIdeaProgressForOwner(session.user!.id!))
+    .map((row) => row.ideaId));
+  assert.deepEqual([listed.has(noPlan.ideaId), listed.has(second.ideaId),
+    listed.has(analysing.ideaId)], [false, false, true], "a closed idea leaves the Ideas list");
 
   const again = await closeAmuxIdeasForOwner({ session, request,
     ideaIds: [noPlan.ideaId], reason: "Batch close of stale ideas" });
