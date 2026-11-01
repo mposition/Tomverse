@@ -342,6 +342,73 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
       NETWORK_ERROR: "无法连接服务器，请检查网络后重试。",
     },
   },
+  "zh-Hant": {
+    upgradeTitle: (plan) => `切換到 ${plan}`,
+    downgradeTitle: (plan) => `切換到 ${plan}`,
+    close: "關閉",
+    loading: "正在確認費用…",
+    loadingStatus: "正在向付款服務商確認本次變更的費用。",
+    dueNow: "今日扣款",
+    creditsLabel: "本月方案額度",
+    creditsRemaining: (remaining, total) =>
+      `變更後剩餘 ${remaining.toLocaleString("zh-TW")} / ${total.toLocaleString("zh-TW")}`,
+    creditsOverageNotice:
+      "本月用量已超過新方案的額度，因此在下次重設前沒有剩餘額度。已使用的額度不會追回。",
+    upgradeBody: (plan) =>
+      `確認後將於今日扣除上述金額。扣款成功後立即啟用 ${plan}；若扣款失敗或需要額外驗證，將保留目前方案且不會扣款。`,
+    downgradeBody: (plan, date) =>
+      `在 ${date} 之前繼續使用目前方案，剩餘時間不予退款。自該日期起啟用 ${plan}，在此之前可隨時取消。`,
+    effectiveOn: (date) => `${date} 起生效`,
+    effectiveImmediately: "扣款成功後立即生效",
+    confirmUpgrade: (plan) => `付款並切換到 ${plan}`,
+    confirmDowngrade: (plan) => `預約 ${plan}`,
+    working: "處理中…",
+    resumeRenewalLabel: "同時重新開啟自動續訂",
+    resumeRenewalHint:
+      "此訂閱已設定在本期結束時終止。僅變更方案不會解除該設定。",
+    cancellationPreservedNotice:
+      "訂閱仍會在本期結束時終止。如需續訂，請勾選上方選項。",
+    scheduledTitle: (plan) => `已預約切換到 ${plan}`,
+    scheduledBody: (plan, date) =>
+      `${date} 起啟用 ${plan}。在此之前目前方案不會有任何變化。`,
+    cancelScheduled: "取消此變更",
+    cancelScheduledDone: "已取消預約的變更。",
+    pendingPaymentTitle: "等待付款中",
+    pendingPaymentBody:
+      "銀行尚未完成付款處理。付款完成後方案立即變更；若未完成，則不會有任何變化。",
+    upgradeDoneTitle: (plan) => `${plan} 已生效`,
+    upgradeDoneBody: "付款已完成，新方案已生效。",
+    retry: "重試",
+    contactSupport: "聯絡支援",
+    errors: {
+      PLAN_CHANGE_NOT_SUPPORTED: "您已在使用此方案。",
+      NO_ACTIVE_SUBSCRIPTION: "沒有可變更的訂閱，請直接開通所需的方案。",
+      SUBSCRIPTION_NOT_CHANGEABLE:
+        "目前無法變更訂閱，需先處理未付款的帳單或未完成的付款。支援團隊可以協助。",
+      BILLING_INTERVAL_CHANGE_NOT_SUPPORTED:
+        "暫不支援在變更方案的同時切換月付與年付。支援團隊可以代為處理。",
+      SUBSCRIPTION_NOT_SINGLE_ITEM:
+        "此訂閱的結構無法在此頁面安全變更。支援團隊可以代為處理。",
+      PLAN_CHANGE_ALREADY_PENDING:
+        "上一次變更仍在等待付款或驗證。完成後請再試一次。",
+      PLAN_CHANGE_ALREADY_SCHEDULED:
+        "已預約一次方案變更。如需其他變更，請先取消。",
+      SUBSCRIPTION_SCHEDULE_CONFLICT:
+        "此訂閱正由非此頁面建立的預約控制。支援團隊可以查看。",
+      PLAN_CHANGE_BLOCKED_BY_CANCELLATION:
+        "訂閱已設定在本期結束時終止，沒有可切換的下一期。如需保留訂閱，請先重新開啟自動續訂。",
+      PLAN_CHANGE_PREVIEW_NOT_FOUND: "此報價已失效，請重新開始。",
+      PLAN_CHANGE_PREVIEW_EXPIRED: "顯示的金額已過期，請重新開始以查看目前金額。",
+      PLAN_CHANGE_PRICE_UNAVAILABLE:
+        "無法以您的幣別提供此方案的價格。支援團隊可以協助。",
+      PLAN_CHANGE_ALREADY_APPLIED: "此變更已經生效。",
+      NO_SCHEDULED_PLAN_CHANGE: "沒有可取消的預約變更。",
+      AUTHENTICATION_REQUIRED: "登入狀態已過期，請重新登入。",
+      STRIPE_NOT_CONFIGURED: "目前無法使用付款功能，請稍後再試。",
+      STRIPE_ERROR: "付款服務商未能完成此操作，未產生任何扣款。",
+      NETWORK_ERROR: "無法連線到伺服器，請檢查網路後重試。",
+    },
+  },
   fr: {
     upgradeTitle: (plan) => `Passer à ${plan}`,
     downgradeTitle: (plan) => `Passer à ${plan}`,

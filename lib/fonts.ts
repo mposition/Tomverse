@@ -1,4 +1,4 @@
-import { Geist, Geist_Mono, Noto_Sans_KR, Noto_Sans_SC } from "next/font/google";
+import { Geist, Geist_Mono, Noto_Sans_KR, Noto_Sans_SC, Noto_Sans_TC } from "next/font/google";
 
 // Preload policy is documented in docs/ui-contracts/typography.md. In short:
 // only the Latin UI face is preloaded on every route; mono and the CJK faces
@@ -30,9 +30,16 @@ export const notoSansSc = Noto_Sans_SC({
   preload: false,
 });
 
+export const notoSansTc = Noto_Sans_TC({
+  variable: "--font-noto-sans-tc",
+  display: "swap",
+  preload: false,
+});
+
 export const fontVariables = [
   geistSans.variable,
   geistMono.variable,
   notoSansKr.variable,
   notoSansSc.variable,
+  notoSansTc.variable,
 ].join(" ");

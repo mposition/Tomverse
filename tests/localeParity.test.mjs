@@ -7,6 +7,7 @@ import { fr } from "../locales/fr.ts";
 import { ko } from "../locales/ko.ts";
 import { pt } from "../locales/pt.ts";
 import { zh } from "../locales/zh.ts";
+import { zhHant } from "../locales/zhHant.ts";
 import { localeLaunchPolicy } from "../lib/localeLaunchPolicy.ts";
 import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
 
@@ -35,7 +36,7 @@ import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
  *      lowering the number on purpose -- which is the visible act.
  */
 
-const dictionaries = { en, ko, zh, fr, de, es, pt };
+const dictionaries = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };
 
 const flatten = (value, prefix = "") =>
   Object.entries(value).flatMap(([key, entry]) =>

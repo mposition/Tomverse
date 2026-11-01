@@ -160,12 +160,22 @@ test("globals.css routes every family through the locale-aware tokens", () => {
 
   assert.match(css, /:lang\(ko\)\s*\{[^}]*--font-ui:\s*var\(--font-noto-sans-kr\)/);
   assert.match(css, /:lang\(zh\)\s*\{[^}]*--font-ui:\s*var\(--font-noto-sans-sc\)/);
+  assert.match(css, /:lang\(zh-Hant\)\s*\{[^}]*--font-ui:\s*var\(--font-noto-sans-tc\)/);
+  // `:lang(zh)` prefix-matches `zh-Hant` at the same specificity, so the
+  // Traditional rule only wins if it comes later in the file.
+  assert.ok(
+    css.indexOf(":lang(zh-Hant) {") > css.indexOf(":lang(zh) {"),
+    ":lang(zh-Hant) must follow :lang(zh)"
+  );
 
   for (const fallback of ["Apple SD Gothic Neo", "Malgun Gothic"]) {
     assert.ok(css.includes(fallback), `Korean stack is missing ${fallback}`);
   }
   for (const fallback of ["PingFang SC", "Microsoft YaHei"]) {
     assert.ok(css.includes(fallback), `Chinese stack is missing ${fallback}`);
+  }
+  for (const fallback of ["PingFang TC", "Microsoft JhengHei"]) {
+    assert.ok(css.includes(fallback), `Traditional Chinese stack is missing ${fallback}`);
   }
   for (const role of [
     "type-display",
@@ -191,7 +201,7 @@ test("only the Latin UI face is preloaded", () => {
     /preload:\s*false/,
     "Geist is the default UI face and must stay preloaded"
   );
-  for (const deferred of ["Geist_Mono", "Noto_Sans_KR", "Noto_Sans_SC"]) {
+  for (const deferred of ["Geist_Mono", "Noto_Sans_KR", "Noto_Sans_SC", "Noto_Sans_TC"]) {
     assert.match(
       declaration(deferred),
       /preload:\s*false/,

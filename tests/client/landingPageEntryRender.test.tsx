@@ -13,6 +13,7 @@ const guestCopyBoundaries: Record<Language, readonly RegExp[]> = {
   en: [/when.*available/i, /text questions/i, /existing guest limit/i, /browser/i, /attachments.*manual/i],
   ko: [/제공되는 경우/, /텍스트 질문/, /기존 Guest 한도/, /브라우저/, /첨부.*수동/],
   zh: [/可用时/, /文字问题/, /现有访客限额/, /浏览器/, /附件.*手动/],
+  "zh-Hant": [/可用時/, /文字問題/, /現有訪客限額/, /瀏覽器/, /附件.*手動/],
   fr: [/disponible/i, /questions textuelles/i, /limite d’invité actuelle/i, /navigateur/i, /pièces jointes.*manuelle/i],
   de: [/verfügbar/i, /Textfragen/i, /bestehenden Gastlimits/i, /Browser/i, /Anhänge.*manuelle/i],
   es: [/disponible/i, /preguntas de texto/i, /límite de invitado actual/i, /navegador/i, /adjuntos.*manual/i],

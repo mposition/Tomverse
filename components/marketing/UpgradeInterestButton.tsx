@@ -202,6 +202,13 @@ const foundingTesterPassCopy: Record<
     billingLabel: "不自动续费的通行证",
     activate: "激活测试通行证",
   },
+  "zh-Hant": {
+    title: "創始測試通行證",
+    detail: (days) =>
+      `${days} 天 Pro 權限。無需付款方式，不收費，也不會自動續費；結束後帳戶會恢復為 Free。`,
+    billingLabel: "不自動續費的通行證",
+    activate: "啟用測試通行證",
+  },
   fr: {
     title: "Pass testeur fondateur",
     detail: (days) =>
@@ -351,6 +358,45 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
         ? `年付方案按每年 ${amount} 自动续订。`
         : `月付方案按每月 ${amount} 自动续订。`,
     continueToCheckout: "继续结账",
+  },
+  "zh-Hant": {
+    secureCheckout: "安全結帳",
+    upgradeTo: (plan) => `升級到 ${plan}`,
+    description: "選擇計費週期，有促銷代碼時可以輸入。確認總金額和續約條件後，再繼續付款。",
+    billingCycle: "計費週期",
+    monthly: "月付",
+    annual: "年付",
+    yearly: "年付",
+    annualOff: "八折優惠",
+    monthlyDescription: "按月付款。",
+    annualDescription: "選擇年付可節省 20%。",
+    paymentMethods: "付款方式",
+    paymentHint:
+      "付款頁面會顯示銀行卡及支援的 Google Pay、Apple Pay 等付款方式。可用選項取決於裝置、瀏覽器和地區。",
+    promoLabel: "促銷代碼",
+    promoPlaceholder: "選填的促銷代碼",
+    apply: "套用",
+    promoFinePrint:
+      "驗證後的優惠會顯示折扣期限。優惠結束後，若未取消，訂閱將依正常價格續訂。",
+    invalidPromo: "促銷代碼無效。",
+    promoApplied: "促銷代碼已套用。",
+    promotionCurrencyNotSupported:
+      "固定金額的促銷代碼目前僅支援以美元結帳。當地貨幣結算請使用依比例折扣的促銷代碼。",
+    orderSummary: "訂單摘要",
+    plan: "方案",
+    billing: "計費",
+    subtotal: "小計",
+    annualSavings: "年付節省",
+    availableOffer: (code) => `可用優惠：${code}`,
+    appliedAtCheckout: "結帳時套用",
+    dueToday: "今日應付",
+    localPriceNote: (amount) =>
+      `結帳時將收取所顯示的當地固定價格 ${amount}。`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `年付方案將依每年 ${amount} 自動續訂。`
+        : `月付方案將依每月 ${amount} 自動續訂。`,
+    continueToCheckout: "繼續結帳",
   },
   fr: {
     secureCheckout: "Paiement sécurisé",
@@ -518,6 +564,7 @@ const promotionPolicyCopy: Record<Language, string> = {
   en: "Promotions do not normally combine with the annual-plan discount. They can be combined only when the offer details for your code explicitly allow it.",
   ko: "연간 플랜 할인과는 원칙적으로 중복 적용되지 않습니다. 입력한 코드의 혜택 안내에서 중복 적용이 명시적으로 허용된 경우만 함께 사용할 수 있습니다.",
   zh: "促销优惠通常不可与年付折扣叠加。仅当该代码的优惠说明明确允许时，才可同时使用。",
+  "zh-Hant": "促銷優惠通常不可與年付折扣疊加。僅當該代碼的優惠說明明確允許時，才可同時使用。",
   fr: "Les promotions ne se cumulent normalement pas avec la remise annuelle. Le cumul est possible uniquement si les conditions du code l’autorisent explicitement.",
   de: "Aktionen sind grundsätzlich nicht mit dem Jahresrabatt kombinierbar. Eine Kombination ist nur möglich, wenn die Angebotsdetails Ihres Codes sie ausdrücklich erlauben.",
   es: "Las promociones no se combinan normalmente con el descuento anual. Solo se pueden combinar si los detalles del código lo permiten expresamente.",
@@ -555,6 +602,13 @@ const checkoutLegalCopy: Record<Language, CheckoutLegalCopy> = {
     conjunction: "并确认",
     refund: "退款政策",
     suffix: "，包括自动续订及在已付费周期结束时取消的条件。",
+  },
+  "zh-Hant": {
+    prefix: "繼續即表示你同意",
+    terms: "條款與條件",
+    conjunction: "並確認",
+    refund: "退款政策",
+    suffix: "，包括自動續訂，以及在已付費週期結束時取消的條件。",
   },
   fr: {
     prefix: "En continuant, vous acceptez les ",
