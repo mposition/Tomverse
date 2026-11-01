@@ -121,6 +121,7 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   const { sql, values } = calls[0];
   assert.equal(/Ciphertext|"title"|"body"|bodyDigest|rawDigest/i.test(sql), false, "no idea text or digest is read");
   assert.ok(values.includes("owner-1") && values.includes(AMUX_IDEA_PROGRESS_LIMIT), "owner scoped and bounded");
+  assert.ok(sql.includes(`AND "cancelledAt" IS NULL`), "a closed or cancelled idea leaves the list");
   assert.ok(values.includes(now.toISOString()), "the proposal expiry is compared with the database clock");
   assert.ok(sql.includes(`u."expiresAt" > (?::timestamptz AT TIME ZONE 'UTC')`), "an expired proposal waits for nobody");
   assert.ok(sql.includes(`d."action" = 'register_card' AND d."state" = 'consumed'`));

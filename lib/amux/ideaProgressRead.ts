@@ -6,7 +6,7 @@ import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/l
 import { AMUX_IDEA_OWNER_CLOSABLE_STATE } from "@/lib/amux/ideaOwnerCloseCore";
 import { amuxIdeaProgress, type AmuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
 
-/** How many of the owner's newest ideas the Ideas tab lists. */
+/** How many of the owner's newest open ideas the Ideas tab lists. */
 export const AMUX_IDEA_PROGRESS_LIMIT = 20;
 
 export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
@@ -110,7 +110,9 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
         "submissionAuditLogId"
       FROM "AmuxIdeaSubmission"
-      WHERE "actorUserId" = ${actorUserId}
+      -- A closed or cancelled idea leaves the list, so the bound is spent on
+      -- ideas still in progress.
+      WHERE "actorUserId" = ${actorUserId} AND "cancelledAt" IS NULL
       ORDER BY "submittedAt" DESC, "id" ASC
       LIMIT ${AMUX_IDEA_PROGRESS_LIMIT}
     )
