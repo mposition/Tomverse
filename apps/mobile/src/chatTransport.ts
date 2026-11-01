@@ -111,8 +111,8 @@ export interface ChatTransport {
   onSessionLost?(listener: () => void): () => void;
   session(): Promise<boolean>;
   signIn(): Promise<void>;
-  requestEmailCode?(email: string, language: string): Promise<void>;
-  verifyEmailCode?(email: string, code: string): Promise<void>;
+  requestEmailCode?(email: string, language: string): Promise<import("./authBridgeContract").EmailCodeRequestResult>;
+  verifyEmailCode?(email: string, code: string, signup?: import("./authBridgeContract").EmailSignupChoice): Promise<void>;
   signOut(): Promise<void>;
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;

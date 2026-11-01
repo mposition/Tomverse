@@ -94,6 +94,17 @@ threshold with lockout, and Turnstile above the threshold; the mobile path
 exchanges a verified code for a token family instead of setting a cookie. No
 password is introduced anywhere.
 
+Native email signup uses the same verified-address creation and one-time signup
+hold as the web. It is separately default-off behind
+`TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED=true`; the email capability probe advertises
+signup and the current consent-copy version only when enabled. A verified new
+address is shown an explicit signup step in the app. The existing signup consent
+devices and finalizer bind only the choice actually presented to the newly
+created account and its spent email-login row. Existing accounts never consume
+that choice, and store-review credentials cannot create accounts. Tokens still
+terminate in the native secure store. An incomplete signup is recovered with a
+fresh code, without replaying an account-creation request.
+
 ### Store review is the exception, and is bounded
 
 Reviewers cannot read the dedicated account's mailbox, so a submission-scoped

@@ -259,10 +259,11 @@ public class MobileAuthPlugin extends Plugin {
         PluginCall call = pendingLogin; pendingLogin = null; verifier = null; state = null;
         if (call != null) call.reject("Browser sign-in could not finish", code);
     }
-    private void requireEmailSupport() throws Exception {
+    private JSONObject requireEmailSupport() throws Exception {
         try {
             JSONObject support = request("/api/auth/mobile/email", null, null);
             if (!support.optBoolean("ok") || !support.optBoolean("emailCode")) throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE");
+            return support;
         } catch (AuthFailure unsupported) { throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE"); }
     }
     @PluginMethod public void requestEmailCode(PluginCall call) {
@@ -272,9 +273,12 @@ public class MobileAuthPlugin extends Plugin {
                 if (email == null || email.length() > 320) throw new AuthFailure("MOBILE_LOGIN_FAILED");
                 // This read cannot send mail. An undeployed route may be caught
                 // by NextAuth (400) rather than returning a conventional 404.
-                requireEmailSupport();
+                JSONObject support = requireEmailSupport();
                 request("/api/auth/mobile/email", new JSONObject().put("action", "request").put("email", email), call.getString("language"));
-                call.resolve();
+                JSObject result = new JSObject();
+                JSONObject signup = support.optJSONObject("emailSignup");
+                if (signup != null) result.put("signup", new JSObject().put("consentEnabled", signup.optBoolean("consentEnabled")).put("copyVersion", signup.optString("copyVersion")));
+                call.resolve(result);
             } catch (Exception e) { call.reject("Could not send sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });
     }
@@ -285,7 +289,10 @@ public class MobileAuthPlugin extends Plugin {
                 String email = call.getString("email"); String code = call.getString("code");
                 if (email == null || email.length() > 320 || code == null || !code.matches("[0-9]{6}")) throw new AuthFailure("EMAIL_CODE_INVALID");
                 clear();
-                acceptSignIn(post("/api/auth/mobile/email", new JSONObject().put("action", "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL)), generation);
+                JSObject signup = call.getObject("signup");
+                JSONObject body = new JSONObject().put("action", signup == null ? "verify" : "signup").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL);
+                if (signup != null) body.put("signupConsent", signup);
+                acceptSignIn(post("/api/auth/mobile/email", body), generation);
                 call.resolve();
             } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Could not verify sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });

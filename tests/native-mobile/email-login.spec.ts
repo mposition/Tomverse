@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { CURRENT_CONSENT_COPY_VERSION } from "../../lib/emailConsentCopy";
+import { mobileSignupCopy } from "../../locales/mobileSignup";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => { localStorage.setItem("tomverse-language", "ko"); localStorage.setItem("tomverse-theme", "light"); });
@@ -23,10 +25,18 @@ test.beforeEach(async ({ page }) => {
         if (window.loginUnavailable) throw { code: "MOBILE_LOGIN_UNAVAILABLE" };
         if (window.loginDeliveryFailed) throw { code: "SEND_FAILED" };
         if (window.loginRequestFailed) throw { code: "MOBILE_LOGIN_FAILED" };
+        return window.nativeSignupDisabled ? undefined : { signup: { consentEnabled: window.nativeConsentDisabled !== true, copyVersion: window.staleSignupCopy ? "old" : ${JSON.stringify(CURRENT_CONSENT_COPY_VERSION)} } };
       };
-      transport.verifyEmailCode = async (email, code) => {
+      transport.verifyEmailCode = async (email, code, signup) => {
         window.loginVerifies = (window.loginVerifies || 0) + 1;
         if (code !== "123456") throw { code: "EMAIL_CODE_INVALID" };
+        if (window.newEmail && !signup) throw { code: "EMAIL_ACCOUNT_NOT_FOUND" };
+        if (signup) {
+          window.signupCalls = (window.signupCalls || 0) + 1;
+          window.signupChoice = signup;
+          if (window.signupFailure) throw { code: window.signupFailure };
+          if (window.holdSignup) await new Promise(resolve => { window.finishSignup = resolve; });
+        }
         await completeSession();
       };
     `;
@@ -131,4 +141,79 @@ test("the email form reports browser failures as browser sign-in errors", async 
   await page.getByRole("button", { name: "다른 로그인 방법 사용" }).click();
   await expect(page.getByRole("alert")).toContainText("브라우저 로그인을 아직 사용할 수 없습니다");
   await expect(page.getByLabel("6자리 인증 코드")).toHaveCount(0);
+});
+
+async function verifyNewEmail(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "앱에서 이메일 코드로 로그인" }).click();
+  await page.getByLabel("이메일 주소").fill("new@example.com");
+  await page.getByRole("button", { name: "인증 코드 받기", exact: true }).click();
+  await page.getByLabel("6자리 인증 코드").fill("123456");
+  await page.getByRole("button", { name: "확인하고 시작하기" }).click();
+}
+
+for (const choice of ["neither", "opt-in", "refuse"]) test("verified new email requires explicit signup and records " + choice, async ({ page }) => {
+  if (choice === "refuse") await page.setViewportSize({ width: 320, height: 780 });
+  if (choice === "opt-in") await page.addInitScript(() => { localStorage.setItem("tomverse-theme", "dark"); });
+  await page.addInitScript(() => { (window as unknown as { newEmail: boolean }).newEmail = true; });
+  await verifyNewEmail(page);
+  await expect(page.getByRole("dialog", { name: "Tomverse 회원가입" })).toBeVisible();
+  await expect(page.locator(".composer textarea")).toHaveCount(0);
+  await expect(page.getByLabel("6자리 인증 코드")).toHaveCount(0);
+  const optIn = page.getByRole("checkbox", { name: "이메일 광고성 정보 수신동의 (선택)", exact: true });
+  const refusal = page.getByRole("checkbox", { name: /광고성 이메일을 받지 않겠습니다/ });
+  await expect(optIn).not.toBeChecked(); await expect(refusal).not.toBeChecked();
+  if (choice === "opt-in") { await refusal.check(); await optIn.check(); await expect(refusal).not.toBeChecked(); }
+  if (choice === "refuse") { await optIn.check(); await refusal.check(); await expect(optIn).not.toBeChecked(); }
+  expect(await page.evaluate(() => (window as unknown as { signupCalls?: number }).signupCalls ?? 0)).toBe(0);
+  await page.screenshot({ path: `.tmp/native-email-signup/signup-${choice}.png` });
+  await page.getByRole("button", { name: "가입하고 시작하기", exact: true }).click();
+  await expect(page.locator(".composer textarea")).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { signupChoice: unknown }).signupChoice)).toEqual({ shown: true, optIn: choice === "opt-in", objected: choice === "refuse", copyVersion: CURRENT_CONSENT_COPY_VERSION, language: "ko" });
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("new@example.com");
+});
+
+test("closing signup creates no account and discards its proof and choices", async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as { newEmail: boolean }).newEmail = true; });
+  await verifyNewEmail(page); await page.getByRole("checkbox", { name: "이메일 광고성 정보 수신동의 (선택)", exact: true }).check();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "앱에서 이메일 코드로 로그인" }).click();
+  await expect(page.getByLabel("이메일 주소")).toHaveValue(""); await expect(page.getByLabel("6자리 인증 코드")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { signupCalls?: number }).signupCalls ?? 0)).toBe(0);
+});
+
+test("signup stays single-flight while the account is being created", async ({ page }) => {
+  await page.addInitScript(() => { Object.assign(window, { newEmail: true, holdSignup: true }); });
+  await verifyNewEmail(page); const create = page.getByRole("button", { name: "가입하고 시작하기", exact: true }); await create.click();
+  await expect(page.locator(".email-login button[type=submit]")).toBeDisabled();
+  await page.getByRole("button", { name: "닫기", exact: true }).click(); await expect(page.getByRole("dialog")).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { signupCalls: number }).signupCalls)).toBe(1);
+  await page.evaluate(() => (window as unknown as { finishSignup: () => void }).finishSignup()); await expect(page.locator(".composer textarea")).toBeVisible();
+});
+
+for (const code of ["EMAIL_CODE_INVALID", "EMAIL_SIGNUP_OPTIONS_CHANGED", "EMAIL_SIGNUP_INCOMPLETE"]) test(code + " never replays a signup and clears its proof", async ({ page }) => {
+  await page.addInitScript((code) => { Object.assign(window, { newEmail: true, signupFailure: code }); }, code);
+  await verifyNewEmail(page); await page.getByRole("button", { name: "가입하고 시작하기", exact: true }).click();
+  await expect(page.getByRole("alert")).toBeVisible(); await expect(page.getByLabel("6자리 인증 코드")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "가입하고 시작하기", exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { signupCalls: number }).signupCalls)).toBe(1);
+});
+
+test("signup without available consent devices never invents a choice", async ({ page }) => {
+  await page.addInitScript(() => { Object.assign(window, { newEmail: true, nativeConsentDisabled: true }); });
+  await verifyNewEmail(page); await expect(page.getByRole("checkbox")).toHaveCount(0); await page.getByRole("button", { name: "가입하고 시작하기", exact: true }).click();
+  await expect(page.locator(".composer textarea")).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { signupChoice: unknown }).signupChoice)).toEqual({ shown: false, optIn: false, objected: false, copyVersion: CURRENT_CONSENT_COPY_VERSION, language: "ko" });
+});
+
+for (const mode of ["nativeSignupDisabled", "staleSignupCopy"]) test(mode + " never creates an account through an unsupported signup UI", async ({ page }) => {
+  await page.addInitScript((mode) => { Object.assign(window, { newEmail: true, [mode]: true }); }, mode);
+  await verifyNewEmail(page); await expect(page.getByRole("alert")).toContainText("Tomverse 웹사이트"); await expect(page.getByRole("button", { name: "가입하고 시작하기", exact: true })).toHaveCount(0);
+});
+
+for (const language of ["en", "ko", "zh", "de", "fr", "es", "pt"] as const) test("new email signup follows the " + language + " app language", async ({ page }) => {
+  await page.addInitScript((language) => { localStorage.setItem("tomverse-language", language); Object.assign(window, { newEmail: true }); }, language);
+  await page.goto("/"); await page.locator(".sign-in-email").click(); await page.locator('.email-login input[type="email"]').fill("new@example.com"); await page.locator('.email-login button[type="submit"]').click();
+  await page.locator(".email-code").fill("123456"); await page.locator('.email-login button[type="submit"]').click();
+  await expect(page.getByRole("dialog", { name: mobileSignupCopy[language].title })).toBeVisible(); await expect(page.getByRole("button", { name: mobileSignupCopy[language].create, exact: true })).toBeVisible();
 });

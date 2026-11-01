@@ -223,10 +223,11 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
             } catch { call.reject("Sign-in is not available on this server", "MOBILE_LOGIN_UNAVAILABLE") }
         }
     }
-    private func requireEmailSupport() throws {
+    private func requireEmailSupport() throws -> [String: Any] {
         do {
             let support = try request("/api/auth/mobile/email", nil)
             guard support["ok"] as? Bool == true, support["emailCode"] as? Bool == true else { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
+            return support
         } catch Failure.refused { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
         catch Failure.invalid { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
     }
@@ -234,9 +235,11 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         queue.async { [self] in
             do {
                 guard let email = call.getString("email"), email.count <= 320 else { throw Failure.invalid }
-                try requireEmailSupport()
+                let support = try requireEmailSupport()
                 _ = try request("/api/auth/mobile/email", ["action": "request", "email": email], language: call.getString("language"))
-                call.resolve()
+                if let signup = support["emailSignup"] as? [String: Any] {
+                    call.resolve(["signup": ["consentEnabled": signup["consentEnabled"] as? Bool ?? false, "copyVersion": signup["copyVersion"] as? String ?? ""]])
+                } else { call.resolve() }
             } catch Failure.refused(let code) { call.reject("Could not send sign-in code", code) }
             catch { call.reject("Could not send sign-in code", "MOBILE_LOGIN_FAILED") }
         }
@@ -247,7 +250,9 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
             do {
                 guard let email = call.getString("email"), email.count <= 320, let code = call.getString("code"), code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { throw Failure.refused("EMAIL_CODE_INVALID") }
                 try clear()
-                try acceptSignIn(post("/api/auth/mobile/email", ["action": "verify", "email": email, "code": code, "platform": "ios", "deviceLabel": UIDevice.current.model]), generation: generation)
+                var body: [String: Any] = ["action": "verify", "email": email, "code": code, "platform": "ios", "deviceLabel": UIDevice.current.model]
+                if let signup = call.getObject("signup") { body["action"] = "signup"; body["signupConsent"] = signup }
+                try acceptSignIn(post("/api/auth/mobile/email", body), generation: generation)
                 call.resolve()
             } catch Failure.refused(let code) { try? clear(); call.reject("Could not verify sign-in code", code) }
             catch { try? clear(); call.reject("Could not verify sign-in code", "MOBILE_LOGIN_FAILED") }
