@@ -20,7 +20,7 @@
  * dropped; it is not stored, logged or submitted.
  *
  * What is reported is one aggregate rate per locale and metric, as the existing
- * `measurement_120d` report kind (policy §10), through the generator's own
+ * `measurement_120d` report kind (docs/policy/marketing-automation.md §10.3), through the generator's own
  * report route and signature: numbers and a sample size, no text, no URL. The
  * per-answer table `AiVisibilityRun` has no writer today and this does not add
  * one.
