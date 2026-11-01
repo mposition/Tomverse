@@ -26,6 +26,12 @@ import {
   type MarketingConsoleSection,
 } from "@/lib/marketingConsoleSections";
 import { adminFetch } from "@/lib/adminFetch";
+import {
+  formatMarketIntelValue,
+  groupMarketIntelFacts,
+  isHttpsUrl,
+  type MarketIntelFactView,
+} from "@/lib/marketingReportView";
 import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
@@ -683,22 +689,18 @@ function MarketingSwitchStrip({
       // broken rather than misaddressed.
       method: "PATCH",
       checked: state === "on",
-      // Two switches the writer is certain to refuse, each drawn disabled with
-      // its reason rather than hidden: someone looking for a switch should
-      // find out why it is not theirs to move, and a control whose only
-      // outcome is a 409 teaches them that this screen's buttons are guesses.
-      //
-      // Publishing cannot go on before the publisher exists (S2c); the writer
-      // answers `publisher_capability_unavailable`. Autonomous cannot go on
-      // while drafts or publishing are off; the writer answers
+      // A switch the writer is certain to refuse is drawn disabled with its
+      // reason rather than hidden: someone looking for a switch should find out
+      // why it is not theirs to move, and a control whose only outcome is a 409
+      // teaches them that this screen's buttons are guesses. Autonomous cannot
+      // go on while drafts or publishing are off; the writer answers
       // `autonomous_needs_drafts_and_publish`.
-      unavailable: !turningOn
-        ? undefined
-        : control.name === "publish"
-          ? m.switchPublishUnavailable
-          : control.name === "autonomous" && (switches.drafts !== "on" || switches.publish !== "on")
-            ? m.switchAutonomousNeedsBoth
-            : undefined,
+      unavailable:
+        turningOn &&
+        control.name === "autonomous" &&
+        (switches.drafts !== "on" || switches.publish !== "on")
+          ? m.switchAutonomousNeedsBoth
+          : undefined,
       confirm: turningOn ? m.switchConfirmOn : undefined,
       body: () => ({
         switch: control.name,
@@ -1490,6 +1492,14 @@ const MARKETING_STOPPED_ACCOUNT_STATUSES = new Set([
   "connect_pending",
 ]);
 
+// Every post is approved by a person in these states, which is where the store
+// accepts a language change. Compared with the store's list by a test: this is
+// a client component and cannot import it.
+const MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES = new Set([
+  "connect_pending",
+  "approval_mode",
+]);
+
 function publishedActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];
   const status = str(row.status);
@@ -1651,6 +1661,42 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
       label: m.actReconnect,
       path: ACCOUNT(row.id, "reconnect"),
       body: () => ({ expectedConnectionGeneration: generation }),
+    });
+  }
+
+  if (MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES.has(status)) {
+    const allowedLocales = Array.isArray(row.allowedLocales)
+      ? row.allowedLocales.map((locale) => str(locale))
+      : [];
+    actions.push({
+      id: "locales",
+      label: m.actChangeLocales,
+      path: ACCOUNT(row.id, "locales"),
+      fields: [
+        {
+          name: "defaultLocale",
+          label: m.fieldDefaultLocale,
+          kind: "select",
+          options: MARKETING_LOCALES,
+          initial: str(row.defaultLocale),
+        },
+        {
+          name: "allowedLocales",
+          label: m.fieldAllowedLocales,
+          kind: "text",
+          initial: allowedLocales.join(", "),
+          hint: m.hintLocalesChange,
+        },
+      ],
+      body: (values) => ({
+        expectedDefaultLocale: str(row.defaultLocale),
+        expectedAllowedLocales: allowedLocales,
+        defaultLocale: values.defaultLocale,
+        allowedLocales: values.allowedLocales
+          .split(",")
+          .map((locale) => locale.trim())
+          .filter((locale) => locale !== ""),
+      }),
     });
   }
 
@@ -2084,9 +2130,66 @@ function MarketingRow({
     );
   }
 
+  return <MarketingReportRow row={row} m={m} />;
+}
+
+type ReportDetail = {
+  id: string;
+  kind: string;
+  payload: unknown;
+  competitorNames: Record<string, string>;
+};
+
+type ReportLoad =
+  | { status: "idle" | "loading" | "failed" | "unreadable" }
+  | { status: "ready"; report: ReportDetail };
+
+/**
+ * One row of the Reports tab. The list carries no payload, so the content is
+ * read from the one-report route when a person opens the row, and kept for the
+ * next time the row is opened.
+ */
+function MarketingReportRow({ row, m }: { row: Row; m: Record<string, string> }) {
+  const [open, setOpen] = useState(false);
+  const [load, setLoad] = useState<ReportLoad>({ status: "idle" });
+
+  const toggle = async () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (load.status === "ready" || load.status === "loading") return;
+    setLoad({ status: "loading" });
+    try {
+      const response = await adminFetch(
+        `/api/admin/marketing/reports/${encodeURIComponent(String(row.id))}`,
+        { cache: "no-store" }
+      );
+      if (!response.ok) {
+        await discardResponseBody(response);
+        setLoad({ status: response.status === 422 ? "unreadable" : "failed" });
+        return;
+      }
+      setLoad({ status: "ready", report: (await response.json()) as ReportDetail });
+    } catch {
+      setLoad({ status: "failed" });
+    }
+  };
+
   return (
     <>
-      <RowHeading title={String(row.kind)} detail={String(row.sourceVersion)} />
+      <RowHeading title={String(row.kind)} detail={String(row.sourceVersion)}>
+        <button
+          type="button"
+          onClick={() => void toggle()}
+          aria-expanded={open}
+          data-testid="marketing-report-toggle"
+          className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-zinc-700 px-3.5 py-2 text-[13px] font-semibold text-zinc-300 transition hover:bg-zinc-800"
+        >
+          {open ? m.reportHide : m.reportView}
+        </button>
+      </RowHeading>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <Field
           label={m.colPeriod}
@@ -2094,6 +2197,158 @@ function MarketingRow({
         />
         <Field label={m.colCreated} value={stamp(row.createdAt) ?? m.none} />
       </div>
+      {open ? (
+        <div className="mt-4 border-t border-zinc-800 pt-4" data-testid="marketing-report-body">
+          {load.status === "ready" ? (
+            <MarketingReportBody report={load.report} m={m} />
+          ) : load.status === "unreadable" ? (
+            <p className="text-sm text-amber-300">{m.reportUnreadable}</p>
+          ) : load.status === "failed" ? (
+            <p className="text-sm text-amber-300">{m.reportLoadFailed}</p>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-zinc-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {m.reportLoading}
+            </p>
+          )}
+        </div>
+      ) : null}
     </>
+  );
+}
+
+const TABLE_HEAD = "py-1 pr-4 text-left text-xs font-medium text-zinc-500";
+const TABLE_CELL = "py-1 pr-4 text-[13px] text-zinc-200";
+
+/** What a report says, by kind: market facts by competitor, the weekly numbers, or the JSON. */
+export function MarketingReportBody({ report, m }: { report: ReportDetail; m: Record<string, string> }) {
+  if (report.kind === "market_intel") {
+    const payload = report.payload as { facts: MarketIntelFactView[]; unrepresentableFactCount: number };
+    const groups = groupMarketIntelFacts(payload.facts, report.competitorNames);
+    return (
+      <div className="grid gap-4" data-testid="marketing-report-market-intel">
+        <p className="text-xs text-zinc-400">
+          {m.reportFactCount.replace("{count}", String(payload.facts.length))}
+          {payload.unrepresentableFactCount > 0 ? (
+            <span className="ml-2 font-semibold text-amber-300" data-testid="marketing-report-unrepresentable">
+              {m.reportUnrepresentable.replace("{count}", String(payload.unrepresentableFactCount))}
+            </span>
+          ) : null}
+        </p>
+        {groups.length === 0 ? <p className="text-sm text-zinc-400">{m.reportNoFacts}</p> : null}
+        {groups.map((group) => (
+          <section key={group.competitorId} data-testid="marketing-report-competitor">
+            <h4 className="flex items-baseline gap-2 text-sm font-semibold text-zinc-100">
+              {group.name}
+              {group.name !== group.competitorId ? (
+                <span className="font-mono text-xs font-normal text-zinc-500">{group.competitorId}</span>
+              ) : null}
+            </h4>
+            <ul className="mt-2 grid gap-1.5">
+              {group.facts.map((fact, index) => (
+                <li
+                  key={`${fact.factType}:${index}`}
+                  className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[13px]"
+                  data-testid="marketing-report-fact"
+                >
+                  <span className="font-mono text-xs text-zinc-400">{fact.factType}</span>
+                  <span className="font-semibold text-zinc-100">{formatMarketIntelValue(fact.value)}</span>
+                  {isHttpsUrl(fact.sourceUrl) ? (
+                    <a
+                      href={fact.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all text-xs text-zinc-300 underline underline-offset-2 hover:text-white"
+                      data-testid="marketing-report-source-link"
+                    >
+                      {m.reportSource}
+                    </a>
+                  ) : (
+                    <span className="break-all text-xs text-zinc-500">{fact.sourceUrl}</span>
+                  )}
+                  <span className="text-xs text-zinc-500">
+                    {m.reportChecked} {stamp(fact.checkedAt) ?? m.none}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    );
+  }
+
+  if (report.kind === "weekly_kpi") {
+    const payload = report.payload as {
+      postsPublished: number;
+      postsRejected: number;
+      guardRejectionsByCode: Array<{ code: string; count: number }>;
+      channelTotals: Array<{ accountSlug: string; published: number; failed: number }>;
+    };
+    return (
+      <div className="grid gap-4" data-testid="marketing-report-weekly-kpi">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={m.reportPostsPublished} value={String(payload.postsPublished)} />
+          <Field label={m.reportPostsRejected} value={String(payload.postsRejected)} />
+        </div>
+        <div>
+          <p className="text-xs font-medium text-zinc-400">{m.reportGuardRejections}</p>
+          {payload.guardRejectionsByCode.length === 0 ? (
+            <p className="mt-1 text-sm text-zinc-500">{m.reportNoRows}</p>
+          ) : (
+            <table className="mt-1 w-full max-w-md border-collapse">
+              <thead>
+                <tr>
+                  <th className={TABLE_HEAD}>{m.reportColCode}</th>
+                  <th className={TABLE_HEAD}>{m.reportColCount}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payload.guardRejectionsByCode.map((entry) => (
+                  <tr key={entry.code}>
+                    <td className={`${TABLE_CELL} font-mono`}>{entry.code}</td>
+                    <td className={TABLE_CELL}>{entry.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div>
+          <p className="text-xs font-medium text-zinc-400">{m.reportByAccount}</p>
+          {payload.channelTotals.length === 0 ? (
+            <p className="mt-1 text-sm text-zinc-500">{m.reportNoRows}</p>
+          ) : (
+            <table className="mt-1 w-full max-w-md border-collapse">
+              <thead>
+                <tr>
+                  <th className={TABLE_HEAD}>{m.reportColAccount}</th>
+                  <th className={TABLE_HEAD}>{m.reportColPublished}</th>
+                  <th className={TABLE_HEAD}>{m.reportColFailed}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payload.channelTotals.map((entry) => (
+                  <tr key={entry.accountSlug}>
+                    <td className={`${TABLE_CELL} font-mono`}>{entry.accountSlug}</td>
+                    <td className={TABLE_CELL}>{entry.published}</td>
+                    <td className={TABLE_CELL}>{entry.failed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <pre
+      className="max-h-96 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 font-mono text-xs leading-5 text-zinc-300"
+      data-testid="marketing-report-json"
+    >
+      {JSON.stringify(report.payload, null, 2)}
+    </pre>
   );
 }

@@ -11,6 +11,8 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
+  const [signup, setSignup] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [cooldown, setCooldown] = useState(0);
@@ -20,30 +22,45 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
   useEffect(() => { if (!cooldown) return; const timer = setTimeout(() => setCooldown(cooldown - 1), 1000); return () => clearTimeout(timer); }, [cooldown]);
   async function submit(verify: boolean | "browser") {
     if (inFlight.current) return;
+    if (verify === true && signup && !termsAccepted) return;
     inFlight.current = true; setBusy(true); setError("");
     try {
       if (verify === "browser") {
         await transport.signIn();
         if (active.current) await onComplete();
       } else if (verify) {
-        await transport.verifyEmailCode!(email.trim(), code);
+        await transport.verifyEmailCode!(email.trim(), code, signup ? { intent: "signup", termsAccepted } : undefined);
         if (active.current) await onComplete();
       } else {
         await transport.requestEmailCode!(email.trim(), language);
-        if (active.current) { setSent(true); setCode(""); setCooldown(60); }
+        if (active.current) { setSent(true); setSignup(false); setTermsAccepted(false); setCode(""); setCooldown(60); }
       }
     } catch (failure) {
-      if (active.current) { setError(mobileLoginError(failure, language, verify === "browser" ? "browser" : verify ? "verify" : "request")); setCode(""); }
+      if (active.current) {
+        if (verify === true && !signup && (failure as { code?: string })?.code === "EMAIL_ACCOUNT_NOT_FOUND") {
+          // Mailbox control is already proven. The server holds this code for
+          // one explicit signup; keep it only in this mounted form's memory.
+          setSignup(true); setTermsAccepted(false); setError("");
+        } else {
+          setError(mobileLoginError(failure, language, verify === "browser" ? "browser" : verify ? "verify" : "request"));
+          setCode("");
+          if (signup) { setSignup(false); setTermsAccepted(false); }
+        }
+      }
     } finally { inFlight.current = false; if (active.current) setBusy(false); }
   }
-  return <Sheet title={copy.title} closeLabel={mobileCopy[language].close} onClose={() => { if (!inFlight.current) onClose(); }}>
+  return <Sheet title={signup ? copy.signupTitle : copy.title} closeLabel={mobileCopy[language].close} onClose={() => { if (!inFlight.current) onClose(); }}>
     <form className="email-login" onSubmit={(event) => { event.preventDefault(); void submit(sent); }} aria-busy={busy}>
-      <p>{sent ? copy.sent : copy.intro}</p>
+      <p>{signup ? copy.signupIntro : sent ? copy.sent : copy.intro}</p>
       <label>{copy.email}<input type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} required maxLength={254} value={email} readOnly={sent} disabled={busy} onChange={(event) => setEmail(event.target.value)} /></label>
-      {sent && <label>{copy.code}<input className="email-code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required maxLength={6} value={code} disabled={busy} onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ""))} /></label>}
+      {sent && !signup && <label>{copy.code}<input className="email-code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required maxLength={6} value={code} disabled={busy} onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ""))} /></label>}
+      {signup && <div className="email-signup-consent">
+        <label><input type="checkbox" required checked={termsAccepted} disabled={busy} onChange={event => setTermsAccepted(event.target.checked)} />{copy.acceptTerms}</label>
+        <p><a href="https://tomverse.app/terms" target="_blank" rel="noreferrer">{copy.terms}</a>{" · "}<a href="https://tomverse.app/privacy" target="_blank" rel="noreferrer">{copy.privacy}</a></p>
+      </div>}
       {error && <p role="alert" className="login-error">{error}</p>}
-      <button className="primary" type="submit" disabled={busy || (sent && code.length !== 6)}>{busy ? mobileCopy[language].loading : sent ? copy.verify : copy.send}</button>
-      {sent && <div className="login-actions"><button type="button" disabled={busy} onClick={() => { setSent(false); setCode(""); setError(""); }}>{copy.change}</button><button type="button" disabled={busy || cooldown > 0} onClick={() => void submit(false)}>{copy.resend}{cooldown > 0 && ` (${cooldown})`}</button></div>}
+      <button className="primary" type="submit" disabled={busy || (sent && code.length !== 6) || (signup && !termsAccepted)}>{busy ? mobileCopy[language].loading : signup ? copy.signup : sent ? copy.verify : copy.send}</button>
+      {sent && <div className="login-actions"><button type="button" disabled={busy} onClick={() => { setSent(false); setSignup(false); setTermsAccepted(false); setCode(""); setError(""); }}>{copy.change}</button>{!signup && <button type="button" disabled={busy || cooldown > 0} onClick={() => void submit(false)}>{copy.resend}{cooldown > 0 && ` (${cooldown})`}</button>}</div>}
       <button type="button" disabled={busy} onClick={() => void submit("browser")}>{copy.otherSignIn}</button>
     </form>
   </Sheet>;

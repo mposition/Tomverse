@@ -57,9 +57,10 @@ const switchKey = (name: MarketingConsoleSwitch) =>
  * Turning one *on* is also checked against what it depends on. Autonomous
  * publishing needs drafts and publishing already on -- enabling it alone would
  * write an audit entry saying autonomous publishing was switched on when
- * nothing can publish. Publishing itself is refused outright: the publisher
- * arrives in S2c, and the plan requires its capability to be available before
- * this switch may be enabled, so until it exists the honest answer is no.
+ * nothing can publish. Publishing itself has no precondition here: the
+ * publisher exists, and whether one post may go out is decided per post
+ * immediately before the vendor call (`resolvePublishAdmission`), which reads
+ * this switch along with the account mode, adapter health and caps.
  *
  * Everything commits with the caller's transaction, including the generation
  * bump, so a reader can never see the new value under the old generation.
@@ -128,9 +129,10 @@ const readConfigGeneration = (value: string | undefined): number => {
  * Turning one *on* is also checked against what it depends on. Autonomous
  * publishing needs drafts and publishing already on -- enabling it alone would
  * write an audit entry saying autonomous publishing was switched on when
- * nothing can publish. Publishing itself is refused outright: the publisher
- * arrives in S2c, and the plan requires its capability to be available before
- * this switch may be enabled, so until it exists the honest answer is no.
+ * nothing can publish. Publishing itself has no precondition here: the
+ * publisher exists, and whether one post may go out is decided per post
+ * immediately before the vendor call (`resolvePublishAdmission`), which reads
+ * this switch along with the account mode, adapter health and caps.
  *
  * Everything commits with the caller's transaction, including the generation
  * bump, so a reader can never see the new value under the old generation.
@@ -185,12 +187,6 @@ export async function writeMarketingAutomationSwitch(
     );
   }
 
-  if (enabled && name === "publish") {
-    throw new MarketingSwitchRefusedError(
-      "publisher_capability_unavailable",
-      "Publishing cannot be switched on until the publisher exists",
-    );
-  }
   if (
     enabled &&
     name === "autonomous" &&

@@ -5,6 +5,10 @@ import {
   isGa4DebugModeEnabled,
   PRODUCT_ANALYTICS_EVENT_NAMES,
 } from "@/lib/productAnalyticsShared";
+import {
+  summarizeMarketingTouchAttribution,
+  type MarketingTouchAttributionSummary,
+} from "@/lib/marketingTouchCore";
 
 type ActorRow = {
   userId: string | null;
@@ -60,7 +64,20 @@ export type ProductAnalyticsDashboard = {
     campaign: string;
     landingViews: number;
   }>;
+  // docs/policy/marketing-automation.md §10.1 / §10.3: sign-ups and guest
+  // leads attributed to the last marketing
+  // touch in the seven days before them. Evidence is client-observed and
+  // server-timed, and every surface that shows these numbers says so.
+  touchAttribution30d: {
+    signups: MarketingTouchAttributionSummary;
+    guestLeads: MarketingTouchAttributionSummary;
+  };
 };
+
+const emptyTouchAttribution = (): ProductAnalyticsDashboard["touchAttribution30d"] => ({
+  signups: summarizeMarketingTouchAttribution({ conversions: [], unobserved: null }),
+  guestLeads: summarizeMarketingTouchAttribution({ conversions: [], unobserved: null }),
+});
 
 const emptyDashboard = (): ProductAnalyticsDashboard => ({
   available: false,
@@ -96,6 +113,7 @@ const emptyDashboard = (): ProductAnalyticsDashboard => ({
     purchaseRate: 0,
   },
   topCampaigns30d: [],
+  touchAttribution30d: emptyTouchAttribution(),
 });
 
 export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDashboard> {
@@ -113,6 +131,9 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
       day7ActorGroups,
       campaignGroups,
       identityLinkGroups,
+      signupConversionRows,
+      guestLeadRows,
+      unobservedSignups,
     ] = await Promise.all([
       prisma.productAnalyticsEvent.groupBy({
         by: ["eventName"],
@@ -187,6 +208,30 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
         where: {
           userId: { not: null },
           occurredAt: { gte: thirtyDaysAgo },
+        },
+      }),
+      prisma.productAnalyticsEvent.findMany({
+        where: {
+          eventName: "signup_completed",
+          occurredAt: { gte: thirtyDaysAgo },
+        },
+        select: { properties: true },
+      }),
+      prisma.productAnalyticsEvent.findMany({
+        where: {
+          eventName: "first_response_completed",
+          userId: null,
+          occurredAt: { gte: thirtyDaysAgo },
+        },
+        select: { properties: true },
+      }),
+      // Accounts created in the window that never sent a sign-up event:
+      // analytics declined, never decided in an opt-in region, or blocked.
+      // Unobserved, not unattributed -- nobody knows where they came from.
+      prisma.user.count({
+        where: {
+          createdAt: { gte: thirtyDaysAgo },
+          productAnalyticsEvents: { none: { eventName: "signup_completed" } },
         },
       }),
     ]);
@@ -342,6 +387,18 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
         }))
         .sort((left, right) => right.landingViews - left.landingViews)
         .slice(0, 10),
+      touchAttribution30d: {
+        signups: summarizeMarketingTouchAttribution({
+          conversions: signupConversionRows,
+          unobserved: unobservedSignups,
+        }),
+        // A guest's first answer leaves no server row when its event is not
+        // sent, so there is nothing to count unobserved leads against.
+        guestLeads: summarizeMarketingTouchAttribution({
+          conversions: guestLeadRows,
+          unobserved: null,
+        }),
+      },
     };
   } catch (error) {
     console.error("Product analytics dashboard query failed", {
