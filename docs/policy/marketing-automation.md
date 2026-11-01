@@ -330,6 +330,14 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 
 `/api/ready` 전체 상태는 트리거로 쓰지 않는다.
 
+**S4a 구현 상태(2026-11-01).** Guard 거절률(최근 20건 중 7건 이상, 20건 미만이어도 분모 20)·연속 실패 3회·플랫폼
+제거(`removed_by_platform`)는 승인·자율 두 모드 모두 계정을 정지한다. 게시기가 계정을 claim하기 전과 Guard 거절 draft를
+기록한 같은 트랜잭션에서 `evaluateMarketingAutoPause()`가 채널 잠금 → 상태 변경 → 시스템 감사
+(`marketing_account.auto_paused`, 사유 코드는 `pauseReasonCode`)를 한 번에 한다. 증거는 계정의 마지막 "새 출발"
+(승인 모드 시작, 직전 자동 정지·재개 감사 시각 중 늦은 것) 이후만 센다. 운영자 재개는 사유 코드를 보지 않는다.
+`outcome_unknown`은 기존대로 자율 모드만 정지한다(운영자 결정 D3). 운영자 삭제·문제 표시는 기존 `operator_problem_report`
+정지를 쓴다. 댓글 24시간 미처리 정지는 S4c, 1시간 상태 조회 무응답·본토 차단 해제 감지는 아직 없다.
+
 ## 9. 랜딩 실험과 SEO 코드
 
 ### 9.1 랜딩 실험
@@ -358,7 +366,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 ### 9.2 SEO 코드
 - LLM 단계: 저장소 읽기 권한과 LLM 키만, 도구는 읽기·편집만, 저장소 설정·MCP·hook 미로드, 버전·무결성 고정, 턴·예산 상한.
   이 줄은 SEO 코드 단계에만 적용한다. 이미지·영상을 만드는 미디어 CLI는 플러그인과 MCP를 쓸 수 있고, 결과는 §7.3의 제출과 사람 승인을 거친다(2026-10-31 운영자).
-- 검증 단계: 허용 파일 정확히 4개(`lib/seo.ts`, `components/seo/StructuredData.tsx`, `app/sitemap.ts`, `app/llms.txt/route.ts` — 마지막은 아직 없는 예정 파일)
+- 검증 단계: 허용 파일 정확히 4개(`lib/seo.ts`, `components/seo/StructuredData.tsx`, `app/sitemap.ts`, `app/llms.txt/route.ts` — 마지막은 환경변수 `LLMS_TXT_ENABLED=true`일 때만 응답하는 기본 꺼진 실험 route이고, 문구·링크는 `tests/llmsTxtRoute.test.mjs`가 판정한다)
   밖의 변경·rename·삭제·바이너리·symlink·mode 변경 거부, 500줄 이하, lint·typecheck·테스트, **base 커밋의 정책 테스트로** 판정.
   판정 테스트는 사람 소유 파일이며 허용 목록에 없다.
 - PR 생성: 이 저장소 전용 GitHub App 토큰, 검증 산출 tree hash와 push 내용 일치 시에만.
@@ -374,8 +382,15 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 ### 10.1 유입 기록
 - 새 분석 이벤트 `marketing_touch`: 클라이언트가 랜딩 URL에서 관측한 UTM을 서버가 **수신 시각**으로 기록한다.
   이벤트 입력 route(`app/api/analytics/events/route.ts`)에서 이 이벤트만 클라이언트 시각을 무시하고,
-  properties schema(`lib/productAnalyticsShared.ts`)에 닫힌 증거 값과 `utmContent`를 추가하며, 증거 값은 서버가 덮어쓴다.
-  eventName DB CHECK 제약과 코드 enum을 함께 바꾼다.
+  properties schema(`lib/productAnalyticsShared.ts`)에 닫힌 증거 값(`touch_evidence`)과 `utm_content`를 추가하며, 증거 값은 서버가 덮어쓴다.
+  eventName DB CHECK 제약과 코드 enum을 함께 바꾼다(`20261101100000_marketing_touch_analytics_event`).
+  구현: 판정은 `lib/marketingTouchCore.ts`, 조회는 `findLatestMarketingTouch`(`lib/productAnalyticsServer.ts`),
+  클라이언트 관측은 `observeMarketingTouch`(`lib/productAnalyticsClient.ts`, 다른 이벤트와 같은 동의 규칙),
+  화면은 Admin › 제품 분석의 마케팅 유입 귀속 카드다. 귀속 스냅샷은 전환 이벤트의 `touch_*` 속성으로 복사해 고정한다.
+  동의 직후 대기열이 touch와 전환을 함께 보내 서버가 전환을 먼저 저장한 경우, 같은 브라우저의 touch가 전환 수신 앞뒤
+  30초 안에 저장되고 브라우저가 그 touch를 전환보다 먼저 관측했다면 서버가 그 전환의 스냅샷을 이 touch로 마무리한다
+  (`lateMarketingTouchRepair`). 같은 브라우저의 touch(저장+보정)와 전환(조회+저장)은 브라우저 단위 트랜잭션 잠금으로
+  직렬화한다(`recordOrderedAnalyticsEvent`). 클라이언트는 전송 순서를 맞추지 않는다.
 - 이 기록의 증거 수준은 **"클라이언트 관측, 서버 시각"**이며 서버가 랜딩 요청을 증명한 것이 아니다.
   보고서와 화면에 그대로 적는다.
 - 가입·게스트 첫 답변 이벤트 수신 시 7일 안의 마지막 touch를 귀속 스냅샷으로 고정한다.
@@ -384,6 +399,21 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 ### 10.2 GA4 User-ID
 분석 전용 무작위 식별자, 동의·고지 조건에서만 전송, 로그아웃 시 해제, 계정 삭제 시 GA4 삭제 요청.
 **개인정보 고지 개정 배포 전에는 전송하지 않는다.**
+
+구현(S6, 기본 꺼짐):
+- 식별자는 저장하지 않고 계정 id를 전용 키 `GA4_USER_ID_KEY`로 HMAC-SHA256한 128비트 값이다(`lib/ga4UserId.ts`).
+  키 없이는 계정 id로 되돌릴 수 없어 GA4에는 무작위 값과 같고, 저장된 값이 없으므로 계정 삭제 시 지울 행이 없으며
+  GA4 삭제 요청만 남는다. 무작위 값을 저장하려면 `prisma/schema.prisma`(Prompt Refiner closure 파일) 변경이 필요해 택하지 않았다.
+  키는 바꾸지 않는다 — 바꾸면 이미 보낸 id를 삭제 요청에서 부를 수 없다.
+- 전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
+  고지 개정 PR에서만 바꾼다) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
+  로그인 · GA4 측정 id. 서버는 여기에 키 존재를 더한다(`app/api/analytics/user-id/route.ts`). 브라우저의 gtag `user_id`로만
+  보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃과 분석 거절은 `user_id`를 `null`로 해제한다.
+- 계정 삭제(`lib/accountDeletion.ts`)는 트랜잭션 커밋 뒤 GA4 Admin API `submitUserDeletion`을 한 번 요청한다
+  (`lib/ga4UserDeletion.ts`, `GA4_PROPERTY_ID`, `GA4_USER_DELETION_SERVICE_ACCOUNT_JSON`). 실패는 id 없이 운영 incident로 남기고
+  재시도하지 않으며 삭제를 막지 않는다. User-ID가 한 번이라도 나갈 수 있었던 경우에만 요청한다 — 고지 상수 `true`, 키 존재,
+  스위치가 지금 켜져 있거나 `GA4_USER_ID_PREVIOUSLY_ENABLED=true`(스위치를 끌 때 운영자가 설정해 이미 보낸 id의 삭제를 계속한다).
+  미리 넣어 둔 자격증명만으로는 아무것도 보내지 않는다.
 
 ### 10.3 120일 측정
 모든 지표를 승인·자율 모드와 계정별로 나눈다.
@@ -397,6 +427,16 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 리드 | touch 귀속된 게스트 첫 답변 |
 | 가입 | 서버 가입 이벤트, 7일 touch 귀속, 채널별 10건 미만이면 판단 보류 |
 | 비용 | 게시 도구, X 사용료 분리, 마케팅 LLM, 가입 1건당 비용 |
+
+### 10.4 AI 노출 측정 (S5, 2026-11-01 운영자 결정, 정책 버전 변경 없음)
+- 기본 꺼짐(`MARKETING_AI_VISIBILITY_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). 월요일(UTC)에만, 생성기 서비스가 깨끗하게 끝난 뒤 두 번째 감독 worker로 돈다
+  (`scripts/marketing-ai-visibility-worker.mjs`, `lib/marketingAiVisibilityCore.ts`). 스위치가 꺼져 있으면 예약·호출이 0건이다.
+- 질문 목록(ko/en/zh-Hant 각 3개, Tomverse를 이름으로 부르지 않는 초안)을 웹 검색이 되는 LLM에 묻고(답변 호출), 그 답변에 Tomverse가 제품으로 언급됐는지는 **두 번째 LLM 호출이 JSON 불리언으로 판정**한다.
+  문자열 검색·정규식·단어 목록으로 답변을 읽지 않는다. 구조적인 것은 답변 본문이 인용한 URL(검색 결과에만 있던 페이지는 인용이 아니다)의 호스트가 `tomverse.app`(또는 하위)인지, 비율 계산, 보고서 모양뿐이다.
+- 모든 호출은 마케팅 LLM 비용 원장(목적 `market_intel`, 운영자가 정한 모델과 월 상한, 호출 전 예약)을 거치며 새 유료 경로는 없다. 답변 본문은 판정 직후 버리고 저장·로그·제출하지 않는다.
+- 저장은 기존 보고서 kind `measurement_120d`(생성기 보고 route와 서명을 그대로 사용, kind만 허용 목록에 추가)이고, locale별로 `ai_visibility.mention_rate.<locale>.<질문·프롬프트 세트 버전>`·`ai_visibility.own_citation_rate.<locale>.<버전>`
+  한 건씩, 값은 비율(0–1)과 표본 수뿐이다. 판정이 JSON이 아니면 표본에서 빼고 세며 추측하지 않는다. 호출 하나라도 결과를 모르면 그 주는 아무것도 보고하지 않는다(부분 주는 비율이 아니다).
+  `AiVisibilityRun`(답변별 행)에는 아직 쓰는 쪽이 없고 이 구현도 만들지 않았다. 정확성 플래그(`accuracyFlags`)는 판정하지 않는다.
 
 ## 11. 직접 연동 판단 기준 (채널별)
 1. 특정 채널이 가입 기여의 대부분(예시 60% 이상)

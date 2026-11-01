@@ -35,6 +35,17 @@ export const studioAnswerAnalysisCopy: Record<Language, typeof en> = {
     empty: "未发现差异。请在详细审查中查看上下文。", close: "关闭", external: "网页核查需单独执行。打开此分析不会搜索网页。",
     disclaimer: "这是对所提供回答的比较。回答一致并不代表内容属实。", signIn: "登录", reviewer: "审查者",
   },
+  "zh-Hant": {
+    start: "用 Tomverse 分析回答", view: "查看分析", title: "Tomverse 回答分析",
+    intro: "比較不同觀點，並核對其依據。", summary: "摘要", detail: "詳細審查",
+    saved: "已儲存的分析", local: "保留在目前的對話中", reuse: "這些分頁顯示的是同一份分析。",
+    checking: "正在尋找已儲存的分析…", running: "正在審查回答…", progress: "正在比較各個回答及其引用的依據。",
+    background: "你可以關閉此視窗，分析會繼續進行。", wait: "至少有兩個回答完成後即可分析。",
+    ready: "在一處查看回答之間的差異和支撐依據。", failed: "暫時無法進行分析。請重試，或檢查你的使用權限。", retry: "重試",
+    differences: "回答之間的分歧", consensus: "共同認可的內容", models: "各模型的觀點", sources: "審查結果與來源",
+    empty: "未發現差異。請在詳細審查中查看脈絡。", close: "關閉", external: "網頁查證需另外執行。開啟此分析不會搜尋網頁。",
+    disclaimer: "這是對所提供回答的比較。回答一致並不代表內容屬實。", signIn: "登入", reviewer: "審查者",
+  },
   fr: {
     start: "Analyser avec Tomverse", view: "Voir l’analyse", title: "Analyse des réponses Tomverse",
     intro: "Comparez les points de vue et vérifiez leurs sources.", summary: "Résumé", detail: "Examen détaillé",

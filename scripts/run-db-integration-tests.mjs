@@ -753,6 +753,7 @@ run(
     // transaction_timeout armed against the service's deadline -- which only a
     // real PostgreSQL 17 can show.
     "tests/integration/marketing-draft-intake.db.test.ts",
+    "tests/integration/marketing-auto-pause.db.test.ts",
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
@@ -946,6 +947,10 @@ run(
     "tests/integration/account-data-export.db.test.ts",
     "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/account-anonymisation.db.test.ts",
+    // docs/policy/marketing-automation.md §10.1: the event-name check admits
+    // marketing_touch, and the
+    // attribution query's seven-day window is inclusive at both ends.
+    "tests/integration/marketing-touch-attribution.db.test.ts",
     // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.
     "tests/integration/routing-attempt-manifest.db.test.ts",
     "tests/integration/routing-dispatch-instrumentation.db.test.ts",

@@ -27,6 +27,7 @@ const localizedMarketingLocales = new Set([
   "en",
   "ko",
   "zh",
+  "zh-Hant",
   "fr",
   "de",
   "es",

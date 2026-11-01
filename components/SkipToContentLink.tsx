@@ -5,12 +5,13 @@ import { fr } from "@/locales/fr";
 import { ko } from "@/locales/ko";
 import { pt } from "@/locales/pt";
 import { zh } from "@/locales/zh";
+import { zhHant } from "@/locales/zhHant";
 import type { Language } from "@/lib/language";
 
 /** The id `DocumentShell` puts on the wrapper this link jumps to. */
 export const MAIN_CONTENT_ID = "main-content";
 
-const dictionaries = { ko, en, zh, fr, de, es, pt };
+const dictionaries: Record<Language, typeof en> = { ko, en, zh, "zh-Hant": zhHant, fr, de, es, pt };
 
 /**
  * UX-016. WCAG 2.4.1 (Level A): a keyboard user must be able to skip the

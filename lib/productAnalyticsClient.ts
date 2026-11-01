@@ -14,6 +14,7 @@ import {
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
 import { EXPERIMENT_COOKIE_NAME } from "@/lib/marketingRoutes";
+import { isAnalyticsUserId } from "@/lib/ga4UserIdPolicy";
 import { discardResponseBody } from "./discardResponseBody";
 
 declare global {
@@ -30,6 +31,8 @@ const SESSION_STORAGE_KEY = "tomverse_analytics_session_v1";
 const PRECONSENT_ATTRIBUTION_STORAGE_KEY =
   "tomverse_analytics_preconsent_attribution_v1";
 const PENDING_EVENTS_STORAGE_KEY = "tomverse_analytics_pending_events_v1";
+const TOUCH_SEEN_STORAGE_KEY = "tomverse_analytics_touch_seen_v1";
+const MAX_TOUCHES_SEEN = 20;
 const MODEL_FINDER_VARIANT_STORAGE_KEY = "tomverse_model_finder_variant_v1";
 const MAX_PENDING_EVENTS = 100;
 const ATTRIBUTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -46,6 +49,12 @@ type AnalyticsRuntime = {
   sentOnce: Set<string>;
 };
 
+type IntentAttribution = {
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+};
+
 type EventIntent = {
   eventId: string;
   eventName: ProductAnalyticsEventName;
@@ -53,6 +62,10 @@ type EventIntent = {
   modelCount: number;
   properties: ProductAnalyticsProperties;
   onceKey?: string;
+  // The UTM values this event itself observed, sent in place of the
+  // session's. Only a marketing touch carries one: it reports the landing URL
+  // it saw, which a later landing in the same session must not overwrite.
+  attribution?: IntentAttribution;
 };
 
 type StoredContext = {
@@ -240,7 +253,16 @@ const readPendingEvents = (): EventIntent[] => {
         if (!candidate || typeof candidate !== "object") return null;
         const event = candidate as Partial<EventIntent>;
         const properties = analyticsPropertiesSchema.safeParse(event.properties);
+        const attribution = event.attribution;
+        const attributionValid =
+          attribution === undefined ||
+          (Boolean(attribution) &&
+            typeof attribution === "object" &&
+            typeof attribution.utmSource === "string" &&
+            typeof attribution.utmMedium === "string" &&
+            typeof attribution.utmCampaign === "string");
         if (
+          !attributionValid ||
           !isUuid(event.eventId) ||
           typeof event.eventName !== "string" ||
           !PRODUCT_ANALYTICS_EVENT_NAMES.includes(
@@ -261,6 +283,15 @@ const readPendingEvents = (): EventIntent[] => {
           modelCount: event.modelCount,
           properties: properties.data,
           ...(event.onceKey ? { onceKey: event.onceKey.slice(0, 100) } : {}),
+          ...(attribution
+            ? {
+                attribution: {
+                  utmSource: limited(attribution.utmSource, "(direct)"),
+                  utmMedium: limited(attribution.utmMedium, "(none)"),
+                  utmCampaign: limited(attribution.utmCampaign, "(not set)"),
+                },
+              }
+            : {}),
         };
       })
       .filter((event): event is EventIntent => Boolean(event))
@@ -317,11 +348,33 @@ const RETRYABLE_INTERNAL_DELIVERY_STATUSES = new Set([
   504,
 ]);
 
+// Bumped by disableAnalyticsClient. A retry that began in an earlier
+// generation is dropped.
+let deliveryGeneration = 0;
+
+/**
+ * Delivers one event, retrying a transient failure. A retry is dropped if
+ * analytics was declined after the first attempt: nothing sent before a
+ * withdrawal is sent again after it.
+ */
 const deliverInternalAnalyticsEvent = (
   payload: ReturnType<typeof analyticsClientEventSchema.parse>,
-  attempt = 0
-) => {
-  void fetch("/api/analytics/events", {
+  attempt = 0,
+  generation = deliveryGeneration
+): Promise<void> => {
+  const withdrawn = () =>
+    generation !== deliveryGeneration || analyticsConsent() === "declined";
+  const retry = () =>
+    attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length && !withdrawn()
+      ? new Promise<void>((resolve) =>
+          window.setTimeout(resolve, INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt])
+        ).then(() =>
+          withdrawn()
+            ? undefined
+            : deliverInternalAnalyticsEvent(payload, attempt + 1, generation)
+        )
+      : undefined;
+  return fetch("/api/analytics/events", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -332,23 +385,16 @@ const deliverInternalAnalyticsEvent = (
       await discardResponseBody(response);
       if (
         !response.ok &&
-        RETRYABLE_INTERNAL_DELIVERY_STATUSES.has(response.status) &&
-        attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length
+        RETRYABLE_INTERNAL_DELIVERY_STATUSES.has(response.status)
       ) {
-        window.setTimeout(
-          () => deliverInternalAnalyticsEvent(payload, attempt + 1),
-          INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt]
-        );
+        return retry();
       }
     })
-    .catch(() => {
-      if (attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length) {
-        window.setTimeout(
-          () => deliverInternalAnalyticsEvent(payload, attempt + 1),
-          INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt]
-        );
-      }
-    });
+    .catch(() => retry())
+    .then(
+      () => undefined,
+      () => undefined
+    );
 };
 
 const sendIntent = (intent: EventIntent) => {
@@ -369,6 +415,13 @@ const sendIntent = (intent: EventIntent) => {
       ...localeMarketingAnalyticsProperties(runtime.attribution.language),
     },
     ...runtime.attribution,
+    ...(intent.attribution
+      ? {
+          utm_source: intent.attribution.utmSource,
+          utm_medium: intent.attribution.utmMedium,
+          utm_campaign: intent.attribution.utmCampaign,
+        }
+      : {}),
   });
 
   if (shouldSendCustomProductEventToGa4(intent.eventName)) {
@@ -404,7 +457,7 @@ const sendIntent = (intent: EventIntent) => {
     });
   }
 
-  deliverInternalAnalyticsEvent(payload);
+  void deliverInternalAnalyticsEvent(payload);
 };
 
 export const analyticsConsent = () =>
@@ -427,6 +480,13 @@ export const configureAnalyticsClient = ({
   measurementId: string | null;
   plan: AnalyticsRuntime["plan"];
 }) => {
+  // A (re)configuration sends a page_view and flushes queued events. Whoever's
+  // User-ID was on the tag may not be who is signed in now -- the account can
+  // change in the same render that re-runs this -- so it is cleared before any
+  // of that goes out. The caller asks for the current account's id afterwards
+  // (AnalyticsProvider, syncGa4UserId). A lookup still in flight for the
+  // previous account is cancelled with it.
+  clearGa4UserId();
   const now = new Date();
   const stored = readStoredContext();
   const preConsentAttribution = capturePreConsentAttribution();
@@ -502,11 +562,80 @@ export const configureAnalyticsClient = ({
   return runtime;
 };
 
+/**
+ * The GA4 User-ID currently set on the tag (docs/policy/marketing-automation.md
+ * §10.2). Whether one may be set at all is lib/ga4UserIdPolicy.ts's decision,
+ * made by the caller; this only applies it. `null` clears it, which is what
+ * signing out and declining analytics do -- GA4 asks for a real `null`, not an
+ * empty string.
+ *
+ * Nothing is pushed while there is no tag, and nothing is pushed for a value
+ * that is already set, so a visitor for whom the feature is off never has a
+ * `user_id` command queued at all.
+ */
+let ga4UserId: string | null = null;
+
+export const applyGa4UserId = (value: string | null) => {
+  const next = isAnalyticsUserId(value) ? value : null;
+  if (next === ga4UserId) return;
+  if (next !== null && (!runtime?.measurementId || !window.gtag)) return;
+  ga4UserId = next;
+  window.gtag?.("set", { user_id: next });
+};
+
+const requestAnalyticsUserId = async (signal: AbortSignal) => {
+  const response = await fetch("/api/analytics/user-id", {
+    method: "POST",
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) {
+    await discardResponseBody(response);
+    return null;
+  }
+  const body = (await response.json()) as { analyticsUserId?: unknown };
+  return typeof body.analyticsUserId === "string" ? body.analyticsUserId : null;
+};
+
+/**
+ * Brings the tag's User-ID in line with who is signed in now. Whatever was set
+ * is cleared first, before anything is asked: when the session moves from one
+ * account to another, the first account's id must not label a single event of
+ * the second's -- not while the lookup runs, and not after it fails. Only a
+ * lookup that finishes un-cancelled sets a new one. Returns the cancel.
+ */
+let ga4UserIdLookup: AbortController | null = null;
+
+/** Clears the tag's User-ID and cancels any lookup still in flight. */
+const clearGa4UserId = () => {
+  ga4UserIdLookup?.abort();
+  ga4UserIdLookup = null;
+  applyGa4UserId(null);
+};
+
+export const syncGa4UserId = (
+  allowed: boolean,
+  requestId: (signal: AbortSignal) => Promise<string | null> = requestAnalyticsUserId
+) => {
+  clearGa4UserId();
+  if (!allowed) return () => {};
+  const controller = new AbortController();
+  ga4UserIdLookup = controller;
+  requestId(controller.signal)
+    .then((analyticsUserId) => {
+      if (!controller.signal.aborted) applyGa4UserId(analyticsUserId);
+    })
+    .catch(() => {});
+  return () => controller.abort();
+};
+
 export const disableAnalyticsClient = () => {
+  clearGa4UserId();
   applyGa4ConsentMode("denied");
   runtime = null;
   pendingEvents = [];
   pendingOnceKeys.clear();
+  deliveryGeneration += 1;
   window.localStorage.removeItem(CONTEXT_STORAGE_KEY);
   window.localStorage.removeItem(SIGNUP_STORAGE_KEY);
   window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);
@@ -516,6 +645,7 @@ export const disableAnalyticsClient = () => {
   // (docs/policy/marketing-automation.md 9.1), so withdrawing it takes the
   // cookie with it and the next landing load is the default copy.
   document.cookie = `${EXPERIMENT_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
+  window.sessionStorage.removeItem(TOUCH_SEEN_STORAGE_KEY);
   for (const cookie of document.cookie.split(";")) {
     const name = cookie.split("=")[0]?.trim();
     if (name === "_ga" || name?.startsWith("_ga_")) {
@@ -584,6 +714,71 @@ export function trackProductEventOnce(
   writeStoredContext(runtime);
   sendIntent(intent);
 }
+
+/**
+ * Report the UTM parameters in the current URL as a `marketing_touch`
+ * (docs/policy/marketing-automation.md §10.1).
+ *
+ * Under the same consent rule as every other event: nothing when analytics was
+ * declined, held in this tab's pending queue until the visitor's choice allows
+ * analytics, and dropped with that queue if it never does. The server times
+ * the touch by its receipt, so a touch that waited for consent is recorded
+ * when consent was given, not when the page loaded -- which is what
+ * "client-observed, server-timed" says.
+ *
+ * Once per distinct set of values per tab session: a reload of the same
+ * landing URL is not a second touch, a different link is.
+ */
+export const observeMarketingTouch = () => {
+  if (typeof window === "undefined") return;
+  if (analyticsConsent() === "declined") return;
+  const params = new URLSearchParams(window.location.search);
+  const keys = ["utm_source", "utm_medium", "utm_campaign", "utm_content"];
+  if (!keys.some((key) => params.has(key))) return;
+  const attribution: IntentAttribution = {
+    utmSource: limited(params.get("utm_source"), "(direct)"),
+    utmMedium: limited(params.get("utm_medium"), "(none)"),
+    utmCampaign: limited(params.get("utm_campaign"), "(not set)"),
+  };
+  const utmContent = params.get("utm_content")?.trim().slice(0, 100) || null;
+  const seenKey = JSON.stringify([
+    attribution.utmSource,
+    attribution.utmMedium,
+    attribution.utmCampaign,
+    utmContent,
+  ]);
+  let seen: string[] = [];
+  try {
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(TOUCH_SEEN_STORAGE_KEY) || "[]"
+    ) as unknown;
+    if (Array.isArray(parsed)) {
+      seen = parsed.filter((item): item is string => typeof item === "string");
+    }
+  } catch {
+    seen = [];
+  }
+  if (seen.includes(seenKey)) return;
+  const properties = analyticsPropertiesSchema.safeParse(
+    utmContent ? { utm_content: utmContent } : {}
+  );
+  if (!properties.success) return;
+  const intent: EventIntent = {
+    eventId: crypto.randomUUID(),
+    eventName: "marketing_touch",
+    occurredAt: new Date().toISOString(),
+    modelCount: 0,
+    properties: properties.data,
+    attribution,
+  };
+  if (runtime) sendIntent(intent);
+  else queuePendingIntent(intent);
+  // Marked seen only once it has been sent or queued.
+  window.sessionStorage.setItem(
+    TOUCH_SEEN_STORAGE_KEY,
+    JSON.stringify([...seen, seenKey].slice(-MAX_TOUCHES_SEEN))
+  );
+};
 
 export const markSignupStarted = (method: string) => {
   if (analyticsConsent() === "declined") return;

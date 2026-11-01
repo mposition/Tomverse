@@ -193,13 +193,16 @@ const BILLING_FINANCE_OPS_VARIABLES = [
  * The marketing generator's three variables (S3 plan, S3e3): the app's URL, its
  * submit secret and the LLM key -- the same list as
  * MARKETING_GENERATOR_WORKER_VARIABLES in lib/marketingGeneratorCycleCore.ts,
- * which a test holds this to. The model and the monthly cap are not here: the
+ * which a test holds this to -- and the switch of the weekly AI-exposure
+ * measurement (marketing S5), declared so an apply keeps it; it is off unless
+ * its value is exactly "true". The model and the monthly cap are not here: the
  * operator sets them in the Admin Console (2026-10-19).
  */
 const MARKETING_GENERATOR_VARIABLES = [
   "MARKETING_APP_URL",
   "MARKETING_GENERATOR_SUBMIT_SECRET",
   "MARKETING_LLM_API_KEY",
+  "MARKETING_AI_VISIBILITY_ENABLED",
 ] as const;
 
 /** The marketing publisher's two variables (S2 plan, S2d1). */

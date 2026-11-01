@@ -4,7 +4,8 @@ import LaunchHomepage from "@/components/marketing/LaunchHomepage";
 import { LandingExperimentBeacon } from "@/components/marketing/LandingExperimentBeacon";
 import { homepageProductLinks } from "@/lib/homepageProductLinks";
 import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
-import { LanguageProvider, type Language } from "@/components/LanguageProvider";
+import { LanguageProvider } from "@/components/LanguageProvider";
+import { MARKETING_LOCALE_ALIASES, marketingLocaleFor } from "@/lib/marketingLocale";
 import {
   SEO_LOCALES,
   createPageMetadata,
@@ -13,26 +14,8 @@ import {
   localizedPath,
 } from "@/lib/seo";
 
-const localeAliases: Record<string, Language> = {
-  kr: "ko",
-  cn: "zh",
-};
-
-const supportedLocales = new Set<Language>([
-  "en",
-  "ko",
-  "zh",
-  "fr",
-  "de",
-  "es",
-  "pt",
-]);
-
-const normalizeLocale = (value: string): Language | null => {
-  const lowered = value.toLowerCase();
-  if (lowered in localeAliases) return localeAliases[lowered];
-  return supportedLocales.has(lowered as Language) ? (lowered as Language) : null;
-};
+const localeAliases = MARKETING_LOCALE_ALIASES;
+const normalizeLocale = marketingLocaleFor;
 
 type LocalePageProps = {
   params: Promise<{ locale: string }>;
@@ -76,7 +59,7 @@ export default async function LocalizedLandingPage({ params }: LocalePageProps) 
     notFound();
   }
 
-  if (localeAliases[loweredLocale]) {
+  if (localeAliases[loweredLocale] || locale !== normalizedLocale) {
     redirect(`/${normalizedLocale}`);
   }
 
