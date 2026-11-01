@@ -140,6 +140,10 @@ test("with the switch on, a Dependabot fix may move an existing test to a change
     ["  await expect(page.getByRole(\"button\")).toBeVisible();", "  await expect(page.getByRole(\"button\")).toBeAttached();", "test_edit_removed"],
     ["  assert.strict.equal(a, b);", "  assert.strict.ok(a, b);", "test_edit_removed"],
     ["  t.assert.deepEqual(a, b);", "  t.assert.ok(a, b);", "test_edit_removed"],
+    // Review r-20261101-022243-2f595c: a chain continued from the line before starts from what this line cannot show.
+    ["    .toBe(1);", "    .toBeGreaterThan(1);", "test_edit_removed"],
+    ["  )).toEqual([]);", "  )).toBeTruthy([]);", "test_edit_removed"],
+    ["    rows].length, 3);", "    rows].size, 3);", "test_edit_removed"],
   ]) {
     const verdict = judge(hunk([removed], [added]));
     assert.equal(verdict.push, false, added);

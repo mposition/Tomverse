@@ -87,8 +87,13 @@ const REMOVED_WORDS_REFUSED = new Set(["assert", "expect", "test", "it", "descri
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
-/** The name the member chain ending at the `.` at `dot` starts from, through calls: `expect` for `expect(x).not.`. */
-function chainRoot(list: readonly string[], dot: number): string {
+/**
+ * The name the member chain ending at the `.` at `dot` starts from, through
+ * calls: `expect` for `expect(x).not.`. Null when the line does not show a
+ * name there -- a chain continued from the line before, `.toBe(1)` -- which
+ * the caller refuses: what it starts from is unknown.
+ */
+function chainRoot(list: readonly string[], dot: number): string | null {
   let i = dot - 1;
   for (;;) {
     if (list[i] === ")") {
@@ -98,7 +103,7 @@ function chainRoot(list: readonly string[], dot: number): string {
       }
       i -= 1;
     }
-    if (i < 0 || !IDENTIFIER.test(list[i])) return "";
+    if (i < 0 || !IDENTIFIER.test(list[i])) return null;
     if (list[i - 1] !== ".") return list[i];
     i -= 2;
   }
@@ -201,7 +206,8 @@ export function testEditProblems(patch: string, paths: ReadonlySet<string>): str
         before.forEach((token, i) => {
           if (keep.a[i]) return;
           const member = before[i - 1] === ".";
-          const assertionName = member && REMOVED_WORDS_REFUSED.has(chainRoot(before, i - 1));
+          const root = member ? chainRoot(before, i - 1) : null;
+          const assertionName = member && (root === null || REMOVED_WORDS_REFUSED.has(root));
           if (!IDENTIFIER.test(token) || !member || REMOVED_WORDS_REFUSED.has(token) || assertionName) problems.add("test_edit_removed");
         });
         after.forEach((token, j) => {
