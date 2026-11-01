@@ -1214,8 +1214,8 @@ test("owner cancellation removes a queued session idea and makes raw purge due",
   assert.equal(JSON.stringify(audit.metadata).includes("Synthetic session idea"), false);
   assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
     (candidate) => candidate.reservationId === created.reservationId), false);
-  assert.equal((await readAmuxIdeaProgressForOwner(ownerId)).find(
-    (row) => row.ideaId === ideaId)?.stage, "cancelled");
+  assert.equal((await readAmuxIdeaProgressForOwner(ownerId)).some(
+    (row) => row.ideaId === ideaId), false, "a cancelled idea leaves the Ideas list");
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
       state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,
