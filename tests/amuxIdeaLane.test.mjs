@@ -10,6 +10,7 @@ import {
   amuxIdeaLaneDailyAttempts,
   amuxIdeaLaneEnabled,
   amuxIdeaLaneState,
+  inspectAmuxIdeaLaneFence,
   inspectAmuxIdeaLaneResult,
 } from "../lib/amux/ideaLaneCore.ts";
 import { amuxIdeaProgress } from "../lib/amux/ideaProgressCore.ts";
@@ -63,6 +64,10 @@ test("a run reports an opened PR or one fixed failure word, nothing else", () =>
     { attemptId: ID, outcome: "pr_open", prNumber: 0 }, { attemptId: ID, outcome: "no_change", prNumber: 5 },
     { attemptId: ID, outcome: "merged" }, { attemptId: ID, outcome: "no_change", note: "hi" }]) {
     assert.equal(inspectAmuxIdeaLaneResult(body), null, JSON.stringify(body));
+  }
+  assert.equal(inspectAmuxIdeaLaneFence({ attemptId: ID }), ID);
+  for (const body of [null, [], {}, { attemptId: "x" }, { attemptId: ID, extra: 1 }, { attemptId: ID.toUpperCase() }]) {
+    assert.equal(inspectAmuxIdeaLaneFence(body), null, JSON.stringify(body));
   }
   const migration = readFileSync("prisma/migrations/20261102120000_amux_idea_lane_attempt/migration.sql", "utf8");
   for (const word of ["pr_open", ...AMUX_IDEA_LANE_FAILURES]) {
