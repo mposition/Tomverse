@@ -28,6 +28,7 @@ import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
 import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewService";
 import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
 import { commitAmuxIdeaAnalysisBudgetReservation as commitReservationWithOwnerAudit,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
@@ -1581,6 +1582,42 @@ test("a bounded owner question is saved as a pause, not a provider failure", asy
   assert.equal(visible.state, "needs_owner_input");
   if (visible.state !== "needs_owner_input") throw new Error("owner question missing");
   assert.equal(visible.ownerQuestion, question);
+});
+
+test("the owner closes an idea paused between pages, never one whose page is running", async () => {
+  const pause = (claimed: Awaited<ReturnType<typeof syntheticFirstClaim>>) =>
+    prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claimed.claim.ideaId, previewId: claimed.previewId,
+      holdId: claimed.holdId, leaseGeneration: 1, outcome: "verified_success",
+      rawModelOutput: JSON.stringify({ schemaVersion: 5, previewId: claimed.previewId,
+        chunkIndex: 0, outcome: "needs_information",
+        coverageStatus: "needs_owner_input", continuationKind: "input",
+        ownerQuestion: "Which existing Feature should this belong to?",
+        coveredScope: "The idea was read; hierarchy is unresolved.",
+        remainingScope: "Proposals need the owner's Feature choice.", units: [] }),
+      inputTokens: 100, outputTokens: 50, keys }));
+  // Paused: the first page asked the owner a question and nothing runs.
+  const paused = await syntheticFirstClaim();
+  await pause(paused);
+  // Running: a claimed page with no result yet. Only one runs Agent-wide.
+  const running = await syntheticFirstClaim();
+  const ids = [paused.claim.ideaId, running.claim.ideaId];
+  const rows = await readAmuxIdeaProgressForOwner(session.user!.id!);
+  assert.deepEqual(ids.map((id) => rows.find((row) => row.ideaId === id)?.closable),
+    [true, false], "only the paused idea offers a close");
+
+  const outcomes = await closeAmuxIdeasForOwner({ session, request,
+    ideaIds: ids, reason: "Paused idea no longer needed" });
+  assert.deepEqual(outcomes.map((entry) => entry.result), ["closed", "not_closable"]);
+  const [closed, kept] = await Promise.all(ids.map((id) =>
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id },
+      select: { state: true, cancelledAt: true, rawPurgeAfter: true } })));
+  assert.equal(closed!.state, "cancelled");
+  assert.ok(closed!.rawPurgeAfter && closed!.cancelledAt &&
+    closed!.rawPurgeAfter <= closed!.cancelledAt, "the body is due for purge");
+  assert.deepEqual([kept!.state, kept!.cancelledAt], ["analyzing", null],
+    "a running page is stopped, not closed");
+  await pause(running); // frees the Agent-wide slot for the tests after this one
 });
 
 test("known provider failure is visible and permits a new owner preview only", async () => {

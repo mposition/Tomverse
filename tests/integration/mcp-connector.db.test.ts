@@ -203,9 +203,12 @@ test("approving near expiry starts a new execution deadline before maintenance c
   await grantMcpTools(alice, row.id, ["create_note"], row.version);
   const own = await ownMcpConnection(alice, row.id);
   const pending = await invokeMcpTool({ userId: alice, connectionId: own.id, version: own.version, name: "create_note", args: { text: "slow" } });
-  await prisma.mcpInvocation.update({ where: { id: pending.approvalId }, data: { expiresAt: new Date(Date.now() + 150) } });
+  // The approval waits on the audit chain lock, so a slow runner needs a margin
+  // between "near expiry" and the sweep; 150 ms expired before the decision ran.
+  await prisma.mcpInvocation.update({ where: { id: pending.approvalId }, data: { expiresAt: new Date(Date.now() + 2_000) } });
   const approved = decideMcpInvocation(alice, pending.approvalId!, true);
-  await new Promise(resolve => setTimeout(resolve, 200));
+  approved.catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 2_100));
   const swept = await prisma.mcpInvocation.updateMany({ where: { id: pending.approvalId, state: "running", expiresAt: { lte: new Date() } }, data: { state: "unknown" } });
   assert.equal(swept.count, 0); assert.equal((await approved).status, "ok");
   assert.equal((await prisma.mcpInvocation.findUniqueOrThrow({ where: { id: pending.approvalId } })).state, "completed");

@@ -233,6 +233,7 @@ async function completedSessionIdea(options: {
   expectedPaths?: string[];
   taskTitle?: string;
   taskRole?: string;
+  evidence?: boolean;
 } = {}) {
   const initialObjectKeys = new Set(objects.keys());
   const ideaId = randomUUID();
@@ -325,7 +326,7 @@ async function completedSessionIdea(options: {
   const claim = await prisma.$transaction((tx) =>
     commitAmuxIdeaOnlyAnalysisClaim(tx,
       { requestId: randomUUID(), previewId, keys: transferKeys }));
-  const unitIds = Array.from({ length: 4 }, () => randomUUID());
+  const unitIds = Array.from({ length: options.evidence ? 5 : 4 }, () => randomUUID());
   const resultKeys = await createAmuxContentKeyRing([transferIdentity], [
     ...unitIds.map((subjectId) => ({ ideaId,
       purpose: "analysis_draft" as const, subjectId })),
@@ -360,11 +361,14 @@ async function completedSessionIdea(options: {
         urgency: 2, dependencyUnlock: 2, workerCoverage: 2, effort: 2,
         deliveryRisk: 1 }) },
   ];
+  const evidence = options.evidence ? [{ kind: "evidence", localId: "c0:evidence-0",
+    evidenceType: "source_finding", summary: "The fixture names the file it changes.",
+    cardRef: "c0:card-0", sourceRefIds: ["operator_idea"] }] : [];
   const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "One synthetic system registration plan was analyzed.",
-    remainingScope: null, units });
+    remainingScope: null, units: [...units, ...evidence] });
   const saved = await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
     requestId: randomUUID(), ideaId, previewId, holdId,
     leaseGeneration: claim.leaseGeneration, outcome: "verified_success",
@@ -521,6 +525,23 @@ async function inRolledBackTx<T>(check: (tx: Prisma.TransactionClient) => Promis
   }, { timeout: 30_000 }), RolledBack);
   return result as T;
 }
+
+test("a registered plan's evidence unit leaves no plan approval waiting", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea({ evidence: true });
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "committed");
+  const units = await prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId },
+    select: { unitKind: true, state: true } });
+  assert.deepEqual(units.filter((unit) => unit.state === "proposed")
+    .map((unit) => unit.unitKind), ["evidence"],
+  "no approval decides an evidence unit, so it stays proposed");
+  const row = (await readAmuxIdeaProgressForOwner(session.user!.id!))
+    .find((entry) => entry.ideaId === ideaId);
+  assert.ok(row, "the registered idea is still listed");
+  assert.deepEqual([row.stage, row.waitingFor, row.taskRows.length], ["execution", null, 1],
+    "the inbox does not ask for a plan approval nobody can give");
+});
 
 test("a system-registered Task is ready, keeps its public PR consent and reads back", async () => {
   assert.ok(registeredSystemTaskId);
