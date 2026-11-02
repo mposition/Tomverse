@@ -354,6 +354,9 @@ run(
     // boundary (the seven-read version failed the 100 ms idle-in-transaction
     // timeout), newest first, bounded and owner scoped.
     "tests/integration/amux-idea-progress.db.test.ts",
+    // The idea lane: attempt limit, a claim scan finished ideas cannot crowd
+    // out, results recorded once, the outcome CHECK.
+    "tests/integration/amux-idea-lane.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.
