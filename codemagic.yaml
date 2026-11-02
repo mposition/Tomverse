@@ -55,7 +55,7 @@ workflows:
       xcode: "26.6"
       ios_signing:
         provisioning_profiles:
-          - tomverse-app-store
+          - tomverse-app-store-apple-signin
         certificates:
           - tomverse-apple-distribution
       vars: &ios_testflight_variables

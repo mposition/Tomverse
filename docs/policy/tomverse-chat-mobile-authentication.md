@@ -97,6 +97,12 @@ cookies retain their existing protections. Signup intent remains explicit and
 matching email never enables automatic account linking. OAuth tokens use the
 existing encrypted adapter. Permanent account deletion revokes Apple's stored
 refresh/access token before deleting the encrypted credential.
+Keep the Apple credentials and OAuth encryption key available while any linked
+account exists, including after disabling new Apple sign-ins. Failed Apple
+revocation leaves account data intact; a scheduled deletion returns to pending
+for the next sweep and logs only a user ID and failure code. Operators must
+restore missing credentials rather than bypass revocation or erase its token.
+The Apple flow requires HTTPS, including local end-to-end provider testing.
 
 The iOS review credential has independent enable/configuration variables and
 an `appstore-review-` address. It does not replace the Android review credential.

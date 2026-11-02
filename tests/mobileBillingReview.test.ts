@@ -13,6 +13,7 @@ test("review sandbox is default-off and cannot change the shared production envi
   assert.equal(iosReviewSandboxUserAllowed(user, { ...environment, MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED: "false" }, now), false);
   assert.equal(iosReviewSandboxUserAllowed(user, { ...environment, MOBILE_BILLING_ENVIRONMENT: "SANDBOX" }, now), false);
   assert.equal(iosReviewSandboxUserAllowed(user, environment, now), true);
+  assert.equal(iosReviewSandboxUserAllowed(user, { ...environment, MOBILE_BILLING_ENVIRONMENT: undefined }, now), true);
   assert.equal(environment.MOBILE_BILLING_ENVIRONMENT, "PRODUCTION");
 });
 
@@ -30,6 +31,7 @@ test("only the active dedicated non-admin account with a server billing identity
 test("a verified review subscription may update its tier without making a terminal credential valid", () => {
   for (const plan of ["Free", "Pro", "Max"]) {
     assert.equal(mobileStoreReviewSessionAllowed({ ...user, plan }, environment, now), true);
+    assert.equal(mobileStoreReviewSessionAllowed({ ...user, plan }, { ...environment, MOBILE_BILLING_ENVIRONMENT: undefined }, now), true);
     assert.equal(mobileStoreReviewSessionAllowed({ ...user, plan }, { ...environment, MOBILE_STORE_REVIEW_IOS_ENABLED: "false" }, now), false);
   }
   assert.equal(mobileStoreReviewSessionAllowed({ ...user, plan: "Pro" }, { ...environment, MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED: "false" }, now), false);

@@ -61,7 +61,7 @@ test("TestFlight signing is manual and uses only the configured account identiti
   assert.equal(signed.triggering, undefined);
   assert.equal(signed.integrations.app_store_connect, "Tomverse Codemagic Signing");
   assert.deepEqual(signed.environment.ios_signing, {
-    provisioning_profiles: ["tomverse-app-store"],
+    provisioning_profiles: ["tomverse-app-store-apple-signin"],
     certificates: ["tomverse-apple-distribution"],
   });
   assert.equal(signed.environment.groups, undefined);

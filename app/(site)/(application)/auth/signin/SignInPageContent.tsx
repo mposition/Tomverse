@@ -539,7 +539,7 @@ function SignInButtons({
             {appleAvailable && (
                 <button type="button" onClick={() => void startOAuth("apple")} className={providerButtonClass}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="https://authjs.dev/img/providers/apple.svg" className="h-5 w-5" alt="Apple" />
+                    <img src="/auth/apple.svg" className="h-5 w-5" alt="Apple" />
                     {t("auth.apple")}
                 </button>
             )}

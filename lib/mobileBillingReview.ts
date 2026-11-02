@@ -18,7 +18,7 @@ export async function mobileSubscriptionEnvironment(userId: string) {
 
 export async function iosReviewSandboxWebhookAllowed(event: { store?: string; environment?: string; app_user_id?: unknown; product_id?: unknown }, db: Pick<Prisma.TransactionClient, "user"> = prisma) {
   if (event.store !== "APP_STORE" || event.environment !== "SANDBOX" ||
-      process.env.MOBILE_BILLING_ENVIRONMENT !== "PRODUCTION" || process.env.MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED !== "true" ||
+      mobileBillingEnvironment() !== "PRODUCTION" || process.env.MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED !== "true" ||
       typeof event.app_user_id !== "string" || event.app_user_id.length > 200 || typeof event.product_id !== "string") return false;
   const products = parseMobileBillingProducts(process.env.MOBILE_BILLING_PRODUCTS_JSON);
   if (!products.some(product => product.store === "app_store" && product.kind === "subscription" && product.productId === event.product_id)) return false;

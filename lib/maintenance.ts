@@ -63,6 +63,7 @@ import {
   effectivePlanForAccess,
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
+import { AppleAccountRevocationError } from "@/lib/appleAccountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
 import { checkBillingFinanceOpsSilence } from "@/lib/billingFinanceOpsSilence";
 import { AGENT_DIGEST_RETENTION_BATCH, expireAgentDigestBodies, purgeAgentDigestMeta } from "@/lib/agentDigestStore";
@@ -127,10 +128,21 @@ export const deleteScheduledAccounts = async (now: Date) => {
       data: { accountStatus: "deletion_processing" },
     });
     if (claimed.count !== 1) continue;
-    const result = await deleteTomverseAccount(user.id, {
-      cancelSubscription: false,
-    });
-    if (result.deleted) deleted += 1;
+    try {
+      const result = await deleteTomverseAccount(user.id, {
+        cancelSubscription: false,
+      });
+      if (result.deleted) deleted += 1;
+    } catch (error) {
+      if (!(error instanceof AppleAccountRevocationError)) throw error;
+      // No account data was deleted: release this claim for the next sweep,
+      // preserving the original deletion deadline and the rest of the batch.
+      await prisma.user.updateMany({
+        where: { id: user.id, accountStatus: "deletion_processing" },
+        data: { accountStatus: "pending_deletion" },
+      });
+      console.error("Scheduled account deletion deferred for Apple revocation", { userId: user.id, code: error.message });
+    }
   }
   return deleted;
 };

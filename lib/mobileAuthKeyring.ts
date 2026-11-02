@@ -47,7 +47,7 @@ export function mobileStoreReviewSessionAllowed(user: { id: string; email?: stri
   if (!isMobileStoreReviewAddress(user.email)) return true;
   const credential = readMobileStoreReviewCredentials(env, now).find(item => item.userId === user.id && item.email === user.email?.toLowerCase());
   const iosPurchasePlan = credential?.email.startsWith("appstore-review") && credential.plan === "Free" &&
-    env.MOBILE_BILLING_ENVIRONMENT === "PRODUCTION" && env.MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED === "true" &&
+    env.MOBILE_BILLING_ENVIRONMENT !== "SANDBOX" && env.MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED === "true" &&
     ["Free", "Pro", "Max"].includes(String(user.plan));
   if (!credential || credential.userId !== user.id || credential.email !== user.email.toLowerCase() || (credential.plan !== user.plan && !iosPurchasePlan)) return false;
   return credential.plan === "Free" || (user.subscriptionStatus === MOBILE_STORE_REVIEW_STATUS &&
