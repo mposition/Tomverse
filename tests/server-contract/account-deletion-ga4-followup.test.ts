@@ -60,6 +60,13 @@ const tx = new Proxy(
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
     prisma: {
+      account: {
+        findMany: async (input: { where: { userId: string; provider: string } }) => {
+          assert.equal(input.where.userId, "cmh-deleted-account");
+          assert.equal(input.where.provider, "apple");
+          return [];
+        },
+      },
       user: {
         findUnique: async () => ({
           id: "cmh-deleted-account",
