@@ -8,7 +8,7 @@ approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 5
 | 1 | 2026-09-17 mposition | 최초 승인 |
 | 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 검증용 shadow 처리와 운영 활성화를 나누고 통과 기준·범위 강제·기록·재검증 범위를 정함(§6.1, §8.1, §8.1.1, §8.3, §14). **O15**: API로 게시를 내릴 수 없는 Instagram·TikTok은 항상 승인 모드(§1, §6.1, §8.2, §15) |
 | 3 | 2026-09-21 mposition | §7.1의 문장 해석 규칙 9개와 `rule.free-wording`을 거절기가 아닌 잠정 언어 진단으로 한정한다. 진단은 `provisional_language_flag` 하나와 세부 rule id를 남겨 사람에게 보내며, 입력 위생·claim/asset·provenance 거절은 그대로 둔다(§7.1, §7.2). 열세 번의 독립 검토가 이 판정기를 양방향으로 틀린 것으로 확인했고, 답은 패턴을 더하는 것이 아니라 tokeniser·형태소로 교체하는 것이다. 그 교체 전까지 거절 권한은 돌아오지 않는다. |
-| 4 | 2026-10-16 mposition | §9.2: 졸업 후 `marketing-agent/to-develop/<topic>` PR에도 auto-merge를 켜지 않는다. 2026-10-02부터 `Auto PR to Develop`은 PR을 열기만 하고, 병합은 운영자가 실행하는 merge train(`npm run merge-train`)이나 사람이 한다. 졸업이 바꾸는 것은 사람 검토 없이 병합 대기열에 들어갈 수 있다는 것이지 auto-merge가 아니다. **(2026-10-16 운영자 결정, S3 계획 D1·D2·D7)** 마케팅 LLM 비용 원장 `MarketingLlmCall`을 다섯 번째 마케팅 전용 표로 더한다(§1 O1, §5, §12.2). 생성 서비스의 임시 전용 키 공급사는 OpenAI이고(O14), 월 상한은 US$100이다(§5) |
+| 4 | 2026-10-16 mposition | §9.2: 졸업 후 `marketing-agent/to-develop/<topic>` PR에도 auto-merge를 켜지 않는다(**2026-11-02 운영자 결정으로 이 줄은 낡았다: 졸업한 SEO 코드 PR에 한해 기본 꺼진 스위치 뒤의 develop auto-merge를 허용한다, §9.2**). 2026-10-02부터 `Auto PR to Develop`은 PR을 열기만 하고, 병합은 운영자가 실행하는 merge train(`npm run merge-train`)이나 사람이 한다. 졸업이 바꾸는 것은 사람 검토 없이 병합 대기열에 들어갈 수 있다는 것이지 auto-merge가 아니다. **(2026-10-16 운영자 결정, S3 계획 D1·D2·D7)** 마케팅 LLM 비용 원장 `MarketingLlmCall`을 다섯 번째 마케팅 전용 표로 더한다(§1 O1, §5, §12.2). 생성 서비스의 임시 전용 키 공급사는 OpenAI이고(O14), 월 상한은 US$100이다(§5) |
 | 5 | 2026-10-18 mposition | **(2026-10-17 운영자 결정: 경쟁사는 상수가 아니라 DB 등록부와 사람의 승인, 사실은 사람이 승인한 고정 페이지에서, 웹 검색은 신규 경쟁사 탐색에만)** 경쟁사 등록부 `MarketingCompetitor`를 여섯 번째 마케팅 전용 표로 더한다(§1 O1, §5, §12.2). A3의 출처 규칙(§4.1)을 정한다. 이 표와 그 위의 고정 페이지 추출(A3 실행)은 버전 4 아래에서 정책 버전 증가 없이 먼저 구현됐다(공개 PR #2646·#2647·#2649·#2653·#2656, develop만, production 미배포). 작성자의 절차 누락이며, 이 판이 승인되기 전에는 그 코드를 production release에 넣지 않았다 |
 
 운영자 결정(아래 §1)은 운영자가 대화 세션에서 내린 것이고, 나머지 계약은 Claude가 설계하고
@@ -101,6 +101,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - Zernio 형식은 어댑터 밖으로 나가지 않는다. 어댑터 표면은 게시·상태·취소(지원 여부 반환)·
   webhook 해석·댓글 조회·채널별 capability다.
 - 플랫폼 OAuth 토큰은 Zernio가 보관한다. Tomverse는 저장하지 않는다.
+- 댓글 모니터 서비스(S4d, §12.1)는 생성기와 같은 자격(LLM 키·제출 secret)만 가진 별도 Railway cron이다. 댓글 조회·기록·판정은 본 앱이 한다.
 - 마케팅 이미지는 기존 private R2 버킷과 **분리된 전용 공개 버킷**과 전용 자격증명을 쓴다.
 
 ### 4.1 시장 정보(A3)의 출처 (버전 5)
@@ -145,9 +146,12 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | `MarketingAsset` | 미디어 CLI가 만든 이미지·영상의 등록부 항목(출처·채널별 AI 표시·locale별 대체 텍스트)과 R2 파일 위치(2026-10-31 운영자) | 상태는 `submitted`·`approved`·`retired`. CLI는 `submitted`만 만들고 업로드 확인은 한 번이며, 승인·은퇴는 사람의 감사 행이 있어야 한다(승인은 정확히 그 파일의 sha256). 승인된 것만 Guard·생성기·게시기가 읽는 등록부에 들어가고, 승인·은퇴마다 등록부 버전이 오른다. 삭제하지 않고 은퇴시킨다 |
 
 - 유입 기록은 새 테이블이 아니라 기존 분석 이벤트에 `marketing_touch`를 추가한다(§10).
-- §6.1의 기능별 스위치와 랜딩 실험 활성화 설정 등 **마케팅이 쓰는 모든 `AppSetting` key**는 `lib/appSettings.ts`에
-  선언하고, 각 key가 감사 기록을 남기는 writer 또는 명시적 read-only 사유를 가진다
-  (`tests/appSettingWriters.test.mjs` 검사 대상).
+- §6.1의 기능별 스위치와 랜딩 실험 활성화 설정 등 **마케팅이 쓰는 모든 `AppSetting` key**는 이름이 한곳에 선언되고
+  (스위치는 `lib/appSettings.ts`가 읽고 `lib/marketingAutomationAccess.ts`가 이름을 가지며, LLM 설정은
+  `lib/marketingLlmBudgetCore.ts`, 랜딩 실험 설정·카운터·사용 id 기록은 `lib/marketingExperimentContract.ts`),
+  각 key가 감사 기록을 남기는 writer 또는 명시적 read-only 사유를 가진다. 스위치 key는
+  `tests/appSettingWriters.test.mjs`가, 랜딩 실험 key는 `tests/marketingExperimentWriters.test.mjs`가 검사한다
+  (`lib/appSettings.ts`는 Prompt Refiner 실행 closure라 새 key를 거기 두지 않는다 — 2026-11-01 서술 정정).
 
 ## 6. 승인·권한·감사
 
@@ -181,7 +185,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | 자율 게시 | 승인 모드 게시 조건 · 자율 스위치 · 계정 자율 모드 · 댓글 모니터링 동작 · 채널이 API 게시 취소 가능(Instagram·TikTok 제외, O15) |
 | 졸업 | `marketing:write` + step-up · O3 · 댓글 모니터링 동작 · 채널이 O15 대상 아님 |
 | 실험 활성화 | 실험 스위치 · kill switch 아님 · 캐시·CSP 스파이크 통과 기록 · (승인 모드) `marketing:write` + step-up / (자율) 표면 졸업 |
-| SEO 자동 병합 | 저장소 변수 · 표면 졸업 상태 조회 성공 |
+| SEO 자동 병합 | 에이전트 스위치 · `MARKETING_SEO_AUTO_MERGE=true`(기본 꺼짐) · kill switch 아님 · 졸업 기록(`MARKETING_SEO_AUTO_PR=true`) · 게시 단계와 같은 서명·tree·허용 4개 파일 재검증 · PR이 develop 기준·열림·draft 아님·검증한 commit 그대로 (§9.2) |
 | webhook shadow 처리 | shadow 스위치 · staging 환경 · kill switch 아님 · 서명 검증 통과 (§8.1.1) |
 | webhook 상태 반영 | 상태 반영 스위치 · kill switch 아님 · 이벤트가 스위치의 허용 event type·채널 범위 안 · 운영자 서명된 §8.1.1 기록이 있고 그 뒤 해당 코드·설정·스키마 변경 없음 |
 
@@ -336,6 +340,14 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 
 `/api/ready` 전체 상태는 트리거로 쓰지 않는다.
 
+**S4a 구현 상태(2026-11-01).** Guard 거절률(최근 20건 중 7건 이상, 20건 미만이어도 분모 20)·연속 실패 3회·플랫폼
+제거(`removed_by_platform`)는 승인·자율 두 모드 모두 계정을 정지한다. 게시기가 계정을 claim하기 전과 Guard 거절 draft를
+기록한 같은 트랜잭션에서 `evaluateMarketingAutoPause()`가 채널 잠금 → 상태 변경 → 시스템 감사
+(`marketing_account.auto_paused`, 사유 코드는 `pauseReasonCode`)를 한 번에 한다. 증거는 계정의 마지막 "새 출발"
+(승인 모드 시작, 직전 자동 정지·재개 감사 시각 중 늦은 것) 이후만 센다. 운영자 재개는 사유 코드를 보지 않는다.
+`outcome_unknown`은 기존대로 자율 모드만 정지한다(운영자 결정 D3). 운영자 삭제·문제 표시는 기존 `operator_problem_report`
+정지를 쓴다. 댓글 24시간 미처리 정지는 S4c, 1시간 상태 조회 무응답·본토 차단 해제 감지는 아직 없다.
+
 ## 9. 랜딩 실험과 SEO 코드
 
 ### 9.1 랜딩 실험
@@ -350,6 +362,19 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - 사전 등록(가설·주 지표·최소 표본·고정 기간·중단 규칙) 없이는 시작하지 않는다. 승자의 영구 반영은 PR.
 - 구현 전 캐시·CSP·rewrite 스파이크를 E2E로 통과해야 하며, 실패하면 실험은 연기한다.
 
+**현재 구현 (2026-11-01, 운영자 지시로 정함 — 구현 설명이며 위 구속 조건을 바꾸지 않는다)**
+- 스파이크: `tests/e2e/landing-experiment-spike.spec.ts`(동의 없음→기본 문구·쿠키 없음, 동의+배정→변형, 사용자 간 캐시 혼입 0건, CSP 해시·위반 0건). 통과 기록은 `lib/marketingExperimentCore.ts`의 `MARKETING_EXPERIMENT_SPIKE`이고, 시험이 그 E2E 파일의 존재를 확인한다.
+- proxy는 DB를 읽지 않는다. 배정 쿠키(`tv_exp=<실험id>.<번들id>.<arm>.<언어들>`, 언어는 사전 등록된 언어를 붙여 쓴 `enko`)가 rewrite의 유일한 근거이며, 쿠키는 배정 route가 분석 동의(동의 provider와 같은 규칙: 수락, 또는 미결정이면서 notice_opt_out 국가)와 활성 실험을 확인했을 때만 발급한다. 문서 요청(`Accept: text/html`, Flight 요청 제외)의 홈(`/`, `/{locale}`)만 rewrite하고, 대상 HTML이 이 빌드에 없으면 기본 페이지를 낸다. 규칙은 `lib/marketingRoutes.ts`에 있다(proxy가 새 로컬 import를 얻으면 Prompt Refiner 실행 closure가 커지기 때문).
+- 모든 랜딩 화면의 beacon(`components/marketing/LandingExperimentBeacon.tsx`)이 쿠키를 다시 확인한다. 실험이 멈췄거나 동의가 사라졌거나 다른 실험의 쿠키면 route가 쿠키를 지우고 변형 화면은 한 번 다시 불러 기본 문구로 돌아간다. 즉 중단·동의 철회는 방문자의 **다음 랜딩 화면**에서 효력이 생기고, kill switch 환경변수는 proxy에서 즉시 rewrite를 끈다.
+- 변형 화면의 beacon이 활성 실험 상태를 읽지 못했다는 답(503; 상태 조회 앞의 속도 제한 DB 호출이 실패한 경우도 같다)을 받으면, 배정 쿠키는 그대로 두고(저장소가 회복돼도 다른 arm으로 다시 뽑히지 않게) 짧은 보류 쿠키 `tv_exp_hold`(5분, 값 `1`)를 심고 한 번 다시 불러 기본 문구를 낸다. 보류 쿠키가 있는 동안 proxy는 rewrite하지 않고 직접 변형 경로 요청도 홈으로 보낸다. 보류 쿠키도 동의 철회 때 배정 쿠키와 함께 지운다.
+- 집계 요청이 서버의 확정 거절(읽기 실패 503, 집계 실패 500, 속도 제한 429)로 끝나면 beacon은 세션의 노출·전환 표시를 되돌려 다음 방문이 다시 센다. 응답 자체가 없는 실패는 집계됐는지 알 수 없으므로 되돌리지 않는다.
+- 첫 화면은 어느 arm이든 기본 문구이며 집계하지 않는다(대조군만 집계하면 대조군에 유리해진다). 노출은 쿠키가 이미 있던 화면에서, 렌더된 arm이 쿠키의 arm과 같을 때만 브라우저 세션당 한 번 센다. 전환은 주 CTA 클릭 한 번(세션당)이다. 집계는 `AppSetting`의 원자적 증가 행이며 페이지 세션 수이지 방문자 수가 아니다.
+- 사전 등록의 중단 규칙은 집계에서 평가한다. 조건이 처음 충족된 것을 본 요청이 "충족 기록" 행(`marketingAutomation.experimentTripped.<id>`)을 한 번만(`ON CONFLICT DO NOTHING`) 남기고, 그 뒤 실험은 비활성으로 읽힌다 — 집계가 계속 움직여도(늦게 도착한 클릭 등) 되살아나지 않는다. 이 행은 집계에서 파생된 사실이고 운영자 결정이 아니므로 카운터와 같은 종류의 기록(감사 행 없음)이며, 사람이 Stop을 누를 때 감사 기록과 보고서가 남는다. 안전한 방향(기본 문구로 복귀)으로만 작동한다.
+- 분석 동의는 브라우저가 알리는 값(localStorage의 동의 키)을 서버가 국가별 동의 정책(`resolveAnalyticsConsentPolicy`)과 맞춰 보는 방식이며, 분석 이벤트 입력 route와 같은 신뢰 수준이다. 교차 출처 POST는 proxy의 변경 요청 출처 검사가 막으므로 다른 사이트가 쿠키를 심을 수 없다. 방문자의 활성 실험 조회는 인스턴스별로 15초 캐시된다(Admin 중단·충족 기록은 그 안에 반영).
+- 쿠키와 집계는 방문자가 읽고 조작할 수 있는 클라이언트 증거다. 속도 제한(IP당 분 60·일 2,000) 안에서 자기 arm을 바꾸거나 노출·클릭을 되풀이해 결과에 편향을 줄 수 있으며, 그래서 Admin 화면과 보고서는 이 증거 수준("브라우저가 세고 서버가 기록")을 그대로 적고 서명된 사실로 쓰지 않는다. 저장소를 읽지 못한 요청은 쿠키를 지우지 않고(재배정으로 arm이 바뀌는 것을 막는다) 아무것도 세지 않는다.
+- 시작·중단은 Admin(`marketing:write`+step-up)이며 사람 감사 기록을 같은 트랜잭션에 남긴다. 중단은 두 arm의 `experiment_result` 보고서를 쓴다. 한 번에 실험 하나. 실험 id는 시작할 때 남기는 영구 기록 행(`marketingAutomation.experimentUsed.<id>`)으로 재사용을 막는다(이전 실행의 쿠키가 새 실행의 배정으로 인정되면 결과가 섞이기 때문).
+- 캐시: 변형 응답은 `private, no-store`와 `X-Robots-Tag: noindex`다(Next가 `Vary`를 자기 값으로 덮어쓰므로 `Vary: Cookie`에 기대지 않는다). 공유 캐시(Cloudflare)에서 `tv_exp` 쿠키가 있는 `/`·`/{locale}` 요청을 캐시 우회하는 규칙은 코드 밖 설정이며, 실험을 켜기 전 운영자가 적용해야 한다(없으면 쿠키 방문자도 캐시된 기본 페이지를 받을 뿐 변형이 섞이지는 않는다).
+
 ### 9.2 SEO 코드
 - LLM 단계: 저장소 읽기 권한과 LLM 키만, 도구는 읽기·편집만, 저장소 설정·MCP·hook 미로드, 버전·무결성 고정, 턴·예산 상한.
   이 줄은 SEO 코드 단계에만 적용한다. 이미지·영상을 만드는 미디어 CLI는 플러그인과 MCP를 쓸 수 있고, 결과는 §7.3의 제출과 사람 승인을 거친다(2026-10-31 운영자).
@@ -359,8 +384,27 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - PR 생성: 이 저장소 전용 GitHub App 토큰, 검증 산출 tree hash와 push 내용 일치 시에만.
 - 브랜치: 졸업 전 `marketing-agent/<topic>`(자동화 권한 없음, 사람 병합). 졸업 후
   `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다
-  (`scripts/auto-pr-branch-policy.mjs`). auto-merge는 어느 쪽도 켜지 않으며(버전 4 제안), 병합은 merge train
-  (`npm run merge-train`) 또는 사람이 한다. develop까지만.
+  (`scripts/auto-pr-branch-policy.mjs`). develop까지만. 졸업 전 PR은 auto-merge 없이 사람이 병합한다.
+  **졸업 후 PR의 auto-merge(2026-11-02 운영자 결정, 정책 버전 변경 없음):** 기본 꺼진 스위치 `MARKETING_SEO_AUTO_MERGE=true`일 때만,
+  게시 단계 뒤(또는 `--phase arm`) 실행기가 GitHub의 auto-merge(`enablePullRequestAutoMerge`, merge commit)를 그 PR 하나에 켠다. 병합은 GitHub가
+  develop의 required check가 통과한 뒤에 한다. 켜는 조건은 모두 결정적 코드이고 하나라도 틀리면 켜지 않는다: 에이전트 스위치 켜짐 · kill switch 비어 있음 ·
+  졸업 기록(아래) · 게시 단계와 같은 재검증(서명, base가 원격 develop 위, tree·부모·diff를 git에서 다시 계산, 허용 4개 파일) · PR이 이 저장소의
+  열린 PR이고(fork 제외) head 이름이 정확히 `marketing-agent/to-develop/<topic>`이며 **base가 정확히 `develop`**이고(main·release·그 밖의 base는 어떤 경우에도
+  켜지 않는다) head commit이 검증한 commit과 같고(GitHub 호출도 `expectedHeadOid`로 묶는다) draft가 아닐 것. 같은 head 이름의 열린 PR이 둘이면 켜지 않는다.
+  **켜 둔 채로 자리를 비우지 않는다**: GitHub는 쓰기 권한자가 commit을 더 push해도 auto-merge를 그대로 두므로, 켠 PR은 실행기가 20초 간격으로 지켜보고
+  head가 검증한 commit이 아니게 되거나 base가 develop이 아니게 되면 끈다(required check는 새 head에서 다시 돌아야 하므로 이 간격이면 병합보다 먼저 본다).
+  감시 창(`--wait-minutes`, 기본·최대 45분, 최소 1. 설치 토큰은 한 시간이고 해제에도 그 토큰이 필요하므로 마감은 토큰 만료 시각(GitHub 응답 헤더 또는 운영자가 주는 `MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT` 중 이른 쪽)에서 10분을 뺀 절대 시각으로 줄고, 그 시각을 알 수 없거나 창이 1분보다 짧으면 push 전에 시작하지 않으며, 남은 창이 1분 안이면 켜지 않는다. 더 기다리려면 새 토큰으로 다시 실행한다)이 끝나거나, PR을 읽지 못하거나(연속 5회), 병합·닫힘 말고 어떤 이유로든 실행이 끝나거나, 오류·SIGINT/SIGTERM이 나면
+  이 실행이 켠 auto-merge는 끈다(사람이 켠 것은 지켜보며 head·base가 어긋날 때만 끄고, 창이 끝났다고 끄지 않는다). PR 목록은 열린 것과 끝난 것을 따로 읽고 열린 쪽이 한 쪽(20개)을 넘으면 읽지 못한 것으로 본다. 켜는 요청은 보내기 전에 해제 대상으로 기록하므로 응답이 유실돼도 같은 경로로 끄고(해제는 세 번까지 다시 묻는다),
+  켠 직후 PR을 다시 읽어 base·head가 검증한 그대로인지 확인한다. 프로세스가 강제로 죽었거나 해제 요청이 세 번 모두 실패한 경우(실행기는 오류로 끝난다)에만 사람이 PR 화면에서 끈다.
+  **남는 위험**: GitHub에는 auto-merge를 특정 base에만 허용하는 설정이 없어 base 제한은 위 재확인과 감시가 하는 것이고, 쓰기 권한자가 이미 검사를 통과한
+  commit으로 head를 되돌리거나 base를 바꾸는 순간부터 감시가 보기까지의 20초 안에는 GitHub가 먼저 병합할 수 있다. 쓰기 권한자는 원래 직접 병합할 수 있으므로 그 이상의 권한은 아니다.
+  **한 실행에서 한 번만 켠다**: 켠 뒤 auto-merge가 다시 꺼져 있으면 사람이나 GitHub가 끈 것이고 다시 켜지 않는다(PR #1256의 교훈).
+  draft는 GitHub가 auto-merge를 받지 않으므로, CI 입장 관리가 ready로 올릴 때까지 1분 간격으로 보며 기다린다(켜기 전에는 아무것도 켜 두지 않는다).
+  창이 끝난 뒤에는 `--phase arm`을 다시 실행하는 것이 운영자의 행위다. kill switch는 새로 켜는 것을 막는다. 이것은 auto-merge를 켜지 않는다는
+  `Auto PR to Develop`의 규칙(AGENTS.md)과 별개의 예외이며, workflow는 여전히 아무것도 켜지 않는다. 여러 PR이 연달아 병합되면 develop 배포가 겹칠 수 있다는
+  2026-10-02 결정의 비용은 이 경로에 한해 운영자가 받아들였다.
+  **졸업 기록**: SEO 표면에는 계정 행이 없어, 운영자가 O3를 확인한 뒤 설정하는 저장소 변수 `MARKETING_SEO_AUTO_PR`(정확히 `true`)이 졸업 기록이다.
+  비어 있거나 다른 값이거나 읽기에 실패하면 졸업 전이다. 이 변수는 게시 단계가 `to-develop` 브랜치를 쓰게 하는 것이기도 하다.
 - 구현(2026-11-01 운영자 결정, 정책 버전 변경 없음): 실행기 `scripts/marketing-seo-agent.mjs`와 순수 규칙 `lib/marketingSeoAgentCore.ts`.
   기본 꺼짐(`MARKETING_SEO_AGENT_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). **두 단계는 서로 다른 프로세스이자 서로 다른 기계(컨테이너)에서 돌린다.**
   검증 단계(`--phase validate`)는 격리된 clone(base 커밋)에서 도구 없는 텍스트 LLM 호출 1회(마케팅 비용 원장 그대로, 목적 `brief`, 새 유료 경로 없음)의 find/replace 수정안을 적용하고
@@ -371,7 +415,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   시험은 제안 코드와 같은 프로세스에서 돌아 악의적인 코드를 원리상 막지 못한다(시험 안의 `assert`를 바꾸는 코드 등). 그래서 추가되는 줄에서 그 길을 닫는 심층 방어를 둔다 — 허용 import(`next`·`react`·`@/lib|components|app`)만, `process`(`LLMS_TXT_ENABLED` 하나만 예외)·`assert`·`eval`·`Function`·`globalThis`·동적 로드·constructor 사슬 거부, 주석과 문자열 내용은 코드가 아니다 — 이는 증명이 아니다. 악의적 코드에 대한 권위 있는 방어는 draft PR, 저장소 CI, 사람의 diff 검토다.
   게시 단계(`--phase publish`)는 신뢰된 checkout과 자기 의존성에서 돌고, GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)과 서명 키만 가지며 LLM 변수가 있으면 시작을 거부한다.
   서명이 맞고, base가 원격 develop의 조상이며, 부모가 base이고, tree·diff를 git에서 다시 계산해 일치할 때만 push하고, push 뒤 원격 tree를 다시 읽어 일치할 때만 PR(draft)을 연다.
-  졸업 상태 조회가 연결되기 전에는 항상 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
+  졸업 기록이 정확히 `true`가 아니면(비어 있음·다른 값·읽기 실패) 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
 - 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.
@@ -396,23 +440,28 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   touch 없음은 미귀속, 이벤트 자체가 없음(미동의·차단)은 미관측으로 따로 보고한다.
 
 ### 10.2 GA4 User-ID
-분석 전용 무작위 식별자, 동의·고지 조건에서만 전송, 로그아웃 시 해제, 계정 삭제 시 GA4 삭제 요청.
-**개인정보 고지 개정 배포 전에는 전송하지 않는다.**
+분석 전용 무작위 식별자, 명시 동의·고지 조건에서만 생성·전송, 로그아웃 시 해제, 동의 철회와 계정 삭제 시 GA4 삭제 요청 후 식별자 삭제.
+**개인정보 고지 개정 배포 전에는 생성하지도 전송하지도 않는다.**
 
-구현(S6, 기본 꺼짐):
-- 식별자는 저장하지 않고 계정 id를 전용 키 `GA4_USER_ID_KEY`로 HMAC-SHA256한 128비트 값이다(`lib/ga4UserId.ts`).
-  키 없이는 계정 id로 되돌릴 수 없어 GA4에는 무작위 값과 같고, 저장된 값이 없으므로 계정 삭제 시 지울 행이 없으며
-  GA4 삭제 요청만 남는다. 무작위 값을 저장하려면 `prisma/schema.prisma`(Prompt Refiner closure 파일) 변경이 필요해 택하지 않았다.
-  키는 바꾸지 않는다 — 바꾸면 이미 보낸 id를 삭제 요청에서 부를 수 없다.
-- 전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
+구현(S6, 기본 꺼짐). 식별자 방식은 2026-11-02 운영자 결정으로 계정 id의 HMAC에서 저장하는 무작위 값으로 바꿨다(정책 버전 변경 없음):
+- 식별자는 계정과 무관한 128비트 암호학적 난수(소문자 hex)이고 `Ga4UserId` 표에 계정당 최대 한 행으로 저장한다
+  (`lib/ga4UserId.ts`, migration `20261102100000_ga4_user_id`, 값 형식은 DB CHECK로 강제). 저장하는 이유는 철회다 —
+  행을 지우면 Tomverse 안에서 그 값을 계정에 잇는 것이 없어져 GA4와의 연결이 끊긴다. 다시 동의하면 새 값을 만든다.
+  이전 HMAC 방식의 id는 고지 상수가 한 번도 `true`가 된 적이 없어 발급·전송된 적이 없으므로 그 삭제 경로는 두지 않는다.
+- 생성·전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
   고지 개정 PR에서만 바꾼다) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
-  로그인 · GA4 측정 id. 서버는 여기에 키 존재를 더한다(`app/api/analytics/user-id/route.ts`). 브라우저의 gtag `user_id`로만
-  보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃과 분석 거절은 `user_id`를 `null`로 해제한다.
-- 계정 삭제(`lib/accountDeletion.ts`)는 트랜잭션 커밋 뒤 GA4 Admin API `submitUserDeletion`을 한 번 요청한다
-  (`lib/ga4UserDeletion.ts`, `GA4_PROPERTY_ID`, `GA4_USER_DELETION_SERVICE_ACCOUNT_JSON`). 실패는 id 없이 운영 incident로 남기고
-  재시도하지 않으며 삭제를 막지 않는다. User-ID가 한 번이라도 나갈 수 있었던 경우에만 요청한다 — 고지 상수 `true`, 키 존재,
-  스위치가 지금 켜져 있거나 `GA4_USER_ID_PREVIOUSLY_ENABLED=true`(스위치를 끌 때 운영자가 설정해 이미 보낸 id의 삭제를 계속한다).
-  미리 넣어 둔 자격증명만으로는 아무것도 보내지 않는다.
+  로그인 · GA4 측정 id. 식별자는 이 조건이 모두 충족된 뒤의 첫 요청에서만 만든다 — 브라우저가 요청 본문에 명시 동의를 적고,
+  서버는 고지·스위치·로그인이 맞고 그 진술이 있을 때만 만든다(`app/api/analytics/user-id/route.ts` POST). 브라우저의 gtag
+  `user_id`로만 보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃은 `user_id`를 `null`로 해제한다.
+- 동의 철회: 로그인 상태에서 분석을 거절하면 브라우저가 `user_id`를 `null`로 해제하고 철회를 요청한다(route DELETE). 서버는 저장된
+  id로 GA4 Admin API `submitUserDeletion`을 한 번 요청한 뒤 행을 지운다. 요청 실패는 철회를 막지 않는다. 요청부터 삭제까지 행을 잠가,
+  그 사이의 동의 요청은 철회 중인 id를 받지 못하고 철회가 끝난 뒤 새 id를 받는다(같은 브라우저는 철회 응답 뒤에 요청한다). 철회는 고지 상수만 따르고
+  스위치와 무관하다 — 스위치가 켜졌을 때 만든 id는 꺼진 뒤에도 철회할 수 있어야 한다. 동의는 브라우저 단위이므로 로그아웃 상태의
+  거절은 계정 id를 지우지 않는다.
+- 계정 삭제(`lib/accountDeletion.ts`): 삭제 트랜잭션 안에서 User 행을 잠근 뒤 저장된 id를 읽고, 행은 User와 함께 cascade로 지운다.
+  커밋 뒤 그 id로 `submitUserDeletion`을 한 번 요청한다(롤백된 삭제는 GA4에 요청하지 않는다). 저장된 id가 없으면 요청하지 않는다.
+- GA4 요청(`lib/ga4UserDeletion.ts`, `GA4_PROPERTY_ID`, `GA4_USER_DELETION_SERVICE_ACCOUNT_JSON`): 저장된 id가 있을 때만 하고,
+  실패와 자격증명 누락은 id 없이 운영 incident로 남기며 재시도하지 않는다. 자격증명만으로는 아무것도 보내지 않는다.
 
 ### 10.3 120일 측정
 모든 지표를 승인·자율 모드와 계정별로 나눈다.
@@ -450,11 +499,32 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 ## 12. 개인정보·보유
 
 ### 12.1 댓글 모니터링
-- 댓글은 게시기가 조회해 **메모리에서만** 분류한다. 모델을 쓰면 작성자 식별자를 제거한 본문만 보낸다.
-  로그에 본문·handle·댓글 URL을 남기지 않는다.
+- 댓글은 본 앱이 게시 도구로 조회하고, 댓글 모니터 서비스가 **본문만** 받아(작성자·글·시각·링크 없음) **메모리에서만** 분류한다.
+  모델에도 그 본문만 보낸다. 로그에 본문·handle·댓글 URL을 남기지 않는다.
 - 저장은 게시물 단위 알림(건수·위험 코드·최초 감지 시각, 게시물 URL)뿐이며 90일 후 삭제한다.
 - **선행 조건(사람):** lawful basis·DPIA 검토, 게시 도구의 처리자 지위·DPA·하위처리자·데이터 위치, 호주 APP 8 해외 이전,
   GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있고, **댓글 모니터링 없이는 졸업이 없다.**
+
+**S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다(건강 판정을 묻는 웹 앱·게시기와 모니터를 돌리는 서비스 모두에 같은 값을 둔다). 꺼져 있으면
+`runMarketingCommentsMonitor()`는 DB·게시 도구·모델 어느 것도 건드리지 않고 돌아온다. 켜진 실행은 최근 14일 안에 게시된 글의 댓글을
+`GET /v1/inbox/comments/{postId}`(게시 도구 생성 클라이언트 문서 기준, 실응답 대조는 12.1 선행 조건 이행 후)로 읽어 **본문만** 분류기에 넘기고
+(작성자·id·링크는 읽는 즉시 버린다), 저장은 `comment_alerts` 보고서(건수·닫힌 위험 코드·최초 감지·URL host)와 시스템 감사 한 줄뿐이다.
+알림은 운영자 확인 감사 항목(`marketing_comment_alert.acknowledge`)보다 오래된 동안 열려 있고, 24시간 열려 있으면 계정이 S4a 경로로 정지한다
+(재개 이전에 열린 알림은 다시 정지시키지 않는다). 모든 글을 읽고 분류까지 끝낸 실행만 `marketing_comments_monitor_last_run` 설정에 **시작** 시각을(다음 실행은 그 시각 10분 전 이후의 댓글을 새 것으로 본다; 한 번에 200글까지, 넘으면 표본이라 기록하지 않는다)
+남기며, 3시간 안이면 `commentsMonitorHealthy`가 참이다(졸업 판정·자율 게시 판정 공통). 분류기가 없으면 `classifier_unavailable`로 아무것도 읽지 않는다.
+
+**S4d 구현 상태(2026-11-02).** 분류기와 실행 경로가 연결됐다. 매시 15분에 Railway `Marketing Comments Monitor` 서비스(생성기와 같은 변수
+`MARKETING_APP_URL`·`MARKETING_GENERATOR_SUBMIT_SECRET`·`MARKETING_LLM_API_KEY`와 스위치만, DB·게시 도구 자격 없음)가 worker를 20분 기한으로 띄운다.
+한 실행은 본 앱 `POST /api/internal/marketing-comments-monitor`(생성기 secret) 두 번이다. `collect`는 새 댓글의 서로 다른 본문을 본문 SHA-256 id와
+함께, 그리고 이번 읽기가 덮는 시각(`readAt`)을 넘기고 아무것도 쓰지 않는다. 본문이 1,000개를 넘으면 밀린 것으로 보고 가장 오래된 것부터 시각 단위로
+잘라 1,000개 이하만 넘긴다(`backlog`). 자르는 시각은 그다음 댓글 직전이되 지금보다 10분(overlap) 이전이어야 하고, 그렇게 자른 온전한 실행은 자른 시각
++10분(실제로 읽은 때보다 늦지 않다)으로 기록되어 다음 실행이 정확히 자른 시각부터 이어받는다(이미 분류한 것을 다시 세지 않는다). 한 시각이나 시각 없는
+댓글이 1,000개를 넘어 자를 수 없으면 실행은 계속 온전하지 않고 모니터는 비정상으로 남는다. 서비스는 본문 50개씩 LLM 한 번(엄격한 구조화 출력, 닫힌 위험 코드만)으로
+분류하고, 모든 호출은 마케팅 LLM 원장의 `comment_triage` purpose로 예약·정산된다(운영자 모델·월 상한 그대로, 재시도 없음; 정산되지 않은 호출에서
+분류를 멈추고 받은 판정만 넘긴다). `judge`는 id별 판정을 받아 본 앱이 댓글을 **다시 읽어** 모니터 전체를 돌린다: 무엇을 읽었는지, 실행이
+온전했는지는 앱이 정하고, 실행은 `readAt`(지금보다 늦을 수 없다)으로 기록되며 그 뒤에 쓰인 댓글은 다음 실행 몫이다. 알림의 최초 감지는
+`readAt`이 아니라 `judge`가 찾은 시각이다. 판정이 없는 본문은 그 글을 미독으로 남긴다(안전으로 읽지 않는다). 서비스는 인증될 뿐 신뢰되지 않으며, 판정은 알림을 열 수만 있다. 앱과 서비스 둘 다 `MARKETING_COMMENTS_MONITOR_ENABLED=true`여야 하고,
+꺼져 있으면 서비스는 worker를 띄우지 않으며 앱은 두 단계 모두 `off`로 답한다. 킬 스위치는 앱이 지킨다(두 단계 `off`, 원장 예약 거절).
 
 ### 12.2 보유
 | 데이터 | 보유 | 만료 처리 |
@@ -471,7 +541,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 | LLM 비용 원장(`MarketingLlmCall`) | 24개월 | 삭제 |
 | 경쟁사 등록부(`MarketingCompetitor`) | 행 유지(은퇴만) | 삭제하지 않는다. 시장 사실이 그 행을 출처 판정의 근거로 가리키기 때문이다. 개인정보가 없다 |
 | 공개 버킷 이미지 | 게시 확인 후 7일 또는 게시 취소 즉시 | 삭제 |
-| 분석 전용 식별자 | 계정 삭제 시 즉시 | 삭제 + GA4 삭제 요청 |
+| 분석 전용 식별자(`Ga4UserId`) | 동의 철회 또는 계정 삭제 시 즉시 | GA4 삭제 요청 + 삭제 |
 
 - history의 append-only 예외는 **보유 정리 하나뿐**이다. 같은 CAS와 감사 기록을 한 트랜잭션에서 쓰고,
   legal hold가 걸린 행은 정리하지 않는다.

@@ -189,6 +189,21 @@ const MARKETING_GENERATOR_VARIABLES = [
   "MARKETING_AI_VISIBILITY_ENABLED",
 ] as const;
 
+/**
+ * The comment monitor's variables (marketing S4d): the generator's three and
+ * the monitor's switch, off unless its value is `true` -- the
+ * COMMENTS_MONITOR_WORKER_VARIABLES of scripts/marketing-comments-monitor-service.mjs
+ * less the kill switch and what Node itself needs, which a test holds this to.
+ * The kill switch is the app's: with it set the app answers both steps `off`
+ * and the ledger refuses every reservation, as for the generator.
+ */
+const MARKETING_COMMENTS_MONITOR_VARIABLES = [
+  "MARKETING_APP_URL",
+  "MARKETING_GENERATOR_SUBMIT_SECRET",
+  "MARKETING_LLM_API_KEY",
+  "MARKETING_COMMENTS_MONITOR_ENABLED",
+] as const;
+
 /** The marketing publisher's two variables (S2 plan, S2d1). */
 const MARKETING_PUBLISHER_VARIABLES = ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"] as const;
 
@@ -430,6 +445,26 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
       production: MARKETING_GENERATOR_VARIABLES,
       staging: MARKETING_GENERATOR_VARIABLES,
       // Not on dev: every run can spend on the LLM.
+    },
+  },
+  {
+    // The comment monitor (marketing S4d, policy 12.1): every hour the worker
+    // asks the app for the new comment bodies, classifies them through the
+    // LLM cost ledger and hands the verdicts back; the app reads, records and
+    // judges. A supervisor that kills its worker at twenty minutes
+    // (scripts/marketing-comments-monitor-service.mjs).
+    //
+    // No database, publishing, bucket or GitHub credential. Off until a person
+    // has done 12.1's legal steps and set MARKETING_COMMENTS_MONITOR_ENABLED
+    // here and on the app; off, a run starts no worker.
+    key: "marketing_comments_monitor",
+    service: "Marketing Comments Monitor",
+    startCommand: "node --experimental-strip-types scripts/marketing-comments-monitor-service.mjs",
+    cronSchedule: "15 * * * *",
+    environments: {
+      production: MARKETING_COMMENTS_MONITOR_VARIABLES,
+      staging: MARKETING_COMMENTS_MONITOR_VARIABLES,
+      // Not on dev, like the publisher: it reads outside accounts.
     },
   },
   {

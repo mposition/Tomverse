@@ -279,6 +279,13 @@ staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
 끈 뒤 push 한 번에 workflow가 다시 켜서, 병합을 보류하라는 지시가 있던 상태로
 병합됐습니다. 자동화가 사람이 끈 스위치를 다시 켜서는 안 됩니다.
 
+예외는 하나입니다(운영자 결정 2026-11-02). 졸업한 마케팅 SEO 코드 에이전트의
+`marketing-agent/to-develop/<topic>` PR에 한해, **workflow가 아니라 그 에이전트의 실행기**
+(`scripts/marketing-seo-agent.mjs`)가 develop auto-merge를 켤 수 있습니다. 기본 꺼진 스위치
+`MARKETING_SEO_AUTO_MERGE=true`, kill switch 없음, 졸업 기록, 게시 단계와 같은 서명·tree·허용 4개 파일
+재검증, base가 정확히 `develop`인 열린 non-draft PR이 모두 맞을 때만이고, 한 실행에서 한 번만 켭니다
+(사람이 끈 것은 다시 켜지 않습니다). 조건 전문은 `docs/policy/marketing-automation.md §9.2`입니다.
+
 `tests/autoPrAutoMergeArming.test.mjs`와 `security-regression-check`가 workflow에
 `gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
 **사람이 켭니다.**
@@ -1608,7 +1615,7 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   Git tree 목록만 검증하며, 게시 서비스의 검사는 거절만 할 수 있습니다.
 - **에이전트는 어떤 PR도 승인·병합하지 않고 auto-merge를 켜지 않습니다.** 공개된
   PR의 승인 증거는 docs/policy/engineering-agent.md §9-10의 일곱 조건입니다.
-  예외 내용: engineering-agent.md v6 3항 조건(졸업, 허용 목록, base 정책 테스트, 결속·최신성, 교차 검토, off 스위치)을 모두 충족한 develop 결정적 병합 호출 하나뿐이고, auto-merge는 켜지 않으며 승인도 하지 않습니다.
+  예외 내용: engineering-agent.md v6 3항 조건(졸업, 허용 목록, base 정책 테스트, 결속·최신성, 교차 검토, off 스위치)을 모두 충족한 develop 결정적 병합 호출 하나뿐이고, auto-merge는 켜지 않으며 승인도 하지 않습니다. (마케팅 SEO 코드 에이전트의 별도 예외는 marketing-automation.md §9.2 — 이 줄은 엔지니어링 에이전트에 대한 것입니다.)
 - **상태 전이는 `lib/engineeringAgentCore.ts`의 표에만 있습니다.** trigger·store·
   테스트는 그 표에서 생성하거나 대조하며, 전이를 다른 곳에 옮겨 적지 않습니다.
   특히 lease 만료는 게시 항목을 `queued`로 되돌리지 않고 `needs_lookup`으로

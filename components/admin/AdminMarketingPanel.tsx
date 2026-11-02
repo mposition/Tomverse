@@ -34,6 +34,7 @@ import {
   type MarketIntelFactView,
 } from "@/lib/marketingReportView";
 import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
+import type { ExperimentRowView, ExperimentsConsoleView } from "@/lib/marketingExperimentView";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
@@ -50,7 +51,7 @@ type Row = Record<string, unknown>;
 export type MarketingConsoleView = {
   section: MarketingConsoleSection;
   availability: Availability;
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
@@ -64,6 +65,8 @@ export type MarketingConsoleView = {
   webhookStaging: WebhookStagingView | null;
   /** Rows were left out at the section's limit (lib/marketingConsoleRead.ts). */
   truncated?: boolean;
+  /** The experiments section only (lib/marketingExperimentView.ts). */
+  experiments?: ExperimentsConsoleView;
 };
 
 type LlmView = {
@@ -268,13 +271,18 @@ export function AdminMarketingPanel({
               {view.section === "competitors" && view.canWrite ? (
                 <MarketingCompetitorCreate section={view.section} onDone={done} m={m} />
               ) : null}
+              {view.section === "experiments" && view.experiments ? (
+                <MarketingExperimentTop view={view} experiments={view.experiments} onDone={done} m={m} />
+              ) : null}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-zinc-500">
                   {(view.section === "assets"
                     ? m.showingAssets
                     : view.ordering === "by-status"
                       ? m.showingByStatus
-                      : m.showing
+                      : view.ordering === "oldest"
+                        ? m.showingOldest
+                        : m.showing
                   ).replace(
                     "{count}",
                     String(view.pageSize)
@@ -1265,6 +1273,119 @@ function MarketingCompetitorCreate({
 }
 
 /**
+ * What sits above the experiment row: why a start would be refused, the
+ * evidence level of the figures, and the pre-registration form.
+ *
+ * The form is drawn only for a person who may write and only while no
+ * experiment is stored as running. The server decides all of it again.
+ */
+function MarketingExperimentTop({
+  view,
+  experiments,
+  onDone,
+  m,
+}: {
+  view: MarketingConsoleView;
+  experiments: ExperimentsConsoleView;
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  const bundleOptions = experiments.bundles.map((bundle) => `${bundle.bundleId} / ${bundle.variantId}`);
+  const action: MarketingAction = {
+    id: "experiment-start",
+    label: m.actStartExperiment,
+    path: "/api/admin/marketing/experiments",
+    primary: true,
+    fields: [
+      { name: "experimentId", label: m.fieldExpId, kind: "text", hint: m.hintExpId },
+      {
+        name: "bundle",
+        label: m.fieldExpBundle,
+        kind: "select",
+        initial: bundleOptions[0],
+        options: bundleOptions,
+        hint: experiments.bundles.map((bundle) => `${bundle.bundleId} / ${bundle.variantId}: ${bundle.locales.join(", ")}`).join(" · "),
+      },
+      { name: "locales", label: m.fieldExpLocales, kind: "text", initial: "en", hint: m.hintExpLocales },
+      { name: "share", label: m.fieldExpShare, kind: "number", initial: "10", hint: m.hintExpShare },
+      { name: "days", label: m.fieldExpDays, kind: "number", initial: "14", hint: m.hintExpDays },
+      { name: "hypothesis", label: m.fieldExpHypothesis, kind: "textarea", hint: m.hintExpHypothesis },
+      { name: "minSample", label: m.fieldExpMinSample, kind: "number", initial: "500", hint: m.hintExpMinSample },
+      { name: "stopDrop", label: m.fieldExpStopDrop, kind: "number", initial: "30", hint: m.hintExpStopDrop },
+      { name: "stopAfter", label: m.fieldExpStopAfter, kind: "number", initial: "100", hint: m.hintExpStopAfter },
+    ],
+    body: (values) => {
+      const [bundleId = "", variantId = ""] = values.bundle.split(" / ");
+      return {
+        experimentId: values.experimentId.trim(),
+        bundleId,
+        variantId,
+        locales: values.locales
+          .split(",")
+          .map((locale) => locale.trim())
+          .filter(Boolean),
+        variantRatioPercent: Number(values.share),
+        durationDays: Number(values.days),
+        preregistration: {
+          hypothesis: values.hypothesis.trim(),
+          primaryMetric: "primary_cta_click",
+          minExposuresPerArm: Number(values.minSample),
+          stopRule: {
+            relativeDropPercent: Number(values.stopDrop),
+            afterExposuresPerArm: Number(values.stopAfter),
+          },
+        },
+        expectedVersion: experiments.version,
+      };
+    },
+  };
+
+  return (
+    <div data-testid="marketing-experiment-top" className="flex flex-col gap-3">
+      {view.switches.experiments === "on" ? null : (
+        <p className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm leading-6 text-zinc-300">
+          {m.expSwitchOff}
+        </p>
+      )}
+      {experiments.unreadable ? (
+        <p className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm leading-6 text-red-300">
+          {m.expUnreadable}
+        </p>
+      ) : null}
+      <p className="text-xs leading-5 text-zinc-500">{m.expEvidenceNote}</p>
+      {view.canWrite ? (
+        experiments.hasRunning ? (
+          <p className="text-sm text-zinc-400">{m.expRunningNote}</p>
+        ) : bundleOptions.length === 0 ? (
+          <p className="text-sm text-zinc-400">{m.expNoBundles}</p>
+        ) : (
+          <div data-testid="marketing-experiment-create" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+            <p className="text-[15px] font-semibold text-white">{m.expCreateTitle}</p>
+            <p className="mt-1 text-xs text-zinc-500">{m.expCreateNote}</p>
+            <MarketingActionRail actions={[action]} section={view.section} onDone={onDone} m={m} />
+          </div>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/** A running experiment can be stopped; a stopped one is a record. */
+function experimentActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  if (row.status !== "running") return [];
+  return [
+    {
+      id: "experiment-stop",
+      label: m.actStopExperiment,
+      path: "/api/admin/marketing/experiments/stop",
+      confirm: m.confirmStopExperiment,
+      danger: true,
+      body: () => ({ expectedVersion: text(row.version) ?? "" }),
+    },
+  ];
+}
+
+/**
  * Which controls a row can take, decided from the row's own state.
  *
  * The server decides every one of these again, and it is the server's answer
@@ -1281,7 +1402,19 @@ function rowActions(
   if (section === "published") return publishedActions(row, m);
   if (section === "accounts") return accountActions(row, m);
   if (section === "competitors") return competitorActions(row, m);
+  if (section === "experiments") return experimentActions(row, m);
   if (section === "assets") return assetActions(row, m);
+  if (section === "comments") {
+    return [
+      {
+        id: "acknowledge-alert",
+        primary: true,
+        label: m.actAcknowledgeAlert,
+        path: `/api/admin/marketing/alerts/${encodeURIComponent(String(row.id))}/acknowledge`,
+        body: () => ({}),
+      },
+    ];
+  }
   return [];
 }
 
@@ -2036,6 +2169,77 @@ function MarketingRow({
             label={m.colIdentity}
             value={`v${row.policyVersion} / e${row.graduationEpoch} / c${row.connectionGeneration}`}
           />
+        </div>
+      </>
+    );
+  }
+
+  if (section === "experiments") {
+    const view = row as unknown as ExperimentRowView;
+    const stateWord: Record<string, string> = {
+      active: m.expStateActive,
+      not_started: m.expStateNotStarted,
+      ended: m.expStateEnded,
+      stopped: m.expStateStopped,
+      stop_rule: m.expStateStopRule,
+      switch_off: m.expStateSwitchOff,
+      kill_switch: m.expStateKillSwitch,
+    };
+    const arm = (exposures: number, conversions: number, rate: number | null) =>
+      m.expArmValue
+        .replace("{exposures}", String(exposures))
+        .replace("{conversions}", String(conversions))
+        .replace("{rate}", rate === null ? m.none : `${rate}%`);
+    return (
+      <>
+        <RowHeading title={view.id} detail={`${view.bundleId} / ${view.variantId}`}>
+          <MarketingTag tone={view.state === "active" ? "success" : view.state === "stopped" ? "neutral" : "warning"}>
+            {stateWord[view.state] ?? view.state}
+          </MarketingTag>
+          <MarketingTag tone={view.sampleReached ? "success" : "neutral"}>
+            {view.sampleReached ? m.expSampleReached : m.expSampleBelow}
+          </MarketingTag>
+        </RowHeading>
+        <p className="mt-3 text-sm leading-6 text-zinc-300">{view.hypothesis}</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label={m.colExpWindow} value={`${stamp(view.startsAt) ?? m.none} → ${stamp(view.endsAt) ?? m.none}`} />
+          <Field label={m.colExpShare} value={`${view.variantRatioPercent}%`} />
+          <Field label={m.colExpLocales} value={view.locales.join(", ")} />
+          <Field label={m.colExpMetric} value={view.primaryMetric} />
+          <Field label={m.colExpSample} value={String(view.minExposuresPerArm)} />
+          <Field
+            label={m.colExpStopRule}
+            value={m.expStopRuleValue
+              .replace("{drop}", String(view.stopRelativeDropPercent))
+              .replace("{after}", String(view.stopAfterExposuresPerArm))}
+          />
+          <Field
+            label={m.colExpControl}
+            value={arm(view.counts.controlExposures, view.counts.controlConversions, view.controlRatePercent)}
+          />
+          <Field
+            label={m.colExpVariant}
+            value={arm(view.counts.variantExposures, view.counts.variantConversions, view.variantRatePercent)}
+          />
+          {view.stoppedAt ? <Field label={m.expStateStopped} value={stamp(view.stoppedAt) ?? m.none} /> : null}
+        </div>
+      </>
+    );
+  }
+
+  if (section === "comments") {
+    const codes = Array.isArray(row.riskCodes) ? (row.riskCodes as string[]) : [];
+    return (
+      <>
+        <RowHeading title={str(row.externalUrlHost)} detail={str(row.id)}>
+          <MarketingTag tone={row.overdue === true ? "danger" : "warning"}>
+            {row.overdue === true ? m.alertOverdue : m.alertOpen}
+          </MarketingTag>
+        </RowHeading>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <Field label={m.colAlertCount} value={String(row.alertCount ?? 0)} />
+          <Field label={m.colRiskCodes} value={codes.join(", ") || m.none} />
+          <Field label={m.colFirstDetected} value={stamp(row.firstDetectedAt) || m.none} />
         </div>
       </>
     );

@@ -9,9 +9,11 @@ import { localizedPath } from "@/lib/seo";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 import { launchAccountEntryCopy, launchHomepageContent, launchReviewEntryCopy, type EverydayExample, type LaunchHomepageCopy } from "./launchHomepageContent";
+import type { LandingSurfaceCopy } from "./landingExperimentBundles";
 import styles from "./LaunchHomepage.module.css";
 
-type LaunchHomepageProps = { reviewInfoHref: string };
+// `variantCopy` is a landing-experiment variant (policy 9.1): headline, subtitle and primary call to action only.
+type LaunchHomepageProps = { reviewInfoHref: string; variantCopy?: LandingSurfaceCopy };
 const modelNames = ["GPT", "Claude", "Gemini"] as const;
 const answerIds = ["A", "B", "C"] as const;
 const exampleIds = ["travel", "learn", "write"] as const;
@@ -124,9 +126,12 @@ function EverydayGallery({ copy }: { copy: LaunchHomepageCopy["gallery"] }) {
   </section>;
 }
 
-export default function LaunchHomepage({ reviewInfoHref }: LaunchHomepageProps) {
+export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHomepageProps) {
   const { lang } = useLanguage();
-  const copy = launchHomepageContent[lang];
+  const defaultCopy = launchHomepageContent[lang];
+  const copy: LaunchHomepageCopy = variantCopy
+    ? { ...defaultCopy, hero: { ...defaultCopy.hero, title: variantCopy.title ? [variantCopy.title[0], variantCopy.title[1]] : defaultCopy.hero.title, body: variantCopy.body ?? defaultCopy.hero.body } }
+    : defaultCopy;
   const { chatAvailable, guestTrialAvailable, isAuthenticated, chatHref, reviewHref: reviewEntryHref, primaryHref, primaryProduct } = useMarketingChatEntry();
   const reviewEntryCopy = launchReviewEntryCopy[lang];
   const accountCopy = isAuthenticated && chatAvailable ? launchAccountEntryCopy[lang] : null;
@@ -151,7 +156,7 @@ export default function LaunchHomepage({ reviewInfoHref }: LaunchHomepageProps) 
               <div className={styles.heroStory}>
                 <p>{copy.hero.body}</p>
                 <div className={styles.actions}>
-                  <ActionLink href={primaryHref} id="landing-hero-primary" testId="landing-primary-cta" location={`landing_hero_${primaryProduct}`}>{copy.actions[primaryProduct]}</ActionLink>
+                  <ActionLink href={primaryHref} id="landing-hero-primary" testId="landing-primary-cta" location={`landing_hero_${primaryProduct}`}>{variantCopy?.cta ?? copy.actions[primaryProduct]}</ActionLink>
                   <ActionLink href={reviewInfoHref} inverse testId="launch-review-info-cta">{copy.actions.reviewInfo}</ActionLink>
                 </div>
                 <p className={styles.heroAccess} data-testid="landing-hero-signup-note">{accountCopy?.heroAccess ?? (isGuestChatTrial ? copy.hero.access : reviewEntryCopy.heroAccess)}</p>

@@ -45,6 +45,10 @@ import {
   type MarketingAutomationAccessReason,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
+import {
+  MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY,
+  commentsMonitorHealthyFromValue,
+} from "@/lib/marketingCommentsMonitorHealth";
 import { marketingPriceAlertReadyInput } from "@/lib/marketingPriceAlertCore";
 import { MARKETING_CHANNEL_CAPS, MARKETING_NO_AUTONOMY_CHANNELS } from "@/lib/marketingAutomationSchema";
 import {
@@ -86,6 +90,8 @@ const ADMISSION_SETTING_KEYS = [
   MARKETING_AUTO_PUBLISH_KEY,
   MARKETING_EXPERIMENTS_KEY,
   MARKETING_CONFIG_GENERATION_KEY,
+  // Not a switch: the instant the comment monitor last finished a whole run.
+  MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY,
 ] as const;
 
 /**
@@ -214,8 +220,17 @@ const admissionDecisionsFrom = (
         settings.get(MARKETING_AUTO_PUBLISH_KEY),
       ),
     },
-    // S4 owns the comment monitor and O4.
-    commentsMonitorHealthy: unreadable,
+    // The comment monitor (S4c): switched on, and a whole run finished lately.
+    // Off by default, so this is false until a person has done the legal steps
+    // of policy 12.1. S4 still owes O4.
+    commentsMonitorHealthy: {
+      ok: true,
+      value: commentsMonitorHealthyFromValue(
+        settings.get(MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY),
+        now,
+        process.env,
+      ),
+    },
     publicationCancellable: unreadable,
     o4Eligible: unreadable,
     o15Channel: {

@@ -18,8 +18,14 @@ import {
   parseMarketingWebhookFaultArm,
 } from "@/lib/marketingWebhookCore";
 import { readMarketingAssetsForConsole } from "@/lib/marketingAssetStore";
+import { readExperimentSnapshot } from "@/lib/marketingExperimentState";
+import { buildExperimentsConsole, type ExperimentsConsoleView } from "@/lib/marketingExperimentView";
 import { readMarketingCommentsMonitorHealthy } from "@/lib/marketingCommentsMonitorHealth";
-import { readMarketingGraduation } from "@/lib/marketingStore";
+import {
+  MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
+  listOpenMarketingCommentAlerts,
+  readMarketingGraduation,
+} from "@/lib/marketingStore";
 import {
   MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
@@ -145,7 +151,7 @@ export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
   /** How the listed rows were chosen, so the screen can say it exactly. */
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Record<string, unknown>[];
   switches: MarketingSwitchStates;
@@ -186,6 +192,8 @@ export type MarketingConsolePayload = {
    * screen cannot act on, and stating the cap alone would not say it was hit.
    */
   truncated?: boolean;
+  /** The experiments section only: what the start form and the stop control need. */
+  experiments?: ExperimentsConsoleView;
 };
 
 const state = (
@@ -391,7 +399,7 @@ export async function readMarketingConsole(
   section: MarketingConsoleSection,
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
-  const availability = marketingSectionAvailability(section);
+  const availability = marketingSectionAvailability();
   const [{ switches, configGeneration }, webhookStaging, llm, overview] = await Promise.all([
     readSwitches(),
     readWebhookStaging(),
@@ -647,6 +655,58 @@ export async function readMarketingConsole(
         ...competitor,
         decidedAt: competitor.decidedAt?.toISOString() ?? null,
         createdAt: competitor.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  if (section === "experiments") {
+    // One row: the current experiment, or the last one. Earlier runs are in
+    // the reports tab (`experiment_result`) and in the audit log.
+    const built = buildExperimentsConsole(await readExperimentSnapshot(prisma), new Date(), {
+      switchOn: switches.experiments === "on",
+      killSwitch: (process.env.MARKETING_AUTOMATION_KILL_SWITCH ?? "").trim() !== "",
+    });
+    return {
+      section,
+      availability,
+      ordering: "newest",
+      pageSize: 1,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      rows: built.rows,
+      experiments: built.experiments,
+    };
+  }
+
+  if (section === "comments") {
+    // The alerts nobody has answered. Counts, codes and a host: the comments
+    // themselves are not kept anywhere, so there is nothing more to show.
+    const open = await listOpenMarketingCommentAlerts(prisma);
+    const now = Date.now();
+    return {
+      section,
+      availability,
+      ordering: "oldest",
+      pageSize: MARKETING_READ_PAGE_SIZE,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      truncated: open.length > MARKETING_READ_PAGE_SIZE,
+      rows: open.slice(0, MARKETING_READ_PAGE_SIZE).map((alert) => ({
+        id: alert.postId,
+        channelId: alert.channelId,
+        alertCount: alert.alertCount,
+        riskCodes: [...alert.riskCodes],
+        externalUrlHost: alert.externalUrlHost,
+        firstDetectedAt: alert.firstDetectedAt.toISOString(),
+        overdue: now - alert.firstDetectedAt.getTime() >= MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
       })),
     };
   }

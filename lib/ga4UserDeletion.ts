@@ -1,17 +1,12 @@
 import "server-only";
 
 import { sign } from "node:crypto";
-import {
-  analyticsUserIdFor,
-  ga4UserIdKey,
-  ga4UserIdMayHaveBeenSent,
-  type Ga4Env,
-} from "@/lib/ga4UserId";
-import { GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED } from "@/lib/ga4UserIdPolicy";
+import { isAnalyticsUserId } from "@/lib/ga4UserIdPolicy";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 /**
- * Asks GA4 to delete an account's User-ID data when the account is deleted
+ * Asks GA4 to delete what it holds under a stored User-ID, when analytics
+ * consent is withdrawn or the account is deleted
  * (docs/policy/marketing-automation.md §10.2, §12.2).
  *
  * Google Analytics Admin API `properties.submitUserDeletion` (v1alpha, scope
@@ -23,14 +18,17 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
  * - `GA4_USER_DELETION_SERVICE_ACCOUNT_JSON` (or `..._BASE64`) -- the service
  *   account key.
  *
- * A follow-up step to the deletion, never part of it: it runs after the
- * account's transaction has committed, cannot undo it, and never throws.
- * One attempt. A refusal or an unknown outcome is reported as an operational
- * incident -- without the id, which must not outlive the account in a log --
+ * Never part of the deletion it follows and never in its way: it cannot undo
+ * anything and never throws, and the caller deletes the stored id whatever it
+ * returns. One attempt. A refusal or an unknown outcome is reported as an
+ * operational incident -- without the id, which must not outlive its row in a log --
  * and not retried blindly; submitting the same deletion twice is harmless,
  * but a blind retry loop on an unknown outcome is not how this repository
  * treats an external write.
  */
+
+/** The environment these read: `process.env`, or a plain map in a test. */
+export type Ga4Env = Readonly<Record<string, string | undefined>>;
 
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const ANALYTICS_EDIT_SCOPE = "https://www.googleapis.com/auth/analytics.edit";
@@ -52,8 +50,6 @@ type Deps = {
   fetch: typeof fetch;
   env: Ga4Env;
   now: () => Date;
-  /** The published-notice flag; a parameter only so a test can open it. */
-  noticePublished?: boolean;
 };
 
 const defaultDeps = (): Deps => ({ fetch, env: process.env, now: () => new Date() });
@@ -170,27 +166,23 @@ export async function submitGa4UserDeletion(
   }
 }
 
+/** Why a stored id is being deleted; reported with a failure, never the id. */
+export type Ga4UserIdDeletionTrigger = "consent_withdrawal" | "account_deletion";
+
 /**
- * The account-deletion step: derive the account's User-ID while its id still
- * exists and ask GA4 to delete it. Silent, and nothing leaves Tomverse, unless
- * a User-ID can have been sent at all (`ga4UserIdMayHaveBeenSent`: notice
- * published, key present, switch on now or previously). An incident when one
- * could have been sent and the request was not submitted. Never throws.
+ * Asks GA4 to delete a stored User-ID's data, once. Only an id that was
+ * stored can be named here, and a stored id is the evidence that one may have
+ * been sent: no other gate, so an id created while the switch was on is still
+ * deleted after it is turned off. An incident when the request was not
+ * submitted -- credentials missing included, since an id exists that cannot
+ * be deleted. Never throws.
  */
-export async function requestGa4UserDeletionForAccount(
-  userId: string,
+export async function requestGa4UserIdDeletion(
+  analyticsUserId: string,
+  trigger: Ga4UserIdDeletionTrigger,
   deps: Deps = defaultDeps()
 ): Promise<Ga4UserDeletionOutcome> {
-  if (
-    !ga4UserIdMayHaveBeenSent(
-      deps.env,
-      deps.noticePublished ?? GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED
-    )
-  ) {
-    return { status: "not_configured" };
-  }
-  const analyticsUserId = analyticsUserIdFor(userId, ga4UserIdKey(deps.env));
-  if (!analyticsUserId) return { status: "not_configured" };
+  if (!isAnalyticsUserId(analyticsUserId)) return { status: "not_configured" };
   const outcome = await submitGa4UserDeletion(analyticsUserId, deps).catch(
     (): Ga4UserDeletionOutcome => ({ status: "unknown", stage: "deletion" })
   );
@@ -203,11 +195,12 @@ export async function requestGa4UserDeletionForAccount(
       title: "GA4 User-ID deletion request was not submitted",
       error:
         outcome.status === "not_configured"
-          ? "GA4_USER_ID_KEY is set but GA4 deletion credentials are not."
+          ? "A stored GA4 User-ID is being deleted but GA4 deletion credentials are not set."
           : `GA4 user deletion ${outcome.status} at the ${outcome.stage} stage.`,
       severity: "warning",
       context: {
         component: "ga4-user-deletion",
+        trigger,
         status: outcome.status,
         stage: "stage" in outcome ? outcome.stage : "none",
         httpStatus: "httpStatus" in outcome ? String(outcome.httpStatus) : "none",
