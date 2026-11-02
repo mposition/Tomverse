@@ -191,7 +191,7 @@ test("the stored alert carries counts and a host and nothing else", async () => 
   assert.deepEqual(Object.keys(payload).sort(), ["alertCount", "externalUrlHost", "firstDetectedAt", "postId", "riskCodes"]);
   assert.equal(payload.externalUrlHost, "www.linkedin.com");
   const audit = await prisma.adminAuditLog.findFirstOrThrow({ where: { action: "marketing_comment_alert.recorded" } });
-  assert.equal(JSON.stringify(audit.metadata).includes("linkedin.com"), false);
+  assert.doesNotMatch(JSON.stringify(audit.metadata), /linkedin\.com/);
 });
 
 test("an alert unanswered for a day stops the account; one answered meanwhile does not", async () => {
