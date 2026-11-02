@@ -688,6 +688,10 @@ test("a figure with a billing period is a price even with no currency, and a lim
   for (const text of ["Choose Pro for GPT-5.", "Pro compares GPT-5, Claude 4.5 and Gemini 3."]) {
     assert.ok(!priceDecision(text, []).codes.includes("price_currency_missing"), text);
   }
+  // "monthly" before a noun describes the noun, not a price.
+  for (const text of ["Pro includes 100 monthly credits.", "Compare 3 monthly reports with Pro."]) {
+    assert.ok(!priceDecision(text, []).codes.includes("price_currency_missing"), text);
+  }
   const limit = priceDecision("Pro includes 100 messages per month.", []);
   assert.ok(!limit.codes.includes("price_currency_missing"));
   assert.ok(!limit.codes.includes("price_text_mismatch"));

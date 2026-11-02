@@ -6,8 +6,8 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "559e5e7a06b20198bacd03eb9faf987722b855adbd1684f48efd7b7b529e8549",
-  "totalSizeBytes": 623768,
+  "digest": "16ccb4116208c68fdf5e01eed4251257dcfbb34fb2b5f0dce89905198c70312b",
+  "totalSizeBytes": 623790,
   "files": [
     {
       "path": "lib/adminAudit.ts",
@@ -42,7 +42,7 @@
     {
       "path": "lib/marketingAutomationAccess.ts",
       "sizeBytes": 53190,
-      "sha256": "b26bf36a44d59dd9b3c9fe17c96b54a875bfd87e62f6a5acb5ef265fbd5a9d67"
+      "sha256": "e86408a46a80745bab9524215de2729b603831d78102c028f1adbf524478b1c4"
     },
     {
       "path": "lib/marketingAutomationSchema.ts",
@@ -66,8 +66,8 @@
     },
     {
       "path": "lib/marketingGuardCore.ts",
-      "sizeBytes": 62294,
-      "sha256": "b6301866511155fbff4c55230db45a7a8000d5c2902ddcf919b10c618c342a9a"
+      "sizeBytes": 62316,
+      "sha256": "b9ece837e2270931779dd23e6f23610f775b9753a7426d7bfba8221861096675"
     },
     {
       "path": "lib/marketingGuardNormalise.ts",

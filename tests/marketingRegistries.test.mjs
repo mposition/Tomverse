@@ -479,6 +479,9 @@ test("no registered price claim is for the Australian or RedNote market", () => 
     assert.equal(claim.factSource?.kind, "billing_plan", claim.id);
     assert.equal(claim.factSource.targetsAustralia, false, claim.id);
     assert.deepEqual([...claim.locales].sort(), ["en", "ko", "zh-Hant"], claim.id);
+    // The English price rule compares a post with the stored name, amount and
+    // currency; a claim that stops reading one of them can never match.
+    assert.deepEqual([...claim.factSource.fields], ["name", "monthlyPriceCents", "currency"], claim.id);
   }
 });
 

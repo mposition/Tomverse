@@ -639,7 +639,7 @@ const PRICE_CURRENCY_CODES ="usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
 const PRICE_MENTION = new RegExp(
   `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(?<![\\d.,])([-+−–]?\\.?\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
     `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks)\\b)?` +
-    `(?:\\s*(?:\\/|\\bper\\b)\\s*(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b)?`,
+    `(?:\\s*(?:\\/|\\bper\\b)\\s*(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b(?!\\s+[\\p{L}\\p{N}]))?`,
   "giu",
 );
 
