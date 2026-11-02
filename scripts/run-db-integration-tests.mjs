@@ -354,6 +354,9 @@ run(
     // the previewed plan is written exactly, under the owner's audit, with
     // updatedAt untouched; a stale digest writes nothing.
     "tests/integration/amux-card-display-key-backfill.db.test.ts",
+    // The idea lane: attempt limit, a claim scan finished ideas cannot crowd
+    // out, results recorded once, the outcome CHECK.
+    "tests/integration/amux-idea-lane.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.
