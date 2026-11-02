@@ -297,6 +297,11 @@ test("a resolution leaves as the lines for each conflict, which rebuild the file
   const lockResolved = ["{", ...big, '  "x": "2"', "}", ""].join("\n");
   assert.deepEqual(conflictHunks(lock, lockResolved), [['  "x": "2"']]);
   assert.equal(rebuildConflictResolution(lock, [['  "x": "2"']]), lockResolved);
+  // And with the long text after the conflict, past the argument limit of a spread call.
+  const tailLock = ["{", "<<<<<<< HEAD", '  "x": "1"', "=======", '  "x": "2"', ">>>>>>> dev", ...big, "}", ""].join("\n");
+  const tailResolved = ["{", '  "x": "2"', ...big, "}", ""].join("\n");
+  assert.deepEqual(conflictHunks(tailLock, tailResolved), [['  "x": "2"']]);
+  assert.equal(rebuildConflictResolution(tailLock, [['  "x": "2"']]), tailResolved);
   // Not found when the text outside the conflicts changed, or the markers do not parse.
   assert.equal(conflictHunks(merged, resolved.replace('"a": 1', '"a": 9')), null);
   assert.equal(conflictHunks(merged, resolved.replace('"c": 4', '"c": 0')), null);

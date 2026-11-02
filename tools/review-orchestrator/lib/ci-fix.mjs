@@ -863,8 +863,8 @@ export function conflictHunks(merged, resolved) {
     hunks.push(lines.slice(at, end));
     at = end + outside[index + 1].length;
   }
-  const rebuilt = [...outside[0]];
-  hunks.forEach((hunk, index) => rebuilt.push(...hunk, ...outside[index + 1]));
+  // Joined without spreading a piece into a call: a lockfile's is past the argument limit.
+  const rebuilt = [outside[0], ...hunks.flatMap((hunk, index) => [hunk, outside[index + 1]])].flat();
   return rebuilt.join("\n") === resolved ? hunks : null;
 }
 
@@ -893,7 +893,7 @@ export function conflictResolution(worktree, paths, merged = {}) {
     if (text.includes("\u0000")) binary = true;
     const side = (stage) => git(["--literal-pathspecs", "show", `:${stage}:${path}`], { cwd: worktree, allowFailure: true }).stdout ?? "";
     const known = new Set([...side(2).split("\n"), ...side(3).split("\n")].map((line) => line.trimEnd()));
-    newLines.push(...text.split("\n").filter((line) => !known.has(line.trimEnd())));
+    for (const line of text.split("\n")) if (!known.has(line.trimEnd())) newLines.push(line);
     const hunks = typeof merged[path] === "string" ? conflictHunks(merged[path], text) : null;
     files[path] = hunks
       ? { merged: createHash("sha256").update(merged[path], "utf8").digest("hex"), hunks }

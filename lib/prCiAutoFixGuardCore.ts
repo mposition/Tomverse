@@ -432,9 +432,10 @@ export function rebuildConflictResolution(merged: string, hunks: unknown): strin
   const parsed = parseConflictMarkers(merged);
   if (parsed === null || !Array.isArray(hunks) || hunks.length !== parsed.hunks.length) return null;
   if (!hunks.every((hunk) => Array.isArray(hunk) && hunk.every((line) => typeof line === "string"))) return null;
-  const lines: string[] = [...parsed.outside[0]];
-  hunks.forEach((hunk: string[], index) => lines.push(...hunk, ...parsed.outside[index + 1]));
-  return lines.join("\n");
+  // Joined without spreading a piece into a call: a lockfile's is past the argument limit.
+  const pieces: string[][] = [parsed.outside[0]];
+  hunks.forEach((hunk: string[], index) => pieces.push(hunk, parsed.outside[index + 1]));
+  return pieces.flat().join("\n");
 }
 
 // Exact, whitespace included: a trailing space can carry meaning (a shell
