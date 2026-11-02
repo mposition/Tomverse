@@ -633,7 +633,7 @@ const PRICE_MENTION = new RegExp(
  * months" are the same sentence to a reader.
  */
 const NON_MONTHLY_BILLING =
-  /\b(?:annual(?:ly)?|yearly|yr|quarterly|(?:semi|bi)-?(?:annual(?:ly)?|monthly|weekly)|fortnight(?:ly)?|(?:billed|charged|paid|billing)\s+(?:\w+\s+)?(?:weekly|daily)|per\s+(?:week|day)|(?:every|each)\s+(?:other|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s*-?\s*(?:weeks?|days?)|(?:per|a|each|every)\s+(?:\w+\s+)?years?|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
+  /\b(?:annual(?:ly)?|yearly|yr|quarterly|(?:semi|bi)-?(?:annual(?:ly)?|monthly|weekly)|fortnight(?:ly)?|(?:billed|charged|paid|billing)\s+(?:\w+\s+){0,3}(?:weeks?|days?|weekly|daily)|per\s+(?:week|day)|(?:every|each)\s+(?:other|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s*-?\s*(?:weeks?|days?)|(?:per|a|each|every)\s+(?:\w+\s+)?years?|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
 const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
 
 /** The plans that carry a price, by the names the product gives them (not "Free"). */
