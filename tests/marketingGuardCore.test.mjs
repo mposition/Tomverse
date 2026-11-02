@@ -638,6 +638,7 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15 per month or 99 a week.",
     "Pro is -15 USD per month.", // a sign is part of the amount
     "Pro is -$15 USD per month.",
+    "Pro costs USD +99.",
     "Pro is −15 USD per month.",
     "Pro is USD ２０ per month.", // full-width digits are digits
     "Pro is USD 15 per month, collected daily.",
@@ -713,7 +714,7 @@ test("an Australian price stays refused: stated in AUD, or stored in AUD", () =>
   const stated = priceDecision("Pro is AUD 15.00 per month.");
   assert.equal(stated.verdict, "reject");
   assert.ok(stated.codes.includes("au_price_gst_unverifiable"));
-  for (const text of ["Pro is A$15 a month.", "Pro is 15 Australian dollars a month.", "Pro is AUD １５ per month."]) {
+  for (const text of ["Pro is A$15 a month.", "Pro is USD 15 per month, AUD +99.", "Pro is 15 Australian dollars a month.", "Pro is AUD １５ per month."]) {
     const decision = priceDecision(text);
     assert.ok(decision.codes.includes("au_price_gst_unverifiable"), text);
   }
@@ -752,6 +753,9 @@ test("a comparative or superlative price expression is refused, in every languag
     ["en", "Cheaper than ChatGPT Plus."],
     ["en", "Cheaper-than-anything review plans."],
     ["en", "The only free way to see three answers."],
+    ["en", "Pro has a lower price than ChatGPT Plus."],
+    ["en", "Pro offers the lowest monthly price."],
+    ["en", "Tomverse is more affordable than the rest."],
     ["en", "Cheapest — free to start."],
     ["ko", "세 모델 답변을 비교하는 최저가 방법입니다."],
     ["ko", "가장 저렴한 AI 비교 서비스입니다."],

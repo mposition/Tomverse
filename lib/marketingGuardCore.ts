@@ -605,7 +605,25 @@ const PRICE_COMPARISON_WORDING: readonly (readonly [string, "word" | "substring"
     Object.freeze(["唯一免費", "substring"] as const),
   ]);
 
-const PRICE_CURRENCY_CODES = "usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
+/**
+ * The same refusal for comparisons with a word or two between the parts: "a
+ * lower price than", "the lowest monthly price", "more affordable than". Word
+ * lists cannot hold every modifier, so the shape is the rule.
+ */
+const PRICE_COMPARISON_PATTERNS: readonly { source: string; flags: string }[] =
+  Object.freeze([
+    Object.freeze({
+      source:
+        "(?<![\\p{L}\\p{N}])(?:lower|lowest|better|best|cheaper|cheapest|less)\\s+(?:[\\p{L}-]+\\s+){0,2}(?:price|prices|priced|cost|costs|rate|rates|fee|fees|pricing)(?![\\p{L}\\p{N}])",
+      flags: "iu",
+    }),
+    Object.freeze({
+      source: "(?<![\\p{L}\\p{N}])(?:more\\s+)?affordable\\s+than(?![\\p{L}\\p{N}])",
+      flags: "iu",
+    }),
+  ]);
+
+const PRICE_CURRENCY_CODES ="usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
 
 /**
  * An amount of money in English text, with whatever currency marks it carries.
@@ -619,7 +637,7 @@ const PRICE_CURRENCY_CODES = "usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
  * between them.
  */
 const PRICE_MENTION = new RegExp(
-  `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(?<![\\d.,])([-−–]?\\.?\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
+  `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(?<![\\d.,])([-+−–]?\\.?\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
     `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks)\\b)?` +
     `(?:\\s*(?:\\/|\\bper\\b)\\s*(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b)?`,
   "giu",
@@ -755,7 +773,7 @@ function englishPriceProblems(
       continue;
     }
     // A minus sign in front of a currency mark is still a minus sign.
-    if (/(?:^|[^\p{L}\p{N}])[-−–]\s*$/u.test(lowered.slice(Math.max(0, start - 3), start))) {
+    if (/(?:^|[^\p{L}\p{N}])[-+−–]\s*$/u.test(lowered.slice(Math.max(0, start - 3), start))) {
       codes.push("price_text_mismatch");
       ruleIds.push("price.text-negative");
       continue;
@@ -1250,7 +1268,10 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   // --- 4b. what the words say about price (owner decision 2026-11-02) ------
   // Read off the words, for every post, because a declared claim says nothing
   // about a sentence that compares our price with someone else's.
-  if (anyTermMatches(forms, PRICE_COMPARISON_WORDING)) {
+  if (
+    anyTermMatches(forms, PRICE_COMPARISON_WORDING) ||
+    anyPatternMatches(forms, PRICE_COMPARISON_PATTERNS)
+  ) {
     rejectCodes.push("price_comparison_claim");
     ruleIds.push("rule.price-comparison");
   }
