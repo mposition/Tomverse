@@ -88,6 +88,22 @@ merged into an existing account on matching email alone, because a relay
 address is not proof of control of the mailbox behind it. `AUTH-01` requires
 deletion to revoke the Apple token, not just to forget it.
 
+The owner requested Apple sign-in for the initial App Store submission on
+2026-11-02. The existing system-browser flow exposes the server's Apple OAuth
+provider only when its default-off switch and dedicated credentials are ready.
+State, PKCE and nonce remain required. Only the Apple flow's short-lived proof
+and callback cookies allow its cross-site form POST; web session and CSRF
+cookies retain their existing protections. Signup intent remains explicit and
+matching email never enables automatic account linking. OAuth tokens use the
+existing encrypted adapter. Permanent account deletion revokes Apple's stored
+refresh/access token before deleting the encrypted credential.
+
+The iOS review credential has independent enable/configuration variables and
+an `appstore-review-` address. It does not replace the Android review credential.
+Both use the same hash, active-account, expiry and terminal-state checks. The
+iOS native HTTP client supplies the bundled app/build identity; it remains a
+client-asserted check, with credential/account binding as the actual boundary.
+
 **Email OTP and magic link**, reusing the existing policy rather than adding a
 password. `lib/emailLogin.ts` already enforces a bounded code TTL, an attempt
 threshold with lockout, and Turnstile above the threshold; the mobile path

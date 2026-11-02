@@ -90,6 +90,25 @@ test("TestFlight export cannot submit to external beta review or the public stor
   }
 });
 
+test("App Store submission builds use production billing and permit review without automatic publication", () => {
+  const release = config.workflows["ios-app-store"];
+  assert.equal(release.triggering, undefined);
+  assert.equal(release.environment.vars.VITE_TOMVERSE_API_ORIGIN, "https://tomverse.app");
+  assert.equal(release.environment.vars.VITE_NATIVE_BILLING_ENABLED, "true");
+  assert.deepEqual(release.environment.groups, ["ios_store_billing"]);
+  assert.deepEqual(release.environment.ios_signing, config.workflows["ios-testflight"].environment.ios_signing);
+  const steps = release.scripts.map(step => step.script);
+  const prepare = steps.findIndex(script => script.includes("npm run prepare:ios"));
+  const profile = steps.findIndex(script => script.includes("xcode-project use-profiles"));
+  const archive = steps.findIndex(script => script.includes("xcode-project build-ipa"));
+  assert.ok(prepare >= 0 && profile > prepare && archive > profile);
+  assert.ok(steps[profile].includes('"testFlightInternalTestingOnly":false'));
+  assert.ok(!steps[profile].includes('"testFlightInternalTestingOnly":true'));
+  assert.deepEqual(release.publishing, { app_store_connect: {
+    auth: "integration", submit_to_testflight: false, submit_to_app_store: false,
+  } });
+});
+
 test("signed builds verify the bundle before signing and assign an explicit CI build number", () => {
   const steps = config.workflows["ios-testflight"].scripts.map(step => step.script);
   const prepare = steps.findIndex(script => script.includes("npm run prepare:ios"));

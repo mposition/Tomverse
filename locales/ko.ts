@@ -1149,6 +1149,7 @@ export const ko = {
         login: "로그인 / 회원가입",
         google: "Google로 계속하기",
         microsoft: "Microsoft로 계속하기",
+        apple: "Apple로 계속하기",
         orDivider: "또는",
         signupDescription: "무료 계정을 만들고 대화와 나만의 설정을 저장하세요.",
         noAccountPrompt: "아직 회원이 아니신가요?",

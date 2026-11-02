@@ -1150,6 +1150,7 @@ export const pt = {
         login: "Entrar / Criar conta",
         google: "Continuar com Google",
         microsoft: "Continuar com Microsoft",
+        apple: "Continuar com Apple",
         orDivider: "ou",
         signupDescription: "Crie uma conta gratuita para salvar conversas e configurações pessoais.",
         noAccountPrompt: "Ainda não tem conta?",

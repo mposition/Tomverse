@@ -401,6 +401,18 @@ acceptance. A successful unsigned compile does not complete those steps.
 
 ## Official references
 
+The manual `ios-app-store` workflow builds an App Store submission candidate
+against `https://tomverse.app` with the existing Apple billing SDK key group.
+It reuses the accepted signing identities and verification steps, and exports
+with `testFlightInternalTestingOnly=false`. Existing internal workflows retain
+their internal-only export. Uploading this candidate does not submit a review
+or release it publicly; attach the verified build and first subscription group
+and products in App Store Connect, and select the owner's release option before submission.
+The owner authorized production preparation, a submission build and App Review
+submission on 2026-11-02, then explicitly selected automatic public release
+after Apple approval in the same chat. The submitted version uses
+`AFTER_APPROVAL`; uploading a candidate still does not submit it for review.
+
 - [Adding an app and limiting GitHub repository access](https://docs.codemagic.io/getting-started/adding-apps/)
 - [Using YAML and manually selecting a branch/workflow](https://docs.codemagic.io/yaml-basic-configuration/yaml-getting-started/)
 - [Personal-account free M2 minutes](https://docs.codemagic.io/billing/pricing/)

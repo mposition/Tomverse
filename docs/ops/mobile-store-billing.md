@@ -93,6 +93,7 @@ API server:
 | --- | --- |
 | MOBILE_BILLING_ENABLED=true | Enroll only /api/mobile/billing in the native bearer gateway and enable the authenticated webhook |
 | MOBILE_BILLING_ENVIRONMENT | PRODUCTION (default) or SANDBOX; use separate test DB/deployment for sandbox |
+| MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED | Default off; a separately approved exception for the one active iOS review account and App Store subscription products only |
 | MOBILE_BILLING_PRODUCTS_JSON | Exact store product mapping; no inferred or client-provided quantities |
 | REVENUECAT_SECRET_API_KEY | Server-only customer lookup key; never bundle it |
 | REVENUECAT_WEBHOOK_AUTHORIZATION | Exact authorization header configured in RevenueCat, at least 32 characters |
@@ -138,6 +139,18 @@ non-renewing purchase events. Verify delivery and refund redelivery before
 activation. A store receipt is never assigned to a different Tomverse account.
 If RevenueCat reports an unknown customer or transfer, investigate instead of
 changing ownership from the webhook.
+
+For Apple's production-signed App Review candidate, the optional review sandbox
+exception remains default off until independently reviewed and explicitly
+activated. It matches only the active iOS review credential's user ID, dedicated
+address and server-issued billing ID, rejects administrators and inactive
+accounts, and accepts only configured App Store subscription SKUs. Existing
+ownership hashes remain environment-scoped and the provider snapshot is filtered
+to App Store sandbox subscriptions for that account. It grants no consumable
+credits and permits no Google or ordinary-user sandbox purchase. Production and
+Android environment settings remain unchanged. Expiry or terminal revocation of
+the review credential rejects review sessions and further review receipts.
+Ordinary TestFlight acceptance continues to use the separate sandbox deployment.
 
 The server also binds each store transaction and subscription original
 transaction to one billing identity. These keyed-hash ownership tombstones have

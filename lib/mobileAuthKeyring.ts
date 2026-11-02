@@ -4,7 +4,7 @@ import { z } from "zod";
 // Code hashing remains in the review-only entry point.
 export const MOBILE_STORE_REVIEW_STATUS = "mobile_store_review";
 export const isMobileStoreReviewAddress = (email: unknown): email is string =>
-  typeof email === "string" && /^play-review[-+][a-z0-9-]+@tomverse\.app$/i.test(email);
+  typeof email === "string" && /^(?:play|appstore)-review[-+][a-z0-9-]+@tomverse\.app$/i.test(email);
 
 const credentialSchema = z.object({
   submissionId: z.string().min(8).max(120),
@@ -21,22 +21,35 @@ const credentialSchema = z.object({
 export type MobileStoreReviewCredential = z.infer<typeof credentialSchema>;
 
 /** One operator-managed, submission-scoped credential; disabled by default. */
-export function readMobileStoreReviewCredential(env = process.env, now = Date.now()): MobileStoreReviewCredential | null {
-  if (env.MOBILE_STORE_REVIEW_ENABLED !== "true") return null;
+export function readMobileStoreReviewCredential(env: Record<string, string | undefined> = process.env, now = Date.now(), platform: "android" | "ios" = "android"): MobileStoreReviewCredential | null {
+  const enabled = platform === "ios" ? env.MOBILE_STORE_REVIEW_IOS_ENABLED : env.MOBILE_STORE_REVIEW_ENABLED;
+  if (enabled !== "true") return null;
   try {
-    const parsed = credentialSchema.safeParse(JSON.parse(env.MOBILE_STORE_REVIEW_CREDENTIAL_JSON || "null"));
+    const input = platform === "ios" ? env.MOBILE_STORE_REVIEW_IOS_CREDENTIAL_JSON : env.MOBILE_STORE_REVIEW_CREDENTIAL_JSON;
+    const parsed = credentialSchema.safeParse(JSON.parse(input || "null"));
     if (!parsed.success) return null;
+    if (!parsed.data.email.startsWith(platform === "ios" ? "appstore-review" : "play-review")) return null;
     const expiry = Date.parse(parsed.data.validUntil);
     if (expiry <= now || expiry > now + 31 * 86_400_000) return null;
     return parsed.data;
   } catch { return null; }
 }
 
+export function readMobileStoreReviewCredentials(env: Record<string, string | undefined> = process.env, now = Date.now()) {
+  return (["android", "ios"] as const).flatMap(platform => {
+    const credential = readMobileStoreReviewCredential(env, now, platform);
+    return credential ? [credential] : [];
+  });
+}
+
 /** Checked again for existing access/refresh sessions, including cached snapshots. */
-export function mobileStoreReviewSessionAllowed(user: { id: string; email?: string | null; plan?: unknown; subscriptionStatus?: string | null; periodEndMs?: number | null }, env = process.env, now = Date.now()) {
+export function mobileStoreReviewSessionAllowed(user: { id: string; email?: string | null; plan?: unknown; subscriptionStatus?: string | null; periodEndMs?: number | null }, env: Record<string, string | undefined> = process.env, now = Date.now()) {
   if (!isMobileStoreReviewAddress(user.email)) return true;
-  const credential = readMobileStoreReviewCredential(env, now);
-  if (!credential || credential.userId !== user.id || credential.email !== user.email.toLowerCase() || credential.plan !== user.plan) return false;
+  const credential = readMobileStoreReviewCredentials(env, now).find(item => item.userId === user.id && item.email === user.email?.toLowerCase());
+  const iosPurchasePlan = credential?.email.startsWith("appstore-review") && credential.plan === "Free" &&
+    env.MOBILE_BILLING_ENVIRONMENT === "PRODUCTION" && env.MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED === "true" &&
+    ["Free", "Pro", "Max"].includes(String(user.plan));
+  if (!credential || credential.userId !== user.id || credential.email !== user.email.toLowerCase() || (credential.plan !== user.plan && !iosPurchasePlan)) return false;
   return credential.plan === "Free" || (user.subscriptionStatus === MOBILE_STORE_REVIEW_STATUS &&
     typeof user.periodEndMs === "number" && Number.isFinite(user.periodEndMs) && user.periodEndMs > now);
 }

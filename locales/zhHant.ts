@@ -1161,6 +1161,7 @@ export const zhHant = {
         login: "登入 / 註冊",
         google: "使用 Google 繼續",
         microsoft: "使用 Microsoft 繼續",
+        apple: "使用 Apple 繼續",
         orDivider: "或",
         signupDescription: "建立免費帳戶，儲存對話與個人設定。",
         noAccountPrompt: "還不是會員？",
