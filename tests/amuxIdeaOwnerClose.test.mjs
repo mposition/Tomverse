@@ -16,10 +16,11 @@ test("an owner close names 1 to 20 distinct ideas and a 3 to 500 character reaso
     amuxIdeaOwnerClosableState("submitted", "owner"),
     amuxIdeaOwnerClosableState("submitted", "session"),
     amuxIdeaOwnerClosableState("analyzing", "owner"),
+    amuxIdeaOwnerClosableState("analyzing", "session"),
     amuxIdeaOwnerClosableState("completed", "owner"),
     amuxIdeaOwnerClosableState("cancelled", "owner"),
-  ], [true, true, true, false, false, false, false],
-  "after analysis, or an owner idea before execution approval; a queued session idea has its own cancel");
+  ], [true, true, true, false, true, false, false, false],
+  "after analysis, or an owner idea before an execution approval; session ideas run on their own");
   assert.equal(AMUX_IDEA_OWNER_CLOSE_LIMIT, 20);
   assert.deepEqual(inspectAmuxIdeaOwnerClose({ ideaIds: [id(1), id(2)], reason: "Not needed" }),
     { ok: true, ideaIds: [id(1), id(2)], reason: "Not needed" });
