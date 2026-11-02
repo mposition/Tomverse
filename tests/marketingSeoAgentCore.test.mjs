@@ -1024,8 +1024,9 @@ test("the runner reads graduation from the operator's variable and arms only thr
     assert.match(runner, /runSeoAgentArmLoop\(/);
     // The window and the token are checked before a graduated push goes out, not after it.
     assert.match(runner, /seoAgentArmWindow\(/);
-    assert.ok(runner.indexOf("const windowMs = willArm ? await armWindowMs() : 0;") < runner.indexOf("const published = await runSeoAgentPublish("));
+    assert.ok(runner.indexOf("const deadlineAtMs = willArm ? await armDeadlineMs() : 0;") < runner.indexOf("const published = await runSeoAgentPublish("));
     assert.match(runner, /github-authentication-token-expiration/);
+    assert.match(runner, /MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT/);
     assert.match(runner, /for \(const signal of \["SIGINT", "SIGTERM"\]\)/);
     assert.match(runner, /await enableInFlight;/);
     assert.match(runner, /attempt < 3/);
@@ -1256,8 +1257,8 @@ const loopClock = () => {
 };
 /** A list per look: the loop reads the next one each time and repeats the last. */
 const sequence = (...looks) => { let index = 0; return () => looks[Math.min(index++, looks.length - 1)]; };
-const loop = (ports, clock, windowMinutes = 240, env = ARM_ENV) =>
-    runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env, windowMs: windowMinutes * MINUTE }, ports, clock);
+const loop = (ports, clock, windowMinutes = 45, env = ARM_ENV) =>
+    runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env, deadlineAtMs: clock.now() + windowMinutes * MINUTE }, ports, clock);
 
 test("the loop waits for a draft to become ready, arms once, then watches until the merge", async () => {
     const { clock, state } = loopClock();
@@ -1306,10 +1307,10 @@ test("the loop never leaves an arming standing when the window ends", async () =
     assert.equal(state.armed.at(-1), null);
 });
 
-test("a window of one minute still arms and then disarms; nothing armed stays armed past the window", async () => {
+test("a window of two minutes still arms and then disarms; nothing armed stays armed past the window", async () => {
     const { clock } = loopClock();
     const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
-    const result = await loop(ports, clock, 1);
+    const result = await loop(ports, clock, 2);
     assert.equal(result.status, "window_ended_disarmed");
     assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
 });
@@ -1446,26 +1447,37 @@ test("a look that cannot read keeps the fast cadence of an armed pull request", 
     assert.deepEqual(state.sleeps, [20000, 20000, 20000]);
 });
 
-test("the arm window is the request, cut to the token's life less a margin for the final disarm", () => {
+test("the arm deadline is the request, cut to the token's life less a margin for the final disarm", () => {
     const now = 1_000_000_000_000;
     const window = (requested, tokenExpiresAtMs) => seoAgentArmWindow({ requested, nowMs: now, tokenExpiresAtMs });
-    // No flag: the default; a token that does not end does not cut it.
-    assert.deepEqual(window(undefined, null), { ok: true, windowMs: 45 * MINUTE });
-    assert.deepEqual(window("1", null), { ok: true, windowMs: MINUTE });
-    assert.deepEqual(window("45", null), { ok: true, windowMs: 45 * MINUTE });
-    // A flag that is not 1 to 45 whole-or-fractional minutes, or has no value, is refused.
-    for (const bad of ["0", "46", "-1", "abc", "", "NaN", "Infinity"]) assert.deepEqual(window(bad, null), { ok: false, reason: "wait_minutes_invalid" }, bad);
+    const far = now + 3600 * 1000;
+    // No flag: the default 45 minutes, when the token outlasts it by the margin.
+    assert.deepEqual(window(undefined, far), { ok: true, deadlineAtMs: now + 45 * MINUTE });
+    assert.deepEqual(window("1", far), { ok: true, deadlineAtMs: now + MINUTE });
+    assert.deepEqual(window("45", far), { ok: true, deadlineAtMs: now + 45 * MINUTE });
+    assert.deepEqual(window("2.5", far), { ok: true, deadlineAtMs: now + 150 * 1000 });
+    // A flag that is not 1 to 45 minutes written in plain digits, or has no value, is refused.
+    for (const bad of ["0", "46", "-1", "abc", "", "NaN", "Infinity", "0x10", " 5 ", "1e1", "5m"]) assert.deepEqual(window(bad, far), { ok: false, reason: "wait_minutes_invalid" }, JSON.stringify(bad));
     // A token with 20 minutes left allows 10: ten are kept back for the disarm.
-    assert.deepEqual(window(undefined, now + 20 * MINUTE), { ok: true, windowMs: 10 * MINUTE });
-    assert.deepEqual(window("5", now + 20 * MINUTE), { ok: true, windowMs: 5 * MINUTE });
-    // Plenty of token: the request stands.
-    assert.deepEqual(window(undefined, now + 55 * MINUTE), { ok: true, windowMs: 45 * MINUTE });
-    // Too little token, an expired token, or an expiry that cannot be read: refused, before anything is pushed.
+    assert.deepEqual(window(undefined, now + 20 * MINUTE), { ok: true, deadlineAtMs: now + 10 * MINUTE });
+    assert.deepEqual(window("5", now + 20 * MINUTE), { ok: true, deadlineAtMs: now + 5 * MINUTE });
+    assert.deepEqual(window(undefined, now + 55 * MINUTE), { ok: true, deadlineAtMs: now + 45 * MINUTE });
+    // Too little token, an expired token, an end that is not known or cannot be read: refused, before anything is pushed.
     assert.deepEqual(window(undefined, now + 10 * MINUTE), { ok: false, reason: "token_expires_too_soon" });
     assert.deepEqual(window(undefined, now + 10 * MINUTE + 59_000), { ok: false, reason: "token_expires_too_soon" });
     assert.deepEqual(window(undefined, now - MINUTE), { ok: false, reason: "token_expires_too_soon" });
-    assert.deepEqual(window(undefined, "unreadable"), { ok: false, reason: "token_expiry_unreadable" });
-    assert.deepEqual(window(undefined, Number.NaN), { ok: false, reason: "token_expiry_unreadable" });
+    assert.deepEqual(window(undefined, null), { ok: false, reason: "token_expiry_unknown" });
+    assert.deepEqual(window(undefined, "unreadable"), { ok: false, reason: "token_expiry_unknown" });
+    assert.deepEqual(window(undefined, Number.NaN), { ok: false, reason: "token_expiry_unknown" });
+});
+
+test("nothing is armed when too little of the window is left to watch it", async () => {
+    // 30 seconds left: the pull request is ready, but there would be no time to watch an arming.
+    const clock = loopClock();
+    const { ports, writes } = armPorts();
+    const result = await runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV, deadlineAtMs: clock.clock.now() + 30_000 }, ports, clock.clock);
+    assert.equal(result.status, "window_over");
+    assert.deepEqual(writes, []);
 });
 
 test("only a merge, an off run, or a person's arming left standing is a clean end", () => {
@@ -1481,7 +1493,7 @@ test("turning it off is asked again when an answer is lost", async () => {
         findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]),
         disableAutoMerge: (pull) => { if (++tries < 3) throw new Error("timeout"); writes.push(["disable", pull]); },
     });
-    const result = await loop(ports, loopClock().clock, 1);
+    const result = await loop(ports, loopClock().clock, 2);
     assert.equal(result.status, "window_ended_disarmed");
     assert.equal(tries, 3);
 });

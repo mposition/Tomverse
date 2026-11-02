@@ -1223,7 +1223,7 @@ export type SeoArmResult =
   | SeoVerifyFailure
   | { readonly status: "pull_request_unreadable" }
   | {
-      readonly status: "pr_not_found" | "pr_ambiguous" | "merged" | "closed" | "waiting_ready" | "auto_merge_turned_off";
+      readonly status: "pr_not_found" | "pr_ambiguous" | "merged" | "closed" | "waiting_ready" | "auto_merge_turned_off" | "window_over";
       readonly branch: string;
     }
   /** Auto-merge is on for this pull request now (this look turned it on, or it already was). */
@@ -1244,6 +1244,8 @@ export async function runSeoAgentArm(
     readonly seenArmed?: boolean;
     /** Told just before the enabling request goes out, so a request whose answer is lost is still cleaned up. */
     readonly onArming?: (pull: { nodeId: string; number: number }) => void;
+    /** False when too little of the window is left to watch an arming: nothing is armed then. Default true. */
+    readonly mayArm?: boolean;
   },
   ports: SeoArmPorts,
 ): Promise<SeoArmResult> {
@@ -1270,6 +1272,7 @@ export async function runSeoAgentArm(
   }
   if (decision.action === "enable") {
     if (input.seenArmed === true) return { status: "auto_merge_turned_off", branch };
+    if (input.mayArm === false) return { status: "window_over", branch };
     // Checked again where the write is made: the only base an auto-merge is ever armed against is develop.
     if (decision.pull.base !== SEO_AGENT_AUTO_MERGE_BASE || decision.pull.headSha !== record.commitSha || decision.pull.crossRepository) {
       return { status: "refused", branch, pullRequest: decision.pull.number, reasons: ["not_the_verified_pull_request"] };
@@ -1321,25 +1324,27 @@ export const SEO_AGENT_ARM_MAX_WAIT_MINUTES = 45;
 export const SEO_AGENT_ARM_TOKEN_MARGIN_MS = 10 * 60 * 1000;
 
 /**
- * How long the arm step may watch. The window is the request (a number of minutes, from 1 to the maximum), cut so
- * that the token is still good for the final disarm: `tokenExpiresAtMs` is when GitHub says the token ends, `null`
- * when it sends no expiry (the token does not end), and `"unreadable"` for an expiry that cannot be read, which is
- * refused. A window under a minute is refused. Pure.
+ * Until when the arm step may watch, as an absolute time. The request is a number of minutes from 1 to the maximum
+ * (digits only), cut so that the token is still good for the final disarm: `tokenExpiresAtMs` is when the token ends,
+ * from GitHub's own header or from the operator, whichever is earlier. A token whose end is not known (`null`) or
+ * cannot be read (`"unreadable"`) is refused, since a token that does not end is not what this runner is given, and
+ * so is a window under a minute. Pure.
  */
 export function seoAgentArmWindow(input: {
   readonly requested: string | undefined;
   readonly nowMs: number;
   readonly tokenExpiresAtMs: number | null | "unreadable";
-}): { readonly ok: true; readonly windowMs: number } | { readonly ok: false; readonly reason: "wait_minutes_invalid" | "token_expiry_unreadable" | "token_expires_too_soon" } {
-  const minutes = input.requested === undefined ? SEO_AGENT_ARM_DEFAULT_WAIT_MINUTES : Number(input.requested);
-  if (input.requested === "" || !Number.isFinite(minutes) || minutes < 1 || minutes > SEO_AGENT_ARM_MAX_WAIT_MINUTES) {
-    return { ok: false, reason: "wait_minutes_invalid" };
+}):
+  | { readonly ok: true; readonly deadlineAtMs: number }
+  | { readonly ok: false; readonly reason: "wait_minutes_invalid" | "token_expiry_unknown" | "token_expires_too_soon" } {
+  const valid = input.requested === undefined || /^[0-9]+(\.[0-9]+)?$/.test(input.requested);
+  const minutes = !valid ? Number.NaN : input.requested === undefined ? SEO_AGENT_ARM_DEFAULT_WAIT_MINUTES : Number(input.requested);
+  if (!Number.isFinite(minutes) || minutes < 1 || minutes > SEO_AGENT_ARM_MAX_WAIT_MINUTES) return { ok: false, reason: "wait_minutes_invalid" };
+  if (input.tokenExpiresAtMs === null || input.tokenExpiresAtMs === "unreadable" || !Number.isFinite(input.tokenExpiresAtMs)) {
+    return { ok: false, reason: "token_expiry_unknown" };
   }
-  if (input.tokenExpiresAtMs === "unreadable" || (input.tokenExpiresAtMs !== null && !Number.isFinite(input.tokenExpiresAtMs))) {
-    return { ok: false, reason: "token_expiry_unreadable" };
-  }
-  const windowMs = input.tokenExpiresAtMs === null ? minutes * 60_000 : Math.min(minutes * 60_000, input.tokenExpiresAtMs - input.nowMs - SEO_AGENT_ARM_TOKEN_MARGIN_MS);
-  return windowMs >= 60_000 ? { ok: true, windowMs } : { ok: false, reason: "token_expires_too_soon" };
+  const deadlineAtMs = Math.min(input.nowMs + minutes * 60_000, input.tokenExpiresAtMs - SEO_AGENT_ARM_TOKEN_MARGIN_MS);
+  return deadlineAtMs - input.nowMs >= 60_000 ? { ok: true, deadlineAtMs } : { ok: false, reason: "token_expires_too_soon" };
 }
 
 /** Whether an arm run that ended like this is a clean end for the operator's monitoring (exit 0). */
@@ -1347,22 +1352,25 @@ export function seoAgentArmEndedCleanly(status: string): boolean {
   return status === "merged" || status === "off" || status === "already_armed";
 }
 
+/** Less of the window than this is left: nothing is armed, because there would be no time to watch it. */
+const MIN_ARMED_WATCH_MS = 60_000;
+
 /** A pull request that cannot be read this many times in a row ends the run, and disarms it if it is armed. */
 export const SEO_AGENT_ARM_MAX_UNREADABLE = 5;
 
 /**
- * The arm step over time. It looks until `windowMs` is over and **never leaves an unattended arming behind**:
+ * The arm step over time. It looks until `deadlineAtMs` and **never leaves an unattended arming behind**:
  * GitHub keeps auto-merge on when someone with write access pushes another commit, so an armed pull request is
  * watched (a moved head or a base that is not develop is disarmed) and is disarmed again when this window ends, when
  * the pull request can no longer be read, when anything but a merge or a close ends the run, and when it throws.
  * Waiting for a draft, or for the pull request to appear, is not an arming.
  */
 export async function runSeoAgentArmLoop(
-  input: { readonly record: unknown; readonly attestation: unknown; readonly env: Readonly<Record<string, string | undefined>>; readonly windowMs: number },
+  input: { readonly record: unknown; readonly attestation: unknown; readonly env: Readonly<Record<string, string | undefined>>; readonly deadlineAtMs: number },
   ports: SeoArmPorts,
   clock: SeoArmClock,
 ): Promise<SeoArmResult | { readonly status: "window_ended_disarmed"; readonly pullRequest: number }> {
-  const deadline = clock.now() + input.windowMs;
+  const deadline = input.deadlineAtMs;
   const state: { armed: { nodeId: string; number: number } | null } = { armed: null };
   const setArmed = (next: { nodeId: string; number: number } | null) => {
     state.armed = next;
@@ -1381,7 +1389,7 @@ export async function runSeoAgentArmLoop(
   try {
     for (;;) {
       const result = await runSeoAgentArm(
-        { record: input.record, attestation: input.attestation, env: input.env, seenArmed: seenArmed || state.armed !== null, onArming: setArmed },
+        { record: input.record, attestation: input.attestation, env: input.env, seenArmed: seenArmed || state.armed !== null, onArming: setArmed, mayArm: clock.now() + MIN_ARMED_WATCH_MS < deadline },
         ports,
       );
       clock.onResult?.(result);

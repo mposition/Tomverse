@@ -121,6 +121,8 @@ const BUNDLE_REF = "seo-agent-change";
 const CHECK_TIMEOUT_MS = 20 * 60 * 1000;
 /** One GitHub API request. */
 const GITHUB_TIMEOUT_MS = 30 * 1000;
+/** The operator-supplied end of the installation token (the expires_at of its creation), an ISO time. */
+const SEO_AGENT_TOKEN_EXPIRES_ENV = "MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT";
 /** How long the arm step waits between two looks while there is nothing armed yet. */
 const ARM_POLL_MS = 60 * 1000;
 /** ...and while it is armed: a moved head has to be seen long before the required checks can finish on it. */
@@ -485,21 +487,30 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
     return { status: response.status, body: await response.json().catch(() => null), expires: response.headers.get("github-authentication-token-expiration") };
   };
 
-  // When the token ends, from the header GitHub sends with a token that expires. No header: it does not expire.
+  // When the token ends: GitHub's header (it sends one with a token that expires), or the operator's
+  // MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT (the expires_at of the token's creation), whichever is earlier.
+  // Neither is "unknown", and an unknown end is refused: this runner is given an installation token, which ends.
   const tokenExpiresAtMs = async () => {
     const read = await github("GET", "");
     if (read.status !== 200) throw new Error(`the token could not be checked (HTTP ${read.status})`);
-    if (read.expires === null) return null;
-    const ms = Date.parse(read.expires.replace(/ UTC$/, "Z").replace(" ", "T"));
-    return Number.isFinite(ms) ? ms : "unreadable";
+    const parse = (text) => {
+      const ms = Date.parse(String(text).replace(/ UTC$/, "Z").replace(" ", "T"));
+      return Number.isFinite(ms) ? ms : "unreadable";
+    };
+    const known = [read.expires, process.env[SEO_AGENT_TOKEN_EXPIRES_ENV]].filter((text) => typeof text === "string" && text !== "").map(parse);
+    if (known.length === 0) return null;
+    return known.includes("unreadable") ? "unreadable" : Math.min(...known);
   };
-  // Validated before anything is pushed, so a bad flag or a token that is about to end does not waste a publish.
-  const armWindowMs = async () => {
+  // Validated before anything is pushed, so a bad flag or a token that is about to end does not waste a publish. The
+  // answer is an absolute time: the publish that follows uses up part of the window, not more of the token.
+  const armDeadlineMs = async () => {
     const requested = option("--wait-minutes");
     if (process.argv.includes("--wait-minutes") && requested === undefined) throw new Error("--wait-minutes needs a number of minutes");
     const window = seoAgentArmWindow({ requested, nowMs: Date.now(), tokenExpiresAtMs: await tokenExpiresAtMs() });
-    if (!window.ok) throw new Error(`the arm window was refused: ${window.reason} (--wait-minutes is 1 to 45; the token must outlast it by 10 minutes)`);
-    return window.windowMs;
+    if (!window.ok) {
+      throw new Error(`the arm window was refused: ${window.reason} (--wait-minutes is 1 to 45; the token must end at least 11 minutes from now; give ${SEO_AGENT_TOKEN_EXPIRES_ENV} if GitHub sends no expiry)`);
+    }
+    return window.deadlineAtMs;
   };
 
   const graphql = async (query, variables) => {
@@ -663,7 +674,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
     enableInFlight = request.then(() => undefined, () => undefined);
     return request;
   };
-  const armLoop = async (windowMs) => {
+  const armLoop = async (deadlineAtMs) => {
     for (const signal of ["SIGINT", "SIGTERM"]) {
       process.on(signal, async () => {
         stopping = true;
@@ -680,7 +691,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
       });
     }
     return await runSeoAgentArmLoop(
-      { record, attestation: attestationFile?.attestation, env: process.env, windowMs },
+      { record, attestation: attestationFile?.attestation, env: process.env, deadlineAtMs },
       ports,
       {
         now: () => Date.now(),
@@ -697,18 +708,18 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
   
   try {
     if (phase === "arm") {
-      const result = await armLoop(seoAgentAutoMergeGate(process.env, true).on ? await armWindowMs() : 0);
+      const result = await armLoop(seoAgentAutoMergeGate(process.env, true).on ? await armDeadlineMs() : 0);
       process.exit(seoAgentArmEndedCleanly(result.status) ? 0 : 2);
     }
     // A graduated push that will be armed is checked first: the window and the token, before anything is pushed.
     const willArm = process.env[SEO_AGENT_GRADUATED_VARIABLE_ENV] === "true" && seoAgentAutoMergeGate(process.env, true).on;
-    const windowMs = willArm ? await armWindowMs() : 0;
+    const deadlineAtMs = willArm ? await armDeadlineMs() : 0;
     const published = await runSeoAgentPublish({ record, attestation: attestationFile?.attestation, env: process.env }, ports);
     console.log(JSON.stringify({ event: "marketing_seo_agent_publish", ...published }));
     if (published.status !== "pushed") process.exit(published.status === "off" ? 0 : 2);
     // After a graduated push the workflow opens the draft PR; arm it when, and only when, the switch says so.
     if (published.graduated && willArm) {
-      const result = await armLoop(windowMs);
+      const result = await armLoop(deadlineAtMs);
       process.exit(seoAgentArmEndedCleanly(result.status) ? 0 : 2);
     }
     process.exit(0);
