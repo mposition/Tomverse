@@ -626,6 +626,9 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15 per month, billed every week.",
     "Pro is USD 15 per month, payable weekly.",
     "Pro is USD 15 per month, debited weekly.",
+    "Pro is USD 15 per month, every week.",
+    "Pro is USD 15 per month or 99 a week.",
+    "Pro is -15 USD per month.", // a sign is part of the amount
     "Pro is USD 15 per month, collected daily.",
     "Pro is USD 15 per month, billed every quarter.",
     "Pro is USD 15 per month, billed every second month.",
@@ -661,11 +664,9 @@ test("a figure with a billing period is a price even with no currency, and a lim
     assert.equal(priceDecision(text).verdict, "approval_required", text);
   }
   assert.equal(priceDecision("Pro is USD  20.00 per month.").verdict, "reject");
-  // "20 a day" is not a billing period, and "100 messages per month" has a noun
-  // between the figure and the period.
-  assert.ok(!priceDecision("Save 20 a day of busywork.", []).codes.includes("price_currency_missing"));
-  // Time words that are not billing leave a correct price alone.
-  for (const text of ["Pro costs USD 15.00 per month. Save hours every day.", "Pro is USD 15.00 per month; see results in days."]) {
+  // "100 messages per month" has a noun between the figure and the period.
+  // A time word that is not a period ("in days") leaves a correct price alone; "every day" does not.
+  for (const text of ["Pro is USD 15.00 per month; see results in days."]) {
     assert.equal(priceDecision(text).verdict, "approval_required", text);
   }
   assert.ok(!priceDecision("Pro has been here since 2026.").codes.includes("price_currency_missing"));
