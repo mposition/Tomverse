@@ -983,6 +983,7 @@ type LockedMarketingChannel = {
   lastResumeAuditLogId: string | null;
   dailyCapOverride: number | null;
   weeklyCapOverride: number | null;
+  approvalStartedAt: Date | null;
 };
 
 /** S2b1 lifecycle writers always take the row lock before deciding. */
@@ -995,7 +996,8 @@ async function lockMarketingChannel(
       "id", "channel", "status", "connectionGeneration", "scopesDigest",
       "policyVersion", "graduationEpoch", "graduatedAt", "graduationSnapshot",
       "pausedAt", "pausedFromMode", "pauseReasonCode", "lastResumeAuditLogId",
-      "dailyCapOverride", "weeklyCapOverride", "externalAccountRef"
+      "dailyCapOverride", "weeklyCapOverride", "externalAccountRef",
+      "approvalStartedAt"
     FROM "MarketingChannel"
     WHERE "id" = ${id}
     FOR UPDATE
