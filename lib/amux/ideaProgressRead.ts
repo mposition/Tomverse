@@ -20,8 +20,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   submittedAt: string;
   /** The first registered card's display key, the only plaintext label an idea has. */
   displayKey: string | null;
-  /** The idea lane's state, when the lane took the idea. */
-  lane: AmuxIdeaLaneState | null;
+  /** The idea lane's state, when the lane took the idea (absent: never taken). */
+  lane?: AmuxIdeaLaneState | null;
   /** Task PRs waiting for GitHub review or merge. */
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
   /** The idea's Task cards in registration order, for its detail view. */
