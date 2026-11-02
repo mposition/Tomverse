@@ -42,7 +42,8 @@
 // arm a draft, and the CI admission bot marks it ready when it has runners. So
 // `--phase arm` (which the publish phase runs by itself after a graduated push)
 // re-verifies the signed record exactly as publish does, then looks at the pull
-// request for --wait-minutes (default 240, at least 1; every minute while it waits, every 20
+// request for --wait-minutes (default and at most 45, because the installation token lasts one hour
+// and a disarm needs it; at least 1; every minute while it waits, every 20
 // seconds once armed): it arms an open, non-draft PR from this repository, based on
 // develop, whose head is exactly the validated commit, and it arms at most once per
 // run. If auto-merge is off again afterwards, a person or GitHub turned it off, and it
@@ -122,8 +123,13 @@ const GITHUB_TIMEOUT_MS = 30 * 1000;
 const ARM_POLL_MS = 60 * 1000;
 /** ...and while it is armed: a moved head has to be seen long before the required checks can finish on it. */
 const ARM_ARMED_POLL_MS = 20 * 1000;
-/** The window the arm step watches for: the CI admission queue, then the required checks. An arming is disarmed when it ends. */
-const ARM_DEFAULT_WAIT_MINUTES = 240;
+/**
+ * The window the arm step watches for, and the most it may be: an installation token lives one hour and every request
+ * of the run, a disarm included, uses the one it started with, so the run must end (and disarm) well inside that. An
+ * arming is disarmed when the window ends; run the phase again, with a fresh token, for a longer wait.
+ */
+const ARM_DEFAULT_WAIT_MINUTES = 45;
+const ARM_MAX_WAIT_MINUTES = 45;
 
 const option = (name) => {
   const index = process.argv.indexOf(name);
@@ -646,7 +652,9 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
     // A flag with no value after it is a mistake, not the default.
     if (process.argv.includes("--wait-minutes") && option("--wait-minutes") === undefined) throw new Error("--wait-minutes needs a number of minutes");
     const waitMinutes = Number(option("--wait-minutes") ?? ARM_DEFAULT_WAIT_MINUTES);
-    if (!Number.isFinite(waitMinutes) || waitMinutes < 1) throw new Error("--wait-minutes must be a number of minutes, 1 or more");
+    if (!Number.isFinite(waitMinutes) || waitMinutes < 1 || waitMinutes > ARM_MAX_WAIT_MINUTES) {
+      throw new Error(`--wait-minutes must be from 1 to ${ARM_MAX_WAIT_MINUTES} (the installation token lasts one hour)`);
+    }
     for (const signal of ["SIGINT", "SIGTERM"]) {
       process.on(signal, async () => {
         stopping = true;
@@ -677,7 +685,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
       },
     );
   };
-  const armFinished = ["merged", "off"];
+  const armFinished = ["merged", "off", "already_armed"];
 
   try {
     if (phase === "arm") {

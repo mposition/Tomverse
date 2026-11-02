@@ -1356,9 +1356,11 @@ export async function runSeoAgentArmLoop(
       // Only an arming this run made is this run's to take back; one that was already on is watched for drift (the
       // decision disarms it then) and left to whoever turned it on.
       if (result.status === "armed") setArmed({ nodeId: result.nodeId, number: result.pullRequest });
-      watchedArmed = result.status === "armed" || result.status === "already_armed";
-      if (watchedArmed) seenArmed = true;
-      if (result.status === "auto_merge_turned_off" || result.status === "merged" || result.status === "closed") setArmed(null);
+      // A look that could not read keeps what the last readable one found.
+      if (result.status !== "pull_request_unreadable") watchedArmed = result.status === "armed" || result.status === "already_armed";
+      if (result.status === "armed" || result.status === "already_armed") seenArmed = true;
+      // Not "turned off": that reading can be stale while this run's arming stands, so it is asked to be off below.
+      if (result.status === "merged" || result.status === "closed") setArmed(null);
       // A pull request other than the one this run armed can be the one that was disarmed; the tracked one is then
       // still armed and is taken back below, with the run's other endings.
       if (result.status === "disarmed" && state.armed?.number === result.pullRequest) setArmed(null);

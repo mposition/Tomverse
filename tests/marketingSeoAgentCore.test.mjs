@@ -1019,7 +1019,8 @@ test("the runner reads graduation from the operator's variable and arms only thr
     assert.match(runner, /published\.graduated && seoAgentAutoMergeGate\(process\.env, true\)\.on/);
     // The runner takes its looping from the core, refuses a window under a minute, and disarms on a signal.
     assert.match(runner, /runSeoAgentArmLoop\(/);
-    assert.match(runner, /waitMinutes < 1/);
+    assert.match(runner, /waitMinutes < 1 \|\| waitMinutes > ARM_MAX_WAIT_MINUTES/);
+    assert.match(runner, /ARM_MAX_WAIT_MINUTES = 45;/);
     assert.match(runner, /for \(const signal of \["SIGINT", "SIGTERM"\]\)/);
     assert.match(runner, /await enableInFlight;/);
     assert.match(runner, /attempt < 3/);
@@ -1287,7 +1288,8 @@ test("the loop does not arm again after a person or GitHub took the pull request
     const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: false })]) });
     const result = await loop(ports, clock);
     assert.equal(result.status, "auto_merge_turned_off");
-    assert.deepEqual(writes.map(([kind]) => kind), ["enable"]);
+    // Never a second enable; the one disable only confirms that this run leaves nothing armed.
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
 });
 
 test("the loop never leaves an arming standing when the window ends", async () => {
@@ -1423,6 +1425,20 @@ test("a drifted arming that shows up right after arming is the one taken back", 
     const result = await runSeoAgentArm({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV }, ports);
     assert.equal(result.status, "armed");
     assert.deepEqual(writes.map(([kind, pull]) => [kind, pull.number]), [["enable", 41], ["disable", 42]]);
+});
+
+test("a reading that says auto-merge is off is not trusted over this run's own arming: it is asked to be off before the run ends", async () => {
+    const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], [pullRequest()]) });
+    const result = await loop(ports, loopClock().clock);
+    assert.equal(result.status, "auto_merge_turned_off");
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("a look that cannot read keeps the fast cadence of an armed pull request", async () => {
+    const { clock, state } = loopClock();
+    const { ports } = armPorts({ findPullRequests: sequence([pullRequest({ autoMerge: true })], null, null, [pullRequest({ state: "MERGED", autoMerge: true })]) });
+    await loop(ports, clock);
+    assert.deepEqual(state.sleeps, [20000, 20000, 20000]);
 });
 
 test("turning it off is asked again when an answer is lost", async () => {
