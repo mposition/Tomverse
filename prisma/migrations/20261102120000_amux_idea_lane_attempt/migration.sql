@@ -32,4 +32,5 @@ ALTER TABLE "AmuxIdeaLaneAttempt" ADD CONSTRAINT "AmuxIdeaLaneAttempt_outcome_ch
     CHECK (("outcome" IS NULL) = ("finishedAt" IS NULL)
       AND ("outcome" IS NULL OR "outcome" IN ('pr_open', 'no_change', 'cli_failed',
         'workflow_edit', 'secret_in_diff', 'push_failed', 'job_failed'))
-      AND (("outcome" = 'pr_open') = ("prNumber" IS NOT NULL AND "prNumber" > 0)));
+      AND ("outcome" IS NOT DISTINCT FROM 'pr_open') = ("prNumber" IS NOT NULL)
+      AND ("prNumber" IS NULL OR "prNumber" > 0));

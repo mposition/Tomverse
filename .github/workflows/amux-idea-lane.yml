@@ -11,13 +11,16 @@
 #
 # Guardrails that must survive any edit to this file:
 #   - workflow_dispatch and schedule only, never a pull-request trigger;
-#   - this repository is public and so are its logs: the idea text lives only
-#     in a file under runner.temp, and so does the model's transcript; neither
-#     is printed or uploaded;
-#   - each secret is in the steps that need it: the sync secret in the app
-#     calls, the model credential in the model step (which also scans the
-#     change for it), the PAT in the push step;
-#   - the change may not touch .github/;
+#   - one secret per job, each job on its own runner: the model runs without
+#     limits, so anything it could reach on a runner (another step's secret, a
+#     git hook in the checkout) must not exist there. claim and report hold the
+#     sync secret, implement the model credential, publish the PAT; publish
+#     runs no repository code, it only applies the patch and pushes;
+#   - this repository is public and so are its logs: the idea text and the
+#     model's transcript are never printed or uploaded; the patch, title and
+#     body are uploaded only after a scan for the model credential, and they
+#     become the public pull request anyway;
+#   - the change may not touch .github/ (checked in implement and again in publish);
 #   - the pull request is a draft into develop with no auto-merge: a person
 #     reviews and merges it.
 name: AMUX Idea Lane
@@ -45,24 +48,21 @@ env:
   TOMVERSE_APP_URL: https://tomverse.app
 
 jobs:
-  run:
+  claim:
     if: github.repository == 'mposition/Tomverse' && vars.AMUX_IDEA_LANE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    # The app's lease (AMUX_IDEA_LANE_LEASE_MS) is longer than this.
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    env:
-      IDEA_PATH: ${{ runner.temp }}/idea.md
-      PR_TITLE_PATH: ${{ runner.temp }}/pr-title.txt
-      PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
+    timeout-minutes: 5
+    outputs:
+      claimed: ${{ steps.claim.outputs.claimed }}
+      attempt: ${{ steps.claim.outputs.attempt }}
+      branch: ${{ steps.claim.outputs.branch }}
+      idea_b64: ${{ steps.claim.outputs.idea_b64 }}
     steps:
-      - name: Claim an idea
+      - name: Claim an idea (sync secret only)
         id: claim
         env:
           AMUX_IDEA_LANE_SYNC_SECRET: ${{ secrets.AMUX_IDEA_LANE_SYNC_SECRET }}
         run: |
-          umask 077
           response=$(curl -sS -f -X POST \
             -H "Authorization: Bearer ${AMUX_IDEA_LANE_SYNC_SECRET}" \
             "${TOMVERSE_APP_URL}/api/internal/amux/idea-lane/claim")
@@ -77,38 +77,50 @@ jobs:
             echo "The claim is malformed."
             exit 1
           fi
-          jq -r '.idea' <<<"$response" > "$IDEA_PATH"
+          # Job outputs reach the next job without entering the log.
+          echo "idea_b64=$(jq -r '.idea' <<<"$response" | base64 -w 0)" >> "$GITHUB_OUTPUT"
           echo "claimed=true" >> "$GITHUB_OUTPUT"
           echo "attempt=${attempt}" >> "$GITHUB_OUTPUT"
           echo "branch=${branch}" >> "$GITHUB_OUTPUT"
 
+  implement:
+    needs: claim
+    if: needs.claim.outputs.claimed == 'true'
+    runs-on: ubuntu-latest
+    # The app's lease (AMUX_IDEA_LANE_LEASE_MS) is longer than this job and publish together.
+    timeout-minutes: 80
+    outputs:
+      failure: ${{ steps.model.outputs.failure }}
+      base: ${{ steps.model.outputs.base }}
+    env:
+      IDEA_PATH: ${{ runner.temp }}/idea.md
+      OUT_DIR: ${{ runner.temp }}/out
+    steps:
       - name: Checkout develop
-        if: steps.claim.outputs.claimed == 'true'
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: develop
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
 
       - name: Setup Node.js
-        if: steps.claim.outputs.claimed == 'true'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          # This job holds credentials and caches nothing (see feedback-autofix.yml).
+          # This job holds a credential and caches nothing (see feedback-autofix.yml).
           package-manager-cache: false
 
       - name: Install dependencies
-        if: steps.claim.outputs.claimed == 'true'
         run: npm ci
 
       - name: Install Claude Code CLI (pinned)
-        if: steps.claim.outputs.claimed == 'true'
         env:
           CLAUDE_CODE_VERSION: "2.1.220"
           CLAUDE_CODE_INTEGRITY: "sha512-ogBrvwkqF9f8okmnXKxmRNHuvtFxFEffe5pWdqOV3iQDxlUOKirFqnyWC7NGXXnDA4WkkbPH8pvSbwyCR2Auyw=="
         run: |
-          package=$(npm pack --json "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" | jq -r '.[0].filename')
+          # Packed outside the checkout, so the tarball never becomes part of the change.
+          package="${RUNNER_TEMP}/$(npm pack --json --pack-destination "$RUNNER_TEMP" \
+            "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" | jq -r '.[0].filename')"
           actual="sha512-$(openssl dgst -sha512 -binary "$package" | openssl base64 -A)"
           if [ "$actual" != "$CLAUDE_CODE_INTEGRITY" ]; then
             echo "Claude Code package integrity mismatch."
@@ -116,10 +128,10 @@ jobs:
           fi
           npm install -g "$package"
 
-      - name: Implement the idea (model credential only in this step)
-        if: steps.claim.outputs.claimed == 'true'
+      - name: Implement the idea (model credential only in this job)
         id: model
         env:
+          IDEA_B64: ${{ needs.claim.outputs.idea_b64 }}
           # One of the two is set: an API key (billed per call) or a
           # subscription token from `claude setup-token`.
           ANTHROPIC_API_KEY: ${{ secrets.AMUX_IDEA_LANE_ANTHROPIC_API_KEY }}
@@ -129,6 +141,11 @@ jobs:
         run: |
           [ -n "$ANTHROPIC_API_KEY" ] || unset ANTHROPIC_API_KEY
           [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || unset CLAUDE_CODE_OAUTH_TOKEN
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p "$OUT_DIR"
+          base64 -d <<<"$IDEA_B64" > "$IDEA_PATH"
+          unset IDEA_B64
+          export PR_TITLE_PATH="${OUT_DIR}/title.txt" PR_BODY_PATH="${OUT_DIR}/body.md"
           prompt=$(cat <<'PROMPT'
           You are implementing one owner request for the Tomverse repository,
           on a fresh checkout of develop. Read AGENTS.md first and follow it.
@@ -141,7 +158,7 @@ jobs:
 
           Rules:
           - Edit files in this checkout only. Do not commit, push, open a pull
-            request or call GitHub; this job does that after you finish.
+            request or call GitHub; a later job does that after you finish.
           - Never edit anything under .github/.
           - Add or update tests for what you change. Run the relevant tests
             and `npx eslint --max-warnings 0` on the files you changed, and
@@ -177,51 +194,96 @@ jobs:
             echo "failure=workflow_edit" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          git diff --cached --binary > "${OUT_DIR}/change.patch"
+          touch "$PR_TITLE_PATH" "$PR_BODY_PATH"
+          # Everything that will be published: the change, its title and body.
           for value in "${ANTHROPIC_API_KEY:-}" "${CLAUDE_CODE_OAUTH_TOKEN:-}"; do
-            if [ -n "$value" ] && git diff --cached | grep -qF -- "$value"; then
+            if [ -n "$value" ] && grep -qF -- "$value" "${OUT_DIR}/change.patch" "$PR_TITLE_PATH" "$PR_BODY_PATH"; then
+              rm -rf "$OUT_DIR"
               echo "failure=secret_in_diff" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
           git diff --cached --stat
 
-      - name: Push the branch and open the draft PR (PAT only here)
-        if: steps.claim.outputs.claimed == 'true' && steps.model.outputs.failure == ''
+      - name: Hand the change to publish
+        if: steps.model.outputs.failure == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: amux-idea-${{ needs.claim.outputs.attempt }}
+          path: ${{ runner.temp }}/out/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: [claim, implement]
+    if: needs.implement.result == 'success' && needs.implement.outputs.failure == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      number: ${{ steps.pr.outputs.number }}
+    steps:
+      - name: Checkout the same develop commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.implement.outputs.base }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch the change
+        uses: actions/download-artifact@v8
+        with:
+          name: amux-idea-${{ needs.claim.outputs.attempt }}
+          path: ${{ runner.temp }}/in
+
+      - name: Push the branch and open the draft PR (PAT only in this job)
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
-          BRANCH: ${{ steps.claim.outputs.branch }}
-          ATTEMPT: ${{ steps.claim.outputs.attempt }}
+          BRANCH: ${{ needs.claim.outputs.branch }}
+          ATTEMPT: ${{ needs.claim.outputs.attempt }}
         run: |
-          title=$(head -n 1 "$PR_TITLE_PATH" 2>/dev/null | tr -d '\000-\037' | cut -c 1-100)
+          in="${RUNNER_TEMP}/in"
+          # git apply only writes files; nothing from the change runs here.
+          git apply --index "${in}/change.patch"
+          if git diff --cached --name-only | grep -q '^\.github/'; then
+            echo "The change touches .github/."
+            exit 1
+          fi
+          title=$(head -n 1 "${in}/title.txt" | tr -d '\000-\037' | cut -c 1-100)
           [ -n "$title" ] || title="feat: implement an AMUX idea"
-          body="${RUNNER_TEMP}/pr-body-final.md"
-          { head -c 50000 "$PR_BODY_PATH" 2>/dev/null || true
+          body="${RUNNER_TEMP}/pr-body.md"
+          { head -c 50000 "${in}/body.md"
             printf '\n\n---\nOpened by the AMUX idea lane (attempt `%s`). A draft: a person reviews and merges it.\n\n' "$ATTEMPT"
             printf '🤖 Generated with [Claude Code](https://claude.com/claude-code)\n'; } > "$body"
-          git checkout -b "$BRANCH"
-          git -c user.name="tomverse-idea-lane[bot]" \
+          git checkout -q -b "$BRANCH"
+          git -c core.hooksPath=/dev/null -c user.name="tomverse-idea-lane[bot]" \
               -c user.email="tomverse-idea-lane-bot@users.noreply.github.com" \
               commit -q -m "$title"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin "$BRANCH"
+          git -c core.hooksPath=/dev/null push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
           url=$(gh pr create --draft --base develop --head "$BRANCH" --title "$title" --body-file "$body")
           echo "number=$(gh pr view "$url" --json number -q .number)" >> "$GITHUB_OUTPUT"
 
-      - name: Report the result
-        if: always() && steps.claim.outputs.claimed == 'true'
+  report:
+    needs: [claim, implement, publish]
+    if: always() && needs.claim.outputs.claimed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report the result (sync secret only)
         env:
           AMUX_IDEA_LANE_SYNC_SECRET: ${{ secrets.AMUX_IDEA_LANE_SYNC_SECRET }}
-          ATTEMPT: ${{ steps.claim.outputs.attempt }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          FAILURE: ${{ steps.model.outputs.failure }}
-          PR_STEP: ${{ steps.pr.outcome }}
+          ATTEMPT: ${{ needs.claim.outputs.attempt }}
+          PR_NUMBER: ${{ needs.publish.outputs.number }}
+          FAILURE: ${{ needs.implement.outputs.failure }}
+          PUBLISH: ${{ needs.publish.result }}
         run: |
           if [ -n "$PR_NUMBER" ]; then
             payload=$(jq -cn --arg id "$ATTEMPT" --argjson pr "$PR_NUMBER" '{attemptId:$id, outcome:"pr_open", prNumber:$pr}')
           else
             outcome="${FAILURE:-job_failed}"
-            [ -n "$FAILURE" ] || [ "$PR_STEP" != "failure" ] || outcome=push_failed
+            [ -n "$FAILURE" ] || [ "$PUBLISH" != "failure" ] || outcome=push_failed
             payload=$(jq -cn --arg id "$ATTEMPT" --arg outcome "$outcome" '{attemptId:$id, outcome:$outcome}')
           fi
           echo "Reporting: $(jq -c 'del(.attemptId)' <<<"$payload")"

@@ -9,6 +9,7 @@ import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import {
   AMUX_IDEA_LANE_LEASE_MS,
+  AMUX_IDEA_LANE_MAX_ATTEMPTS,
   AMUX_IDEA_LANE_SECRET_ENV,
   amuxIdeaLaneBranch,
   amuxIdeaLaneClaimable,
@@ -67,6 +68,12 @@ export async function claimAmuxIdeaLane(): Promise<AmuxIdeaLaneClaim | null> {
         AND i."rawKeyId" IS NOT NULL AND i."rawDigest" IS NOT NULL
         AND i."analysisDeadlineAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')
         AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaAnalysisChunk" c WHERE c."ideaId" = i."id")
+        -- Ideas the lane is done with (PR opened, out of attempts) or running now
+        -- are left out before the LIMIT, so they can never crowd out a new idea.
+        AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
+          AND (a."outcome" = 'pr_open' OR (a."outcome" IS NULL
+            AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
+        AND (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
       ORDER BY i."submittedAt" ASC, i."id" ASC
       LIMIT ${CANDIDATES}
     `;
