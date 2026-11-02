@@ -1057,8 +1057,8 @@ const armPorts = (overrides = {}) => {
     );
     return { ...base, writes };
 };
-const arm = (ports, { env = ARM_ENV, record = RECORD, attestation = ATTESTATION, armedByThisRun = false } = {}) =>
-    runSeoAgentArm({ record, attestation, env, armedByThisRun }, ports);
+const arm = (ports, { env = ARM_ENV, record = RECORD, attestation = ATTESTATION, seenArmed = false } = {}) =>
+    runSeoAgentArm({ record, attestation, env, seenArmed }, ports);
 
 test("the auto-merge gate: the agent on, the switch exactly true, the kill switch empty, and graduated", () => {
     assert.deepEqual(seoAgentAutoMergeGate(ARM_ENV, true), { on: true });
@@ -1146,7 +1146,7 @@ test("main, a release branch or any base but develop is never armed, however the
 
 test("a base that moved off develop after arming is disarmed", async () => {
     const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ base: "main", autoMerge: true })] });
-    const result = await arm(ports, { armedByThisRun: true });
+    const result = await arm(ports, { seenArmed: true });
     assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["base_not_develop"] });
     assert.deepEqual(writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
 });
@@ -1157,7 +1157,7 @@ test("a pull request whose head is not the validated commit is not armed, and is
     assert.deepEqual(await arm(idle.ports), { status: "refused", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["head_is_not_the_validated_commit"] });
     assert.deepEqual(idle.writes, []);
     const armedPull = armPorts({ findPullRequests: [{ ...moved, autoMerge: true }] });
-    const result = await arm(armedPull.ports, { armedByThisRun: true });
+    const result = await arm(armedPull.ports, { seenArmed: true });
     assert.equal(result.status, "disarmed");
     assert.deepEqual(armedPull.writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
 });
@@ -1210,7 +1210,7 @@ test("arming is not repeated: an armed pull request is left alone, and one switc
     assert.deepEqual(on.writes, []);
     // Turned off by a person or by GitHub after this run armed it: not turned back on.
     const off = armPorts();
-    assert.deepEqual(await arm(off.ports, { armedByThisRun: true }), { status: "auto_merge_turned_off", branch: GRADUATED_BRANCH });
+    assert.deepEqual(await arm(off.ports, { seenArmed: true }), { status: "auto_merge_turned_off", branch: GRADUATED_BRANCH });
     assert.deepEqual(off.writes, []);
 });
 
@@ -1227,7 +1227,7 @@ test("the pure decision arms exactly one thing", () => {
 test("an armed pull request that drifted is disarmed even when a second pull request makes the branch ambiguous", async () => {
     const pulls = [pullRequest({ headSha: "a".repeat(40), autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42 })];
     const { ports, writes } = armPorts({ findPullRequests: pulls });
-    const result = await arm(ports, { armedByThisRun: true });
+    const result = await arm(ports, { seenArmed: true });
     assert.equal(result.status, "disarmed");
     assert.deepEqual(writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
 });
@@ -1331,10 +1331,10 @@ test("any other ending with an arming standing disarms it, and so does a throw",
     assert.deepEqual(ambiguous.writes.map(([kind]) => kind), ["enable", "disable"]);
     // A check that stops passing while armed (the base left develop's history, say).
     let looks = 0;
-    const failing = armPorts({ baseOnDevelop: () => ++looks === 1, findPullRequests: [pullRequest({ autoMerge: true })] });
+    const failing = armPorts({ baseOnDevelop: () => ++looks === 1, findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
     const failed = await loop(failing.ports, loopClock().clock);
     assert.equal(failed.status, "base_not_on_develop");
-    assert.deepEqual(failing.writes.map(([kind]) => kind), ["disable"]);
+    assert.deepEqual(failing.writes.map(([kind]) => kind), ["enable", "disable"]);
     // A throw before anything is armed leaves nothing to disarm.
     const exploding = armPorts({ diff: () => { throw new Error("git failed"); } });
     await assert.rejects(loop(exploding.ports, loopClock().clock), /git failed/);
@@ -1386,6 +1386,29 @@ test("disarming a different pull request does not clear the one this run armed",
         ["disable", { nodeId: "PR_node_2", number: 42 }],
         ["disable", { nodeId: "PR_node_1", number: 41 }],
     ]);
+});
+
+test("an arming a person made is watched but not taken back by the end of the window, and is not re-armed if they turn it off", async () => {
+    const mine = armPorts({ findPullRequests: [pullRequest({ autoMerge: true })] });
+    const result = await loop(mine.ports, loopClock().clock, 2);
+    assert.equal(result.status, "already_armed");
+    assert.deepEqual(mine.writes, []);
+    const off = armPorts({ findPullRequests: sequence([pullRequest({ autoMerge: true })], [pullRequest()]) });
+    assert.equal((await loop(off.ports, loopClock().clock)).status, "auto_merge_turned_off");
+    assert.deepEqual(off.writes, []);
+    // Drift is still taken back, whoever armed it.
+    const drifted = armPorts({ findPullRequests: sequence([pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true, headSha: "a".repeat(40) })]) });
+    assert.equal((await loop(drifted.ports, loopClock().clock)).status, "disarmed");
+    assert.deepEqual(drifted.writes.map(([kind]) => kind), ["disable"]);
+});
+
+test("a drifted arming that shows up right after arming is the one taken back", async () => {
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42, base: "main", autoMerge: true })]),
+    });
+    const result = await runSeoAgentArm({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV }, ports);
+    assert.equal(result.status, "armed");
+    assert.deepEqual(writes.map(([kind, pull]) => [kind, pull.number]), [["enable", 41], ["disable", 42]]);
 });
 
 test("turning it off is asked again when an answer is lost", async () => {

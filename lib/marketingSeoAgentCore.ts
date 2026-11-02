@@ -1218,7 +1218,7 @@ export type SeoArmResult =
 
 /**
  * One look at the pull request and at most one write. The caller repeats it (a draft waits for CI admission) and
- * says through `armedByThisRun` whether an earlier look already armed it: if auto-merge is then off again, a
+ * says through `seenArmed` whether an earlier look saw it armed (by this run or by anyone): if auto-merge is then off again, a
  * person or GitHub turned it off, and it is not turned back on (a re-armed PR once merged while its author was
  * still working on it).
  */
@@ -1227,7 +1227,7 @@ export async function runSeoAgentArm(
     readonly record: unknown;
     readonly attestation: unknown;
     readonly env: Readonly<Record<string, string | undefined>>;
-    readonly armedByThisRun?: boolean;
+    readonly seenArmed?: boolean;
     /** Told just before the enabling request goes out, so a request whose answer is lost is still cleaned up. */
     readonly onArming?: (pull: { nodeId: string; number: number }) => void;
   },
@@ -1255,7 +1255,7 @@ export async function runSeoAgentArm(
     return { status: "disarmed", branch, pullRequest: decision.pull.number, reasons: decision.reasons };
   }
   if (decision.action === "enable") {
-    if (input.armedByThisRun === true) return { status: "auto_merge_turned_off", branch };
+    if (input.seenArmed === true) return { status: "auto_merge_turned_off", branch };
     // Checked again where the write is made: the only base an auto-merge is ever armed against is develop.
     if (decision.pull.base !== SEO_AGENT_AUTO_MERGE_BASE || decision.pull.headSha !== record.commitSha || decision.pull.crossRepository) {
       return { status: "refused", branch, pullRequest: decision.pull.number, reasons: ["not_the_verified_pull_request"] };
@@ -1267,9 +1267,15 @@ export async function runSeoAgentArm(
     // request): read them again now that it is on, and take it back at once if either is not what was verified.
     const after = await ports.findPullRequests(branch).catch(() => null);
     const drift = after === null ? null : seoAgentAutoMergeDecision({ pulls: after, branch, commitSha: record.commitSha });
-    if (after === null || drift?.action === "disable") {
+    if (after === null) {
       await ports.disableAutoMerge(target);
-      return { status: "disarmed", branch, pullRequest: target.number, reasons: drift?.action === "disable" ? drift.reasons : ["unreadable_after_arming"] };
+      return { status: "disarmed", branch, pullRequest: target.number, reasons: ["unreadable_after_arming"] };
+    }
+    if (drift?.action === "disable") {
+      // The drifted arming is the one taken back, which may be another pull request than the one just armed; the
+      // one just armed then stays and the next look (two open pull requests are ambiguous) takes it back too.
+      await ports.disableAutoMerge({ nodeId: drift.pull.nodeId, number: drift.pull.number });
+      if (drift.pull.number === target.number) return { status: "disarmed", branch, pullRequest: target.number, reasons: drift.reasons };
     }
     return { status: "armed", branch, pullRequest: target.number, nodeId: target.nodeId };
   }
@@ -1332,15 +1338,19 @@ export async function runSeoAgentArmLoop(
     throw failure;
   };
   let unreadable = 0;
+  let seenArmed = false;
   try {
     for (;;) {
       const result = await runSeoAgentArm(
-        { record: input.record, attestation: input.attestation, env: input.env, armedByThisRun: state.armed !== null, onArming: setArmed },
+        { record: input.record, attestation: input.attestation, env: input.env, seenArmed: seenArmed || state.armed !== null, onArming: setArmed },
         ports,
       );
       clock.onResult?.(result);
       unreadable = result.status === "pull_request_unreadable" ? unreadable + 1 : 0;
-      if (result.status === "armed" || result.status === "already_armed") setArmed({ nodeId: result.nodeId, number: result.pullRequest });
+      // Only an arming this run made is this run's to take back; one that was already on is watched for drift (the
+      // decision disarms it then) and left to whoever turned it on.
+      if (result.status === "armed") setArmed({ nodeId: result.nodeId, number: result.pullRequest });
+      if (result.status === "armed" || result.status === "already_armed") seenArmed = true;
       if (result.status === "auto_merge_turned_off" || result.status === "merged" || result.status === "closed") setArmed(null);
       // A pull request other than the one this run armed can be the one that was disarmed; the tracked one is then
       // still armed and is taken back below, with the run's other endings.

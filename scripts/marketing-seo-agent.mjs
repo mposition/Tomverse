@@ -565,18 +565,21 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
       });
     },
     findPullRequests: async (branch) => {
+      // Open ones and finished ones are asked separately, so a long history cannot hide an open pull request,
+      // and a page that is not the whole list is unreadable: an arming is never decided on part of the open ones.
+      const nodeFields = "id number state isDraft baseRefName headRefName headRefOid isCrossRepository autoMergeRequest { enabledAt }";
       const data = await graphql(
         `query($owner: String!, $name: String!, $head: String!) {
           repository(owner: $owner, name: $name) {
-            pullRequests(headRefName: $head, states: [OPEN, MERGED, CLOSED], first: 10, orderBy: { field: CREATED_AT, direction: DESC }) {
-              nodes { id number state isDraft baseRefName headRefName headRefOid isCrossRepository autoMergeRequest { enabledAt } }
-            }
+            open: pullRequests(headRefName: $head, states: [OPEN], first: 20) { pageInfo { hasNextPage } nodes { ${nodeFields} } }
+            finished: pullRequests(headRefName: $head, states: [MERGED, CLOSED], first: 20, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ${nodeFields} } }
           }
         }`,
         { owner: repositoryOwner, name: repositoryName, head: branch },
       );
-      const nodes = data.repository?.pullRequests?.nodes;
-      if (!Array.isArray(nodes)) return null;
+      const openList = data.repository?.open;
+      if (!Array.isArray(openList?.nodes) || openList.pageInfo?.hasNextPage !== false || !Array.isArray(data.repository?.finished?.nodes)) return null;
+      const nodes = [...openList.nodes, ...data.repository.finished.nodes];
       const views = [];
       for (const node of nodes) {
         // A shape that is not exactly what the decision reads is unreadable, never a guess.
