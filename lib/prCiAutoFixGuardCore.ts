@@ -421,6 +421,22 @@ export function parseConflictMarkers(text: string): MergedFile | null {
   return state === "outside" && hunks.length > 0 ? { outside, hunks } : null;
 }
 
+/**
+ * A resolution sent as the lines that replace each conflict, in order, put
+ * back into the file git left here: a lockfile conflict is a few lines, the
+ * whole file is megabytes and does not fit in a dispatch. Null unless the
+ * markers parse and there is exactly one replacement, of string lines, per
+ * conflict; the result is then judged like any other resolution.
+ */
+export function rebuildConflictResolution(merged: string, hunks: unknown): string | null {
+  const parsed = parseConflictMarkers(merged);
+  if (parsed === null || !Array.isArray(hunks) || hunks.length !== parsed.hunks.length) return null;
+  if (!hunks.every((hunk) => Array.isArray(hunk) && hunk.every((line) => typeof line === "string"))) return null;
+  const lines: string[] = [...parsed.outside[0]];
+  hunks.forEach((hunk: string[], index) => lines.push(...hunk, ...parsed.outside[index + 1]));
+  return lines.join("\n");
+}
+
 // Exact, whitespace included: a trailing space can carry meaning (a shell
 // line continuation, a multi-line string).
 const sameLine = (a: string, b: string) => a === b;

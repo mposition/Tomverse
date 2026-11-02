@@ -807,11 +807,76 @@ export function conflictedFiles(worktree) {
 }
 
 /**
- * The model's resolution: each conflicted file's contents (base64), whether
- * any still holds a marker or a NUL byte, and the lines it wrote that are on
- * neither side, for the secret check.
+ * A file git left with conflict markers, split as the workflow splits it
+ * (lib/prCiAutoFixGuardCore.ts parseConflictMarkers): the text outside the
+ * conflicts, one more piece than there are conflicts. Null when the markers
+ * do not nest as git writes them.
  */
-export function conflictResolution(worktree, paths) {
+function outsideConflicts(text) {
+  const outside = [[]];
+  let state = "outside";
+  for (const line of text.split("\n")) {
+    const bare = line.replace(/\r$/, "");
+    if (/^<{7}( |$)/.test(bare)) {
+      if (state !== "outside") return null;
+      state = "ours";
+    } else if (/^\|{7}( |$)/.test(bare) && state === "ours") {
+      state = "base";
+    } else if (bare === "=======" && (state === "ours" || state === "base")) {
+      state = "theirs";
+    } else if (/^>{7}( |$)/.test(bare)) {
+      if (state !== "theirs") return null;
+      state = "outside";
+      outside.push([]);
+    } else if (state === "outside") {
+      outside[outside.length - 1].push(line);
+    }
+  }
+  return state === "outside" && outside.length > 1 ? outside : null;
+}
+
+/**
+ * The lines that replaced each conflict of `merged` in `resolved`, found the
+ * way the workflow's judge walks them; null when the resolution changed the
+ * text outside the conflicts or the lines would not rebuild it exactly.
+ */
+export function conflictHunks(merged, resolved) {
+  const outside = outsideConflicts(merged);
+  if (outside === null) return null;
+  const lines = resolved.split("\n");
+  const startsAt = (at, piece) => at + piece.length <= lines.length && piece.every((line, index) => lines[at + index] === line);
+  const last = outside.length - 1;
+  const tailAt = lines.length - outside[last].length;
+  if (!startsAt(0, outside[0]) || tailAt < outside[0].length || !startsAt(tailAt, outside[last])) return null;
+  const hunks = [];
+  let at = outside[0].length;
+  for (let index = 0; index < last; index += 1) {
+    let end = tailAt;
+    if (index + 1 < last) {
+      const next = outside[index + 1];
+      end = at;
+      while (end <= tailAt - next.length && !startsAt(end, next)) end += 1;
+      if (end > tailAt - next.length) return null;
+    } else if (end < at) {
+      return null;
+    }
+    hunks.push(lines.slice(at, end));
+    at = end + outside[index + 1].length;
+  }
+  const rebuilt = [...outside[0]];
+  hunks.forEach((hunk, index) => rebuilt.push(...hunk, ...outside[index + 1]));
+  return rebuilt.join("\n") === resolved ? hunks : null;
+}
+
+/**
+ * The model's resolution: for each conflicted file, the lines that replace its
+ * conflicts with the sha256 of the file git left (`merged`, read before the
+ * model ran), or the whole contents (base64) when they cannot be found; whether
+ * any still holds a marker or a NUL byte, and the lines it wrote that are on
+ * neither side, for the secret check. Lines, because a lockfile conflict is a
+ * few of them and the whole lockfile does not fit in a dispatch (#2969, #2976).
+ */
+export function conflictResolution(worktree, paths, merged = {}) {
   const files = {};
   const newLines = [];
   let unresolved = false;
@@ -829,7 +894,10 @@ export function conflictResolution(worktree, paths) {
     const side = (stage) => git(["--literal-pathspecs", "show", `:${stage}:${path}`], { cwd: worktree, allowFailure: true }).stdout ?? "";
     const known = new Set([...side(2).split("\n"), ...side(3).split("\n")].map((line) => line.trimEnd()));
     newLines.push(...text.split("\n").filter((line) => !known.has(line.trimEnd())));
-    files[path] = Buffer.from(text, "utf8").toString("base64");
+    const hunks = typeof merged[path] === "string" ? conflictHunks(merged[path], text) : null;
+    files[path] = hunks
+      ? { merged: createHash("sha256").update(merged[path], "utf8").digest("hex"), hunks }
+      : Buffer.from(text, "utf8").toString("base64");
   }
   return { files, newLines, unresolved, binary };
 }
@@ -1076,6 +1144,15 @@ async function fixConflict(pass, chosen) {
       record(key, { outcome: "no_change", reason: unsupported ? "outside_rules" : "transient" });
       return { outcome: "no_change" };
     }
+    // The files as git left them, which the workflow's own merge reproduces.
+    const merged = {};
+    for (const path of conflicted) {
+      try {
+        merged[path] = readFileSync(join(worktree, path), "utf8");
+      } catch {
+        // Sent whole, then; the judge reads the workflow's merge, not this.
+      }
+    }
     const answer = claude({
       provider, model, cwd: worktree, logDir,
       prompt: conflictPrompt({ files: conflicted }),
@@ -1089,7 +1166,7 @@ async function fixConflict(pass, chosen) {
       record(key, { outcome: answer.timedOut ? "model_timeout" : "model_failed", answer: said });
       return { outcome: "model_failed" };
     }
-    const resolution = conflictResolution(worktree, conflicted);
+    const resolution = conflictResolution(worktree, conflicted, merged);
     if (resolution.unresolved) {
       record(key, { outcome: "no_change", reason, answer: said });
       return { outcome: "no_change" };
