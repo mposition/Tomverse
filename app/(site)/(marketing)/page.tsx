@@ -1,4 +1,5 @@
 import LaunchHomepage from "@/components/marketing/LaunchHomepage";
+import { LandingExperimentBeacon } from "@/components/marketing/LandingExperimentBeacon";
 import { homepageProductLinks } from "@/lib/homepageProductLinks";
 import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { createPageMetadata, getHomeOgCopy, getHomeSeoCopy } from "@/lib/seo";
@@ -17,5 +18,10 @@ export const metadata = createPageMetadata({
 });
 
 export default function LandingPage() {
-  return <LaunchHomepage {...homepageProductLinks("en")} />;
+  return (
+    <>
+      <LaunchHomepage {...homepageProductLinks("en")} />
+      <LandingExperimentBeacon renderedArm="control" locale="en" />
+    </>
+  );
 }

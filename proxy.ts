@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import {
+  EXPERIMENT_COOKIE_NAME,
+  EXPERIMENT_HOLD_COOKIE_NAME,
+  experimentCookieMatchesVariantPath,
+  experimentVariantHomePathname,
+  isExperimentVariantPathname,
   isStaticMarketingPathname,
   localizedMarketingRedirect,
+  resolveExperimentRewrite,
 } from "@/lib/marketingRoutes";
 import { getStaticMarketingCspHashes } from "@/lib/staticMarketingCsp";
 import {
@@ -159,6 +165,16 @@ const withNativeCors = <T extends NextResponse>(
     response.headers.set(key, value);
   }
   return response;
+};
+
+/** A variant path's visitor goes to the default home page it varies. */
+const variantRedirect = (request: NextRequest, home: string) => {
+  const target = request.nextUrl.clone();
+  target.pathname = home;
+  const redirect = NextResponse.redirect(target, 307);
+  redirect.headers.set("Cache-Control", "private, no-store");
+  redirect.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return redirect;
 };
 
 export function proxy(request: NextRequest) {
@@ -337,6 +353,28 @@ export function proxy(request: NextRequest) {
     );
   }
 
+  // Landing experiments (policy 9.1). This function runs again on the path a
+  // rewrite lands on, so a variant path reaches here both ways: rewritten for
+  // an assigned visitor, or named directly. Either is served only to a visitor
+  // whose cookie assigns them to exactly this variant; anyone else is sent to
+  // the home page it varies, because visitors without an assignment always get
+  // the default copy.
+  const variantHome =
+    request.method === "GET" || request.method === "HEAD"
+      ? experimentVariantHomePathname(request.nextUrl.pathname)
+      : null;
+  if (
+    variantHome &&
+    !experimentCookieMatchesVariantPath({
+      pathname: request.nextUrl.pathname,
+      cookie: request.cookies.get(EXPERIMENT_COOKIE_NAME)?.value,
+      hold: request.cookies.get(EXPERIMENT_HOLD_COOKIE_NAME)?.value,
+      killSwitch: process.env.MARKETING_AUTOMATION_KILL_SWITCH,
+    })
+  ) {
+    return variantRedirect(request, variantHome);
+  }
+
   // R-05-LANG. Send a non-English visitor to their own localized page before
   // anything renders, rather than serving English HTML that the client rewrites
   // after first paint. See `localizedMarketingRedirect` for the measurements.
@@ -383,9 +421,44 @@ export function proxy(request: NextRequest) {
   }
 
   const isStaticMarketingRequest = marketing.staticMarketing;
-  const staticMarketingHashes = isStaticMarketingRequest
-    ? getStaticMarketingCspHashes(request.nextUrl.pathname)
+  // Landing experiments (policy 9.1). A home document load whose assignment
+  // cookie names a variant is answered from that variant's prerendered path.
+  // The CSP hashes are those of the path that will be served, and a variant
+  // whose HTML is not in this build is not served at all: the visitor gets the
+  // default page, which is the safe answer to every doubt here.
+  const experimentTarget = isStaticMarketingRequest
+    ? resolveExperimentRewrite({
+        pathname: request.nextUrl.pathname,
+        method: request.method,
+        accept: request.headers.get("accept"),
+        rscHeader: request.headers.get("rsc"),
+        cookie: request.cookies.get(EXPERIMENT_COOKIE_NAME)?.value,
+        hold: request.cookies.get(EXPERIMENT_HOLD_COOKIE_NAME)?.value,
+        killSwitch: process.env.MARKETING_AUTOMATION_KILL_SWITCH,
+      })
     : null;
+  const experimentHashes = experimentTarget
+    ? getStaticMarketingCspHashes(experimentTarget)
+    : null;
+  const rewriteTarget =
+    experimentTarget &&
+    (experimentHashes || process.env.NODE_ENV !== "production")
+      ? experimentTarget
+      : null;
+  const staticMarketingHashes = isStaticMarketingRequest
+    ? rewriteTarget
+      ? experimentHashes
+      : getStaticMarketingCspHashes(request.nextUrl.pathname)
+    : null;
+  if (
+    variantHome &&
+    process.env.NODE_ENV === "production" &&
+    !staticMarketingHashes
+  ) {
+    // A variant whose HTML is not in this build cannot be served, and policy
+    // 9.1 answers that with the default page, as the rewrite does.
+    return variantRedirect(request, variantHome);
+  }
   if (
     isStaticMarketingRequest &&
     process.env.NODE_ENV === "production" &&
@@ -448,10 +521,26 @@ export function proxy(request: NextRequest) {
   if (nonce) requestHeaders.set("x-nonce", nonce);
   requestHeaders.set(policyHeader, csp);
 
-  const response = NextResponse.next({
-    request: { headers: requestHeaders },
-  });
-  if (isStaticMarketingRequest) {
+  let response: NextResponse;
+  if (rewriteTarget) {
+    // The browser's URL stays what it asked for, with its query string; only
+    // the route that answers changes.
+    const target = request.nextUrl.clone();
+    target.pathname = rewriteTarget;
+    response = NextResponse.rewrite(target, {
+      request: { headers: requestHeaders },
+    });
+  } else {
+    response = NextResponse.next({
+      request: { headers: requestHeaders },
+    });
+  }
+  if (rewriteTarget || isExperimentVariantPathname(request.nextUrl.pathname)) {
+    // A variant is for one visitor's assignment, never for a shared cache, and
+    // never for a search index.
+    response.headers.set("Cache-Control", "private, no-store");
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  } else if (isStaticMarketingRequest) {
     response.headers.set(
       "Cache-Control",
       "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"

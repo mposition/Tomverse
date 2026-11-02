@@ -145,9 +145,12 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | `MarketingAsset` | 미디어 CLI가 만든 이미지·영상의 등록부 항목(출처·채널별 AI 표시·locale별 대체 텍스트)과 R2 파일 위치(2026-10-31 운영자) | 상태는 `submitted`·`approved`·`retired`. CLI는 `submitted`만 만들고 업로드 확인은 한 번이며, 승인·은퇴는 사람의 감사 행이 있어야 한다(승인은 정확히 그 파일의 sha256). 승인된 것만 Guard·생성기·게시기가 읽는 등록부에 들어가고, 승인·은퇴마다 등록부 버전이 오른다. 삭제하지 않고 은퇴시킨다 |
 
 - 유입 기록은 새 테이블이 아니라 기존 분석 이벤트에 `marketing_touch`를 추가한다(§10).
-- §6.1의 기능별 스위치와 랜딩 실험 활성화 설정 등 **마케팅이 쓰는 모든 `AppSetting` key**는 `lib/appSettings.ts`에
-  선언하고, 각 key가 감사 기록을 남기는 writer 또는 명시적 read-only 사유를 가진다
-  (`tests/appSettingWriters.test.mjs` 검사 대상).
+- §6.1의 기능별 스위치와 랜딩 실험 활성화 설정 등 **마케팅이 쓰는 모든 `AppSetting` key**는 이름이 한곳에 선언되고
+  (스위치는 `lib/appSettings.ts`가 읽고 `lib/marketingAutomationAccess.ts`가 이름을 가지며, LLM 설정은
+  `lib/marketingLlmBudgetCore.ts`, 랜딩 실험 설정·카운터·사용 id 기록은 `lib/marketingExperimentContract.ts`),
+  각 key가 감사 기록을 남기는 writer 또는 명시적 read-only 사유를 가진다. 스위치 key는
+  `tests/appSettingWriters.test.mjs`가, 랜딩 실험 key는 `tests/marketingExperimentWriters.test.mjs`가 검사한다
+  (`lib/appSettings.ts`는 Prompt Refiner 실행 closure라 새 key를 거기 두지 않는다 — 2026-11-01 서술 정정).
 
 ## 6. 승인·권한·감사
 
@@ -357,6 +360,19 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - 대상 표면: 홈·검색 intent 페이지의 헤드라인·부제·CTA. 가격·결제·약관·개인정보·환불·Auto·starter·AI Review 설명은 제외.
 - 사전 등록(가설·주 지표·최소 표본·고정 기간·중단 규칙) 없이는 시작하지 않는다. 승자의 영구 반영은 PR.
 - 구현 전 캐시·CSP·rewrite 스파이크를 E2E로 통과해야 하며, 실패하면 실험은 연기한다.
+
+**현재 구현 (2026-11-01, 운영자 지시로 정함 — 구현 설명이며 위 구속 조건을 바꾸지 않는다)**
+- 스파이크: `tests/e2e/landing-experiment-spike.spec.ts`(동의 없음→기본 문구·쿠키 없음, 동의+배정→변형, 사용자 간 캐시 혼입 0건, CSP 해시·위반 0건). 통과 기록은 `lib/marketingExperimentCore.ts`의 `MARKETING_EXPERIMENT_SPIKE`이고, 시험이 그 E2E 파일의 존재를 확인한다.
+- proxy는 DB를 읽지 않는다. 배정 쿠키(`tv_exp=<실험id>.<번들id>.<arm>.<언어들>`, 언어는 사전 등록된 언어를 붙여 쓴 `enko`)가 rewrite의 유일한 근거이며, 쿠키는 배정 route가 분석 동의(동의 provider와 같은 규칙: 수락, 또는 미결정이면서 notice_opt_out 국가)와 활성 실험을 확인했을 때만 발급한다. 문서 요청(`Accept: text/html`, Flight 요청 제외)의 홈(`/`, `/{locale}`)만 rewrite하고, 대상 HTML이 이 빌드에 없으면 기본 페이지를 낸다. 규칙은 `lib/marketingRoutes.ts`에 있다(proxy가 새 로컬 import를 얻으면 Prompt Refiner 실행 closure가 커지기 때문).
+- 모든 랜딩 화면의 beacon(`components/marketing/LandingExperimentBeacon.tsx`)이 쿠키를 다시 확인한다. 실험이 멈췄거나 동의가 사라졌거나 다른 실험의 쿠키면 route가 쿠키를 지우고 변형 화면은 한 번 다시 불러 기본 문구로 돌아간다. 즉 중단·동의 철회는 방문자의 **다음 랜딩 화면**에서 효력이 생기고, kill switch 환경변수는 proxy에서 즉시 rewrite를 끈다.
+- 변형 화면의 beacon이 활성 실험 상태를 읽지 못했다는 답(503; 상태 조회 앞의 속도 제한 DB 호출이 실패한 경우도 같다)을 받으면, 배정 쿠키는 그대로 두고(저장소가 회복돼도 다른 arm으로 다시 뽑히지 않게) 짧은 보류 쿠키 `tv_exp_hold`(5분, 값 `1`)를 심고 한 번 다시 불러 기본 문구를 낸다. 보류 쿠키가 있는 동안 proxy는 rewrite하지 않고 직접 변형 경로 요청도 홈으로 보낸다. 보류 쿠키도 동의 철회 때 배정 쿠키와 함께 지운다.
+- 집계 요청이 서버의 확정 거절(읽기 실패 503, 집계 실패 500, 속도 제한 429)로 끝나면 beacon은 세션의 노출·전환 표시를 되돌려 다음 방문이 다시 센다. 응답 자체가 없는 실패는 집계됐는지 알 수 없으므로 되돌리지 않는다.
+- 첫 화면은 어느 arm이든 기본 문구이며 집계하지 않는다(대조군만 집계하면 대조군에 유리해진다). 노출은 쿠키가 이미 있던 화면에서, 렌더된 arm이 쿠키의 arm과 같을 때만 브라우저 세션당 한 번 센다. 전환은 주 CTA 클릭 한 번(세션당)이다. 집계는 `AppSetting`의 원자적 증가 행이며 페이지 세션 수이지 방문자 수가 아니다.
+- 사전 등록의 중단 규칙은 집계에서 평가한다. 조건이 처음 충족된 것을 본 요청이 "충족 기록" 행(`marketingAutomation.experimentTripped.<id>`)을 한 번만(`ON CONFLICT DO NOTHING`) 남기고, 그 뒤 실험은 비활성으로 읽힌다 — 집계가 계속 움직여도(늦게 도착한 클릭 등) 되살아나지 않는다. 이 행은 집계에서 파생된 사실이고 운영자 결정이 아니므로 카운터와 같은 종류의 기록(감사 행 없음)이며, 사람이 Stop을 누를 때 감사 기록과 보고서가 남는다. 안전한 방향(기본 문구로 복귀)으로만 작동한다.
+- 분석 동의는 브라우저가 알리는 값(localStorage의 동의 키)을 서버가 국가별 동의 정책(`resolveAnalyticsConsentPolicy`)과 맞춰 보는 방식이며, 분석 이벤트 입력 route와 같은 신뢰 수준이다. 교차 출처 POST는 proxy의 변경 요청 출처 검사가 막으므로 다른 사이트가 쿠키를 심을 수 없다. 방문자의 활성 실험 조회는 인스턴스별로 15초 캐시된다(Admin 중단·충족 기록은 그 안에 반영).
+- 쿠키와 집계는 방문자가 읽고 조작할 수 있는 클라이언트 증거다. 속도 제한(IP당 분 60·일 2,000) 안에서 자기 arm을 바꾸거나 노출·클릭을 되풀이해 결과에 편향을 줄 수 있으며, 그래서 Admin 화면과 보고서는 이 증거 수준("브라우저가 세고 서버가 기록")을 그대로 적고 서명된 사실로 쓰지 않는다. 저장소를 읽지 못한 요청은 쿠키를 지우지 않고(재배정으로 arm이 바뀌는 것을 막는다) 아무것도 세지 않는다.
+- 시작·중단은 Admin(`marketing:write`+step-up)이며 사람 감사 기록을 같은 트랜잭션에 남긴다. 중단은 두 arm의 `experiment_result` 보고서를 쓴다. 한 번에 실험 하나. 실험 id는 시작할 때 남기는 영구 기록 행(`marketingAutomation.experimentUsed.<id>`)으로 재사용을 막는다(이전 실행의 쿠키가 새 실행의 배정으로 인정되면 결과가 섞이기 때문).
+- 캐시: 변형 응답은 `private, no-store`와 `X-Robots-Tag: noindex`다(Next가 `Vary`를 자기 값으로 덮어쓰므로 `Vary: Cookie`에 기대지 않는다). 공유 캐시(Cloudflare)에서 `tv_exp` 쿠키가 있는 `/`·`/{locale}` 요청을 캐시 우회하는 규칙은 코드 밖 설정이며, 실험을 켜기 전 운영자가 적용해야 한다(없으면 쿠키 방문자도 캐시된 기본 페이지를 받을 뿐 변형이 섞이지는 않는다).
 
 ### 9.2 SEO 코드
 - LLM 단계: 저장소 읽기 권한과 LLM 키만, 도구는 읽기·편집만, 저장소 설정·MCP·hook 미로드, 버전·무결성 고정, 턴·예산 상한.

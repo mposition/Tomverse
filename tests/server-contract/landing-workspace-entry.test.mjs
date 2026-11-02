@@ -48,6 +48,25 @@ const { default: LandingPage } = await import(mod("app/(site)/(marketing)/page.t
 const { default: LocalizedLandingPage } = await import(mod("app/[locale]/page.tsx"));
 const { MarketingShell } = await import(mod("components/marketing/MarketingShell.tsx"));
 
+const findElement = (element, type) => {
+  if (!React.isValidElement(element)) return null;
+  if (element.type === type) return element;
+  for (const child of React.Children.toArray(element.props.children)) {
+    const found = findElement(child, type);
+    if (found) return found;
+  }
+  return null;
+};
+
+// The page also renders the landing experiment beacon beside the homepage, so
+// the homepage is found in the tree rather than assumed to be its root.
+const assertPublicProductLinks = (page, locale) => {
+  const element = findElement(page, LaunchHomepage);
+  assert.ok(element);
+  assert.equal(element.props.reviewInfoHref, `/${locale}/products/review`);
+  assert.equal("chatSurfaceAvailable" in element.props, false);
+};
+
 test.after(() => { delete globalThis.React; });
 
 test("the public trial is available without session, auth-secret or account rollout reads", () => {
@@ -68,9 +87,7 @@ test("the static marketing shell supplies public Guest entry without an account 
 
 test("the root static document supplies product links without a build-time account offer", () => {
   const element = LandingPage();
-  assert.equal(element.type, LaunchHomepage);
-  assert.equal(element.props.reviewInfoHref, "/en/products/review");
-  assert.equal("chatSurfaceAvailable" in element.props, false);
+  assertPublicProductLinks(element, "en");
   assert.equal(sessionReads, 0);
   assert.equal(availabilityReads, 0);
 });
@@ -78,10 +95,7 @@ test("the root static document supplies product links without a build-time accou
 test("each localized static document carries product links without account reads", async () => {
   for (const locale of ["en", "ko", "zh", "fr", "de", "es", "pt"]) {
     const element = await LocalizedLandingPage({ params: Promise.resolve({ locale }) });
-    const landing = element.props.children.props.children;
-    assert.equal(landing.type, LaunchHomepage);
-    assert.equal(landing.props.reviewInfoHref, `/${locale}/products/review`);
-    assert.equal("chatSurfaceAvailable" in landing.props, false);
+    assertPublicProductLinks(element, locale);
   }
   assert.equal(sessionReads, 0);
   assert.equal(availabilityReads, 0);
