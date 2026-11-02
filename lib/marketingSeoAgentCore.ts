@@ -1176,18 +1176,21 @@ export function seoAgentAutoMergeDecision(input: {
   // A pull request from a fork can carry the same branch name; it is not ours and is not looked at again.
   const ours = input.pulls.filter((pull) => pull.head === input.branch && !pull.crossRepository);
   const open = ours.filter((pull) => pull.state === "OPEN");
+  const drift = (pull: SeoPullRequestView): string[] => [
+    ...(pull.base !== SEO_AGENT_AUTO_MERGE_BASE ? ["base_not_develop"] : []),
+    ...(pull.headSha !== input.commitSha ? ["head_is_not_the_validated_commit"] : []),
+  ];
+  // An armed pull request that is no longer what was verified is disarmed first, whatever else is open.
+  const drifted = open.find((pull) => pull.autoMerge && drift(pull).length > 0);
+  if (drifted !== undefined) return { action: "disable", pull: drifted, reasons: drift(drifted) };
   if (open.length > 1) return { action: "none", status: "pr_ambiguous" };
   const pull = open[0];
   if (pull === undefined) {
     if (ours.some((candidate) => candidate.state === "MERGED" && candidate.headSha === input.commitSha)) return { action: "none", status: "merged" };
     return { action: "none", status: ours.length > 0 ? "closed" : "pr_not_found" };
   }
-  const reasons: string[] = [];
-  if (pull.base !== SEO_AGENT_AUTO_MERGE_BASE) reasons.push("base_not_develop");
-  if (pull.headSha !== input.commitSha) reasons.push("head_is_not_the_validated_commit");
-  if (reasons.length > 0) {
-    return pull.autoMerge ? { action: "disable", pull, reasons } : { action: "none", status: "refused", pull, reasons };
-  }
+  const reasons = drift(pull);
+  if (reasons.length > 0) return { action: "none", status: "refused", pull, reasons };
   if (pull.isDraft) return { action: "none", status: "waiting_ready", pull };
   return pull.autoMerge ? { action: "none", status: "already_armed", pull } : { action: "enable", pull };
 }
@@ -1206,10 +1209,12 @@ export type SeoArmResult =
   | SeoVerifyFailure
   | { readonly status: "pull_request_unreadable" }
   | {
-      readonly status: "pr_not_found" | "pr_ambiguous" | "merged" | "closed" | "waiting_ready" | "already_armed" | "auto_merge_turned_off";
+      readonly status: "pr_not_found" | "pr_ambiguous" | "merged" | "closed" | "waiting_ready" | "auto_merge_turned_off";
       readonly branch: string;
     }
-  | { readonly status: "armed" | "disarmed" | "refused"; readonly branch: string; readonly pullRequest: number; readonly reasons?: readonly string[] };
+  /** Auto-merge is on for this pull request now (this look turned it on, or it already was). */
+  | { readonly status: "armed" | "already_armed"; readonly branch: string; readonly pullRequest: number; readonly nodeId: string }
+  | { readonly status: "disarmed" | "refused"; readonly branch: string; readonly pullRequest: number; readonly reasons?: readonly string[] };
 
 /**
  * One look at the pull request and at most one write. The caller repeats it (a draft waits for CI admission) and
@@ -1254,10 +1259,85 @@ export async function runSeoAgentArm(
       return { status: "refused", branch, pullRequest: decision.pull.number, reasons: ["not_the_verified_pull_request"] };
     }
     await ports.enableAutoMerge({ nodeId: decision.pull.nodeId, number: decision.pull.number, headSha: record.commitSha });
-    return { status: "armed", branch, pullRequest: decision.pull.number };
+    return { status: "armed", branch, pullRequest: decision.pull.number, nodeId: decision.pull.nodeId };
+  }
+  if (decision.status === "already_armed" && decision.pull !== undefined) {
+    return { status: "already_armed", branch, pullRequest: decision.pull.number, nodeId: decision.pull.nodeId };
   }
   if (decision.status === "refused") {
     return { status: "refused", branch, pullRequest: decision.pull?.number ?? 0, reasons: decision.reasons };
   }
-  return { status: decision.status, branch };
+  return { status: decision.status as Exclude<typeof decision.status, "refused" | "already_armed">, branch };
+}
+
+export type SeoArmClock = {
+  readonly now: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
+  /** Between two looks while the pull request is waiting for a draft to become ready, or has not appeared. */
+  readonly pollMs: number;
+  /** Between two looks while it is armed: a moved head must be seen long before the required checks can finish on it. */
+  readonly armedPollMs: number;
+  /** Told whenever the pull request this run has armed changes (null: none), so a signal handler can disarm it. */
+  readonly onArmed?: (armed: { nodeId: string; number: number } | null) => void;
+  readonly onResult?: (result: SeoArmResult) => void;
+};
+
+/** Looks at a pull request that cannot be read this many times in a row while armed, then disarms. */
+export const SEO_AGENT_ARM_MAX_UNREADABLE = 5;
+
+/**
+ * The arm step over time. It looks until `windowMs` is over and **never leaves an unattended arming behind**:
+ * GitHub keeps auto-merge on when someone with write access pushes another commit, so an armed pull request is
+ * watched (a moved head or a base that is not develop is disarmed) and is disarmed again when this window ends, when
+ * the pull request can no longer be read, when anything but a merge or a close ends the run, and when it throws.
+ * Waiting for a draft, or for the pull request to appear, is not an arming.
+ */
+export async function runSeoAgentArmLoop(
+  input: { readonly record: unknown; readonly attestation: unknown; readonly env: Readonly<Record<string, string | undefined>>; readonly windowMs: number },
+  ports: SeoArmPorts,
+  clock: SeoArmClock,
+): Promise<SeoArmResult | { readonly status: "window_ended_disarmed"; readonly pullRequest: number }> {
+  const deadline = clock.now() + input.windowMs;
+  const state: { armed: { nodeId: string; number: number } | null } = { armed: null };
+  const setArmed = (next: { nodeId: string; number: number } | null) => {
+    state.armed = next;
+    clock.onArmed?.(next);
+  };
+  const disarmNow = async () => {
+    const pull = state.armed;
+    if (pull === null) return;
+    await ports.disableAutoMerge(pull);
+    setArmed(null);
+  };
+  let unreadable = 0;
+  try {
+    for (;;) {
+      const result = await runSeoAgentArm({ record: input.record, attestation: input.attestation, env: input.env, armedByThisRun: state.armed !== null }, ports);
+      clock.onResult?.(result);
+      unreadable = result.status === "pull_request_unreadable" ? unreadable + 1 : 0;
+      if (result.status === "armed" || result.status === "already_armed") setArmed({ nodeId: result.nodeId, number: result.pullRequest });
+      if (result.status === "disarmed" || result.status === "auto_merge_turned_off" || result.status === "merged" || result.status === "closed") setArmed(null);
+
+      const waiting =
+        result.status === "pr_not_found" || result.status === "waiting_ready" || result.status === "armed" || result.status === "already_armed" ||
+        (result.status === "pull_request_unreadable" && state.armed !== null && unreadable < SEO_AGENT_ARM_MAX_UNREADABLE);
+      if (!waiting) {
+        // Any other end with an arming still standing (a refusal, a failed check, an unreadable list, an ambiguity).
+        await disarmNow();
+        return result;
+      }
+      const pause = state.armed !== null ? clock.armedPollMs : clock.pollMs;
+      if (clock.now() + pause > deadline) {
+        const pull = state.armed;
+        if (pull === null) return result;
+        await disarmNow();
+        return { status: "window_ended_disarmed", pullRequest: pull.number };
+      }
+      await clock.sleep(pause);
+    }
+  } catch (error) {
+    // A throw (GitHub down, a git failure) must not leave what this run armed standing; the original error stays.
+    await disarmNow().catch(() => undefined);
+    throw error;
+  }
 }

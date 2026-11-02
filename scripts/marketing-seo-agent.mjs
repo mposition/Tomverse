@@ -42,12 +42,16 @@
 // arm a draft, and the CI admission bot marks it ready when it has runners. So
 // `--phase arm` (which the publish phase runs by itself after a graduated push)
 // re-verifies the signed record exactly as publish does, then looks at the pull
-// request about once a minute for --wait-minutes (default 180; 0 is one look):
-// it arms an open, non-draft PR from this repository, based on develop, whose head
-// is exactly the validated commit, and it arms at most once per run. If auto-merge
-// is off again afterwards, a person or GitHub turned it off, and it is left off. A
-// PR whose head moved or whose base is not develop is disarmed. Running the phase
-// again later is an operator action and may arm again. GitHub merges the PR once
+// request for --wait-minutes (default 240, at least 1; every minute while it waits, every 20
+// seconds once armed): it arms an open, non-draft PR from this repository, based on
+// develop, whose head is exactly the validated commit, and it arms at most once per
+// run. If auto-merge is off again afterwards, a person or GitHub turned it off, and it
+// is left off. GitHub keeps auto-merge on when someone with write access pushes another
+// commit, so an armed PR is never left unattended: a head that moved or a base that is
+// not develop is disarmed, and so is any arming still standing when the window ends,
+// when the PR cannot be read, on any ending but a merge or a close, on an error and on
+// SIGINT/SIGTERM (a killed process cannot: a person turns auto-merge off in the PR then).
+// Running the phase again later is an operator action and may arm again. GitHub merges the PR once
 // the required checks of develop pass; the App needs Pull requests: write and
 // Contents: write, which the push and the PR already needed.
 //
@@ -98,7 +102,7 @@ import {
   SEO_AGENT_GRADUATED_VARIABLE_ENV,
   SEO_AGENT_JUNIT_PLACEHOLDER,
   SEO_AGENT_POLICY_TESTS,
-  runSeoAgentArm,
+  runSeoAgentArmLoop,
   runSeoAgentPublish,
   runSeoAgentValidate,
   seoAgentAutoMergeGate,
@@ -114,10 +118,12 @@ const BUNDLE_REF = "seo-agent-change";
 const CHECK_TIMEOUT_MS = 20 * 60 * 1000;
 /** One GitHub API request. */
 const GITHUB_TIMEOUT_MS = 30 * 1000;
-/** How long the arm step waits between two looks at the pull request. */
+/** How long the arm step waits between two looks while there is nothing armed yet. */
 const ARM_POLL_MS = 60 * 1000;
-/** How long the arm step keeps looking by default: the CI admission queue and the required checks both take time. */
-const ARM_DEFAULT_WAIT_MINUTES = 180;
+/** ...and while it is armed: a moved head has to be seen long before the required checks can finish on it. */
+const ARM_ARMED_POLL_MS = 20 * 1000;
+/** The window the arm step watches for: the CI admission queue, then the required checks. An arming is disarmed when it ends. */
+const ARM_DEFAULT_WAIT_MINUTES = 240;
 
 const option = (name) => {
   const index = process.argv.indexOf(name);
@@ -618,25 +624,37 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
     },
   };
 
-  // Looks at the pull request until the wait is over. It arms at most once, stops at any final answer, and
-  // keeps looking after arming so that a head that moved or a base that changed is disarmed.
+  // The loop is in the core (runSeoAgentArmLoop): it looks until the window is over, watches an armed pull
+  // request, and disarms it again at the end of the window, on any other ending and on a throw. A signal
+  // does the same here, because GitHub keeps auto-merge on after a person with write access pushes.
+  let armedNow = null;
   const armLoop = async () => {
     const waitMinutes = Number(option("--wait-minutes") ?? ARM_DEFAULT_WAIT_MINUTES);
-    if (!Number.isFinite(waitMinutes) || waitMinutes < 0) throw new Error("--wait-minutes must be a number of minutes, 0 or more");
-    const deadline = Date.now() + waitMinutes * 60 * 1000;
-    let armed = false;
-    for (;;) {
-      const result = await runSeoAgentArm({ record, attestation: attestationFile?.attestation, env: process.env, armedByThisRun: armed }, ports);
-      console.log(JSON.stringify({ event: "marketing_seo_agent_arm", ...result }));
-      if (result.status === "armed" || result.status === "already_armed") armed = true;
-      // pr_not_found and waiting_ready wait for the workflow and for CI admission; armed and already_armed
-      // wait for GitHub's merge. Anything else is a final answer.
-      const waiting = ["pr_not_found", "waiting_ready", "armed", "already_armed"].includes(result.status);
-      if (!waiting || Date.now() + ARM_POLL_MS > deadline) return result;
-      await new Promise((done) => setTimeout(done, ARM_POLL_MS));
+    if (!Number.isFinite(waitMinutes) || waitMinutes < 1) throw new Error("--wait-minutes must be a number of minutes, 1 or more");
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      process.on(signal, () => {
+        const pull = armedNow;
+        const done = () => process.exit(signal === "SIGINT" ? 130 : 143);
+        if (pull === null) done();
+        else ports.disableAutoMerge(pull).then(done, done);
+      });
     }
+    return await runSeoAgentArmLoop(
+      { record, attestation: attestationFile?.attestation, env: process.env, windowMs: waitMinutes * 60 * 1000 },
+      ports,
+      {
+        now: () => Date.now(),
+        sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+        pollMs: ARM_POLL_MS,
+        armedPollMs: ARM_ARMED_POLL_MS,
+        onArmed: (pull) => {
+          armedNow = pull;
+        },
+        onResult: (result) => console.log(JSON.stringify({ event: "marketing_seo_agent_arm", ...result })),
+      },
+    );
   };
-  const armFinished = ["armed", "already_armed", "merged", "off"];
+  const armFinished = ["merged", "off"];
 
   try {
     if (phase === "arm") {

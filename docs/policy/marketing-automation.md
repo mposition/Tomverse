@@ -383,11 +383,15 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   졸업 기록(아래) · 게시 단계와 같은 재검증(서명, base가 원격 develop 위, tree·부모·diff를 git에서 다시 계산, 허용 4개 파일) · PR이 이 저장소의
   열린 PR이고(fork 제외) head 이름이 정확히 `marketing-agent/to-develop/<topic>`이며 **base가 정확히 `develop`**이고(main·release·그 밖의 base는 어떤 경우에도
   켜지 않는다) head commit이 검증한 commit과 같고(GitHub 호출도 `expectedHeadOid`로 묶는다) draft가 아닐 것. 같은 head 이름의 열린 PR이 둘이면 켜지 않는다.
-  이미 켠 뒤 head가 움직이거나 base가 develop이 아니게 되면 끈다. **한 실행에서 한 번만 켠다**: 켠 뒤 auto-merge가 다시 꺼져 있으면 사람이나 GitHub가 끈 것이고
-  다시 켜지 않는다(PR #1256의 교훈). draft는 GitHub가 auto-merge를 받지 않으므로, CI 입장 관리가 ready로 올릴 때까지 실행기가 1분 간격으로 보며 기다린다
-  (`--wait-minutes`, 기본 180분, 0이면 한 번만). 시간이 지난 뒤에는 `--phase arm`을 다시 실행하는 것이 운영자의 행위다. kill switch는 새로 켜는 것을 막고,
-  이미 켜진 PR의 auto-merge는 사람이 `gh pr merge --disable-auto`로 끈다. 이것은 auto-merge를 켜지 않는다는 `Auto PR to Develop`의 규칙(AGENTS.md)과 별개의 예외이며,
-  workflow는 여전히 아무것도 켜지 않는다. 여러 PR이 연달아 병합되면 develop 배포가 겹칠 수 있다는 2026-10-02 결정의 비용은 이 경로에 한해 운영자가 받아들였다.
+  **켜 둔 채로 자리를 비우지 않는다**: GitHub는 쓰기 권한자가 commit을 더 push해도 auto-merge를 그대로 두므로, 켠 PR은 실행기가 20초 간격으로 지켜보고
+  head가 검증한 commit이 아니게 되거나 base가 develop이 아니게 되면 끈다(required check는 새 head에서 다시 돌아야 하므로 이 간격이면 병합보다 먼저 본다).
+  감시 창(`--wait-minutes`, 기본 240분, 최소 1)이 끝나거나, PR을 읽지 못하거나(연속 5회), 병합·닫힘 말고 어떤 이유로든 실행이 끝나거나, 오류·SIGINT/SIGTERM이 나면
+  이 실행이 켠 auto-merge는 끈다. 프로세스가 강제로 죽은 경우만 사람이 PR 화면에서 끈다.
+  **한 실행에서 한 번만 켠다**: 켠 뒤 auto-merge가 다시 꺼져 있으면 사람이나 GitHub가 끈 것이고 다시 켜지 않는다(PR #1256의 교훈).
+  draft는 GitHub가 auto-merge를 받지 않으므로, CI 입장 관리가 ready로 올릴 때까지 1분 간격으로 보며 기다린다(켜기 전에는 아무것도 켜 두지 않는다).
+  창이 끝난 뒤에는 `--phase arm`을 다시 실행하는 것이 운영자의 행위다. kill switch는 새로 켜는 것을 막는다. 이것은 auto-merge를 켜지 않는다는
+  `Auto PR to Develop`의 규칙(AGENTS.md)과 별개의 예외이며, workflow는 여전히 아무것도 켜지 않는다. 여러 PR이 연달아 병합되면 develop 배포가 겹칠 수 있다는
+  2026-10-02 결정의 비용은 이 경로에 한해 운영자가 받아들였다.
   **졸업 기록**: SEO 표면에는 계정 행이 없어, 운영자가 O3를 확인한 뒤 설정하는 저장소 변수 `MARKETING_SEO_AUTO_PR`(정확히 `true`)이 졸업 기록이다.
   비어 있거나 다른 값이거나 읽기에 실패하면 졸업 전이다. 이 변수는 게시 단계가 `to-develop` 브랜치를 쓰게 하는 것이기도 하다.
 - 구현(2026-11-01 운영자 결정, 정책 버전 변경 없음): 실행기 `scripts/marketing-seo-agent.mjs`와 순수 규칙 `lib/marketingSeoAgentCore.ts`.
