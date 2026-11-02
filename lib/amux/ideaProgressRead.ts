@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { amuxIdeaOwnerClosableState } from "@/lib/amux/ideaOwnerCloseCore";
-import { amuxIdeaProgress, type AmuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
+import { amuxIdeaProgress, type AmuxIdeaProgress, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 
 /** How many of the owner's newest open ideas the Ideas tab lists. */
 export const AMUX_IDEA_PROGRESS_LIMIT = 20;
@@ -97,6 +97,9 @@ type SqlIdea = {
 };
 
 const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+/** An owner idea before analysis ends waits on one of these execution approvals. */
+const WAITS_FOR_EXECUTION_APPROVAL: ReadonlySet<AmuxIdeaWaitingFor> =
+  new Set(["execution_approval", "continuation", "owner_input"]);
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   actorUserId: string, now: Date): Promise<AmuxIdeaProgressRow[]> {
@@ -195,10 +198,11 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       ...progress,
       ideaId: idea.id,
       submissionOrigin: idea.submissionOrigin,
-      // A submitted idea counts only while its execution approval is still
-      // open: once a preview is confirmed or a budget held, it is analysis.
+      // An owner idea before analysis ends counts only while it waits for an
+      // execution approval: a page running, or one already approved, is analysis.
       closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
-        (idea.state !== "submitted" || progress.waitingFor === "execution_approval"),
+        (idea.state === "awaiting_owner" || (progress.waitingFor !== null &&
+          WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor))),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,

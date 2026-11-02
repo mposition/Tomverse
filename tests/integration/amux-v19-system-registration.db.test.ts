@@ -360,15 +360,15 @@ async function completedSessionIdea(options: {
       sourceRefIds: ["operator_idea"], portfolioSignal: signal({ contribution: 3,
         urgency: 2, dependencyUnlock: 2, workerCoverage: 2, effort: 2,
         deliveryRisk: 1 }) },
-    ...(options.evidence ? [{ kind: "evidence", localId: "c0:evidence-0",
-      evidenceType: "source_finding", summary: "The fixture names the file it changes.",
-      cardRef: "c0:card-0", sourceRefIds: ["operator_idea"] }] : []),
   ];
+  const evidence = options.evidence ? [{ kind: "evidence", localId: "c0:evidence-0",
+    evidenceType: "source_finding", summary: "The fixture names the file it changes.",
+    cardRef: "c0:card-0", sourceRefIds: ["operator_idea"] }] : [];
   const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "One synthetic system registration plan was analyzed.",
-    remainingScope: null, units });
+    remainingScope: null, units: [...units, ...evidence] });
   const saved = await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
     requestId: randomUUID(), ideaId, previewId, holdId,
     leaseGeneration: claim.leaseGeneration, outcome: "verified_success",
@@ -538,8 +538,8 @@ test("a registered plan's evidence unit leaves no plan approval waiting", async 
   "no approval decides an evidence unit, so it stays proposed");
   const row = (await readAmuxIdeaProgressForOwner(session.user!.id!))
     .find((entry) => entry.ideaId === ideaId);
-  assert.ok(row?.displayKey, "the registered Task names the idea");
-  assert.deepEqual([row.stage, row.waitingFor], ["execution", null],
+  assert.ok(row, "the registered idea is still listed");
+  assert.deepEqual([row.stage, row.waitingFor, row.taskRows.length], ["execution", null, 1],
     "the inbox does not ask for a plan approval nobody can give");
 });
 
