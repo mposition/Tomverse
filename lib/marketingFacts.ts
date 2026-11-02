@@ -50,6 +50,12 @@ export type MarketingGuardClaimFact = {
   /** For a price claim: the stored currency. */
   readonly currency?: string;
   readonly targetsAustralia?: boolean;
+  /**
+   * For a plan price claim: the stored monthly price in minor units and the
+   * plan's name, which an English post's amount is compared against.
+   */
+  readonly priceMinor?: number;
+  readonly planName?: string;
   /** For `model`: the runtime row agreed with the claim. */
   readonly modelMatches?: boolean;
   /** For `feature` and `availability`: the gate is on and the evidence resolves. */
@@ -148,6 +154,8 @@ export function marketingFactsDigest(facts: MarketingGuardFacts): string {
     entry.allowanceStatement ?? null,
     entry.currency ?? null,
     entry.targetsAustralia ?? null,
+    entry.priceMinor ?? null,
+    entry.planName ?? null,
     entry.modelMatches ?? null,
     entry.featurePublic ?? null,
     entry.evidenceStatement ?? null,
@@ -158,7 +166,7 @@ export function marketingFactsDigest(facts: MarketingGuardFacts): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
-        "marketing-guard-facts-v2",
+        "marketing-guard-facts-v3",
         facts.channelId,
         facts.channel,
         facts.locale,

@@ -5879,7 +5879,7 @@ export async function evaluateMarketingAutoPause(
  */
 export const MARKETING_GRADUATE_ACTION = "marketing_account.graduate";
 
-/** Policy O3: seven days after the first success, three approvals, a third of edits. */
+/** Policy O3: seven days after the first success, three approvals, a third of approvals edited. */
 export const MARKETING_GRADUATION_MIN_APPROVALS = 3;
 export const MARKETING_GRADUATION_MIN_DAYS_AFTER_FIRST_SUCCESS = 7;
 
@@ -5902,7 +5902,6 @@ export type MarketingGraduationMetrics = {
   /** The earliest `publishedAt` in the period; the database's clock wrote it. */
   readonly firstSuccessAt: Date | null;
   readonly approvedPostCount: number;
-  readonly operatorRejectedCount: number;
   /** Approved posts whose text a person changed before approving. */
   readonly editedApprovedCount: number;
   readonly draftCount: number;
@@ -5912,8 +5911,8 @@ export type MarketingGraduationMetrics = {
 /**
  * The O3 test, as a pure function of counts: every condition at once, none
  * short-circuited, so a person sees all that is missing. The edit rate is
- * edited approvals over approvals plus the operator's rejections (a rejection
- * is in the denominator), and has to be at most a third.
+ * edited approvals over approvals (owner decision 2026-11-02: a rejection is a
+ * different signal and is not in the denominator), and has to be at most a third.
  */
 export const evaluateMarketingGraduation = (input: {
   readonly status: string;
@@ -5928,8 +5927,8 @@ export const evaluateMarketingGraduation = (input: {
   readonly guardRejectionRate: number;
 } => {
   const { metrics } = input;
-  const decided = metrics.approvedPostCount + metrics.operatorRejectedCount;
-  const operatorEditRate = decided === 0 ? 0 : metrics.editedApprovedCount / decided;
+  const operatorEditRate =
+    metrics.approvedPostCount === 0 ? 0 : metrics.editedApprovedCount / metrics.approvedPostCount;
   const guardRejectionRate =
     metrics.draftCount === 0 ? 0 : metrics.guardRejectedCount / metrics.draftCount;
   const unmet: MarketingGraduationUnmetCode[] = [];
@@ -5948,7 +5947,7 @@ export const evaluateMarketingGraduation = (input: {
   if (metrics.approvedPostCount < MARKETING_GRADUATION_MIN_APPROVALS) {
     unmet.push("approvals_below_minimum");
   }
-  if (metrics.editedApprovedCount * 3 > decided) unmet.push("edit_rate_above_limit");
+  if (metrics.editedApprovedCount * 3 > metrics.approvedPostCount) unmet.push("edit_rate_above_limit");
   if (!input.commentsMonitorHealthy) unmet.push("comments_monitor_unhealthy");
   return { eligible: unmet.length === 0, unmet, operatorEditRate, guardRejectionRate };
 };
@@ -5985,12 +5984,10 @@ async function measureMarketingGraduation(
   }
   let firstSuccessAt: Date | null = null;
   let approvedPostCount = 0;
-  let operatorRejectedCount = 0;
   let editedApprovedCount = 0;
   let guardRejectedCount = 0;
   for (const post of posts) {
     if (post.status === "guard_rejected") guardRejectedCount += 1;
-    if (post.status === "rejected") operatorRejectedCount += 1;
     if (post.publishedAt && (firstSuccessAt === null || post.publishedAt < firstSuccessAt)) {
       firstSuccessAt = post.publishedAt;
     }
@@ -6014,7 +6011,6 @@ async function measureMarketingGraduation(
     observedFromAt,
     firstSuccessAt,
     approvedPostCount,
-    operatorRejectedCount,
     editedApprovedCount,
     draftCount: posts.length,
     guardRejectedCount,

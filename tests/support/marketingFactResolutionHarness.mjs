@@ -29,7 +29,7 @@ const claims = [
     factSource: {
       kind: "billing_plan",
       planId: "pro",
-      fields: ["monthlyPriceCents"],
+      fields: ["name", "monthlyPriceCents", "currency"],
       targetsAustralia: false,
     },
     evidence: null,
@@ -88,8 +88,10 @@ mock.module(mod("lib/billingConfig.ts"), {
   namedExports: {
     getBillingPlansWithFieldSources: async () => [
       {
-        plan: { id: "pro", currency: "AUD" },
+        plan: { id: "pro", name: "Pro", monthlyPriceCents: 1500, currency: "USD" },
         sources: {
+          name: "stored",
+          currency: "stored",
           monthlyPriceCents: world.priceStored ? "stored" : "compiled_default",
         },
         row: { id: "pro", updatedAt: "2026-10-01T00:00:00.000Z" },
@@ -312,6 +314,8 @@ const recorded = await resolveMarketingFactsWithSnapshot(database, {
   locale: "en",
 });
 const snapshot = {
+  // What an English post's amount is compared against, from the stored plan row.
+  priceFact: recorded.facts.claims.find((claim) => claim.claimId === "claim.price"),
   factSnapshot: recorded.factSnapshot,
   sealedDigest: recorded.facts.factSnapshotDigest,
   recomputedDigest: marketingFactSnapshotDigest(recorded.factSnapshot),

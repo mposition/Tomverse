@@ -616,9 +616,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * that moved this value without changing a webhook decision; under the new
  * scope none of them would have. A change to a webhook module, a declaration
  * it uses or a watched column still moves it, and still re-opens verification.
+ *
+ * 2026-11-02: the Guard's reject-code list and its price-wording constants
+ * (owner decision of that date, docs/policy/marketing-automation.md §7.2 rule
+ * 9) are top-level declarations of `lib/marketingGuardCore.ts`, which the
+ * receiver's closure loads. No webhook module, event decision or admission
+ * condition changes; the bytes moved, so prior signed evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "6e879a67e7a439d0eb78487802638efcc4de718a1a93108b3b0aa28600abcc33";
+  "faf980ddfa735eb1b8a93bc713e847f477f666b9c2be98aee18637d8def0a802";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
