@@ -631,6 +631,8 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15 per month, every single day.",
     "Pro is USD 15 per month for the first year.",
     "Pro is USD 15 per month for one year.",
+    "Pro is USD 15 per month /week.",
+    "Pro is USD 15 per month /days.",
     "Pro is USD 15 per month for 1 year.",
     "Pro is USD 15 per month for one month only.",
     "Pro is USD 15 per month; subscription required for one year.",
