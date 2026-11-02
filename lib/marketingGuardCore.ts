@@ -620,7 +620,7 @@ const PRICE_CURRENCY_CODES = "usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
 const PRICE_MENTION = new RegExp(
   `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
     `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks)\\b)?` +
-    `(?:\\s*(?:\\/|\\b(?:per|a|each)\\b)\\s*(mo|months?|yr|years?|wk|weeks?|day)\\b|\\s+(monthly|yearly|annually|weekly)\\b)?`,
+    `(?:\\s*(?:\\/|\\b(?:per|a|each)\\b)\\s*(mo|months?|yr|years?)\\b|\\s+(monthly|yearly|annually)\\b)?`,
   "giu",
 );
 
@@ -628,6 +628,9 @@ const PRICE_MENTION = new RegExp(
 const PRICE_PERIOD_WORD =
   /\b(months?|monthly|mo|years?|yearly|yr|annual|annually|annum|weeks?|weekly|wk|days?|daily|quarterly)\b/iu;
 const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
+
+/** The plans that carry a price, by the names the product gives them (not "Free"). */
+const PRICED_PLAN_NAMES: readonly string[] = Object.freeze(["Pro", "Max"]);
 
 /** What a symbol or a country names. `$` and `¥` name no one currency. */
 const PRICE_SYMBOL_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
@@ -689,12 +692,25 @@ function englishPriceProblems(
     );
     return [
       {
+        name,
         priceMinor: claim.priceMinor,
         currency: claim.currency.toUpperCase(),
         positions: [...lowered.matchAll(pattern)].map((hit) => hit.index ?? 0),
       },
     ];
   });
+  // A plan the post names and the draft did not declare owns the amounts next to
+  // it: "Pro users can upgrade: Max costs USD 15" is a Max price, and nothing
+  // stored backs it. Capitalised, because "max" and "pro" are ordinary words.
+  for (const other of PRICED_PLAN_NAMES) {
+    if (expectations.some((entry) => entry.name === other.toLowerCase())) continue;
+    const positions = [
+      ...text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${other}(?![\\p{L}\\p{N}])`, "gu")),
+    ].map((hit) => hit.index ?? 0);
+    if (positions.length > 0) {
+      expectations.push({ name: other.toLowerCase(), priceMinor: Number.NaN, currency: "", positions });
+    }
+  }
 
   for (const match of lowered.matchAll(PRICE_MENTION)) {
     const [whole, codeBefore, symbol, amount, codeAfter, country, word, periodUnit, periodAdverb] = match;
@@ -724,14 +740,26 @@ function englishPriceProblems(
       continue;
     }
 
-    // The stored price is a monthly one: a price per year, week or day, said
-    // right after the figure or just after it in the same clause, is another
-    // price.
-    const tail = lowered
+    // The stored price is a monthly one, so the post has to say it is: a price
+    // with no period, or per year, week, day or "12 months", is another price.
+    // Read from the figure's own period, else the first one after it or the
+    // last one before it in the same clause.
+    const after = lowered
       .slice(start + whole.length, start + whole.length + 40)
       .split(/[.!?\n;:]/u)[0];
-    const period = periodUnit ?? periodAdverb ?? PRICE_PERIOD_WORD.exec(tail)?.[1];
-    if (period && !isMonthlyPeriod(period)) {
+    const before = lowered
+      .slice(Math.max(0, start - 30), start)
+      .split(/[.!?\n;:]/u)
+      .pop();
+    const periodAfter = periodUnit ?? periodAdverb ?? PRICE_PERIOD_WORD.exec(after)?.[1];
+    const periodBefore = [...(before ?? "").matchAll(new RegExp(PRICE_PERIOD_WORD.source, "giu"))].pop()?.[1];
+    const several = /\b(?:per|every|for)\s+(?:the\s+)?(\d+)\s*-?\s*(?:months?|years?|weeks?|days?)\b/iu.exec(after);
+    if (
+      !periodAfter ||
+      !isMonthlyPeriod(periodAfter) ||
+      (periodBefore && !isMonthlyPeriod(periodBefore)) ||
+      (several && several[1] !== "1")
+    ) {
       codes.push("price_text_mismatch");
       ruleIds.push("price.text-period");
       continue;
@@ -1197,6 +1225,10 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     rejectCodes.push("price_comparison_claim");
     ruleIds.push("rule.price-comparison");
   }
+  // Keyed on the draft's declared locale, which is the author's assertion (the
+  // note on `ruleFires`): the seam is a post written in English and labelled
+  // otherwise, and the earlier rules (hygiene, comparison wording, the always-
+  // approving price category) still read its words.
   if (draft.locale === "en") {
     const problems = englishPriceProblems(draft.renderedText, facts.claims);
     rejectCodes.push(...problems.codes);

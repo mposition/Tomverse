@@ -605,6 +605,10 @@ test("an English price that is not the stored amount is refused", () => {
     "Team is USD 15.00 per month.", // not the plan the claim is about
     "Pro is USD 15.00 or EUR 15.00 per month.", // a second amount in another currency
     "Pro is USD 15.00 per year.", // the right amount for another billing period
+    "Pro annual price: USD 15.",
+    "Pro costs USD 15 per 12 months.",
+    "Pro is USD 15.00.", // no billing period said
+    "Pro users can upgrade: Max costs USD 15 per month.", // the amount belongs to a plan nothing declares
     "Pro is USD 15.00/yr.",
     "Pro is USD 15.00 for the first year.",
     "Pro is USD 15.00 billed yearly.",
@@ -628,7 +632,9 @@ test("a figure with a billing period is a price even with no currency, and a lim
     assert.equal(priceDecision(text).verdict, "approval_required", text);
   }
   assert.equal(priceDecision("Pro is USD  20.00 per month.").verdict, "reject");
-  // "100 messages per month" has a noun between the figure and the period.
+  // "20 a day" is not a billing period, and "100 messages per month" has a noun
+  // between the figure and the period.
+  assert.ok(!priceDecision("Save 20 a day of busywork.", []).codes.includes("price_currency_missing"));
   const limit = priceDecision("Pro includes 100 messages per month.", []);
   assert.ok(!limit.codes.includes("price_currency_missing"));
   assert.ok(!limit.codes.includes("price_text_mismatch"));
