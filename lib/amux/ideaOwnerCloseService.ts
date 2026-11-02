@@ -29,7 +29,7 @@ export class AmuxIdeaOwnerCloseError extends Error {
  *
  * The row and its draft units stay, and proposed units expire on their own
  * clock. The encrypted body keeps its purge time when that is already due
- * (every idea after analysis); an idea closed before its execution approval
+ * (every idea after analysis); an idea closed before an execution approval
  * becomes due for purge at the close, as a cancelled idea must be.
  */
 export async function closeAmuxIdeasForOwner(input: {
@@ -88,11 +88,12 @@ async function closeOne(input: {
           idea.cancelledAt !== null) {
         return { ideaId, result: "not_closable" };
       }
-      if (idea.state === "submitted") {
+      if (idea.state === "submitted" || idea.state === "analyzing") {
         // Execution approval already set a paid analysis going: a confirmed
-        // preview or a held budget keeps its own path (claim, stop, release
-        // of an unused hold). Confirmation and reservation take the same two
-        // locks first, so neither can land between this read and the close.
+        // or running preview, or a held budget, keeps its own path (claim,
+        // stop, release of an unused hold). Confirmation, reservation and
+        // claim take the same two locks first, so none can land between this
+        // read and the close.
         const started = await tx.$queryRaw<Array<{ started: boolean }>>`
           SELECT EXISTS (
             SELECT 1 FROM "AmuxIdeaTransferPreview" p
@@ -110,7 +111,7 @@ async function closeOne(input: {
       }
       // A cancelled idea's body must already be due for purge
       // (AmuxIdeaSubmission_raw_purge_bound_check). After analysis it is, by
-      // analysisCompletedAt; before execution approval the close makes it due
+      // analysisCompletedAt; before an execution approval the close makes it due
       // now, as the queued session cancel does, and the purge worker retires it.
       const rawPurgeAfter = idea.rawPurgeAfter && idea.rawPurgeAfter <= now
         ? idea.rawPurgeAfter : now;
