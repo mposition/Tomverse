@@ -104,7 +104,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   // instant is converted to a naive UTC value before it is compared, and every
   // timestamp leaves as epoch milliseconds (a double, never a session-zone
   // string). An expired proposal can no longer be approved, so it waits for
-  // nobody. Chunks keep their index order and cards their registration order.
+  // nobody; neither does an evidence unit, which no approval ever decides.
+  // Chunks keep their index order and cards their registration order.
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
       SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
@@ -125,6 +126,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       (n."cancelledAt" IS NOT NULL) AS "cancelled",
       (SELECT count(*)::int FROM "AmuxIdeaDraftUnit" u
         WHERE u."ideaId" = n."id" AND u."state" = 'proposed'
+          AND u."unitKind" IN ('node', 'card')
           AND u."expiresAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')) AS "proposedUnits",
       (SELECT json_agg(json_build_object(
           'chunkIndex', c."chunkIndex", 'state', c."state", 'coverageStatus', c."coverageStatus",
