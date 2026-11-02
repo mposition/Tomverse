@@ -14,6 +14,8 @@ import {
     seoAgentCheckIsolation,
     runSeoAgentArm,
     runSeoAgentArmLoop,
+    seoAgentArmEndedCleanly,
+    seoAgentArmWindow,
     runSeoAgentPublish,
     seoAgentAutoMergeDecision,
     seoAgentAutoMergeGate,
@@ -1016,11 +1018,14 @@ test("the runner reads graduation from the operator's variable and arms only thr
     assert.match(runner, /lookupGraduation: async \(\) => process\.env\[SEO_AGENT_GRADUATED_VARIABLE_ENV\] === "true"/);
     assert.doesNotMatch(runner, /graduation lookup is not connected/);
     // After a push the arm loop runs only for a graduated push and only when the arm gate is on.
-    assert.match(runner, /published\.graduated && seoAgentAutoMergeGate\(process\.env, true\)\.on/);
+    assert.match(runner, /published\.graduated && willArm/);
+    assert.match(runner, /const willArm = process\.env\[SEO_AGENT_GRADUATED_VARIABLE_ENV\] === "true" && seoAgentAutoMergeGate\(process\.env, true\)\.on;/);
     // The runner takes its looping from the core, refuses a window under a minute, and disarms on a signal.
     assert.match(runner, /runSeoAgentArmLoop\(/);
-    assert.match(runner, /waitMinutes < 1 \|\| waitMinutes > ARM_MAX_WAIT_MINUTES/);
-    assert.match(runner, /ARM_MAX_WAIT_MINUTES = 45;/);
+    // The window and the token are checked before a graduated push goes out, not after it.
+    assert.match(runner, /seoAgentArmWindow\(/);
+    assert.ok(runner.indexOf("const windowMs = willArm ? await armWindowMs() : 0;") < runner.indexOf("const published = await runSeoAgentPublish("));
+    assert.match(runner, /github-authentication-token-expiration/);
     assert.match(runner, /for \(const signal of \["SIGINT", "SIGTERM"\]\)/);
     assert.match(runner, /await enableInFlight;/);
     assert.match(runner, /attempt < 3/);
@@ -1439,6 +1444,35 @@ test("a look that cannot read keeps the fast cadence of an armed pull request", 
     const { ports } = armPorts({ findPullRequests: sequence([pullRequest({ autoMerge: true })], null, null, [pullRequest({ state: "MERGED", autoMerge: true })]) });
     await loop(ports, clock);
     assert.deepEqual(state.sleeps, [20000, 20000, 20000]);
+});
+
+test("the arm window is the request, cut to the token's life less a margin for the final disarm", () => {
+    const now = 1_000_000_000_000;
+    const window = (requested, tokenExpiresAtMs) => seoAgentArmWindow({ requested, nowMs: now, tokenExpiresAtMs });
+    // No flag: the default; a token that does not end does not cut it.
+    assert.deepEqual(window(undefined, null), { ok: true, windowMs: 45 * MINUTE });
+    assert.deepEqual(window("1", null), { ok: true, windowMs: MINUTE });
+    assert.deepEqual(window("45", null), { ok: true, windowMs: 45 * MINUTE });
+    // A flag that is not 1 to 45 whole-or-fractional minutes, or has no value, is refused.
+    for (const bad of ["0", "46", "-1", "abc", "", "NaN", "Infinity"]) assert.deepEqual(window(bad, null), { ok: false, reason: "wait_minutes_invalid" }, bad);
+    // A token with 20 minutes left allows 10: ten are kept back for the disarm.
+    assert.deepEqual(window(undefined, now + 20 * MINUTE), { ok: true, windowMs: 10 * MINUTE });
+    assert.deepEqual(window("5", now + 20 * MINUTE), { ok: true, windowMs: 5 * MINUTE });
+    // Plenty of token: the request stands.
+    assert.deepEqual(window(undefined, now + 55 * MINUTE), { ok: true, windowMs: 45 * MINUTE });
+    // Too little token, an expired token, or an expiry that cannot be read: refused, before anything is pushed.
+    assert.deepEqual(window(undefined, now + 10 * MINUTE), { ok: false, reason: "token_expires_too_soon" });
+    assert.deepEqual(window(undefined, now + 10 * MINUTE + 59_000), { ok: false, reason: "token_expires_too_soon" });
+    assert.deepEqual(window(undefined, now - MINUTE), { ok: false, reason: "token_expires_too_soon" });
+    assert.deepEqual(window(undefined, "unreadable"), { ok: false, reason: "token_expiry_unreadable" });
+    assert.deepEqual(window(undefined, Number.NaN), { ok: false, reason: "token_expiry_unreadable" });
+});
+
+test("only a merge, an off run, or a person's arming left standing is a clean end", () => {
+    for (const status of ["merged", "off", "already_armed"]) assert.equal(seoAgentArmEndedCleanly(status), true, status);
+    for (const status of ["armed", "disarmed", "refused", "closed", "waiting_ready", "pr_not_found", "pr_ambiguous", "window_ended_disarmed", "auto_merge_turned_off", "pull_request_unreadable", "attestation_invalid", "not_graduated"]) {
+        assert.equal(seoAgentArmEndedCleanly(status), false, status);
+    }
 });
 
 test("turning it off is asked again when an answer is lost", async () => {

@@ -1314,6 +1314,39 @@ export type SeoArmClock = {
   readonly onResult?: (result: SeoArmResult) => void;
 };
 
+/** The default and the most a run may watch: an installation token lasts one hour and a disarm needs it. */
+export const SEO_AGENT_ARM_DEFAULT_WAIT_MINUTES = 45;
+export const SEO_AGENT_ARM_MAX_WAIT_MINUTES = 45;
+/** What is kept back from the token's life for the final disarm and its retries. */
+export const SEO_AGENT_ARM_TOKEN_MARGIN_MS = 10 * 60 * 1000;
+
+/**
+ * How long the arm step may watch. The window is the request (a number of minutes, from 1 to the maximum), cut so
+ * that the token is still good for the final disarm: `tokenExpiresAtMs` is when GitHub says the token ends, `null`
+ * when it sends no expiry (the token does not end), and `"unreadable"` for an expiry that cannot be read, which is
+ * refused. A window under a minute is refused. Pure.
+ */
+export function seoAgentArmWindow(input: {
+  readonly requested: string | undefined;
+  readonly nowMs: number;
+  readonly tokenExpiresAtMs: number | null | "unreadable";
+}): { readonly ok: true; readonly windowMs: number } | { readonly ok: false; readonly reason: "wait_minutes_invalid" | "token_expiry_unreadable" | "token_expires_too_soon" } {
+  const minutes = input.requested === undefined ? SEO_AGENT_ARM_DEFAULT_WAIT_MINUTES : Number(input.requested);
+  if (input.requested === "" || !Number.isFinite(minutes) || minutes < 1 || minutes > SEO_AGENT_ARM_MAX_WAIT_MINUTES) {
+    return { ok: false, reason: "wait_minutes_invalid" };
+  }
+  if (input.tokenExpiresAtMs === "unreadable" || (input.tokenExpiresAtMs !== null && !Number.isFinite(input.tokenExpiresAtMs))) {
+    return { ok: false, reason: "token_expiry_unreadable" };
+  }
+  const windowMs = input.tokenExpiresAtMs === null ? minutes * 60_000 : Math.min(minutes * 60_000, input.tokenExpiresAtMs - input.nowMs - SEO_AGENT_ARM_TOKEN_MARGIN_MS);
+  return windowMs >= 60_000 ? { ok: true, windowMs } : { ok: false, reason: "token_expires_too_soon" };
+}
+
+/** Whether an arm run that ended like this is a clean end for the operator's monitoring (exit 0). */
+export function seoAgentArmEndedCleanly(status: string): boolean {
+  return status === "merged" || status === "off" || status === "already_armed";
+}
+
 /** A pull request that cannot be read this many times in a row ends the run, and disarms it if it is armed. */
 export const SEO_AGENT_ARM_MAX_UNREADABLE = 5;
 
