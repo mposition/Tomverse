@@ -1228,6 +1228,8 @@ export async function runSeoAgentArm(
     readonly attestation: unknown;
     readonly env: Readonly<Record<string, string | undefined>>;
     readonly armedByThisRun?: boolean;
+    /** Told just before the enabling request goes out, so a request whose answer is lost is still cleaned up. */
+    readonly onArming?: (pull: { nodeId: string; number: number }) => void;
   },
   ports: SeoArmPorts,
 ): Promise<SeoArmResult> {
@@ -1258,8 +1260,18 @@ export async function runSeoAgentArm(
     if (decision.pull.base !== SEO_AGENT_AUTO_MERGE_BASE || decision.pull.headSha !== record.commitSha || decision.pull.crossRepository) {
       return { status: "refused", branch, pullRequest: decision.pull.number, reasons: ["not_the_verified_pull_request"] };
     }
-    await ports.enableAutoMerge({ nodeId: decision.pull.nodeId, number: decision.pull.number, headSha: record.commitSha });
-    return { status: "armed", branch, pullRequest: decision.pull.number, nodeId: decision.pull.nodeId };
+    const target = { nodeId: decision.pull.nodeId, number: decision.pull.number };
+    input.onArming?.(target);
+    await ports.enableAutoMerge({ ...target, headSha: record.commitSha });
+    // The base and the head were read before the write and are not bound to it (only the head is, by the
+    // request): read them again now that it is on, and take it back at once if either is not what was verified.
+    const after = await ports.findPullRequests(branch).catch(() => null);
+    const drift = after === null ? null : seoAgentAutoMergeDecision({ pulls: after, branch, commitSha: record.commitSha });
+    if (after === null || drift?.action === "disable") {
+      await ports.disableAutoMerge(target);
+      return { status: "disarmed", branch, pullRequest: target.number, reasons: drift?.action === "disable" ? drift.reasons : ["unreadable_after_arming"] };
+    }
+    return { status: "armed", branch, pullRequest: target.number, nodeId: target.nodeId };
   }
   if (decision.status === "already_armed" && decision.pull !== undefined) {
     return { status: "already_armed", branch, pullRequest: decision.pull.number, nodeId: decision.pull.nodeId };
@@ -1282,7 +1294,7 @@ export type SeoArmClock = {
   readonly onResult?: (result: SeoArmResult) => void;
 };
 
-/** Looks at a pull request that cannot be read this many times in a row while armed, then disarms. */
+/** A pull request that cannot be read this many times in a row ends the run, and disarms it if it is armed. */
 export const SEO_AGENT_ARM_MAX_UNREADABLE = 5;
 
 /**
@@ -1306,13 +1318,26 @@ export async function runSeoAgentArmLoop(
   const disarmNow = async () => {
     const pull = state.armed;
     if (pull === null) return;
-    await ports.disableAutoMerge(pull);
-    setArmed(null);
+    // Turning it off is idempotent, so a lost answer is simply asked again; the last failure stays visible.
+    let failure: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await ports.disableAutoMerge(pull);
+        setArmed(null);
+        return;
+      } catch (error) {
+        failure = error;
+      }
+    }
+    throw failure;
   };
   let unreadable = 0;
   try {
     for (;;) {
-      const result = await runSeoAgentArm({ record: input.record, attestation: input.attestation, env: input.env, armedByThisRun: state.armed !== null }, ports);
+      const result = await runSeoAgentArm(
+        { record: input.record, attestation: input.attestation, env: input.env, armedByThisRun: state.armed !== null, onArming: setArmed },
+        ports,
+      );
       clock.onResult?.(result);
       unreadable = result.status === "pull_request_unreadable" ? unreadable + 1 : 0;
       if (result.status === "armed" || result.status === "already_armed") setArmed({ nodeId: result.nodeId, number: result.pullRequest });
@@ -1320,7 +1345,7 @@ export async function runSeoAgentArmLoop(
 
       const waiting =
         result.status === "pr_not_found" || result.status === "waiting_ready" || result.status === "armed" || result.status === "already_armed" ||
-        (result.status === "pull_request_unreadable" && state.armed !== null && unreadable < SEO_AGENT_ARM_MAX_UNREADABLE);
+        (result.status === "pull_request_unreadable" && unreadable < SEO_AGENT_ARM_MAX_UNREADABLE);
       if (!waiting) {
         // Any other end with an arming still standing (a refusal, a failed check, an unreadable list, an ambiguity).
         await disarmNow();

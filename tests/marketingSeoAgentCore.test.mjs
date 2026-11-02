@@ -1257,7 +1257,8 @@ test("the loop waits for a draft to become ready, arms once, then watches until 
     const { ports, writes } = armPorts({
         findPullRequests: sequence(
             [], [pullRequest({ isDraft: true })], [pullRequest({ isDraft: true })], [pullRequest()],
-            [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true })], [pullRequest({ state: "MERGED", autoMerge: true })],
+            // The read that follows the arming, then the looks of the watch.
+            [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true })], [pullRequest({ state: "MERGED", autoMerge: true })],
         ),
     });
     const result = await loop(ports, clock);
@@ -1313,10 +1314,10 @@ test("the loop gives up on a draft that never becomes ready without having armed
 });
 
 test("an armed pull request that can no longer be read is disarmed after a few looks, one blip is tolerated", async () => {
-    const blip = armPorts({ findPullRequests: sequence([pullRequest()], null, [pullRequest({ autoMerge: true })], [pullRequest({ state: "MERGED", autoMerge: true })]) });
+    const blip = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], null, [pullRequest({ autoMerge: true })], [pullRequest({ state: "MERGED", autoMerge: true })]) });
     assert.equal((await loop(blip.ports, loopClock().clock)).status, "merged");
     assert.deepEqual(blip.writes.map(([kind]) => kind), ["enable"]);
-    const gone = armPorts({ findPullRequests: sequence([pullRequest()], null) });
+    const gone = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], null) });
     const result = await loop(gone.ports, loopClock().clock);
     assert.equal(result.status, "pull_request_unreadable");
     assert.deepEqual(gone.writes.map(([kind]) => kind), ["enable", "disable"]);
@@ -1341,6 +1342,40 @@ test("any other ending with an arming standing disarms it, and so does a throw",
     const midway = armPorts({ commitFacts: () => { if (++calls === 3) throw new Error("git failed"); return { tree: TREE, parent: BASE, parentCount: 1 }; }, findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
     await assert.rejects(loop(midway.ports, loopClock().clock), /git failed/);
     assert.deepEqual(midway.writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("a base that changed between the read and the arming is caught by the read that follows it, and taken back at once", async () => {
+    const { clock } = loopClock();
+    const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ base: "main", autoMerge: true })]) });
+    const result = await loop(ports, clock);
+    assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["base_not_develop"] });
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("an arming request whose answer is lost is still taken back, and so is an unreadable pull request after it", async () => {
+    // The request reached GitHub, the answer did not.
+    const lost = armPorts({ findPullRequests: [pullRequest()] });
+    const original = lost.ports.enableAutoMerge;
+    lost.ports.enableAutoMerge = async (pull) => { await original(pull); throw new Error("timeout"); };
+    await assert.rejects(loop(lost.ports, loopClock().clock), /timeout/);
+    assert.deepEqual(lost.writes.map(([kind]) => kind), ["enable", "disable"]);
+    // The read after the request fails.
+    let reads = 0;
+    const blind = armPorts({ findPullRequests: () => (++reads === 1 ? [pullRequest()] : null) });
+    const result = await runSeoAgentArm({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV }, blind.ports);
+    assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["unreadable_after_arming"] });
+    assert.deepEqual(blind.writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("turning it off is asked again when an answer is lost", async () => {
+    let tries = 0;
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]),
+        disableAutoMerge: (pull) => { if (++tries < 3) throw new Error("timeout"); writes.push(["disable", pull]); },
+    });
+    const result = await loop(ports, loopClock().clock, 1);
+    assert.equal(result.status, "window_ended_disarmed");
+    assert.equal(tries, 3);
 });
 
 test("the loop is off, and touches nothing, behind the kill switch and without the auto-merge switch", async () => {
