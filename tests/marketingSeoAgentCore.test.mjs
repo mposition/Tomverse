@@ -1402,6 +1402,20 @@ test("an arming a person made is watched but not taken back by the end of the wi
     assert.deepEqual(drifted.writes.map(([kind]) => kind), ["disable"]);
 });
 
+test("any armed pull request is watched at the fast cadence, and a drift disarm is asked again when an answer is lost", async () => {
+    const { clock, state } = loopClock();
+    const person = armPorts({ findPullRequests: [pullRequest({ autoMerge: true })] });
+    await loop(person.ports, clock, 2);
+    assert.ok(state.sleeps.length > 0 && state.sleeps.every((ms) => ms === 20000), JSON.stringify(state.sleeps));
+    let tries = 0;
+    const drifted = armPorts({
+        findPullRequests: [pullRequest({ autoMerge: true, headSha: "a".repeat(40) })],
+        disableAutoMerge: (pull) => { if (++tries < 3) throw new Error("timeout"); drifted.writes.push(["disable", pull]); },
+    });
+    assert.equal((await loop(drifted.ports, loopClock().clock)).status, "disarmed");
+    assert.equal(tries, 3);
+});
+
 test("a drifted arming that shows up right after arming is the one taken back", async () => {
     const { ports, writes } = armPorts({
         findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42, base: "main", autoMerge: true })]),

@@ -1204,6 +1204,20 @@ export type SeoArmPorts = SeoVerifyPorts & {
   readonly disableAutoMerge: (pull: { nodeId: string; number: number }) => Promise<void>;
 };
 
+/** Turning auto-merge off is idempotent: an answer that is lost is asked for again, and the last failure stays visible. */
+async function disableWithRetry(ports: Pick<SeoArmPorts, "disableAutoMerge">, pull: { nodeId: string; number: number }): Promise<void> {
+  let failure: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await ports.disableAutoMerge(pull);
+      return;
+    } catch (error) {
+      failure = error;
+    }
+  }
+  throw failure;
+}
+
 export type SeoArmResult =
   | { readonly status: "off"; readonly reason: string }
   | SeoVerifyFailure
@@ -1214,7 +1228,7 @@ export type SeoArmResult =
     }
   /** Auto-merge is on for this pull request now (this look turned it on, or it already was). */
   | { readonly status: "armed" | "already_armed"; readonly branch: string; readonly pullRequest: number; readonly nodeId: string }
-  | { readonly status: "disarmed" | "refused"; readonly branch: string; readonly pullRequest: number; readonly reasons?: readonly string[] };
+  | { readonly status: "disarmed" | "refused"; readonly branch: string; readonly pullRequest?: number; readonly reasons?: readonly string[] };
 
 /**
  * One look at the pull request and at most one write. The caller repeats it (a draft waits for CI admission) and
@@ -1251,7 +1265,7 @@ export async function runSeoAgentArm(
   const decision = seoAgentAutoMergeDecision({ pulls, branch, commitSha: record.commitSha });
 
   if (decision.action === "disable") {
-    await ports.disableAutoMerge({ nodeId: decision.pull.nodeId, number: decision.pull.number });
+    await disableWithRetry(ports, { nodeId: decision.pull.nodeId, number: decision.pull.number });
     return { status: "disarmed", branch, pullRequest: decision.pull.number, reasons: decision.reasons };
   }
   if (decision.action === "enable") {
@@ -1268,13 +1282,13 @@ export async function runSeoAgentArm(
     const after = await ports.findPullRequests(branch).catch(() => null);
     const drift = after === null ? null : seoAgentAutoMergeDecision({ pulls: after, branch, commitSha: record.commitSha });
     if (after === null) {
-      await ports.disableAutoMerge(target);
+      await disableWithRetry(ports, target);
       return { status: "disarmed", branch, pullRequest: target.number, reasons: ["unreadable_after_arming"] };
     }
     if (drift?.action === "disable") {
       // The drifted arming is the one taken back, which may be another pull request than the one just armed; the
       // one just armed then stays and the next look (two open pull requests are ambiguous) takes it back too.
-      await ports.disableAutoMerge({ nodeId: drift.pull.nodeId, number: drift.pull.number });
+      await disableWithRetry(ports, { nodeId: drift.pull.nodeId, number: drift.pull.number });
       if (drift.pull.number === target.number) return { status: "disarmed", branch, pullRequest: target.number, reasons: drift.reasons };
     }
     return { status: "armed", branch, pullRequest: target.number, nodeId: target.nodeId };
@@ -1283,7 +1297,7 @@ export async function runSeoAgentArm(
     return { status: "already_armed", branch, pullRequest: decision.pull.number, nodeId: decision.pull.nodeId };
   }
   if (decision.status === "refused") {
-    return { status: "refused", branch, pullRequest: decision.pull?.number ?? 0, reasons: decision.reasons };
+    return { status: "refused", branch, ...(decision.pull !== undefined ? { pullRequest: decision.pull.number } : {}), reasons: decision.reasons };
   }
   return { status: decision.status as Exclude<typeof decision.status, "refused" | "already_armed">, branch };
 }
@@ -1324,21 +1338,13 @@ export async function runSeoAgentArmLoop(
   const disarmNow = async () => {
     const pull = state.armed;
     if (pull === null) return;
-    // Turning it off is idempotent, so a lost answer is simply asked again; the last failure stays visible.
-    let failure: unknown = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        await ports.disableAutoMerge(pull);
-        setArmed(null);
-        return;
-      } catch (error) {
-        failure = error;
-      }
-    }
-    throw failure;
+    await disableWithRetry(ports, pull);
+    setArmed(null);
   };
   let unreadable = 0;
   let seenArmed = false;
+  // The last look found an armed pull request, whoever armed it: watched at the fast cadence.
+  let watchedArmed = false;
   try {
     for (;;) {
       const result = await runSeoAgentArm(
@@ -1350,7 +1356,8 @@ export async function runSeoAgentArmLoop(
       // Only an arming this run made is this run's to take back; one that was already on is watched for drift (the
       // decision disarms it then) and left to whoever turned it on.
       if (result.status === "armed") setArmed({ nodeId: result.nodeId, number: result.pullRequest });
-      if (result.status === "armed" || result.status === "already_armed") seenArmed = true;
+      watchedArmed = result.status === "armed" || result.status === "already_armed";
+      if (watchedArmed) seenArmed = true;
       if (result.status === "auto_merge_turned_off" || result.status === "merged" || result.status === "closed") setArmed(null);
       // A pull request other than the one this run armed can be the one that was disarmed; the tracked one is then
       // still armed and is taken back below, with the run's other endings.
@@ -1364,7 +1371,7 @@ export async function runSeoAgentArmLoop(
         await disarmNow();
         return result;
       }
-      const pause = state.armed !== null ? clock.armedPollMs : clock.pollMs;
+      const pause = watchedArmed || state.armed !== null ? clock.armedPollMs : clock.pollMs;
       if (clock.now() + pause > deadline) {
         const pull = state.armed;
         if (pull === null) return result;

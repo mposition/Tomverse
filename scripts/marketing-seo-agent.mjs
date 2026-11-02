@@ -643,6 +643,8 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
     return request;
   };
   const armLoop = async () => {
+    // A flag with no value after it is a mistake, not the default.
+    if (process.argv.includes("--wait-minutes") && option("--wait-minutes") === undefined) throw new Error("--wait-minutes needs a number of minutes");
     const waitMinutes = Number(option("--wait-minutes") ?? ARM_DEFAULT_WAIT_MINUTES);
     if (!Number.isFinite(waitMinutes) || waitMinutes < 1) throw new Error("--wait-minutes must be a number of minutes, 1 or more");
     for (const signal of ["SIGINT", "SIGTERM"]) {
