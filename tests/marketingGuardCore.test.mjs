@@ -625,6 +625,8 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15.00 per month, billed weekly.",
     "Pro is USD 15 per month, billed every week.",
     "Pro is USD 15 per month, payable weekly.",
+    "Pro is USD 15 per month, debited weekly.",
+    "Pro is USD 15 per month, collected daily.",
     "Pro is USD 15 per month, billed every quarter.",
     "Pro is USD 15 per month, billed every second month.",
     "Pro is USD 15 per month, renews automatically.",

@@ -633,7 +633,7 @@ const PRICE_MENTION = new RegExp(
  * months" are the same sentence to a reader.
  */
 const NON_MONTHLY_BILLING =
-  /\b(?:annual(?:ly)?|yearly|yr|quarterly|(?:semi|bi)-?(?:annual(?:ly)?|monthly|weekly)|fortnight(?:ly)?|(?:billed|charged|paid|billing)\s+(?:\w+\s+){0,3}(?:weeks?|days?|weekly|daily)|per\s+(?:week|day)|(?:every|each)\s+(?:other|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s*-?\s*(?:weeks?|days?)|(?:per|a|each|every)\s+(?:\w+\s+)?years?|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
+  /\b(?:annual(?:ly)?|yearly|yr|quarterly|(?:semi|bi)-?(?:annual(?:ly)?|monthly|weekly)|fortnight(?:ly)?|(?:billed|charged|paid|billing)\s+(?:\w+\s+){0,3}(?:weeks?|days?)|weekly|daily|hourly|per\s+(?:week|day)|(?:every|each)\s+(?:other|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s*-?\s*(?:weeks?|days?)|(?:per|a|each|every)\s+(?:\w+\s+)?years?|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
 /**
  * Billing mechanics in any words: a post that states a price says it per month
  * and nothing about how it is billed, paid or renewed. A list of periods
@@ -643,7 +643,7 @@ const NON_MONTHLY_BILLING =
  * stored price does not carry out of the post.
  */
 const BILLING_TALK =
-  /\b(?:bill(?:ed|ing|s)?|charg(?:e|es|ed|ing)|pay(?:s|ment|ments|able|ing)?|paid|renew(?:s|al|ed|ing)?|cycle|invoice[ds]?|prepa(?:y|id)|upfront|installments?|quarters?|(?:second|third|fourth|other)\s+month)\b/iu;
+  /\b(?:bill(?:ed|ing|s)?|charg(?:e|es|ed|ing)|pay(?:s|ment|ments|able|ing)?|paid|renew(?:s|al|ed|ing)?|cycle|invoice[ds]?|prepa(?:y|id)|debit(?:s|ed|ing)?|collect(?:s|ed|ion)?|deduct(?:s|ed|ion)?|withdraw(?:s|n|al)?|upfront|installments?|quarters?|(?:second|third|fourth|other)\s+month)\b/iu;
 const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
 
 /** The plans that carry a price, by the names the product gives them (not "Free"). */
