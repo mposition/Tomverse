@@ -12,7 +12,10 @@ import {
     parseGitRawDiff,
     SEO_AGENT_PUSH_CREDENTIAL_ENVS,
     seoAgentCheckIsolation,
+    runSeoAgentArm,
     runSeoAgentPublish,
+    seoAgentAutoMergeDecision,
+    seoAgentAutoMergeGate,
     seoAgentAttest,
     seoAgentAttestationMatches,
     runSeoAgentValidate,
@@ -987,14 +990,231 @@ test("an import that fails stops the run before a push", async () => {
 // Authority the agent does not have
 // ---------------------------------------------------------------------------
 
-test("neither the core nor the runner has any merge or auto-merge call", () => {
-    for (const path of ["../lib/marketingSeoAgentCore.ts", "../scripts/marketing-seo-agent.mjs"]) {
-        const source = readFileSync(new URL(path, import.meta.url), "utf8");
-        assert.doesNotMatch(source, /enablePullRequestAutoMerge|auto_merge|merge_method|pulls\/\$\{[^}]*\}\/merge|\/merge["'`]|gh pr merge|mergePullRequest/i, path);
+test("nothing merges a pull request; the one merge-related write is GitHub's auto-merge, armed in the runner and nowhere else", () => {
+    const core = readFileSync(new URL("../lib/marketingSeoAgentCore.ts", import.meta.url), "utf8");
+    const runner = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
+    // No immediate merge anywhere: no REST merge, no gh merge, no mergePullRequest mutation, no ready/draft switch.
+    for (const [path, source] of [["core", core], ["runner", runner]]) {
+        assert.doesNotMatch(source, /\bauto_merge\s*:|merge_method|pulls\/\$\{[^}]*\}\/merge|\/merge["'`]|gh pr merge|mergePullRequest\b|markPullRequestReadyForReview|convertPullRequestToDraft|update-branch/i, path);
     }
+    // The core never speaks GitHub: it holds the port names, not the mutation.
+    assert.doesNotMatch(core, /graphql|mutation|api\.github\.com/i);
+    // The runner has exactly one enabling mutation, a merge commit, bound to the validated head, and no squash or rebase.
+    assert.equal(runner.match(/enablePullRequestAutoMerge\(/g)?.length, 1);
+    assert.match(runner, /mergeMethod: MERGE, expectedHeadOid: \$sha/);
+    assert.doesNotMatch(runner, /mergeMethod: (SQUASH|REBASE)/);
+    assert.equal(runner.match(/disablePullRequestAutoMerge\(/g)?.length, 1);
+    // Neither the validate nor the publish ports can arm anything; only the arm ports have the writes.
     for (const { ports } of [validatePorts(), publishPorts()]) {
         assert.deepEqual(Object.keys(ports).filter((name) => /merge/i.test(name)), []);
     }
+});
+
+test("the runner reads graduation from the operator's variable and arms only through the gate", () => {
+    const runner = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
+    assert.match(runner, /lookupGraduation: async \(\) => process\.env\[SEO_AGENT_GRADUATED_VARIABLE_ENV\] === "true"/);
+    assert.doesNotMatch(runner, /graduation lookup is not connected/);
+    // After a push the arm loop runs only for a graduated push and only when the arm gate is on.
+    assert.match(runner, /published\.graduated && seoAgentAutoMergeGate\(process\.env, true\)\.on/);
+    // The pull requests are read by head branch name in this repository, and the fork flag is read with them.
+    assert.match(runner, /headRefName: \$head/);
+    assert.match(runner, /isCrossRepository/);
+});
+
+// ---------------------------------------------------------------------------
+// The arm step, over fake ports
+// ---------------------------------------------------------------------------
+
+const GRADUATED_BRANCH = "marketing-agent/to-develop/improve-hreflang";
+const pullRequest = (overrides = {}) => ({
+    nodeId: "PR_node_1", number: 41, state: "OPEN", isDraft: false, base: "develop", head: GRADUATED_BRANCH, headSha: COMMIT,
+    crossRepository: false, autoMerge: false, ...overrides,
+});
+const ARM_ENV = { ...PUBLISH_ENV, MARKETING_SEO_AUTO_MERGE: "true" };
+
+const armPorts = (overrides = {}) => {
+    const writes = [];
+    const base = recorder(
+        {
+            bundleSha256: BUNDLE,
+            baseOnDevelop: true,
+            importCommit: undefined,
+            commitFacts: { tree: TREE, parent: BASE, parentCount: 1 },
+            diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: GOOD_PATCH },
+            lookupGraduation: true,
+            findPullRequests: [pullRequest()],
+            enableAutoMerge: (pull) => writes.push(["enable", pull]),
+            disableAutoMerge: (pull) => writes.push(["disable", pull]),
+        },
+        overrides,
+    );
+    return { ...base, writes };
+};
+const arm = (ports, { env = ARM_ENV, record = RECORD, attestation = ATTESTATION, armedByThisRun = false } = {}) =>
+    runSeoAgentArm({ record, attestation, env, armedByThisRun }, ports);
+
+test("the auto-merge gate: the agent on, the switch exactly true, the kill switch empty, and graduated", () => {
+    assert.deepEqual(seoAgentAutoMergeGate(ARM_ENV, true), { on: true });
+    assert.deepEqual(seoAgentAutoMergeGate({ ...ARM_ENV, MARKETING_AUTOMATION_KILL_SWITCH: "1" }, true), { on: false, reason: "kill_switch" });
+    assert.deepEqual(seoAgentAutoMergeGate({ ...ARM_ENV, MARKETING_SEO_AGENT_ENABLED: "false" }, true), { on: false, reason: "switch_off" });
+    assert.deepEqual(seoAgentAutoMergeGate(ARM_ENV, false), { on: false, reason: "not_graduated" });
+    assert.deepEqual(seoAgentAutoMergeGate(PUBLISH_ENV, true), { on: false, reason: "auto_merge_switch_off" });
+    for (const value of ["", "false", "1", "TRUE", "yes", " true"]) {
+        assert.equal(seoAgentAutoMergeGate({ ...ARM_ENV, MARKETING_SEO_AUTO_MERGE: value }, true).on, false, JSON.stringify(value));
+    }
+});
+
+test("arm with every gate on: a verified, ready pull request into develop is armed once, bound to the validated commit", async () => {
+    const { ports, calls, writes } = armPorts();
+    assert.deepEqual(await arm(ports), { status: "armed", branch: GRADUATED_BRANCH, pullRequest: 41 });
+    assert.deepEqual(writes, [["enable", { nodeId: "PR_node_1", number: 41, headSha: COMMIT }]]);
+    // The publish checks come first, then graduation, then the pull request.
+    for (const [before, after] of [["bundleSha256", "importCommit"], ["baseOnDevelop", "importCommit"], ["importCommit", "commitFacts"], ["commitFacts", "diff"], ["diff", "lookupGraduation"], ["lookupGraduation", "findPullRequests"], ["findPullRequests", "enableAutoMerge"]]) {
+        assert.ok(calls.indexOf(before) >= 0 && calls.indexOf(before) < calls.indexOf(after), `${before} before ${after}`);
+    }
+});
+
+test("arm is off, and touches nothing, for the kill switch, a missing switch, or a missing agent switch", async () => {
+    const cases = [
+        [{ ...ARM_ENV, MARKETING_AUTOMATION_KILL_SWITCH: "1" }, "kill_switch"],
+        [PUBLISH_ENV, "auto_merge_switch_off"],
+        [{ ...ARM_ENV, MARKETING_SEO_AUTO_MERGE: "false" }, "auto_merge_switch_off"],
+        [{ ...ARM_ENV, MARKETING_SEO_AGENT_ENABLED: "" }, "switch_off"],
+    ];
+    for (const [env, reason] of cases) {
+        const { ports, calls } = armPorts();
+        assert.deepEqual(await arm(ports, { env }), { status: "off", reason });
+        assert.deepEqual(calls, [], reason);
+    }
+});
+
+test("arm before graduation, or when the graduation lookup fails or says anything but true, writes nothing", async () => {
+    for (const lookup of [false, () => { throw new Error("down"); }, "true", undefined, null]) {
+        const { ports, calls, writes } = armPorts({ lookupGraduation: lookup });
+        assert.deepEqual(await arm(ports), { status: "off", reason: "not_graduated" });
+        assert.deepEqual(writes, []);
+        assert.ok(!calls.includes("findPullRequests"));
+    }
+});
+
+test("arm re-runs every publish check and writes nothing when one fails", async () => {
+    const wrongRaw = GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0.github/workflows/auto-pr-to-develop.yml\0`;
+    const wrongNumstat = GOOD_NUMSTAT + "1\t1\t.github/workflows/auto-pr-to-develop.yml\0";
+    const failures = [
+        [{ bundleSha256: "9".repeat(64) }, { status: "attestation_invalid" }],
+        [{ baseOnDevelop: false }, { status: "base_not_on_develop" }],
+        [{ commitFacts: { tree: "f".repeat(40), parent: BASE, parentCount: 1 } }, { status: "tree_mismatch", stage: "before_push" }],
+        [{ commitFacts: { tree: TREE, parent: BASE, parentCount: 2 } }, { status: "tree_mismatch", stage: "before_push" }],
+        [{ diff: { raw: wrongRaw, numstat: wrongNumstat, patch: GOOD_PATCH } }, { status: "validation_failed", problems: ["path_outside_allowlist"] }],
+    ];
+    for (const [overrides, expected] of failures) {
+        const { ports, writes, calls } = armPorts(overrides);
+        assert.deepEqual(await arm(ports), expected);
+        assert.deepEqual(writes, []);
+        assert.ok(!calls.includes("findPullRequests"));
+    }
+    const unsigned = armPorts();
+    assert.deepEqual(await arm(unsigned.ports, { attestation: null }), { status: "attestation_invalid" });
+    const llm = armPorts();
+    assert.deepEqual(await arm(llm.ports, { env: { ...ARM_ENV, MARKETING_LLM_API_KEY: "x" } }), { status: "wrong_environment", problems: ["MARKETING_LLM_API_KEY"] });
+    const unparsed = armPorts();
+    assert.deepEqual(await arm(unparsed.ports, { record: { ...RECORD, paths: ["package.json"] } }), { status: "invalid_record" });
+    for (const { writes, calls } of [unsigned, llm, unparsed]) {
+        assert.deepEqual(writes, []);
+        assert.ok(!calls.includes("findPullRequests"));
+    }
+});
+
+test("main, a release branch or any base but develop is never armed, however the pull request looks otherwise", async () => {
+    for (const base of ["main", "release/train-1", "hotfix/x", "Develop", "develop ", "develop2", "refs/heads/develop", "", "test"]) {
+        const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ base })] });
+        assert.deepEqual(await arm(ports), { status: "refused", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["base_not_develop"] }, JSON.stringify(base));
+        assert.deepEqual(writes, [], JSON.stringify(base));
+    }
+    // One pull request into develop and one into main for the same branch: two are open, so none is armed.
+    const both = armPorts({ findPullRequests: [pullRequest(), pullRequest({ nodeId: "PR_node_2", number: 42, base: "main" })] });
+    assert.deepEqual(await arm(both.ports), { status: "pr_ambiguous", branch: GRADUATED_BRANCH });
+    assert.deepEqual(both.writes, []);
+});
+
+test("a base that moved off develop after arming is disarmed", async () => {
+    const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ base: "main", autoMerge: true })] });
+    const result = await arm(ports, { armedByThisRun: true });
+    assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["base_not_develop"] });
+    assert.deepEqual(writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
+});
+
+test("a pull request whose head is not the validated commit is not armed, and is disarmed when it already is", async () => {
+    const moved = pullRequest({ headSha: "a".repeat(40) });
+    const idle = armPorts({ findPullRequests: [moved] });
+    assert.deepEqual(await arm(idle.ports), { status: "refused", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["head_is_not_the_validated_commit"] });
+    assert.deepEqual(idle.writes, []);
+    const armedPull = armPorts({ findPullRequests: [{ ...moved, autoMerge: true }] });
+    const result = await arm(armedPull.ports, { armedByThisRun: true });
+    assert.equal(result.status, "disarmed");
+    assert.deepEqual(armedPull.writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
+});
+
+test("a pull request from another branch name, or from a fork with this branch name, is not ours", async () => {
+    for (const other of [
+        pullRequest({ head: "marketing-agent/to-develop/other-topic" }),
+        pullRequest({ head: "marketing-agent/improve-hreflang" }),
+        pullRequest({ crossRepository: true }),
+    ]) {
+        const { ports, writes } = armPorts({ findPullRequests: [other] });
+        assert.equal((await arm(ports)).status, "pr_not_found", JSON.stringify(other));
+        assert.deepEqual(writes, []);
+    }
+    // A fork's pull request does not make ours ambiguous and is not armed in its place.
+    const mixed = armPorts({ findPullRequests: [pullRequest({ crossRepository: true, nodeId: "fork", number: 99 }), pullRequest()] });
+    assert.equal((await arm(mixed.ports)).status, "armed");
+    assert.deepEqual(mixed.writes.map(([, pull]) => pull.number), [41]);
+});
+
+test("a draft waits for the CI admission bot and is not armed", async () => {
+    const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ isDraft: true })] });
+    assert.deepEqual(await arm(ports), { status: "waiting_ready", branch: GRADUATED_BRANCH });
+    assert.deepEqual(writes, []);
+});
+
+test("a pull request that is not there yet, closed, merged or unreadable writes nothing", async () => {
+    const cases = [
+        [[], "pr_not_found"],
+        [[pullRequest({ state: "CLOSED" })], "closed"],
+        [[pullRequest({ state: "MERGED" })], "merged"],
+        // A merged pull request for a different commit is not this change's merge.
+        [[pullRequest({ state: "MERGED", headSha: "a".repeat(40) })], "closed"],
+    ];
+    for (const [pulls, status] of cases) {
+        const { ports, writes } = armPorts({ findPullRequests: pulls });
+        assert.deepEqual(await arm(ports), { status, branch: GRADUATED_BRANCH });
+        assert.deepEqual(writes, []);
+    }
+    for (const lookup of [null, () => { throw new Error("down"); }]) {
+        const { ports, writes } = armPorts({ findPullRequests: lookup });
+        assert.deepEqual(await arm(ports), { status: "pull_request_unreadable" });
+        assert.deepEqual(writes, []);
+    }
+});
+
+test("arming is not repeated: an armed pull request is left alone, and one switched off after this run armed it stays off", async () => {
+    const on = armPorts({ findPullRequests: [pullRequest({ autoMerge: true })] });
+    assert.deepEqual(await arm(on.ports), { status: "already_armed", branch: GRADUATED_BRANCH });
+    assert.deepEqual(on.writes, []);
+    // Turned off by a person or by GitHub after this run armed it: not turned back on.
+    const off = armPorts();
+    assert.deepEqual(await arm(off.ports, { armedByThisRun: true }), { status: "auto_merge_turned_off", branch: GRADUATED_BRANCH });
+    assert.deepEqual(off.writes, []);
+});
+
+test("the pure decision arms exactly one thing", () => {
+    const decide = (pulls) => seoAgentAutoMergeDecision({ pulls, branch: GRADUATED_BRANCH, commitSha: COMMIT });
+    assert.equal(decide([pullRequest()]).action, "enable");
+    assert.equal(decide([pullRequest({ isDraft: true })]).action, "none");
+    assert.equal(decide([pullRequest({ base: "main" })]).action, "none");
+    assert.equal(decide([pullRequest({ headSha: "a".repeat(40) })]).action, "none");
+    assert.equal(decide([pullRequest(), pullRequest({ number: 2 })]).action, "none");
+    assert.equal(decide([]).action, "none");
 });
 
 test("the runner reads no robots policy, workflow or test file into the prompt", () => {
