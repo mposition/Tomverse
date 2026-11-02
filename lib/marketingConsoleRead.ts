@@ -399,7 +399,7 @@ export async function readMarketingConsole(
   section: MarketingConsoleSection,
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
-  const availability = marketingSectionAvailability(section);
+  const availability = marketingSectionAvailability();
   const [{ switches, configGeneration }, webhookStaging, llm, overview] = await Promise.all([
     readSwitches(),
     readWebhookStaging(),

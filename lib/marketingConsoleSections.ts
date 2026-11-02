@@ -49,9 +49,7 @@ export type MarketingSectionAvailability =
  * Every section is built: comment monitoring (S4) and landing experiments
  * (S5) both write theirs, so none renders as a future-stage affordance.
  */
-export function marketingSectionAvailability(
-  _section: MarketingConsoleSection
-): MarketingSectionAvailability {
+export function marketingSectionAvailability(): MarketingSectionAvailability {
   return { available: true };
 }
 

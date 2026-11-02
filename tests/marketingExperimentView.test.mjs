@@ -44,8 +44,7 @@ const snapshot = (overrides = {}, counts) => {
 };
 
 test("the experiments section is a section of its own now, not a future-stage placeholder", () => {
-  assert.deepEqual(marketingSectionAvailability("experiments"), { available: true });
-  assert.deepEqual(marketingSectionAvailability("comments"), { available: true });
+  assert.deepEqual(marketingSectionAvailability(), { available: true });
 });
 
 test("with nothing stored the section has no row and offers every bundle", () => {
