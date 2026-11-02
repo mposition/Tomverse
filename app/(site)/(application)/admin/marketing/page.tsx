@@ -47,7 +47,6 @@ export default async function AdminMarketingPage({
     accounts: accounts && accounts.total > 0 ? { label: String(accounts.total) } : undefined,
     competitors: competitors && competitors.approved > 0 ? { label: String(competitors.approved) } : undefined,
     comments: { label: "S4", locked: true },
-    experiments: { label: "S5", locked: true },
   };
 
   return (
