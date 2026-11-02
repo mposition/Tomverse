@@ -23,7 +23,7 @@ export const AMUX_IDEA_LANE_DEFAULT_DAILY_ATTEMPTS = 10;
  */
 export const AMUX_IDEA_LANE_LEASE_MS = 150 * 60_000;
 /** What a finished run may report besides an opened PR (the table's CHECK holds the same words). */
-export const AMUX_IDEA_LANE_FAILURES = ["no_change", "cli_failed", "workflow_edit", "secret_in_diff",
+export const AMUX_IDEA_LANE_FAILURES = ["no_change", "cli_failed", "workflow_edit", "binary_change", "secret_in_diff",
   "push_failed", "job_failed"] as const;
 export type AmuxIdeaLaneFailure = typeof AMUX_IDEA_LANE_FAILURES[number];
 

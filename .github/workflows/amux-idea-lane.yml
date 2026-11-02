@@ -16,10 +16,12 @@
 #     git hook in the checkout) must not exist there. claim and report hold the
 #     sync secret, implement the model credential, publish the PAT; publish
 #     runs no repository code, it only applies the patch and pushes;
-#   - this repository is public and so are its logs: the idea text and the
-#     model's transcript are never printed or uploaded; the patch, title and
-#     body are uploaded only after a scan for the model credential, and they
-#     become the public pull request anyway;
+#   - this repository is public and so are its logs and artifacts: the idea
+#     text crosses from claim to implement only encrypted with
+#     AMUX_IDEA_LANE_TRANSIT_KEY, the model's transcript is never printed or
+#     uploaded, and the patch, title and body are uploaded only after a scan
+#     for the model credential (they become the public pull request anyway);
+#   - a binary change is refused, since the scan reads text;
 #   - the change may not touch .github/ (checked in implement and again in publish);
 #   - the pull request is a draft into develop with no auto-merge: a person
 #     reviews and merges it.
@@ -56,13 +58,17 @@ jobs:
       claimed: ${{ steps.claim.outputs.claimed }}
       attempt: ${{ steps.claim.outputs.attempt }}
       branch: ${{ steps.claim.outputs.branch }}
-      idea_b64: ${{ steps.claim.outputs.idea_b64 }}
     steps:
-      - name: Claim an idea (sync secret only)
+      - name: Claim an idea (sync secret and transit key only)
         id: claim
         env:
           AMUX_IDEA_LANE_SYNC_SECRET: ${{ secrets.AMUX_IDEA_LANE_SYNC_SECRET }}
+          AMUX_IDEA_LANE_TRANSIT_KEY: ${{ secrets.AMUX_IDEA_LANE_TRANSIT_KEY }}
         run: |
+          if [ ${#AMUX_IDEA_LANE_TRANSIT_KEY} -lt 32 ]; then
+            echo "AMUX_IDEA_LANE_TRANSIT_KEY is missing; nothing was claimed."
+            exit 1
+          fi
           response=$(curl -sS -f -X POST \
             -H "Authorization: Bearer ${AMUX_IDEA_LANE_SYNC_SECRET}" \
             "${TOMVERSE_APP_URL}/api/internal/amux/idea-lane/claim")
@@ -77,11 +83,22 @@ jobs:
             echo "The claim is malformed."
             exit 1
           fi
-          # Job outputs reach the next job without entering the log.
-          echo "idea_b64=$(jq -r '.idea' <<<"$response" | base64 -w 0)" >> "$GITHUB_OUTPUT"
+          # Artifacts of a public repository are public: the idea leaves this
+          # runner only encrypted, for implement to open.
+          mkdir -p "${RUNNER_TEMP}/handoff"
+          jq -r '.idea' <<<"$response" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:AMUX_IDEA_LANE_TRANSIT_KEY -out "${RUNNER_TEMP}/handoff/idea.enc"
           echo "claimed=true" >> "$GITHUB_OUTPUT"
           echo "attempt=${attempt}" >> "$GITHUB_OUTPUT"
           echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Hand the encrypted idea to implement
+        if: steps.claim.outputs.claimed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: amux-idea-in-${{ steps.claim.outputs.attempt }}
+          path: ${{ runner.temp }}/handoff/
+          retention-days: 1
+          if-no-files-found: error
 
   implement:
     needs: claim
@@ -97,6 +114,20 @@ jobs:
       IDEA_PATH: ${{ runner.temp }}/idea.md
       OUT_DIR: ${{ runner.temp }}/out
     steps:
+      - name: Fetch the encrypted idea
+        uses: actions/download-artifact@v8
+        with:
+          name: amux-idea-in-${{ needs.claim.outputs.attempt }}
+          path: ${{ runner.temp }}/in
+
+      - name: Open the idea (transit key only in this step)
+        env:
+          AMUX_IDEA_LANE_TRANSIT_KEY: ${{ secrets.AMUX_IDEA_LANE_TRANSIT_KEY }}
+        run: |
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:AMUX_IDEA_LANE_TRANSIT_KEY -in "${RUNNER_TEMP}/in/idea.enc" -out "$IDEA_PATH"
+          rm -f "${RUNNER_TEMP}/in/idea.enc"
+
       - name: Checkout develop
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -132,7 +163,6 @@ jobs:
       - name: Implement the idea (model credential only in this job)
         id: model
         env:
-          IDEA_B64: ${{ needs.claim.outputs.idea_b64 }}
           # One of the two is set: an API key (billed per call) or a
           # subscription token from `claude setup-token`.
           ANTHROPIC_API_KEY: ${{ secrets.AMUX_IDEA_LANE_ANTHROPIC_API_KEY }}
@@ -144,8 +174,6 @@ jobs:
           [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || unset CLAUDE_CODE_OAUTH_TOKEN
           echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           mkdir -p "$OUT_DIR"
-          base64 -d <<<"$IDEA_B64" > "$IDEA_PATH"
-          unset IDEA_B64
           export PR_TITLE_PATH="${OUT_DIR}/title.txt" PR_BODY_PATH="${OUT_DIR}/body.md"
           prompt=$(cat <<'PROMPT'
           You are implementing one owner request for the Tomverse repository,
@@ -195,20 +223,31 @@ jobs:
             echo "failure=workflow_edit" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git diff --cached --binary > "${OUT_DIR}/change.patch"
-          touch "$PR_TITLE_PATH" "$PR_BODY_PATH"
-          # Everything that will be published: the change, its title and body.
+          # A binary file would reach the patch encoded, past the text scan below.
+          if git diff --cached --numstat | grep -q '^-'; then
+            echo "failure=binary_change" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # What is published is collected here, after the model exited, into a
+          # directory it could not have known: the patch straight from git, and
+          # the title and body only if they are regular files. These three
+          # copies are what is scanned and handed on. (A model that wanted to
+          # leak its credential could use the network instead; the scan is
+          # against accidents and the public PR, not against that.)
+          pub=$(mktemp -d)
+          git diff --cached > "${pub}/change.patch"
+          for name in title.txt body.md; do
+            source="${OUT_DIR}/${name}"
+            if [ -f "$source" ] && [ ! -L "$source" ]; then head -c 60000 "$source" > "${pub}/${name}"; else : > "${pub}/${name}"; fi
+          done
           for value in "${ANTHROPIC_API_KEY:-}" "${CLAUDE_CODE_OAUTH_TOKEN:-}"; do
-            if [ -n "$value" ] && grep -qF -- "$value" "${OUT_DIR}/change.patch" "$PR_TITLE_PATH" "$PR_BODY_PATH"; then
-              rm -rf "$OUT_DIR"
+            if [ -n "$value" ] && grep -rqF -- "$value" "$pub"; then
+              rm -rf "$pub"
               echo "failure=secret_in_diff" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
-          # Only the three scanned files are handed on; anything else the model
-          # left in OUT_DIR stays on this runner.
-          mkdir -p "${RUNNER_TEMP}/publish"
-          cp "${OUT_DIR}/change.patch" "$PR_TITLE_PATH" "$PR_BODY_PATH" "${RUNNER_TEMP}/publish/"
+          echo "publish=${pub}" >> "$GITHUB_OUTPUT"
           git diff --cached --stat
 
       - name: Hand the change to publish
@@ -216,7 +255,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: amux-idea-${{ needs.claim.outputs.attempt }}
-          path: ${{ runner.temp }}/publish/
+          path: ${{ steps.model.outputs.publish }}/
           retention-days: 1
           if-no-files-found: error
 
