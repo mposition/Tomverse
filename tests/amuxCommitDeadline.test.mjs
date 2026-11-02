@@ -305,6 +305,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261031090050_amux_v22_test_consent_receipt_guard",
   "20261031090100_amux_v22_test_recovery_workspace",
   "20261031090200_amux_v22_test_prless_approval",
+  // The AMUX idea lane: one additive attempts table, written outside the AMUX
+  // DB boundaries, so no commit-deadline trigger is involved.
+  "20261102120000_amux_idea_lane_attempt",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
