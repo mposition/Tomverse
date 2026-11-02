@@ -25,6 +25,12 @@ test("each idea is at exactly one of the six stages, and a human step still open
   assert.deepEqual(stage({ submissionOrigin: "session", state: "awaiting_owner", proposedUnits: 2,
     chunks: [chunk()] }), ["plan_approval", "plan_approval"],
     "a session plan that registration did not take waits for plan approval");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "completed", proposedUnits: 5,
+    chunks: [chunk()], cards: [{ ...task(), cardType: "story" }, task(), task({ status: "backlog" })] }),
+  ["execution", null], "a plan the system registered is in execution; its leftover proposals ask nothing");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "completed", proposedUnits: 1,
+    chunks: [chunk()], cards: [task({ merged: true, status: "done" })] }),
+  ["done", null], "a registered plan finishes with its Tasks");
   assert.deepEqual(stage({ submissionOrigin: "session", state: "analyzing", chunks: [
     chunk({ coverageStatus: "more" }),
     chunk({ chunkIndex: 1, state: "pending", coverageStatus: null, previewState: null, holdStatus: null })] }),
