@@ -68,7 +68,9 @@ Report implemented and tested behavior separately from documentation, review, me
   08·11·14·17·20시)에 그 PR들로 `release/train-*` main PR 하나를 엽니다(`docs/policy/qa-release-agent.md`
   8절 12항). `main:next` 라벨은 더 읽지 않습니다. 급한 수정은 `hotfix/**`입니다.
 - workflow는 PR을 열기만 하고 병합하거나 auto-merge를 켜지 않습니다. 병합은 운영자의
-  `npm run merge-train`이 합니다. 사람이 끈 스위치를 자동화가 다시 켜지 않습니다.
+  `npm run merge-train`이 합니다. 사람이 끈 스위치를 자동화가 다시 켜지 않습니다. 예외는 하나뿐입니다:
+  졸업한 마케팅 SEO 코드 에이전트의 `marketing-agent/to-develop/<topic>` PR에 한해 그 에이전트의 실행기가 develop
+  auto-merge를 켤 수 있습니다(기본 꺼짐 `MARKETING_SEO_AUTO_MERGE`, 운영자 결정 2026-11-02, `docs/policy/marketing-automation.md §9.2`).
 - PR은 draft로 시작하고 끝나면 ready로 바꿉니다(draft는 CI가 돌지 않습니다). develop은 dev
   환경에, Test는 `test` 브랜치에 배포됩니다(`docs/ops/dev-test-lanes.md`).
 - **CI 입장 관리**: head 커밋의 `CI admission` 상태가 pending인 PR은 대기열에서 차례를 기다리는 중입니다.

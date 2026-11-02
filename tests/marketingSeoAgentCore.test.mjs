@@ -12,7 +12,13 @@ import {
     parseGitRawDiff,
     SEO_AGENT_PUSH_CREDENTIAL_ENVS,
     seoAgentCheckIsolation,
+    runSeoAgentArm,
+    runSeoAgentArmLoop,
+    seoAgentArmEndedCleanly,
+    seoAgentArmWindow,
     runSeoAgentPublish,
+    seoAgentAutoMergeDecision,
+    seoAgentAutoMergeGate,
     seoAgentAttest,
     seoAgentAttestationMatches,
     runSeoAgentValidate,
@@ -987,13 +993,530 @@ test("an import that fails stops the run before a push", async () => {
 // Authority the agent does not have
 // ---------------------------------------------------------------------------
 
-test("neither the core nor the runner has any merge or auto-merge call", () => {
-    for (const path of ["../lib/marketingSeoAgentCore.ts", "../scripts/marketing-seo-agent.mjs"]) {
-        const source = readFileSync(new URL(path, import.meta.url), "utf8");
-        assert.doesNotMatch(source, /enablePullRequestAutoMerge|auto_merge|merge_method|pulls\/\$\{[^}]*\}\/merge|\/merge["'`]|gh pr merge|mergePullRequest/i, path);
+test("nothing merges a pull request; the one merge-related write is GitHub's auto-merge, armed in the runner and nowhere else", () => {
+    const core = readFileSync(new URL("../lib/marketingSeoAgentCore.ts", import.meta.url), "utf8");
+    const runner = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
+    // No immediate merge anywhere: no REST merge, no gh merge, no mergePullRequest mutation, no ready/draft switch.
+    for (const [path, source] of [["core", core], ["runner", runner]]) {
+        assert.doesNotMatch(source, /\bauto_merge\s*:|merge_method|pulls\/\$\{[^}]*\}\/merge|\/merge["'`]|gh pr merge|mergePullRequest\b|markPullRequestReadyForReview|convertPullRequestToDraft|update-branch/i, path);
     }
+    // The core never speaks GitHub: it holds the port names, not the mutation.
+    assert.doesNotMatch(core, /graphql|mutation|api\.github\.com/i);
+    // The runner has exactly one enabling mutation, a merge commit, bound to the validated head, and no squash or rebase.
+    assert.equal(runner.match(/enablePullRequestAutoMerge\(/g)?.length, 1);
+    assert.match(runner, /mergeMethod: MERGE, expectedHeadOid: \$sha/);
+    assert.doesNotMatch(runner, /mergeMethod: (SQUASH|REBASE)/);
+    assert.equal(runner.match(/disablePullRequestAutoMerge\(/g)?.length, 1);
+    // Neither the validate nor the publish ports can arm anything; only the arm ports have the writes.
     for (const { ports } of [validatePorts(), publishPorts()]) {
         assert.deepEqual(Object.keys(ports).filter((name) => /merge/i.test(name)), []);
+    }
+});
+
+test("the runner reads graduation from the operator's variable and arms only through the gate", () => {
+    const runner = readFileSync(new URL("../scripts/marketing-seo-agent.mjs", import.meta.url), "utf8");
+    assert.match(runner, /lookupGraduation: async \(\) => process\.env\[SEO_AGENT_GRADUATED_VARIABLE_ENV\] === "true"/);
+    assert.doesNotMatch(runner, /graduation lookup is not connected/);
+    // After a push the arm loop runs only for a graduated push and only when the arm gate is on.
+    assert.match(runner, /published\.graduated && willArm/);
+    assert.match(runner, /const willArm = process\.env\[SEO_AGENT_GRADUATED_VARIABLE_ENV\] === "true" && seoAgentAutoMergeGate\(process\.env, true\)\.on;/);
+    // The runner takes its looping from the core, refuses a window under a minute, and disarms on a signal.
+    assert.match(runner, /runSeoAgentArmLoop\(/);
+    // The window and the token are checked before a graduated push goes out, not after it.
+    assert.match(runner, /seoAgentArmWindow\(/);
+    assert.ok(runner.indexOf("const deadlineAtMs = willArm ? await armDeadlineMs() : 0;") < runner.indexOf("const published = await runSeoAgentPublish("));
+    assert.match(runner, /github-authentication-token-expiration/);
+    assert.match(runner, /MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT/);
+    assert.match(runner, /for \(const signal of \["SIGINT", "SIGTERM"\]\)/);
+    assert.match(runner, /await enableInFlight;/);
+    assert.match(runner, /attempt < 3/);
+    // The pull requests are read by head branch name in this repository, and the fork flag is read with them.
+    assert.match(runner, /headRefName: \$head/);
+    assert.match(runner, /isCrossRepository/);
+});
+
+// ---------------------------------------------------------------------------
+// The arm step, over fake ports
+// ---------------------------------------------------------------------------
+
+const GRADUATED_BRANCH = "marketing-agent/to-develop/improve-hreflang";
+const pullRequest = (overrides = {}) => ({
+    nodeId: "PR_node_1", number: 41, state: "OPEN", isDraft: false, base: "develop", head: GRADUATED_BRANCH, headSha: COMMIT,
+    crossRepository: false, autoMerge: false, ...overrides,
+});
+const ARM_ENV = { ...PUBLISH_ENV, MARKETING_SEO_AUTO_MERGE: "true" };
+
+const armPorts = (overrides = {}) => {
+    const writes = [];
+    const base = recorder(
+        {
+            bundleSha256: BUNDLE,
+            baseOnDevelop: true,
+            importCommit: undefined,
+            commitFacts: { tree: TREE, parent: BASE, parentCount: 1 },
+            diff: { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: GOOD_PATCH },
+            lookupGraduation: true,
+            findPullRequests: [pullRequest()],
+            enableAutoMerge: (pull) => writes.push(["enable", pull]),
+            disableAutoMerge: (pull) => writes.push(["disable", pull]),
+        },
+        overrides,
+    );
+    return { ...base, writes };
+};
+const arm = (ports, { env = ARM_ENV, record = RECORD, attestation = ATTESTATION, seenArmed = false } = {}) =>
+    runSeoAgentArm({ record, attestation, env, seenArmed }, ports);
+
+test("the auto-merge gate: the agent on, the switch exactly true, the kill switch empty, and graduated", () => {
+    assert.deepEqual(seoAgentAutoMergeGate(ARM_ENV, true), { on: true });
+    assert.deepEqual(seoAgentAutoMergeGate({ ...ARM_ENV, MARKETING_AUTOMATION_KILL_SWITCH: "1" }, true), { on: false, reason: "kill_switch" });
+    assert.deepEqual(seoAgentAutoMergeGate({ ...ARM_ENV, MARKETING_SEO_AGENT_ENABLED: "false" }, true), { on: false, reason: "switch_off" });
+    assert.deepEqual(seoAgentAutoMergeGate(ARM_ENV, false), { on: false, reason: "not_graduated" });
+    assert.deepEqual(seoAgentAutoMergeGate(PUBLISH_ENV, true), { on: false, reason: "auto_merge_switch_off" });
+    for (const value of ["", "false", "1", "TRUE", "yes", " true"]) {
+        assert.equal(seoAgentAutoMergeGate({ ...ARM_ENV, MARKETING_SEO_AUTO_MERGE: value }, true).on, false, JSON.stringify(value));
+    }
+});
+
+test("arm with every gate on: a verified, ready pull request into develop is armed once, bound to the validated commit", async () => {
+    const { ports, calls, writes } = armPorts();
+    assert.deepEqual(await arm(ports), { status: "armed", branch: GRADUATED_BRANCH, pullRequest: 41, nodeId: "PR_node_1" });
+    assert.deepEqual(writes, [["enable", { nodeId: "PR_node_1", number: 41, headSha: COMMIT }]]);
+    // The publish checks come first, then graduation, then the pull request.
+    for (const [before, after] of [["bundleSha256", "importCommit"], ["baseOnDevelop", "importCommit"], ["importCommit", "commitFacts"], ["commitFacts", "diff"], ["diff", "lookupGraduation"], ["lookupGraduation", "findPullRequests"], ["findPullRequests", "enableAutoMerge"]]) {
+        assert.ok(calls.indexOf(before) >= 0 && calls.indexOf(before) < calls.indexOf(after), `${before} before ${after}`);
+    }
+});
+
+test("arm is off, and touches nothing, for the kill switch, a missing switch, or a missing agent switch", async () => {
+    const cases = [
+        [{ ...ARM_ENV, MARKETING_AUTOMATION_KILL_SWITCH: "1" }, "kill_switch"],
+        [PUBLISH_ENV, "auto_merge_switch_off"],
+        [{ ...ARM_ENV, MARKETING_SEO_AUTO_MERGE: "false" }, "auto_merge_switch_off"],
+        [{ ...ARM_ENV, MARKETING_SEO_AGENT_ENABLED: "" }, "switch_off"],
+    ];
+    for (const [env, reason] of cases) {
+        const { ports, calls } = armPorts();
+        assert.deepEqual(await arm(ports, { env }), { status: "off", reason });
+        assert.deepEqual(calls, [], reason);
+    }
+});
+
+test("arm before graduation, or when the graduation lookup fails or says anything but true, writes nothing", async () => {
+    for (const lookup of [false, () => { throw new Error("down"); }, "true", undefined, null]) {
+        const { ports, calls, writes } = armPorts({ lookupGraduation: lookup });
+        assert.deepEqual(await arm(ports), { status: "off", reason: "not_graduated" });
+        assert.deepEqual(writes, []);
+        assert.ok(!calls.includes("findPullRequests"));
+    }
+});
+
+test("arm re-runs every publish check and writes nothing when one fails", async () => {
+    const wrongRaw = GOOD_RAW + `:100644 100644 ${sha} ${sha2} M\0.github/workflows/auto-pr-to-develop.yml\0`;
+    const wrongNumstat = GOOD_NUMSTAT + "1\t1\t.github/workflows/auto-pr-to-develop.yml\0";
+    const failures = [
+        [{ bundleSha256: "9".repeat(64) }, { status: "attestation_invalid" }],
+        [{ baseOnDevelop: false }, { status: "base_not_on_develop" }],
+        [{ commitFacts: { tree: "f".repeat(40), parent: BASE, parentCount: 1 } }, { status: "tree_mismatch", stage: "before_push" }],
+        [{ commitFacts: { tree: TREE, parent: BASE, parentCount: 2 } }, { status: "tree_mismatch", stage: "before_push" }],
+        [{ diff: { raw: wrongRaw, numstat: wrongNumstat, patch: GOOD_PATCH } }, { status: "validation_failed", problems: ["path_outside_allowlist"] }],
+    ];
+    for (const [overrides, expected] of failures) {
+        const { ports, writes, calls } = armPorts(overrides);
+        assert.deepEqual(await arm(ports), expected);
+        assert.deepEqual(writes, []);
+        assert.ok(!calls.includes("findPullRequests"));
+    }
+    const unsigned = armPorts();
+    assert.deepEqual(await arm(unsigned.ports, { attestation: null }), { status: "attestation_invalid" });
+    const llm = armPorts();
+    assert.deepEqual(await arm(llm.ports, { env: { ...ARM_ENV, MARKETING_LLM_API_KEY: "x" } }), { status: "wrong_environment", problems: ["MARKETING_LLM_API_KEY"] });
+    const unparsed = armPorts();
+    assert.deepEqual(await arm(unparsed.ports, { record: { ...RECORD, paths: ["package.json"] } }), { status: "invalid_record" });
+    for (const { writes, calls } of [unsigned, llm, unparsed]) {
+        assert.deepEqual(writes, []);
+        assert.ok(!calls.includes("findPullRequests"));
+    }
+});
+
+test("main, a release branch or any base but develop is never armed, however the pull request looks otherwise", async () => {
+    for (const base of ["main", "release/train-1", "hotfix/x", "Develop", "develop ", "develop2", "refs/heads/develop", "", "test"]) {
+        const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ base })] });
+        assert.deepEqual(await arm(ports), { status: "refused", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["base_not_develop"] }, JSON.stringify(base));
+        assert.deepEqual(writes, [], JSON.stringify(base));
+    }
+    // One pull request into develop and one into main for the same branch: two are open, so none is armed.
+    const both = armPorts({ findPullRequests: [pullRequest(), pullRequest({ nodeId: "PR_node_2", number: 42, base: "main" })] });
+    assert.deepEqual(await arm(both.ports), { status: "pr_ambiguous", branch: GRADUATED_BRANCH });
+    assert.deepEqual(both.writes, []);
+});
+
+test("a base that moved off develop after arming is disarmed", async () => {
+    const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ base: "main", autoMerge: true })] });
+    const result = await arm(ports, { seenArmed: true });
+    assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["base_not_develop"] });
+    assert.deepEqual(writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
+});
+
+test("a pull request whose head is not the validated commit is not armed, and is disarmed when it already is", async () => {
+    const moved = pullRequest({ headSha: "a".repeat(40) });
+    const idle = armPorts({ findPullRequests: [moved] });
+    assert.deepEqual(await arm(idle.ports), { status: "refused", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["head_is_not_the_validated_commit"] });
+    assert.deepEqual(idle.writes, []);
+    const armedPull = armPorts({ findPullRequests: [{ ...moved, autoMerge: true }] });
+    const result = await arm(armedPull.ports, { seenArmed: true });
+    assert.equal(result.status, "disarmed");
+    assert.deepEqual(armedPull.writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
+});
+
+test("a pull request from another branch name, or from a fork with this branch name, is not ours", async () => {
+    for (const other of [
+        pullRequest({ head: "marketing-agent/to-develop/other-topic" }),
+        pullRequest({ head: "marketing-agent/improve-hreflang" }),
+        pullRequest({ crossRepository: true }),
+    ]) {
+        const { ports, writes } = armPorts({ findPullRequests: [other] });
+        assert.equal((await arm(ports)).status, "pr_not_found", JSON.stringify(other));
+        assert.deepEqual(writes, []);
+    }
+    // A fork's pull request does not make ours ambiguous and is not armed in its place.
+    const mixed = armPorts({ findPullRequests: [pullRequest({ crossRepository: true, nodeId: "fork", number: 99 }), pullRequest()] });
+    assert.equal((await arm(mixed.ports)).status, "armed");
+    assert.deepEqual(mixed.writes.map(([, pull]) => pull.number), [41]);
+});
+
+test("a draft waits for the CI admission bot and is not armed", async () => {
+    const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ isDraft: true })] });
+    assert.deepEqual(await arm(ports), { status: "waiting_ready", branch: GRADUATED_BRANCH });
+    assert.deepEqual(writes, []);
+});
+
+test("a pull request that is not there yet, closed, merged or unreadable writes nothing", async () => {
+    const cases = [
+        [[], "pr_not_found"],
+        [[pullRequest({ state: "CLOSED" })], "closed"],
+        [[pullRequest({ state: "MERGED" })], "merged"],
+        // A merged pull request for a different commit is not this change's merge.
+        [[pullRequest({ state: "MERGED", headSha: "a".repeat(40) })], "closed"],
+    ];
+    for (const [pulls, status] of cases) {
+        const { ports, writes } = armPorts({ findPullRequests: pulls });
+        assert.deepEqual(await arm(ports), { status, branch: GRADUATED_BRANCH });
+        assert.deepEqual(writes, []);
+    }
+    for (const lookup of [null, () => { throw new Error("down"); }]) {
+        const { ports, writes } = armPorts({ findPullRequests: lookup });
+        assert.deepEqual(await arm(ports), { status: "pull_request_unreadable" });
+        assert.deepEqual(writes, []);
+    }
+});
+
+test("arming is not repeated: an armed pull request is left alone, and one switched off after this run armed it stays off", async () => {
+    const on = armPorts({ findPullRequests: [pullRequest({ autoMerge: true })] });
+    assert.deepEqual(await arm(on.ports), { status: "already_armed", branch: GRADUATED_BRANCH, pullRequest: 41, nodeId: "PR_node_1" });
+    assert.deepEqual(on.writes, []);
+    // Turned off by a person or by GitHub after this run armed it: not turned back on.
+    const off = armPorts();
+    assert.deepEqual(await arm(off.ports, { seenArmed: true }), { status: "auto_merge_turned_off", branch: GRADUATED_BRANCH });
+    assert.deepEqual(off.writes, []);
+});
+
+test("the pure decision arms exactly one thing", () => {
+    const decide = (pulls) => seoAgentAutoMergeDecision({ pulls, branch: GRADUATED_BRANCH, commitSha: COMMIT });
+    assert.equal(decide([pullRequest()]).action, "enable");
+    assert.equal(decide([pullRequest({ isDraft: true })]).action, "none");
+    assert.equal(decide([pullRequest({ base: "main" })]).action, "none");
+    assert.equal(decide([pullRequest({ headSha: "a".repeat(40) })]).action, "none");
+    assert.equal(decide([pullRequest(), pullRequest({ number: 2 })]).action, "none");
+    assert.equal(decide([]).action, "none");
+});
+
+test("an armed pull request that drifted is disarmed even when a second pull request makes the branch ambiguous", async () => {
+    const pulls = [pullRequest({ headSha: "a".repeat(40), autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42 })];
+    const { ports, writes } = armPorts({ findPullRequests: pulls });
+    const result = await arm(ports, { seenArmed: true });
+    assert.equal(result.status, "disarmed");
+    assert.deepEqual(writes, [["disable", { nodeId: "PR_node_1", number: 41 }]]);
+});
+
+// The loop over time, with a clock the test moves: no waiting, no GitHub.
+const MINUTE = 60 * 1000;
+const loopClock = () => {
+    const state = { now: 0, sleeps: [], armed: [], results: [] };
+    return {
+        state,
+        clock: {
+            now: () => state.now,
+            sleep: async (ms) => { state.sleeps.push(ms); state.now += ms; },
+            pollMs: MINUTE,
+            armedPollMs: 20 * 1000,
+            onArmed: (pull) => state.armed.push(pull),
+            onResult: (result) => state.results.push(result.status),
+        },
+    };
+};
+/** A list per look: the loop reads the next one each time and repeats the last. */
+const sequence = (...looks) => { let index = 0; return () => looks[Math.min(index++, looks.length - 1)]; };
+const loop = (ports, clock, windowMinutes = 45, env = ARM_ENV) =>
+    runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env, deadlineAtMs: clock.now() + windowMinutes * MINUTE }, ports, clock);
+
+test("the loop waits for a draft to become ready, arms once, then watches until the merge", async () => {
+    const { clock, state } = loopClock();
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence(
+            [], [pullRequest({ isDraft: true })], [pullRequest({ isDraft: true })], [pullRequest()],
+            // The read that follows the arming, then the looks of the watch.
+            [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true })], [pullRequest({ state: "MERGED", autoMerge: true })],
+        ),
+    });
+    const result = await loop(ports, clock);
+    assert.equal(result.status, "merged");
+    assert.deepEqual(state.results, ["pr_not_found", "waiting_ready", "waiting_ready", "armed", "already_armed", "already_armed", "merged"]);
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable"]);
+    // One minute while nothing is armed, twenty seconds once armed.
+    assert.deepEqual(state.sleeps, [MINUTE, MINUTE, MINUTE, 20000, 20000, 20000]);
+    assert.equal(state.armed.at(-1), null);
+});
+
+test("the loop disarms what it armed when the head moves while it watches", async () => {
+    const { clock, state } = loopClock();
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true, headSha: "a".repeat(40) })]),
+    });
+    const result = await loop(ports, clock);
+    assert.equal(result.status, "disarmed");
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+    assert.equal(state.armed.at(-1), null);
+});
+
+test("the loop does not arm again after a person or GitHub took the pull request out of auto-merge", async () => {
+    const { clock } = loopClock();
+    const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: false })]) });
+    const result = await loop(ports, clock);
+    assert.equal(result.status, "auto_merge_turned_off");
+    // Never a second enable; the one disable only confirms that this run leaves nothing armed.
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("the loop never leaves an arming standing when the window ends", async () => {
+    const { clock, state } = loopClock();
+    const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
+    const result = await loop(ports, clock, 2);
+    assert.deepEqual(result, { status: "window_ended_disarmed", pullRequest: 41 });
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+    assert.equal(state.armed.at(-1), null);
+});
+
+test("a window of two minutes still arms and then disarms; nothing armed stays armed past the window", async () => {
+    const { clock } = loopClock();
+    const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
+    const result = await loop(ports, clock, 2);
+    assert.equal(result.status, "window_ended_disarmed");
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("the loop gives up on a draft that never becomes ready without having armed anything", async () => {
+    const { clock } = loopClock();
+    const { ports, writes } = armPorts({ findPullRequests: [pullRequest({ isDraft: true })] });
+    assert.equal((await loop(ports, clock, 5)).status, "waiting_ready");
+    assert.deepEqual(writes, []);
+});
+
+test("an armed pull request that can no longer be read is disarmed after a few looks, one blip is tolerated", async () => {
+    const blip = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], null, [pullRequest({ autoMerge: true })], [pullRequest({ state: "MERGED", autoMerge: true })]) });
+    assert.equal((await loop(blip.ports, loopClock().clock)).status, "merged");
+    assert.deepEqual(blip.writes.map(([kind]) => kind), ["enable"]);
+    const gone = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], null) });
+    const result = await loop(gone.ports, loopClock().clock);
+    assert.equal(result.status, "pull_request_unreadable");
+    assert.deepEqual(gone.writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("any other ending with an arming standing disarms it, and so does a throw", async () => {
+    // A second open pull request appears: ambiguous, so nothing may stay armed.
+    const ambiguous = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42 })]) });
+    assert.equal((await loop(ambiguous.ports, loopClock().clock)).status, "pr_ambiguous");
+    assert.deepEqual(ambiguous.writes.map(([kind]) => kind), ["enable", "disable"]);
+    // A check that stops passing while armed (the base left develop's history, say).
+    let looks = 0;
+    const failing = armPorts({ baseOnDevelop: () => ++looks === 1, findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
+    const failed = await loop(failing.ports, loopClock().clock);
+    assert.equal(failed.status, "base_not_on_develop");
+    assert.deepEqual(failing.writes.map(([kind]) => kind), ["enable", "disable"]);
+    // A throw before anything is armed leaves nothing to disarm.
+    const exploding = armPorts({ diff: () => { throw new Error("git failed"); } });
+    await assert.rejects(loop(exploding.ports, loopClock().clock), /git failed/);
+    assert.deepEqual(exploding.writes, []);
+    let calls = 0;
+    const midway = armPorts({ commitFacts: () => { if (++calls === 3) throw new Error("git failed"); return { tree: TREE, parent: BASE, parentCount: 1 }; }, findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
+    await assert.rejects(loop(midway.ports, loopClock().clock), /git failed/);
+    assert.deepEqual(midway.writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("a base that changed between the read and the arming is caught by the read that follows it, and taken back at once", async () => {
+    const { clock } = loopClock();
+    const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ base: "main", autoMerge: true })]) });
+    const result = await loop(ports, clock);
+    assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["base_not_develop"] });
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("an arming request whose answer is lost is still taken back, and so is an unreadable pull request after it", async () => {
+    // The request reached GitHub, the answer did not.
+    const lost = armPorts({ findPullRequests: [pullRequest()] });
+    const original = lost.ports.enableAutoMerge;
+    lost.ports.enableAutoMerge = async (pull) => { await original(pull); throw new Error("timeout"); };
+    await assert.rejects(loop(lost.ports, loopClock().clock), /timeout/);
+    assert.deepEqual(lost.writes.map(([kind]) => kind), ["enable", "disable"]);
+    // The read after the request fails.
+    let reads = 0;
+    const blind = armPorts({ findPullRequests: () => (++reads === 1 ? [pullRequest()] : null) });
+    const result = await runSeoAgentArm({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV }, blind.ports);
+    assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["unreadable_after_arming"] });
+    assert.deepEqual(blind.writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("disarming a different pull request does not clear the one this run armed", async () => {
+    // This run armed #41. A second open PR #42 for the same head appears already armed and on main: it is the
+    // one the decision disarms, and #41 must still be taken back before the run ends.
+    const { clock } = loopClock();
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence(
+            [pullRequest()],
+            [pullRequest({ autoMerge: true })],
+            [pullRequest({ autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42, base: "main", autoMerge: true })],
+        ),
+    });
+    const result = await loop(ports, clock);
+    assert.equal(result.status, "disarmed");
+    assert.deepEqual(writes, [
+        ["enable", { nodeId: "PR_node_1", number: 41, headSha: COMMIT }],
+        ["disable", { nodeId: "PR_node_2", number: 42 }],
+        ["disable", { nodeId: "PR_node_1", number: 41 }],
+    ]);
+});
+
+test("an arming a person made is watched but not taken back by the end of the window, and is not re-armed if they turn it off", async () => {
+    const mine = armPorts({ findPullRequests: [pullRequest({ autoMerge: true })] });
+    const result = await loop(mine.ports, loopClock().clock, 2);
+    assert.equal(result.status, "already_armed");
+    assert.deepEqual(mine.writes, []);
+    const off = armPorts({ findPullRequests: sequence([pullRequest({ autoMerge: true })], [pullRequest()]) });
+    assert.equal((await loop(off.ports, loopClock().clock)).status, "auto_merge_turned_off");
+    assert.deepEqual(off.writes, []);
+    // Drift is still taken back, whoever armed it.
+    const drifted = armPorts({ findPullRequests: sequence([pullRequest({ autoMerge: true })], [pullRequest({ autoMerge: true, headSha: "a".repeat(40) })]) });
+    assert.equal((await loop(drifted.ports, loopClock().clock)).status, "disarmed");
+    assert.deepEqual(drifted.writes.map(([kind]) => kind), ["disable"]);
+});
+
+test("any armed pull request is watched at the fast cadence, and a drift disarm is asked again when an answer is lost", async () => {
+    const { clock, state } = loopClock();
+    const person = armPorts({ findPullRequests: [pullRequest({ autoMerge: true })] });
+    await loop(person.ports, clock, 2);
+    assert.ok(state.sleeps.length > 0 && state.sleeps.every((ms) => ms === 20000), JSON.stringify(state.sleeps));
+    let tries = 0;
+    const drifted = armPorts({
+        findPullRequests: [pullRequest({ autoMerge: true, headSha: "a".repeat(40) })],
+        disableAutoMerge: (pull) => { if (++tries < 3) throw new Error("timeout"); drifted.writes.push(["disable", pull]); },
+    });
+    assert.equal((await loop(drifted.ports, loopClock().clock)).status, "disarmed");
+    assert.equal(tries, 3);
+});
+
+test("a drifted arming that shows up right after arming is the one taken back", async () => {
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42, base: "main", autoMerge: true })]),
+    });
+    const result = await runSeoAgentArm({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV }, ports);
+    assert.equal(result.status, "armed");
+    assert.deepEqual(writes.map(([kind, pull]) => [kind, pull.number]), [["enable", 41], ["disable", 42]]);
+});
+
+test("a reading that says auto-merge is off is not trusted over this run's own arming: it is asked to be off before the run ends", async () => {
+    const { ports, writes } = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })], [pullRequest()]) });
+    const result = await loop(ports, loopClock().clock);
+    assert.equal(result.status, "auto_merge_turned_off");
+    assert.deepEqual(writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("a look that cannot read keeps the fast cadence of an armed pull request", async () => {
+    const { clock, state } = loopClock();
+    const { ports } = armPorts({ findPullRequests: sequence([pullRequest({ autoMerge: true })], null, null, [pullRequest({ state: "MERGED", autoMerge: true })]) });
+    await loop(ports, clock);
+    assert.deepEqual(state.sleeps, [20000, 20000, 20000]);
+});
+
+test("the arm deadline is the request, cut to the token's life less a margin for the final disarm", () => {
+    const now = 1_000_000_000_000;
+    const window = (requested, tokenExpiresAtMs) => seoAgentArmWindow({ requested, nowMs: now, tokenExpiresAtMs });
+    const far = now + 3600 * 1000;
+    // No flag: the default 45 minutes, when the token outlasts it by the margin.
+    assert.deepEqual(window(undefined, far), { ok: true, deadlineAtMs: now + 45 * MINUTE });
+    assert.deepEqual(window("1", far), { ok: true, deadlineAtMs: now + MINUTE });
+    assert.deepEqual(window("45", far), { ok: true, deadlineAtMs: now + 45 * MINUTE });
+    assert.deepEqual(window("2.5", far), { ok: true, deadlineAtMs: now + 150 * 1000 });
+    // A flag that is not 1 to 45 minutes written in plain digits, or has no value, is refused.
+    for (const bad of ["0", "46", "-1", "abc", "", "NaN", "Infinity", "0x10", " 5 ", "1e1", "5m"]) assert.deepEqual(window(bad, far), { ok: false, reason: "wait_minutes_invalid" }, JSON.stringify(bad));
+    // A token with 20 minutes left allows 10: ten are kept back for the disarm.
+    assert.deepEqual(window(undefined, now + 20 * MINUTE), { ok: true, deadlineAtMs: now + 10 * MINUTE });
+    assert.deepEqual(window("5", now + 20 * MINUTE), { ok: true, deadlineAtMs: now + 5 * MINUTE });
+    assert.deepEqual(window(undefined, now + 55 * MINUTE), { ok: true, deadlineAtMs: now + 45 * MINUTE });
+    // Too little token, an expired token, an end that is not known or cannot be read: refused, before anything is pushed.
+    assert.deepEqual(window(undefined, now + 10 * MINUTE), { ok: false, reason: "token_expires_too_soon" });
+    assert.deepEqual(window(undefined, now + 10 * MINUTE + 59_000), { ok: false, reason: "token_expires_too_soon" });
+    assert.deepEqual(window(undefined, now - MINUTE), { ok: false, reason: "token_expires_too_soon" });
+    assert.deepEqual(window(undefined, null), { ok: false, reason: "token_expiry_unknown" });
+    assert.deepEqual(window(undefined, "unreadable"), { ok: false, reason: "token_expiry_unknown" });
+    assert.deepEqual(window(undefined, Number.NaN), { ok: false, reason: "token_expiry_unknown" });
+});
+
+test("a window of exactly one minute arms; the time is checked again right before the request, after the verification", async () => {
+    const exact = loopClock();
+    const armedOnce = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
+    const first = await runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV, deadlineAtMs: exact.clock.now() + MINUTE }, armedOnce.ports, exact.clock);
+    assert.equal(first.status, "window_ended_disarmed");
+    assert.deepEqual(armedOnce.writes.map(([kind]) => kind), ["enable", "disable"]);
+    // The verification and the pull request read take time: the deadline passes while they run.
+    const slow = loopClock();
+    const late = armPorts({ diff: () => { slow.state.now += 5 * MINUTE; return { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: GOOD_PATCH }; } });
+    const result = await runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV, deadlineAtMs: slow.clock.now() + 3 * MINUTE }, late.ports, slow.clock);
+    assert.equal(result.status, "window_over");
+    assert.deepEqual(late.writes, []);
+});
+
+test("nothing is armed when too little of the window is left to watch it", async () => {
+    // 30 seconds left: the pull request is ready, but there would be no time to watch an arming.
+    const clock = loopClock();
+    const { ports, writes } = armPorts();
+    const result = await runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV, deadlineAtMs: clock.clock.now() + 30_000 }, ports, clock.clock);
+    assert.equal(result.status, "window_over");
+    assert.deepEqual(writes, []);
+});
+
+test("only a merge, an off run, or a person's arming left standing is a clean end", () => {
+    for (const status of ["merged", "off", "already_armed"]) assert.equal(seoAgentArmEndedCleanly(status), true, status);
+    for (const status of ["armed", "disarmed", "refused", "closed", "waiting_ready", "pr_not_found", "pr_ambiguous", "window_ended_disarmed", "auto_merge_turned_off", "pull_request_unreadable", "attestation_invalid", "not_graduated"]) {
+        assert.equal(seoAgentArmEndedCleanly(status), false, status);
+    }
+});
+
+test("turning it off is asked again when an answer is lost", async () => {
+    let tries = 0;
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]),
+        disableAutoMerge: (pull) => { if (++tries < 3) throw new Error("timeout"); writes.push(["disable", pull]); },
+    });
+    const result = await loop(ports, loopClock().clock, 2);
+    assert.equal(result.status, "window_ended_disarmed");
+    assert.equal(tries, 3);
+});
+
+test("the loop is off, and touches nothing, behind the kill switch and without the auto-merge switch", async () => {
+    for (const env of [{ ...ARM_ENV, MARKETING_AUTOMATION_KILL_SWITCH: "1" }, PUBLISH_ENV]) {
+        const { ports, calls } = armPorts();
+        assert.equal((await loop(ports, loopClock().clock, 240, env)).status, "off");
+        assert.deepEqual(calls, []);
     }
 });
 
