@@ -72,6 +72,7 @@ model User {
   emailLoginEnabled             Boolean       @default(true)
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
+  ga4UserId                     Ga4UserId?
 
   accounts                             Account[]
   sessions                             Session[]
@@ -1042,6 +1043,20 @@ model ComparisonReviewRunAttempt {
   @@index([reviewerModelId, createdAt])
   @@index([status, createdAt])
   @@index([createdAt])
+}
+
+/// The GA4 User-ID of an account (docs/policy/marketing-automation.md §10.2):
+/// 128 random bits with no relation to the account id, at most one per
+/// account. Created on the first request made after the visitor explicitly
+/// accepted analytics, never before. Withdrawing consent deletes it, after one
+/// GA4 deletion request naming it; so does deleting the account, through the
+/// cascade. Deleting the row is what cuts the account off from whatever GA4
+/// holds under the value, and a later consent gets a new one.
+model Ga4UserId {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyticsUserId String   @unique
+  createdAt       DateTime @default(now())
 }
 
 model ProductAnalyticsEvent {

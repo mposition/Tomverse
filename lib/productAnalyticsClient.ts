@@ -582,10 +582,22 @@ export const applyGa4UserId = (value: string | null) => {
   window.gtag?.("set", { user_id: next });
 };
 
+/** A withdrawal this browser has sent and not yet seen answered. */
+let ga4UserIdWithdrawal: Promise<void> | null = null;
+
+// The caller asks only once the visitor explicitly accepted analytics
+// (lib/ga4UserIdPolicy.ts), and says so: the server creates no id for a
+// request that does not. A withdrawal sent from this browser is answered
+// first, so declining and then accepting again cannot be handed the id that
+// is being withdrawn.
 const requestAnalyticsUserId = async (signal: AbortSignal) => {
+  await ga4UserIdWithdrawal;
+  if (signal.aborted) return null;
   const response = await fetch("/api/analytics/user-id", {
     method: "POST",
     cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ consent: "accepted" }),
     signal,
   });
   if (!response.ok) {
@@ -626,6 +638,30 @@ export const syncGa4UserId = (
     })
     .catch(() => {});
   return () => controller.abort();
+};
+
+/**
+ * Withdrawal of the account's GA4 User-ID, for a visitor who declined
+ * analytics while signed in (docs/policy/marketing-automation.md §10.2): the
+ * tag's id is cleared here and the server asks GA4 to delete what it holds
+ * under the stored id, then deletes it. One request, kept alive past a
+ * navigation and never retried; whether it may be made at all is the caller's
+ * decision (`ga4UserIdWithdrawalApplies`).
+ */
+export const withdrawGa4UserId = () => {
+  clearGa4UserId();
+  const withdrawal: Promise<void> = fetch("/api/analytics/user-id", {
+    method: "DELETE",
+    cache: "no-store",
+    keepalive: true,
+  })
+    .then(discardResponseBody)
+    .catch(() => {})
+    .finally(() => {
+      if (ga4UserIdWithdrawal === withdrawal) ga4UserIdWithdrawal = null;
+    });
+  ga4UserIdWithdrawal = withdrawal;
+  return withdrawal;
 };
 
 export const disableAnalyticsClient = () => {

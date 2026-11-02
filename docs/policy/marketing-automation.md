@@ -414,23 +414,28 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   touch 없음은 미귀속, 이벤트 자체가 없음(미동의·차단)은 미관측으로 따로 보고한다.
 
 ### 10.2 GA4 User-ID
-분석 전용 무작위 식별자, 동의·고지 조건에서만 전송, 로그아웃 시 해제, 계정 삭제 시 GA4 삭제 요청.
-**개인정보 고지 개정 배포 전에는 전송하지 않는다.**
+분석 전용 무작위 식별자, 명시 동의·고지 조건에서만 생성·전송, 로그아웃 시 해제, 동의 철회와 계정 삭제 시 GA4 삭제 요청 후 식별자 삭제.
+**개인정보 고지 개정 배포 전에는 생성하지도 전송하지도 않는다.**
 
-구현(S6, 기본 꺼짐):
-- 식별자는 저장하지 않고 계정 id를 전용 키 `GA4_USER_ID_KEY`로 HMAC-SHA256한 128비트 값이다(`lib/ga4UserId.ts`).
-  키 없이는 계정 id로 되돌릴 수 없어 GA4에는 무작위 값과 같고, 저장된 값이 없으므로 계정 삭제 시 지울 행이 없으며
-  GA4 삭제 요청만 남는다. 무작위 값을 저장하려면 `prisma/schema.prisma`(Prompt Refiner closure 파일) 변경이 필요해 택하지 않았다.
-  키는 바꾸지 않는다 — 바꾸면 이미 보낸 id를 삭제 요청에서 부를 수 없다.
-- 전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
+구현(S6, 기본 꺼짐). 식별자 방식은 2026-11-02 운영자 결정으로 계정 id의 HMAC에서 저장하는 무작위 값으로 바꿨다(정책 버전 변경 없음):
+- 식별자는 계정과 무관한 128비트 암호학적 난수(소문자 hex)이고 `Ga4UserId` 표에 계정당 최대 한 행으로 저장한다
+  (`lib/ga4UserId.ts`, migration `20261102100000_ga4_user_id`, 값 형식은 DB CHECK로 강제). 저장하는 이유는 철회다 —
+  행을 지우면 Tomverse 안에서 그 값을 계정에 잇는 것이 없어져 GA4와의 연결이 끊긴다. 다시 동의하면 새 값을 만든다.
+  이전 HMAC 방식의 id는 고지 상수가 한 번도 `true`가 된 적이 없어 발급·전송된 적이 없으므로 그 삭제 경로는 두지 않는다.
+- 생성·전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
   고지 개정 PR에서만 바꾼다) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
-  로그인 · GA4 측정 id. 서버는 여기에 키 존재를 더한다(`app/api/analytics/user-id/route.ts`). 브라우저의 gtag `user_id`로만
-  보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃과 분석 거절은 `user_id`를 `null`로 해제한다.
-- 계정 삭제(`lib/accountDeletion.ts`)는 트랜잭션 커밋 뒤 GA4 Admin API `submitUserDeletion`을 한 번 요청한다
-  (`lib/ga4UserDeletion.ts`, `GA4_PROPERTY_ID`, `GA4_USER_DELETION_SERVICE_ACCOUNT_JSON`). 실패는 id 없이 운영 incident로 남기고
-  재시도하지 않으며 삭제를 막지 않는다. User-ID가 한 번이라도 나갈 수 있었던 경우에만 요청한다 — 고지 상수 `true`, 키 존재,
-  스위치가 지금 켜져 있거나 `GA4_USER_ID_PREVIOUSLY_ENABLED=true`(스위치를 끌 때 운영자가 설정해 이미 보낸 id의 삭제를 계속한다).
-  미리 넣어 둔 자격증명만으로는 아무것도 보내지 않는다.
+  로그인 · GA4 측정 id. 식별자는 이 조건이 모두 충족된 뒤의 첫 요청에서만 만든다 — 브라우저가 요청 본문에 명시 동의를 적고,
+  서버는 고지·스위치·로그인이 맞고 그 진술이 있을 때만 만든다(`app/api/analytics/user-id/route.ts` POST). 브라우저의 gtag
+  `user_id`로만 보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃은 `user_id`를 `null`로 해제한다.
+- 동의 철회: 로그인 상태에서 분석을 거절하면 브라우저가 `user_id`를 `null`로 해제하고 철회를 요청한다(route DELETE). 서버는 저장된
+  id로 GA4 Admin API `submitUserDeletion`을 한 번 요청한 뒤 행을 지운다. 요청 실패는 철회를 막지 않는다. 요청부터 삭제까지 행을 잠가,
+  그 사이의 동의 요청은 철회 중인 id를 받지 못하고 철회가 끝난 뒤 새 id를 받는다(같은 브라우저는 철회 응답 뒤에 요청한다). 철회는 고지 상수만 따르고
+  스위치와 무관하다 — 스위치가 켜졌을 때 만든 id는 꺼진 뒤에도 철회할 수 있어야 한다. 동의는 브라우저 단위이므로 로그아웃 상태의
+  거절은 계정 id를 지우지 않는다.
+- 계정 삭제(`lib/accountDeletion.ts`): 삭제 트랜잭션 안에서 User 행을 잠근 뒤 저장된 id를 읽고, 행은 User와 함께 cascade로 지운다.
+  커밋 뒤 그 id로 `submitUserDeletion`을 한 번 요청한다(롤백된 삭제는 GA4에 요청하지 않는다). 저장된 id가 없으면 요청하지 않는다.
+- GA4 요청(`lib/ga4UserDeletion.ts`, `GA4_PROPERTY_ID`, `GA4_USER_DELETION_SERVICE_ACCOUNT_JSON`): 저장된 id가 있을 때만 하고,
+  실패와 자격증명 누락은 id 없이 운영 incident로 남기며 재시도하지 않는다. 자격증명만으로는 아무것도 보내지 않는다.
 
 ### 10.3 120일 측정
 모든 지표를 승인·자율 모드와 계정별로 나눈다.
@@ -510,7 +515,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 | LLM 비용 원장(`MarketingLlmCall`) | 24개월 | 삭제 |
 | 경쟁사 등록부(`MarketingCompetitor`) | 행 유지(은퇴만) | 삭제하지 않는다. 시장 사실이 그 행을 출처 판정의 근거로 가리키기 때문이다. 개인정보가 없다 |
 | 공개 버킷 이미지 | 게시 확인 후 7일 또는 게시 취소 즉시 | 삭제 |
-| 분석 전용 식별자 | 계정 삭제 시 즉시 | 삭제 + GA4 삭제 요청 |
+| 분석 전용 식별자(`Ga4UserId`) | 동의 철회 또는 계정 삭제 시 즉시 | GA4 삭제 요청 + 삭제 |
 
 - history의 append-only 예외는 **보유 정리 하나뿐**이다. 같은 CAS와 감사 기록을 한 트랜잭션에서 쓰고,
   legal hold가 걸린 행은 정리하지 않는다.
