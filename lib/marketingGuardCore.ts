@@ -852,17 +852,19 @@ function englishPriceProblems(
     }
   }
 
-  // A currency code or a money word that no amount above was read from: the
-  // amount is spelled out ("USD ninety-nine"), or there is none. An amount this
-  // cannot read is not an amount it can compare, so it is refused.
+  // A currency code, symbol or money word that no amount above was read from:
+  // the amount is spelled out ("USD ninety-nine", "A$fifteen"), or there is
+  // none. An amount this cannot read is not an amount it can compare, so it is
+  // refused; the Australian marks keep their own code.
   const unit = new RegExp(
-    `(?<![\\p{L}\\p{N}])(${PRICE_CURRENCY_CODES}|dollars?|bucks|cents?|euros?|pounds?)(?![\\p{L}\\p{N}])`,
+    `(?<![\\p{L}\\p{N}])(${PRICE_CURRENCY_CODES}|dollars?|bucks|cents?|euros?|pounds?|yen|won)(?![\\p{L}\\p{N}])|(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])`,
     "giu",
   );
   for (const hit of lowered.matchAll(unit)) {
     const at = hit.index ?? 0;
     if (read.some(([from, to]) => at >= from && at < to)) continue;
-    if (hit[1].toLowerCase() === "aud") {
+    const mark = (hit[1] ?? hit[2]).toLowerCase();
+    if (mark === "aud" || mark === "au$" || mark === "a$") {
       codes.push("au_price_gst_unverifiable");
       ruleIds.push("price.text-aud");
     } else {
