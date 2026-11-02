@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { LANDING_EXPERIMENT_LOCALES } from "@/components/marketing/landingExperimentBundles";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { ANALYTICS_CONSENT_STORAGE_KEY } from "@/lib/productAnalyticsShared";
 import {
   EXPERIMENT_CONTROL_ARM,
@@ -156,9 +157,11 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
         // A refusal the server wrote (unreadable state, a failed count, a rate
         // limit) is a definite "not counted" and says so; only a request that
         // got no answer at all is unknown, and is null.
-        .then((response) =>
-          response.ok ? response.json() : { status: "error", http: response.status }
-        )
+        .then(async (response) => {
+          if (response.ok) return response.json();
+          await discardResponseBody(response);
+          return { status: "error", http: response.status };
+        })
         .catch(() => null) as Promise<{
         status?: string;
         arm?: string;
