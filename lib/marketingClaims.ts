@@ -351,7 +351,7 @@ const monthlyPriceClaim = (id: string, planId: "pro" | "max", statementKey: stri
   // The Korean and Taiwanese markets (policy O7), and `en` since the owner's
   // decision of 2026-11-02: an English post may state this price only as the
   // stored amount in the stored currency, naming the currency and the plan, and
-  // an AUD price stays refused (§7.2 rules 2 and 3; the Guard reads the words in
+  // an AUD price stays refused (§7.2 rules 3 and 9; the Guard reads the words in
   // `englishPriceProblems()`). Not `zh-Hans`: RedNote's overseas readers
   // include Australia.
   locales: ["en", "ko", "zh-Hant"],

@@ -619,6 +619,10 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro costs USD 15 per month, billed every 7 days.",
     "Pro costs USD 15 per month, billed every twelve months.",
     "Pro costs USD 15.004 per month.", // more decimals than money has
+    "Pro is .15 USD per month.", // a leading dot is part of the amount
+    "Pro is USD 15.00 per month, billed semiannually.",
+    "Pro is USD 15.00 per month, billed every other day.",
+    "Pro is USD 15.00 per month, billed weekly.",
     "Pro is USD 15.00/yr.",
     "Pro is USD 15.00 for the first year.",
     "Pro is USD 15.00 billed yearly.",
@@ -652,6 +656,10 @@ test("a figure with a billing period is a price even with no currency, and a lim
   // "20 a day" is not a billing period, and "100 messages per month" has a noun
   // between the figure and the period.
   assert.ok(!priceDecision("Save 20 a day of busywork.", []).codes.includes("price_currency_missing"));
+  // Time words that are not billing leave a correct price alone.
+  for (const text of ["Pro costs USD 15.00 per month. Save hours every day.", "Pro is USD 15.00 per month; see results in days."]) {
+    assert.equal(priceDecision(text).verdict, "approval_required", text);
+  }
   assert.ok(!priceDecision("Pro has been here since 2026.").codes.includes("price_currency_missing"));
   // A model version ending a clause beside a plan name is not a price with no currency.
   for (const text of ["Choose Pro for GPT-5.", "Pro compares GPT-5, Claude 4.5 and Gemini 3."]) {

@@ -61,7 +61,7 @@ export const MARKETING_REJECT_CODES = Object.freeze([
   "model_claim_false",
   "feature_not_public",
   "comparison_without_evidence",
-  // Owner decision 2026-11-02 (§7.2 rule 2): a comparative or superlative price
+  // Owner decision 2026-11-02 (§7.2 rule 9): a comparative or superlative price
   // is refused in every language; an English price needs its currency and has
   // to be the stored amount of a plan the post names.
   "price_comparison_claim",
@@ -619,7 +619,7 @@ const PRICE_CURRENCY_CODES = "usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
  * between them.
  */
 const PRICE_MENTION = new RegExp(
-  `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
+  `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(?<![\\d.,])(\\.?\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
     `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks)\\b)?` +
     `(?:\\s*(?:\\/|\\bper\\b)\\s*(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b)?`,
   "giu",
@@ -633,7 +633,7 @@ const PRICE_MENTION = new RegExp(
  * months" are the same sentence to a reader.
  */
 const NON_MONTHLY_BILLING =
-  /\b(?:annual(?:ly)?|yearly|yr|quarterly|biannual(?:ly)?|weekly|daily|weeks?|days?|(?:per|a|each|every)\s+(?:\w+\s+)?years?|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
+  /\b(?:annual(?:ly)?|yearly|yr|quarterly|(?:semi|bi)-?(?:annual(?:ly)?|monthly|weekly)|fortnight(?:ly)?|(?:billed|charged|paid|billing)\s+(?:\w+\s+)?(?:weekly|daily)|per\s+(?:week|day)|(?:every|each)\s+(?:other|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s*-?\s*(?:weeks?|days?)|(?:per|a|each|every)\s+(?:\w+\s+)?years?|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
 const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
 
 /** The plans that carry a price, by the names the product gives them (not "Free"). */
@@ -661,7 +661,7 @@ const PRICE_COUNTRY_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
 
 /**
  * What an English post says about money, against the stored plan prices it
- * declares (owner decision 2026-11-02, §7.2 rule 2).
+ * declares (owner decision 2026-11-02, §7.2 rule 9).
  *
  * Each amount has to name its currency exactly once (a bare `$` is read as
  * Australian dollars by an Australian reader), the currency cannot be AUD (an
