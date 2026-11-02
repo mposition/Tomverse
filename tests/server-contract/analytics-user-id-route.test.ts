@@ -55,14 +55,23 @@ mock.module(mod("lib/ga4UserDeletion.ts"), {
     },
   },
 });
+// The two locking reads (FOR SHARE when handing out, FOR UPDATE when
+// withdrawing) are answered from the map; the locks themselves are the DB
+// suite's subject (tests/integration/ga4-user-id.db.test.ts).
+const queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+  const sql = strings.join("?");
+  assert.match(sql, /FROM "Ga4UserId" WHERE "userId" = [?] FOR (SHARE|UPDATE)/);
+  const row = stored.get(String(values[0]));
+  return row ? [{ analyticsUserId: row.analyticsUserId }] : [];
+};
+const fakePrisma: Record<string, unknown> = {
+  $queryRaw: queryRaw,
+  $transaction: async (work: (tx: unknown) => Promise<unknown>) => work(fakePrisma),
+};
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
-    prisma: {
+    prisma: Object.assign(fakePrisma, {
       ga4UserId: {
-        findUnique: async ({ where }: { where: { userId: string } }) => {
-          const row = stored.get(where.userId);
-          return row ? { analyticsUserId: row.analyticsUserId } : null;
-        },
         createMany: async ({
           data,
         }: {
@@ -78,19 +87,15 @@ mock.module(mod("lib/prisma.ts"), {
           }
           return { count };
         },
-        deleteMany: async ({
-          where,
-        }: {
-          where: { userId: string; analyticsUserId: string };
-        }) => {
+        delete: async ({ where }: { where: { userId: string } }) => {
           const row = stored.get(where.userId);
-          if (!row || row.analyticsUserId !== where.analyticsUserId) return { count: 0 };
+          if (!row) throw new Error("Record to delete does not exist.");
           stored.delete(where.userId);
-          events.push(`delete:${where.userId}:${where.analyticsUserId}`);
-          return { count: 1 };
+          events.push(`delete:${where.userId}:${row.analyticsUserId}`);
+          return { userId: where.userId, ...row };
         },
       },
-    },
+    }),
   },
 });
 
@@ -157,6 +162,7 @@ test("without a statement of explicit consent nothing is created", async () => {
   }
   assert.equal(stored.size, 0);
   assert.deepEqual(events, []);
+  assert.deepEqual(rateLimitKeys, [], "and spends no quota");
 });
 
 test("switch off or unset, or signed out: the same 404, and nothing created", async () => {

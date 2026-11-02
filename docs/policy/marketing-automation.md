@@ -427,7 +427,8 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   서버는 고지·스위치·로그인이 맞고 그 진술이 있을 때만 만든다(`app/api/analytics/user-id/route.ts` POST). 브라우저의 gtag
   `user_id`로만 보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃은 `user_id`를 `null`로 해제한다.
 - 동의 철회: 로그인 상태에서 분석을 거절하면 브라우저가 `user_id`를 `null`로 해제하고 철회를 요청한다(route DELETE). 서버는 저장된
-  id로 GA4 Admin API `submitUserDeletion`을 한 번 요청한 뒤 행을 지운다. 요청 실패는 철회를 막지 않는다. 철회는 고지 상수만 따르고
+  id로 GA4 Admin API `submitUserDeletion`을 한 번 요청한 뒤 행을 지운다. 요청 실패는 철회를 막지 않는다. 요청부터 삭제까지 행을 잠가,
+  그 사이의 동의 요청은 철회 중인 id를 받지 못하고 철회가 끝난 뒤 새 id를 받는다(같은 브라우저는 철회 응답 뒤에 요청한다). 철회는 고지 상수만 따르고
   스위치와 무관하다 — 스위치가 켜졌을 때 만든 id는 꺼진 뒤에도 철회할 수 있어야 한다. 동의는 브라우저 단위이므로 로그아웃 상태의
   거절은 계정 id를 지우지 않는다.
 - 계정 삭제(`lib/accountDeletion.ts`): 삭제 트랜잭션 안에서 User 행을 잠근 뒤 저장된 id를 읽고, 행은 User와 함께 cascade로 지운다.

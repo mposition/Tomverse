@@ -33,13 +33,17 @@ export const ga4UserIdServerEnabled = (
   noticePublished === true &&
   isGa4UserIdSwitchOn(env.NEXT_PUBLIC_GA4_USER_ID_ENABLED);
 
-const readStored = async (userId: string) =>
-  (
-    await prisma.ga4UserId.findUnique({
-      where: { userId },
-      select: { analyticsUserId: true },
-    })
-  )?.analyticsUserId ?? null;
+/**
+ * A locking read. A withdrawal holds the row FOR UPDATE until it has named the
+ * id to GA4 and deleted it, so this waits for one in progress and then finds
+ * no row: an id being withdrawn is never handed out again, and the consent
+ * that follows gets a new one.
+ */
+const readStored = async (userId: string) => {
+  const rows = await prisma.$queryRaw<Array<{ analyticsUserId: string }>>`
+    SELECT "analyticsUserId" FROM "Ga4UserId" WHERE "userId" = ${userId} FOR SHARE`;
+  return rows[0]?.analyticsUserId ?? null;
+};
 
 /**
  * The account's id, created on the first call. Only the route that answers
@@ -57,20 +61,35 @@ export async function ensureGa4UserId(userId: string): Promise<string | null> {
 }
 
 /**
+ * Bounds the withdrawal transaction: the GA4 request (two calls of at most
+ * 5 s each) and, when it is not submitted, the incident alert (5 s).
+ */
+const WITHDRAWAL_TRANSACTION_TIMEOUT_MS = 30_000;
+
+/**
  * Withdrawal of analytics consent: one GA4 deletion request naming the stored
  * id, then the id is deleted whatever that request returned -- a failure is
  * the request's own incident and never keeps the id. Nothing stored, nothing
  * asked. Not gated on the switch: an id created while it was on must still be
  * withdrawable after it is turned off.
+ *
+ * The row stays locked from the read to the delete, the GA4 request included,
+ * so `ensureGa4UserId` cannot hand the id out in between (it waits, then
+ * creates a new one). Should the transaction fail, the row and its link to the
+ * account stay as they were, so account deletion can still name it.
  */
 export async function withdrawGa4UserId(userId: string): Promise<{ withdrawn: boolean }> {
-  const analyticsUserId = await readStored(userId);
-  if (!analyticsUserId) return { withdrawn: false };
-  await requestGa4UserIdDeletion(analyticsUserId, "consent_withdrawal").catch(
-    () => undefined
+  return prisma.$transaction(
+    async (tx) => {
+      const [row] = await tx.$queryRaw<Array<{ analyticsUserId: string }>>`
+        SELECT "analyticsUserId" FROM "Ga4UserId" WHERE "userId" = ${userId} FOR UPDATE`;
+      if (!row) return { withdrawn: false };
+      await requestGa4UserIdDeletion(row.analyticsUserId, "consent_withdrawal").catch(
+        () => undefined
+      );
+      await tx.ga4UserId.delete({ where: { userId } });
+      return { withdrawn: true };
+    },
+    { maxWait: 10_000, timeout: WITHDRAWAL_TRANSACTION_TIMEOUT_MS }
   );
-  // Only the id that was named: an id created after the read stays until it
-  // is withdrawn itself, rather than disappearing without a request.
-  await prisma.ga4UserId.deleteMany({ where: { userId, analyticsUserId } });
-  return { withdrawn: true };
 }

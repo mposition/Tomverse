@@ -20,10 +20,13 @@ const mod = (relativePath: string) =>
   pathToFileURL(resolve(ROOT, relativePath)).href;
 
 const requested: Array<{ analyticsUserId: string; trigger: string }> = [];
+// Set by a test to keep the GA4 request open, as a slow Google would.
+let ga4Response: Promise<void> | null = null;
 mock.module(mod("lib/ga4UserDeletion.ts"), {
   namedExports: {
     requestGa4UserIdDeletion: async (analyticsUserId: string, trigger: string) => {
       requested.push({ analyticsUserId, trigger });
+      await ga4Response;
       return { status: "submitted", deletionRequestTime: null };
     },
   },
@@ -48,6 +51,7 @@ const reset = async () => {
 
 beforeEach(async () => {
   requested.length = 0;
+  ga4Response = null;
   await reset();
 });
 
@@ -114,6 +118,39 @@ test("withdrawal names the stored id, leaves no row, and the next consent gets a
   const second = await ga4.ensureGa4UserId(user.id);
   assert.match(String(second), /^[0-9a-f]{32}$/);
   assert.notEqual(second, first);
+});
+
+test("consenting again while a withdrawal waits on GA4 never gets the id being withdrawn", async () => {
+  const user = await createUser();
+  const withdrawnId = await ga4.ensureGa4UserId(user.id);
+  let answer!: () => void;
+  ga4Response = new Promise<void>((resolveAnswer) => {
+    answer = resolveAnswer;
+  });
+
+  const withdrawal = ga4.withdrawGa4UserId(user.id);
+  while (requested.length === 0) {
+    await new Promise((resolveTick) => setTimeout(resolveTick, 10));
+  }
+
+  let settled = false;
+  const reconsent = ga4.ensureGa4UserId(user.id).finally(() => {
+    settled = true;
+  });
+  await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+  assert.equal(settled, false, "the new consent waits for the withdrawal");
+
+  answer();
+  assert.deepEqual(await withdrawal, { withdrawn: true });
+  const newId = await reconsent;
+  assert.match(String(newId), /^[0-9a-f]{32}$/);
+  assert.notEqual(newId, withdrawnId);
+  assert.deepEqual(requested, [{ analyticsUserId: withdrawnId, trigger: "consent_withdrawal" }]);
+  assert.deepEqual(
+    (await rows(user.id)).map((row) => row.analyticsUserId),
+    [newId],
+    "the account is linked to the new id only, so its deletion can name it"
+  );
 });
 
 test("account deletion names the stored id after the commit and the row goes with the account", async () => {

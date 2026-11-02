@@ -321,3 +321,39 @@ test("withdrawing clears the tag's id and asks the server to delete it, once", a
   assert.equal(requests[0].init.method, "DELETE");
   assert.equal(requests[0].init.keepalive, true, "survives the navigation a decline may cause");
 });
+
+test("after declining, accepting again asks for an id only once the withdrawal is answered", async () => {
+  client.disableAnalyticsClient();
+  win.dataLayer = [];
+  configure("G-TEST1234");
+  const requests = [];
+  const withdrawalAnswer = deferred();
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    requests.push(init.method);
+    if (init.method === "DELETE") {
+      await withdrawalAnswer.promise;
+      return new Response(null, { status: 204 });
+    }
+    return new Response(JSON.stringify({ analyticsUserId: ID_B }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    const withdrawal = client.withdrawGa4UserId();
+    client.syncGa4UserId(true);
+    await flush();
+    await flush();
+    assert.deepEqual(requests, ["DELETE"], "no id is asked for while the withdrawal is open");
+    withdrawalAnswer.resolve();
+    await withdrawal;
+    await flush();
+    await flush();
+    await flush();
+    assert.deepEqual(requests, ["DELETE", "POST"]);
+    assert.deepEqual(userIdCommands(), [ID_B], "the new id, after the withdrawal");
+  } finally {
+    globalThis.fetch = original;
+  }
+});

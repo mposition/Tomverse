@@ -51,11 +51,11 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) return notFound();
+    if (!(await statesExplicitConsent(req))) return notFound();
     await consumeApiRateLimit(req, userId, "analytics-user-id", {
       minute: 30,
       day: 1_000,
     });
-    if (!(await statesExplicitConsent(req))) return notFound();
     const analyticsUserId = await ensureGa4UserId(userId);
     if (!analyticsUserId) return notFound();
     return NextResponse.json({ analyticsUserId }, { headers: noStore });
