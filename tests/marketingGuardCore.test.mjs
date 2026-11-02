@@ -675,6 +675,8 @@ test("a figure with a billing period is a price even with no currency, and a lim
     "Pro costs 99 per week.",
     "Pro costs ninety-nine per month.",
     "Pro costs 99 per calendar month.",
+    "Pro costs 99 monthly with credits included.",
+    "Pro is USD 15 per month, or 99 monthly with credits included.",
     "Pro is 99 cents per month.",
     "Pro is USD 15 per month, or 99 cents per month.",
   ]) {
