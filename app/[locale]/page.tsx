@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import LaunchHomepage from "@/components/marketing/LaunchHomepage";
+import { LandingExperimentBeacon } from "@/components/marketing/LandingExperimentBeacon";
 import { homepageProductLinks } from "@/lib/homepageProductLinks";
 import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { LanguageProvider } from "@/components/LanguageProvider";
@@ -66,6 +67,7 @@ export default async function LocalizedLandingPage({ params }: LocalePageProps) 
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
         <LaunchHomepage {...homepageProductLinks(normalizedLocale)} />
+        <LandingExperimentBeacon renderedArm="control" locale={normalizedLocale} />
       </LanguageProvider>
     </div>
   );
