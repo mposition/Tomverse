@@ -3,8 +3,9 @@
  * (docs/policy/marketing-automation.md §10.2, §12.2, §14 S6).
  *
  * The User-ID lets GA4 join one account's visits across devices. It is an
- * analytics-only pseudonym (lib/ga4UserId.ts), never the account id or an
- * email, and it is sent only when every one of these holds:
+ * analytics-only random value stored for the account (lib/ga4UserId.ts),
+ * never the account id or an email, and it is created and sent only when
+ * every one of these holds:
  *
  * 1. **Notice.** The privacy notice that tells people about it is published.
  *    That is this constant, flipped in the same pull request that ships the
@@ -18,12 +19,13 @@
  * 3. **Consent.** The visitor explicitly accepted analytics. Stricter than the
  *    rest of analytics, which in a notice region also runs when no choice was
  *    made: a cross-device identifier is not something a visitor should get by
- *    not answering.
+ *    not answering. The request that creates the id states this consent, and
+ *    the server creates nothing without it.
  * 4. **A signed-in session and a configured measurement id.** Signing out
- *    clears it (`applyGa4UserId(null)`), as does declining analytics.
- *
- * The server adds its own fifth condition -- the derivation key exists
- * (`GA4_USER_ID_KEY`) -- before it will hand an id out at all.
+ *    clears it (`applyGa4UserId(null)`). Declining analytics clears it too,
+ *    and while signed in also withdraws it: the server asks GA4 to delete
+ *    what it holds under the id and then deletes the id, so a later consent
+ *    gets a new one.
  */
 
 export const GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED = false as boolean;
@@ -33,7 +35,7 @@ export const GA4_USER_ID_SWITCH_ENV = "NEXT_PUBLIC_GA4_USER_ID_ENABLED";
 export const isGa4UserIdSwitchOn = (value: unknown) =>
   typeof value === "string" && value.trim().toLowerCase() === "true";
 
-/** 128 bits as lowercase hex: what `analyticsUserIdFor` produces. */
+/** 128 bits as lowercase hex: what `newAnalyticsUserId` produces. */
 export const isAnalyticsUserId = (value: unknown): value is string =>
   typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
 
@@ -49,3 +51,13 @@ export const ga4UserIdTransmissionAllowed = (input: {
   input.consent === "accepted" &&
   input.signedIn &&
   Boolean(input.measurementId);
+
+/**
+ * Whether declining analytics while signed in should withdraw the account's
+ * stored id. Only the notice gates it, not the switch: an id created while
+ * the switch was on must still be withdrawable after it is turned off.
+ */
+export const ga4UserIdWithdrawalApplies = (input: {
+  noticePublished: boolean;
+  signedIn: boolean;
+}) => input.noticePublished === true && input.signedIn;

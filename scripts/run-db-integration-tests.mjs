@@ -1024,6 +1024,16 @@ run(
     "--test-concurrency=1", "tests/integration/chat-c16-lifecycle.db.test.ts"],
   "Running Chat sharing, export and deletion lifecycle scenarios"
 );
+// The stored GA4 User-ID: one per account under racing first requests, the
+// CHECK on its form, withdrawal and account deletion leaving no row, and the
+// deletion lock against a racing creation. Its own process because it replaces
+// the GA4 request module, so nothing reaches Google.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/ga4-user-id.db.test.ts"],
+  "Running the GA4 User-ID creation, withdrawal and account deletion scenarios"
+);
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
 // seam. Module mocks are process-global, so keeping this in its own process
