@@ -16,8 +16,12 @@ export const AMUX_IDEA_LANE_DAILY_ENV = "AMUX_IDEA_LANE_MAX_ATTEMPTS_PER_DAY";
 /** Runs one idea may use before the lane gives up on it. */
 export const AMUX_IDEA_LANE_MAX_ATTEMPTS = 3;
 export const AMUX_IDEA_LANE_DEFAULT_DAILY_ATTEMPTS = 10;
-/** Longer than the workflow job's 90-minute timeout, so a live run never looks dead. */
-export const AMUX_IDEA_LANE_LEASE_MS = 100 * 60_000;
+/**
+ * The workflow's implement (80 min) and publish (10 min) timeouts plus an hour
+ * for queueing between jobs. A run still going past it may overlap a retry; the
+ * worst case is a second draft PR for the idea, which a person closes.
+ */
+export const AMUX_IDEA_LANE_LEASE_MS = 150 * 60_000;
 /** What a finished run may report besides an opened PR (the table's CHECK holds the same words). */
 export const AMUX_IDEA_LANE_FAILURES = ["no_change", "cli_failed", "workflow_edit", "secret_in_diff",
   "push_failed", "job_failed"] as const;

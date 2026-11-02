@@ -87,7 +87,8 @@ jobs:
     needs: claim
     if: needs.claim.outputs.claimed == 'true'
     runs-on: ubuntu-latest
-    # The app's lease (AMUX_IDEA_LANE_LEASE_MS) is longer than this job and publish together.
+    # The app's lease (AMUX_IDEA_LANE_LEASE_MS, 150 minutes) covers this job,
+    # publish and the queueing between them.
     timeout-minutes: 80
     outputs:
       failure: ${{ steps.model.outputs.failure }}
@@ -204,6 +205,10 @@ jobs:
               exit 0
             fi
           done
+          # Only the three scanned files are handed on; anything else the model
+          # left in OUT_DIR stays on this runner.
+          mkdir -p "${RUNNER_TEMP}/publish"
+          cp "${OUT_DIR}/change.patch" "$PR_TITLE_PATH" "$PR_BODY_PATH" "${RUNNER_TEMP}/publish/"
           git diff --cached --stat
 
       - name: Hand the change to publish
@@ -211,7 +216,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: amux-idea-${{ needs.claim.outputs.attempt }}
-          path: ${{ runner.temp }}/out/
+          path: ${{ runner.temp }}/publish/
           retention-days: 1
           if-no-files-found: error
 

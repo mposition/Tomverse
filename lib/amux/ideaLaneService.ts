@@ -67,6 +67,7 @@ export async function claimAmuxIdeaLane(): Promise<AmuxIdeaLaneClaim | null> {
         AND i."cancelledAt" IS NULL AND i."rawPurgedAt" IS NULL AND i."rawCiphertext" IS NOT NULL
         AND i."rawKeyId" IS NOT NULL AND i."rawDigest" IS NOT NULL
         AND i."analysisDeadlineAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+        AND i."currentSourcePlanRevisionId" IS NULL
         AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaAnalysisChunk" c WHERE c."ideaId" = i."id")
         -- Ideas the lane is done with (PR opened, out of attempts) or running now
         -- are left out before the LIMIT, so they can never crowd out a new idea.
@@ -78,8 +79,24 @@ export async function claimAmuxIdeaLane(): Promise<AmuxIdeaLaneClaim | null> {
       LIMIT ${CANDIDATES}
     `;
     const nowMs = now.getTime();
-    const pick = candidates.find((idea) =>
-      amuxIdeaLaneClaimable(amuxIdeaLaneState((idea.attempts ?? []) as AmuxIdeaLaneAttemptFact[], nowMs)));
+    let pick: Candidate | null = null;
+    for (const idea of candidates) {
+      if (!amuxIdeaLaneClaimable(amuxIdeaLaneState((idea.attempts ?? []) as AmuxIdeaLaneAttemptFact[], nowMs))) continue;
+      // The owner's close (ideaOwnerCloseService.ts) and the analysis path's
+      // first source plan lock this row too, so
+      // what is read after the lock is final: an idea closed or put into
+      // analysis meanwhile is skipped, and that path refuses an idea claimed here.
+      const [locked] = await tx.$queryRaw<Array<{ open: boolean }>>`
+        SELECT (i."state" = 'submitted' AND i."cancelledAt" IS NULL
+          AND i."currentSourcePlanRevisionId" IS NULL
+          AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaAnalysisChunk" c WHERE c."ideaId" = i."id")) AS "open"
+        FROM "AmuxIdeaSubmission" i WHERE i."id" = ${idea.id} FOR UPDATE
+      `;
+      if (locked?.open) {
+        pick = idea;
+        break;
+      }
+    }
     if (!pick) return null;
     const attemptId = randomUUID();
     await tx.amuxIdeaLaneAttempt.create({ data: { id: attemptId, ideaId: pick.id, claimedAt: now,

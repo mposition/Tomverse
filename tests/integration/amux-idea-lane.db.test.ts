@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
 import { AMUX_IDEA_LANE_MAX_ATTEMPTS } from "@/lib/amux/ideaLaneCore";
+import { createInitialIdeaOnlySourcePlan } from "@/lib/amux/ideaInitialSourcePlanService";
 import { claimAmuxIdeaLane, recordAmuxIdeaLaneResult } from "@/lib/amux/ideaLaneService";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { prisma } from "@/lib/prisma";
@@ -138,5 +139,15 @@ test("a run's result is recorded once, and the table refuses an unknown outcome"
     leaseUntil: now, finishedAt: now, outcome: "merged" } }));
   await assert.rejects(prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea, claimedAt: now,
     leaseUntil: now, prNumber: 5 } }), "a run still going carries no PR number");
+  await removeIdeas();
+});
+
+test("an idea the lane took never starts the analysis path as well", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const idea = await seedIdea(owner, new Date(OLD));
+  await claimAmuxIdeaLane();
+  assert.equal((await attemptsOf(idea)).length, 1);
+  await assert.rejects(prisma.$transaction((tx) => createInitialIdeaOnlySourcePlan(tx,
+    { ideaId: idea, actorUserId: owner, keys: {} as never })), { message: "not_ready" });
   await removeIdeas();
 });
