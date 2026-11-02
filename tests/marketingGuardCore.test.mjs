@@ -578,6 +578,8 @@ test("an English price equal to the stored amount, currency and plan is a person
   for (const text of [
     "Pro is USD 15.00 per month.",
     "Pro costs 15 USD a month.",
+    "Pro monthly price is USD 15.", // the period said before the figure
+    "Pro is USD 15.00 per month, pause for 2 months any time.",
     "Pro: $15 USD per month.",
     "Pro is US$15 a month.",
     "Pro is 15 US dollars a month.",
@@ -609,6 +611,8 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro costs USD 15 per 12 months.",
     "Pro is USD 15.00.", // no billing period said
     "Pro users can upgrade: Max costs USD 15 per month.", // the amount belongs to a plan nothing declares
+    "Pro users can upgrade: max costs USD 15 per month.",
+    "Pro costs USD 15 per month, billed annually.", // a monthly figure with a yearly condition
     "Pro is USD 15.00/yr.",
     "Pro is USD 15.00 for the first year.",
     "Pro is USD 15.00 billed yearly.",

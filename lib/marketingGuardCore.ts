@@ -701,11 +701,11 @@ function englishPriceProblems(
   });
   // A plan the post names and the draft did not declare owns the amounts next to
   // it: "Pro users can upgrade: Max costs USD 15" is a Max price, and nothing
-  // stored backs it. Capitalised, because "max" and "pro" are ordinary words.
+  // stored backs it. In any case: "max costs USD 15" is the same claim.
   for (const other of PRICED_PLAN_NAMES) {
     if (expectations.some((entry) => entry.name === other.toLowerCase())) continue;
     const positions = [
-      ...text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${other}(?![\\p{L}\\p{N}])`, "gu")),
+      ...lowered.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${other.toLowerCase()}(?![\\p{L}\\p{N}])`, "gu")),
     ].map((hit) => hit.index ?? 0);
     if (positions.length > 0) {
       expectations.push({ name: other.toLowerCase(), priceMinor: Number.NaN, currency: "", positions });
@@ -740,24 +740,28 @@ function englishPriceProblems(
       continue;
     }
 
-    // The stored price is a monthly one, so the post has to say it is: a price
-    // with no period, or per year, week, day or "12 months", is another price.
-    // Read from the figure's own period, else the first one after it or the
-    // last one before it in the same clause.
-    const after = lowered
-      .slice(start + whole.length, start + whole.length + 40)
-      .split(/[.!?\n;:]/u)[0];
-    const before = lowered
-      .slice(Math.max(0, start - 30), start)
-      .split(/[.!?\n;:]/u)
-      .pop();
-    const periodAfter = periodUnit ?? periodAdverb ?? PRICE_PERIOD_WORD.exec(after)?.[1];
-    const periodBefore = [...(before ?? "").matchAll(new RegExp(PRICE_PERIOD_WORD.source, "giu"))].pop()?.[1];
-    const several = /\b(?:per|every|for)\s+(?:the\s+)?(\d+)\s*-?\s*(?:months?|years?|weeks?|days?)\b/iu.exec(after);
+    // The stored price is a monthly one, so the post has to say it is, and say
+    // nothing else about billing: every period word in the same clause (30
+    // characters before the figure, 40 after, and the figure's own) has to be a
+    // monthly one, at least one has to be there, and "per 12 months" is another
+    // price. "Billed annually" after "per month" is another condition.
+    const clauseEdge = /[.!?\n;:]/u;
+    const around = [
+      lowered.slice(Math.max(0, start - 30), start).split(clauseEdge).pop() ?? "",
+      lowered.slice(start + whole.length, start + whole.length + 40).split(clauseEdge)[0],
+    ];
+    const periods = [periodUnit, periodAdverb]
+      .concat(
+        around.flatMap((part) =>
+          [...part.matchAll(new RegExp(PRICE_PERIOD_WORD.source, "giu"))].map((hit) => hit[1]),
+        ),
+      )
+      .filter((word): word is string => typeof word === "string");
+    const several =
+      /^[\s,]*(?:per|every|for)\s+(?:the\s+)?(\d+)\s*-?\s*(?:months?|years?|weeks?|days?)\b/iu.exec(around[1]);
     if (
-      !periodAfter ||
-      !isMonthlyPeriod(periodAfter) ||
-      (periodBefore && !isMonthlyPeriod(periodBefore)) ||
+      !periods.some(isMonthlyPeriod) ||
+      !periods.every(isMonthlyPeriod) ||
       (several && several[1] !== "1")
     ) {
       codes.push("price_text_mismatch");
