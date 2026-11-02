@@ -638,7 +638,7 @@ const PRICE_CURRENCY_CODES ="usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
  */
 const PRICE_MENTION = new RegExp(
   `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(?<![\\d.,])([-+−–]?\\.?\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
-    `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks)\\b)?` +
+    `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks|cents?|euros?|pounds?|yen|won)\\b)?` +
     `(?:\\s*(?:\\/|\\bper\\b)\\s*(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b(?!\\s+[\\p{L}\\p{N}]))?`,
   "giu",
 );
@@ -678,6 +678,12 @@ const PRICE_SYMBOL_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
   "€": "EUR",
   "£": "GBP",
   "₩": "KRW",
+});
+/** What a spelled-out unit names (singular). Dollars, cents and yen name no one currency. */
+const PRICE_WORD_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
+  euro: "EUR",
+  pound: "GBP",
+  won: "KRW",
 });
 const PRICE_COUNTRY_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
   us: "USD",
@@ -783,6 +789,8 @@ function englishPriceProblems(
     if (codeAfter) hints.add(codeAfter.toUpperCase());
     if (symbol && PRICE_SYMBOL_CURRENCY[symbol]) hints.add(PRICE_SYMBOL_CURRENCY[symbol]);
     if (country && PRICE_COUNTRY_CURRENCY[country]) hints.add(PRICE_COUNTRY_CURRENCY[country]);
+    const wordCurrency = word ? PRICE_WORD_CURRENCY[word.replace(/s$/u, "")] : undefined;
+    if (wordCurrency) hints.add(wordCurrency);
 
     if (hints.size === 0) {
       codes.push("price_currency_missing");
@@ -804,7 +812,13 @@ function englishPriceProblems(
 
     // The stored price is a monthly one: the figure says "per month" itself, and
     // nothing else in the post bills another way.
-    const own = periodPer ?? periodA ?? periodAdverb;
+    // "monthly" straight after a figure with a currency is its period even when a
+    // word follows ("USD 15 monthly with monthly credits").
+    const own =
+      periodPer ??
+      periodA ??
+      periodAdverb ??
+      /^\s+(monthly)\b/iu.exec(lowered.slice(start + whole.length))?.[1];
     if (!own || !isMonthlyPeriod(own) || NON_MONTHLY_BILLING.test(lowered) || BILLING_TALK.test(lowered)) {
       codes.push("price_text_mismatch");
       ruleIds.push("price.text-period");

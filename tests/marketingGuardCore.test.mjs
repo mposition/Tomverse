@@ -581,6 +581,7 @@ test("an English price equal to the stored amount, currency and plan is a person
     "Pro: $15 USD per month.",
     "Pro is US$15 a month.",
     "Pro is 15 US dollars a month.",
+    "Pro is USD 15 monthly with monthly credits included.",
   ]) {
     const decision = priceDecision(text);
     // Always the approval queue (§7.4), never autonomous and never refused.
@@ -668,6 +669,8 @@ test("a figure with a billing period is a price even with no currency, and a lim
     "Pro is 99 monthly.",
     "Pro monthly price is 99.", // a figure ending the sentence right after the plan
     "Pro costs 99 per week.",
+    "Pro is 99 cents per month.",
+    "Pro is USD 15 per month, or 99 cents per month.",
   ]) {
     const decision = priceDecision(text);
     assert.equal(decision.verdict, "reject", text);
