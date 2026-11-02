@@ -1021,7 +1021,8 @@ test("the runner reads graduation from the operator's variable and arms only thr
     assert.match(runner, /runSeoAgentArmLoop\(/);
     assert.match(runner, /waitMinutes < 1/);
     assert.match(runner, /for \(const signal of \["SIGINT", "SIGTERM"\]\)/);
-    assert.match(runner, /ports\.disableAutoMerge\(pull\)/);
+    assert.match(runner, /await enableInFlight;/);
+    assert.match(runner, /attempt < 3/);
     // The pull requests are read by head branch name in this repository, and the fork flag is read with them.
     assert.match(runner, /headRefName: \$head/);
     assert.match(runner, /isCrossRepository/);
@@ -1365,6 +1366,26 @@ test("an arming request whose answer is lost is still taken back, and so is an u
     const result = await runSeoAgentArm({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV }, blind.ports);
     assert.deepEqual(result, { status: "disarmed", branch: GRADUATED_BRANCH, pullRequest: 41, reasons: ["unreadable_after_arming"] });
     assert.deepEqual(blind.writes.map(([kind]) => kind), ["enable", "disable"]);
+});
+
+test("disarming a different pull request does not clear the one this run armed", async () => {
+    // This run armed #41. A second open PR #42 for the same head appears already armed and on main: it is the
+    // one the decision disarms, and #41 must still be taken back before the run ends.
+    const { clock } = loopClock();
+    const { ports, writes } = armPorts({
+        findPullRequests: sequence(
+            [pullRequest()],
+            [pullRequest({ autoMerge: true })],
+            [pullRequest({ autoMerge: true }), pullRequest({ nodeId: "PR_node_2", number: 42, base: "main", autoMerge: true })],
+        ),
+    });
+    const result = await loop(ports, clock);
+    assert.equal(result.status, "disarmed");
+    assert.deepEqual(writes, [
+        ["enable", { nodeId: "PR_node_1", number: 41, headSha: COMMIT }],
+        ["disable", { nodeId: "PR_node_2", number: 42 }],
+        ["disable", { nodeId: "PR_node_1", number: 41 }],
+    ]);
 });
 
 test("turning it off is asked again when an answer is lost", async () => {

@@ -1341,7 +1341,10 @@ export async function runSeoAgentArmLoop(
       clock.onResult?.(result);
       unreadable = result.status === "pull_request_unreadable" ? unreadable + 1 : 0;
       if (result.status === "armed" || result.status === "already_armed") setArmed({ nodeId: result.nodeId, number: result.pullRequest });
-      if (result.status === "disarmed" || result.status === "auto_merge_turned_off" || result.status === "merged" || result.status === "closed") setArmed(null);
+      if (result.status === "auto_merge_turned_off" || result.status === "merged" || result.status === "closed") setArmed(null);
+      // A pull request other than the one this run armed can be the one that was disarmed; the tracked one is then
+      // still armed and is taken back below, with the run's other endings.
+      if (result.status === "disarmed" && state.armed?.number === result.pullRequest) setArmed(null);
 
       const waiting =
         result.status === "pr_not_found" || result.status === "waiting_ready" || result.status === "armed" || result.status === "already_armed" ||

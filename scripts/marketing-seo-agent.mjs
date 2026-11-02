@@ -628,15 +628,33 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
   // request, and disarms it again at the end of the window, on any other ending and on a throw. A signal
   // does the same here, because GitHub keeps auto-merge on after a person with write access pushes.
   let armedNow = null;
+  // A signal waits for an enabling request that is already on its way (turning it off first would be
+  // overtaken by it), refuses a new one, and asks to turn it off up to three times.
+  let stopping = false;
+  let enableInFlight = Promise.resolve();
+  const enableOnce = ports.enableAutoMerge;
+  ports.enableAutoMerge = (pull) => {
+    if (stopping) throw new Error("stopping: no new auto-merge request");
+    const request = enableOnce(pull);
+    enableInFlight = request.then(() => undefined, () => undefined);
+    return request;
+  };
   const armLoop = async () => {
     const waitMinutes = Number(option("--wait-minutes") ?? ARM_DEFAULT_WAIT_MINUTES);
     if (!Number.isFinite(waitMinutes) || waitMinutes < 1) throw new Error("--wait-minutes must be a number of minutes, 1 or more");
     for (const signal of ["SIGINT", "SIGTERM"]) {
-      process.on(signal, () => {
-        const pull = armedNow;
-        const done = () => process.exit(signal === "SIGINT" ? 130 : 143);
-        if (pull === null) done();
-        else ports.disableAutoMerge(pull).then(done, done);
+      process.on(signal, async () => {
+        stopping = true;
+        await enableInFlight;
+        for (let attempt = 0; armedNow !== null && attempt < 3; attempt += 1) {
+          try {
+            await ports.disableAutoMerge(armedNow);
+            break;
+          } catch {
+            // Asked again; a person turns it off in the PR if all three fail.
+          }
+        }
+        process.exit(signal === "SIGINT" ? 130 : 143);
       });
     }
     return await runSeoAgentArmLoop(
