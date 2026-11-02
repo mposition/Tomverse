@@ -158,9 +158,9 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
         // limit) is a definite "not counted" and says so; only a request that
         // got no answer at all is unknown, and is null.
         .then(async (response) => {
-          if (response.ok) return response.json();
-          await discardResponseBody(response);
-          return { status: "error", http: response.status };
+          const answer = response.ok ? response.json() : { status: "error", http: response.status };
+          if (!response.ok) await discardResponseBody(response);
+          return answer;
         })
         .catch(() => null) as Promise<{
         status?: string;
