@@ -397,7 +397,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   (`npm run merge-train`) 또는 사람이 한다. develop까지만.
 - 구현(2026-11-01 운영자 결정, 정책 버전 변경 없음): 실행기 `scripts/marketing-seo-agent.mjs`와 순수 규칙 `lib/marketingSeoAgentCore.ts`.
   기본 꺼짐(`MARKETING_SEO_AGENT_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). **두 단계는 서로 다른 프로세스이자 서로 다른 기계(컨테이너)에서 돌린다.**
-  검증 단계(`--phase validate`)는 격리된 clone(base 커밋)에서 도구 없는 텍스트 LLM 호출 1회(마케팅 비용 원장 그대로, 목적 `brief`, 새 유료 경로 없음)의 find/replace 수정안을 적용하고
+  검증 단계(`--phase validate`)는 격리된 clone(base 커밋)에서 도구 없는 텍스트 LLM 호출 1회(마케팅 비용 원장 그대로, 자기 목적 `seo`, 새 유료 경로 없음. 시장 분석 스위치에 묶인 `brief`를 쓰지 않는다, 2026-11-02)의 find/replace 수정안을 적용하고
   git의 diff로 판정한다(허용 4개 정확 일치, rename·삭제·binary·symlink·mode 거부, 500줄). 판정 시험은 base 커밋의 고정 목록이며 없으면 실패로 닫는다(유료 호출 전에). 시험은 파일마다 따로 돌려 junit 보고서로 확인한다: 종료 코드 0은 증거가 아니고(제안 코드가 import 중 프로세스를 0으로 끝낼 수 있다), 실패가 없고 파일 이름을 시험으로 보고하지 않으며 base가 선언한 개수 이상이 돌았어야 통과다.
   검사가 제안 코드를 실행하므로 이 단계는 게시 자격증명이 없는 일회용 러너에서만 돌리고(GitHub 토큰 변수가 있으면 시작을 거부), 검사는 허용 목록 환경으로, POSIX에서는 운영자가 정한 별도 비특권 사용자(`MARKETING_SEO_CHECK_UID`·`_GID`)로 돌린다. 그 사용자는 작업 트리를 읽기만 하고 도구 산출물(`.next`, `next-env.d.ts`)과 자기 HOME에만 쓸 수 있어, 제안 코드가 판정 시험·설정을 바꿀 수 없고 검사마다 시간 제한이 있다.
   게시할 수 있는 결과는 이 사용자로 돌린 검사에서만 나오며, 사용자가 없으면 복제도 호출도 하지 않는다(서명 키 없이 같은 사용자로 돌려 보기만 하는 `--dry-run`은 산출물을 만들지 않는다). 검사가 남긴 프로세스는 새 세션을 만든 것까지 그 사용자의 `kill(-1)`로 끝낸다. 게시 단계는 이미 있는 원격 브랜치 위에 push하지 않고, 정리 삭제는 이번 실행이 만든 브랜치가 아직 자기 commit일 때만 한다.

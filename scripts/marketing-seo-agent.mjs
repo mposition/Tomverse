@@ -133,9 +133,9 @@ if (option("--stage") === "llm" && process.argv[1] && fileURLToPath(import.meta.
     console.log(JSON.stringify({ status: "refused", stage: "reserve", code: "no_pin" }));
     process.exit(0);
   }
-  // "brief" is the ledger's purpose for a call that is neither a draft nor market intel.
+  // The agent's own purpose: "brief" spends only while the market analysis switch is on.
   const outcome = await runMarketingLlmCall(
-    { pin: chosen.pin, generatorRunId: runId, purpose: "brief", messages },
+    { pin: chosen.pin, generatorRunId: runId, purpose: "seo", messages },
     {
       budget: marketingLlmBudgetHttpPort({ appUrl: appUrl.toString(), secret, deadlineAt, fetch, signal: controller.signal }),
       transport: fetch,
