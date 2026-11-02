@@ -31,7 +31,6 @@ const metrics = (overrides: Partial<MarketingGraduationMetrics> = {}): Marketing
   observedFromAt: STARTED,
   firstSuccessAt: new Date(NOW.getTime() - 7 * DAY),
   approvedPostCount: 3,
-  operatorRejectedCount: 0,
   editedApprovedCount: 0,
   draftCount: 3,
   guardRejectedCount: 0,
@@ -72,15 +71,15 @@ test("three approvals are needed, not two", () => {
   assert.deepEqual(evaluate({ approvedPostCount: 2, draftCount: 2 }).unmet, ["approvals_below_minimum"]);
 });
 
-test("the edit rate is at most a third, with the operator's rejections in the denominator", () => {
-  // 1 edit in 3 decisions is exactly a third: allowed.
+test("the edit rate is at most a third of the approved posts; rejections are not in the denominator", () => {
+  // 1 edit in 3 approvals is exactly a third: allowed.
   assert.equal(evaluate({ approvedPostCount: 3, editedApprovedCount: 1 }).eligible, true);
-  // 2 edits in 3 decisions is not.
+  // 2 edits in 3 approvals is not.
   assert.deepEqual(evaluate({ approvedPostCount: 3, editedApprovedCount: 2 }).unmet, ["edit_rate_above_limit"]);
-  // 2 edits among 3 approvals and 3 rejections is 2 in 6: allowed, because the rejections count.
-  assert.equal(
-    evaluate({ approvedPostCount: 3, editedApprovedCount: 2, operatorRejectedCount: 3, draftCount: 6 }).eligible,
-    true,
+  // Operator rejections do not dilute the rate: 2 edits in 3 approvals stays above a third.
+  assert.deepEqual(
+    evaluate({ approvedPostCount: 3, editedApprovedCount: 2, draftCount: 6 }).unmet,
+    ["edit_rate_above_limit"],
   );
   assert.equal(evaluate({ approvedPostCount: 3, editedApprovedCount: 1 }).operatorEditRate, 1 / 3);
 });
@@ -278,6 +277,22 @@ test("a graduation writes the mode, the instant and a snapshot of counts under a
   assert.equal(snapshot.guardRejectionRate, 0.25);
   assert.equal(snapshot.approvalAuditLogId, "audit-1");
   assert.equal(snapshot.observedFromAt, STARTED.toISOString());
+});
+
+test("operator rejections do not dilute the edit rate: it is edits over approvals", async () => {
+  const rejected = { status: "rejected", approvedAt: null, publishedAt: null, history: [] };
+  const edit = { history: [{ type: "edit_revision" }] };
+  // 2 edits in 3 approvals is above a third, however many drafts were rejected.
+  const refused = await graduate(
+    world({ posts: [approvedPost(edit), approvedPost(edit), approvedPost(), rejected, rejected, rejected] }).database,
+  );
+  assert.deepEqual(refused, { graduated: false, unmet: ["edit_rate_above_limit"] });
+  // 1 edit in 3 approvals is exactly a third, and the rejections change nothing.
+  const allowed = await graduate(
+    world({ posts: [approvedPost(edit), approvedPost(), approvedPost(), rejected] }).database,
+  );
+  assert.equal(allowed.graduated, true);
+  if (allowed.graduated) assert.equal(allowed.snapshot.operatorEditRate, 1 / 3);
 });
 
 test("it answers with every unmet condition and writes nothing", async () => {

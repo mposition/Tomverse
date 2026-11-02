@@ -61,6 +61,12 @@ export const MARKETING_REJECT_CODES = Object.freeze([
   "model_claim_false",
   "feature_not_public",
   "comparison_without_evidence",
+  // Owner decision 2026-11-02 (§7.2 rule 9): a comparative or superlative price
+  // is refused in every language; an English price needs its currency and has
+  // to be the stored amount of a plan the post names.
+  "price_comparison_claim",
+  "price_currency_missing",
+  "price_text_mismatch",
   "claim_unknown",
   "claim_type_unknown",
   "claim_not_declared",
@@ -542,6 +548,345 @@ const FACT_PATTERNS: readonly { source: string; flags: string }[] = Object.freez
   ],
 );
 
+/**
+ * Comparative and superlative price wording (owner decision 2026-11-02).
+ *
+ * "Cheapest", "cheaper than ...", "the only free ...": a claim about how our
+ * price stands against everyone else's is one nobody here can prove, and the
+ * Australian Consumer Law reads it as a representation about price. Refused
+ * rather than sent to a person, in every language, because no stored fact could
+ * ever make it true.
+ *
+ * Words rather than a model's reading, deliberately. The Guard is pure and runs
+ * again on every edit and every template rendering, where no extraction ran:
+ * a flag the drafter reported about its own text would be missing exactly
+ * where a person typed the sentence, and a post has no column to keep it in.
+ * Same shape as `PROMOTION_WORDING` beside it.
+ */
+const PRICE_COMPARISON_WORDING: readonly (readonly [string, "word" | "substring"])[] =
+  Object.freeze([
+    Object.freeze(["cheapest", "word"] as const),
+    Object.freeze(["lowest price", "word"] as const),
+    Object.freeze(["lowest prices", "word"] as const),
+    Object.freeze(["lowest priced", "word"] as const),
+    Object.freeze(["lowest cost", "word"] as const),
+    Object.freeze(["best price", "word"] as const),
+    Object.freeze(["best prices", "word"] as const),
+    Object.freeze(["better price than", "word"] as const),
+    Object.freeze(["unbeatable price", "word"] as const),
+    Object.freeze(["unbeatable prices", "word"] as const),
+    Object.freeze(["most affordable", "word"] as const),
+    Object.freeze(["cheaper than", "word"] as const),
+    Object.freeze(["less expensive than", "word"] as const),
+    Object.freeze(["the only free", "word"] as const),
+    Object.freeze(["only truly free", "word"] as const),
+    Object.freeze(["최저가", "substring"] as const),
+    Object.freeze(["최저 가격", "substring"] as const),
+    Object.freeze(["최저 요금", "substring"] as const),
+    Object.freeze(["가장 저렴", "substring"] as const),
+    Object.freeze(["가장 싼", "substring"] as const),
+    Object.freeze(["가장 싸", "substring"] as const),
+    Object.freeze(["제일 저렴", "substring"] as const),
+    Object.freeze(["제일 싼", "substring"] as const),
+    Object.freeze(["제일 싸", "substring"] as const),
+    Object.freeze(["보다 저렴", "substring"] as const),
+    Object.freeze(["보다 싸", "substring"] as const),
+    Object.freeze(["유일한 무료", "substring"] as const),
+    Object.freeze(["最便宜", "substring"] as const),
+    Object.freeze(["更便宜", "substring"] as const),
+    Object.freeze(["最低价", "substring"] as const),
+    Object.freeze(["最低價", "substring"] as const),
+    Object.freeze(["价格最低", "substring"] as const),
+    Object.freeze(["價格最低", "substring"] as const),
+    Object.freeze(["最实惠", "substring"] as const),
+    Object.freeze(["最實惠", "substring"] as const),
+    Object.freeze(["最划算", "substring"] as const),
+    Object.freeze(["唯一免费", "substring"] as const),
+    Object.freeze(["唯一免費", "substring"] as const),
+  ]);
+
+/**
+ * The same refusal for comparisons with a word or two between the parts: "a
+ * lower price than", "the lowest monthly price", "more affordable than". Word
+ * lists cannot hold every modifier, so the shape is the rule.
+ */
+const PRICE_COMPARISON_PATTERNS: readonly { source: string; flags: string }[] =
+  Object.freeze([
+    Object.freeze({
+      source:
+        "(?<![\\p{L}\\p{N}])(?:(?:lower|lowest|better|best|cheaper|cheapest|less)\\s+(?:[\\p{L}-]+\\s+){0,2}(?:price|prices|priced|pricing)|(?:lower|lowest|cheaper|cheapest|less)\\s+(?:cost|costs|fee|fees))(?![\\p{L}\\p{N}])",
+      flags: "iu",
+    }),
+    Object.freeze({
+      source: "(?<![\\p{L}\\p{N}])(?:more\\s+)?affordable\\s+than(?![\\p{L}\\p{N}])",
+      flags: "iu",
+    }),
+  ]);
+
+const PRICE_CURRENCY_CODES ="usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
+
+/**
+ * An amount of money in English text, with whatever currency marks it carries.
+ *
+ * Groups: 1 a code before, 2 a symbol, 3 the amount, 4 a code after, 5 the
+ * country before "dollars", 6 "dollars" or "bucks", 7 the unit after "per" or
+ * "/", 8 the unit after "a" or "each", 9 a period adverb ("monthly"). A bare
+ * number is not money: one of the others has to be there. A figure with a
+ * billing period is a price whether or not it names a currency ("99 per
+ * month"), and "100 messages per month" is not one, because a noun stands
+ * between them.
+ */
+const PRICE_MENTION = new RegExp(
+  `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(?<![\\d.,])([-+−–]?\\.?\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
+    `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks|cents?|euros?|pounds?)\\b)?` +
+    `(?:\\s*(?:\\/|\\bper\\b)\\s*(?:(?:calendar|billing|whole|full|single)\\s+)?(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b(?!\\s+(?!(?:with|and|or|for|including|plus|on)\\b)[\\p{L}\\p{N}]))?`,
+  "giu",
+);
+
+/**
+ * Any other way of billing, anywhere in a post that states a price: the stored
+ * price is a monthly one, and "billed annually", "per 12 months" or "weekly"
+ * beside it is another condition. Read over the whole post rather than a
+ * window, because "per month; billed annually" and "per month, billed every 12
+ * months" are the same sentence to a reader.
+ */
+const NON_MONTHLY_BILLING =
+  /\b(?:annual(?:ly)?|yearly|yr|quarterly|(?:semi|bi)-?(?:annual(?:ly)?|monthly|weekly)|fortnight(?:ly)?|(?:billed|charged|paid|billing)\s+(?:\w+\s+){0,3}(?:weeks?|days?)|weekly|daily|hourly|(?:per|a|each|every)\s+(?:\w+\s+){0,2}(?:week|day|hour)|(?:every|each)\s+(?:other|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s*-?\s*(?:weeks?|days?)|years?|for\s+(?:\w+\s+){0,3}(?:weeks?|days?|hours?|months?)|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|years?|weeks?|days?|hours?)\b/iu;
+/**
+ * Billing mechanics in any words: a post that states a price says it per month
+ * and nothing about how it is billed, paid or renewed. A list of periods
+ * (above) can never be complete -- "payable weekly", "every second month" --
+ * so the vocabulary of billing itself is refused beside a stated price. The
+ * price stays a person's decision either way (7.4); this keeps a condition the
+ * stored price does not carry out of the post.
+ */
+const BILLING_TALK =
+  /\b(?:bill(?:ed|ing|s)?|charg(?:e|es|ed|ing)|pay(?:s|ments?|able|ing)?|paid|renew(?:s|al|ed|ing)?|cycle|invoice[ds]?|subscri(?:be|bed|ption|ptions)|commit(?:s|ted|ment|ments)?|contracts?|minimum|terms?|introductory|trial|first\s+(?:\w+\s+)?(?:years?|months?|weeks?|days?)|prepa(?:y|id)|debit(?:s|ed|ing)?|collect(?:s|ed|ion)?|deduct(?:s|ed|ion)?|withdraw(?:s|n|al)?|upfront|installments?|quarters?|(?:second|third|fourth|other)\s+month)\b/iu;
+const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
+
+/** The plans that carry a price, by the names the product gives them (not "Free"). */
+const PRICED_PLAN_NAMES: readonly string[] = Object.freeze(["Pro", "Max"]);
+
+/** What a symbol or a country names. `$` and `¥` name no one currency. */
+const PRICE_SYMBOL_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
+  "us$": "USD",
+  "au$": "AUD",
+  "a$": "AUD",
+  "ca$": "CAD",
+  "nz$": "NZD",
+  "hk$": "HKD",
+  "€": "EUR",
+  "£": "GBP",
+  "₩": "KRW",
+});
+/** What a spelled-out unit names (singular). Dollars, cents and yen name no one currency. */
+const PRICE_WORD_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
+  euro: "EUR",
+  pound: "GBP",
+});
+const PRICE_COUNTRY_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
+  us: "USD",
+  "u.s.": "USD",
+  australian: "AUD",
+  canadian: "CAD",
+  "new zealand": "NZD",
+});
+
+/**
+ * What an English post says about money, against the stored plan prices it
+ * declares (owner decision 2026-11-02, §7.2 rule 9).
+ *
+ * Each amount has to name its currency exactly once (a bare `$` is read as
+ * Australian dollars by an Australian reader), the currency cannot be AUD (an
+ * Australian price stays refused until the catalogue can prove GST), and the
+ * amount has to be the stored monthly price, in the stored currency, of the
+ * plan whose name is nearest to it in the text. Anything else is refused: with
+ * no declared price claim there is nothing for the amount to be.
+ */
+function englishPriceProblems(
+  text: string,
+  claims: MarketingGuardFacts["claims"],
+): { codes: MarketingRejectCode[]; ruleIds: string[] } {
+  const codes: MarketingRejectCode[] = [];
+  const ruleIds: string[] = [];
+  // NFKC first: a full-width ２０ is 20 to a reader.
+  const lowered = text.normalize("NFKC").toLowerCase();
+
+  // The stored prices of the plans this draft declares, each with where its
+  // name stands in the text.
+  const expectations = claims.flatMap((claim) => {
+    if (
+      !claim.known ||
+      (claim.type !== "pricing" && claim.type !== "plan") ||
+      claim.priceSourcesAllStored !== true ||
+      typeof claim.priceMinor !== "number" ||
+      typeof claim.currency !== "string" ||
+      typeof claim.planName !== "string" ||
+      claim.planName.trim().length === 0
+    ) {
+      return [];
+    }
+    const name = claim.planName.trim().toLowerCase();
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`,
+      "gu",
+    );
+    return [
+      {
+        name,
+        priceMinor: claim.priceMinor,
+        currency: claim.currency.toUpperCase(),
+        positions: [...lowered.matchAll(pattern)].map((hit) => hit.index ?? 0),
+      },
+    ];
+  });
+  // A plan the post names and the draft did not declare owns the amounts next to
+  // it: "Pro users can upgrade: Max costs USD 15" is a Max price, and nothing
+  // stored backs it. In any case: "max costs USD 15" is the same claim.
+  for (const other of PRICED_PLAN_NAMES) {
+    if (expectations.some((entry) => entry.name === other.toLowerCase())) continue;
+    const positions = [
+      ...lowered.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${other.toLowerCase()}(?![\\p{L}\\p{N}])`, "gu")),
+    ].map((hit) => hit.index ?? 0);
+    if (positions.length > 0) {
+      expectations.push({ name: other.toLowerCase(), priceMinor: Number.NaN, currency: "", positions });
+    }
+  }
+
+  const read: Array<readonly [number, number]> = [];
+  for (const match of lowered.matchAll(PRICE_MENTION)) {
+    const [whole, codeBefore, symbol, amount, codeAfter, country, word, periodPer, periodA, periodAdverb] =
+      match;
+    const start = match.index ?? 0;
+    read.push([start, start + whole.length]);
+    if (!codeBefore && !symbol && !codeAfter && !word && !periodPer && !periodA && !periodAdverb) {
+      // A bare number is not money -- unless it ends the sentence right after a
+      // plan's name, which is how a price reads when it forgets its currency
+      // ("Pro monthly price is 99."). A year is not a price.
+      const rest = lowered.slice(start + whole.length);
+      const isYear = /^(?:19|20)\d{2}$/u.test(amount);
+      if (
+        !isYear &&
+        /^\s*(?:[.,;:!?)]|$)/u.test(rest) &&
+        // Only where a price is being said: "Pro costs 99.", not "Pro, GPT-5."
+        /(?:\b(?:price|prices|cost|costs|costing|is|are|at|only|just|from|for)|[:=])\s*$/u.test(
+          lowered.slice(Math.max(0, start - 12), start),
+        ) &&
+        expectations.some((entry) => entry.positions.some((at) => at < start && start - at <= 25))
+      ) {
+        codes.push("price_currency_missing");
+        ruleIds.push("price.currency-missing");
+      }
+      continue;
+    }
+    // A minus sign in front of a currency mark is still a minus sign.
+    if (/(?:^|[^\p{L}\p{N}])[-+−–]\s*$/u.test(lowered.slice(Math.max(0, start - 3), start))) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-negative");
+      continue;
+    }
+    const hints = new Set<string>();
+    if (codeBefore) hints.add(codeBefore.toUpperCase());
+    if (codeAfter) hints.add(codeAfter.toUpperCase());
+    if (symbol && PRICE_SYMBOL_CURRENCY[symbol]) hints.add(PRICE_SYMBOL_CURRENCY[symbol]);
+    if (country && PRICE_COUNTRY_CURRENCY[country]) hints.add(PRICE_COUNTRY_CURRENCY[country]);
+    const wordCurrency = word ? PRICE_WORD_CURRENCY[word.replace(/s$/u, "")] : undefined;
+    if (wordCurrency) hints.add(wordCurrency);
+
+    if (hints.size === 0) {
+      codes.push("price_currency_missing");
+      ruleIds.push("price.currency-missing");
+      continue;
+    }
+    if (hints.size > 1) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.currency-conflict");
+      continue;
+    }
+    const currency = [...hints][0];
+    if (word && /^cents?$/u.test(word)) {
+      // Minor units are not read: "15 US cents" is not 15 dollars.
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-cents");
+      continue;
+    }
+    if (currency === "AUD") {
+      // The existing Australian refusal, for a price the post states in AUD.
+      codes.push("au_price_gst_unverifiable");
+      ruleIds.push("price.text-aud");
+      continue;
+    }
+
+    // The stored price is a monthly one: the figure says "per month" itself, and
+    // nothing else in the post bills another way.
+    // "monthly" straight after a figure with a currency is its period even when a
+    // word follows ("USD 15 monthly with monthly credits").
+    const own =
+      periodPer ??
+      periodA ??
+      periodAdverb ??
+      /^\s+(monthly)\b/iu.exec(lowered.slice(start + whole.length))?.[1];
+    if (!own || !isMonthlyPeriod(own) || NON_MONTHLY_BILLING.test(lowered) || BILLING_TALK.test(lowered)) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-period");
+      continue;
+    }
+    // Exact: two decimals at most, so 15.004 is not 15.00.
+    const priceMinor = Math.round(Number(amount.replace(/,/g, "")) * 100);
+    const exact = !/\.\d{3,}/u.test(amount);
+    let nearest: (typeof expectations)[number] | undefined;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const expectation of expectations) {
+      for (const position of expectation.positions) {
+        const distance = Math.abs(position - start);
+        if (distance < nearestDistance) {
+          nearest = expectation;
+          nearestDistance = distance;
+        }
+      }
+    }
+    if (!exact || !nearest || nearest.priceMinor !== priceMinor || nearest.currency !== currency) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-mismatch");
+    }
+  }
+
+  // A currency code, symbol or money word that no amount above was read from:
+  // the amount is spelled out ("USD ninety-nine", "A$fifteen"), or there is
+  // none. An amount this cannot read is not an amount it can compare, so it is
+  // refused; the Australian marks keep their own code.
+  const unit = new RegExp(
+    `(?<![\\p{L}\\p{N}])(${PRICE_CURRENCY_CODES}|dollars?|bucks|cents?|euros?|pounds?)(?![\\p{L}\\p{N}])|(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])`,
+    "giu",
+  );
+  for (const hit of lowered.matchAll(unit)) {
+    const at = hit.index ?? 0;
+    if (read.some(([from, to]) => at >= from && at < to)) continue;
+    const mark = (hit[1] ?? hit[2]).toLowerCase();
+    if (mark === "aud" || mark === "au$" || mark === "a$") {
+      codes.push("au_price_gst_unverifiable");
+      ruleIds.push("price.text-aud");
+    } else {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-unreadable-amount");
+    }
+  }
+
+  // A spelled-out figure standing where a price goes: "ninety-nine per month".
+  const spelled =
+    "(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)";
+  if (
+    new RegExp(
+      `(?<![\\p{L}])${spelled}(?:[-\\s]${spelled})?\\s*(?:\\/|\\bper\\b|\\ba\\b|\\beach\\b)\\s*(?:(?:calendar|billing)\\s+)?(?:month|mo|year|yr)\\b`,
+      "iu",
+    ).test(lowered)
+  ) {
+    codes.push("price_currency_missing");
+    ruleIds.push("price.currency-missing");
+  }
+  return { codes, ruleIds };
+}
+
 /** The credit condition a "free" post has to carry with it (§7.2 rule 4). */
 /**
  * Each term with the boundary rule its script needs.
@@ -973,6 +1318,26 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       continue;
     }
     if (!asset.usedBefore) approvalCodes.push("first_use_of_asset");
+  }
+
+  // --- 4b. what the words say about price (owner decision 2026-11-02) ------
+  // Read off the words, for every post, because a declared claim says nothing
+  // about a sentence that compares our price with someone else's.
+  if (
+    anyTermMatches(forms, PRICE_COMPARISON_WORDING) ||
+    anyPatternMatches(forms, PRICE_COMPARISON_PATTERNS)
+  ) {
+    rejectCodes.push("price_comparison_claim");
+    ruleIds.push("rule.price-comparison");
+  }
+  // Keyed on the draft's declared locale, which is the author's assertion (the
+  // note on `ruleFires`): the seam is a post written in English and labelled
+  // otherwise, and the earlier rules (hygiene, comparison wording, the always-
+  // approving price category) still read its words.
+  if (draft.locale === "en") {
+    const problems = englishPriceProblems(draft.renderedText, facts.claims);
+    rejectCodes.push(...problems.codes);
+    ruleIds.push(...problems.ruleIds);
   }
 
   // --- 5. "free" needs its condition in the same post ---------------------
