@@ -592,10 +592,13 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
     "package.json과 맞지 않는다"(`Missing: @tomverse/mobile-auth`)고 거부합니다. 그래서 설치 전에 `npm --version`을 읽고,
     10 미만이면 `npm_too_old:<버전>`으로 기록한 뒤 설치하지 않습니다.
   - unit의 PATH는 auto-fix 전용 npm(`/usr/local/lib/pr-ci-auto-fix-npm/bin`)을 맨 앞에 둡니다. 다른 계정의 npm은 바뀌지 않습니다.
-    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다.
+    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다. 관리 계정의 umask가 077이면
+    폴더가 root만 읽는 `drwx------`로 생기고, review 계정은 그것을 건너뛰어 9.2를 씁니다(2026-11-02). 그래서
+    `chmod`로 읽기와 실행만 엽니다. 확인 줄은 `10.9.9`여야 합니다.
 
     ```bash
     sudo npm install -g --prefix /usr/local/lib/pr-ci-auto-fix-npm --ignore-scripts --no-audit --no-fund npm@10.9.9
+    sudo chmod -R go+rX,go-w /usr/local/lib/pr-ci-auto-fix-npm
     sudo -u review env PATH=/usr/local/lib/pr-ci-auto-fix-npm/bin:/usr/bin:/bin npm --version
     ```
 
@@ -621,7 +624,15 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   실행이 실패하면 stderr도 `stderr`에 남습니다. `no_change`의 이유는 여기서 봅니다.
   답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
   Admin › QA·릴리스 › CI 입장 화면에 PR별로 보입니다(2026-10-27). 모델의 문장 자체는 앱으로 가지 않습니다.
-- **다시 분석.** 같은 head는 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
+- **기능이 바뀌면 저절로 다시 시도.** ledger는 시도마다 그때의 능력(`ability`)을 남깁니다. 이 모듈
+  (`lib/ci-fix.mjs`, 프롬프트와 설치 경로)의 내용과, 그 head에 닿는 스위치의 digest입니다. Dependabot
+  스위치 두 개(`PR_CI_AUTO_FIX_DEPENDABOT_TESTS`, `PR_CI_AUTO_FIX_INSTALL`)는 Dependabot head에만 닿습니다.
+  고치지 못했거나 검사에 거부된 head도, 그 뒤 능력이 바뀌면 라벨 없이 **한 번 더** 시도합니다. 스위치를
+  켜거나 서버 checkout을 갱신한 경우입니다. 같은 능력으로는 다시 시도하지 않습니다. 보낸 수정과 시도 2회
+  소진은 대상이 아니고, 한 pass에 하나·시간당 상한·quota는 그대로입니다. 이 기록이 없던 예전 항목은 첫
+  갱신 뒤에 한 번 다시 시도합니다(운영자 결정 2026-11-02: 운영자가 라벨을 붙여야만 다시 시도하는 것은
+  자동화가 아니다).
+- **다시 분석.** 같은 head는 같은 능력으로 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
   PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
   서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 시도보다 **나중에** 붙은 라벨만 요청으로 봅니다.
   그래서 예전 head에서 남은 라벨은 새 head를 다시 시도하게 하지 않습니다. 고치지 못함·분석 실패·검사 거부만

@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { readJson, withLock, writeJsonAtomic } from "./fsutil.mjs";
 import { addWorktree, ensureMirror, git, isInstructionPath, isolateInstructionFiles, removeWorktree } from "./git.mjs";
@@ -240,14 +242,34 @@ export async function againLabelledAt(github, number) {
   }
 }
 
+const SOURCE_DIGEST = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex");
+
 /**
- * Whether a head already in the ledger may be tried once more: the label was
- * put on after this head's try (`labelledAt`, ms), and it was not retried yet.
+ * What a pass can do for one head: this module's source (its prompts and
+ * install path) and the switches that reach the head. The two Dependabot
+ * switches reach only a dependabot/ head, so turning one on leaves agent
+ * heads as they were.
  */
-export function retryable(entry, labelledAt, now) {
-  if (!Number.isFinite(labelledAt) || entry?.retried === true || !(labelledAt > (entry?.at ?? Infinity))) return false;
-  if (entry?.outcome === "started") return now - (entry.at ?? now) > STARTED_STALE_MS;
-  return RETRYABLE_OUTCOMES.has(entry?.outcome);
+export function ciFixAbility({ kind, headBranch = "", install = false, dependabotTests = false }) {
+  const dependabot = kind === "ci" && CI_FIX_DEPENDABOT_BRANCH.test(headBranch);
+  const switches = dependabot ? { install: install === true, dependabotTests: dependabotTests === true } : {};
+  return createHash("sha256").update(JSON.stringify({ source: SOURCE_DIGEST, kind, ...switches })).digest("hex").slice(0, 16);
+}
+
+/**
+ * Whether a head already in the ledger may be tried once more, and why:
+ * `"label"` when the label was put on after this head's try (`labelledAt`,
+ * ms) and it was not retried by label yet; `"ability"` when the pass can now
+ * do something it could not when it tried (`ability`, ciFixAbility) -- a
+ * capability turned on or the code updated -- so no person has to ask. Each
+ * ability is tried once per head; the hourly cap and the quota still bound it.
+ */
+export function retryable(entry, labelledAt, now, ability = null) {
+  const asked = Number.isFinite(labelledAt) && entry?.retried !== true && labelledAt > (entry?.at ?? Infinity);
+  const changed = typeof ability === "string" && entry?.ability !== ability;
+  if (!asked && !changed) return false;
+  if (entry?.outcome === "started" ? !(now - (entry.at ?? now) > STARTED_STALE_MS) : !RETRYABLE_OUTCOMES.has(entry?.outcome)) return false;
+  return asked ? "label" : "ability";
 }
 
 /**
@@ -852,12 +874,15 @@ export async function runCiFix({
 
   // The label's time is read only for a head already tried, labelled now.
   const askedAgain = async (pull, tried) => (tried && labelled(pull, CI_FIX_AGAIN_LABEL) ? againLabelledAt(github, pull.number) : null);
+  const abilityOf = (pull, kind) => ciFixAbility({ kind, headBranch: pull.head.ref, install, dependabotTests });
 
   let chosen = null;
   for (const pull of servedPulls(pulls)) {
     const tried = ledger[pull.head.sha];
     if (busy(ledger[`${pull.head.sha}:conflict`])) continue;
-    if (tried && !retryable(tried, await askedAgain(pull, tried), now)) continue;
+    const ability = abilityOf(pull, "ci");
+    const retry = tried ? retryable(tried, await askedAgain(pull, tried), now, ability) : false;
+    if (tried && !retry) continue;
     const { workflow_runs: runs = [] } = await github.json(`/actions/runs?head_sha=${pull.head.sha}&per_page=100`);
     const { ready, failed } = failedRuns(runs);
     if (!ready || failed.length === 0) continue;
@@ -866,7 +891,7 @@ export async function runCiFix({
       record(pull.head.sha, { pr: pull.number, kind: "ci", outcome: "attempts_exhausted" });
       continue;
     }
-    chosen = { kind: "ci", key: pull.head.sha, pull, failed, retry: tried !== undefined };
+    chosen = { kind: "ci", key: pull.head.sha, pull, failed, retry, ability };
     break;
   }
   if (!chosen && conflicts) {
@@ -874,7 +899,9 @@ export async function runCiFix({
       const key = `${pull.head.sha}:conflict`;
       const tried = ledger[key];
       if (busy(ledger[pull.head.sha])) continue;
-      if (tried && !retryable(tried, await askedAgain(pull, tried), now)) continue;
+      const ability = abilityOf(pull, "conflict");
+      const retry = tried ? retryable(tried, await askedAgain(pull, tried), now, ability) : false;
+      if (tried && !retry) continue;
       // The list does not carry mergeability; a null is GitHub still computing it.
       const detail = await github.json(`/pulls/${pull.number}`);
       if (detail?.mergeable !== false) continue;
@@ -883,7 +910,7 @@ export async function runCiFix({
         record(key, { pr: pull.number, kind: "conflict", outcome: "attempts_exhausted" });
         continue;
       }
-      chosen = { kind: "conflict", key, pull, retry: tried !== undefined };
+      chosen = { kind: "conflict", key, pull, retry, ability };
       break;
     }
   }
@@ -907,10 +934,10 @@ export async function runCiFix({
  */
 const busy = (entry) => entry?.outcome === "started" || entry?.outcome === "queued";
 
-/** Starts a head's entry: a retry starts it afresh, marked so it is the only one. */
-function start({ ledger, record }, { key, pull, retry }, entry) {
+/** Starts a head's entry: a retry starts it afresh; one the label asked for is marked so it is the only one. */
+function start({ ledger, record }, { key, pull, retry, ability }, entry) {
   if (retry) delete ledger[key];
-  record(key, { pr: pull.number, ...entry, outcome: "started", ...(retry ? { retried: true } : {}) });
+  record(key, { pr: pull.number, ...entry, ability, outcome: "started", ...(retry === "label" ? { retried: true } : {}) });
 }
 
 async function fixFailedCi(pass, chosen) {

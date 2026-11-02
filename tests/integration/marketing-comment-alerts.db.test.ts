@@ -16,6 +16,13 @@ import {
   requireOpenMarketingCommentAlert,
   runMarketingTransaction,
 } from "@/lib/marketingStore";
+import {
+  commentsMonitorEnabled,
+  MARKETING_COMMENTS_MONITOR_ENV,
+  MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY,
+} from "@/lib/marketingCommentsMonitorHealth";
+import { marketingCommentsMonitorOperations } from "@/lib/marketingCommentsMonitorOperations";
+import { answerMarketingCommentsMonitorRequest, marketingCommentBodyId } from "@/lib/marketingCommentsMonitorRequest";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
@@ -234,4 +241,56 @@ test("the monitor reads live posts of connected accounts, paused ones included, 
   // A post older than two weeks is no longer read (another account, so the first stays disconnected).
   await publishedPost(20);
   assert.deepEqual(await listed(), [], "older than two weeks");
+});
+
+test("the two steps against the real store: collect writes nothing, judge records the alert and the run as begun at the read", async () => {
+  await prisma.appSetting.deleteMany({ where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY } });
+  try {
+    const { post } = await publishedPost();
+    const readAt = new Date(Date.now() - 60_000);
+    const written = new Date(readAt.getTime() - 60_000);
+    const comments = [
+      { text: "Love this", createdAt: written },
+      { text: "My lawyer will be in touch", createdAt: written },
+    ];
+    let now = readAt;
+    const deps = {
+      env: { [MARKETING_COMMENTS_MONITOR_ENV]: "true" },
+      enabled: commentsMonitorEnabled,
+      now: () => now,
+      fetchComments: async (target: { externalPostId: string }) =>
+        target.externalPostId === post.externalPostId
+          ? { kind: "ok" as const, comments, truncated: false }
+          : { kind: "ok" as const, comments: [], truncated: false },
+      operations: marketingCommentsMonitorOperations(prisma),
+    };
+
+    const collected = await answerMarketingCommentsMonitorRequest({ action: "collect" }, deps);
+    const items = (collected.body as { items: Array<{ id: string; body: string }> }).items;
+    assert.deepEqual(items.map((item) => item.body), comments.map((comment) => comment.text));
+    assert.equal(await prisma.marketingReport.count({ where: { kind: "comment_alerts" } }), 0);
+    assert.equal(await prisma.appSetting.count({ where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY } }), 0);
+
+    now = new Date();
+    const judged = await answerMarketingCommentsMonitorRequest(
+      {
+        action: "judge",
+        readAt: readAt.toISOString(),
+        backlog: false,
+        verdicts: [
+          { id: marketingCommentBodyId("Love this"), codes: [] },
+          { id: marketingCommentBodyId("My lawyer will be in touch"), codes: ["legal_threat"] },
+        ],
+      },
+      deps,
+    );
+    const result = (judged.body as { result: { complete: boolean; alertsRecorded: number } }).result;
+    assert.deepEqual({ complete: result.complete, alertsRecorded: result.alertsRecorded }, { complete: true, alertsRecorded: 1 });
+    const [alert] = await listOpenMarketingCommentAlerts(prisma);
+    assert.equal(alert?.postId, post.id);
+    const lastRun = await prisma.appSetting.findUniqueOrThrow({ where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY } });
+    assert.equal(lastRun.value, readAt.toISOString());
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY } });
+  }
 });
