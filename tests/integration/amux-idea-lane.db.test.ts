@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
-import { AMUX_IDEA_LANE_MAX_ATTEMPTS } from "@/lib/amux/ideaLaneCore";
+import { AMUX_IDEA_LANE_MAX_ATTEMPTS, AMUX_IDEA_LANE_PUBLISH_FENCE_MS } from "@/lib/amux/ideaLaneCore";
 import { createInitialIdeaOnlySourcePlan } from "@/lib/amux/ideaInitialSourcePlanService";
-import { claimAmuxIdeaLane, recordAmuxIdeaLaneResult } from "@/lib/amux/ideaLaneService";
+import { claimAmuxIdeaLane, fenceAmuxIdeaLanePublish, recordAmuxIdeaLaneResult } from "@/lib/amux/ideaLaneService";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { prisma } from "@/lib/prisma";
 
@@ -148,5 +148,29 @@ test("an idea the lane took never starts the analysis path as well", async () =>
   assert.equal((await attemptsOf(idea)).length, 1);
   await assert.rejects(prisma.$transaction((tx) => createInitialIdeaOnlySourcePlan(tx,
     { ideaId: idea, actorUserId: owner, keys: {} as never })), { message: "not_ready" });
+  await removeIdeas();
+});
+
+test("a run may publish only while its idea is open and its lease live, and the fence holds a close off", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const idea = await seedIdea(owner, new Date(OLD));
+  const now = Date.now();
+  const make = async (leaseMs: number, outcome?: "no_change") => {
+    const id = randomUUID();
+    await prisma.amuxIdeaLaneAttempt.create({ data: { id, ideaId: idea, claimedAt: new Date(now - 1_000),
+      leaseUntil: new Date(now + leaseMs), ...(outcome ? { outcome, finishedAt: new Date(now) } : {}) } });
+    return id;
+  };
+  assert.equal(await fenceAmuxIdeaLanePublish(randomUUID()), false, "an unknown run");
+  assert.equal(await fenceAmuxIdeaLanePublish(await make(-1_000)), false, "a lapsed lease: a retry may be running");
+  assert.equal(await fenceAmuxIdeaLanePublish(await make(60_000, "no_change")), false, "a finished run");
+  const live = await make(5_000);
+  assert.equal(await fenceAmuxIdeaLanePublish(live), true);
+  const { leaseUntil } = await prisma.amuxIdeaLaneAttempt.findUniqueOrThrow({ where: { id: live } });
+  assert.ok(leaseUntil.getTime() - now >= AMUX_IDEA_LANE_PUBLISH_FENCE_MS - 5_000,
+    "the lease now outlasts the publish job");
+  await prisma.amuxIdeaSubmission.update({ where: { id: idea },
+    data: { state: "cancelled", cancelledAt: new Date(), rawPurgeAfter: new Date() } });
+  assert.equal(await fenceAmuxIdeaLanePublish(live), false, "a closed idea is never published");
   await removeIdeas();
 });

@@ -11,11 +11,13 @@
 #
 # Guardrails that must survive any edit to this file:
 #   - workflow_dispatch and schedule only, never a pull-request trigger;
-#   - one secret per job, each job on its own runner: the model runs without
-#     limits, so anything it could reach on a runner (another step's secret, a
-#     git hook in the checkout) must not exist there. claim and report hold the
-#     sync secret, implement the model credential, publish the PAT; publish
-#     runs no repository code, it only applies the patch and pushes;
+#   - secrets are split by job, each job on its own runner: the model runs
+#     without limits, so anything it could reach on its runner (another step's
+#     secret, a git hook in the checkout) must not exist there. implement holds
+#     only the model credential (and the transit key); claim and report hold
+#     the sync secret; publish holds the PAT and, for its fence call before the
+#     push, the sync secret, and runs no repository code: it only applies the
+#     patch and pushes;
 #   - this repository is public and so are its logs and artifacts: the idea
 #     text crosses from claim to implement only encrypted with
 #     AMUX_IDEA_LANE_TRANSIT_KEY, the model's transcript is never printed or
@@ -219,7 +221,8 @@ jobs:
             echo "failure=no_change" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --cached --name-only | grep -q '^\.github/'; then
+          # NUL-separated, so no quoting of an odd file name hides the prefix.
+          if git diff --cached --name-only -z | grep -zq '^\.github/'; then
             echo "failure=workflow_edit" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -280,7 +283,34 @@ jobs:
           name: amux-idea-${{ needs.claim.outputs.attempt }}
           path: ${{ runner.temp }}/in
 
-      - name: Push the branch and open the draft PR (PAT only in this job)
+      - name: Apply the change (no secret)
+        run: |
+          # git apply only writes files; nothing from the change runs here.
+          git apply --index "${RUNNER_TEMP}/in/change.patch"
+          # NUL-separated, so no quoting of an odd file name hides the prefix.
+          if git diff --cached --name-only -z | grep -zq '^\.github/'; then
+            echo "The change touches .github/."
+            exit 1
+          fi
+
+      - name: Ask the app whether this run may still publish (sync secret only)
+        env:
+          AMUX_IDEA_LANE_SYNC_SECRET: ${{ secrets.AMUX_IDEA_LANE_SYNC_SECRET }}
+          ATTEMPT: ${{ needs.claim.outputs.attempt }}
+        run: |
+          # Refused when the owner closed the idea or this run's lease lapsed (a
+          # retry may be running); a yes holds off a close until the push is done.
+          answer=$(curl -sS -f -X POST \
+            -H "Authorization: Bearer ${AMUX_IDEA_LANE_SYNC_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -cn --arg id "$ATTEMPT" '{attemptId:$id}')" \
+            "${TOMVERSE_APP_URL}/api/internal/amux/idea-lane/fence")
+          if [ "$(jq -r '.proceed' <<<"$answer")" != "true" ]; then
+            echo "The app refused this publish."
+            exit 1
+          fi
+
+      - name: Push the branch and open the draft PR (PAT only in this step)
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
@@ -288,12 +318,6 @@ jobs:
           ATTEMPT: ${{ needs.claim.outputs.attempt }}
         run: |
           in="${RUNNER_TEMP}/in"
-          # git apply only writes files; nothing from the change runs here.
-          git apply --index "${in}/change.patch"
-          if git diff --cached --name-only | grep -q '^\.github/'; then
-            echo "The change touches .github/."
-            exit 1
-          fi
           title=$(head -n 1 "${in}/title.txt" | tr -d '\000-\037' | cut -c 1-100)
           [ -n "$title" ] || title="feat: implement an AMUX idea"
           body="${RUNNER_TEMP}/pr-body.md"

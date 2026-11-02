@@ -10,6 +10,7 @@ import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import {
   AMUX_IDEA_LANE_LEASE_MS,
   AMUX_IDEA_LANE_MAX_ATTEMPTS,
+  AMUX_IDEA_LANE_PUBLISH_FENCE_MS,
   AMUX_IDEA_LANE_SECRET_ENV,
   amuxIdeaLaneBranch,
   amuxIdeaLaneClaimable,
@@ -128,6 +129,31 @@ async function openIdeaText(idea: Candidate): Promise<string | null> {
   } finally {
     plain.fill(0);
   }
+}
+
+/**
+ * The last check before a run pushes and opens its PR. Under the idea row lock
+ * the owner's close also takes, the idea must still be open and this run's
+ * lease live; the lease is then set AMUX_IDEA_LANE_PUBLISH_FENCE_MS ahead, so a close stays refused until the push is done. A run whose lease
+ * lapsed (the idea may already be closed or retried) is refused here.
+ */
+export async function fenceAmuxIdeaLanePublish(attemptId: string): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+    const attempt = await tx.amuxIdeaLaneAttempt.findUnique({ where: { id: attemptId }, select: { ideaId: true } });
+    if (!attempt) return false;
+    const [row] = await tx.$queryRaw<Array<{ open: boolean; now: Date }>>`
+      SELECT (i."state" = 'submitted' AND i."cancelledAt" IS NULL) AS "open",
+        (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+      FROM "AmuxIdeaSubmission" i WHERE i."id" = ${attempt.ideaId} FOR UPDATE
+    `;
+    if (!row?.open) return false;
+    const { count } = await tx.amuxIdeaLaneAttempt.updateMany({
+      where: { id: attemptId, outcome: null, leaseUntil: { gt: row.now } },
+      data: { leaseUntil: new Date(row.now.getTime() + AMUX_IDEA_LANE_PUBLISH_FENCE_MS) },
+    });
+    return count === 1;
+  }, { timeout: 10_000 });
 }
 
 /** Records a run's outcome once; a replay or an unknown attempt is not applied. */

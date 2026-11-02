@@ -22,6 +22,12 @@ export const AMUX_IDEA_LANE_DEFAULT_DAILY_ATTEMPTS = 10;
  * worst case is a second draft PR for the idea, which a person closes.
  */
 export const AMUX_IDEA_LANE_LEASE_MS = 150 * 60_000;
+/**
+ * The publish fence (ideaLaneService.ts) keeps a run's lease at least this far
+ * ahead, longer than the publish job's 10-minute timeout: the owner cannot
+ * close the idea between the fence and the push.
+ */
+export const AMUX_IDEA_LANE_PUBLISH_FENCE_MS = 15 * 60_000;
 /** What a finished run may report besides an opened PR (the table's CHECK holds the same words). */
 export const AMUX_IDEA_LANE_FAILURES = ["no_change", "cli_failed", "workflow_edit", "binary_change", "secret_in_diff",
   "push_failed", "job_failed"] as const;
@@ -66,6 +72,13 @@ export const amuxIdeaLaneClaimable = (state: AmuxIdeaLaneState | null) => state 
 export const amuxIdeaLaneBranch = (attemptId: string) => `amux-idea/${attemptId}`;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The attempt id of a fence request, or null. */
+export function inspectAmuxIdeaLaneFence(body: unknown): string | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const { attemptId, ...rest } = body as Record<string, unknown>;
+  return Object.keys(rest).length === 0 && typeof attemptId === "string" && UUID.test(attemptId) ? attemptId : null;
+}
 
 export type AmuxIdeaLaneResult = { attemptId: string; outcome: "pr_open" | AmuxIdeaLaneFailure; prNumber: number | null };
 

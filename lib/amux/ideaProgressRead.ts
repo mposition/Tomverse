@@ -212,11 +212,11 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       submissionOrigin: idea.submissionOrigin,
       // An owner idea before analysis ends counts only while it waits for an
       // execution approval: a page running, or one already approved, is analysis.
-      // A lane idea can be closed once its run is over: its PR opened or it ran out of attempts.
+      // A lane idea can be closed whenever no run holds it (the close refuses a live one).
       closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
         (idea.state === "awaiting_owner" || (progress.waitingFor !== null &&
           WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor)) ||
-          lane?.state === "pr_open" || lane?.state === "failed"),
+          lane?.state === "pr_open" || lane?.state === "queued" || lane?.state === "failed"),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
