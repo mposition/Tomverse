@@ -50,6 +50,12 @@ const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = 
     { label: "ChatGPT 与 Claude", path: "/chatgpt-vs-claude" },
     { label: "AI 文件分析", path: "/ai-for-file-analysis" },
   ],
+  "zh-Hant": [
+    { label: "比較 AI 模型", path: "/compare-ai-models" },
+    { label: "AI 回答交叉審查", path: "/ai-answer-review" },
+    { label: "ChatGPT 與 Claude", path: "/chatgpt-vs-claude" },
+    { label: "AI 檔案分析", path: "/ai-for-file-analysis" },
+  ],
   fr: [
     { label: "Comparer les modèles", path: "/compare-ai-models" },
     { label: "Revue des réponses IA", path: "/ai-answer-review" },
@@ -135,6 +141,26 @@ const chrome = {
       { label: "隐私", href: "/privacy" },
       { label: "支持", href: "/support" },
       { label: "服务状态", href: "/status" },
+    ],
+  },
+  "zh-Hant": {
+    app: "開啟 Review",
+    appSignedIn: "返回 Review",
+    menu: "選單",
+    close: "關閉選單",
+    topMenu: [
+      { label: "運作方式", href: "/#how-it-works" },
+      { label: "模型", href: "/models" },
+      { label: "價格", href: "/pricing" },
+      { label: "信任", href: "/#trust" },
+    ],
+    footerMenu: [
+      { label: "FAQ", href: "/faq" },
+      { label: "條款", href: "/terms" },
+      { label: "退款", href: "/refund" },
+      { label: "隱私", href: "/privacy" },
+      { label: "支援", href: "/support" },
+      { label: "服務狀態", href: "/status" },
     ],
   },
   fr: {
@@ -582,6 +608,14 @@ const launchChrome = {
     login: "登录", start: "开始 Chat", back: "返回 Chat", navigation: "主导航",
     description: "在同一个地方使用多个 AI，为问题选择模型，并比较回答中的不同观点。",
     caution: "做出重要决定前，请自行核实 AI 的回答。",
+  },
+  "zh-Hant": {
+    products: "產品", help: "說明", policies: "政策", guides: "使用指南",
+    models: "探索模型", pricing: "價格方案", helpCentre: "說明中心", faq: "常見問題", support: "聯絡客服",
+    status: "服務狀態", safety: "安全與資料處理", privacy: "隱私權政策", terms: "使用條款", refund: "退款政策",
+    login: "登入", start: "開始 Chat", back: "返回 Chat", navigation: "主導覽",
+    description: "在同一個地方使用多個 AI，為問題選擇模型，並比較回答中的不同觀點。",
+    caution: "做出重要決定前，請自行查證 AI 的回答。",
   },
   fr: {
     products: "Produits", help: "Aide", policies: "Politiques", guides: "Guides",

@@ -21,7 +21,7 @@
  * statement of what the router did. None of them says the choice was right.
  */
 
-export type AutoRoutingLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
+export type AutoRoutingLanguage = "en" | "ko" | "zh" | "zh-Hant" | "fr" | "de" | "es" | "pt";
 
 export type AutoRoutingCopy = {
   /** The control's own label. */
@@ -102,6 +102,22 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     answeredByTitle: "自动选择",
     rewriteSummary: "Auto 对你消息的理解",
     rewriteNote: "回复依据的是这段重述。你的消息按原样保存。",
+  },
+  "zh-Hant": {
+    label: "智慧自動",
+    compactLabel: "自動",
+    description: "Tomverse 會為每則訊息挑選模型。回答的模型會顯示在回覆上。",
+    activeSummary: "智慧自動 — 每則訊息挑選一個模型",
+    manualFallbackLabel: "手動模式模型",
+    manualFallbackDescription: "關閉智慧自動後使用此模型。",
+    variableCreditLabel: "浮動",
+    variableCreditNotice: "點數取決於回答的模型。",
+    turnedOn: "智慧自動已開啟。每則訊息都會挑選一個模型。",
+    turnedOff: "智慧自動已關閉。你選擇的模型將回答所有訊息。",
+    answeredBy: "自動",
+    answeredByTitle: "自動選擇",
+    rewriteSummary: "Auto 對你訊息的理解",
+    rewriteNote: "回覆依據的是這段重述。你的訊息會依原樣儲存。",
   },
   fr: {
     label: "Adaptation intelligente",
@@ -206,6 +222,13 @@ export const autoRoutingReasonCopy: Record<
     fallback_order: "没有更适合这条消息的模型",
     sticky: "沿用上一条消息",
     llm_pick: "根据这条消息的内容挑选",
+  },
+  "zh-Hant": {
+    only_candidate: "這則訊息唯一可用的模型",
+    task_preference: "針對這類訊息挑選",
+    fallback_order: "沒有更適合這則訊息的模型",
+    sticky: "沿用上一則訊息",
+    llm_pick: "依據這則訊息的內容挑選",
   },
   fr: {
     only_candidate: "le seul modèle disponible pour ce message",

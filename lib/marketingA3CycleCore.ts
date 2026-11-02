@@ -29,6 +29,7 @@ import {
   readMarketingA3Answer,
   readMarketingA3Discovery,
   type MarketIntelFact,
+  type MarketIntelFeature,
   type MarketingA3CandidateDropReason,
   type MarketingA3DropReason,
 } from "./marketingA3Core.ts";
@@ -106,6 +107,12 @@ export type MarketingA3CycleDeps = {
   readonly newId: () => string;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
+  /**
+   * Handed, once the searches are done, the facts the report will carry and
+   * the feature names kept, for the same run's analysis. In memory only: the
+   * summary below is logged, and holds counts.
+   */
+  readonly keep?: (kept: { readonly facts: readonly MarketIntelFact[]; readonly features: readonly MarketIntelFeature[] }) => void;
 };
 
 export type MarketingA3CycleSummary = {
@@ -115,6 +122,9 @@ export type MarketingA3CycleSummary = {
   readonly unrepresentable: number;
   /** The facts the service did not keep, by reason (the model's own unrepresentable count is not here). */
   readonly dropped: Partial<Record<MarketingA3DropReason | "unreadable_answer", number>>;
+  /** Feature names kept for the analysis, and the ones not kept. */
+  readonly featuresKept: number;
+  readonly featuresDropped: number;
   /** New competitors proposed for a person to approve, and the ones not kept, by reason. */
   readonly candidatesKept: number;
   readonly candidatesDropped: Partial<Record<MarketingA3CandidateDropReason | "unreadable_answer", number>>;
@@ -178,6 +188,8 @@ export async function runMarketingA3Cycle(
   let unrepresentable = 0;
   const dropped: Partial<Record<MarketingA3DropReason | "unreadable_answer", number>> = {};
   const facts: MarketIntelFact[] = [];
+  const features: MarketIntelFeature[] = [];
+  let featuresDropped = 0;
   const candidates: MarketingCompetitorCandidate[] = [];
   const candidatesDropped: MarketingA3CycleSummary["candidatesDropped"] = {};
   const summary = (
@@ -189,6 +201,8 @@ export async function runMarketingA3Cycle(
     factsKept: facts.length,
     unrepresentable,
     dropped,
+    featuresKept: features.length,
+    featuresDropped,
     candidatesKept: candidates.length,
     candidatesDropped,
     report,
@@ -250,6 +264,8 @@ export async function runMarketingA3Cycle(
       dropped[reason] = (dropped[reason] ?? 0) + count;
     }
     facts.push(...read.facts);
+    features.push(...read.features);
+    featuresDropped += read.featuresDropped;
   }
 
   // One discovery search a run, after the tracked competitors, for ones the
@@ -273,6 +289,7 @@ export async function runMarketingA3Cycle(
   if (found.unreadable) candidatesDropped.unreadable_answer = 1;
   Object.assign(candidatesDropped, found.dropped);
   candidates.push(...found.candidates);
+  deps.keep?.({ facts: marketingA3FactsInTurn(facts).slice(0, MARKETING_A3_REPORT_MAX_FACTS), features: [...features] });
 
   if (facts.length === 0 && unrepresentable === 0 && candidates.length === 0) return summary(null);
   if (deadline - deps.now() < MARKETING_A3_REPORT_MARGIN_MS) {

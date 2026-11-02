@@ -7599,6 +7599,24 @@ model MarketingAsset {
   @@index([status])
 }
 
+/// The analysis behind one marketing brief report (operator decision
+/// 2026-11-01): written in the brief's transaction, read by a person in the
+/// Reports tab, never given to A5. `briefReportId` is a plain column rather
+/// than a relation, so MarketingReport -- watched by the webhook pipeline
+/// fingerprint -- gains no back relation. The migration's triggers set both
+/// dates from the database clock, refuse every update, and let retention
+/// alone delete a row past `retentionUntil`.
+model MarketingAnalysis {
+  id             String   @id
+  briefReportId  String   @unique
+  payload        Json
+  sourceVersion  String
+  retentionUntil DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@index([retentionUntil])
+}
+
 model AmuxWorkerRuntime {
   workerName     String   @id
   instanceId     String

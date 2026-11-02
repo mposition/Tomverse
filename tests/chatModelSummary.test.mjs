@@ -166,7 +166,7 @@ test("long model names are passed through untouched for the UI to truncate", () 
 });
 
 test("every language names the model on screen and the total active count", () => {
-  const languages = ["en", "ko", "zh", "fr", "de", "es", "pt"];
+  const languages = ["en", "ko", "zh", "zh-Hant", "fr", "de", "es", "pt"];
   assert.deepEqual(Object.keys(chatModelSummaryCopy).sort(), [...languages].sort());
 
   for (const language of languages) {

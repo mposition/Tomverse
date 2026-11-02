@@ -5,11 +5,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { ko } from "@/locales/ko";
 import { en } from "@/locales/en";
 import { zh } from "@/locales/zh";
+import { zhHant } from "@/locales/zhHant";
 import { fr } from "@/locales/fr";
 import { de } from "@/locales/de";
 import { es } from "@/locales/es";
 import { pt } from "@/locales/pt";
-import { isLanguage, type Language } from "@/lib/language";
+import { isLanguage, languageFromTag, type Language } from "@/lib/language";
 
 export type { Language };
 
@@ -21,7 +22,7 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-const dictionaries = { ko, en, zh, fr, de, es, pt };
+const dictionaries: Record<Language, unknown> = { ko, en, zh, "zh-Hant": zhHant, fr, de, es, pt };
 const LANGUAGE_STORAGE_KEY = "tomverse_language";
 
 /**
@@ -66,11 +67,8 @@ const detectBrowserLanguage = (): Language | null => {
     ];
 
     for (const candidate of candidates) {
-        const normalized = candidate?.trim().toLowerCase();
-        if (!normalized) continue;
-
-        const baseLanguage = normalized.split("-")[0];
-        if (isLanguage(baseLanguage)) return baseLanguage;
+        const language = languageFromTag(candidate);
+        if (language) return language;
     }
 
     return null;

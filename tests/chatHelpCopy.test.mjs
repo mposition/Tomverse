@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chatHelpCopy } from "../components/chat/chatHelpCopy.ts";
 
-const languages = ["en", "ko", "zh", "fr", "de", "es", "pt"];
+const languages = ["en", "ko", "zh", "zh-Hant", "fr", "de", "es", "pt"];
 
 test("contextual chat help is available in every supported language", () => {
   assert.deepEqual(Object.keys(chatHelpCopy).sort(), languages.sort());

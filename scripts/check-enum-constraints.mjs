@@ -234,9 +234,9 @@ const REGISTRY = {
   ProductAnalyticsEvent_language_check: {
     owner: "list",
     module: "lib/language.ts",
-    list: "SUPPORTED_LANGUAGES",
+    list: "ANALYTICS_LANGUAGES",
     reason:
-      "The seven shipped locales. Adding a locale without recreating this constraint would drop that locale's analytics on the floor at insert time.",
+      "The seven analytics languages. A site locale outside it (zh-Hant) reports under an existing value; adding one here without recreating this constraint would drop that locale's analytics on the floor at insert time.",
   },
   ChatResponseAttempt_status_check: {
     owner: "list",

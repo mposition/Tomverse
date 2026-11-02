@@ -114,13 +114,22 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - **사실은 승인된 경쟁사의 공식 host에서만 나온다**(운영자 결정 2026-10-19: 페이지를 직접 읽는 대신 LLM 웹 검색).
   - A3는 승인된 경쟁사마다 웹 검색을 한 번 하며, 검색은 그 행의 공식 host로 제한된다. 사실의 출처는 공급사가 같은 응답에서 인용하거나 검색으로 돌려준 URL이면서 공식 host 위여야 한다(서비스가 대조한다).
   - 앱은 보고서를 기록하는 트랜잭션 안에서 승인 host를 다시 읽어, 그 밖의 출처를 가진 사실은 저장하지 않고 센다.
-  - 검색 결과는 A3의 추출 요청에만 데이터로 들어가며, A5 프롬프트·게시물·로그에 닿지 않는다. 추적 페이지 열(`trackedPages`)은 남아 있지만 읽히지 않는다.
+  - 검색 결과는 A3의 추출 요청에만 데이터로 들어가며, A5 프롬프트·게시물·로그에 닿지 않는다. A3가 남긴 구조화 사실과 기능 이름(공식·검색된 페이지의 것만)은 같은 실행의 시장 분석 호출에도 데이터로 들어간다(2026-11-01 운영자, §4.2). 추적 페이지 열(`trackedPages`)은 남아 있지만 읽히지 않는다.
 - **신규 경쟁사는 실행당 한 번의 제한 없는 웹 검색으로 찾고, 제안만 만든다.** 이 검색으로는 사실을 만들지 않는다.
   - 호출당 검색 횟수 상한이 있고, 그 최대 비용은 §5의 비용 원장 안에서 예약한다(다른 A3 호출과 같은 web-search profile).
   - 제안에는 근거 URL이 1~5개 있어야 하며, 모두 같은 응답이 인용하거나 돌려준 URL과 문자열로 정확히 같아야 한다(서비스가 대조하고, 앱은 근거 없는 제안을 거절한다). 등록부가 이미 아는 id는 상태와 무관하게 다시 제안하지 않는다.
   - Admin은 근거를 새 탭·`rel="noopener noreferrer nofollow"` 링크로 보인다. 사람이 그 근거를 열어 보고 승인·거절한다.
 
-## 5. 데이터 (마케팅 전용 테이블 7개)
+### 4.2 시장 분석과 주간 브리프 (2026-11-01 운영자)
+
+- Admin 마케팅 화면의 스위치(`marketing.analysisEnabled`, 기본 꺼짐)가 켜져 있을 때만, 생성기는 A3 다음에 텍스트 호출 두 번을 기존 `brief` 목적으로 원장에 예약해 쓴다. 원장은 스위치가 꺼져 있으면 `brief` 예약을 거절한다(`purpose_disabled`). 월 상한은 그대로다.
+  - 1번: Tomverse 공개 문구(홈·About·FAQ)와 저장된 플랜 값을 객관적으로 분석한다.
+  - 2번: 그 분석, 우리 플랜, A3가 이번 실행에 남긴 경쟁사 사실·기능 이름, 등록된 claim으로 가격 위치·앞서는 점·뒤처지는 점·이번 주 메시지를 쓰고, 이번 주 주제(topic id)와 claim id 1~5개를 고른다.
+- 결과는 `brief` 보고서 하나로 기록되고, 분석 본문은 `MarketingAnalysis`에 같은 트랜잭션으로 저장된다. 사람은 보고서 탭에서 읽는다. 모델이 쓴 출처는 https이면서 승인된 경쟁사 공식 host일 때만 링크로, 그 밖은 텍스트로 보인다.
+- A5는 brief의 topic id·claim id와 claim의 문장(페이지 문자열)·가격 값만 받는다. 분석 본문과 경쟁사 사실은 받지 않는다. 생성기는 맥락에 없는 claim id를 brief에서 빼고, 추적 중인 경쟁사 이름이 들어간 topic은 버린다. 앱은 레지스트리에 없는 claim을 담은 brief를 거절한다.
+- claim은 코드(`lib/marketingClaims.ts`)에 사람이 등록한다. 모델 출력은 claim을 만들거나 승인하지 않는다.
+
+## 5. 데이터 (마케팅 전용 테이블 8개)
 
 사용자 콘텐츠를 담는 컬럼은 없다.
 
@@ -132,6 +141,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | `AiVisibilityRun` | AI 답변 노출 측정 | 답변 본문 미저장, digest·인용 URL·플래그만 |
 | `MarketingLlmCall` | 마케팅 LLM 호출의 예약·정산(비용 원장, 버전 4) | 호출 **전에** 그 호출의 최대 비용을 예약하고, 이번 달(UTC) 합계에 새 예약을 더해 상한을 넘으면 예약을 거절해 호출하지 않는다. 합계는 정산된 호출을 보고된 토큰과 pin 단가, 과금될 수 있는 검색 수로(예약액 이하) 세고, 열린 호출과 결과를 모르는 호출은 예약액으로 센다(2026-10-23 운영자). 결과를 모르는 호출은 재시도하지 않는다. 프롬프트·응답 본문을 저장하지 않는다(공급사·모델·토큰·비용·run id만). 사용자 크레딧·플랜·`CHAT_PROVIDER_*` 예산과 별개 namespace다. 월 상한(코드 상한 US$100)과 생성기 모델은 운영자가 Admin Console에서 정하며(2026-10-19 운영자, 이전에는 환경변수; 모델은 Tomverse 모델 카탈로그에서 가격이 확인된 OpenAI 모델 중 고른다, 2026-10-23), 예약은 같은 트랜잭션에서 그 값을 읽는다. 상한이 없거나 고른 모델이 아니면 접수·예약을 거절한다 |
 | `MarketingCompetitor` | A3가 추적하는 경쟁사와 그 공식 host·추적 페이지(경쟁사 등록부, 버전 5) | 상태는 `proposed`·`approved`·`rejected`·`retired`. 생성기는 `proposed`만 만들고, 결정은 사람의 감사 행과 DB가 대조한다(§4.1). 제안의 내용(근거·이유)은 고칠 수 없고, 이름·host·페이지는 승인으로만 바뀐다. 행은 삭제하지 않는다. 사용자 콘텐츠와 개인정보를 담지 않는다(공개 회사 정보와 공개 URL) |
+| `MarketingAnalysis` | brief 하나의 근거가 된 시장 분석(§4.2, 2026-11-01 운영자) | brief 보고서와 같은 트랜잭션에서 한 번 쓰고 고치지 않는다. 보고서와 같은 24개월 뒤 보존 작업만 지운다. 우리 공개 문구, 공개 경쟁사 사실과 그에 대한 모델의 분석이며 사용자 콘텐츠와 개인정보가 없다 |
 | `MarketingAsset` | 미디어 CLI가 만든 이미지·영상의 등록부 항목(출처·채널별 AI 표시·locale별 대체 텍스트)과 R2 파일 위치(2026-10-31 운영자) | 상태는 `submitted`·`approved`·`retired`. CLI는 `submitted`만 만들고 업로드 확인은 한 번이며, 승인·은퇴는 사람의 감사 행이 있어야 한다(승인은 정확히 그 파일의 sha256). 승인된 것만 Guard·생성기·게시기가 읽는 등록부에 들어가고, 승인·은퇴마다 등록부 버전이 오른다. 삭제하지 않고 은퇴시킨다 |
 
 - 유입 기록은 새 테이블이 아니라 기존 분석 이벤트에 `marketing_touch`를 추가한다(§10).
@@ -165,6 +175,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 |---|---|
 | 기록 열람 | 관리자 인증(스위치 무관) |
 | 초안 접수 | 초안 스위치 · kill switch 아님 · LLM 생성 예산 이내 · 생성기 인증 |
+| 시장 분석·주간 브리프(§4.2) | 분석 스위치(`marketing:write` + step-up으로 켬, 기본 꺼짐) · kill switch 아님 · LLM 생성 예산 이내(원장이 `brief` 예약 때 스위치를 다시 읽음) |
 | 수동 승인 | `marketing:write` + step-up · 초안 스위치 · kill switch 아님 (LLM 예산과 무관) |
 | 승인 모드 게시 | 게시 스위치 · kill switch 아님 · 계정이 승인/자율 모드 · 어댑터 health · 채널 복구 계약 존재 · 플랫폼 예산 이내 |
 | 자율 게시 | 승인 모드 게시 조건 · 자율 스위치 · 계정 자율 모드 · 댓글 모니터링 동작 · 채널이 API 게시 취소 가능(Instagram·TikTok 제외, O15) |
@@ -303,6 +314,13 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 어느 모드든 | 재연결·scope·정책 버전 변경 | 승인 모드 |
 | 정지 중 지난 예약 | 재개 | 자동 게시하지 않고 승인 만료로 전환 |
 
+**S4b 구현 상태(2026-11-01).** 졸업은 Admin 계정 화면의 "자율 게시로 졸업" 버튼(`marketing:write` + 재인증,
+감사 `marketing_account.graduate`)이 `graduateMarketingChannel()`을 부르는 것이 유일한 경로다. 서버가 계정 행 잠금 아래에서
+O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에서 첫 게시 성공 후 7일, 승인 3건 이상, 수정 비율
+(수정된 승인 ÷ (승인 + 운영자 반려)) 1/3 이하, 댓글 모니터링 정상, Instagram·TikTok 아님. 미충족 사유는 모두 한 번에 화면에 보인다.
+스냅샷(`graduationSnapshot`)에는 건수와 비율만 고정한다. 댓글 모니터링(S4c)이 없는 동안 `comments_monitor_unhealthy`로 모든 계정의 졸업이
+거절된다. 자율 게시 스위치는 졸업이 건드리지 않는다.
+
 ### 8.3 자동 정지 (구현된 트리거만 안전장치로 계산)
 | 트리거 | 출처 | 범위 |
 |---|---|---|
@@ -343,8 +361,20 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
   `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다
   (`scripts/auto-pr-branch-policy.mjs`). auto-merge는 어느 쪽도 켜지 않으며(버전 4 제안), 병합은 merge train
   (`npm run merge-train`) 또는 사람이 한다. develop까지만.
+- 구현(2026-11-01 운영자 결정, 정책 버전 변경 없음): 실행기 `scripts/marketing-seo-agent.mjs`와 순수 규칙 `lib/marketingSeoAgentCore.ts`.
+  기본 꺼짐(`MARKETING_SEO_AGENT_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). **두 단계는 서로 다른 프로세스이자 서로 다른 기계(컨테이너)에서 돌린다.**
+  검증 단계(`--phase validate`)는 격리된 clone(base 커밋)에서 도구 없는 텍스트 LLM 호출 1회(마케팅 비용 원장 그대로, 목적 `brief`, 새 유료 경로 없음)의 find/replace 수정안을 적용하고
+  git의 diff로 판정한다(허용 4개 정확 일치, rename·삭제·binary·symlink·mode 거부, 500줄). 판정 시험은 base 커밋의 고정 목록이며 없으면 실패로 닫는다(유료 호출 전에). 시험은 파일마다 따로 돌려 junit 보고서로 확인한다: 종료 코드 0은 증거가 아니고(제안 코드가 import 중 프로세스를 0으로 끝낼 수 있다), 실패가 없고 파일 이름을 시험으로 보고하지 않으며 base가 선언한 개수 이상이 돌았어야 통과다.
+  검사가 제안 코드를 실행하므로 이 단계는 게시 자격증명이 없는 일회용 러너에서만 돌리고(GitHub 토큰 변수가 있으면 시작을 거부), 검사는 허용 목록 환경으로, POSIX에서는 운영자가 정한 별도 비특권 사용자(`MARKETING_SEO_CHECK_UID`·`_GID`)로 돌린다. 그 사용자는 작업 트리를 읽기만 하고 도구 산출물(`.next`, `next-env.d.ts`)과 자기 HOME에만 쓸 수 있어, 제안 코드가 판정 시험·설정을 바꿀 수 없고 검사마다 시간 제한이 있다.
+  게시할 수 있는 결과는 이 사용자로 돌린 검사에서만 나오며, 사용자가 없으면 복제도 호출도 하지 않는다(서명 키 없이 같은 사용자로 돌려 보기만 하는 `--dry-run`은 산출물을 만들지 않는다). 검사가 남긴 프로세스는 새 세션을 만든 것까지 그 사용자의 `kill(-1)`로 끝낸다. 게시 단계는 이미 있는 원격 브랜치 위에 push하지 않고, 정리 삭제는 이번 실행이 만든 브랜치가 아직 자기 commit일 때만 한다.
+  스테이징된 tree를 검사 전에 고정해 검사 후·커밋의 tree가 같아야 하며, 끝에 commit bundle과 기록에 서명(`MARKETING_SEO_ATTESTATION_KEY`)한다.
+  시험은 제안 코드와 같은 프로세스에서 돌아 악의적인 코드를 원리상 막지 못한다(시험 안의 `assert`를 바꾸는 코드 등). 그래서 추가되는 줄에서 그 길을 닫는 심층 방어를 둔다 — 허용 import(`next`·`react`·`@/lib|components|app`)만, `process`(`LLMS_TXT_ENABLED` 하나만 예외)·`assert`·`eval`·`Function`·`globalThis`·동적 로드·constructor 사슬 거부, 주석과 문자열 내용은 코드가 아니다 — 이는 증명이 아니다. 악의적 코드에 대한 권위 있는 방어는 draft PR, 저장소 CI, 사람의 diff 검토다.
+  게시 단계(`--phase publish`)는 신뢰된 checkout과 자기 의존성에서 돌고, GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)과 서명 키만 가지며 LLM 변수가 있으면 시작을 거부한다.
+  서명이 맞고, base가 원격 develop의 조상이며, 부모가 base이고, tree·diff를 git에서 다시 계산해 일치할 때만 push하고, push 뒤 원격 tree를 다시 읽어 일치할 때만 PR(draft)을 연다.
+  졸업 상태 조회가 연결되기 전에는 항상 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
+- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.
 
 ## 10. 측정
 
@@ -397,6 +427,16 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 가입 | 서버 가입 이벤트, 7일 touch 귀속, 채널별 10건 미만이면 판단 보류 |
 | 비용 | 게시 도구, X 사용료 분리, 마케팅 LLM, 가입 1건당 비용 |
 
+### 10.4 AI 노출 측정 (S5, 2026-11-01 운영자 결정, 정책 버전 변경 없음)
+- 기본 꺼짐(`MARKETING_AI_VISIBILITY_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). 월요일(UTC)에만, 생성기 서비스가 깨끗하게 끝난 뒤 두 번째 감독 worker로 돈다
+  (`scripts/marketing-ai-visibility-worker.mjs`, `lib/marketingAiVisibilityCore.ts`). 스위치가 꺼져 있으면 예약·호출이 0건이다.
+- 질문 목록(ko/en/zh-Hant 각 3개, Tomverse를 이름으로 부르지 않는 초안)을 웹 검색이 되는 LLM에 묻고(답변 호출), 그 답변에 Tomverse가 제품으로 언급됐는지는 **두 번째 LLM 호출이 JSON 불리언으로 판정**한다.
+  문자열 검색·정규식·단어 목록으로 답변을 읽지 않는다. 구조적인 것은 답변 본문이 인용한 URL(검색 결과에만 있던 페이지는 인용이 아니다)의 호스트가 `tomverse.app`(또는 하위)인지, 비율 계산, 보고서 모양뿐이다.
+- 모든 호출은 마케팅 LLM 비용 원장(목적 `market_intel`, 운영자가 정한 모델과 월 상한, 호출 전 예약)을 거치며 새 유료 경로는 없다. 답변 본문은 판정 직후 버리고 저장·로그·제출하지 않는다.
+- 저장은 기존 보고서 kind `measurement_120d`(생성기 보고 route와 서명을 그대로 사용, kind만 허용 목록에 추가)이고, locale별로 `ai_visibility.mention_rate.<locale>.<질문·프롬프트 세트 버전>`·`ai_visibility.own_citation_rate.<locale>.<버전>`
+  한 건씩, 값은 비율(0–1)과 표본 수뿐이다. 판정이 JSON이 아니면 표본에서 빼고 세며 추측하지 않는다. 호출 하나라도 결과를 모르면 그 주는 아무것도 보고하지 않는다(부분 주는 비율이 아니다).
+  `AiVisibilityRun`(답변별 행)에는 아직 쓰는 쪽이 없고 이 구현도 만들지 않았다. 정확성 플래그(`accuracyFlags`)는 판정하지 않는다.
+
 ## 11. 직접 연동 판단 기준 (채널별)
 1. 특정 채널이 가입 기여의 대부분(예시 60% 이상)
 2. 같은 필요 기능이 반복해서 미해결(예시 30일 3회)
@@ -423,7 +463,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 거절·만료 초안 | 90일 | 삭제 |
 | history의 webhook id·시도 세부 | 90일 | 요약으로 치환 |
 | webhook shadow 기록(§8.1.1) | 90일 | 삭제 |
-| 주간 보고·브리프·시장 정보 | 24개월 | 삭제 |
+| 주간 보고·브리프·시장 정보·시장 분석(`MarketingAnalysis`) | 24개월 | 삭제 |
 | 실험 결과·120일 측정 | 36개월 | 삭제 |
 | 댓글 알림 | 90일 | 삭제 |
 | 본토 차단 점검·보유 실행 기록 | 12개월 | 삭제 |

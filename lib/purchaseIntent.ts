@@ -50,6 +50,7 @@ const APP_LANGUAGES = [
   "en",
   "ko",
   "zh",
+  "zh-Hant",
   "fr",
   "de",
   "es",

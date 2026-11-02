@@ -29,6 +29,7 @@ import { ensureDefaultPreferences } from "@/lib/emailPreferences";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { z } from "zod";
+import { SUPPORTED_LANGUAGES } from "@/lib/language";
 import { Prisma } from "@prisma/client";
 import { getPlatformReviewProviderDefaults } from "@/lib/reviewProviderDefaults";
 import { parseReviewProviderDefaults, resolveReviewProviderDefaults, reviewProviderOptions } from "@/lib/reviewProviderPreferencesCore";
@@ -42,7 +43,7 @@ const settingsSchema = z
     .object({
         reviewEasyDefaultProviders: z.array(z.string()).min(1).max(3).refine(value => parseReviewProviderDefaults(value) !== null, "Choose distinct providers.").nullable().optional(),
         theme: z.enum(["dark", "light", "system"]).optional(),
-        language: z.enum(["en", "ko", "zh", "fr", "de", "es", "pt"]).optional(),
+        language: z.enum(SUPPORTED_LANGUAGES).optional(),
         defaultModel: z.string().min(1).max(120).optional(),
         newConversationModelIds: z
             .array(z.string().trim().min(1).max(120))
@@ -70,7 +71,7 @@ const settingsSchema = z
         "A time zone is required when its source is provided."
     );
 
-const languageSchema = z.enum(["en", "ko", "zh", "fr", "de", "es", "pt"]);
+const languageSchema = z.enum(SUPPORTED_LANGUAGES);
 
 class TimeZoneChangeCooldownError extends Error {
     readonly retryAt: Date;

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { getPublicStatusCopy } from "../../lib/publicStatusCopy";
+import { SEO_LOCALES } from "../../lib/seo";
 
 const english = getPublicStatusCopy("en");
 
@@ -127,7 +128,8 @@ for (const language of ["ko", "fr"] as const) {
     await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", copy.metadataDescription);
     await expect(page.locator('meta[property="og:locale"]')).toHaveAttribute("content", language === "ko" ? "ko_KR" : "fr_FR");
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `https://tomverse.app/status?lang=${language}`);
-    await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(8);
+    // One alternate per site locale, plus x-default.
+    await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(SEO_LOCALES.length + 1);
     await expect(page.locator(`link[rel="alternate"][hreflang="${language}"]`)).toHaveAttribute("href", `https://tomverse.app/status?lang=${language}`);
     await expect(page.getByRole("link", { name: copy.backHome })).toHaveAttribute("href", `/${language}`);
     const heading = page.getByRole("heading", { level: 1 });

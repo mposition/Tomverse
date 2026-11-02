@@ -4,7 +4,7 @@ import test from "node:test";
 import { MARKETING_SUPERLATIVE_WORDS } from "../lib/marketingBannedClaims.ts";
 
 import { buildModelLaunchEmail } from "../lib/modelLaunchEmail.ts";
-import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
+import { EMAIL_COPY_LANGUAGES } from "../lib/language.ts";
 import {
   MODEL_LAUNCH_TEMPLATE,
   emailTemplateDefinition,
@@ -38,9 +38,9 @@ test("the template is registered as marketing, gated, and unsubscribable", () =>
 });
 
 test("every supported language renders, with no silent fallback", () => {
-  assert.equal(SUPPORTED_LANGUAGES.length, 7);
+  assert.equal(EMAIL_COPY_LANGUAGES.length, 7);
   const subjects = new Set();
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const { subject, html, text } = buildModelLaunchEmail(PAYLOAD, language);
     assert.ok(subject.includes(PAYLOAD.modelName), `${language} subject`);
     assert.ok(text.includes(PAYLOAD.creditLine), `${language} credit line`);
@@ -65,7 +65,7 @@ test("no locale claims a model is best, fastest or smartest", () => {
   // disagreed. The shared list carries "meilleur", "beste", "mejor" and
   // "melhor" without their articles, which matches the same copy and more.
   const forbidden = MARKETING_SUPERLATIVE_WORDS;
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const { subject, text } = buildModelLaunchEmail(PAYLOAD, language);
     const body = `${subject}\n${text}`.toLowerCase();
     for (const word of forbidden) {
@@ -79,7 +79,7 @@ test("no locale claims a model is best, fastest or smartest", () => {
 });
 
 test("every locale says why the message arrived and what does not change", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const { text } = buildModelLaunchEmail(PAYLOAD, language);
     const lines = text.split("\n").filter(Boolean);
     // The reason line is last, and the "nothing changes" sentence is present:
@@ -135,5 +135,12 @@ test("the same payload renders the same bytes twice", () => {
   assert.deepEqual(
     buildModelLaunchEmail(PAYLOAD, "ko"),
     buildModelLaunchEmail(PAYLOAD, "ko")
+  );
+});
+
+test("Traditional Chinese readers get the Simplified copy until zh-Hant email is translated", () => {
+  assert.equal(
+    buildModelLaunchEmail(PAYLOAD, "zh-Hant").subject,
+    buildModelLaunchEmail(PAYLOAD, "zh").subject
   );
 });
