@@ -126,6 +126,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.ok(sql.includes(`AND "cancelledAt" IS NULL`), "a closed or cancelled idea leaves the list");
   assert.ok(values.includes(now.toISOString()), "the proposal expiry is compared with the database clock");
   assert.ok(sql.includes(`u."expiresAt" > (?::timestamptz AT TIME ZONE 'UTC')`), "an expired proposal waits for nobody");
+  assert.ok(sql.includes(`AND u."unitKind" IN ('node', 'card')`),
+    "an evidence unit is never approved, so it waits for nobody");
   assert.ok(sql.includes(`d."action" = 'register_card' AND d."state" = 'consumed'`));
   assert.ok(sql.includes(`ORDER BY c."chunkIndex"`));
   assert.ok(sql.includes(`ORDER BY w."createdAt" ASC, w."id" ASC`));
