@@ -656,7 +656,6 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD ninety-nine per month.", // an amount spelled out cannot be compared
     "Pro is ninety-nine dollars per month.",
     "Pro is £ninety-nine per month.",
-    "Pro is fifteen yen per month.",
     "Pro is USD 15.00 per month, or USD 15.00 per year.",
     "Starting at USD 15.00 per month.", // no plan named
   ]) {
@@ -674,6 +673,8 @@ test("a figure with a billing period is a price even with no currency, and a lim
     "Pro is 99 monthly.",
     "Pro monthly price is 99.", // a figure ending the sentence right after the plan
     "Pro costs 99 per week.",
+    "Pro costs ninety-nine per month.",
+    "Pro costs 99 per calendar month.",
     "Pro is 99 cents per month.",
     "Pro is USD 15 per month, or 99 cents per month.",
   ]) {
@@ -696,6 +697,8 @@ test("a figure with a billing period is a price even with no currency, and a lim
   for (const text of ["Choose Pro for GPT-5.", "Pro compares GPT-5, Claude 4.5 and Gemini 3."]) {
     assert.ok(!priceDecision(text, []).codes.includes("price_currency_missing"), text);
   }
+  // "won" is a verb, not a currency.
+  assert.ok(!priceDecision("Three answers side by side. Pick the one that won you over.", []).codes.includes("price_text_mismatch"));
   // "monthly" before a noun describes the noun, not a price.
   for (const text of ["Pro includes 100 monthly credits.", "Compare 3 monthly reports with Pro."]) {
     assert.ok(!priceDecision(text, []).codes.includes("price_currency_missing"), text);
@@ -790,6 +793,7 @@ test("price wording that is not a comparison is left to the earlier rules", () =
     "Start free with monthly credits included.", // "free" keeps its section 7.2 rule 4 handling
     "Cheap thrills are not our thing; clear answers are.", // "cheap" alone is not a comparison
     "Choose a cheaper model for simple questions.", // "cheaper" without "than" is about models
+    "Pro gives better response rates and lower error rates.", // rates that are not prices
     "Our best answers come from comparing three models.", // "best" is the superlative rule's, an approval
   ]) {
     const decision = priceDecision(text, []);

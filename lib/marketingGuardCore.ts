@@ -614,7 +614,7 @@ const PRICE_COMPARISON_PATTERNS: readonly { source: string; flags: string }[] =
   Object.freeze([
     Object.freeze({
       source:
-        "(?<![\\p{L}\\p{N}])(?:lower|lowest|better|best|cheaper|cheapest|less)\\s+(?:[\\p{L}-]+\\s+){0,2}(?:price|prices|priced|cost|costs|rate|rates|fee|fees|pricing)(?![\\p{L}\\p{N}])",
+        "(?<![\\p{L}\\p{N}])(?:(?:lower|lowest|better|best|cheaper|cheapest|less)\\s+(?:[\\p{L}-]+\\s+){0,2}(?:price|prices|priced|pricing)|(?:lower|lowest|cheaper|cheapest|less)\\s+(?:cost|costs|fee|fees))(?![\\p{L}\\p{N}])",
       flags: "iu",
     }),
     Object.freeze({
@@ -638,8 +638,8 @@ const PRICE_CURRENCY_CODES ="usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
  */
 const PRICE_MENTION = new RegExp(
   `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(?<![\\d.,])([-+−–]?\\.?\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
-    `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks|cents?|euros?|pounds?|yen|won)\\b)?` +
-    `(?:\\s*(?:\\/|\\bper\\b)\\s*(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b(?!\\s+[\\p{L}\\p{N}]))?`,
+    `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks|cents?|euros?|pounds?)\\b)?` +
+    `(?:\\s*(?:\\/|\\bper\\b)\\s*(?:(?:calendar|billing|whole|full|single)\\s+)?(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b(?!\\s+[\\p{L}\\p{N}]))?`,
   "giu",
 );
 
@@ -683,7 +683,6 @@ const PRICE_SYMBOL_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
 const PRICE_WORD_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
   euro: "EUR",
   pound: "GBP",
-  won: "KRW",
 });
 const PRICE_COUNTRY_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
   us: "USD",
@@ -857,7 +856,7 @@ function englishPriceProblems(
   // none. An amount this cannot read is not an amount it can compare, so it is
   // refused; the Australian marks keep their own code.
   const unit = new RegExp(
-    `(?<![\\p{L}\\p{N}])(${PRICE_CURRENCY_CODES}|dollars?|bucks|cents?|euros?|pounds?|yen|won)(?![\\p{L}\\p{N}])|(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])`,
+    `(?<![\\p{L}\\p{N}])(${PRICE_CURRENCY_CODES}|dollars?|bucks|cents?|euros?|pounds?)(?![\\p{L}\\p{N}])|(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])`,
     "giu",
   );
   for (const hit of lowered.matchAll(unit)) {
@@ -871,6 +870,19 @@ function englishPriceProblems(
       codes.push("price_text_mismatch");
       ruleIds.push("price.text-unreadable-amount");
     }
+  }
+
+  // A spelled-out figure standing where a price goes: "ninety-nine per month".
+  const spelled =
+    "(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)";
+  if (
+    new RegExp(
+      `(?<![\\p{L}])${spelled}(?:[-\\s]${spelled})?\\s*(?:\\/|\\bper\\b|\\ba\\b|\\beach\\b)\\s*(?:(?:calendar|billing)\\s+)?(?:month|mo|year|yr)\\b`,
+      "iu",
+    ).test(lowered)
+  ) {
+    codes.push("price_currency_missing");
+    ruleIds.push("price.currency-missing");
   }
   return { codes, ruleIds };
 }

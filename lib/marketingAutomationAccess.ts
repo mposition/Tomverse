@@ -624,7 +624,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * condition changes; the bytes moved, so prior signed evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "151f2aa485f6f3ec01689be16ef48394206bd38a6d7756d1c598d8b2cdad0d67";
+  "ace9005d89f146f708edff7861ba8d1ae6c10408cc1548e159af4d62db337d92";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
