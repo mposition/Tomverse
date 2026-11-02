@@ -705,14 +705,15 @@ if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish"
       },
     );
   };
-  
+
+  // Only a run that can arm needs a window and a token whose end is known; checked before anything is pushed.
+  const willArm = process.env[SEO_AGENT_GRADUATED_VARIABLE_ENV] === "true" && seoAgentAutoMergeGate(process.env, true).on;
+
   try {
     if (phase === "arm") {
-      const result = await armLoop(seoAgentAutoMergeGate(process.env, true).on ? await armDeadlineMs() : 0);
+      const result = await armLoop(willArm ? await armDeadlineMs() : 0);
       process.exit(seoAgentArmEndedCleanly(result.status) ? 0 : 2);
     }
-    // A graduated push that will be armed is checked first: the window and the token, before anything is pushed.
-    const willArm = process.env[SEO_AGENT_GRADUATED_VARIABLE_ENV] === "true" && seoAgentAutoMergeGate(process.env, true).on;
     const deadlineAtMs = willArm ? await armDeadlineMs() : 0;
     const published = await runSeoAgentPublish({ record, attestation: attestationFile?.attestation, env: process.env }, ports);
     console.log(JSON.stringify({ event: "marketing_seo_agent_publish", ...published }));

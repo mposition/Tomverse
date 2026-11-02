@@ -1471,6 +1471,20 @@ test("the arm deadline is the request, cut to the token's life less a margin for
     assert.deepEqual(window(undefined, Number.NaN), { ok: false, reason: "token_expiry_unknown" });
 });
 
+test("a window of exactly one minute arms; the time is checked again right before the request, after the verification", async () => {
+    const exact = loopClock();
+    const armedOnce = armPorts({ findPullRequests: sequence([pullRequest()], [pullRequest({ autoMerge: true })]) });
+    const first = await runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV, deadlineAtMs: exact.clock.now() + MINUTE }, armedOnce.ports, exact.clock);
+    assert.equal(first.status, "window_ended_disarmed");
+    assert.deepEqual(armedOnce.writes.map(([kind]) => kind), ["enable", "disable"]);
+    // The verification and the pull request read take time: the deadline passes while they run.
+    const slow = loopClock();
+    const late = armPorts({ diff: () => { slow.state.now += 5 * MINUTE; return { raw: GOOD_RAW, numstat: GOOD_NUMSTAT, patch: GOOD_PATCH }; } });
+    const result = await runSeoAgentArmLoop({ record: RECORD, attestation: ATTESTATION, env: ARM_ENV, deadlineAtMs: slow.clock.now() + 3 * MINUTE }, late.ports, slow.clock);
+    assert.equal(result.status, "window_over");
+    assert.deepEqual(late.writes, []);
+});
+
 test("nothing is armed when too little of the window is left to watch it", async () => {
     // 30 seconds left: the pull request is ready, but there would be no time to watch an arming.
     const clock = loopClock();

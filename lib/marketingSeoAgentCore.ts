@@ -1244,8 +1244,8 @@ export async function runSeoAgentArm(
     readonly seenArmed?: boolean;
     /** Told just before the enabling request goes out, so a request whose answer is lost is still cleaned up. */
     readonly onArming?: (pull: { nodeId: string; number: number }) => void;
-    /** False when too little of the window is left to watch an arming: nothing is armed then. Default true. */
-    readonly mayArm?: boolean;
+    /** Asked right before the enabling request: false when too little of the window is left to watch an arming. */
+    readonly mayArm?: () => boolean;
   },
   ports: SeoArmPorts,
 ): Promise<SeoArmResult> {
@@ -1272,7 +1272,7 @@ export async function runSeoAgentArm(
   }
   if (decision.action === "enable") {
     if (input.seenArmed === true) return { status: "auto_merge_turned_off", branch };
-    if (input.mayArm === false) return { status: "window_over", branch };
+    if (input.mayArm !== undefined && !input.mayArm()) return { status: "window_over", branch };
     // Checked again where the write is made: the only base an auto-merge is ever armed against is develop.
     if (decision.pull.base !== SEO_AGENT_AUTO_MERGE_BASE || decision.pull.headSha !== record.commitSha || decision.pull.crossRepository) {
       return { status: "refused", branch, pullRequest: decision.pull.number, reasons: ["not_the_verified_pull_request"] };
@@ -1389,7 +1389,7 @@ export async function runSeoAgentArmLoop(
   try {
     for (;;) {
       const result = await runSeoAgentArm(
-        { record: input.record, attestation: input.attestation, env: input.env, seenArmed: seenArmed || state.armed !== null, onArming: setArmed, mayArm: clock.now() + MIN_ARMED_WATCH_MS < deadline },
+        { record: input.record, attestation: input.attestation, env: input.env, seenArmed: seenArmed || state.armed !== null, onArming: setArmed, mayArm: () => clock.now() + MIN_ARMED_WATCH_MS <= deadline },
         ports,
       );
       clock.onResult?.(result);
