@@ -633,7 +633,7 @@ const PRICE_MENTION = new RegExp(
  * months" are the same sentence to a reader.
  */
 const NON_MONTHLY_BILLING =
-  /\b(?:annual(?:ly)?|yearly|years?|yr|quarterly|biannual(?:ly)?|weekly|daily|(?:per|a|each|every)\s+(?:week|day)|(?:[2-9]|\d{2,})\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
+  /\b(?:annual(?:ly)?|yearly|yr|quarterly|biannual(?:ly)?|weekly|daily|weeks?|days?|(?:per|a|each|every)\s+(?:\w+\s+)?years?|(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
 const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
 
 /** The plans that carry a price, by the names the product gives them (not "Free"). */
@@ -732,6 +732,10 @@ function englishPriceProblems(
       if (
         !isYear &&
         /^\s*(?:[.,;:!?)]|$)/u.test(rest) &&
+        // Only where a price is being said: "Pro costs 99.", not "Pro, GPT-5."
+        /(?:\b(?:price|prices|cost|costs|costing|is|are|at|only|just|from|for)|[:=])\s*$/u.test(
+          lowered.slice(Math.max(0, start - 12), start),
+        ) &&
         expectations.some((entry) => entry.positions.some((at) => at < start && start - at <= 25))
       ) {
         codes.push("price_currency_missing");
@@ -771,7 +775,9 @@ function englishPriceProblems(
       ruleIds.push("price.text-period");
       continue;
     }
+    // Exact: two decimals at most, so 15.004 is not 15.00.
     const priceMinor = Math.round(Number(amount.replace(/,/g, "")) * 100);
+    const exact = !/\.\d{3,}/u.test(amount);
     let nearest: (typeof expectations)[number] | undefined;
     let nearestDistance = Number.POSITIVE_INFINITY;
     for (const expectation of expectations) {
@@ -783,7 +789,7 @@ function englishPriceProblems(
         }
       }
     }
-    if (!nearest || nearest.priceMinor !== priceMinor || nearest.currency !== currency) {
+    if (!exact || !nearest || nearest.priceMinor !== priceMinor || nearest.currency !== currency) {
       codes.push("price_text_mismatch");
       ruleIds.push("price.text-mismatch");
     }
