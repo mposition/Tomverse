@@ -578,8 +578,6 @@ test("an English price equal to the stored amount, currency and plan is a person
   for (const text of [
     "Pro is USD 15.00 per month.",
     "Pro costs 15 USD a month.",
-    "Pro monthly price is USD 15.", // the period said before the figure
-    "Pro is USD 15.00 per month, pause for 2 months any time.",
     "Pro: $15 USD per month.",
     "Pro is US$15 a month.",
     "Pro is 15 US dollars a month.",
@@ -613,6 +611,10 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro users can upgrade: Max costs USD 15 per month.", // the amount belongs to a plan nothing declares
     "Pro users can upgrade: max costs USD 15 per month.",
     "Pro costs USD 15 per month, billed annually.", // a monthly figure with a yearly condition
+    "Pro is USD 15 per month; billed annually.",
+    "Pro is USD 15 per month, billed every 12 months.",
+    "Pro monthly price is USD 15.", // the period is not attached to the figure
+    "Pro costs USD 15 per week.",
     "Pro is USD 15.00/yr.",
     "Pro is USD 15.00 for the first year.",
     "Pro is USD 15.00 billed yearly.",
@@ -626,7 +628,14 @@ test("an English price that is not the stored amount is refused", () => {
 });
 
 test("a figure with a billing period is a price even with no currency, and a limit is not", () => {
-  for (const text of ["Pro is 99 per month.", "Pro is 99/mo.", "Pro is 99 a month.", "Pro is 99 monthly."]) {
+  for (const text of [
+    "Pro is 99 per month.",
+    "Pro is 99/mo.",
+    "Pro is 99 a month.",
+    "Pro is 99 monthly.",
+    "Pro monthly price is 99.", // a figure ending the sentence right after the plan
+    "Pro costs 99 per week.",
+  ]) {
     const decision = priceDecision(text);
     assert.equal(decision.verdict, "reject", text);
     assert.ok(decision.codes.includes("price_currency_missing"), text);
@@ -639,6 +648,7 @@ test("a figure with a billing period is a price even with no currency, and a lim
   // "20 a day" is not a billing period, and "100 messages per month" has a noun
   // between the figure and the period.
   assert.ok(!priceDecision("Save 20 a day of busywork.", []).codes.includes("price_currency_missing"));
+  assert.ok(!priceDecision("Pro has been here since 2026.").codes.includes("price_currency_missing"));
   const limit = priceDecision("Pro includes 100 messages per month.", []);
   assert.ok(!limit.codes.includes("price_currency_missing"));
   assert.ok(!limit.codes.includes("price_text_mismatch"));

@@ -611,22 +611,29 @@ const PRICE_CURRENCY_CODES = "usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
  * An amount of money in English text, with whatever currency marks it carries.
  *
  * Groups: 1 a code before, 2 a symbol, 3 the amount, 4 a code after, 5 the
- * country before "dollars", 6 "dollars" or "bucks", 7 the unit of a billing
- * period ("per month", "/yr"), 8 a period adverb ("monthly"). A bare number is
- * not money: one of 1, 2, 4, 6, 7 or 8 has to be there. A figure with a billing
- * period is a price whether or not it names a currency ("99 per month"), and
- * "100 messages per month" is not one, because a noun stands between them.
+ * country before "dollars", 6 "dollars" or "bucks", 7 the unit after "per" or
+ * "/", 8 the unit after "a" or "each", 9 a period adverb ("monthly"). A bare
+ * number is not money: one of the others has to be there. A figure with a
+ * billing period is a price whether or not it names a currency ("99 per
+ * month"), and "100 messages per month" is not one, because a noun stands
+ * between them.
  */
 const PRICE_MENTION = new RegExp(
   `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
     `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks)\\b)?` +
-    `(?:\\s*(?:\\/|\\b(?:per|a|each)\\b)\\s*(mo|months?|yr|years?)\\b|\\s+(monthly|yearly|annually)\\b)?`,
+    `(?:\\s*(?:\\/|\\bper\\b)\\s*(mo|months?|yr|years?|wk|weeks?|days?)\\b|\\s+(?:a|each)\\s+(mo|months?|yr|years?)\\b|\\s+(monthly|yearly|annually|weekly|daily)\\b)?`,
   "giu",
 );
 
-/** The first billing period named after a price, up to the end of its clause. */
-const PRICE_PERIOD_WORD =
-  /\b(months?|monthly|mo|years?|yearly|yr|annual|annually|annum|weeks?|weekly|wk|days?|daily|quarterly)\b/iu;
+/**
+ * Any other way of billing, anywhere in a post that states a price: the stored
+ * price is a monthly one, and "billed annually", "per 12 months" or "weekly"
+ * beside it is another condition. Read over the whole post rather than a
+ * window, because "per month; billed annually" and "per month, billed every 12
+ * months" are the same sentence to a reader.
+ */
+const NON_MONTHLY_BILLING =
+  /\b(?:annual(?:ly)?|yearly|years?|yr|quarterly|biannual(?:ly)?|weekly|daily|(?:per|a|each|every)\s+(?:week|day)|(?:[2-9]|\d{2,})\s*-?\s*months?)\b|\/\s*(?:yr|wk|day)\b/iu;
 const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
 
 /** The plans that carry a price, by the names the product gives them (not "Free"). */
@@ -713,9 +720,25 @@ function englishPriceProblems(
   }
 
   for (const match of lowered.matchAll(PRICE_MENTION)) {
-    const [whole, codeBefore, symbol, amount, codeAfter, country, word, periodUnit, periodAdverb] = match;
-    if (!codeBefore && !symbol && !codeAfter && !word && !periodUnit && !periodAdverb) continue;
+    const [whole, codeBefore, symbol, amount, codeAfter, country, word, periodPer, periodA, periodAdverb] =
+      match;
     const start = match.index ?? 0;
+    if (!codeBefore && !symbol && !codeAfter && !word && !periodPer && !periodA && !periodAdverb) {
+      // A bare number is not money -- unless it ends the sentence right after a
+      // plan's name, which is how a price reads when it forgets its currency
+      // ("Pro monthly price is 99."). A year is not a price.
+      const rest = lowered.slice(start + whole.length);
+      const isYear = /^(?:19|20)\d{2}$/u.test(amount);
+      if (
+        !isYear &&
+        /^\s*(?:[.,;:!?)]|$)/u.test(rest) &&
+        expectations.some((entry) => entry.positions.some((at) => at < start && start - at <= 25))
+      ) {
+        codes.push("price_currency_missing");
+        ruleIds.push("price.currency-missing");
+      }
+      continue;
+    }
     const hints = new Set<string>();
     if (codeBefore) hints.add(codeBefore.toUpperCase());
     if (codeAfter) hints.add(codeAfter.toUpperCase());
@@ -740,35 +763,14 @@ function englishPriceProblems(
       continue;
     }
 
-    // The stored price is a monthly one, so the post has to say it is, and say
-    // nothing else about billing: every period word in the same clause (30
-    // characters before the figure, 40 after, and the figure's own) has to be a
-    // monthly one, at least one has to be there, and "per 12 months" is another
-    // price. "Billed annually" after "per month" is another condition.
-    const clauseEdge = /[.!?\n;:]/u;
-    const around = [
-      lowered.slice(Math.max(0, start - 30), start).split(clauseEdge).pop() ?? "",
-      lowered.slice(start + whole.length, start + whole.length + 40).split(clauseEdge)[0],
-    ];
-    const periods = [periodUnit, periodAdverb]
-      .concat(
-        around.flatMap((part) =>
-          [...part.matchAll(new RegExp(PRICE_PERIOD_WORD.source, "giu"))].map((hit) => hit[1]),
-        ),
-      )
-      .filter((word): word is string => typeof word === "string");
-    const several =
-      /^[\s,]*(?:per|every|for)\s+(?:the\s+)?(\d+)\s*-?\s*(?:months?|years?|weeks?|days?)\b/iu.exec(around[1]);
-    if (
-      !periods.some(isMonthlyPeriod) ||
-      !periods.every(isMonthlyPeriod) ||
-      (several && several[1] !== "1")
-    ) {
+    // The stored price is a monthly one: the figure says "per month" itself, and
+    // nothing else in the post bills another way.
+    const own = periodPer ?? periodA ?? periodAdverb;
+    if (!own || !isMonthlyPeriod(own) || NON_MONTHLY_BILLING.test(lowered)) {
       codes.push("price_text_mismatch");
       ruleIds.push("price.text-period");
       continue;
     }
-
     const priceMinor = Math.round(Number(amount.replace(/,/g, "")) * 100);
     let nearest: (typeof expectations)[number] | undefined;
     let nearestDistance = Number.POSITIVE_INFINITY;

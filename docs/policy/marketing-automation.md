@@ -235,7 +235,7 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
    확인한다. production에 공개되지 않은 기능은 거절한다.
 7. **비교:** 항상 승인 범주. 근거 URL과 비교 범위를 함께 저장한다.
 8. 추출 실패·검증 불가는 승인 큐로 간다.
-9. **영어 게시물의 가격 문구(운영자 결정 2026-11-02, 정책 버전 변경 없음):** 가격 claim의 locale에 `en`을 더했다. 영어 본문의 금액은 모두 통화를 한 번 밝혀야 하고(통화 없는 `$`·"dollars"·"99 per month"는 거절), AUD·`A$`는 위 3항대로 거절하며, 금액·통화·결제 주기(월)는 본문이 이름 댄 플랜(가장 가까운 플랜명)의 저장 월 가격과 정확히 같아야 한다(다르거나 선언한 가격 claim이 없으면 거절). "cheapest"·"lowest price"·"cheaper than"·"the only free"·"최저가"·"가장 저렴" 같은 비교·최상급 가격 표현은 모든 언어에서 거절한다. 사실 추출 필드를 두지 않고 Guard가 본문에서 결정적으로 읽는다(Guard는 편집·템플릿 승인에서도 다시 돌고 게시물에 추출값을 둘 열이 없다). 가격은 계속 항상 승인 범주(7.4)다. 거절 코드는 `price_comparison_claim`·`price_currency_missing`·`price_text_mismatch`.
+9. **영어 게시물의 가격 문구(운영자 결정 2026-11-02, 정책 버전 변경 없음):** 가격 claim의 locale에 `en`을 더했다. 영어 본문의 금액은 모두 통화를 한 번 밝혀야 하고(통화 없는 `$`·"dollars"·"99 per month"는 거절), AUD·`A$`는 위 3항대로 거절하며, 금액·통화는 본문이 이름 댄 플랜(가장 가까운 플랜명; 선언하지 않은 Pro·Max가 더 가까우면 거절)의 저장 월 가격과 정확히 같아야 하고, 금액 바로 뒤에 월 주기("per month"·"/mo"·"monthly")가 붙어야 하며 글 어디에도 연·주·일·12개월 같은 다른 결제 표현이 없어야 한다(다르거나 선언한 가격 claim이 없으면 거절). "cheapest"·"lowest price"·"cheaper than"·"the only free"·"최저가"·"가장 저렴" 같은 비교·최상급 가격 표현은 모든 언어에서 거절한다. 사실 추출 필드를 두지 않고 Guard가 본문에서 결정적으로 읽는다(Guard는 편집·템플릿 승인에서도 다시 돌고 게시물에 추출값을 둘 열이 없다). 가격은 계속 항상 승인 범주(7.4)다. 거절 코드는 `price_comparison_claim`·`price_currency_missing`·`price_text_mismatch`.
 
 ### 7.3 링크·자산
 - 모델은 URL을 쓰지 않는다. 승인된 경로 목록의 id만 고르고, 서버가 URL API로 조립해
