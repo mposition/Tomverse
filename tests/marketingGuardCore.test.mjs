@@ -604,12 +604,34 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15.00 per month and USD 9 for the first month.", // a second amount nothing stores
     "Team is USD 15.00 per month.", // not the plan the claim is about
     "Pro is USD 15.00 or EUR 15.00 per month.", // a second amount in another currency
+    "Pro is USD 15.00 per year.", // the right amount for another billing period
+    "Pro is USD 15.00/yr.",
+    "Pro is USD 15.00 for the first year.",
+    "Pro is USD 15.00 billed yearly.",
+    "Pro is USD 15.00 per month, or USD 15.00 per year.",
     "Starting at USD 15.00 per month.", // no plan named
   ]) {
     const decision = priceDecision(text);
     assert.equal(decision.verdict, "reject", text);
     assert.ok(decision.codes.includes("price_text_mismatch"), text);
   }
+});
+
+test("a figure with a billing period is a price even with no currency, and a limit is not", () => {
+  for (const text of ["Pro is 99 per month.", "Pro is 99/mo.", "Pro is 99 a month.", "Pro is 99 monthly."]) {
+    const decision = priceDecision(text);
+    assert.equal(decision.verdict, "reject", text);
+    assert.ok(decision.codes.includes("price_currency_missing"), text);
+  }
+  // Whitespace of any kind between the code and the amount is still that amount.
+  for (const text of ["Pro is USD  15.00 per month.", "Pro is USD\n15.00 per month."]) {
+    assert.equal(priceDecision(text).verdict, "approval_required", text);
+  }
+  assert.equal(priceDecision("Pro is USD  20.00 per month.").verdict, "reject");
+  // "100 messages per month" has a noun between the figure and the period.
+  const limit = priceDecision("Pro includes 100 messages per month.", []);
+  assert.ok(!limit.codes.includes("price_currency_missing"));
+  assert.ok(!limit.codes.includes("price_text_mismatch"));
 });
 
 test("an English price with no declared price claim has nothing to match and is refused", () => {

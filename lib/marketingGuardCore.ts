@@ -611,14 +611,23 @@ const PRICE_CURRENCY_CODES = "usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
  * An amount of money in English text, with whatever currency marks it carries.
  *
  * Groups: 1 a code before, 2 a symbol, 3 the amount, 4 a code after, 5 the
- * country before "dollars", 6 "dollars" or "bucks". A bare number is not money;
- * one of 1, 2, 4 or 6 has to be there.
+ * country before "dollars", 6 "dollars" or "bucks", 7 the unit of a billing
+ * period ("per month", "/yr"), 8 a period adverb ("monthly"). A bare number is
+ * not money: one of 1, 2, 4, 6, 7 or 8 has to be there. A figure with a billing
+ * period is a price whether or not it names a currency ("99 per month"), and
+ * "100 messages per month" is not one, because a noun stands between them.
  */
 const PRICE_MENTION = new RegExp(
-  `(?:\\b(${PRICE_CURRENCY_CODES})\\s?)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s?(\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
-    `(?:\\s?(${PRICE_CURRENCY_CODES})\\b|\\s?(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s)?(dollars?|bucks)\\b)?`,
+  `(?:\\b(${PRICE_CURRENCY_CODES})\\s*)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s*(\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
+    `(?:\\s*(${PRICE_CURRENCY_CODES})\\b|\\s*(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s+)?(dollars?|bucks)\\b)?` +
+    `(?:\\s*(?:\\/|\\b(?:per|a|each)\\b)\\s*(mo|months?|yr|years?|wk|weeks?|day)\\b|\\s+(monthly|yearly|annually|weekly)\\b)?`,
   "giu",
 );
+
+/** The first billing period named after a price, up to the end of its clause. */
+const PRICE_PERIOD_WORD =
+  /\b(months?|monthly|mo|years?|yearly|yr|annual|annually|annum|weeks?|weekly|wk|days?|daily|quarterly)\b/iu;
+const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
 
 /** What a symbol or a country names. `$` and `¥` name no one currency. */
 const PRICE_SYMBOL_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
@@ -688,8 +697,8 @@ function englishPriceProblems(
   });
 
   for (const match of lowered.matchAll(PRICE_MENTION)) {
-    const [, codeBefore, symbol, amount, codeAfter, country, word] = match;
-    if (!codeBefore && !symbol && !codeAfter && !word) continue;
+    const [whole, codeBefore, symbol, amount, codeAfter, country, word, periodUnit, periodAdverb] = match;
+    if (!codeBefore && !symbol && !codeAfter && !word && !periodUnit && !periodAdverb) continue;
     const start = match.index ?? 0;
     const hints = new Set<string>();
     if (codeBefore) hints.add(codeBefore.toUpperCase());
@@ -712,6 +721,19 @@ function englishPriceProblems(
       // The existing Australian refusal, for a price the post states in AUD.
       codes.push("au_price_gst_unverifiable");
       ruleIds.push("price.text-aud");
+      continue;
+    }
+
+    // The stored price is a monthly one: a price per year, week or day, said
+    // right after the figure or just after it in the same clause, is another
+    // price.
+    const tail = lowered
+      .slice(start + whole.length, start + whole.length + 40)
+      .split(/[.!?\n;:]/u)[0];
+    const period = periodUnit ?? periodAdverb ?? PRICE_PERIOD_WORD.exec(tail)?.[1];
+    if (period && !isMonthlyPeriod(period)) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-period");
       continue;
     }
 
