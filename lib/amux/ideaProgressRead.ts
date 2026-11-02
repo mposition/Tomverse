@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { amuxIdeaLaneState, type AmuxIdeaLaneAttemptFact, type AmuxIdeaLaneState } from "@/lib/amux/ideaLaneCore";
 import { amuxIdeaOwnerClosableState } from "@/lib/amux/ideaOwnerCloseCore";
 import { amuxIdeaProgress, type AmuxIdeaProgress, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 
@@ -19,6 +20,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   submittedAt: string;
   /** The first registered card's display key, the only plaintext label an idea has. */
   displayKey: string | null;
+  /** The idea lane's state, when the lane took the idea. */
+  lane: AmuxIdeaLaneState | null;
   /** Task PRs waiting for GitHub review or merge. */
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
   /** The idea's Task cards in registration order, for its detail view. */
@@ -94,6 +97,7 @@ type SqlIdea = {
   referencePins: unknown;
   referencePinAuditStatus: "declared" | "legacy" | null;
   checkoutEvidence: SqlCheckoutEvidence[] | null;
+  laneAttempts: AmuxIdeaLaneAttemptFact[] | null;
 };
 
 const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -177,7 +181,13 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
             WHERE m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"))
           ORDER BY e."referenceOrdinal")
         FROM "AmuxIdeaTrackedCheckoutEvidence" e
-        WHERE e."ideaId" = n."id") AS "checkoutEvidence"
+        WHERE e."ideaId" = n."id") AS "checkoutEvidence",
+      (SELECT json_agg(json_build_object(
+          'claimedAtMs', (extract(epoch FROM l."claimedAt") * 1000)::double precision,
+          'leaseUntilMs', (extract(epoch FROM l."leaseUntil") * 1000)::double precision,
+          'outcome', l."outcome", 'prNumber', l."prNumber"))
+        FROM "AmuxIdeaLaneAttempt" l
+        WHERE l."ideaId" = n."id") AS "laneAttempts"
     FROM newest n
     ORDER BY n."submittedAt" DESC, n."id" ASC
   `;
@@ -185,6 +195,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   return ideas.map((idea) => {
     const own = idea.cards ?? [];
     const pins = idea.referencePins;
+    const lane = amuxIdeaLaneState(idea.laneAttempts ?? [], now.getTime());
     const progress = amuxIdeaProgress({
       state: idea.state,
       submissionOrigin: idea.submissionOrigin,
@@ -193,6 +204,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       proposedUnits: idea.proposedUnits,
       cards: own.map((card) => ({ cardType: card.cardType, status: card.status,
         reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
+      lane,
     });
     return {
       ...progress,
@@ -200,15 +212,19 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       submissionOrigin: idea.submissionOrigin,
       // An owner idea before analysis ends counts only while it waits for an
       // execution approval: a page running, or one already approved, is analysis.
+      // A lane idea can be closed once its run is over: its PR opened or it ran out of attempts.
       closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
         (idea.state === "awaiting_owner" || (progress.waitingFor !== null &&
-          WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor))),
+          WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor)) ||
+          lane?.state === "pr_open" || lane?.state === "failed"),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
       reviewPullRequests: own.filter((card) => card.cardType !== "story" && !card.terminal &&
         card.status === "review" && card.reviewPrNumber !== null)
-        .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey })),
+        .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey }))
+        .concat(lane?.state === "pr_open" && lane.prNumber !== null ? [{ number: lane.prNumber, displayKey: null }] : []),
+      lane,
       taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
         status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
       referencePins: Array.isArray(pins) && pins.every((sha) =>
