@@ -2125,6 +2125,26 @@ domains:
       own registered actor link and privacy decision; no session intake route is
       enabled.
 
+  - domain: amuxIdeaLaneAttempt
+    prismaModel: AmuxIdeaLaneAttempt
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7 and v19, AMUX account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      One idea-lane run (lib/amux/ideaLaneCore.ts): claim and lease times, a fixed
+      outcome word and the draft PR number. It stores no idea text, prompt,
+      transcript or change; the row goes with its idea by cascade, so it
+      follows the parent's unresolved account-deletion and export decision.
+
   - domain: amuxIdeaTrackedCheckoutEvidence
     prismaModel: AmuxIdeaTrackedCheckoutEvidence
     userLinkageRole: actor

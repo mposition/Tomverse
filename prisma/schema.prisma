@@ -10324,6 +10324,7 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
+  laneAttempts        AmuxIdeaLaneAttempt[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
@@ -10352,6 +10353,25 @@ model AmuxIdeaSubmission {
   @@index([state, analysisDeadlineAt])
   @@index([rawPurgeAfter, rawPurgedAt])
   @@index([actorUserId, submittedAt])
+}
+
+/// One run of the idea lane (lib/amux/ideaLaneCore.ts): a GitHub Actions job
+/// that implements an owner idea in one Claude Code session and opens a draft
+/// PR into develop. A run without an outcome past its lease died; the next
+/// claim counts it and tries again, up to the lane's attempt limit.
+model AmuxIdeaLaneAttempt {
+  id         String    @id
+  ideaId     String
+  claimedAt  DateTime
+  leaseUntil DateTime
+  finishedAt DateTime?
+  /// pr_open, or a fixed failure word (AMUX_IDEA_LANE_FAILURES).
+  outcome    String?
+  prNumber   Int?
+  idea       AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+
+  @@index([ideaId, claimedAt])
+  @@index([claimedAt])
 }
 
 /// Intake v19 queue identity created atomically with one session submission.
