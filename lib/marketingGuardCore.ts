@@ -754,10 +754,12 @@ function englishPriceProblems(
     }
   }
 
+  const read: Array<readonly [number, number]> = [];
   for (const match of lowered.matchAll(PRICE_MENTION)) {
     const [whole, codeBefore, symbol, amount, codeAfter, country, word, periodPer, periodA, periodAdverb] =
       match;
     const start = match.index ?? 0;
+    read.push([start, start + whole.length]);
     if (!codeBefore && !symbol && !codeAfter && !word && !periodPer && !periodA && !periodAdverb) {
       // A bare number is not money -- unless it ends the sentence right after a
       // plan's name, which is how a price reads when it forgets its currency
@@ -847,6 +849,25 @@ function englishPriceProblems(
     if (!exact || !nearest || nearest.priceMinor !== priceMinor || nearest.currency !== currency) {
       codes.push("price_text_mismatch");
       ruleIds.push("price.text-mismatch");
+    }
+  }
+
+  // A currency code or a money word that no amount above was read from: the
+  // amount is spelled out ("USD ninety-nine"), or there is none. An amount this
+  // cannot read is not an amount it can compare, so it is refused.
+  const unit = new RegExp(
+    `(?<![\\p{L}\\p{N}])(${PRICE_CURRENCY_CODES}|dollars?|bucks|cents?|euros?|pounds?)(?![\\p{L}\\p{N}])`,
+    "giu",
+  );
+  for (const hit of lowered.matchAll(unit)) {
+    const at = hit.index ?? 0;
+    if (read.some(([from, to]) => at >= from && at < to)) continue;
+    if (hit[1].toLowerCase() === "aud") {
+      codes.push("au_price_gst_unverifiable");
+      ruleIds.push("price.text-aud");
+    } else {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-unreadable-amount");
     }
   }
   return { codes, ruleIds };

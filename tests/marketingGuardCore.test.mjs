@@ -653,6 +653,8 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15.00 for the first year.",
     "Pro is USD 15.00 billed yearly.",
     "Pro is 15 US cents per month.", // minor units are not dollars
+    "Pro is USD ninety-nine per month.", // an amount spelled out cannot be compared
+    "Pro is ninety-nine dollars per month.",
     "Pro is USD 15.00 per month, or USD 15.00 per year.",
     "Starting at USD 15.00 per month.", // no plan named
   ]) {
@@ -724,7 +726,7 @@ test("an Australian price stays refused: stated in AUD, or stored in AUD", () =>
   const stated = priceDecision("Pro is AUD 15.00 per month.");
   assert.equal(stated.verdict, "reject");
   assert.ok(stated.codes.includes("au_price_gst_unverifiable"));
-  for (const text of ["Pro is A$15 a month.", "Pro is USD 15 per month, AUD +99.", "Pro is 15 Australian dollars a month.", "Pro is AUD １５ per month."]) {
+  for (const text of ["Pro is A$15 a month.", "Pro is USD 15 per month, AUD +99.", "Pro is 15 Australian dollars a month.", "Pro is AUD １５ per month.", "Pro is AUD fifteen per month."]) {
     const decision = priceDecision(text);
     assert.ok(decision.codes.includes("au_price_gst_unverifiable"), text);
   }
