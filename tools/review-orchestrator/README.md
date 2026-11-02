@@ -512,7 +512,10 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
 
 **develop과의 충돌(운영자 결정 2026-10-27, 기본 꺼짐).** 실패한 CI가 없을 때, 같은 대상 브랜치의 PR(draft 포함)이
 GitHub에서 develop과 충돌하면 이 서버가 mirror의 develop을 그 head에 merge하고(커밋하지 않음) 모델이
-충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 충돌 파일들의 내용과 merge한 develop 커밋뿐이고,
+충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 각 충돌 구간을 대신할 줄과 merge한 develop 커밋뿐이고,
+workflow는 자기가 merge한 같은 파일(sha256이 같아야 합니다)에 그 줄을 다시 끼워 넣습니다. 파일 전체를 보내면
+`package-lock.json` 충돌이 전송 상한(60KB)을 넘어 `patch_too_large`로 멈췄습니다(#2969, #2976). 줄을 찾지 못하면
+예전처럼 파일 전체를 보냅니다.
 workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(conflict):` merge 커밋으로 push합니다.
 - 충돌 파일만 바꿨는지, 충돌 표시가 남지 않았는지 봅니다.
 - git이 충돌 구간 밖에 합쳐 둔 내용은 공백까지, 순서까지 그대로 남아야 합니다. 바뀌는 것은 충돌 구간뿐입니다.
