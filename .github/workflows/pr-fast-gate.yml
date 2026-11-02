@@ -84,9 +84,10 @@ jobs:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
     name: Security, lint, and encoding checks
     runs-on: ubuntu-latest
-    # Without the unit suite the job measured ~5.5 minutes of checks plus
-    # install. 15 bounds a hang, not the runtime.
-    timeout-minutes: 15
+    # Without the unit suite the job measured ~10 minutes of checks plus
+    # install on 2026-11-02, half of it the server-contract suite. 20 bounds a
+    # hang, not the runtime.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -171,10 +172,12 @@ jobs:
       # which is what published Tomverse's per-model USD cost basis to anyone
       # who asked. A guard nobody runs is not a guard.
       #
-      # No database, no browser: 110 tests in ~6s, so it belongs in the static
-      # tier beside the other cheap fail-closed checks.
+      # No database, no browser, so it belongs in the static tier beside the
+      # other cheap fail-closed checks. The suite has grown to ~1,500 tests and
+      # takes 4-5 minutes on a hosted runner (2026-11-02), so a 5-minute limit
+      # cancelled passing runs; 10 leaves room while still catching a hang.
       - name: Server contract tests
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: npm run test:server-contract
 
       # The release checklist is the only place the whole gate is written down
