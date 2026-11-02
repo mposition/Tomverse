@@ -17,7 +17,7 @@ approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 5
 | 1 | 2026-09-17 mposition | 최초 승인 |
 | 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 검증용 shadow 처리와 운영 활성화를 나누고 통과 기준·범위 강제·기록·재검증 범위를 정함(§6.1, §8.1, §8.1.1, §8.3, §14). **O15**: API로 게시를 내릴 수 없는 Instagram·TikTok은 항상 승인 모드(§1, §6.1, §8.2, §15) |
 | 3 | 2026-09-21 mposition | §7.1의 문장 해석 규칙 9개와 `rule.free-wording`을 거절기가 아닌 잠정 언어 진단으로 한정한다. 진단은 `provisional_language_flag` 하나와 세부 rule id를 남겨 사람에게 보내며, 입력 위생·claim/asset·provenance 거절은 그대로 둔다(§7.1, §7.2). 열세 번의 독립 검토가 이 판정기를 양방향으로 틀린 것으로 확인했고, 답은 패턴을 더하는 것이 아니라 tokeniser·형태소로 교체하는 것이다. 그 교체 전까지 거절 권한은 돌아오지 않는다. |
-| 4 | 2026-10-16 mposition | §9.2: 졸업 후 `marketing-agent/to-develop/<topic>` PR에도 auto-merge를 켜지 않는다. 2026-10-02부터 `Auto PR to Develop`은 PR을 열기만 하고, 병합은 운영자가 실행하는 merge train(`npm run merge-train`)이나 사람이 한다. 졸업이 바꾸는 것은 사람 검토 없이 병합 대기열에 들어갈 수 있다는 것이지 auto-merge가 아니다. **(2026-10-16 운영자 결정, S3 계획 D1·D2·D7)** 마케팅 LLM 비용 원장 `MarketingLlmCall`을 다섯 번째 마케팅 전용 표로 더한다(§1 O1, §5, §12.2). 생성 서비스의 임시 전용 키 공급사는 OpenAI이고(O14), 월 상한은 US$100이다(§5) |
+| 4 | 2026-10-16 mposition | §9.2: 졸업 후 `marketing-agent/to-develop/<topic>` PR에도 auto-merge를 켜지 않는다(**2026-11-02 운영자 결정으로 이 줄은 낡았다: 졸업한 SEO 코드 PR에 한해 기본 꺼진 스위치 뒤의 develop auto-merge를 허용한다, §9.2**). 2026-10-02부터 `Auto PR to Develop`은 PR을 열기만 하고, 병합은 운영자가 실행하는 merge train(`npm run merge-train`)이나 사람이 한다. 졸업이 바꾸는 것은 사람 검토 없이 병합 대기열에 들어갈 수 있다는 것이지 auto-merge가 아니다. **(2026-10-16 운영자 결정, S3 계획 D1·D2·D7)** 마케팅 LLM 비용 원장 `MarketingLlmCall`을 다섯 번째 마케팅 전용 표로 더한다(§1 O1, §5, §12.2). 생성 서비스의 임시 전용 키 공급사는 OpenAI이고(O14), 월 상한은 US$100이다(§5) |
 | 5 | 2026-10-18 mposition | **(2026-10-17 운영자 결정: 경쟁사는 상수가 아니라 DB 등록부와 사람의 승인, 사실은 사람이 승인한 고정 페이지에서, 웹 검색은 신규 경쟁사 탐색에만)** 경쟁사 등록부 `MarketingCompetitor`를 여섯 번째 마케팅 전용 표로 더한다(§1 O1, §5, §12.2). A3의 출처 규칙(§4.1)을 정한다. 이 표와 그 위의 고정 페이지 추출(A3 실행)은 버전 4 아래에서 정책 버전 증가 없이 먼저 구현됐다(공개 PR #2646·#2647·#2649·#2653·#2656, develop만, production 미배포). 작성자의 절차 누락이며, 이 판이 승인되기 전에는 그 코드를 production release에 넣지 않았다 |
 
 운영자 결정(아래 §1)은 운영자가 대화 세션에서 내린 것이고, 나머지 계약은 Claude가 설계하고
@@ -194,7 +194,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | 자율 게시 | 승인 모드 게시 조건 · 자율 스위치 · 계정 자율 모드 · 댓글 모니터링 동작 · 채널이 API 게시 취소 가능(Instagram·TikTok 제외, O15) |
 | 졸업 | `marketing:write` + step-up · O3 · 댓글 모니터링 동작 · 채널이 O15 대상 아님 |
 | 실험 활성화 | 실험 스위치 · kill switch 아님 · 캐시·CSP 스파이크 통과 기록 · (승인 모드) `marketing:write` + step-up / (자율) 표면 졸업 |
-| SEO 자동 병합 | 저장소 변수 · 표면 졸업 상태 조회 성공 |
+| SEO 자동 병합 | 에이전트 스위치 · `MARKETING_SEO_AUTO_MERGE=true`(기본 꺼짐) · kill switch 아님 · 졸업 기록(`MARKETING_SEO_AUTO_PR=true`) · 게시 단계와 같은 서명·tree·허용 4개 파일 재검증 · PR이 develop 기준·열림·draft 아님·검증한 commit 그대로 (§9.2) |
 | webhook shadow 처리 | shadow 스위치 · staging 환경 · kill switch 아님 · 서명 검증 통과 (§8.1.1) |
 | webhook 상태 반영 | 상태 반영 스위치 · kill switch 아님 · 이벤트가 스위치의 허용 event type·채널 범위 안 · 운영자 서명된 §8.1.1 기록이 있고 그 뒤 해당 코드·설정·스키마 변경 없음 |
 
@@ -393,8 +393,27 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - PR 생성: 이 저장소 전용 GitHub App 토큰, 검증 산출 tree hash와 push 내용 일치 시에만.
 - 브랜치: 졸업 전 `marketing-agent/<topic>`(자동화 권한 없음, 사람 병합). 졸업 후
   `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다
-  (`scripts/auto-pr-branch-policy.mjs`). auto-merge는 어느 쪽도 켜지 않으며(버전 4 제안), 병합은 merge train
-  (`npm run merge-train`) 또는 사람이 한다. develop까지만.
+  (`scripts/auto-pr-branch-policy.mjs`). develop까지만. 졸업 전 PR은 auto-merge 없이 사람이 병합한다.
+  **졸업 후 PR의 auto-merge(2026-11-02 운영자 결정, 정책 버전 변경 없음):** 기본 꺼진 스위치 `MARKETING_SEO_AUTO_MERGE=true`일 때만,
+  게시 단계 뒤(또는 `--phase arm`) 실행기가 GitHub의 auto-merge(`enablePullRequestAutoMerge`, merge commit)를 그 PR 하나에 켠다. 병합은 GitHub가
+  develop의 required check가 통과한 뒤에 한다. 켜는 조건은 모두 결정적 코드이고 하나라도 틀리면 켜지 않는다: 에이전트 스위치 켜짐 · kill switch 비어 있음 ·
+  졸업 기록(아래) · 게시 단계와 같은 재검증(서명, base가 원격 develop 위, tree·부모·diff를 git에서 다시 계산, 허용 4개 파일) · PR이 이 저장소의
+  열린 PR이고(fork 제외) head 이름이 정확히 `marketing-agent/to-develop/<topic>`이며 **base가 정확히 `develop`**이고(main·release·그 밖의 base는 어떤 경우에도
+  켜지 않는다) head commit이 검증한 commit과 같고(GitHub 호출도 `expectedHeadOid`로 묶는다) draft가 아닐 것. 같은 head 이름의 열린 PR이 둘이면 켜지 않는다.
+  **켜 둔 채로 자리를 비우지 않는다**: GitHub는 쓰기 권한자가 commit을 더 push해도 auto-merge를 그대로 두므로, 켠 PR은 실행기가 20초 간격으로 지켜보고
+  head가 검증한 commit이 아니게 되거나 base가 develop이 아니게 되면 끈다(required check는 새 head에서 다시 돌아야 하므로 이 간격이면 병합보다 먼저 본다).
+  감시 창(`--wait-minutes`, 기본·최대 45분, 최소 1. 설치 토큰은 한 시간이고 해제에도 그 토큰이 필요하므로 마감은 토큰 만료 시각(GitHub 응답 헤더 또는 운영자가 주는 `MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT` 중 이른 쪽)에서 10분을 뺀 절대 시각으로 줄고, 그 시각을 알 수 없거나 창이 1분보다 짧으면 push 전에 시작하지 않으며, 남은 창이 1분 안이면 켜지 않는다. 더 기다리려면 새 토큰으로 다시 실행한다)이 끝나거나, PR을 읽지 못하거나(연속 5회), 병합·닫힘 말고 어떤 이유로든 실행이 끝나거나, 오류·SIGINT/SIGTERM이 나면
+  이 실행이 켠 auto-merge는 끈다(사람이 켠 것은 지켜보며 head·base가 어긋날 때만 끄고, 창이 끝났다고 끄지 않는다). PR 목록은 열린 것과 끝난 것을 따로 읽고 열린 쪽이 한 쪽(20개)을 넘으면 읽지 못한 것으로 본다. 켜는 요청은 보내기 전에 해제 대상으로 기록하므로 응답이 유실돼도 같은 경로로 끄고(해제는 세 번까지 다시 묻는다),
+  켠 직후 PR을 다시 읽어 base·head가 검증한 그대로인지 확인한다. 프로세스가 강제로 죽었거나 해제 요청이 세 번 모두 실패한 경우(실행기는 오류로 끝난다)에만 사람이 PR 화면에서 끈다.
+  **남는 위험**: GitHub에는 auto-merge를 특정 base에만 허용하는 설정이 없어 base 제한은 위 재확인과 감시가 하는 것이고, 쓰기 권한자가 이미 검사를 통과한
+  commit으로 head를 되돌리거나 base를 바꾸는 순간부터 감시가 보기까지의 20초 안에는 GitHub가 먼저 병합할 수 있다. 쓰기 권한자는 원래 직접 병합할 수 있으므로 그 이상의 권한은 아니다.
+  **한 실행에서 한 번만 켠다**: 켠 뒤 auto-merge가 다시 꺼져 있으면 사람이나 GitHub가 끈 것이고 다시 켜지 않는다(PR #1256의 교훈).
+  draft는 GitHub가 auto-merge를 받지 않으므로, CI 입장 관리가 ready로 올릴 때까지 1분 간격으로 보며 기다린다(켜기 전에는 아무것도 켜 두지 않는다).
+  창이 끝난 뒤에는 `--phase arm`을 다시 실행하는 것이 운영자의 행위다. kill switch는 새로 켜는 것을 막는다. 이것은 auto-merge를 켜지 않는다는
+  `Auto PR to Develop`의 규칙(AGENTS.md)과 별개의 예외이며, workflow는 여전히 아무것도 켜지 않는다. 여러 PR이 연달아 병합되면 develop 배포가 겹칠 수 있다는
+  2026-10-02 결정의 비용은 이 경로에 한해 운영자가 받아들였다.
+  **졸업 기록**: SEO 표면에는 계정 행이 없어, 운영자가 O3를 확인한 뒤 설정하는 저장소 변수 `MARKETING_SEO_AUTO_PR`(정확히 `true`)이 졸업 기록이다.
+  비어 있거나 다른 값이거나 읽기에 실패하면 졸업 전이다. 이 변수는 게시 단계가 `to-develop` 브랜치를 쓰게 하는 것이기도 하다.
 - 구현(2026-11-01 운영자 결정, 정책 버전 변경 없음): 실행기 `scripts/marketing-seo-agent.mjs`와 순수 규칙 `lib/marketingSeoAgentCore.ts`.
   기본 꺼짐(`MARKETING_SEO_AGENT_ENABLED=true`만 켬, `MARKETING_AUTOMATION_KILL_SWITCH`에 값이 있으면 끔). **두 단계는 서로 다른 프로세스이자 서로 다른 기계(컨테이너)에서 돌린다.**
   검증 단계(`--phase validate`)는 격리된 clone(base 커밋)에서 도구 없는 텍스트 LLM 호출 1회(마케팅 비용 원장 그대로, 목적 `brief`, 새 유료 경로 없음)의 find/replace 수정안을 적용하고
@@ -405,7 +424,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   시험은 제안 코드와 같은 프로세스에서 돌아 악의적인 코드를 원리상 막지 못한다(시험 안의 `assert`를 바꾸는 코드 등). 그래서 추가되는 줄에서 그 길을 닫는 심층 방어를 둔다 — 허용 import(`next`·`react`·`@/lib|components|app`)만, `process`(`LLMS_TXT_ENABLED` 하나만 예외)·`assert`·`eval`·`Function`·`globalThis`·동적 로드·constructor 사슬 거부, 주석과 문자열 내용은 코드가 아니다 — 이는 증명이 아니다. 악의적 코드에 대한 권위 있는 방어는 draft PR, 저장소 CI, 사람의 diff 검토다.
   게시 단계(`--phase publish`)는 신뢰된 checkout과 자기 의존성에서 돌고, GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)과 서명 키만 가지며 LLM 변수가 있으면 시작을 거부한다.
   서명이 맞고, base가 원격 develop의 조상이며, 부모가 base이고, tree·diff를 git에서 다시 계산해 일치할 때만 push하고, push 뒤 원격 tree를 다시 읽어 일치할 때만 PR(draft)을 연다.
-  졸업 상태 조회가 연결되기 전에는 항상 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
+  졸업 기록이 정확히 `true`가 아니면(비어 있음·다른 값·읽기 실패) 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
 - 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.

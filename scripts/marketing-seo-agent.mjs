@@ -6,7 +6,10 @@
 //     --phase validate --topic "<what to improve>" --out <empty dir> [--base <commit>] [--proposal-file <json>]
 //
 //   node --experimental-strip-types --no-warnings scripts/marketing-seo-agent.mjs \
-//     --phase publish --out <the same dir>
+//     --phase publish --out <the same dir> [--wait-minutes <n>]
+//
+//   node --experimental-strip-types --no-warnings scripts/marketing-seo-agent.mjs \
+//     --phase arm --out <the same dir> [--wait-minutes <n>]
 //
 // Run from a clone of this repository with dependencies installed, after
 // `git fetch origin develop`. Nothing happens unless MARKETING_SEO_AGENT_ENABLED
@@ -28,9 +31,30 @@
 // The rules live in lib/marketingSeoAgentCore.ts; this file binds them to git,
 // the marketing LLM cost ledger and GitHub. The paid call runs in a child
 // process (`--stage llm`) that has the ledger's variables and no repository
-// credential. Nothing here calls a merge or auto-merge API: before graduation
-// the publish phase opens a draft PR for a person; after graduation the push is
-// what the standard `Auto PR to Develop` workflow acts on.
+// credential. Nothing here merges a pull request. Before graduation the publish
+// phase opens a draft PR for a person; after graduation the push is what the
+// standard `Auto PR to Develop` workflow acts on. The one merge-related write is
+// GitHub's auto-merge (`enablePullRequestAutoMerge`, merge commit), turned on by
+// the arm step only when MARKETING_SEO_AUTO_MERGE is exactly "true" and the
+// graduation variable is "true" (policy 9.2, operator decision 2026-11-02).
+//
+// The arm step: the workflow opens the graduated PR as a draft, GitHub does not
+// arm a draft, and the CI admission bot marks it ready when it has runners. So
+// `--phase arm` (which the publish phase runs by itself after a graduated push)
+// re-verifies the signed record exactly as publish does, then looks at the pull
+// request for --wait-minutes (default and at most 45, because the installation token lasts one hour
+// and a disarm needs it; at least 1; every minute while it waits, every 20
+// seconds once armed): it arms an open, non-draft PR from this repository, based on
+// develop, whose head is exactly the validated commit, and it arms at most once per
+// run. If auto-merge is off again afterwards, a person or GitHub turned it off, and it
+// is left off. GitHub keeps auto-merge on when someone with write access pushes another
+// commit, so an armed PR is never left unattended: a head that moved or a base that is
+// not develop is disarmed, and so is any arming still standing when the window ends,
+// when the PR cannot be read, on any ending but a merge or a close, on an error and on
+// SIGINT/SIGTERM (a killed process cannot: a person turns auto-merge off in the PR then).
+// Running the phase again later is an operator action and may arm again. GitHub merges the PR once
+// the required checks of develop pass; the App needs Pull requests: write and
+// Contents: write, which the push and the PR already needed.
 //
 // Variables (names only; the values and the GitHub App are the operator's):
 //   MARKETING_SEO_AGENT_ENABLED        exactly "true" to run, both phases
@@ -46,7 +70,8 @@
 //                                      the publish phase refuses anything that does not verify
 //   MARKETING_SEO_GITHUB_APP_TOKEN     publish phase only: installation token of the repository-only GitHub App
 //   MARKETING_SEO_GITHUB_REPOSITORY    publish phase only: owner/name
-//   MARKETING_SEO_AUTO_PR              repository variable; "true" only after graduation
+//   MARKETING_SEO_AUTO_PR              the surface's graduation record, set by the operator: "true" only after graduation
+//   MARKETING_SEO_AUTO_MERGE           exactly "true" lets the arm step turn on auto-merge; default off
 //
 // `--proposal-file` replaces the LLM call with a saved answer, for trying the
 // validation without spending anything. `--dry-run` (validate only) runs the whole
@@ -78,8 +103,12 @@ import {
   SEO_AGENT_GRADUATED_VARIABLE_ENV,
   SEO_AGENT_JUNIT_PLACEHOLDER,
   SEO_AGENT_POLICY_TESTS,
+  runSeoAgentArmLoop,
   runSeoAgentPublish,
   runSeoAgentValidate,
+  seoAgentArmEndedCleanly,
+  seoAgentArmWindow,
+  seoAgentAutoMergeGate,
   seoAgentGate,
   seoAgentJunitVerdict,
   seoAgentStageEnvironment,
@@ -92,6 +121,15 @@ const BUNDLE_REF = "seo-agent-change";
 const CHECK_TIMEOUT_MS = 20 * 60 * 1000;
 /** One GitHub API request. */
 const GITHUB_TIMEOUT_MS = 30 * 1000;
+/** The operator-supplied end of the installation token (the expires_at of its creation), an ISO time. */
+const SEO_AGENT_TOKEN_EXPIRES_ENV = "MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT";
+/** How long the arm step waits between two looks while there is nothing armed yet. */
+const ARM_POLL_MS = 60 * 1000;
+/** ...and while it is armed: a moved head has to be seen long before the required checks can finish on it. */
+const ARM_ARMED_POLL_MS = 20 * 1000;
+// The window the arm step watches (--wait-minutes, at most 45) is cut to the token's own expiry, as GitHub reports it,
+// less a margin for the final disarm (seoAgentArmWindow): every request of the run, a disarm included, uses the one
+// token it started with. An arming is disarmed when the window ends; run the phase again with a fresh token to wait longer.
 
 const option = (name) => {
   const index = process.argv.indexOf(name);
@@ -409,7 +447,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
 // Phase 2: publish
 // ---------------------------------------------------------------------------
 
-if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish") {
+if (process.argv[1] && self === resolve(process.argv[1]) && (phase === "publish" || phase === "arm")) {
   const outDir = option("--out");
   if (!outDir) fail(new Error("--out is required"));
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"]).trim();
@@ -446,8 +484,54 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
     });
-    return { status: response.status, body: await response.json().catch(() => null) };
+    return { status: response.status, body: await response.json().catch(() => null), expires: response.headers.get("github-authentication-token-expiration") };
   };
+
+  // When the token ends: GitHub's header (it sends one with a token that expires), or the operator's
+  // MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT (the expires_at of the token's creation), whichever is earlier.
+  // Neither is "unknown", and an unknown end is refused: this runner is given an installation token, which ends.
+  const tokenExpiresAtMs = async () => {
+    const read = await github("GET", "");
+    if (read.status !== 200) throw new Error(`the token could not be checked (HTTP ${read.status})`);
+    const parse = (text) => {
+      const ms = Date.parse(String(text).replace(/ UTC$/, "Z").replace(" ", "T"));
+      return Number.isFinite(ms) ? ms : "unreadable";
+    };
+    const known = [read.expires, process.env[SEO_AGENT_TOKEN_EXPIRES_ENV]].filter((text) => typeof text === "string" && text !== "").map(parse);
+    if (known.length === 0) return null;
+    return known.includes("unreadable") ? "unreadable" : Math.min(...known);
+  };
+  // Validated before anything is pushed, so a bad flag or a token that is about to end does not waste a publish. The
+  // answer is an absolute time: the publish that follows uses up part of the window, not more of the token.
+  const armDeadlineMs = async () => {
+    const requested = option("--wait-minutes");
+    if (process.argv.includes("--wait-minutes") && requested === undefined) throw new Error("--wait-minutes needs a number of minutes");
+    const window = seoAgentArmWindow({ requested, nowMs: Date.now(), tokenExpiresAtMs: await tokenExpiresAtMs() });
+    if (!window.ok) {
+      throw new Error(`the arm window was refused: ${window.reason} (--wait-minutes is 1 to 45; the token must end at least 11 minutes from now; give ${SEO_AGENT_TOKEN_EXPIRES_ENV} if GitHub sends no expiry)`);
+    }
+    return window.deadlineAtMs;
+  };
+
+  const graphql = async (query, variables) => {
+    const response = await fetch("https://api.github.com/graphql", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+    });
+    const body = await response.json().catch(() => null);
+    if (response.status !== 200 || !body || Array.isArray(body.errors) || !body.data) {
+      throw new Error(`GitHub GraphQL request failed (HTTP ${response.status}): ${String(body?.errors?.[0]?.message ?? "").slice(0, 120)}`);
+    }
+    return body.data;
+  };
+  const [repositoryOwner, repositoryName] = (repository ?? "/").split("/");
 
   const ports = {
     bundleSha256: async () => createHash("sha256").update(readFileSync(join(resolve(outDir), "change.bundle"))).digest("hex"),
@@ -470,13 +554,10 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
       numstat: git(root, ["diff", "--numstat", "-z", "--no-renames", base, commitSha]),
       patch: git(root, ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", base, commitSha]),
     }),
-    lookupGraduation: async () => {
-      // The surface graduation read belongs to S4 (graduation) and does not exist
-      // yet, so a repository variable alone cannot say "graduated": this throws,
-      // and a throw is "not graduated" (policy 6.1: the lookup must succeed).
-      if (process.env[SEO_AGENT_GRADUATED_VARIABLE_ENV] !== "true") return false;
-      throw new Error("the surface graduation lookup is not connected");
-    },
+    // The SEO surface has no account row to graduate: the operator's own record is this variable, set after
+    // the operator has checked the O3 conditions (policy 6.1, 9.2). Exactly "true"; unset, empty or any other
+    // value is "not graduated", and so is a read that throws.
+    lookupGraduation: async () => process.env[SEO_AGENT_GRADUATED_VARIABLE_ENV] === "true",
     push: async (commitSha, branch) => {
       // The lease with an empty expected value is "the branch must not exist": the server
       // refuses the update if it does, so a branch created since the lookup is never advanced.
@@ -515,8 +596,61 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
         },
       });
     },
+    findPullRequests: async (branch) => {
+      // Open ones and finished ones are asked separately, so a long history cannot hide an open pull request,
+      // and a page that is not the whole list is unreadable: an arming is never decided on part of the open ones.
+      const nodeFields = "id number state isDraft baseRefName headRefName headRefOid isCrossRepository autoMergeRequest { enabledAt }";
+      const data = await graphql(
+        `query($owner: String!, $name: String!, $head: String!) {
+          repository(owner: $owner, name: $name) {
+            open: pullRequests(headRefName: $head, states: [OPEN], first: 20) { pageInfo { hasNextPage } nodes { ${nodeFields} } }
+            finished: pullRequests(headRefName: $head, states: [MERGED, CLOSED], first: 20, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ${nodeFields} } }
+          }
+        }`,
+        { owner: repositoryOwner, name: repositoryName, head: branch },
+      );
+      const openList = data.repository?.open;
+      if (!Array.isArray(openList?.nodes) || openList.pageInfo?.hasNextPage !== false || !Array.isArray(data.repository?.finished?.nodes)) return null;
+      const nodes = [...openList.nodes, ...data.repository.finished.nodes];
+      const views = [];
+      for (const node of nodes) {
+        // A shape that is not exactly what the decision reads is unreadable, never a guess.
+        if (
+          typeof node?.id !== "string" || !Number.isInteger(node.number) || !["OPEN", "MERGED", "CLOSED"].includes(node.state) ||
+          typeof node.isDraft !== "boolean" || typeof node.baseRefName !== "string" || typeof node.headRefName !== "string" ||
+          !/^[0-9a-f]{40}$/.test(node.headRefOid ?? "") || typeof node.isCrossRepository !== "boolean"
+        ) {
+          return null;
+        }
+        views.push({
+          nodeId: node.id, number: node.number, state: node.state, isDraft: node.isDraft, base: node.baseRefName,
+          head: node.headRefName, headSha: node.headRefOid, crossRepository: node.isCrossRepository, autoMerge: node.autoMergeRequest != null,
+        });
+      }
+      return views;
+    },
+    enableAutoMerge: async ({ nodeId, headSha }) => {
+      // expectedHeadOid: GitHub refuses if the head is no longer the validated commit. A merge commit,
+      // as the merge train makes. The merge itself is GitHub's, when develop's required checks pass.
+      const data = await graphql(
+        `mutation($id: ID!, $sha: GitObjectID!) {
+          enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE, expectedHeadOid: $sha }) {
+            pullRequest { autoMergeRequest { enabledAt } }
+          }
+        }`,
+        { id: nodeId, sha: headSha },
+      );
+      if (data.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest == null) throw new Error("auto-merge was not enabled");
+    },
+    disableAutoMerge: async ({ nodeId }) => {
+      const data = await graphql(
+        `mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { autoMergeRequest { enabledAt } } } }`,
+        { id: nodeId },
+      );
+      if (data.disablePullRequestAutoMerge?.pullRequest?.autoMergeRequest != null) throw new Error("auto-merge was not disabled");
+    },
     createPullRequest: async ({ branch, title, body }) => {
-      // Draft, against develop, and no merge or auto-merge call of any kind.
+      // Draft, against develop, and no merge call of any kind.
       const created = await github("POST", "/pulls", { title, head: branch, base: "develop", body, draft: true });
       if (created.status !== 201 || typeof created.body?.html_url !== "string") {
         throw new Error(`pull request was not created (HTTP ${created.status})`);
@@ -525,14 +659,77 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "publish")
     },
   };
 
+  // The loop is in the core (runSeoAgentArmLoop): it looks until the window is over, watches an armed pull
+  // request, and disarms it again at the end of the window, on any other ending and on a throw. A signal
+  // does the same here, because GitHub keeps auto-merge on after a person with write access pushes.
+  let armedNow = null;
+  // A signal waits for an enabling request that is already on its way (turning it off first would be
+  // overtaken by it), refuses a new one, and asks to turn it off up to three times.
+  let stopping = false;
+  let enableInFlight = Promise.resolve();
+  const enableOnce = ports.enableAutoMerge;
+  ports.enableAutoMerge = (pull) => {
+    if (stopping) throw new Error("stopping: no new auto-merge request");
+    const request = enableOnce(pull);
+    enableInFlight = request.then(() => undefined, () => undefined);
+    return request;
+  };
+  const armLoop = async (deadlineAtMs) => {
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      process.on(signal, async () => {
+        stopping = true;
+        await enableInFlight;
+        for (let attempt = 0; armedNow !== null && attempt < 3; attempt += 1) {
+          try {
+            await ports.disableAutoMerge(armedNow);
+            break;
+          } catch {
+            // Asked again; a person turns it off in the PR if all three fail.
+          }
+        }
+        process.exit(signal === "SIGINT" ? 130 : 143);
+      });
+    }
+    return await runSeoAgentArmLoop(
+      { record, attestation: attestationFile?.attestation, env: process.env, deadlineAtMs },
+      ports,
+      {
+        now: () => Date.now(),
+        sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+        pollMs: ARM_POLL_MS,
+        armedPollMs: ARM_ARMED_POLL_MS,
+        onArmed: (pull) => {
+          armedNow = pull;
+        },
+        onResult: (result) => console.log(JSON.stringify({ event: "marketing_seo_agent_arm", ...result })),
+      },
+    );
+  };
+
+  // Only a run that can arm needs a window and a token whose end is known; checked before anything is pushed.
+  const willArm = process.env[SEO_AGENT_GRADUATED_VARIABLE_ENV] === "true" && seoAgentAutoMergeGate(process.env, true).on;
+
   try {
-    printAndExit("marketing_seo_agent_publish", await runSeoAgentPublish({ record, attestation: attestationFile?.attestation, env: process.env }, ports), ["pushed", "off"]);
+    if (phase === "arm") {
+      const result = await armLoop(willArm ? await armDeadlineMs() : 0);
+      process.exit(seoAgentArmEndedCleanly(result.status) ? 0 : 2);
+    }
+    const deadlineAtMs = willArm ? await armDeadlineMs() : 0;
+    const published = await runSeoAgentPublish({ record, attestation: attestationFile?.attestation, env: process.env }, ports);
+    console.log(JSON.stringify({ event: "marketing_seo_agent_publish", ...published }));
+    if (published.status !== "pushed") process.exit(published.status === "off" ? 0 : 2);
+    // After a graduated push the workflow opens the draft PR; arm it when, and only when, the switch says so.
+    if (published.graduated && willArm) {
+      const result = await armLoop(deadlineAtMs);
+      process.exit(seoAgentArmEndedCleanly(result.status) ? 0 : 2);
+    }
+    process.exit(0);
   } catch (error) {
     fail(error);
   }
 }
 
-if (process.argv[1] && self === resolve(process.argv[1]) && phase !== "validate" && phase !== "publish") {
-  console.error("Usage: --phase validate|publish (see the header of this file).");
+if (process.argv[1] && self === resolve(process.argv[1]) && phase !== "validate" && phase !== "publish" && phase !== "arm") {
+  console.error("Usage: --phase validate|publish|arm (see the header of this file).");
   process.exit(1);
 }
