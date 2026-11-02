@@ -803,6 +803,12 @@ function englishPriceProblems(
       continue;
     }
     const currency = [...hints][0];
+    if (word && /^cents?$/u.test(word)) {
+      // Minor units are not read: "15 US cents" is not 15 dollars.
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-cents");
+      continue;
+    }
     if (currency === "AUD") {
       // The existing Australian refusal, for a price the post states in AUD.
       codes.push("au_price_gst_unverifiable");

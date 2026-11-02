@@ -652,6 +652,7 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15.00/yr.",
     "Pro is USD 15.00 for the first year.",
     "Pro is USD 15.00 billed yearly.",
+    "Pro is 15 US cents per month.", // minor units are not dollars
     "Pro is USD 15.00 per month, or USD 15.00 per year.",
     "Starting at USD 15.00 per month.", // no plan named
   ]) {
