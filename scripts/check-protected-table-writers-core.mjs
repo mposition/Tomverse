@@ -3279,6 +3279,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Replaces the ledger's shape check in one ALTER to add the comment monitor's comment_triage purpose; every other predicate is unchanged. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
   },
   {
+    path: "prisma/migrations/20261102110000_marketing_llm_seo_purpose/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "Replaces the ledger's shape check in one ALTER to add the SEO code agent's seo purpose; every other predicate is unchanged. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
+  },
+  {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     table: "MarketingLlmCall",
     tableMentions: 5,

@@ -467,8 +467,11 @@ test("a brief reservation spends only while the operator's analysis switch is on
   assert.deepEqual(await reserve(2, OPEN, { purpose: "brief" }), { status: "refused", code: "purpose_disabled" });
   assert.equal(await prisma.marketingLlmCall.count(), 0);
   assert.equal(await prisma.adminAuditLog.count(), 0);
-  // A draft is another purpose and does not ask.
+  // A draft is another purpose and does not ask, nor does the SEO code agent's own.
   assert.equal((await reserve(3)).status, "ok");
+  const seo = await reserve(6, OPEN, { purpose: "seo" });
+  assert.equal(seo.status, "ok");
+  if (seo.status === "ok") assert.equal((await row(seo.value.callId)).purpose, "seo");
 
   await prisma.appSetting.update({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, data: { value: "true" } });
   assert.equal((await reserve(4, OPEN, { purpose: "brief" })).status, "ok");

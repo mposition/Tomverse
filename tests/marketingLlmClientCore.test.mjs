@@ -122,7 +122,7 @@ test("a text request given an answer schema holds the answer to it, strictly, an
   assert.equal(b.calls[0].fields.adapterProfile, "text-only-v1");
 });
 
-test("the budget route takes the comment monitor's purpose and no other new one", () => {
+test("the budget route takes the comment monitor's and SEO agent's purposes and no other new one", () => {
   const reserve = (purpose) =>
     marketingLlmBudgetRequestSchema.safeParse({
       action: "reserve",
@@ -135,6 +135,7 @@ test("the budget route takes the comment monitor's purpose and no other new one"
       adapterProfile: "text-only-v1",
     }).success;
   assert.equal(reserve("comment_triage"), true);
+  assert.equal(reserve("seo"), true);
   assert.equal(reserve("comment_moderation"), false);
 });
 

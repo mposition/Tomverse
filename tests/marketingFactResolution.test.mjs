@@ -67,3 +67,10 @@ test("a new draft's facts are sealed against the rows that answered them (S3a2)"
   // The decision is bound to exactly that record.
   assert.equal(recorded.sealedDigest, recorded.recomputedDigest);
 });
+
+test("a stored plan price reaches the Guard as an amount, a currency and a plan name (2026-11-02)", () => {
+  assert.equal(recorded.priceFact.priceSourcesAllStored, true);
+  assert.equal(recorded.priceFact.priceMinor, 1500);
+  assert.equal(recorded.priceFact.currency, "USD");
+  assert.equal(recorded.priceFact.planName, "Pro");
+});
