@@ -38,9 +38,8 @@ const DAY_MS = 86_400_000;
 
 
 const OWNER_PREFIX = "idea-lane-";
-// Claims pick the oldest idea across owners, so these ideas are older than any
-// other test's (still inside the seven-day analysis deadline), and each test
-// removes its own ideas when it ends.
+// Each claim is scoped to its test's owner, so no other suite's idea is
+// touched; each test removes its own ideas when it ends.
 const OLD = Date.now() - 6 * DAY_MS;
 const removeIdeas = async () => {
   const where = { actorUserId: { startsWith: OWNER_PREFIX } };
@@ -76,7 +75,7 @@ test("an idea is tried up to the attempt limit and then left alone", async () =>
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const idea = await seedIdea(owner, new Date(OLD));
   for (let index = 0; index < AMUX_IDEA_LANE_MAX_ATTEMPTS + 1; index += 1) {
-    assert.equal(await claimAmuxIdeaLane(), null, "an idea that cannot be opened is never handed out");
+    assert.equal(await claimAmuxIdeaLane({ actorUserId: owner }), null, "an idea that cannot be opened is never handed out");
   }
   const attempts = await attemptsOf(idea);
   assert.equal(attempts.length, AMUX_IDEA_LANE_MAX_ATTEMPTS);
@@ -105,7 +104,7 @@ test("ideas the lane is done with never crowd out a new one, and an idea already
   });
   const fresh = await seedIdea(owner, new Date(base + 32_000));
 
-  await claimAmuxIdeaLane();
+  await claimAmuxIdeaLane({ actorUserId: owner });
   assert.equal((await attemptsOf(fresh)).length, 1, "the new idea is claimed past 25 finished ones");
   assert.equal((await attemptsOf(analysed)).length, 0, "an owner idea whose analysis started stays on that path");
   for (const id of done) assert.equal((await attemptsOf(id)).length, 1);
@@ -125,7 +124,7 @@ test("a run's result is recorded once, and the table refuses an unknown outcome"
   await prisma.amuxIdeaLaneAttempt.create({ data: { id: attemptId, ideaId: idea, claimedAt: now,
     leaseUntil: new Date(now.getTime() + 60_000) } });
   assert.equal((await readAmuxIdeaProgressForOwner(owner))[0].lane?.state, "running");
-  assert.equal(await claimAmuxIdeaLane(), null);
+  assert.equal(await claimAmuxIdeaLane({ actorUserId: owner }), null);
   assert.equal((await attemptsOf(idea)).length, 1, "never a second run beside a live one");
 
   assert.equal(await recordAmuxIdeaLaneResult({ attemptId, outcome: "pr_open", prNumber: 77 }), true);
@@ -145,7 +144,7 @@ test("a run's result is recorded once, and the table refuses an unknown outcome"
 test("an idea the lane took never starts the analysis path as well", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const idea = await seedIdea(owner, new Date(OLD));
-  await claimAmuxIdeaLane();
+  await claimAmuxIdeaLane({ actorUserId: owner });
   assert.equal((await attemptsOf(idea)).length, 1);
   await assert.rejects(prisma.$transaction((tx) => createInitialIdeaOnlySourcePlan(tx,
     { ideaId: idea, actorUserId: owner, keys: {} as never })), { message: "not_ready" });

@@ -45,9 +45,11 @@ export type AmuxIdeaLaneClaim = { ideaId: string; attemptId: string; branch: str
  * Claims the oldest owner idea the lane may run, or null. Owner ideas only:
  * a session idea belongs to the v19 analysis queue, and an owner idea whose
  * analysis already started stays on that path. One claim at a time (advisory
- * lock), within the daily attempt limit.
+ * lock), within the daily attempt limit. `actorUserId` narrows the scan to one
+ * owner, for isolated DB tests; the route never passes it.
  */
-export async function claimAmuxIdeaLane(): Promise<AmuxIdeaLaneClaim | null> {
+export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): Promise<AmuxIdeaLaneClaim | null> {
+  const actor = scope.actorUserId ?? null;
   const claimed = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('amux_idea_lane_claim'))`;
@@ -64,6 +66,7 @@ export async function claimAmuxIdeaLane(): Promise<AmuxIdeaLaneClaim | null> {
           FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id") AS "attempts"
       FROM "AmuxIdeaSubmission" i
       WHERE i."submissionOrigin" = 'owner' AND i."state" = 'submitted'
+        AND (${actor}::text IS NULL OR i."actorUserId" = ${actor})
         AND i."cancelledAt" IS NULL AND i."rawPurgedAt" IS NULL AND i."rawCiphertext" IS NOT NULL
         AND i."rawKeyId" IS NOT NULL AND i."rawDigest" IS NOT NULL
         AND i."analysisDeadlineAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')

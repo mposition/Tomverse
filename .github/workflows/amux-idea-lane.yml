@@ -86,7 +86,7 @@ jobs:
           # Artifacts of a public repository are public: the idea leaves this
           # runner only encrypted, for implement to open.
           mkdir -p "${RUNNER_TEMP}/handoff"
-          jq -r '.idea' <<<"$response" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:AMUX_IDEA_LANE_TRANSIT_KEY -out "${RUNNER_TEMP}/handoff/idea.enc"
+          jq -j '.idea' <<<"$response" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:AMUX_IDEA_LANE_TRANSIT_KEY -out "${RUNNER_TEMP}/handoff/idea.enc"
           echo "claimed=true" >> "$GITHUB_OUTPUT"
           echo "attempt=${attempt}" >> "$GITHUB_OUTPUT"
           echo "branch=${branch}" >> "$GITHUB_OUTPUT"

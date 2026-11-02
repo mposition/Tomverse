@@ -81,3 +81,24 @@ test("a lane idea skips analysis and approvals on the Ideas list", () => {
   assert.deepEqual(view(amuxIdeaLaneState([failed(3), failed(2), failed(1)], NOW)), ["execution", null, true],
     "out of attempts is flagged for the owner");
 });
+
+test("the claim and result routes answer only the lane's own secret, and only while the lane is on", async () => {
+  const { isAmuxIdeaLaneAuthorized } = await import("../lib/amux/ideaLaneService.ts");
+  const secret = "s".repeat(40);
+  const on = { AMUX_IDEA_LANE_ENABLED: "true", AMUX_IDEA_LANE_SYNC_SECRET: secret };
+  const ask = (authorization) => new Request("https://tomverse.test/api/internal/amux/idea-lane/claim",
+    { method: "POST", headers: authorization ? { authorization } : {} });
+  assert.equal(isAmuxIdeaLaneAuthorized(ask(`Bearer ${secret}`), on), true);
+  assert.equal(isAmuxIdeaLaneAuthorized(ask(`Bearer ${secret}`), { ...on, AMUX_IDEA_LANE_ENABLED: "false" }), false,
+    "off means off, whatever the caller holds");
+  assert.equal(isAmuxIdeaLaneAuthorized(ask("Bearer short"), { ...on, AMUX_IDEA_LANE_SYNC_SECRET: "short" }), false,
+    "a short configured secret is no secret");
+  for (const header of [null, secret, `Bearer ${secret}x`, `bearer ${secret}`, "Bearer "]) {
+    assert.equal(isAmuxIdeaLaneAuthorized(ask(header), on), false, String(header));
+  }
+  for (const route of ["claim", "result"]) {
+    const source = readFileSync(`app/api/internal/amux/idea-lane/${route}/route.ts`, "utf8");
+    assert.ok(source.indexOf("isAmuxIdeaLaneAuthorized(request)") < source.indexOf(route === "claim"
+      ? "claimAmuxIdeaLane()" : "readLimitedJson("), `${route} checks the secret before anything else`);
+  }
+});
