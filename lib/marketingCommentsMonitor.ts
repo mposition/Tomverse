@@ -20,10 +20,23 @@
  * else. What it returns can only open an alert (a closed list of codes, anything
  * else is dropped); it cannot close one, clear the account or approve a post.
  * No classifier means no run: the monitor does not substitute a keyword list for
- * a judgement it was designed to ask a model for. The classifier is wired to the
- * marketing LLM ledger and monthly cap by the service that runs this (the
- * generator holds the key), which is a later step; until then the run answers
- * `classifier_unavailable` and the monitor stays unhealthy.
+ * a judgement it was designed to ask a model for.
+ *
+ * ## Two steps, two services (S4d)
+ *
+ * The model is asked by the comments service, which holds the marketing LLM key
+ * and spends through the ledger and its monthly cap; the app holds the posting
+ * tool's key and the database. So a run is two requests to the app:
+ * `collectMarketingCommentBodies()` reads what a run would ask about and hands
+ * over the bodies alone with what its reading covers, and the whole run then
+ * happens here with the service's verdicts as the classifier, reading no
+ * comment written after that. The second step reads the comments again rather
+ * than trust anything the service sends back but verdicts: what was read and
+ * whether the run was whole are the app's own. A comment written after the
+ * reading is left to the next run, whose floor is below it.
+ *
+ * The service loads this file with `--experimental-strip-types` (through
+ * lib/marketingCommentsClassifierCore.ts), so its imports stay type-only.
  *
  * ## Health
  *
@@ -49,10 +62,12 @@ export type MarketingCommentRiskCode = (typeof MARKETING_COMMENT_RISK_CODES)[num
 /**
  * Comment bodies in, one list of risk codes per body out (same length, same
  * order). Throws when it cannot answer; the run then counts the post unread.
+ * `null` for a body it has no verdict on: the post is unread, and the verdicts
+ * it did give still raise their alert.
  */
 export type MarketingCommentClassifier = (
   bodies: readonly string[],
-) => Promise<ReadonlyArray<ReadonlyArray<string>>>;
+) => Promise<ReadonlyArray<ReadonlyArray<string> | null>>;
 
 export const MARKETING_COMMENT_BODY_MAX_CHARS = 1_000;
 /** Bodies per classifier call. Every new comment is classified, in as many calls as it takes. */
@@ -76,6 +91,14 @@ export type MarketingCommentsMonitorDeps = {
   readonly enabled: (env: Readonly<Record<string, string | undefined>>) => boolean;
   readonly classifier: MarketingCommentClassifier | null;
   readonly now: () => Date;
+  /**
+   * In a two-step run, what the first step's reading covers: comments written
+   * up to `until`; the run reads none written later. `backlog` when the first
+   * step cut a backlog there (`collectMarketingCommentBodies`). Its alerts are
+   * still detected at `now()`. Absent, the run reads and classifies in one pass
+   * and begins at `now()`.
+   */
+  readonly reading?: { readonly until: Date; readonly backlog: boolean };
   readonly fetchComments: (post: MarketingCommentMonitorPost) => Promise<ZernioCommentsResult>;
   readonly operations: {
     readonly listPosts: (limit: number) => Promise<MarketingCommentMonitorPost[]>;
@@ -120,6 +143,7 @@ export const marketingNewComments = (
   comments: readonly ParsedZernioComment[],
   floor: Date | null,
   answeredAt: Date | null = null,
+  readAt: Date | null = null,
 ): ParsedZernioComment[] =>
   comments
     // What an operator has answered is handled. A comment with no time cannot be
@@ -130,17 +154,133 @@ export const marketingNewComments = (
     // A comment with no time cannot be placed, so it is read every run.
     .filter((comment) =>
       floor === null || comment.createdAt === null || comment.createdAt.getTime() > floor.getTime(),
+    )
+    // Written after the run began: the next run's floor is below it, so it is that run's.
+    .filter((comment) =>
+      readAt === null || comment.createdAt === null || comment.createdAt.getTime() <= readAt.getTime(),
     );
 
-/** The bodies a model may see: text only, bounded. */
-export const marketingCommentBodiesForModel = (
-  comments: readonly ParsedZernioComment[],
+type MarketingCommentsReadDeps = Pick<MarketingCommentsMonitorDeps, "fetchComments"> & {
+  readonly operations: Pick<
+    MarketingCommentsMonitorDeps["operations"],
+    "listPosts" | "lastCompleteRunAt" | "alertAnswers"
+  >;
+};
+
+/**
+ * What a run covers: its posts, the floor their comments are new above, and
+ * when each post's alert was last answered. `sampled` when more posts were
+ * listed than one run takes.
+ */
+const readMonitorScope = async (deps: MarketingCommentsReadDeps) => {
+  // New is relative to the last run that saw everything -- not to when an
+  // alert was written, which is later than the page it came from. A run that
+  // did not see everything does not move it, so what it missed is read again.
+  const lastRun = await deps.operations.lastCompleteRunAt();
+  const floor = lastRun === null ? null : new Date(lastRun.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS);
+  const listed = await deps.operations.listPosts(MARKETING_COMMENT_MONITOR_POST_LIMIT + 1);
+  const posts = listed.slice(0, MARKETING_COMMENT_MONITOR_POST_LIMIT);
+  const answers = await deps.operations.alertAnswers(posts.map((post) => post.id));
+  return { floor, posts, answers, sampled: listed.length > posts.length };
+};
+
+/** One post's comments a run asks about, or null when its page could not be read. */
+const readPostComments = async (
+  deps: MarketingCommentsReadDeps,
+  post: MarketingCommentMonitorPost,
   floor: Date | null,
-  answeredAt: Date | null = null,
-): string[] =>
-  marketingNewComments(comments, floor, answeredAt).map((comment) =>
-    comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS),
-  );
+  answeredAt: Date | null,
+  readAt: Date | null,
+): Promise<{ fresh: ParsedZernioComment[]; truncated: boolean } | null> => {
+  const page = await deps.fetchComments(post);
+  if (page.kind !== "ok") return null;
+  // An account that was reconnected or resumed since the last whole run was not
+  // read in between, so the run's time says nothing about its comments: all
+  // of them are read once.
+  const postFloor =
+    floor !== null && post.channelApprovalStartedAt !== null && post.channelApprovalStartedAt.getTime() > floor.getTime()
+      ? null
+      : floor;
+  return { fresh: marketingNewComments(page.comments, postFloor, answeredAt, readAt), truncated: page.truncated };
+};
+
+/** Distinct bodies one collect hands over at most. More, and the run covers the oldest and the next run the rest. */
+export const MARKETING_COMMENT_COLLECT_MAX_BODIES = 1_000;
+
+export type MarketingCommentsCollectResult =
+  | { readonly ran: false; readonly reason: "switch_off" }
+  | {
+      readonly ran: true;
+      readonly bodies: string[];
+      /** What the reading covers: comments written up to `until`, and whether that is a backlog cut. */
+      readonly reading: { readonly until: Date; readonly backlog: boolean };
+    };
+
+/**
+ * The first step of a two-step run: the distinct bodies a run would ask the
+ * model about, and nothing else -- no post, author, time or link -- with nothing
+ * written, and what the reading covers. A page that cannot be read is left
+ * out; the second step reads again and finds that out for itself.
+ *
+ * Past the cap a backlog is cut, oldest first, at an instant `until`: every
+ * comment written up to it is handed over, none after it. The cut is never
+ * later than the overlap before now, so everything up to it was in view for at
+ * least the overlap -- the margin a whole run's overlap exists to give -- and a
+ * whole run after a cut is recorded as begun one overlap later than `until`
+ * (never later than now): the next run's floor is then `until` itself, and it
+ * carries on with what is left rather than reading the same backlog again.
+ * What cannot be cut -- more comments with no time, or written in one instant,
+ * than the cap -- stays unwhole run after run, which keeps the monitor
+ * unhealthy: the safe way to be stuck.
+ */
+export async function collectMarketingCommentBodies(
+  deps: MarketingCommentsReadDeps & Pick<MarketingCommentsMonitorDeps, "env" | "enabled">,
+  now: Date,
+): Promise<MarketingCommentsCollectResult> {
+  if (!deps.enabled(deps.env)) return { ran: false, reason: "switch_off" };
+  const scope = await readMonitorScope(deps);
+  const fresh: ParsedZernioComment[] = [];
+  for (const post of scope.posts) {
+    const read = await readPostComments(deps, post, scope.floor, scope.answers.get(post.id) ?? null, now).catch(
+      () => null,
+    );
+    fresh.push(...(read?.fresh ?? []));
+  }
+  const body = (comment: ParsedZernioComment) => comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS);
+  const all = new Set(fresh.map(body));
+  if (all.size <= MARKETING_COMMENT_COLLECT_MAX_BODIES) {
+    return { ran: true, bodies: [...all], reading: { until: now, backlog: false } };
+  }
+  // Oldest first, an instant at a time: a run reads all of an instant's
+  // comments or none. A comment with no time is read every run, so it is first.
+  const at = (comment: ParsedZernioComment) => comment.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const sorted = [...fresh].sort((left, right) => at(left) - at(right));
+  const counted = new Set<string>();
+  let overflow = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < sorted.length; index += 1) {
+    const comment = sorted[index] as ParsedZernioComment;
+    counted.add(body(comment));
+    // Judged at the end of each instant, so an instant is never split.
+    const instantEnds = index + 1 === sorted.length || at(sorted[index + 1] as ParsedZernioComment) !== at(comment);
+    if (instantEnds && counted.size > MARKETING_COMMENT_COLLECT_MAX_BODIES) {
+      overflow = at(comment);
+      break;
+    }
+  }
+  const capCut = overflow - 1;
+  const timeCut = now.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS;
+  const firstTimed = sorted.find((comment) => comment.createdAt !== null);
+  // Cut by the cap before the first instant there is, the cut would hand over
+  // no timed comment (at most the ones with no time, read every run) and no
+  // later run could do better: that is not a cut, and the run stays unwhole.
+  // (Cut by time instead, the rest waits an hour for the overlap to pass it.)
+  if (!Number.isFinite(capCut) || (capCut <= timeCut && firstTimed !== undefined && at(firstTimed) === overflow)) {
+    return { ran: true, bodies: [...all].slice(0, MARKETING_COMMENT_COLLECT_MAX_BODIES), reading: { until: now, backlog: false } };
+  }
+  const until = Math.min(capCut, timeCut);
+  const bodies = new Set(fresh.filter((comment) => at(comment) <= until).map(body));
+  return { ran: true, bodies: [...bodies], reading: { until: new Date(until), backlog: true } };
+}
 
 export async function runMarketingCommentsMonitor(
   deps: MarketingCommentsMonitorDeps,
@@ -150,7 +290,17 @@ export async function runMarketingCommentsMonitor(
   if (classifier === null) return { ran: false, reason: "classifier_unavailable" };
 
   const { operations } = deps;
+  // An alert is detected when this run finds it. The run is recorded as begun
+  // when its comments were read -- in a two-step run that can be earlier, and
+  // for a backlog much earlier, which must not age the alerts it raises.
   const startedAt = deps.now();
+  const readAt = deps.reading?.until ?? null;
+  // After a backlog cut the next run carries on from the cut itself (see
+  // `collectMarketingCommentBodies`); otherwise the run is recorded as begun
+  // when its comments were read.
+  const recordAt = deps.reading
+    ? new Date(deps.reading.until.getTime() + (deps.reading.backlog ? MARKETING_COMMENT_MONITOR_OVERLAP_MS : 0))
+    : startedAt;
   let postsChecked = 0;
   let postsUnread = 0;
   let alertsRecorded = 0;
@@ -160,46 +310,31 @@ export async function runMarketingCommentsMonitor(
   // incomplete -- and cannot stop the check below that an unanswered alert
   // counts against its account.
   try {
-    // New is relative to the last run that saw everything -- not to when an
-    // alert was written, which is later than the page it came from. A run that
-    // did not see everything does not move it, so what it missed is read again.
-    const lastRun = await operations.lastCompleteRunAt();
-    const floor = lastRun === null ? null : new Date(lastRun.getTime() - MARKETING_COMMENT_MONITOR_OVERLAP_MS);
-    const listed = await operations.listPosts(MARKETING_COMMENT_MONITOR_POST_LIMIT + 1);
-    const posts = listed.slice(0, MARKETING_COMMENT_MONITOR_POST_LIMIT);
+    const { floor, posts, answers, sampled } = await readMonitorScope(deps);
     postsChecked = posts.length;
-    const answers = await operations.alertAnswers(posts.map((post) => post.id));
     // A sample is not a run: with posts left over, the health record is not moved.
-    if (listed.length > posts.length) postsUnread += 1;
+    if (sampled) postsUnread += 1;
 
     for (const post of posts) {
       try {
-        const page = await deps.fetchComments(post);
-        if (page.kind !== "ok") {
+        const read = await readPostComments(deps, post, floor, answers.get(post.id) ?? null, readAt);
+        if (read === null) {
           postsUnread += 1;
           continue;
         }
         // A thread longer than the pages read is not a whole read, so the run is
         // not recorded as one -- but what was read is still classified and still
         // raises its alerts: an unread part is no reason to ignore the read part.
-        if (page.truncated) postsUnread += 1;
-        // An account that was reconnected or resumed since the last whole run was not
-        // read in between, so the run's time says nothing about its comments: all
-        // of them are read once.
-        const postFloor =
-          floor !== null &&
-          post.channelApprovalStartedAt !== null &&
-          post.channelApprovalStartedAt.getTime() > floor.getTime()
-            ? null
-            : floor;
-        const fresh = marketingNewComments(page.comments, postFloor, answers.get(post.id) ?? null);
+        if (read.truncated) postsUnread += 1;
+        const fresh = read.fresh;
         const bodies = fresh.map((comment) => comment.text.slice(0, MARKETING_COMMENT_BODY_MAX_CHARS));
         if (bodies.length === 0) continue;
         const flagged: MarketingCommentRiskCode[][] = [];
         let wellFormed = true;
+        let unanswered = false;
         for (let from = 0; from < bodies.length && wellFormed; from += MARKETING_COMMENT_CLASSIFIER_BATCH) {
           const batch = bodies.slice(from, from + MARKETING_COMMENT_CLASSIFIER_BATCH);
-          let verdicts: ReadonlyArray<ReadonlyArray<string>>;
+          let verdicts: ReadonlyArray<ReadonlyArray<string> | null>;
           try {
             verdicts = await classifier(batch);
           } catch {
@@ -212,16 +347,21 @@ export async function runMarketingCommentsMonitor(
           if (
             !Array.isArray(verdicts) ||
             verdicts.length !== batch.length ||
-            verdicts.some((codes) => !Array.isArray(codes) || codes.some((code) => typeof code !== "string"))
+            verdicts.some(
+              (codes) => codes !== null && (!Array.isArray(codes) || codes.some((code) => typeof code !== "string")),
+            )
           ) {
             wellFormed = false;
             break;
           }
-          flagged.push(...verdicts.map((codes) => knownCodes(codes)));
+          // A body with no verdict is not a safe one: the post is unread. Its
+          // neighbours' verdicts are verdicts all the same.
+          if (verdicts.some((codes) => codes === null)) unanswered = true;
+          flagged.push(...verdicts.map((codes) => (codes === null ? [] : knownCodes(codes))));
         }
         // A batch that failed leaves the post unread -- the run is not whole -- but
         // what the earlier batches found is real, and is still raised below.
-        if (!wellFormed) postsUnread += 1;
+        if (!wellFormed || unanswered) postsUnread += 1;
         const alertCount = flagged.filter((codes) => codes.length > 0).length;
         if (alertCount === 0) continue;
         const riskCodes = MARKETING_COMMENT_RISK_CODES.filter((code) =>
@@ -262,7 +402,7 @@ export async function runMarketingCommentsMonitor(
   let complete = postsUnread === 0;
   if (complete) {
     try {
-      await operations.recordRun(startedAt);
+      await operations.recordRun(recordAt);
     } catch {
       complete = false;
     }
