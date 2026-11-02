@@ -10,6 +10,7 @@ import { useSession } from "next-auth/react";
 import {
   GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
   ga4UserIdTransmissionAllowed,
+  ga4UserIdWithdrawalApplies,
 } from "@/lib/ga4UserIdPolicy";
 import {
   analyticsConsent,
@@ -19,6 +20,7 @@ import {
   observeMarketingTouch,
   setAnalyticsConsent,
   syncGa4UserId,
+  withdrawGa4UserId,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
 import {
@@ -718,9 +720,20 @@ export function AnalyticsProvider({
   const decline = useCallback(() => {
     setAnalyticsConsent("declined");
     disableAnalyticsClient();
+    // Declining while signed in withdraws the account's GA4 User-ID: the
+    // server names it to GA4 for deletion and then forgets it, so a later
+    // consent gets a new one (docs/policy/marketing-automation.md §10.2).
+    if (
+      ga4UserIdWithdrawalApplies({
+        noticePublished: GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+        signedIn: Boolean(sessionUserId),
+      })
+    ) {
+      void withdrawGa4UserId();
+    }
     setConsent("declined");
     closePreferences();
-  }, [closePreferences]);
+  }, [closePreferences, sessionUserId]);
 
   const consentPromptReady = !isChatWorkspacePath(pathname) || chatConsentReady;
   const defaultEnabledNotice =
