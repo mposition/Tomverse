@@ -23,6 +23,7 @@ import {
   CI_FIX_MAX_PATCH_CHARS,
   CI_FIX_MAX_QUEUED_PER_HOUR,
   answerLine,
+  ciFixAbility,
   ciFixReport,
   autoFixAttempts,
   ciFixPrompt,
@@ -41,6 +42,7 @@ import {
   readLedger,
   readTail,
   resultCode,
+  retryable,
   runCiFix,
   runClaude,
   servedPulls,
@@ -863,6 +865,77 @@ test("an operator's label tries a head once more, and only once", async () => {
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+test("a head given up on is tried once more, unasked, when the pass can do more for it", async () => {
+  const branch = "dependabot/npm_and_yarn/develop/officeparser-8.4.0";
+  const f = passFixture({ branch, author: "dependabot[bot]" });
+  try {
+    let calls = 0;
+    const claude = () => {
+      calls += 1;
+      return { ok: true, timedOut: false, tail: "The test calls a removed API.\nRESULT: outside_rules" };
+    };
+    const pass = (at, dependabotTests) => runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0, dependabotTests,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => at, log: () => {} });
+    const ledgerPath = join(f.config.stateDir, "ci-fix", "ledger.json");
+
+    assert.equal((await pass(1000, false)).outcome, "no_change");
+    assert.equal((await pass(2000, false)).outcome, "nothing_to_fix", "the same pass does not try the same head twice");
+    assert.equal(calls, 1);
+
+    // The operator turns test edits on: no label, and the head is tried again.
+    assert.equal((await pass(3000, true)).outcome, "no_change");
+    assert.equal(calls, 2);
+    const entry = readLedger(ledgerPath)[f.sha];
+    assert.equal(entry.at, 3000, "the retry starts the entry afresh");
+    assert.equal(entry.retried, undefined, "an ability retry leaves the label's one retry for the operator");
+    assert.equal(entry.ability, ciFixAbility({ kind: "ci", headBranch: branch, dependabotTests: true }));
+
+    assert.equal((await pass(4000, true)).outcome, "nothing_to_fix", "one try per ability");
+    assert.equal(calls, 2);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("an entry written before abilities were recorded is tried once more; a Dependabot switch leaves agent heads alone", async () => {
+  const f = passFixture();
+  try {
+    let calls = 0;
+    const claude = () => {
+      calls += 1;
+      return { ok: true, timedOut: false, tail: "RESULT: not_found" };
+    };
+    const ledgerPath = join(f.config.stateDir, "ci-fix", "ledger.json");
+    mkdirSync(dirname(ledgerPath), { recursive: true });
+    writeFileSync(ledgerPath, JSON.stringify({ [f.sha]: { pr: 41, kind: "ci", outcome: "no_change", reason: "not_found", at: 500 } }));
+    const pass = (at, dependabotTests) => runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0, dependabotTests,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => at, log: () => {} });
+
+    assert.equal((await pass(1000, false)).outcome, "no_change", "the older code's verdict is not the newer code's");
+    assert.equal(calls, 1);
+    assert.equal((await pass(2000, true)).outcome, "nothing_to_fix", "a Dependabot switch does nothing for an agent head");
+    assert.equal(calls, 1);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("an ability retry never revisits a head whose fix was sent or used up its attempts", () => {
+  const ability = ciFixAbility({ kind: "ci", headBranch: "claude/to-develop/x" });
+  for (const outcome of ["queued", "pushed", "superseded", "attempts_exhausted"]) {
+    assert.equal(retryable({ outcome, at: 1, ability: "old" }, null, 10, ability), false, outcome);
+  }
+  assert.equal(retryable({ outcome: "patch_refused", at: 1, ability: "old" }, null, 10, ability), "ability");
+  assert.equal(retryable({ outcome: "patch_refused", at: 1, ability }, null, 10, ability), false, "same ability, no label");
+  assert.equal(retryable({ outcome: "started", at: 1, ability: "old" }, null, 10, ability), false, "a running try is not stale yet");
+  assert.equal(retryable({ outcome: "no_change", at: 1, ability }, 5, 10, ability), "label");
+  assert.notEqual(ciFixAbility({ kind: "ci", headBranch: "dependabot/a", dependabotTests: true }),
+    ciFixAbility({ kind: "ci", headBranch: "dependabot/a", dependabotTests: false }));
+  assert.equal(ciFixAbility({ kind: "ci", headBranch: "claude/to-develop/a", install: true, dependabotTests: true }),
+    ciFixAbility({ kind: "ci", headBranch: "claude/to-develop/a" }));
+  assert.notEqual(ciFixAbility({ kind: "conflict" }), ciFixAbility({ kind: "ci" }));
 });
 
 test("the report carries numbers, commit ids and fixed names only, newest first", () => {

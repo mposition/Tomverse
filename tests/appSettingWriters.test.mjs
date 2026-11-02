@@ -130,8 +130,12 @@ const READ_ONLY_KEYS = {
   },
   MARKETING_EXPERIMENTS_KEY: {
     reason:
-      "S2 adds the audited experiment activation route after cache and CSP " +
-      "evidence exists; S1 only consumes this default-off value.",
+      "The audited start and stop routes (app/api/admin/marketing/experiments) " +
+      "write the experiment configuration, not this switch. Turning landing " +
+      "experiments on is an operator step -- writing this row -- taken after " +
+      "the pre-registration and the copy bundle are settled and the " +
+      "shared-cache bypass for the assignment cookie is in place " +
+      "(docs/policy/marketing-automation.md 9.1).",
   },
   VOICE_INPUT_FLAG_KEY: {
     reason:
