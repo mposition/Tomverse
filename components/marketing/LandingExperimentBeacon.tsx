@@ -157,11 +157,11 @@ export function LandingExperimentBeacon({ renderedArm, locale }: Props) {
         // A refusal the server wrote (unreadable state, a failed count, a rate
         // limit) is a definite "not counted" and says so; only a request that
         // got no answer at all is unknown, and is null.
-        .then(async (response) => {
-          const answer = response.ok ? response.json() : { status: "error", http: response.status };
-          if (!response.ok) await discardResponseBody(response);
-          return answer;
-        })
+        .then((response) =>
+          response.ok
+            ? response.json()
+            : discardResponseBody(response).then(() => ({ status: "error", http: response.status }))
+        )
         .catch(() => null) as Promise<{
         status?: string;
         arm?: string;

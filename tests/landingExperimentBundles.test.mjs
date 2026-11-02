@@ -162,7 +162,7 @@ test("the beacon tells a refused count from one that got no answer, and holds a 
     "utf8"
   );
   // A non-ok response is a definite refusal, carried with its status.
-  assert.match(beacon, /response\.ok \? response\.json\(\) : \{ status: "error", http: response\.status \}/);
+  assert.match(beacon, /response\.ok\s*\?\s*response\.json\(\)\s*:\s*discardResponseBody\(response\)\.then\(\(\) => \(\{ status: "error", http: response\.status \}\)\)/);
   // Only a 503 (the route's answer to an unreadable state) holds a variant, and
   // the assignment cookie is never touched on that path.
   assert.match(beacon, /if \(result\.http === 503\) \{[^}]*holdVariant\(renderedArm\)/s);
