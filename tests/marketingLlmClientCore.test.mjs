@@ -102,6 +102,42 @@ test("the provider request is the allowlist and nothing else", () => {
   assert.equal(body.stream, false);
 });
 
+test("a text request given an answer schema holds the answer to it, strictly, and adds nothing else", async () => {
+  const answerSchema = { name: "verdicts", schema: { type: "object", properties: {}, required: [], additionalProperties: false } };
+  const { response_format: format, ...rest } = marketingLlmRequestBody(PIN, MESSAGES, answerSchema);
+  assert.deepEqual(rest, marketingLlmRequestBody(PIN, MESSAGES));
+  assert.deepEqual(format, { type: "json_schema", json_schema: { name: "verdicts", strict: true, schema: answerSchema.schema } });
+
+  // And the call sends it, to the same endpoint, under the same reservation.
+  const b = budget();
+  const p = provider(() => jsonResponse(200, completion()));
+  const outcome = await runMarketingLlmCall(
+    { pin: PIN, generatorRunId: "run-1", purpose: "comment_triage", messages: MESSAGES, answerSchema },
+    { budget: b.port, transport: p.transport, apiKey: "sk-fixture", newId: ids },
+  );
+  assert.equal(outcome.status, "answered");
+  assert.equal(p.requests[0].url, MARKETING_LLM_CHAT_COMPLETIONS_URL);
+  assert.deepEqual(JSON.parse(p.requests[0].init.body), marketingLlmRequestBody(PIN, MESSAGES, answerSchema));
+  assert.equal(b.calls[0].fields.purpose, "comment_triage");
+  assert.equal(b.calls[0].fields.adapterProfile, "text-only-v1");
+});
+
+test("the budget route takes the comment monitor's purpose and no other new one", () => {
+  const reserve = (purpose) =>
+    marketingLlmBudgetRequestSchema.safeParse({
+      action: "reserve",
+      deadlineAt: "2026-11-02T10:00:00.000Z",
+      signature: "a".repeat(64),
+      requestKey: "00000000-0000-4000-8000-000000000001",
+      generatorRunId: "run-1",
+      purpose,
+      model: PIN.model,
+      adapterProfile: "text-only-v1",
+    }).success;
+  assert.equal(reserve("comment_triage"), true);
+  assert.equal(reserve("comment_moderation"), false);
+});
+
 test("an answered call: reserve, dispatch, one provider request, settle with what came back", async () => {
   const b = budget();
   const p = provider(() => jsonResponse(200, completion()));
