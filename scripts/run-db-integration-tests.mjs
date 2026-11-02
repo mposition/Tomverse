@@ -223,6 +223,7 @@ run(
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
     "tests/integration/mobile-store-billing.db.test.ts",
+    "tests/integration/ios-review-billing.db.test.ts",
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
@@ -561,6 +562,7 @@ run(
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
+    "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
     // Durable Chat recovery is a database coordination contract: duplicate

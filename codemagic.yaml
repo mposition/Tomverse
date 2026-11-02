@@ -9,7 +9,8 @@ workflows:
       node: "22.22.2"
       xcode: "26.6"
     scripts:
-      - name: Install locked dependencies
+      - &ios_install
+        name: Install locked dependencies
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -54,7 +55,7 @@ workflows:
       xcode: "26.6"
       ios_signing:
         provisioning_profiles:
-          - tomverse-app-store
+          - tomverse-app-store-apple-signin
         certificates:
           - tomverse-apple-distribution
       vars: &ios_testflight_variables
@@ -66,7 +67,8 @@ workflows:
           #!/usr/bin/env bash
           set -euo pipefail
           npm ci --no-audit --no-fund
-      - name: Prepare and verify the bundled iOS project
+      - &ios_prepare
+        name: Prepare and verify the bundled iOS project
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -76,7 +78,8 @@ workflows:
           npm run test:mobile-billing
           mkdir -p .tmp/codemagic
           npm run --silent check:ios-prebuild > .tmp/codemagic/prebuild.json
-      - name: Assign a unique project build number
+      - &ios_version
+        name: Assign a unique project build number
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -84,7 +87,8 @@ workflows:
           [[ "$PROJECT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid project build number" >&2; exit 1; }
           cd apps/mobile/ios/App
           agvtool new-version -all "$PROJECT_BUILD_NUMBER"
-      - name: Verify isolated native session storage
+      - &ios_session_namespace
+        name: Verify isolated native session storage
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -99,7 +103,8 @@ workflows:
           xcode-project use-profiles --project "$XCODE_PROJECT" \
             --archive-method app-store \
             --custom-export-options='{"testFlightInternalTestingOnly":true}'
-      - name: Archive and export the signed IPA
+      - &ios_archive
+        name: Archive and export the signed IPA
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -145,3 +150,28 @@ workflows:
         <<: *ios_testflight_variables
         VITE_TOMVERSE_API_ORIGIN: https://staging.tomverse.app
         VITE_NATIVE_BILLING_ENABLED: "true"
+
+  ios-app-store:
+    <<: *ios_testflight
+    name: Tomverse iOS App Store Submission
+    environment:
+      <<: *ios_testflight_environment
+      groups:
+        - ios_store_billing
+      vars:
+        <<: *ios_testflight_variables
+        VITE_TOMVERSE_API_ORIGIN: https://tomverse.app
+        VITE_NATIVE_BILLING_ENABLED: "true"
+    scripts:
+      - *ios_install
+      - *ios_prepare
+      - *ios_version
+      - *ios_session_namespace
+      - name: Apply the App Store submission signing profile
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          xcode-project use-profiles --project "$XCODE_PROJECT" \
+            --archive-method app-store \
+            --custom-export-options='{"testFlightInternalTestingOnly":false}'
+      - *ios_archive

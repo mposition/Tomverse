@@ -12,6 +12,7 @@ import { requestGa4UserIdDeletion } from "@/lib/ga4UserDeletion";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
+import { revokeAppleAccountTokens } from "@/lib/appleAccountDeletion";
 import {
   deleteSupportTriageDataForAccount,
   flushSupportTriageDeletionAudit,
@@ -160,6 +161,8 @@ export async function deleteTomverseAccount(
   });
 
   if (!user) return { deleted: false as const };
+
+  await revokeAppleAccountTokens(user.id);
 
   if (options?.cancelSubscription !== false) {
     await cancelStripeSubscription(user.stripeSubscriptionId);

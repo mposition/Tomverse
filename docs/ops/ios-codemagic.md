@@ -81,7 +81,7 @@ Configure these names in the existing Codemagic personal account before running:
 |---|---|
 | Apple Developer Portal API integration | `Tomverse Codemagic Signing` |
 | Apple Distribution certificate reference | `tomverse-apple-distribution` |
-| App Store profile reference for `app.tomverse.shell` | `tomverse-app-store` |
+| App Store profile reference for `app.tomverse.shell` | `tomverse-app-store-apple-signin` |
 
 The registered App ID and provisioning profile must include Associated Domains
 for the existing `applinks:tomverse.app` and `webcredentials:tomverse.app`
@@ -398,6 +398,25 @@ the build's billing UI stays behind the existing build flag and actual Apple SDK
 key. See [native store billing](mobile-store-billing.md#ios-preparation-and-remaining-store-setup)
 for account/product registration, server configuration and signed-device payment
 acceptance. A successful unsigned compile does not complete those steps.
+
+## App Store submission candidate
+
+Enabling Sign in with Apple invalidated the old profile on 2026-11-02. The
+replacement `tomverse-app-store-apple-signin` reuses the existing distribution
+certificate and includes Apple sign-in and Associated Domains. All signed
+workflows use this active profile; no new distribution certificate was created.
+
+The manual `ios-app-store` workflow builds an App Store submission candidate
+against `https://tomverse.app` with the existing Apple billing SDK key group.
+It reuses the accepted signing identities and verification steps, and exports
+with `testFlightInternalTestingOnly=false`. Existing internal workflows retain
+their internal-only export. Uploading this candidate does not submit a review
+or release it publicly; attach the verified build and first subscription group
+and products in App Store Connect, and select the owner's release option before submission.
+The owner authorized production preparation, a submission build and App Review
+submission on 2026-11-02, then explicitly selected automatic public release
+after Apple approval in the same chat. The submitted version uses
+`AFTER_APPROVAL`; uploading a candidate still does not submit it for review.
 
 ## Official references
 

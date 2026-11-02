@@ -1148,6 +1148,7 @@ export const en = {
         login: "Login / Sign Up",
         google: "Continue with Google",
         microsoft: "Continue with Microsoft",
+        apple: "Continue with Apple",
         orDivider: "or",
         signupDescription: "Create a free account to save conversations and your personal settings.",
         noAccountPrompt: "Not a member yet?",
