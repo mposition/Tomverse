@@ -539,14 +539,169 @@ test("a claim or asset the registry does not hold is refused", () => {
   assert.ok(asset.codes.includes("asset_unknown"));
 });
 
-test("a number with no claim behind it goes to a person, not to a refusal", () => {
+test("a figure that is not money with no claim behind it goes to a person, not to a refusal", () => {
   // §7.2 rule 8: what cannot be verified is an approval. The failure is the
-  // extraction's, and a person can read the sentence.
+  // extraction's, and a person can read the sentence. (An English *price* is
+  // held to the stored amount instead, since 2026-11-02: see the tests below.)
   const decision = guardDraft(
-    input({ draft: { renderedText: "Compare answers from 3 models for $20 a month." } }),
+    input({ draft: { renderedText: "Compare answers from 3 models, and save 20% of your time." } }),
   );
   assert.equal(decision.verdict, "approval_required");
   assert.ok(decision.codes.includes("undeclared_fact"));
+});
+
+// --- owner decision 2026-11-02: English prices and price comparisons --------
+
+/** A stored Pro price: 15.00 USD a month. */
+const PRO_PRICE = {
+  claimId: "claim.pro-monthly-price",
+  type: "pricing",
+  known: true,
+  priceSourcesAllStored: true,
+  currency: "USD",
+  targetsAustralia: false,
+  priceMinor: 1500,
+  planName: "Pro",
+  usedBefore: true,
+};
+const MAX_PRICE = { ...PRO_PRICE, claimId: "claim.max-monthly-price", priceMinor: 4500, planName: "Max" };
+
+const priceDecision = (renderedText, claims = [PRO_PRICE], locale = "en") =>
+  guardDraft(
+    input({
+      draft: { renderedText, locale, claimIds: claims.map((claim) => claim.claimId) },
+      facts: { locale, claims, assets: [] },
+    }),
+  );
+
+test("an English price equal to the stored amount, currency and plan is a person's decision, not a refusal", () => {
+  for (const text of [
+    "Pro is USD 15.00 per month.",
+    "Pro costs 15 USD a month.",
+    "Pro: $15 USD per month.",
+    "Pro is US$15 a month.",
+    "Pro is 15 US dollars a month.",
+  ]) {
+    const decision = priceDecision(text);
+    // Always the approval queue (§7.4), never autonomous and never refused.
+    assert.equal(decision.verdict, "approval_required", text);
+    assert.ok(decision.codes.includes("price_or_promotion"), text);
+  }
+});
+
+test("two plan prices in one post are each held to their own plan", () => {
+  const ok = priceDecision("Pro is USD 15.00 per month and Max is USD 45.00 per month.", [PRO_PRICE, MAX_PRICE]);
+  assert.equal(ok.verdict, "approval_required");
+  const swapped = priceDecision("Pro is USD 45.00 per month and Max is USD 15.00 per month.", [PRO_PRICE, MAX_PRICE]);
+  assert.equal(swapped.verdict, "reject");
+  assert.ok(swapped.codes.includes("price_text_mismatch"));
+});
+
+test("an English price that is not the stored amount is refused", () => {
+  for (const text of [
+    "Pro is USD 20.00 per month.", // another amount
+    "Pro is EUR 15.00 per month.", // another currency
+    "Pro is USD 15.00 per month and USD 9 for the first month.", // a second amount nothing stores
+    "Team is USD 15.00 per month.", // not the plan the claim is about
+    "Pro is USD 15.00 or EUR 15.00 per month.", // a second amount in another currency
+    "Starting at USD 15.00 per month.", // no plan named
+  ]) {
+    const decision = priceDecision(text);
+    assert.equal(decision.verdict, "reject", text);
+    assert.ok(decision.codes.includes("price_text_mismatch"), text);
+  }
+});
+
+test("an English price with no declared price claim has nothing to match and is refused", () => {
+  const decision = priceDecision("Compare answers from 3 models for USD 15 a month.", []);
+  assert.equal(decision.verdict, "reject");
+  assert.ok(decision.codes.includes("price_text_mismatch"));
+});
+
+test("an English price with no currency is refused, even when the amount is right", () => {
+  for (const text of [
+    "Pro is $15 a month.",
+    "Pro is 15 dollars a month.",
+    "Pro is 15 bucks a month.",
+    "Compare answers from 3 models for $20 a month.",
+  ]) {
+    const decision = priceDecision(text);
+    assert.equal(decision.verdict, "reject", text);
+    assert.ok(decision.codes.includes("price_currency_missing"), text);
+  }
+});
+
+test("an Australian price stays refused: stated in AUD, or stored in AUD", () => {
+  const stated = priceDecision("Pro is AUD 15.00 per month.");
+  assert.equal(stated.verdict, "reject");
+  assert.ok(stated.codes.includes("au_price_gst_unverifiable"));
+  for (const text of ["Pro is A$15 a month.", "Pro is 15 Australian dollars a month."]) {
+    const decision = priceDecision(text);
+    assert.ok(decision.codes.includes("au_price_gst_unverifiable"), text);
+  }
+  const storedInAud = priceDecision("Pro is USD 15.00 per month.", [
+    { ...PRO_PRICE, currency: "AUD", targetsAustralia: true },
+  ]);
+  assert.equal(storedInAud.verdict, "reject");
+  assert.ok(storedInAud.codes.includes("au_price_gst_unverifiable"));
+  // Stored in AUD without the flag: the words still do not match.
+  const mismatch = priceDecision("Pro is USD 15.00 per month.", [{ ...PRO_PRICE, currency: "AUD" }]);
+  assert.equal(mismatch.verdict, "reject");
+  assert.ok(mismatch.codes.includes("price_text_mismatch"));
+});
+
+test("a price that did not come from stored values is not something an English amount can match", () => {
+  const decision = priceDecision("Pro is USD 15.00 per month.", [{ ...PRO_PRICE, priceSourcesAllStored: false }]);
+  assert.equal(decision.verdict, "reject");
+  assert.ok(decision.codes.includes("price_source_not_stored"));
+  assert.ok(decision.codes.includes("price_text_mismatch"));
+});
+
+test("other languages are not held to the English money rule", () => {
+  // Korean and Traditional Chinese posts keep their earlier behaviour: the
+  // owner's decision of 2026-11-02 is about English posts.
+  const decision = priceDecision("Pro는 월 $20입니다.", [PRO_PRICE], "ko");
+  assert.equal(decision.verdict, "approval_required");
+  assert.ok(!decision.codes.includes("price_text_mismatch"));
+});
+
+test("a comparative or superlative price expression is refused, in every language", () => {
+  for (const [locale, text] of [
+    ["en", "The cheapest way to compare three AI models."],
+    ["en", "Tomverse has the lowest price for side by side answers."],
+    ["en", "Always the lowest-priced option."],
+    ["en", "Get the best price on AI answers."],
+    ["en", "Cheaper than ChatGPT Plus."],
+    ["en", "Cheaper-than-anything review plans."],
+    ["en", "The only free way to see three answers."],
+    ["en", "Cheapest — free to start."],
+    ["ko", "세 모델 답변을 비교하는 최저가 방법입니다."],
+    ["ko", "가장 저렴한 AI 비교 서비스입니다."],
+    ["ko", "다른 서비스보다 저렴합니다."],
+    ["ko", "유일한 무료 비교 서비스입니다."],
+    ["zh-Hant", "最便宜的 AI 回答比較。"],
+    ["zh-Hans", "最低价的 AI 回答对比。"],
+  ]) {
+    const decision = priceDecision(text, [], locale);
+    assert.equal(decision.verdict, "reject", text);
+    assert.ok(decision.codes.includes("price_comparison_claim"), text);
+    assert.ok(decision.ruleIds.includes("rule.price-comparison"), text);
+  }
+});
+
+test("price wording that is not a comparison is left to the earlier rules", () => {
+  for (const text of [
+    "Start free with monthly credits included.", // "free" keeps its section 7.2 rule 4 handling
+    "Cheap thrills are not our thing; clear answers are.", // "cheap" alone is not a comparison
+    "Choose a cheaper model for simple questions.", // "cheaper" without "than" is about models
+    "Our best answers come from comparing three models.", // "best" is the superlative rule's, an approval
+  ]) {
+    const decision = priceDecision(text, []);
+    assert.ok(!decision.codes.includes("price_comparison_claim"), text);
+  }
+  const free = priceDecision("Start free with monthly credits included.", []);
+  assert.equal(free.verdict, "approval_required");
+  assert.ok(free.codes.includes("provisional_language_flag"));
 });
 
 test("RedNote is an approval whatever the post says", () => {
@@ -616,6 +771,12 @@ test("every reject code is reachable", () => {
       },
     }),
   );
+
+  // An English amount with no currency, one that is not the stored price, and a
+  // comparison of prices.
+  collect(guardDraft(input({ draft: { renderedText: "Pro is $15 a month." } })));
+  collect(guardDraft(input({ draft: { renderedText: "Pro is USD 15 a month." } })));
+  collect(guardDraft(input({ draft: { renderedText: "The cheapest way to compare models." } })));
 
   const claims = [
     { claimId: "a", type: "pricing", known: true, priceSourcesAllStored: false, usedBefore: true },

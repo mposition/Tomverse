@@ -470,14 +470,15 @@ test("every registered page claim's sentence can pass the Guard's text hygiene",
 
 test("no registered price claim is for the Australian or RedNote market", () => {
   // An Australian price needs a stored GST-inclusive AUD amount the Guard
-  // cannot verify (§7.2 rule 3), and `en` is the Australian market (O11);
-  // RedNote's overseas readers include it. A price claim speaks Korean or
-  // Traditional Chinese until somebody decides otherwise.
+  // cannot verify (§7.2 rule 3); RedNote's overseas readers include Australia.
+  // `en` is in since the owner's decision of 2026-11-02, and only because the
+  // Guard holds an English price to the stored amount with its currency named
+  // and refuses AUD (tests/marketingGuardCore.test.mjs). `zh-Hans` stays out.
   for (const claim of MARKETING_CLAIMS) {
     if (claim.type !== "pricing" && claim.type !== "plan") continue;
     assert.equal(claim.factSource?.kind, "billing_plan", claim.id);
     assert.equal(claim.factSource.targetsAustralia, false, claim.id);
-    assert.deepEqual([...claim.locales].sort(), ["ko", "zh-Hant"], claim.id);
+    assert.deepEqual([...claim.locales].sort(), ["en", "ko", "zh-Hant"], claim.id);
   }
 });
 

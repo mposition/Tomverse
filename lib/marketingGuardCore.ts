@@ -61,6 +61,12 @@ export const MARKETING_REJECT_CODES = Object.freeze([
   "model_claim_false",
   "feature_not_public",
   "comparison_without_evidence",
+  // Owner decision 2026-11-02 (§7.2 rule 2): a comparative or superlative price
+  // is refused in every language; an English price needs its currency and has
+  // to be the stored amount of a plan the post names.
+  "price_comparison_claim",
+  "price_currency_missing",
+  "price_text_mismatch",
   "claim_unknown",
   "claim_type_unknown",
   "claim_not_declared",
@@ -542,6 +548,193 @@ const FACT_PATTERNS: readonly { source: string; flags: string }[] = Object.freez
   ],
 );
 
+/**
+ * Comparative and superlative price wording (owner decision 2026-11-02).
+ *
+ * "Cheapest", "cheaper than ...", "the only free ...": a claim about how our
+ * price stands against everyone else's is one nobody here can prove, and the
+ * Australian Consumer Law reads it as a representation about price. Refused
+ * rather than sent to a person, in every language, because no stored fact could
+ * ever make it true.
+ *
+ * Words rather than a model's reading, deliberately. The Guard is pure and runs
+ * again on every edit and every template rendering, where no extraction ran:
+ * a flag the drafter reported about its own text would be missing exactly
+ * where a person typed the sentence, and a post has no column to keep it in.
+ * Same shape as `PROMOTION_WORDING` beside it.
+ */
+const PRICE_COMPARISON_WORDING: readonly (readonly [string, "word" | "substring"])[] =
+  Object.freeze([
+    Object.freeze(["cheapest", "word"] as const),
+    Object.freeze(["lowest price", "word"] as const),
+    Object.freeze(["lowest prices", "word"] as const),
+    Object.freeze(["lowest priced", "word"] as const),
+    Object.freeze(["lowest cost", "word"] as const),
+    Object.freeze(["best price", "word"] as const),
+    Object.freeze(["best prices", "word"] as const),
+    Object.freeze(["better price than", "word"] as const),
+    Object.freeze(["unbeatable price", "word"] as const),
+    Object.freeze(["unbeatable prices", "word"] as const),
+    Object.freeze(["most affordable", "word"] as const),
+    Object.freeze(["cheaper than", "word"] as const),
+    Object.freeze(["less expensive than", "word"] as const),
+    Object.freeze(["the only free", "word"] as const),
+    Object.freeze(["only truly free", "word"] as const),
+    Object.freeze(["최저가", "substring"] as const),
+    Object.freeze(["최저 가격", "substring"] as const),
+    Object.freeze(["최저 요금", "substring"] as const),
+    Object.freeze(["가장 저렴", "substring"] as const),
+    Object.freeze(["가장 싼", "substring"] as const),
+    Object.freeze(["가장 싸", "substring"] as const),
+    Object.freeze(["제일 저렴", "substring"] as const),
+    Object.freeze(["제일 싼", "substring"] as const),
+    Object.freeze(["제일 싸", "substring"] as const),
+    Object.freeze(["보다 저렴", "substring"] as const),
+    Object.freeze(["보다 싸", "substring"] as const),
+    Object.freeze(["유일한 무료", "substring"] as const),
+    Object.freeze(["最便宜", "substring"] as const),
+    Object.freeze(["更便宜", "substring"] as const),
+    Object.freeze(["最低价", "substring"] as const),
+    Object.freeze(["最低價", "substring"] as const),
+    Object.freeze(["价格最低", "substring"] as const),
+    Object.freeze(["價格最低", "substring"] as const),
+    Object.freeze(["最实惠", "substring"] as const),
+    Object.freeze(["最實惠", "substring"] as const),
+    Object.freeze(["最划算", "substring"] as const),
+    Object.freeze(["唯一免费", "substring"] as const),
+    Object.freeze(["唯一免費", "substring"] as const),
+  ]);
+
+const PRICE_CURRENCY_CODES = "usd|aud|eur|gbp|krw|cny|jpy|cad|nzd|chf|sgd|hkd";
+
+/**
+ * An amount of money in English text, with whatever currency marks it carries.
+ *
+ * Groups: 1 a code before, 2 a symbol, 3 the amount, 4 a code after, 5 the
+ * country before "dollars", 6 "dollars" or "bucks". A bare number is not money;
+ * one of 1, 2, 4 or 6 has to be there.
+ */
+const PRICE_MENTION = new RegExp(
+  `(?:\\b(${PRICE_CURRENCY_CODES})\\s?)?(us\\$|au\\$|a\\$|ca\\$|nz\\$|hk\\$|[$€£¥₩])?\\s?(\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
+    `(?:\\s?(${PRICE_CURRENCY_CODES})\\b|\\s?(?:(us|u\\.s\\.|australian|canadian|new zealand)\\s)?(dollars?|bucks)\\b)?`,
+  "giu",
+);
+
+/** What a symbol or a country names. `$` and `¥` name no one currency. */
+const PRICE_SYMBOL_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
+  "us$": "USD",
+  "au$": "AUD",
+  "a$": "AUD",
+  "ca$": "CAD",
+  "nz$": "NZD",
+  "hk$": "HKD",
+  "€": "EUR",
+  "£": "GBP",
+  "₩": "KRW",
+});
+const PRICE_COUNTRY_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
+  us: "USD",
+  "u.s.": "USD",
+  australian: "AUD",
+  canadian: "CAD",
+  "new zealand": "NZD",
+});
+
+/**
+ * What an English post says about money, against the stored plan prices it
+ * declares (owner decision 2026-11-02, §7.2 rule 2).
+ *
+ * Each amount has to name its currency exactly once (a bare `$` is read as
+ * Australian dollars by an Australian reader), the currency cannot be AUD (an
+ * Australian price stays refused until the catalogue can prove GST), and the
+ * amount has to be the stored monthly price, in the stored currency, of the
+ * plan whose name is nearest to it in the text. Anything else is refused: with
+ * no declared price claim there is nothing for the amount to be.
+ */
+function englishPriceProblems(
+  text: string,
+  claims: MarketingGuardFacts["claims"],
+): { codes: MarketingRejectCode[]; ruleIds: string[] } {
+  const codes: MarketingRejectCode[] = [];
+  const ruleIds: string[] = [];
+  const lowered = text.toLowerCase();
+
+  // The stored prices of the plans this draft declares, each with where its
+  // name stands in the text.
+  const expectations = claims.flatMap((claim) => {
+    if (
+      !claim.known ||
+      (claim.type !== "pricing" && claim.type !== "plan") ||
+      claim.priceSourcesAllStored !== true ||
+      typeof claim.priceMinor !== "number" ||
+      typeof claim.currency !== "string" ||
+      typeof claim.planName !== "string" ||
+      claim.planName.trim().length === 0
+    ) {
+      return [];
+    }
+    const name = claim.planName.trim().toLowerCase();
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`,
+      "gu",
+    );
+    return [
+      {
+        priceMinor: claim.priceMinor,
+        currency: claim.currency.toUpperCase(),
+        positions: [...lowered.matchAll(pattern)].map((hit) => hit.index ?? 0),
+      },
+    ];
+  });
+
+  for (const match of lowered.matchAll(PRICE_MENTION)) {
+    const [, codeBefore, symbol, amount, codeAfter, country, word] = match;
+    if (!codeBefore && !symbol && !codeAfter && !word) continue;
+    const start = match.index ?? 0;
+    const hints = new Set<string>();
+    if (codeBefore) hints.add(codeBefore.toUpperCase());
+    if (codeAfter) hints.add(codeAfter.toUpperCase());
+    if (symbol && PRICE_SYMBOL_CURRENCY[symbol]) hints.add(PRICE_SYMBOL_CURRENCY[symbol]);
+    if (country && PRICE_COUNTRY_CURRENCY[country]) hints.add(PRICE_COUNTRY_CURRENCY[country]);
+
+    if (hints.size === 0) {
+      codes.push("price_currency_missing");
+      ruleIds.push("price.currency-missing");
+      continue;
+    }
+    if (hints.size > 1) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.currency-conflict");
+      continue;
+    }
+    const currency = [...hints][0];
+    if (currency === "AUD") {
+      // The existing Australian refusal, for a price the post states in AUD.
+      codes.push("au_price_gst_unverifiable");
+      ruleIds.push("price.text-aud");
+      continue;
+    }
+
+    const priceMinor = Math.round(Number(amount.replace(/,/g, "")) * 100);
+    let nearest: (typeof expectations)[number] | undefined;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const expectation of expectations) {
+      for (const position of expectation.positions) {
+        const distance = Math.abs(position - start);
+        if (distance < nearestDistance) {
+          nearest = expectation;
+          nearestDistance = distance;
+        }
+      }
+    }
+    if (!nearest || nearest.priceMinor !== priceMinor || nearest.currency !== currency) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-mismatch");
+    }
+  }
+  return { codes, ruleIds };
+}
+
 /** The credit condition a "free" post has to carry with it (§7.2 rule 4). */
 /**
  * Each term with the boundary rule its script needs.
@@ -973,6 +1166,19 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       continue;
     }
     if (!asset.usedBefore) approvalCodes.push("first_use_of_asset");
+  }
+
+  // --- 4b. what the words say about price (owner decision 2026-11-02) ------
+  // Read off the words, for every post, because a declared claim says nothing
+  // about a sentence that compares our price with someone else's.
+  if (anyTermMatches(forms, PRICE_COMPARISON_WORDING)) {
+    rejectCodes.push("price_comparison_claim");
+    ruleIds.push("rule.price-comparison");
+  }
+  if (draft.locale === "en") {
+    const problems = englishPriceProblems(draft.renderedText, facts.claims);
+    rejectCodes.push(...problems.codes);
+    ruleIds.push(...problems.ruleIds);
   }
 
   // --- 5. "free" needs its condition in the same post ---------------------

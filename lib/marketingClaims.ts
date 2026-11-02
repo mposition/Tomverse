@@ -348,11 +348,13 @@ const monthlyPriceClaim = (id: string, planId: "pro" | "max", statementKey: stri
   id,
   type: "pricing",
   statementKey,
-  // The Korean and Taiwanese markets (policy O7). Not `en`: Australia is the
-  // first English market (O11), and an Australian price needs a stored GST-
-  // inclusive AUD amount the Guard cannot verify yet (§7.2 rule 3). Not
-  // `zh-Hans`: RedNote's overseas readers include Australia.
-  locales: ["ko", "zh-Hant"],
+  // The Korean and Taiwanese markets (policy O7), and `en` since the owner's
+  // decision of 2026-11-02: an English post may state this price only as the
+  // stored amount in the stored currency, naming the currency and the plan, and
+  // an AUD price stays refused (§7.2 rules 2 and 3; the Guard reads the words in
+  // `englishPriceProblems()`). Not `zh-Hans`: RedNote's overseas readers
+  // include Australia.
+  locales: ["en", "ko", "zh-Hant"],
   validUntil: "2027-01-31",
   gate: null,
   planMeaning: null,
@@ -398,9 +400,10 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
  * post, and a version that never moves answers "what did this post see" with
  * the same number for every registry there has ever been. Version 1 is the
  * empty registry, which is why the test refuses a non-empty registry still
- * calling itself 1. Version 2 is the first content (2026-11-01).
+ * calling itself 1. Version 2 is the first content (2026-11-01); version 3 adds `en` to the
+ * plan price claims (2026-11-02).
  */
-export const MARKETING_CLAIM_REGISTRY_VERSION = 2;
+export const MARKETING_CLAIM_REGISTRY_VERSION = 3;
 
 export const marketingClaimById = (id: string): MarketingClaim | null =>
   MARKETING_CLAIMS.find((claim) => claim.id === id) ?? null;
