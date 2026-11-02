@@ -629,6 +629,9 @@ test("an English price that is not the stored amount is refused", () => {
     "Pro is USD 15 per month, every week.",
     "Pro is USD 15 per month; pay in advance.",
     "Pro is USD 15 per month, every single day.",
+    "Pro is USD 15 per month for the first year.",
+    "Pro is USD 15 per month; subscription required for one year.",
+    "Pro is USD 15 per month on a 12-month contract.",
     "Pro is USD 15 per month or 99 a week.",
     "Pro is -15 USD per month.", // a sign is part of the amount
     "Pro is -$15 USD per month.",

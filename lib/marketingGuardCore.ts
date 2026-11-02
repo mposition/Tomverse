@@ -643,7 +643,7 @@ const NON_MONTHLY_BILLING =
  * stored price does not carry out of the post.
  */
 const BILLING_TALK =
-  /\b(?:bill(?:ed|ing|s)?|charg(?:e|es|ed|ing)|pay(?:s|ments?|able|ing)?|paid|renew(?:s|al|ed|ing)?|cycle|invoice[ds]?|prepa(?:y|id)|debit(?:s|ed|ing)?|collect(?:s|ed|ion)?|deduct(?:s|ed|ion)?|withdraw(?:s|n|al)?|upfront|installments?|quarters?|(?:second|third|fourth|other)\s+month)\b/iu;
+  /\b(?:bill(?:ed|ing|s)?|charg(?:e|es|ed|ing)|pay(?:s|ments?|able|ing)?|paid|renew(?:s|al|ed|ing)?|cycle|invoice[ds]?|subscri(?:be|bed|ption|ptions)|commit(?:s|ted|ment|ments)?|contracts?|minimum|terms?|introductory|trial|first\s+(?:\w+\s+)?(?:years?|months?|weeks?|days?)|prepa(?:y|id)|debit(?:s|ed|ing)?|collect(?:s|ed|ion)?|deduct(?:s|ed|ion)?|withdraw(?:s|n|al)?|upfront|installments?|quarters?|(?:second|third|fourth|other)\s+month)\b/iu;
 const isMonthlyPeriod = (word: string): boolean => /^(?:mo|months?|monthly)$/iu.test(word);
 
 /** The plans that carry a price, by the names the product gives them (not "Free"). */
