@@ -3,7 +3,7 @@ import { generateKeyPairSync, verify } from "node:crypto";
 import test from "node:test";
 import type { NextAuthOptions } from "next-auth";
 import type { AppleProfile } from "next-auth/providers/apple";
-import { appleCallbackOptions, appleClientSecret, appleCredentials, appleSignInProvider, revokeAppleToken } from "../lib/appleAuth";
+import { appleCallbackOptions, appleClientSecret, appleCredentials, appleSignInProvider, revokeAppleToken } from "../lib/oauthTokenCrypto";
 
 const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 const environment = {

@@ -1,6 +1,6 @@
 ﻿import NextAuth from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { appleCallbackOptions } from "@/lib/appleAuth";
+import { appleCallbackOptions } from "@/lib/oauthTokenCrypto";
 
 const defaultHandler = NextAuth(authOptions);
 const appleHandler = NextAuth(appleCallbackOptions(authOptions));

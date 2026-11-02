@@ -1,7 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { decryptOAuthToken } from "@/lib/oauthTokenCrypto";
-import { appleCredentials, revokeAppleToken } from "@/lib/appleAuth";
+import { appleCredentials, decryptOAuthToken, revokeAppleToken } from "@/lib/oauthTokenCrypto";
 
 export class AppleAccountRevocationError extends Error {}
 
