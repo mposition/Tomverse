@@ -112,9 +112,6 @@ jobs:
     outputs:
       failure: ${{ steps.model.outputs.failure }}
       base: ${{ steps.model.outputs.base }}
-    env:
-      IDEA_PATH: ${{ runner.temp }}/idea.md
-      OUT_DIR: ${{ runner.temp }}/out
     steps:
       - name: Fetch the encrypted idea
         uses: actions/download-artifact@v8
@@ -127,7 +124,7 @@ jobs:
           AMUX_IDEA_LANE_TRANSIT_KEY: ${{ secrets.AMUX_IDEA_LANE_TRANSIT_KEY }}
         run: |
           umask 077
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:AMUX_IDEA_LANE_TRANSIT_KEY -in "${RUNNER_TEMP}/in/idea.enc" -out "$IDEA_PATH"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:AMUX_IDEA_LANE_TRANSIT_KEY -in "${RUNNER_TEMP}/in/idea.enc" -out "${RUNNER_TEMP}/idea.md"
           rm -f "${RUNNER_TEMP}/in/idea.enc"
 
       - name: Checkout develop
@@ -175,6 +172,8 @@ jobs:
           [ -n "$ANTHROPIC_API_KEY" ] || unset ANTHROPIC_API_KEY
           [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || unset CLAUDE_CODE_OAUTH_TOKEN
           echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          export IDEA_PATH="${RUNNER_TEMP}/idea.md"
+          OUT_DIR="${RUNNER_TEMP}/out"
           mkdir -p "$OUT_DIR"
           export PR_TITLE_PATH="${OUT_DIR}/title.txt" PR_BODY_PATH="${OUT_DIR}/body.md"
           prompt=$(cat <<'PROMPT'
