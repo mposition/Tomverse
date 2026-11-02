@@ -100,7 +100,12 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   if (latest && latest.chunkIndex > 0 && NOT_YET_SENT.has(latest.state)) {
     return at("execution_approval", "continuation");
   }
-  if (facts.proposedUnits > 0) return at("plan_approval", "plan_approval");
+  // System registration (v19) registers the whole plan and marks the idea
+  // completed, leaving its draft units proposed: nothing is left to approve,
+  // and the plan approval read refuses a completed idea.
+  if (facts.proposedUnits > 0 && facts.state !== "completed") {
+    return at("plan_approval", "plan_approval");
+  }
 
   if (counts.total > 0) {
     if (tasks.every(closed)) return at(counts.done > 0 ? "done" : "cancelled");
