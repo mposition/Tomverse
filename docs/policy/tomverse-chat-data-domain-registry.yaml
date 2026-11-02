@@ -168,6 +168,22 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: analyticsUserId
+    prismaModel: Ga4UserId
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      The account's GA4 User-ID (docs/policy/marketing-automation.md §10.2).
+      Account deletion reads it inside the deletion transaction, with the User
+      row locked, and names it in one GA4 deletion request after the commit;
+      the cascade removes the row. Withdrawing analytics consent deletes it the
+      same way without deleting the account.
+
   - domain: account
     prismaModel: Account
     userLinkageRole: subject
