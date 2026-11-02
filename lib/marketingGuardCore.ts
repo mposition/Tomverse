@@ -686,7 +686,8 @@ function englishPriceProblems(
 ): { codes: MarketingRejectCode[]; ruleIds: string[] } {
   const codes: MarketingRejectCode[] = [];
   const ruleIds: string[] = [];
-  const lowered = text.toLowerCase();
+  // NFKC first: a full-width ２０ is 20 to a reader.
+  const lowered = text.normalize("NFKC").toLowerCase();
 
   // The stored prices of the plans this draft declares, each with where its
   // name stands in the text.
@@ -751,6 +752,12 @@ function englishPriceProblems(
         codes.push("price_currency_missing");
         ruleIds.push("price.currency-missing");
       }
+      continue;
+    }
+    // A minus sign in front of a currency mark is still a minus sign.
+    if (/(?:^|[^\p{L}\p{N}])[-−–]\s*$/u.test(lowered.slice(Math.max(0, start - 3), start))) {
+      codes.push("price_text_mismatch");
+      ruleIds.push("price.text-negative");
       continue;
     }
     const hints = new Set<string>();
