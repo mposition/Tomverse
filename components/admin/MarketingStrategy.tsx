@@ -160,7 +160,12 @@ export function MarketingWeeklyStrategyCard() {
         return;
       }
       const body = (await response.json()) as StrategyLoad;
-      setLoad(body.status === "found" || body.status === "none" || body.status === "unreadable" ? body : { status: "failed" });
+      // A found body without the plan it names is a failed load, not a render that throws.
+      const usable =
+        body.status === "none" ||
+        body.status === "unreadable" ||
+        (body.status === "found" && Array.isArray(body.strategy?.accounts) && typeof body.strategy.weekStart === "string");
+      setLoad(usable ? body : { status: "failed" });
     } catch {
       setLoad({ status: "failed" });
     }

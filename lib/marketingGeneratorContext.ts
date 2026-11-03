@@ -406,7 +406,9 @@ export async function readMarketingGeneratorContext(
     ownProduct: { pages: ownPages(), plans: activePlans },
     analysis: {
       enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
-      strategyDue: await marketingStrategyDue(db, Date.now()),
+      // Only asked while the switch is on: off, no plan is written either way.
+      strategyDue:
+        marketingAnalysisEnabledFromValue(analysisSetting?.value) && (await marketingStrategyDue(db, Date.now())),
     },
   };
 }

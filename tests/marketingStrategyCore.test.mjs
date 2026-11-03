@@ -73,6 +73,15 @@ test("a hand-posted platform plans no automated posts, and a fenced answer is re
   assert.equal(marketingWeeklyStrategySchema.safeParse(read).success, true);
 });
 
+test("the post count is the number of distinct days named", () => {
+  const read = readMarketingWeeklyStrategy(answer([plan({ posts: 3, days: ["mon", "Mon", "someday"] })]), {
+    week: WEEK,
+    accounts: ACCOUNTS,
+    claims: CLAIMS,
+  });
+  assert.deepEqual([read.accounts[0].posts, read.accounts[0].days], [1, ["mon"]]);
+});
+
 test("an answer that is not a plan, or plans no offered account, is not kept", () => {
   const input = { week: WEEK, accounts: ACCOUNTS, claims: CLAIMS };
   assert.equal(readMarketingWeeklyStrategy("not json", input), null);

@@ -12,7 +12,8 @@
  *
  * The model chooses words and ids, never authority: an account, claim or
  * asset the context did not offer is dropped, a post count above the policy's
- * weekly cap is cut to it, and a plan with no account left is not recorded.
+ * weekly cap is cut to it, the count is the number of distinct days named,
+ * and a plan with no account left is not recorded.
  *
  * Imports zod and relative modules only, so the service loads it with
  * `--experimental-strip-types`.
@@ -151,12 +152,14 @@ export function readMarketingWeeklyStrategy(
     if (!account || seen.has(plan.accountSlug)) return [];
     seen.add(plan.accountSlug);
     const cap = weeklyCap(account.platform);
-    const posts = Math.min(plan.posts, cap ?? 0, 14);
+    // One post per day it names, so the count and the calendar always agree:
+    // a repeated or unknown day is a post the plan does not have.
     const days = unique(
       plan.days
         .map((day) => day.toLowerCase().slice(0, 3))
         .filter((day): day is MarketingStrategyDay => (MARKETING_STRATEGY_DAYS as readonly string[]).includes(day)),
-    ).slice(0, posts);
+    ).slice(0, Math.min(plan.posts, cap ?? 0, 14));
+    const posts = days.length;
     const claimIds = unique(plan.claimIds)
       .filter((id) => input.claims.some((claim) => claim.id === id && claim.locales.includes(account.locale)))
       .slice(0, 5);
