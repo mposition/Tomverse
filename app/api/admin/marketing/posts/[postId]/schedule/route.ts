@@ -4,6 +4,7 @@ import { z } from "zod";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import {
   MARKETING_S2B1_ACTIONS,
+  marketingScheduleAuditMetadata,
   scheduleMarketingPost,
 } from "@/lib/marketingStore";
 
@@ -34,7 +35,7 @@ export async function POST(req: Request, context: RouteContext) {
     gate: "manual_approval",
     bucket: "admin-marketing-post-schedule",
     schema,
-    metadata: (body) => ({ digest: body.expectedEnvelopeDigest }),
+    metadata: (body) => marketingScheduleAuditMetadata(body),
     run: async (tx, { body, auditLogId }) => {
       await scheduleMarketingPost(tx, {
         id: postId,

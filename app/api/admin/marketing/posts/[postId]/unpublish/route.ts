@@ -4,6 +4,7 @@ import { z } from "zod";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import {
   MARKETING_S2B1_ACTIONS,
+  marketingUnpublishAuditMetadata,
   unpublishMarketingPost,
 } from "@/lib/marketingStore";
 
@@ -52,9 +53,8 @@ export async function POST(req: Request, context: RouteContext) {
     bucket: "admin-marketing-post-unpublish",
     schema,
     metadata: (body) => ({
-      evidenceRef: body.evidenceRef,
+      ...marketingUnpublishAuditMetadata(body),
       expectedStatus: body.expectedStatus,
-      historyVersion: body.expectedHistoryVersion,
     }),
     run: async (tx, { body, auditLogId }) => {
       await unpublishMarketingPost(tx, {
