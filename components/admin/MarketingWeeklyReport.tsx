@@ -128,7 +128,7 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
             value={
               x.llm === null
                 ? m.unreadable
-                : `US$${(x.llm.countedMicroUsd / 1_000_000).toFixed(2)}${x.llm.capUsd === null ? "" : ` / US$${x.llm.capUsd}`}`
+                : `US${(x.llm.countedMicroUsd / 1_000_000).toFixed(2)}${x.llm.capUsd === null ? "" : ` / US${x.llm.capUsd.toFixed(2)}`}`
             }
           />
         </div>
@@ -141,6 +141,7 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
               {x.dispatch.failuresByCode.map((entry) => `${entry.code} ${entry.count}`).join(" · ")}
             </span>
           )}
+          {x.dispatch.notSent > 0 ? ` · ${m.notSent.replace("{count}", String(x.dispatch.notSent))}` : ""}
         </p>
       </Section>
 

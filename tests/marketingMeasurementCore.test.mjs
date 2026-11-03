@@ -4,7 +4,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { readFileSync } from "node:fs";
+
 import {
+  MARKETING_NOT_SENT_ERROR_CODES,
   marketingPercentile,
   marketingWeekWindow,
   summarizeMarketingMeasurement,
@@ -31,6 +34,7 @@ const WINDOW = marketingWeekWindow("2026-11-02");
 const post = (overrides = {}) => ({
   accountSlug: "instagram-3",
   status: "pending_approval",
+  publishAttempt: 0,
   createdAt: at("2026-11-03T00:00:00Z"),
   updatedAt: at("2026-11-03T00:00:00Z"),
   approvedAt: null,
@@ -187,4 +191,76 @@ test("sends are attempts: a failure requeued and then published is two sends, an
   assert.equal(measurement.dispatch.latencyP50Ms, 5 * 60 * 1000);
   assert.equal(measurement.accounts[0].published, 1);
   assert.equal(measurement.accounts[0].failed, 2);
+});
+
+test("an attempt is counted once, in the week it was sent, with its final outcome", () => {
+  const unknownThenFailed = post({
+    status: "failed",
+    publishAttempt: 1,
+    attempts: [
+      { at: at("2026-10-31T00:00:00Z"), attempt: 1, outcome: "outcome_unknown", errorCode: "timeout" },
+      { at: at("2026-11-03T00:00:00Z"), attempt: 1, outcome: "failed", errorCode: "not_on_platform" },
+    ],
+  });
+  const thisWeek = summarizeMarketingMeasurement({
+    window: WINDOW,
+    posts: [unknownThenFailed],
+    channels: [],
+    touches: 0,
+    signups: null,
+    guestLeads: null,
+    llm: null,
+  });
+  assert.equal(thisWeek.dispatch.sent, 0);
+  const lastWeek = summarizeMarketingMeasurement({
+    window: marketingWeekWindow("2026-10-26"),
+    posts: [unknownThenFailed],
+    channels: [],
+    touches: 0,
+    signups: null,
+    guestLeads: null,
+    llm: null,
+  });
+  assert.equal(lastWeek.dispatch.sent, 1);
+  assert.equal(lastWeek.dispatch.failed, 1);
+  assert.equal(lastWeek.dispatch.outcomeUnknown, 0);
+});
+
+test("an unknown outcome a person confirmed as published counts as published, and pre-call stops are not sends", () => {
+  const measurement = summarizeMarketingMeasurement({
+    window: WINDOW,
+    posts: [
+      post({
+        status: "verified",
+        publishAttempt: 1,
+        approvedAt: at("2026-11-03T00:00:00Z"),
+        publishedAt: at("2026-11-03T00:20:00Z"),
+        verifiedPublicAt: at("2026-11-03T02:00:00Z"),
+        attempts: [{ at: at("2026-11-03T00:30:00Z"), attempt: 1, outcome: "outcome_unknown", errorCode: "timeout" }],
+      }),
+      post({
+        status: "failed",
+        publishAttempt: 1,
+        attempts: [{ at: at("2026-11-04T00:00:00Z"), attempt: 1, outcome: "failed", errorCode: "run_deadline_before_call" }],
+      }),
+    ],
+    channels: [],
+    touches: 0,
+    signups: null,
+    guestLeads: null,
+    llm: null,
+  });
+  assert.equal(measurement.dispatch.sent, 1);
+  assert.equal(measurement.dispatch.published, 1);
+  assert.equal(measurement.dispatch.verified, 1);
+  assert.equal(measurement.dispatch.outcomeUnknown, 0);
+  assert.equal(measurement.dispatch.notSent, 1);
+  assert.equal(measurement.dispatch.latencyP50Ms, 20 * 60 * 1000);
+});
+
+test("every code counted as not sent is one the publisher records before its call", () => {
+  const source = readFileSync(new URL("../lib/marketingPublisherBatch.ts", import.meta.url), "utf8");
+  for (const code of MARKETING_NOT_SENT_ERROR_CODES) {
+    assert.ok(source.includes(`errorCode: "${code}"`), code);
+  }
 });

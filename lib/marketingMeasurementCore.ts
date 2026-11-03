@@ -18,6 +18,21 @@ export const MARKETING_MEASUREMENT_MIN_SIGNUPS = 10;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Failures the publisher records before it calls the publishing tool
+ * (lib/marketingPublisherBatch.ts): no request left, so they are not sends
+ * (policy §10.3 counts requests sent to the tool). A test holds this list to
+ * the publisher's source.
+ */
+export const MARKETING_NOT_SENT_ERROR_CODES: readonly string[] = [
+  "run_deadline_before_call",
+  "approval_expired_before_call",
+  "account_ref_missing",
+];
+
+/** The statuses a post is in once it is out on a platform. */
+const MARKETING_PUBLISHED_STATUSES: readonly string[] = ["published", "verified", "removed_by_platform", "deleted"];
+
 export type MarketingMeasurementWindow = { readonly start: Date; readonly end: Date };
 
 /**
@@ -36,6 +51,8 @@ export function marketingWeekWindow(weekStart: string): MarketingMeasurementWind
 export type MarketingMeasurementPost = {
   readonly accountSlug: string;
   readonly status: string;
+  /** The newest dispatch attempt's number. */
+  readonly publishAttempt: number;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly approvedAt: Date | null;
@@ -81,6 +98,8 @@ export type MarketingMeasurement = {
     readonly verified: number;
     readonly failed: number;
     readonly outcomeUnknown: number;
+    /** Failures recorded before the tool was called: not sends, counted apart. */
+    readonly notSent: number;
     /** Verified ÷ sent, or null while fewer than the minimum were sent. */
     readonly successRate: number | null;
     readonly latencyP50Ms: number | null;
@@ -145,21 +164,44 @@ export function summarizeMarketingMeasurement(input: {
 }): MarketingMeasurement {
   const { window, posts } = input;
   const created = posts.filter((post) => within(post.createdAt, window));
-  // A send is one dispatch attempt of one post: read from the attempt history,
-  // not the post's status now, so a failure that was requeued and then
-  // published counts as two sends, one failed and one published. An attempt's
-  // outcome is its newest entry in the window (an unknown outcome resolved as
-  // failed is one send). A post still `publishing` is a send not yet resolved.
-  const attempts = new Map<string, { post: MarketingMeasurementPost; at: Date; outcome: string; errorCode: string | null }>();
-  posts.forEach((post, index) => {
-    for (const entry of post.attempts) {
-      if (!within(entry.at, window)) continue;
-      const key = `${index}:${entry.attempt}`;
-      const seen = attempts.get(key);
-      if (!seen || seen.at.getTime() <= entry.at.getTime()) attempts.set(key, { post, ...entry });
+  // A send is one dispatch attempt of one post, read from the attempt history
+  // rather than the post's status now, so a failure requeued and then
+  // published is two sends. Each attempt belongs to the window of its first
+  // entry, and its outcome is its newest entry, wherever that falls: an
+  // unknown outcome resolved as failed a week later is one send, in the first
+  // week. A post still `publishing` is a send not yet resolved.
+  const resolved: Array<{
+    readonly post: MarketingMeasurementPost;
+    readonly at: Date;
+    readonly outcome: string;
+    readonly errorCode: string | null;
+  }> = [];
+  let notSent = 0;
+  for (const post of posts) {
+    const byAttempt = new Map<number, MarketingMeasurementPost["attempts"][number][]>();
+    for (const entry of post.attempts) byAttempt.set(entry.attempt, [...(byAttempt.get(entry.attempt) ?? []), entry]);
+    for (const [attempt, entries] of byAttempt) {
+      const ordered = [...entries].sort((left, right) => left.at.getTime() - right.at.getTime());
+      if (!within(ordered[0].at, window)) continue;
+      const last = ordered[ordered.length - 1];
+      // A person confirming an unknown outcome as published moves the post
+      // and writes no attempt entry: the post's state is that resolution.
+      if (
+        last.outcome === "outcome_unknown" &&
+        attempt === post.publishAttempt &&
+        MARKETING_PUBLISHED_STATUSES.includes(post.status)
+      ) {
+        resolved.push({ post, at: post.publishedAt ?? last.at, outcome: "published", errorCode: null });
+        continue;
+      }
+      // Stopped before the publishing tool was called: nothing was sent.
+      if (last.outcome === "failed" && last.errorCode !== null && MARKETING_NOT_SENT_ERROR_CODES.includes(last.errorCode)) {
+        notSent += 1;
+        continue;
+      }
+      resolved.push({ post, at: last.at, outcome: last.outcome, errorCode: last.errorCode });
     }
-  });
-  const resolved = [...attempts.values()];
+  }
   const inFlight = posts.filter((post) => post.status === "publishing" && within(post.updatedAt, window)).length;
   const published = resolved.filter((entry) => entry.outcome === "published");
   const failed = resolved.filter((entry) => entry.outcome === "failed");
@@ -195,6 +237,7 @@ export function summarizeMarketingMeasurement(input: {
       verified,
       failed: failed.length,
       outcomeUnknown: unknown.length,
+      notSent,
       successRate: sent < MARKETING_MEASUREMENT_MIN_SENT ? null : verified / sent,
       latencyP50Ms: marketingPercentile(latencies, 0.5),
       latencyP95Ms: marketingPercentile(latencies, 0.95),

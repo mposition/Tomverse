@@ -89,7 +89,7 @@ export async function readMarketingMeasurement(
   const [posts, channels, touches, signups, guestLeads, llm] = await Promise.all([
     db
       .$queryRaw<Array<Omit<MarketingMeasurementPost, "attempts"> & { history: unknown }>>(Prisma.sql`
-        SELECT c."accountSlug", p."status", p."createdAt", p."updatedAt", p."approvedAt", p."scheduledAt",
+        SELECT c."accountSlug", p."status", p."publishAttempt", p."createdAt", p."updatedAt", p."approvedAt", p."scheduledAt",
                p."publishedAt", p."verifiedPublicAt", p."outcomeUnknownAt", p."approvalExpiresAt",
                p."errorCode", p."guardCodes", p."history"
         FROM "MarketingPost" p JOIN "MarketingChannel" c ON c."id" = p."channelId"
