@@ -15,12 +15,17 @@ import "server-only";
 import { launchHomepageContent } from "@/components/marketing/launchHomepageContent";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
 import { getBillingPlansWithFieldSources } from "@/lib/billingConfig";
-import { MARKETING_ANALYSIS_ENABLED_KEY, marketingAnalysisEnabledFromValue } from "@/lib/marketingAnalysisCore";
+import {
+  MARKETING_ANALYSIS_ENABLED_KEY,
+  marketingAnalysisEnabledFromValue,
+  marketingStrategyWeek,
+} from "@/lib/marketingAnalysisCore";
 import {
   MARKETING_REPORT_PAYLOAD_SCHEMAS,
   type MarketingReportKind,
 } from "@/lib/marketingAutomationSchema";
 import type { MarketingAssetRegistry } from "@/lib/marketingAssets";
+import { resolveMarketingClaimGate } from "@/lib/marketingClaimGates";
 import {
   readKnownMarketingCompetitorIds,
   readMarketingCompetitorsForGenerator,
@@ -68,10 +73,20 @@ export type MarketingGeneratorContext = {
     readonly accountSlug: string;
     readonly defaultLocale: string;
     readonly allowedLocales: readonly string[];
+    /**
+     * The claims this account's drafts named in the last
+     * `MARKETING_RECENT_CLAIM_DAYS` days, whatever became of them, so A5 can
+     * prefer others (policy §7.6: a claim is not used again on an account
+     * within 14 days). Guidance for the model, not a gate.
+     */
+    readonly recentClaimIds: readonly string[];
   }>;
+  /** Claims whose gate is off or unreadable are left out: a post making one would be refused. */
   readonly claims: readonly MarketingGeneratorClaim[];
   readonly assets: readonly MarketingGeneratorAsset[];
   readonly brief: MarketingGeneratorReport | null;
+  /** The topics of the latest briefs, newest first, so the analysis picks a different one. */
+  readonly recentBriefTopics: readonly string[];
   readonly marketIntel: MarketingGeneratorReport | null;
   readonly competitors: MarketingGeneratorCompetitors;
   /**
@@ -87,8 +102,12 @@ export type MarketingGeneratorContext = {
    * competitor text, no URL.
    */
   readonly ownProduct: { readonly pages: Readonly<Record<string, unknown>>; readonly plans: readonly MarketingGeneratorPlan[] };
-  /** Whether the Admin switch lets this run spend on the analysis and brief. Off when unreadable. */
-  readonly analysis: { readonly enabled: boolean };
+  /**
+   * Whether the Admin switch lets this run spend on the analysis and brief
+   * (off when unreadable), and whether the current Brisbane week still has no
+   * stored plan, so this run writes one (lib/marketingStrategyCore.ts).
+   */
+  readonly analysis: { readonly enabled: boolean; readonly strategyDue: boolean };
 };
 
 /**
@@ -250,9 +269,40 @@ export type MarketingGeneratorReport = {
   readonly payload: unknown;
 };
 
+/** How far back an account's drafts count as having used a claim (policy §7.6). */
+export const MARKETING_RECENT_CLAIM_DAYS = 14;
+
+/** The most drafts that window reads. */
+export const MARKETING_RECENT_POSTS_MAX = 1_000;
+
+/** Briefs whose topics the analysis is told not to repeat. */
+export const MARKETING_RECENT_BRIEF_TOPICS = 4;
+
+/** Each account's recently named claim ids, sorted and without repeats. */
+export function marketingRecentClaimIds(
+  rows: ReadonlyArray<{ readonly channelId: string; readonly claimIds: readonly string[] }>,
+): ReadonlyMap<string, readonly string[]> {
+  const byChannel = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const ids = byChannel.get(row.channelId) ?? new Set<string>();
+    for (const id of row.claimIds) ids.add(id);
+    byChannel.set(row.channelId, ids);
+  }
+  return new Map([...byChannel].map(([channelId, ids]) => [channelId, [...ids].sort()]));
+}
+
+/** The claims a post may make today: no gate, or a gate that read as on. */
+export function marketingClaimsWithOpenGates<T extends { readonly gate: string | null }>(
+  claims: readonly T[],
+  gates: ReadonlyMap<string, boolean | null>,
+): T[] {
+  return claims.filter((claim) => claim.gate === null || gates.get(claim.gate) === true);
+}
+
 type ContextReader = Pick<
   MarketingTransaction,
   | "marketingChannel"
+  | "marketingPost"
   | "marketingReport"
   | "marketingCompetitor"
   | "appSetting"
@@ -310,6 +360,21 @@ const llmContext = async (db: ContextReader, model: string | null): Promise<Mark
   return pin ? { model, pin } : { model: null, pin: null };
 };
 
+/**
+ * Whether the current Brisbane week has no stored plan yet. Keyed on the
+ * week the plan itself names, so a run on Monday writes it and the rest of
+ * the week's runs do not; a run whose plan was unusable leaves it due.
+ */
+async function marketingStrategyDue(db: Pick<ContextReader, "$queryRaw">, now: number): Promise<boolean> {
+  const week = marketingStrategyWeek(now).start;
+  const rows = await db.$queryRaw<Array<{ found: number }>>`
+    SELECT 1 AS "found" FROM "MarketingAnalysis"
+    WHERE "payload"->'strategy'->>'weekStart' = ${week}
+    LIMIT 1
+  `;
+  return rows.length === 0;
+}
+
 export async function readMarketingGeneratorContext(
   db: ContextReader,
 ): Promise<MarketingGeneratorContext> {
@@ -326,7 +391,7 @@ export async function readMarketingGeneratorContext(
       allowedLocales: true,
     },
   });
-  const [brief, marketIntel, tracked, knownIds, llmSetting, analysisSetting, plans] = await Promise.all([
+  const [brief, marketIntel, tracked, knownIds, llmSetting, analysisSetting, plans, recentPosts, recentBriefs] = await Promise.all([
     latestReport(db, "brief"),
     latestReport(db, "market_intel"),
     readMarketingCompetitorsForGenerator(db),
@@ -334,7 +399,34 @@ export async function readMarketingGeneratorContext(
     db.appSetting.findUnique({ where: { key: MARKETING_LLM_SETTINGS_KEY }, select: { value: true } }),
     db.appSetting.findUnique({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, select: { value: true } }),
     getBillingPlansWithFieldSources(db),
+    db.marketingPost.findMany({
+      where: {
+        channelId: { in: channels.map((row) => row.id) },
+        createdAt: { gte: new Date(Date.now() - MARKETING_RECENT_CLAIM_DAYS * 24 * 60 * 60 * 1000) },
+      },
+      // Newest first and bounded: the caps (§7.6) keep two weeks far below this.
+      orderBy: { createdAt: "desc" },
+      take: MARKETING_RECENT_POSTS_MAX,
+      select: { channelId: true, claimIds: true },
+    }),
+    db.marketingReport.findMany({
+      where: { kind: "brief" },
+      orderBy: [{ periodEnd: "desc" }, { createdAt: "desc" }],
+      take: MARKETING_RECENT_BRIEF_TOPICS,
+      select: { payload: true },
+    }),
   ]);
+  const recentClaims = marketingRecentClaimIds(recentPosts);
+  const recentBriefTopics = recentBriefs.flatMap((row) => {
+    // The registry types every schema as `z.ZodType`; the brief's has `topicIds: string[]`.
+    const parsed = MARKETING_REPORT_PAYLOAD_SCHEMAS.brief.safeParse(row.payload);
+    return parsed.success ? (parsed.data as { readonly topicIds: readonly string[] }).topicIds : [];
+  });
+  // One at a time and in a fixed order, as the Guard's fact resolution reads them.
+  const gates = new Map<string, boolean | null>();
+  for (const gate of [...new Set(MARKETING_CLAIMS.flatMap((claim) => (claim.gate ? [claim.gate] : [])))].sort()) {
+    gates.set(gate, await resolveMarketingClaimGate(gate, db));
+  }
   const active = plans.filter((entry) => entry.plan.isActive);
   const activePlans: MarketingGeneratorPlan[] = active.map(({ plan, sources }) => ({
     id: plan.id,
@@ -358,9 +450,10 @@ export async function readMarketingGeneratorContext(
       accountSlug: row.accountSlug,
       defaultLocale: row.defaultLocale,
       allowedLocales: [...row.allowedLocales],
+      recentClaimIds: [...(recentClaims.get(row.id) ?? [])],
     })),
     claims: generatorClaimContext(
-      MARKETING_CLAIMS,
+      marketingClaimsWithOpenGates(MARKETING_CLAIMS, gates),
       new Map(
         active.map(({ plan, sources }) => [
           plan.id,
@@ -377,10 +470,16 @@ export async function readMarketingGeneratorContext(
       await readApprovedMarketingAssetKinds(db),
     ),
     brief,
+    recentBriefTopics,
     marketIntel,
     competitors: { tracked, knownIds },
     llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
     ownProduct: { pages: ownPages(), plans: activePlans },
-    analysis: { enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value) },
+    analysis: {
+      enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
+      // Only asked while the switch is on: off, no plan is written either way.
+      strategyDue:
+        marketingAnalysisEnabledFromValue(analysisSetting?.value) && (await marketingStrategyDue(db, Date.now())),
+    },
   };
 }
