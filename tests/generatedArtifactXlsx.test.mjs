@@ -94,7 +94,7 @@ test("a third-party OOXML reader opens the file and returns every value", async 
     extractAttachments: false,
     ocr: false,
   });
-  const text = document.toText();
+  const text = (await document.to("text")).value;
 
   // The title, the headers, and the cells -- read by something that has never
   // seen lib/generatedArtifactXlsx.ts.

@@ -166,7 +166,7 @@ const { OfficeParser } = require("officeparser");
             Buffer.from(workerData.buffer),
             { extractAttachments: false, ocr: false }
         );
-        const text = document.toText().trim();
+        const text = (await document.to("text")).value.trim();
         parentPort.postMessage({
             ok: true,
             text:
