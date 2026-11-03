@@ -169,7 +169,7 @@ test("the prompt keeps logs as data, opens every file but the workflows, and ask
   assert.match(prompt, /Never write a digest you did not read/);
   // The one path the prompt names is the one the guard refuses.
   for (const path of [".github/workflows/x.yml", ".github/actions/a/action.yml"]) {
-    assert.equal(judgePrCiAutoFixDiff({ nameStatus: `M\t${path}`, numstat: `1\t1\t${path}` }).push, false, path);
+    assert.equal(judgePrCiAutoFixDiff({ nameStatus: `M\0${path}\0`, numstat: `1\t1\t${path}\0` }).push, false, path);
   }
   assert.doesNotMatch(prompt, /Dependabot/);
   assert.match(ciFixPrompt({ workflows: ["PR Fast Gate"], logFile: "/x/ci.log", headBranch: "dependabot/npm_and_yarn/develop/g" }),
@@ -208,6 +208,8 @@ test("a placeholder digest is filled from an allowed registry's manifest header"
     // Another registry, a placeholder naming no host, or a repository path with a dot segment is refused before any request.
     for (const text of ["FROM docker.io/library/node:22@sha256:RESOLVE\n", "FROM node:22@sha256:RESOLVE\n",
       "FROM mcr.microsoft.com/../x:1@sha256:RESOLVE\n", "FROM mcr.microsoft.com/a//b:1@sha256:RESOLVE\n",
+      // The host starts the reference (review r-20261103-030659-e52c4e).
+      "FROM evil.example.com/mcr.microsoft.com/x:1@sha256:RESOLVE\n",
       "FROM mcr.microsoft.com/a:1@sha256:RESOLVE\nFROM ghcr.io/b/c:2@sha256:RESOLVE\n"]) {
       write(text);
       asked.length = 0;
@@ -244,13 +246,18 @@ test("a placeholder behind a link is neither read nor written", { skip: process.
     mkdirSync(join(dir, "elsewhere"));
     writeFileSync(join(dir, "elsewhere", "D"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
     symlinkSync(join(dir, "elsewhere"), join(tree, "via"));
+    // A sibling whose name extends the checkout's is not inside it.
+    mkdirSync(join(dir, "tree-evil"));
+    writeFileSync(join(dir, "tree-evil", "D"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
+    symlinkSync(join(dir, "tree-evil"), join(tree, "near"));
     let asked = 0;
     const fetchImpl = async () => {
       asked += 1;
       return { ok: true, headers: new Map([["docker-content-digest", `sha256:${"a".repeat(64)}`]]) };
     };
-    assert.equal(await resolveImageDigests(tree, ["Dockerfile", "via/D"], { fetchImpl }), null);
+    assert.equal(await resolveImageDigests(tree, ["Dockerfile", "via/D", "near/D"], { fetchImpl }), null);
     assert.equal(asked, 0);
+    assert.equal(readFileSync(join(dir, "tree-evil", "D"), "utf8"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
     assert.equal(readFileSync(outside, "utf8"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
     assert.equal(readFileSync(join(dir, "elsewhere", "D"), "utf8"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
   } finally {

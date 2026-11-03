@@ -37,20 +37,44 @@ export const PR_CI_AUTO_FIX_BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 
 export type PrCiAutoFixVerdict = { push: true } | { push: false; reasons: string[] };
 
+/**
+ * Judged from `git diff -z --name-status` and `-z --numstat`: NUL-separated,
+ * so every path is the real one. Without -z git quotes a path with a quote, a
+ * control or a non-ASCII byte (`".github/workflows/\355\225\234.yml"`), and a
+ * quoted path would not match the fence (review r-20261103-030659-e52c4e).
+ * Output that does not parse is refused.
+ */
 export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: string }): PrCiAutoFixVerdict {
   const reasons = new Set<string>();
+  const names = input.nameStatus.split("\0");
+  if (names.at(-1) === "") names.pop();
   let changed = 0;
-  for (const line of input.nameStatus.split("\n").filter((l) => l.trim() !== "")) {
-    const [, ...paths] = line.split("\t");
+  for (let i = 0; i < names.length; ) {
+    const status = names[i];
+    // A rename or a copy names both sides; either one in the workflows refuses it.
+    const count = /^[RC]\d*$/.test(status) ? 2 : 1;
+    const paths = names.slice(i + 1, i + 1 + count);
+    if (!/^[ACDMRTUX]\d*$/.test(status) || paths.length !== count || paths.some((path) => path === "")) {
+      reasons.add("diff_unreadable");
+      break;
+    }
     changed += 1;
-    // A rename names both sides; either one in the workflows refuses it.
     if (paths.some((path) => PR_CI_AUTO_FIX_SECRET_PATH.test(path))) reasons.add("gate_path");
+    i += 1 + count;
   }
-  if (changed === 0) reasons.add("no_change");
-  for (const line of input.numstat.split("\n").filter((l) => l.trim() !== "")) {
-    const [added, removed] = line.split("\t");
+  if (changed === 0 && !reasons.has("diff_unreadable")) reasons.add("no_change");
+  const stats = input.numstat.split("\0");
+  if (stats.at(-1) === "") stats.pop();
+  for (let i = 0; i < stats.length; ) {
+    const stat = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(stats[i]);
+    if (!stat) {
+      reasons.add("diff_unreadable");
+      break;
+    }
     // Binary files report "-": refused, a model has no business writing them.
-    if (added === "-" || removed === "-") reasons.add("binary");
+    if (stat[1] === "-" || stat[2] === "-") reasons.add("binary");
+    // A rename's line ends empty and its two paths follow.
+    i += stat[3] === "" ? 3 : 1;
   }
   return reasons.size === 0 ? { push: true } : { push: false, reasons: [...reasons].sort() };
 }

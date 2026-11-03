@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -9,7 +13,10 @@ import {
 } from "../lib/prCiAutoFixGuardCore.ts";
 import { judgeQaReleaseMergeLaneExclusion } from "../lib/qaReleaseMergeLaneExclusionCore.ts";
 
-const diff = (nameStatus, numstat) => judgePrCiAutoFixDiff({ nameStatus, numstat });
+// The cases are written one change a line, tab-separated; git -z gives the guard NUL-separated fields.
+const z = (text) => text.split("\n").filter(Boolean).map((line) => `${line.split("\t").join("\0")}\0`).join("");
+const zStat = (text) => text.split("\n").filter(Boolean).map((line) => `${line}\0`).join("");
+const diff = (nameStatus, numstat) => judgePrCiAutoFixDiff({ nameStatus: z(nameStatus), numstat: zStat(numstat) });
 
 test("any file but the workflows and actions is pushed: tests, deletions, scripts, policy, packages, root config", () => {
   // Owner 2026-11-03: the auto-fix fixes CI with no exception; a person still merges.
@@ -50,6 +57,50 @@ test("a change to the workflows or actions, a binary or an empty diff is refused
     const verdict = diff(nameStatus, numstat);
     assert.equal(verdict.push, false, nameStatus);
     assert.ok(verdict.reasons.includes(reason), `${nameStatus}: ${verdict.reasons}`);
+  }
+});
+
+test("paths are read as git -z gives them, so a name git would quote still meets the fence", () => {
+  // Review r-20261103-030659-e52c4e: without -z git prints ".github/workflows/\355\225\234.yml", quoted.
+  for (const path of [".github/workflows/한글.yml", ".github/workflows/a\"b.yml", ".github/workflows/a\nb.yml", ".github/actions/a\tb/action.yml"]) {
+    const verdict = judgePrCiAutoFixDiff({ nameStatus: `A\0${path}\0`, numstat: `3\t0\t${path}\0` });
+    assert.deepEqual(verdict, { push: false, reasons: ["gate_path"] }, JSON.stringify(path));
+  }
+  // A rename's numstat line ends empty and its two paths follow.
+  assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus: "R090\0lib/a.ts\0lib/b.ts\0", numstat: "1\t1\t\0lib/a.ts\0lib/b.ts\0" }), { push: true });
+  assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus: "R090\0lib/a.ts\0.github/workflows/b.yml\0",
+    numstat: "1\t1\t\0lib/a.ts\0.github/workflows/b.yml\0" }), { push: false, reasons: ["gate_path"] });
+  // Output that does not parse as -z is refused, not read as no change.
+  for (const [nameStatus, numstat] of [
+    ["M\t.github/workflows/x.yml\n", "1\t1\t.github/workflows/x.yml\n"],
+    ["M\0", "1\t1\tx\0"],
+    ["R100\0only-one\0", "0\t0\t\0only-one\0"],
+    ["M\0lib/x.ts\0", "garbage\0"],
+  ]) {
+    const verdict = judgePrCiAutoFixDiff({ nameStatus, numstat });
+    assert.equal(verdict.push, false, JSON.stringify(nameStatus));
+    assert.ok(verdict.reasons.includes("diff_unreadable"), `${JSON.stringify(nameStatus)}: ${verdict.reasons}`);
+  }
+});
+
+test("the workflow's guard reads a checkout's diff with -z: a workflow git would quote is refused", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ci-fix-guard-diff-"));
+  try {
+    const git = (...args) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" });
+    git("init", "-q");
+    git("commit", "-q", "--allow-empty", "-m", "base");
+    mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(dir, ".github", "workflows", "한글.yml"), "on: push\n");
+    const guard = (checkout) => spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "diff", checkout], { encoding: "utf8" });
+    const refused = guard(dir);
+    assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+    assert.deepEqual(JSON.parse(refused.stdout), { push: false, reasons: ["gate_path"] });
+    rmSync(join(dir, ".github"), { recursive: true, force: true });
+    writeFileSync(join(dir, "한글.ts"), "export {};\n");
+    const pushed = guard(dir);
+    assert.equal(pushed.status, 0, pushed.stdout + pushed.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

@@ -17,7 +17,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, constants, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 import { judgePrCiAutoFixConflict, judgePrCiAutoFixDiff, judgePrCiAutoFixTarget, rebuildConflictResolution } from "../lib/prCiAutoFixGuardCore.ts";
 
@@ -41,9 +41,10 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const [checkoutDir] = args;
   const git = (gitArgs) => execFileSync("git", ["-C", checkoutDir, ...gitArgs], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   git(["add", "--intent-to-add", "--all"]);
+  // NUL-separated: every path as it is, never quoted.
   verdict = judgePrCiAutoFixDiff({
-    nameStatus: git(["diff", "--name-status", "-M", "HEAD"]),
-    numstat: git(["diff", "--numstat", "-M", "HEAD"]),
+    nameStatus: git(["diff", "-z", "--name-status", "-M", "HEAD"]),
+    numstat: git(["diff", "-z", "--numstat", "-M", "HEAD"]),
   });
 } else if (mode === "conflict" && args.length === 2) {
   const [checkoutDir, resolutionPath] = args;
@@ -60,12 +61,14 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const root = realpathSync(checkoutDir);
   const fullPath = (path) => join(root, path);
   // A regular file on both sides, and here a regular file inside the checkout:
-  // never a link a write would follow, nor a path through one.
+  // never a link a write would follow, nor a path through one. Inside means
+  // under the root's own directory, not a sibling whose name extends it.
   const regular = (path) => {
     const seen = stages.get(path) ?? {};
     if (!["2", "3"].every((stage) => seen[stage] === "100644" || seen[stage] === "100755")) return false;
     try {
-      return lstatSync(fullPath(path)).isFile() && realpathSync(dirname(fullPath(path))).startsWith(root);
+      const dir = realpathSync(dirname(fullPath(path)));
+      return lstatSync(fullPath(path)).isFile() && (dir === root || dir.startsWith(root + sep));
     } catch {
       return false;
     }

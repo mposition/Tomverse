@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { readJson, withLock, writeJsonAtomic } from "./fsutil.mjs";
@@ -404,8 +404,9 @@ End your answer with exactly one line: "RESULT: fixed" when you changed files to
 
 // host/repository:tag as the OCI distribution grammar spells them: repository
 // components joined by single separators, so no `..` reaches the request URL.
+// The host starts the reference: `evil.com/mcr.microsoft.com/x` names evil.com.
 const COMPONENT = "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
-const IMAGE_PIN = new RegExp(`([a-z0-9][a-z0-9.-]*\\.[a-z]{2,}(?::\\d{1,5})?)/(${COMPONENT}(?:/${COMPONENT})*):([A-Za-z0-9_][A-Za-z0-9._-]{0,127})@sha256:${CI_FIX_DIGEST_PLACEHOLDER}\\b`, "g");
+const IMAGE_PIN = new RegExp(`(?<![A-Za-z0-9._/:@-])([a-z0-9][a-z0-9.-]*\\.[a-z]{2,}(?::\\d{1,5})?)/(${COMPONENT}(?:/${COMPONENT})*):([A-Za-z0-9_][A-Za-z0-9._-]{0,127})@sha256:${CI_FIX_DIGEST_PLACEHOLDER}\\b`, "g");
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const MANIFEST_TYPES = [
   "application/vnd.oci.image.index.v1+json",
@@ -446,7 +447,8 @@ export async function resolveImageDigests(worktree, paths, { fetchImpl = fetch }
     // A regular file inside the checkout only: never a link a write would follow, nor a path through one.
     let text;
     try {
-      if (!lstatSync(full).isFile() || !realpathSync(dirname(full)).startsWith(root)) continue;
+      const dir = realpathSync(dirname(full));
+      if (!lstatSync(full).isFile() || (dir !== root && !dir.startsWith(root + sep))) continue;
       text = readFileSync(full, "utf8");
     } catch {
       continue;
