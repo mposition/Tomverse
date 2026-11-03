@@ -8,14 +8,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 968;
 
 import { after, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { startChatImageTurn } from "@/lib/chatImageTurn";
 import { processImageGenerationGroup } from "@/lib/imageGenerationService";
@@ -39,6 +38,9 @@ const imageTurnSchema = z
     // the image workspace takes any prompt they type -- so nothing is
     // widened by accepting it here.
     prompt: z.string().trim().min(1).max(4_000).optional(),
+    // Edit the photo attached to the saved question. Only a flag: the server
+    // finds the photo from the question itself.
+    edit: z.boolean().optional(),
   })
   .strict();
 
@@ -46,7 +48,9 @@ type Params = { params: Promise<{ conversationId: string }> };
 
 export async function POST(req: Request, { params }: Params) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
@@ -70,6 +74,7 @@ export async function POST(req: Request, { params }: Params) {
       ...(body.imageGroupModelIds ? { imageGroupModelIds: body.imageGroupModelIds } : {}),
       preset: body.preset,
       prompt: body.prompt,
+      ...(body.edit ? { edit: true } : {}),
       request: req,
     });
 

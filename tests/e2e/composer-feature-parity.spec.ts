@@ -47,7 +47,8 @@ test.describe("Shared Chat and Review composer", () => {
           }
           if (width === 390) await openOnScreenKeyboard(page);
           await page.getByTestId("composer-tools-button").click();
-          for (const feature of ["attach", "web-search", "assistant", "memory", "deep-research", "image-generation"]) {
+          await expect(page.getByTestId("tools-image-generation-row")).toHaveCount(0);
+          for (const feature of ["attach", "web-search", "assistant", "memory", "deep-research"]) {
             const control = page.getByTestId(`tools-${feature}-row`);
             await control.scrollIntoViewIfNeeded();
             await expectTappableInVisibleViewport(page, control, `${product} ${feature}`);

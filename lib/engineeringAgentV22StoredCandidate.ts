@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import "server-only";
 
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
@@ -10,8 +11,7 @@ import { loadEngineeringAgentV22Candidate } from
   "@/lib/engineeringAgentV22CandidateLoad";
 import { loadEngineeringAgentV22BaseEvidence } from
   "@/lib/engineeringAgentV22BaseEvidence";
-import { readEngineeringAgentV22ImageExclusion } from
-  "@/lib/engineeringAgentV22ImageEvidence";
+import { readEngineeringAgentGitBlob } from "@/lib/engineeringAgentGitHubRead";
 import { decideEngineeringAgentV22Tier } from
   "@/lib/engineeringAgentV22Tier";
 import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
@@ -26,26 +26,28 @@ type Ports = {
   readSwitch: () => Promise<boolean>;
   publicationEnabled: () => boolean;
   loadCandidate: typeof loadEngineeringAgentV22Candidate;
-  readTier: (baseSha: string, candidate: Extract<Candidate,
-    { ok: true }>) => Promise<{ tier: TierVerdict;
-      imageProofDigest: string | null }>;
+  readTier: (candidate: Extract<Candidate, { ok: true }>) =>
+    Promise<{ tier: TierVerdict; imageProofDigest: string | null }>;
 };
 
-async function readTier(baseSha: string,
-  candidate: Extract<Candidate, { ok: true }>): Promise<{
-    tier: TierVerdict; imageProofDigest: string | null }> {
-  const image = await readEngineeringAgentV22ImageExclusion(baseSha);
+// The base commit is bound through `candidate.baseTree`; its own
+// `.dockerignore` says which test sources its image leaves out, whose text
+// the evidence does not read. The field keeps its stored name,
+// `imageProofDigest`, for the exclusion digest.
+async function readTier(candidate: Extract<Candidate, { ok: true }>):
+  Promise<{ tier: TierVerdict; imageProofDigest: string | null }> {
   const evidence = await loadEngineeringAgentV22BaseEvidence({
     tree: candidate.baseTree,
-    excludedPrefixes: image.excludedPrefixes,
+    fetchBlob: (oid, maxBytes) =>
+      readEngineeringAgentGitBlob(oid, {}, maxBytes),
   });
   if (!evidence) return { tier: { tier: "T2", findings: [{
     reason: "slice_analysis_failed", path: null,
   }] }, imageProofDigest: null };
+  const { exclusionDigest, ...sources } = evidence;
   return { tier: decideEngineeringAgentV22Tier({
-    changes: candidate.changes, ...evidence,
-    deployExcludedPrefixes: image.excludedPrefixes,
-  }), imageProofDigest: image.proofDigest };
+    changes: candidate.changes, ...sources,
+  }), imageProofDigest: exclusionDigest };
 }
 
 async function readSnapshot(attemptId: string): Promise<Snapshot> {
@@ -63,7 +65,7 @@ async function readSnapshot(attemptId: string): Promise<Snapshot> {
       !attempt || attempt.endedAt !== null || !attempt.v22AssignmentId ||
       !task || run.cardId !== task.id ||
       task.sourceSystem !== "admin-idea-v4" ||
-      task.taskRole !== "implement" || task.status !== "doing" ||
+      !amuxV22TaskWritesPatch(task.taskRole) || task.status !== "doing" ||
       task.owner !== attempt.worker ||
       task.v22AssignmentId !== attempt.v22AssignmentId)
     return null;
@@ -84,15 +86,17 @@ const livePorts: Ports = {
 
 /** This is a verified candidate, not T1 authority. Every read that could
  * change during GitHub I/O is repeated before returning the patch to the
- * deterministic tier gate. No patch or source text is sent to a client. */
+ * deterministic tier gate. No patch or source text is sent to a client. A
+ * caller after settlement names its own snapshot (the pending draft's run). */
 export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
-  ports: Ports = livePorts): Promise<
+  given: Partial<Ports> = {}): Promise<
     { ok: true; runId: string; taskId: string; baseSha: string;
       patchBody: string; patchDigest: string;
       candidate: Extract<Candidate, { ok: true }>;
       tier: TierVerdict; imageProofDigest: string | null } |
     { ok: false; reason: string }
   > {
+  const ports = { ...livePorts, ...given };
   const first = await ports.readSnapshot(attemptId);
   if (!first || !ports.publicationEnabled() ||
       !(await ports.readSwitch()) ||
@@ -104,7 +108,7 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
   const candidate = await ports.loadCandidate({ baseSha: first.baseSha,
     files: patch.files });
   if (!candidate.ok) return { ok: false, reason: candidate.reason };
-  const tierEvidence = await ports.readTier(first.baseSha, candidate);
+  const tierEvidence = await ports.readTier(candidate);
   const current = await ports.readSnapshot(attemptId);
   if (!current || current.runId !== first.runId ||
       current.taskId !== first.taskId || current.baseSha !== first.baseSha ||

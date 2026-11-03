@@ -154,6 +154,7 @@ const LOCALIZED_ROUTES: Array<{ path: string; expected: string }> = [
   { path: "/ko", expected: "ko" },
   { path: "/ko/compare-ai-models", expected: "ko" },
   { path: "/zh", expected: "zh" },
+  { path: "/zh-Hant", expected: "zh-Hant" },
   { path: "/fr/chatgpt-vs-claude", expected: "fr" },
   { path: "/en", expected: "en" },
 ];
@@ -207,6 +208,12 @@ const LANGUAGE_REDIRECTS: Array<{
     headers: { "accept-language": "zh-CN,zh;q=0.9" },
     to: "/zh",
     why: "a Chinese browser is sent to the Chinese page",
+  },
+  {
+    path: "/",
+    headers: { "accept-language": "zh-TW,zh;q=0.9" },
+    to: "/zh-Hant",
+    why: "a Taiwan browser is sent to the Traditional Chinese page",
   },
   {
     path: "/",

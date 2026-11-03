@@ -6,8 +6,8 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "66206688a6fea1a6144de33905744f93f0dd73e84b08c2e2bae97d93050465dd",
-  "totalSizeBytes": 562238,
+  "digest": "c7f11ee4977870d74e015d6444e6cecfdb19ea34a1d9147e5891d69da7d8e371",
+  "totalSizeBytes": 626391,
   "files": [
     {
       "path": "lib/adminAudit.ts",
@@ -21,8 +21,8 @@
     },
     {
       "path": "lib/adminAuditSystemActors.ts",
-      "sizeBytes": 32825,
-      "sha256": "46dbd558f33ab58a5af06d79e608548e9e956a59b61c5961a84ab49edb25bf4a"
+      "sizeBytes": 34479,
+      "sha256": "890d1a17788ff2f9e384fa716e92cebdb134cbe729f66515268dafaf744f7257"
     },
     {
       "path": "lib/clientIp.ts",
@@ -41,8 +41,8 @@
     },
     {
       "path": "lib/marketingAutomationAccess.ts",
-      "sizeBytes": 52806,
-      "sha256": "1aceab1822074489ac22491fd33fb7fcbad419eae0e21c20ab10b36eec80d998"
+      "sizeBytes": 53190,
+      "sha256": "75fe1fffc131c4550367e8185d46adf472d0c18aa7c4f9866f38daa7a3e5d1dd"
     },
     {
       "path": "lib/marketingAutomationSchema.ts",
@@ -61,13 +61,13 @@
     },
     {
       "path": "lib/marketingFacts.ts",
-      "sizeBytes": 6923,
-      "sha256": "6d3510d2b80e58b7f899ce13ff6eecec6ead05862333a6a94aef93d8123d4e8a"
+      "sizeBytes": 7202,
+      "sha256": "0d578b736d4f66d12fd2a93df65a9442295f7eb66d3c777d7a2df7b39e049624"
     },
     {
       "path": "lib/marketingGuardCore.ts",
-      "sizeBytes": 47448,
-      "sha256": "50415089075502625a4d47cc0b187b52453b651db6adaa4fdd6bfbba2c75527e"
+      "sizeBytes": 64917,
+      "sha256": "ce7651026d31171d80c71f20dd320dacc0c417dede56a72ca307a51595327e8f"
     },
     {
       "path": "lib/marketingGuardNormalise.ts",
@@ -101,8 +101,8 @@
     },
     {
       "path": "lib/marketingStore.ts",
-      "sizeBytes": 235208,
-      "sha256": "90226e04f42de747bff99b7115186f3eedf6e94dc9404f164d07f7cff77ef7a4"
+      "sizeBytes": 279575,
+      "sha256": "3ffb6b70cc973a0914330e7ad182449f99d5f1a8240a63a99563b2a01cb58ea0"
     },
     {
       "path": "lib/postgresConnectionConfigCore.mjs",

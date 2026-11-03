@@ -61,6 +61,10 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "UserMemorySettings",
     state: "included",
   },
+  // The account's GA4 User-ID and when it was created: an identifier held
+  // about the person, so they are told it exists
+  // (docs/policy/marketing-automation.md §10.2).
+  { domain: "analyticsUserId", publicName: "analytics_user_id", prismaModel: "Ga4UserId", state: "included" },
   { domain: "conversation", publicName: "conversations", prismaModel: "Conversation", state: "included" },
   {
     domain: "conversationProject",
@@ -691,6 +695,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one AMUX worker capability change, not customer data. The actor id is the owner who recorded it and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a worker name, a model id, closed routing tags, tools and a v22 profile, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxCliModelLinkEvent",
+    publicName: "amux_cli_model_link_events",
+    prismaModel: "AmuxCliModelLinkEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one link from a worker CLI's model name to the Admin › Models entry that prices it, not customer data. The actor id is the owner who recorded it and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a CLI name, a CLI model name and a model id, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxTaskRecoveryInspectionRequest",
     publicName: "amux_v22_task_recovery_inspection_requests",
     prismaModel: "AmuxV22TaskRecoveryInspectionRequest",
@@ -815,6 +827,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaLaneAttempt",
+    publicName: "amux_idea_lane_attempt",
+    prismaModel: "AmuxIdeaLaneAttempt",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaTrackedCheckoutEvidence",
     publicName: "amux_idea_tracked_checkout_evidence",
     prismaModel: "AmuxIdeaTrackedCheckoutEvidence",
@@ -890,6 +908,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxTaskResult",
     publicName: "amux_v22_task_results",
     prismaModel: "AmuxV22TaskResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskOwnerQuestion",
+    publicName: "amux_v22_task_owner_questions",
+    prismaModel: "AmuxV22TaskQuestion",
     state: "unverified",
   },
   {

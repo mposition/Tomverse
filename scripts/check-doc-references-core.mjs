@@ -144,14 +144,6 @@ export const PLANNED_REFERENCES = {
         document: "docs/policy/email-product-news-redesign-draft.md",
         reason: "The test that would enforce D5 across seven locales, named so the design can say what proves the rule rather than leaving it to review.",
     },
-    // The marketing automation policy fixes the SEO agent's allowlist to four
-    // exact files. Three exist; the fourth is the llms.txt route the policy
-    // names as a planned file. The policy was approved on 2026-09-17; the route
-    // is built in stage S5, and this entry leaves when it exists.
-    "app/llms.txt/route.ts": {
-        document: "docs/policy/marketing-automation.md",
-        reason: "Fourth file of the SEO agent's exact allowlist (section 9.2). Planned, not built: the policy is approved and the route lands in stage S5.",
-    },
     // An entry here is a document telling the reader about something that does
     // not exist yet. Empty is the healthy state; `lib/marketingMemoryClaims.ts`
     // was the last one and now exists, so the boundary in

@@ -14,10 +14,13 @@ import {
   groupAmuxWorkerRows,
 } from "../lib/amux/workerOverviewCore.ts";
 import {
-  amuxWorkerProviderClassOf,
   buildAmuxWorkerRegistryAdminView,
 } from "../lib/amux/workerRegistryCore.ts";
 import { buildAmuxWorkerCapabilityAdminView } from "../lib/amux/workerCapabilityCore.ts";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+
 
 const NOW = Date.parse("2026-10-20T04:00:00.000Z");
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();

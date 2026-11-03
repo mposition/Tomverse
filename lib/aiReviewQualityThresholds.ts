@@ -34,6 +34,7 @@ import {
     AI_REVIEW_EVAL_TASK_TYPES,
     type AiReviewArmMetrics,
 } from "@/lib/aiReviewEvalCore";
+import { AI_REVIEW_JUDGED_THRESHOLD_SETS, judgedThresholdProblems } from "./aiReviewJudgedThresholds";
 
 export type AiReviewThresholdSet = {
     version: string;
@@ -124,7 +125,7 @@ export const findThresholdSet = (version: string) =>
  * is the same as no day.
  */
 export const thresholdSetApprovalProblems = (
-    set: AiReviewThresholdSet
+    set: Pick<AiReviewThresholdSet, "version" | "approvedBy" | "approvedAt">
 ): readonly string[] => {
     const problems: string[] = [];
     const hasApprover = Boolean(set.approvedBy && set.approvedBy.trim() !== "");
@@ -154,11 +155,11 @@ export const thresholdSetApprovalProblems = (
     return problems;
 };
 
-export const isApprovedThresholdSet = (set: AiReviewThresholdSet): boolean =>
+export const isApprovedThresholdSet = (set: Pick<AiReviewThresholdSet, "version" | "approvedBy" | "approvedAt">): boolean =>
     thresholdSetApprovalProblems(set).length === 0;
 
 export const approvedThresholdSets = () =>
-    AI_REVIEW_THRESHOLD_SETS.filter(isApprovedThresholdSet);
+    [...AI_REVIEW_THRESHOLD_SETS.filter(isApprovedThresholdSet), ...AI_REVIEW_JUDGED_THRESHOLD_SETS.filter((set) => judgedThresholdProblems(set).length === 0)];
 
 /**
  * The metrics an approval has to carry for the gate to be able to judge it.

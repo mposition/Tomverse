@@ -1,8 +1,11 @@
 export const dynamic = "force-dynamic";
 
+import { after } from "next/server";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
+import { ENGINEERING_PUBLISHER_FEATURES_HEADER,
+  publisherOpensReviewDrafts } from "@/lib/engineeringAgentCore";
 import {
   ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
   EngineeringAgentStoreRefusedError,
@@ -17,12 +20,22 @@ import {
   isEngineeringAgentRouteAuthorized,
   runIdempotentEngineeringAgentRequest,
 } from "@/lib/engineeringAgentRouteAuth";
+import { startEngineeringAgentV22TierPromotion } from
+  "@/lib/engineeringAgentV22TierPromotion";
 import { prisma } from "@/lib/prisma";
 
 // The publisher's claim (docs/policy/engineering-agent.md §11): the next
 // lookup or, while publishing is allowed, the next queued publish item with a
 // live capability, claimed with a new fencing token. A write claim consumes
 // the capability in the same transaction. Nothing to do answers `work: null`.
+//
+// After answering, the round also reads one `tier_pending` v22 draft's tier
+// (§4): GitHub reads and source analysis that no settlement budget can hold.
+// A publish item it opens is claimed by a later round.
+//
+// An owner review item (a T2 patch, opened as a draft pull request) is handed
+// for writing only to a publisher whose features header names `review_draft`:
+// one deployed before that feature would open it as a ready pull request.
 
 const requestSchema = z
   .object({
@@ -34,11 +47,15 @@ export async function POST(request: Request) {
   if (!isEngineeringAgentRouteAuthorized(request, "publisher")) return engineeringAgentUnauthorized();
   try {
     const body = await readLimitedJson(request, 1024, requestSchema);
+    after(startEngineeringAgentV22TierPromotion);
     const outcome = await runIdempotentEngineeringAgentRequest({
       route: "publish/claim",
       requestKey: body.requestKey,
       body,
-      work: (tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS }),
+      work: (tx) => claimNextEngineeringAgentPublishWork(tx, {
+        leaseMs: ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
+        reviewDrafts: publisherOpensReviewDrafts(request.headers.get(ENGINEERING_PUBLISHER_FEATURES_HEADER)),
+      }),
       // A publisher that loses the answer learns which item it holds; the
       // claim's lease then passes and a lookup finds the work again (§10).
       resultRef: (work) => work?.workItemId ?? null,

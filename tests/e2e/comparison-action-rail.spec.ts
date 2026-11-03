@@ -356,19 +356,14 @@ test.describe("comparison readiness states", { tag: "@ui-risk" }, () => {
     await expect(page.getByTestId("quick-comparison-dialog")).toHaveCount(0);
   });
 
-  test("the quick summary never quotes a fixed price it cannot guarantee", async ({
+  test("the quick summary entry does not display a credit figure", async ({
     page,
   }) => {
     await seedGuestComparison(page);
     await openSeeded(page);
 
     const badge = page.getByTestId("quick-comparison-credit-cost");
-    await expect(badge).toHaveAttribute("data-approximate", "true");
-    await expect(badge).toContainText("~1");
-    await expect(badge).toHaveAttribute(
-      "aria-label",
-      /About 1 credit .*Long answers may use more/
-    );
+    await expect(badge).toHaveCount(0);
   });
 });
 
@@ -620,12 +615,12 @@ for (const shell of SHELLS) {
         "the hidden sentence left a gap under the actions"
       ).toBeLessThanOrEqual(12);
 
-      // Both actions, their prices and the help control stay on screen: the
+      // Both actions and the help control stay on screen: the
       // feature must not become less discoverable than it was.
       await expect(quickButton(page)).toBeVisible();
       await expect(page.getByTestId("ai-review-button")).toBeVisible();
-      await expect(page.getByTestId("quick-comparison-credit-cost")).toBeVisible();
-      await expect(page.getByTestId("ai-review-entry-credit-cost")).toBeVisible();
+      await expect(page.getByTestId("quick-comparison-credit-cost")).toHaveCount(0);
+      await expect(page.getByTestId("ai-review-entry-credit-cost")).toHaveCount(0);
       await expect(
         page.getByTestId(
           shell.name === "mobile" ? "ai-review-help-mobile" : "ai-review-help"
@@ -747,7 +742,7 @@ for (const shell of SHELLS) {
       );
     });
 
-    test("a replayed summary costs 0 and keeps the state steady", async ({ page }) => {
+    test("a replayed summary stays available without cost labels", async ({ page }) => {
       await enterAuthenticatedComparison(page, {
         viewport: shell.viewport,
         // A first successful comparison is also what triggers the upsell
@@ -757,16 +752,15 @@ for (const shell of SHELLS) {
       });
       await mockQuickSummaryRun(page);
 
-      await expect(page.getByTestId("quick-comparison-credit-cost")).toContainText("~1");
+      await expect(page.getByTestId("quick-comparison-credit-cost")).toHaveCount(0);
       await quickButton(page).click();
       const dialog = page.getByTestId("quick-comparison-dialog");
       await expect(dialog).toBeVisible();
       await dialog.getByRole("button", { name: "Cancel" }).click();
       await expect(dialog).toHaveCount(0);
 
-      // The replay is free: the badge drops to 0 and the state is still the
-      // steady one, so the sentence stays off screen and in the a11y tree.
-      await expect(page.getByTestId("quick-comparison-credit-cost")).toContainText("0");
+      // Cache availability keeps the state steady without adding a cost badge.
+      await expect(page.getByTestId("quick-comparison-credit-cost")).toHaveCount(0);
       await expect(quickButton(page)).toHaveAttribute("aria-disabled", "false");
       await expect(rail(page)).toHaveAttribute("data-steady", "true");
       await expect(rail(page)).toHaveAttribute("data-status-hidden", "true");
@@ -785,8 +779,7 @@ for (const shell of SHELLS) {
       await expect(review).toHaveAttribute("data-access", "guestTrial");
       await expect(review).toHaveAttribute("aria-disabled", "false");
       await expect(quickButton(page)).toBeVisible();
-      // Its own price, on the button itself.
-      await expect(page.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
+      await expect(page.getByTestId("ai-review-entry-credit-cost")).toHaveCount(0);
 
       // ...and the disclosure policy does not change for a guest: with a run
       // available this is the steady state in both shells, so the sentence is
@@ -1022,7 +1015,7 @@ test.describe("per-action descriptions", { tag: "@ui-risk" }, () => {
     );
   });
 
-  test("the two actions point at two different descriptions", async ({ page }) => {
+  test("the two actions keep separate target descriptions without routine credit amounts", async ({ page }) => {
     await enterAuthenticatedComparison(page);
 
     const quickId = await quickButton(page).getAttribute("aria-describedby");
@@ -1033,15 +1026,15 @@ test.describe("per-action descriptions", { tag: "@ui-risk" }, () => {
     expect(reviewId).toBeTruthy();
     expect(quickId).not.toBe(reviewId);
 
-    // Each description names that action's own comparison target and price.
+    // Each action retains its own comparison target; routine prices are omitted.
     await expect(page.locator(`#${quickId}`)).toContainText(
       "Comparing 3 completed answers"
     );
-    await expect(page.locator(`#${quickId}`)).toContainText("About 1 credit");
+    await expect(page.locator(`#${quickId}`)).not.toContainText(/credits?/i);
     await expect(page.locator(`#${reviewId}`)).toContainText(
       "Comparing 3 completed answers"
     );
-    await expect(page.locator(`#${reviewId}`)).toContainText("8 credits");
+    await expect(page.locator(`#${reviewId}`)).not.toContainText(/credits?/i);
     // The name is the action alone -- the description is not read twice.
     await expect(quickButton(page)).toHaveAccessibleName("Quick difference summary");
     await expect(page.getByTestId("ai-review-button")).toHaveAccessibleName(

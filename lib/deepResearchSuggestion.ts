@@ -288,6 +288,8 @@ export type DeepResearchSuggestionRefusal =
   | "no_turn"
   /** The recorded turn belongs to a conversation that is no longer on screen. */
   | "conversation_changed"
+  /** Smart Adaptive picks the model per question; it is not offered a switch. */
+  | "auto_selection"
   | "feature_unavailable"
   | "sign_in_required"
   | "plan_locked"
@@ -320,6 +322,12 @@ export type DeepResearchSuggestionInput = {
   conversationId: string | null;
   /** The last ordinary question asked in it, or null. */
   turn: DeepResearchSuggestionTurn | null;
+  /**
+   * Smart Adaptive (Auto) is choosing the model. The router already decides
+   * how deep each question goes, so a card asking the user to pick a deeper
+   * model argues with it (owner decision; same as the add-a-model nudge).
+   */
+  autoSelection?: boolean;
   selectedModelIds: readonly string[];
   disabledModelIds: readonly string[];
   /** Per-panel runtime status, the same map the comparison rail reads. */
@@ -391,6 +399,7 @@ export const deriveDeepResearchSuggestion = (
   if (!input.conversationId || turn.conversationId !== input.conversationId) {
     return NOT_OFFERED("conversation_changed");
   }
+  if (input.autoSelection) return NOT_OFFERED("auto_selection");
 
   if (input.availability === "unavailable") {
     return NOT_OFFERED("feature_unavailable");

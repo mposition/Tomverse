@@ -19,17 +19,24 @@ for (const name of ["DATABASE_URL", "DIRECT_URL", "TOMVERSE_AMUX_SYNC_SECRET",
   if (process.env[name]) throw new Error("sidecar credential boundary violated");
 }
 
-const config = amuxV22SidecarLaunchConfigFromEnvironment(process.env);
+// The CLI this sidecar runs (a v19 channel name); Claude when unset. Another
+// provider reuses the binary and config-directory variables for its own CLI.
+const provider = process.env.TOMVERSE_AMUX_V22_PROVIDER ?? "anthropic";
+if (!["anthropic", "openai", "github-copilot", "cursor"].includes(provider))
+  throw new Error("invalid sidecar provider");
+const config = { ...amuxV22SidecarLaunchConfigFromEnvironment(process.env), provider };
 const socketPath = process.env.TOMVERSE_AMUX_V22_SIDECAR_SOCKET;
 const stateDir = process.env.TOMVERSE_AMUX_V22_SIDECAR_STATE_DIR;
 const invocationId = process.env.INVOCATION_ID ?? null;
 await checkAmuxV22SidecarStateDir(stateDir);
 await checkAmuxV22SidecarSocketDir(socketPath);
 const sidecar = createAmuxV22SidecarServer(socketPath,
-  createAmuxV22SidecarHandler({ worker: config.worker, stateDir,
+  createAmuxV22SidecarHandler({ worker: config.worker, stateDir, provider,
     invocationId,
     recoveryUnit: () => inspectAmuxV22RecoveryUnit({ worker: config.worker, invocationId }),
     recoveryWorkspace: () => captureAmuxV22PatchBaseline(config.worktreePath),
-    quota: () => probeAmuxV22ClaudeQuota(config),
+    // Only Claude's subscription quota can be read; the app claims another
+    // provider's route without one.
+    quota: () => provider === "anthropic" ? probeAmuxV22ClaudeQuota(config) : null,
     run: (request) => runAmuxV22OneShot(request, config) }));
 await sidecar.listen();

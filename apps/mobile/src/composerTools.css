@@ -1,0 +1,75 @@
+/* Quiet Precision: tools stay in a compact sheet outside the input canvas. */
+.native-sheet.composer-tools-sheet {
+  background: var(--mobile-paper);
+  padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
+  max-height: calc(100dvh - env(safe-area-inset-top) - 16px);
+}
+.composer-tools-sheet .sheet-handle { margin-bottom: 10px; }
+.composer-tools-sheet .sheet-header { min-height: 44px; margin-bottom: 20px; }
+.composer-tools-sheet .sheet-header h2 { min-width: 0; font-size: 1.375rem; line-height: 1.4; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.composer-tools-sheet .sheet-header button { display: grid; place-items: center; padding: 0; flex: 0 0 44px; margin-right: -10px; }
+.composer-tools-sheet .composer-tools { display: block; padding: 0; }
+.tool-attachments { padding-bottom: 16px; }
+.tool-attachment-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tool-attachment-actions button {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  min-height: 68px; padding: 12px; border-radius: 14px;
+  border: 1px solid var(--mobile-border); background: var(--mobile-soft);
+  font-size: 1rem; font-weight: 600;
+}
+.tool-attachment-actions button span { min-width: 0; overflow-wrap: anywhere; }
+.tool-attachment-actions button svg { color: var(--mobile-action); flex-shrink: 0; }
+.tool-attachment-actions button:hover { border-color: var(--mobile-action); }
+.tool-attachment-hint, .tool-location-hint, .tool-scope {
+  color: var(--mobile-muted); font-size: .75rem; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere;
+}
+.tool-attachment-hint { margin: 10px 0 0; text-align: center; }
+.tool-settings { border-top: 1px solid var(--mobile-border); }
+.composer-tools-sheet .tool-row {
+  position: relative; display: flex; align-items: center; justify-content: flex-start;
+  gap: 16px; min-height: 60px; padding: 16px 4px;
+  border-bottom: 1px solid var(--mobile-border); border-radius: 0;
+  font-size: .9375rem; line-height: 1.5;
+}
+.tool-icon { color: var(--mobile-muted); flex-shrink: 0; }
+.tool-copy { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.tool-copy small { display: block; color: var(--mobile-muted); font-size: .75rem; font-weight: 400; line-height: 1.6; margin-top: 4px; }
+.tool-switch-row { cursor: pointer; }
+.tool-switch-row > .tool-icon { color: var(--mobile-action); }
+.composer-tools-sheet .tool-switch {
+  appearance: none; -webkit-appearance: none; position: relative;
+  flex: 0 0 42px; width: 42px; height: 26px; margin: 0;
+  border: 1px solid transparent; border-radius: 999px; background: var(--mobile-border);
+  cursor: pointer; transition: background-color 120ms ease;
+}
+.tool-switch::before {
+  content: ""; position: absolute; width: 20px; height: 20px; top: 2px; left: 2px;
+  border-radius: 50%; background: #fff; transition: transform 120ms ease;
+}
+.tool-switch:checked { background: var(--mobile-action); }
+.tool-switch:checked::before { transform: translateX(16px); }
+.tool-switch:disabled { opacity: .45; cursor: default; }
+.tool-location { border-bottom: 1px solid var(--mobile-border); padding-bottom: 16px; }
+.composer-tools-sheet .tool-location .tool-row { border-bottom: 0; padding-bottom: 8px; min-height: 52px; }
+.tool-location-hint { margin: 0 4px 0 42px; }
+.tool-location [role="status"] { margin: 8px 4px 0 42px; font-size: .75rem; }
+.tool-assistant { cursor: pointer; }
+.composer-tools-sheet .tool-assistant select {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none;
+  opacity: 0; cursor: pointer; font-size: 16px;
+}
+.tool-assistant:has(select:focus-visible) { outline: 2px solid var(--mobile-ink); outline-offset: 2px; border-radius: 8px; }
+.tool-selected { display: flex; align-items: center; justify-content: flex-end; gap: 8px; max-width: 55%; min-width: 0; color: var(--mobile-muted); font-size: .8125rem; text-align: right; overflow-wrap: anywhere; }
+.tool-selected svg { flex-shrink: 0; }
+.tool-assistant:has(select:disabled) { cursor: default; }
+.tool-action { width: 100%; text-align: left; }
+.composer-tools-sheet .tool-action { justify-content: space-between; }
+.tool-action svg { color: var(--mobile-muted); flex-shrink: 0; }
+.tool-scope { margin: 12px 4px 0; }
+.tool-error { margin: 12px 4px 0; font-size: .8125rem; }
+@media (prefers-reduced-motion: reduce) { .tool-switch, .tool-switch::before { transition: none; } }
+@media (forced-colors: active) {
+  .composer-tools-sheet .tool-switch { border-color: ButtonText; background: Canvas; }
+  .tool-switch::before { background: ButtonText; }
+  .tool-switch:checked { outline: 2px solid Highlight; }
+}

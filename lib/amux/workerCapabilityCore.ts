@@ -21,14 +21,22 @@
 import {
   amuxV22OneShotRoleSupported,
   amuxV22OneShotRouteSupported,
+  amuxV22ProviderForClass,
+  amuxV22ProviderRoleSupported,
   amuxV22RequiredTool,
 } from "./v22WorkerClaimCore.ts";
 import {
   AMUX_WORKER_PROVIDER_CLASS_TABLE,
   amuxWorkerRoleRank,
+  isAmuxWorkerName,
+  isAmuxWorkerProviderClass,
   type AmuxWorkerRegistration,
   type AmuxWorkerRoleCeiling,
 } from "./workerRegistryCore.ts";
+import {
+  parseAmuxCliModelCatalogAdminView,
+  type AmuxCliModelCatalogAdminView,
+} from "./cliModelCatalogCore.ts";
 
 /** What a tag or v22 role needs of the worker: any ceiling, a minimum ceiling, or a verified class. */
 export type AmuxWorkerCapabilityRequirement = "any" | "implementation" | "contract" | "verified";
@@ -55,11 +63,17 @@ export const AMUX_WORKER_ROUTING_TAG_REQUIREMENTS: Readonly<Record<string, AmuxW
   });
 export const AMUX_WORKER_ROUTING_TAGS = Object.freeze(Object.keys(AMUX_WORKER_ROUTING_TAG_REQUIREMENTS).sort());
 
-/** Version 35's v22 one-shot roles: investigate is read-only and needs no ceiling. */
+/**
+ * Version 35's v22 one-shot roles: investigate is read-only and needs no
+ * ceiling. Implement needs none either since version 52 made `roleCeiling` a
+ * v4 Task worker's grade, not a cap: a `routine` implement Task runs only on
+ * a `chore` worker (owner decision 2026-10-27). It still needs `repo_write`,
+ * and Cursor still cannot take it (amuxV22ProviderRoleSupported).
+ */
 export const AMUX_WORKER_V22_ROLE_REQUIREMENTS: Readonly<Record<string, AmuxWorkerCapabilityRequirement>> =
   Object.freeze({
     investigate: "any",
-    implement: "implementation",
+    implement: "any",
     design: "contract",
     review: "verified",
   });
@@ -111,7 +125,8 @@ export const AMUX_WORKER_CAPABILITY_REFUSALS = [
   "tag_above_ceiling",
   "tag_requires_verified",
   "tools_invalid",
-  "v22_not_claude",
+  "v22_provider_unsupported",
+  "v22_role_provider",
   "v22_model_unsupported",
   "v22_roles_invalid",
   "v22_role_unknown",
@@ -173,8 +188,9 @@ export function amuxWorkerCapabilityRefusal(
     return "tools_invalid";
   }
   if (v22 !== null) {
-    if (registration.providerClass !== "claude") return "v22_not_claude";
-    if (!amuxV22OneShotRouteSupported("anthropic", v22.model)) return "v22_model_unsupported";
+    const provider = amuxV22ProviderForClass(registration.providerClass);
+    if (provider === null) return "v22_provider_unsupported";
+    if (!amuxV22OneShotRouteSupported(provider, v22.model)) return "v22_model_unsupported";
     if (v22.roles.length < 1 || v22.roles.length > AMUX_WORKER_CAPABILITY_LIMITS.v22RolesMax ||
         new Set(v22.roles).size !== v22.roles.length) {
       return "v22_roles_invalid";
@@ -190,6 +206,7 @@ export function amuxWorkerCapabilityRefusal(
           !amuxV22OneShotRoleSupported(role)) {
         return "v22_role_unknown";
       }
+      if (!amuxV22ProviderRoleSupported(provider, role)) return "v22_role_provider";
       if (!amuxWorkerMeetsRequirement(registration, requirement)) {
         return requirementRefusal(requirement, "v22_role_above_ceiling", "v22_role_requires_verified");
       }
@@ -216,9 +233,11 @@ export function amuxWorkerCapabilityWithinCeiling(
   if (routingTags.length === 0) return null;
   let v22 = capability.v22;
   if (v22 !== null) {
+    const provider = amuxV22ProviderForClass(registration.providerClass);
     const roles = v22.roles.filter((role) =>
-      Object.hasOwn(AMUX_WORKER_V22_ROLE_REQUIREMENTS, role) && allowed(AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]));
-    v22 = roles.length > 0 && registration.providerClass === "claude" ? { ...v22, roles } : null;
+      Object.hasOwn(AMUX_WORKER_V22_ROLE_REQUIREMENTS, role) && allowed(AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]) &&
+      provider !== null && amuxV22ProviderRoleSupported(provider, role));
+    v22 = roles.length > 0 ? { ...v22, roles } : null;
   }
   return { ...capability, routingTags, v22 };
 }
@@ -240,6 +259,8 @@ export function amuxWorkerCapabilitiesEqual(a: AmuxWorkerCapability | null, b: A
 
 export type AmuxWorkerCapabilityAdminRow = {
   workerName: string;
+  /** The CLI it runs, as registered (owner decision 2026-10-27: never read from the name). */
+  providerClass: AmuxWorkerRegistration["providerClass"];
   desiredState: AmuxWorkerRegistration["desiredState"];
   roleCeiling: AmuxWorkerRoleCeiling;
   /** The newest recorded capability, or null when none is. */
@@ -255,12 +276,15 @@ export type AmuxWorkerCapabilityAdminRow = {
 export type AmuxWorkerCapabilityAdminView = {
   writesLatch: boolean;
   rows: AmuxWorkerCapabilityAdminRow[];
+  /** Each CLI's model names and the Tomverse models they price from; null when unread. */
+  cliModels: AmuxCliModelCatalogAdminView | null;
 };
 
 /** One row per registered, non-retired worker, in name order. */
 export function buildAmuxWorkerCapabilityAdminView(input: {
   registrations: readonly AmuxWorkerRegistration[];
   current: ReadonlyMap<string, { revision: number; capability: AmuxWorkerCapability; changedAt: string }>;
+  cliModels?: AmuxCliModelCatalogAdminView | null;
   writesLatch?: boolean;
 }): AmuxWorkerCapabilityAdminView {
   const rows = [...input.registrations]
@@ -268,11 +292,16 @@ export function buildAmuxWorkerCapabilityAdminView(input: {
     .sort((a, b) => a.workerName.localeCompare(b.workerName))
     .map((registration): AmuxWorkerCapabilityAdminRow => ({
       workerName: registration.workerName,
+      providerClass: registration.providerClass,
       desiredState: registration.desiredState,
       roleCeiling: registration.roleCeiling,
       current: input.current.get(registration.workerName) ?? null,
     }));
-  return { writesLatch: input.writesLatch ?? amuxWorkerCapabilityWritesOpen(), rows };
+  return {
+    writesLatch: input.writesLatch ?? amuxWorkerCapabilityWritesOpen(),
+    rows,
+    cliModels: input.cliModels ?? null,
+  };
 }
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -312,7 +341,7 @@ export function parseAmuxWorkerCapabilityAdminView(body: unknown): AmuxWorkerCap
   }
   const rows: AmuxWorkerCapabilityAdminRow[] = [];
   for (const row of body.rows) {
-    if (!isPlainRecord(row) || typeof row.workerName !== "string" || !/^(claude|codex|cursor|copilot)-[a-z0-9]{1,24}$/.test(row.workerName)) {
+    if (!isPlainRecord(row) || !isAmuxWorkerName(row.workerName) || !isAmuxWorkerProviderClass(row.providerClass)) {
       return null;
     }
     if (typeof row.desiredState !== "string" || !DESIRED_STATES.includes(row.desiredState) || row.desiredState === "retired") return null;
@@ -329,10 +358,16 @@ export function parseAmuxWorkerCapabilityAdminView(body: unknown): AmuxWorkerCap
     }
     rows.push({
       workerName: row.workerName,
+      providerClass: row.providerClass,
       desiredState: row.desiredState as AmuxWorkerCapabilityAdminRow["desiredState"],
       roleCeiling: row.roleCeiling as AmuxWorkerRoleCeiling,
       current,
     });
   }
-  return { writesLatch: body.writesLatch, rows };
+  let cliModels: AmuxCliModelCatalogAdminView | null = null;
+  if (body.cliModels !== null && body.cliModels !== undefined) {
+    cliModels = parseAmuxCliModelCatalogAdminView(body.cliModels);
+    if (cliModels === null) return null;
+  }
+  return { writesLatch: body.writesLatch, rows, cliModels };
 }

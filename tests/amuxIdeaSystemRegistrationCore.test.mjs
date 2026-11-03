@@ -6,6 +6,7 @@ import {
   AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED,
   AMUX_V19_SYSTEM_REGISTRATION_ENV,
   AMUX_V19_UNIT_REGISTRATION_AUTHORITY,
+  amuxUnitDecisionAuditActorValid,
   amuxV19SystemRegistrationEnabled,
   amuxV19SystemRegistrationTestBoundary,
   deriveAmuxV19RegistrationRefusalRequestId,
@@ -98,4 +99,55 @@ test("durable refusal request ids are deterministic UUIDs and bind the closed co
   assert.equal(deriveAmuxV19RegistrationRefusalRequestId(input), requestId);
   assert.notEqual(deriveAmuxV19RegistrationRefusalRequestId({ ...input,
     refusalCode: "plan_score_invalid" }), requestId);
+});
+
+test("a unit audit is either the deciding owner or the scoped v19 system registrar", () => {
+  const decision = { id: "decision-0001", ideaId: "idea-000001",
+    actorUserId: "owner-000001",
+    confirmationSnapshot: { registrationAuthority: AMUX_V19_UNIT_REGISTRATION_AUTHORITY } };
+  const empty = { actorUserId: null, actorEmail: null, ipAddress: null,
+    userAgent: null, entryHash: "a".repeat(64) };
+  const audit = { ...empty, action: "amux.v4.unit.consume",
+    targetType: "AmuxIdeaUnitDecision", targetId: decision.id,
+    metadata: { ideaId: decision.ideaId, registrationAuthority: "system",
+      systemActor: "amux-v4-intake", actorScope: "system-unit-registration-v1" } };
+  const plan = { ...empty, action: "amux.v19.plan.auto_registered",
+    targetType: "AmuxIdeaSubmission", targetId: decision.ideaId,
+    metadata: { systemActor: "amux-v4-intake",
+      actorScope: "system-plan-registration-v1" } };
+  const valid = (overrides = {}) => amuxUnitDecisionAuditActorValid({
+    audit, decision, planRegistrationAudit: plan, ...overrides });
+  assert.equal(valid(), true);
+  assert.equal(valid({ audit: { ...audit, action: "amux.v4.unit.prepare" } }), true);
+  assert.equal(valid({ planRegistrationAudit: null }), false);
+  assert.equal(valid({ planRegistrationAudit: { ...plan,
+    targetId: "idea-000002" } }), false);
+  assert.equal(valid({ planRegistrationAudit: { ...plan, entryHash: null } }), false);
+  assert.equal(valid({ audit: { ...audit, metadata: { ...audit.metadata,
+    actorScope: "unit-decision-housekeeping-v1" } } }), false);
+  assert.equal(valid({ audit: { ...audit, metadata: { ...audit.metadata,
+    registrationAuthority: "owner" } } }), false);
+  assert.equal(valid({ audit: { ...audit, metadata: { ...audit.metadata,
+    ideaId: "idea-000002" } } }), false);
+  assert.equal(valid({ audit: { ...audit, action: "amux.v4.unit.cancel" } }), false);
+  assert.equal(valid({ decision: { ...decision, confirmationSnapshot: {} } }), false);
+  // A person's row that copies the system marker is neither actor.
+  assert.equal(valid({ audit: { ...audit, actorUserId: decision.actorUserId } }), false);
+  assert.equal(valid({ audit: { ...audit, actorUserId: decision.actorUserId,
+    actorEmail: "owner@example.test" } }), false);
+
+  const human = { ...empty, actorUserId: decision.actorUserId,
+    actorEmail: "owner@example.test", ipAddress: "203.0.113.1",
+    userAgent: "synthetic", action: "amux.v4.unit.consume",
+    targetType: "AmuxIdeaUnitDecision", targetId: decision.id,
+    metadata: { ideaId: decision.ideaId, registrationAuthority: "owner" } };
+  const owner = { ...decision, confirmationSnapshot: { action: "register_card" } };
+  assert.equal(valid({ audit: human, decision: owner,
+    planRegistrationAudit: null }), true);
+  assert.equal(valid({ audit: human, decision: { ...owner,
+    confirmationSnapshot: null } }), true);
+  assert.equal(valid({ audit: { ...human, actorUserId: "owner-000002" },
+    decision: owner }), false);
+  // An owner row cannot consume a receipt that claims system authority.
+  assert.equal(valid({ audit: human }), false);
 });

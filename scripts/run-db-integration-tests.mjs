@@ -223,6 +223,7 @@ run(
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
     "tests/integration/mobile-store-billing.db.test.ts",
+    "tests/integration/ios-review-billing.db.test.ts",
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
@@ -337,6 +338,10 @@ run(
     // the closed tag and v22 lists, every tag and role within the worker's
     // current ceiling and class, the owner's audit, nothing changed.
     "tests/integration/amux-worker-capability.db.test.ts",
+    // The worker CLIs' model catalog (owner decision 2026-10-27): the host
+    // refresh, each owner link bound to its audit and never changed, and the
+    // cost catalog's one statement over the registry and the links.
+    "tests/integration/amux-cli-model-catalog.db.test.ts",
     // AMUX card display numbers (docs/policy/amux-card-display-key.md §3):
     // the format, uniqueness and immutability of a card's number and a
     // Feature's prefix, and a per-prefix counter that only advances by one
@@ -350,6 +355,9 @@ run(
     // boundary (the seven-read version failed the 100 ms idle-in-transaction
     // timeout), newest first, bounded and owner scoped.
     "tests/integration/amux-idea-progress.db.test.ts",
+    // The idea lane: attempt limit, a claim scan finished ideas cannot crowd
+    // out, results recorded once, the outcome CHECK.
+    "tests/integration/amux-idea-lane.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.
@@ -379,6 +387,10 @@ run(
     // to deliver, nothing under the kill switch, the decision once and its
     // outcome once, each through its route's own DB boundary.
     "tests/integration/amux-decision-maker-delivery.db.test.ts",
+    // A v22 worker's owner question (docs/policy/development-agent-orchestration.md,
+    // operator decision 2026-10-30): the answer resumes a parked Task once, a
+    // Task that moved on is not resumed, and the table guards its lifecycle.
+    "tests/integration/amux-v22-owner-question.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
@@ -422,10 +434,6 @@ run(
     // Support-triage LLM step: the model answer written with the ready row, the
     // human-lane floor, and the keyword lane when there is no answer.
     "tests/integration/support-triage-llm.db.test.ts",
-    // Support-triage new groups: one kind per group, the higher kind first, a
-    // tombstoned key stops a second group, a member lost to a concurrent pass
-    // empties and invalidates the group, and the pass membership budget.
-    "tests/integration/support-triage-group-formation.db.test.ts",
     // Support-triage data in a real account deletion: the derived rows go in
     // that transaction, the reports stay anonymised, nothing is derived again.
     "tests/integration/support-triage-account-deletion.db.test.ts",
@@ -559,6 +567,7 @@ run(
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
+    "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
     // Durable Chat recovery is a database coordination contract: duplicate
@@ -749,6 +758,9 @@ run(
     // transaction_timeout armed against the service's deadline -- which only a
     // real PostgreSQL 17 can show.
     "tests/integration/marketing-draft-intake.db.test.ts",
+    "tests/integration/marketing-auto-pause.db.test.ts",
+    "tests/integration/marketing-comment-alerts.db.test.ts",
+    "tests/integration/marketing-graduation.db.test.ts",
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
@@ -760,12 +772,18 @@ run(
     // audit row (action, row, predecessor, and an approval's exact name and
     // hosts), and only approved hosts are a source. Needs a real audit chain.
     "tests/integration/marketing-competitor-registry.db.test.ts",
+    // The media asset store (2026-10-31): the media CLI submits and uploads, a
+    // person approves exactly those bytes on their own audit row or retires,
+    // and only an approved file reaches the registry. Needs a real audit chain.
+    "tests/integration/marketing-asset-store.db.test.ts",
     // The rows a draft's price and model facts rest on, held FOR SHARE until
     // the reading transaction ends (S3a2): only two connections can show it.
     "tests/integration/marketing-fact-row-hold.db.test.ts",
     // Marketing retention (S3h1): what the delete triggers let go goes, with an
     // audit row each and a retention_run report; what they keep stays.
     "tests/integration/marketing-retention.db.test.ts",
+    // A1's weekly KPI (S3g): the ended week reported once, also under two runs at once.
+    "tests/integration/marketing-weekly-kpi.db.test.ts",
     // The LLM cost ledger's own rules (S3c1), in plain SQL against a scratch
     // schema: born reserved, five transitions, evidence set once, the
     // reservation clock checked rather than recomputed, reasons paired to
@@ -780,6 +798,9 @@ run(
     // one writer, compare-and-set on the row, only a pinned model, the cap
     // within its ceiling, and a refused save that writes nothing.
     "tests/integration/marketing-llm-settings.db.test.ts",
+    // The marketing analysis and brief switch (2026-11-01): default off, one
+    // writer, compare-and-set on the row, and a save that changes nothing refused.
+    "tests/integration/marketing-analysis-setting.db.test.ts",
     // The Scout's spending stop: a call reserved against the model and cap as
     // they are under the ledger lock, so turning the model off or lowering the
     // cap stops every later call, and racing reservations stay within the cap.
@@ -936,6 +957,10 @@ run(
     "tests/integration/account-data-export.db.test.ts",
     "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/account-anonymisation.db.test.ts",
+    // docs/policy/marketing-automation.md §10.1: the event-name check admits
+    // marketing_touch, and the
+    // attribution query's seven-day window is inclusive at both ends.
+    "tests/integration/marketing-touch-attribution.db.test.ts",
     // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.
     "tests/integration/routing-attempt-manifest.db.test.ts",
     "tests/integration/routing-dispatch-instrumentation.db.test.ts",
@@ -963,6 +988,14 @@ run(
   { TEST_DATABASE_URL: oneShotTestUrl.toString(),
     DATABASE_URL: oneShotTestUrl.toString(),
     DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
+);
+// Native pass redemption uses real promotion/entitlement rows with mocked
+// authentication and email/provider seams. Keep those mocks in their own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/native-pass-redemption.db.test.ts"],
+  "Running native access pass activation, expiry and duplicate redemption scenarios",
 );
 // Managed Code replaces only provider/session seams while exercising the real
 // credit ledger. Keep its module mocks in a separate finance-lane process.
@@ -995,6 +1028,16 @@ run(
     "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
     "--test-concurrency=1", "tests/integration/chat-c16-lifecycle.db.test.ts"],
   "Running Chat sharing, export and deletion lifecycle scenarios"
+);
+// The stored GA4 User-ID: one per account under racing first requests, the
+// CHECK on its form, withdrawal and account deletion leaving no row, and the
+// deletion lock against a racing creation. Its own process because it replaces
+// the GA4 request module, so nothing reaches Google.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/ga4-user-id.db.test.ts"],
+  "Running the GA4 User-ID creation, withdrawal and account deletion scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session

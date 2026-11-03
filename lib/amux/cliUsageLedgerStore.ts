@@ -10,7 +10,7 @@ import { inspectV4TaskCostCatalog } from "@/lib/amux/v4TaskCostCatalogCore";
 
 type AcceptedAssignment = { id: string; authorizationAuditLogId: string;
   catalogApprovalId: string; routeId: string };
-import { amuxCliUsageReceiptDigest, amuxCliUsageReceiptSchema,
+import { amuxCliPricedModelId, amuxCliUsageReceiptDigest, amuxCliUsageReceiptSchema,
   amuxUsageLedgerReceiptSchema,
   estimateAmuxCliApiCost, v22ReceiptModelMatchesAssignment,
   type AmuxCliApiPrice, type AmuxUsageLedgerReceipt } from
@@ -104,8 +104,8 @@ async function retainedApprovalRoutePrice(tx: Prisma.TransactionClient,
 async function assignmentRoutePrice(tx: Prisma.TransactionClient, receipt: Receipt,
   assignment: AcceptedAssignment | null):
   Promise<AmuxCliApiPrice | null> {
-  if (!assignment || !receipt.actualModelId ||
-      receipt.actualModelId === "multi_model") return null;
+  const pricedModelId = amuxCliPricedModelId(receipt);
+  if (!assignment || !pricedModelId) return null;
   const audit = await tx.adminAuditLog.findUnique({
     where: { id: assignment.authorizationAuditLogId },
     select: { action: true, targetId: true, targetType: true,
@@ -118,7 +118,7 @@ async function assignmentRoutePrice(tx: Prisma.TransactionClient, receipt: Recei
   const price = metadata && Object.hasOwn(metadata, "routePrice") ?
     parseAmuxTaskRoutePrice(metadata.routePrice) :
     await retainedApprovalRoutePrice(tx, assignment);
-  if (!price || price.modelId !== receipt.actualModelId) return null;
+  if (!price || price.modelId !== pricedModelId) return null;
   // No verified cache-write rate: a run that wrote to the cache stays unpriced.
   if (price.cacheWriteMicroUsdPerMillion === 0 &&
       (receipt.observed?.cacheCreationInputTokens ?? 0) > 0) return null;

@@ -28,7 +28,6 @@ import {
   buildAmuxWorkerRegistryAdminView,
   amuxWorkerEffectiveState,
   amuxWorkerLatchOpen,
-  amuxWorkerProviderClassOf,
   amuxWorkerRegistrationFromRow,
   amuxWorkerRegistryAuditAction,
   amuxWorkerRegistryAuditMetadata,
@@ -39,6 +38,10 @@ import {
 import { AGENT_OFFICE_AMUX_ROSTER } from "../lib/agentOffice/amuxRoster.ts";
 import { AMUX_MACHINE_ID_PATTERN } from "../lib/amux/claimContract.ts";
 
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+
+
 const registration = (workerName, desiredState, roleCeiling, revision = 1) => ({
   workerName,
   providerClass: amuxWorkerProviderClassOf(workerName),
@@ -47,8 +50,8 @@ const registration = (workerName, desiredState, roleCeiling, revision = 1) => ({
   revision,
 });
 
-const change = (workerName, desiredState, roleCeiling, expectedRevision) => {
-  const parsed = parseAmuxWorkerRegistryChange({ workerName, desiredState, roleCeiling, expectedRevision });
+const change = (workerName, desiredState, roleCeiling, expectedRevision, providerClass = amuxWorkerProviderClassOf(workerName)) => {
+  const parsed = parseAmuxWorkerRegistryChange({ workerName, providerClass, desiredState, roleCeiling, expectedRevision });
   assert.ok(parsed, `${workerName} ${desiredState} ${roleCeiling} parses`);
   return parsed;
 };
@@ -75,18 +78,18 @@ test("activation gate 2's values are the ones the operator approved", () => {
   assert.equal(AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES, 3);
 });
 
-test("the name grammar is the class prefix and 1-24 of [a-z0-9]", () => {
-  for (const name of ["claude-impl", "codex-x", "cursor-worker", "copilot-" + "a".repeat(24), "codex-0"]) {
+test("the name grammar is 1-40 lower-case letters, digits and hyphens, and says nothing of the CLI", () => {
+  // Owner decision 2026-10-27: every name the old prefix grammar allowed still is.
+  for (const name of ["claude-impl", "codex-x", "cursor-worker", "copilot-" + "a".repeat(24), "codex-0",
+    "kimi-impl", "review-2", "a", "x".repeat(40), "claude-impl-2"]) {
     assert.ok(isAmuxWorkerName(name), name);
   }
   for (const name of [
-    "claude-", "devin-worker", "Claude-impl", "claude-impl-2", "claude_impl", "copilot-" + "a".repeat(25),
-    " claude-impl", "claude-impl\n", "claude-IMPL", "codex", "", null, 7,
+    "claude-", "-impl", "Claude-impl", "claude_impl", "x".repeat(41),
+    " claude-impl", "claude-impl\n", "claude-IMPL", "", null, 7,
   ]) {
     assert.equal(isAmuxWorkerName(name), false, String(name));
-    assert.equal(amuxWorkerProviderClassOf(name), null, String(name));
   }
-  assert.equal(amuxWorkerProviderClassOf("copilot-chore"), "copilot");
 });
 
 test("the seed is version 27's thirteen: the catalog's seven active, the six new requested", () => {
@@ -100,8 +103,9 @@ test("the seed is version 27's thirteen: the catalog's seven active, the six new
     ["claude-chore", "claude-contract", "claude-impl", "claude-review", "codex-chore", "codex-contract", "codex-impl"],
   );
   for (const entry of AMUX_WORKER_REGISTRY_V31_SEED) {
-    const providerClass = amuxWorkerProviderClassOf(entry.workerName);
-    assert.ok(providerClass, entry.workerName);
+    const providerClass = entry.providerClass;
+    // The seed's names still start with their CLI, so the first run registers what it always did.
+    assert.equal(providerClass, amuxWorkerProviderClassOf(entry.workerName), entry.workerName);
     if (entry.desiredState === "requested") assert.ok(["cursor", "copilot"].includes(providerClass));
     // Every seed entry is a valid first event.
     assert.equal(
@@ -117,11 +121,16 @@ test("the seed is version 27's thirteen: the catalog's seven active, the six new
   assert.ok(Object.isFrozen(AMUX_WORKER_REGISTRY_V31_SEED[0]));
 });
 
-test("parsing refuses anything outside the vocabularies and derives the class from the name", () => {
-  const good = { workerName: "cursor-impl", roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 };
-  assert.deepEqual(parseAmuxWorkerRegistryChange(good), { ...good, providerClass: "cursor" });
+test("parsing refuses anything outside the vocabularies and keeps the chosen class, whatever the name", () => {
+  const good = { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 };
+  assert.deepEqual(parseAmuxWorkerRegistryChange(good), good);
+  // A name that does not start with its CLI is fine; the chosen class is kept.
+  const renamed = { ...good, workerName: "kimi-impl", providerClass: "copilot" };
+  assert.deepEqual(parseAmuxWorkerRegistryChange(renamed), renamed);
   for (const bad of [
-    { ...good, workerName: "devin-worker" },
+    { ...good, workerName: "Devin_worker" },
+    { ...good, providerClass: "devin" },
+    { ...good, providerClass: undefined },
     { ...good, roleCeiling: "review" },
     { ...good, roleCeiling: "Chore" },
     { ...good, desiredState: "autonomous" },
@@ -225,15 +234,18 @@ test("a stored row maps back only when it is one the guard would have accepted",
   const row = { workerName: "copilot-impl", providerClass: "copilot", roleCeiling: "implementation", desiredState: "requested", revision: 2n };
   assert.deepEqual(amuxWorkerRegistrationFromRow(row), { ...row, revision: 2 });
   for (const [label, bad] of Object.entries({
-    class: { ...row, providerClass: "codex" },
+    class: { ...row, providerClass: "devin" },
     ceiling: { ...row, roleCeiling: "contract" },
     state: { ...row, desiredState: "on" },
     zero: { ...row, revision: 0 },
     string: { ...row, revision: "2" },
-    name: { ...row, workerName: "devin-worker" },
+    name: { ...row, workerName: "Devin_worker" },
+    reserved: { ...row, workerName: "engineering-runner" },
   })) {
     assert.equal(amuxWorkerRegistrationFromRow(bad), null, label);
   }
+  // The class is the row's own, whatever the name says (owner decision 2026-10-27).
+  assert.deepEqual(amuxWorkerRegistrationFromRow({ ...row, providerClass: "codex" }), { ...row, providerClass: "codex", revision: 2 });
 });
 
 test("a latch is open when its newest event is an opening", () => {
@@ -337,16 +349,22 @@ test("the catalog name rule is the AMUX machine-id rule, and wider than the regi
 test("version 34: the engineering adapter's runner is a code constant by name and can never be a registry entry", () => {
   assert.deepEqual([...AMUX_WORKER_CATALOG_EXEMPT], ["engineering-runner"]);
   assert.ok(Object.isFrozen(AMUX_WORKER_CATALOG_EXEMPT));
-  // An exempt name can never also be a registry entry: the grammar (and the
-  // migration's CHECK) refuse it, so the derived catalog's constant entry
-  // and the ceiling check's exception cannot collide with a registered worker.
+  // An exempt name can never also be a registry entry: the grammar refuses it
+  // by name (and the CHECK of migration 20261027120000 likewise), so the
+  // derived catalog's constant entry and the ceiling check's exception cannot
+  // collide with a registered worker.
   for (const name of AMUX_WORKER_CATALOG_EXEMPT) {
     assert.equal(isAmuxWorkerName(name), false, name);
-    assert.equal(parseAmuxWorkerRegistryChange({ workerName: name, roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 }), null, name);
+    for (const providerClass of AMUX_WORKER_PROVIDER_CLASSES) {
+      assert.equal(parseAmuxWorkerRegistryChange({ workerName: name, providerClass, roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 }), null, name);
+    }
   }
-  // No other name is: devin-worker, removed in version 27, is neither a constant nor registrable.
+  const sql = readFileSync(new URL("../prisma/migrations/20261027120000_amux_cli_models_and_worker_cli/migration.sql", import.meta.url), "utf8");
+  for (const name of AMUX_WORKER_CATALOG_EXEMPT) assert.equal(sql.split(`"workerName" <> '${name}'`).length - 1, 5, name);
+  // No other name is: devin-worker, removed in version 27, is not a constant;
+  // since names are free it is registrable, but only with one of the four CLIs.
   assert.equal(AMUX_WORKER_CATALOG_EXEMPT.includes("devin-worker"), false);
-  assert.equal(isAmuxWorkerName("devin-worker"), false);
+  assert.equal(parseAmuxWorkerRegistryChange({ workerName: "devin-worker", providerClass: "devin", roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 }), null);
 });
 
 test("version 34 is recorded in the policy with the exempt name", () => {
@@ -355,4 +373,16 @@ test("version 34 is recorded in the policy with the exempt name", () => {
   assert.ok(policy.includes(["## 버전 34 — engineering adapter runner의 등록부 비교 제외", "", "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`"].join(String.fromCharCode(10))));
   assert.ok(policy.includes("`AMUX_WORKER_CATALOG_EXEMPT`"));
   assert.ok(policy.includes("`engineering-runner`"));
+});
+
+test("a worker keeps the CLI it was registered with (owner decision 2026-10-27)", () => {
+  const active = registration("kimi-impl", "active", "implementation");
+  const copilot = { ...active, providerClass: "copilot" };
+  assert.equal(amuxWorkerRegistryChangeRefusal(copilot, change("kimi-impl", "paused", "implementation", 1, "copilot")), null);
+  assert.equal(
+    amuxWorkerRegistryChangeRefusal(copilot, change("kimi-impl", "paused", "implementation", 1, "codex")),
+    "class_changed",
+  );
+  // A new name with any CLI is a first event like any other.
+  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("kimi-impl", "requested", "implementation", 0, "copilot")), null);
 });

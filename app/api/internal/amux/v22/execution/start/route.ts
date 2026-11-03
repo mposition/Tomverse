@@ -11,8 +11,8 @@ import { amuxInternalErrorResponse, amuxJsonNoStore,
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { startAmuxV22TaskExecution } from "@/lib/amux/execution";
 import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
-import { readEngineeringAgentDevelopHead } from
-  "@/lib/engineeringAgentGitHubRead";
+import { EngineeringAgentGitHubReadError,
+  readEngineeringAgentDevelopHead } from "@/lib/engineeringAgentGitHubRead";
 import { readEngineeringAgentSwitches } from
   "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -40,16 +40,25 @@ export async function POST(request: Request) {
     try {
       const body = await readLimitedJson(request, 4 * 1_024, requestSchema);
       let publicationBaseSha: string | null = null;
-      try {
-        if (amuxV22EngineeringPublicationEnabled(
-          process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
-            (await readEngineeringAgentSwitches(prisma)).publishAllowed &&
-            await readAmuxV22PublicPrConsent(body.task_id)) {
-          publicationBaseSha = await readEngineeringAgentDevelopHead();
-        }
-      } catch {
+      if (amuxV22EngineeringPublicationEnabled(
+        process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV])) {
         // Publication is optional. A missing consent key or read-only GitHub
-        // outage cannot confer authority or prevent private Task execution.
+        // outage cannot confer authority or prevent private Task execution,
+        // but the skip is logged: a silent one hid every cause so far.
+        let skipped: string | null = null;
+        try {
+          if (!(await readEngineeringAgentSwitches(prisma)).publishAllowed)
+            skipped = "publish_switch_off";
+          else if (!(await readAmuxV22PublicPrConsent(body.task_id)))
+            skipped = "public_pr_consent_unverified";
+          else publicationBaseSha = await readEngineeringAgentDevelopHead();
+        } catch (error) {
+          skipped = error instanceof EngineeringAgentGitHubReadError ?
+            `develop_head_${error.code}` : "publication_read_failed";
+        }
+        if (skipped) console.warn(JSON.stringify({ subsystem: "amux",
+          event: "v22_publication_skipped", taskId: body.task_id,
+          reason: skipped }));
       }
       const result = await startAmuxV22TaskExecution({
         taskId: body.task_id, assignmentId: body.assignment_id,

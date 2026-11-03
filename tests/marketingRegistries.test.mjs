@@ -24,8 +24,10 @@ import {
   MARKETING_EVIDENCE_PAGES,
   MARKETING_LOCALE_PAGE_LANGUAGE,
   isMarketingEvidenceRoute,
+  resolveMarketingPageEvidence,
   unresolvedClaimEvidence,
 } from "../lib/marketingEvidencePages.ts";
+import { marketingTextHygiene } from "../lib/marketingGuardNormalise.ts";
 import {
   MARKETING_ASSET_REGISTRY_PATH,
   marketingAssetRegistrySchema,
@@ -70,8 +72,7 @@ const asset = (overrides = {}) => ({
 // Claims
 // ---------------------------------------------------------------------------
 
-test("both registries ship empty, so nothing publishes before it is approved", () => {
-  assert.deepEqual([...MARKETING_CLAIMS], []);
+test("the asset registry ships empty, so no file publishes before a person approves it", () => {
   const registry = marketingAssetRegistrySchema.parse(
     JSON.parse(readFileSync(MARKETING_ASSET_REGISTRY_PATH, "utf8")),
   );
@@ -445,6 +446,56 @@ test("a registered page claim names a route whose copy can be read", () => {
   }
 
   assert.deepEqual(unresolvedClaimEvidence(MARKETING_CLAIMS), []);
+});
+
+test("every registered page claim's sentence can pass the Guard's text hygiene", () => {
+  // The Guard refuses a draft whose words carry an address-like token, and a
+  // page claim is rendered word for word -- so a sentence that fails hygiene in
+  // one of its locales is a claim no post in that locale can ever carry.
+  // (The Chinese FAQ's credits answer is the case: "。AI Review" reads as a host.)
+  const pageClaims = MARKETING_CLAIMS.filter((claim) => claim.evidence?.kind === "page");
+  assert.ok(pageClaims.length > 0);
+  for (const claim of pageClaims) {
+    for (const locale of claim.locales) {
+      const resolved = resolveMarketingPageEvidence({
+        pageRoute: claim.evidence.pageRoute,
+        localeKey: claim.evidence.localeKey,
+        locale,
+      });
+      assert.equal(resolved.ok, true, `${claim.id} ${locale}`);
+      assert.deepEqual(marketingTextHygiene(resolved.text), [], `${claim.id} ${locale}`);
+    }
+  }
+});
+
+test("no registered price claim is for the Australian or RedNote market", () => {
+  // An Australian price needs a stored GST-inclusive AUD amount the Guard
+  // cannot verify (§7.2 rule 3); RedNote's overseas readers include Australia.
+  // `en` is in since the owner's decision of 2026-11-02, and only because the
+  // Guard holds an English price to the stored amount with its currency named
+  // and refuses AUD (tests/marketingGuardCore.test.mjs). `zh-Hans` stays out.
+  for (const claim of MARKETING_CLAIMS) {
+    if (claim.type !== "pricing" && claim.type !== "plan") continue;
+    assert.equal(claim.factSource?.kind, "billing_plan", claim.id);
+    assert.equal(claim.factSource.targetsAustralia, false, claim.id);
+    assert.deepEqual([...claim.locales].sort(), ["en", "ko", "zh-Hant"], claim.id);
+    // The English price rule compares a post with the stored name, amount and
+    // currency; a claim that stops reading one of them can never match.
+    assert.deepEqual([...claim.factSource.fields], ["name", "monthlyPriceCents", "currency"], claim.id);
+  }
+});
+
+test("a registered claim cannot be edited at runtime", () => {
+  // Frozen all the way down: a claim whose evidence key could be reassigned
+  // after the schema test ran is a different claim from the one reviewed.
+  const claim = MARKETING_CLAIMS.find((entry) => entry.evidence?.kind === "page");
+  assert.equal(Object.isFrozen(claim), true);
+  assert.equal(Object.isFrozen(claim.evidence), true);
+  assert.equal(Object.isFrozen(claim.locales), true);
+  assert.throws(() => {
+    "use strict";
+    claim.evidence.localeKey = "title";
+  }, TypeError);
 });
 
 test("a registry that has content no longer calls itself version one", () => {

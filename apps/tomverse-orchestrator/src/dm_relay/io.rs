@@ -321,6 +321,9 @@ pub struct Relay<A, L, B> {
     settled_start: bool,
     /// Stage S2-2b4: where the walk over the operator's answer records stands.
     direct_cursor: DirectCursor,
+    /// Where the v22 question walk over confirmed proposals stands
+    /// (`v22_question`), as the app last said.
+    v22_cursor: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,6 +348,7 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             delivery_cursor: None,
             settled_start: false,
             direct_cursor: DirectCursor::starting_at(now_secs()),
+            v22_cursor: None,
         }
     }
 
@@ -406,6 +410,21 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         // A person's confirmed answer goes before a new question: it is the
         // end of a question already asked.
         let delivered = self.deliver().await || closed;
+        // A v22 worker's questions: the app answers a confirmed one, and the
+        // cards to file and to close (`v22_question`). Never halts.
+        let v22 = super::v22_question::sync_v22_questions(&self.app, &self.local, self.v22_cursor.as_ref()).await;
+        match &v22.cursor {
+            super::v22_question::V22Cursor::Keep => {}
+            super::v22_question::V22Cursor::Reset => self.v22_cursor = None,
+            super::v22_question::V22Cursor::Advance(after) => self.v22_cursor = Some(after.clone()),
+        }
+        if v22.did_work() {
+            println!(
+                "amux dm relay: v22 questions: resolved {}, filed {}, closed {}",
+                v22.resolved, v22.filed, v22.closed
+            );
+        }
+        let delivered = delivered || v22.did_work();
         if self.halt.is_some() {
             return Tick::Idle;
         }
@@ -877,7 +896,16 @@ mod tests {
         (relay, app_seen, local_seen, lines)
     }
 
+    /// The app paths of the question and delivery flows. The v22 question
+    /// sync (`v22_question`) runs every tick too; `all_app_paths` keeps it.
     fn app_paths(seen: &Arc<Mutex<Vec<Seen>>>) -> Vec<String> {
+        all_app_paths(seen)
+            .into_iter()
+            .filter(|path| !path.starts_with("v22-questions/"))
+            .collect()
+    }
+
+    fn all_app_paths(seen: &Arc<Mutex<Vec<Seen>>>) -> Vec<String> {
         seen.lock()
             .unwrap()
             .iter()
@@ -907,6 +935,12 @@ mod tests {
             relay_with(vec![], json!({"status": "verified"})).await;
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(relay.halt(), None);
+        // After the confirmed answers and before the question scan, every tick
+        // asks the app for v22 worker questions (`v22_question`).
+        let all = all_app_paths(&app_seen);
+        let sync = all.iter().position(|path| path == "v22-questions/sync").expect("v22 sync");
+        assert!(all.iter().position(|path| path == "deliveries/next").unwrap() < sync);
+        assert!(sync < all.iter().position(|path| path == "requests").unwrap());
         // The first tick settles the start (stage S2-2b4), then asks for a confirmed
         // answer (stage S2-2b3); there is neither.
         assert_eq!(

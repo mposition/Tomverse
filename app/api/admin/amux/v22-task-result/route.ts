@@ -8,6 +8,8 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication,
   isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
+import { readAmuxV22OwnerQuestionForResult } from
+  "@/lib/amux/v22OwnerQuestionService";
 import { readAmuxV22TaskResultForOwner } from
   "@/lib/amux/v22TaskResultStore";
 import { authOptions } from "@/lib/auth";
@@ -31,7 +33,11 @@ export async function GET(request: Request): Promise<Response> {
     const taskId = z.string().min(1).max(160).safeParse(params.get("taskId"));
     if (!taskId.success) return json({ error: "Invalid request." }, 400);
     const result = await readAmuxV22TaskResultForOwner(taskId.data);
-    return result ? json({ result }) : json({ error: "Not found." }, 404);
+    if (!result) return json({ error: "Not found." }, 404);
+    const question = result.state === "available" ?
+      await readAmuxV22OwnerQuestionForResult(result.attemptId, result.text) :
+      null;
+    return json({ result, question });
   } catch (error) {
     if (isAdminReauthenticationError(error))
       return json({ error: "ADMIN_REAUTHENTICATION_REQUIRED" }, 428);

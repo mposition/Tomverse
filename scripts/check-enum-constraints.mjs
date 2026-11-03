@@ -234,9 +234,9 @@ const REGISTRY = {
   ProductAnalyticsEvent_language_check: {
     owner: "list",
     module: "lib/language.ts",
-    list: "SUPPORTED_LANGUAGES",
+    list: "ANALYTICS_LANGUAGES",
     reason:
-      "The seven shipped locales. Adding a locale without recreating this constraint would drop that locale's analytics on the floor at insert time.",
+      "The seven analytics languages. A site locale outside it (zh-Hant) reports under an existing value; adding one here without recreating this constraint would drop that locale's analytics on the floor at insert time.",
   },
   ChatResponseAttempt_status_check: {
     owner: "list",
@@ -1182,7 +1182,21 @@ const REGISTRY = {
     module: "lib/amux/workerRegistryCore.ts",
     list: "AMUX_WORKER_PROVIDER_CLASSES",
     reason:
-      "Orchestration policy version 31, section 2: the four provider classes. A fifth class, or a ceiling raised for one, is a new policy version; a second CHECK keeps the unverified cursor and copilot below contract, and a third ties the class to the worker name's prefix.",
+      "Orchestration policy version 31, section 2: the four provider classes. A fifth class, or a ceiling raised for one, is a new policy version; a second CHECK keeps the unverified cursor and copilot below contract. Since the owner decision of 2026-10-27 the class is chosen at registration and no CHECK ties it to the name.",
+  },
+  AmuxCliModel_cli_check: {
+    owner: "list",
+    module: "lib/amux/cliModelCatalogCore.ts",
+    list: "AMUX_CLI_MODEL_CLIS",
+    reason:
+      "The worker CLIs whose model names the AMUX host refreshes (owner decision 2026-10-27): the four worker classes, since a worker's class is the CLI it runs.",
+  },
+  AmuxCliModelLinkEvent_cli_check: {
+    owner: "list",
+    module: "lib/amux/cliModelCatalogCore.ts",
+    list: "AMUX_CLI_MODEL_CLIS",
+    reason:
+      "The CLIs an owner may link a model name of to the Admin › Models entry that prices it (owner decision 2026-10-27): the four worker classes.",
   },
   AmuxWorkerRegistryEvent_role_ceiling_check: {
     owner: "list",
@@ -2103,6 +2117,27 @@ const REGISTRY = {
     list: "MARKETING_REPORT_KINDS",
     reason:
       "Which aggregate a report row is. It is also the key into MARKETING_REPORT_PAYLOAD_SCHEMAS and into the retention periods of docs/policy/marketing-automation.md §12.2, so a kind the list does not know would be a row with no schema to parse it and no date to delete it by -- which is why MarketingReport_retentionUntil_check's CASE has no ELSE.",
+  },
+  MarketingAsset_kind_check: {
+    owner: "list",
+    module: "lib/marketingAssetCore.ts",
+    list: "MARKETING_ASSET_KINDS",
+    reason:
+      "Whether a stored file is a picture or a video. It decides the content types, the size limit and whether a duration is required (MarketingAsset_file_check), so a kind the list did not know would be a file no rule measured.",
+  },
+  MarketingAsset_provenance_check: {
+    owner: "list",
+    module: "lib/marketingAssets.ts",
+    list: "MARKETING_ASSET_PROVENANCES",
+    reason:
+      "Where a file came from, in the hand-kept registry's terms. The AI-origin values forbid a product-interface asset and a `none` disclosure, so the list is the one the registry schema checks.",
+  },
+  MarketingAsset_status_check: {
+    owner: "list",
+    module: "lib/marketingAssetCore.ts",
+    list: "MARKETING_ASSET_STATUSES",
+    reason:
+      "Where a file stands. Only `approved` reaches the registry the Guard and the publisher read, and MarketingAsset_write_guard checks each decision against the person's audit action 'marketing_asset.' || status, so a status the list did not know is one no audit action could prove.",
   },
   MarketingCompetitor_status_check: {
     owner: "list",

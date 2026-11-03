@@ -273,6 +273,12 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/analytics?tab=ai-review");
 
+    // Preparation intentionally hides observed scores until the operator
+    // chooses the results view. Exercise that navigation, then the scorecard.
+    await expect(page.getByTestId("ai-review-preparation")).toBeVisible();
+    await expect(page.getByTestId("admin-ai-review-scorecard")).toHaveCount(0);
+    await page.getByRole("link", { name: "Run results and operations" }).click();
+    await expect(page).toHaveURL(/reviewView=reports/);
     await expect(page.getByTestId("admin-ai-review-scorecard")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "M5 scorecard" })

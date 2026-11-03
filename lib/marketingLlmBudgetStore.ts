@@ -27,6 +27,7 @@ import { randomBytes } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { MARKETING_ANALYSIS_ENABLED_KEY, marketingAnalysisEnabledFromValue } from "@/lib/marketingAnalysisCore";
 import { MARKETING_RETENTION_SETTING } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
@@ -117,6 +118,7 @@ export type MarketingLlmRefusal =
   | "kill_switch"
   | "cap_unreadable"
   | "model_not_selected"
+  | "purpose_disabled"
   | "model_not_pinned"
   | "pin_expired"
   | "adapter_profile_unknown"
@@ -231,6 +233,15 @@ export async function reserveMarketingLlmCall(
   const cap = parseMarketingLlmMonthlyCap(settings?.monthlyUsdCap ?? undefined);
   if (settings === null || cap === null) return refused("cap_unreadable");
   if (settings.model !== input.payload.model) return refused("model_not_selected");
+  // The analysis and brief spend only while the operator's Admin switch is on
+  // (2026-11-01, default off), read after the same lock as the settings: a
+  // generator that does not know the switch is off still spends nothing.
+  if (input.payload.purpose === "brief") {
+    const analysisSwitch = await tx.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+      SELECT "value" FROM "AppSetting" WHERE "key" = ${MARKETING_ANALYSIS_ENABLED_KEY}
+    `);
+    if (!marketingAnalysisEnabledFromValue(analysisSwitch[0]?.value)) return refused("purpose_disabled");
+  }
   const pin = resolveMarketingLlmPin(
     env.pins ?? [],
     input.payload.model,

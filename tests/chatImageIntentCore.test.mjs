@@ -10,10 +10,11 @@ import {
   chatImageIntentUserMessage,
   chatImageModelCandidates,
   latestUserTurnHasAttachments,
+  latestUserTurnHasImageAttachment,
   parseChatImageIntentOutput,
   readChatImageDecision,
 } from "../lib/chatImageIntentCore.ts";
-import { askChatImageIntent } from "../lib/chatImageIntentClient.ts";
+import { askChatImageIntent, askChatImageTurn } from "../lib/chatImageIntentClient.ts";
 import { IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
 
 const price = (quality, size, credits) => ({
@@ -96,8 +97,9 @@ test("the schema requires the decision, a listed model and a preset", () => {
       modelId: { type: "string", enum: ["strong", "quick"] },
       preset: { type: "string", enum: ["draft", "standard", "final"] },
       prompt: { type: "string" },
+      edit: { type: "boolean" },
     },
-    required: ["image", "modelId", "preset", "prompt"],
+    required: ["image", "modelId", "preset", "prompt", "edit"],
     additionalProperties: false,
   });
 });
@@ -112,22 +114,22 @@ test("the instructions triage by complexity and keep code graphics in chat", () 
 test("a valid image answer keeps the triaged model and preset", () => {
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "strong", preset: "final" }, candidates),
-    { image: true, modelId: "strong", preset: "final", prompt: null }
+    { image: true, modelId: "strong", preset: "final", prompt: null, edit: false }
   );
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "quick", preset: "standard" }, candidates),
-    { image: true, modelId: "quick", preset: "standard", prompt: null }
+    { image: true, modelId: "quick", preset: "standard", prompt: null, edit: false }
   );
 });
 
 test("an unlisted model or an unoffered preset is dropped, not trusted", () => {
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "held", preset: "standard" }, candidates),
-    { image: true, modelId: null, preset: null, prompt: null }
+    { image: true, modelId: null, preset: null, prompt: null, edit: false }
   );
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "quick", preset: "final" }, candidates),
-    { image: true, modelId: "quick", preset: null, prompt: null }
+    { image: true, modelId: "quick", preset: null, prompt: null, edit: false }
   );
 });
 
@@ -158,14 +160,14 @@ test("the client posts the text and reads the decision", async () => {
     seen = { url, init };
     return jsonResponse({ image: true, modelId: "quick", preset: "draft" });
   });
-  assert.deepEqual(decision, { image: true, modelId: "quick", preset: "draft", prompt: null });
+  assert.deepEqual(decision, { image: true, modelId: "quick", preset: "draft", prompt: null, edit: false });
   assert.equal(seen.url, "/api/chat/image-intent");
   assert.equal(seen.init.method, "POST");
   assert.deepEqual(JSON.parse(seen.init.body), { text: "draw a cat" });
   assert.ok(seen.init.signal instanceof AbortSignal);
   assert.deepEqual(
     await askChatImageIntent("x", {}, async () => jsonResponse({ image: true, preset: "huge" })),
-    { image: true, modelId: null, preset: null, prompt: null }
+    { image: true, modelId: null, preset: null, prompt: null, edit: false }
   );
 });
 
@@ -188,6 +190,27 @@ test("the client falls back to chat on no, refusal, malformed body or failure", 
   );
 });
 
+test("the send reads the answer as the image turn to make, or none for text", async () => {
+  assert.deepEqual(
+    await askChatImageTurn("draw a cat", {}, async () =>
+      jsonResponse({ image: true, modelId: "quick", preset: "draft", edit: true })),
+    { modelIds: ["quick"], preset: "draft", edit: true }
+  );
+  assert.deepEqual(
+    await askChatImageTurn("x", {}, async () => jsonResponse({ image: true, preset: "huge" })),
+    { modelIds: [], preset: null }
+  );
+  assert.equal(await askChatImageTurn("x", {}, async () => jsonResponse({ image: false })), undefined);
+  // The send starts beside the question and reads it later, so a failure is a
+  // text answer, never a rejection left for nobody to catch.
+  assert.equal(
+    await askChatImageTurn("x", {}, async () => {
+      throw new TypeError("network");
+    }),
+    undefined
+  );
+});
+
 test("a follow-up's rewritten prompt is kept only when a previous image was shown", () => {
   const output = { image: true, modelId: "strong", preset: "standard", prompt: "  a blue cat icon  " };
   assert.deepEqual(parseChatImageIntentOutput(output, candidates, true), {
@@ -195,6 +218,7 @@ test("a follow-up's rewritten prompt is kept only when a previous image was show
     modelId: "strong",
     preset: "standard",
     prompt: "a blue cat icon",
+    edit: false,
   });
   assert.equal(parseChatImageIntentOutput(output, candidates).prompt, null);
   assert.equal(
@@ -254,4 +278,63 @@ test("only the message being sent decides attachment eligibility", () => {
     true
   );
   assert.equal(latestUserTurnHasAttachments([]), false);
+});
+
+test("with an attached photo only an edit routes, and never with a rewrite", () => {
+  const edit = { image: true, modelId: "strong", preset: "standard", prompt: "ignored", edit: true };
+  assert.deepEqual(parseChatImageIntentOutput(edit, candidates, false, true), {
+    image: true,
+    modelId: "strong",
+    preset: "standard",
+    prompt: null,
+    edit: true,
+  });
+  // A photo sent with a message that is not about changing it stays in chat.
+  assert.deepEqual(
+    parseChatImageIntentOutput({ ...edit, edit: false }, candidates, false, true),
+    { image: false }
+  );
+  // Without a photo the call's edit flag is never believed.
+  assert.equal(parseChatImageIntentOutput(edit, candidates).edit, false);
+  assert.equal(readChatImageDecision(edit).edit, true);
+});
+
+test("the attached photo is announced to the call and explained in its instructions", () => {
+  const message = chatImageIntentUserMessage("뒤의 소나무를 30% 줄여줘", candidates, null, true);
+  assert.match(message, /Attached photo:\nThe user attached a photo to this message\.\n\nMessage:\n/);
+  assert.doesNotMatch(chatImageIntentUserMessage("cat", candidates), /Attached photo/);
+  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /image=true and edit=true/);
+  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /Without that section edit is always false/);
+});
+
+test("a photo on the message being sent makes it edit-eligible; other files do not", () => {
+  assert.equal(
+    latestUserTurnHasImageAttachment([
+      { role: "user", content: "make it smaller", attachments: [{ id: "a", mediaType: "image/jpeg" }] },
+    ]),
+    true
+  );
+  assert.equal(
+    latestUserTurnHasImageAttachment([
+      { role: "user", content: "x", attachments: [{ id: "a", mediaType: "application/pdf" }] },
+    ]),
+    false
+  );
+  assert.equal(
+    latestUserTurnHasImageAttachment([
+      { role: "user", content: "x", attachments: [{ id: "a", mediaType: "image/png" }] },
+      { role: "assistant", content: "ok" },
+      { role: "user", content: "now this" },
+    ]),
+    false
+  );
+});
+
+test("the client says when the message carries a photo", async () => {
+  let body;
+  await askChatImageIntent("뒤 소나무를 줄여줘", { conversationId: "c", attachedPhoto: true }, async (_url, init) => {
+    body = JSON.parse(init.body);
+    return jsonResponse({ image: false });
+  });
+  assert.deepEqual(body, { text: "뒤 소나무를 줄여줘", conversationId: "c", attachedPhoto: true });
 });

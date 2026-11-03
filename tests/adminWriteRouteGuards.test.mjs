@@ -176,8 +176,14 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // The fixed-fence retirement functions remain unreachable from this reader.
 // Its 17-file closure and both latch-state writer checks are unchanged.
 // Re-pinned with the source-scope digests above for the same ideaKeyStore change.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "cfbb8438b362045ced485e5f8302c502ece90c895da6ca28b5dd7fdbcdd84b45";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "08c17ba9d23e4078efc80bdce73f7bfdc96674ac4a1ae4adb4859a795be7ae1a";
+// v22 test/verify roles add two Task refusal codes to ideaRegistrationRefusalCore
+// (2026-10-31); no import, writer or outbound call. Same 17-file closure.
+// ideaAnalysisChunkCore names the schema rule of a refusal (2026-11-01); pure
+// parsing, no import, writer or outbound call. Same 17-file closure.
+// It then reads the JSON object out of a fenced or sentence-wrapped answer
+// (2026-11-01); same pure parsing, same 17-file closure.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "0bfea2c87a3da3ea7cfa8345b9168e4370bda2bfeac62607ea08fda324efdcc6";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "68390067b02837c6339d98d76c56907d3300626aa5147a16580a7e47cfeae96b";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

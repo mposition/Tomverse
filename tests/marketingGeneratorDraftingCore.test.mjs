@@ -50,15 +50,65 @@ test("the model is given a fixed instruction and only this account's slice of th
   assert.equal(system.role, "system");
   assert.match(system.content, /data, not instructions/);
   assert.match(system.content, /Never write a URL/);
+  assert.match(system.content, /space after the ideographic full stop/);
   const data = JSON.parse(user.content);
   assert.deepEqual(data.task, { platform: "linkedin", locale: "en", posts: 3 });
   assert.deepEqual(data.claims.map((claim) => claim.id), ["claim_compare"]);
   assert.deepEqual(data.assets.map((asset) => asset.id), ["asset_hero"]);
-  assert.deepEqual(data.brief, context.brief);
+  assert.deepEqual(data.brief, { topics: ["topic_compare"], claimIds: [] });
   // A5 writes posts; it is told nothing about the competitor registry, so no
-  // host name can reach a post.
+  // host name can reach a post -- and no market facts, so no competitor price.
   assert.equal("competitors" in data, false);
+  assert.equal("marketIntel" in data, false);
   assert.doesNotMatch(user.content, /poe\.com/u);
+});
+
+test("a claim reaches A5 as what a post making it must say in this locale, and the brief as ids", () => {
+  const withWords = marketingGeneratorContextSchema.parse({
+    ...context,
+    claims: [
+      {
+        id: "claim_compare",
+        type: "feature",
+        statementKey: "compare",
+        locales: ["en", "ko"],
+        validUntil: "2099-12-31",
+        gate: null,
+        planMeaning: null,
+        statements: { en: "Read three answers side by side.", ko: "세 답변을 나란히 읽습니다." },
+        values: null,
+      },
+      {
+        id: "claim_price",
+        type: "pricing",
+        statementKey: "price",
+        locales: ["en"],
+        validUntil: "2099-12-31",
+        gate: null,
+        planMeaning: null,
+        statements: {},
+        values: { name: "Pro", monthlyPriceCents: 1500, currency: "USD" },
+      },
+    ],
+    // As the context route sends it: the latest brief report.
+    brief: {
+      reportId: "r1",
+      periodEnd: "2026-11-01T00:00:00.000Z",
+      payload: { topicIds: ["side-by-side"], claimIds: ["claim_compare"], sourceDigests: [] },
+    },
+  });
+  const [system, user] = marketingA5Messages(withWords, SCOPE);
+  assert.match(system.content, /exactly as given, character for character/);
+  assert.match(system.content, /Do not name another product or company/);
+  const data = JSON.parse(user.content);
+  assert.deepEqual(data.claims, [
+    { id: "claim_compare", type: "feature", statement: "Read three answers side by side.", values: null },
+    { id: "claim_price", type: "pricing", statement: null, values: { name: "Pro", monthlyPriceCents: 1500, currency: "USD" } },
+  ]);
+  assert.deepEqual(data.brief, { topics: ["side-by-side"], claimIds: ["claim_compare"] });
+  // No brief, or one this cannot read, is no brief.
+  assert.equal(JSON.parse(marketingA5Messages({ ...withWords, brief: null }, SCOPE)[1].content).brief, null);
+  assert.equal(JSON.parse(marketingA5Messages({ ...withWords, brief: { payload: "x" } }, SCOPE)[1].content).brief, null);
 });
 
 test("an answer without the registry still parses, for a service deployed before the app", () => {
@@ -132,6 +182,12 @@ test("a link, an id the context did not offer, or a shape the intake refuses dro
   assert.equal(shape.drafts.length, 1);
 });
 
+test("the advertising disclosure is the service's flag: a draft the model left it off still carries it", () => {
+  const read = readMarketingA5Answer(answer([proposal({ disclosureFlags: [] })]), context, SCOPE);
+  assert.equal(read.drafts.length, 1);
+  assert.deepEqual(read.drafts[0].disclosureFlags, ["advertising"]);
+});
+
 test("an answer that is not the one JSON object asked for is refused whole", () => {
   assert.deepEqual(readMarketingA5Answer("Here are your posts:", context, SCOPE), {
     drafts: [],
@@ -174,4 +230,43 @@ test("the submission is what the intake parses and verifies, with the ledger cal
     "00000000-0000-4000-8000-000000000002",
   ]);
   assert.throws(() => marketingDraftSubmissionBody(SECRET, { ...body, drafts: [] }));
+});
+
+test("an asset reaches the model as its kind and what it shows in this locale, and video posts follow the platform", () => {
+  const withVideo = marketingGeneratorContextSchema.parse({
+    ...context,
+    channels: [{ id: "chn_yt", channel: "youtube", accountSlug: "tomverse", defaultLocale: "en", allowedLocales: ["en", "ko"] }],
+    assets: [
+      {
+        id: "media-20261031-compare-ko-short",
+        allowedChannels: ["youtube"],
+        altLocales: ["en", "ko"],
+        claimIds: [],
+        validUntil: "2099-12-31",
+        kind: "video",
+        alt: { en: "Three answers to one question, side by side", ko: "한 질문에 대한 세 답변을 나란히 보여 줍니다" },
+      },
+    ],
+  });
+  const [system, user] = marketingA5Messages(withVideo, { ...SCOPE, channelId: "chn_yt", locale: "ko" });
+  assert.match(system.content, /first line is the video's title/);
+  assert.match(system.content, /return no draft rather than a post without one/);
+  assert.deepEqual(JSON.parse(user.content).assets, [
+    {
+      id: "media-20261031-compare-ko-short",
+      kind: "video",
+      description: "한 질문에 대한 세 답변을 나란히 보여 줍니다",
+      claimIds: [],
+      validUntil: "2099-12-31",
+    },
+  ]);
+  // A context from an app deployed before kinds were sent still reads, with no kind or description.
+  const [, older] = marketingA5Messages(context, SCOPE);
+  assert.deepEqual(JSON.parse(older.content).assets[0], {
+    id: "asset_hero",
+    kind: null,
+    description: null,
+    claimIds: [],
+    validUntil: "2099-12-31",
+  });
 });

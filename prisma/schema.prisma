@@ -72,6 +72,7 @@ model User {
   emailLoginEnabled             Boolean       @default(true)
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
+  ga4UserId                     Ga4UserId?
 
   accounts                             Account[]
   sessions                             Session[]
@@ -1042,6 +1043,20 @@ model ComparisonReviewRunAttempt {
   @@index([reviewerModelId, createdAt])
   @@index([status, createdAt])
   @@index([createdAt])
+}
+
+/// The GA4 User-ID of an account (docs/policy/marketing-automation.md §10.2):
+/// 128 random bits with no relation to the account id, at most one per
+/// account. Created on the first request made after the visitor explicitly
+/// accepted analytics, never before. Withdrawing consent deletes it, after one
+/// GA4 deletion request naming it; so does deleting the account, through the
+/// cascade. Deleting the row is what cuts the account off from whatever GA4
+/// holds under the value, and a later consent gets a new one.
+model Ga4UserId {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyticsUserId String   @unique
+  createdAt       DateTime @default(now())
 }
 
 model ProductAnalyticsEvent {
@@ -2749,6 +2764,7 @@ model AdminAuditLog {
   amuxWorkerTrialEvidence AmuxWorkerTrialEvidence?
   amuxWorkerLatchEvent AmuxWorkerLatchEvent?
   amuxWorkerCapabilityEvent AmuxWorkerCapabilityEvent?
+  amuxCliModelLinkEvent AmuxCliModelLinkEvent?
   promptRefinerAutoBudgetReservations PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetReservationAudit")
   promptRefinerAutoBudgetDispatches PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetDispatchAudit")
   promptRefinerAutoBudgetUnknowns PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetUnknownAudit")
@@ -7707,6 +7723,51 @@ model MarketingCompetitor {
   @@index([status])
 }
 
+model MarketingAsset {
+  id                      String    @id
+  kind                    String
+  provenance              String
+  allowedChannels         String[]
+  disclosure              Json
+  alt                     Json
+  claimIds                String[]
+  validUntil              DateTime  @db.Date
+  depictsProductInterface Boolean
+  r2Key                   String    @unique
+  contentType             String
+  bytes                   Int
+  sha256                  String
+  durationSeconds         Int?
+  transcript              Json
+  status                  String
+  uploadedAt              DateTime?
+  registryVersion         Int?
+  decisionAuditLogId      String?   @unique
+  decidedAt               DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([status])
+}
+
+/// The analysis behind one marketing brief report (operator decision
+/// 2026-11-01): written in the brief's transaction, read by a person in the
+/// Reports tab, never given to A5. `briefReportId` is a plain column rather
+/// than a relation, so MarketingReport -- watched by the webhook pipeline
+/// fingerprint -- gains no back relation. The migration's triggers set both
+/// dates from the database clock, refuse every update, and let retention
+/// alone delete a row past `retentionUntil`.
+model MarketingAnalysis {
+  id             String   @id
+  briefReportId  String   @unique
+  payload        Json
+  sourceVersion  String
+  retentionUntil DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@index([retentionUntil])
+}
+
 model AmuxWorkerRuntime {
   workerName     String   @id
   instanceId     String
@@ -7862,6 +7923,7 @@ model AmuxWorkItem {
   executionAttempts AmuxExecutionAttempt[]
   v22TaskResults    AmuxV22TaskResult[]
   v22TaskPatches    AmuxV22TaskPatch[]
+  v22OwnerQuestions AmuxV22TaskQuestion[]
   v52ReviewRecords  AmuxV52ReviewRecord[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
@@ -7978,6 +8040,7 @@ model AmuxExecutionAttempt {
   cliUsageEvents    AmuxCliUsageEvent[]
   v22TaskResult     AmuxV22TaskResult?
   v22TaskPatch      AmuxV22TaskPatch?
+  v22OwnerQuestion  AmuxV22TaskQuestion?
   v52ReviewRecord   AmuxV52ReviewRecord?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -8019,6 +8082,38 @@ model AmuxV22TaskResult {
   @@unique([attemptId, taskId])
   @@index([taskId, createdAt])
   @@index([ideaId, bodyPurgedAt])
+}
+
+/// A v22 worker question to the owner (operator decision 2026-10-30). The
+/// question text stays in the attempt's encrypted result; this row keeps its
+/// digest, where it stands and the answer until the resumed delivery reads it.
+model AmuxV22TaskQuestion {
+  id               String    @id
+  taskId           String
+  attemptId        String    @unique
+  worker           String
+  sequence         Int
+  questionSha256   String
+  /// open | answered | resumed | cancelled
+  state            String    @default("open")
+  answerText       String?
+  /// operator | dm_confirmed
+  answerSource     String?
+  answeredByUserId String?
+  answeredAt       DateTime?
+  resumedAttemptId String?
+  /// The typed-ask card mirroring this question on the AMUX host, once.
+  localCardId       String?  @unique
+  localCardClosedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@unique([taskId, sequence])
+  @@index([state, createdAt])
 }
 
 /// A bounded patch candidate, not a publication grant. The Publisher may
@@ -10229,6 +10324,7 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
+  laneAttempts        AmuxIdeaLaneAttempt[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
@@ -10257,6 +10353,25 @@ model AmuxIdeaSubmission {
   @@index([state, analysisDeadlineAt])
   @@index([rawPurgeAfter, rawPurgedAt])
   @@index([actorUserId, submittedAt])
+}
+
+/// One run of the idea lane (lib/amux/ideaLaneCore.ts): a GitHub Actions job
+/// that implements an owner idea in one Claude Code session and opens a draft
+/// PR into develop. A run without an outcome past its lease died; the next
+/// claim counts it and tries again, up to the lane's attempt limit.
+model AmuxIdeaLaneAttempt {
+  id         String    @id
+  ideaId     String
+  claimedAt  DateTime
+  leaseUntil DateTime
+  finishedAt DateTime?
+  /// pr_open, or a fixed failure word (AMUX_IDEA_LANE_FAILURES).
+  outcome    String?
+  prNumber   Int?
+  idea       AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+
+  @@index([ideaId, claimedAt])
+  @@index([claimedAt])
 }
 
 /// Intake v19 queue identity created atomically with one session submission.
@@ -11664,6 +11779,41 @@ model AmuxWorkerCapabilityEvent {
 
   @@unique([workerName, revision])
   @@index([workerName, sequence])
+}
+
+/// One model name a worker CLI lists, as the AMUX host last read it (owner
+/// decision 2026-10-27). A system observation refreshed in place; it prices
+/// nothing by itself. `listed` is false once a refresh no longer lists it.
+model AmuxCliModel {
+  id          String   @id
+  cli         String
+  cliModel    String
+  displayName String?
+  listed      Boolean  @default(true)
+  firstSeenAt DateTime @default(now()) @db.Timestamptz(3)
+  lastSeenAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([cli, cliModel])
+}
+
+/// The owner's link from a CLI model name to the Admin › Models entry that
+/// prices it. Append-only, each with its audit row; the newest per name wins.
+/// A NULL `pricedModelId` holds that name. With no link, the name prices from
+/// the Admin › Models entry whose id or API model is that exact name.
+model AmuxCliModelLinkEvent {
+  id            String   @id
+  sequence      BigInt   @unique @default(autoincrement())
+  cli           String
+  cliModel      String
+  pricedModelId String?
+  actorUserId   String
+  auditLogId    String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([cli, cliModel, sequence])
 }
 
 /// Runtime overrides and additions for the image and coding model catalogues.

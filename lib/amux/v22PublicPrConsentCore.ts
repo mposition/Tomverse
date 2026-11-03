@@ -1,7 +1,10 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { deriveAmuxIdeaUnitConfirmation,
   sameAmuxIdeaUnitConfirmation,
   type AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
+import { type AmuxUnitDecisionAuditRow, amuxUnitDecisionAuditActorValid } from
+  "./ideaSystemRegistrationCore.ts";
 
 type ConsentEvidence = {
   cardId: string;
@@ -10,16 +13,14 @@ type ConsentEvidence = {
   taskRole: string | null;
   sourceApprovalId: string | null;
   decision: {
-    id: string; state: string; action: string; actorUserId: string;
-    registeredWorkItemId: string | null; confirmationDigest: string;
-    confirmationDigestKeyId: string; confirmationSnapshot: unknown;
+    id: string; ideaId: string; state: string; action: string;
+    actorUserId: string; registeredWorkItemId: string | null;
+    confirmationDigest: string; confirmationDigestKeyId: string; confirmationSnapshot: unknown;
     finalAuditLogId: string | null;
   } | null;
-  audit: {
-    id: string; action: string; actorUserId: string | null;
-    targetType: string; targetId: string | null; entryHash: string | null;
-    metadata: unknown;
-  } | null;
+  audit: (AmuxUnitDecisionAuditRow & { id: string }) | null;
+  /** The idea's v19 plan registration audit when a system row consumed it. */
+  planRegistrationAudit: AmuxUnitDecisionAuditRow | null;
   digestKey: { digestKeyId: string; digestKey: Buffer };
 };
 
@@ -28,14 +29,15 @@ type ConsentEvidence = {
 export function amuxV22PublicPrConsentAllowed(input: ConsentEvidence): boolean {
   const { decision, audit } = input;
   if (input.sourceSystem !== "admin-idea-v4" ||
-      input.cardType !== "task" || input.taskRole !== "implement" ||
+      input.cardType !== "task" || !amuxV22TaskWritesPatch(input.taskRole) ||
       !decision || !audit || input.sourceApprovalId !== decision.id ||
       decision.action !== "register_card" || decision.state !== "consumed" ||
       decision.registeredWorkItemId !== input.cardId ||
       decision.confirmationDigestKeyId !== input.digestKey.digestKeyId ||
       decision.finalAuditLogId !== audit.id ||
       audit.action !== "amux.v4.unit.consume" ||
-      audit.actorUserId !== decision.actorUserId ||
+      !amuxUnitDecisionAuditActorValid({ audit, decision,
+        planRegistrationAudit: input.planRegistrationAudit }) ||
       audit.targetType !== "AmuxIdeaUnitDecision" ||
       audit.targetId !== decision.id || !audit.entryHash ||
       !/^[a-f0-9]{64}$/.test(audit.entryHash)) return false;
@@ -45,7 +47,7 @@ export function amuxV22PublicPrConsentAllowed(input: ConsentEvidence): boolean {
       snapshot.decisionId !== decision.id ||
       snapshot.actorUserId !== decision.actorUserId ||
       snapshot.card?.cardType !== "task" ||
-      snapshot.card.task?.role !== "implement" ||
+      !snapshot.card.task || !amuxV22TaskWritesPatch(snapshot.card.task.role) ||
       snapshot.card.task.publicPrDisclosureApproved !== true ||
       !snapshot.duplicates) return false;
   const metadata = audit.metadata;

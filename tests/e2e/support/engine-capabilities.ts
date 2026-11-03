@@ -135,3 +135,58 @@ export async function layoutBox(target: Locator) {
   if (!box) throw new Error("element has no layout box");
   return box;
 }
+
+type HarnessCoordinates = { latitude: number; longitude: number; accuracy?: number };
+
+/**
+ * Puts the browser at `coordinates` through the engine's own geolocation, and
+ * returns a function that moves it.
+ *
+ * `context.setGeolocation()` plus a granted permission is how Playwright fakes a
+ * position. Chromium reports it with an epoch-millisecond `timestamp`, as the
+ * spec says. Playwright's WebKit reports the same fix 1000x too large
+ * (1793242133294000 against a `Date.now()` of 1793242133834 on Windows WebKit;
+ * the audit's Linux WebKit fails the same four specs with the same screen), so
+ * the product's `parseChatLocation` reads it
+ * as a fix from the future and refuses it, and every chat-location spec got
+ * "Current location is unavailable" on mobile-safari from the night the feature
+ * ran (2026-10-25). Real Safari takes its timestamp from the device, not from
+ * this override.
+ *
+ * So the engine's own `getCurrentPosition` still answers, permission prompt,
+ * denial and timeout included; only a timestamp that is plainly in the wrong
+ * unit (more than 100x the clock) is scaled back to milliseconds before the
+ * page sees it. The product's freshness and range checks then run on it
+ * unchanged.
+ */
+export async function provideGeolocation(page: Page, coordinates: HarnessCoordinates) {
+  const context = page.context();
+  const moveTo = (next: HarnessCoordinates) => context.setGeolocation(next);
+  await context.grantPermissions(["geolocation"]);
+  await moveTo(coordinates);
+  await page.addInitScript(() => {
+    const native = navigator.geolocation;
+    if (!native) return;
+    const getCurrentPosition = native.getCurrentPosition.bind(native);
+    Object.defineProperty(native, "getCurrentPosition", {
+      configurable: true,
+      value: (
+        success: PositionCallback,
+        failure?: PositionErrorCallback | null,
+        options?: PositionOptions
+      ) =>
+        getCurrentPosition(
+          (position) => {
+            if (position.timestamp <= Date.now() * 100) return success(position);
+            success({
+              coords: position.coords,
+              timestamp: Math.round(position.timestamp / 1000),
+            } as GeolocationPosition);
+          },
+          failure,
+          options
+        ),
+    });
+  });
+  return moveTo;
+}

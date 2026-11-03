@@ -149,11 +149,38 @@ test("the round shows people their pull requests, even behind the pick, without 
   assert.deepEqual(quiet.calls.filter((c) => c[0] === "exclusion").map((c) => c[1].number), [2, 3]);
 });
 
-test("a round that holds for a deploy shows nothing new", async () => {
-  const { ports } = lanePorts([pull(2)], () => ["components/x.tsx"]);
+test("a round that stops before listing still shows the pull requests as GitHub has them, and merges nothing", async () => {
+  // Owner, 2026-10-27: pull requests whose CI had passed showed as needing a
+  // fix for half an hour while every round held for dev deploys.
+  const files = { 2: [".github/workflows/a.yml"], 3: ["components/x.tsx"] };
+  const { ports, calls } = lanePorts([pull(2), pull(3)], (p) => files[p.number]);
   ports.railway.developDeployments = async () => [{ status: "WAITING", createdAt: new Date().toISOString(), serviceId: "s", meta: { branch: "develop", commitHash: HEAD } }];
   let seen = "untouched";
   const outcome = await runQaReleaseMergeLaneRound(ENV, ports, { verdicts: (list) => { seen = list; } });
   assert.equal(outcome.outcome, "hold");
+  assert.deepEqual(seen.map((v) => [v.number, v.status]), [[2, "human"], [3, "queued"]]);
+  assert.equal(calls.some((c) => c[0] === "issue" || c[0] === "merge"), false);
+
+  // Latched: the same.
+  const latched = lanePorts([pull(3)], () => ["components/x.tsx"]);
+  latched.ports.app.readState = async () => ({ dbNowMs: Date.now(), latched: true, openAttempt: null });
+  seen = "untouched";
+  assert.equal((await runQaReleaseMergeLaneRound(ENV, latched.ports, { verdicts: (list) => { seen = list; } })).outcome, "latched");
+  assert.deepEqual(seen.map((v) => [v.number, v.status]), [[3, "queued"]]);
+
+  // A list GitHub will not give leaves the screen as it was, and the outcome as it is.
+  const unread = lanePorts([pull(3)], () => ["components/x.tsx"]);
+  unread.ports.railway.developDeployments = ports.railway.developDeployments;
+  unread.ports.github.listOpenDevelopPulls = async () => {
+    throw new Error("github_500");
+  };
+  seen = "untouched";
+  assert.equal((await runQaReleaseMergeLaneRound(ENV, unread.ports, { verdicts: (list) => { seen = list; } })).outcome, "hold");
   assert.equal(seen, "untouched");
+
+  // Without an observer a holding round reads no pull request.
+  const quiet = lanePorts([pull(3)], () => ["components/x.tsx"]);
+  quiet.ports.railway.developDeployments = ports.railway.developDeployments;
+  await runQaReleaseMergeLaneRound(ENV, quiet.ports);
+  assert.equal(quiet.calls.some((c) => c[0] === "list"), false);
 });

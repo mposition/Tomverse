@@ -25,6 +25,14 @@
 .shell button.primary { background:var(--plugin-selected); color:var(--plugin-accent); border-color:var(--plugin-accent); font-weight:600; }
 .shell button.iconButton { padding:8px 12px; }
 .toolbar { display:flex; gap:12px; margin:28px 0 20px; flex-wrap:wrap; }
+.filter { min-height:44px; max-width:100%; padding:8px 12px; border:1px solid var(--plugin-border); border-radius:10px; color:inherit; background:var(--plugin-surface); font-size:.8125rem!important; }
+.catalogHeading { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+.catalogNotice { font-size:.8125rem; line-height:1.7; color:var(--plugin-muted); margin:0 0 20px; }
+.badges { display:flex; flex-wrap:wrap; gap:6px; }
+.badges span { padding:3px 7px; border-radius:6px; font-size:.6875rem; color:var(--plugin-muted); background:var(--plugin-bg); }
+.cardFooter { margin-top:auto; }
+.loadMore { margin-top:20px; width:100%; }
+.docsLink { color:var(--plugin-accent); text-decoration:underline; text-underline-offset:3px; }
 .search { display:flex; align-items:center; gap:10px; padding:0 14px; border:1px solid var(--plugin-border); border-radius:10px; min-height:44px; max-width:400px; flex:1; min-width:200px; background:var(--plugin-surface); color:var(--plugin-muted); }
 .search input { width:100%; min-width:0; border:0; background:none; color:var(--plugin-text); outline:none; font-size:.875rem; }
 .disclosure { display:flex; align-items:flex-start; gap:12px; padding:16px; margin:0 0 28px; border-radius:12px; background:var(--plugin-selected); color:var(--plugin-accent); font-size:.875rem; line-height:1.7; }

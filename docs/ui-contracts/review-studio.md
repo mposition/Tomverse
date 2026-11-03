@@ -29,6 +29,29 @@ Owner approved Concept B on 2026-10-20: Figma file
   supported providers retain the existing image execution/consent flow. An
   all-unsupported image request never substitutes a provider or calls text.
 
+## Desktop answer analysis (owner direction, 2026-10-27)
+
+PC Review Studio puts one Tomverse answer analysis entry below the composer.
+Results open in a wide modal with Summary and Detailed review tabs. Original
+model answers stay in the canvas; analysis never starts automatically while
+those answers are being generated. Classic and mobile retain their existing
+entry points. The new entry and modal show no credit figures or review-mode
+options.
+
+Both tabs project the same balanced comparison review (without synthesis), not
+two paid requests. Dismissal leaves pending work alive. Reopening and switching
+tabs reuse the result and preserve evidence/feedback state. The authenticated
+GET with the explicit review mode restores server-saved results after reload;
+guest results remain in the current mounted workspace session, not server
+storage. Question/answer changes select a different input; identity changes
+discard the local session. Existing API authorization, quotas and verification
+remain enforced. A progress bar is indeterminate, not an invented percentage.
+
+Verification: `npm run verify:studio-answer-analysis` mounts the real component
+against loopback responses (no provider/DB). It covers one execution across
+reopens, background completion, tabs and evidence, saved reload, changed input,
+identity scope, guest reuse, dark mode and mobile exclusion.
+
 ## In-conversation image answers (owner direction, 2026-10-23)
 
 Image prompts stay in the current Review conversation, as in Chat. Easy routes
@@ -68,8 +91,23 @@ Analytics consent sits after the composer and AI disclaimer, at the bottom of
 the Studio question panel or mobile dock, without changing the consent actions.
 The mobile dock reserves the bottom safe area after its last visible footer.
 
-In Review Studio, drag a model card or answer header into the large answer
-panel to focus that model. The same cards support click, tap, Enter and Space.
+With two selected models, desktop Review Studio shows equal-width, full-height
+answers side by side. Only three selected models expose the Focus/Side-by-side
+view switch. Model chips and the view switch share one toolbar row, without
+the redundant Edit question action; the existing Write/Results control remains.
+The hint describes focusing in Focus and reordering in Side-by-side. Removing a
+model from a focused trio immediately restores the two-column comparison without
+resending or losing answers. Narrow screens retain the existing active-answer
+tabs.
+
+In side-by-side view, dragging a model chip or answer header onto another panel
+moves that answer to the target position. This changes display order only and
+preserves each panel's transcript, follow-up draft and pending stream without
+resending.
+
+With three selected models in Review Studio, drag a model card or answer header
+into the large answer panel to focus that model. The same cards support click,
+tap, Enter and Space in Focus; selecting a card in Side-by-side keeps that view.
 Changing focus or switching to side-by-side only changes the live layout:
 answers, pending streams and selected models stay intact, and no request is
 sent. Narrow screens use the same cards to select the visible answer. Opening

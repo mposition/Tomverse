@@ -162,6 +162,11 @@ export type CiAdmissionGithub = {
   cancelRuns(pull: CiAdmissionPull, options?: { force?: boolean }): Promise<number>;
   /** Who holds or waits for a GitHub-hosted runner right now, repository-wide: each pull request, deploy and other workflow. */
   runnerUsage(): Promise<CiRunnerOwner[]>;
+  /**
+   * Puts a label on the pull request or takes it off (absent already is
+   * fine): the CI auto-fix's "try again" request (CI_FIX_AGAIN_LABEL).
+   */
+  setLabel?(number: number, name: string, present: boolean): Promise<void>;
   /** The `CI admission` commit status on the pull request's head. */
   setStatus(sha: string, state: "pending" | "success", description: string): Promise<void>;
   /**
@@ -192,8 +197,29 @@ export function tokenRefusal(status: number, body: () => unknown): string {
   return `github_token_${status}`;
 }
 
+/**
+ * Why GitHub refused to update a pull request's branch, as a short code; its
+ * message is matched, never kept. 2026-10-26: the repository ruleset "no
+ * updates outside develop" refused every update of #3041's branch, and the
+ * line said "being updated" for half an hour.
+ */
+export function updateBranchRefusal(status: number, body: () => unknown): string {
+  let message = "";
+  try {
+    const parsed = body();
+    if (typeof parsed === "object" && parsed !== null && typeof (parsed as Json).message === "string") message = (parsed as Json).message as string;
+  } catch {
+    // An unreadable body says nothing more than its status.
+  }
+  if (/rule violation|protected ref|ruleset/i.test(message)) return "github_update_branch_ruleset";
+  if (/workflow/i.test(message)) return "github_update_branch_workflows";
+  if (/expected head sha|head sha/i.test(message)) return "github_update_branch_head_moved";
+  if (/conflict/i.test(message)) return "github_update_branch_conflict";
+  return `github_update_branch_${status}`;
+}
+
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
-  const call = async (method: "GET" | "POST" | "PUT", url: string, auth: string, body?: Json) => {
+  const call = async (method: "GET" | "POST" | "PUT" | "DELETE", url: string, auth: string, body?: Json) => {
     const response = await fetch(url, {
       method,
       headers: {
@@ -378,6 +404,14 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       if (answer.status !== 200) throw new Error(`github_${answer.status}`);
       return answer.json();
     },
+    async setLabel(number, name, present) {
+      if (!/^[a-z0-9:-]{1,50}$/.test(name)) throw new Error("github_label_name");
+      const token = await installationToken({ pull_requests: "write", metadata: "read" });
+      const answer = present
+        ? await call("POST", `${REPO}/issues/${number}/labels`, token, { labels: [name] })
+        : await call("DELETE", `${REPO}/issues/${number}/labels/${encodeURIComponent(name)}`, token);
+      if (answer.status !== 200 && !(answer.status === 404 && !present)) throw new Error(`github_label_${answer.status}`);
+    },
     async updateBranch(pull) {
       // Only this write needs Contents write; every other token stays without it.
       const answer = await call(
@@ -388,7 +422,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       );
       // 422: the head moved meanwhile, a conflict, or GitHub refused (a
       // workflow file change needs the Workflows permission too).
-      if (answer.status !== 202) throw new Error(`github_update_branch_${answer.status}`);
+      if (answer.status !== 202) throw new Error(updateBranchRefusal(answer.status, () => answer.json()));
     },
     async runnerUsage() {
       const runs = new Map<number, Json>();

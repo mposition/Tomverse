@@ -24,7 +24,8 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       objects.set(key, Buffer.concat(chunks));
       response.writeHead(200, { ETag: '"synthetic"' }); response.end();
     } else if (request.method === "GET" && url.searchParams.has("versions")) {
-      const prefix = url.searchParams.get("prefix");
+      const prefix = String(url.searchParams.get("prefix"))
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       response.writeHead(200, { "Content-Type": "application/xml" });
       response.end(`<ListVersionsResult><IsTruncated>${listing === "truncated"}</IsTruncated>${
         listing === "version" ? `<Version><Key>${prefix}</Key><VersionId>old</VersionId></Version>` :
@@ -121,7 +122,8 @@ test("retired read-manifest key fences delayed creates and removes old versions"
       return;
     }
     if (request.method === "GET" && url.searchParams.has("versions")) {
-      const prefix = url.searchParams.get("prefix");
+      const prefix = String(url.searchParams.get("prefix"))
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const entries = objects.get(`/amux-test-keys/${prefix}`) ?? [];
       response.writeHead(200, { "Content-Type": "application/xml" });
       response.end(`<ListVersionsResult><IsTruncated>false</IsTruncated>${

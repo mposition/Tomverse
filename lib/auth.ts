@@ -5,7 +5,7 @@ import AzureADProvider from "next-auth/providers/azure-ad";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
-import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
+import { appleSignInProvider, encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
 import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 import { parseEmailLoginIntent, verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
@@ -38,6 +38,7 @@ import { readOAuthSignupGate, readSessionSecuritySnapshot } from "@/lib/sessionS
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
+const appleProvider = appleSignInProvider();
 const azureTenantId = process.env.AZURE_AD_TENANT_ID?.trim();
 const hasCompleteAzureConfiguration = [
     process.env.AZURE_AD_CLIENT_ID,
@@ -66,6 +67,7 @@ export const authOptions: NextAuthOptions = {
     useSecureCookies: process.env.NODE_ENV === "production",
     adapter: encryptedTokenAdapter,
     providers: [
+        ...(appleProvider ? [appleProvider] : []),
         GoogleProvider({
             clientId: process.env.GOOGLE_ID as string,
             clientSecret: process.env.GOOGLE_SECRET as string,

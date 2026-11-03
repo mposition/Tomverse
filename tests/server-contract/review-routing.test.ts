@@ -14,9 +14,9 @@ const { AVAILABLE_MODELS } = require(resolve(root, "lib/models.ts"));
 let configured: string | null = "gpt-6-luna";
 let guidance = "Shared Chat routing criteria, revision one.";
 let budget = true;
-let failed = false;
+let failed: false | Error = false;
 let usage: { inputTokens?: number; outputTokens?: number } = { inputTokens: 100, outputTokens: 10 };
-const calls: Array<{ system: string; maxRetries: number }> = [];
+const calls: Array<{ system: string; maxRetries: number; abortSignal: AbortSignal }> = [];
 const holds: number[] = [];
 const settlements: number[] = [];
 let installed = false;
@@ -25,9 +25,9 @@ async function load() {
   if (!installed) {
     installed = true;
     const realAi = require("ai");
-    mock.module("ai", { namedExports: { ...realAi, generateText: async (options: { system: string; maxRetries: number }) => {
+    mock.module("ai", { namedExports: { ...realAi, generateText: async (options: { system: string; maxRetries: number; abortSignal: AbortSignal }) => {
       calls.push(options);
-      if (failed) throw new Error("unknown provider outcome");
+      if (failed) throw failed;
       return { output: { kind: "text", preset: "standard", choices: [{ provider: "openai", modelId: "gpt-6-luna" }] }, usage };
     } } });
     mock.module(mod("lib/autoLlmRouterSettings.ts"), { namedExports: { readAutoLlmRouterModelId: async () => configured } });
@@ -71,10 +71,30 @@ test("Review reads the same live Chat guidance on each prompt and settles report
   assert.ok(holds.every(amount => amount > 0));
 });
 test("unknown outcomes and missing usage retain their reservation without retries", async () => {
-  const { routeReviewPrompt } = await load(); reset(); failed = true;
+  const { routeReviewPrompt } = await load(); reset(); failed = new Error("unknown provider outcome");
   assert.equal(await routeReviewPrompt(input), null);
   assert.equal(calls.length, 1); assert.equal(settlements.length, 0);
   reset(); usage = {};
   assert.ok(await routeReviewPrompt(input));
   assert.equal(calls.length, 1); assert.equal(settlements.length, 0);
+});
+test("Review gets a longer deadline than Chat and logs only the failure kind", async () => {
+  const { routeReviewPrompt } = await load(); reset();
+  const { REVIEW_ROUTER_TIMEOUT_MS, REVIEW_ROUTER_CLIENT_TIMEOUT_MS } = require(resolve(root, "lib/reviewRoutingCore.ts"));
+  const { AUTO_LLM_ROUTER_TIMEOUT_MS } = require(resolve(root, "lib/autoLlmRouterCore.ts"));
+  assert.ok(REVIEW_ROUTER_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
+  assert.ok(REVIEW_ROUTER_CLIENT_TIMEOUT_MS > REVIEW_ROUTER_TIMEOUT_MS);
+  const logged: string[] = [];
+  const spy = mock.method(console, "error", (line: string) => { logged.push(line); });
+  try {
+    failed = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    assert.equal(await routeReviewPrompt(input), null);
+    assert.equal(calls.length, 1); assert.equal(settlements.length, 0);
+    assert.ok(calls[0].abortSignal instanceof AbortSignal);
+    assert.equal(logged.length, 1);
+    const entry = JSON.parse(logged[0]);
+    assert.equal(entry.event, "review_router_failed"); assert.equal(entry.error, "TimeoutError");
+    assert.equal(entry.provider, "openai"); assert.equal(typeof entry.latencyMs, "number");
+    assert.ok(!logged[0].includes(input.text));
+  } finally { spy.mock.restore(); }
 });

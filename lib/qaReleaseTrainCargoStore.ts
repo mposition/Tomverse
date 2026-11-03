@@ -5,7 +5,7 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { QaReleaseOperatorControlRefusedError } from "@/lib/qaReleaseOperatorControlStore";
-import type { QaReleaseTrainEmergency, QaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoCore";
+import { qaReleaseTrainHiddenUpdate, type QaReleaseTrainEmergency, type QaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoCore";
 import {
   QA_RELEASE_TRAIN_CARGO_ACTION,
   QA_RELEASE_TRAIN_CARGO_TARGET_ID,
@@ -13,7 +13,10 @@ import {
   QA_RELEASE_TRAIN_EMERGENCY_ACTION,
   QA_RELEASE_TRAIN_EMERGENCY_TARGET_ID,
   QA_RELEASE_TRAIN_EMERGENCY_TARGET_TYPE,
+  QA_RELEASE_TRAIN_HIDDEN_ACTION,
+  QA_RELEASE_TRAIN_HIDDEN_TARGET_ID,
   readQaReleaseTrainEmergency,
+  readQaReleaseTrainHidden,
   readQaReleaseTrainSelection,
 } from "@/lib/qaReleaseTrainStore";
 
@@ -82,4 +85,40 @@ export async function saveQaReleaseTrainEmergency(
     { maxWait: 5_000, timeout: 15_000 },
   );
   return readQaReleaseTrainEmergency();
+}
+
+/**
+ * Hides one candidate from the next train's list, or shows it again (owner
+ * request 2026-10-27), audited in the same transaction. Read and written
+ * under the audit chain lock, so two operators' clicks never drop each
+ * other's. Display only: the train never reads it.
+ */
+export async function saveQaReleaseTrainHidden(
+  actor: { session: Session; request: Request },
+  /** Several at once (owner, 2026-10-29): hiding what the verdicts say needs no release. */
+  number: number | readonly number[],
+  hidden: boolean,
+): Promise<number[]> {
+  const changed = typeof number === "number" ? [number] : [...new Set(number)];
+  // The summary names up to ten; the metadata keeps every number.
+  const label =
+    changed.length > 10 ? `${changed.length} candidates (${changed.slice(0, 10).map((n) => `#${n}`).join(", ")}, …)` : changed.map((n) => `#${n}`).join(", ");
+  return prisma.$transaction(
+    async (tx) => {
+      await takeAuditChainLock(tx);
+      let numbers = await readQaReleaseTrainHidden(tx);
+      for (const one of changed) numbers = qaReleaseTrainHiddenUpdate(numbers, one, hidden);
+      await writeAdminAuditLog({
+        ...actor,
+        tx,
+        action: QA_RELEASE_TRAIN_HIDDEN_ACTION,
+        targetType: QA_RELEASE_TRAIN_CARGO_TARGET_TYPE,
+        targetId: QA_RELEASE_TRAIN_HIDDEN_TARGET_ID,
+        summary: hidden ? `Hid ${label} from the next release train's list.` : `Showed ${label} again in the next release train's list.`,
+        metadata: typeof number === "number" ? { number, hidden, numbers } : { changed, hidden, numbers },
+      });
+      return numbers;
+    },
+    { maxWait: 5_000, timeout: 15_000 },
+  );
 }

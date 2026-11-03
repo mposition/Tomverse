@@ -593,16 +593,16 @@ function signatureShapeProblems(
     label: string
 ): string[] {
     const problems: string[] = [];
-    const require = (ok: boolean, what: string) => {
+    const ensure = (ok: boolean, what: string) => {
         if (!ok) problems.push(`${label}: ${what}`);
     };
-    require(/^@[\w-]+$/.test(signature.reviewer), `reviewer "${signature.reviewer}"`);
-    require(ISO_DAY.test(signature.reviewedAt), `reviewedAt "${signature.reviewedAt}"`);
-    require(
+    ensure(/^@[\w-]+$/.test(signature.reviewer), `reviewer "${signature.reviewer}"`);
+    ensure(ISO_DAY.test(signature.reviewedAt), `reviewedAt "${signature.reviewedAt}"`);
+    ensure(
         SHA_40.test(signature.reviewedCommit),
         `reviewedCommit is not a 40-character SHA: "${signature.reviewedCommit}"`
     );
-    require(
+    ensure(
         AUDIT_RECORD.test(signature.record),
         `record is not an audit path: "${signature.record}"`
     );
@@ -611,35 +611,35 @@ function signatureShapeProblems(
         "signedManifestDigest",
         "signedSourceDatasetDigest",
     ] as const) {
-        require(HEX_64.test(signature[field]), `${field} "${signature[field]}"`);
+        ensure(HEX_64.test(signature[field]), `${field} "${signature[field]}"`);
     }
     if (signature.signedTransitionDigest === undefined) {
-        require(
+        ensure(
             signature.reviewedCommit ===
                 LEGACY_SIGNATURE_WITHOUT_TRANSITION_DIGEST,
             "no signedTransitionDigest, and this is not the one signature that " +
                 "predates it"
         );
     } else {
-        require(
+        ensure(
             HEX_64.test(signature.signedTransitionDigest),
             `signedTransitionDigest "${signature.signedTransitionDigest}"`
         );
     }
     const { verdict } = signature;
-    require(
+    ensure(
         verdict.sameBoundaryTotal === SUCC7_SAME_BOUNDARY_COUNT,
         `the verdict counts ${verdict.sameBoundaryTotal} same-boundary ` +
             `transitions, the transition declares ${SUCC7_SAME_BOUNDARY_COUNT}`
     );
-    require(
+    ensure(
         verdict.sameBoundaryPassed === verdict.sameBoundaryTotal,
         `the verdict passes ${verdict.sameBoundaryPassed} of ` +
             `${verdict.sameBoundaryTotal} same-boundary transitions`
     );
-    require(verdict.problemCases === 0, `${verdict.problemCases} problem case(s)`);
-    require(verdict.coverageRepairGoldFit, "the coverage repair's gold was not passed");
-    require(
+    ensure(verdict.problemCases === 0, `${verdict.problemCases} problem case(s)`);
+    ensure(verdict.coverageRepairGoldFit, "the coverage repair's gold was not passed");
+    ensure(
         verdict.cellDiversitySufficient,
         "a cell's diversity was not found sufficient"
     );

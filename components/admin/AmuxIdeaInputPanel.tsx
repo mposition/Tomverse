@@ -89,13 +89,15 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
-  analysisStopAvailable, sessionIntake = false,
+  analysisStopAvailable, sessionIntake = false, analysisTranslationAvailable = false,
   openRequestId = null, progressRows }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisResultAvailable: boolean; analysisBudgetAvailable: boolean;
   analysisStopAvailable: boolean; operatorId: string;
+  /** The Korean reading aid on the analysis result (TOMVERSE_AMUX_ADMIN_KO_TRANSLATION). */
+  analysisTranslationAvailable?: boolean;
   /** amux-intake v19 item 1: session intake is on, so a saved idea joins the
    * automatic analysis queue instead of the v4 approval steps. */
   sessionIntake?: boolean;
@@ -803,7 +805,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           ideaId={submission.ideaId}
           watchToken={analysisWatch?.ideaId === submission.ideaId ? analysisWatch.token : 0}
           watchChunk={continuationChunkIndex}
-          onContinuationReady={setContinuationChunkIndex} /> : null}
+          onContinuationReady={setContinuationChunkIndex}
+          translationAvailable={analysisTranslationAvailable} /> : null}
       {submission.kind === "submitted" && submission.origin !== "session" ? (
         <section className="space-y-3 rounded-xl border p-4 border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-100">{messages.sourceScopeTitle}</h3>

@@ -17,7 +17,17 @@ import {
   marketingWebhookIsStaging,
   parseMarketingWebhookFaultArm,
 } from "@/lib/marketingWebhookCore";
+import { readMarketingAssetsForConsole } from "@/lib/marketingAssetStore";
+import { readExperimentSnapshot } from "@/lib/marketingExperimentState";
+import { buildExperimentsConsole, type ExperimentsConsoleView } from "@/lib/marketingExperimentView";
+import { readMarketingCommentsMonitorHealthy } from "@/lib/marketingCommentsMonitorHealth";
 import {
+  MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
+  listOpenMarketingCommentAlerts,
+  readMarketingGraduation,
+} from "@/lib/marketingStore";
+import {
+  MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
   MARKETING_READ_PAGE_SIZE,
   marketingSectionAvailability,
@@ -141,7 +151,7 @@ export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
   /** How the listed rows were chosen, so the screen can say it exactly. */
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Record<string, unknown>[];
   switches: MarketingSwitchStates;
@@ -182,6 +192,8 @@ export type MarketingConsolePayload = {
    * screen cannot act on, and stating the cap alone would not say it was hit.
    */
   truncated?: boolean;
+  /** The experiments section only: what the start form and the stop control need. */
+  experiments?: ExperimentsConsoleView;
 };
 
 const state = (
@@ -387,7 +399,7 @@ export async function readMarketingConsole(
   section: MarketingConsoleSection,
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
-  const availability = marketingSectionAvailability(section);
+  const availability = marketingSectionAvailability();
   const [{ switches, configGeneration }, webhookStaging, llm, overview] = await Promise.all([
     readSwitches(),
     readWebhookStaging(),
@@ -546,6 +558,7 @@ export async function readMarketingConsole(
   }
 
   if (section === "accounts") {
+    const commentsMonitorHealthy = await readMarketingCommentsMonitorHealthy();
     const channels = await prisma.marketingChannel.findMany({
       orderBy: { createdAt: "desc" },
       take: MARKETING_READ_PAGE_SIZE,
@@ -584,12 +597,20 @@ export async function readMarketingConsole(
       overview,
       webhookStaging,
       canWrite,
-      rows: channels.map((channel) => ({
-        ...channel,
-        approvalStartedAt: channel.approvalStartedAt?.toISOString() ?? null,
-        graduatedAt: channel.graduatedAt?.toISOString() ?? null,
-        pausedAt: channel.pausedAt?.toISOString() ?? null,
-      })),
+      rows: await Promise.all(
+        channels.map(async (channel) => ({
+          ...channel,
+          approvalStartedAt: channel.approvalStartedAt?.toISOString() ?? null,
+          graduatedAt: channel.graduatedAt?.toISOString() ?? null,
+          pausedAt: channel.pausedAt?.toISOString() ?? null,
+          // Where the account stands against the graduation conditions, for an
+          // account that could graduate. The server repeats the test on the click.
+          graduation:
+            channel.status === "approval_mode"
+              ? await marketingGraduationForConsole(channel.id, commentsMonitorHealthy)
+              : null,
+        })),
+      ),
     };
   }
 
@@ -638,6 +659,79 @@ export async function readMarketingConsole(
     };
   }
 
+  if (section === "experiments") {
+    // One row: the current experiment, or the last one. Earlier runs are in
+    // the reports tab (`experiment_result`) and in the audit log.
+    const built = buildExperimentsConsole(await readExperimentSnapshot(prisma), new Date(), {
+      switchOn: switches.experiments === "on",
+      killSwitch: (process.env.MARKETING_AUTOMATION_KILL_SWITCH ?? "").trim() !== "",
+    });
+    return {
+      section,
+      availability,
+      ordering: "newest",
+      pageSize: 1,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      rows: built.rows,
+      experiments: built.experiments,
+    };
+  }
+
+  if (section === "comments") {
+    // The alerts nobody has answered. Counts, codes and a host: the comments
+    // themselves are not kept anywhere, so there is nothing more to show.
+    const open = await listOpenMarketingCommentAlerts(prisma);
+    const now = Date.now();
+    return {
+      section,
+      availability,
+      ordering: "oldest",
+      pageSize: MARKETING_READ_PAGE_SIZE,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      truncated: open.length > MARKETING_READ_PAGE_SIZE,
+      rows: open.slice(0, MARKETING_READ_PAGE_SIZE).map((alert) => ({
+        id: alert.postId,
+        channelId: alert.channelId,
+        alertCount: alert.alertCount,
+        riskCodes: [...alert.riskCodes],
+        externalUrlHost: alert.externalUrlHost,
+        firstDetectedAt: alert.firstDetectedAt.toISOString(),
+        overdue: now - alert.firstDetectedAt.getTime() >= MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
+      })),
+    };
+  }
+
+  if (section === "assets") {
+    // Submissions waiting for a person first, then approved, then retired.
+    // Every value a decision compares against travels with the row: the
+    // decision the page showed and the bytes it showed.
+    const assets = await readMarketingAssetsForConsole(prisma, MARKETING_ASSET_READ_LIMIT);
+    return {
+      section,
+      availability,
+      ordering: "by-status",
+      pageSize: MARKETING_ASSET_READ_LIMIT,
+      switches,
+      configGeneration,
+      llm,
+      overview,
+      webhookStaging,
+      canWrite,
+      truncated: assets.truncated,
+      rows: assets.rows,
+    };
+  }
+
   const reports = await prisma.marketingReport.findMany({
     orderBy: { createdAt: "desc" },
     take: MARKETING_READ_PAGE_SIZE,
@@ -668,4 +762,20 @@ export async function readMarketingConsole(
       createdAt: report.createdAt.toISOString(),
     })),
   };
+}
+
+/** The graduation reading of one account, or null when it cannot be read: the page then offers no graduation. */
+async function marketingGraduationForConsole(channelId: string, commentsMonitorHealthy: boolean) {
+  try {
+    const reading = await readMarketingGraduation(prisma, channelId, commentsMonitorHealthy);
+    return {
+      eligible: reading.eligible,
+      unmet: reading.unmet,
+      approvedPostCount: reading.metrics.approvedPostCount,
+      operatorEditRate: reading.operatorEditRate,
+      firstSuccessAt: reading.metrics.firstSuccessAt?.toISOString() ?? null,
+    };
+  } catch {
+    return null;
+  }
 }

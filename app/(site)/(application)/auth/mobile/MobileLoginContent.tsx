@@ -4,7 +4,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { mobileCopy } from "@/locales/mobile";
 
 export function MobileLoginContent({ challenge, state }: { challenge: string; state: string }) {
-  const { lang } = useLanguage(); const copy = mobileCopy[lang];
+  const { lang } = useLanguage(); const copy = mobileCopy[lang === "zh-Hant" ? "zh" : lang];
   const [error, setError] = useState(false);
   const attempt = useRef<{ key: string; result: Promise<string> } | null>(null);
   useEffect(() => {

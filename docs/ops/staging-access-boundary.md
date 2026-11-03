@@ -280,3 +280,8 @@ if (
 우회를 검토하고 채택하지 않은 이유를 적어 뒀습니다. 인증이 서면 크롤 문제도 같이
 해결되지만, 그것은 결과이지 이 항목의 근거가 아닙니다 — 크롤 억제만 원한다면 더 싼
 방법이 있고, 여기서 값을 치르는 이유는 **사람이 읽는 것**입니다.
+
+## 6. 관련 문서
+
+- [search-indexing-boundary.md](search-indexing-boundary.md): Cloudflare 관리 블록과 애플리케이션 절반이 합쳐져 edge의 `robots.txt`가 만들어지는 방식, staging의 `X-Robots-Tag: noindex` 헤더와 `check:edge-robots` 검사, 그리고 §3에서 staging 접근 문제를 이 문서에 넘기는 경위를 설명합니다.
+- [dev-test-lanes.md](dev-test-lanes.md): dev, Test(staging), production의 배포 lane과 `promote:test` 절차를 설명하고, dev의 bypass 앱이 staging과 같은 다섯 경로를 덮도록 정한 내용을 기록합니다.

@@ -36,4 +36,11 @@ const ko: typeof en = {
   choose: "참여 모델 선택", noParticipants: "모델 또는 제공사를 하나 이상 선택하세요.", reviewUnavailable: "Review를 사용하려면 모바일 서버 연동 업데이트가 필요합니다.",
   imageDecision: "이미지 생성이 필요한 질문입니다. Review 이미지 생성은 별도 가격 확인이 필요합니다.",
 };
-export const mobileParityCopy = (language: MobileLanguage) => language === "ko" ? ko : en;
+const otherLanguages: Record<Exclude<MobileLanguage, "en" | "ko">, typeof en> = {
+  zh: { ...en, review: "对比观点", copy: "复制", copied: "已复制", copyFailed: "复制失败" },
+  de: { ...en, review: "Perspektiven vergleichen", copy: "Kopieren", copied: "Kopiert", copyFailed: "Kopieren fehlgeschlagen" },
+  fr: { ...en, review: "Comparer les points de vue", copy: "Copier", copied: "Copié", copyFailed: "Échec de la copie" },
+  es: { ...en, review: "Comparar perspectivas", copy: "Copiar", copied: "Copiado", copyFailed: "No se pudo copiar" },
+  pt: { ...en, review: "Comparar perspetivas", copy: "Copiar", copied: "Copiado", copyFailed: "Não foi possível copiar" },
+};
+export const mobileParityCopy = (language: MobileLanguage) => language === "ko" ? ko : language === "en" ? en : otherLanguages[language];

@@ -392,7 +392,10 @@ test("default root reader measures fixed unit artifacts and returns metadata-onl
     const state = await readAmuxV22ReadOnlyApiLauncherState(worker, frame, options);
     assert.equal(state.worker, worker);
     assert.match(state.serviceConfigDigest, /^[a-f0-9]{64}$/);
+    // No path or PID leaks into the state. A 64-hex digest is not a leak: it
+    // changes with the temp paths and can contain "4242" by chance.
     assert.equal(Object.values(state).some(value => typeof value === "string" &&
+      !/^[a-f0-9]{64}$/.test(value) &&
       (value.includes("/etc/") || value.includes("4242"))), false);
     assert.equal(providerCalls, 0);
     const current = await inspectAmuxV22ReadOnlyApiLauncher(worker, frame, options);

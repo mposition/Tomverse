@@ -82,6 +82,12 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       },
     }),
 
+  analyticsUserId: (userId) =>
+    prisma.ga4UserId.findMany({
+      where: { userId },
+      select: { analyticsUserId: true, createdAt: true },
+    }),
+
   conversation: (userId) =>
     prisma.conversation.findMany({
       where: { userId },

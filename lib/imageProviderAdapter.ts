@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   IMAGE_GENERATION_MODEL_ID,
+  imageModelSupportsEdit,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
@@ -13,7 +14,9 @@ import {
 } from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
+  buildFalImageEditRequest,
   buildFalImageRequest,
+  FAL_EDIT_ENDPOINT_SUFFIX,
   falAuthorizationHeader,
   falPlatformHeaders,
   falAssetLengthRefused,
@@ -35,9 +38,12 @@ import {
   parseGoogleImageResponse,
 } from "@/lib/googleImageRequest";
 import {
+  buildXaiImageEditRequest,
   buildXaiImageRequest,
   parseXaiImageResponse,
+  XAI_IMAGE_EDITS_URL,
   XAI_IMAGES_URL,
+  xaiReportedCostMicroUsd,
 } from "@/lib/xaiImageRequest";
 
 // The OpenAI Images API call, pinned to the parameter allowlist from
@@ -52,6 +58,19 @@ import {
 // library's retry/config surface.
 
 const OPENAI_IMAGES_URL = "https://api.openai.com/v1/images/generations";
+const OPENAI_IMAGE_EDITS_URL = "https://api.openai.com/v1/images/edits";
+
+/**
+ * The photo an edit changes, already downscaled and re-encoded by the caller
+ * (lib/imageEditSource.ts). Only its description reaches the audit record.
+ */
+export type ImageEditInput = {
+  bytes: Buffer;
+  mimeType: "image/png";
+  width: number;
+  height: number;
+  sha256: string;
+};
 
 // A complex request can run up to ~2 minutes provider-side; the ceiling
 // leaves room for that plus network without letting a hung call outlive the
@@ -122,6 +141,32 @@ export const classifyImageProviderFailure = (
   return "provider_user_error";
 };
 
+/**
+ * Splits an edit's reported input into its text and image parts. With no
+ * breakdown, every input token is counted as an image token -- the dearer
+ * rate, so a missing field never under-settles the cost. With no usage at all
+ * the image part is unknown (null), and settlement then charges the photo's
+ * whole reserved budget rather than nothing.
+ */
+export const openAiEditInputTokens = (
+  totalInputTokens: number | null,
+  details: { text_tokens?: number; image_tokens?: number } | undefined
+): { textTokens: number; imageTokens: number | null } => {
+  const image = details?.image_tokens;
+  if (!Number.isSafeInteger(image) || (image as number) < 0) {
+    return totalInputTokens === null
+      ? { textTokens: 0, imageTokens: null }
+      : { textTokens: 0, imageTokens: Math.max(0, totalInputTokens) };
+  }
+  const text = details?.text_tokens;
+  return {
+    imageTokens: image as number,
+    textTokens: Number.isSafeInteger(text) && (text as number) >= 0
+      ? (text as number)
+      : Math.max(0, (totalInputTokens ?? 0) - (image as number)),
+  };
+};
+
 export type ImageProviderResult = {
   imageBytes: Buffer;
   /**
@@ -132,6 +177,17 @@ export type ImageProviderResult = {
   mimeType: string;
   /** Provider-reported text input tokens; 0 when the response omits usage. */
   inputTokens: number;
+  /**
+   * Image input tokens an edit's photo was billed as. Absent for a
+   * generation; on an edit, `inputTokens` is then the text part alone, and
+   * null means the response reported no usage to read it from.
+   */
+  imageInputTokens?: number | null;
+  /**
+   * What the provider said the whole request cost, micro-USD, where it says
+   * (xAI). Compared against what an edit reserved; never what settles.
+   */
+  reportedCostMicroUsd?: number | null;
   /**
    * Billable internal reasoning tokens, when the provider charges for them.
    * 0 for models that do not (OpenAI images). Recorded so settlement can
@@ -249,6 +305,24 @@ const auditableRequestParams = (
     Object.entries(body).filter(([key]) => !PROMPT_FIELD_NAMES.has(key))
   );
 
+/**
+ * The audit view of an edit's photo: described, never stored. The bytes are
+ * the user's attachment and already live where deletion finds them.
+ */
+const editAuditParams = (editImage: ImageEditInput | undefined): Record<string, unknown> =>
+  editImage
+    ? {
+        endpoint: "edits",
+        image: {
+          mimeType: editImage.mimeType,
+          width: editImage.width,
+          height: editImage.height,
+          byteSize: editImage.bytes.byteLength,
+          sha256: editImage.sha256,
+        },
+      }
+    : {};
+
 const wait = (ms: number) =>
   new Promise((resolveWait) => setTimeout(resolveWait, ms));
 
@@ -263,6 +337,8 @@ export const generateImageWithProvider = async (input: {
   size: ImageSize;
   quality: ImageQuality;
   modelId?: string;
+  /** Set for an edit: the photo the prompt changes. */
+  editImage?: ImageEditInput;
 }): Promise<ImageProviderResult> => {
   const modelId = input.modelId ?? IMAGE_GENERATION_MODEL_ID;
   const model = getImageModel(modelId);
@@ -282,6 +358,18 @@ export const generateImageWithProvider = async (input: {
     throw new ImageProviderError(
       "provider_failed",
       `Image model ${modelId} has no thinking cap its request can enforce.`
+    );
+  }
+  // OpenAI, xAI and fal have edit requests. Any other model asked to edit
+  // would draw a new picture from the prompt alone -- charged as an edit and
+  // ignoring the photo -- so it is refused, as is one whose edit price is held.
+  if (
+    input.editImage &&
+    !(["openai", "xai", "fal"].includes(model.provider) && imageModelSupportsEdit(model.id))
+  ) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image model ${modelId} cannot edit an image.`
     );
   }
   if (model.provider === "xai") {
@@ -309,7 +397,28 @@ export const generateImageWithProvider = async (input: {
     moderation: "auto",
     n: 1,
   };
-  const requestParams = auditableRequestParams(openAiBody);
+  const editImage = input.editImage;
+  const requestParams = { ...auditableRequestParams(openAiBody), ...editAuditParams(editImage) };
+  const openAiRequest = (): { url: string; init: RequestInit } => {
+    if (!editImage) {
+      return {
+        url: OPENAI_IMAGES_URL,
+        init: {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(openAiBody),
+        },
+      };
+    }
+    // The edit endpoint takes multipart form data; fetch writes the boundary.
+    const form = new FormData();
+    for (const [key, value] of Object.entries(openAiBody)) form.set(key, String(value));
+    form.set(
+      "image",
+      new Blob([new Uint8Array(editImage.bytes)], { type: editImage.mimeType }),
+      "image.png"
+    );
+    return { url: OPENAI_IMAGE_EDITS_URL, init: { body: form } };
+  };
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
 
@@ -320,13 +429,15 @@ export const generateImageWithProvider = async (input: {
     }
     let response: Response;
     try {
-      response = await fetch(OPENAI_IMAGES_URL, {
+      // Built per attempt: a multipart body is a stream fetch consumes.
+      const { url, init } = openAiRequest();
+      response = await fetch(url, {
+        ...init,
         method: "POST",
         headers: {
+          ...(init.headers as Record<string, string> | undefined),
           Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify(openAiBody),
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -365,7 +476,11 @@ export const generateImageWithProvider = async (input: {
 
     const payload = (await response.json().catch(() => null)) as {
       data?: Array<{ b64_json?: string }>;
-      usage?: { input_tokens?: number; output_tokens?: number };
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        input_tokens_details?: { text_tokens?: number; image_tokens?: number };
+      };
     } | null;
     const b64 = payload?.data?.[0]?.b64_json;
     if (!b64) {
@@ -377,9 +492,13 @@ export const generateImageWithProvider = async (input: {
         requestParams
       );
     }
-    const inputTokens = Number.isSafeInteger(payload?.usage?.input_tokens)
+    const reportedInputTokens = Number.isSafeInteger(payload?.usage?.input_tokens)
       ? Number(payload?.usage?.input_tokens)
-      : 0;
+      : null;
+    const editInput = editImage
+      ? openAiEditInputTokens(reportedInputTokens, payload?.usage?.input_tokens_details)
+      : null;
+    const inputTokens = editInput ? editInput.textTokens : (reportedInputTokens ?? 0);
     const imageBytes = Buffer.from(b64, "base64");
     // The request pins output_format: "png", so this is the format the
     // provider was told to produce -- still stated explicitly rather than
@@ -390,6 +509,7 @@ export const generateImageWithProvider = async (input: {
       imageBytes,
       mimeType,
       inputTokens,
+      ...(editInput ? { imageInputTokens: editInput.imageTokens } : {}),
       thinkingTokens: 0,
       outputTokens: Number.isSafeInteger(payload?.usage?.output_tokens)
         ? Number(payload?.usage?.output_tokens)
@@ -566,27 +686,33 @@ const generateWithGoogle = async (
  */
 const generateWithFal = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: { prompt: string; size: ImageSize; editImage?: ImageEditInput }
 ): Promise<ImageProviderResult> => {
-  const body = buildFalImageRequest({
+  const request = {
     prompt: input.prompt,
     size: input.size,
     // PNG for the same reason gpt-image-2 stores PNG: it is lossless, and the
     // response's own content type is still what gets recorded.
-    outputFormat: "png",
-  });
-  if (!body) {
+    outputFormat: "png" as const,
+  };
+  const generationBody = buildFalImageRequest(request);
+  const body = input.editImage
+    ? buildFalImageEditRequest({ ...request, image: input.editImage })
+    : generationBody;
+  if (!body || !generationBody) {
     throw new ImageProviderError(
       "provider_failed",
       `Image size ${input.size} has no approved fal price for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  // From the body without the photo: its data URI is the user's bytes.
+  const requestParams = { ...auditableRequestParams(generationBody), ...editAuditParams(input.editImage) };
   const apiKey = getFalApiKey();
+  const endpoint = `${FAL_RUN_URL_BASE}/${model.apiModelId}${input.editImage ? FAL_EDIT_ENDPOINT_SUFFIX : ""}`;
 
   let response: Response;
   try {
-    response = await fetch(`${FAL_RUN_URL_BASE}/${model.apiModelId}`, {
+    response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: falAuthorizationHeader(apiKey),
@@ -744,20 +870,26 @@ const generateWithFal = async (
  */
 const generateWithXai = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: { prompt: string; size: ImageSize; editImage?: ImageEditInput }
 ): Promise<ImageProviderResult> => {
-  const body = buildXaiImageRequest({
+  const request = {
     apiModelId: model.apiModelId,
     prompt: input.prompt,
     size: input.size,
-  });
-  if (!body) {
+  };
+  const generationBody = buildXaiImageRequest(request);
+  const body = input.editImage
+    ? buildXaiImageEditRequest({ ...request, image: input.editImage })
+    : generationBody;
+  if (!body || !generationBody) {
     throw new ImageProviderError(
       "provider_failed",
       `Image size ${input.size} has no xAI resolution mapping.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  // From the body without the photo: its data URL is the user's bytes.
+  const requestParams = { ...auditableRequestParams(generationBody), ...editAuditParams(input.editImage) };
+  const url = input.editImage ? XAI_IMAGE_EDITS_URL : XAI_IMAGES_URL;
   const apiKey = getXaiApiKey();
   let lastError: ImageProviderError | null = null;
 
@@ -768,7 +900,7 @@ const generateWithXai = async (
     }
     let response: Response;
     try {
-      response = await fetch(XAI_IMAGES_URL, {
+      response = await fetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -812,9 +944,8 @@ const generateWithXai = async (
       throw error;
     }
 
-    const parsed = parseXaiImageResponse(
-      await response.json().catch(() => null)
-    );
+    const payload = await response.json().catch(() => null);
+    const parsed = parseXaiImageResponse(payload);
     if (!parsed) {
       throw new ImageProviderError(
         "provider_failed",
@@ -832,6 +963,7 @@ const generateWithXai = async (
       inputTokens: 0,
       thinkingTokens: 0,
       outputTokens: 0,
+      reportedCostMicroUsd: xaiReportedCostMicroUsd(payload),
       providerRequestId,
       // Verified absent 2026-08-04: xAI documents no watermark, C2PA or
       // metadata guarantee. Claiming provenance the bytes may not carry would

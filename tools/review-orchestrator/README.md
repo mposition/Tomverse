@@ -352,7 +352,9 @@ drain 표시는 상태 폴더의 파일이라 재시작해도 남으므로, 마�
 RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
 $RO drain on
 $RO drain wait --timeout 3600        # 실행 중인 검토가 0이 되면 0으로 끝납니다. 시간 초과는 3
-sudo -u review git -C /home/review/review-orchestrator pull --ff-only
+sudo -u review git -C /home/review/review-orchestrator fetch origin main
+sudo -u review git -C /home/review/review-orchestrator checkout --detach origin/main
+sudo -u review git -C /home/review/review-orchestrator log -1 --oneline
 sudo systemctl restart review-orchestrator
 $RO drain off
 ```
@@ -417,13 +419,18 @@ Agent office "독립 검토실"에서 그것을 봅니다.
   때문입니다. unit 파일도 같은 이유로 GitHub에서 받습니다.
 - **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, 계정 quota
   (`quota check`와 같은 probe가 마지막으로 읽은 상태 하나와 남은 양 하나 — 퍼센트, credits 또는
-  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
-  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, probe가 읽은
+  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown),
+  그리고 CI 자동 수정 ledger가 있을 때 최근 시도 12건(PR 번호, head 커밋 id, 종류, 결과, 모델의 결과 코드
+  — 모두 정해진 목록의 이름)과 최근 1시간 수정안 수.
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, 모델의 답·로그·patch, probe가 읽은
   계정 정보. daemon이 그런
   값을 snapshot에 넣지 않고, sender는 review 설정·job·reviewer 원문을 읽지 않으며 파일을
   필드 단위로 다시 만들어 그 밖의 것은 버리고, 앱도 모르는 필드를 거절합니다.
-- **`review` 계정이 할 수 있는 최악은 검토실 숫자를 틀리게 보이는 것입니다**(snapshot 파일을
-  고쳐 쓰는 것). 앱에서 이 숫자로 결정되는 것은 없습니다.
+- **`review` 계정이 할 수 있는 최악은 검토실 숫자와 CI 입장 화면의 자동 수정 상태를 틀리게 보이는 것입니다**
+  (snapshot 파일을 고쳐 쓰는 것). 앱에서 이 값으로 결정되는 것은 "다시 분석" 버튼을 보일지와, 입장 라운드가
+  `ci:fix-again` 라벨을 뗄지뿐입니다. 다시 시도할지는 이 서버가 자기 ledger로 정합니다.
+- **배포 순서**: 앱이 `ciFix` 필드를 받는 버전이 먼저 배포되어야 합니다. 그 전의 앱은 모르는 필드를
+  거절하므로, sender를 먼저 바꾸면 그동안 상태 보고 전체가 400으로 거절됩니다.
 - **검토에 영향을 주지 않습니다.** daemon은 작은 파일 하나를 쓸 뿐 네트워크를 기다리지
   않고, 쓰기에 실패해도 검토는 그대로 진행합니다. 로그는 결과가 바뀔 때만 한 줄입니다.
 - **daemon이 멈추면 sender도 조용해집니다.** snapshot이 3분보다 오래되면(1분 쓰기 세 번
@@ -497,11 +504,106 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 
 ## CI 자동 수정 (PR CI Auto-Fix)
 
-develop으로 가는 `claude/to-develop/**`·`codex/to-develop/**` PR에서 필수 CI(PR Fast Gate,
+develop으로 가는 `claude/to-develop/**`·`codex/to-develop/**`·`dependabot/**` PR에서 필수 CI(PR Fast Gate,
 Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패하면, 이 서버의
 구독 Claude CLI가 가장 작은 수정을 만들고 `.github/workflows/pr-ci-auto-fix.yml`이 검사한 뒤
 그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
 운영자 결정 2026-10-23). PR 하나에 자동 수정 커밋은 최대 2개이고, head 하나에 한 번만 시도합니다.
+
+**develop과의 충돌(운영자 결정 2026-10-27, 기본 꺼짐).** 실패한 CI가 없을 때, 같은 대상 브랜치의 PR(draft 포함)이
+GitHub에서 develop과 충돌하면 이 서버가 mirror의 develop을 그 head에 merge하고(커밋하지 않음) 모델이
+충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 각 충돌 구간을 대신할 줄과 merge한 develop 커밋뿐이고,
+workflow는 자기가 merge한 같은 파일(sha256이 같아야 합니다)에 그 줄을 다시 끼워 넣습니다. 파일 전체를 보내면
+`package-lock.json` 충돌이 전송 상한(60KB)을 넘어 `patch_too_large`로 멈췄습니다(#2969, #2976). 줄을 찾지 못하면
+예전처럼 파일 전체를 보냅니다.
+workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(conflict):` merge 커밋으로 push합니다.
+- 충돌 파일만 바꿨는지, 충돌 표시가 남지 않았는지 봅니다.
+- git이 충돌 구간 밖에 합쳐 둔 내용은 공백까지, 순서까지 그대로 남아야 합니다. 바뀌는 것은 충돌 구간뿐입니다.
+- 충돌 구간 안에서 그 구간의 어느 쪽에도 없던 줄은 새 줄입니다. 게이트 경로에서는 새 줄을 쓸 수 없고,
+  그 밖의 경로도 모두 합쳐 40줄까지입니다.
+- 양쪽 모두 일반 파일이어야 하고, 링크를 따라가지 않고 씁니다.
+- 한쪽이 지운 파일, symlink, 지시 파일이 걸린 충돌은 풀지 않습니다(`no_change`, `outside_rules`).
+- PR마다 `auto-fix(conflict):` 커밋은 최대 2개입니다.
+- head 하나에는 요청 하나만 보냅니다. 같은 head의 CI 수정이 진행 중이거나 보내졌으면 충돌 해결은 기다립니다(반대도 같습니다).
+켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,
+그리고 GitHub 저장소 변수 `PR_AUTO_FIX_CONFLICTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이
+main에 들어간 뒤에 켭니다. develop 쪽에서 workflow 파일이 바뀐 merge는 `GH_AUTOMATION_PAT`에
+workflow 권한이 없으면 push가 거절됩니다.
+
+**보낸 수정의 확인.** 다음 pass가 PR의 새 head를 보고, 그것이 자동 수정 커밋(접두사가 맞고 부모가 시도한
+head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `superseded`로 바꿉니다. 입장 화면의
+"push됨"은 `pushed`이고 그 자동 수정 커밋이 지금도 head일 때만 나옵니다(보고의 `settled`). 보낸 지 2시간이
+지나도 head가 그대로면 workflow가 거절했거나 push가 실패한 것으로 보고 `not_published`로 끝냅니다. 이 상태는
+다시 분석할 수 있고, 같은 head의 다른 종류 수정을 더 막지 않습니다.
+
+**Dependabot PR(운영자 결정 2026-10-26).**
+- main으로 가는 보안 업데이트는 대상이 아닙니다. Dependabot이 연 PR만 대상이고, 사람이 `dependabot/` 이름으로 만든 브랜치는 대상이 아닙니다.
+- 수정은 업데이트된 패키지에 맞춰 앱 코드를 고치는 것입니다. 패키지 버전과 `package.json`·lock은 그대로 둡니다.
+- 루트에서는 앱 빌드·계측 설정(`next.config.ts|mjs|js`, `sentry.client|server|edge.config.ts`, `instrumentation.ts`, `instrumentation-client.ts`)만 고칠 수 있습니다.
+  `proxy.ts`와 검사 설정(`tsconfig`, `eslint`, `playwright` 등)은 계속 막힙니다.
+- **테스트의 API 호출 수정(기본 꺼짐, 운영자 결정 2026-11-01).** 업데이트가 API를 없애거나 이름을 바꾸면
+  그 API를 부르는 테스트도 깨집니다(#3192: officeparser 8이 `toText()`를 없앰). 이 스위치가 켜지면 모델은 이미 있는
+  `*.test.*`·`*.spec.*` 파일에서 그 호출만 새 API로 바꿀 수 있습니다. workflow guard(`testEditProblems`)는 그 파일의 diff를
+  줄 단위로 짝지어 토큰을 비교하고, 다음 중 하나라도 있으면 거부합니다.
+  - 지운 줄 수와 더한 줄 수가 다릅니다. 줄을 끼워 넣거나 뺄 수 없습니다(`test_edit_shape`).
+  - 고친 줄이 그 자체로 완결된 문장이 아닙니다. 이름으로 시작하지 않거나(앞 줄의 호출을 잇는 `(…)`, `.toBe(…)`),
+    여는 괄호를 닫지 않거나(블록을 여는 `{`로 끝나는 줄은 예외), 첫 토큰이나 마지막 토큰이 바뀌었습니다(`test_edit_context`).
+    한 줄만 보고 판정하기 때문에, 여러 줄에 걸친 호출의 가운데 줄은 고칠 수 없습니다.
+  - 지운 토큰이 속성·메서드 이름(`x.toText`의 `toText`)이 아닙니다. 변수, literal, 정규식, 주석, 구두점,
+    `assert`·`expect`로 시작하는 체인의 이름(`assert.strict.equal`의 `equal`, `expect(x).toEqual`의 `toEqual`), `test`·`it`·`describe`는
+    지울 수 없습니다(`test_edit_removed`).
+  - 더한 토큰이 제어 흐름을 바꾸지 않는 이름, `.`·`(`·`)`, 따옴표 문자열 중 하나가 아닙니다. 주석, `return`·`if`·`throw`,
+    `skip`·`todo`·`only`·`not`, `typeof`·`instanceof`·`new` 같은 연산자 키워드, `!`·`||`, `true`·`false`, `,`·`[`·`]`, 객체 literal은 더할 수 없습니다(`test_edit_added`).
+  - 호출되는 쪽(`assert.equal(`, `expect(…).toBe(`, `test(`)에 무엇이 끼어들었거나(`test.bind(`), 그 호출의 인자 개수가 바뀌었습니다
+    (`assert.ok((x, message))`). 인자 안의 식은 고칠 수 있습니다. API를 바꾸는 곳이 거기이기 때문입니다(`test_edit_added`).
+
+  예: `const text = document.toText();` → `const text = (await document.to("text")).value;`와 콜백에 `async`를 붙이는 것은 통과합니다.
+  값을 함수로 감싸는 식의 약화까지 모두 막지는 못하므로, 사람이 병합 전에 diff를 봅니다.
+
+  새 테스트 파일, 이름 바꾸기, 삭제, fixture·snapshot은 계속 막힙니다. merge lane이 사람에게 남기는 정책 테스트(AGENTS.md,
+  CLAUDE.md, `docs/policy/qa-release-agent.md`가 이름을 대는 테스트)도 막히는데, 2026-11-01 현재 그 목록은 비어 있습니다.
+  병합은 사람이 하므로 그 PR의 테스트 diff는 병합 전에 사람이 봅니다.
+  켜는 방법(둘 다 필요): `read.env`에 `PR_CI_AUTO_FIX_DEPENDABOT_TESTS=on`, 그리고 저장소 변수
+  `PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이 main에 들어간 뒤에 켭니다.
+- 다른 계정의 커밋이 들어간 PR은 Dependabot이 더 이상 자동 rebase하지 않습니다. `@dependabot recreate`를
+  쓰면 자동 수정 커밋은 지워집니다.
+- merge lane은 `dependabot/**`를 병합하지 않으므로, 수정된 Dependabot PR의 병합은 사람이 합니다.
+- **패키지 설치(기본 꺼짐).** 메이저 업데이트는 새 API를 봐야 고칠 수 있습니다(#2969: 모델이 v11의
+  `.d.ts`를 볼 수 없어 `not_found`). `read.env`에 `PR_CI_AUTO_FIX_INSTALL=on`을 두면 Dependabot head에서만
+  모델을 부르기 전에 작업 checkout에 `npm ci`를 돌립니다. 설치는 다음 조건으로 돌고, 막히면 모델은 패키지 없이 돕니다.
+  - 패키지 코드는 실행하지 않습니다(`--ignore-scripts`).
+  - lockfile은 허용 목록으로 검사합니다. npm은 git이나 로컬 경로에서 패키지를 받을 때 `--ignore-scripts`와
+    상관없이 git이나 prepare script를 실행하기 때문입니다. lockfile의 모든 항목은 다음 셋 중 하나여야 합니다.
+    - registry(`registry.npmjs.org`) tarball과 integrity, 또는 registry에서 받는 버전 번호
+    - checkout 안의 workspace 폴더
+    - 그 폴더로 가는 link
+
+    아니면 설치하지 않습니다(`non_registry_package`, `no_integrity`, `link_outside`, `path_outside`).
+    `npm-shrinkwrap.json`이 있으면 npm이 그것을 먼저 쓰므로 설치하지 않습니다. 자기 shrinkwrap을 가진 패키지(`hasShrinkwrap`)가 있어도 설치하지 않습니다(`shrinkwrap`).
+  - npm이 도는 동안 브랜치의 `.npmrc`는 모두 옆으로 치워 둡니다. `.npmrc`는 npm이 실행할 프로그램(`git`, `node-gyp` 등)을
+    지정할 수 있는데, 명령줄 flag가 이기는 것은 그 flag가 지정한 키뿐이기 때문입니다.
+  - registry, user config, global config, `git`(`/bin/false`)은 명령줄에서 고정합니다. 계정의 npm 설정과 토큰도 쓰이지 않습니다.
+    두 config는 임시 폴더의 서로 다른 빈 파일입니다. npm 9는 같은 파일(`/dev/null`)을 둘 다로 주면 거부합니다(2026-10-31).
+  - npm에는 `PATH`·`HOME`·`LANG`·`TMPDIR`만 넘깁니다. GitHub 토큰, `npm_config_*`, `NODE_OPTIONS`는 넘기지 않습니다.
+  - lockfile은 브랜치의 것이라 임의의 경로로 가는 링크를 만들 수 있습니다. 그래서 설치 뒤 모델 앞에서 한 번 검사합니다.
+    링크가 checkout 밖을 가리키거나(`link_outside`), hard link·특수 파일이 있으면 설치한 패키지를 지웁니다.
+    패키지가 가진 지시 파일(`CLAUDE.md`, `.claude/` 등)은 지웁니다.
+  - 설치는 15분 안에 끝나야 합니다. 그래서 unit의 `TimeoutStartSec`가 65분입니다.
+  결과는 ledger의 `packages`(`installed` 또는 사유)와 로그 `packages not installed: …`에 남습니다.
+  켜려면 갱신된 `pr-ci-auto-fix.service`를 ④처럼 다시 설치한 뒤, `read.env`에 한 줄을 더합니다.
+  - **npm은 10 이상이어야 합니다**(CI는 npm 10.9). Ubuntu 패키지의 npm 9.2는 이 저장소 lockfile의 workspace를
+    "package.json과 맞지 않는다"(`Missing: @tomverse/mobile-auth`)고 거부합니다. 그래서 설치 전에 `npm --version`을 읽고,
+    10 미만이면 `npm_too_old:<버전>`으로 기록한 뒤 설치하지 않습니다.
+  - unit의 PATH는 auto-fix 전용 npm(`/usr/local/lib/pr-ci-auto-fix-npm/bin`)을 맨 앞에 둡니다. 다른 계정의 npm은 바뀌지 않습니다.
+    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다. 관리 계정의 umask가 077이면
+    폴더가 root만 읽는 `drwx------`로 생기고, review 계정은 그것을 건너뛰어 9.2를 씁니다(2026-11-02). 그래서
+    `chmod`로 읽기와 실행만 엽니다. 확인 줄은 `10.9.9`여야 합니다.
+
+    ```bash
+    sudo npm install -g --prefix /usr/local/lib/pr-ci-auto-fix-npm --ignore-scripts --no-audit --no-fund npm@10.9.9
+    sudo chmod -R go+rX,go-w /usr/local/lib/pr-ci-auto-fix-npm
+    sudo -u review env PATH=/usr/local/lib/pr-ci-auto-fix-npm/bin:/usr/bin:/bin npm --version
+    ```
 
 **두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.** 상태 보고와 같은 이유입니다. 모델은 `review`
 계정으로 돌고, CI 로그와 브랜치 내용은 모델에게 그 계정이 읽을 수 있는 파일이나 프로세스 환경을
@@ -512,6 +614,32 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
   `PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`(기본 30) 이상일 때만 모델을 부릅니다. 한 시간에 6건
   넘게 내보내지 않습니다(sender의 상한과 같아서 sender에서 기다리다 만료되는 요청이 없습니다).
   로그를 읽지 못하면 시도로 치지 않고 다음 pass가 다시 합니다.
+- **모델이 받는 로그.** 실패한 job마다 로그 끝 16MB를 읽어, 실패를 말하는 줄만 앞뒤 몇 줄과 함께 뽑습니다.
+  우선순위는 실패한 step의 마지막 출력(`##[error]Process completed with exit code N` 바로 위, 가까우면
+  그 step의 `Run` 머리부터 최대 60줄)과 node:test의 `✖ failing tests:` 요약, 그다음 `##[error]`·`error TS…`,
+  그다음 실패한 테스트 줄, 마지막으로 일반 `Error` 줄입니다. TAP의 `not ok … # TODO`·`# SKIP`은 실패가
+  아니라서 뽑지 않습니다. step 출력을 맨 앞에 두는 것은 release record 검사나 `npm ci`처럼 결과를 평문으로만
+  쓰는 실패가 다른 실패 줄을 남기지 않기 때문입니다(#3089·#2997, 2026-10-29). job 끝부분만 자르지 않습니다.
+  실패 뒤에 이어지는 정리 단계 로그가 오류 줄을 밀어냈기 때문입니다(#3048, 2026-10-27). 실패 줄이 앞 job과
+  같은 job은 이름만 적습니다(실패 줄이 없으면 실패한 step 이름으로 비교합니다). 전체는 60,000자 안에서 job마다
+  몫을 나눕니다.
+- **모델의 답.** 모델의 마지막 답이 서버 로그(`ci-fix: #PR model said: ...`)와 ledger의 `answer`에 남습니다.
+  실행이 실패하면 stderr도 `stderr`에 남습니다. `no_change`의 이유는 여기서 봅니다.
+  답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
+  Admin › QA·릴리스 › CI 입장 화면에 PR별로 보입니다(2026-10-27). 모델의 문장 자체는 앱으로 가지 않습니다.
+- **기능이 바뀌면 저절로 다시 시도.** ledger는 시도마다 그때의 능력(`ability`)을 남깁니다. 이 모듈
+  (`lib/ci-fix.mjs`, 프롬프트와 설치 경로)의 내용과, 그 head에 닿는 스위치의 digest입니다. Dependabot
+  스위치 두 개(`PR_CI_AUTO_FIX_DEPENDABOT_TESTS`, `PR_CI_AUTO_FIX_INSTALL`)는 Dependabot head에만 닿습니다.
+  고치지 못했거나 검사에 거부된 head도, 그 뒤 능력이 바뀌면 라벨 없이 **한 번 더** 시도합니다. 스위치를
+  켜거나 서버 checkout을 갱신한 경우입니다. 같은 능력으로는 다시 시도하지 않습니다. 보낸 수정과 시도 2회
+  소진은 대상이 아니고, 한 pass에 하나·시간당 상한·quota는 그대로입니다. 이 기록이 없던 예전 항목은 첫
+  갱신 뒤에 한 번 다시 시도합니다(운영자 결정 2026-11-02: 운영자가 라벨을 붙여야만 다시 시도하는 것은
+  자동화가 아니다).
+- **다시 분석.** 같은 head는 같은 능력으로 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
+  PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
+  서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 시도보다 **나중에** 붙은 라벨만 요청으로 봅니다.
+  그래서 예전 head에서 남은 라벨은 새 head를 다시 시도하게 하지 않습니다. 고치지 못함·분석 실패·검사 거부만
+  대상이고, 시도 2회 소진은 대상이 아닙니다. 입장 라운드는 보고에서 현재 head의 재시도가 시작된 것을 확인했을 때만 라벨을 뗍니다(보고가 없거나 기록이 빠진 것은 근거가 아닙니다).
 - **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
   만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
   - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.
@@ -529,8 +657,9 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
 - **sender(`bin/pr-ci-auto-fix-sender.mjs`, systemd `DynamicUser`)**: workflow를 dispatch할 수
   있는 유일한 토큰을 갖습니다. Node 내장 모듈만 쓰는 파일 하나이고, 운영자가 GitHub main에서
   root 소유 경로로 받습니다. outbox 파일은 `review` 계정이 쓰므로 필드 단위로 다시 만들고,
-  head 하나에 한 번(POST 전에 기록하므로 결과를 모르는 요청도 다시 보내지 않습니다), 한 시간에
-  최대 6건 보냅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
+  요청 하나에 한 번(head와 생성 시각으로 기록합니다. POST 전에 기록하므로 결과를 모르는 요청도 다시
+  보내지 않습니다), head 하나에 최대 4건(CI 수정·충돌 해결 × 첫 시도·다시 분석), 한 시간에 최대 6건
+  보냅니다. 예전 sender가 head만으로 남긴 기록은 그 시각 이전에 만든 요청을 보낸 것으로 봅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
 - **판단의 경계는 workflow입니다.** dispatch 입력을 믿지 않고 GitHub 기록으로 다시 확인합니다
   (PR이 그 head에서 열려 있는지, 넘겨받은 run이 그 커밋에서 실패한 필수 run이면서 그 workflow의
   최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 자동 수정 커밋이
@@ -577,12 +706,20 @@ sudo journalctl -u pr-ci-auto-fix-sender --since "5 min ago"     # ci-fix sender
 **④ 같은 서버 bash.** "서버 업데이트 (drain)" 절차로 checkout을 갱신한 뒤 제안 pass를 설치합니다.
 unit은 `/opt/...` 배치를 기준으로 쓰여 있으므로, 이 서버의 현재 배치(`/home/review/...`)로 경로를
 바꿉니다(`systemctl cat review-orchestrator`의 `ExecStart`·`REVIEW_ORCH_CONFIG`와 같아야 합니다).
+관리 계정은 `/home/review`를 읽지 못하므로 파일은 review 계정으로 읽습니다. 읽기가 실패해도
+`sudo tee`는 unit을 빈 파일로 덮어쓰므로(2026-10-31에 실제로 그랬습니다), 임시 파일에 먼저 만들고
+비어 있지 않고 `ExecStart`가 맞을 때만 설치합니다. `INSTALLED`가 나오지 않으면 `daemon-reload`를
+하지 않습니다. reload 전까지 systemd는 이전 unit으로 계속 돕니다. 서버에 둔 drop-in(예:
+`PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`)은 이 설치가 건드리지 않습니다.
 
 ```bash
 D=/home/review/review-orchestrator/tools/review-orchestrator/deploy
-sed -e 's#/opt/review-orchestrator#/home/review/review-orchestrator#' \
-  -e 's#/etc/review-orchestrator/config.json#/home/review/.config/review-orchestrator/config.json#' \
-  "$D/pr-ci-auto-fix.service" | sudo tee /etc/systemd/system/pr-ci-auto-fix.service > /dev/null
+T=$(mktemp)
+sudo -u review cat "$D/pr-ci-auto-fix.service" | sed -e 's#/opt/review-orchestrator#/home/review/review-orchestrator#' \
+  -e 's#/etc/review-orchestrator/config.json#/home/review/.config/review-orchestrator/config.json#' > "$T"
+test -s "$T" && grep -q '^ExecStart=/usr/bin/node /home/review/review-orchestrator/' "$T" \
+  && sudo install -m 0644 -o root -g root "$T" /etc/systemd/system/pr-ci-auto-fix.service && echo INSTALLED
+rm -f "$T"
 sudo cp "$D/pr-ci-auto-fix.timer" /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl start pr-ci-auto-fix && sudo journalctl -u pr-ci-auto-fix --since "5 min ago"
 sudo systemctl enable --now pr-ci-auto-fix.timer

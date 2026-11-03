@@ -15,7 +15,7 @@ export type AmuxCliTokenCounts = {
 
 export type AmuxCliUsageObservation = {
   version: 1;
-  cli: "codex" | "claude";
+  cli: "codex" | "claude" | "copilot" | "cursor";
   completeness: AmuxCliUsageCompleteness;
   /** Null means no trustworthy numeric report, never zero spend. */
   observed: AmuxCliTokenCounts | null;
@@ -247,4 +247,44 @@ export function inspectClaudeCliResultUsage(raw: unknown, options: {
     reasoningOutputIncludedInOutput: null,
     models,
   };
+}
+
+/**
+ * Copilot's `session.usage_checkpoint` and Cursor's `result` report totals in
+ * their own JSON; the v22 sidecar reads them (lib/amux/v22ChannelRun.mjs) and
+ * hands the numbers over. Semantics measured for v19 on 2026-10-20: Copilot
+ * input includes cache reads (no separate count is kept, so all of it is
+ * priced as uncached input), Cursor input excludes them. Neither has a
+ * measured cache-write rule, so a nonzero write is an unknown usage; at zero
+ * the inclusion question cannot change a price and is recorded as false.
+ */
+export function amuxSubscriptionCliUsageObservation(cli: "copilot" | "cursor", input: {
+  counts: { inputTokens: number; outputTokens: number; cacheReadTokens: number;
+    cacheWriteTokens: number } | null;
+  servedModelId: string | null;
+  completedTurns: number;
+  complete: boolean;
+}): AmuxCliUsageObservation {
+  const includeCacheRead = cli === "copilot";
+  const unknown: AmuxCliUsageObservation = {
+    version: 1, cli, completeness: "unknown", observed: null, completedTurns: 0,
+    models: [], inputTokensIncludeCacheRead: includeCacheRead,
+    inputTokensIncludeCacheWrite: false, reasoningOutputIncludedInOutput: null,
+  };
+  const counts = input.counts;
+  if (!counts || ![counts.inputTokens, counts.outputTokens, counts.cacheReadTokens,
+    counts.cacheWriteTokens].every(token) || counts.cacheWriteTokens !== 0 ||
+      (input.servedModelId !== null && !validModelId(input.servedModelId))) return unknown;
+  const observed: AmuxCliTokenCounts = {
+    inputTokens: counts.inputTokens, outputTokens: counts.outputTokens,
+    cacheReadInputTokens: includeCacheRead ? 0 : counts.cacheReadTokens,
+    cacheCreationInputTokens: counts.cacheWriteTokens, reasoningOutputTokens: null,
+  };
+  if (![observed.inputTokens, observed.outputTokens, observed.cacheReadInputTokens]
+    .some((count) => count > 0)) return unknown;
+  const completedTurns = token(input.completedTurns) && input.completedTurns > 0 &&
+    input.completedTurns <= MAX_TURNS ? input.completedTurns : 0;
+  return { ...unknown, observed, completedTurns,
+    completeness: input.complete && completedTurns > 0 ? "reported_complete" : "reported_partial",
+    models: input.servedModelId === null ? [] : [{ modelId: input.servedModelId, observed }] };
 }

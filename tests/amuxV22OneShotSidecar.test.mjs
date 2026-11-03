@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { createConnection } from "node:net";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -701,3 +701,166 @@ test("Ubuntu socket parent must be private",
         join(root, "worker.sock")), /unsafe/);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+
+test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Codex receipt", async () => {
+  const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
+  const investigate = { ...request, role: "investigate", modelId: "gpt-6-luna" };
+  const output = [
+    { type: "thread.started", thread_id: "opaque" }, { type: "turn.started" },
+    { type: "item.completed", item: { type: "agent_message", text: "Findings." } },
+    { type: "turn.completed", usage: { input_tokens: 900, cached_input_tokens: 400,
+      output_tokens: 120, reasoning_output_tokens: 20 } },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const fake = fakeSpawn(output);
+  let cleaned = 0;
+  const result = await runAmuxV22OneShot(investigate, codex,
+    { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+      createRunHome: async (_provider, value) => ({
+        config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
+        cleanup: async () => { cleaned += 1; } }) });
+  assert.equal(cleaned, 1);
+  assert.equal(fake.calls.length, 1);
+  const [call] = fake.calls;
+  assert.equal(call.binary, "/opt/tomverse-amux-v22/codex");
+  assert.deepEqual(call.args.slice(0, 4), ["-a", "never", "--no-daemon", "exec"]);
+  assert.ok(call.args.includes("read-only") && call.args.includes("gpt-6-luna"));
+  // The CLI sees the fresh run home, never the sidecar's own config dir.
+  assert.equal(call.spawnOptions.env.CODEX_HOME, "/run-home/codex");
+  assert.equal(call.spawnOptions.env.HOME, "/run-home");
+  assert.equal(call.spawnOptions.env.CLAUDE_CONFIG_DIR, undefined);
+  assert.equal(result.kind, "succeeded");
+  assert.equal(result.resultText, "Findings.");
+  assert.equal(result.usageReceipt.cli, "codex");
+  assert.equal(result.usageReceipt.provider, "openai");
+  assert.equal(result.usageReceipt.source, "codex_jsonl");
+  // A Claude model or the Claude-only read-only retry is refused before any spawn.
+  await assert.rejects(() => runAmuxV22OneShot({ ...investigate, modelId: "gpt 6" }, codex,
+    { syntheticPlatform: true, spawnChild: fake.spawnChild }), /invalid v22 one-shot request/);
+  // Cursor takes read roles only: implement is refused before any spawn.
+  await assert.rejects(() => runAmuxV22OneShot(request, { ...config, provider: "cursor" },
+    { syntheticPlatform: true, spawnChild: fake.spawnChild }), /invalid v22 one-shot request/);
+  assert.equal(fake.calls.length, 1);
+  // An MCP configuration beside Cursor stops the run before its CLI starts.
+  const guarded = fakeSpawn(output);
+  const blocked = await runAmuxV22OneShot({ ...request, role: "investigate" },
+    { ...config, provider: "cursor" }, { syntheticPlatform: true,
+      spawnChild: guarded.spawnChild, channelPreflight: () => "project_cli_config_present" });
+  assert.equal(guarded.calls.length, 0);
+  assert.deepEqual([blocked.kind, blocked.cliStarted, blocked.failure],
+    ["failed", false, "project_cli_config_present"]);
+  const claudeOnly = fakeSpawn(output);
+  await assert.rejects(() => runAmuxV22OneShot({ ...request, role: "investigate" },
+    { ...config, provider: "cursor" },
+    { syntheticPlatform: true, spawnChild: claudeOnly.spawnChild, channelPreflight: () => null,
+      createRunHome: async (_provider, value) => ({ config: value, cleanup: async () => {} }) }).then((value) => {
+    // The request is valid for Cursor (any model name); a Claude JSON result
+    // has no Cursor terminal event, so the run is unknown, not failed.
+    assert.equal(value.kind, "outcome_unknown");
+    throw new Error("checked");
+  }), /checked/);
+});
+
+// The sidecar takes absolute POSIX paths only.
+test("a Codex or Copilot run never holds the operator's refresh token, and an expiring login never starts",
+  { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "amux-v22-sidecar-auth-"));
+  try {
+    const home = join(root, "home");
+    const cli = join(root, "cli");
+    await mkdir(home);
+    await mkdir(cli);
+    const now = Date.now();
+    const jwt = (expiresAt) => ["e30", Buffer.from(JSON.stringify({
+      exp: Math.floor(expiresAt / 1000) })).toString("base64url"), "c3ludGhldGlj"].join(".");
+    const login = (expiresIn) => JSON.stringify({ auth_mode: "chatgpt", OPENAI_API_KEY: null,
+      tokens: { id_token: jwt(now + expiresIn), access_token: jwt(now + expiresIn),
+        refresh_token: "synthetic-operator-refresh-secret", account_id: "acct-1" },
+      last_refresh: new Date(now - 60_000).toISOString() });
+    const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+      homePath: home, claudeConfigDir: cli };
+    const investigate = { ...request, role: "investigate", modelId: "gpt-6-luna" };
+    const output = [{ type: "turn.started" },
+      { type: "item.completed", item: { type: "agent_message", text: "Findings." } },
+      { type: "turn.completed", usage: { input_tokens: 9, cached_input_tokens: 0,
+        output_tokens: 3 } }].map((event) => JSON.stringify(event)).join("\n") + "\n";
+    // What the CLI would find in its CODEX_HOME at the moment it starts.
+    const seen = [];
+    const fake = fakeSpawn(output);
+    const spawnChild = (binary, args, spawnOptions) => {
+      seen.push(readFile(join(spawnOptions.env.CODEX_HOME, "auth.json"), "utf8"));
+      return fake.spawnChild(binary, args, spawnOptions);
+    };
+    await writeFile(join(cli, "auth.json"), login(24 * 60 * 60 * 1000));
+    const ran = await runAmuxV22OneShot(investigate, codex,
+      { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
+    assert.equal(ran.kind, "succeeded");
+    const copy = JSON.parse(await seen[0]);
+    assert.equal(copy.tokens.refresh_token, "");
+    assert.ok(!JSON.stringify(copy).includes("synthetic-operator-refresh-secret"));
+    // The operator's own file is untouched.
+    assert.match(await readFile(join(cli, "auth.json"), "utf8"), /synthetic-operator-refresh-secret/);
+
+    await writeFile(join(cli, "auth.json"), login(5 * 60 * 60 * 1000));
+    const expiring = await runAmuxV22OneShot(investigate, codex,
+      { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
+    assert.deepEqual([expiring.kind, expiring.cliStarted, expiring.failure],
+      ["failed", false, "channel_auth_refused"]);
+    assert.equal(fake.calls.length, 1);
+
+    // Copilot: the checked token is the only sign-in, carried in its env.
+    const copilot = { ...codex, provider: "github-copilot",
+      binaryPath: "/opt/tomverse-amux-v22/copilot" };
+    const copilotRequest = { ...investigate, modelId: "gpt-6-luna" };
+    const token = `gho_${"a".repeat(36)}`;
+    await writeFile(join(cli, "auth-token"), `${token}\n`);
+    await runAmuxV22OneShot(copilotRequest, copilot,
+      { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
+    assert.equal(fake.calls.length, 2);
+    assert.equal(fake.calls[1].spawnOptions.env.COPILOT_GITHUB_TOKEN, token);
+    await writeFile(join(cli, "auth-token"), "not-a-token");
+    const badToken = await runAmuxV22OneShot(copilotRequest, copilot,
+      { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
+    assert.deepEqual([badToken.kind, badToken.cliStarted, badToken.failure],
+      ["failed", false, "channel_auth_refused"]);
+    assert.equal(fake.calls.length, 2);
+    // Every run home was removed.
+    assert.deepEqual((await readdir(home)).filter((name) => name.startsWith("run-")), []);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("an implement attempt is checked out on its publication base before the CLI starts", async () => {
+  const base = "b".repeat(40);
+  assert.deepEqual(parseAmuxV22OneShotRequest({ ...request, baseSha: base },
+    "worker-a"), { ...request, baseSha: base });
+  for (const bad of [{ ...request, baseSha: "B".repeat(40) },
+    { ...request, baseSha: "b".repeat(39) },
+    { ...request, baseSha: 7 },
+    { ...request, role: "investigate", baseSha: base }])
+    assert.throws(() => parseAmuxV22OneShotRequest(bad, "worker-a"));
+
+  let spawned = 0;
+  const failed = await runAmuxV22OneShot({ ...request, baseSha: base }, config, {
+    syntheticPlatform: true,
+    syncBase: async (path, sha) => {
+      assert.equal(path, config.worktreePath);
+      assert.equal(sha, base);
+      return { ok: false, reason: "worktree_dirty" };
+    },
+    spawnChild: () => { spawned += 1; throw new Error("must not spawn"); },
+  });
+  assert.equal(failed.kind, "failed");
+  assert.equal(failed.cliStarted, false);
+  assert.equal(failed.failure, "base_sync_worktree_dirty");
+  assert.equal(spawned, 0);
+
+  const order = [];
+  const fake = fakeSpawn(JSON.stringify(usage));
+  await runAmuxV22OneShot({ ...request, baseSha: base }, config, {
+    syntheticPlatform: true,
+    syncBase: async () => { order.push("sync"); return { ok: true, baseSha: base }; },
+    captureBaseline: async () => { order.push("baseline"); return { ok: true, baseSha: base }; },
+    spawnChild: (...args) => { order.push("spawn"); return fake.spawnChild(...args); },
+  });
+  assert.deepEqual(order.slice(0, 3), ["sync", "baseline", "spawn"]);
+});

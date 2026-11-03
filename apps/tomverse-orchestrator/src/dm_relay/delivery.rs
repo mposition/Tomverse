@@ -323,6 +323,8 @@ pub fn local_delivery(answer: &HttpAnswer) -> LocalDelivery {
             "question_changed" => Some("question_changed"),
             "owner_changed" | "attempt_changed" => Some("binding_changed"),
             "store_unreadable" => Some("local_refused"),
+            // A v22 worker's question card: answered in the app, never sent.
+            "v22_question_card" | "store_unavailable" => Some("local_refused"),
             lane if lane_refusal(lane) => Some("lane_refused"),
             _ => None,
         },

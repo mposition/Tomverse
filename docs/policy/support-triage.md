@@ -67,9 +67,11 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
 4. 사실을 약속하지 않는 **답변 초안**을 결정적 템플릿으로 만든다. 보내는 것은 사람이다.
 5. 소유자에게는 공통 Agent digest 영역의 일일 digest 하나와, 상한·만료·자동 해소가 있는 대기열만 남긴다.
 
-**LLM을 쓰지 않는다.** 신고 본문과 파생 데이터는 앱 밖의 어떤 제3자에게도 가지 않는다. 본문이 만들 수 있는
-값은 고정 키워드 목록 일치의 enum flag뿐이고, flag는 우선순위를 올리거나 사람 전용 lane으로 보내기만 한다.
-LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 없이는 불가하다.
+**LLM 우선(2026-10-19 운영자 결정, 9절).** 위 1·3·4의 lane·중복 후보·답변 초안은 신고마다 한 번의 LLM 호출이
+만든다. 고정 키워드 목록의 enum flag는 그 아래 바닥으로 남는다: flag가 정한 사람 lane은 모델이 내리지 못하고
+(`billing_human`을 `trust_safety_human`으로 올리는 것만 된다), 서버 검증 없는 `bug_verified`는 쓰지 않는다.
+그래서 신고 본문과 중복 후보의 본문은 운영자가 Admin에서 고른 모델 공급자에게 간다. 모델 선택과 triage는 기본
+꺼짐이고, 어느 하나가 꺼져 있으면 본문은 앱 밖으로 나가지 않는다. 계정 삭제되었거나 닫힌 신고는 보내지 않는다(5절).
 
 ## 2. 하지 않는 것 (절대 조건)
 
@@ -153,6 +155,16 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
   누락 검사가 실패한다. 보존·계정 삭제 fixture는 이 분류에서 파생한다.
 - 계정 삭제 transaction은 manifest의 triage 파생 데이터 전체를 지운다. 그 뒤 어떤 worker pass도 계정 삭제
   marker가 있는 신고에서 triage 행을 만들지 않는다(적격성 조건을 선택 query와 생성 쓰기의 잠금 확인에 함께 적용).
+  모델 호출 직전에 그 배치의 신고와 중복 후보를 id로 한 번 더 읽어, 그때까지 계정 삭제되었거나 닫힌 신고는
+  모델에게 보내지 않는다(2026-10-30). 그 읽기 뒤에 끝난 삭제는 호출보다 뒤의 일이고, 결과 transaction이 그 신고를
+  본 답을 버리며 삭제가 그 행을 지운다.
+  삭제된 신고를 모델에게 보여 준 다른 신고의 suggestion도 지우되, 그 suggestion이 입력을 확정한 상태였으면 같은
+  입력의 내용 없는 `expired` 행을 같은 transaction에 대신 남긴다(2026-10-30). 그래서 남은 신고는 같은 입력으로
+  다시 유료 호출되지 않는다.
+- 답을 받은 입력(`lane`이 있는 행)은 그 행이 뒤에 `superseded`나 `invalidated`가 되어도 확정된 입력으로
+  남는다. 신고의 입력이 바뀌었다가 같은 입력으로 돌아와도, 닫혔다가 다시 열려도 그 입력으로 모델을 다시 부르지
+  않는다. 답을 받기 전에 닫힌 행만 다시 만든다. claim 중인 행은 supersede하거나 invalidate하지 않는다. 그 모델
+  호출은 진행 중일 수 있으므로 claim이 만료되어 `failed`가 되게 두고, `failed`가 입력을 확정한다(2026-10-30).
 - 파생 데이터는 아래 보존 기한을 넘기지 않고, 로그·Sentry·analytics에 남지 않는다.
 
 | 데이터 | 보존 |
@@ -167,6 +179,7 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 | `SupportTriageDecisionRecord`·`SupportTriageDecisionRecordLink` | **결정 뒤 12개월**(X2). link된 신고 중 하나라도 계정 삭제 대상이면 record와 모든 link를 즉시 삭제. 링크만 끊고 행을 남기는 상태는 없다. 목적은 결정의 결과 digest를 본문 삭제 뒤에도 남기는 것이다 |
 | 공통 `AgentDigestItem`(이 Agent 몫) | 본문 `payloadRetentionDays = 90`, 메타 행 `metaRetentionDays = 365`(팀 3 공통값) |
 
+- worker는 만든 지 30일(`TRIAGE_REPORT_WINDOW_DAYS`, terminal suggestion 보존 기한과 같음) 안의 신고만 triage한다. 처리된 suggestion 행이 지워질 때 그 신고는 이미 이 기간 밖이므로, 같은 입력으로 유료 모델을 다시 부르지 않는다(2026-10-30).
 - **보존 회차의 처리 능력.** 한 배치 transaction은 manifest의 모든 부류를 **부류마다 문장 하나**로, 문장마다 그 부류에서 최대 500행(바닥 125행)을 지운다. 그래서 하루 필요한 배치 수는 부류의 합계가 아니라 **가장 큰 부류**가 정하고, 그 부류는 그룹 신호 행(하루 31,200, 8절)이다 — 정상 크기 63배치, 바닥 크기 250배치. suggestion·멤버십·그룹·tombstone·run·결정 record와 link는 같은 배치 안의 자기 문장이 지운다. 앞의 다섯은 8절의 유도 상한이 신호보다 작다. **결정 record와 link에는 상한이 없다**(사람 결정 수는 DB가 막지 않고, 결정당 link ≤ 50). 그래서 이 처리 능력 주장은 **결정 link의 하루 생성량이 31,200 이하**라는 전제 위에 있고, 일일 digest가 그날 생성한 link 수를 보이며, 그 수가 31,200을 넘는 날이 생기면 이 주장은 성립하지 않으므로 이 정책의 새 버전으로 다시 유도한다.
   하루 능력 48회 × 8배치 = 384배치는 **성공 배치 수가 아니라 시작할 수 있는 배치 수**이고, abort된 배치도 이 수를 쓴다. 바닥 요구 250을 빼고 남는 134배치가 abort 여유다. 이 산수는 부류별 DELETE 문장이 `statement_timeout`(400ms) 안에, 배치 하나가 `C_guarded`(10.3초) 안에 끝난다는 **측정되지 않은 전제** 위에 있다. 그래서 "삭제 기한을 맞춘다"는 두 번 확인한다. **(1) P1 착수 전, staging 부하 시험** — P1 전에는 triage flag가 꺼져 production에 지울 행이 없으므로, staging에 8절의 하루 유도 상한만큼(신호 31,200행과 다른 부류의 상한) **보존 기한이 이미 지난 행**을 seed하고 예정 회차를 24시간 돌려 (a) `batchesCompleted = 0 AND overdueRemaining > 0`으로 끝난 회차 0회, (b) 24시간 뒤 `overdueRemaining = 0`, (c) `oldestOverdueAgeSeconds` 최대 86,400초 미만, (d) abort된 배치 수 ≤ 134를 기록한다. 밀린 행을 다 비운 뒤의 배치 0 회차는 실패가 아니다. **(2) P1d 착수 전, production 7일 관측** — 같은 (a)~(c)를 실제 부하로 다시 보고, (d)는 **UTC 하루 단위**로 그 7일 각각에서 abort된 배치 수 ≤ 134를 본다. 어느 쪽이든 실패하면 원인이 처리량인지 독성 행인지 먼저 가르고, 처리량이면 배치 크기와 `C_guarded`를 다시 측정해 이 정책의 새 버전으로 고친다.
 - 한 배치가 `statement_timeout`으로 abort되면 다음 배치 크기를 500 → 250 → 125로 줄인다. 바닥에서 같은 회차에
@@ -178,10 +191,12 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 
 ## 6. 대기열과 그룹
 
+> **2026-10-30, 그룹 형성 제거.** worker는 더 이상 그룹을 만들지 않습니다. 같은 문제의 신고는 LLM 호출의 `duplicateOfFeedbackIds`가 가리키고(LLM 우선, 운영자 결정 2026-10-19), 손으로 짠 그룹 형성 코드는 지웠습니다. 열린 그룹을 만료시키는 보존 경로가 없어 만든 그룹이 남는다는 독립 검토 지적 때문입니다. 그룹 테이블과 종결 그룹 보존·계정 삭제 경로는 그대로이고, 아래 그룹 규칙은 다시 그룹을 만들 때의 설계로만 남습니다.
+
 - **owner-bound 상한**: P1 동안 표본 판정 7일당 최대 10건, P1d 동안 표시된 결정 대기(WIP) 최대 10건, 각 7일 만료.
   상한에 닿으면 사람에게 보이는 자리로의 승격을 멈추고(P1 표본은 추출 자체를 멈춤) 만료된 항목은 `expired`로
   기록한다. 상한 계수와 승격·추출은 같은 Serializable transaction에서만 한다. 상한은 어떤 경우에도 넘지 않는다.
-- **배치 크기**: worker claim 배치 10건, pass 50건(배치 5개). lease 5분, 갱신 없음. 실행은 single-flight가 아니다 — 예정 회차와 수동 재실행이 겹칠 수 있고, lease가 만료되면 다른 회차가 그 행을 다시 claim한다. 정확성은 단일 실행이 아니라 **fencing**이 진다: result transaction의 첫 쓰기는 `(id, state = claimed, claimToken)` 조건부 갱신이고, **그 갱신이 RETURNING한 신고만** 같은 transaction의 멤버십·그룹·신호 문장의 입력 집합이 된다. 그래서 claim을 잃은 옛 회차는 deadline이 남아 있어도 그 신고에 대해 어떤 triage 행도 쓰지 못하고(`stale_claim` — 쓰기가 없는 구조화 로그 event이며 상태 전이가 아니므로 감사 대상도 아니다. 그 수는 일일 digest가 센다), 옛 회차가 자기 `deadlineAt`을 넘긴 transaction은 마지막 라운드트립의 마감 검사로 전체 rollback된다(4절). 겹친 두 pass에서도 owner-bound 상한과 그룹 key unique는 유지된다(통합 테스트가 두 연결로 고정).
+- **배치 크기**: worker claim 배치 10건, pass 50건(배치 5개). lease 5분, 갱신 없음. 실행은 single-flight가 아니다 — 예정 회차와 수동 재실행이 겹칠 수 있다. lease가 만료된 claim은 다시 pending으로 돌리지 않고 `failed`(`retry_exhausted`)로 닫는다(2026-10-30): 그 회차가 유료 모델 호출을 이미 했을 수 있어, 다시 claim하면 같은 입력을 또 과금한다(2절 11항). claim transaction의 마지막 마감 검사는 모델 호출 timeout과 결과 transaction 예산을 남긴 시각을 기준으로 해서, 그만큼 남지 않으면 claim 전체가 rollback된다. 그래서 claim된 배치는 언제나 호출되고, 호출을 마친 답은 시간 검사 없이 결과 transaction으로 쓴다. 정확성은 단일 실행이 아니라 **fencing**이 진다: result transaction의 첫 쓰기는 `(id, state = claimed, claimToken)` 조건부 갱신이고, **그 갱신이 RETURNING한 신고만** 같은 transaction의 멤버십·그룹·신호 문장의 입력 집합이 된다. 그래서 claim을 잃은 옛 회차는 deadline이 남아 있어도 그 신고에 대해 어떤 triage 행도 쓰지 못하고(`stale_claim` — 쓰기가 없는 구조화 로그 event이며 상태 전이가 아니므로 감사 대상도 아니다. 그 수는 일일 digest가 센다), 옛 회차가 자기 `deadlineAt`을 넘긴 transaction은 마지막 라운드트립의 마감 검사로 전체 rollback된다(4절). 겹친 두 pass에서도 owner-bound 상한과 그룹 key unique는 유지된다(통합 테스트가 두 연결로 고정).
 - **그룹 모델(Q20).** 그룹은 `primaryKind` 하나의 동치류이고, 그룹 행과 멤버 행이 같은 `primarySnapshotDigest`를
   들며 복합 FK가 이를 강제한다. 신호는 `(groupId, kind)` 한 행이다. 멤버 상한 50. 부차 kind의 신호 행은 그 값을
   멤버 전원이 공유할 때만 쓴다.
@@ -205,6 +220,9 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
   통해서만 도달하고 recorder는 셋뿐이다 — 시스템 transaction(`writeSystemAuditLog` 1행), admin transaction
   (`writeAdminAuditLog({ tx })` 1행), 계정 삭제 recorder(그 transaction의 마지막 문장). 세 mode의 전이 집합은
   서로소다. 감사 테이블에 직접 쓰지 않는다. 감사 행에는 불투명 id와 결정 enum만 들어간다.
+  시스템 actor 셋은 자기 action만 쓸 수 있다: worker는 run 시작·종료와 claim·reclaim·result, retention은 run
+  시작·종료와 보존 배치(대상은 둘 다 `SupportTriageRun`), 계정 삭제는 `support_triage.account_data_deleted`
+  (`SupportTriageAccountData`) 하나다(`systemAuditActionAllowed`, 2026-10-30).
 - digest는 팀 3의 공통 `AgentDigestItem` 하나에만 들어가고 단일 writer는 팀 3 공통 계약이 정한 digest store 하나다(아직 구현되지 않았고, 그 배포가 P1 착수 조건이다).
   `kind = daily_digest`, 멱등 키 접두사 `support-triage:`, UTC 날짜당 한 항목. payload는 정수·enum·boolean과
   `date` 문자열 하나뿐이고 팀 3 공통 계약의 bounded schema 규칙을 따른다. 시점값을 넣지 않는다.
@@ -234,7 +252,8 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 
 > **2026-10-19 운영자 결정(LLM 우선 전환)이 아래 표보다 우선한다.** 신고마다 LLM을 한 번 호출해 lane·중복 후보·답변
 > 초안을 만들고 Admin 지원 인박스에 바로 보인다(`lib/supportTriageLlm.ts`, #2719). 모델은 Admin에서 고르며 기본은
-> 꺼짐이다(#2727). 돈·신뢰안전 키워드의 사람 lane과 서버 검증 없는 `bug_verified` 금지는 코드가 지킨다. 초안은
+> 꺼짐이다(#2727). 돈·신뢰안전 키워드의 사람 lane과 서버 검증 없는 `bug_verified` 금지는 코드가 지킨다. 모델은
+> 사람 lane을 내리지 못하고, `billing_human`을 더 앞선 `trust_safety_human`으로 올리는 것만 할 수 있다(2026-10-30). 초안은
 > 운영자에게만 보이고 자동 발송하지 않는다. 그룹 상향 이동·노출 승격·측정 단계는 중단했다. 켜는 데 필요한 것은
 > 운영자의 모델 선택(유료 호출)과 `SUPPORT_TRIAGE_ENABLED`뿐이며, 아래 P1의 Q15·Q16 같은 착수 조건은 더 이상
 > 켜기를 막지 않는다.

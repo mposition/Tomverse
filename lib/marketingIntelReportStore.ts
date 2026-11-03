@@ -17,6 +17,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { insertMarketingAnalysis } from "@/lib/marketingAnalysisStore";
 import { marketingClaimById } from "@/lib/marketingClaims";
 import { holdApprovedMarketingCompetitorHosts, proposeMarketingCompetitors } from "@/lib/marketingCompetitorStore";
 import {
@@ -121,6 +122,11 @@ export async function recordMarketingGeneratorReport(
     sourceVersion: MARKETING_GENERATOR_REPORT_SOURCE_VERSION,
   });
 
+  // The analysis a brief was chosen from, for a person to read: its own
+  // table, the same transaction, so a brief and its analysis land together.
+  const analysis = report.kind === "brief" ? report.analysis : undefined;
+  if (analysis) await insertMarketingAnalysis(tx, { briefReportId: row.id, analysis });
+
   // What A3 found that the registry may not know, kept as proposals for a
   // person. A known id is left as it is, so a proposal cannot reopen a
   // rejection or rename an approved competitor.
@@ -148,7 +154,9 @@ export async function recordMarketingGeneratorReport(
     summary:
       report.kind === "brief"
         ? "Recorded the marketing generator's brief."
-        : "Recorded the market facts the marketing generator found.",
+        : report.kind === "measurement_120d"
+          ? "Recorded an AI-exposure measurement of the marketing generator."
+          : "Recorded the market facts the marketing generator found.",
     metadata: {
       reportKey,
       reportDigest,
@@ -158,6 +166,8 @@ export async function recordMarketingGeneratorReport(
       provenanceDigest: marketingGeneratorReportProvenanceDigest(report.provenance),
       droppedFactCount: stored.droppedFactCount,
       proposedCompetitorCount: proposals.proposed.length,
+      // Present only for a brief that carries one; its bytes are in reportDigest.
+      ...(analysis ? { analysis: true } : {}),
     },
   });
 

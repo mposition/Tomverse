@@ -16,7 +16,7 @@ const row = (overrides: Partial<QaReleaseTrainBoardRow>): QaReleaseTrainBoardRow
   pullRequestNumber: 2986,
   settledAt: "2026-10-25T01:56:00Z",
   included: [{ number: 2978, title: "ci admission stop fast" }],
-  leftOut: [{ number: 2913, title: "", outcome: "conflict", predecessors: [2726] }],
+  leftOut: [{ number: 2913, title: "", outcome: "conflict", why: "It needs #2726." }],
   alreadyOnMain: [2824],
   onOpenTrain: [],
   rcSha: "f".repeat(40),

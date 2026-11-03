@@ -61,6 +61,7 @@ import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
+import { imageEditEnabled } from "@/lib/imageEditSource";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
@@ -203,6 +204,9 @@ export async function ReviewWorkspaceShell({
   // router model and turns image triage on. Never throws; unreadable is off.
   const chatImageIntentEnabled =
     imageGenerationEnabled && (await chatImageTriageModelId()) !== null;
+  // Whether a send with a photo asks the same call whether to edit it
+  // (IMAGE_EDIT_ENABLED, default off). Off, a photo is never held for a check.
+  const chatImageEditEnabled = chatImageIntentEnabled && imageEditEnabled();
 
   // The image catalogue an operator may have changed at runtime, resolved
   // once here so the composer quotes the prices admission will charge
@@ -367,6 +371,7 @@ export async function ReviewWorkspaceShell({
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
+        chatImageEditEnabled={chatImageEditEnabled}
         voiceInputEnabled={voiceInputEnabled}
         voiceConversationEnabled={voiceConversationEnabled}
         voiceConversationMaxSeconds={voiceConfig ? voiceConfig.maxSeconds : 300}

@@ -249,6 +249,23 @@ where
     Some(BridgeArgs::Worker(name))
 }
 
+/// A v22 delivery's model name, of any provider (owner decision 2026-10-26:
+/// Codex, Copilot and Cursor workers run v22 too). It is the app's
+/// `amuxV22OneShotRouteSupported` grammar: `claude-` and 1 to 120 of
+/// [A-Za-z0-9._-], or any other name of 1 to 120 such characters starting
+/// with a letter or digit. Whether the model belongs to the worker's own CLI
+/// is the sidecar's check, which knows its provider.
+pub fn v22_model_id_valid(model_id: &str) -> bool {
+    let plain = |part: &[u8]| part.iter().all(|byte| byte.is_ascii_alphanumeric() ||
+        matches!(byte, b'.' | b'_' | b'-'));
+    let bytes = model_id.as_bytes();
+    match model_id.strip_prefix("claude-") {
+        Some(rest) => (1..=120).contains(&rest.len()) && plain(rest.as_bytes()),
+        None => (1..=120).contains(&bytes.len()) && bytes[0].is_ascii_alphanumeric() &&
+            plain(bytes),
+    }
+}
+
 /// The sidecar socket of a v22 worker's `--worker` bridge (orchestration
 /// policy version 55, section 2), computed from the worker's name, never
 /// read from the environment.
@@ -1907,6 +1924,23 @@ mod quota_tests {
             "observed_at":"2026-10-12T00:00:00.000Z","reset_at":"2026-10-12T07:00:00.000Z"}})
     }
     #[test]
+    fn v22_delivery_model_names_any_provider_but_only_a_plain_id() {
+        for model in ["claude-opus-5-5", "gpt-6-luna", "composer-2.5", "auto",
+            "claude-sonnet-5-5", "grok-4.7-high", "a.b_c"] {
+            assert!(v22_model_id_valid(model), "{model}");
+        }
+        let long_claude = format!("claude-{}", "a".repeat(120));
+        assert!(v22_model_id_valid(&long_claude));
+        assert!(!v22_model_id_valid(&format!("{long_claude}a")));
+        let other = "a".repeat(121);
+        for model in ["", "-leading", ".x", "gpt 6", "gpt/6", "x;rm", "a:b", "claude-",
+            "claude-a:b", other.as_str()] {
+            assert!(!v22_model_id_valid(model), "{model}");
+        }
+        assert!(v22_model_id_valid(&"a".repeat(120)));
+    }
+
+    #[test]
     fn quota_binds_worker_request_source_and_freshness() {
         let id = "00000000-0000-4000-8000-000000000001";
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T00:00:01Z").unwrap().timestamp();
@@ -2233,6 +2267,20 @@ async fn v22_sidecar_call(
 const V22_READ_ONLY_RETRY_TASK_ID: &str = "c48886b9-86f8-4631-8db8-c0b288a707af";
 const V22_READ_ONLY_LAUNCHER_POLICY: &str = "amux-v22-read-only-retry-v1";
 
+/// The publication run's base, which the sidecar checks out before the CLI
+/// runs. Only a lowercase 40-hex commit id crosses to the sidecar.
+fn v22_insert_base_sha(payload: &mut serde_json::Value,
+    base_sha: Option<&str>) -> Result<()> {
+    let Some(base_sha) = base_sha else { return Ok(()); };
+    if base_sha.len() != 40 || !base_sha.bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+        bail!("invalid v22 base commit");
+    }
+    payload.as_object_mut().context("v22 payload object")?
+        .insert("baseSha".into(), serde_json::json!(base_sha));
+    Ok(())
+}
+
 fn v22_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) &&
         value.bytes().all(|byte| !byte.is_ascii_uppercase())
@@ -2246,11 +2294,59 @@ enum V52ReviewStep {
     Findings { text: String },
 }
 
+/// The control characters the app refuses in question text (`CONTROL` of
+/// lib/amux/v22OwnerQuestionCore.ts): C0 but tab, newline and carriage
+/// return, and DEL.
+pub fn v22_question_control(c: char) -> bool {
+    matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{7f}')
+}
+
+/// Whether a v22 result ends with an owner question the app records
+/// (`parseAmuxV22OwnerQuestion` of lib/amux/v22OwnerQuestionCore.ts, the same
+/// grammar and bounds): such a run is not finished, so it is never reviewed
+/// (operator decision 2026-10-30).
+pub fn v22_result_asks_owner(text: &str) -> bool {
+    const MARKER: &str = "AMUX_OWNER_QUESTION:";
+    let Some(last) = text.lines().map(str::trim).filter(|line| !line.is_empty()).last() else {
+        return false;
+    };
+    let Some(raw) = last.strip_prefix(MARKER) else { return false };
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    // The app's boundedText exactly: the raw string's UTF-16 length, the
+    // same control set (tab, newline and carriage return allowed), not blank.
+    let bounded = |value: Option<&serde_json::Value>, max: usize| {
+        value.and_then(serde_json::Value::as_str).is_some_and(|text| {
+            !text.trim().is_empty() && text.encode_utf16().count() <= max
+                && !text.chars().any(v22_question_control)
+        })
+    };
+    if !bounded(map.get("question"), 2_000) || !bounded(map.get("unblocks"), 1_000) {
+        return false;
+    }
+    let options = match map.get("options") {
+        None | Some(serde_json::Value::Null) => return true,
+        Some(serde_json::Value::Array(items)) if items.len() <= 6 => items,
+        _ => return false,
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    options.iter().all(|option| {
+        let id = option.get("id").and_then(serde_json::Value::as_str).unwrap_or("");
+        let id_ok = id.len() <= 32 && id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+        id_ok && ids.insert(id.to_owned()) && bounded(option.get("label"), 300)
+    })
+}
+
 fn v52_review_required(
     profile: &crate::tomverse_api::V22ExecutionProfile,
     result: &V22SidecarResult,
     outcome: &str,
 ) -> bool {
+    // A run that ended with an owner question is not reviewed: the app parks
+    // it for the answer and reviews the run that finishes the Task.
+    !result.result_text.as_deref().is_some_and(v22_result_asks_owner) &&
     profile.grade_guard && profile.role == "implement" && outcome == "succeeded" &&
         (result.review_touches_contract != Some(true) ||
             profile.execution_grade.as_deref() == Some("frontier"))
@@ -2539,7 +2635,7 @@ impl LocalAmux for HttpLocal {
         instance_id: &str, generation: i64) -> Result<V22SidecarState> {
         let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
         if delivery.assignment_id.is_none() ||
-            !profile.model_id.starts_with("claude-") ||
+            !v22_model_id_valid(&profile.model_id) ||
             profile.budget_microusd < 1 || profile.budget_microusd > 5_000_000 ||
             delivery.prompt.len() > 32 * 1024 {
             bail!("invalid v22 one-shot delivery");
@@ -2590,6 +2686,7 @@ impl LocalAmux for HttpLocal {
                 .insert("executionGrade".into(),
                     serde_json::json!(profile.execution_grade));
         }
+        v22_insert_base_sha(&mut payload, profile.base_sha.as_deref())?;
         if let Some(read_only_retry) = read_only_retry {
             payload.as_object_mut().context("v22 payload object")?
                 .insert("readOnlyRetry".into(), read_only_retry);
@@ -4058,6 +4155,7 @@ mod tests {
             review_author_vendor: Some("anthropic".into()),
             review_scope: Some("test".into()), review_feedback_job_id: None,
             read_only_retry: None,
+            base_sha: None,
         };
         let mut result = V22SidecarResult {
             state: V22SidecarState::Succeeded, read_only_retry: None,
@@ -4081,6 +4179,12 @@ mod tests {
         result.review_touches_contract = Some(false);
         assert!(v52_review_required(&profile, &result, "succeeded"));
         assert!(!v52_review_required(&profile, &result, "failed"));
+        let asking = V22SidecarResult {
+            result_text: Some("Partial.
+AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"a\",\"label\":\"A\"}]}".into()),
+            ..result.clone()
+        };
+        assert!(!v52_review_required(&profile, &asking, "succeeded"));
     }
 
     #[test]
@@ -5789,6 +5893,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn v22_execute_payload_carries_only_a_plain_base_commit() {
+        let mut payload = serde_json::json!({"op": "execute"});
+        v22_insert_base_sha(&mut payload, None).unwrap();
+        assert!(payload.get("baseSha").is_none());
+        v22_insert_base_sha(&mut payload, Some(&"a".repeat(40))).unwrap();
+        assert_eq!(payload["baseSha"], "a".repeat(40));
+        for bad in ["A".repeat(40), "a".repeat(39), "g".repeat(40), "a".repeat(64)] {
+            let mut other = serde_json::json!({"op": "execute"});
+            assert!(v22_insert_base_sha(&mut other, Some(&bad)).is_err());
+            assert!(other.get("baseSha").is_none());
+        }
+    }
+
     #[tokio::test]
     async fn v22_dispatch_uses_only_the_one_shot_sidecar() {
         let mut local = SidecarOnlyLocal { sidecar_sends: 0,
@@ -5804,6 +5922,7 @@ mod tests {
             review_feedback_job_id: None,
             budget_microusd: 1_000_000,
             read_only_retry: None,
+            base_sha: None,
         });
         assert!(matches!(dispatch_v22(&delivery, "00000000-0000-4000-8000-000000000001", 3, &mut local).await,
             BridgeTickResult::Pending { .. }));
@@ -5851,6 +5970,7 @@ mod tests {
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+            base_sha: None,
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
         assert_eq!(payload["launchBindingId"], retry.launch_binding_id);
@@ -5902,6 +6022,7 @@ mod tests {
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+            base_sha: None,
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
         assert_eq!(payload["executorKind"], "read_only_api_retry_v1");
@@ -6902,5 +7023,36 @@ mod tests {
         assert!(!deferral.contains("halted = true"));
         assert!(!deferral.contains("v22_sidecar_api_model_access"));
         assert!(!deferral.contains("record_once"));
+    }
+}
+
+#[cfg(test)]
+mod v22_owner_question_tests {
+    use super::v22_result_asks_owner;
+
+    #[test]
+    fn only_a_well_formed_last_line_is_an_owner_question() {
+        assert!(v22_result_asks_owner("x
+AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
+
+"));
+        // At the bound, and with C1 text the app also allows.
+        assert!(v22_result_asks_owner(&format!(
+            "AMUX_OWNER_QUESTION: {{\"question\":\"{}\",\"unblocks\":\"u\\u0085\"}}", "가".repeat(2_000))));
+        for text in [
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
+Done.",
+            "AMUX_OWNER_QUESTION: not json",
+            "AMUX_OWNER_QUESTION: {\"question\":\" \",\"unblocks\":\"u\"}",
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\"}",
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"A\",\"label\":\"x\"}]}",
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"a\",\"label\":\"x\"},{\"id\":\"a\",\"label\":\"y\"}]}",
+            "All done.",
+            // The bound is on the raw text, as the app's: padding counts.
+            &format!("AMUX_OWNER_QUESTION: {{\"question\":\"{}Q\",\"unblocks\":\"u\"}}", " ".repeat(2_000)),
+            "AMUX_OWNER_QUESTION: {\"question\":\"Q\\u0007\",\"unblocks\":\"u\"}",
+        ] {
+            assert!(!v22_result_asks_owner(text), "{text}");
+        }
     }
 }

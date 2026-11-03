@@ -328,6 +328,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/marketing-automation.md §3",
   },
   {
+    table: "MarketingAsset",
+    delegate: "marketingAsset",
+    writers: ["lib/marketingAssetStore.ts"],
+    contract: "docs/policy/marketing-automation.md §7.3",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -982,6 +988,13 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "lib/adminAuditSystemActors.ts",
+    table: "SupportTriageRun",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The support-triage actors' audit scope names their run row as the audit target; it executes no SQL.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
     tableMentions: 1,
     writeVerbs: 2,
@@ -1296,6 +1309,73 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 7,
     reason:
       "The capability migration (orchestration policy version 35, section 2). Its two AdminAuditLog mentions are the restrictive foreign key from auditLogId and the one SELECT EXISTS read in the guard that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLE adding the key with ON DELETE / ON UPDATE RESTRICT, the trigger events, the guard's TG_OP comparison and words of comments.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AmuxWorkerCapabilityEvent",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "Its three mentions are the ALTER TABLE that replaces the v22 shape CHECK, and the guard's read of the worker's newest capability revision and its error naming. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The replaced capability guard reads the worker's newest registry event (class, ceiling, desired state), as before. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The replaced capability guard keeps its one SELECT EXISTS read of the person's audit row of the same transaction. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The ALTER TABLE that replaces the usage ledger's source and shape CHECKs to admit the Copilot and Cursor CLIs. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  ...["AmuxWorkerRegistryEvent", "AmuxWorkerCapabilityEvent", "AdminAuditLog"].map((table) => ({
+    path: "prisma/migrations/20261027120000_amux_cli_models_and_worker_cli/migration.sql",
+    table,
+    tableMentions: table === "AdminAuditLog" ? 2 : 1,
+    writeVerbs: 18,
+    reason:
+      (table === "AdminAuditLog"
+        ? "Its two mentions are the new CLI model link table's foreign key to its audit row (ON DELETE RESTRICT) and the link guard's one SELECT EXISTS read of the person's audit row of the same transaction."
+        : `The one mention is the ALTER TABLE that replaces ${table}'s worker name CHECK with the free grammar (owner decision 2026-10-27: the CLI is chosen at registration, not read from the name).`) +
+      " The migration only replaces five name CHECKs, drops the registry's name/class CHECK and creates the CLI model tables with their append-only guard; its write verbs are DROP/ALTER clauses, the guard's TG_OP comparison and words of comments. It writes no row.",
+  })),
+  {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    table: "AmuxWorkerCapabilityEvent",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "Its two mentions are the replaced guard's read of the worker's newest capability revision and its error naming. It replaces the capability guard body only (owner decision 2026-10-27: v22 implement needs repo_write and no ceiling, policy version 52); its one write verb is the trigger's TG_OP comparison. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The replaced capability guard reads the worker's newest registry event (class, ceiling, desired state), as before. It replaces the capability guard body only (owner decision 2026-10-27: v22 implement needs repo_write and no ceiling, policy version 52); its one write verb is the trigger's TG_OP comparison. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The replaced capability guard keeps its one SELECT EXISTS read of the person's audit row of the same transaction. It replaces the capability guard body only (owner decision 2026-10-27: v22 implement needs repo_write and no ceiling, policy version 52); its one write verb is the trigger's TG_OP comparison. It writes no row.",
   },
   {
     path: "lib/amux/workerCapabilityStore.ts",
@@ -1743,10 +1823,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingStore.ts",
     table: "MarketingPost",
-    tableMentions: 30,
+    tableMentions: 32,
     writeVerbs: 13,
     reason:
-      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable. S2f production webhook apply adds three mentions and one verb: one constant SELECT ... FOR UPDATE that locks the post the event names by provider post id and channel, and the two audit targetType names of its applied and refused entries. Its one write is a delegate updateMany bound by id, status and history version that appends a webhook_event entry and may move a live post to removed_by_platform. The decision-refusal writer adds one more mention, its audit targetType name; it reads and writes no post. S3h1 adds the twenty-fourth mention: the retention writer's table union and target type, which name the table a deleted row came from for its audit entry; the delete itself is the delegate's deleteMany by id. S3h2 adds six more, three in each of its two writers for posts that are kept: the audit targetType, the audit metadata's table and the retention_run report's table, which together say which table a purged content or a compacted history belongs to. Neither writer has raw SQL naming the table: the content purge is a delegate updateMany by id setting envelope to NULL and contentPurgedAt, and the compaction is a delegate updateMany by id and history version writing the summarised history.",
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable. S2f production webhook apply adds three mentions and one verb: one constant SELECT ... FOR UPDATE that locks the post the event names by provider post id and channel, and the two audit targetType names of its applied and refused entries. Its one write is a delegate updateMany bound by id, status and history version that appends a webhook_event entry and may move a live post to removed_by_platform. The decision-refusal writer adds one more mention, its audit targetType name; it reads and writes no post. S3h1 adds the twenty-fourth mention: the retention writer's table union and target type, which name the table a deleted row came from for its audit entry; the delete itself is the delegate's deleteMany by id. S3h2 adds six more, three in each of its two writers for posts that are kept: the audit targetType, the audit metadata's table and the retention_run report's table, which together say which table a purged content or a compacted history belongs to. Neither writer has raw SQL naming the table: the content purge is a delegate updateMany by id setting envelope to NULL and contentPurgedAt, and the compaction is a delegate updateMany by id and history version writing the summarised history. S4a adds the thirty-first and thirty-second mentions: one constant SELECT over the account's attempt history that reads the newest publish attempts for the automatic stop, and its check that no retention summary reaches into their span; it names no write.",
   },
   {
     path: "lib/marketingStore.ts",
@@ -2320,17 +2400,17 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageWorker.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 17,
+    writeVerbs: 6,
     reason:
-      "SupportTriageRun appears once, as the audit entry's targetType string, never in SQL; the run row is written only through lib/supportTriageRunStore.ts. The write verbs are the worker's SupportTriageSuggestion statements: reclaim and retry_exhausted UPDATEs, supersede UPDATE, pending INSERT, claim UPDATE and ready UPDATE; its group statements: SupportTriageGroup INSERT, SupportTriageGroupMember INSERT and DELETE, the lost group's invalidating UPDATE, the joined group's key UPDATE, the undone join's member DELETE, and the SupportTriageGroupSignal DELETE and INSERT; plus the words in comments describing them. None names a protected table.",
+      "SupportTriageRun appears once, as the audit entry's targetType string, never in SQL; the run row is written only through lib/supportTriageRunStore.ts. The write verbs are the worker's SupportTriageSuggestion statements: the retry_exhausted UPDATE of expired claims (none is reclaimed since 2026-10-30), supersede UPDATE, pending INSERT, claim UPDATE and ready UPDATE (it forms no groups since 2026-10-30); plus the words in comments describing them. None names a protected table.",
   },
   {
     path: "lib/supportTriageRetention.ts",
     table: "SupportTriageRun",
     tableMentions: 3,
-    writeVerbs: 1,
+    writeVerbs: 2,
     reason:
-      "The retention step is a named SupportTriageRun writer, and its run-row delete goes through the Prisma delegate. Its SQL literals only read SupportTriageRun (the window read and the overdue count). The one write verb is the UPDATE that moves open SupportTriageSuggestion rows of closed reports to invalidated; it names no protected table.",
+      "The retention step is a named SupportTriageRun writer, and its run-row delete goes through the Prisma delegate. Its SQL literals only read SupportTriageRun (the window read and the overdue count). The two write verbs are the UPDATEs that move open SupportTriageSuggestion rows to invalidated (closed reports) and to expired (never shown, 7 days old); neither names a protected table.",
   },
   {
     path: "lib/supportTriageDeletionManifest.ts",
@@ -2427,6 +2507,46 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 76,
     reason:
       "The migration creates EngineeringAgentRequest and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentRun mentions reads the producing run, locked, and counts active runs and the first T1 run.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 27,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentWorkItem mentions is the guarded table itself: the promoted draft and the run's products are read from it.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentApproval",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentApproval mention is the unchanged T2 decision read.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentCapability",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentCapability mentions are the unchanged consumed-capability reads.",
+  },
+  {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-10-29): its insert rule also admits the publish item of a finished run whose v22 draft closed as promoted, into a pull request queue with room. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentBinding mention counts the open pull requests the queue holds.",
   },
   {
     path: "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql",
@@ -3029,6 +3149,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
   {
+    path: "lib/marketingAssetStore.ts",
+    table: "MarketingAsset",
+    tableMentions: 10,
+    writeVerbs: 8,
+    reason:
+      "The sole registered writer of the media asset store: it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups, and the approved kinds the generator reads).",
+  },
+  {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    table: "MarketingAsset",
+    tableMentions: 20,
+    writeVerbs: 17,
+    reason:
+      "Creates the media asset store, its sequence, its checks (including the transcript's), the one insert-and-update guard and the delete guard. It writes no row.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingAsset",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the asset submission target for marketing-generator. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
     path: "lib/marketingLlmBudgetStore.ts",
     table: "MarketingLlmCall",
     tableMentions: 23,
@@ -3057,6 +3201,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 13,
     reason:
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 17,
+    reason:
+      "Creates the media asset store. Its one AdminAuditLog mention is the write guard's read of a person's own decision audit row (action, target, actor, recorded predecessor and the approved bytes). No audit row is written.",
   },
   {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
@@ -3113,6 +3265,22 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 2,
     reason:
       "Replaces the ledger's shape check in one ALTER so a catalog model's 1.05M window and a reservation up to the monthly cap ceiling fit. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261102090000_marketing_llm_comment_triage_purpose/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "Replaces the ledger's shape check in one ALTER to add the comment monitor's comment_triage purpose; every other predicate is unchanged. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261102110000_marketing_llm_seo_purpose/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "Replaces the ledger's shape check in one ALTER to add the SEO code agent's seo purpose; every other predicate is unchanged. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
   },
   {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
@@ -3353,6 +3521,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
+    count: 1,
+    reason:
+      "One read in the asset store's decision check: the decision's own AdminAuditLog row, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is quoted with %I and the id is bound with USING. It reads and never writes.",
+  },
+  {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
     count: 1,
     reason:
@@ -3381,6 +3555,24 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "Three reads in the capability event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the worker's newest registry event, its newest capability revision, and one SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    count: 3,
+    reason:
+      "The same three EXECUTE reads in the replaced capability event guard (owner decision 2026-10-26 widens only its class check): the worker's newest registry event, its newest capability revision and one SELECT EXISTS on AdminAuditLog, each over a TG_TABLE_SCHEMA-qualified constant name quoted with %I and bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    count: 3,
+    reason:
+      "The same three EXECUTE reads in the replaced capability event guard (owner decision 2026-10-27 drops only the implement ceiling): the worker's newest registry event, its newest capability revision and one SELECT EXISTS on AdminAuditLog, each over a TG_TABLE_SCHEMA-qualified constant name quoted with %I and bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261027120000_amux_cli_models_and_worker_cli/migration.sql",
+    count: 1,
+    reason:
+      "One EXECUTE read in the CLI model link guard (owner decision 2026-10-27): a SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction naming this link, over a TG_TABLE_SCHEMA-qualified constant name quoted with %I because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. It reads and never writes.",
   },
   {
     path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",
@@ -3453,6 +3645,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "Three dynamic SELECTs in the v4 PR-less review guard read the fixed task, latest retained result, and attempt. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261031090200_amux_v22_test_prless_approval/migration.sql",
+    count: 3,
+    reason:
+      "The replaced v4 PR-less review guard keeps the same three dynamic SELECTs of the fixed task, latest retained result, and attempt; only its role list drops test. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
   },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
@@ -3605,6 +3803,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "The engineering agent triggers read their sibling tables, AMUX and AppSetting's mode row, all with EXECUTE over a name built from TG_TABLE_SCHEMA, for the reason the permission ledger gives: an unqualified name resolves through the session search path, where a temporary table of the same name answers for the real one, and a hard-coded public. is wrong under ?schema=. Every function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
+    path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
+    count: 7,
+    reason:
+      "The replaced work item guard keeps the original's reads and adds two: whether the run's v22 draft closed as promoted with this patch, and the pull request queue's open count, active runs and first T1 run. All are EXECUTE over a TG_TABLE_SCHEMA-qualified constant name quoted with %I, because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. They read and never write.",
+  },
+  {
     path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
     count: 3,
     reason:
@@ -3685,10 +3889,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "d6221d28efaf5d8a47e79d0587a56b8e093863937c460ea94b8692fa339bfca2",
+    sha256: "102cf9de0f1bb1c294b1336d3c8aaa86c08f95479694f69192fceb9c068dc6f9",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. A function replacement compares the read prosrc digest with the header's prior digest and, when the header names one, the digest of the body the migration writes; the query is unchanged. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
@@ -4694,6 +4898,12 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 // a publication nobody approved.
 
 export const RETENTION_SETTING_ALLOWLIST = [
+  {
+    path: "lib/marketingAnalysisStore.ts",
+    count: 2,
+    reason:
+      "The marketing analysis table's retention writer (2026-11-01): it imports the setting's constant and sets it for its own transaction before deleting analyses past their 24 months, each with its audit row. The table's delete trigger is the shared marketing_retained_row_delete_is_bounded, which still refuses a row before its retentionUntil.",
+  },
   {
     path: "lib/marketingLlmBudgetStore.ts",
     count: 2,

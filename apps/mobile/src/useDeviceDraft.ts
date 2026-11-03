@@ -9,9 +9,9 @@ export function useDeviceDraft(owner: string | null, conversation: string | null
   if (snapshot.owner !== owner || snapshot.conversation !== conversation) {
     setSnapshot({ owner, conversation, text: read() });
   }
-  const update = useCallback((text: string) => {
-    setSnapshot({ owner, conversation, text });
-    if (owner) { try { writeDeviceDraft(localStorage, owner, conversation, text); } catch { /* Input remains in memory. */ } }
+  const update = useCallback((text: string, targetConversation: string | null = conversation) => {
+    setSnapshot({ owner, conversation: targetConversation, text });
+    if (owner) { try { writeDeviceDraft(localStorage, owner, targetConversation, text); } catch { /* Input remains in memory. */ } }
   }, [owner, conversation]);
   return [snapshot.text, update] as const;
 }

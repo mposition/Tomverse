@@ -1,6 +1,6 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test, type Page } from "@playwright/test";
 import { resolve } from "node:path";
-import { workspaceWelcomeCopy } from "../../locales/workspaceWelcome";
 
 const storage = "tomverse-native-synthetic-demo";
 const output = resolve(process.cwd(), "../../.tmp/native-parity");
@@ -20,7 +20,7 @@ async function signIn(page: Page) {
   await expect(page.getByRole("textbox")).toBeVisible();
 }
 async function reviewHome(page: Page) {
-  await page.getByTestId("product-switcher").selectOption("review");
+  await selectProduct(page, "review");
   await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeEnabled();
   await expect(page.getByTestId("review-landing")).toBeVisible();
 }
@@ -32,19 +32,19 @@ test("Review entry stays on its landing page; only a history selection restores 
   await reviewHome(page);
   await expect(page.locator("article.user")).toHaveCount(0);
   await page.screenshot({ path: resolve(output, "review-landing-implemented-light.png") });
-  await page.getByRole("button", { name: "같은 자료, 다른 해석.", exact: true }).click();
-  await expect(page.getByRole("textbox")).toHaveValue(workspaceWelcomeCopy.ko.starter.cards.documentQuestions.seed);
+  await page.getByRole("textbox").fill("My unsent Review question");
+  await expect(page.getByRole("textbox")).toHaveValue("My unsent Review question");
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).length, storage)).toBe(2);
   await page.getByRole("button", { name: "대화", exact: true }).click();
   await page.getByRole("button", { name: "Saved comparison", exact: true }).click();
   await expect(page.locator("article.user")).toContainText("Previous Review question");
-  await page.getByTestId("product-switcher").selectOption("chat");
+  await selectProduct(page, "chat");
   await expect(page.locator(".chat-welcome")).toBeVisible(); await expect(page.locator("article.user")).toHaveCount(0);
   await reviewHome(page);
   await expect(page.locator("article.user")).toHaveCount(0);
   await page.reload(); await reviewHome(page);
   await expect(page.locator("article.user")).toHaveCount(0);
-  await expect(page.getByRole("textbox")).toHaveValue(workspaceWelcomeCopy.ko.starter.cards.documentQuestions.seed);
+  await expect(page.getByRole("textbox")).toHaveValue("My unsent Review question");
 });
 
 test("Chat and Review share the same full-page history heading, action and search spacing", async ({ page }) => {
@@ -75,10 +75,10 @@ test("Review landing scrolls above a compact composer on a narrow, keyboard-size
   await page.setViewportSize({ width: 320, height: 460 });
   await signIn(page); await reviewHome(page);
   await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
-  await page.addStyleTag({ content: ".review-intro h1{font-size:36px}.review-intro p,.welcome-card strong{font-size:18px}" });
+  await page.addStyleTag({ content: ".review-intro h1{font-size:36px}.review-intro p{font-size:18px}" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await expect(page.getByRole("textbox")).toBeInViewport();
   await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeInViewport();
-  await page.getByRole("button", { name: "코드 · 오류 해결", exact: true }).click();
-  await expect(page.getByRole("textbox")).toHaveValue(workspaceWelcomeCopy.ko.starter.cards.debugStackTrace.seed);
+  await page.getByRole("textbox").fill("My narrow-screen draft");
+  await expect(page.getByRole("textbox")).toHaveValue("My narrow-screen draft");
 });

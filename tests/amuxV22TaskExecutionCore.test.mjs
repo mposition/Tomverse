@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV22DeliveryBudgetMicrousd, amuxV22EngineeringPublicationEnabled,
+import { amuxV22DeliveryBaseShaEnabled, amuxV22DeliveryBudgetMicrousd,
+  amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
   v22ReadOnlyApiReceiptMatchesUsage,
@@ -34,6 +35,26 @@ test("settlement refuses a patch inserted, removed, or changed after decrypt", (
   assert.equal(matches(readPatch, { ...storedPatch,
     bodyPurgedAt: new Date() }), false);
   assert.equal(matches({ ...readPatch, taskId: "task-2" }, storedPatch), false);
+});
+
+test("a blocked or failed settlement keeps a stored patch private", () => {
+  const storedPatch = { taskId: "task-1", patchSha256: "a".repeat(64),
+    baseSha: "b".repeat(40), bodyPurgedAt: null };
+  const readPatch = { taskId: "task-1", sha256: "a".repeat(64),
+    baseSha: "b".repeat(40) };
+  for (const outcome of ["blocked", "failed"]) {
+    // These outcomes never read the patch, so the stored one is not a race.
+    assert.equal(v22SettlementPatchMatches({ taskId: "task-1", outcome,
+      readPatch: null, storedPatch }), true);
+    assert.equal(v22SettlementPatchMatches({ taskId: "task-1", outcome,
+      readPatch: null, storedPatch: null }), true);
+    // A patch read for an outcome that never publishes one is unexpected.
+    assert.equal(v22SettlementPatchMatches({ taskId: "task-1", outcome,
+      readPatch, storedPatch }), false);
+  }
+  // A succeeded settlement still refuses a patch it did not read.
+  assert.equal(v22SettlementPatchMatches({ taskId: "task-1",
+    outcome: "succeeded", readPatch: null, storedPatch }), false);
 });
 
 test("v22 settlement accepts only its one preallocated invocation receipt", () => {
@@ -126,4 +147,10 @@ test("an ordinary delivery's budget field stays within the bridge's 5 USD wire r
     "a dear ordinary run is still delivered, not refused by the bridge");
   assert.equal(amuxV22DeliveryBudgetMicrousd(3_400_000, true), 3_400_000,
     "the read-only retry carries its exact signed amount");
+});
+
+test("the publication base reaches the box only behind its default-off switch", () => {
+  assert.equal(amuxV22DeliveryBaseShaEnabled(undefined), false);
+  assert.equal(amuxV22DeliveryBaseShaEnabled("true"), false);
+  assert.equal(amuxV22DeliveryBaseShaEnabled("enabled"), true);
 });

@@ -160,7 +160,7 @@ const QA_RELEASE_MERGE_LANE_VARIABLES = [
   "QA_RELEASE_CONTROL_REVISION",
 ] as const;
 
-/** The release train: the lane's App and app secret, its own switch and slots. */
+/** The release train: the lane's App and app secret, its own switches and slots. */
 const QA_RELEASE_TRAIN_VARIABLES = [
   "QA_RELEASE_MERGE_LANE_SECRET",
   "QA_RELEASE_MERGE_LANE_APP_ID",
@@ -168,6 +168,10 @@ const QA_RELEASE_TRAIN_VARIABLES = [
   "QA_RELEASE_CONTROL_REVISION",
   "QA_RELEASE_TRAIN_ENABLED",
   "QA_RELEASE_TRAIN_SLOTS",
+  "QA_RELEASE_TRAIN_MODEL_RESOLVE",
+  "QA_RELEASE_TRAIN_ANTHROPIC_API_KEY",
+  // Unset: the verdict round's model runs on the key above; "false" stops it.
+  "QA_RELEASE_TRAIN_MODEL_VERDICT",
   // "git": the deploy image has none, and the train clones and cherry-picks.
   "RAILPACK_DEPLOY_APT_PACKAGES",
 ] as const;
@@ -189,13 +193,31 @@ const BILLING_FINANCE_OPS_VARIABLES = [
  * The marketing generator's three variables (S3 plan, S3e3): the app's URL, its
  * submit secret and the LLM key -- the same list as
  * MARKETING_GENERATOR_WORKER_VARIABLES in lib/marketingGeneratorCycleCore.ts,
- * which a test holds this to. The model and the monthly cap are not here: the
+ * which a test holds this to -- and the switch of the weekly AI-exposure
+ * measurement (marketing S5), declared so an apply keeps it; it is off unless
+ * its value is exactly "true". The model and the monthly cap are not here: the
  * operator sets them in the Admin Console (2026-10-19).
  */
 const MARKETING_GENERATOR_VARIABLES = [
   "MARKETING_APP_URL",
   "MARKETING_GENERATOR_SUBMIT_SECRET",
   "MARKETING_LLM_API_KEY",
+  "MARKETING_AI_VISIBILITY_ENABLED",
+] as const;
+
+/**
+ * The comment monitor's variables (marketing S4d): the generator's three and
+ * the monitor's switch, off unless its value is `true` -- the
+ * COMMENTS_MONITOR_WORKER_VARIABLES of scripts/marketing-comments-monitor-service.mjs
+ * less the kill switch and what Node itself needs, which a test holds this to.
+ * The kill switch is the app's: with it set the app answers both steps `off`
+ * and the ledger refuses every reservation, as for the generator.
+ */
+const MARKETING_COMMENTS_MONITOR_VARIABLES = [
+  "MARKETING_APP_URL",
+  "MARKETING_GENERATOR_SUBMIT_SECRET",
+  "MARKETING_LLM_API_KEY",
+  "MARKETING_COMMENTS_MONITOR_ENABLED",
 ] as const;
 
 /** The marketing publisher's two variables (S2 plan, S2d1). */
@@ -464,6 +486,26 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
       // there. Spend is still the ledger's -- nothing runs until a pinned
       // model and a cap are set in that environment's Admin Console.
       dev: MARKETING_GENERATOR_VARIABLES,
+    },
+  },
+  {
+    // The comment monitor (marketing S4d, policy 12.1): every hour the worker
+    // asks the app for the new comment bodies, classifies them through the
+    // LLM cost ledger and hands the verdicts back; the app reads, records and
+    // judges. A supervisor that kills its worker at twenty minutes
+    // (scripts/marketing-comments-monitor-service.mjs).
+    //
+    // No database, publishing, bucket or GitHub credential. Off until a person
+    // has done 12.1's legal steps and set MARKETING_COMMENTS_MONITOR_ENABLED
+    // here and on the app; off, a run starts no worker.
+    key: "marketing_comments_monitor",
+    service: "Marketing Comments Monitor",
+    startCommand: "node --experimental-strip-types scripts/marketing-comments-monitor-service.mjs",
+    cronSchedule: "15 * * * *",
+    environments: {
+      production: MARKETING_COMMENTS_MONITOR_VARIABLES,
+      staging: MARKETING_COMMENTS_MONITOR_VARIABLES,
+      // Not on dev, like the publisher: it reads outside accounts.
     },
   },
   {

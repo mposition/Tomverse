@@ -1,5 +1,5 @@
 import { AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS } from "@/lib/autoLlmRouterCore";
-import type { ReviewRouteDecision } from "@/lib/reviewRoutingCore";
+import { REVIEW_ROUTER_CLIENT_TIMEOUT_MS, type ReviewRouteDecision } from "@/lib/reviewRoutingCore";
 
 export async function askReviewRoute(input: {
   text: string; providers: string[]; context?: string; hasImages: boolean;
@@ -9,7 +9,7 @@ export async function askReviewRoute(input: {
   try {
     const response = await fetchImpl("/api/review/route", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...input, text: input.text.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS), ...(input.context ? { context: input.context.slice(0, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS) } : {}) }), signal: AbortSignal.timeout(8_000),
+      body: JSON.stringify({ ...input, text: input.text.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS), ...(input.context ? { context: input.context.slice(0, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS) } : {}) }), signal: AbortSignal.timeout(REVIEW_ROUTER_CLIENT_TIMEOUT_MS),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => null);

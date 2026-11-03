@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
+import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
@@ -147,8 +148,8 @@ import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraf
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
-import { askChatImageIntent } from "@/lib/chatImageIntentClient";
-import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import { askChatImageTurn } from "@/lib/chatImageIntentClient";
+import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
@@ -456,6 +457,7 @@ const isLanguage = (value: unknown): value is Language =>
   value === "en" ||
   value === "ko" ||
   value === "zh" ||
+  value === "zh-Hant" ||
   value === "fr" ||
   value === "de" ||
   value === "es" ||
@@ -482,6 +484,12 @@ const guestTrialCopy: Record<
     body: "创建免费账户即可解锁更广泛的模型库、保存对话记录，并使用登录专属功能。",
     action: "创建免费账户",
     cancel: "以访客身份继续",
+  },
+  "zh-Hant": {
+    title: "想要更多模型選擇和儲存功能嗎？",
+    body: "建立免費帳戶即可解鎖更廣泛的模型庫、儲存對話紀錄，並使用登入專屬功能。",
+    action: "建立免費帳戶",
+    cancel: "以訪客身分繼續",
   },
   fr: {
     title: "Envie de plus de modèles et de sauvegarder votre travail ?",
@@ -688,6 +696,8 @@ type GlobalSubmitOptions = {
   imageIntentChecked?: boolean;
   /** Answer this send with an image in the conversation (lib/chatImageTurn.ts). */
   imageTurn?: ChatImageTurnRequest;
+  /** The image-intent answer still on its way: read just before the preflight. */
+  imageTurnDecision?: Promise<ChatImageTurnRequest | undefined>;
   imageTurnsByModel?: ReviewImageTurns;
   reviewRouteChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
@@ -759,6 +769,7 @@ export function ChatPageClient({
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
   chatImageIntentEnabled = false,
+  chatImageEditEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
   voiceConversationEnabled = false,
@@ -791,6 +802,8 @@ export function ChatPageClient({
    * triage on.
    */
   chatImageIntentEnabled?: boolean;
+  /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
+  chatImageEditEnabled?: boolean;
   reviewEasyAvailable?: boolean;
   /**
    * The voice input opt-in flag AND its kill switch AND the signed-in
@@ -1737,6 +1750,14 @@ export function ChatPageClient({
   const pendingSubmissionOwnerKey = identityKey ?? "unresolved";
   const pendingSubmission =
     pendingSubmissionOwners.get(pendingSubmissionOwnerKey) ?? null;
+  /*
+    The composer send being prepared, drawn in the panels at once
+    (`SendEchoTurn`). Bound to the selection it was pressed in, so leaving that
+    conversation hides it and frees the composer, and cleared when the send
+    either hands its payload to the panels or ends without one.
+  */
+  const sendEchoRef = useRef<PendingSendEcho | null>(null);
+  const [sendEcho, setSendEcho] = useState<PendingSendEcho | null>(null);
   const [promptPayload, setPromptPayload] = useState<{
     id: string;
     text: string;
@@ -5912,7 +5933,7 @@ export function ChatPageClient({
     /*
       A composer send that asks for a picture is answered with an image in
       this conversation instead of text, decided by one small model call
-      before anything is saved (lib/chatImageIntent.ts). Any failure or "no"
+      before the question is saved (lib/chatImageIntent.ts). Any failure or "no"
       falls through to the ordinary text send.
     */
     if (
@@ -5922,66 +5943,37 @@ export function ChatPageClient({
       // (app/api/chat/route.ts), so it does not wait for this call first.
       selectionModeRef.current !== "auto" &&
       !isImageDraftActiveRef.current &&
-      attachments.length === 0 &&
+      // A photo is the one attachment the image turn uses: it may be edited.
+      (attachments.length === 0 ||
+        (chatImageEditEnabled &&
+          attachments.some((attachment) =>
+            IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(attachment.mediaType.toLowerCase())
+          ))) &&
       inputValue.trim().length > 0
     ) {
       if (imageIntentCheckPendingRef.current) return;
-      const intentText = inputValue;
-      const intentScope = composerDraftConversationId;
-      const intentTicket = conversationSelectionTicketRef.current;
-      const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
       imageIntentCheckPendingRef.current = true;
-      let decision: ChatImageDecision = { image: false };
-      try {
-        // The conversation lets a follow-up ("make it bluer") find the
-        // image it changes.
-        decision = await askChatImageIntent(intentText, {
-          conversationId: currentChatIdRef.current,
-        });
-      } finally {
+      // The conversation lets a follow-up ("make it bluer") find the image it
+      // changes. Asked about the text as pressed -- the same draft the send
+      // below captures -- and never rejects.
+      const imageTurnDecision = askChatImageTurn(inputValue, {
+        conversationId: currentChatIdRef.current,
+        ...(attachments.length > 0 ? { attachedPhoto: true } : {}),
+      }).finally(() => {
         imageIntentCheckPendingRef.current = false;
-      }
-      /*
-        The answer is about the text as it was pressed. A draft edited, given
-        an attachment, or left for another conversation during the wait is a
-        different request: neither handed off (it could start a paid
-        generation for words already withdrawn, and cancel would restore the
-        stale text over the edit) nor sent from this render's stale closure.
-        The next press decides it. The identity fence comes first: after an
-        account switch the same text in the new account's draft is not this
-        request either.
-      */
-      const liveDraft = readDraft(intentScope);
-      if (
-        !identityKey ||
-        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
-        intentIdentityEpoch !== submitIdentityFenceRef.current.epoch ||
-        !activeChatIdentityIs(identityKey, intentIdentityEpoch) ||
-        submitIdentityFenceRef.current.identityKey !== identityKey ||
-        intentTicket !== conversationSelectionTicketRef.current ||
-        isImageDraftActiveRef.current ||
-        liveDraft.text !== intentText ||
-        liveDraft.attachments.length > 0
-      ) {
-        return;
-      }
-      // Re-entered through the ref so the ordinary send runs on current state.
-      // An image request is still an ordinary send -- the question is saved
-      // and the conversation created exactly as for text -- and only its
-      // answer differs: an image in the conversation, made by the triage's
-      // model and preset (owner decision 2026-10-20: Chat needs no image
-      // workspace and asks no confirmation).
+      });
+      // The send starts now, beside the question: the conversation create and
+      // the model-settings flush every answer needs run while it is out, and
+      // the send reads the answer just before the preflight, the first step
+      // that differs between a text and an image turn. An image request is
+      // still an ordinary send -- the question is saved and the conversation
+      // created exactly as for text -- and only its answer differs: an image
+      // in the conversation, made by the triage's model and preset (owner
+      // decision 2026-10-20: Chat needs no image workspace and asks no
+      // confirmation).
       return handleGlobalSubmitRef.current({
         imageIntentChecked: true,
-        ...(decision.image
-          ? {
-              imageTurn: {
-                modelIds: decision.modelId ? [decision.modelId] : [],
-                preset: decision.preset,
-                ...(decision.prompt ? { prompt: decision.prompt } : {}),
-              },
-            }
-          : {}),
+        imageTurnDecision,
       });
     }
     const waitForCommittedAutoScope = async (
@@ -6791,6 +6783,10 @@ export function ChatPageClient({
         return true;
       };
       if (!chatSendIsCurrent()) return;
+      const imageTurn = options?.imageTurnDecision
+        ? await options.imageTurnDecision
+        : options?.imageTurn;
+      if (options?.imageTurnDecision && !chatSendIsCurrent()) return;
       /*
         An image turn never reaches /api/chat (lib/chatImageTurn.ts), so it
         takes none of the text path's preparation: the preflight would reserve
@@ -6799,7 +6795,7 @@ export function ChatPageClient({
         bundle would be prepared for a prompt no text model reads. The image
         reservation applies its own gates.
       */
-      const imageTurnSend = (Boolean(options?.imageTurn) && activeModelIds.length === 1) ||
+      const imageTurnSend = (Boolean(imageTurn) && activeModelIds.length === 1) ||
         (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
       const preflight = imageTurnSend
         ? { allowed: true as const, admissionToken: null, contextBundle: null }
@@ -7338,6 +7334,9 @@ export function ChatPageClient({
         voiceTurnRef.current.promptId = comparisonId;
         voiceTurnRef.current.sourceUserMessageId = userMsgId;
       }
+      // The panels draw the real user turn from this payload, in this commit.
+      sendEchoRef.current = null;
+      setSendEcho(null);
       setPromptPayload({
         id: comparisonId,
         text: authoredPrompt,
@@ -7377,8 +7376,8 @@ export function ChatPageClient({
         // One answer per question: every panel named in modelIds consumes
         // this payload, and each image turn reserves its own paid group, so
         // a send made for more than one panel never carries one.
-        ...(imageTurnSend && options?.imageTurn
-          ? { imageTurn: options.imageTurn }
+        ...(imageTurnSend && imageTurn
+          ? { imageTurn }
           : {}),
         ...(imageTurnSend && options?.imageTurnsByModel
           ? { imageTurnsByModel: options.imageTurnsByModel }
@@ -8735,6 +8734,37 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
+  /*
+    The composer's send. Everything before the payload -- the image-intent and
+    Review routing calls, creating the conversation, saving the question --
+    used to run with nothing on screen, so a press looked ignored and was
+    pressed again. The question is drawn first; a second press while it is up
+    is the same question and is dropped here. The recursive re-entries inside
+    `handleGlobalSubmit` go through its ref and never come back here.
+  */
+  const handleComposerSubmit = async () => {
+    const active = sendEchoRef.current;
+    if (active && active.ticket === conversationSelectionTicketRef.current) return;
+    const text = inputValue.trim();
+    const mine = !isImageDraftActiveRef.current && (text || attachments.length > 0)
+      ? {
+          ticket: conversationSelectionTicketRef.current,
+          echo: { text, attachmentCount: attachments.length },
+        }
+      : null;
+    if (mine) {
+      sendEchoRef.current = mine;
+      setSendEcho(mine);
+    }
+    try {
+      await handleGlobalSubmit();
+    } finally {
+      if (mine && sendEchoRef.current === mine) {
+        sendEchoRef.current = null;
+        setSendEcho(null);
+      }
+    }
+  };
   const requestVoiceAnswer = (text: string): Promise<VoiceAnswerReceipt> => {
     if (voiceTurnRef.current || inputValue.trim() || attachments.length || pendingSubmission) {
       return Promise.reject(new Error("The composer is busy."));
@@ -10322,6 +10352,7 @@ export function ChatPageClient({
           selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
+          sendEcho={sendEcho}
           inputValue={inputValue}
           setInputValue={setInputValue}
           personalizedPrompt={personalizedPrompt}
@@ -10432,7 +10463,7 @@ export function ChatPageClient({
           onRequestUndoToast={(message, undo) =>
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
-          onSubmit={handleGlobalSubmit}
+          onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}
@@ -10467,6 +10498,12 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          getGuestReviewSource={readGuestComparisonTurn}
+          onAnalysisCompleted={() => {
+            if (isGuestMode) {
+              refreshGuestUsage();
+            }
+          }}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
@@ -10497,6 +10534,7 @@ export function ChatPageClient({
           selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
+          sendEcho={sendEcho}
           inputValue={inputValue}
           setInputValue={setInputValue}
           personalizedPrompt={personalizedPrompt}
@@ -10604,7 +10642,7 @@ export function ChatPageClient({
           webSearchSuggestionCopyFor={webSearchSuggestionCopyFor}
           onWebSearchSuggestionConfirm={handleWebSearchSuggestionConfirm}
           onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
-          onSubmit={handleGlobalSubmit}
+          onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}
@@ -11109,12 +11147,8 @@ export function ChatPageClient({
               </h2>
               <p id="model-comparison-note" className="mt-1 text-sm leading-5 text-zinc-500">
                 {compareSummary.cached
-                  ? formatCopy("chat.quickDifferenceSummaryCachedNote", {
-                      credits: String(compareSummary.originalUsageCredits || 0),
-                    })
-                  : formatCopy("chat.quickDifferenceSummaryNote", {
-                      credits: String(compareSummary.usageCredits),
-                    })}
+                  ? t("chat.quickDifferenceSummaryCachedNote")
+                  : t("chat.quickDifferenceSummaryNote")}
               </p>
               <p className="mt-0.5 text-xs leading-5 text-zinc-400">
                 {t("chat.aiReviewedBy")}:{" "}

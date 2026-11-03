@@ -11,6 +11,7 @@ import {
   ciAdmissionDraftsToCheck,
   ciAdmissionOrder,
   ciAdmissionUnits,
+  ciAdmissionReleasesBehind,
   ciAdmissionUpdatesBranchOf,
   ciRunKey,
   ciRunnerCount,
@@ -92,6 +93,14 @@ test("the line is every open handled pull request, drafts included: stored order
   assert.deepEqual(order, [20, 30, 5, 10]);
   // A ci:hold label takes a pull request out of the line wherever it was.
   assert.deepEqual(ciAdmissionOrder(lineOf(20, 30), open.map((p) => (p.number === 20 ? { ...p, labels: [CI_ADMISSION_HOLD_LABEL] } : p))).map((p) => p.number), [30, 5, 10]);
+});
+
+test("the engineering agent's pull requests are never in the line, so admission never marks an owner review draft ready", () => {
+  const agent = pull(7, { head: "agent/engineering/123456789012" });
+  const open = [pull(30), agent, pull(8, { head: "agent/other" })];
+  assert.deepEqual(ciAdmissionOrder(lineOf(7, 30), open).map((p) => p.number), [30, 8]);
+  const evaluation = judge({ state: state(), openPulls: open, checks: checksFor(open) });
+  assert.ok(!evaluation.actions.some((action) => action.pull?.number === 7), "nothing is done to it");
 });
 
 test("the same GitHub snapshot judged again gives the same line: nothing appears and disappears", () => {
@@ -389,19 +398,45 @@ test("shadow records the branch update it would ask for; a stored state from bef
   assert.deepEqual(parseCiAdmissionState(JSON.stringify(before)).updating, []);
 });
 
-test("a branch is brought up to date only for a pull request into develop from a working branch: never a deploy branch", () => {
+test("a branch is brought up to date into develop from a working branch, or into main from a release train: never a deploy branch or a hand-made release", () => {
   assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "claude/to-develop/x", fork: false }), true);
-  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false }), true);
-  for (const head of ["main", "develop", "release/2026-10-25", "hotfix/x"]) {
+  for (const head of ["main", "develop", "release/2026-10-25", "hotfix/x", "dependabot/npm_and_yarn/x"]) {
     assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head, fork: false }), false, head);
   }
-  assert.equal(ciAdmissionUpdatesBranchOf({ base: "main", head: "release/train-1", fork: false }), false);
+  // The train service's branch into main (2026-10-27: #3047); a look-alike name is not one.
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "main", head: "release/train-20261027-0941", fork: false }), true);
+  for (const head of ["release/train-1", "release/train-20261027-0941-x", "release/2026-10-25-x", "hotfix/x", "develop", "claude/to-develop/x"]) {
+    assert.equal(ciAdmissionUpdatesBranchOf({ base: "main", head, fork: false }), false, head);
+  }
   assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "x", fork: true }), false);
-  // A release behind main stays "behind": no update is asked for.
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "main", head: "release/train-20261027-0941", fork: true }), false);
+  // A hand-made release behind main stays "behind": no update is asked for.
   const release = [pull(1, { base: "main", head: "release/x" })];
   const judged = judge({ state: state({ queue: lineOf(1) }), openPulls: release, checks: new Map([[1, { conflict: false, behind: true }]]) });
   assert.deepEqual(kinds(judged), []);
   assert.equal(statuses(judged)[1], "behind");
+  // A train behind main is brought up to date.
+  const train = [pull(2, { base: "main", head: "release/train-20261027-0941" })];
+  const updating = judge({ state: state({ queue: lineOf(2) }), openPulls: train, checks: new Map([[2, { conflict: false, behind: true }]]) });
+  assert.deepEqual(kinds(updating), ["update_branch:2"]);
+  assert.equal(statuses(updating)[2], "updating");
+});
+
+test("a Dependabot update behind develop is released as it is, never merged into: Dependabot keeps rebasing its own branch", () => {
+  assert.equal(ciAdmissionReleasesBehind({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false }), true);
+  for (const change of [{ base: "main" }, { head: "claude/to-develop/x" }, { fork: true }]) {
+    assert.equal(ciAdmissionReleasesBehind({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false, ...change }), false,
+      JSON.stringify(change));
+  }
+  const open = [pull(1, { head: "dependabot/npm_and_yarn/develop/x" }), pull(2)];
+  const behind = new Map([[1, { conflict: false, behind: true }], [2, { conflict: false, behind: true }]]);
+  const judged = judge({ state: state({ queue: lineOf(1, 2) }), openPulls: open, checks: behind });
+  assert.deepEqual(kinds(judged), ["release:1", "update_branch:2"]);
+  assert.deepEqual(statuses(judged), { 1: "next", 2: "updating" });
+  // A conflict still waits: Dependabot resolves its own.
+  const conflict = judge({ state: state({ queue: lineOf(1) }), openPulls: [open[0]], checks: new Map([[1, { conflict: true, behind: true }]]) });
+  assert.deepEqual(kinds(conflict), []);
+  assert.equal(statuses(conflict)[1], "conflict");
 });
 
 test("a ci:hold pull request out of the line still counts the runners its CI holds when GitHub's jobs are unread", () => {

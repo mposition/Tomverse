@@ -13,6 +13,9 @@
  * Network access is the injected `http` function, so every call is tested
  * without a network. An answer that is not the expected shape is an error,
  * never a guess; the round turns errors into "unknown" and does not retry.
+ * The one exception is the installation lookup, a read: a GitHub 5xx there is
+ * asked once more after a pause, since it otherwise costs the whole round
+ * (2026-10-29: one 502 held an emergency train for ten minutes).
  */
 import { createSign } from "node:crypto";
 
@@ -78,11 +81,21 @@ const str = (value: unknown): string => {
   return value;
 };
 
+/** How long the installation lookup waits before asking again after a GitHub 5xx. */
+export const QA_RELEASE_INSTALLATION_RETRY_MS = 5_000;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /**
  * An installation token for this one repository with section 3's permissions,
  * obtained once per round and reused by every call in it.
  */
-export function qaReleaseInstallationToken(http: QaReleaseHttp, appId: string, privateKeyPem: string, now: () => number) {
+export function qaReleaseInstallationToken(
+  http: QaReleaseHttp,
+  appId: string,
+  privateKeyPem: string,
+  now: () => number,
+  wait: (ms: number) => Promise<void> = sleep,
+) {
   let token: Promise<string> | null = null;
   const fetchToken = async () => {
     const jwt = qaReleaseAppJwt(appId, privateKeyPem, now());
@@ -91,7 +104,12 @@ export function qaReleaseInstallationToken(http: QaReleaseHttp, appId: string, p
       authorization: `Bearer ${jwt}`,
       "x-github-api-version": "2022-11-28",
     };
-    const installation = await http({ method: "GET", url: `${QA_RELEASE_GITHUB_API}${REPO_PATH}/installation`, headers });
+    const lookup = () => http({ method: "GET", url: `${QA_RELEASE_GITHUB_API}${REPO_PATH}/installation`, headers });
+    let installation = await lookup();
+    if (installation.status >= 500) {
+      await wait(QA_RELEASE_INSTALLATION_RETRY_MS);
+      installation = await lookup();
+    }
     if (installation.status !== 200) throw new Error(`github_installation_${installation.status}`);
     const id = record(parseJson(installation.text)).id;
     if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) throw new Error("github_shape");

@@ -20,6 +20,20 @@ export const marketingGeneratorSecret = (
   return secret && secret.length >= 32 ? secret : null;
 };
 
+/**
+ * The media CLI's own secret (operator decision 2026-10-31): it runs on the
+ * AMUX box, not in the generator service, so a leak of one does not reach the
+ * other's routes. Same rule, same comparison.
+ */
+export const MARKETING_MEDIA_SECRET_ENV = "MARKETING_MEDIA_SUBMIT_SECRET";
+
+export const marketingMediaSecret = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string | null => {
+  const secret = env[MARKETING_MEDIA_SECRET_ENV];
+  return secret && secret.length >= 32 ? secret : null;
+};
+
 export const marketingGeneratorAuthorized = (request: Request, secret: string): boolean => {
   const authorization = request.headers.get("authorization");
   const provided = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";

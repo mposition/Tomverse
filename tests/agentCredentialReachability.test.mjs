@@ -834,7 +834,12 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // existing finance DB workflow. Compared with fc36be440^, credentialed jobs,
 // credential reasons and the forbid state are identical; only these two
 // additional CI path patterns change the path-rule portion of this digest.
-const POSTURE_DIGEST = "a2999e874657";
+// 2026-11-02 owner-approved AMUX idea lane (.github/workflows/amux-idea-lane.yml):
+// four credentialed jobs, one secret each (claim and report: the app sync
+// secret; implement: the model credential; publish: GH_AUTOMATION_PAT). They
+// run on schedule and workflow_dispatch only, so no reason and no path rule
+// changes; only the credentialed-job portion of this digest moves.
+const POSTURE_DIGEST = "c2102c98f0f4";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();

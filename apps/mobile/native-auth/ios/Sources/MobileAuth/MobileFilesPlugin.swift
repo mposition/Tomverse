@@ -6,7 +6,7 @@ import Capacitor
 public class MobileFilesPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDelegate {
     public let identifier = "MobileFilesPlugin"
     public let jsName = "MobileFiles"
-    public let pluginMethods = [CAPPluginMethod(name: "saveFile", returnType: CAPPluginReturnPromise), CAPPluginMethod(name: "uploadFile", returnType: CAPPluginReturnPromise)]
+    public let pluginMethods: [CAPPluginMethod] = [CAPPluginMethod(name: "saveFile", returnType: CAPPluginReturnPromise), CAPPluginMethod(name: "uploadFile", returnType: CAPPluginReturnPromise)]
     private var pending: CAPPluginCall?
     private var temporaryDirectory: URL?
 
