@@ -49,7 +49,7 @@ export class MarketingAnalysisSettingsRefusedError extends Error {
 }
 
 /** Recorded with each analysis, so a change to what the model is asked is a new version. */
-export const MARKETING_ANALYSIS_PROMPT_VERSION = "analysis-v1";
+export const MARKETING_ANALYSIS_PROMPT_VERSION = "analysis-v2";
 
 /** Claims one brief may name. */
 export const MARKETING_BRIEF_MAX_CLAIMS = 5;
@@ -233,6 +233,7 @@ const COMPETITIVE_PROMPT = [
   "Write for the person who runs Tomverse's marketing. pricePosition compares Tomverse's prices and allowances with the competitors' in a few sentences, naming plans and amounts. ahead lists where Tomverse is ahead and behind where it is behind; each point is one or two sentences and lists the source URLs it rests on, copied exactly from the data, or none when it rests on Tomverse's own plans or reading. weeklyMessage says what Tomverse should stress in this week's posts, and why, in two to four sentences.",
   "Use only the data. When a competitor has no facts, say nothing about it; when no competitor has any, say the comparison has no data this week. A Tomverse price whose monthlyPriceStored or annualPriceStored flag is false is built in or computed, not confirmed: say so rather than compare it as a current price.",
   "Then choose this week's topic for the posts: topicId is two to six lower case English words joined by hyphens naming the Tomverse capability or benefit to focus on, never another product or company. claimIds lists one to five ids from the claims list that best carry that topic, most important first.",
+  "Tomverse has two products, Tomverse Chat (working with a model and its features) and Tomverse Review (comparing answers). recentTopics are the topics of the last few weeks, newest first: choose a topic that is not one of them, and move between Chat's features and Review from week to week.",
   'Answer with one JSON object and nothing else: {"pricePosition":string,"ahead":[{"point":string,"sources":[string]}],"behind":[{"point":string,"sources":[string]}],"weeklyMessage":string,"topicId":string,"claimIds":[string]}.',
 ].join("\n");
 
@@ -270,8 +271,11 @@ export function marketingCompetitiveAnalysisMessages(input: {
   readonly facts: readonly MarketingAnalysisMarketFact[];
   readonly features: readonly MarketingAnalysisMarketFeature[];
   readonly claims: readonly MarketingAnalysisClaim[];
+  /** The latest briefs' topics, newest first. */
+  readonly recentTopics?: readonly string[];
 }): MarketingLlmMessage[] {
   const data = {
+    recentTopics: input.recentTopics ?? [],
     tomverse: { plans: input.plans, reading: input.self },
     competitors: input.competitors.map((competitor) => ({
       id: competitor.competitorId,
