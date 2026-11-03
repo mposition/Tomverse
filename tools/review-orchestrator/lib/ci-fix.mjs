@@ -863,7 +863,7 @@ export function patchProblem(patch, secrets) {
   return null;
 }
 
-/** The change the model made, without instruction files (the checkout holds the base's) or the removed links. */
+/** The change the model made, without instruction files (the checkout holds develop's) or the removed links. */
 export function proposedPatch(worktree, skip = []) {
   git(["add", "--all"], { cwd: worktree });
   const skipped = new Set(skip);

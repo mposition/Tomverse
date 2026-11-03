@@ -633,7 +633,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
     `/proc`(이 프로세스의 환경 = 읽기 토큰), `/etc`, `/run`, `/sys`, review 상태 폴더, outbox를
     읽기·쓰기 모두 막습니다. deny 규칙은 symlink 경로나 그 대상 중 하나만 맞아도 막습니다.
   - 그래서 checkout과 로그는 그 밖(`PR_CI_AUTO_FIX_WORK`)에 둡니다. 겹치면 pass가 시작하지 않습니다.
-  - 지시 파일(AGENTS.md 등)은 PR base의 것으로 바꾸고, 브랜치가 넣은 symlink는 모델을 부르기
+  - 지시·설정 파일(AGENTS.md, `.claude/` 등)은 PR base와 상관없이 develop의 것으로 바꾸고, 브랜치가 넣은 symlink는 모델을 부르기
     전에 모두 지웁니다.
   - patch가 서버를 떠나기 전 마지막 검사: binary·symlink 변경, 이 계정이 아는 비밀값(읽기 토큰,
     CLI에 넘기는 환경 변수, 자격증명 파일의 문자열 — 원문과 base64), 추가된 줄의 비밀 형태
