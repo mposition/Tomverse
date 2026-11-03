@@ -120,6 +120,58 @@ test("a stable envelope and column schedule still append", async () => {
   assert.equal(write.data.envelope.scheduledAt, FIRST_SCHEDULE);
 });
 
+const guardEntry = {
+  at: "2026-09-21T01:00:00.000Z",
+  type: "guard_result",
+  decision: "approval_required",
+  codes: [],
+  ruleIds: [],
+};
+
+test("a post a person scheduled by the column alone still takes a history append", async () => {
+  // `scheduleMarketingPost` gives an approved draft its slot in the column and
+  // leaves the approved envelope's `scheduledAt` null. That is not two answers
+  // to when the post goes out, so a later append must not be refused for it.
+  let write;
+  const database = postDatabase((args) => {
+    write = args;
+  });
+  const findUnique = database.marketingPost.findUnique;
+  database.marketingPost.findUnique = async () => ({
+    ...(await findUnique()),
+    status: "scheduled",
+    scheduledAt: new Date(FIRST_SCHEDULE),
+  });
+  const result = await appendMarketingPostHistory(database, {
+    id: "post-1",
+    expectedVersion: 0,
+    entry: guardEntry,
+  });
+  assert.equal(result.appended, true);
+  assert.ok(write);
+});
+
+test("an envelope that names a time the column does not hold still refuses", async () => {
+  let write;
+  await assert.rejects(
+    appendMarketingPostHistory(
+      postDatabase((args) => {
+        write = args;
+      }),
+      {
+        id: "post-1",
+        expectedVersion: 0,
+        entry: guardEntry,
+        patch: { envelope: envelope(FIRST_SCHEDULE) },
+      },
+    ),
+    (error) =>
+      error instanceof MarketingStoreRefusedError &&
+      error.code === "envelope_schedule_disagrees",
+  );
+  assert.equal(write, undefined);
+});
+
 test("different resolved answers write their different facts digests", () => {
   const child = spawnSync(
     process.execPath,

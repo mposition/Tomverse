@@ -44,6 +44,11 @@ test.describe("marketing console", () => {
     // The contract's rule about counts: a page of the newest N says N, and
     // does not present it as a total.
     await expect(page.getByText(/Newest 20 of this section/)).toBeVisible();
+    // The fixture draft carries no files, and the row says so rather than
+    // reading as text-only by omission.
+    await expect(page.getByTestId("marketing-post-assets-none").first()).toHaveText(
+      "No files attached"
+    );
   });
 
   test("the publish-state section carries both what went out and what got stuck", async ({

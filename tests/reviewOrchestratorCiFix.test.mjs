@@ -12,6 +12,7 @@ import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { parse as parseYaml } from "yaml";
 import {
   CI_FIX_BRANCH,
   CI_FIX_DEPENDABOT_AUTHOR,
@@ -231,6 +232,21 @@ test("the sender posts once to the default branch, refuses redirects and reports
   assert.deepEqual(JSON.parse(calls[0].init.body), { ref: "main", inputs: dispatchInputs(request) });
   assert.deepEqual(await dispatchWorkflow({ repo: "o/r", token: TOKEN, request, fetchImpl: async () => { throw new TypeError("x"); } }),
     { ok: false, outcome: "network_error" });
+});
+
+// The dispatch above runs on main, so the run's check suite lands on main's
+// head, and Railway's Wait for CI skips that commit's production deployment
+// when any suite there fails (run 41558793323 skipped 1758ccab on 2026-11-03).
+// Job-level continue-on-error keeps the suite green while the job stays red,
+// the split back-merge-main-to-develop.yml relies on (tests/backMergeDeployGate.test.mjs).
+test("a failed auto-fix run never fails the suite on main's head", () => {
+  const workflow = parseYaml(read("../.github/workflows/pr-ci-auto-fix.yml"));
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"], "dispatch only: every run is on the ref the sender names");
+  const offenders = Object.entries(workflow.jobs).filter(([, job]) => job["continue-on-error"] !== true).map(([id]) => id);
+  assert.deepEqual(offenders, [], `${offenders.join(", ")} can fail the run on main and skip its production deployment`);
+  // The push step still fails its job, so a rejected push stays visible.
+  const push = workflow.jobs.publish.steps.find((step) => /git push/.test(step.run ?? ""));
+  assert.ok(push && push["continue-on-error"] === undefined, "the push step itself must not swallow a rejected push");
 });
 
 function senderHarness({ files, now = 10 * 60 * 60_000, fetchImpl }) {
