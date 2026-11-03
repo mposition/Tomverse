@@ -383,9 +383,12 @@ const monthlyPriceClaim = (id: string, planId: "pro" | "max", statementKey: stri
  * 2026-11-03: promote Tomverse Chat's own features, not only Review). The
  * import answer carries §17's required disclosure word for word
  * (lib/marketingMemoryClaims.ts), as every copy that claims import must. No
- * claim is registered for memory itself or for Smart Adaptive: memory waits
- * for the owner to confirm §17's approved wording against the released
- * feature, and Smart Adaptive has no flag a gate could read. The Guard
+ * claim is registered for memory itself, Smart Adaptive or question
+ * refinement: memory waits for the owner to confirm §17's approved wording
+ * against the released feature, and whether the other two are offered is not
+ * one flag a gate could read (refinement also needs its release activation and
+ * an adapter). Each FAQ answer says "where available", because the page is
+ * static and renders whatever the flags are. The Guard
  * still re-reads the page and the price every time it judges a draft, so a
  * sentence the page no longer says, or a price no person saved, refuses the
  * post. Code, not a model, writes this list: a model's output never adds or
@@ -399,7 +402,6 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
   pageClaim("claim.save-and-share", "feature", "/faq", "sections.9.body"),
   pageClaim("claim.about-tomverse", "feature", "/about", "description"),
   pageClaim("claim.start-a-question", "feature", "/about", "sections.0.body"),
-  pageClaim("claim.question-refinement", "feature", "/faq", "sections.3.body", "feature.promptRefiner"),
   pageClaim("claim.chat-assistants", "feature", "/faq", "sections.10.body", "feature.assistantProfiles"),
   pageClaim("claim.chat-import-and-continue", "feature", "/faq", "sections.11.body", "feature.externalImportAndContinuation"),
   pageClaim("claim.chat-image-generation", "feature", "/faq", "sections.12.body", "feature.imageGeneration"),

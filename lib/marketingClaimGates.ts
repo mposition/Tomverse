@@ -34,7 +34,6 @@ import {
 import { EXTERNAL_CONTINUATION_FLAG_KEY, externalContinuationEnabledFromValue } from "@/lib/externalContinuationAccess";
 import { EXTERNAL_IMPORT_FLAG_KEY, externalImportEnabledFromValue } from "@/lib/externalImportAccess";
 import { IMAGE_GENERATION_FLAG_KEY, imageGenerationEnabledFromValue } from "@/lib/imageGenerationAccess";
-import { PROMPT_REFINER_FLAG_KEY, promptRefinerAvailable } from "@/lib/promptRefinerAccess";
 
 /**
  * The client a gate reads through: the caller's transaction, so a flag is read
@@ -104,12 +103,6 @@ export const MARKETING_CLAIM_GATES: Readonly<
   // lib/appSettings.ts): a missing row is the product's "on".
   "feature.attachments": async (database) =>
     (await heldSettingValues(database, [ATTACHMENTS_FLAG_KEY])).get(ATTACHMENTS_FLAG_KEY) !== "false",
-  // The rollout flag and the environment kill switch, as the product reads them.
-  "feature.promptRefiner": async (database) =>
-    promptRefinerAvailable({
-      storedFlagValue: (await heldSettingValues(database, [PROMPT_REFINER_FLAG_KEY])).get(PROMPT_REFINER_FLAG_KEY),
-      env: process.env,
-    }),
 });
 
 /**

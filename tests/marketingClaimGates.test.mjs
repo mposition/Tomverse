@@ -94,21 +94,6 @@ test("the attachments gate is a kill switch: only \"false\" turns it off", async
   assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ "feature.attachmentsEnabled": "false" })), false);
 });
 
-test("the question-refinement gate also honours the environment kill switch", async () => {
-  const gate = "feature.promptRefiner";
-  const on = settingsDatabase({ "feature.promptRefinerEnabled": "true" });
-  const saved = process.env.PROMPT_REFINER_KILL_SWITCH;
-  try {
-    delete process.env.PROMPT_REFINER_KILL_SWITCH;
-    assert.equal(await resolveMarketingClaimGate(gate, on), true);
-    process.env.PROMPT_REFINER_KILL_SWITCH = "1";
-    assert.equal(await resolveMarketingClaimGate(gate, on), false);
-  } finally {
-    if (saved === undefined) delete process.env.PROMPT_REFINER_KILL_SWITCH;
-    else process.env.PROMPT_REFINER_KILL_SWITCH = saved;
-  }
-});
-
 test("an unbound gate is unreadable, not off", () => {
   // A claim naming a flag this build does not bind means the registry has
   // drifted from the claims, which somebody has to look at. Answering `false`

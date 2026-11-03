@@ -264,6 +264,9 @@ export type MarketingGeneratorReport = {
 /** How far back an account's drafts count as having used a claim (policy §7.6). */
 export const MARKETING_RECENT_CLAIM_DAYS = 14;
 
+/** The most drafts that window reads. */
+export const MARKETING_RECENT_POSTS_MAX = 1_000;
+
 /** Briefs whose topics the analysis is told not to repeat. */
 export const MARKETING_RECENT_BRIEF_TOPICS = 4;
 
@@ -378,6 +381,9 @@ export async function readMarketingGeneratorContext(
         channelId: { in: channels.map((row) => row.id) },
         createdAt: { gte: new Date(Date.now() - MARKETING_RECENT_CLAIM_DAYS * 24 * 60 * 60 * 1000) },
       },
+      // Newest first and bounded: the caps (§7.6) keep two weeks far below this.
+      orderBy: { createdAt: "desc" },
+      take: MARKETING_RECENT_POSTS_MAX,
       select: { channelId: true, claimIds: true },
     }),
     db.marketingReport.findMany({
@@ -389,8 +395,9 @@ export async function readMarketingGeneratorContext(
   ]);
   const recentClaims = marketingRecentClaimIds(recentPosts);
   const recentBriefTopics = recentBriefs.flatMap((row) => {
+    // The registry types every schema as `z.ZodType`; the brief's has `topicIds: string[]`.
     const parsed = MARKETING_REPORT_PAYLOAD_SCHEMAS.brief.safeParse(row.payload);
-    return parsed.success ? parsed.data.topicIds : [];
+    return parsed.success ? (parsed.data as { readonly topicIds: readonly string[] }).topicIds : [];
   });
   // One at a time and in a fixed order, as the Guard's fact resolution reads them.
   const gates = new Map<string, boolean | null>();
