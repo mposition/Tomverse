@@ -44,6 +44,7 @@ import {
   type MarketingLlmPricePin,
 } from "@/lib/marketingLlmBudgetCore";
 import { marketingLlmCatalogPinsIn } from "@/lib/marketingLlmModelCatalog";
+import { readMarketingOperations, readMarketingPriceHistory } from "@/lib/marketingMeasurement";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
@@ -97,6 +98,14 @@ export type MarketingGeneratorContext = {
    * stored plan, so this run writes one (lib/marketingStrategyCore.ts).
    */
   readonly analysis: { readonly enabled: boolean; readonly strategyDue: boolean };
+  /**
+   * The last seven days counted and the switches, for the morning report
+   * (lib/marketingMorningCore.ts); null while the analysis switch is off.
+   * Counts only: no post text, person or URL.
+   */
+  readonly operations: Awaited<ReturnType<typeof readMarketingOperations>> | null;
+  /** Competitor prices from the two newest market reports, newest first; empty while the switch is off. */
+  readonly marketPrices: Awaited<ReturnType<typeof readMarketingPriceHistory>>;
 };
 
 /**
@@ -358,6 +367,7 @@ export async function readMarketingGeneratorContext(
     db.appSetting.findUnique({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, select: { value: true } }),
     getBillingPlansWithFieldSources(db),
   ]);
+  const analysisOn = marketingAnalysisEnabledFromValue(analysisSetting?.value);
   const active = plans.filter((entry) => entry.plan.isActive);
   const activePlans: MarketingGeneratorPlan[] = active.map(({ plan, sources }) => ({
     id: plan.id,
@@ -404,6 +414,8 @@ export async function readMarketingGeneratorContext(
     competitors: { tracked, knownIds },
     llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
     ownProduct: { pages: ownPages(), plans: activePlans },
+    operations: analysisOn ? await readMarketingOperations(db) : null,
+    marketPrices: analysisOn ? await readMarketingPriceHistory(db) : [],
     analysis: {
       enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
       // Only asked while the switch is on: off, no plan is written either way.

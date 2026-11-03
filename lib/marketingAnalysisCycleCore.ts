@@ -2,7 +2,8 @@
  * One run of the analysis and brief (operator decision 2026-11-01), between
  * A3 and A5: what Tomverse is, then where it stands and this week's brief,
  * then -- at the first run of a Brisbane week -- the week's plan
- * (lib/marketingStrategyCore.ts), then one signed `brief` report carrying the
+ * (lib/marketingStrategyCore.ts), then the operator's morning report
+ * (lib/marketingMorningCore.ts), then one signed `brief` report carrying the
  * analysis beside it. Pure
  * orchestration over ports, so the worker and the tests drive the same code.
  *
@@ -37,10 +38,18 @@ import {
   type MarketingAnalysisMarketFeature,
   type MarketingAnalysisPayload,
   type MarketingAnalysisRefusal,
+  type MarketingMorningReport,
   type MarketingWeeklyStrategy,
 } from "./marketingAnalysisCore.ts";
 import { marketingGeneratorReportProvenance, type MarketingGeneratorReport } from "./marketingIntelReportCore.ts";
 import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
+import {
+  marketingBrisbaneDate,
+  marketingMorningFigures,
+  marketingMorningMessages,
+  marketingMorningOperationsSchema,
+  readMarketingMorningReport,
+} from "./marketingMorningCore.ts";
 import {
   marketingStrategyMessages,
   readMarketingWeeklyStrategy,
@@ -88,6 +97,12 @@ export type MarketingAnalysisCycleSummary = {
    * time for it, or null when the run never got that far.
    */
   readonly strategy: null | "recorded" | "not_due" | "unusable" | "no_time";
+  /**
+   * The morning report: in the brief, left out because the context carried
+   * no operations to read, its answer was unusable or the run had no time
+   * for it, or null when the run never got that far.
+   */
+  readonly morning: null | "recorded" | "no_data" | "unusable" | "no_time";
   readonly stoppedAt:
     | null
     | { readonly stage: "disabled" | "context" | "deadline" | "llm" | "submit"; readonly detail: string };
@@ -109,6 +124,16 @@ const contextSchema = z.object({
     .optional(),
   ownProduct: z.object({ plans: z.unknown() }).passthrough().optional(),
   analysis: z.object({ enabled: z.boolean(), strategyDue: z.boolean().optional() }).optional(),
+  /** The app's counts for the morning report (lib/marketingMeasurementCore.ts); read by its own schema. */
+  operations: z.unknown().optional(),
+  marketPrices: z
+    .array(
+      z.object({
+        reportCreatedAt: z.string(),
+        prices: z.array(z.object({ competitorId: z.string(), factType: z.string(), value: z.unknown() })),
+      }),
+    )
+    .optional(),
   channels: z
     .array(z.object({ channel: z.string(), accountSlug: z.string(), defaultLocale: z.string() }))
     .optional(),
@@ -203,11 +228,20 @@ export async function runMarketingAnalysisCycle(
   let calls = 0;
   let claimIds = 0;
   let strategyState: MarketingAnalysisCycleSummary["strategy"] = null;
+  let morningState: MarketingAnalysisCycleSummary["morning"] = null;
   const summary = (
     stoppedAt: MarketingAnalysisCycleSummary["stoppedAt"],
     unusable: MarketingAnalysisCycleSummary["unusable"] = null,
     report: MarketingAnalysisCycleSummary["report"] = null,
-  ): MarketingAnalysisCycleSummary => ({ calls, unusable, claimIds, report, strategy: strategyState, stoppedAt });
+  ): MarketingAnalysisCycleSummary => ({
+    calls,
+    unusable,
+    claimIds,
+    report,
+    strategy: strategyState,
+    morning: morningState,
+    stoppedAt,
+  });
 
   let context: z.infer<typeof contextSchema>;
   try {
@@ -309,6 +343,39 @@ export async function runMarketingAnalysisCycle(
     strategyState = strategy ? "recorded" : "unusable";
   }
 
+  // The morning report, at every run: the app's counts in, the operator's
+  // five-minute read out. Unusable, no counts or no time records the brief
+  // without it; a refused or unknown call stops the run as the others do.
+  let morning: MarketingMorningReport | null = null;
+  const operations = marketingMorningOperationsSchema.safeParse(context.operations);
+  if (!operations.success) {
+    morningState = "no_data";
+  } else if (deadline - deps.now() < MARKETING_ANALYSIS_CALL_BUDGET_MS + MARKETING_ANALYSIS_REPORT_MARGIN_MS) {
+    morningState = "no_time";
+  } else {
+    const date = marketingBrisbaneDate(deps.now());
+    const answer = await ask(
+      marketingMorningMessages({
+        date,
+        operations: context.operations,
+        brief: {
+          topicId: read.topicId,
+          weeklyMessage: read.competitive.weeklyMessage,
+          plan: strategy ? { headline: strategy.headline, goal: strategy.goal } : null,
+        },
+        competitors,
+        marketPrices: context.marketPrices ?? [],
+      }),
+    );
+    if ("stop" in answer) return answer.stop;
+    morning = readMarketingMorningReport(answer.content, {
+      date,
+      figures: marketingMorningFigures(operations.data),
+      competitorIds: competitors.map((competitor) => competitor.competitorId),
+    });
+    morningState = morning ? "recorded" : "unusable";
+  }
+
   if (deadline - deps.now() < MARKETING_ANALYSIS_REPORT_MARGIN_MS) {
     return summary({ stage: "deadline", detail: "report_deadline_too_close" });
   }
@@ -328,6 +395,7 @@ export async function runMarketingAnalysisCycle(
       factCount: facts.length,
       featureCount: features.length,
       ...(strategy ? { strategy } : {}),
+      ...(morning ? { morning } : {}),
     },
   });
 
