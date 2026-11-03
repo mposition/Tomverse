@@ -7,6 +7,7 @@ import {
     MarketingFooter,
     MarketingHeader,
 } from "@/components/marketing/MarketingChrome";
+import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 import {
     PROVIDER_DATA_DESTINATIONS,
     disclosableDataDestinations,
@@ -264,6 +265,11 @@ export function PrivacyPolicy() {
     const { t, lang } = useLanguage();
     const localizedContentAvailable = lang === "en" || lang === "ko" || lang === "zh";
     const destinations = disclosableDataDestinations();
+    // The comment-monitoring section is shown only once its operator-confirmation
+    // placeholders are resolved (lib/privacyNoticeStatus.ts).
+    const visibleSections = sections.filter(
+        ([, bodyKey]) => bodyKey !== "comments" || COMMENTS_PRIVACY_NOTICE_CONFIRMED
+    );
     const showProviderTable =
         destinations.length > 0 &&
         destinations.length === PROVIDER_DATA_DESTINATIONS.length;
@@ -288,7 +294,7 @@ export function PrivacyPolicy() {
                 </div>
 
                 <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                    {sections.map(([titleKey, bodyKey, Icon]) => (
+                    {visibleSections.map(([titleKey, bodyKey, Icon]) => (
                         <section
                             key={titleKey}
                             id={bodyKey === "rights" ? "account-deletion" : undefined}

@@ -11,13 +11,17 @@ import { zh } from "../locales/zh.ts";
 import { MARKETING_REPORT_RETENTION } from "../lib/marketingAutomationSchema.ts";
 import { MARKETING_COMMENT_BODY_MAX_CHARS } from "../lib/marketingCommentsMonitor.ts";
 import { isAnalyticsUserId } from "../lib/ga4UserIdPolicy.ts";
+import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "../lib/privacyNoticeStatus.ts";
 import { newAnalyticsUserId } from "../lib/ga4UserId.ts";
 
 // The privacy policy sections for comment monitoring and the GA4 User-ID
 // (docs/policy/marketing-automation.md sections 10.2 and 12.1). The text is
 // public, so what it states about the code is held to the code's own
 // constants, and what is not yet confirmed carries a placeholder that is
-// listed here, in one place, until the operator resolves it.
+// listed here, in one place, until the operator resolves it. While any
+// placeholder is left the page does not render the comment section
+// (lib/privacyNoticeStatus.ts), and the section cannot be marked confirmed with
+// one still in it.
 
 const LOCALES = { en, ko, zh, fr, de, es, pt };
 
@@ -71,14 +75,35 @@ test("the page renders every one of those keys", () => {
     }
 });
 
-test("placeholders are exactly the listed pending confirmations, the same in every locale", () => {
+test("placeholders are exactly the listed pending confirmations, the same in every locale, and none once the section is confirmed", () => {
+    const expected = COMMENTS_PRIVACY_NOTICE_CONFIRMED ? [] : Object.keys(PENDING_CONFIRMATIONS).sort();
     for (const [name, bundle] of Object.entries(LOCALES)) {
         const found = Object.entries(bundle.privacyPolicy)
             .filter(([, value]) => typeof value === "string" && PLACEHOLDER.test(value))
             .map(([key]) => key)
             .sort();
-        assert.deepEqual(found, Object.keys(PENDING_CONFIRMATIONS).sort(), name);
+        assert.deepEqual(found, expected, name);
     }
+});
+
+test("the page renders the comment section only when it is confirmed", () => {
+    const source = readFileSync("components/legal/PrivacyPolicy.tsx", "utf8").replace(/\r\n/g, "\n");
+    assert.match(source, /import \{ COMMENTS_PRIVACY_NOTICE_CONFIRMED \} from "@\/lib\/privacyNoticeStatus"/);
+    assert.match(
+        source,
+        /sections\.filter\(\s*\(\[, bodyKey\]\) => bodyKey !== "comments" \|\| COMMENTS_PRIVACY_NOTICE_CONFIRMED\s*\)/
+    );
+    assert.match(source, /visibleSections\.map\(/);
+    assert.doesNotMatch(source, /[^e]sections\.map\(/, "the unfiltered list must not be rendered");
+});
+
+test("text outside the comment section never refers to comments or carries a placeholder", () => {
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        for (const key of ["retention", "rights", "analytics", "purpose", "collected"]) {
+            assert.doesNotMatch(bundle.privacyPolicy[key], PLACEHOLDER, name + "." + key);
+        }
+    }
+    assert.doesNotMatch(en.privacyPolicy.retention + en.privacyPolicy.rights, /comment/i);
 });
 
 test("the stated retention and limits are the code's own", () => {
@@ -87,7 +112,6 @@ test("the stated retention and limits are the code's own", () => {
     for (const [name, bundle] of Object.entries(LOCALES)) {
         const copy = bundle.privacyPolicy;
         assert.match(copy.commentsTransfer7, /\b90\b/, `${name}: alert retention`);
-        assert.match(copy.retention, /\b90\b/, `${name}: retention section`);
         assert.match(copy.commentsTransfer1, /1[,.\s]?000/, `${name}: comment length`);
     }
 });
