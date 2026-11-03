@@ -64,6 +64,8 @@ const PREWRITE_REFUSALS: Record<string, number> = {
   model_not_approved: 409,
   model_not_launchable: 409,
   reference_snapshot_unavailable: 503,
+  // The idea lane's test entry while the lane is off.
+  lane_disabled: 503,
 };
 
 const originOf = (body: Record<string, unknown>): IdeaSubmissionOrigin =>

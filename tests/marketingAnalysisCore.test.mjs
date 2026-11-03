@@ -91,6 +91,22 @@ test("the competitive call carries each competitor's facts and features with the
   assert.equal(data.competitors[0].facts[0].sourceUrl, "https://poe.com/pricing");
   assert.deepEqual(data.claims.map((claim) => claim.id), ["claim.review-three-models"]);
   assert.deepEqual(data.tomverse.reading, SELF);
+  assert.deepEqual(data.recentTopics, []);
+});
+
+test("the brief is told the recent topics, to move between Chat and Review", () => {
+  const [system, user] = marketingCompetitiveAnalysisMessages({
+    plans: [],
+    self: SELF,
+    competitors: [],
+    facts: [],
+    features: [],
+    claims: [],
+    recentTopics: ["side-by-side-answers", "review-without-account"],
+  });
+  assert.match(system.content, /recentTopics/);
+  assert.match(system.content, /Tomverse Chat/);
+  assert.deepEqual(JSON.parse(user.content).recentTopics, ["side-by-side-answers", "review-without-account"]);
 });
 
 test("only offered claim ids survive into the brief, in the model's order, at most five", () => {

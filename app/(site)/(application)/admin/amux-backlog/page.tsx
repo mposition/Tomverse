@@ -61,6 +61,7 @@ import { AMUX_SESSION_INTAKE_READBACK_ENV, amuxSessionIntakeReadbackEnabled } fr
   "@/lib/amux/ideaSessionIntakeReadbackCore";
 import { AMUX_SESSION_INTAKE_ENV, amuxSessionIntakeWritePermitted } from
   "@/lib/amux/ideaSessionSubmissionCore";
+import { amuxIdeaLaneEnabled } from "@/lib/amux/ideaLaneCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { amuxBacklogPage, amuxBacklogSearch } from "@/lib/amux/adminBacklogListCore";
@@ -209,6 +210,7 @@ export default async function AdminAmuxBacklogPage({
           analysisStopAvailable={
             process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_READ === "enabled" &&
             process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_WRITE === "enabled"}
+          laneAvailable={amuxIdeaLaneEnabled()}
           operatorId={session.user.id} />
         {openedIdea && ideaProgress !== undefined ? <AmuxIdeaProgressPanel rows={ideaProgress}
           activeRequestId={openRequestId} /> : null}

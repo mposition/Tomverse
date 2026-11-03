@@ -907,8 +907,10 @@ test("every widely readable workflow in this repository holds a read-only cache 
   // change here and not only a red gate somebody silences. 24 until
   // 2026-10-08, when the develop push lane gained the unit tests; 26 from
   // 2026-10-20, when the PR CI auto-fix (workflow_run, cache-mode: read) arrived;
-  // 27 from 2026-11-02, when the AMUX idea lane (schedule, cache-mode: read) arrived.
-  assert.equal(checked, 27);
+  // 27 from 2026-11-02, when the AMUX idea lane (schedule, cache-mode: read) arrived;
+  // 28 from 2026-11-03, when the marketing SEO agent runner (workflow_dispatch,
+  // cache-mode: read) arrived.
+  assert.equal(checked, 28);
 });
 
 test("an explicit write stops being allowed the moment a wider trigger is added", () => {
