@@ -1849,6 +1849,7 @@ export const zhHant = {
         modelModeExplicit: "指定模型",
         modelsLimitHint: "最多 {max} 個，第一個為預設。",
         modelsKeepOne: "若不指定任何模型，請選擇「跟隨帳戶預設」。",
+        modelUnavailableTag: "已不再提供",
         createHint: "只需名稱與指令即可開始使用。其餘內容之後都可以修改。",
         instructionsPlaceholder: "例如：簡短作答，並先說明理由。",
         nameRequired: "請輸入名稱。",

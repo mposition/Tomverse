@@ -8,6 +8,8 @@ import {
 import { ASSISTANT_PROMPT_FORMAT_VERSION } from "@/lib/assistantProfileVersioning";
 import { buildChatProfileContext } from "@/lib/chatProfileContext";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { buildChatTurnPrelude } from "@/lib/chatTurnSystemBlocks";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -381,4 +383,146 @@ test("republishing the profile makes a bundle priced against the old one stale",
     });
 
     assert.notEqual(before.fingerprint, after.fingerprint);
+});
+
+/* ---------------------------------------- a retired model with a successor */
+
+test("a version naming a retired model still reaches the provider request through its replacement", async () => {
+    // Production, 2026-11-03: `claude-sonnet-5` was retired with
+    // `claude-sonnet-5-5` as its replacement. Conversation create followed the
+    // replacement and the conversation ran on 5.5, but the turn context checked
+    // the retired id itself, refused the profile as `model_unavailable`, and
+    // the answer ignored the assistant's instructions and its knowledge file.
+    const user = await createUser();
+    // Seeds the registry, so the replacement is a real catalogue row.
+    await getRuntimeModels();
+    const source = await prisma.modelRegistryEntry.findUniqueOrThrow({
+        where: { id: MODEL_ID },
+    });
+    const retiredId = `retired-test-${randomUUID().slice(0, 8)}`;
+    await prisma.modelRegistryEntry.create({
+        data: {
+            id: retiredId,
+            name: "Retired test model",
+            apiModel: source.apiModel,
+            provider: source.provider,
+            apiBaseUrl: source.apiBaseUrl,
+            apiKeyEnvName: source.apiKeyEnvName,
+            minimumPlan: source.minimumPlan,
+            usageClass: source.usageClass,
+            creditWeight: source.creditWeight,
+            enabled: false,
+            status: "disabled",
+            publiclyListed: false,
+            replacementModelId: MODEL_ID,
+        },
+    });
+    try {
+        const profile = await prisma.assistantProfile.create({
+            data: { userId: user.id, name: "가족 여행 도우미" },
+        });
+        const file = await prisma.assistantKnowledgeFile.create({
+            data: {
+                profileId: profile.id,
+                userId: user.id,
+                name: "우리 가족 여행 메모.txt",
+                mime: "text/plain",
+                bytes: 256,
+                digest: `sha256-${randomUUID()}`,
+                r2Key: `assistant-knowledge/${randomUUID()}`,
+                processingStatus: "ready",
+                extractedCharacters: 60,
+                chunkCount: 1,
+            },
+        });
+        await prisma.assistantKnowledgeChunk.create({
+            data: {
+                fileId: file.id,
+                userId: user.id,
+                ordinal: 0,
+                content: "여행 메모: 계단 피하기, 매운 음식 X, 엘리베이터 있는 숙소.",
+                searchTerms: ["여행", "일정", "경주", "계단", "숙소"],
+            },
+        });
+        const version = await prisma.assistantProfileVersion.create({
+            data: {
+                profileId: profile.id,
+                userId: user.id,
+                revision: 3,
+                instructions: "부모님과 함께 가는 여행 일정, 걷는 거리 짧게, 표로.",
+                models: [retiredId],
+                toolPolicy: { webSearch: false, deepResearch: false },
+                memoryPolicy: { useAccountMemory: false },
+                starters: [],
+                knowledgeManifest: [
+                    { fileId: file.id, name: file.name, digest: file.digest },
+                ],
+                retrievalVersion: 1,
+                promptFormatVersion: ASSISTANT_PROMPT_FORMAT_VERSION,
+            },
+        });
+        await prisma.assistantProfile.update({
+            where: { id: profile.id },
+            data: { currentVersionId: version.id },
+        });
+
+        const turn = await buildChatTurnContext({
+            userId: user.id,
+            query: "다음 달 경주 1박 2일 여행 일정 짜 줘.",
+            profileVersionId: version.id,
+            plan: "Free",
+        });
+
+        assert.equal(turn.profile.refusal, null);
+        assert.equal(turn.profile.knowledgeChunkCount, 1);
+        assert.ok(turn.profileTokens > 0, "a bundle is issued for the profile");
+        // What the chat route sends: the turn prelude opens with this block.
+        const [first] = buildChatTurnPrelude({
+            contextSystemPrompt: turn.systemPrompt,
+            blocks: { systemMessages: [], untrustedDataMessages: [] },
+        });
+        assert.equal(first?.role, "system");
+        assert.match(first?.content ?? "", /걷는 거리 짧게/);
+        assert.match(first?.content ?? "", /계단 피하기/);
+        assert.match(first?.content ?? "", /우리 가족 여행 메모\.txt/);
+        // The tool policy is still the version's, not widened by the swap.
+        assert.deepEqual(turn.profile.tools, {
+            webSearch: false,
+            deepResearch: false,
+        });
+    } finally {
+        await prisma.modelRegistryEntry.deleteMany({ where: { id: retiredId } });
+    }
+});
+
+test("a version naming a retired model with no live successor is still refused", async () => {
+    const user = await createUser();
+    await getRuntimeModels();
+    const source = await prisma.modelRegistryEntry.findUniqueOrThrow({
+        where: { id: MODEL_ID },
+    });
+    const retiredId = `retired-test-${randomUUID().slice(0, 8)}`;
+    await prisma.modelRegistryEntry.create({
+        data: {
+            id: retiredId,
+            name: "Retired test model",
+            apiModel: source.apiModel,
+            provider: source.provider,
+            apiBaseUrl: source.apiBaseUrl,
+            apiKeyEnvName: source.apiKeyEnvName,
+            minimumPlan: source.minimumPlan,
+            usageClass: source.usageClass,
+            creditWeight: source.creditWeight,
+            enabled: false,
+            status: "disabled",
+        },
+    });
+    try {
+        const { version } = await publishProfile(user.id, { models: [retiredId] });
+        const result = await context(user.id, version.id);
+        assert.equal(result.refusal, "model_unavailable");
+        assert.equal(result.instructionsPrompt, null);
+    } finally {
+        await prisma.modelRegistryEntry.deleteMany({ where: { id: retiredId } });
+    }
 });

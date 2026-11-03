@@ -28,6 +28,7 @@ import {
     readAssistantProfile,
 } from "@/lib/assistantProfileService";
 import { ASSISTANT_KNOWLEDGE_LIMITS } from "@/lib/assistantKnowledgeLimits";
+import { resolveProfileModelIds } from "@/lib/assistantProfileModels";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { authOptions } from "@/lib/auth";
 
@@ -134,7 +135,9 @@ export async function POST(
             expectedRevision: body.expectedRevision,
             draft: {
                 instructions: body.instructions,
-                modelIds: body.modelIds,
+                // Resolved and de-duplicated, so a retired id ticked beside its
+                // successor is stored once, under the id Chat runs.
+                modelIds: await resolveProfileModelIds(body.modelIds),
                 toolPolicy: body.toolPolicy,
                 memoryPolicy: body.memoryPolicy,
                 starters: body.starters,
