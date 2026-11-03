@@ -44,7 +44,9 @@ export const marketingGeneratorDraftSchema = z
     locale: envelope.locale,
     renderedText: envelope.renderedText,
     claimIds: envelope.claimIds,
-    assets: envelope.assets,
+    // Every post carries an image or a video (owner decision 2026-11-03), so a
+    // draft without one is refused rather than queued for a person to reject.
+    assets: envelope.assets.min(1, "a post carries an image or a video"),
     // Every post from a Tomverse account is advertising (policy §13, AANA;
     // S3i), so a draft that does not say so is refused rather than fixed here.
     disclosureFlags: envelope.disclosureFlags.refine(

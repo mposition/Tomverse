@@ -24,7 +24,7 @@ const draft = (overrides = {}) => ({
   locale: "en",
   renderedText: "Three models, three answers, side by side.",
   claimIds: [],
-  assets: [],
+  assets: [{ assetId: "media-card-en", altKey: "en" }],
   disclosureFlags: ["advertising"],
   ...overrides,
 });
@@ -68,6 +68,15 @@ test("a draft that does not say it is advertising is refused: every Tomverse pos
   }
   const both = signed({ drafts: [draft({ disclosureFlags: ["advertising", "ai_generated_asset"] })] });
   assert.equal(marketingDraftSubmissionSchema.safeParse(both).success, true);
+});
+
+test("a draft that carries no image or video is refused: there are no text-only posts", () => {
+  // Owner decision 2026-11-03, on every channel and for a RedNote package too.
+  for (const kind of ["social", "rednote_package"]) {
+    const body = signed({ drafts: [draft({ kind, assets: [] })] });
+    assert.equal(marketingDraftSubmissionSchema.safeParse(body).success, false, kind);
+  }
+  assert.equal(marketingDraftSubmissionSchema.safeParse(signed()).success, true);
 });
 
 test("a submission is bounded and names each draft once", () => {
