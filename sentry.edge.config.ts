@@ -22,8 +22,24 @@ Sentry.init({
   // under production while the same process answered "staging".
   environment: resolveSentryEnvironmentTag(),
   release: process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA,
-  sendDefaultPii: false,
-  enableLogs: true,
+  // Sentry 11 replaced `sendDefaultPii: false` with `dataCollection`, and an
+  // unset `dataCollection` collects user info, cookies, bodies and AI/MCP
+  // content. This is the SDK's documented v10 default, kept as it was.
+  dataCollection: {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: {
+      request: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+      response: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+    },
+    httpBodies: [],
+    urlQueryParams: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+    genAI: { inputs: false, outputs: false },
+    mcp: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    graphQL: { document: false, variables: false },
+  },
   tracesSampleRate:
     Number.isFinite(tracesSampleRate) && tracesSampleRate >= 0
       ? Math.min(1, tracesSampleRate)

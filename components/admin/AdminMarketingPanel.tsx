@@ -2062,6 +2062,49 @@ const guardTone = (decision: unknown): "success" | "warning" | "danger" | "neutr
   return value ? "warning" : "neutral";
 };
 
+/**
+ * The files a post carries, each opening the same preview the Assets tab uses.
+ *
+ * A post's text excerpt says nothing about its media, so a draft with a video
+ * read as words only. With nothing attached the line says so, rather than
+ * leaving the absence to be inferred.
+ */
+export function MarketingPostAssets({
+  assetIds,
+  m,
+}: {
+  assetIds: unknown;
+  m: Record<string, string>;
+}) {
+  const ids = Array.isArray(assetIds)
+    ? assetIds.filter((id): id is string => typeof id === "string" && id !== "")
+    : [];
+  if (ids.length === 0) {
+    return (
+      <p className="mt-3 text-xs text-zinc-500" data-testid="marketing-post-assets-none">
+        {m.postNoAssets}
+      </p>
+    );
+  }
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-400" data-testid="marketing-post-assets">
+      <span>{m.postAssets}</span>
+      {ids.map((id) => (
+        <a
+          key={id}
+          href={ASSET_PATH(id, "preview")}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-zinc-300 underline underline-offset-2 hover:text-white"
+          data-testid="marketing-asset-preview-link"
+        >
+          {id}
+        </a>
+      ))}
+    </p>
+  );
+}
+
 function MarketingRow({
   section,
   row,
@@ -2098,6 +2141,7 @@ function MarketingRow({
           </span>
         </div>
         <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-100">{text(row.excerpt) ?? m.none}</p>
+        <MarketingPostAssets assetIds={row.assetIds} m={m} />
         <p className="mt-3 text-xs text-zinc-500" title={`${stamp(row.createdAt) ?? ""} UTC`}>
           {m.queueMeta
             .replace("{created}", relative(row.createdAt, now, m) ?? m.none)
@@ -2138,6 +2182,7 @@ function MarketingRow({
             }
           />
         </div>
+        <MarketingPostAssets assetIds={row.assetIds} m={m} />
       </>
     );
   }

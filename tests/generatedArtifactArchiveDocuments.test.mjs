@@ -149,7 +149,7 @@ test("a rendered docx entry inside a zip reopens in a Word-compatible parser", a
     extractAttachments: false,
     ocr: false,
   });
-  assert.match(parsed.toText(), /매출 보고/);
+  assert.match((await parsed.to("text")).value, /매출 보고/);
 });
 
 // Regression: the archive that existed before this change still builds the
