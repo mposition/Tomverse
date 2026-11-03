@@ -28,6 +28,7 @@ import {
   MARKETING_S2B1_ACTIONS,
   requeueMarketingPostAfterFailure,
   resumeMarketingChannelToAutonomous,
+  scheduleMarketingPost,
 } from "../lib/marketingStore.ts";
 
 const DIGEST = "b".repeat(64);
@@ -458,6 +459,198 @@ test("a requeue ends the failed attempt's claim and keeps its day", async () => 
     !("slotDate" in written),
     "a requeue leaves the day for the next claim to renew or move",
   );
+});
+
+const SCHEDULE_NOW = new Date("2026-11-03T00:00:00.000Z");
+const SLOT = new Date("2026-11-04T01:00:00.000Z");
+
+const approvedEnvelope = (scheduledAt = null) => ({
+  channel: "linkedin",
+  accountSlug: "linkedin-1",
+  locale: "en",
+  renderedText: "Three models, three answers, side by side.",
+  claimIds: [],
+  assets: [],
+  finalUrl: null,
+  scheduledAt,
+  disclosureFlags: ["advertising"],
+});
+
+const approvedPost = (envelopeSchedule = null) => ({
+  ...pendingPost(),
+  status: "approved",
+  envelope: approvedEnvelope(envelopeSchedule),
+  approvedDigest: DIGEST,
+  approvalAuditLogId: "approval-1",
+  approvedAt: new Date("2026-11-02T00:00:00.000Z"),
+  historyVersion: 3,
+});
+
+/** Answers the two reads a schedule makes, in order: the row, then the clock. */
+const scheduleDatabase = ({ row, audit, writes = [], count = 1 }) => {
+  let reads = 0;
+  return {
+    $queryRaw: async () => (reads++ === 0 ? [row] : [{ now: SCHEDULE_NOW }]),
+    adminAuditLog: auditReader(audit),
+    marketingPost: {
+      updateMany: async (args) => {
+        writes.push(args);
+        return { count };
+      },
+    },
+  };
+};
+
+const scheduleAudit = (row) =>
+  signedAudit({
+    action: MARKETING_S2B1_ACTIONS.postSchedule,
+    targetId: row.id,
+    metadata: { digest: DIGEST, historyVersion: row.historyVersion },
+  });
+
+const scheduleInput = (row, audit, scheduledAt = SLOT) => ({
+  id: row.id,
+  expectedEnvelopeDigest: DIGEST,
+  expectedHistoryVersion: row.historyVersion,
+  scheduledAt,
+  auditLogId: audit.id,
+});
+
+const refusedWith = (code) => (error) =>
+  error instanceof MarketingStoreRefusedError && error.code === code;
+
+test("an approved draft whose envelope names no time is scheduled by the column alone", async () => {
+  // Intake writes `scheduledAt: null` into every generated draft, so the slot is
+  // the person's decision and not part of the approved bytes: the envelope and
+  // its digest stay as approved and only the column moves.
+  const row = approvedPost(null);
+  const audit = scheduleAudit(row);
+  const writes = [];
+  await withAuditKey(() =>
+    scheduleMarketingPost(
+      scheduleDatabase({ row, audit, writes }),
+      scheduleInput(row, audit),
+    ),
+  );
+  assert.equal(writes.length, 1);
+  const [{ where, data }] = writes;
+  assert.equal(data.status, "scheduled");
+  assert.equal(data.scheduledAt.toISOString(), SLOT.toISOString());
+  assert.deepEqual(Object.keys(data).sort(), ["scheduledAt", "status"]);
+  assert.equal(where.status, "approved");
+  assert.equal(where.envelopeDigest, DIGEST);
+  assert.equal(where.approvedDigest, DIGEST);
+  assert.equal(where.historyVersion, row.historyVersion);
+});
+
+test("an envelope that names the same time schedules", async () => {
+  const row = approvedPost(SLOT.toISOString());
+  const audit = scheduleAudit(row);
+  const writes = [];
+  await withAuditKey(() =>
+    scheduleMarketingPost(
+      scheduleDatabase({ row, audit, writes }),
+      scheduleInput(row, audit),
+    ),
+  );
+  assert.equal(writes.length, 1);
+});
+
+test("an envelope that names a different time refuses and writes nothing", async () => {
+  const row = approvedPost("2026-11-05T01:00:00.000Z");
+  const audit = scheduleAudit(row);
+  const writes = [];
+  await withAuditKey(() =>
+    assert.rejects(
+      scheduleMarketingPost(
+        scheduleDatabase({ row, audit, writes }),
+        scheduleInput(row, audit),
+      ),
+      refusedWith("schedule_conflict"),
+    ),
+  );
+  assert.equal(writes.length, 0);
+});
+
+test("a time that is not in the future refuses even for a null envelope", async () => {
+  const row = approvedPost(null);
+  const audit = scheduleAudit(row);
+  for (const at of [
+    new Date("2026-11-02T23:59:59.000Z"),
+    new Date(SCHEDULE_NOW.getTime()),
+  ]) {
+    const writes = [];
+    await withAuditKey(() =>
+      assert.rejects(
+        scheduleMarketingPost(
+          scheduleDatabase({ row, audit, writes }),
+          scheduleInput(row, audit, at),
+        ),
+        refusedWith("schedule_conflict"),
+      ),
+    );
+    assert.equal(writes.length, 0);
+  }
+});
+
+test("a post that is not approved, or whose digest or version moved, is not scheduled", async () => {
+  const base = approvedPost(null);
+  const audit = scheduleAudit(base);
+  const cases = [
+    { ...base, status: "pending_approval" },
+    { ...base, status: "scheduled" },
+    { ...base, approvedDigest: "c".repeat(64) },
+    { ...base, historyVersion: base.historyVersion + 1 },
+  ];
+  for (const row of cases) {
+    const writes = [];
+    await withAuditKey(() =>
+      assert.rejects(
+        scheduleMarketingPost(
+          scheduleDatabase({ row, audit, writes }),
+          scheduleInput(base, audit),
+        ),
+        refusedWith("schedule_conflict"),
+      ),
+    );
+    assert.equal(writes.length, 0);
+  }
+});
+
+test("a schedule that loses the compare-and-set refuses", async () => {
+  const row = approvedPost(null);
+  const audit = scheduleAudit(row);
+  await withAuditKey(() =>
+    assert.rejects(
+      scheduleMarketingPost(
+        scheduleDatabase({ row, audit, count: 0 }),
+        scheduleInput(row, audit),
+      ),
+      refusedWith("schedule_conflict"),
+    ),
+  );
+});
+
+test("a schedule without an audit entry for it refuses before writing", async () => {
+  const row = approvedPost(null);
+  const wrong = signedAudit({
+    action: MARKETING_S2B1_ACTIONS.postApprove,
+    targetId: row.id,
+    metadata: { digest: DIGEST, historyVersion: row.historyVersion },
+  });
+  const writes = [];
+  await withAuditKey(() =>
+    assert.rejects(
+      scheduleMarketingPost(
+        scheduleDatabase({ row, audit: wrong, writes }),
+        scheduleInput(row, wrong),
+      ),
+      (error) =>
+        error instanceof MarketingStoreRefusedError &&
+        error.code.startsWith("audit_evidence_"),
+    ),
+  );
+  assert.equal(writes.length, 0);
 });
 
 test("requeue refuses reuse of the previous approval audit id", async () => {
