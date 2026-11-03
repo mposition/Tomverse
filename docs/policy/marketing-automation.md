@@ -304,6 +304,9 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 
 **범위.** 허용 범위는 운영자가 서명한 검증 기록에 **실제로 관측된 `event type × MarketingChannel` 조합의 부분집합**이다.
 검증하지 않은 채널·계정이나 event type으로 통과를 넓히지 않는다. 넓히려면 그 조합을 새로 검증해 기록한다.
+기록의 쌍은 채널 **id**로 적히고 id는 DB마다 다르다. production 범위에 쓸 채널은 staging이 **그 운영 채널의 id와 Zernio 계정**으로 관측해야 하며,
+Test 전용 채널의 관측으로는 운영 채널을 허용할 수 없다(절차: `docs/ops/marketing-webhook-production-activation.md`).
+production 수신기는 서명된 설정 세대가 있으면 범위 밖 이벤트도 서명 검증 뒤 받지만, 게시물을 읽지 않고 `apply_not_permitted` 감사 행만 남긴다(수신만).
 
 **통과 조건 — 활성화할 범위의 event type마다 아래가 모두 staging에서 관측될 것:**
 1. 유효 서명(`X-Zernio-Signature`, raw body HMAC-SHA256)의 Zernio 이벤트는 수락되고 shadow 기록에 남는다.
