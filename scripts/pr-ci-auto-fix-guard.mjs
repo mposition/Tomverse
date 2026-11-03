@@ -2,21 +2,15 @@
 // workflow .github/workflows/pr-ci-auto-fix.yml.
 //
 //   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> [ci|conflict]
-//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff <checkout-dir> [<head-branch>]
-//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs conflict <checkout-dir> <resolution.json> [<head-branch>]
-//
-// `diff` takes the head branch the target job read from GitHub; without it no
-// root file is allowed. With PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED=true in the
-// environment (the repository variable) a Dependabot head's fix may edit a test
-// file, judged by its patch and by the tests the merge lane leaves to a person,
-// which this reads from its own trusted checkout.
+//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff <checkout-dir>
+//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs conflict <checkout-dir> <resolution.json>
 //
 // `target` reads the pull request and its commits as `gh api --paginate
 // --slurp` returned them; `diff` reads the diff against HEAD of another
-// checkout. `conflict` reads a checkout where the workflow has merged develop
-// and stopped on conflicts, and the proposed resolution ({ files: { path:
-// base64 | { merged: sha256, hunks: lines[][] } } }); only when the resolution
-// passes does it write the files there.
+// checkout. `conflict` reads a checkout where the workflow has merged the
+// pull request's base and stopped on conflicts, and the proposed resolution
+// ({ files: { path: base64 | { merged: sha256, hunks: lines[][] } } }); only
+// when the resolution passes does it write the files there.
 // The workflow runs this file from a trusted checkout, never from the tree the
 // model or the pull request could change. Prints the verdict as one JSON line
 // and exits 0 to proceed, 1 to stop.
@@ -24,21 +18,8 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, constants, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { judgePrCiAutoFixConflict, judgePrCiAutoFixDiff, judgePrCiAutoFixTarget, rebuildConflictResolution } from "../lib/prCiAutoFixGuardCore.ts";
-import { isQaReleasePolicyDocument, qaReleasePolicyTestPaths } from "../lib/qaReleaseMergeLanePolicyInputsCore.ts";
-
-/** The tests the merge lane leaves to a person, named in its policy documents in this trusted checkout; null when unread. */
-function trustedPolicyTestPaths() {
-  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-  try {
-    const documents = execFileSync("git", ["-C", root, "ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(isQaReleasePolicyDocument);
-    return documents.length === 0 ? null : qaReleasePolicyTestPaths(documents.map((path) => readFileSync(join(root, path), "utf8")));
-  } catch {
-    return null;
-  }
-}
 
 const [mode, ...args] = process.argv.slice(2);
 let verdict;
@@ -49,30 +30,21 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const pages = JSON.parse(readFileSync(commitsPath, "utf8"));
   const commits = Array.isArray(pages) ? pages.flat() : [];
   verdict = judgePrCiAutoFixTarget({
-    headBranch: pr.head?.ref ?? "",
-    baseBranch: pr.base?.ref ?? "",
-    draft: pr.draft === true,
     sameRepository: pr.head?.repo?.full_name === pr.base?.repo?.full_name,
-    author: String(pr.user?.login ?? ""),
     commitMessages: commits.map((c) => String(c.commit?.message ?? "")),
     commitCount: pr.commits,
     kind: kind === "conflict" ? "conflict" : "ci",
   });
-} else if (mode === "diff" && (args.length === 1 || args.length === 2)) {
-  const [checkoutDir, headBranch] = args;
-  const git = (gitArgs) => execFileSync("git", ["-C", checkoutDir, ...gitArgs], { encoding: "utf8" });
+} else if (mode === "diff" && args.length === 1) {
+  const [checkoutDir] = args;
+  const git = (gitArgs) => execFileSync("git", ["-C", checkoutDir, ...gitArgs], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   git(["add", "--intent-to-add", "--all"]);
-  const dependabotTests = process.env.PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED === "true";
   verdict = judgePrCiAutoFixDiff({
     nameStatus: git(["diff", "--name-status", "-M", "HEAD"]),
     numstat: git(["diff", "--numstat", "-M", "HEAD"]),
-    headBranch,
-    dependabotTests,
-    policyTestPaths: dependabotTests ? trustedPolicyTestPaths() : [],
-    patch: dependabotTests ? git(["diff", "-U0", "-M", "--no-color", "--no-ext-diff", "HEAD"]) : undefined,
   });
-} else if (mode === "conflict" && (args.length === 2 || args.length === 3)) {
-  const [checkoutDir, resolutionPath, headBranch] = args;
+} else if (mode === "conflict" && args.length === 2) {
+  const [checkoutDir, resolutionPath] = args;
   const git = (gitArgs) =>
     execFileSync("git", ["-C", checkoutDir, "--literal-pathspecs", ...gitArgs], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   // Each unmerged path's stages and modes, from the index git wrote here.
@@ -115,7 +87,7 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
     const merged = ok && stages.get(path)["2"] && stages.get(path)["3"] ? readFileSync(fullPath(path), "utf8") : null;
     return { path, regular: ok, merged, resolved: text(path, merged) };
   });
-  verdict = judgePrCiAutoFixConflict({ files, proposed: Object.keys(proposed), headBranch });
+  verdict = judgePrCiAutoFixConflict({ files, proposed: Object.keys(proposed) });
   if (verdict.push) {
     for (const file of files) {
       // Opened without following a link, on top of the checks above (the
@@ -132,7 +104,7 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   }
 } else {
   console.error(
-    "usage: pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> [ci|conflict] | diff <checkout-dir> [<head-branch>] | conflict <checkout-dir> <resolution.json> [<head-branch>]",
+    "usage: pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> [ci|conflict] | diff <checkout-dir> | conflict <checkout-dir> <resolution.json>",
   );
   process.exit(2);
 }

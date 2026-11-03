@@ -1,7 +1,7 @@
 // The CI auto-fix's conflict resolution (owner 2026-10-27): the proposing pass
-// on the review server (tools/review-orchestrator/lib/ci-fix.mjs) merges
-// develop into a conflicting branch and has the model resolve the markers;
-// the sender carries the resolution and the develop commit; the workflow's
+// on the review server (tools/review-orchestrator/lib/ci-fix.mjs) merges the
+// pull request's base into a conflicting branch and has the model resolve the
+// markers; the sender carries the resolution and the base commit; the workflow's
 // guard (lib/prCiAutoFixGuardCore.ts, scripts/pr-ci-auto-fix-guard.mjs)
 // merges that commit itself and decides whether the resolution is committed.
 import { test } from "node:test";
@@ -27,7 +27,6 @@ import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { createDispatchSender, dispatchInputs, normaliseDispatchRequest } from "../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs";
 import {
   PR_CI_AUTO_FIX_CONFLICT_PREFIX,
-  PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES,
   judgePrCiAutoFixConflict,
   judgePrCiAutoFixTarget,
   rebuildConflictResolution,
@@ -71,14 +70,14 @@ test("the guard commits a resolution that keeps everything outside the conflicts
   assert.deepEqual(one("lib/x.ts", "name: ci \n- run: npm audit\nb-branch\n- run: npm test\n"), ["outside_conflict_changed"]);
   assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nb-branch \n- run: npm test\n"), ["gate_path_new_line"]);
 
-  // Inside it, a gate path takes only its sides' lines; elsewhere a few joined lines are fine.
+  // Inside it, a workflow or action takes only its sides' lines (they read the
+  // repository's secrets); any other file may take as many new lines as it needs.
   assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
-  assert.deepEqual(one("package.json", "name: ci\n- run: npm audit\n\"x\": \"1\"\n- run: npm test\n"), ["gate_path_new_line"]);
-  assert.deepEqual(one("lib/adminAuth.ts", "name: ci\n- run: npm audit\nb-branch + b-develop\n- run: npm test\n"), ["gate_path_new_line"]);
-  // The authority manifest is the lane's to hold at merge, not the guard's.
-  assert.deepEqual(one("lib/agentAuthorityFiles.ts", "name: ci\n- run: npm audit\nb-branch + b-develop\n- run: npm test\n"), []);
-  const many = Array.from({ length: PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES + 1 }, (_, i) => `new ${i}`).join("\n");
-  assert.deepEqual(one("lib/x.ts", `name: ci\n- run: npm audit\n${many}\n- run: npm test\n`), ["too_many_new_lines"]);
+  assert.deepEqual(one(".github/actions/a/action.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
+  const many = Array.from({ length: 200 }, (_, i) => `new ${i}`).join("\n");
+  for (const path of ["package.json", "lib/adminAuth.ts", "lib/agentAuthorityFiles.ts", "scripts/x.mjs", "AGENTS.md", "lib/x.ts"]) {
+    assert.deepEqual(one(path, `name: ci\n- run: npm audit\n${many}\n- run: npm test\n`), [], path);
+  }
 
   assert.deepEqual(verdict({ files: [file("lib/x.ts", "name: ci\n- run: npm audit\nb-branch\n- run: npm test\n")], proposed: ["lib/x.ts", "lib/other.ts"] }), ["not_conflicted"]);
   assert.deepEqual(one("lib/x.ts", null), ["unresolved"]);
@@ -96,17 +95,13 @@ test("two conflicts in one file are each replaced, the text between them kept", 
   assert.deepEqual(judge("top\na1\nend\n"), { push: false, reasons: ["outside_conflict_changed"] });
 });
 
-test("a conflict may be resolved on a draft, and counts its own attempts", () => {
-  const target = (extra) => judgePrCiAutoFixTarget({
-    headBranch: "claude/to-develop/x", baseBranch: "develop", draft: true, sameRepository: true, author: "codex",
-    commitMessages: ["work"], commitCount: 1, ...extra,
-  });
+test("a conflict counts its own attempts, and its commit names the base it merged", () => {
+  const target = (extra) => judgePrCiAutoFixTarget({ sameRepository: true, commitMessages: ["work"], commitCount: 1, ...extra });
   assert.deepEqual(target({ kind: "conflict" }), { push: true });
-  assert.deepEqual(target({}), { push: false, reasons: ["draft"] }, "a failed-CI fix still needs a ready pull request");
   const twice = [`${PR_CI_AUTO_FIX_CONFLICT_PREFIX}one`, `${PR_CI_AUTO_FIX_CONFLICT_PREFIX}two`];
   assert.deepEqual(target({ kind: "conflict", commitMessages: twice, commitCount: 2 }), { push: false, reasons: ["attempts_exhausted"] });
   assert.equal(CI_FIX_CONFLICT_COMMIT_PREFIX, PR_CI_AUTO_FIX_CONFLICT_PREFIX);
-  assert.ok(read("../.github/workflows/pr-ci-auto-fix.yml").includes(`"${PR_CI_AUTO_FIX_CONFLICT_PREFIX}merge develop into #`));
+  assert.ok(read("../.github/workflows/pr-ci-auto-fix.yml").includes(`"${PR_CI_AUTO_FIX_CONFLICT_PREFIX}merge \${BASE_BRANCH} into #`));
 });
 
 test("a conflict request carries the develop commit and no runs, and a CI fix's inputs are unchanged", () => {
@@ -173,13 +168,13 @@ test("a sent fix is settled from the pull request's new head: its own commit, or
   assert.equal(report.entries[1].settled, "1".repeat(40), "only a pushed fix carries the head it became");
 });
 
-/** A develop and a branch that both changed one line of app.js after they parted. */
-function conflictFixture() {
+/** A base branch (develop unless named) and a branch that both changed one line of app.js after they parted. */
+function conflictFixture({ base = "develop" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ci-fix-conflict-"));
   const source = join(root, "source");
   mkdirSync(source);
-  sh(source, "init", "-q", "-b", "develop");
-  writeFileSync(join(source, "CLAUDE.md"), "develop instructions\n");
+  sh(source, "init", "-q", "-b", base);
+  writeFileSync(join(source, "CLAUDE.md"), `${base} instructions\n`);
   mkdirSync(join(source, "lib"));
   writeFileSync(join(source, "lib", "app.js"), "const a = 1;\nconst b = 2;\nconst c = 3;\n");
   writeFileSync(join(source, "lib", "other.js"), "export {};\n");
@@ -189,7 +184,7 @@ function conflictFixture() {
   writeFileSync(join(source, "lib", "app.js"), "const a = 1;\nconst b = 2 + branch;\nconst c = 3;\n");
   sh(source, "commit", "-q", "-am", "branch change");
   const head = sh(source, "rev-parse", "HEAD");
-  sh(source, "checkout", "-q", "develop");
+  sh(source, "checkout", "-q", base);
   writeFileSync(join(source, "lib", "app.js"), "const a = 1;\nconst b = 2 + develop;\nconst c = 3;\n");
   sh(source, "commit", "-q", "-am", "develop change");
   const develop = sh(source, "rev-parse", "HEAD");
@@ -200,7 +195,7 @@ function conflictFixture() {
   });
   const github = {
     async json(path) {
-      if (path.startsWith("/pulls?")) return [pull(51, "claude/to-develop/both", head, { draft: true })];
+      if (path.startsWith("/pulls?")) return [pull(51, "claude/to-develop/both", head, { draft: true, base: { ref: base, repo: { full_name: "o/r" } } })];
       if (path === "/pulls/51") return { number: 51, mergeable: false };
       if (path.startsWith("/pulls/51/commits")) return [{ sha: head, commit: { message: "branch change" } }];
       if (path.startsWith("/actions/runs?head_sha=")) return { workflow_runs: [] };
@@ -209,6 +204,7 @@ function conflictFixture() {
   };
   return { root, source, config, outbox: join(root, "outbox"), workDir: join(root, "work"), head, develop, github };
 }
+
 
 const pass = (f, claude, extra = {}) => runCiFix({
   ...f, model: "sonnet", minRemainingPercent: 0, quota: async () => ({ state: "available", remainingPercent: 90 }),
@@ -256,7 +252,7 @@ test("a conflicting draft is merged with develop, resolved by the model, and the
     spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "merge", "--no-commit", "--no-ff", request.baseSha], { cwd: checkout });
     const resolutionPath = join(f.root, "resolution.json");
     writeFileSync(resolutionPath, JSON.stringify(resolution));
-    const guard = spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "conflict", checkout, resolutionPath, "claude/to-develop/both"], { encoding: "utf8" });
+    const guard = spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "conflict", checkout, resolutionPath], { encoding: "utf8" });
     assert.equal(guard.status, 0, guard.stdout + guard.stderr);
     assert.equal(sh(checkout, "diff", "--name-only", "--diff-filter=U"), "", "nothing left unmerged");
     assert.equal(readFileSync(join(checkout, "lib", "app.js"), "utf8"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
@@ -488,6 +484,29 @@ test("the guard writes through no link: a conflicted path that is one is refused
     assert.match(guard.stdout, /not_regular_file/);
     assert.equal(readFileSync(outside, "utf8"), "keep me\n");
   } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("a pull request into main is merged with main, against main's instruction files", async () => {
+  const f = conflictFixture({ base: "main" });
+  const env = { GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0: process.env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: process.env.GIT_CONFIG_VALUE_0 };
+  Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.autocrlf", GIT_CONFIG_VALUE_0: "false" });
+  try {
+    const seen = [];
+    const result = await pass(f, ({ cwd, prompt }) => {
+      seen.push({ prompt, instructions: readFileSync(join(cwd, "CLAUDE.md"), "utf8") });
+      writeFileSync(join(cwd, "lib", "app.js"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
+      return { ok: true, timedOut: false, tail: "RESULT: fixed" };
+    });
+    assert.deepEqual(result, { outcome: "queued", pr: 51 });
+    assert.equal(seen[0].instructions, "main instructions\n");
+    assert.equal(seen[0].prompt, conflictPrompt({ files: ["lib/app.js"], base: "main" }));
+    assert.match(seen[0].prompt, /with main merged in/);
+    const request = normaliseDispatchRequest(JSON.parse(readFileSync(join(f.outbox, `${f.head}.json`), "utf8")), `${f.head}.json`);
+    assert.equal(request.baseSha, f.develop, "main's tip is the commit to merge");
+  } finally {
+    for (const [name, value] of Object.entries(env)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
     rmSync(f.root, { recursive: true, force: true });
   }
 });
