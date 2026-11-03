@@ -2007,6 +2007,40 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(providerMessages.at(-1)?.content).toBe("Canonical text-only question.");
   });
 
+  // The server consumes a draft only when the Message bytes equal it. A new
+  // Auto Chat froze the raw composer text but saved the trimmed Message, so a
+  // trailing IME newline was refused with 409 and every such send ended in
+  // receipt recovery ("Confirm this saved question").
+  test("a new Auto Chat freezes and saves one trimmed snapshot for draft, Message, and provider", async ({ page }) => {
+    const state = await openChat(page, { fresh: true, autoSelectionOffered: true });
+    await expect(page.getByTestId("composer-auto-routing-toggle"))
+      .toHaveAttribute("aria-checked", "true");
+    await page.getByTestId("chat-textarea").fill("\n  Canonical new Auto question.\n");
+    await page.getByTestId("chat-send-button").click();
+    await drive(page, 0, "push", "New Auto answer.");
+    await drive(page, 0, "finish");
+    await expect(message(page, "New Auto answer.")).toBeVisible();
+    await expect(page.getByTestId("message-receipt-recovery-dialog")).toHaveCount(0);
+
+    const messageWrite = state.writes.find(
+      (write) => write.method === "POST" &&
+        write.path === "/api/conversations/qa-chat-created/messages"
+    );
+    expect((messageWrite?.body.draftConsume as { scopeKey?: string })?.scopeKey).toBe("new");
+    const draftPuts = state.writes.filter(
+      (write) => write.method === "PUT" && write.path.endsWith("/drafts/new")
+    );
+    expect(draftPuts.at(-1)?.body.text).toBe("Canonical new Auto question.");
+    expect((messageWrite?.body.messages as Array<{ content: string }>)[0].content).toBe(
+      "Canonical new Auto question."
+    );
+    const providerMessages = (await requests(page))[0].messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(providerMessages.at(-1)?.content).toBe("Canonical new Auto question.");
+  });
+
   test("a duplicate live request adopts the durable attempt response without opening a second stream", async ({ page }) => {
     await openChat(page, { durableAttemptResponse: true });
     await page.getByTestId("chat-textarea").fill("Attach to the one durable attempt.");
