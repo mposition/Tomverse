@@ -805,6 +805,29 @@ export async function createMarketingChannel(
 }
 
 /**
+ * Insert a `connect_pending` row under a given id: the Test database's mirror of
+ * a production channel (docs/ops/marketing-webhook-production-activation.md §4).
+ * The caller has already planned and checked the row; the database trigger
+ * admits only `connect_pending`.
+ */
+export async function insertMirroredMarketingChannel(
+  database: MarketingDatabase,
+  row: {
+    id: string;
+    channel: MarketingChannelName;
+    provider: MarketingProvider;
+    externalAccountRef: string;
+    accountSlug: string;
+    defaultLocale: MarketingLocale;
+    allowedLocales: MarketingLocale[];
+    policyVersion: number;
+    scopesDigest: string;
+  },
+) {
+  return database.marketingChannel.create({ data: { ...row, status: "connect_pending" } });
+}
+
+/**
  * The columns an update may set, and the whole of it.
  *
  * `pausedAt`, `pausedFromMode`, `approvalStartedAt` and `createdAt` are not

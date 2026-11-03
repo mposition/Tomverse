@@ -43,7 +43,7 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 | O3 | 졸업 조건(계정·표면 단위, 모두 충족): 첫 실행 성공 후 7일(서버가 기록한 불변 시각) · 승인 3건 이상 · 수정률 1/3 이하(분모는 사람이 승인한 글, 반려는 분모에 넣지 않음) · 운영자 확인 1회 |
 | O4 | 자율 모드의 문구는 **승인된 템플릿·문구 라이브러리만**. 새 문구는 모드와 무관하게 승인 큐 |
 | O5 | 게시 인프라는 Zernio, 교체 가능한 어댑터 뒤. 계정·게시·오류 상태의 원장은 Tomverse DB |
-| O6 | 연결 계정 9개: LinkedIn 1, X 1, Facebook 1, YouTube 1, TikTok 1, Instagram 3(en/ko/zh-Hant), Threads 1(zh-Hant). RedNote 1은 수동 |
+| O6 | 연결 계정 11개: LinkedIn 1, X 1, Facebook 3(en/ko/zh-Hant), YouTube 1, TikTok 1, Instagram 3(en/ko/zh-Hant), Threads 1(zh-Hant). RedNote 1은 수동 |
 | O7 | 언어: ko·en·zh-Hant(대만). RedNote만 zh-Hans(해외 화교) |
 | O8 | 중국 본토는 출시·마케팅 대상이 아니다(법률 검토). "중국에서 사용 가능" 류 주장 금지 |
 | O9 | 120일 성과 측정과 채널별 직접 연동 판단 기준 6개(§11) |
@@ -123,12 +123,14 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 
 ### 4.2 시장 분석과 주간 브리프 (2026-11-01 운영자)
 
-- Admin 마케팅 화면의 스위치(`marketing.analysisEnabled`, 기본 꺼짐)가 켜져 있을 때만, 생성기는 A3 다음에 텍스트 호출 두 번을 기존 `brief` 목적으로 원장에 예약해 쓴다. 원장은 스위치가 꺼져 있으면 `brief` 예약을 거절한다(`purpose_disabled`). 월 상한은 그대로다.
+- Admin 마케팅 화면의 스위치(`marketing.analysisEnabled`, 기본 꺼짐)가 켜져 있을 때만, 생성기는 A3 다음에 텍스트 호출 두 번(그 주의 첫 실행은 세 번)을 기존 `brief` 목적으로 원장에 예약해 쓴다. 원장은 스위치가 꺼져 있으면 `brief` 예약을 거절한다(`purpose_disabled`). 월 상한은 그대로다.
   - 1번: Tomverse 공개 문구(홈·About·FAQ)와 저장된 플랜 값을 객관적으로 분석한다.
   - 2번: 그 분석, 우리 플랜, A3가 이번 실행에 남긴 경쟁사 사실·기능 이름, 등록된 claim으로 가격 위치·앞서는 점·뒤처지는 점·이번 주 메시지를 쓰고, 이번 주 주제(topic id)와 claim id 1~5개를 고른다.
+  - 3번(주간 전략, 2026-11-03 운영자): 브리즈번 주(월~일)에 저장된 계획이 아직 없을 때만, 그 분석과 브리프, 승인 모드 계정(플랫폼·언어·주간 상한·쓸 수 있는 승인 자산), 등록된 claim으로 그 주의 전략·목표·계정별 역할·각도·형식·횟수·요일·claim·자산을 한국어로 계획한다(`lib/marketingStrategyCore.ts`). 생성기는 맥락에 없는 계정·claim·자산을 지우고 횟수를 정책 주간 상한으로 자르며, 계정이 하나도 남지 않으면 계획 없이 brief만 기록한다. 계획은 분석 본문과 함께 저장되어 보고서 탭 맨 위 카드에 보이고, A5에는 전달되지 않는다.
 - 결과는 `brief` 보고서 하나로 기록되고, 분석 본문은 `MarketingAnalysis`에 같은 트랜잭션으로 저장된다. 사람은 보고서 탭에서 읽는다. 모델이 쓴 출처는 https이면서 승인된 경쟁사 공식 host일 때만 링크로, 그 밖은 텍스트로 보인다.
 - A5는 brief의 topic id·claim id와 claim의 문장(페이지 문자열)·가격 값만 받는다. 분석 본문과 경쟁사 사실은 받지 않는다. 생성기는 맥락에 없는 claim id를 brief에서 빼고, 추적 중인 경쟁사 이름이 들어간 topic은 버린다. 앱은 레지스트리에 없는 claim을 담은 brief를 거절한다.
 - claim은 코드(`lib/marketingClaims.ts`)에 사람이 등록한다. 모델 출력은 claim을 만들거나 승인하지 않는다.
+- Chat과 Review를 고르게 다룬다(운영자 결정 2026-11-03). FAQ에 Chat 기능 문장(어시스턴트·대화 가져오기와 이어가기·이미지 생성·파일 질문, 정적 페이지라 모두 "제공되는 환경에서" 조건을 붙인다)을 두고 claim으로 등록하며, flag 뒤 기능의 claim은 `gate`로 묶어 flag가 꺼지면 생성기 맥락에서 빠지고 Guard가 거절한다. 페이지 claim은 zh-Hant 사이트 문구가 생긴 뒤(2026-11-01) zh-Hant도 인용한다. 생성기에는 계정별 최근 14일에 쓴 claim id와 최근 brief 주제 4개를 주고, 프롬프트로 다른 claim·다른 주제를 고르게 한다(7.6의 14일 규칙은 결정적 게이트가 아니라 이 입력으로 지킨다).
 
 ## 5. 데이터 (마케팅 전용 테이블 8개)
 
@@ -253,17 +255,22 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 ### 7.6 채널별 초기값
 | 채널·계정 | 언어 | 필수 형식 | 일/주 상한 |
 |---|---|---|---|
-| LinkedIn | en(ko 보조) | 텍스트(±이미지) | 1/3 |
-| X | en | 텍스트(±이미지) | 2/10 |
-| Facebook | en + zh-Hant | 텍스트(±이미지) | 1/5 |
+| LinkedIn | en(ko 보조) | 이미지·영상+텍스트 | 1/3 |
+| X | en | 이미지·영상+텍스트 | 2/10 |
+| Facebook ×3 | en / ko / zh-Hant | 이미지·영상+텍스트 | 1/5 |
 | YouTube | en(제목·설명·자막 ko·zh-Hant) | 영상 | 1/2 |
 | TikTok | en(자막 3언어) | 영상 | 1/5 |
 | Instagram ×3 | en / ko / zh-Hant | 이미지·영상 | 1/4 |
-| Threads | zh-Hant | 텍스트(±이미지) | 2/7 |
+| Threads | zh-Hant | 이미지·영상+텍스트 | 2/7 |
 | RedNote | zh-Hans | 이미지+텍스트 | 수동 |
 
+모든 채널의 게시물은 이미지나 영상을 하나 이상 싣는다. 글만 있는 게시물은 없다(운영자 결정 2026-11-03).
+이미지가 최소선이고 영상이 가장 좋다. 생성기는 맞는 승인 자산이 없는 계정의 초안을 만들지 않고, 초안 접수는 자산이 없는
+초안을 받지 않으며, 게시기는 미디어가 없는 게시물을 보내기 전에 `media_required`로 실패시킨다(YouTube는 영상 하나가 아니면
+`youtube_needs_one_video`). YouTube·TikTok 계정에는 영상 자산만, 나머지 계정에는 저장된 이미지·영상 자산만 초안 후보가 된다.
+
 상한은 코드 상수이고 운영 설정으로는 **내리기만** 한다. 게시 시간창은 대상 시장 현지 09:00~20:00,
-같은 claim은 계정당 14일 안에 다시 쓰지 않는다.
+같은 claim은 계정당 14일 안에 다시 쓰지 않는다(생성기 입력과 프롬프트로 지킨다. 4.2 참조).
 
 ## 8. 게시와 상태
 
@@ -301,6 +308,9 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 
 **범위.** 허용 범위는 운영자가 서명한 검증 기록에 **실제로 관측된 `event type × MarketingChannel` 조합의 부분집합**이다.
 검증하지 않은 채널·계정이나 event type으로 통과를 넓히지 않는다. 넓히려면 그 조합을 새로 검증해 기록한다.
+기록의 쌍은 채널 **id**로 적히고 id는 DB마다 다르다. production 범위에 쓸 채널은 staging이 **그 운영 채널의 id와 Zernio 계정**으로 관측해야 하며,
+Test 전용 채널의 관측으로는 운영 채널을 허용할 수 없다(절차: `docs/ops/marketing-webhook-production-activation.md`).
+production 수신기는 서명된 설정 세대가 있으면 범위 밖 이벤트도 서명 검증 뒤 받지만, 게시물을 읽지 않고 `apply_not_permitted` 감사 행만 남긴다(수신만).
 
 **통과 조건 — 활성화할 범위의 event type마다 아래가 모두 staging에서 관측될 것:**
 1. 유효 서명(`X-Zernio-Signature`, raw body HMAC-SHA256)의 Zernio 이벤트는 수락되고 shadow 기록에 남는다.
@@ -423,9 +433,29 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   게시 단계(`--phase publish`)는 신뢰된 checkout과 자기 의존성에서 돌고, GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)과 서명 키만 가지며 LLM 변수가 있으면 시작을 거부한다.
   서명이 맞고, base가 원격 develop의 조상이며, 부모가 base이고, tree·diff를 git에서 다시 계산해 일치할 때만 push하고, push 뒤 원격 tree를 다시 읽어 일치할 때만 PR(draft)을 연다.
   졸업 기록이 정확히 `true`가 아니면(비어 있음·다른 값·읽기 실패) 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
+- 실행 환경(2026-11-03 운영자 결정, 정책 버전 변경 없음): `.github/workflows/marketing-seo-agent.yml`. **GitHub Actions workflow 하나에 job 둘**로 정했다
+  (Railway 서비스가 아니다 — 실행마다 새로 뜨는 VM이 일회용성을, job마다 다른 VM이 기계 분리를, step 단위 비밀 바인딩이 자격증명 분리를 주고,
+  비특권 사용자를 만들 root가 있으며 새 서비스·이미지·상시 비용이 없다). 상시 서비스로 옮길 이유는 아직 없다.
+  - 기본 꺼짐: 두 job 모두 저장소 변수 `MARKETING_SEO_AGENT_ENABLED`가 정확히 `true`이고 변수 `MARKETING_AUTOMATION_KILL_SWITCH`가 비어 있을 때만 돈다.
+    꺼져 있으면 job이 건너뛰어져 실패 실행도 남지 않는다. publish job은 validate가 끝난 뒤 이 조건을 다시 본다. 트리거는 `workflow_dispatch`(주제 입력)뿐이라
+    사람이 한 번 시작하는 실행이고, 스케줄·PR·push 트리거는 없다(스케줄은 새 자율 권한이므로 켤 때 운영자가 따로 정한다).
+    GitHub 변수 `MARKETING_AUTOMATION_KILL_SWITCH`는 workflow의 입장 조건일 뿐이고 원장의 예약 거절은 앱의 같은 이름 환경변수가 한다. 긴급 정지는 둘 다 건다.
+  - validate job: `develop` 전체 이력을 자격증명 없이(`persist-credentials: false`, job 토큰은 읽기 전용) checkout하고 base 커밋을 고정한 뒤 `npm ci`까지는 비밀 없이 하고,
+    `seo-check` 시스템 사용자를 만들어 검사가 그 사용자로 돈다. 비밀은 `--phase validate` step 하나에만 환경변수로 들어간다 — 원장 앱 `MARKETING_APP_URL`(변수),
+    `MARKETING_GENERATOR_SUBMIT_SECRET`, `MARKETING_LLM_API_KEY`(생성기·댓글 모니터와 같은 값, 같은 마케팅 원장 경유, 목적 `seo`), 서명 키 `MARKETING_SEO_ATTESTATION_KEY`.
+    부모는 `sudo --preserve-env=<목록>`으로 root로 돌고(검사를 비특권 사용자로 바꾸려면 필요하다) 비밀은 인자가 아니라 환경으로만 간다. GitHub 쓰기 자격증명은 없다.
+    결과(`--out`의 정확히 3개 파일)는 보존 1일의 artifact로만 넘긴다.
+  - publish job: 다른 VM에서 validate가 고정한 base 커밋을 checkout해(자기 의존성으로 `npm ci --ignore-scripts`) artifact를 받고,
+    `actions/create-github-app-token`(커밋 SHA 고정)으로 이 저장소 한정 설치 토큰(Contents·Pull requests write만, job이 끝나면 폐기)을 `--phase publish` step 하나에만 준다.
+    서명 키와 졸업 기록(`MARKETING_SEO_AUTO_PR`)·auto-merge 스위치(`MARKETING_SEO_AUTO_MERGE`)도 이 job에만 있고 LLM 변수는 하나도 없다. 토큰 끝 시각은 만들기 전에 잰
+    55분 뒤를 `MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT`로 준다(실제 끝보다 이르다). 게시 단계가 졸업 뒤 스스로 `--phase arm`을 이어 돌리며 최대 45분 지켜본다.
+  - 모든 job은 `continue-on-error`다(이 workflow는 main에서 돌고, Railway는 main 커밋에 실패한 workflow가 하나라도 있으면 배포를 건너뛰기 때문이다). 구조는
+    `tests/marketingSeoAgentWorkflow.test.mjs`가 지킨다.
+  - 구현 한계: 이 환경은 Linux 러너에서 아직 한 번도 돈 적이 없다. 첫 실행은 검사 사용자 권한(작업 트리·`node_modules` 읽기 경로)에서 실패할 수 있고, 실패해도 닫힌 쪽(게시 없음)이다.
+    비용은 validate의 LLM 호출 1회이며 원장의 운영자 모델·월 상한이 한도다.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
-- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.
+- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake), `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)와 `tests/marketingSeoAgentWorkflow.test.mjs`(실행 환경 workflow 구조)는 사람 소유이며 허용 목록에 없다.
 
 ## 10. 측정
 

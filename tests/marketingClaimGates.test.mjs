@@ -6,17 +6,34 @@ import {
   readGateSafely,
   resolveMarketingClaimGate,
 } from "@/lib/marketingClaimGates";
-import { marketingClaimUsable } from "@/lib/marketingClaims";
+import { MARKETING_CLAIMS, marketingClaimUsable } from "@/lib/marketingClaims";
 
 // A gate the registry does not bind never reaches its client.
 const NO_DATABASE = {};
 
+/**
+ * Settings as a transaction sees them: `rows` exist when the lock runs, and
+ * `lateRows` appear between the lock and the read, which the lock did not hold.
+ */
+const settingsDatabase = (rows, lateRows = {}) => ({
+  $queryRaw: async (strings, keys) => {
+    assert.match(strings.join("?"), /FOR SHARE/);
+    return keys.filter((key) => Object.hasOwn(rows, key)).sort().map((key) => ({ key }));
+  },
+  appSetting: {
+    findMany: async ({ where }) => {
+      const all = { ...rows, ...lateRows };
+      return where.key.in.filter((key) => Object.hasOwn(all, key)).map((key) => ({ key, value: all[key] }));
+    },
+  },
+});
+
 // The S1 plan's S1e fact-source list: "feature public: claim `gate` resolves
 // via existing production flag reader; unreadable -> not public".
 
-test("the registry is empty, and frozen so a caller cannot add to it", () => {
-  // Empty for the same reason MARKETING_CLAIMS is: no claim names a gate yet.
-  assert.deepEqual(Object.keys(MARKETING_CLAIM_GATES), []);
+test("the registry binds exactly the gates the claims name, and is frozen", () => {
+  const named = [...new Set(MARKETING_CLAIMS.map((claim) => claim.gate).filter(Boolean))].sort();
+  assert.deepEqual(Object.keys(MARKETING_CLAIM_GATES).sort(), named);
 
   assert.throws(
     () => {
@@ -26,6 +43,55 @@ test("the registry is empty, and frozen so a caller cannot add to it", () => {
     TypeError,
     "a gate is bound in the same change as the claim that needs it",
   );
+});
+
+test("a rollout gate is on only when its row says true", async () => {
+  const gate = "feature.imageGeneration";
+  const key = "feature.imageGenerationEnabled";
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "true" })), true);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "false" })), false);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({})), false, "missing row");
+  // A row the lock did not hold is not one the decision rests on.
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({}, { [key]: "true" })), false, "late row");
+});
+
+test("the assistants gate needs profiles and knowledge files, as the claim says both", async () => {
+  const gate = "feature.assistantProfiles";
+  const both = { "feature.assistantProfilesEnabled": "true", "feature.assistantKnowledgeEnabled": "true" };
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase(both)), true);
+  // Profiles on, knowledge off is a real configuration: the claim would promise files nobody can attach.
+  assert.equal(
+    await resolveMarketingClaimGate(gate, settingsDatabase({ ...both, "feature.assistantKnowledgeEnabled": "false" })),
+    false,
+  );
+  assert.equal(
+    await resolveMarketingClaimGate(gate, settingsDatabase({ "feature.assistantProfilesEnabled": "true" })),
+    false,
+    "knowledge row missing",
+  );
+  assert.equal(
+    await resolveMarketingClaimGate(gate, settingsDatabase({ ...both, "feature.assistantProfilesEnabled": "false" })),
+    false,
+  );
+});
+
+test("import and continue needs both flags", async () => {
+  const gate = "feature.externalImportAndContinuation";
+  const both = {
+    "feature.externalConversationImportEnabled": "true",
+    "feature.externalConversationContinuationEnabled": "true",
+  };
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase(both)), true);
+  for (const key of Object.keys(both)) {
+    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ ...both, [key]: "false" })), false, key);
+  }
+});
+
+test("the attachments gate is a kill switch: only \"false\" turns it off", async () => {
+  const gate = "feature.attachments";
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({})), true);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ "feature.attachmentsEnabled": "true" })), true);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ "feature.attachmentsEnabled": "false" })), false);
 });
 
 test("an unbound gate is unreadable, not off", () => {

@@ -1,7 +1,9 @@
 /**
  * One run of the analysis and brief (operator decision 2026-11-01), between
  * A3 and A5: what Tomverse is, then where it stands and this week's brief,
- * then one signed `brief` report carrying the analysis beside it. Pure
+ * then -- at the first run of a Brisbane week -- the week's plan
+ * (lib/marketingStrategyCore.ts), then one signed `brief` report carrying the
+ * analysis beside it. Pure
  * orchestration over ports, so the worker and the tests drive the same code.
  *
  * **Off unless the Admin switch is on**, read from the app's context, and the
@@ -30,13 +32,20 @@ import {
   marketingSelfAnalysisMessages,
   readMarketingCompetitiveAnalysis,
   readMarketingSelfAnalysis,
+  marketingStrategyWeek,
   type MarketingAnalysisMarketFact,
   type MarketingAnalysisMarketFeature,
   type MarketingAnalysisPayload,
   type MarketingAnalysisRefusal,
+  type MarketingWeeklyStrategy,
 } from "./marketingAnalysisCore.ts";
 import { marketingGeneratorReportProvenance, type MarketingGeneratorReport } from "./marketingIntelReportCore.ts";
 import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
+import {
+  marketingStrategyMessages,
+  readMarketingWeeklyStrategy,
+  type MarketingStrategyAccount,
+} from "./marketingStrategyCore.ts";
 
 /** Time a call is not started without: one reservation, one answer, and the report after it. */
 export const MARKETING_ANALYSIS_CALL_BUDGET_MS = 90_000;
@@ -73,6 +82,12 @@ export type MarketingAnalysisCycleSummary = {
   readonly claimIds: number;
   /** The report route's answer, or null when nothing was reported. */
   readonly report: null | { readonly httpStatus: number; readonly status: string };
+  /**
+   * The week's plan: in the brief, not due (this week has one, or the context
+   * did not ask), left out because its answer was unusable or the run had no
+   * time for it, or null when the run never got that far.
+   */
+  readonly strategy: null | "recorded" | "not_due" | "unusable" | "no_time";
   readonly stoppedAt:
     | null
     | { readonly stage: "disabled" | "context" | "deadline" | "llm" | "submit"; readonly detail: string };
@@ -93,8 +108,39 @@ const contextSchema = z.object({
     .object({ tracked: z.array(z.object({ competitorId: z.string(), displayName: z.string() })) })
     .optional(),
   ownProduct: z.object({ plans: z.unknown() }).passthrough().optional(),
-  analysis: z.object({ enabled: z.boolean() }).optional(),
+  analysis: z.object({ enabled: z.boolean(), strategyDue: z.boolean().optional() }).optional(),
+  // Optional so a service deployed before the app still reads an older answer.
+  recentBriefTopics: z.array(z.string()).optional(),
+  channels: z
+    .array(z.object({ channel: z.string(), accountSlug: z.string(), defaultLocale: z.string() }))
+    .optional(),
+  assets: z
+    .array(
+      z.object({
+        id: z.string(),
+        allowedChannels: z.array(z.string()),
+        altLocales: z.array(z.string()),
+        kind: z.string().nullable().optional(),
+        alt: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .optional(),
 });
+
+/** The accounts a plan is for, each with the approved assets its platform and locale may carry. */
+const strategyAccounts = (context: z.infer<typeof contextSchema>): MarketingStrategyAccount[] =>
+  (context.channels ?? []).map((channel) => ({
+    accountSlug: channel.accountSlug,
+    platform: channel.channel,
+    locale: channel.defaultLocale,
+    assets: (context.assets ?? [])
+      .filter((asset) => asset.allowedChannels.includes(channel.channel) && asset.altLocales.includes(channel.defaultLocale))
+      .map((asset) => ({
+        id: asset.id,
+        kind: asset.kind ?? null,
+        about: asset.alt?.[channel.defaultLocale]?.slice(0, 300) ?? null,
+      })),
+  }));
 
 const canonical = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonical);
@@ -158,11 +204,12 @@ export async function runMarketingAnalysisCycle(
   const startedAt = new Date(deps.now()).toISOString();
   let calls = 0;
   let claimIds = 0;
+  let strategyState: MarketingAnalysisCycleSummary["strategy"] = null;
   const summary = (
     stoppedAt: MarketingAnalysisCycleSummary["stoppedAt"],
     unusable: MarketingAnalysisCycleSummary["unusable"] = null,
     report: MarketingAnalysisCycleSummary["report"] = null,
-  ): MarketingAnalysisCycleSummary => ({ calls, unusable, claimIds, report, stoppedAt });
+  ): MarketingAnalysisCycleSummary => ({ calls, unusable, claimIds, report, strategy: strategyState, stoppedAt });
 
   let context: z.infer<typeof contextSchema>;
   try {
@@ -223,6 +270,7 @@ export async function runMarketingAnalysisCycle(
         statement: claim.statements?.en ?? null,
         values: claim.values ?? null,
       })),
+      recentTopics: context.recentBriefTopics ?? [],
     }),
   );
   if ("stop" in competitive) return competitive.stop;
@@ -232,6 +280,37 @@ export async function runMarketingAnalysisCycle(
   });
   if (!read.ok) return summary(null, read.refusal);
   claimIds = read.claimIds.length;
+
+  // The week's plan, once a Brisbane week: the app says whether this week
+  // has one. Its answer being unusable, or no time left for it, records the
+  // brief without it; a refused or unknown call stops the run as the others do.
+  let strategy: MarketingWeeklyStrategy | null = null;
+  const accounts = strategyAccounts(context);
+  if (context.analysis?.strategyDue !== true || accounts.length === 0) {
+    strategyState = "not_due";
+  } else if (deadline - deps.now() < MARKETING_ANALYSIS_CALL_BUDGET_MS + MARKETING_ANALYSIS_REPORT_MARGIN_MS) {
+    strategyState = "no_time";
+  } else {
+    const week = marketingStrategyWeek(deps.now());
+    const claims = context.claims.map((claim) => ({
+      id: claim.id,
+      type: claim.type,
+      locales: claim.locales,
+      statement: claim.statements?.en ?? null,
+    }));
+    const plan = await ask(
+      marketingStrategyMessages({
+        week,
+        analysis: { self: reading, competitive: read.competitive },
+        brief: { topicId: read.topicId, claimIds: read.claimIds },
+        accounts,
+        claims,
+      }),
+    );
+    if ("stop" in plan) return plan.stop;
+    strategy = readMarketingWeeklyStrategy(plan.content, { week, accounts, claims });
+    strategyState = strategy ? "recorded" : "unusable";
+  }
 
   if (deadline - deps.now() < MARKETING_ANALYSIS_REPORT_MARGIN_MS) {
     return summary({ stage: "deadline", detail: "report_deadline_too_close" });
@@ -251,6 +330,7 @@ export async function runMarketingAnalysisCycle(
       competitorIds: [...new Set(facts.map((fact) => fact.competitorId))].sort(),
       factCount: facts.length,
       featureCount: features.length,
+      ...(strategy ? { strategy } : {}),
     },
   });
 

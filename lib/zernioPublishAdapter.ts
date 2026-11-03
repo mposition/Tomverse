@@ -121,6 +121,7 @@ export const ZERNIO_ERROR_CODES = [
   "request_key_not_found",
   "provider_reports_failed",
   "asset_unresolved",
+  "media_required",
   "youtube_needs_one_video",
   "youtube_title_invalid",
 ] as const;
@@ -256,6 +257,8 @@ const YOUTUBE_TITLE_MAX = 100;
  *   attestations its posting rules ask for: the person who approved the post in
  *   Admin saw it and agreed to publish it.
  * - **Instagram** shares a video (a Reel) to the feed as well.
+ * - **Every platform** carries an image or a video: a post with no media is
+ *   refused, whatever the platform would accept (owner decision 2026-11-03).
  */
 export function zernioPlatformFields(
   platform: string,
@@ -277,6 +280,7 @@ export function zernioPlatformFields(
       data: { title, visibility: "public", madeForKids: false, containsSyntheticMedia: aiOrigin },
     };
   }
+  if (mediaItems.length === 0) return { refused: "media_required" };
   if (platform === "tiktok") {
     return {
       content: text,

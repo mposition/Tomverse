@@ -837,7 +837,13 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // secret; implement: the model credential; publish: GH_AUTOMATION_PAT). They
 // run on schedule and workflow_dispatch only, so no reason and no path rule
 // changes; only the credentialed-job portion of this digest moves.
-const POSTURE_DIGEST = "c2102c98f0f4";
+// 2026-11-03 operator-approved marketing SEO agent runner
+// (.github/workflows/marketing-seo-agent.yml): two credentialed jobs (validate:
+// the marketing ledger secret, the provider key and the attestation key;
+// publish: the GitHub App private key and the attestation key). It runs on
+// workflow_dispatch only, so no reason and no path rule changes; only the
+// credentialed-job portion of this digest moves.
+const POSTURE_DIGEST = "0b0e3ed91146";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();

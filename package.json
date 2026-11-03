@@ -163,6 +163,8 @@
     "agent:product-research-scout": "node --conditions=react-server --import tsx scripts/agents/product-research-scout.mjs",
     "agent:product-research-scout-s0-probe": "node --conditions=react-server --import tsx scripts/agents/product-research-scout-s0-probe.mjs",
     "marketing:zernio-s0": "node scripts/marketing/zernio-s0-probe.mjs",
+    "marketing:zernio-webhook": "node scripts/marketing/zernio-webhook-setup.mjs",
+    "marketing:mirror-channel": "node --conditions=react-server --import tsx scripts/marketing/mirror-channel-to-staging.mjs",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
     "maintenance:notification-deliveries": "node scripts/run-notification-deliveries.mjs",
