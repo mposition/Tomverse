@@ -25,6 +25,7 @@ async function prepare(page: Page, width: number, theme: "light" | "dark" = "lig
   await expect(page.getByTestId("chat-input")).toBeVisible({ timeout: 60_000 });
   await page.getByTestId("composer-review-mode").getByRole("button", { name: "Easy", exact: true }).click();
   await expect(page.locator(".review-participant-list>button")).toHaveCount(providerCount, { timeout: 20000 });
+  return account;
 }
 
 async function expectHeaderControlsFit(page: Page) {
@@ -316,6 +317,31 @@ test("Easy routes once and dispatches each selected provider through the existin
   expect(routes).toBe(2);
   await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
   await expect.poll(() => page.getByTestId("desktop-model-panel").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-model-id")))).toEqual(THREE_MODELS);
+});
+
+// The screen shows a retired stored model as its replacement. Recording that
+// repair as server-confirmed let an Auto pick of the replacement skip the
+// PATCH, and the preflight refused a model the row never held
+// (MODEL_NOT_SELECTED, trace b3ad49ca-7e79-4a54-9380-9bdcdf69d104).
+test("Easy saves an Auto pick that only replaces a retired stored model before the preflight", async ({ page }) => {
+  await installChatModelStub(page, Object.fromEntries(THREE_MODELS.map(id => [id, { kind: "success", chunks: [`Answer from ${id}.`] }])));
+  const account = await prepare(page, 1600, "light", ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-5-flash"]);
+  let refused = 0;
+  await page.route("**/api/chat/preflight", async route => {
+    const body = route.request().postDataJSON() as { modelIds?: string[] };
+    if ((body.modelIds ?? []).some(id => !account.selectedModels.includes(id))) {
+      refused++;
+      return route.fulfill({ status: 403, json: { error: "One or more comparison models are not selected for this conversation.", code: "MODEL_NOT_SELECTED", traceId: "qa-trace" } });
+    }
+    return route.fallback();
+  });
+  await page.route("**/api/review/route", route => route.fulfill({ json: { kind: "text", preset: "standard",
+    choices: ["openai", "anthropic", "google"].map((provider, index) => ({ provider, modelId: THREE_MODELS[index] })) } }));
+  await page.getByTestId("chat-textarea").fill("Compare a stored retired model's replacement.");
+  await page.getByTestId("chat-send-button").click();
+  await expect(page.getByText("Answer from gemini-3-6-flash.", { exact: true })).toBeVisible();
+  expect(refused).toBe(0);
+  expect(account.selectedModels).toEqual(THREE_MODELS);
 });
 
 test("unsupported image providers show a local notice and never start a text or substitute image call", async ({ page }) => {
