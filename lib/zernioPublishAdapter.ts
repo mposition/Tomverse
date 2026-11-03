@@ -16,6 +16,7 @@ import {
   zernioPostId,
   zernioRequestUuid,
   zernioStatusQuery,
+  type ZernioPlatformResult,
   type ZernioPost,
 } from "@/lib/zernioStatusQuery";
 
@@ -32,21 +33,28 @@ export { ZERNIO_API_BASE_URL, zernioRequestUuid };
  * an asset id is resolved to a public URL by an injected port, so this file never
  * learns an object-store credential either.
  *
- * ## There is no lookup by our own key, and that is the whole shape of this file
+ * ## The lookup by our own key reads the recent list, and only an exact match counts
  *
  * S2c's contract called `publish` and `lookupByRequestKey` two halves of one
  * guarantee: a request whose answer never arrived is settled by asking about the
- * exact key we sent. **Zernio cannot be asked that question.** Its idempotency for
- * `POST /v1/posts` is the `x-request-id` header, good for about five minutes, and
- * `GET /v1/posts` has no `metadata` filter -- `metadata` comes back on read but
- * cannot be queried on. The S0 verification record had already classified the
- * consequence blocking, twice, as C6 and C7; C7 *is* this lookup.
+ * exact key we sent. `GET /v1/posts` has no `metadata` filter, which is why
+ * amendment 4 (approved 2026-09-28) had this adapter answer "cannot answer" and
+ * leave every unknown to a person.
  *
- * Amendment 4 (approved 2026-09-28) takes option A: **do not pretend to look up.**
- * `lookupByRequestKey` answers that it cannot answer. The publisher then records
- * `outcome_unknown` and pauses the autonomous channel, which is failure in the
- * safe direction, and a person resolves the row. A dropped connection pausing an
- * account is the accepted cost.
+ * Operator decision 2026-11-03 (docs/policy/marketing-automation.md §4): every
+ * post in that list carries back the `metadata.requestKey` we sent, verified in
+ * production, and the key is the post's unique logical key. So the lookup pages
+ * the most recent posts (`MARKETING_ZERNIO_LOOKUP_PAGES` pages of
+ * `MARKETING_ZERNIO_LOOKUP_PAGE_SIZE`) and accepts only a post whose key is ours
+ * exactly and which has exactly one entry for this account. That is
+ * identification, not a guess. **Not finding it is not evidence of anything**:
+ * the answer stays `outcome_unknown`, the row stays with a person, and nothing is
+ * ever re-sent. An unknown outcome still pauses an autonomous account.
+ *
+ * A 201 whose platform entry is still processing (Instagram video) is the same
+ * shape from the other side: the post exists and has an id, and only its result
+ * is pending. That id is handed back with the unknown outcome, so the next run's
+ * status query settles the row instead of a person.
  *
  * ## Two response shapes the S0 record warns about, and both are handled here
  *
@@ -109,6 +117,9 @@ export const ZERNIO_ERROR_CODES = [
   "provider_timeout",
   "provider_unreadable_response",
   "no_lookup_by_request_key",
+  "provider_still_processing",
+  "request_key_not_found",
+  "provider_reports_failed",
   "asset_unresolved",
   "media_required",
   "youtube_needs_one_video",
@@ -159,6 +170,75 @@ const RETRACTABLE_PLATFORMS = new Set([
 
 
 
+
+/**
+ * An unknown outcome that names the provider's post: it exists, and its result
+ * is still pending. The id rides on the shared unknown result as an extra field
+ * rather than a change to `MarketingPublishResult`, whose declaration the
+ * webhook receiver reaches and the webhook pipeline fingerprint hashes. The
+ * publisher reads it with `marketingPublishResultExternalPostId`.
+ */
+export type ZernioPendingResult = {
+  readonly outcome: "outcome_unknown";
+  readonly errorCode: "provider_still_processing";
+  readonly externalPostId: string;
+};
+
+const stillProcessing = (externalPostId: string): MarketingPublishResult => {
+  const result: ZernioPendingResult = {
+    outcome: "outcome_unknown",
+    errorCode: "provider_still_processing",
+    externalPostId,
+  };
+  return result;
+};
+
+/**
+ * How far back the lookup by our key reads: the newest posts, a few pages of
+ * them. An unknown outcome is looked up within minutes of the post, so the post
+ * it is about is near the top; a small bound keeps one run's lookups cheap.
+ */
+export const MARKETING_ZERNIO_LOOKUP_PAGE_SIZE = 50;
+export const MARKETING_ZERNIO_LOOKUP_PAGES = 3;
+
+/** This account's entry on a post, or nothing when there is not exactly one. */
+const accountEntry = (
+  post: ZernioPost | null | undefined,
+  externalAccountRef: string,
+): ZernioPlatformResult | undefined => {
+  const ref = String(externalAccountRef ?? "").trim();
+  if (ref === "") return undefined;
+  const accountOf = (entry: ZernioPlatformResult) =>
+    typeof entry.accountId === "string"
+      ? entry.accountId
+      : (entry.accountId?._id ?? entry.accountId?.id ?? null);
+  const matching = (post?.platforms ?? []).filter((entry) => accountOf(entry) === ref);
+  return matching.length === 1 ? matching[0] : undefined;
+};
+
+/**
+ * What this account's entry on a post that exists says, as a publish result.
+ *
+ * Published with an id and an HTTPS URL is published. `failed` is the provider
+ * saying the platform refused it. Anything else -- processing, publishing, a
+ * shape we cannot read -- is still unknown, and carries the post's id when there
+ * is one so a status query can settle it later.
+ */
+const resultFromEntry = (
+  post: ZernioPost | null | undefined,
+  entry: ZernioPlatformResult | undefined,
+): MarketingPublishResult => {
+  const externalPostId = zernioPostId(post);
+  if (!externalPostId || !entry) {
+    return { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
+  }
+  if (entry.status === "published") {
+    const externalUrl = httpsUrl(entry.platformPostUrl ?? entry.publishedUrl);
+    if (externalUrl) return { outcome: "published", externalPostId, externalUrl };
+  }
+  if (entry.status === "failed") return { outcome: "failed", errorCode: "provider_reports_failed" };
+  return stillProcessing(externalPostId);
+};
 
 /** The longest title YouTube takes. */
 const YOUTUBE_TITLE_MAX = 100;
@@ -252,8 +332,8 @@ export const zernioPublishAdapter = (
         // autonomous posting to a channel whose mistakes cannot be taken back.
         canRetract: platform !== undefined && RETRACTABLE_PLATFORMS.has(platform),
         canMonitorComments: platform !== undefined,
-        // **The one that is false, and the reason this file is shaped as it is.**
-        canLookupByRequestKey: false,
+        // Through the recent list, by exact key (operator decision 2026-11-03).
+        canLookupByRequestKey: platform !== undefined,
       };
     },
 
@@ -346,9 +426,8 @@ export const zernioPublishAdapter = (
           // result.
           publishNow: true,
           ...(mediaItems.length > 0 ? { mediaItems } : {}),
-          // Stored and returned on read and webhook. Recorded so a person
-          // reconciling by hand can find our key -- **not** so this adapter can
-          // query it, because `GET /v1/posts` cannot filter on it.
+          // Stored and returned on read and webhook. `lookupByRequestKey`
+          // finds a post whose answer never arrived by this exact key.
           metadata: { requestKey: request.requestKey, locale: request.locale },
         },
       });
@@ -395,7 +474,13 @@ export const zernioPublishAdapter = (
       // this platform's entry must say `published`; a 201 carrying any other
       // status is not proof, and not a confirmed failure either.
       if (post?.status !== "published" || entry?.status !== "published") {
-        return { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
+        // Instagram video answers 201 while still processing, and publishes a
+        // minute or two later. The post exists and has an id: the id is kept
+        // so the next run's status query settles the row (operator decision
+        // 2026-11-03). Without one there is nothing to ask about.
+        return externalPostId
+          ? stillProcessing(externalPostId)
+          : { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
       }
       if (!externalPostId || !externalUrl) {
         // Created, by the status code, and the object it created is not
@@ -406,14 +491,48 @@ export const zernioPublishAdapter = (
       return { outcome: "published", externalPostId, externalUrl };
     },
 
-    async lookupByRequestKey(): Promise<MarketingPublishResult> {
-      // **The provider cannot be asked this.** No call is made, because there is
-      // nothing to call: `GET /v1/posts` has no `metadata` filter, and the
-      // `x-request-id` window is both short and, per C6, ambiguous when it hits.
-      // Answering "unknown" is the honest answer, and amendment 4 is where it was
-      // agreed that this is what the adapter does rather than page the list
-      // endpoint and produce a guess that looks like proof.
-      return { outcome: "outcome_unknown", errorCode: "no_lookup_by_request_key" };
+    async lookupByRequestKey(
+      requestKey: string,
+      externalAccountRef: string,
+    ): Promise<MarketingPublishResult> {
+      // Reads only. A miss, a page that does not load and a match still
+      // processing are all `outcome_unknown`; only our exact key on this
+      // account's entry is an answer.
+      const key = String(requestKey ?? "");
+      if (key === "") return { outcome: "outcome_unknown", errorCode: "request_key_not_found" };
+      // Every bounded page is read before answering: one key under two posts,
+      // even on different pages, does not identify one post.
+      const matches: ZernioPost[] = [];
+      // **All pages share one call budget.** The publisher leaves room for one
+      // vendor call of `callBudgetMs` before its deadline, so the pages are
+      // that one call between them, not three of it.
+      const budgetEndsAt = Date.now() + ports.callBudgetMs;
+      for (let page = 1; page <= MARKETING_ZERNIO_LOOKUP_PAGES; page += 1) {
+        const remainingMs = budgetEndsAt - Date.now();
+        if (remainingMs <= 0) return { outcome: "outcome_unknown", errorCode: "provider_timeout" };
+        const result = await zernioCall(
+          { ...ports, callBudgetMs: remainingMs },
+          `/v1/posts?limit=${MARKETING_ZERNIO_LOOKUP_PAGE_SIZE}&page=${page}`,
+          { method: "GET" },
+        );
+        if (result.kind === "unreachable") return { outcome: "outcome_unknown", errorCode: result.code };
+        if (result.status !== 200) return { outcome: "outcome_unknown", errorCode: "provider_unavailable" };
+        const body = result.body as { posts?: unknown; pagination?: { pages?: unknown } | null } | null;
+        if (!Array.isArray(body?.posts)) {
+          return { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
+        }
+        const posts = body.posts as Array<ZernioPost & { metadata?: { requestKey?: unknown } | null }>;
+        matches.push(...posts.filter((post) => post?.metadata?.requestKey === key));
+        if (matches.length > 1) {
+          return { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
+        }
+        const pages = Number(body.pagination?.pages);
+        if ((Number.isFinite(pages) && page >= pages) || posts.length < MARKETING_ZERNIO_LOOKUP_PAGE_SIZE) break;
+      }
+      if (matches.length === 1) {
+        return resultFromEntry(matches[0], accountEntry(matches[0], externalAccountRef));
+      }
+      return { outcome: "outcome_unknown", errorCode: "request_key_not_found" };
     },
 
     lookupStatus: status.lookupStatus,
