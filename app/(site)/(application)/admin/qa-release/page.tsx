@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AmuxIdeaLaneDailyLoading, AmuxIdeaLaneDailySection } from "@/components/admin/AmuxIdeaLaneDailySection";
 import { CiAdmissionSection } from "@/components/admin/CiAdmissionSection";
 import { QaReleaseLaneVerdictsSection } from "@/components/admin/QaReleaseLaneVerdictsSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
@@ -14,6 +15,7 @@ import { QaReleaseTrainRefresher } from "@/components/admin/QaReleaseTrainRefres
 import { QaReleaseTrainLoading, QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
 import { QA_RELEASE_SECTION_IDS } from "@/components/admin/qaReleaseTabParts";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
+import { readAmuxIdeaLaneDailyReport } from "@/lib/amux/ideaLaneDailyReportRead";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
 import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
 import { type QaReleaseLaneRounds, readQaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
@@ -118,10 +120,24 @@ async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number 
         emergencyPulls={next.emergency.pending?.numbers.length ?? null}
       />
       <QaReleaseTrainEmergencySection canWrite={canWrite} openUnknown={!board.openRead} />
+      {/* What the idea lane merged into develop over the last day (owner, 2026-11-04): tested on develop, then picked below. */}
+      <Suspense fallback={<AmuxIdeaLaneDailyLoading />}>
+        <IdeaLaneDaily nowMs={nowMs} />
+      </Suspense>
       <QaReleaseTrainCargoSection canWrite={canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
       <QaReleaseTrainBoard rows={board.rows} pullsRead={board.pullsRead} nowMs={nowMs} />
     </div>
   );
+}
+
+/** The idea lane's daily report, streamed on its own: the cargo's GitHub read can take a while cold. */
+async function IdeaLaneDaily({ nowMs }: { nowMs: number }) {
+  // A failed read is "unread" on this section alone; the rest of the tab still shows.
+  const report = await readAmuxIdeaLaneDailyReport(nowMs).catch(() => {
+    console.warn(JSON.stringify({ event: "amux_idea_lane_daily_read_failed" }));
+    return { status: "unread", failure: "read_failed" } as const;
+  });
+  return <AmuxIdeaLaneDailySection report={report} />;
 }
 
 /** The merge lane: what it will merge and what is the operator's, then its latch and attempt. */
