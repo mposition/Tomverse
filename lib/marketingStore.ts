@@ -3581,7 +3581,11 @@ export async function appendMarketingPostHistory(
     materialisedPatch.hasScheduledAt
       ? materialisedPatch.scheduledAt
       : (current.scheduledAt?.toISOString() ?? null);
-  if (finalEnvelopeSchedule !== finalColumnSchedule) {
+  // An envelope with no time (`null`) is the ordinary approved draft, and a
+  // person gives it its slot in the column alone (`scheduleMarketingPost`), so
+  // that state is not a disagreement. An envelope that names a time must still
+  // be the column's time.
+  if (finalEnvelopeSchedule !== null && finalEnvelopeSchedule !== finalColumnSchedule) {
     throw new MarketingStoreRefusedError(
       "envelope_schedule_disagrees",
       "The envelope and the column would name different schedules",
@@ -4105,12 +4109,17 @@ export async function scheduleMarketingPost(
     row.approvedDigest !== input.expectedEnvelopeDigest ||
     row.historyVersion !== input.expectedHistoryVersion ||
     !envelope.success ||
-    envelope.data.scheduledAt !== input.scheduledAt.toISOString() ||
+    // A draft is created with `scheduledAt: null`, so the approved content
+    // carries no time: the slot is a separate decision a person makes here, and
+    // it lives only in the column. An envelope that does name a time was
+    // approved with that time, and the person's choice has to be the same one.
+    (envelope.data.scheduledAt !== null &&
+      envelope.data.scheduledAt !== input.scheduledAt.toISOString()) ||
     input.scheduledAt.getTime() <= now.getTime()
   ) {
     throw new MarketingStoreRefusedError(
       "schedule_conflict",
-      "The approval or its future envelope schedule no longer matches",
+      "The approval or its future schedule no longer matches",
     );
   }
   await requireMarketingAudit(database, {
