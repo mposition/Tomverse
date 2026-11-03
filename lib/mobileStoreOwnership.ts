@@ -1,4 +1,5 @@
 import "server-only";
+import { iosReviewSandboxWebhookAllowed } from "@/lib/mobileBillingReview";
 import { createHmac } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { mobileBillingEnvironment, parseMobileBillingProducts, type MobileStore, type revenueCatWebhookSchema } from "@/lib/mobileBillingCore";
@@ -26,7 +27,7 @@ export async function claimMobileStoreOwnership(tx: Prisma.TransactionClient, ev
   const store: MobileStore = event.store === "APP_STORE" ? "app_store" : "play_store";
   const product = parseMobileBillingProducts(process.env.MOBILE_BILLING_PRODUCTS_JSON).find((p) => p.store === store && p.productId === event.product_id);
   if (!product) return;
-  if (event.environment !== mobileBillingEnvironment()) throw new Error("Store environment mismatch.");
+  if (event.environment !== mobileBillingEnvironment() && !await iosReviewSandboxWebhookAllowed(event, tx)) throw new Error("Store environment mismatch.");
   if (product.kind === "subscription" && !event.original_transaction_id) throw new Error("Subscription ownership evidence is incomplete.");
   const hashes = [...new Set([event.transaction_id, ...(product.kind === "subscription" ? [event.original_transaction_id!] : [])].map(mobileStoreTransactionHash))].sort();
   const ownerHash = mobileStoreOwnerHash(event.app_user_id);

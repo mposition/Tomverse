@@ -18,6 +18,8 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { user: { findUnique
 let api: typeof import("../../lib/mobileStoreReview");
 before(async () => { api = await import("../../lib/mobileStoreReview"); });
 beforeEach(() => {
+  delete process.env.MOBILE_STORE_REVIEW_IOS_ENABLED;
+  delete process.env.MOBILE_STORE_REVIEW_IOS_CREDENTIAL_JSON;
   process.env.MOBILE_STORE_REVIEW_ENABLED = "true";
   process.env.MOBILE_STORE_REVIEW_CREDENTIAL_JSON = JSON.stringify(credential);
   delete process.env.ADMIN_EMAILS; delete process.env.ADMIN_USER_IDS;
@@ -37,6 +39,21 @@ test("intended Free account uses existing session issuance proof and request rev
   assert.equal(await api.requestMobileStoreReviewCode(request, credential.email), true);
   assert.deepEqual(await api.verifyMobileStoreReviewCode(request, input), { ok: true, userId: credential.userId });
   assert.deepEqual(calls, ["mobile-store-review-request", "mobile-store-review-verify", "account"]);
+});
+
+test("iOS review uses a separate credential and keeps platform and active-account checks", async () => {
+  const ios = { ...credential, submissionId: "ios-review-synthetic", email: "appstore-review-synthetic@tomverse.app", buildNumber: 11, codeHash: "" };
+  ios.codeHash = hashMobileStoreReviewCode(ios, "123456");
+  process.env.MOBILE_STORE_REVIEW_IOS_ENABLED = "true";
+  process.env.MOBILE_STORE_REVIEW_IOS_CREDENTIAL_JSON = JSON.stringify(ios);
+  user.email = ios.email;
+  const proof = { ...input, email: ios.email, code: "123456", platform: "ios", buildNumber: 11 };
+  assert.equal(await api.requestMobileStoreReviewCode(request, ios.email), true);
+  assert.deepEqual(await api.verifyMobileStoreReviewCode(request, proof), { ok: true, userId: credential.userId });
+  assert.equal(await api.verifyMobileStoreReviewCode(request, { ...proof, platform: "android" }), null);
+  assert.equal((await api.verifyMobileStoreReviewCode(request, { ...proof, buildNumber: 12 }))?.ok, false);
+  user.accountStatus = "suspended";
+  assert.equal((await api.verifyMobileStoreReviewCode(request, proof))?.ok, false);
 });
 test("attempt budget precedes code verification and cannot be bypassed by a correct code", async () => {
   limited = true;

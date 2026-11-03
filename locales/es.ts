@@ -1150,6 +1150,7 @@ export const es = {
         login: "Iniciar sesión / Registrarse",
         google: "Continuar con Google",
         microsoft: "Continuar con Microsoft",
+        apple: "Continuar con Apple",
         orDivider: "o",
         signupDescription: "Crea una cuenta gratuita para guardar conversaciones y tus ajustes.",
         noAccountPrompt: "¿Aún no tienes cuenta?",

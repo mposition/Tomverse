@@ -2358,3 +2358,25 @@ test("the owner closes an idea before its execution approval, never one whose ap
   assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
     where: { id: choice.previewId }, select: { state: true } })).state, "prepared");
 });
+
+test("the owner cannot close an idea while its idea-lane run is going, and can once it finished", async () => {
+  const ideaId = randomUUID();
+  const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: randomUUID(), input: { version: 1,
+      idea: `SYNTHETIC_LANE_${randomUUID()}`, repositories: [], pullRequests: [] },
+  }));
+  if (!inspected.ok) throw new Error(inspected.code);
+  await prisma.$transaction((tx) => commitIdeaSubmission(tx,
+    { session, request, inspected, ideaId, keys }));
+  const attemptId = randomUUID();
+  const now = new Date();
+  await prisma.amuxIdeaLaneAttempt.create({ data: { id: attemptId, ideaId, claimedAt: now,
+    leaseUntil: new Date(now.getTime() + 60 * 60_000) } });
+  assert.deepEqual((await closeAmuxIdeasForOwner({ session, request, ideaIds: [ideaId],
+    reason: "Close during a lane run" })).map((entry) => entry.result), ["not_closable"],
+    "the run would still open its PR");
+  await prisma.amuxIdeaLaneAttempt.update({ where: { id: attemptId },
+    data: { outcome: "pr_open", prNumber: 9, finishedAt: new Date() } });
+  assert.deepEqual((await closeAmuxIdeasForOwner({ session, request, ideaIds: [ideaId],
+    reason: "Close after the lane opened its PR" })).map((entry) => entry.result), ["closed"]);
+});

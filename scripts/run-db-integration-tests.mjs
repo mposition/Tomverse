@@ -223,6 +223,7 @@ run(
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
     "tests/integration/mobile-store-billing.db.test.ts",
+    "tests/integration/ios-review-billing.db.test.ts",
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
@@ -353,6 +354,9 @@ run(
     // the previewed plan is written exactly, under the owner's audit, with
     // updatedAt untouched; a stale digest writes nothing.
     "tests/integration/amux-card-display-key-backfill.db.test.ts",
+    // The idea lane: attempt limit, a claim scan finished ideas cannot crowd
+    // out, results recorded once, the outcome CHECK.
+    "tests/integration/amux-idea-lane.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.
@@ -561,6 +565,7 @@ run(
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
+    "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
     // Durable Chat recovery is a database coordination contract: duplicate

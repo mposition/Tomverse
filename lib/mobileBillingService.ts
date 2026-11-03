@@ -18,6 +18,7 @@ import {
   type MobileBillingState, type MobileStore, type revenueCatWebhookSchema,
 } from "@/lib/mobileBillingCore";
 import type { z } from "zod";
+import { mobileSubscriptionEnvironment } from "@/lib/mobileBillingReview";
 
 export const mobileBillingProducts = () => parseMobileBillingProducts(process.env.MOBILE_BILLING_PRODUCTS_JSON);
 
@@ -42,18 +43,19 @@ async function readRevenueCatCustomer(billingId: string) {
 
 export async function syncMobileSubscription(userId: string, billingId: string) {
   assertMobileOwnershipConfigured();
-  const products = mobileBillingProducts();
+  const environment = await mobileSubscriptionEnvironment(userId);
+  const products = mobileBillingProducts().filter(product => environment === mobileBillingEnvironment() || (product.store === "app_store" && product.kind === "subscription"));
   // Timestamp before HTTP; stale responses cannot replace newer provider state.
   const observedAt = new Date();
   const providerSnapshot = await readRevenueCatCustomer(billingId);
-  const candidates = resolveMobileSubscriptions(providerSnapshot || { subscriber: { subscriptions: {} } }, products, mobileBillingEnvironment());
+  const candidates = resolveMobileSubscriptions(providerSnapshot || { subscriber: { subscriptions: {} } }, products, environment);
   const owned: typeof candidates = [];
   let ownershipConflict = false;
   const conflictingProducts = new Set<string>();
   for (const candidate of candidates) {
     if (!candidate.transactionId) continue;
     const ownership = await prisma.mobileStoreOwnership.findUnique({ where: {
-      store_environment_transactionHash: { store: candidate.store, environment: mobileBillingEnvironment(), transactionHash: mobileStoreTransactionHash(candidate.transactionId) },
+      store_environment_transactionHash: { store: candidate.store, environment, transactionHash: mobileStoreTransactionHash(candidate.transactionId) },
     } });
     if (!ownership) continue;
     if (ownership.ownerHash !== mobileStoreOwnerHash(billingId) || ownership.kind !== "subscription") {

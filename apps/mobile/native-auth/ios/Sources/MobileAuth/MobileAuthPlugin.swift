@@ -168,6 +168,10 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         if let language, ["en", "ko", "zh", "de", "fr", "es", "pt"].contains(language) { request.setValue(language, forHTTPHeaderField: "Accept-Language") }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.timeoutInterval = 25
+        request.setValue(Bundle.main.bundleIdentifier, forHTTPHeaderField: "X-Tomverse-App-Id")
+        if let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String {
+            request.setValue(build, forHTTPHeaderField: "X-Tomverse-Build")
+        }
         let config = URLSessionConfiguration.ephemeral; config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCache = nil
         let delegate = NoRedirect(); let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         let semaphore = DispatchSemaphore(value: 0); var received: Data?; var code = 0

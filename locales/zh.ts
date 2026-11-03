@@ -1166,6 +1166,7 @@ export const zh = {
         login: "登录 / 注册",
         google: "使用 Google 继续",
         microsoft: "使用 Microsoft 继续",
+        apple: "使用 Apple 继续",
         orDivider: "或",
         signupDescription: "创建免费账户，保存对话与个人设置。",
         noAccountPrompt: "还不是会员？",

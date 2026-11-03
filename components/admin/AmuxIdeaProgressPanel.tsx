@@ -9,6 +9,7 @@ import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
+import { AMUX_IDEA_LANE_MAX_ATTEMPTS } from "@/lib/amux/ideaLaneCore";
 import { amuxIdeaProgressStep, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 
@@ -187,7 +188,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                         ? "border-red-500/40 bg-red-500/10 text-red-200"
                         : human ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
                           : "border-blue-500/40 bg-blue-500/10 text-blue-200"}`}>
-                        {row.attention ? m.attention : m.stages[row.stage]}
+                        {row.attention ? (row.lane ? m.lane.badgeFailed : m.attention) : m.stages[row.stage]}
                       </span>
                       <span className="text-zinc-400">
                         {step ? m.stepOf(step) : null}{step ? " · " : ""}{human ? m.human : m.automatic}
@@ -205,6 +206,9 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                         ))}
                       </span>
                     ) : null}
+                    {row.lane ? (
+                      <span className="block text-xs text-zinc-300" data-testid="amux-idea-lane">{laneLine(row.lane, m)}</span>
+                    ) : null}
                     <span className="block text-xs text-zinc-400">{m.savedAt(when(row.submittedAt))}</span>
                   </Link>
                 </li>
@@ -220,6 +224,21 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
       {children}
     </section>
   );
+}
+
+/** One line for an idea the lane took (lib/amux/ideaLaneCore.ts). */
+function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
+  running: (attempt: number, max: number) => string;
+  queued: (attempts: number, max: number, outcome: string) => string;
+  prOpen: (pr: number) => string;
+  failed: (max: number, outcome: string) => string;
+} }): string {
+  const max = AMUX_IDEA_LANE_MAX_ATTEMPTS;
+  const last = lane.lastOutcome ?? "-";
+  if (lane.state === "pr_open" && lane.prNumber !== null) return m.lane.prOpen(lane.prNumber);
+  if (lane.state === "running") return m.lane.running(lane.attempts, max);
+  if (lane.state === "queued") return m.lane.queued(lane.attempts, max, last);
+  return m.lane.failed(max, last);
 }
 
 /**

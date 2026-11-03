@@ -93,15 +93,20 @@ async function closeOne(input: {
         // or running preview, or a held budget, keeps its own path (claim,
         // stop, release of an unused hold). Confirmation, reservation and
         // claim take the same two locks first, so none can land between this
-        // read and the close.
+        // read and the close. A running idea-lane run is the same: its claim
+        // took this row's lock, and the run would still open its PR.
         const started = await tx.$queryRaw<Array<{ started: boolean }>>`
-          SELECT EXISTS (
+          SELECT (EXISTS (
             SELECT 1 FROM "AmuxIdeaTransferPreview" p
             LEFT JOIN "AmuxIdeaAnalysisBudgetHold" h ON h."previewId" = p."id"
             WHERE p."ideaId" = ${ideaId}
               AND (p."state" IN ('confirmed', 'in_flight', 'outcome_unknown')
                 OR h."status" IN ('reserved', 'in_flight', 'outcome_unknown'))
-          ) AS "started"
+          ) OR EXISTS (
+            SELECT 1 FROM "AmuxIdeaLaneAttempt" a
+            WHERE a."ideaId" = ${ideaId} AND a."outcome" IS NULL
+              AND a."leaseUntil" > (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3)
+          )) AS "started"
         `;
         if (started[0]?.started !== false) return { ideaId, result: "not_closable" };
       }

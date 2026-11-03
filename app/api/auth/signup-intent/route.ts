@@ -43,6 +43,7 @@ export async function POST(req: Request) {
     const response = NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
     response.cookies.set(SIGNUP_INTENT_COOKIE, body.provider, {
       ...cookieOptions,
+      ...(body.provider === "apple" ? { sameSite: "none" as const, secure: true } : {}),
       maxAge: SIGNUP_INTENT_MAX_AGE_SECONDS,
     });
     return response;
