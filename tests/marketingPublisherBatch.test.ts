@@ -55,7 +55,7 @@ type Scenario = {
     externalAccountRef: string;
   }>;
   lookup?: MarketingPublishResult | Error;
-  reconcileAnswer?: { recorded: boolean; changed?: boolean; reason?: string };
+  reconcileAnswer?: { recorded: boolean; changed?: boolean; reason?: string } | Error;
 };
 
 const world = (scenario: Scenario = {}) => {
@@ -131,6 +131,7 @@ const world = (scenario: Scenario = {}) => {
           },
           recordReconciled: async (input: unknown) => {
             note("recordReconciled", input);
+            if (scenario.reconcileAnswer instanceof Error) throw scenario.reconcileAnswer;
             return scenario.reconcileAnswer ?? { recorded: true, changed: true };
           },
         }
@@ -803,4 +804,17 @@ test("identifying an id the row already holds is not counted again", async () =>
   const result = await run();
   assert.equal(result.reconcileIdentified, 0);
   assert.deepEqual(result.refused, {});
+});
+
+test("a reconcile write that throws is counted and the run goes on", async () => {
+  const { run, named } = world({
+    channels: [],
+    unknown: [unknownRow({ id: "u1", externalPostId: "zpost_1" }), unknownRow({ id: "u2", externalPostId: "zpost_2" })],
+    status: { state: "live", externalUrl: "https://www.instagram.com/reel/abc/" },
+    reconcileAnswer: new Error("refused"),
+  });
+  const result = await run();
+  assert.equal(named("recordReconciled").length, 2);
+  assert.deepEqual(result.refused, { "reconcile:write_threw": 2 });
+  assert.equal(result.stopped, null);
 });

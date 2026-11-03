@@ -411,6 +411,34 @@ test("one key under two posts on different pages is no answer either", async () 
   assert.equal(calls.length, 2);
 });
 
+test("the pages of one lookup share a single call budget", async () => {
+  const full = Array.from({ length: 50 }, (_, index) => listed(`other-${index}`, publishedEntry));
+  const budgets: number[] = [];
+  let clock = 0;
+  const realNow = Date.now;
+  Date.now = () => clock;
+  try {
+    const { adapter } = adapterWith([{ status: 200, body: page(full, 9) }], {
+      callBudgetMs: 30_000,
+      fetch: (async (_input: URL | RequestInfo, init?: RequestInit) => {
+        // Each page takes 20 seconds of the budget.
+        budgets.push(clock);
+        clock += 20_000;
+        void init;
+        return { status: 200, json: async () => page(full, 9) } as Response;
+      }) as typeof fetch,
+    });
+    assert.deepEqual(await adapter.lookupByRequestKey(request.requestKey, "acct_9"), {
+      outcome: "outcome_unknown",
+      errorCode: "provider_timeout",
+    });
+    // Two pages fit in 30 seconds; the third is never started.
+    assert.equal(budgets.length, 2);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test("a list that cannot be read is unknown", async () => {
   for (const response of [
     { status: 500, body: null },

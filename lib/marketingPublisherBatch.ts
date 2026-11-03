@@ -564,13 +564,21 @@ export async function runMarketingPublisherBatch(
         finding = null;
       }
       if (!finding) continue;
-      const written = await operations.recordReconciled({
-        id: post.id,
-        requestKey: post.requestKey,
-        expectedHistoryVersion: post.historyVersion,
-        expectedPublishAttempt: post.publishAttempt,
-        finding,
-      });
+      // Nothing was sent, so a write that throws leaves nothing unanswered: it
+      // is counted and the row stays unknown, rather than stopping the run.
+      let written: Awaited<ReturnType<NonNullable<typeof operations.recordReconciled>>>;
+      try {
+        written = await operations.recordReconciled({
+          id: post.id,
+          requestKey: post.requestKey,
+          expectedHistoryVersion: post.historyVersion,
+          expectedPublishAttempt: post.publishAttempt,
+          finding,
+        });
+      } catch {
+        count(result.refused, "reconcile:write_threw");
+        continue;
+      }
       if (!written.recorded) count(result.refused, `reconcile:${written.reason}`);
       else if (!written.changed) continue;
       else if (finding.kind === "identified") result.reconcileIdentified += 1;

@@ -499,8 +499,15 @@ export const zernioPublishAdapter = (
       // Every bounded page is read before answering: one key under two posts,
       // even on different pages, does not identify one post.
       const matches: ZernioPost[] = [];
+      // **All pages share one call budget.** The publisher leaves room for one
+      // vendor call of `callBudgetMs` before its deadline, so the pages are
+      // that one call between them, not three of it.
+      const budgetEndsAt = Date.now() + ports.callBudgetMs;
       for (let page = 1; page <= MARKETING_ZERNIO_LOOKUP_PAGES; page += 1) {
-        const result = await call(
+        const remainingMs = budgetEndsAt - Date.now();
+        if (remainingMs <= 0) return { outcome: "outcome_unknown", errorCode: "provider_timeout" };
+        const result = await zernioCall(
+          { ...ports, callBudgetMs: remainingMs },
           `/v1/posts?limit=${MARKETING_ZERNIO_LOOKUP_PAGE_SIZE}&page=${page}`,
           { method: "GET" },
         );
