@@ -164,6 +164,12 @@ const transcript = [
 ].join(" ");
 const channels = CARD_CHANNELS[pack.locale];
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
+// The card reuses the approved short's words and captures, so it rests on the
+// same claims: a post that carries it declares them and the Guard judges them
+// again at submission and at every post.
+const sourceAsset = path.join(packDir, pack.videoAsset ?? "");
+if (!pack.videoAsset || !existsSync(sourceAsset)) fail("the pack names no source asset file to take its claims from");
+const claimIds = [...(JSON.parse(readFileSync(sourceAsset, "utf8")).asset?.claimIds ?? [])];
 writeFileSync(
   path.join(outDir, `${spec.id}.asset.json`),
   JSON.stringify(
@@ -172,7 +178,7 @@ writeFileSync(
         id: spec.id,
         provenance: "capture",
         allowedChannels: channels,
-        claimIds: [],
+        claimIds,
         validUntil,
         disclosure: Object.fromEntries(channels.map((channel) => [channel, "none"])),
         depictsProductInterface: true,
