@@ -284,6 +284,30 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // body pairs an intent with its own manifest; no commit-deadline marker,
   // classifier or deferred trigger changes.
   "20261024010000_amux_v19_read_manifest_per_page",
+  // v22 on every provider class, owner decision 2026-10-26: the capability
+  // guard body and three CHECK constraints admit the Codex, Copilot and Cursor
+  // CLIs; no commit-deadline marker, classifier or deferred trigger changes.
+  "20261026100000_amux_v22_all_providers",
+  // Version 52, owner decision 2026-10-27: the capability guard body drops
+  // the implementation ceiling on v22 implement; no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261027100000_amux_v22_routine_implement",
+  // Worker CLI chosen at registration and the CLI model catalog, owner
+  // decision 2026-10-27: five worker name CHECKs and two new tables with an
+  // append-only guard; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261027120000_amux_cli_models_and_worker_cli",
+  // v22 worker owner questions, operator decision 2026-10-30: one new table
+  // with a lifecycle guard; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261030120000_amux_v22_owner_question",
+  "20261031090000_amux_v22_test_verify_roles",
+  "20261031090050_amux_v22_test_consent_receipt_guard",
+  "20261031090100_amux_v22_test_recovery_workspace",
+  "20261031090200_amux_v22_test_prless_approval",
+  // The AMUX idea lane: one additive attempts table, written outside the AMUX
+  // DB boundaries, so no commit-deadline trigger is involved.
+  "20261102120000_amux_idea_lane_attempt",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

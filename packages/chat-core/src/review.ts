@@ -1,6 +1,7 @@
 export type ReviewMode = "balanced" | "evidence" | "action";
 
 export type ReviewSetup = {
+  source?: { question: string; responses: Array<{ messageId: string; content: string }> };
   storedReview?: ComparisonReview;
   available: boolean;
   reason?: string;

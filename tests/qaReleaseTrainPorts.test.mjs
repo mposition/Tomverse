@@ -171,3 +171,35 @@ test("open trains are counted across every page of open main pull requests", asy
     { count: 1, riders: [2985, 2989] },
   );
 });
+
+test("a report an older app refuses for why is sent again without it; any other refusal stands", async () => {
+  const env = { RAILWAY_ENVIRONMENT_NAME: "production", QA_RELEASE_MERGE_LANE_SECRET: "lane-secret", QA_RELEASE_CONTROL_REVISION: "3" };
+  const sent = [];
+  const ports = (statuses) =>
+    createQaReleaseTrainAppPorts({
+      env,
+      http: async (request) => {
+        sent.push(JSON.parse(request.body));
+        const status = statuses.shift();
+        return { status, text: JSON.stringify(status === 200 ? { ok: true } : { error: "bad" }) };
+      },
+    });
+  const report = {
+    slot: "20261027-1100",
+    outcome: "opened",
+    pullRequestNumber: 3100,
+    branch: "release/train-20261027-1100",
+    rcSha: "b".repeat(40),
+    failure: null,
+    picks: [
+      { number: 10, outcome: "conflict", why: "It needs #9." },
+      { number: 11, outcome: "included" },
+    ],
+  };
+  await ports([400, 200]).report(report);
+  assert.deepEqual(sent.map((body) => body.picks), [report.picks, [{ number: 10, outcome: "conflict" }, { number: 11, outcome: "included" }]]);
+  sent.length = 0;
+  await assert.rejects(ports([500]).report(report), /app_500/);
+  await assert.rejects(ports([400]).report({ ...report, picks: [{ number: 11, outcome: "included" }] }), /app_400/);
+  assert.equal(sent.length, 2);
+});

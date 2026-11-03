@@ -10,11 +10,11 @@ import { qaReleaseTrainIsTrainPull, type QaReleaseTrainPick } from "./qaReleaseT
 
 /**
  * How long a train may run between its admission and its report before the
- * board calls it unreported: the train service is killed at ten minutes
- * (HARD_TIMEOUT_MS in scripts/qa-release-train-service.mjs), so one not
- * reported a minute after that never will be.
+ * board calls it unreported: the train service is killed at 25 minutes
+ * (HARD_TIMEOUT_MS in scripts/qa-release-train-service.mjs; model calls can
+ * take minutes), so one not reported a minute after that never will be.
  */
-export const QA_RELEASE_TRAIN_BOARD_RUNNING_MS = 11 * 60 * 1000;
+export const QA_RELEASE_TRAIN_BOARD_RUNNING_MS = 26 * 60 * 1000;
 
 export type QaReleaseTrainBoardStatus =
   /** Admitted, assembling; no report yet. */
@@ -45,7 +45,7 @@ export type QaReleaseTrainBoardRow = {
   /** When its main pull request was merged or closed, from GitHub. */
   settledAt: string | null;
   included: QaReleaseTrainBoardPull[];
-  leftOut: (QaReleaseTrainBoardPull & { outcome: Exclude<QaReleaseTrainPick["outcome"], "included" | "already_in_main">; predecessors: number[] | null })[];
+  leftOut: (QaReleaseTrainBoardPull & { outcome: Exclude<QaReleaseTrainPick["outcome"], "included" | "already_in_main">; why: string | null })[];
   alreadyOnMain: number[];
   /** An emergency train's pull requests already riding an open train. */
   onOpenTrain: number[];
@@ -129,13 +129,16 @@ export function qaReleaseTrainBoardRows(input: {
       status,
       pullRequestNumber: report.pullRequestNumber,
       settledAt: state?.settledAt ?? null,
-      included: picks.filter((p) => p.outcome === "included").map((p) => pull(p.number as number)),
+      included: picks
+        .filter((p) => p.outcome === "included")
+        .map((p) => pull(p.number as number)),
       leftOut: picks
         .filter((p) => p.outcome === "conflict" || p.outcome === "over_capacity" || p.outcome === "changes_workflows")
         .map((p) => ({
           ...pull(p.number as number),
           outcome: p.outcome as "conflict" | "over_capacity" | "changes_workflows",
-          predecessors: Array.isArray(p.predecessors) ? p.predecessors.filter((n): n is number => Number.isInteger(n) && n > 0) : null,
+          // What the model said a conflict lacks; null for a train that did not ask it.
+          why: typeof p.why === "string" && p.why !== "" ? p.why : null,
         })),
       alreadyOnMain: picks.filter((p) => p.outcome === "already_in_main").map((p) => p.number as number),
       onOpenTrain: picks.filter((p) => p.outcome === "in_open_train").map((p) => p.number as number),

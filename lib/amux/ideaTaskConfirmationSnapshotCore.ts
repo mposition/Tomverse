@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
@@ -47,7 +48,7 @@ export function assembleAmuxV4TaskConfirmation(input: {
         expectedPaths: proposal.expectedPaths,
         proposedGrade: proposal.executionGrade,
       }) ||
-      (input.publicPrDisclosureApproved && proposal.taskRole !== "implement") ||
+      (input.publicPrDisclosureApproved && !amuxV22TaskWritesPatch(proposal.taskRole)) ||
       input.costReceipt.role !== proposal.taskRole ||
       input.costReceipt.grade !== input.finalExecutionGrade ||
       (proposal.parentStoryRef === null) !== (input.parentStory === null) ||

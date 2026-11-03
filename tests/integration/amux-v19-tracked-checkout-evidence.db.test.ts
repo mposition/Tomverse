@@ -171,6 +171,33 @@ before(async () => {
   }));
 });
 
+class ProgressReadRollback extends Error {
+  constructor(readonly progress: Awaited<ReturnType<typeof readAmuxIdeaProgressInTx>>) {
+    super("progress read rolled back");
+  }
+}
+
+// The progress view lists the owner's newest ideas only, and other files in
+// this database group submit ideas for the same owner. Read this fixture's
+// backdated idea as the newest one, then roll that clock change back.
+async function readProgressOfBackdatedIdea() {
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+      const submittedAt = new Date();
+      const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+      await tx.amuxIdeaSubmission.update({ where: { id: ideaId },
+        data: { submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt } });
+      throw new ProgressReadRollback(
+        await readAmuxIdeaProgressInTx(tx, authority.approvedByUserId, new Date()));
+    });
+  } catch (error) {
+    if (error instanceof ProgressReadRollback) return error.progress;
+    throw error;
+  }
+  throw new Error("progress read did not roll back");
+}
+
 after(async () => {
   masterKey.fill(0);
   digestKey.fill(0);
@@ -534,8 +561,7 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   assert.equal(purged.fileCount, 2);
   assert.equal(purged.digest, manifest.digest);
   assert.equal(purged.auditLogId, manifest.auditLogId);
-  const progress = await prisma.$transaction((tx) =>
-    readAmuxIdeaProgressInTx(tx, authority.approvedByUserId, new Date()));
+  const progress = await readProgressOfBackdatedIdea();
   assert.deepEqual(progress.find((item) => item.ideaId === ideaId)
     ?.checkoutEvidence[0]?.readManifests,
   [{ manifestId: manifest.id, fileCount: 2, digest: manifest.digest, bodyPurged: true }]);

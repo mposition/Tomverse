@@ -11,6 +11,7 @@ import {
   localDateTimeValue,
   type MarketingAction,
 } from "@/components/admin/MarketingActions";
+import { MarketingAnalysisSwitch, MarketingBriefReport } from "@/components/admin/MarketingAnalysis";
 import { MarketingWebhookProduction } from "@/components/admin/MarketingWebhookProduction";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -26,7 +27,14 @@ import {
   type MarketingConsoleSection,
 } from "@/lib/marketingConsoleSections";
 import { adminFetch } from "@/lib/adminFetch";
+import {
+  formatMarketIntelValue,
+  groupMarketIntelFacts,
+  isHttpsUrl,
+  type MarketIntelFactView,
+} from "@/lib/marketingReportView";
 import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
+import type { ExperimentRowView, ExperimentsConsoleView } from "@/lib/marketingExperimentView";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
@@ -43,7 +51,7 @@ type Row = Record<string, unknown>;
 export type MarketingConsoleView = {
   section: MarketingConsoleSection;
   availability: Availability;
-  ordering: "newest" | "by-account" | "by-status";
+  ordering: "newest" | "oldest" | "by-account" | "by-status";
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
@@ -57,6 +65,8 @@ export type MarketingConsoleView = {
   webhookStaging: WebhookStagingView | null;
   /** Rows were left out at the section's limit (lib/marketingConsoleRead.ts). */
   truncated?: boolean;
+  /** The experiments section only (lib/marketingExperimentView.ts). */
+  experiments?: ExperimentsConsoleView;
 };
 
 type LlmView = {
@@ -122,6 +132,8 @@ const ACCOUNT = (id: unknown, action: string) =>
   `/api/admin/marketing/accounts/${encodeURIComponent(String(id))}/${action}`;
 const COMPETITOR_DECISION = (id: unknown) =>
   `/api/admin/marketing/competitors/${encodeURIComponent(String(id))}/decision`;
+const ASSET_PATH = (id: unknown, leaf: "decision" | "preview") =>
+  `/api/admin/marketing/assets/${encodeURIComponent(String(id))}/${leaf}`;
 
 /**
  * What the person typed into a page box: one URL per line. Not split on
@@ -259,9 +271,19 @@ export function AdminMarketingPanel({
               {view.section === "competitors" && view.canWrite ? (
                 <MarketingCompetitorCreate section={view.section} onDone={done} m={m} />
               ) : null}
+              {view.section === "experiments" && view.experiments ? (
+                <MarketingExperimentTop view={view} experiments={view.experiments} onDone={done} m={m} />
+              ) : null}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-zinc-500">
-                  {(view.ordering === "by-status" ? m.showingByStatus : m.showing).replace(
+                  {(view.section === "assets"
+                    ? m.showingAssets
+                    : view.ordering === "by-status"
+                      ? m.showingByStatus
+                      : view.ordering === "oldest"
+                        ? m.showingOldest
+                        : m.showing
+                  ).replace(
                     "{count}",
                     String(view.pageSize)
                   )}
@@ -335,6 +357,7 @@ export function AdminMarketingPanel({
             onDone={done}
             m={m}
           />
+          <MarketingAnalysisSwitch section={view.section} canWrite={view.canWrite} />
           {view.webhookStaging || view.canWrite ? (
             <div data-testid="marketing-webhook-card" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
               <div className="flex items-start justify-between gap-2">
@@ -431,6 +454,7 @@ const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "accent" | 
   paused: "warning",
   disconnected: "danger",
   proposed: "warning",
+  submitted: "accent",
   retired: "neutral",
 };
 
@@ -675,22 +699,18 @@ function MarketingSwitchStrip({
       // broken rather than misaddressed.
       method: "PATCH",
       checked: state === "on",
-      // Two switches the writer is certain to refuse, each drawn disabled with
-      // its reason rather than hidden: someone looking for a switch should
-      // find out why it is not theirs to move, and a control whose only
-      // outcome is a 409 teaches them that this screen's buttons are guesses.
-      //
-      // Publishing cannot go on before the publisher exists (S2c); the writer
-      // answers `publisher_capability_unavailable`. Autonomous cannot go on
-      // while drafts or publishing are off; the writer answers
+      // A switch the writer is certain to refuse is drawn disabled with its
+      // reason rather than hidden: someone looking for a switch should find out
+      // why it is not theirs to move, and a control whose only outcome is a 409
+      // teaches them that this screen's buttons are guesses. Autonomous cannot
+      // go on while drafts or publishing are off; the writer answers
       // `autonomous_needs_drafts_and_publish`.
-      unavailable: !turningOn
-        ? undefined
-        : control.name === "publish"
-          ? m.switchPublishUnavailable
-          : control.name === "autonomous" && (switches.drafts !== "on" || switches.publish !== "on")
-            ? m.switchAutonomousNeedsBoth
-            : undefined,
+      unavailable:
+        turningOn &&
+        control.name === "autonomous" &&
+        (switches.drafts !== "on" || switches.publish !== "on")
+          ? m.switchAutonomousNeedsBoth
+          : undefined,
       confirm: turningOn ? m.switchConfirmOn : undefined,
       body: () => ({
         switch: control.name,
@@ -1253,6 +1273,119 @@ function MarketingCompetitorCreate({
 }
 
 /**
+ * What sits above the experiment row: why a start would be refused, the
+ * evidence level of the figures, and the pre-registration form.
+ *
+ * The form is drawn only for a person who may write and only while no
+ * experiment is stored as running. The server decides all of it again.
+ */
+function MarketingExperimentTop({
+  view,
+  experiments,
+  onDone,
+  m,
+}: {
+  view: MarketingConsoleView;
+  experiments: ExperimentsConsoleView;
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  const bundleOptions = experiments.bundles.map((bundle) => `${bundle.bundleId} / ${bundle.variantId}`);
+  const action: MarketingAction = {
+    id: "experiment-start",
+    label: m.actStartExperiment,
+    path: "/api/admin/marketing/experiments",
+    primary: true,
+    fields: [
+      { name: "experimentId", label: m.fieldExpId, kind: "text", hint: m.hintExpId },
+      {
+        name: "bundle",
+        label: m.fieldExpBundle,
+        kind: "select",
+        initial: bundleOptions[0],
+        options: bundleOptions,
+        hint: experiments.bundles.map((bundle) => `${bundle.bundleId} / ${bundle.variantId}: ${bundle.locales.join(", ")}`).join(" · "),
+      },
+      { name: "locales", label: m.fieldExpLocales, kind: "text", initial: "en", hint: m.hintExpLocales },
+      { name: "share", label: m.fieldExpShare, kind: "number", initial: "10", hint: m.hintExpShare },
+      { name: "days", label: m.fieldExpDays, kind: "number", initial: "14", hint: m.hintExpDays },
+      { name: "hypothesis", label: m.fieldExpHypothesis, kind: "textarea", hint: m.hintExpHypothesis },
+      { name: "minSample", label: m.fieldExpMinSample, kind: "number", initial: "500", hint: m.hintExpMinSample },
+      { name: "stopDrop", label: m.fieldExpStopDrop, kind: "number", initial: "30", hint: m.hintExpStopDrop },
+      { name: "stopAfter", label: m.fieldExpStopAfter, kind: "number", initial: "100", hint: m.hintExpStopAfter },
+    ],
+    body: (values) => {
+      const [bundleId = "", variantId = ""] = values.bundle.split(" / ");
+      return {
+        experimentId: values.experimentId.trim(),
+        bundleId,
+        variantId,
+        locales: values.locales
+          .split(",")
+          .map((locale) => locale.trim())
+          .filter(Boolean),
+        variantRatioPercent: Number(values.share),
+        durationDays: Number(values.days),
+        preregistration: {
+          hypothesis: values.hypothesis.trim(),
+          primaryMetric: "primary_cta_click",
+          minExposuresPerArm: Number(values.minSample),
+          stopRule: {
+            relativeDropPercent: Number(values.stopDrop),
+            afterExposuresPerArm: Number(values.stopAfter),
+          },
+        },
+        expectedVersion: experiments.version,
+      };
+    },
+  };
+
+  return (
+    <div data-testid="marketing-experiment-top" className="flex flex-col gap-3">
+      {view.switches.experiments === "on" ? null : (
+        <p className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm leading-6 text-zinc-300">
+          {m.expSwitchOff}
+        </p>
+      )}
+      {experiments.unreadable ? (
+        <p className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm leading-6 text-red-300">
+          {m.expUnreadable}
+        </p>
+      ) : null}
+      <p className="text-xs leading-5 text-zinc-500">{m.expEvidenceNote}</p>
+      {view.canWrite ? (
+        experiments.hasRunning ? (
+          <p className="text-sm text-zinc-400">{m.expRunningNote}</p>
+        ) : bundleOptions.length === 0 ? (
+          <p className="text-sm text-zinc-400">{m.expNoBundles}</p>
+        ) : (
+          <div data-testid="marketing-experiment-create" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+            <p className="text-[15px] font-semibold text-white">{m.expCreateTitle}</p>
+            <p className="mt-1 text-xs text-zinc-500">{m.expCreateNote}</p>
+            <MarketingActionRail actions={[action]} section={view.section} onDone={onDone} m={m} />
+          </div>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/** A running experiment can be stopped; a stopped one is a record. */
+function experimentActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  if (row.status !== "running") return [];
+  return [
+    {
+      id: "experiment-stop",
+      label: m.actStopExperiment,
+      path: "/api/admin/marketing/experiments/stop",
+      confirm: m.confirmStopExperiment,
+      danger: true,
+      body: () => ({ expectedVersion: text(row.version) ?? "" }),
+    },
+  ];
+}
+
+/**
  * Which controls a row can take, decided from the row's own state.
  *
  * The server decides every one of these again, and it is the server's answer
@@ -1269,6 +1402,19 @@ function rowActions(
   if (section === "published") return publishedActions(row, m);
   if (section === "accounts") return accountActions(row, m);
   if (section === "competitors") return competitorActions(row, m);
+  if (section === "experiments") return experimentActions(row, m);
+  if (section === "assets") return assetActions(row, m);
+  if (section === "comments") {
+    return [
+      {
+        id: "acknowledge-alert",
+        primary: true,
+        label: m.actAcknowledgeAlert,
+        path: `/api/admin/marketing/alerts/${encodeURIComponent(String(row.id))}/acknowledge`,
+        body: () => ({}),
+      },
+    ];
+  }
   return [];
 }
 
@@ -1338,6 +1484,41 @@ function competitorActions(row: Row, m: Record<string, string>): MarketingAction
   }
   // Rejected or retired: a person may change their mind.
   return [approve];
+}
+
+/**
+ * An asset's decisions, each against the decision this row showed. An
+ * approval names the bytes the page showed, which the database compares: a
+ * file replaced since cannot ride on this approval.
+ */
+function assetActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  const expected = { expectedDecisionAuditLogId: text(row.decisionAuditLogId) };
+  const retire: MarketingAction = {
+    id: "asset-retire",
+    label: m.actRetireAsset,
+    path: ASSET_PATH(row.id, "decision"),
+    confirm: m.confirmRetireAsset,
+    danger: true,
+    body: () => ({ decision: "retired", ...expected }),
+  };
+  if (row.status === "submitted") {
+    return [
+      ...(row.uploadedAt
+        ? [
+            {
+              id: "asset-approve",
+              primary: true,
+              label: m.actApproveAsset,
+              path: ASSET_PATH(row.id, "decision"),
+              confirm: m.confirmApproveAsset,
+              body: () => ({ decision: "approved", ...expected, sha256: str(row.sha256) }),
+            } satisfies MarketingAction,
+          ]
+        : []),
+      retire,
+    ];
+  }
+  return row.status === "approved" ? [retire] : [];
 }
 
 /** The two values every post writer compares against. */
@@ -1444,6 +1625,14 @@ const MARKETING_STOPPED_ACCOUNT_STATUSES = new Set([
   "paused",
   "disconnected",
   "connect_pending",
+]);
+
+// Every post is approved by a person in these states, which is where the store
+// accepts a language change. Compared with the store's list by a test: this is
+// a client component and cannot import it.
+const MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES = new Set([
+  "connect_pending",
+  "approval_mode",
 ]);
 
 function publishedActions(row: Row, m: Record<string, string>): MarketingAction[] {
@@ -1581,6 +1770,26 @@ function publishedActions(row: Row, m: Record<string, string>): MarketingAction[
   return actions;
 }
 
+const GRADUATION_UNMET_MESSAGE: Record<string, string> = {
+  not_in_approval_mode: "graduateUnmetNotInApprovalMode",
+  channel_never_graduates: "graduateUnmetChannelNeverGraduates",
+  first_success_missing: "graduateUnmetFirstSuccessMissing",
+  first_success_too_recent: "graduateUnmetFirstSuccessTooRecent",
+  approvals_below_minimum: "graduateUnmetApprovalsBelowMinimum",
+  edit_rate_above_limit: "graduateUnmetEditRateAboveLimit",
+  comments_monitor_unhealthy: "graduateUnmetCommentsMonitorUnhealthy",
+};
+
+/** Why graduation is not offered yet, or undefined when the server's reading says it may be. The server decides again on the click. */
+function graduationUnavailable(graduation: unknown, m: Record<string, string>): string | undefined {
+  if (typeof graduation !== "object" || graduation === null) return m.graduateUnreadable;
+  const reading = graduation as { eligible?: unknown; unmet?: unknown };
+  if (reading.eligible === true) return undefined;
+  const unmet = Array.isArray(reading.unmet) ? reading.unmet : [];
+  const reasons = unmet.map((code) => m[GRADUATION_UNMET_MESSAGE[String(code)] ?? ""] ?? String(code));
+  return [m.graduateUnmetPrefix, reasons.join(" / ")].join(" ").trim();
+}
+
 function accountActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];
   const status = str(row.status);
@@ -1607,6 +1816,42 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
       label: m.actReconnect,
       path: ACCOUNT(row.id, "reconnect"),
       body: () => ({ expectedConnectionGeneration: generation }),
+    });
+  }
+
+  if (MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES.has(status)) {
+    const allowedLocales = Array.isArray(row.allowedLocales)
+      ? row.allowedLocales.map((locale) => str(locale))
+      : [];
+    actions.push({
+      id: "locales",
+      label: m.actChangeLocales,
+      path: ACCOUNT(row.id, "locales"),
+      fields: [
+        {
+          name: "defaultLocale",
+          label: m.fieldDefaultLocale,
+          kind: "select",
+          options: MARKETING_LOCALES,
+          initial: str(row.defaultLocale),
+        },
+        {
+          name: "allowedLocales",
+          label: m.fieldAllowedLocales,
+          kind: "text",
+          initial: allowedLocales.join(", "),
+          hint: m.hintLocalesChange,
+        },
+      ],
+      body: (values) => ({
+        expectedDefaultLocale: str(row.defaultLocale),
+        expectedAllowedLocales: allowedLocales,
+        defaultLocale: values.defaultLocale,
+        allowedLocales: values.allowedLocales
+          .split(",")
+          .map((locale) => locale.trim())
+          .filter((locale) => locale !== ""),
+      }),
     });
   }
 
@@ -1654,6 +1899,17 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
         },
       ],
       body: (values) => ({ ...identityCas, policyVersion: Number(values.policyVersion) }),
+    });
+  }
+
+  if (status === "approval_mode") {
+    actions.push({
+      id: "graduate",
+      label: m.actGraduate,
+      path: ACCOUNT(row.id, "graduate"),
+      confirm: m.confirmGraduate,
+      unavailable: graduationUnavailable(row.graduation, m),
+      body: () => ({ expectedGraduationEpoch: int(row.graduationEpoch) }),
     });
   }
 
@@ -1918,6 +2174,77 @@ function MarketingRow({
     );
   }
 
+  if (section === "experiments") {
+    const view = row as unknown as ExperimentRowView;
+    const stateWord: Record<string, string> = {
+      active: m.expStateActive,
+      not_started: m.expStateNotStarted,
+      ended: m.expStateEnded,
+      stopped: m.expStateStopped,
+      stop_rule: m.expStateStopRule,
+      switch_off: m.expStateSwitchOff,
+      kill_switch: m.expStateKillSwitch,
+    };
+    const arm = (exposures: number, conversions: number, rate: number | null) =>
+      m.expArmValue
+        .replace("{exposures}", String(exposures))
+        .replace("{conversions}", String(conversions))
+        .replace("{rate}", rate === null ? m.none : `${rate}%`);
+    return (
+      <>
+        <RowHeading title={view.id} detail={`${view.bundleId} / ${view.variantId}`}>
+          <MarketingTag tone={view.state === "active" ? "success" : view.state === "stopped" ? "neutral" : "warning"}>
+            {stateWord[view.state] ?? view.state}
+          </MarketingTag>
+          <MarketingTag tone={view.sampleReached ? "success" : "neutral"}>
+            {view.sampleReached ? m.expSampleReached : m.expSampleBelow}
+          </MarketingTag>
+        </RowHeading>
+        <p className="mt-3 text-sm leading-6 text-zinc-300">{view.hypothesis}</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label={m.colExpWindow} value={`${stamp(view.startsAt) ?? m.none} → ${stamp(view.endsAt) ?? m.none}`} />
+          <Field label={m.colExpShare} value={`${view.variantRatioPercent}%`} />
+          <Field label={m.colExpLocales} value={view.locales.join(", ")} />
+          <Field label={m.colExpMetric} value={view.primaryMetric} />
+          <Field label={m.colExpSample} value={String(view.minExposuresPerArm)} />
+          <Field
+            label={m.colExpStopRule}
+            value={m.expStopRuleValue
+              .replace("{drop}", String(view.stopRelativeDropPercent))
+              .replace("{after}", String(view.stopAfterExposuresPerArm))}
+          />
+          <Field
+            label={m.colExpControl}
+            value={arm(view.counts.controlExposures, view.counts.controlConversions, view.controlRatePercent)}
+          />
+          <Field
+            label={m.colExpVariant}
+            value={arm(view.counts.variantExposures, view.counts.variantConversions, view.variantRatePercent)}
+          />
+          {view.stoppedAt ? <Field label={m.expStateStopped} value={stamp(view.stoppedAt) ?? m.none} /> : null}
+        </div>
+      </>
+    );
+  }
+
+  if (section === "comments") {
+    const codes = Array.isArray(row.riskCodes) ? (row.riskCodes as string[]) : [];
+    return (
+      <>
+        <RowHeading title={str(row.externalUrlHost)} detail={str(row.id)}>
+          <MarketingTag tone={row.overdue === true ? "danger" : "warning"}>
+            {row.overdue === true ? m.alertOverdue : m.alertOpen}
+          </MarketingTag>
+        </RowHeading>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <Field label={m.colAlertCount} value={String(row.alertCount ?? 0)} />
+          <Field label={m.colRiskCodes} value={codes.join(", ") || m.none} />
+          <Field label={m.colFirstDetected} value={stamp(row.firstDetectedAt) || m.none} />
+        </div>
+      </>
+    );
+  }
+
   if (section === "competitors") {
     const hosts = Array.isArray(row.officialHosts) ? (row.officialHosts as string[]) : [];
     const evidence = Array.isArray(row.evidenceUrls) ? (row.evidenceUrls as string[]) : [];
@@ -1940,8 +2267,9 @@ function MarketingRow({
           </p>
         ) : null}
         {/*
-          A3's own words and the pages it cites, shown as text: they are what
-          the generator read, which is data to judge, not links to follow.
+          A3's own words are text. Its evidence is the web-search pages a
+          person opens to judge the proposal (S3f-R5c): https only, a new tab,
+          no referrer and no endorsement.
         */}
         {text(row.rationale) ? (
           <p className="mt-3 text-sm leading-6 text-zinc-300">{text(row.rationale)}</p>
@@ -1956,16 +2284,149 @@ function MarketingRow({
         ) : null}
         {evidence.length > 0 ? (
           <p className="mt-1 break-all text-xs text-zinc-500">
-            {m.colEvidence} {evidence.join(" / ")}
+            {m.colEvidence}{" "}
+            {evidence.map((url, index) => (
+              <span key={`${index}:${url}`}>
+                {index > 0 ? " / " : null}
+                {url.startsWith("https://") ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className="text-zinc-300 underline underline-offset-2 hover:text-white"
+                    data-testid="marketing-competitor-evidence-link"
+                  >
+                    {url}
+                  </a>
+                ) : (
+                  url
+                )}
+              </span>
+            ))}
           </p>
         ) : null}
       </>
     );
   }
 
+  if (section === "assets") {
+    const disclosure = (row.disclosure ?? {}) as Record<string, string>;
+    const alt = (row.alt ?? {}) as Record<string, string>;
+    const transcript = (row.transcript ?? {}) as Record<string, string>;
+    const size = int(row.bytes);
+    return (
+      <>
+        <RowHeading title={str(row.id)} detail={`${str(row.kind)} · ${str(row.provenance)}`}>
+          <StatusTag status={row.status} m={m} />
+        </RowHeading>
+        <p className="mt-3 text-xs text-zinc-500">
+          {m.colFile} {str(row.contentType)} · {(size / (1024 * 1024)).toFixed(1)} MB
+          {row.durationSeconds ? ` · ${int(row.durationSeconds)}s` : ""} · {str(row.sha256).slice(0, 12)}…
+        </p>
+        <p className="mt-1 break-all text-xs text-zinc-500">
+          {m.colChannels}{" "}
+          {Object.entries(disclosure)
+            .map(([channel, decision]) => `${channelName(channel)} (${decision})`)
+            .join(" / ")}
+        </p>
+        {Object.entries(alt).map(([locale, value]) => (
+          <p key={locale} className="mt-1 text-sm leading-6 text-zinc-300">
+            <span className="mr-2 text-xs text-zinc-500">{locale}</span>
+            {value}
+          </p>
+        ))}
+        {/*
+          What the file says, per locale, so the person approving reads it
+          beside the preview. The Guard read it at submission; the words are
+          the media agent's and shown as text.
+        */}
+        {Object.entries(transcript).map(([locale, value]) => (
+          <details key={`transcript:${locale}`} className="mt-2" data-testid="marketing-asset-transcript">
+            <summary className="cursor-pointer text-xs text-zinc-400">
+              {m.colTranscript} · {locale}
+            </summary>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{value}</p>
+          </details>
+        ))}
+        <p className="mt-2 text-xs">
+          {row.uploadedAt ? (
+            <a
+              href={ASSET_PATH(row.id, "preview")}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-300 underline underline-offset-2 hover:text-white"
+              data-testid="marketing-asset-preview-link"
+            >
+              {m.colPreview}
+            </a>
+          ) : (
+            <span className="text-zinc-500">{m.notUploaded}</span>
+          )}
+        </p>
+      </>
+    );
+  }
+
+  return <MarketingReportRow row={row} m={m} />;
+}
+
+type ReportDetail = {
+  id: string;
+  kind: string;
+  payload: unknown;
+  competitorNames: Record<string, string>;
+};
+
+type ReportLoad =
+  | { status: "idle" | "loading" | "failed" | "unreadable" }
+  | { status: "ready"; report: ReportDetail };
+
+/**
+ * One row of the Reports tab. The list carries no payload, so the content is
+ * read from the one-report route when a person opens the row, and kept for the
+ * next time the row is opened.
+ */
+function MarketingReportRow({ row, m }: { row: Row; m: Record<string, string> }) {
+  const [open, setOpen] = useState(false);
+  const [load, setLoad] = useState<ReportLoad>({ status: "idle" });
+
+  const toggle = async () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (load.status === "ready" || load.status === "loading") return;
+    setLoad({ status: "loading" });
+    try {
+      const response = await adminFetch(
+        `/api/admin/marketing/reports/${encodeURIComponent(String(row.id))}`,
+        { cache: "no-store" }
+      );
+      if (!response.ok) {
+        await discardResponseBody(response);
+        setLoad({ status: response.status === 422 ? "unreadable" : "failed" });
+        return;
+      }
+      setLoad({ status: "ready", report: (await response.json()) as ReportDetail });
+    } catch {
+      setLoad({ status: "failed" });
+    }
+  };
+
   return (
     <>
-      <RowHeading title={String(row.kind)} detail={String(row.sourceVersion)} />
+      <RowHeading title={String(row.kind)} detail={String(row.sourceVersion)}>
+        <button
+          type="button"
+          onClick={() => void toggle()}
+          aria-expanded={open}
+          data-testid="marketing-report-toggle"
+          className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-zinc-700 px-3.5 py-2 text-[13px] font-semibold text-zinc-300 transition hover:bg-zinc-800"
+        >
+          {open ? m.reportHide : m.reportView}
+        </button>
+      </RowHeading>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <Field
           label={m.colPeriod}
@@ -1973,6 +2434,160 @@ function MarketingRow({
         />
         <Field label={m.colCreated} value={stamp(row.createdAt) ?? m.none} />
       </div>
+      {open ? (
+        <div className="mt-4 border-t border-zinc-800 pt-4" data-testid="marketing-report-body">
+          {load.status === "ready" ? (
+            <MarketingReportBody report={load.report} m={m} />
+          ) : load.status === "unreadable" ? (
+            <p className="text-sm text-amber-300">{m.reportUnreadable}</p>
+          ) : load.status === "failed" ? (
+            <p className="text-sm text-amber-300">{m.reportLoadFailed}</p>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-zinc-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {m.reportLoading}
+            </p>
+          )}
+        </div>
+      ) : null}
     </>
+  );
+}
+
+const TABLE_HEAD = "py-1 pr-4 text-left text-xs font-medium text-zinc-500";
+const TABLE_CELL = "py-1 pr-4 text-[13px] text-zinc-200";
+
+/** What a report says, by kind: market facts by competitor, the weekly numbers, or the JSON. */
+export function MarketingReportBody({ report, m }: { report: ReportDetail; m: Record<string, string> }) {
+  if (report.kind === "brief") return <MarketingBriefReport report={report} />;
+
+  if (report.kind === "market_intel") {
+    const payload = report.payload as { facts: MarketIntelFactView[]; unrepresentableFactCount: number };
+    const groups = groupMarketIntelFacts(payload.facts, report.competitorNames);
+    return (
+      <div className="grid gap-4" data-testid="marketing-report-market-intel">
+        <p className="text-xs text-zinc-400">
+          {m.reportFactCount.replace("{count}", String(payload.facts.length))}
+          {payload.unrepresentableFactCount > 0 ? (
+            <span className="ml-2 font-semibold text-amber-300" data-testid="marketing-report-unrepresentable">
+              {m.reportUnrepresentable.replace("{count}", String(payload.unrepresentableFactCount))}
+            </span>
+          ) : null}
+        </p>
+        {groups.length === 0 ? <p className="text-sm text-zinc-400">{m.reportNoFacts}</p> : null}
+        {groups.map((group) => (
+          <section key={group.competitorId} data-testid="marketing-report-competitor">
+            <h4 className="flex items-baseline gap-2 text-sm font-semibold text-zinc-100">
+              {group.name}
+              {group.name !== group.competitorId ? (
+                <span className="font-mono text-xs font-normal text-zinc-500">{group.competitorId}</span>
+              ) : null}
+            </h4>
+            <ul className="mt-2 grid gap-1.5">
+              {group.facts.map((fact, index) => (
+                <li
+                  key={`${fact.factType}:${index}`}
+                  className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[13px]"
+                  data-testid="marketing-report-fact"
+                >
+                  <span className="font-mono text-xs text-zinc-400">{fact.factType}</span>
+                  <span className="font-semibold text-zinc-100">{formatMarketIntelValue(fact.value)}</span>
+                  {isHttpsUrl(fact.sourceUrl) ? (
+                    <a
+                      href={fact.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all text-xs text-zinc-300 underline underline-offset-2 hover:text-white"
+                      data-testid="marketing-report-source-link"
+                    >
+                      {m.reportSource}
+                    </a>
+                  ) : (
+                    <span className="break-all text-xs text-zinc-500">{fact.sourceUrl}</span>
+                  )}
+                  <span className="text-xs text-zinc-500">
+                    {m.reportChecked} {stamp(fact.checkedAt) ?? m.none}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    );
+  }
+
+  if (report.kind === "weekly_kpi") {
+    const payload = report.payload as {
+      postsPublished: number;
+      postsRejected: number;
+      guardRejectionsByCode: Array<{ code: string; count: number }>;
+      channelTotals: Array<{ accountSlug: string; published: number; failed: number }>;
+    };
+    return (
+      <div className="grid gap-4" data-testid="marketing-report-weekly-kpi">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={m.reportPostsPublished} value={String(payload.postsPublished)} />
+          <Field label={m.reportPostsRejected} value={String(payload.postsRejected)} />
+        </div>
+        <div>
+          <p className="text-xs font-medium text-zinc-400">{m.reportGuardRejections}</p>
+          {payload.guardRejectionsByCode.length === 0 ? (
+            <p className="mt-1 text-sm text-zinc-500">{m.reportNoRows}</p>
+          ) : (
+            <table className="mt-1 w-full max-w-md border-collapse">
+              <thead>
+                <tr>
+                  <th className={TABLE_HEAD}>{m.reportColCode}</th>
+                  <th className={TABLE_HEAD}>{m.reportColCount}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payload.guardRejectionsByCode.map((entry) => (
+                  <tr key={entry.code}>
+                    <td className={`${TABLE_CELL} font-mono`}>{entry.code}</td>
+                    <td className={TABLE_CELL}>{entry.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div>
+          <p className="text-xs font-medium text-zinc-400">{m.reportByAccount}</p>
+          {payload.channelTotals.length === 0 ? (
+            <p className="mt-1 text-sm text-zinc-500">{m.reportNoRows}</p>
+          ) : (
+            <table className="mt-1 w-full max-w-md border-collapse">
+              <thead>
+                <tr>
+                  <th className={TABLE_HEAD}>{m.reportColAccount}</th>
+                  <th className={TABLE_HEAD}>{m.reportColPublished}</th>
+                  <th className={TABLE_HEAD}>{m.reportColFailed}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payload.channelTotals.map((entry) => (
+                  <tr key={entry.accountSlug}>
+                    <td className={`${TABLE_CELL} font-mono`}>{entry.accountSlug}</td>
+                    <td className={TABLE_CELL}>{entry.published}</td>
+                    <td className={TABLE_CELL}>{entry.failed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <pre
+      className="max-h-96 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 font-mono text-xs leading-5 text-zinc-300"
+      data-testid="marketing-report-json"
+    >
+      {JSON.stringify(report.payload, null, 2)}
+    </pre>
   );
 }

@@ -14,9 +14,9 @@ type Changes = TierInput["changes"];
 type BaseFiles = Parameters<typeof computeControlPlaneSlice>[0]["baseFiles"];
 type Workflows = Parameters<typeof analyseCredentialReachability>[0]["workflows"];
 
-/** The final T1 judgement consumes verified source and image evidence; it
- * never trusts a worker-supplied tier, workflow list, or excluded prefix. The
- * caller must establish those bindings before invoking this pure function. */
+/** The final T1 judgement consumes verified source evidence; it never trusts
+ * a worker-supplied tier or workflow list. The caller must establish those
+ * bindings before invoking this pure function. */
 export function decideEngineeringAgentV22Tier(input: {
   changes: Changes;
   baseFiles: BaseFiles;
@@ -24,7 +24,6 @@ export function decideEngineeringAgentV22Tier(input: {
   installedVersions: Readonly<Record<keyof typeof CONVENTION_VERSIONS,
     string | null>>;
   policyDocuments: readonly string[];
-  deployExcludedPrefixes: readonly string[];
 }): TierVerdict {
   const blind = analyseCredentialReachability({
     workflows: input.workflows,
@@ -42,7 +41,6 @@ export function decideEngineeringAgentV22Tier(input: {
   }) : blind;
   const slice = computeControlPlaneSlice({
     baseFiles: input.baseFiles, changes: input.changes,
-    deployExcludedPrefixes: input.deployExcludedPrefixes,
   });
   return decideTier({
     changes: input.changes,

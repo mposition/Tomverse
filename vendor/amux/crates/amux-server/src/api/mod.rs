@@ -18,6 +18,7 @@ pub mod board_typed_ask;
 pub mod criteria;
 pub mod dependency_audit;
 pub mod dm_relay;
+pub mod dm_relay_v22;
 pub mod browser;
 pub mod browser_import;
 pub mod calendar;

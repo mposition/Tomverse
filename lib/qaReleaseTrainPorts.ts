@@ -6,7 +6,7 @@
  * every failure is a fixed error code.
  */
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -14,9 +14,7 @@ import { promisify } from "node:util";
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint } from "./qaReleaseDigestEndpointCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
-import { QA_RELEASE_TRAIN_CANDIDATE_DAYS } from "./qaReleaseTrainCargoCore.ts";
 import {
-  QA_RELEASE_TRAIN_MAX_PREDECESSORS,
   QA_RELEASE_TRAIN_REPOSITORY,
   qaReleaseTrainIncludedNumbers,
   qaReleaseTrainIsTrainPull,
@@ -24,7 +22,16 @@ import {
   type QaReleaseTrainCandidate,
   type QaReleaseTrainPick,
 } from "./qaReleaseTrainCore.ts";
+import {
+  QA_RELEASE_TRAIN_MARKER_LINE,
+  qaReleaseTrainApplyHunks,
+  qaReleaseTrainDiff3Hunks,
+  type QaReleaseTrainConflict,
+  type QaReleaseTrainResolver,
+} from "./qaReleaseTrainResolve.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
+import type { QaReleaseTrainVerdictCandidate, QaReleaseTrainVerdictPorts } from "./qaReleaseTrainVerdict.ts";
+import { qaReleaseTrainVerdictsFrom } from "./qaReleaseTrainVerdictCore.ts";
 
 const REPOSITORY = QA_RELEASE_TRAIN_REPOSITORY;
 const API = `https://api.github.com/repos/${REPOSITORY}`;
@@ -113,13 +120,30 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
   };
 }
 
+/** At most this many conflicting picks go to the model in one train: each call is paid. */
+const RESOLVES_PER_TRAIN = 6;
+/**
+ * No model call starts this long after a train began assembling: a call takes
+ * up to four minutes, and the push, pull request and report must still fit
+ * inside the service's 25 minutes (scripts/qa-release-train-service.mjs).
+ */
+const RESOLVE_WINDOW_MS = 15 * 60 * 1000;
+/** The commit trailer naming the files of a conflict the model resolved. */
+const RESOLVED_TRAILER = "Release-train-model-resolved";
+
 /**
  * `remote` is for tests only: a local repository path stands in for GitHub,
- * and the push goes to it without a token.
+ * and the push goes to it without a token. `resolve` (owner, 2026-10-28; the
+ * service passes one only when switched on): a pick that conflicts has its
+ * conflict hunks filled by the model (lib/qaReleaseTrainResolve.ts).
  */
-export function createQaReleaseTrainGitPorts(input: { token: () => Promise<string>; remote?: string }): QaReleaseTrainPorts["git"] & { cleanup(): Promise<void> } {
+export function createQaReleaseTrainGitPorts(input: {
+  token: () => Promise<string>;
+  remote?: string;
+  resolve?: QaReleaseTrainResolver;
+}): QaReleaseTrainPorts["git"] & { cleanup(): Promise<void> } {
   let dir: string | null = null;
-  const git = async (args: string[], options: { cwd?: string; allowFail?: boolean; extraEnv?: Record<string, string> } = {}) => {
+  const git = async (args: string[], options: { cwd?: string; allowFail?: boolean; extraEnv?: Record<string, string>; raw?: boolean } = {}) => {
     try {
       const { stdout } = await run("git", args, {
         cwd: options.cwd ?? dir ?? undefined,
@@ -127,7 +151,7 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
         maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.extraEnv },
       });
-      return { ok: true, stdout: stdout.trim() };
+      return { ok: true, stdout: options.raw ? stdout : stdout.trim() };
     } catch (error) {
       // No git binary at all is a deployment problem, not a repository one.
       if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") throw new Error("git_missing");
@@ -135,23 +159,133 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
       throw new Error(`git_${args[0] === "clone" ? "clone" : args[0] === "push" ? "push" : "failed"}`);
     }
   };
-  // Develop pull requests merged before this one, within the Admin window, that
-  // changed a file the pick conflicted on: what main most likely lacks. The
-  // fetch of the merge commit brought develop's history; a failed read names none.
-  const predecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<number[]> => {
-    if (files.length === 0) return [];
-    const since = new Date(Date.parse(pull.mergedAt) - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const log = await git(["log", "--first-parent", `--since=${since}`, "--format=%s", `${pull.mergeCommitSha}^1`, "--", ...files], { allowFail: true });
-    const numbers = log.stdout.split("\n").map(qaReleaseTrainMergedPullNumber).filter((n): n is number => n !== null && n !== pull.number);
-    return [...new Set(numbers)].slice(0, QA_RELEASE_TRAIN_MAX_PREDECESSORS);
+  /** Commits whose conflict the model resolved, with the files and what it said. */
+  const resolvedCommits = new Map<string, { files: readonly string[]; why: string }>();
+  // Both counted per train: assemble resets them.
+  let resolves = 0;
+  let assembleStartedMs = 0;
+  // A stopped pick's conflicts handed to the model, which fills every hunk;
+  // the files are written and staged. Only regular UTF-8 text files on all
+  // three sides with no marker-like line are handed over. `why` is empty
+  // when no resolver is set.
+  const resolveConflict = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<{ resolved: boolean; why: string }> => {
+    if (!input.resolve) return { resolved: false, why: "" };
+    // A name the trailer or the body's code span cannot carry as one item is not resolved.
+    if (!dir || files.length === 0 || files.some((file) => /[,`\r\n]/.test(file))) return { resolved: false, why: "A conflicted file's name cannot be carried." };
+    if (resolves >= RESOLVES_PER_TRAIN) return { resolved: false, why: "This train already handed the model its limit of conflicts." };
+    if (Date.now() - assembleStartedMs > RESOLVE_WINDOW_MS) return { resolved: false, why: "This train ran out of time to ask the model." };
+    // A workflow change is left out whatever the model writes: never paid for.
+    const changed = (await git(["diff", "--name-only", `${pull.mergeCommitSha}^1`, pull.mergeCommitSha], { allowFail: true })).stdout.split("\n");
+    if (changed.some((file) => file.startsWith(".github/workflows/"))) return { resolved: false, why: "It changes .github/workflows, which the train cannot push." };
+    const marked = new Map<string, string[]>();
+    const conflict: QaReleaseTrainConflict = { number: pull.number, title: pull.title, diff: "", files: [] };
+    for (const file of files) {
+      const notText = { resolved: false, why: `\`${file}\` is not a text file changed on both sides.` };
+      // Changed on one side and deleted on the other, a symlink or a submodule is not handed over.
+      const stages = (await git(["ls-files", "-u", "--", file], { allowFail: true })).stdout.split("\n").filter((row) => row !== "");
+      if (stages.length !== 3 || !stages.every((row) => /^100(644|755) [0-9a-f]{40} [123]\t/.test(row))) return notText;
+      // Nor a binary one (git leaves it without markers) or one holding marker-like lines.
+      for (const stage of [1, 2, 3]) {
+        const side = await git(["show", `:${stage}:${file}`], { allowFail: true, raw: true });
+        if (!side.ok || side.stdout.includes("\0") || QA_RELEASE_TRAIN_MARKER_LINE.test(side.stdout)) return notText;
+      }
+      if (!(await git(["checkout", "--conflict=diff3", "--", file], { allowFail: true })).ok) return notText;
+      // Written back as UTF-8, so only a file that is strictly UTF-8 (byte order mark kept).
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readFile(join(dir, file)));
+      } catch {
+        return notText;
+      }
+      const lines = text.split("\n");
+      const hunks = qaReleaseTrainDiff3Hunks(lines);
+      // A conflicted file with no hunk to read is one git could not mark.
+      if (hunks === null || hunks.length === 0) return notText;
+      marked.set(file, lines);
+      conflict.files.push({ path: file, hunks });
+    }
+    conflict.diff = (await git(["diff", "--no-color", "--no-ext-diff", `${pull.mergeCommitSha}^1`, pull.mergeCommitSha, "--", ...files], { allowFail: true })).stdout;
+    resolves += 1;
+    const answer = await input.resolve(conflict);
+    if (!answer.resolved) return answer;
+    for (const file of answer.files) {
+      await writeFile(join(dir, file.path), qaReleaseTrainApplyHunks(marked.get(file.path) ?? [], file.hunks).join("\n"));
+      if (!(await git(["add", "--", file.path], { allowFail: true })).ok) return { resolved: false, why: "A resolved file could not be staged." };
+    }
+    return answer;
+  };
+  // develop's tip, fetched once per train the first time a pick conflicts; "" when it could not be read.
+  let developSha: string | null = null;
+  const supersededOnMain = async (pull: QaReleaseTrainCandidate, base: string): Promise<boolean> => {
+    if (developSha === null) {
+      const fetched = await git(["fetch", "--quiet", "--filter=blob:none", "origin", "develop"], { allowFail: true });
+      const tip = fetched.ok ? (await git(["rev-parse", "FETCH_HEAD"], { allowFail: true })).stdout : "";
+      developSha = SHA.test(tip) ? tip : "";
+    }
+    if (developSha === "") return false;
+    const changed = await git(["diff", "--name-only", "--no-renames", `${pull.mergeCommitSha}^1`, pull.mergeCommitSha], { allowFail: true });
+    const files = changed.stdout.split("\n").filter((file) => file !== "");
+    if (!changed.ok || files.length === 0) return false;
+    return (await git(["diff", "--quiet", base, developSha, "--", ...files], { allowFail: true })).ok;
+  };
+  type Attempt = { result: "applied" } | { result: "empty" } | { result: "workflows" } | { result: "conflict"; why: string };
+  // One cherry-pick onto the train branch; whatever it does not keep is undone.
+  const pickOnce = async (pull: QaReleaseTrainCandidate): Promise<Attempt> => {
+    const before = (await git(["rev-parse", "HEAD"])).stdout;
+    let picked = (await git(["cherry-pick", "-m", "1", pull.mergeCommitSha], { allowFail: true })).ok;
+    if (!picked) {
+      // A pick that stopped with nothing to apply and no conflict is already on main.
+      const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"])).stdout;
+      const staged = await git(["diff", "--cached", "--quiet"], { allowFail: true });
+      if (unmerged === "" && staged.ok) {
+        await git(["cherry-pick", "--skip"], { allowFail: true });
+        return { result: "empty" };
+      }
+      // Every file it changed already reads on main as it does on develop now:
+      // a later pull request rewrote them and main has that, so nothing is
+      // left to bring (2026-10-29: #3061's golden, re-recorded by #3106).
+      if (await supersededOnMain(pull, before)) {
+        await git(["cherry-pick", "--abort"]);
+        return { result: "empty" };
+      }
+      const files = unmerged.split("\n").filter((file) => file !== "");
+      const answer = await resolveConflict(pull, files);
+      picked = answer.resolved;
+      // Resolved to nothing new: main already had what it adds. A skip that fails is aborted like a conflict.
+      if (picked && (await git(["diff", "--cached", "--quiet"], { allowFail: true })).ok) {
+        if ((await git(["cherry-pick", "--skip"], { allowFail: true })).ok) return { result: "empty" };
+        picked = false;
+      }
+      // Resolved, it commits with the original message and a trailer naming the files.
+      picked = picked && (await git(["commit", "--quiet", "--no-edit", "--trailer", `${RESOLVED_TRAILER}: ${files.join(", ")}`], { allowFail: true })).ok;
+      if (!picked) {
+        await git(["cherry-pick", "--abort"]);
+        return { result: "conflict", why: answer.why };
+      }
+      // Kept here, not read back from messages: a develop merge commit's own message could carry the trailer's words.
+      resolvedCommits.set((await git(["rev-parse", "HEAD"])).stdout, { files, why: answer.why });
+    }
+    if ((await git(["rev-parse", "HEAD"])).stdout === before) return { result: "empty" };
+    // The App has no workflows permission, and GitHub refuses a push that
+    // adds or changes a workflow file without it: the whole train would
+    // fail. Such a pull request comes back off and is released alone.
+    const touched = (await git(["diff", "--name-only", before, "HEAD"])).stdout.split("\n");
+    if (touched.some((file) => file.startsWith(".github/workflows/"))) {
+      await git(["reset", "--quiet", "--hard", before]);
+      return { result: "workflows" };
+    }
+    return { result: "applied" };
   };
   return {
     async assemble(branch, cargo, capacity) {
+      resolves = 0;
+      developSha = null;
+      assembleStartedMs = Date.now();
       // A round that assembles twice (an empty emergency, then the scheduled
       // train) keeps one clone: the first is removed before the second.
       if (dir) await rm(dir, { recursive: true, force: true });
       dir = await mkdtemp(join(tmpdir(), "qa-release-train-"));
-      await git(["clone", "--quiet", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", "main", input.remote ?? `https://github.com/${REPOSITORY}.git`, dir], { cwd: tmpdir() });
+      await git(["clone", "--quiet", "--config", "core.autocrlf=false", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", "main", input.remote ?? `https://github.com/${REPOSITORY}.git`, dir], { cwd: tmpdir() });
       await git(["config", "user.name", "tomverse-qa-release-train"]);
       await git(["config", "user.email", "qa-release-train@users.noreply.github.com"]);
       const mainSha = (await git(["rev-parse", "HEAD"])).stdout;
@@ -159,8 +293,9 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
       if (cargo.length > 0) await git(["fetch", "--quiet", "--filter=blob:none", "origin", ...cargo.map((c) => c.mergeCommitSha)]);
       await git(["switch", "--quiet", "-c", branch]);
       const picks: QaReleaseTrainPick[] = [];
+      const riding = () => picks.filter((p) => p.outcome === "included").length;
       for (const pull of cargo) {
-        if (picks.filter((p) => p.outcome === "included").length >= capacity) {
+        if (riding() >= capacity) {
           picks.push({ number: pull.number, outcome: "over_capacity" });
           continue;
         }
@@ -169,35 +304,22 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
           picks.push({ number: pull.number, outcome: "already_in_main" });
           continue;
         }
-        const before = (await git(["rev-parse", "HEAD"])).stdout;
-        const picked = await git(["cherry-pick", "-m", "1", pull.mergeCommitSha], { allowFail: true });
-        if (picked.ok && (await git(["rev-parse", "HEAD"])).stdout !== before) {
-          // The App has no workflows permission, and GitHub refuses a push that
-          // adds or changes a workflow file without it: the whole train would
-          // fail. Such a pull request comes back off and is released alone.
-          const touched = (await git(["diff", "--name-only", before, "HEAD"])).stdout.split("\n");
-          if (touched.some((file) => file.startsWith(".github/workflows/"))) {
-            await git(["reset", "--quiet", "--hard", before]);
-            picks.push({ number: pull.number, outcome: "changes_workflows" });
-            continue;
-          }
-          picks.push({ number: pull.number, outcome: "included" });
-          continue;
-        }
-        // A pick that stopped with nothing to apply and no conflict is already on main.
-        const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"])).stdout;
-        const staged = await git(["diff", "--cached", "--quiet"], { allowFail: true });
-        if (unmerged === "" && staged.ok) {
-          await git(["cherry-pick", "--skip"], { allowFail: true });
-          picks.push({ number: pull.number, outcome: "already_in_main" });
-        } else {
-          await git(["cherry-pick", "--abort"]);
-          const conflicted = unmerged.split("\n").filter((file) => file !== "");
-          picks.push({ number: pull.number, outcome: "conflict", predecessors: await predecessors(pull, conflicted) });
-        }
+        const ride = await pickOnce(pull);
+        if (ride.result === "applied") picks.push({ number: pull.number, outcome: "included" });
+        else if (ride.result === "workflows") picks.push({ number: pull.number, outcome: "changes_workflows" });
+        else if (ride.result === "empty") picks.push({ number: pull.number, outcome: "already_in_main" });
+        else picks.push({ number: pull.number, outcome: "conflict", ...(ride.why ? { why: ride.why } : {}) });
       }
       const headSha = (await git(["rev-parse", "HEAD"])).stdout;
-      return { mainSha, headSha, picks };
+      // What rides resolved: the commits the model resolved that are still on the branch (an attempt undone took its commit with it).
+      const resolved: { number: number; files: string[]; why: string }[] = [];
+      for (const entry of (await git(["log", "--format=%H%x1f%s", `${mainSha}..HEAD`])).stdout.split("\n")) {
+        const [sha = "", subject = ""] = entry.split("\x1f");
+        const number = qaReleaseTrainMergedPullNumber(subject);
+        const kept = resolvedCommits.get(sha);
+        if (number !== null && kept) resolved.push({ number, files: [...kept.files], why: kept.why });
+      }
+      return { mainSha, headSha, picks, resolved };
     },
     async push(branch) {
       if (!dir) throw new Error("git_not_assembled");
@@ -222,23 +344,64 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
   };
 }
 
-export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: Readonly<Record<string, string | undefined>> }): QaReleaseTrainPorts["app"] {
-  const call = async (body: Json) => {
-    const url = qaReleaseMergeLaneEndpoint({ ...input.env }, "train");
-    assertQaReleaseMergeLaneEndpoint(url, "train");
-    const response = await input.http({
-      method: "POST",
-      url,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${input.env.QA_RELEASE_MERGE_LANE_SECRET ?? ""}`,
-        [QA_RELEASE_CONTROL_REVISION_HEADER]: (input.env.QA_RELEASE_CONTROL_REVISION ?? "").trim(),
-      },
-      body: JSON.stringify(body),
-    });
-    if (response.status !== 200 && response.status !== 409) throw new Error(`app_${response.status}`);
-    return { status: response.status, body: record(JSON.parse(response.text)) };
+type AppInput = { http: QaReleaseHttp; env: Readonly<Record<string, string | undefined>> };
+
+/** One call to the app's train route with the lane's secret and revision. */
+async function trainAppCall(input: AppInput, body: Json) {
+  const url = qaReleaseMergeLaneEndpoint({ ...input.env }, "train");
+  assertQaReleaseMergeLaneEndpoint(url, "train");
+  const response = await input.http({
+    method: "POST",
+    url,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${input.env.QA_RELEASE_MERGE_LANE_SECRET ?? ""}`,
+      [QA_RELEASE_CONTROL_REVISION_HEADER]: (input.env.QA_RELEASE_CONTROL_REVISION ?? "").trim(),
+    },
+    body: JSON.stringify(body),
+  });
+  if (response.status !== 200 && response.status !== 409) throw new Error(`app_${response.status}`);
+  return { status: response.status, body: record(JSON.parse(response.text)) };
+}
+
+/** The verdict round's app calls (lib/qaReleaseTrainVerdict.ts): read what to check, save what was found. */
+export function createQaReleaseTrainVerdictAppPorts(input: AppInput): QaReleaseTrainVerdictPorts["app"] {
+  return {
+    async queue() {
+      const answer = await trainAppCall(input, { phase: "verdict_queue" });
+      const candidates = answer.body.candidates;
+      if (answer.status !== 200 || !Array.isArray(candidates)) throw new Error("app_queue_shape");
+      return {
+        candidates: candidates.flatMap((item) => {
+          const candidate = item as Partial<QaReleaseTrainVerdictCandidate> | null;
+          return candidate &&
+            Number.isInteger(candidate.number) &&
+            typeof candidate.mergeCommitSha === "string" &&
+            SHA.test(candidate.mergeCommitSha) &&
+            typeof candidate.mergedAt === "string"
+            ? [
+                {
+                  number: candidate.number as number,
+                  title: String(candidate.title ?? ""),
+                  mergeCommitSha: candidate.mergeCommitSha,
+                  mergedAt: candidate.mergedAt,
+                  mainPullRequest: Number.isInteger(candidate.mainPullRequest) ? (candidate.mainPullRequest as number) : null,
+                },
+              ]
+            : [];
+        }),
+        stored: qaReleaseTrainVerdictsFrom(answer.body.stored ?? null),
+      };
+    },
+    async save(verdicts) {
+      const answer = await trainAppCall(input, { phase: "verdicts", ...verdicts });
+      if (answer.status !== 200) throw new Error("app_verdicts_refused");
+    },
   };
+}
+
+export function createQaReleaseTrainAppPorts(input: AppInput): QaReleaseTrainPorts["app"] {
+  const call = (body: Json) => trainAppCall(input, body);
   return {
     async schedule(hours) {
       await call({ phase: "schedule", hours });
@@ -263,7 +426,22 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
         : { admitted: false, reason: typeof answer.body.reason === "string" ? answer.body.reason : "unknown" };
     },
     async report(report) {
-      const answer = await call({ phase: "report", ...report });
+      const send = (picks: QaReleaseTrainPick[]) => call({ phase: "report", ...report, picks });
+      let answer;
+      try {
+        answer = await send(report.picks);
+      } catch (error) {
+        // An app older than model resolution refuses `why` (400: nothing was
+        // written). Sent again without it, the report still lands.
+        if (!(error instanceof Error && error.message === "app_400") || !report.picks.some((p) => p.why !== undefined)) throw error;
+        answer = await send(
+          report.picks.map((pick) => {
+            const plain = { ...pick };
+            delete plain.why;
+            return plain;
+          }),
+        );
+      }
       if (answer.status !== 200) throw new Error("app_report_refused");
     },
   };

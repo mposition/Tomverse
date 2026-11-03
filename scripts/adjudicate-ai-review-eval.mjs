@@ -26,6 +26,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { AI_REVIEW_EVAL_BLIND_SHEET_RULES } from "../lib/aiReviewEvalCore.ts";
+import { findJudgedThresholdSet } from "../lib/aiReviewJudgedThresholds.ts";
 import {
   humanVerdictsByCase,
   parseBlindReviewRecord,
@@ -148,7 +149,7 @@ const blindSheetText = existsSync(sheetPath) ? readFileSync(sheetPath, "utf8") :
 // artifact would otherwise carry a bar nobody can look up, and the gate would
 // be left to discover it after the fact.
 const recordThresholdVersion = thresholdVersionFromRecord(recordText);
-if (recordThresholdVersion && !findThresholdSet(recordThresholdVersion)) {
+if (recordThresholdVersion && !findThresholdSet(recordThresholdVersion) && !findJudgedThresholdSet(recordThresholdVersion)) {
   die(
     `The record names threshold version "${recordThresholdVersion}", which does not ` +
       `exist. Known: ${AI_REVIEW_THRESHOLD_SETS.map((set) => set.version).join(", ")}.`

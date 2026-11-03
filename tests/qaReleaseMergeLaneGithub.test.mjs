@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   QA_RELEASE_APP_TOKEN_PERMISSIONS,
+  QA_RELEASE_INSTALLATION_RETRY_MS,
   createQaReleaseGithubPorts,
   qaReleaseAppJwt,
   qaReleaseInstallationToken,
@@ -93,6 +94,35 @@ test("the installation token is scoped to this repository and section 3's permis
   assert.equal(calls.length, 2);
   assert.deepEqual(JSON.parse(calls[1].body), { repositories: ["Tomverse"], permissions: QA_RELEASE_APP_TOKEN_PERMISSIONS });
   assert.deepEqual(QA_RELEASE_APP_TOKEN_PERMISSIONS, { contents: "write", pull_requests: "write", checks: "read", statuses: "read", metadata: "read" });
+});
+
+test("a GitHub 5xx on the installation lookup is asked once more after a pause; a second 5xx or a 4xx is not", async () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs1", format: "pem" });
+  const lookups = (...statuses) => {
+    const waits = [];
+    const { http, calls } = fakeHttp([
+      [is("GET", `${REPO}/installation`), () => (statuses.length > 0 ? json(statuses.shift(), { message: "x" }) : json(200, { id: 77 }))],
+      [is("POST", `${API}/app/installations/77/access_tokens`), json(201, { token: "ghs_x" })],
+    ]);
+    const token = qaReleaseInstallationToken(http, "1", pem, () => 1_700_000_000_000, async (ms) => void waits.push(ms));
+    return { token, calls, waits };
+  };
+
+  // 2026-10-29: one 502 cost an emergency train a whole round.
+  const once = lookups(502);
+  assert.equal(await once.token(), "ghs_x");
+  assert.deepEqual(once.waits, [QA_RELEASE_INSTALLATION_RETRY_MS]);
+  assert.deepEqual(once.calls.map((call) => call.method), ["GET", "GET", "POST"]);
+
+  const twice = lookups(502, 503);
+  await assert.rejects(twice.token(), /github_installation_503/);
+  assert.equal(twice.calls.length, 2);
+
+  const missing = lookups(404);
+  await assert.rejects(missing.token(), /github_installation_404/);
+  assert.deepEqual(missing.waits, []);
+  assert.equal(missing.calls.length, 1);
 });
 
 test("open develop pull requests come back in the merge train's rollup shape", async () => {

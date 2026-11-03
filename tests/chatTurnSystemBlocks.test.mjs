@@ -3,6 +3,7 @@ import test from "node:test";
 import { buildChatTurnSystemBlocks } from "../lib/chatTurnSystemBlocks.ts";
 import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 import { buildChatLocationPrompt, buildChatLocationContext } from "../lib/chatLocationPrompt.ts";
+import { buildChatCurrentDatePrompt } from "../lib/chatCurrentDatePrompt.ts";
 import {
   ARTIFACT_TOOL_DEFINITION_TOKENS,
 } from "../lib/generatedArtifactToolPolicy.ts";
@@ -29,21 +30,40 @@ const base = {
 const build = (overrides = {}) =>
   buildChatTurnSystemBlocks({ ...base, ...overrides });
 
-test("a chat turn that cannot search carries file, image, location, and search blocks", () => {
+test("a chat turn that cannot search carries file, image, location, date, and search blocks", () => {
   const blocks = build();
-  assert.equal(blocks.systemMessages.length, 4);
+  assert.equal(blocks.systemMessages.length, 5);
   assert.equal(blocks.systemMessages[0].role, "system");
   assert.ok(blocks.systemMessages[0].content.includes("# File generation"));
   assert.ok(blocks.systemMessages[1].content.includes("# Images"));
   assert.ok(blocks.systemMessages[2].content.includes("# Current device location"));
-  assert.ok(blocks.systemMessages[3].content.includes("# Current information"));
+  assert.ok(blocks.systemMessages[3].content.includes("# Current date"));
+  assert.ok(blocks.systemMessages[4].content.includes("# Current information"));
 });
 
-test("a searching turn keeps location context without a search limitation", () => {
+test("the date block states the turn's UTC date and that it is the present", () => {
+  // The screenshots: "this December" answered with 2024, "today" dated to a
+  // January day, both because nothing told the model what today is.
+  const now = new Date("2026-10-29T13:05:00Z");
+  const date = build({ now }).systemMessages[3].content;
+  assert.ok(date.includes("Thursday, 2026-10-29 (UTC)"), date);
+  assert.match(date, /This is the present/);
+  assert.match(date, /put the year in the query/);
+  // No time of day: the block must stay byte-identical for the whole day so
+  // provider prefix caching survives every turn but the first after midnight.
+  assert.equal(date.includes("13:05"), false);
+  assert.equal(
+    build({ now: new Date("2026-10-29T23:59:59Z") }).systemMessages[3].content,
+    date
+  );
+});
+
+test("a searching turn keeps location and date context without a search limitation", () => {
   const blocks = build({ nativeSearchEnabled: true });
   assert.equal(blocks.webSearchTurnState, "searching");
   assert.equal(blocks.webSearchCapabilityPrompt, "");
-  assert.equal(blocks.systemMessages.length, 3);
+  assert.equal(blocks.systemMessages.length, 4);
+  assert.ok(blocks.systemMessages.some((message) => message.content.includes("# Current date")));
   // An empty system message is a message saying nothing, priced and sent.
   assert.ok(blocks.systemMessages.every((message) => message.content.trim()));
 });
@@ -61,6 +81,7 @@ test("the priced tokens are exactly the blocks present plus the tool schema", ()
   const blocks = build();
   const expected =
     estimateTextTokens(buildChatLocationPrompt()) +
+    estimateTextTokens(buildChatCurrentDatePrompt()) +
     estimateTextTokens(blocks.artifactPlan.systemPrompt) +
     estimateTextTokens(blocks.imageCapabilityPrompt) +
     estimateTextTokens(blocks.webSearchCapabilityPrompt) +

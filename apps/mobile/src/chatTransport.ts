@@ -40,15 +40,15 @@ export type Conversation = {
 export type MobileImageGroup = {
   status: string;
   targets: Array<{ targetId: string; modelId: string; currentGenerationId: string | null }>;
-  generations: Array<{ generationId: string; status: string; prompt: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
+  generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type MobileCapabilities = { historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
 export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
 export type AssistantSummary = { id: string; name: string; description?: string | null };
-export type ChatSummary = Pick<Conversation, "id" | "title"> & { kind?: string; surface?: string; productKey?: string | null; updatedAt?: string; pinned?: boolean; pinSeq?: number; projectId?: string | null; selectedModels?: string[]; isLocked?: boolean; shareEnabled?: boolean; sourceState?: string | null };
+export type ChatSummary = Pick<Conversation, "id" | "title"> & Partial<import("../../../lib/continuationTitleContext").ContinuationRowNaming> & { kind?: string; surface?: string; productKey?: string | null; updatedAt?: string; pinned?: boolean; pinSeq?: number; projectId?: string | null; selectedModels?: string[]; isLocked?: boolean; shareEnabled?: boolean };
 export type HistoryProject = { id: string; name: string; conversationCount?: number };
 export type HistorySearch = { results: Array<{ id: string; kind?: string; conversationId: string; conversationTitle: string; snippet: string; surface?: string }>; truncated?: boolean; sourceSearch?: string; validUntil?: string | null };
 export interface HistoryTransport {
@@ -112,7 +112,7 @@ export interface ChatTransport {
   session(): Promise<boolean>;
   signIn(): Promise<void>;
   requestEmailCode?(email: string, language: string): Promise<void>;
-  verifyEmailCode?(email: string, code: string): Promise<void>;
+  verifyEmailCode?(email: string, code: string, signup?: { intent: "signup"; termsAccepted: boolean }): Promise<void>;
   signOut(): Promise<void>;
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;

@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test, type Page } from "@playwright/test";
 const pageErrors = new WeakMap<Page, string[]>();
 
@@ -75,13 +76,13 @@ test("stopping requires a server read and never silently resends", async ({ page
 
 test("Chat draft stays with Chat when viewing Review modes", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Chat에만 남을 초안");
-  await page.getByTestId("product-switcher").selectOption("review");
-  await expect(page.getByRole("heading", { name: "질문은 한 번. 관점은 세 가지." })).toBeVisible();
+  await selectProduct(page, "review");
+  await expect(page.getByTestId("workspace-start")).toBeVisible();
   await page.getByRole("button", { name: /참여 모델 선택/ }).click();
   await page.getByRole("button", { name: "Professional", exact: true }).click();
   await expect(page.getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "닫기", exact: true }).click();
-  await page.getByTestId("product-switcher").selectOption("chat");
+  await selectProduct(page, "chat");
   await expect(page.getByRole("textbox")).toHaveValue("Chat에만 남을 초안");
 });
 
@@ -122,7 +123,7 @@ test("microphone refusal leaves typed input usable", async ({ page }) => {
 
 test("sign-out removes previous account drafts and saved conversations", async ({ page }) => {
   await signIn(page); await send(page, "이전 계정의 질문"); await page.getByRole("textbox").fill("비공개 초안");
-  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.getByRole("button", { name: "설정", exact: true }).click(); await page.getByRole("button", { name: "개인정보 및 데이터", exact: true }).click(); await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.getByRole("button", { name: "설정", exact: true }).click(); await page.getByRole("button", { name: "계정", exact: true }).click(); await page.getByRole("button", { name: "로그아웃", exact: true }).click();
   await page.getByRole("button", { name: "Tomverse로 계속" }).click();
   await expect(page.locator("article")).toHaveCount(0); await expect(page.getByRole("textbox")).toHaveValue("");
 });
@@ -138,4 +139,41 @@ for (const width of [320, 390, 768, 1024, 1440]) test(`light/dark layout and con
     await expect(page.locator(".app-header .wordmark")).toBeVisible();
     expect(await page.locator(".app-header .icon-logo").evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   }
+});
+
+
+test("a failed Auto capability read still shows manually selectable models", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", "transport.capabilities=async()=>{throw Error('Unavailable');};createRoot(container).render(") });
+  });
+  await signIn(page);
+  await page.getByRole("button", { name: /모델 선택|Smart Adaptive/ }).click();
+  const dialog = page.getByRole("dialog", { name: "모델 선택", exact: true });
+  await expect(dialog.getByRole("status")).toContainText("모델을 직접 선택할 수 있습니다");
+  await expect(dialog.getByRole("radio")).toHaveCount(3);
+  await dialog.getByRole("radio").nth(1).check();
+  await dialog.getByRole("button", { name: "선택 적용", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]);
+  expect(saved.selectionMode).toBe("manual"); expect(saved.selectedModels).toEqual(["demo-b"]);
+});
+
+test("a model catalogue failure can be retried without sending the draft", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    const fixture = "const priorModels=transport.models;transport.models=async()=>{if(!sessionStorage.getItem('native-fixture-models-recovered'))throw Error('Temporary catalogue failure');return priorModels();};";
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", fixture+"createRoot(container).render(") });
+  });
+  await signIn(page); await page.getByRole("textbox").fill("Keep this draft");
+  await page.getByRole("button", { name: /모델 선택|Smart Adaptive/ }).click();
+  const dialog = page.getByRole("dialog", { name: "모델 선택", exact: true });
+  await expect(dialog.getByRole("alert")).toContainText("모델을 불러오지 못했습니다");
+  await expect(dialog.getByRole("button", { name: "선택 적용", exact: true })).toBeDisabled();
+  await page.evaluate(() => sessionStorage.setItem("native-fixture-models-recovered", "true"));
+  await dialog.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect(dialog.getByRole("radio")).toHaveCount(3);
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(page.getByRole("textbox")).toHaveValue("Keep this draft");
+  await expect(page.locator("article.user")).toHaveCount(0);
 });

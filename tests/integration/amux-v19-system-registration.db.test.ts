@@ -23,6 +23,14 @@ import { commitAmuxIdeaAnalysisResult } from
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
+import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import { consumeAmuxV4UnitRejection, prepareAmuxV4UnitRejection } from
+  "@/lib/amux/ideaUnitRejectionService";
+import { amuxV4UnitBrowserDigest } from "@/lib/amux/ideaUnitBrowserCore";
+import type { AmuxIdeaUnitConfirmationSnapshot } from "@/lib/amux/ideaUnitConfirmationCore";
+import { readVerifiedAmuxUnitProposal } from "@/lib/amux/ideaUnitProposalReadService";
 import { commitFrontierCatalogDecision } from
   "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from
@@ -64,6 +72,10 @@ import { commitIdeaTransferConfirmation } from
 import { amuxSessionPageKeyIdentities,
   commitAmuxSessionAnalysisPlanInTx, readAmuxSessionPageContextInTx } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
+import { commitAmuxV4UnitRejection, readAmuxV4UnitDecision } from "@/lib/amux/ideaUnitDecisionStore";
+import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
+import { evaluateAmuxV4TaskReadyInTransaction, loadAmuxV4TaskReadyContext } from
+  "@/lib/amux/v4TaskReadyService";
 import { prisma } from "@/lib/prisma";
 import { ensureModelRegistrySeeded } from "@/lib/modelRegistry";
 import { seedAmuxWorkerCatalog, truncateAmuxWorkerRegistry } from "./amuxDerivedCatalogFixture";
@@ -111,6 +123,7 @@ let registeredSystemIdeaId: string;
 let registeredSystemIdeaPreviewId: string;
 let registeredSystemIdeaUnitIds: string[];
 let registeredTaskTitle: string;
+let registeredSystemTaskId: string;
 
 const listen = (server: Server) => new Promise<void>((resolve, reject) => {
   server.once("error", reject);
@@ -219,6 +232,8 @@ async function approveSyntheticTaskCatalog() {
 async function completedSessionIdea(options: {
   expectedPaths?: string[];
   taskTitle?: string;
+  taskRole?: string;
+  evidence?: boolean;
 } = {}) {
   const initialObjectKeys = new Set(objects.keys());
   const ideaId = randomUUID();
@@ -311,7 +326,7 @@ async function completedSessionIdea(options: {
   const claim = await prisma.$transaction((tx) =>
     commitAmuxIdeaOnlyAnalysisClaim(tx,
       { requestId: randomUUID(), previewId, keys: transferKeys }));
-  const unitIds = Array.from({ length: 4 }, () => randomUUID());
+  const unitIds = Array.from({ length: options.evidence ? 5 : 4 }, () => randomUUID());
   const resultKeys = await createAmuxContentKeyRing([transferIdentity], [
     ...unitIds.map((subjectId) => ({ ideaId,
       purpose: "analysis_draft" as const, subjectId })),
@@ -338,7 +353,7 @@ async function completedSessionIdea(options: {
       completionCriteria: ["The inert Task is auditable"],
       featureRef: "c0:node-2",
       parentStoryRef: null, dependencyRefs: [], duplicateCandidateRefs: [],
-      taskRole: "implement", executionGrade: "advanced",
+      taskRole: options.taskRole ?? "implement", executionGrade: "advanced",
       expectedPaths: options.expectedPaths ??
         ["lib/amux/ideaSystemRegistrationCore.ts"],
       executionBrief: "Implement and verify one bounded contract change.",
@@ -346,11 +361,14 @@ async function completedSessionIdea(options: {
         urgency: 2, dependencyUnlock: 2, workerCoverage: 2, effort: 2,
         deliveryRisk: 1 }) },
   ];
+  const evidence = options.evidence ? [{ kind: "evidence", localId: "c0:evidence-0",
+    evidenceType: "source_finding", summary: "The fixture names the file it changes.",
+    cardRef: "c0:card-0", sourceRefIds: ["operator_idea"] }] : [];
   const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "One synthetic system registration plan was analyzed.",
-    remainingScope: null, units });
+    remainingScope: null, units: [...units, ...evidence] });
   const saved = await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
     requestId: randomUUID(), ideaId, previewId, holdId,
     leaseGeneration: claim.leaseGeneration, outcome: "verified_success",
@@ -407,6 +425,7 @@ test("one completed session plan registers atomically under system evidence", as
   assert.ok(systemDecision?.finalAuditLogId);
   registeredSystemDecisionId = systemDecision.id;
   registeredSystemDecisionAuditId = systemDecision.finalAuditLogId;
+  registeredSystemTaskId = task.id;
   registeredSystemIdeaId = ideaId;
   registeredSystemIdeaPreviewId = previewId;
   registeredSystemIdeaUnitIds = unitIds;
@@ -478,6 +497,110 @@ test("one completed session plan registers atomically under system evidence", as
   assert.deepEqual(await readAmuxV19SystemRegistration(ideaId), {
     state: "committed", retryWrite: false, ideaId, auditId: result.auditId,
   });
+});
+
+class RolledBack extends Error {}
+
+/** Runs `check` against one rolled-back transaction. The worker heartbeat is
+ * the one ready fact registration never writes, so it is synthesized here;
+ * `mutate` may simulate stored-row corruption the product writers refuse. */
+async function inRolledBackTx<T>(check: (tx: Prisma.TransactionClient) => Promise<T>,
+  mutate?: (tx: Prisma.TransactionClient) => Promise<unknown>): Promise<T> {
+  let result: T | undefined;
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const now = new Date();
+    await tx.amuxWorkerRuntime.upsert({ where: { workerName: "claude-contract" },
+      create: { workerName: "claude-contract", instanceId: randomUUID(),
+        status: "idle", dispatchReady: true, heartbeatAt: now,
+        leaseExpiresAt: new Date(now.getTime() + 10 * 60_000) },
+      update: { status: "idle", dispatchReady: true, heartbeatAt: now,
+        leaseExpiresAt: new Date(now.getTime() + 10 * 60_000) } });
+    if (mutate) {
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+      await mutate(tx);
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    }
+    result = await check(tx);
+    throw new RolledBack();
+  }, { timeout: 30_000 }), RolledBack);
+  return result as T;
+}
+
+test("a registered plan's evidence unit leaves no plan approval waiting", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea({ evidence: true });
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "committed");
+  const units = await prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId },
+    select: { unitKind: true, state: true } });
+  assert.deepEqual(units.filter((unit) => unit.state === "proposed")
+    .map((unit) => unit.unitKind), ["evidence"],
+  "no approval decides an evidence unit, so it stays proposed");
+  const row = (await readAmuxIdeaProgressForOwner(session.user!.id!))
+    .find((entry) => entry.ideaId === ideaId);
+  assert.ok(row, "the registered idea is still listed");
+  assert.deepEqual([row.stage, row.waitingFor, row.taskRows.length], ["execution", null, 1],
+    "the inbox does not ask for a plan approval nobody can give");
+});
+
+test("a system-registered Task is ready, keeps its public PR consent and reads back", async () => {
+  assert.ok(registeredSystemTaskId);
+  const taskId = registeredSystemTaskId;
+  const context = await loadAmuxV4TaskReadyContext(taskId);
+  // The automatic tick passes no actor; an owner's Admin read passes theirs.
+  for (const expectedActorUserId of [null, authority.approvedByUserId]) {
+    const ready = await inRolledBackTx((tx) => evaluateAmuxV4TaskReadyInTransaction(
+      tx, taskId, context, expectedActorUserId));
+    assert.deepEqual(ready.reasons, []);
+    assert.equal(ready.ready, true);
+    assert.equal(ready.sourceApprovalId, registeredSystemDecisionId);
+  }
+  assert.equal(await readAmuxV22PublicPrConsent(taskId), true);
+  const readback = await readAmuxV4UnitDecision(session,
+    { decisionId: registeredSystemDecisionId });
+  assert.equal(readback.state, "consumed");
+  assert.equal(readback.state === "consumed" && "cardId" in readback ?
+    readback.cardId : null, taskId);
+  const nodeDecision = await prisma.amuxIdeaUnitDecision.findFirstOrThrow({
+    where: { ideaId: registeredSystemIdeaId, action: "create_node" },
+    select: { id: true } });
+  assert.equal((await readAmuxV4UnitDecision(session,
+    { decisionId: nodeDecision.id })).state, "consumed");
+});
+
+test("a person's consume row with the system marker, or another system scope, is no approval", async () => {
+  assert.ok(registeredSystemTaskId);
+  const taskId = registeredSystemTaskId;
+  const context = await loadAmuxV4TaskReadyContext(taskId);
+  const unitAuditId = registeredSystemDecisionAuditId;
+  const forgeries: Array<(tx: Prisma.TransactionClient) => Promise<unknown>> = [
+    (tx) => tx.$executeRaw`UPDATE "AdminAuditLog"
+      SET "actorUserId" = ${authority.approvedByUserId} WHERE "id" = ${unitAuditId}`,
+    (tx) => tx.$executeRaw`UPDATE "AdminAuditLog"
+      SET "metadata" = jsonb_set("metadata", '{actorScope}',
+        '"unit-decision-housekeeping-v1"'::jsonb) WHERE "id" = ${unitAuditId}`,
+    (tx) => tx.$executeRaw`UPDATE "AdminAuditLog"
+      SET "metadata" = jsonb_set("metadata", '{registrationAuthority}',
+        '"owner"'::jsonb) WHERE "id" = ${unitAuditId}`,
+    // The idea's plan registration pointer must name the v19 plan audit.
+    (tx) => tx.$executeRaw`UPDATE "AmuxIdeaSubmission"
+      SET "systemRegistrationAuditLogId" = ${unitAuditId}
+      WHERE "id" = ${registeredSystemIdeaId}`,
+  ];
+  for (const forge of forgeries) {
+    const seen = await inRolledBackTx(async (tx) => ({
+      ready: await evaluateAmuxV4TaskReadyInTransaction(tx, taskId, context, null),
+      consent: await readAmuxV22PublicPrConsent(taskId, tx),
+    }), forge);
+    assert.equal(seen.ready.ready, false);
+    assert.deepEqual(seen.ready.reasons, ["source_approval_invalid"]);
+    assert.equal(seen.ready.sourceApprovalId, null);
+    assert.equal(seen.consent, false);
+  }
+  // Nothing above committed.
+  const stored = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: unitAuditId } });
+  assert.equal(auditRowActorKind(stored), "system");
 });
 
 /** A session idea analysing on its own: no owner preview, no confirmation,
@@ -996,4 +1119,192 @@ test("the deferred DB guard rejects a forged system actor scope", async () => {
   } });
   assert.equal((audit.metadata as { actorScope?: string }).actorScope,
     "system-unit-registration-v1");
+});
+
+test("a test Task registers through the implement execution with its public PR consent", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea({ taskRole: "test" });
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "committed");
+  if (result.state !== "committed") throw new Error("test Task was refused");
+  const decision = await prisma.amuxIdeaUnitDecision.findFirstOrThrow({
+    where: { ideaId, action: "register_card" },
+    select: { registeredWorkItemId: true } });
+  const cardId = decision.registeredWorkItemId!;
+  const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: cardId },
+    select: { taskRole: true } });
+  assert.equal(task.taskRole, "test");
+  assert.equal(await readAmuxV22PublicPrConsent(cardId), true);
+});
+
+test("an operate Task is a recorded refusal, never an unknown outcome", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea({ taskRole: "operate" });
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "awaiting_operator");
+  if (result.state !== "awaiting_operator") throw new Error("operate Task registered");
+  assert.equal(result.refusal.refusalCode, "task_role_not_runnable");
+  assert.equal(await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }), 0);
+});
+
+test("a Task no priced worker can take is a recorded refusal", async () => {
+  await ensureModelRegistrySeeded();
+  // The only worker runs investigate, so nothing prices an implement Task.
+  await seedAmuxWorkerCatalog([{ worker_name: "claude-contract",
+    routing_roles: ["contract"],
+    v22: { model: "claude-opus-4-8", routing_roles: ["investigate"],
+      tool_capabilities: ["repo_read"] } }]);
+  try {
+    const { ideaId } = await completedSessionIdea();
+    const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+    assert.equal(result.state, "awaiting_operator");
+    if (result.state !== "awaiting_operator") throw new Error("unpriced Task registered");
+    assert.equal(result.refusal.refusalCode, "task_route_unpriced");
+    assert.equal(await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }), 0);
+  } finally {
+    await approveSyntheticTaskCatalog();
+  }
+});
+
+test("a catalog with no priced worker at all is a recorded refusal, not an unknown outcome", async () => {
+  await ensureModelRegistrySeeded();
+  // Admin › Models has no entry for this model, so no worker is priced.
+  await seedAmuxWorkerCatalog([{ worker_name: "claude-contract",
+    routing_roles: ["contract"],
+    v22: { model: "claude-unlisted-model", routing_roles: ["implement"],
+      tool_capabilities: ["repo_write"] } }]);
+  try {
+    const { ideaId } = await completedSessionIdea();
+    const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+    assert.equal(result.state, "awaiting_operator");
+    if (result.state !== "awaiting_operator") throw new Error("unpriced Task registered");
+    assert.equal(result.refusal.refusalCode, "task_route_unpriced");
+    assert.equal(await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }), 0);
+  } finally {
+    await approveSyntheticTaskCatalog();
+  }
+});
+
+test("the owner closes an idea waiting after analysis; none of its units can be decided afterwards", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId, unitIds } = await completedSessionIdea({
+    taskTitle: `Synthetic closed Task ${randomUUID()}` });
+  const before = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId },
+    select: { state: true, rawPurgeAfter: true, rawPurgedAt: true } });
+  assert.equal(before.state, "awaiting_owner");
+
+  // A rejection prepared before the close must not be consumable after it.
+  const previous = process.env.TOMVERSE_AMUX_V4_UNIT_WRITE;
+  process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = "enabled";
+  try {
+    const browserNonce = randomBytes(32).toString("base64url");
+    const prepared = await prepareAmuxV4UnitRejection({ session, request, ideaId,
+      draftUnitId: unitIds[3]!, prepareRequestId: randomUUID(),
+      reason: "Synthetic rejection prepared before close", browserNonce });
+    // Read before the close, as a consume that raced it would have.
+    const verified = await readVerifiedAmuxUnitProposal(session, ideaId, unitIds[3]!);
+    const decision = await prisma.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: prepared.decisionId } });
+    const keys = loadCurrentAmuxContentKeys(process.env);
+    const browser = amuxV4UnitBrowserDigest({ decisionId: decision.id,
+      actorUserId: session.user!.id!, authenticatedAt: session.user!.authenticatedAt,
+      nonce: browserNonce, key: keys });
+
+    const reason = "No longer needed after review";
+    const [closed] = await closeAmuxIdeasForOwner({ session, request,
+      ideaIds: [ideaId], reason });
+    assert.equal(closed!.result, "closed");
+    if (closed!.result !== "closed") throw new Error("not closed");
+
+    // The commit re-checks the idea under the audit lock: every earlier check
+    // in it answers reconfirm, so not_ready is the closed-idea guard.
+    await assert.rejects(prisma.$transaction((tx) => commitAmuxV4UnitRejection(tx, {
+      session, request,
+      snapshot: decision.confirmationSnapshot as AmuxIdeaUnitConfirmationSnapshot,
+      proposal: verified.proposal, consumeRequestId: randomUUID(), keys,
+      context: { decisionId: decision.id, ideaId, draftUnitId: unitIds[3]!,
+        actorUserId: session.user!.id!, recentOwnerStepUp: true,
+        ownerSessionDigest: browser.digest, ownerSessionDigestKeyId: browser.keyId },
+    })), { code: "not_ready" });
+    // The service paths refuse it too, before any transaction.
+    await assert.rejects(consumeAmuxV4UnitRejection({ session, request,
+      decisionId: prepared.decisionId, consumeRequestId: randomUUID(),
+      confirmationDigest: prepared.confirmationDigest, browserNonce }),
+    { code: "not_ready" });
+    await assert.rejects(prepareAmuxV4UnitRejection({ session, request, ideaId,
+      draftUnitId: unitIds[2]!, prepareRequestId: randomUUID(),
+      reason: "Synthetic rejection after close", browserNonce }),
+    { code: "not_ready" });
+    assert.equal((await prisma.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: prepared.decisionId }, select: { state: true } })).state, "prepared");
+
+    const after = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId },
+      select: { state: true, cancelledAt: true, rawPurgeAfter: true, rawPurgedAt: true } });
+    assert.equal(after.state, "cancelled");
+    assert.equal(after.cancelledAt?.toISOString(), closed!.cancelledAt);
+    assert.deepEqual([after.rawPurgeAfter, after.rawPurgedAt],
+      [before.rawPurgeAfter, before.rawPurgedAt], "the seven-day body clock is not moved");
+    assert.deepEqual(new Set((await prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId },
+      select: { state: true } })).map((unit) => unit.state)), new Set(["proposed"]),
+    "units stay and expire on their own clock");
+
+    const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: closed!.auditId } });
+    assert.deepEqual([audit.action, audit.targetType, audit.targetId, audit.actorUserId],
+      [AMUX_IDEA_OWNER_CLOSE_ACTION, "AmuxIdeaSubmission", ideaId, session.user!.id]);
+    assert.ok(audit.entryHash, "hash-chained");
+    const metadata = audit.metadata as Record<string, unknown>;
+    assert.equal(metadata.previousState, "awaiting_owner");
+    assert.match(String(metadata.reasonDigest), /^[a-f0-9]{64}$/);
+    assert.equal(JSON.stringify(audit).includes(reason), false, "only the reason's digest is kept");
+
+    await assert.rejects(commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId),
+      { code: "not_ready" }, "unattended registration refuses a closed idea");
+    assert.equal(await prisma.amuxWorkItem.count({ where: {
+      sourceSystem: "admin-idea-v4", sourceKey: { in: unitIds } } }), 0);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V4_UNIT_WRITE;
+    else process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = previous;
+  }
+});
+
+test("a batch close answers per idea and one refusal leaves the others closed", async () => {
+  const noPlan = await sessionPlannedIdea(sessionPage([], {
+    outcome: "needs_information", coverageStatus: "needs_owner_input",
+    continuationKind: "input", ownerQuestion: "Which repository owns this change?" }));
+  const second = await sessionPlannedIdea(sessionPage([], {
+    outcome: "needs_information", coverageStatus: "needs_owner_input",
+    continuationKind: "input", ownerQuestion: "Which team should review it?" }));
+  const analysing = await analysingSessionIdea();
+  const missing = `missing-${randomUUID()}`;
+  const auditsBefore = await prisma.adminAuditLog.count({ where: {
+    action: AMUX_IDEA_OWNER_CLOSE_ACTION } });
+
+  const outcomes = await closeAmuxIdeasForOwner({ session, request,
+    ideaIds: [noPlan.ideaId, analysing.ideaId, missing, second.ideaId],
+    reason: "Batch close of stale ideas" });
+  assert.deepEqual(outcomes.map((entry) => [entry.ideaId, entry.result]), [
+    [noPlan.ideaId, "closed"], [analysing.ideaId, "not_closable"],
+    [missing, "not_found"], [second.ideaId, "closed"]]);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: AMUX_IDEA_OWNER_CLOSE_ACTION } }), auditsBefore + 2, "one audit per closed idea");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: analysing.ideaId }, select: { state: true } })).state, "analyzing",
+  "an analysis still running is not closed under it");
+  const listed = new Set((await readAmuxIdeaProgressForOwner(session.user!.id!))
+    .map((row) => row.ideaId));
+  assert.deepEqual([listed.has(noPlan.ideaId), listed.has(second.ideaId),
+    listed.has(analysing.ideaId)], [false, false, true], "a closed idea leaves the Ideas list");
+
+  const again = await closeAmuxIdeasForOwner({ session, request,
+    ideaIds: [noPlan.ideaId], reason: "Batch close of stale ideas" });
+  assert.deepEqual(again, [{ ideaId: noPlan.ideaId, result: "already_closed" }]);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: AMUX_IDEA_OWNER_CLOSE_ACTION } }), auditsBefore + 2, "a repeat writes nothing");
+
+  const stranger = { ...session, user: { ...session.user!, id: `stranger-${randomUUID()}`,
+    email: "amux-close-stranger@example.test" } };
+  await assert.rejects(closeAmuxIdeasForOwner({ session: stranger, request,
+    ideaIds: [second.ideaId], reason: "Not my idea" }), { code: "forbidden" });
+  await assert.rejects(closeAmuxIdeasForOwner({ session, request,
+    ideaIds: [second.ideaId], reason: "no" }), { code: "invalid" });
 });

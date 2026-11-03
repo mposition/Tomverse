@@ -1,11 +1,11 @@
 export const dynamic = "force-dynamic";
 
+import { SUPPORTED_LANGUAGES, type Language } from "@/lib/language";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { randomUUID } from "node:crypto";
 import type Stripe from "stripe";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import {
   ApiSecurityError,
   apiSecurityResponse,
@@ -91,7 +91,7 @@ const checkoutSchema = z
   .object({
     planId: z.enum(["pro", "max"]),
     billingInterval: z.enum(["monthly", "annual"]).default("monthly"),
-    language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
+    language: z.enum(SUPPORTED_LANGUAGES).optional(),
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
     analytics: analyticsAttributionSchema.optional(),
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
@@ -142,7 +142,7 @@ const billingSuccessUrl = (
   origin: string,
   planId: BillingPlanId,
   billingInterval: "monthly" | "annual",
-  language?: "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt",
+  language?: Language,
   accessType?: "founding-tester-pass"
 ) =>
   `${origin}${PRODUCT_SURFACE_PATH.review}?billing=success&plan=${encodeURIComponent(
@@ -173,9 +173,21 @@ async function activateInternalPass({
   ) {
     throw new Error("INTERNAL_PASS_POLICY_INVALID");
   }
-  const accessStartsAt = new Date();
-  const periodEnd = addUtcDays(accessStartsAt, promotion.accessDurationDays);
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
+    await lockSubscriptionAccount(tx, userId);
+    const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    // A store/web grant may have committed since the initial checkout read.
+    // Re-check under the same account lock before consuming the code or access.
+    const block = checkoutPlanEligibilityBlock({
+      effectivePlan: effectivePlanForAccess(entitlement),
+      targetTier: tierForPlanId(planId),
+      hasStripeSubscription: Boolean(entitlement.stripeSubscriptionId),
+      subscriptionStatus: entitlement.subscriptionStatus,
+    });
+    if (block) throw new ApiSecurityError(block.status, block.code, block.error);
+    if (!promotion.accessDurationDays) throw new Error("INTERNAL_PASS_POLICY_INVALID");
+    const accessStartsAt = new Date();
+    const periodEnd = addUtcDays(accessStartsAt, promotion.accessDurationDays);
     if (!promotion.maxRedemptions || !promotion.endsAt || !clientIpHash) {
       throw new Error("PROMOTION_POLICY_INCOMPLETE");
     }
@@ -207,8 +219,6 @@ async function activateInternalPass({
       },
     });
 
-    await lockSubscriptionAccount(tx, userId);
-    const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     await tx.user.update({
       where: { id: userId },
       data: {
@@ -223,9 +233,8 @@ async function activateInternalPass({
         subscriptionCancelAtPeriodEnd: true,
       },
     });
+    return periodEnd;
   });
-
-  return periodEnd;
 }
 
 async function createCheckoutSession(
@@ -371,7 +380,9 @@ export async function POST(req: Request) {
   // finds the exact request in the structured log.
   const traceId = randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json(
         { code: "AUTHENTICATION_REQUIRED", error: "Authentication required." },
@@ -503,6 +514,12 @@ export async function POST(req: Request) {
       promotionRiskFlags = promotionValidation.riskFlags;
     }
 
+    // Native redemption grants only existing complimentary passes. A bearer
+    // request must never reach Stripe, even for a 100% subscription coupon.
+    if (req.headers.has("authorization") && (!appliedPromotion || !isInternalPassPromotion(appliedPromotion))) {
+      return NextResponse.json({ code: "NATIVE_PASS_REQUIRED", error: "Enter a Tomverse access pass code." }, { status: 400 });
+    }
+
     // Fail closed, a second time, from the same pure predicate the validation
     // above already ran. Unreachable while both agree, which is the point: a
     // forged request that skipped the validate endpoint, or a future edit that
@@ -587,7 +604,7 @@ export async function POST(req: Request) {
     if (internalPass) {
       if (billingInterval !== "monthly" || finalPriceMinor !== 0) {
         return NextResponse.json(
-          { error: "This access pass is available only for the monthly Pro plan." },
+          { code: "INTERNAL_PASS_NOT_ELIGIBLE", error: "This access pass is available only for the monthly Pro plan." },
           { status: 400 }
         );
       }

@@ -38,11 +38,18 @@ with a different baseline, stroke weight and advance width in the same sentence.
 | Default (en, de, fr, es, pt) | `Geist → system-ui → -apple-system → BlinkMacSystemFont → Segoe UI → sans-serif` |
 | `:lang(ko)` | `Noto Sans KR → Noto Sans KR Korean Fallback → Apple SD Gothic Neo → Malgun Gothic → system-ui → sans-serif` |
 | `:lang(zh)` | `Noto Sans SC → PingFang SC → Microsoft YaHei → system-ui → sans-serif` |
+| `:lang(zh-Hant)` | `Noto Sans TC → PingFang TC → Microsoft JhengHei → system-ui → sans-serif` |
 | Code (`--font-code`) | `Geist Mono → ui-monospace → SFMono-Regular → Menlo → Consolas → monospace` |
 
-Under `:lang(ko)` and `:lang(zh)`, `--font-code` appends the locale UI face after
-the monospace chain, so Korean or Chinese text inside a preserved-formatting
-input still lands in the same family as the rest of that locale.
+Under `:lang(ko)`, `:lang(zh)` and `:lang(zh-Hant)`, `--font-code` appends the
+locale UI face after the monospace chain, so Korean or Chinese text inside a
+preserved-formatting input still lands in the same family as the rest of that
+locale.
+
+`:lang(zh)` is a language-range match, so it also matches `zh-Hant`. The
+`:lang(zh-Hant)` rule has the same specificity and therefore comes after
+`:lang(zh)` in `app/globals.css`; `tests/typographyPolicy.test.mjs` checks the
+order.
 
 ### Why Noto Sans KR over Pretendard
 
@@ -150,8 +157,8 @@ Two constraints on changing it:
 
 ### Preload policy
 
-Only the Latin UI face is preloaded. `Geist_Mono`, `Noto_Sans_KR` and
-`Noto_Sans_SC` are declared `preload: false` in `lib/fonts.ts`: they are still
+Only the Latin UI face is preloaded. `Geist_Mono`, `Noto_Sans_KR`,
+`Noto_Sans_SC` and `Noto_Sans_TC` are declared `preload: false` in `lib/fonts.ts`: they are still
 self-hosted and still fetched on demand by `unicode-range` matching, but no
 route blocks its first render on bytes it may never draw.
 

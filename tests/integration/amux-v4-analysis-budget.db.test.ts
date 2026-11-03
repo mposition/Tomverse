@@ -27,6 +27,8 @@ import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
 import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewService";
+import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
 import { commitAmuxIdeaAnalysisBudgetReservation as commitReservationWithOwnerAudit,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
@@ -1582,6 +1584,42 @@ test("a bounded owner question is saved as a pause, not a provider failure", asy
   assert.equal(visible.ownerQuestion, question);
 });
 
+test("the owner closes an idea paused between pages, never one whose page is running", async () => {
+  const pause = (claimed: Awaited<ReturnType<typeof syntheticFirstClaim>>) =>
+    prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claimed.claim.ideaId, previewId: claimed.previewId,
+      holdId: claimed.holdId, leaseGeneration: 1, outcome: "verified_success",
+      rawModelOutput: JSON.stringify({ schemaVersion: 5, previewId: claimed.previewId,
+        chunkIndex: 0, outcome: "needs_information",
+        coverageStatus: "needs_owner_input", continuationKind: "input",
+        ownerQuestion: "Which existing Feature should this belong to?",
+        coveredScope: "The idea was read; hierarchy is unresolved.",
+        remainingScope: "Proposals need the owner's Feature choice.", units: [] }),
+      inputTokens: 100, outputTokens: 50, keys }));
+  // Paused: the first page asked the owner a question and nothing runs.
+  const paused = await syntheticFirstClaim();
+  await pause(paused);
+  // Running: a claimed page with no result yet. Only one runs Agent-wide.
+  const running = await syntheticFirstClaim();
+  const ids = [paused.claim.ideaId, running.claim.ideaId];
+  const rows = await readAmuxIdeaProgressForOwner(session.user!.id!);
+  assert.deepEqual(ids.map((id) => rows.find((row) => row.ideaId === id)?.closable),
+    [true, false], "only the paused idea offers a close");
+
+  const outcomes = await closeAmuxIdeasForOwner({ session, request,
+    ideaIds: ids, reason: "Paused idea no longer needed" });
+  assert.deepEqual(outcomes.map((entry) => entry.result), ["closed", "not_closable"]);
+  const [closed, kept] = await Promise.all(ids.map((id) =>
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id },
+      select: { state: true, cancelledAt: true, rawPurgeAfter: true } })));
+  assert.equal(closed!.state, "cancelled");
+  assert.ok(closed!.rawPurgeAfter && closed!.cancelledAt &&
+    closed!.rawPurgeAfter <= closed!.cancelledAt, "the body is due for purge");
+  assert.deepEqual([kept!.state, kept!.cancelledAt], ["analyzing", null],
+    "a running page is stopped, not closed");
+  await pause(running); // frees the Agent-wide slot for the tests after this one
+});
+
 test("known provider failure is visible and permits a new owner preview only", async () => {
   const { claim, previewId, holdId, selectedModelId,
     frontierApprovalId } = await syntheticFirstClaim();
@@ -2263,3 +2301,82 @@ test("a saved USD 1000 setting immediately admits a real reservation that the ol
   assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({ where: { id: holdId } }), 0);
 });
 
+
+test("the owner closes an idea before its execution approval, never one whose approval already held a budget", async () => {
+  // Waiting for execution approval: saved, planned and previewed, nothing confirmed.
+  const waitingId = randomUUID();
+  const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: randomUUID(), input: { version: 1,
+      idea: `SYNTHETIC_CLOSE_${randomUUID()}`, repositories: [], pullRequests: [] },
+  }));
+  if (!inspected.ok) throw new Error(inspected.code);
+  await prisma.$transaction((tx) => commitIdeaSubmission(tx,
+    { session, request, inspected, ideaId: waitingId, keys }));
+  await prisma.$transaction((tx) => commitInitialIdeaSourcePlan(tx,
+    { session, request, ideaId: waitingId, keys }));
+  const choice = { previewId: randomUUID(), ideaId: waitingId, provider: "openai" as const,
+    modelId: modelId(), reasoningEffort: "high" as const,
+    approvalId: randomUUID(), approvalVersion: 1 };
+  const prepared = await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice, keys, browserNonce }));
+
+  // Approved: a confirmed preview whose budget is already held.
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    // Earlier tests in this suite leave the month's window full.
+    update: { spentMicroUsd: BigInt(0), reservedMicroUsd: BigInt(0) },
+  });
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId: randomUUID(), previewId, priceVersionId, runner, keys }));
+  const approvedId = (await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { ideaId: true } })).ideaId;
+
+  const outcomes = await closeAmuxIdeasForOwner({ session, request,
+    ideaIds: [waitingId, approvedId], reason: "Stale before execution approval" });
+  assert.deepEqual(outcomes.map((entry) => entry.result), ["closed", "not_closable"]);
+  const [waiting, approved] = await Promise.all([waitingId, approvedId].map((id) =>
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id },
+      select: { state: true, cancelledAt: true } })));
+  assert.equal(waiting!.state, "cancelled");
+  assert.ok(waiting!.cancelledAt);
+  assert.deepEqual(approved, { state: "submitted", cancelledAt: null },
+    "a held budget keeps its own path");
+  // A cancelled idea's body is due for purge at the close, as the DB requires.
+  const purge = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: waitingId },
+    select: { rawPurgeAfter: true, cancelledAt: true } });
+  assert.equal(purge.rawPurgeAfter?.toISOString(), purge.cancelledAt?.toISOString());
+
+  // The approval that was about to happen can no longer land.
+  await assert.rejects(prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx,
+    { session, request, choice: { previewId: choice.previewId, ideaId: waitingId,
+      payloadDigest: prepared.payloadDigest,
+      payloadDigestKeyId: prepared.payloadDigestKeyId }, browserNonce, keys })));
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: choice.previewId }, select: { state: true } })).state, "prepared");
+});
+
+test("the owner cannot close an idea while its idea-lane run is going, and can once it finished", async () => {
+  const ideaId = randomUUID();
+  const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: randomUUID(), input: { version: 1,
+      idea: `SYNTHETIC_LANE_${randomUUID()}`, repositories: [], pullRequests: [] },
+  }));
+  if (!inspected.ok) throw new Error(inspected.code);
+  await prisma.$transaction((tx) => commitIdeaSubmission(tx,
+    { session, request, inspected, ideaId, keys }));
+  const attemptId = randomUUID();
+  const now = new Date();
+  await prisma.amuxIdeaLaneAttempt.create({ data: { id: attemptId, ideaId, claimedAt: now,
+    leaseUntil: new Date(now.getTime() + 60 * 60_000) } });
+  assert.deepEqual((await closeAmuxIdeasForOwner({ session, request, ideaIds: [ideaId],
+    reason: "Close during a lane run" })).map((entry) => entry.result), ["not_closable"],
+    "the run would still open its PR");
+  await prisma.amuxIdeaLaneAttempt.update({ where: { id: attemptId },
+    data: { outcome: "pr_open", prNumber: 9, finishedAt: new Date() } });
+  assert.deepEqual((await closeAmuxIdeasForOwner({ session, request, ideaIds: [ideaId],
+    reason: "Close after the lane opened its PR" })).map((entry) => entry.result), ["closed"]);
+});

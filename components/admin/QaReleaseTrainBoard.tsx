@@ -89,13 +89,7 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
   const reason = (row: QaReleaseTrainBoardRow["leftOut"][number]) => {
     if (row.outcome === "over_capacity") return m.detailOverCapacity;
     if (row.outcome === "changes_workflows") return m.detailWorkflows;
-    const needs =
-      row.predecessors === null
-        ? m.detailNeedsUnknown
-        : row.predecessors.length === 0
-          ? m.detailNeedsNone
-          : m.detailNeeds.replace("{numbers}", row.predecessors.map((n) => `#${n}`).join(" "));
-    return `${m.detailConflict} · ${needs}`;
+    return row.why === null ? m.detailConflict : `${m.detailConflict} · ${m.detailModelWhy.replace("{why}", row.why)}`;
   };
   const pullLink = (number: number, title: string) => (
     <>
@@ -253,7 +247,9 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
                           <h3 className="mt-3 text-xs font-medium text-[#f5c46b]">{m.detailRode.replace("{count}", String(row.included.length))}</h3>
                           <ul className="mt-1 flex flex-col gap-0.5">
                             {row.included.map((pull) => (
-                              <li key={pull.number}>{pullLink(pull.number, pull.title)}</li>
+                              <li key={pull.number}>
+                                {pullLink(pull.number, pull.title)}
+                              </li>
                             ))}
                           </ul>
                         </>

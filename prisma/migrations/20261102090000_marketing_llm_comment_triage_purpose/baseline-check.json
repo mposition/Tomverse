@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "e31eafe1a310fa4d2934f9b899e380c4653595b9f0ef806e115ec3e407c4e714",
+  "replacedChecks": [
+    {
+      "table": "MarketingLlmCall",
+      "constraint": "MarketingLlmCall_shape_check",
+      "previousDefinitionSha256": "9037ab76fcd1d7d88585dc9c2cb74b90829f0ce9110f511719a957bf3bc005e3"
+    }
+  ]
+}

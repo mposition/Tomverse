@@ -124,20 +124,27 @@ test.describe("marketing console", () => {
     ).toBeVisible();
   });
 
-  test("a section a later stage owns says so instead of looking empty", async ({
+  test("comments are built in S4, so their section no longer says a later stage owns it", async ({
     page,
     signInAs,
   }) => {
     await signInAs("owner");
 
     await page.goto("/admin/marketing?tab=comments");
-    await expect(page.getByText(/stage S4/)).toBeVisible();
-    // Not the empty state: "nothing is waiting" would be a false claim about a
-    // feature nothing writes yet.
-    await expect(page.getByText("Nothing here yet.")).toHaveCount(0);
+    // The monitor writes this section now, so an empty one is a true empty.
+    await expect(page.getByText("Nothing here yet.")).toBeVisible();
+    await expect(page.getByText(/stage S4/)).toHaveCount(0);
+  });
 
+  test("the experiments section is built, so it opens its own controls instead of a stage notice", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
     await page.goto("/admin/marketing?tab=experiments");
-    await expect(page.getByText(/stage S5/)).toBeVisible();
+
+    await expect(page.getByTestId("marketing-experiment-top")).toBeVisible();
+    await expect(page.getByText(/stage S5/)).toHaveCount(0);
   });
 
   test("the competitors section shows a proposal with its decisions, and says how many rows it lists", async ({
@@ -152,6 +159,11 @@ test.describe("marketing console", () => {
       page.getByText(FIXTURE_MARKETING.competitor.host, { exact: false }).first()
     ).toBeVisible();
     await expect(page.getByText(/Up to 100 competitors/)).toBeVisible();
+    // The evidence is a link a person opens to judge: a new tab, no referrer, no endorsement.
+    const evidence = page.getByTestId("marketing-competitor-evidence-link").first();
+    await expect(evidence).toHaveAttribute("href", `https://${FIXTURE_MARKETING.competitor.host}/pricing`);
+    await expect(evidence).toHaveAttribute("target", "_blank");
+    await expect(evidence).toHaveAttribute("rel", "noopener noreferrer nofollow");
     // A proposal can be approved or rejected, not retired: only an approval
     // has sources to take away.
     await expect(page.getByTestId("marketing-action-competitor-approve")).toBeVisible();

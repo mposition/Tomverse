@@ -10,6 +10,10 @@ import { mobileApiFetch, MobileAuth } from "./authBridge";
 import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArtifactCore";
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
+import { displayTimeZoneHeaders } from "../../../lib/continuationTitleContext";
+import { readChatImageTurnRequest, readChatImageTurnRef, type ChatImageTurnRequest } from "../../../lib/chatImageTurnCore";
+import { askChatImageIntent } from "../../../lib/chatImageIntentClient";
+import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "../../../lib/imageGenerationPricing";
 import { uploadMobileFile } from "./nativeUpload";
 import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
 
@@ -140,6 +144,36 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     if (!persisted.messages.some(message => message.id === sourceId)) throw Error("SAVED_MESSAGE_MISSING");
     return { persisted, sourceId };
   }
+  // Reuse the saved question and this answer's idempotency key. An unreadable
+  // outcome is restored through load(), never resubmitted. An edit only says
+  // so: the server finds the photo from the saved question.
+  async function postImageTurn(conversationId: string, sourceId: string, assistantMessageId: string, modelId: string, decision: ChatImageTurnRequest, signal: AbortSignal) {
+    const receipt = await request<{ imageTurn?: unknown }>(`${pathFor(conversationId)}/image-turn`, {
+      ...json("POST", { sourceUserMessageId: sourceId, assistantMessageId, modelId,
+        imageModelIds: decision.modelIds, preset: decision.preset,
+        ...(decision.prompt ? { prompt: decision.prompt } : {}),
+        ...(decision.edit ? { edit: true } : {}) }), signal,
+    });
+    if (!readChatImageTurnRef(receipt.imageTurn)) throw Error("CHAT_IMAGE_RECEIPT_INVALID");
+  }
+  // A manual-mode send with a photo may ask to change it. Auto asks on the
+  // server beside its router call; here the composer asks, as the web's does.
+  // Only when the server advertises edits, so an older server is never sent a
+  // bearer it does not enroll; any failure or "no" leaves the ordinary send.
+  async function manualPhotoEdit(persisted: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal): Promise<ChatImageTurnRequest | null> {
+    if (persisted.selectionMode === "auto" || !text.trim() ||
+      !files.some(file => IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(file.mediaType.toLowerCase()))) return null;
+    try { if (!(await requireParity()).chatImageEdits) return null; } catch { return null; }
+    const revision = sessionRevision;
+    const decision = await askChatImageIntent(text, { conversationId: persisted.id, attachedPhoto: true }, (path, init) => run(String(path), () => {
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      return init ?? {};
+    }));
+    signal.throwIfAborted();
+    return decision.image && decision.edit
+      ? { modelIds: decision.modelId ? [decision.modelId] : [], preset: decision.preset, edit: true }
+      : null;
+  }
   async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }) {
     const messages = fitChatRequestTranscript(persisted.messages.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
@@ -175,6 +209,18 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const routed = response.headers.get("X-Chat-Routed-Model");
       if (routed) routedModelByMessage.set(assistantMessageId, routed);
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new ApiClientError(response.status, typeof body?.code === "string" ? body.code : "CHAT_REQUEST_FAILED"); }
+      if (response.headers.get("X-Chat-Response-Mode") === "image-turn") {
+        watchdog.stop();
+        const body = await response.json().catch(() => null);
+        const decision = readChatImageTurnRequest(body?.imageTurn);
+        if (!decision || review) throw Error("CHAT_IMAGE_TURN_INVALID");
+        // An older server's image-turn route accepts web cookies only. Never
+        // call it with a native bearer until the server advertises enrollment.
+        if (!(await requireParity()).chatImageTurns) throw new ApiClientError(503, "NATIVE_IMAGE_TURNS_UNAVAILABLE");
+        controller.signal.throwIfAborted();
+        await postImageTurn(persisted.id, sourceId, assistantMessageId, modelId, decision, controller.signal);
+        return;
+      }
       if ((response.headers.get("content-type") ?? "").includes("application/json")) {
         const receipt = await response.json();
         if (receipt.deepResearchJobId !== assistantMessageId) throw Error("RESEARCH_RECEIPT_INVALID");
@@ -297,7 +343,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     setDeviceLock: async (enabled, reason) => { await bridge.setDeviceLock({ enabled, reason }); window.dispatchEvent(new Event("tomverse-device-security-changed")); },
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
     // A Review continuation is listed with Review (owner request 2026-10-26).
-    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
+    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations", { headers: displayTimeZoneHeaders() })).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
     createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
@@ -341,10 +387,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     session: async () => { const active = (await bridge.hasSession()).signedIn; if (!active) clearSessionState(); return active; },
     signIn: async () => { clearSessionState(); await bridge.signIn(); },
     requestEmailCode: (email, language) => bridge.requestEmailCode({ email, language }),
-    verifyEmailCode: (email, code) => { clearSessionState(); return bridge.verifyEmailCode({ email, code }); },
+    verifyEmailCode: (email, code, signup) => { clearSessionState(); return bridge.verifyEmailCode({ email, code, ...signup }); },
     signOut: () => { clearSessionState(); return bridge.signOut(); },
     list: async () => {
-      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean; productKey?: string | null }>>("/api/conversations");
+      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean; productKey?: string | null }>>("/api/conversations", { headers: displayTimeZoneHeaders() });
       // A Chat continuation is a Chat conversation with its imported original
       // above it, so it is listed with Chat (owner request 2026-10-26).
       return rows.filter((row) => row.kind === "chat" && (row.surface === "chat" || (row.surface === "continuation" && row.productKey === "chat")));
@@ -361,6 +407,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     },
     send: async (conversation, text, files, signal, onProgress) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
+      const edit = await manualPhotoEdit(persisted, text, files, signal);
+      if (edit) {
+        await postImageTurn(persisted.id, sourceId, crypto.randomUUID(), persisted.selectedModels[0], edit, signal);
+        return;
+      }
       await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress);
     },
     sendReview: async (conversation, text, files, signal, progress) => {

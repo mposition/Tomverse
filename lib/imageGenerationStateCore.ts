@@ -29,6 +29,9 @@ export const IMAGE_GENERATION_FAILURE_PHASES = [
   // write for it was lost. Reading the second as the first would send an
   // operator to the provider's status page.
   "settlement_failed",
+  // An edit's photo was gone or unreadable when the job ran. The provider was
+  // not called and the reservation was refunded.
+  "edit_source_unavailable",
 ] as const;
 
 export type ImageGenerationFailurePhase =

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 
@@ -40,8 +41,9 @@ import { AmuxPortfolioError, writeAmuxPortfolioAssessmentInTx } from
 import { writeAmuxPortfolioScoreInTx } from "./portfolioScoreService.ts";
 import { AMUX_IDEA_PLAN_APPROVAL_TRANSACTION } from
   "./ideaRequestTimeoutsCore.ts";
-import { calculateCurrentApprovedAmuxV4TaskCost } from
-  "./v4TaskCostCatalogApprovalService.ts";
+import { calculateCurrentApprovedAmuxV4TaskCost,
+  readAmuxV4TaskAutoCatalog } from "./v4TaskCostCatalogApprovalService.ts";
+import { calculateV4TaskCeilingFromCatalog } from "./v4TaskCostCatalogCore.ts";
 import { AmuxV19PlanRegistrationRefusalDetected,
   AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
@@ -300,14 +302,31 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
         "plan_dependency_invalid", refusalIdentity(unit));
     }
   }
+  // Read once for every Task of the plan, and only when a Task reaches it.
+  let catalog: Awaited<ReturnType<typeof readAmuxV4TaskAutoCatalog>> | undefined;
   for (const card of cards) {
     if (card.cardType !== "task") continue;
+    const identity = { ideaId, draftUnitId: card.draftUnitId,
+      analysisPreviewId: card.verified.previewId };
     const inspected = inspectAmuxV20TaskRegistration(card.verified.proposal);
     if (!inspected.ok) {
-      throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
-        ideaId, draftUnitId: card.draftUnitId,
-        analysisPreviewId: card.verified.previewId,
-      }, card.verified.proposal);
+      throw new AmuxV20RegistrationRefusalDetected(inspected.code, identity,
+        card.verified.proposal);
+    }
+    // No priced worker for the role and grade -- including no priced worker
+    // at all (no_priced_worker) -- is a recorded refusal here, not an unknown
+    // outcome of the registration transaction below. A registry or catalog
+    // that cannot be read throws from the read: that is no refusal of a Task.
+    catalog ??= await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+      return readAmuxV4TaskAutoCatalog(tx);
+    });
+    const priced = catalog.ok && calculateV4TaskCeilingFromCatalog({
+      rawCatalog: catalog.catalog, role: card.verified.proposal.taskRole!,
+      grade: inspected.executionGrade, asOfIso: new Date().toISOString() }).ok;
+    if (!priced) {
+      throw new AmuxV20RegistrationRefusalDetected("task_route_unpriced",
+        identity, card.verified.proposal);
     }
   }
   const every = [...nodes, ...cards];
@@ -559,9 +578,9 @@ async function commitAmuxV19CompletedIdeaSystemRegistration(
       for (const entry of plan.cards) {
         const proposal = entry.verified.proposal;
         // amux-intake.md v19 item 5 explicitly makes this default true for
-        // unattended implement Tasks under the saved operating scope.
+        // unattended implement (and test) Tasks under the saved operating scope.
         const publicPrDisclosureApproved = entry.cardType === "task" &&
-          proposal.taskRole === "implement";
+          amuxV22TaskWritesPatch(proposal.taskRole);
         const ownerSession = deriveAmuxV19SystemRegistrationBinding({
           ideaId: plan.ideaId, decisionId: entry.decisionId,
           actorUserId: plan.actorUserId, key: plan.keys,

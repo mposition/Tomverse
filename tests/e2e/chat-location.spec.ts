@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installTurnstileScript, mockAuthenticatedApi, mockChatStream, openRecentConversation, prepareGuestPage, readTurnstileState } from "./support/app-fixtures";
+import { provideGeolocation } from "./support/engine-capabilities";
 
 const openChat = async (page: Page) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-6-luna"] });
@@ -20,19 +21,24 @@ const send = async (page: Page, text: string) => {
 };
 
 test("a guest receives the verification cookie before location analysis and the original answer", { tag: "@ui-risk" }, async ({ page, context }) => {
-  await context.grantPermissions(["geolocation"]);
-  await context.setGeolocation({ latitude: -27.47, longitude: 153.025, accuracy: 150 });
+  await provideGeolocation(page, { latitude: -27.47, longitude: 153.025, accuracy: 150 });
   await prepareGuestPage(page, "en");
   await installTurnstileScript(page, "silent");
   const spentTokens: string[] = [];
   let analyses = 0;
+  // Whether the browser holds the grant for this URL, read from its cookie jar.
+  // WebKit stores the fulfilled response's cookie, but never shows a `Cookie`
+  // header to an intercepting route (neither `headers()` nor `allHeaders()`),
+  // so reading the header refused every follow-up on mobile-safari.
+  const holdsGrant = async (url: string) =>
+    (await context.cookies(url)).some(cookie => cookie.name === "qa_location_grant" && cookie.value === "1");
   await page.route("**/api/chat/location-intent", async route => {
     const { turnstileToken } = route.request().postDataJSON();
     if (turnstileToken) {
       expect(spentTokens).not.toContain(turnstileToken);
       spentTokens.push(turnstileToken);
       await route.fulfill({ json: { requiresLocation: false }, headers: { "Set-Cookie": "qa_location_grant=1; Path=/; HttpOnly; SameSite=Lax" } });
-    } else if (!(route.request().headers().cookie ?? "").includes("qa_location_grant=1")) {
+    } else if (!(await holdsGrant(route.request().url()))) {
       await route.fulfill({ status: 403, json: { code: "TURNSTILE_REQUIRED" } });
     } else {
       analyses++;
@@ -40,7 +46,7 @@ test("a guest receives the verification cookie before location analysis and the 
     }
   });
   await page.route("**/api/chat", async route => {
-    expect(route.request().headers().cookie).toContain("qa_location_grant=1");
+    expect(await holdsGrant(route.request().url())).toBe(true);
     expect(route.request().postDataJSON().currentLocation.latitude).toBe(-27.47);
     await route.fulfill({ contentType: "text/plain; charset=utf-8", body: "Location test reply." });
   });
@@ -52,9 +58,8 @@ test("a guest receives the verification cookie before location analysis and the 
   expect((await readTurnstileState(page))?.issuedTokens).toHaveLength(1);
 });
 
-test("a location question automatically acquires permission and answers without opening tools", { tag: "@ui-risk" }, async ({ page, context }) => {
-  await context.grantPermissions(["geolocation"]);
-  await context.setGeolocation({ latitude: -27.46977, longitude: 153.02512, accuracy: 10 });
+test("a location question automatically acquires permission and answers without opening tools", { tag: "@ui-risk" }, async ({ page }) => {
+  const moveTo = await provideGeolocation(page, { latitude: -27.46977, longitude: 153.02512, accuracy: 10 });
   await openChat(page);
   let analyses = 0;
   await page.route("**/api/chat/location-intent", async route => {
@@ -65,7 +70,7 @@ test("a location question automatically acquires permission and answers without 
   await expect(page.getByTestId("chat-location-status")).toHaveCount(0);
   expect((await send(page, "지금 제가 있는 위치가 어디인가요?")).currentLocation.latitude).toBe(-27.47);
   await expect(page.getByTestId("chat-location-status")).toBeVisible();
-  await context.setGeolocation({ latitude: -33.8688, longitude: 151.2093 });
+  await moveTo({ latitude: -33.8688, longitude: 151.2093 });
   expect((await send(page, "What is nearby now?")).currentLocation.latitude).toBe(-33.869);
   expect(analyses).toBe(1);
   await page.reload();
@@ -97,9 +102,8 @@ test("an automatic permission denial continues without coordinates and never re-
   expect(await page.evaluate(() => (window as unknown as { locationRequests: number }).locationRequests)).toBe(1);
 });
 
-test("foreground location is off by default, refreshed on each send, removable, and not restored on reload", { tag: "@ui-risk" }, async ({ page, context }) => {
-  await context.grantPermissions(["geolocation"]);
-  await context.setGeolocation({ latitude: -27.4697701, longitude: 153.0251234, accuracy: 10 });
+test("foreground location is off by default, refreshed on each send, removable, and not restored on reload", { tag: "@ui-risk" }, async ({ page }) => {
+  const moveTo = await provideGeolocation(page, { latitude: -27.4697701, longitude: 153.0251234, accuracy: 10 });
   await openChat(page);
   expect((await send(page, "Hello without location")).currentLocation).toBeUndefined();
 
@@ -116,7 +120,7 @@ test("foreground location is off by default, refreshed on each send, removable, 
   expect(first.currentLocation.longitude).toBe(153.025);
   expect(first.currentLocation.accuracy).toBeGreaterThanOrEqual(150);
 
-  await context.setGeolocation({ latitude: -33.8688123, longitude: 151.2093234, accuracy: 20 });
+  await moveTo({ latitude: -33.8688123, longitude: 151.2093234, accuracy: 20 });
   const moved = await send(page, "How about here now?");
   expect(moved.currentLocation.latitude).toBe(-33.869);
   expect(moved.currentLocation.longitude).toBe(151.209);
@@ -150,9 +154,8 @@ for (const [code, message] of [[1, "permission denied"], [3, "timed out"]] as co
   });
 }
 
-test("location status preserves the full-width input at 320px and 200% text", { tag: "@ui-risk" }, async ({ page, context }) => {
-  await context.grantPermissions(["geolocation"]);
-  await context.setGeolocation({ latitude: -27.47, longitude: 153.025 });
+test("location status preserves the full-width input at 320px and 200% text", { tag: "@ui-risk" }, async ({ page }) => {
+  await provideGeolocation(page, { latitude: -27.47, longitude: 153.025 });
   await page.setViewportSize({ width: 320, height: 700 });
   await openChat(page);
   await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });

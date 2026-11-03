@@ -194,6 +194,10 @@ export async function GET(
       );
     }
     validateComparisonReviewInputSize(turn.prompt.content, turn.responses);
+    const source = {
+      question: turn.prompt.content,
+      responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })),
+    };
     // Read-only recovery never dispatches a reviewer or reserves credits.
     const query = new URL(request.url).searchParams;
     const requestedMode = comparisonReviewModeSchema.safeParse(query.get("reviewMode"));
@@ -202,7 +206,7 @@ export async function GET(
       const stored = await prisma.comparisonReview.findUnique({ where: { userId_inputHash: { userId: session.user.id, inputHash } } });
       const parsed = stored && !stored.isStale ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
       const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
-      if (stored && parsed?.success && responseMap) return Response.json({ available: true, storedReview: { id: stored.id, result: parsed.data, reviewItems: reviewItemIds(parsed.data), responseMap, reviewerModelId: stored.reviewerModelId, usageCredits: 0, originalUsageCredits: stored.usageCredits, cached: true, disclaimer: "This AI review compares supplied answers and is not external fact verification." } }, { headers: { "Cache-Control": "no-store" } });
+      if (stored && parsed?.success && responseMap) return Response.json({ available: true, source, storedReview: { id: stored.id, result: parsed.data, reviewItems: reviewItemIds(parsed.data), responseMap, reviewerModelId: stored.reviewerModelId, usageCredits: 0, originalUsageCredits: stored.usageCredits, cached: true, disclaimer: "This AI review compares supplied answers and is not external fact verification." } }, { headers: { "Cache-Control": "no-store" } });
     }
     const billingPlan = await getUserBillingPlan(session.user.id);
     const access = identifyChatCaller(request, session.user.id, billingPlan.tier, {
@@ -232,6 +236,7 @@ export async function GET(
       {
         available: true,
         title: authorization.conversation.title,
+        source,
         promptMessageId: turn.prompt.id,
         assistantMessageIds: turn.responses.map((response) => response.messageId),
         responses: turn.responses.map((response) => ({

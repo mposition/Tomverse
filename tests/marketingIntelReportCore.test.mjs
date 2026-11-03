@@ -39,7 +39,7 @@ const signed = (overrides = {}) => {
   return { ...report, provenance: marketingGeneratorReportProvenance(SECRET, report) };
 };
 
-test("only a brief or market facts, strictly shaped, with a period that runs forwards", () => {
+test("only a brief, market facts or a measurement, strictly shaped, with a period that runs forwards", () => {
   assert.equal(marketingGeneratorReportSchema.safeParse(signed()).success, true);
   assert.equal(
     marketingGeneratorReportSchema.safeParse(
@@ -47,7 +47,7 @@ test("only a brief or market facts, strictly shaped, with a period that runs for
     ).success,
     true,
   );
-  for (const kind of ["weekly_kpi", "retention_run", "webhook_shadow", "measurement_120d"]) {
+  for (const kind of ["weekly_kpi", "retention_run", "webhook_shadow", "comment_alerts", "experiment_result"]) {
     assert.equal(marketingGeneratorReportSchema.safeParse(signed({ kind })).success, false, kind);
   }
   assert.equal(marketingGeneratorReportSchema.safeParse({ ...signed(), verdict: "ok" }).success, false);
@@ -55,6 +55,52 @@ test("only a brief or market facts, strictly shaped, with a period that runs for
     marketingGeneratorReportSchema.safeParse(signed({ periodStart: "2026-10-17T00:00:00.000Z" })).success,
     false,
   );
+});
+
+const measurement = (overrides = {}) =>
+  signed({
+    kind: "measurement_120d",
+    reportId: "aiv-mention-ko",
+    payload: {
+      metricId: "ai_visibility.mention_rate.ko",
+      value: 0.3333,
+      sampleSize: 3,
+      observedFromAt: "2026-10-16T00:00:00.000Z",
+      observedUntilAt: "2026-10-16T00:30:00.000Z",
+      ...overrides,
+    },
+  });
+
+test("a measurement is one metric, numbers only, observed forwards in time", () => {
+  assert.equal(marketingGeneratorReportSchema.safeParse(measurement()).success, true);
+  for (const bad of [
+    { observedFromAt: "2026-10-16T01:00:00.000Z" },
+    { sampleSize: -1 },
+    { sampleSize: 1.5 },
+    { metricId: "has space" },
+    { metricId: "" },
+    { answerText: "Tomverse is mentioned" },
+  ]) {
+    assert.equal(marketingGeneratorReportSchema.safeParse(measurement(bad)).success, false, JSON.stringify(bad));
+  }
+  // A market-intel payload under the measurement kind is the wrong shape.
+  assert.equal(marketingGeneratorReportSchema.safeParse(signed({ kind: "measurement_120d" })).success, false);
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse({ ...measurement(), competitorCandidates: [] }).success,
+    false,
+    "candidates belong to market_intel only",
+  );
+});
+
+test("a measurement is signed, keyed and stored like the other generator reports", () => {
+  const report = measurement();
+  assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
+  assert.equal(
+    marketingGeneratorReportProvenanceMatches(SECRET, { ...report, payload: { ...report.payload, value: 0.9 } }),
+    false,
+  );
+  assert.notEqual(marketingGeneratorReportKey(report), marketingGeneratorReportKey({ ...report, kind: "brief" }));
+  assert.deepEqual(marketingGeneratorReportStoredPayload(report, {}), { payload: report.payload, droppedFactCount: 0 });
 });
 
 test("the signature covers every field but itself, the deadline included", () => {

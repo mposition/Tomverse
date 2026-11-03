@@ -133,6 +133,8 @@ const SWITCHED = [
   "markEngineeringAgentWorkItemLeaseExpired",
   "expireEngineeringAgentWorkItem",
   "issueEngineeringAgentCapability",
+  "resolveEngineeringAgentV22TierPendingDraft",
+  "expireEngineeringAgentV22LapsedPublish",
   "moveEngineeringAgentBinding",
   "recordEngineeringAgentBindingObservation",
   "removeEngineeringAgentReviewer",

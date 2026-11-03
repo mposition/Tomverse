@@ -7,6 +7,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { planAllowsImageGeneration } from "../../lib/imageGenerationAccess.ts";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(ROOT, path)).href;
@@ -50,7 +51,7 @@ async function loadRoute() {
       namedExports: {
         getUserBillingPlan: async () => ({ tier: planTier }),
         planAllowsFeature: (plan: { tier: string }, feature: string) =>
-          feature === "imageGeneration" && (plan.tier === "Pro" || plan.tier === "Max"),
+          feature === "imageGeneration" && planAllowsImageGeneration(plan.tier as "Free" | "Pro" | "Max"),
       },
     });
     mock.module(mod("lib/chatSecurity.ts"), {
@@ -119,7 +120,6 @@ test("an eligible caller gets the triage decision", async () => {
 for (const [name, arrange] of [
   ["image triage is off in Admin › Routing", () => (triageModelId = null)],
   ["image generation is off", () => (flagEnabled = false)],
-  ["the plan has no image generation", () => (planTier = "Free")],
   ["the account is restricted", () => (accessRefused = true)],
 ] as const) {
   test(`no model call when ${name}`, async () => {
@@ -137,4 +137,11 @@ test("blank text makes no call and an unknown field is refused", async () => {
   const { status } = await answer({ text: "draw", extra: 1 });
   assert.equal(status, 400);
   assert.equal(detectCalls.length, 0);
+});
+
+test("Free accounts receive the same image decision without changing their plan", async () => {
+  reset();
+  planTier = "Free";
+  assert.equal((await answer()).payload.image, true);
+  assert.equal(detectCalls.length, 1);
 });

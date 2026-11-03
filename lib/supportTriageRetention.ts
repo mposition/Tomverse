@@ -12,7 +12,8 @@
  * A batch cancelled by `statement_timeout` is retried smaller (500, 250, 125).
  * Two cancellations at the floor in one run move the cursor past that window
  * and count it as blocked: a row that never deletes cannot stop the step, and
- * is reported instead (`oldestOverdueAgeSeconds`).
+ * is reported instead (`oldestOverdueAgeSeconds`). When the window itself was
+ * never read, the class is left for the next run and its rows stay overdue.
  *
  * One batch deletes every class in `RETENTION_CLASSES`, one window read and
  * one delete per class, each class with its own cursor: run rows 30 days
@@ -38,6 +39,14 @@
  * What remains is the gap between a closure and the next successful retention
  * run, which the liveness heartbeat bounds.
  *
+ * A suggestion never shown to the owner expires 7 days after it was created,
+ * whether or not its report is still open: each batch moves not_queued rows
+ * past that age to `expired`, which starts their 30 days. A claim whose lease
+ * is still live is the worker's and waits; a lapsed claim expires here, since
+ * with triage switched off the worker never fails it. The worker treats
+ * expired as settled, so the same input is never derived (or charged for)
+ * again, and its late result for a lapsed claim matches no claimed row.
+ *
  * A class whose statement was cancelled is quarantined for the rest of the
  * run: later batches carry the other classes without it, so their deletes
  * commit, and the quarantined class is retried alone, smaller, and skipped
@@ -50,9 +59,11 @@ import { FEEDBACK_STATUSES, isTerminalFeedbackStatus } from "@/lib/feedbackLifec
 import { prisma } from "@/lib/prisma";
 import {
   LANE_TIMEOUTS,
+  NOT_QUEUED_SUGGESTION_EXPIRY_DAYS,
   RETENTION_BATCH_SIZES,
   RETENTION_OVERDUE_GRACE_SECONDS,
   RETENTION_CLASSES,
+  SUGGESTION_CLOSABLE_OPEN_STATES,
   SUGGESTION_STATES,
   SUGGESTION_TERMINAL_STATES,
   SUPPORT_TRIAGE_RUN_RETENTION_DAYS,
@@ -95,12 +106,15 @@ type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 const GROUP_TERMINAL_STATES = ["dismissed", "expired", "invalidated"];
 const CLOSED_REPORT_STATUSES = FEEDBACK_STATUSES.filter(isTerminalFeedbackStatus);
 const OPEN_SUGGESTION_STATES = SUGGESTION_STATES.filter((state) => !SUGGESTION_TERMINAL_STATES.includes(state));
+const CLOSABLE_SUGGESTION_STATES = [...SUGGESTION_CLOSABLE_OPEN_STATES];
 
 /**
- * Moves up to `size` open suggestions of closed reports to invalidated. The
+ * Moves up to `size` pending or ready suggestions of closed reports to
+ * invalidated. A claim is left to lapse to failed or expired, since its model
+ * call may be under way and an invalidated row would not settle its input. The
  * report is read, not locked: this write locks only suggestion rows, so an
  * account deletion holding the report waits here and never the other way.
- * The open-state condition is repeated on the updated row: a second run that
+ * The state condition is repeated on the updated row: a second run that
  * waited for the first one's lock re-reads the row and skips it, instead of
  * updating a terminal row the guard trigger refuses.
  */
@@ -108,14 +122,37 @@ export const invalidateClosedReportSuggestions = (tx: Tx, size: number) =>
   tx.$executeRaw`
     UPDATE "SupportTriageSuggestion" s
        SET "state" = 'invalidated'
-     WHERE s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+     WHERE s."state" = ANY(${CLOSABLE_SUGGESTION_STATES}::text[])
        AND s."id" IN (
        SELECT o."id"
          FROM "SupportTriageSuggestion" o
          JOIN "Feedback" f ON f."id" = o."feedbackId"
         WHERE f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
-          AND o."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+          AND o."state" = ANY(${CLOSABLE_SUGGESTION_STATES}::text[])
         ORDER BY o."id"
+        LIMIT ${size}::integer)`;
+
+/**
+ * Moves up to `size` open suggestions that were never shown to the owner and
+ * are 7 days old to expired, except a claim whose lease is still live. Like the
+ * invalidation, the condition is repeated on the updated row, so a row another
+ * run or the worker moved meanwhile is skipped, not refused.
+ */
+export const expireUnqueuedSuggestions = (tx: Tx, size: number) =>
+  tx.$executeRaw`
+    UPDATE "SupportTriageSuggestion" s
+       SET "state" = 'expired'
+     WHERE s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+       AND s."ownerQueueState" = 'not_queued'
+       AND (s."state" <> 'claimed' OR s."leaseExpiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC'))
+       AND s."id" IN (
+       SELECT o."id"
+         FROM "SupportTriageSuggestion" o
+        WHERE o."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+          AND o."ownerQueueState" = 'not_queued'
+          AND (o."state" <> 'claimed' OR o."leaseExpiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC'))
+          AND o."createdAt" <= (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${NOT_QUEUED_SUGGESTION_EXPIRY_DAYS}::integer)
+        ORDER BY o."createdAt", o."id"
         LIMIT ${size}::integer)`;
 
 /** The rows of one class past their boundary, after the cursor, oldest first. */
@@ -193,6 +230,7 @@ type BatchResult =
       readonly kind: "deleted";
       readonly deleted: ClassCounts;
       readonly invalidated: number;
+      readonly expired: number;
       /** Per class, where the window ended; absent when it was empty. */
       readonly last: Partial<Record<RetentionClass, Cursor>>;
       /** Classes that may hold more work past the cursor. */
@@ -216,6 +254,7 @@ const runBatch = async (input: {
         await armSupportTriageTransaction(tx, "retention");
         const deleted = zeroCounts();
         let invalidated = 0;
+        let expired = 0;
         const last: Partial<Record<RetentionClass, Cursor>> = {};
         const full: RetentionClass[] = [];
         for (const cls of input.classes) {
@@ -225,7 +264,8 @@ const runBatch = async (input: {
           const size = input.sizes[cls];
           if (cls === "suggestions") {
             invalidated = await invalidateClosedReportSuggestions(tx, size);
-            if (invalidated === size) full.push(cls);
+            expired = await expireUnqueuedSuggestions(tx, size);
+            if (invalidated === size || expired === size) full.push(cls);
           }
           const window = await readWindow(tx, cls, input.cursors[cls] ?? null, size);
           const lastRow = window[window.length - 1];
@@ -237,7 +277,9 @@ const runBatch = async (input: {
         }
         const total = RETENTION_CLASSES.reduce((sum, cls) => sum + deleted[cls], 0);
         // Nothing written, so nothing to audit.
-        if (total === 0 && invalidated === 0) return { kind: "deleted" as const, deleted, invalidated, last, full };
+        if (total === 0 && invalidated === 0 && expired === 0) {
+          return { kind: "deleted" as const, deleted, invalidated, expired, last, full };
+        }
         await writeSystemAuditLog({
           tx,
           systemActor: "support-triage-retention",
@@ -250,11 +292,12 @@ const runBatch = async (input: {
             batchSize: Math.max(...input.classes.map((cls) => input.sizes[cls])),
             ...deleted,
             invalidated,
+            expired,
           },
         });
         // Last round trip: the database clock against the run deadline.
         await tx.$executeRaw`SELECT "support_triage_assert_deadline"(${input.deadlineAt}::timestamp(3))`;
-        return { kind: "deleted" as const, deleted, invalidated, last, full };
+        return { kind: "deleted" as const, deleted, invalidated, expired, last, full };
       },
       { timeout: LANE_TIMEOUTS.retention.prismaTransactionTimeoutMs }
     );
@@ -276,7 +319,7 @@ export type RetentionRunResult = {
   readonly notProgressing: boolean;
 };
 
-/** Rows past their boundary in every class, and how long the oldest has waited. */
+/** Rows past their boundary (or a suggestion past its expiry) in every class, and how long the oldest has waited. */
 const overdueState = async () => {
   const [row] = await prisma.$queryRaw<{ remaining: bigint | null; oldestAgeSeconds: number | null }[]>`
     WITH now_utc AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS t),
@@ -284,16 +327,22 @@ const overdueState = async () => {
       SELECT r."createdAt" + make_interval(days => ${SUPPORT_TRIAGE_RUN_RETENTION_DAYS}::integer) AS "dueAt"
         FROM "SupportTriageRun" r
       UNION ALL
-      -- The earlier of: terminal for 30 days, or its report closed for 30
-      -- days. The report's updatedAt is no earlier than its closure, so the
-      -- second arm can only under-state how long a row has been due.
+      -- The earliest of: terminal for 30 days, its report closed for 30 days,
+      -- or, never shown to the owner and still open, created 7 days ago (due
+      -- to expire). The report's updatedAt is no earlier than its closure, so
+      -- the second arm can only under-state how long a row has been due.
       SELECT LEAST(
-               CASE WHEN s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[]) THEN s."updatedAt" END,
-               CASE WHEN f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[]) THEN f."updatedAt" END
-             ) + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
+               CASE WHEN s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[])
+                    THEN s."updatedAt" + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer) END,
+               CASE WHEN f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
+                    THEN f."updatedAt" + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer) END,
+               CASE WHEN s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[]) AND s."ownerQueueState" = 'not_queued'
+                    THEN s."createdAt" + make_interval(days => ${NOT_QUEUED_SUGGESTION_EXPIRY_DAYS}::integer) END
+             )
         FROM "SupportTriageSuggestion" s JOIN "Feedback" f ON f."id" = s."feedbackId"
        WHERE s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[])
           OR f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
+          OR (s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[]) AND s."ownerQueueState" = 'not_queued')
       UNION ALL
       SELECT g."keyRetiredAt" + make_interval(days => ${TERMINAL_GROUP_RETENTION_DAYS}::integer)
         FROM "SupportTriageGroup" g WHERE g."state" = ANY(${GROUP_TERMINAL_STATES}::text[])
@@ -340,7 +389,7 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
         const batchDeleted = RETENTION_CLASSES.reduce((sum, cls) => sum + result.deleted[cls], 0);
         // A batch counts as completed when it wrote something: an empty batch
         // after a skipped window is not progress.
-        if (batchDeleted + result.invalidated > 0) batchesCompleted += 1;
+        if (batchDeleted + result.invalidated + result.expired > 0) batchesCompleted += 1;
         deleted += batchDeleted;
         for (const cls of classes) {
           const windowEnd = result.last[cls];
@@ -368,9 +417,13 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
       if (floorCancellations[cls] >= 2) {
         // Move past the window that keeps cancelling; the next run starts over.
         // Count the rows actually skipped, not the batch size. A window that
-        // was never read cannot be skipped; the gate's batch cap ends the run.
+        // was never read cannot be skipped, so the class is left for the next
+        // run instead of spending this run's batches; its rows stay in
+        // overdueRemaining and the oldest overdue age, which make the run
+        // partial or not progressing.
         blocked += result.windowRows;
         if (result.window) cursors[cls] = result.window;
+        else pending = pending.filter((other) => other !== cls);
         floorCancellations[cls] = 0;
       }
     }

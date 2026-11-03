@@ -17,7 +17,7 @@ const NOW = new Date("2026-10-25T00:00:00.000Z");
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
   readAmuxRegistryAndDerivedCatalog: async () => ({
     registrations: [{ workerName: "claude-impl", roleCeiling: "implementation" }],
-    derived: { v22: [{ worker_name: "claude-impl", model: "claude-sonnet-5",
+    derived: { v22: [{ worker_name: "claude-impl", provider: "anthropic", model: "claude-sonnet-5",
       routing_roles: ["implement", "investigate"] }] },
   }),
 } });
@@ -30,9 +30,20 @@ mock.module(mod("lib/modelRegistry.ts"), { namedExports: {
 } });
 
 let rows: Array<Record<string, unknown>> = [];
+let links: Array<Record<string, unknown>> = [];
+// The registry and the CLI model links come in one statement (owner decision
+// 2026-10-27), so no AMUX boundary that prices a Task sends one more.
+const sent: string[] = [];
 const tx = {
-  modelRegistryEntry: { findMany: async () => rows },
-  $queryRaw: async () => [{ now: NOW }],
+  $queryRaw: async (strings: TemplateStringsArray) => {
+    const sql = strings.join("$");
+    sent.push(sql);
+    if (sql.includes('FROM "ModelRegistryEntry"')) {
+      assert.match(sql, /FROM "AmuxCliModelLinkEvent"/);
+      return [{ rows: JSON.parse(JSON.stringify(rows)), links }];
+    }
+    return [{ now: NOW }];
+  },
 };
 // A real model id, so its verified cache-write rate comes from lib/modelPricing.ts.
 const row = (overrides: Record<string, unknown> = {}) => ({ id: "claude-sonnet-5",
@@ -71,7 +82,7 @@ test("a Task's ceiling comes from the registry price and reproduces at a pinned 
 test("no worker for the role, or no model in the registry, is a hold", async () => {
   const { calculateCurrentApprovedAmuxV4TaskCost } = await service;
   rows = [row()];
-  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "test", "advanced"),
+  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "operate", "advanced"),
     { name: "AmuxV4TaskCatalogApprovalError" });
   rows = [];
   await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "implement", "advanced"),
@@ -104,4 +115,30 @@ test("an unreadable row that might be the dearest prices nothing", async () => {
     inputUsdPerMillionTokens: 1 })];
   assert.deepEqual(await readAmuxV4TaskAutoCatalog(tx as never),
     { ok: false, code: "no_priced_worker" }, "an unreadable exact row never falls through");
+});
+
+test("an owner's CLI model link prices a route from its entry; a held name prices nothing", async () => {
+  const { readAmuxV4TaskAutoCatalog } = await service;
+  rows = [row({ id: "claude-sonnet-5", inputUsdPerMillionTokens: 3 }), row({ id: "kimi-k3", apiModel: "kimi-k3", provider: "moonshot", inputUsdPerMillionTokens: 4 })];
+  // The worker's Claude CLI name is linked to another entry: that entry prices it.
+  links = [{ cli: "claude", cliModel: "claude-sonnet-5", pricedModelId: "kimi-k3" }];
+  const linked = await readAmuxV4TaskAutoCatalog(tx as never);
+  assert.equal(linked.ok, true);
+  if (!linked.ok) return;
+  const [route] = linked.catalog.routes as Array<Record<string, unknown>>;
+  assert.equal(route?.uncachedInputMicroUsdPerMillion, 4_000_000);
+  assert.equal(route?.modelId, "claude-sonnet-5", "the route keeps the CLI's own name");
+  assert.equal(route?.pricingSource, "model-registry:kimi-k3");
+  // A link to nothing holds the name, even though an exact entry exists.
+  links = [{ cli: "claude", cliModel: "claude-sonnet-5", pricedModelId: null }];
+  assert.deepEqual(await readAmuxV4TaskAutoCatalog(tx as never), { ok: false, code: "no_priced_worker" });
+  // Another CLI's link does not apply; the exact name decides as before.
+  links = [{ cli: "cursor", cliModel: "claude-sonnet-5", pricedModelId: "kimi-k3" }];
+  const exact = await readAmuxV4TaskAutoCatalog(tx as never);
+  assert.equal(exact.ok && (exact.catalog.routes as Array<Record<string, unknown>>)[0]?.pricingSource, "model-registry:claude-sonnet-5");
+  links = [];
+  // One statement read both.
+  sent.length = 0;
+  await readAmuxV4TaskAutoCatalog(tx as never);
+  assert.equal(sent.length, 1);
 });

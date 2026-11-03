@@ -74,6 +74,19 @@ export const adminProductAnalyticsMessages = defineAdminMessages({
     noLandingEvents: "No consented landing events yet.",
     derivationNote:
       "Country is derived from trusted edge headers when available; plan is resolved from the database for signed-in users.",
+    touchTitle: "Marketing touch attribution · 30d",
+    touchEvidence:
+      "Evidence: client-observed, server-timed. A browser reported the UTM values of the link it landed on; the server recorded when it received that report and never saw the landing request itself.",
+    touchWindow: "Last touch in the 7 days before the conversion was received.",
+    touchSignups: "Sign-ups",
+    touchGuestLeads: "Guest leads (first answer)",
+    touchAttributed: "Attributed",
+    touchUnattributed: "Unattributed (no touch)",
+    touchUnobserved: "Unobserved (no event)",
+    touchUnobservedUnknown: "Not countable",
+    touchChannels: "Attributed sign-ups by link",
+    touchHeld: "Fewer than 10: no decision",
+    touchNoChannels: "No attributed sign-ups yet.",
   },
   ko: {
     eyebrow: "제품 분석",
@@ -147,5 +160,18 @@ export const adminProductAnalyticsMessages = defineAdminMessages({
     noLandingEvents: "아직 동의된 랜딩 이벤트가 없습니다.",
     derivationNote:
       "국가는 가능한 경우 신뢰할 수 있는 edge header에서 도출하고, 로그인 사용자의 플랜은 데이터베이스에서 확인합니다.",
+    touchTitle: "마케팅 유입 귀속 · 30일",
+    touchEvidence:
+      "증거 수준: 클라이언트 관측, 서버 시각. 브라우저가 도착한 링크의 UTM 값을 보고했고, 서버는 그 보고를 받은 시각을 기록했습니다. 서버가 랜딩 요청 자체를 본 것은 아닙니다.",
+    touchWindow: "전환을 서버가 받은 시각 이전 7일 안의 마지막 유입입니다.",
+    touchSignups: "가입",
+    touchGuestLeads: "게스트 리드(첫 답변)",
+    touchAttributed: "귀속",
+    touchUnattributed: "미귀속(유입 없음)",
+    touchUnobserved: "미관측(이벤트 없음)",
+    touchUnobservedUnknown: "셀 수 없음",
+    touchChannels: "링크별 귀속 가입",
+    touchHeld: "10건 미만: 판단 보류",
+    touchNoChannels: "아직 귀속된 가입이 없습니다.",
   },
 });

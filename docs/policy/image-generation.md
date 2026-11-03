@@ -45,8 +45,9 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   한다.** 초과 선택은 거절하되 선택을 바꾸지 않고, 이유를 남기며, 이미
   선택된 모델의 해제는 계속 허용한다. 계약은
   `docs/ui-contracts/image-generation-workspace.md`의 "Selection limit".
-- text-to-image 전용, 모델당 요청 1장. `size=auto`·`quality=auto`·부분
-  스트리밍·투명 배경·편집·참조 이미지는 여전히 범위 밖이다. 크기·품질
+- text-to-image와, Chat에서 첨부한 사진 한 장의 편집(아래 "첨부 사진 편집"), 모델당 요청
+  1장. `size=auto`·`quality=auto`·부분 스트리밍·투명 배경·mask·여러 장 참조
+  이미지는 여전히 범위 밖이다. 크기·품질
   선택지는 모델별 profile이 정의하되 provider 제약이 아니라 **Tomverse
   제품 제한**이다.
 - Pro·Max 전용. Free·Guest는 서버에서 `PLAN_FEATURE_NOT_INCLUDED`로
@@ -63,8 +64,11 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
    달리 **명시적 opt-in**이다. 행이 없거나 값이 `"true"`가 아니면 꺼진다
    (`imageGenerationEnabledFromValue`). default-on helper
    (`enabledFromValue`)를 이 키에 재사용하지 않는다.
-2. **플랜 entitlement** `BillingFeature`의 `imageGeneration` — 코드 기본값
-   (`planAllowsImageGeneration`: Pro·Max만 true)이며 v1에서는 DB 컬럼을 두지
+2. **플랜 entitlement** `BillingFeature`의 `imageGeneration` — 2026-10-28 운영자 승인으로
+   `planAllowsImageGeneration`은 Free·Pro·Max에 true이고 Guest에는 false입니다.
+   Free도 기존 지급·구매 크레딧 잔액 안에서 이미지를 생성하며 추가 크레딧을 지급하지 않습니다.
+   기존 일일·월간 크레딧, 이미지 가격, 동시 실행 및 공급자 비용 한도는 그대로 적용합니다.
+   코드 기본값이며 v1에서는 DB 컬럼을 두지
    않는다. admin override가 필요해지면 스키마 PR에서 컬럼을 추가하고 NULL은
    코드 기본값 상속을 뜻한다.
 
@@ -806,11 +810,12 @@ blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴
 ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두 문서가 어긋나면
 이 정책이 우선한다.
 
-- 진입점은 네 곳이다: ① 데스크톱 사이드바 **split-button**(기본 클릭 =
+- 진입점은 세 곳이다: ① 데스크톱 사이드바 **split-button**(기본 클릭 =
   새 채팅, 펼침 메뉴에 이미지 생성), ② 모바일 **"새로 만들기" bottom
-  sheet**(split-button을 축소하지 않는다), ③ 채팅 컴포저 도구 메뉴의
-  **이미지 생성**(서버 행 없이 image draft로 전환), ④ 모델 카탈로그의
+  sheet**(split-button을 축소하지 않는다), ③ 모델 카탈로그의
   **`채팅 | 이미지` 분리 탭**. v1의 별도 "새 이미지" 버튼은 대체·제거한다.
+  채팅 컴포저 도구 메뉴에는 이미지 생성 항목을 두지 않으며, 이미지 요청은
+  보내는 순간 기존 LLM 경로에서 자동 판단한다(⑥).
 - **⑤ 이미지 요청 인계 제안 칩은 2026-10-20에 LLM 판정(⑥)으로 대체되어
   삭제됐다.** 규칙 기반 분류기(삭제된 `imageIntentSignals`)가 컴포저의 칩과
   서버의 이미지 capability 시스템 블록에서 같은 판정을 하던 구조였고, 이제
@@ -829,7 +834,7 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     떨어지고, "제출 전 가격 표시"가 그 선택에 대해 참이 아니게 된다.
     - **계정 설정이지 브라우저 설정이 아니다.** 클릭 하나가 크레딧을 쓸지
       정하므로, 기기별 저장은 공용 PC에서 남의 크레딧을 쓰게 만든다.
-    - **글로 쓴 요청에서 시작한 인계만 이 설정을 쓴다.** 런처·드로어·도구 메뉴·카탈로그 탭은
+    - **글로 쓴 요청에서 시작한 인계만 이 설정을 쓴다.** 런처·드로어·카탈로그 탭은
       작성하러 워크스페이스를 여는 행위이고, 열었다고 생성하는 워크스페이스는
       이동에 크레딧을 쓰는 것이다.
     - **거절을 우회하지 않는다.** 버튼이 활성일 때만 제출하므로 보류된 가격,
@@ -846,8 +851,13 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   켠다. 이미지 생성을 쓸 수 있는 계정의 Chat composer 제출은 먼저
   `POST /api/chat/image-intent`(`lib/chatImageIntent.ts`)에서 그 router 모델에
   이미지 요청인지 묻고, 같은 호출에서 Auto처럼 triage한다: 활성 이미지 모델과
-  정사각 크레딧 목록을 보고 복잡한 이미지는 상위 모델·높은 preset, 간단한
-  이미지는 하위 모델·낮은 preset을 고른다. 목록 밖의 모델이나 그 모델이
+  정사각 크레딧 목록을 보고 요청에 적합한 모델을 고른다. 운영자 결정
+  (2026-10-29): 일반 요청은 `standard`를 기본으로 하며 포스터·문자·복잡한
+  장면이라는 이유만으로 `final`을 고르지 않는다. 사용자가 고품질을 명시하면
+  `final`, 초안·빠른 생성·낮은 비용을 요청하면 `draft`를 고른다. 완료 답변에는
+  실제 생성 품질을 표시하고, 표준 결과에는 고품질 재생성을 요청하는 문장과
+  재생성 시 크레딧이 사용된다는 안내를 제공한다. 안내 자체는 생성하지 않는다.
+  목록 밖의 모델이나 그 모델이
   제공하지 않는 preset은 버리고 기본값(기본 모델, standard)을 쓴다.
   - **Review도 같은 대화 안에서 이미지로 답한다**(운영자 결정 2026-10-23).
     Easy는 기존 공급자별 판정 결과를 각 답변 패널에 하나씩 전달하며, 미지원
@@ -875,8 +885,48 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     버린다. 이미지 턴은 이 프롬프트로 생성하지만, 답변 문장
     (`[Image generated] <질문>`)은 사용자가 쓴 질문 그대로다. 재작성된 프롬프트는
     요청 body로 오지만 사용자가 워크스페이스에 직접 입력할 수 있는 텍스트와 같은
-    권한이므로 경계를 넓히지 않는다. 첨부 이미지를 참조하는 진짜 편집은 여전히
-    범위 밖이다(§1).
+    권한이므로 경계를 넓히지 않는다. 이 재작성은 그림을 새로 만드는 것이며, 사진의
+    일부만 바꾸는 편집은 아래 "첨부 사진 편집"이다.
+  - **첨부 사진 편집**(운영자 요청 2026-10-29, `IMAGE_EDIT_ENABLED=true`일 때만, 기본
+    꺼짐). 보내는 메시지에 사진(png·jpeg·webp·gif)이 붙어 있으면 판정 호출에
+    "Attached photo" 절과 편집 가능한 모델(편집 가격이 검증된 모델, `imageModelSupportsEdit`)만
+    보이고, 사진을 바꾸라는 요청이면 `edit=true`를 돌려준다. 사진이 붙은 메시지에서
+    편집이 아닌 답은 채팅으로 간다(채팅 모델은 사진을 본다). 이미지 턴은 `edit: true`
+    플래그만 받고, 편집할 사진은 저장된 질문의 첫 이미지 첨부에서 서버가 찾는다(요청이
+    파일을 지목하지 않는다). 결과 크기는 사진 방향에 가까운 가격표 크기(가로 1536×1024,
+    세로 1024×1536, 그 밖은 정사각)이고 그 크기의 가격을 낸다. 대상 모델 하나라도 그 크기를
+    팔지 않으면(Grok Imagine, Nano Banana 2는 1K 정사각만 판다) 정사각으로 편집한다.
+    실행기는 사진을 EXIF 방향대로 세우고 1024px 안으로 줄여 PNG로 만든 뒤 모델의 편집
+    요청으로 보낸다: OpenAI `/v1/images/edits`(multipart), xAI `/v1/images/edits`(data URL),
+    fal `fal-ai/nano-banana-2/edit`(`image_urls` data URI, 생성과 같은 가격 필드). 감사
+    기록에는 사진의 형식·크기·sha256만 남고 바이트는 남지 않는다. 사용자 파일은 지우거나
+    고치지 않는다. Google 직접 호출은 생성 자체가 `worst_case_cost_unbounded`로 막혀 있어
+    편집 adapter를 두지 않는다. 같은 Google 모델은 fal의 Nano Banana 2로 편집한다.
+  - **편집 가격은 모델별이다**(`lib/imageGenerationPricing.ts`의 편집 가격 표). 각 모델은
+    가산 크레딧, 입력 사진 예산, 토큰 과금이면 단가와 최대 토큰, 그리고 근거
+    (`verification`)를 가진다. 근거가 없거나, 토큰 과금 모델의 실측 최댓값이 예산을 넘으면
+    `IMAGE_EDIT_ENABLED`가 켜져도 그 모델은 편집하지 않는다.
+    - gpt-image-2: 가산 90, 사진 예산 10,000토큰 × 이미지 입력 US$8/M = 80,000µUSD(최악
+      high 1024² 871µ/credit). 2026-10-29 운영자 승인 실측(`scripts/measure-image-edit-tokens.mjs`,
+      저품질 3장, 약 US$0.04): 1024×1024가 1,024토큰, 1024×768과 768×1024가 768토큰으로
+      32×32 픽셀당 1토큰이었다. 정산은 예약 snapshot의 단가로 보고된 이미지 입력 토큰을
+      계산하고, 사용량이 없으면 사진 예산 전체로 정산하며, 예산을 넘으면
+      `image_edit_input_over_budget`을 남긴다.
+    - Nano Banana 2(fal): fal 가격 API가 2026-10-29 생성과 편집 엔드포인트 모두 출력 1장당
+      US$0.08로 답했고, 모델 페이지에 입력 사진 요금이 없다. 그래서 가산 0, 사진 예산 0이다.
+      2026-10-29 운영자 승인 실측에서 1024×768 사진을 data URI로 보내 fal CDN의 1024×1024
+      PNG를 받았다(가격을 매긴 그 이미지).
+    - Grok Imagine(xAI): 공개된 것은 출력 1장당 US$0.05뿐이고, 편집의 입력 사진 요금은
+      문서에 없다. 응답의 `usage.cost_in_usd_ticks`(US$1 = 10^10 ticks)가 실제 비용이다.
+      2026-10-29 운영자 승인 실측에서 1024×1024와 1024×768 사진 편집이 모두 600,000,000 ticks
+      (US$0.06)였다. 사진은 모양과 관계없이 US$0.01을 더한다. 사진 예산 10,000µUSD, 가산
+      10크레딧으로 (50,000 + 5,000 + 10,000) / 85 = 765µ/credit이다(생성 733).
+    - xAI·fal 실측은 `node --import tsx scripts/measure-image-edit-providers.mjs --confirm-paid`
+      (유료 약 US$0.25 이하, 운영자 승인 필요). 실측은 adapter와 같은 요청 빌더를 쓴다.
+      2026-10-29 실행의 실제 지출은 약 US$0.20(xAI 2장 US$0.12, fal 1장 US$0.082)이다.
+    - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
+      없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
+      재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.
   - **확인 없는 과금은 운영자 결정이다**(2026-10-20). Chat의 텍스트 턴처럼
     제출 즉시 생성하며, 위 §3·§11의 "제출 전 가격 표시"와 ⑤의
     `imageHandoffAutoGenerate` 조건은 이 경로에 적용하지 않는다. 크레딧
@@ -892,7 +942,7 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     `detectChatTurnImage`를 실행하므로, 대기 시간은 두 호출의 합이 아니라 긴 쪽이다.
     대상은 저장된 대화가 Auto(`selectionMode = auto`)인 로그인 단일 패널 Chat 턴이다.
     router가 routed했는지와 관계없이 판정하고(fallback 턴 포함), 보내는 메시지 자체에
-    첨부·Refiner 제안·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
+    첨부(편집할 사진은 예외, 위 "첨부 사진 편집")·Refiner 제안·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
     스위치). 이미지면 소유권·잠금·kind·context 검사를 모두 통과한 뒤, Refiner 소비·durable
     attempt·context bundle 사용·크레딧/lease/usage hold가 일어나기 **전에**
     `X-Chat-Response-Mode: image-turn`으로 끝난다. 그래서 반납할 것이 없다. 클라이언트는 같은
@@ -904,7 +954,10 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     낸다. 두 호출은 병렬이라 대기 시간은 줄지만 호출 수는 그대로다.
   - 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을 hold한 뒤
     나가며, 실패·시간 초과·거절은 모두 일반 텍스트 전송으로 떨어진다. 첨부가
-    있는 제출과 override 전송(Deep Research 확장 등)은 묻지 않는다. 판정을
+    있는 제출(편집이 켜져 있을 때의 사진은 예외)과 override 전송(Deep Research 확장 등)은
+    묻지 않는다. 네이티브 앱은 Auto에서 서버 판정을 그대로 따르고, manual에서는 서버가
+    `chatImageEdits`를 광고할 때만 사진 메시지에 대해 `/api/chat/image-intent`를 bearer로
+    묻는다(native parity 허용 목록). 판정을
     기다리는 동안 초안이 바뀌면 아무것도 보내지 않는다.
   - **Review Easy (운영자 승인 2026-10-20)**는 별도 `POST /api/review/route`를
     사용한다. `REVIEW_EASY_ENABLED=true`인 로그인 계정에만 제공하며 기본은 꺼짐이다.

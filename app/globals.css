@@ -119,6 +119,17 @@
 }
 
 /*
+ * `:lang(zh)` also matches `zh-Hant` (a language-range prefix match), so this
+ * rule must come after it: same specificity, later wins.
+ */
+:lang(zh-Hant) {
+  --font-ui: var(--font-noto-sans-tc), "PingFang TC", "Microsoft JhengHei",
+    system-ui, sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, var(--font-noto-sans-tc), "PingFang TC", monospace;
+}
+
+/*
  * A subtree that declares a language other than the document's -- the Admin
  * Console root carries its own `lang` (docs/ui-contracts/admin-console-ia.md).
  * The tokens above are inherited from <html>, and `font-family` is inherited as

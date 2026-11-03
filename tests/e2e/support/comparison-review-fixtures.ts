@@ -24,7 +24,9 @@ export async function mockComparisonReview(
   page: Page,
   options: {
     deferSetup?: boolean;
+    deferRun?: boolean;
     withSecondary?: boolean;
+    longSource?: boolean;
     /**
      * Makes the review request itself fail. The setup step still succeeds, so
      * the dialog reaches the state a user actually hits: they chose a mode,
@@ -37,13 +39,15 @@ export async function mockComparisonReview(
   let requestBody: Record<string, unknown> | null = null;
   let runCount = 0;
   let releaseSetup = () => {};
+  let releaseRun = () => {};
+  const runGate = options.deferRun ? new Promise<void>((resolve) => { releaseRun = resolve; }) : Promise.resolve();
   const setupGate = options.deferSetup
     ? new Promise<void>((resolve) => {
         releaseSetup = resolve;
       })
     : Promise.resolve();
   await page.route(
-    "**/api/conversations/qa-conversation/comparison-reviews",
+    /\/api\/conversations\/qa-conversation\/comparison-reviews(?:\?.*)?$/,
     async (route) => {
       if (route.request().method() === "GET") {
         await setupGate;
@@ -52,6 +56,14 @@ export async function mockComparisonReview(
           contentType: "application/json",
           body: JSON.stringify({
             available: true,
+            source: {
+              question: "Compare these approaches",
+              responses: [
+                { messageId: "21111111-1111-4111-8111-111111111111", content: (options.longSource ? "추가 배경 설명입니다.\n\n".repeat(60) : "") + "단계적으로 접근해야 합니다. 먼저 배포부터 진행합니다. 보안 검토를 먼저 합니다." },
+                { messageId: "31111111-1111-4111-8111-111111111111", content: "사용자 검증을 먼저 합니다. 단계적 접근이 필요합니다." },
+                { messageId: "41111111-1111-4111-8111-111111111111", content: "비용과 속도를 분석합니다." },
+              ],
+            },
             promptMessageId: "11111111-1111-4111-8111-111111111111",
             assistantMessageIds: [
               "21111111-1111-4111-8111-111111111111",
@@ -87,6 +99,7 @@ export async function mockComparisonReview(
 
       requestBody = route.request().postDataJSON() as Record<string, unknown>;
       runCount += 1;
+      await runGate;
       if (options.failRun === true || (options.failRun === "first" && runCount === 1)) {
         await route.fulfill({
           status: 500,
@@ -263,6 +276,8 @@ export async function mockComparisonReview(
   return {
     getRequestBody: () => requestBody,
     releaseSetup,
+    releaseRun,
+    getRunCount: () => runCount,
   };
 }
 

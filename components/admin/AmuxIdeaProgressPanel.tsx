@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
+import { AMUX_IDEA_LANE_MAX_ATTEMPTS } from "@/lib/amux/ideaLaneCore";
 import { amuxIdeaProgressStep, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 
@@ -119,7 +121,8 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
 /**
  * "Ideas in progress": compact rows with the stage badge and the six-step
  * bar. It keeps its card when the read failed, so the page layout does not
- * move; the reason is stated once, in the inbox's place.
+ * move; the reason is stated once, in the inbox's place. Ideas waiting for
+ * the owner after analysis can be ticked and closed together.
  */
 export function AmuxIdeaList({ rows, activeRequestId, children }: {
   rows: AmuxIdeaProgressRows;
@@ -131,6 +134,18 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
   const router = useRouter();
   const keepDraft = useDraftGuard();
   const list = Array.isArray(rows) ? rows : null;
+  const closable = (list ?? []).filter((row) => row.closable);
+  const [picked, setPicked] = useState<string[]>([]);
+  // Kept after a close so its per-idea results stay readable once the rows refresh.
+  const [closeSent, setCloseSent] = useState(false);
+  // A refreshed list drops ideas that are no longer closable from the selection.
+  const selected = picked.filter((id) => closable.some((row) => row.ideaId === id));
+  const toggle = (ideaId: string) => setPicked((current) => current.includes(ideaId)
+    ? current.filter((id) => id !== ideaId) : [...current, ideaId]);
+  const labelFor = (ideaId: string) => {
+    const row = list?.find((entry) => entry.ideaId === ideaId);
+    return row ? label(row, m.untitled) : `${m.untitled} ${ideaId.slice(0, 8)}`;
+  };
 
   return (
     <section aria-labelledby="amux-idea-list-heading" data-testid="amux-idea-list"
@@ -155,9 +170,16 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
               const human = row.waitingFor !== null || row.tasks.inReview > 0;
               const active = row.requestId === activeRequestId;
               return (
-                <li key={row.ideaId}>
+                <li key={row.ideaId} className="flex items-stretch gap-2">
+                  {closable.length > 0 ? (
+                    <label className="flex min-h-11 w-8 shrink-0 items-start justify-center pt-3">
+                      {row.closable ? <input type="checkbox" checked={selected.includes(row.ideaId)}
+                        onChange={() => toggle(row.ideaId)} aria-label={m.close.select(label(row, m.untitled))}
+                        data-testid="amux-idea-close-select" className={`h-5 w-5 ${FOCUS}`} /> : null}
+                    </label>
+                  ) : null}
                   <Link href={amuxIdeaHref(row.requestId)} onClick={keepDraft} aria-current={active ? "page" : undefined}
-                    className={`block min-h-11 space-y-2 rounded-lg border p-3 text-sm hover:bg-zinc-800/60 ${FOCUS} ${active
+                    className={`block min-h-11 min-w-0 flex-1 space-y-2 rounded-lg border p-3 text-sm hover:bg-zinc-800/60 ${FOCUS} ${active
                       ? "border-blue-400 ring-1 ring-blue-400" : "border-zinc-800"}`}
                     data-testid="amux-idea-progress-row" data-stage={row.stage}>
                     <span className="block font-semibold text-zinc-100">{label(row, m.untitled)}</span>
@@ -166,7 +188,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                         ? "border-red-500/40 bg-red-500/10 text-red-200"
                         : human ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
                           : "border-blue-500/40 bg-blue-500/10 text-blue-200"}`}>
-                        {row.attention ? m.attention : m.stages[row.stage]}
+                        {row.attention ? (row.lane ? m.lane.badgeFailed : m.attention) : m.stages[row.stage]}
                       </span>
                       <span className="text-zinc-400">
                         {step ? m.stepOf(step) : null}{step ? " · " : ""}{human ? m.human : m.automatic}
@@ -184,6 +206,9 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                         ))}
                       </span>
                     ) : null}
+                    {row.lane ? (
+                      <span className="block text-xs text-zinc-300" data-testid="amux-idea-lane">{laneLine(row.lane, m)}</span>
+                    ) : null}
                     <span className="block text-xs text-zinc-400">{m.savedAt(when(row.submittedAt))}</span>
                   </Link>
                 </li>
@@ -191,9 +216,29 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
             })}
           </ul>
         )}
+      {closable.length > 0 || closeSent ? (
+        <AmuxIdeaClosePanel mode="selection" ideaIds={selected} labelFor={labelFor}
+          onSelectAll={() => setPicked(closable.map((row) => row.ideaId))}
+          onClear={() => setPicked([])} onSent={() => setCloseSent(true)} />
+      ) : null}
       {children}
     </section>
   );
+}
+
+/** One line for an idea the lane took (lib/amux/ideaLaneCore.ts). */
+function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
+  running: (attempt: number, max: number) => string;
+  queued: (attempts: number, max: number, outcome: string) => string;
+  prOpen: (pr: number) => string;
+  failed: (max: number, outcome: string) => string;
+} }): string {
+  const max = AMUX_IDEA_LANE_MAX_ATTEMPTS;
+  const last = lane.lastOutcome ?? "-";
+  if (lane.state === "pr_open" && lane.prNumber !== null) return m.lane.prOpen(lane.prNumber);
+  if (lane.state === "running") return m.lane.running(lane.attempts, max);
+  if (lane.state === "queued") return m.lane.queued(lane.attempts, max, last);
+  return m.lane.failed(max, last);
 }
 
 /**

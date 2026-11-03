@@ -17,7 +17,11 @@ import {
   readAmuxDerivedWorkerCatalog,
 } from "../lib/amux/workerAssignmentCatalog.ts";
 import * as derivedCatalogCore from "../lib/amux/workerDerivedCatalogCore.ts";
-import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
+import { AMUX_WORKER_REGISTRY_V31_SEED } from "../lib/amux/workerRegistryCore.ts";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+
 
 
 // What the catalog variables' parser returned for production's catalog
@@ -110,7 +114,10 @@ test("R2e: R2c's latch is gone and the reader always derives, one statement each
   const reader = code(read("lib/amux/workerAssignmentCatalog.ts"));
   assert.match(reader, /export async function readAmuxAssignmentCatalogs\(client: CatalogReader\): Promise<AmuxAssignmentCatalogs> \{/);
   assert.match(reader, /export async function amuxWorkerCatalogRefusal\(\s*client: CatalogReader,\s*workerName: string,\s*\): Promise/);
-  assert.doesNotMatch(reader, /process\.env|source:/);
+  // The one variable it reads turns on non-Claude v22 profiles (owner decision
+  // 2026-10-26); none sends assignment back to a catalog variable.
+  assert.doesNotMatch(reader.replace(
+    "process.env[AMUX_V22_MULTI_PROVIDER_ENV]", ""), /process\.env|source:/);
   const client = fakeClient(statement());
   const catalogs = await readAmuxAssignmentCatalogs(client);
   assert.equal(client.sent.length, 1);
@@ -158,7 +165,7 @@ test("anything the stores would not accept makes the catalog absent, never short
     assert.deepEqual([catalogs.workers, catalogs.v22, catalogs.ceilings], [null, null, null]);
   };
   await absent(undefined);
-  await absent(statement(REGISTRY_ROWS.map((row, index) => (index === 0 ? { ...row, providerClass: "cursor" } : row))));
+  await absent(statement(REGISTRY_ROWS.map((row, index) => (index === 0 ? { ...row, providerClass: "devin" } : row))));
   await absent(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "unknown" }]));
   await absent(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[0], routingTags: [] }]));
   await absent(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[3], v22Roles: null }]));

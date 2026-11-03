@@ -1,9 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import type { Prisma } from "@prisma/client";
+
 import { AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_V4_UNIT_DECISION_TARGET,
   AMUX_V19_SYSTEM_REGISTRATION_ACTION,
   AMUX_V19_SYSTEM_REGISTRATION_SCOPE,
-  AMUX_V19_SYSTEM_REGISTRATION_TARGET } from
+  AMUX_V19_SYSTEM_REGISTRATION_TARGET,
+  AMUX_V19_UNIT_REGISTRATION_SCOPE,
+  SYSTEM_AUDIT_ACTOR_METADATA_KEY,
+  auditRowActorKind } from
   "../adminAuditSystemActors.ts";
 import type { AmuxDigestKey } from "./ideaCrypto.ts";
 
@@ -125,6 +131,81 @@ export function amuxV19SystemRegistrationEnabled(env: NodeJS.ProcessEnv): boolea
     env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
     env.TOMVERSE_AMUX_V4_UNIT_WRITE === "enabled" &&
     env.TOMVERSE_AMUX_V4_PORTFOLIO_WRITE === "enabled";
+}
+
+export type AmuxUnitDecisionAuditRow = {
+  action: string; targetType: string; targetId: string | null;
+  actorUserId: string | null; actorEmail: string | null;
+  ipAddress: string | null; userAgent: string | null;
+  metadata: unknown; entryHash: string | null;
+};
+
+const jsonObject = (value: unknown) => value && typeof value === "object" &&
+  !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+/**
+ * Who may have written a unit decision's prepare or consume audit. An Admin
+ * registration is the deciding owner's own row. An intake v19 registration
+ * stays the scoped system registrar's row (intake v19 item 5), bound to the
+ * receipt's system authority and to the idea's one plan registration audit
+ * (owner decision 2026-10-27). A human row carrying a system marker, or a
+ * system row outside the unit registration scope, is neither.
+ */
+export function amuxUnitDecisionAuditActorValid(input: {
+  audit: AmuxUnitDecisionAuditRow;
+  decision: { id: string; ideaId: string; actorUserId: string;
+    confirmationSnapshot: unknown };
+  planRegistrationAudit: AmuxUnitDecisionAuditRow | null;
+}): boolean {
+  const { audit, decision, planRegistrationAudit: plan } = input;
+  const snapshot = jsonObject(decision.confirmationSnapshot);
+  const kind = auditRowActorKind(audit);
+  if (kind === "human") {
+    return audit.actorUserId === decision.actorUserId &&
+      (!snapshot || !Object.hasOwn(snapshot, "registrationAuthority"));
+  }
+  const metadata = jsonObject(audit.metadata);
+  const planMetadata = plan ? jsonObject(plan.metadata) : null;
+  return kind === "system" && !!snapshot &&
+    (audit.action === "amux.v4.unit.prepare" ||
+      audit.action === "amux.v4.unit.consume") &&
+    audit.targetType === AMUX_V4_UNIT_DECISION_TARGET &&
+    audit.targetId === decision.id &&
+    metadata?.[SYSTEM_AUDIT_ACTOR_METADATA_KEY] ===
+      AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR &&
+    metadata.actorScope === AMUX_V19_UNIT_REGISTRATION_SCOPE &&
+    metadata.registrationAuthority === "system" &&
+    metadata.ideaId === decision.ideaId &&
+    isAmuxV19UnitRegistrationAuthority(snapshot.registrationAuthority) &&
+    !!plan && !!plan.entryHash && auditRowActorKind(plan) === "system" &&
+    plan.action === AMUX_V19_SYSTEM_REGISTRATION_ACTION &&
+    plan.targetType === AMUX_V19_SYSTEM_REGISTRATION_TARGET &&
+    plan.targetId === decision.ideaId &&
+    planMetadata?.[SYSTEM_AUDIT_ACTOR_METADATA_KEY] ===
+      AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR &&
+    planMetadata.actorScope === AMUX_V19_SYSTEM_REGISTRATION_SCOPE;
+}
+
+export const AMUX_UNIT_DECISION_AUDIT_SELECT = { action: true,
+  targetType: true, targetId: true,
+  actorUserId: true, actorEmail: true, ipAddress: true, userAgent: true,
+  metadata: true, entryHash: true } as const;
+
+/** The idea's one v19 plan registration audit, read only when a unit audit
+ * is not a person's: an Admin registration never needs it. */
+export async function readAmuxPlanRegistrationAuditFor(
+  db: Pick<Prisma.TransactionClient, "amuxIdeaSubmission" | "adminAuditLog">,
+  ideaId: string,
+  unitAudit: { actorUserId: string | null } | null,
+): Promise<AmuxUnitDecisionAuditRow | null> {
+  if (!unitAudit || unitAudit.actorUserId !== null) return null;
+  const idea = await db.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
+    select: { systemRegistrationAuditLogId: true } });
+  return idea?.systemRegistrationAuditLogId ?
+    db.adminAuditLog.findUnique({ where: {
+      id: idea.systemRegistrationAuditLogId },
+    select: AMUX_UNIT_DECISION_AUDIT_SELECT }) :
+    null;
 }
 
 /** The ungated transaction primitive is exposed only to an isolated local DB

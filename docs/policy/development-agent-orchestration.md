@@ -1488,7 +1488,7 @@ v27의 여섯 세션은 이 일곱 곳이 모두 걸려 아직 제품 배정에 
 ### 3. worker 등록부 — 사람이 정하는 원하는 상태
 
 - **단일 출처.** worker 목록의 출처는 앱 DB의 등록부 표 하나다. 등록부에 들어가는 값은 이름, 종류, 역할 상한(종류의 최고 역할 이하), 원하는 상태, revision이다.
-  - 이름은 `^(claude|codex|cursor|copilot)-[a-z0-9]{1,24}$`이고 앞부분이 종류다.
+  - 이름은 소문자·숫자·하이픈 1–40자(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)이고 종류를 담지 않는다. 종류(실행하는 CLI)는 등록할 때 owner가 고르고, 한 번 등록한 이름의 종류는 바꾸지 않는다. `engineering-runner`는 등록할 수 없다(운영자 결정 2026-10-27, migration `20261027120000_amux_cli_models_and_worker_cli`).
   - 이 버전 8항의 전환을 마치면 이 버전 1항의 2·3·4·5번이 등록부를 읽는다. 7번은 이 버전 4항의 조정기가 맞춘다.
 - **등록부는 사람만 쓴다.** owner가 Admin에서 최근 step-up을 거쳐 쓰고, 변경과 같은 트랜잭션에 사람 감사 `amux.worker.*`를 남긴다. Agent, worker, 조정기, bridge, 앱의 시스템 경로는 등록부를 쓰지 않는다(공통 기반 원칙 6).
 - **원하는 상태(사람이 정함):**
@@ -1734,7 +1734,7 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
   - 모델(1~160자).
   - 역할 태그(지금 카탈로그의 태그 문법, 1~64개).
   - 도구(0~16개).
-  - 선택 항목인 v22 one-shot 프로필(모델, 역할, 도구). v22 프로필 규칙은 지금 `parseAmuxV22WorkerCatalog()`의 규칙 그대로다. 공급사 anthropic, 지원 역할, 역할마다 필요한 도구가 그 규칙이다.
+  - 선택 항목인 v22 one-shot 프로필(모델, 역할, 도구). v22 프로필 규칙은 지금 `parseAmuxV22WorkerCatalog()`의 규칙 그대로다. 지원 역할과 역할마다 필요한 도구가 그 규칙이다. 카드의 Task 역할 `test`와 `verify`는 프로필 역할이 아니라 실행 역할로 대응한다(운영자 결정 2026-10-30). `test`는 `implement` 실행(테스트 작성, 실행은 PR CI)이고 `verify`는 `investigate` 실행(읽기 전용)이며, 가격 산정·배정·sidecar 전달이 모두 그 실행 역할을 쓴다. worker 안에서 테스트를 직접 돌리는 격리 실행기는 여전히 별도 승인 사항이고, `operate`는 사람 단계다. 공급사는 등록된 네 종류(anthropic, openai, github-copilot, cursor) 모두이고, Claude worker만 `claude-*` 모델이어야 한다. Claude 외 공급사의 프로필은 `TOMVERSE_AMUX_V22_MULTI_PROVIDER`가 `enabled`인 동안만 배정 카탈로그에 든다. Cursor는 쓰기를 허용하면 셸을 막을 수 없으므로 읽기 역할만 맡고, 작업 폴더·홈·설정 폴더에 MCP 설정 파일이 있으면 실행하지 않는다. review는 지금처럼 verified 공급사(claude, codex)만 맡으므로 Cursor와 Copilot의 읽기 역할은 design과 investigate다. Codex는 셸로만 파일을 읽으므로, 그 셸은 Codex 자체 OS sandbox 안에서만 돈다(읽기 역할은 읽기 전용, implement는 작업 폴더만 쓰기이고 `/tmp`·추가 쓰기 경로·네트워크는 차단, 브라우저·컴퓨터 조작·앱·웹 검색·MCP는 끔. 2026-10-26 runner에서 모델 호출 없이 실측). 이는 Claude 경로의 셸 금지보다 넓은 경계이고, 운영자가 2026-10-26에 채팅으로 승인했다.
 - **누가 쓰는가.** owner만 Admin에서 최근 step-up을 거쳐 쓴다. 같은 트랜잭션에 사람 감사 `amux.worker.capability`가 있어야 하며, 트리거가 강제한다. 시스템은 쓰지 않는다.
 - **등록부 사건과 표를 나누는 이유.** 원하는 상태의 변경 규칙과 능력 변경의 규칙이 다르기 때문이다. 원하는 상태는 퇴역과 역할 확대 규칙을 따른다(활성화의 시험 증거 요구는 2026-10-20 운영자 결정으로 없앴다). 능력은 owner의 운영 행위다. 대신 능력은 역할 상한을 넘지 못한다.
 - **역할 상한과 태그의 대응.** 배정 경로는 카드의 `requiredRoutingRole`이 worker의 태그에 들어 있는지만 본다. 그러므로 태그가 곧 권한이며, 다음 표로 묶는다. 태그와 v22 역할은 닫힌 목록이고, 목록 밖의 값은 받지 않는다. 목록을 늘리는 것은 검토를 거치는 코드 변경이다.
@@ -1742,7 +1742,8 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
   | 태그 또는 v22 역할 | 필요한 것 |
   |---|---|
   | `chore`; v22 `investigate`(읽기 전용, `repo_read`만) | 아무 상한 |
-  | `implementation`; v22 `implement` | 상한 `implementation` 이상 |
+  | v22 `implement`(`repo_write` 필요, Cursor 불가) | 아무 상한. v4 Task에서 상한은 worker의 등급이므로(버전 52 2항), `chore` worker가 `routine` implement Task를 맡는다(운영자 결정 2026-10-27) |
+  | `implementation` | 상한 `implementation` 이상 |
   | `contract`, `architecture`, `security`; v22 `design` | 상한 `contract` |
   | `review`; v22 `review` | 검증된 종류(버전 31 2항). 아래 선택 규칙도 함께 적용 |
   | 그 밖의 작업 태그(`bugfix`, `tests`, `multi_file`, `reasoning`, `integration`, `long_running`, `fallback`) | 아무 상한 |
@@ -2736,8 +2737,9 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
   시각으로 기록한다. 이 경로에서 v22 §3의 "운영자 완료 판정"은 그 GitHub 승인 review다.
   Admin의 별도 승인 클릭은 없다. stale-approval dismissal, 승인자 대조, 병합 주체의 관측
   기록, runner 자기 보고 불인정은 공통 기반 원칙 12 그대로다.
-- **PR 없이 끝나는 역할**(design·test·review·verify·investigate·operate)은 지금처럼 Admin의
-  사람 승인으로 `done`이 된다. 이 버전은 그 경로를 바꾸지 않는다.
+- **PR 없이 끝나는 역할**(design·review·verify·investigate·operate)은 지금처럼 Admin의
+  사람 승인으로 `done`이 된다. 이 버전은 그 경로를 바꾸지 않는다. `test` Task는 2026-10-30부터
+  `implement` 실행으로 patch를 남기므로 `implement`와 같은 PR 경로를 따른다.
 - **바뀌지 않는 것**: 비용 상한과 예약, 정지와 incident, worker 용량, 의존 관계, 1회 승인의
   결속, 결과 불명은 멈추고 사람에게 넘긴다는 원칙, 에이전트는 PR을 승인·병합하지 않고
   auto-merge를 켜지 않는다는 원칙.
@@ -2779,7 +2781,9 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
   `amux-intake.md` v19 1항이다.
 - **등록의 근거.** 분석 결과는 결정적 Guard(schema·계층·의존 순환·점수 재계산)를 통과할 때만
   시스템 actor가 한 트랜잭션으로 등록한다. 걸리면 아무것도 등록하지 않고 운영자 검토로 간다.
-  LLM 출력은 제안이며 등록 여부를 정하지 않는다.
+  LLM 출력은 제안이며 등록 여부를 정하지 않는다. v22 ready 판정과 공개 PR 동의는 그 시스템 등록
+  감사를 owner의 사람 감사와 같은 source approval 근거로 인정한다(`amux-intake.md` v19 5항, 운영자
+  결정 2026-10-27).
 - **바뀌지 않는 것.** 등록된 Task의 v22 자동 편입 규칙, `implement` Task의 PR review·병합(v49)과
   졸업한 develop 자동 병합(v50), PR 없는 역할의 Admin 사람 승인, `main` 병합은 운영자의 release,
   결과 불명은 멈추고 사람에게 넘긴다는 원칙, 에이전트는 PR을 승인하지 않는다는 원칙.
@@ -2832,6 +2836,11 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
 
 v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 worker의 등급**이다. legacy 카드에는
 버전 35·45의 상한 의미가 그대로 남는다.
+
+운영자 결정 2026-10-27: 그래서 v22 `implement`는 상한을 요구하지 않는다(`repo_write`는 필요, Cursor는 계속 불가).
+버전 35의 표가 `implementation` 이상을 요구해 `chore` worker가 implement를 가질 수 없었고, routine implement
+경로가 없어 그런 Task를 가진 아이디어의 무인 등록이 `not_ready`로 실패했다(production, 2026-10-27).
+migration `20261027100000_amux_v22_routine_implement`가 능력 guard에서 그 조건만 뺀다.
 
 ### 3. contract 경로 목록
 
@@ -3299,3 +3308,13 @@ r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승
 - **16 상태 위치**: 담당 범위는 본 앱 DB(등록부·능력)에서 나온다.
 
 그 밖의 항목은 이 버전이 바꾸지 않는다.
+
+## v22 worker의 운영자 질문 (운영자 결정 2026-10-30)
+
+v22 실행은 마감 10분인 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그래서 운영자 결정이 필요한 worker는 추측하지 않고, 결과의 마지막 줄에 `AMUX_OWNER_QUESTION: {"question", "unblocks", "options"}`를 남기고 끝낸다(`lib/amux/v22OwnerQuestionCore.ts`).
+
+- **완료가 아니다.** 질문으로 끝난 실행은 정산에서 review·게시·등급 판정을 받지 않는다. Task는 `blocked`(attempt 사유 `owner_question`)로 답을 기다리고, 사람 escalation은 열지 않는다.
+- **질문은 Task당 3번까지다.** 네 번째 질문은 `owner_question_limit`으로 막히고 사람 escalation이 열린다.
+- **답하면 같은 worker가 이어서 한다.** 답이 기록되면 Task는 `todo`로 돌아간다. 배정은 질문한 worker에 그 Task의 경로가 남아 있는 한 그 worker를 기다린다. 다음 전달에는 질문, 답, 이전 실행의 변경이 붙는다. 변경은 프롬프트 상한에 들어갈 때만 붙인다.
+- **기록 방식.** 질문 원문은 그 attempt의 암호화된 결과 본문에 남고, `AmuxV22TaskQuestion`에는 digest·상태·순번만 둔다. 답은 재개된 실행이 정산될 때 지운다. 상태는 `open → answered | cancelled`, `answered → resumed`로만 움직이고 행은 지우지 않는다(DB trigger).
+- **답하는 길.** 1단계에서는 운영자가 Admin › AMUX 카드의 결과 보기에서 직접 답한다. Decision Maker 경로는 그 다음 단계다: 질문을 박스 로컬 카드의 typed ask로 올려 DM이 제안하고, 운영자가 Admin에서 확정하면 그 답으로 재개한다.

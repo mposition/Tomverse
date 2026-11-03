@@ -1,3 +1,4 @@
+import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import type { AmuxVisibleAnalysisUnit } from "./ideaAnalysisResultReadCore.ts";
 import { amuxV4CardPlanRound, orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
 
@@ -84,6 +85,11 @@ export function amuxV4PlanRound(units: readonly AmuxV4PlanScreenUnit[]) {
  * path through an earlier approval is left for the single score screen,
  * because this screen cannot see whether that subject is assessed.
  */
+/** The plan screen shows a public PR consent box for a Task whose run leaves
+ * a patch: implement, and test (owner decision 2026-10-30). */
+export const amuxV4PlanShowsPublicPrConsent = (unit: { kind: string;
+  taskRole?: string | null }) => unit.kind === "task" && amuxV22TaskWritesPatch(unit.taskRole);
+
 export function buildAmuxV4PlanRequest(input: {
   ideaId: string; planRequestId: string; units: readonly AmuxV4PlanScreenUnit[];
   edits: ReadonlyMap<string, Record<string, number>>; consentOff: ReadonlySet<string>;
@@ -113,8 +119,8 @@ export function buildAmuxV4PlanRequest(input: {
   }).map((unit) => unit.unitId);
   return {
     ideaId: input.ideaId, planRequestId: input.planRequestId, reasons: {},
-    publicPrConsentOff: units.filter((unit) => unit.kind === "task" &&
-      unit.taskRole === "implement" && input.consentOff.has(unit.unitId)).map((unit) => unit.unitId),
+    publicPrConsentOff: units.filter((unit) => amuxV4PlanShowsPublicPrConsent(unit) &&
+      input.consentOff.has(unit.unitId)).map((unit) => unit.unitId),
     assessments, scoreTaskUnitIds, expectedUnitIds: units.map((unit) => unit.unitId),
   };
 }

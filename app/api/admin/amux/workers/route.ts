@@ -52,6 +52,8 @@ const withNoStore = (response: Response) => {
 const bodySchema = z
   .object({
     workerName: z.string().max(40),
+    // The CLI the worker runs, chosen by the owner (owner decision 2026-10-27).
+    providerClass: z.string().max(16),
     roleCeiling: z.string().max(32),
     desiredState: z.string().max(32),
     expectedRevision: z.number().int().min(0).max(1_000_000),

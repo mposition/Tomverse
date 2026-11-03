@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { AMUX_CLI_MODEL_PRICED_ID_MAX, parseAmuxCliModelLinkChange } from "../lib/amux/cliModelCatalogCore.ts";
+
 import {
   AMUX_TASK_CATALOG_CAPS,
   amuxTaskRoutePrice,
@@ -12,14 +14,17 @@ import {
   inspectV4TaskCostCatalog,
   inspectV52TaskCatalogGrades,
 } from "../lib/amux/v4TaskCostCatalogCore.ts";
+import { deriveAmuxWorkerCatalog } from "../lib/amux/workerDerivedCatalogCore.ts";
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
 
 const NOW = "2026-10-25T01:02:03.000Z";
 const workers = [
-  { workerName: "claude-chore", modelId: "claude-haiku-4-5", roles: ["investigate"],
+  { workerName: "claude-chore", provider: "anthropic", modelId: "claude-haiku-4-5", roles: ["investigate"],
     roleCeiling: "chore" },
-  { workerName: "claude-impl", modelId: "claude-sonnet-5",
+  { workerName: "claude-impl", provider: "anthropic", modelId: "claude-sonnet-5",
     roles: ["implement", "investigate", "review"], roleCeiling: "implementation" },
-  { workerName: "claude-contract", modelId: "claude-opus-4-8",
+  { workerName: "claude-contract", provider: "anthropic", modelId: "claude-opus-4-8",
     roles: ["design", "implement", "investigate"], roleCeiling: "contract" },
 ];
 // Verified five-minute write rates are 1.25x input.
@@ -49,21 +54,35 @@ test("the derived catalog passes the catalog and grade checks", () => {
   assert.deepEqual(inspectV52TaskCatalogGrades(result.catalog, ceilings), { ok: true });
   assert.deepEqual(result.catalog.routes.map((route) =>
     [route.workerName, route.grades, route.roles]), [
-    ["claude-chore", ["routine"], ["investigate"]],
-    ["claude-contract", ["frontier"], ["design", "implement", "investigate"]],
-    ["claude-impl", ["advanced"], ["implement", "investigate"]]]);
+    ["claude-chore", ["routine"], ["verify", "investigate"]],
+    ["claude-contract", ["frontier"], ["design", "implement", "test", "verify", "investigate"]],
+    ["claude-impl", ["advanced"], ["implement", "test", "verify", "investigate"]]]);
   assert.match(result.catalogId, /^registry:[a-f0-9]{32}$/);
   assert.equal(result.catalogId, `registry:${result.catalogDigest.slice(0, 32)}`);
 });
 
-test("only the Task roles a worker's profile runs get a ceiling", () => {
+test("a Task role gets a ceiling only where a worker's profile runs its execution role", () => {
   const { catalog } = derive();
-  assert.equal(ceiling(catalog, "implement", "advanced").ok, true);
-  assert.equal(ceiling(catalog, "investigate", "routine").ok, true);
-  for (const [role, grade] of [["test", "advanced"], ["implement", "routine"],
-    ["review", "advanced"], ["verify", "frontier"]]) {
+  // test runs as implement and verify as investigate (owner decision 2026-10-30).
+  for (const [role, grade] of [["implement", "advanced"], ["investigate", "routine"],
+    ["test", "advanced"], ["verify", "routine"], ["verify", "frontier"]]) {
+    assert.equal(ceiling(catalog, role, grade).ok, true, `${role}/${grade} has a worker`);
+  }
+  for (const [role, grade] of [["test", "routine"], ["implement", "routine"],
+    ["review", "advanced"], ["operate", "frontier"]]) {
     assert.equal(ceiling(catalog, role, grade).ok, false, `${role}/${grade} has no worker`);
   }
+});
+
+test("a route keeps its policy digest when test and verify are priced on it", () => {
+  const only = (roles) => deriveAmuxV4TaskAutoCatalog({ priceFor,
+    workers: [{ ...workers[1], roles }] }).catalog.routes[0];
+  const route = only(["implement", "investigate", "review"]);
+  assert.deepEqual(route.roles, ["implement", "test", "verify", "investigate"]);
+  // The digest follows the profile's own roles only.
+  assert.notEqual(route.routePolicyDigest, only(["implement"]).routePolicyDigest);
+  assert.equal(route.routePolicyDigest,
+    only(["implement", "investigate", "review"]).routePolicyDigest);
 });
 
 test("each price is asked for at the input cap of the worker's grade", () => {
@@ -141,9 +160,9 @@ test("an assignment records exactly its route's prices, and only that shape read
 
 test("a worker without a price, a role ceiling or a Task role is left out", () => {
   const result = derive({ workers: [...workers,
-    { workerName: "claude-new", modelId: "claude-unknown", roles: ["investigate"], roleCeiling: "chore" },
-    { workerName: "claude-odd", modelId: "claude-sonnet-5", roles: ["implement"], roleCeiling: null },
-    { workerName: "claude-reviewer", modelId: "claude-sonnet-5", roles: ["review"], roleCeiling: "contract" }] });
+    { workerName: "claude-new", provider: "anthropic", modelId: "claude-unknown", roles: ["investigate"], roleCeiling: "chore" },
+    { workerName: "claude-odd", provider: "anthropic", modelId: "claude-sonnet-5", roles: ["implement"], roleCeiling: null },
+    { workerName: "claude-reviewer", provider: "anthropic", modelId: "claude-sonnet-5", roles: ["review"], roleCeiling: "contract" }] });
   assert.equal(result.catalog.routes.length, 3);
   assert.equal(result.catalogDigest, derive().catalogDigest,
     "a worker that cannot be priced does not change the catalog");
@@ -178,4 +197,57 @@ test("a dear model is priced, not left out: the reservation is the budget", () =
   assert.equal(dear.ok, true);
   assert.ok(BigInt(ceiling(dear.catalog, "design", "frontier").receipt.routes[0].perAttemptMicroUsd) >
     BigInt(5_000_000));
+});
+
+test("a linked route names its entry, and one whose source would not fit leaves the rest priced", () => {
+  // Review r-20261027-042558-2575fc: the catalog refuses a pricing source over
+  // 160 characters, so one long link must not take every other route with it.
+  const linked = (id) => (modelId) => modelId === "claude-sonnet-5"
+    ? { ...flat["claude-sonnet-5"], linkedModelId: id } : flat[modelId] ?? null;
+  const fits = "x".repeat(AMUX_CLI_MODEL_PRICED_ID_MAX);
+  const ok = derive({ priceFor: linked(fits) });
+  assert.equal(ok.ok, true);
+  const route = ok.catalog.routes.find((entry) => entry.workerName === "claude-impl");
+  assert.equal(route.pricingSource, `model-registry:${fits}`);
+  assert.equal(route.pricingSource.length, 160);
+  assert.equal(route.modelId, "claude-sonnet-5", "the route keeps the CLI's own name");
+  const tooLong = derive({ priceFor: linked("x".repeat(AMUX_CLI_MODEL_PRICED_ID_MAX + 1)) });
+  assert.equal(tooLong.ok, true);
+  assert.deepEqual(tooLong.catalog.routes.map((entry) => entry.workerName).sort(), ["claude-chore", "claude-contract"]);
+  // The link's own limit is the one that keeps every linked source within 160.
+  assert.equal(parseAmuxCliModelLinkChange({ cli: "cursor", cliModel: "x", pricedModelId: fits })?.pricedModelId, fits);
+  assert.equal(parseAmuxCliModelLinkChange({ cli: "cursor", cliModel: "x", pricedModelId: `${fits}y` }), null);
+});
+
+test("a chore worker's v22 implement profile prices routine implement Tasks (v52, 2026-10-27)", () => {
+  // The registry and capability as the owner records them, through the
+  // derived assignment catalog the approval service reads.
+  const registration = (workerName, roleCeiling) => ({ workerName,
+    providerClass: amuxWorkerProviderClassOf(workerName), roleCeiling,
+    desiredState: "active", revision: 1 });
+  const registrations = [registration("claude-chore", "chore"),
+    registration("codex-chore", "chore")];
+  const profile = (model) => ({ capability: { model: null, routingTags: ["chore"],
+    toolCapabilities: [], v22: { model, roles: ["implement", "investigate"],
+      tools: ["repo_read", "repo_write"] } } });
+  const derived = deriveAmuxWorkerCatalog({ registrations,
+    capabilities: new Map([["claude-chore", profile("claude-haiku-4-5")],
+      ["codex-chore", profile("gpt-6-luna")]]),
+    latches: new Map(), multiProvider: true });
+  assert.deepEqual(derived.v22.map((entry) => [entry.worker_name, entry.routing_roles]), [
+    ["claude-chore", ["implement", "investigate"]],
+    ["codex-chore", ["implement", "investigate"]]]);
+  const ceilings = new Map(registrations.map((entry) => [entry.workerName, entry.roleCeiling]));
+  const result = deriveAmuxV4TaskAutoCatalog({ priceFor: (modelId) =>
+    flat[modelId] ?? (modelId === "gpt-6-luna" ? flat["claude-haiku-4-5"] : null),
+  workers: derived.v22.map((entry) => ({ workerName: entry.worker_name,
+    provider: entry.provider, modelId: entry.model, roles: entry.routing_roles,
+    roleCeiling: ceilings.get(entry.worker_name) ?? null })) });
+  assert.equal(result.ok, true);
+  assert.deepEqual(inspectV52TaskCatalogGrades(result.catalog, ceilings), { ok: true });
+  assert.deepEqual(result.catalog.routes.map((route) => [route.workerName, route.grades]), [
+    ["claude-chore", ["routine"]], ["codex-chore", ["routine"]]]);
+  assert.equal(ceiling(result.catalog, "implement", "routine").ok, true);
+  // Same-grade routing is unchanged: a chore worker never prices advanced work.
+  assert.equal(ceiling(result.catalog, "implement", "advanced").ok, false);
 });

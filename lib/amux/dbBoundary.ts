@@ -340,6 +340,30 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // setup + the CLI model catalog (what each CLI lists, the newest links, the
+  // Admin › Models entries: 3, pinned by tests/amuxCliModelCatalogStore.test.mjs)
+  // + fence (owner decision 2026-10-27)
+  cliModelCatalogRead: {
+    operation: "cli_model_catalog_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
+  // setup + an owner's link at its largest (audit chain lock, the name's newest
+  // link, the target model, the administrator audit's 4 with an integrity key,
+  // the event insert: 8, pinned by tests/amuxCliModelCatalogStore.test.mjs) +
+  // fence
+  cliModelLinkChange: {
+    operation: "cli_model_link_change",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // setup + the host's refresh of one CLI (the upsert and the unlisting: 2,
+  // pinned by tests/amuxCliModelCatalogStore.test.mjs) + fence
+  cliModelRefresh: {
+    operation: "cli_model_refresh",
+    prismaCallCeiling: 4,
+    isolation: "mutation",
+  },
   // setup + a question's routing at its largest (audit chain lock, the
   // request read, the switch read, the throughput read, the router's audit 4
   // with an integrity key, the request insert, the card text insert: 10,
@@ -468,7 +492,7 @@ export const AMUX_DB_BOUNDARIES = {
   // within docs/policy/amux-decision-maker.md §9's 12.
   decisionMakerDeliveryCandidateRead: {
     operation: "decision_maker_delivery_candidate_read",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "read",
   },
   decisionMakerDeliveryDecision: {
@@ -497,6 +521,46 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerDirectAnswerClose: {
     operation: "decision_maker_direct_answer_close",
     prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
+  // Each within docs/policy/amux-decision-maker.md §9's 12 statements.
+  // Resolve read: setup + switches + the next confirmation + request state +
+  // the open question of its card + result detail + bodies + fence.
+  decisionMakerV22QuestionResolve: {
+    operation: "decision_maker_v22_question_resolve",
+    prismaCallCeiling: 8,
+    isolation: "read",
+  },
+  // Answer: setup + audit chain lock + switches + the locked question, Task
+  // and newest attempt + canonical audit 4 + question + Task + fence.
+  decisionMakerV22QuestionAnswer: {
+    operation: "decision_maker_v22_question_answer",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // Escalate: setup + Task + escalation (lookup, Task, create, audit 4) + fence.
+  decisionMakerV22QuestionEscalate: {
+    operation: "decision_maker_v22_question_escalate",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // Cancel: setup + question + canonical audit 4 + fence.
+  decisionMakerV22QuestionCancel: {
+    operation: "decision_maker_v22_question_cancel",
+    prismaCallCeiling: 7,
+    isolation: "mutation",
+  },
+  // Sync read: setup + pending + closing + fence.
+  decisionMakerV22QuestionRead: {
+    operation: "decision_maker_v22_question_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  // Card or close record: setup + update + read-back + fence.
+  decisionMakerV22QuestionWrite: {
+    operation: "decision_maker_v22_question_write",
+    prismaCallCeiling: 4,
     isolation: "mutation",
   },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment

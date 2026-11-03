@@ -247,6 +247,12 @@ mock.module(mod("lib/marketingRetention.ts"), {
     }),
   },
 });
+// A1's weekly KPI report (S3 plan, S3g), mocked as its runner's answer.
+mock.module(mod("lib/marketingWeeklyKpi.ts"), {
+  namedExports: {
+    runMarketingWeeklyKpi: async () => ({ recorded: true, weekStart: "2026-10-18T14:00:00.000Z", reportId: "kpi-1" }),
+  },
+});
 mock.module(mod("lib/productResearchObservationRouteAuth.ts"), {
   namedExports: {
     // On, so the silence step does its reads: off would make it report
@@ -505,6 +511,11 @@ test("a clean run reports no failed steps and every count", async () => {
     MarketingLlmCall: 0,
     MarketingPostContent: 1,
     MarketingPostHistory: 4,
+  });
+  assert.deepEqual(result.marketingWeeklyKpi, {
+    recorded: true,
+    weekStart: "2026-10-18T14:00:00.000Z",
+    reportId: "kpi-1",
   });
   assert.equal(result.scheduledAccountsDeleted, 1);
 

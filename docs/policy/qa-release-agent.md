@@ -189,7 +189,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      있는 것만 남김). 나머지 `.github/**`(감사 기록 등), `scripts/**`, 저장소 루트 설정, `package.json`·lock 파일, 다른 기능의
      정책·UI 계약 문서는 되돌릴 수 있는 코드로 보고 레인이 병합합니다 — PR의 CI가 이미 그 내용으로 돌았습니다. CI 자동 수정은
      모델이 쓰는 변경이므로 이전의 넓은 경계(`.github/**`, `scripts/**`, 루트 파일, package 파일, 계약 문서)를 그대로 둡니다
-     (`lib/prCiAutoFixGuardCore.ts`). 같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
+     (`lib/prCiAutoFixGuardCore.ts`). 예외는 하나입니다: develop으로 가는 Dependabot PR(`dependabot/**`, 작성자 `dependabot[bot]`)의 수정은 루트의 앱
+     빌드·계측 설정(`next.config.ts|mjs|js`, `sentry.client|server|edge.config.ts`, `instrumentation.ts`, `instrumentation-client.ts`)만 고칠 수 있습니다(운영자 결정 2026-10-26).
+     같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
    - 변경 경로에 이 Agent 자신의 파일(부록 A, 판정은 PR base의 목록으로).
    - 이 Agent의 테이블(`AgentDigestItem`, `QaRelease`로 시작하는 테이블)을 이름 대는 migration. 판정은 변경된
      `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.
@@ -267,7 +269,11 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    않으면) ruleset을 걸지 않고, **S-M1에도 들어가지 않으며**, 운영자가 다음을 정합니다. 이 보호를 바꾸는 것은 이 정책의 개정입니다.
    ruleset은 bypass 목록 밖의 **모든** actor에게 걸리므로, 브랜치를 갱신해야 하는 기존 자동화(Dependabot, 저장소 workflow의
    GitHub Actions 등)는 bypass에 넣고 **이 App만 넣지 않습니다**. 관측에는 그 자동화의 브랜치 갱신 성공도 포함하며, 거는 날과
-   bypass 목록은 운영자가 관측 결과를 보고 정합니다.
+   bypass 목록은 운영자가 관측 결과를 보고 정합니다. 2026-10-26 운영자 결정으로 CI 입장 App(`tomverse-ci-admission`,
+   integration 5391627)을 "no updates outside develop" ruleset의 bypass에 더했습니다 — 뒤처진 draft의 브랜치를 base 기준으로
+   업데이트(update-branch)하기 위해서입니다. 2026-10-30 운영자 결정으로 엔지니어링 에이전트 게시 App(`tomverse-engineering-publisher`,
+   integration 5224114)을 같은 bypass에 `always`로 더했습니다 — `creation` 규칙이 이 App의 `agent/engineering/*` 브랜치 생성을 거절해
+   게시가 한 번도 되지 않았기 때문입니다. 병합 레인 App은 여전히 넣지 않습니다.
 8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
@@ -303,10 +309,28 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       실었던 PR은 운영자가 새로 저장하기 전까지 다음 열차에 다시 실립니다(운영자 2026-10-24; 보고 감사 기록에서 계산하며 새로
       쓰는 기록은 없습니다). workflow를 바꾼 PR은 이월하지 않습니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 고른 PR이 없으면 열지 않습니다. 한
       열차는 최대 30개를 싣습니다. 서비스는 30분마다 돌고(운영자 2026-10-23) 출발 창 한 시간 안에서 두 번 기회가 있습니다.
+      Dependabot(`dependabot[bot]`)이 만든 패키지 업데이트 PR은 후보에 올리지 않습니다. 같은 업데이트의 main PR을 Dependabot이 따로
+      엽니다(운영자 2026-10-27).
+      운영자는 후보를 목록에서 숨기거나 다시 보이게 할 수 있습니다(운영자 2026-10-27, `qa_release.train_cargo_hidden` 감사 기록,
+      owner·ops). 화면 표시만 바꾸며 열차는 읽지 않고, 고른 PR은 숨겨도 목록에 남아 실립니다.
+    - **후보 판정**(운영자 2026-10-29, `lib/qaReleaseTrainVerdict.ts`): 열차 서비스가 열차 회차 뒤에, main이 바뀌었거나 새 후보가
+      있을 때 목록의 후보마다 내용을 대조합니다. "main에 있음"은 증명된 것만입니다: 파일이 main에서 PR이 남긴 그대로(모드 포함)이거나
+      develop의 지금 파일과 같거나, PR의 hunk마다 문맥을 포함한 결과 블록이 main에 통째로 있을 때입니다. 그러면 "내용 대조로 main에
+      있음"이 되어 목록에서 빠집니다. 나머지는 "확인되지 않은 변경"으로 남고, 모델이 PR 본문, 그 변경, 그 파일을 나중에 건드린 main
+      PR 본문을 보고 "릴리스 필요·불필요·운영자 판단"과 이유를 답하며, 근거로는 보여 준 PR만 인정합니다. 모델은 열차
+      전용 키로 돌며 한 회차 10건까지, 같은 차이는 한 번만 묻습니다(실패는 6시간 뒤 다시). `QA_RELEASE_TRAIN_MODEL_VERDICT=false`로
+      끕니다. 결과는 표시 전용 AppSetting 하나이고 열차는 읽지 않습니다. Admin은 판정과 근거를 후보마다 보여 주고, 모델이 불필요로 본
+      후보를 한 번에 숨기는 버튼을 둡니다(숨김은 위의 감사 기록 그대로).
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
-      합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뛰고, 충돌하는 PR은 abort하고 뺍니다. 뺀 PR과
-      이유는 PR 본문과 Admin에 보입니다. 충돌 해결은 하지 않습니다. 대신 충돌한 PR마다 충돌 파일을 먼저 바꾼 develop PR(그 PR
-      병합 전 14일 안, 최대 10개)을 보고에 적고, Admin은 그중 아직 main에 없는 것을 "먼저 실어야 할 PR"로 보이며 함께 고르게 합니다. `.github/workflows/**`를 바꾸는 PR도
+      합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뜁니다. 충돌한 PR은
+      `QA_RELEASE_TRAIN_MODEL_RESOLVE=true`이고 열차 전용 키 `QA_RELEASE_TRAIN_ANTHROPIC_API_KEY`가 있을 때 모델에 넘깁니다(운영자
+      2026-10-28, `lib/qaReleaseTrainResolve.ts`, 기본 꺼짐, 호출마다 과금). 모델은 PR의 diff와 충돌 구간(diff3, 앞뒤 20줄)을 보고
+      각 구간이 main에서 될 줄만 씁니다. main의 줄에 이 PR의 변경만 더하고, main에 없는 다른 PR의 줄은 들이지 않습니다. 모든
+      구간에 답하지 않았거나 충돌 표시가 남은 답은 쓰지 않습니다. 텍스트가 아닌 파일, 한쪽에서 지운 파일은 넘기지 않습니다. 한 열차에서
+      모델에 넘기는 충돌은 6개까지이고, 조립 시작 15분이 지나면 더 넘기지 않으며, workflow를 바꾸는 PR은 넘기지 않습니다. 이렇게 실린 PR은 커밋 trailer `Release-train-model-resolved:`와 PR 본문에 파일과 모델의
+      설명이 "확인" 표시와 함께 붙고, CI와 운영자의 병합이 그 뒤에 그대로 있습니다. 모델이 풀지 못하거나 스위치가 꺼져 있으면
+      abort하고 뺍니다. 모델이 말한 이유는 PR 본문과 Admin에 보입니다. 사람이 짠 선행 PR 탑승과 인접 줄 정리는 이 경로로 대체되어
+      지웠습니다. `.github/workflows/**`를 바꾸는 PR도
       되돌려 뺍니다: App에 workflows 권한이 없어 그 파일이 든 push는 GitHub이 거절하고, 열차 전체가 실패하기 때문입니다. 그런 PR은
       `release/**`나 `hotfix/**`로 따로 냅니다.
     - **긴급 열차**(운영자 2026-10-25): owner·ops가 최근 로그인으로 릴리스 열차 탭에서 PR과 사유(5~300자)를 적어 요청하면
@@ -317,7 +341,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       긴급 열차는 clone 전에는 출발할 정기 열차를 막지 않습니다: 긴급 요청의 PR이 develop에 병합된 것이 없거나, 읽기가
       실패하거나, 그 분에 이미 출발했거나, 승인이 거부되면 그 회차는 정기 출발로 넘어갑니다(요청은 출발하거나 취소될 때까지 대기로
       남습니다). 요청한 PR이 모두 이미 열린 열차에 있으면 clone 없이 승인·"공차" 보고로 요청을 소진하고 정기 출발로 넘어갑니다.
-      clone해서 조립했는데 실린 PR이 없으면 그 회차는 거기서 끝납니다(두 번째 clone이 서비스의 10분 제한을 넘기면 정기 선택만
+      clone해서 조립했는데 실린 PR이 없으면 그 회차는 거기서 끝납니다(두 번째 clone이 서비스의 시간 제한을 넘기면 정기 선택만
       소진될 수 있으므로). 대기 요청이 없을 때의 취소는 아무것도 기록하지 않습니다. 사유는 감사 기록에만 남고 공개 PR 본문에는 나오지 않습니다. 빈 요청은 대기 중인
       요청을 취소합니다. 요청·취소는 화면이 본 대기 요청 ID를 함께 보내고, 감사 잠금 안에서 그것이 아직 대기 중인 요청이 아니면
       거부됩니다(이미 출발했거나 다른 운영자가 바꾼 요청을 오래된 화면이 덮어쓰지 않도록). 이미 열린 열차 PR의 Included 목록에 있는
@@ -333,8 +357,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       다음 열차 후보와 열차 서비스는 열린 main PR 중 이 저장소 브랜치에서 온 것만 믿습니다. 열린 열차가 실은 PR은 Included 항목 맨
       앞의 번호로만 셉니다(서비스). 다음 열차 후보는 거기에 릴리스 PR 제목의 번호를 더하고, 병합된 main PR은 커밋으로도 봅니다(fork PR이나
       항목 제목 속 번호는 세지 않음). 다음 열차 후보, 전광판, 열차 서비스 모두 열린 main PR을 페이지 끝까지(300개까지, 넘으면 읽지
-      못함) 읽습니다. 보고 없는 열차는 서비스의 10분 강제 종료를 고려해 승인 뒤 11분까지만 "편성 중"이고 그 뒤로는 "보고 없음"입니다.
-      줄을 누르면 실린 PR, 못 실린 PR과 이유·선행 PR, 이미 main에 있던 PR, RC SHA와 걸린 시간이 펼쳐집니다. 긴급 승인이 거부되면
+      못함) 읽습니다. 보고 없는 열차는 서비스의 25분 강제 종료를 고려해 승인 뒤 26분까지만 "편성 중"이고 그 뒤로는 "보고 없음"입니다.
+      줄을 누르면 실린 PR, 못 실린 PR과 이유(모델이 풀지 못한 이유 포함), 이미 main에 있던 PR, RC SHA와 걸린 시간이 펼쳐집니다. 긴급 승인이 거부되면
       그 회차는 출발할 정기 열차를 이어서 출발시킵니다.
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**

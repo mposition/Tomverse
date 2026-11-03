@@ -21,6 +21,7 @@ import {
   renderBlindSheet,
 } from "../lib/aiReviewEvalBlindSheet.ts";
 import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
+import { findJudgedThresholdSet } from "../lib/aiReviewJudgedThresholds.ts";
 import { fileDigest } from "../lib/aiReviewEvidenceBundle.ts";
 import {
   findThresholdSet,
@@ -84,12 +85,16 @@ const seed = Number(argValue("seed", "1"));
 // meant adding a `v2` with a different bar would have kept producing sheets of
 // the old size, silently.
 const thresholdVersion = argValue("threshold-version", "v1-draft");
-const thresholdSet = findThresholdSet(thresholdVersion);
+const thresholdSet = findThresholdSet(thresholdVersion) ?? findJudgedThresholdSet(thresholdVersion);
 if (!thresholdSet) {
   console.error(
     `No threshold set "${thresholdVersion}". Known: ` +
       `${AI_REVIEW_THRESHOLD_SETS.map((set) => set.version).join(", ")}.`
   );
+  process.exit(1);
+}
+if (!Number.isSafeInteger(thresholdSet.minBlindReviewedCases) || thresholdSet.minBlindReviewedCases < 1) {
+  console.error("Select a positive blind-review sample size in the threshold draft first.");
   process.exit(1);
 }
 const sampleSize = Number(

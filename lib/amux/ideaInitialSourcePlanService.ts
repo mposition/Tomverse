@@ -65,6 +65,11 @@ export async function createInitialIdeaOnlySourcePlan(
       !idea.rawDigest || !idea.rawDigestKeyId) {
     throw new InitialSourcePlanError("not_ready");
   }
+  // An idea the idea lane took is implemented there; it never starts this
+  // analysis as well. The lane's claim holds the same row lock.
+  if (await tx.amuxIdeaLaneAttempt.count({ where: { ideaId: input.ideaId } }) > 0) {
+    throw new InitialSourcePlanError("not_ready");
+  }
   const submittedAuditSelect = { id: true, action: true, targetType: true,
     targetId: true, actorUserId: true, actorEmail: true, ipAddress: true,
     userAgent: true, metadata: true, entryHash: true } as const;

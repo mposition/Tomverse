@@ -393,6 +393,16 @@ test("a turn recorded in another conversation is not offered on this screen", ()
   assert.equal(suggestion({ conversationId: null }).refusal, "conversation_changed");
 });
 
+test("Smart Adaptive is never offered a Deep Research expansion", () => {
+  // The same question that is offered in a manual pick.
+  assert.equal(suggestion().offered, true);
+  const auto = suggestion({ autoSelection: true });
+  assert.equal(auto.offered, false);
+  assert.equal(auto.refusal, "auto_selection");
+  assert.equal(auto.text, null);
+  assert.equal(suggestion({ autoSelection: false }).offered, true);
+});
+
 test("a refused offer carries no question with it", () => {
   const decision = suggestion({ availability: "plan_locked" });
   assert.equal(decision.promptId, null);

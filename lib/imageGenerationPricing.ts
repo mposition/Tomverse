@@ -35,6 +35,149 @@ export const IMAGE_PROMPT_BUDGET_MICRO_USD = Math.ceil(
     1_000_000
 ); // 5_000
 
+// Editing an attached photo sends that photo to the provider as input. The
+// server first downscales it to fit IMAGE_EDIT_INPUT_MAX_EDGE_PX, and each
+// edit-capable model below states what that photo costs and the credits an
+// edit adds for it. A fixed price needs a computable worst case
+// (docs/policy/image-generation.md section 12), so a model edits only once
+// `verification` records the evidence its budget rests on.
+export const IMAGE_EDIT_INPUT_MAX_EDGE_PX = 1_024;
+
+export type ImageEditPricing = {
+  /** Credits added to the option's own price for an edit. */
+  surchargeCredits: number;
+  /** Worst-case provider cost of the photo as input, micro-USD. */
+  inputBudgetMicroUsd: number;
+  /**
+   * Set when the provider bills the photo per input token: settlement then
+   * charges the reported tokens at this rate. Null when the photo costs a
+   * fixed amount per edit, which settles at `inputBudgetMicroUsd`.
+   */
+  inputTokens: { maxTokens: number; usdPerMillionTokens: number } | null;
+  /**
+   * What the budget rests on: a published price or a billed measurement.
+   * Null holds edits on the model whatever IMAGE_EDIT_ENABLED says.
+   */
+  verification: {
+    verifiedAt: string;
+    source: string;
+    /** For a per-token photo: the largest image-input tokens measured. */
+    measuredMaxTokens?: number;
+  } | null;
+};
+
+const IMAGE_EDIT_PRICING: Readonly<Record<string, ImageEditPricing>> = {
+  // POST /v1/images/edits bills the photo as image input at US$8 per million
+  // tokens (read 2026-10-29 from developers.openai.com/api/docs/pricing). The
+  // budget is 10,000 tokens. Measured 2026-10-29 (owner-approved run,
+  // scripts/measure-image-edit-tokens.mjs, quality low): 1,024 image tokens
+  // for 1024x1024 and 768 for 1024x768 and 768x1024 -- one token per 32x32
+  // pixels, so a photo fitted inside 1024px is at most a tenth of the budget.
+  // 90 credits carry the 80,000 micro-USD budget under the ceiling for every
+  // option: the worst is high 1024x1024 at
+  // (211,000 + 5,000 + 80,000) / (250 + 90) = 871 micro-USD per credit.
+  "gpt-image-2": {
+    surchargeCredits: 90,
+    inputBudgetMicroUsd: 80_000,
+    inputTokens: { maxTokens: 10_000, usdPerMillionTokens: 8 },
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "scripts/measure-image-edit-tokens.mjs",
+      measuredMaxTokens: 1_024,
+    },
+  },
+  // fal-ai/nano-banana-2/edit is sold per output image at the generation's own
+  // price: fal's pricing API answered unit_price 0.08 per "images" for both
+  // endpoints on 2026-10-29, and the model page names no input-image charge.
+  // The edit therefore adds nothing to the 120 credits already approved. The
+  // owner-approved run of scripts/measure-image-edit-providers.mjs on
+  // 2026-10-29 sent a 1024x768 photo as a data URI and got back a 1024x1024
+  // PNG on fal's CDN -- the image that was priced.
+  "fal-ai/nano-banana-2": {
+    surchargeCredits: 0,
+    inputBudgetMicroUsd: 0,
+    inputTokens: null,
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "fal pricing API (fal-ai/nano-banana-2/edit) + scripts/measure-image-edit-providers.mjs",
+    },
+  },
+  // xAI publishes only the output price (US$0.05 per image). The owner-approved
+  // run of scripts/measure-image-edit-providers.mjs on 2026-10-29 read
+  // usage.cost_in_usd_ticks = 600,000,000 (US$0.06) for both a 1024x1024 and a
+  // 1024x768 photo: the photo adds a flat US$0.01 whatever its shape. 10
+  // credits carry it at (50,000 + 5,000 + 10,000) / (75 + 10) = 765 micro-USD
+  // per credit, beside the 733 the generation already carries.
+  "grok-imagine-image-quality-20260403": {
+    surchargeCredits: 10,
+    inputBudgetMicroUsd: 10_000,
+    inputTokens: null,
+    verification: {
+      verifiedAt: "2026-10-29",
+      source: "scripts/measure-image-edit-providers.mjs (usage.cost_in_usd_ticks)",
+    },
+  },
+};
+
+/** A model's edit pricing, or null when it cannot edit (yet). */
+export const imageEditPricing = (modelId: string): ImageEditPricing | null => {
+  const pricing = Object.hasOwn(IMAGE_EDIT_PRICING, modelId) ? IMAGE_EDIT_PRICING[modelId] : null;
+  if (!pricing?.verification) return null;
+  const { inputTokens, verification } = pricing;
+  // A per-token budget is proven only by a measurement inside it.
+  if (
+    inputTokens &&
+    !(
+      typeof verification.measuredMaxTokens === "number" &&
+      verification.measuredMaxTokens > 0 &&
+      verification.measuredMaxTokens <= inputTokens.maxTokens
+    )
+  ) {
+    return null;
+  }
+  return pricing;
+};
+
+// The photo is read from the user's own attachment storage; anything larger
+// is not a file /api/chat accepted (its MAX_ATTACHMENT_SIZE).
+export const IMAGE_EDIT_SOURCE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Attachment types an edit can start from: what sharp decodes here. */
+export const IMAGE_EDIT_SOURCE_MEDIA_TYPES: readonly string[] = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+];
+
+/**
+ * The priced size closest to the photo's shape, read upright (EXIF
+ * orientations 5-8 turn the stored width and height by 90 degrees). Within
+ * 10% of square stays square.
+ */
+export const imageEditOutputSize = (
+  width: number,
+  height: number,
+  orientation?: number
+): ImageSize => {
+  const [w, h] = orientation && orientation >= 5 && orientation <= 8 ? [height, width] : [width, height];
+  if (!(w > 0 && h > 0)) return "1024x1024";
+  const ratio = w / h;
+  if (ratio > 1.1) return "1536x1024";
+  if (ratio < 1 / 1.1) return "1024x1536";
+  return "1024x1024";
+};
+
+/**
+ * Image models that edit a supplied photo: those with verified edit pricing.
+ * Every other model refuses an edit request before anything is reserved.
+ */
+export const imageModelSupportsEdit = (modelId: string) => imageEditPricing(modelId) !== null;
+
+/** Models with an edit adapter, verified or still held. */
+export const IMAGE_EDIT_MODEL_IDS: readonly string[] = Object.keys(IMAGE_EDIT_PRICING);
+
+
 export type ImageQuality = "low" | "medium" | "high";
 export type ImageSize = "1024x1024" | "1536x1024" | "1024x1536";
 export type ImagePreset = "draft" | "standard" | "final";

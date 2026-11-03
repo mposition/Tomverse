@@ -80,7 +80,9 @@ export function createDemoTransport(): ChatTransport {
       item.messages.push({ id: crypto.randomUUID(), role: "user", content: text, attachments: files.map((file) => ({ id: file.uploadId, uploadId: file.uploadId, name: file.name, mediaType: file.mediaType, size: file.size, kind: "file" })) });
       item.title = text.slice(0, 48) || files[0]?.name || item.title;
       write(read().map((c) => c.id === item.id ? item : c));
-      const answer = `This is a local demo response to “${text}”.\n\nYour conversation is saved. You can ask a follow-up or reopen this app to continue.${files.length ? " A synthetic attachment was included." : ""}`;
+      const answer = text === "브랜드 소개 문구를 더 짧고 선명하게 다듬어 줘."
+        ? "## 핵심부터, 선명하게.\n\n복잡한 설명을 덜고, 고객이 얻는 변화를 먼저 말해보세요.\n\n> 아이디어를 꺼내고, 다음 일을 시작하세요.\n\n### 이렇게 바꿨어요\n\n1. 얻는 결과를 먼저\n2. 추상적인 표현은 줄이고\n3. 다음 행동이 떠오르게"
+        : `This is a local demo response to “${text}”.\n\nYour conversation is saved. You can ask a follow-up or reopen this app to continue.${files.length ? " A synthetic attachment was included." : ""}`;
       for (let i = 0; i <= answer.length; i += 8) {
         if (signal.aborted) throw new DOMException("Stopped", "AbortError");
         progress(answer.slice(0, i));

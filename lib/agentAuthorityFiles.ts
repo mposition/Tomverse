@@ -100,6 +100,12 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The official hosts a market fact may cite (S3f): which competitor and which
   // host is a person's decision about content.
   "lib/marketingIntelReportCore.ts",
+  // The marketing SEO code agent's allowlist, validation and publishing rules
+  // (docs/policy/marketing-automation.md §9.2) and the tests that pin them: an
+  // agent changing them could widen what it may edit or where it may push.
+  "lib/marketingSeoAgentCore.ts",
+  "tests/marketingSeoAgentCore.test.mjs",
+  "tests/marketingSeoBranchPolicy.test.mjs",
   "docs/release-gates/**",
   "prisma/**",
   // §4-2: the execution environment. Root files and root dot-directories are
@@ -184,6 +190,10 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/**/*-amux-*",
   "tests/verifyAmuxWslGitTransfer.test.mjs",
   "tests/orchestrator*",
+  // Brand assets whose names carry the agent safety-net token. Classify only
+  // these exact images; the rest of the public asset directory stays unclassified.
+  "public/plugins/providers/data-agent-kit.png",
+  "public/plugins/providers/quarkus-agent.png",
 ];
 
 /**
@@ -343,5 +353,4 @@ export const AGENTS_NAMED_CONTRACT_CONSTANTS: readonly string[] = [
   "IMAGE_INLINE_MODEL_DISCOVERY_LIMIT",
   "CHAT_STARTER_MAX_VISIBLE",
   "CROSS_LOCK_ORDER",
-  "DEPLOY_EXCLUDED_PREFIXES",
 ];

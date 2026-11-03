@@ -13,6 +13,7 @@ import {
   AMUX_EXECUTION_GRADE_ENV,
   amuxExecutionGradeRoutingEnabled,
   amuxExecutionGradeRoutingOpen,
+  amuxV52ReviewRequired,
   amuxWorkerMatchesExecutionGrade,
   classifyAmuxExecutionPath,
   decideAmuxV52ChangedPaths,
@@ -210,4 +211,24 @@ test("distribution report reads proposals and prints counts without their paths"
   } finally {
     unlinkSync(inputFile);
   }
+});
+
+test("an implement run with no change and no patch settles without a v52 review", () => {
+  const base = { gradeGuard: true, role: "implement", outcome: "succeeded",
+    pathDecision: "pass", patchPresent: true, changedPaths: ["docs/a.md"] };
+  assert.equal(amuxV52ReviewRequired(base), true);
+  // Nothing changed: there is no diff to review.
+  assert.equal(amuxV52ReviewRequired({ ...base, patchPresent: false,
+    changedPaths: [] }), false);
+  // A reported change without its patch still needs the review, so it
+  // cannot settle as reviewed.
+  assert.equal(amuxV52ReviewRequired({ ...base, patchPresent: false }), true);
+  // A missing inventory is unknown, never "no change".
+  assert.equal(amuxV52ReviewRequired({ ...base, patchPresent: false,
+    changedPaths: undefined }), true);
+  assert.equal(amuxV52ReviewRequired({ ...base, patchPresent: true,
+    changedPaths: [] }), true);
+  for (const changed of [{ gradeGuard: false }, { role: "investigate" },
+    { outcome: "failed" }, { pathDecision: "escalate" }])
+    assert.equal(amuxV52ReviewRequired({ ...base, ...changed }), false);
 });

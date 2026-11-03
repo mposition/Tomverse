@@ -45,6 +45,26 @@ export const publisherPrBody = (runId, cardRef) =>
     "",
   ].join("\n");
 
+/**
+ * An owner review item: a T2 patch, opened as a draft for the owner (owner
+ * decision 2026-10-30). The title says so, and the body says what marking it
+ * ready does -- the one step that runs its code with the repository's secrets.
+ */
+export const publisherReviewPrTitle = (runId) => `${publisherPrTitle(runId)} (owner review)`;
+export const publisherReviewPrBody = (runId, cardRef) =>
+  [
+    prBodyMarker(runId),
+    "",
+    "**Owner review (T2).** Opened by the Tomverse engineering agent's publisher as a draft. The change touches files the agent may not publish on its own, so a person reviews it before anything runs it.",
+    "",
+    "- While it is a draft, no CI workflow runs.",
+    "- Marking it ready runs this change's code in CI with the repository's secrets. Read the whole diff first.",
+    "- A person reviews and merges it; nothing here merges itself.",
+    "",
+    `Card: ${cardRef}`,
+    "",
+  ].join("\n");
+
 /** The commit object the capability describes, from its named sources only. */
 export const expectedPublishCommit = (work, baseCommitterDate) =>
   expectedCommitObject({
@@ -93,7 +113,7 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
  *     branchOid(branch) -> sha | null,
  *     pullsForHead(branch) -> [{ number, state, baseRef, baseSha, headRef, headSha, body }]  (complete, or throws)
  *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (null: not read; refused: not a diff AMUX would bind)
- *     createPull({ title, body, head }) -> { status: "created", number } | { status: "rejected" } | { status: "unknown" },
+ *     createPull({ title, body, head, draft }) ->{ status: "created", number } | { status: "rejected" } | { status: "unknown" },
  *   }
  *   workspace(baseSha) -> {
  *     baseCommitterDate,
@@ -200,7 +220,11 @@ export async function runPublisherCycle(ports) {
     }
 
     // A write claim. Everything before the push can only refuse.
-    const titled = { title: publisherPrTitle(work.runId), body: publisherPrBody(work.runId, work.cardRef) };
+    // Only `true` is a review item: anything else is the ordinary pull request.
+    const review = work.ownerReview === true;
+    const titled = review ?
+      { title: publisherReviewPrTitle(work.runId), body: publisherReviewPrBody(work.runId, work.cardRef) } :
+      { title: publisherPrTitle(work.runId), body: publisherPrBody(work.runId, work.cardRef) };
     if (
       sha256(work.patchBody) !== work.patchDigest ||
       detectSecrets(work.patchBody).length > 0 ||
@@ -247,7 +271,7 @@ export async function runPublisherCycle(ports) {
       return leave(pushed ? "branch_changed_after_push" : "push_outcome_unknown");
     }
 
-    const created = await github.createPull({ ...titled, head: work.branch });
+    const created = await github.createPull({ ...titled, head: work.branch, draft: review });
     if (created.status === "rejected") return await report("pr_create_rejected");
     let pull = null;
     if (created.status === "created") {

@@ -19,8 +19,10 @@
  * its account quota as the daemon's own probe last read it (a state and one
  * number);
  * how many jobs wait for a reviewer; whether the server is draining; and the
- * last 24 hours' verdict counts. No job id, author, branch, scope, diff,
- * finding or reviewer text is read into it.
+ * last 24 hours' verdict counts; and the CI auto-fix's latest tries (per head
+ * its pull request number, commit id, kind, outcome and the model's result
+ * code from a fixed list -- lib/ci-fix.mjs ciFixReport). No job id, author,
+ * branch, scope, diff, finding, log or model text is read into it.
  *
  * Reporting is telemetry. It never decides anything here: a failed write does
  * not delay, skip or change a review.
@@ -83,7 +85,7 @@ export function quotaForSnapshot(quota) {
  * `computeLoad(jobs, now)`, `quotas` is `readQuotaStatus(config)` (absent
  * entries read as unknown).
  */
-export function buildStatusSnapshot({ jobs, providers, load, quotas = {}, draining, now }) {
+export function buildStatusSnapshot({ jobs, providers, load, quotas = {}, draining, now, ciFix }) {
   const last24h = { accept: 0, reject: 0, unknown: 0 };
   let pendingJobs = 0;
   for (const { slots } of jobs) {
@@ -114,6 +116,9 @@ export function buildStatusSnapshot({ jobs, providers, load, quotas = {}, draini
       reject: Math.min(last24h.reject, MAX_COUNT),
       unknown: Math.min(last24h.unknown, MAX_COUNT),
     },
+    // Only when the CI auto-fix keeps a ledger here, so a server without it
+    // sends the shape every earlier app version accepts.
+    ...(ciFix ? { ciFix } : {}),
   };
 }
 

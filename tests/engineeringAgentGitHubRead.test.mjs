@@ -101,6 +101,25 @@ test("v22 base tree is complete, self-consistent and read from the fixed repo", 
         tree: [] }) }).fetchImpl }), /invalid_response/);
   await assert.rejects(readEngineeringAgentPinnedBaseTree("b".repeat(40),
     { env, fetchImpl }), /invalid_input/);
+  // A tier read after settlement: develop moved on, and the base is still
+  // one of its commits only when GitHub says the head contains it.
+  const moved = "c".repeat(40);
+  const movedRoutes = (compare) => fakeFetch({ ...routes,
+    "/commits/develop": () => ({ sha: moved }),
+    [`/compare/${PIN}...${moved}`]: () => compare }).fetchImpl;
+  const contained = { status: "ahead", behind_by: 0,
+    merge_base_commit: { sha: PIN } };
+  assert.equal((await readEngineeringAgentPinnedBaseTree(PIN,
+    { env, fetchImpl: movedRoutes(contained) }, { onDevelop: true })).rootTreeId,
+  treeId);
+  await assert.rejects(readEngineeringAgentPinnedBaseTree(PIN,
+    { env, fetchImpl: movedRoutes(contained) }), /invalid_input/);
+  for (const compare of [{ ...contained, status: "diverged" },
+    { ...contained, behind_by: 1 },
+    { ...contained, merge_base_commit: { sha: "d".repeat(40) } }])
+    await assert.rejects(readEngineeringAgentPinnedBaseTree(PIN,
+      { env, fetchImpl: movedRoutes(compare) }, { onDevelop: true }),
+    /invalid_input/);
   const blobFetch = fakeFetch({ [`/git/blobs/${blobId}`]: () => ({
     sha: blobId, encoding: "base64", size: blob.length,
     content: blob.toString("base64"),

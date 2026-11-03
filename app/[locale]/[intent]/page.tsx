@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { LanguageProvider, type Language } from "@/components/LanguageProvider";
+import { LanguageProvider } from "@/components/LanguageProvider";
+import { MARKETING_LOCALE_ALIASES, marketingLocaleFor } from "@/lib/marketingLocale";
 import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
 import {
   SEARCH_INTENT_SLUGS,
@@ -10,11 +11,10 @@ import {
 import {
   SEO_LOCALES,
   createPageMetadata,
-  isSeoLocale,
   localizedPath,
 } from "@/lib/seo";
 
-const localeAliases: Record<string, Language> = { kr: "ko", cn: "zh" };
+const localeAliases = MARKETING_LOCALE_ALIASES;
 
 type LocalizedIntentPageProps = {
   params: Promise<{ locale: string; intent: string }>;
@@ -32,8 +32,8 @@ export async function generateMetadata({
   params,
 }: LocalizedIntentPageProps): Promise<Metadata> {
   const { locale, intent } = await params;
-  const normalizedLocale = localeAliases[locale.toLowerCase()] || locale.toLowerCase();
-  if (!isSeoLocale(normalizedLocale) || !isSearchIntentSlug(intent)) return {};
+  const normalizedLocale = marketingLocaleFor(locale);
+  if (!normalizedLocale || !isSearchIntentSlug(intent)) return {};
   const copy = searchIntentPages[intent][normalizedLocale];
   const basePath = `/${intent}`;
   return createPageMetadata({
@@ -50,9 +50,9 @@ export default async function LocalizedIntentPage({
 }: LocalizedIntentPageProps) {
   const { locale, intent } = await params;
   const loweredLocale = locale.toLowerCase();
-  const normalizedLocale = localeAliases[loweredLocale] || loweredLocale;
-  if (!isSeoLocale(normalizedLocale) || !isSearchIntentSlug(intent)) notFound();
-  if (localeAliases[loweredLocale]) {
+  const normalizedLocale = marketingLocaleFor(locale);
+  if (!normalizedLocale || !isSearchIntentSlug(intent)) notFound();
+  if (localeAliases[loweredLocale] || locale !== normalizedLocale) {
     redirect(localizedPath(normalizedLocale, `/${intent}`));
   }
 

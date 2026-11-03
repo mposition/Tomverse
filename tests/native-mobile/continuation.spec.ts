@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test } from '@playwright/test';
 
 /*
@@ -17,7 +18,7 @@ const importedPage = (offset: number, ids: string[]) => ({
 const rows = [
   { id: 'ordinary', title: 'Ordinary chat', surface: 'chat', kind: 'chat', selectedModels: ['demo'], messages: [] },
   {
-    id: 'chat-continuation', title: 'Imported trip plan', surface: 'continuation', productKey: 'chat', kind: 'chat',
+    id: 'chat-continuation', title: 'Continued from an imported chat', sourceTitle: 'Imported trip plan', sourceState: 'available', surface: 'continuation', productKey: 'chat', kind: 'chat',
     selectedModels: ['demo'], selectionMode: 'auto', autoSelection: { offered: true }, messages: [],
     imported: importedPage(2, ['ext-2', 'ext-3']), importedPages: { '0': importedPage(0, ['ext-0', 'ext-1']) },
   },
@@ -49,6 +50,10 @@ test('a Chat continuation is listed with Chat and opens with its original above 
   await expect(page.locator('.conversation-row')).toHaveCount(3);
   await expect(page.locator('.conversation-row', { hasText: 'Imported trip plan' })).toBeVisible();
   await expect(page.locator('.conversation-row', { hasText: 'Imported comparison' })).toHaveCount(0);
+  await expect(page.locator('.history-more[aria-label$="Imported trip plan"]')).toBeVisible();
+  await page.getByPlaceholder('대화 검색').fill('Imported trip');
+  await expect(page.locator('.conversation-row')).toHaveCount(1);
+  await page.getByPlaceholder('대화 검색').fill('');
 
   await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
   await expect(page.getByTestId('continuation-provenance')).toContainText('ChatGPT에서 가져온 대화');
@@ -68,10 +73,17 @@ test('a Chat continuation is listed with Chat and opens with its original above 
   await expect(imported.first()).toContainText('Imported ext-0');
   await expect(page.getByTestId('imported-load-older')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  await page.getByRole('button', { name: '대화', exact: true }).click();
+  await expect(page.locator('.history-more[aria-label$="Imported trip plan"]')).toBeVisible();
+  await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
+  await expect(page.locator('[data-message-source="imported"]', { hasText: 'Imported ext-2' })).toBeVisible();
+  await expect(page.getByTestId('continuation-divider')).toBeVisible();
+  await expect(page.locator('.email-login')).toHaveCount(0);
 });
 
 test('a Review continuation is listed with Review and shows its original', async ({ page }) => {
-  await page.getByTestId('product-switcher').selectOption('review');
+  await selectProduct(page, "review");
   await page.getByRole('button', { name: '대화', exact: true }).click();
   await expect(page.locator('.conversation-row', { hasText: 'Imported comparison' })).toBeVisible();
   await expect(page.locator('.conversation-row', { hasText: 'Imported trip plan' })).toHaveCount(0);

@@ -96,3 +96,4 @@ test("stored v22 patch refuses missing files, base drift and candidate errors", 
       reason: "tree_verification_failed" }) })),
   { ok: false, reason: "tree_verification_failed" });
 });
+

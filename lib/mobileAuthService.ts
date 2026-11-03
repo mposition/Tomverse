@@ -53,6 +53,7 @@ import {
 import { invalidateMobileSessionSnapshots } from "@/lib/mobileSessionAuthorization";
 import { prisma } from "@/lib/prisma";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
+import { mobileStoreReviewSessionAllowed } from "@/lib/mobileAuthKeyring";
 
 const IDLE_WINDOW_MS = MOBILE_REFRESH_IDLE_SECONDS * 1000;
 const ABSOLUTE_WINDOW_MS = MOBILE_REFRESH_ABSOLUTE_SECONDS * 1000;
@@ -210,6 +211,7 @@ type LoadedRotation = {
     revokedAtMs: number | null;
     deviceRevokedAtMs: number | null;
     accountStatus: string;
+    reviewUser: { id: string; email: string | null; plan: string; subscriptionStatus: string | null; periodEndMs: number | null };
   } | null;
 };
 
@@ -234,7 +236,7 @@ const loadRotation = async (recordId: string): Promise<LoadedRotation | null> =>
           absoluteExpiresAt: true,
           revokedAt: true,
           device: { select: { revokedAt: true } },
-          user: { select: { accountStatus: true } },
+          user: { select: { accountStatus: true, email: true, plan: true, subscriptionStatus: true, subscriptionCurrentPeriodEnd: true } },
         },
       },
     },
@@ -262,6 +264,8 @@ const loadRotation = async (recordId: string): Promise<LoadedRotation | null> =>
           revokedAtMs: row.family.revokedAt?.getTime() ?? null,
           deviceRevokedAtMs: row.family.device.revokedAt?.getTime() ?? null,
           accountStatus: row.family.user.accountStatus,
+          reviewUser: { id: row.family.userId, email: row.family.user.email, plan: row.family.user.plan,
+            subscriptionStatus: row.family.user.subscriptionStatus, periodEndMs: row.family.user.subscriptionCurrentPeriodEnd?.getTime() ?? null },
         }
       : null,
   };
@@ -385,6 +389,13 @@ export const rotateMobileSession = async (input: {
   }
 
   const family = decision.family;
+  if (loaded?.family && !mobileStoreReviewSessionAllowed(loaded.family.reviewUser, process.env, now.getTime())) {
+    await revokeFamily({ familyId: family.familyId, userId: family.userId, deviceId: family.deviceId,
+      reason: "logout", event: "mobile_auth.family_revoked", now });
+    await record("mobile_auth.refresh_rejected", { userId: family.userId, deviceId: family.deviceId,
+      familyId: family.familyId, reason: "store_review_ended", outcome: "denied" });
+    return refuse("store_review_ended");
+  }
   // Keyed on the device, and only now that the secret has matched. Keying it on
   // the record id a caller supplied would let anyone who learned an id throttle
   // somebody else's phone.

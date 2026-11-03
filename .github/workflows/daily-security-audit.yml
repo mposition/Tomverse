@@ -312,6 +312,13 @@ jobs:
     # If a shard does start nearing it, add shards rather than minutes. Shard 4
     # is the one to watch, and splitting further would divide the WebKit block
     # that makes it the slowest.
+    #
+    # It did, from 2026-10-27: shard 4 held 1589 mobile-safari cases, WebKit
+    # slowed ~27% per case while every Chromium shard held steady, and the
+    # step hit its 60 minutes at case 1292 on three nights running. Nine
+    # shards, per `--list --shard=i/9` on develop that day, cap WebKit at 977
+    # cases in one shard (638, 977, 786 across 5-7) -- about 43 minutes at the
+    # slow nights' 2.66s a case.
     timeout-minutes: 75
     strategy:
       # A failing shard must not cancel its siblings. Their results are the
@@ -319,8 +326,8 @@ jobs:
       # into an unreadable run.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-        shards: [6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shards: [9]
     env:
       NEXTAUTH_URL: http://127.0.0.1:3100
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
@@ -510,6 +517,19 @@ jobs:
       # lib/emailSendingIdentityCore.ts, so it needs the dependency tree.
       - name: Install dependencies
         run: npm ci
+
+      # npm audit runs in the audit job, so its JSON reaches this job only as
+      # that job's artifact. Without this step the reporter opened a file that
+      # was never here: the 2026-10-17, 10-26 and 10-29 reports all carried
+      # null counts with "ENOENT ... security-audit/npm-audit.json". Allowed to
+      # fail because an audit job that stopped early uploads nothing, and the
+      # reporter already says so in that case.
+      - name: Download dependency audit evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: security-audit-checks-${{ github.run_id }}
+          path: security-audit
 
       - name: Deliver security audit report
         id: report

@@ -133,12 +133,8 @@ test("AI comparison review does not flash an unavailable setup before loading", 
 
   const reviewButton = page.getByRole("button", { name: "AI 답변 교차검토" });
   await expect(reviewButton).toBeVisible({ timeout: 30_000 });
-  // The entry badge is the rail's own approximate figure, and it says 8
-  // because a review runs two reviewers. The dialog below quotes the server's
-  // exact price for the chosen setup, which is why the two numbers are
-  // asserted separately rather than shared.
-  await expect(reviewButton.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
-  await expect(reviewButton.getByTestId("credit-coin-icon")).toBeVisible();
+  await expect(reviewButton.getByTestId("ai-review-entry-credit-cost")).toHaveCount(0);
+  await expect(reviewButton.getByTestId("credit-coin-icon")).toHaveCount(0);
   await reviewButton.click();
   const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
   await expect(dialog.getByTestId("comparison-review-loading")).toBeVisible();
@@ -166,18 +162,18 @@ for (const viewport of [
     await openReviewConversation(page);
 
     const reviewEntryButton = page.getByRole("button", { name: "AI 답변 교차검토" });
-    await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
+    await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toHaveCount(0);
     await reviewEntryButton.click();
     const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByTestId("ai-review-estimated-credits")).toContainText("4");
-    await expect(dialog.getByTestId("ai-review-estimated-credits").getByTestId("credit-coin-icon")).toBeVisible();
+    await expect(dialog.getByTestId("ai-review-estimated-credits")).toHaveCount(0);
     await dialog.getByRole("button", { name: /근거 중심/ }).click();
     await dialog.getByText("신중한 종합안 포함").click();
     await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
 
+    await dialog.getByTestId("ai-review-full-report").locator("summary").click();
     await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
-    await expect(dialog.getByText("2. 중요한 차이")).toBeVisible();
+    await expect(dialog.getByTestId("ai-review-full-report").getByText("2. 중요한 차이")).toBeVisible();
     await expect(dialog.getByText("GPT-5.4 mini").last()).toBeVisible();
     await expect(dialog.getByText("검토 한계")).toBeVisible();
     expect(reviewApi.getRequestBody()).toMatchObject({
@@ -219,12 +215,13 @@ test("AI comparison review with two reviewers shows a tab switcher and agreement
   ).toBeVisible();
 
   // Primary tab shows the first reviewer's content (from the base mock).
-  await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
+  await expect(dialog.locator('[data-testid="ai-review-workspace"]:visible')).toBeVisible();
 
   await secondaryTab.click();
+  await dialog.getByTestId("ai-review-full-report").locator("summary").click();
   await expect(secondaryTab).toHaveAttribute("aria-selected", "true");
-  await expect(dialog.getByText("두 검토자 모두 단계적 접근에 동의합니다.")).toBeVisible();
-  await expect(dialog.getByText("보안 정책 문서는 별도 확인이 필요합니다.")).toBeVisible();
+  await expect(dialog.getByTestId("ai-review-full-report").getByText("두 검토자 모두 단계적 접근에 동의합니다.")).toBeVisible();
+  await expect(dialog.getByTestId("ai-review-full-report").getByText("보안 정책 문서는 별도 확인이 필요합니다.")).toBeVisible();
 });
 
 test("a verificationNeeded item can be checked with a separate, per-item web search", async ({
@@ -260,7 +257,8 @@ test("a verificationNeeded item can be checked with a separate, per-item web sea
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
 
-  await expect(dialog.getByText("공급자별 가격은 외부 확인이 필요합니다.")).toBeVisible();
+  await dialog.locator('[data-testid="ai-review-workspace"]:visible').getByRole("button", {name: /확인이 필요한 내용/}).click();
+  await expect(dialog.locator('[data-testid="ai-review-workspace"]:visible').getByRole("heading", {name: "공급자별 가격은 외부 확인이 필요합니다."})).toBeVisible();
   await dialog.getByRole("button", { name: "웹으로 확인" }).click();
 
   await expect(dialog.getByText("반박됨:")).toBeVisible();
@@ -282,8 +280,8 @@ test("quick comparison performs a structured AI analysis on mobile", async ({
   await openReviewConversation(page);
 
   const quickButton = page.getByTestId("quick-comparison-button");
-  await expect(quickButton.getByTestId("quick-comparison-credit-cost")).toContainText("1");
-  await expect(quickButton.getByTestId("credit-coin-icon")).toBeVisible();
+  await expect(quickButton.getByTestId("quick-comparison-credit-cost")).toHaveCount(0);
+  await expect(quickButton.getByTestId("credit-coin-icon")).toHaveCount(0);
   await quickButton.click();
   await expect(page.getByTestId("quick-comparison-setup")).toHaveCount(0);
   const dialog = page.getByTestId("quick-comparison-dialog");

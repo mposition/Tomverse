@@ -23,8 +23,9 @@ mock.module(mod("lib/autoAvailability.ts"), { namedExports: { autoAvailabilityFo
   availabilityReads += 1;
   throw new Error("ACCOUNT_AVAILABILITY_MUST_NOT_BE_READ");
 } } });
+const LaunchHomepage = () => null;
 mock.module(mod("components/marketing/LaunchHomepage.tsx"), {
-  defaultExport: () => null,
+  defaultExport: LaunchHomepage,
 });
 const MarketingChatAvailabilityProvider = () => null;
 mock.module(mod("components/marketing/MarketingChatAvailability.tsx"), {
@@ -61,7 +62,11 @@ const findElement = (element, type) => {
   return null;
 };
 
-const assertPublicProductLinks = (element, locale) => {
+// The page also renders the landing experiment beacon beside the homepage, so
+// the homepage is found in the tree rather than assumed to be its root.
+const assertPublicProductLinks = (page, locale) => {
+  const element = findElement(page, LaunchHomepage);
+  assert.ok(element);
   assert.equal(element.props.reviewInfoHref, `/${locale}/products/review`);
   assert.equal("chatSurfaceAvailable" in element.props, false);
 };
@@ -94,8 +99,7 @@ test("the root static document carries both public product entries without a bui
 test("each localized static document carries the same public entry without account reads", async () => {
   for (const locale of ["en", "ko", "zh", "fr", "de", "es", "pt"]) {
     const element = await LocalizedLandingPage({ params: Promise.resolve({ locale }) });
-    const landing = element.props.children.props.children;
-    assertPublicProductLinks(landing, locale);
+    assertPublicProductLinks(element, locale);
   }
   assert.equal(sessionReads, 0);
   assert.equal(availabilityReads, 0);

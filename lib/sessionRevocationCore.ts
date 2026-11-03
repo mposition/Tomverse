@@ -110,7 +110,7 @@ export const SIGNUP_INTENT_COOKIE = "tomverse.signup-intent";
 export const SIGNUP_INTENT_MAX_AGE_SECONDS = 10 * 60;
 
 /** The providers the sign-up screen offers. Anything else is not an intent. */
-export const SIGNUP_INTENT_PROVIDERS = ["google", "azure-ad"] as const;
+export const SIGNUP_INTENT_PROVIDERS = ["google", "azure-ad", "apple"] as const;
 export type SignupIntentProvider = (typeof SIGNUP_INTENT_PROVIDERS)[number];
 
 export const isSignupIntentProvider = (value: unknown): value is SignupIntentProvider =>

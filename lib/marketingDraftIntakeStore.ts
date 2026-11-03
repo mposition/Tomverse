@@ -50,6 +50,7 @@ import { resolveMarketingGuardContext } from "@/lib/marketingGuardContext";
 import {
   appendMarketingPostHistory,
   createMarketingPost,
+  evaluateMarketingAutoPause,
   marketingEnvelopeDigest,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
@@ -392,6 +393,11 @@ export async function intakeMarketingGeneratorDraft(
   if (!appended.appended) {
     throw new Error("The intake's own post changed inside its transaction");
   }
+
+  // A rejected draft may be the one that crosses the account's rejection limit
+  // (policy 8.3). Decided here, in this transaction, so the stop and the draft
+  // that caused it commit together or not at all.
+  if (rejected) await evaluateMarketingAutoPause(tx, { channelId: draft.channelId });
 
   // The last statement before the audit row: past the deadline by the
   // database's clock, the whole intake rolls back. The timer already makes the

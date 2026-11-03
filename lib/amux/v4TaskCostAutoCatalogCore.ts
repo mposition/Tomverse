@@ -4,6 +4,7 @@ import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { AMUX_EXECUTION_GRADE_WORKER_ROLE,
   type AmuxExecutionGrade } from "./executionGradeCore.ts";
 import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
+import { amuxV22ExecutionRole } from "./v22WorkerClaimCore.ts";
 
 /**
  * The Task cost catalog, derived on every use from what Tomverse already
@@ -65,6 +66,8 @@ export const AMUX_TASK_CATALOG_CAPS: Readonly<Record<AmuxExecutionGrade,
 
 export type AmuxTaskCatalogWorker = {
   workerName: string;
+  /** The v22 provider (a v19 CLI channel name). */
+  provider: string;
   modelId: string;
   /** The v22 profile's roles. */
   roles: readonly string[];
@@ -77,6 +80,11 @@ export type AmuxTaskCatalogResolvedPrice = {
   cachedInputPriceMultiplier: number;
   /** The verified five-minute write rate; null when none was verified. */
   cacheWriteUsdPerMillionTokens: number | null;
+  /**
+   * The Admin › Models entry an owner's CLI model link priced the route from
+   * (owner decision 2026-10-27); absent when the route's own model name did.
+   */
+  linkedModelId?: string;
 };
 
 export type AmuxTaskAutoCatalog =
@@ -108,8 +116,8 @@ const gradeOf = (roleCeiling: string | null): AmuxExecutionGrade | null =>
 
 export function deriveAmuxV4TaskAutoCatalog(input: {
   workers: readonly AmuxTaskCatalogWorker[];
-  /** The registry price for a model at a prompt of this many input tokens. */
-  priceFor: (modelId: string, inputTokens: number) => AmuxTaskCatalogResolvedPrice | null;
+  /** The registry price for a provider's model at a prompt of this many input tokens. */
+  priceFor: (modelId: string, inputTokens: number, provider: string) => AmuxTaskCatalogResolvedPrice | null;
   caps?: Readonly<Record<AmuxExecutionGrade, AmuxTaskCatalogGradeCaps>>;
 }): AmuxTaskAutoCatalog {
   const caps = input.caps ?? AMUX_TASK_CATALOG_CAPS;
@@ -117,9 +125,15 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
   for (const worker of [...input.workers].sort((a, b) =>
     a.workerName.localeCompare(b.workerName))) {
     const grade = gradeOf(worker.roleCeiling);
-    const roles = AMUX_TASK_CATALOG_ROLES.filter((role) => worker.roles.includes(role));
+    // A Task role is priced on the worker that runs its execution role
+    // (test as implement, verify as investigate).
+    const roles = AMUX_TASK_CATALOG_ROLES.filter((role) =>
+      worker.roles.includes(amuxV22ExecutionRole(role)));
     if (!grade || roles.length === 0) continue;
-    const price = input.priceFor(worker.modelId, caps[grade].inputTokens);
+    // The identity keeps the profile's own roles, so a route an approved Task
+    // already holds keeps its digest.
+    const profileRoles = AMUX_TASK_CATALOG_ROLES.filter((role) => worker.roles.includes(role));
+    const price = input.priceFor(worker.modelId, caps[grade].inputTokens, worker.provider);
     const uncached = microUsd(price?.inputUsdPerMillionTokens);
     const output = microUsd(price?.outputUsdPerMillionTokens);
     // A zero or missing price never becomes a free route.
@@ -130,12 +144,16 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const cacheRead = Number.isFinite(multiplier) && multiplier > 0
       ? Math.ceil(uncached * multiplier) : uncached;
     const cacheWrite = verifiedWrite;
-    const identity = { workerName: worker.workerName, provider: "anthropic",
-      modelId: worker.modelId, roles, grade };
+    // A linked name names the entry that priced it; an unlinked one is unchanged.
+    const pricingSource = `model-registry:${price.linkedModelId ?? worker.modelId}`;
+    // One route the catalog would refuse never takes every other route with it.
+    if (pricingSource.length > 160) continue;
+    const identity = { workerName: worker.workerName, provider: worker.provider,
+      modelId: worker.modelId, roles: profileRoles, grade };
     routes.push({
       routeId: `v22:${worker.workerName}`,
       workerName: worker.workerName,
-      provider: "anthropic",
+      provider: worker.provider,
       modelId: worker.modelId,
       // Only the route's identity, so a price change never asks an approved
       // Task to reconfirm its route.
@@ -143,7 +161,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       enabled: true,
       roles,
       grades: [grade],
-      pricingSource: `model-registry:${worker.modelId}`,
+      pricingSource,
       pricingVerifiedAt: PRICES_FROM,
       pricingExpiresAt: PRICES_UNTIL,
       uncachedInputMicroUsdPerMillion: uncached,

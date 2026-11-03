@@ -17,6 +17,7 @@ export const MARKETING_CONSOLE_SECTIONS = [
   "experiments",
   "reports",
   "competitors",
+  "assets",
   "comments",
 ] as const;
 
@@ -32,6 +33,12 @@ export const MARKETING_READ_PAGE_SIZE = 20;
  */
 export const MARKETING_COMPETITOR_READ_LIMIT = 100;
 
+/**
+ * How many stored images and videos the assets section lists: submissions
+ * first, so one waiting for a person is never past the limit behind old ones.
+ */
+export const MARKETING_ASSET_READ_LIMIT = 100;
+
 export type MarketingSectionAvailability =
   | { available: true }
   | { available: false; stage: "S4" | "S5" };
@@ -39,15 +46,10 @@ export type MarketingSectionAvailability =
 /**
  * Stage ownership, from policy §14's stage table.
  *
- * Comment monitoring is S4 and landing experiments are S5, so their sections
- * render as future-stage affordances rather than as queues that are always
- * empty.
+ * Every section is built: comment monitoring (S4) and landing experiments
+ * (S5) both write theirs, so none renders as a future-stage affordance.
  */
-export function marketingSectionAvailability(
-  section: MarketingConsoleSection
-): MarketingSectionAvailability {
-  if (section === "comments") return { available: false, stage: "S4" };
-  if (section === "experiments") return { available: false, stage: "S5" };
+export function marketingSectionAvailability(): MarketingSectionAvailability {
   return { available: true };
 }
 

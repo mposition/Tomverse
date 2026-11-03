@@ -7,6 +7,7 @@ Pod::Spec.new do |s|
   s.author = 'Tomverse'
   s.source = { :path => '.' }
   s.source_files = 'ios/Sources/MobileAuth/**/*.swift'
+  s.resource_bundles = { 'TomverseMobileAuthPrivacy' => ['ios/Sources/MobileAuth/PrivacyInfo.xcprivacy'] }
   s.ios.deployment_target = '15.0'
   s.dependency 'Capacitor'
   s.swift_version = '5.9'
