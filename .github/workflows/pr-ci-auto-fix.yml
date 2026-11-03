@@ -26,20 +26,18 @@
 #   from GitHub's own records -- the pull request is open at exactly head_sha,
 #   its branch is in this repository and is not one that deploys (main,
 #   develop, test: a push there would be an unapproved merge), both branch
-#   names are plain refs, every commit was read and it has fewer
-#   than two auto-fix commits of the kind, and each named run is a failed
+#   names are plain refs, and each named run is a failed
 #   pull_request run on that same commit and the newest run of its workflow
 #   there; a conflict is one GitHub shows, and base_sha is on the pull
 #   request's base branch.
 # - publish: a fresh runner with a trusted checkout runs
 #   scripts/pr-ci-auto-fix-guard.mjs against the patch applied to a clean
-#   checkout of the pull request (nothing under .github/workflows or
-#   .github/actions, which read the repository's secrets; no binary), or, for
+#   checkout of the pull request (any file, workflows included -- owner
+#   2026-11-03; no binary), or, for
 #   a conflict, merges base_sha itself and judges the resolution (exactly the
 #   conflicted files, regular files on both sides and written through no
 #   link, everything git merged outside the conflicts kept in order, no marker
-#   left, no line on none of a conflict's sides in a workflow or action), and
-#   only then pushes with GH_AUTOMATION_PAT, leased to the commit judged. It
+#   left), and only then pushes with GH_AUTOMATION_PAT, leased to the commit judged. It
 #   installs and runs nothing from the pull request.
 
 name: PR CI Auto-Fix
@@ -164,8 +162,7 @@ jobs:
               workflows="${workflows:+${workflows}, }$(jq -r .name /tmp/run.json)"
             done
           fi
-          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits?per_page=100" > /tmp/commits.json
-          node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json /tmp/commits.json "$KIND" || refuse "The pull request is not served."
+          node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json || refuse "The pull request is not served."
           {
             echo "served=true"
             echo "head_branch=$(jq -r .head.ref /tmp/pr.json)"

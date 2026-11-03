@@ -1,12 +1,11 @@
 // The CI auto-fix's decisions (lib/prCiAutoFixGuardCore.ts), for the
 // workflow .github/workflows/pr-ci-auto-fix.yml.
 //
-//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> [ci|conflict]
+//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target <pr.json>
 //   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff <checkout-dir>
 //   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs conflict <checkout-dir> <resolution.json>
 //
-// `target` reads the pull request and its commits as `gh api --paginate
-// --slurp` returned them; `diff` reads the diff against HEAD of another
+// `target` reads the pull request as `gh api` returned it; `diff` reads the diff against HEAD of another
 // checkout. `conflict` reads a checkout where the workflow has merged the
 // pull request's base and stopped on conflicts, and the proposed resolution
 // ({ files: { path: base64 | { merged: sha256, hunks: lines[][] } } }); only
@@ -23,19 +22,12 @@ import { judgePrCiAutoFixConflict, judgePrCiAutoFixDiff, judgePrCiAutoFixTarget,
 
 const [mode, ...args] = process.argv.slice(2);
 let verdict;
-if (mode === "target" && (args.length === 2 || args.length === 3)) {
-  const [prPath, commitsPath, kind = "ci"] = args;
-  const pr = JSON.parse(readFileSync(prPath, "utf8"));
-  // --slurp: one array per page.
-  const pages = JSON.parse(readFileSync(commitsPath, "utf8"));
-  const commits = Array.isArray(pages) ? pages.flat() : [];
+if (mode === "target" && args.length === 1) {
+  const pr = JSON.parse(readFileSync(args[0], "utf8"));
   verdict = judgePrCiAutoFixTarget({
     headBranch: String(pr.head?.ref ?? ""),
     baseBranch: String(pr.base?.ref ?? ""),
     sameRepository: pr.head?.repo?.full_name === pr.base?.repo?.full_name,
-    commitMessages: commits.map((c) => String(c.commit?.message ?? "")),
-    commitCount: pr.commits,
-    kind: kind === "conflict" ? "conflict" : "ci",
   });
 } else if (mode === "diff" && args.length === 1) {
   const [checkoutDir] = args;

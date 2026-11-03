@@ -507,16 +507,15 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 이 저장소의 열린 PR이면 base·브랜치·draft와 상관없이, 그 PR에서 돈 CI(pull_request run)가 실패하면 이 서버의
 구독 Claude CLI가 가장 작은 수정을 만들고 `.github/workflows/pr-ci-auto-fix.yml`이 검사한 뒤
 그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
-운영자 결정 2026-10-23). PR 하나에 자동 수정 커밋은 최대 2개이고, head 하나에 한 번만 시도합니다.
+운영자 결정 2026-10-23). head 하나에 한 번만 시도하고, PR당 시도 횟수에는 상한이 없습니다.
 
 **예외 없이 고칩니다(운영자 결정 2026-11-03).** 대상은 열린 PR 전부입니다(main으로 가는 PR, release·hotfix·Dependabot
-브랜치, draft 포함). 모델은 테스트, 삭제, `scripts/`, 정책·계약 문서, `package.json`·lock, 루트 설정, `.github/`의
-다른 파일까지 고칠 수 있고 크기 상한도 없습니다. 병합은 그대로 사람이 합니다. merge lane은 Dependabot 브랜치와
-게이트 경로를 건드린 PR을 병합하지 않습니다. 남은 제한은 다섯입니다.
-- `.github/workflows/**`, `.github/actions/**`: 저장소 비밀값을 이름으로 꺼낼 수 있는 파일이라 고치지 않습니다.
+브랜치, draft 포함). 모델은 테스트, 삭제, `scripts/`, 정책·계약 문서, `package.json`·lock, 루트 설정, `.github/workflows`·`actions`까지
+고칠 수 있고 크기 상한과 PR당 시도 상한도 없습니다(workflow 수정은 저장소 secret을 읽을 수 있고, 상한 없는 재시도는
+CI 시간을 쓴다는 설명을 듣고 운영자가 정함). workflow 파일을 push하려면 `GH_AUTOMATION_PAT`에 workflow 권한이 있어야 합니다. 병합은 그대로 사람이 합니다. merge lane은 Dependabot 브랜치와
+게이트 경로를 건드린 PR을 병합하지 않습니다. 남은 제한은 셋입니다.
 - head가 배포되는 브랜치(`main`, `develop`, `test`)인 PR(예: main→develop back-merge): 그 브랜치에 push하면 사람이
   승인하지 않은 병합·배포가 되므로 push하지 않습니다. 브랜치 이름은 평범한 ref(`A-Za-z0-9._/-`)여야 합니다.
-- PR당 종류별 시도 2회.
 - binary 변경, fork 브랜치(push할 수 없음).
 - 전송 상한 60KB(`workflow_dispatch` 입력 한계).
 지시 파일(AGENTS.md 등)은 모델이 브랜치의 지시를 받지 않도록 base의 것으로 바꿔 두므로, 그 파일의 수정은 patch에 들어가지 않습니다.
@@ -537,11 +536,8 @@ workflow는 자기가 merge한 같은 파일(sha256이 같아야 합니다)에 �
 workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(conflict):` merge 커밋으로 push합니다.
 - 충돌 파일만 바꿨는지, 충돌 표시가 남지 않았는지 봅니다.
 - git이 충돌 구간 밖에 합쳐 둔 내용은 공백까지, 순서까지 그대로 남아야 합니다. 바뀌는 것은 충돌 구간뿐입니다.
-- 충돌 구간 안에서 그 구간의 어느 쪽에도 없던 줄은 새 줄입니다. `.github/workflows/**`·`.github/actions/**`에서는
-  새 줄을 쓸 수 없습니다. 그 밖의 파일은 제한이 없습니다.
 - 양쪽 모두 일반 파일이어야 하고, 링크를 따라가지 않고 씁니다.
 - 한쪽이 지운 파일, symlink, 지시 파일이 걸린 충돌은 풀지 않습니다(`no_change`, `outside_rules`).
-- PR마다 `auto-fix(conflict):` 커밋은 최대 2개입니다.
 - head 하나에는 요청 하나만 보냅니다. 같은 head의 CI 수정이 진행 중이거나 보내졌으면 충돌 해결은 기다립니다(반대도 같습니다).
 켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,
 그리고 GitHub 저장소 변수 `PR_AUTO_FIX_CONFLICTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이
@@ -621,15 +617,15 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 - **기능이 바뀌면 저절로 다시 시도.** ledger는 시도마다 그때의 능력(`ability`)을 남깁니다. 이 모듈
   (`lib/ci-fix.mjs`, 프롬프트와 설치 경로)의 내용과, CI 수정이면 설치 스위치(`PR_CI_AUTO_FIX_INSTALL`)의 digest입니다.
   고치지 못했거나 검사에 거부된 head도, 그 뒤 능력이 바뀌면 라벨 없이 **한 번 더** 시도합니다. 스위치를
-  켜거나 서버 checkout을 갱신한 경우입니다. 같은 능력으로는 다시 시도하지 않습니다. 보낸 수정과 시도 2회
-  소진은 대상이 아니고, 한 pass에 하나·시간당 상한·quota는 그대로입니다. 이 기록이 없던 예전 항목은 첫
+  켜거나 서버 checkout을 갱신한 경우입니다. 같은 능력으로는 다시 시도하지 않습니다. 보낸 수정은 대상이
+  아니고, 한 pass에 하나·시간당 상한·quota는 그대로입니다. 이 기록이 없던 예전 항목은 첫
   갱신 뒤에 한 번 다시 시도합니다(운영자 결정 2026-11-02: 운영자가 라벨을 붙여야만 다시 시도하는 것은
   자동화가 아니다).
 - **다시 분석.** 같은 head는 같은 능력으로 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
   PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
   서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 시도보다 **나중에** 붙은 라벨만 요청으로 봅니다.
   그래서 예전 head에서 남은 라벨은 새 head를 다시 시도하게 하지 않습니다. 고치지 못함·분석 실패·검사 거부만
-  대상이고, 시도 2회 소진은 대상이 아닙니다. 입장 라운드는 보고에서 현재 head의 재시도가 시작된 것을 확인했을 때만 라벨을 뗍니다(보고가 없거나 기록이 빠진 것은 근거가 아닙니다).
+  대상입니다. 입장 라운드는 보고에서 현재 head의 재시도가 시작된 것을 확인했을 때만 라벨을 뗍니다(보고가 없거나 기록이 빠진 것은 근거가 아닙니다).
 - **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
   만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
   - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.
@@ -652,9 +648,8 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   보냅니다. 예전 sender가 head만으로 남긴 기록은 그 시각 이전에 만든 요청을 보낸 것으로 봅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
 - **판단의 경계는 workflow입니다.** dispatch 입력을 믿지 않고 GitHub 기록으로 다시 확인합니다
   (PR이 그 head에서 열려 있고 브랜치가 이 저장소의 것인지, 넘겨받은 run이 그 커밋에서 실패한 pull_request run이면서 그 workflow의
-  최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 자동 수정 커밋이
-  2개 미만인지, 충돌이면 base 커밋이 PR의 base 브랜치에 있는지). 그 뒤 `scripts/pr-ci-auto-fix-guard.mjs`가 patch를 검사하고
-  (`.github/workflows/**`·`.github/actions/**` 변경과 binary 금지) 통과할 때만 `GH_AUTOMATION_PAT`으로 push합니다. 위조된
+  최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 충돌이면 base 커밋이 PR의 base 브랜치에 있는지). 그 뒤 `scripts/pr-ci-auto-fix-guard.mjs`가 patch를 검사하고
+  (binary 금지) 통과할 때만 `GH_AUTOMATION_PAT`으로 push합니다. 위조된
   outbox 요청이 할 수 있는 최악은 나쁜 모델 patch와 같고, guard가 둘 다 같은 기준으로 판단합니다.
 - **기본은 꺼짐입니다.** 저장소 변수 `PR_AUTO_FIX_ENABLED`가 정확히 `true`가 아니면 workflow가
   아무것도 하지 않고, timer와 sender를 설치하지 않으면 서버도 아무것도 하지 않습니다.

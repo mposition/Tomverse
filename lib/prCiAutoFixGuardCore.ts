@@ -5,16 +5,15 @@
  * The auto-fix fixes CI on every pull request, with no exception (owner
  * 2026-11-03): any base, any branch, drafts too, and any file -- tests,
  * deletions, policy documents, scripts, package files and root config
- * included. A person still merges: the merge lane leaves Dependabot branches
- * and gate paths to the operator. Refused are only what a push cannot take
- * back or the dispatch cannot carry: a change to the workflows or actions
- * (they read the repository's secrets by name), a push to a branch that
- * deploys, a binary, an empty diff, a fork's branch, and more than
- * PR_CI_AUTO_FIX_MAX_ATTEMPTS tries of a kind.
+ * included, workflows and actions too, with no cap on attempts (owner
+ * 2026-11-03, told that a workflow edit can read the repository's secrets and
+ * that an unbounded retry spends CI minutes). A person still merges: the merge
+ * lane leaves Dependabot branches and gate paths to the operator. Refused are
+ * only what a push cannot take back or the dispatch cannot carry: a push to a
+ * branch that deploys, a binary, an empty diff and a fork's branch.
  * Pure: the caller passes `git diff --name-status` and `--numstat` output.
  */
 
-export const PR_CI_AUTO_FIX_MAX_ATTEMPTS = 2;
 export const PR_CI_AUTO_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
 /**
  * A conflict with the pull request's base resolved by the auto-fix (owner
@@ -24,8 +23,6 @@ export const PR_CI_AUTO_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
 export const PR_CI_AUTO_FIX_CONFLICT_PREFIX = "auto-fix(conflict): ";
 const CONFLICT_MARKER = /^(<{7}|>{7})( |$)|^={7}$|^\|{7}( |$)/m;
 
-/** The workflows and actions: what CI runs with the repository's secrets. */
-export const PR_CI_AUTO_FIX_SECRET_PATH = /^\.github\/(workflows|actions)\//;
 /**
  * Branches that deploy (docs/ops/dev-test-lanes.md): a push there is a merge
  * and a deployment no person approved, so a pull request whose head is one
@@ -39,10 +36,8 @@ export type PrCiAutoFixVerdict = { push: true } | { push: false; reasons: string
 
 /**
  * Judged from `git diff -z --name-status` and `-z --numstat`: NUL-separated,
- * so every path is the real one. Without -z git quotes a path with a quote, a
- * control or a non-ASCII byte (`".github/workflows/\355\225\234.yml"`), and a
- * quoted path would not match the fence (review r-20261103-030659-e52c4e).
- * Output that does not parse is refused.
+ * so every path is the real one, whatever bytes it holds. Output that does not
+ * parse is refused.
  */
 export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: string }): PrCiAutoFixVerdict {
   const reasons = new Set<string>();
@@ -51,7 +46,7 @@ export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: strin
   let changed = 0;
   for (let i = 0; i < names.length; ) {
     const status = names[i];
-    // A rename or a copy names both sides; either one in the workflows refuses it.
+    // A rename or a copy names both sides.
     const count = /^[RC]\d*$/.test(status) ? 2 : 1;
     const paths = names.slice(i + 1, i + 1 + count);
     if (!/^[ACDMRTUX]\d*$/.test(status) || paths.length !== count || paths.some((path) => path === "")) {
@@ -59,7 +54,6 @@ export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: strin
       break;
     }
     changed += 1;
-    if (paths.some((path) => PR_CI_AUTO_FIX_SECRET_PATH.test(path))) reasons.add("gate_path");
     i += 1 + count;
   }
   if (changed === 0 && !reasons.has("diff_unreadable")) reasons.add("no_change");
@@ -79,25 +73,16 @@ export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: strin
   return reasons.size === 0 ? { push: true } : { push: false, reasons: [...reasons].sort() };
 }
 
-/** Whether a pull request's branch can take the auto-fix's push, and still has attempts left. */
+/** Whether a pull request's branch can take the auto-fix's push. */
 export function judgePrCiAutoFixTarget(input: {
   headBranch: string;
   baseBranch: string;
   sameRepository: boolean;
-  commitMessages: readonly string[];
-  /** The number of commits GitHub says the pull request has; the attempt count is only trusted when every one was read. */
-  commitCount: number;
-  /** A failed CI (the default) or a conflict with the base. */
-  kind?: "ci" | "conflict";
 }): PrCiAutoFixVerdict {
   const reasons: string[] = [];
   if (!input.sameRepository) reasons.push("fork");
   if (PR_CI_AUTO_FIX_DEPLOYED_BRANCHES.includes(input.headBranch)) reasons.push("deployed_branch");
   if (![input.headBranch, input.baseBranch].every((name) => PR_CI_AUTO_FIX_BRANCH_NAME.test(name ?? ""))) reasons.push("branch_name");
-  if (!Number.isInteger(input.commitCount) || input.commitMessages.length !== input.commitCount) reasons.push("commits_incomplete");
-  const prefix = input.kind === "conflict" ? PR_CI_AUTO_FIX_CONFLICT_PREFIX : PR_CI_AUTO_FIX_COMMIT_PREFIX;
-  const attempts = input.commitMessages.filter((m) => m.startsWith(prefix)).length;
-  if (attempts >= PR_CI_AUTO_FIX_MAX_ATTEMPTS) reasons.push("attempts_exhausted");
   return reasons.length === 0 ? { push: true } : { push: false, reasons };
 }
 
@@ -167,8 +152,7 @@ const startsAt = (lines: string[], at: number, piece: string[]) =>
  * `proposed` every path the resolution names.
  *
  * The resolution must keep everything git merged outside the conflicts, in
- * order and unchanged: only the conflicts themselves are replaced. Inside a
- * conflict a workflow or action may take only its sides' lines.
+ * order and unchanged: only the conflicts themselves are replaced.
  * Refused as well: a resolution for any path that is not conflicted, or none
  * for one that is; a conflict a side deleted, or a side that is not a regular
  * file; markers git did not write; a marker or a NUL byte left.
@@ -209,7 +193,6 @@ export function judgePrCiAutoFixConflict(input: {
     const tailAt = lines.length - tail.length;
     let kept = startsAt(lines, 0, merged.outside[0]) && tailAt >= merged.outside[0].length;
     let at = merged.outside[0].length;
-    let added = 0;
     for (let index = 0; kept && index < merged.hunks.length; index += 1) {
       let end: number;
       if (index + 1 === last) {
@@ -222,15 +205,9 @@ export function judgePrCiAutoFixConflict(input: {
         kept = end <= tailAt - next.length;
       }
       if (!kept) break;
-      const sides = new Set(merged.hunks[index].sides);
-      added += lines.slice(at, end).filter((line) => !sides.has(line)).length;
       at = end + (index + 1 === last ? tail.length : merged.outside[index + 1].length);
     }
-    if (!kept) {
-      reasons.add("outside_conflict_changed");
-      continue;
-    }
-    if (PR_CI_AUTO_FIX_SECRET_PATH.test(file.path) && added > 0) reasons.add("gate_path_new_line");
+    if (!kept) reasons.add("outside_conflict_changed");
   }
   return reasons.size === 0 ? { push: true } : { push: false, reasons: [...reasons].sort() };
 }

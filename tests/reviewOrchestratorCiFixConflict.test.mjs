@@ -68,14 +68,11 @@ test("the guard commits a resolution that keeps everything outside the conflicts
   assert.deepEqual(one("lib/x.ts", "name: ci\n- run: npm audit\nb-branch\n- run: npm test --bail\n"), ["outside_conflict_changed"]);
   // Whitespace counts: a trailing space added or dropped outside is a change.
   assert.deepEqual(one("lib/x.ts", "name: ci \n- run: npm audit\nb-branch\n- run: npm test\n"), ["outside_conflict_changed"]);
-  assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nb-branch \n- run: npm test\n"), ["gate_path_new_line"]);
 
-  // Inside it, a workflow or action takes only its sides' lines (they read the
-  // repository's secrets); any other file may take as many new lines as it needs.
-  assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
-  assert.deepEqual(one(".github/actions/a/action.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
+  // Inside it any file may take as many new lines as it needs, workflows too (owner 2026-11-03).
   const many = Array.from({ length: 200 }, (_, i) => `new ${i}`).join("\n");
-  for (const path of ["package.json", "lib/adminAuth.ts", "lib/agentAuthorityFiles.ts", "scripts/x.mjs", "AGENTS.md", "lib/x.ts"]) {
+  for (const path of ["package.json", "lib/adminAuth.ts", "lib/agentAuthorityFiles.ts", "scripts/x.mjs", "AGENTS.md", "lib/x.ts",
+    ".github/workflows/ci.yml", ".github/actions/a/action.yml"]) {
     assert.deepEqual(one(path, `name: ci\n- run: npm audit\n${many}\n- run: npm test\n`), [], path);
   }
 
@@ -95,12 +92,8 @@ test("two conflicts in one file are each replaced, the text between them kept", 
   assert.deepEqual(judge("top\na1\nend\n"), { push: false, reasons: ["outside_conflict_changed"] });
 });
 
-test("a conflict counts its own attempts, and its commit names the base it merged", () => {
-  const target = (extra) => judgePrCiAutoFixTarget({ headBranch: "claude/to-develop/x", baseBranch: "main", sameRepository: true,
-    commitMessages: ["work"], commitCount: 1, ...extra });
-  assert.deepEqual(target({ kind: "conflict" }), { push: true });
-  const twice = [`${PR_CI_AUTO_FIX_CONFLICT_PREFIX}one`, `${PR_CI_AUTO_FIX_CONFLICT_PREFIX}two`];
-  assert.deepEqual(target({ kind: "conflict", commitMessages: twice, commitCount: 2 }), { push: false, reasons: ["attempts_exhausted"] });
+test("a conflict is served into any base, and its commit names the base it merged", () => {
+  assert.deepEqual(judgePrCiAutoFixTarget({ headBranch: "claude/to-develop/x", baseBranch: "main", sameRepository: true }), { push: true });
   assert.equal(CI_FIX_CONFLICT_COMMIT_PREFIX, PR_CI_AUTO_FIX_CONFLICT_PREFIX);
   assert.ok(read("../.github/workflows/pr-ci-auto-fix.yml").includes(`"${PR_CI_AUTO_FIX_CONFLICT_PREFIX}merge \${BASE_BRANCH} into #`));
 });

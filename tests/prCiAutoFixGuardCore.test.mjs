@@ -6,8 +6,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  PR_CI_AUTO_FIX_COMMIT_PREFIX,
-  PR_CI_AUTO_FIX_CONFLICT_PREFIX,
   judgePrCiAutoFixDiff,
   judgePrCiAutoFixTarget,
 } from "../lib/prCiAutoFixGuardCore.ts";
@@ -43,14 +41,17 @@ test("any file but the workflows and actions is pushed: tests, deletions, script
   }
 });
 
-test("a change to the workflows or actions, a binary or an empty diff is refused", () => {
+test("a change to the workflows or actions is pushed too; only a binary or an empty diff is refused", () => {
+  // Owner 2026-11-03: no exception, workflows included.
+  for (const [nameStatus, numstat] of [
+    ["M\t.github/workflows/x.yml", "1\t1\t.github/workflows/x.yml"],
+    ["A\t.github/actions/setup/action.yml", "9\t0\t.github/actions/setup/action.yml"],
+    ["D\t.github/workflows/x.yml", "0\t9\t.github/workflows/x.yml"],
+    ["R100\t.github/workflows/x.yml\tdocs/x.yml", "0\t0\tdocs/x.yml"],
+  ]) {
+    assert.deepEqual(diff(nameStatus, numstat), { push: true }, nameStatus);
+  }
   for (const [nameStatus, numstat, reason] of [
-    ["M\t.github/workflows/x.yml", "1\t1\t.github/workflows/x.yml", "gate_path"],
-    ["A\t.github/actions/setup/action.yml", "9\t0\t.github/actions/setup/action.yml", "gate_path"],
-    ["D\t.github/workflows/x.yml", "0\t9\t.github/workflows/x.yml", "gate_path"],
-    // A rename names both sides; either one in the workflows refuses it.
-    ["R100\t.github/workflows/x.yml\tdocs/x.yml", "0\t0\tdocs/x.yml", "gate_path"],
-    ["R100\tdocs/x.yml\t.github/workflows/x.yml", "0\t0\t.github/workflows/x.yml", "gate_path"],
     ["M\tpublic/logo.png", "-\t-\tpublic/logo.png", "binary"],
     ["", "", "no_change"],
   ]) {
@@ -60,19 +61,16 @@ test("a change to the workflows or actions, a binary or an empty diff is refused
   }
 });
 
-test("paths are read as git -z gives them, so a name git would quote still meets the fence", () => {
-  // Review r-20261103-030659-e52c4e: without -z git prints ".github/workflows/\355\225\234.yml", quoted.
-  for (const path of [".github/workflows/한글.yml", ".github/workflows/a\"b.yml", ".github/workflows/a\nb.yml", ".github/actions/a\tb/action.yml"]) {
+test("paths are read as git -z gives them, and output that does not parse is refused", () => {
+  for (const path of ["lib/한글.ts", "lib/a\"b.ts", "lib/a\nb.ts"]) {
     const verdict = judgePrCiAutoFixDiff({ nameStatus: `A\0${path}\0`, numstat: `3\t0\t${path}\0` });
-    assert.deepEqual(verdict, { push: false, reasons: ["gate_path"] }, JSON.stringify(path));
+    assert.deepEqual(verdict, { push: true }, JSON.stringify(path));
   }
   // A rename's numstat line ends empty and its two paths follow.
   assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus: "R090\0lib/a.ts\0lib/b.ts\0", numstat: "1\t1\t\0lib/a.ts\0lib/b.ts\0" }), { push: true });
-  assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus: "R090\0lib/a.ts\0.github/workflows/b.yml\0",
-    numstat: "1\t1\t\0lib/a.ts\0.github/workflows/b.yml\0" }), { push: false, reasons: ["gate_path"] });
   // Output that does not parse as -z is refused, not read as no change.
   for (const [nameStatus, numstat] of [
-    ["M\t.github/workflows/x.yml\n", "1\t1\t.github/workflows/x.yml\n"],
+    ["M\tlib/x.ts\n", "1\t1\tlib/x.ts\n"],
     ["M\0", "1\t1\tx\0"],
     ["R100\0only-one\0", "0\t0\t\0only-one\0"],
     ["M\0lib/x.ts\0", "garbage\0"],
@@ -83,7 +81,7 @@ test("paths are read as git -z gives them, so a name git would quote still meets
   }
 });
 
-test("the workflow's guard reads a checkout's diff with -z: a workflow git would quote is refused", () => {
+test("the workflow's guard reads a checkout's diff with -z and refuses a binary", () => {
   const dir = mkdtempSync(join(tmpdir(), "ci-fix-guard-diff-"));
   try {
     const git = (...args) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" });
@@ -92,13 +90,12 @@ test("the workflow's guard reads a checkout's diff with -z: a workflow git would
     mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
     writeFileSync(join(dir, ".github", "workflows", "한글.yml"), "on: push\n");
     const guard = (checkout) => spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "diff", checkout], { encoding: "utf8" });
-    const refused = guard(dir);
-    assert.equal(refused.status, 1, refused.stdout + refused.stderr);
-    assert.deepEqual(JSON.parse(refused.stdout), { push: false, reasons: ["gate_path"] });
-    rmSync(join(dir, ".github"), { recursive: true, force: true });
-    writeFileSync(join(dir, "한글.ts"), "export {};\n");
     const pushed = guard(dir);
     assert.equal(pushed.status, 0, pushed.stdout + pushed.stderr);
+    writeFileSync(join(dir, "logo.png"), Buffer.from([0, 1, 2, 0, 255]));
+    const refused = guard(dir);
+    assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+    assert.deepEqual(JSON.parse(refused.stdout), { push: false, reasons: ["binary"] });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -117,10 +114,9 @@ test("a fix to a gate path is pushed so CI runs, and the merge lane still leaves
   }
 });
 
-test("every same-repository pull request is served, whatever its base, branch or draft state, at most twice per kind", () => {
-  const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", sameRepository: true, commitMessages: ["feat: a"], commitCount: 1 };
+test("every same-repository pull request is served, whatever its base, branch or attempts so far", () => {
+  const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", sameRepository: true };
   assert.deepEqual(judgePrCiAutoFixTarget(base), { push: true });
-  assert.deepEqual(judgePrCiAutoFixTarget({ ...base, kind: "conflict" }), { push: true });
   for (const [headBranch, baseBranch] of [["dependabot/cargo/rustls-0.23.46", "main"], ["release/train-20261103-0800", "main"],
     ["hotfix/x", "main"], ["feature/anything", "develop"]]) {
     assert.deepEqual(judgePrCiAutoFixTarget({ ...base, headBranch, baseBranch }), { push: true }, headBranch);
@@ -135,16 +131,9 @@ test("every same-repository pull request is served, whatever its base, branch or
     [{ headBranch: "x$(id)" }, "branch_name"],
     [{ baseBranch: "main\nserved=true" }, "branch_name"],
     [{ headBranch: "" }, "branch_name"],
-    [{ commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`, "feat: b", `${PR_CI_AUTO_FIX_COMMIT_PREFIX}c`], commitCount: 3 }, "attempts_exhausted"],
-    [{ kind: "conflict", commitMessages: [`${PR_CI_AUTO_FIX_CONFLICT_PREFIX}a`, `${PR_CI_AUTO_FIX_CONFLICT_PREFIX}b`], commitCount: 2 }, "attempts_exhausted"],
-    // A list cut short by paging cannot prove the attempt count.
-    [{ commitMessages: ["feat: a"], commitCount: 251 }, "commits_incomplete"],
   ]) {
     const verdict = judgePrCiAutoFixTarget({ ...base, ...change });
     assert.equal(verdict.push, false, JSON.stringify(change));
     assert.ok(verdict.reasons.includes(reason));
   }
-  // Each kind counts its own commits.
-  assert.deepEqual(judgePrCiAutoFixTarget({ ...base, commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`, `${PR_CI_AUTO_FIX_COMMIT_PREFIX}b`],
-    commitCount: 2, kind: "conflict" }), { push: true });
 });
