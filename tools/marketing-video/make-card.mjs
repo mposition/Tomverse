@@ -146,10 +146,17 @@ try {
   await browser.close();
 }
 
-// Every word the card shows, in reading order, for the Guard at submission.
+// Every word the card shows, in reading order, for the Guard at submission --
+// the captures' own text included (the answers' model names, numbers and
+// wording are on the card too), so a person approving it sees the Guard's
+// codes for all of it.
+if (!Array.isArray(pack.captureText) || pack.captureText.length !== 3) {
+  fail("pack.captureText must hold the left, center and right captures' text");
+}
 const transcript = [
   ...pack.question,
   ...spec.headline,
+  ...pack.captureText,
   spec.callout,
   pack.summaryText,
   "Tomverse",

@@ -8,7 +8,7 @@
 //
 // Exit codes: 0 written, 2 usage, 1 anything else.
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,14 +55,19 @@ const seconds = Number(
 if (!(seconds > 0)) fail("the short has no duration");
 
 // The props and the short side by side: render.mjs serves the props' folder as static files.
+// Removed whether the render succeeds or not: the job runs every week on the box.
 const work = mkdtempSync(path.join(tmpdir(), "mv-feed-"));
-copyFileSync(video, path.join(work, "short.mp4"));
-writeFileSync(path.join(work, "props.json"), JSON.stringify({ video: "short.mp4", seconds }));
 mkdirSync(outDir, { recursive: true });
 const out = path.resolve(outDir, `${id}.mp4`);
-execFileSync(process.execPath, [path.join(here, "render.mjs"), path.join(work, "props.json"), "Feed", out], {
-  stdio: "inherit",
-});
+try {
+  copyFileSync(video, path.join(work, "short.mp4"));
+  writeFileSync(path.join(work, "props.json"), JSON.stringify({ video: "short.mp4", seconds }));
+  execFileSync(process.execPath, [path.join(here, "render.mjs"), path.join(work, "props.json"), "Feed", out], {
+    stdio: "inherit",
+  });
+} finally {
+  rmSync(work, { recursive: true, force: true });
+}
 
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
 writeFileSync(

@@ -35,6 +35,7 @@ not stopped by a rejection: 2026-11-04.
 - `job/sources/<asset-id>/pack.json`: the source material of one approved
   short, kept on the box beside its captures. `locale`, `topic`, `question`
   (two lines), `images` (`left`, `center`, `right`, `summary`, `logo`),
+  `captureText` (the words in the left, center and right captures) and
   `summaryText`, `headlines` (pairs of lines), `callouts`, `ctas`, `cardAlt`,
   and `video` / `videoAsset` (the approved short and its asset file).
 - `job/history.json`: what earlier runs made (`[{date, id, locale, kind,
