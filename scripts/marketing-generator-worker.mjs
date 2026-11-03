@@ -39,8 +39,11 @@ class StopRun extends Error {}
  */
 const A3_SHARE_MS = 20 * 60 * 1000;
 
-/** The analysis and brief's share after A3: two text calls and a report. */
-const ANALYSIS_SHARE_MS = 5 * 60 * 1000;
+/**
+ * The analysis and brief's share after A3: two text calls, the week's plan
+ * at the first run of a week, and a report. A ceiling: A5 has whatever is left.
+ */
+const ANALYSIS_SHARE_MS = 7 * 60 * 1000;
 
 /** Drafts asked of each account per run. */
 const POSTS_PER_ACCOUNT = 3;
