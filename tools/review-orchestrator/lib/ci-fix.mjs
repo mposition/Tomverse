@@ -377,16 +377,18 @@ export async function openPulls(github, maxPages = 20, log = () => {}) {
 }
 
 /**
- * The newest run of each workflow on one head. Nothing is ready while any of
- * them still runs, so one fix sees every failure on the commit and one push
+ * The newest run of each workflow on one head, a workflow known by its id as
+ * the workflow judges it (two files may share a name). Nothing is ready while
+ * any of them still runs, so one fix sees every failure on the commit and one push
  * answers them all.
  */
 export function failedRuns(runs) {
   const latest = new Map();
   for (const run of runs) {
     if (run?.event !== "pull_request") continue;
-    const seen = latest.get(run.name);
-    if (!seen || run.id > seen.id) latest.set(run.name, run);
+    const key = run.workflow_id ?? run.name;
+    const seen = latest.get(key);
+    if (!seen || run.id > seen.id) latest.set(key, run);
   }
   const list = [...latest.values()];
   if (list.some((run) => run.status !== "completed")) return { ready: false, failed: [] };

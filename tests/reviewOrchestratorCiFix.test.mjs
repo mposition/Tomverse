@@ -136,6 +136,15 @@ test("a head is ready only when every workflow's newest run has finished", () =>
   ]);
   assert.equal(ready, true);
   assert.deepEqual(failed.map((r) => r.id), [2, 3], "the newest PR Fast Gate run passed; a push run is not the pull request's");
+  // Two workflow files may share a name: each is its own workflow (review r-20261103-040234-80d59c).
+  const shared = failedRuns([run(6, "CI", "failure", { workflow_id: 10 }), run(7, "CI", "success", { workflow_id: 11 })]);
+  assert.deepEqual(shared.failed.map((r) => r.id), [6], "the other file's green run does not hide this one's failure");
+});
+
+test("a workflow name reaches the step outputs as plain characters, and the push checks its branch again", () => {
+  const workflow = read("../.github/workflows/pr-ci-auto-fix.yml");
+  assert.ok(workflow.includes(`jq -r '.name | gsub("[^A-Za-z0-9 ._()/-]"; "")' /tmp/run.json`));
+  assert.match(workflow, /case "\$HEAD_BRANCH" in main\|develop\|test\) echo "\$HEAD_BRANCH deploys; nothing is pushed to it\."; exit 1 ;; esac\n\s+git config user\.name/);
 });
 
 test("a patch is gzip+base64 and refused when it would not fit in a dispatch", () => {
