@@ -231,8 +231,9 @@ function marketingSendStats(sends: readonly ResolvedSend[]): MarketingSendStats 
     failed: failed.length,
     outcomeUnknown: sends.filter((entry) => entry.outcome === "outcome_unknown").length,
     successRate: sends.length < MARKETING_MEASUREMENT_MIN_SENT ? null : verified / sends.length,
-    latencyP50Ms: marketingPercentile(latencies, 0.5),
-    latencyP95Ms: marketingPercentile(latencies, 0.95),
+    // A held delay is not shown at any level: no percentile from too few sends.
+    latencyP50Ms: held.includes("latency") ? null : marketingPercentile(latencies, 0.5),
+    latencyP95Ms: held.includes("latency") ? null : marketingPercentile(latencies, 0.95),
     failuresByCode: tally(failed.map((entry) => entry.errorCode ?? "unknown")),
     held,
   };

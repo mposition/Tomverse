@@ -104,7 +104,8 @@ test("the week's posts, dispatch and queue are counted, and a small sample is he
   assert.equal(measurement.dispatch.verified, 1);
   assert.equal(measurement.dispatch.failed, 1);
   assert.equal(measurement.dispatch.successRate, null);
-  assert.equal(measurement.dispatch.latencyP50Ms, 10 * 60 * 1000);
+  // One delay is held, not shown.
+  assert.equal(measurement.dispatch.latencyP50Ms, null);
   assert.deepEqual(measurement.dispatch.failuresByCode, [{ code: "rate_limited", count: 1 }]);
   assert.equal(measurement.queue.pendingApproval, 3);
   assert.equal(measurement.queue.oldestPendingAt, "2026-10-20T00:00:00.000Z");
@@ -207,8 +208,7 @@ test("sends are attempts: a failure requeued and then published is two sends, an
     measurement.dispatch.failuresByCode.map((entry) => entry.code).sort(),
     ["media_rejected", "not_on_platform"],
   );
-  // Measured from the requeued schedule to the attempt that published.
-  assert.equal(measurement.dispatch.latencyP50Ms, 5 * 60 * 1000);
+  assert.equal(measurement.dispatch.latencyP50Ms, null);
   assert.equal(measurement.accounts[0].published, 1);
   assert.equal(measurement.dispatch.segments[0].failed, 2);
 });
@@ -281,7 +281,7 @@ test("an unknown outcome a person confirmed as published counts as published, an
   assert.equal(measurement.dispatch.verified, 1);
   assert.equal(measurement.dispatch.outcomeUnknown, 0);
   assert.equal(measurement.dispatch.notSent, 1);
-  assert.equal(measurement.dispatch.latencyP50Ms, 20 * 60 * 1000);
+  assert.equal(measurement.dispatch.latencyP50Ms, null);
 });
 
 test("every code counted as not sent is one the publisher records before its call", () => {
@@ -365,6 +365,10 @@ test("each mode and account is judged on its own sample, and weekly published fo
   });
   const rate = Object.fromEntries(measurement.dispatch.segments.map((row) => [row.accountSlug, row.successRate]));
   assert.deepEqual(rate, { "facebook-3": null, "instagram-3": 1 });
+  // Delays from approval to each attempt that published: 10 to 14 minutes on instagram-3,
+  // held on facebook-3's single send.
+  const delay = Object.fromEntries(measurement.dispatch.segments.map((row) => [row.accountSlug, row.latencyP50Ms]));
+  assert.deepEqual(delay, { "facebook-3": null, "instagram-3": 12 * 60 * 1000 });
   assert.equal(measurement.dispatch.sent, 6);
   assert.equal(measurement.publishedInWindow, 7);
 });
