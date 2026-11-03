@@ -100,6 +100,7 @@ test("with the switch on, two calls make one signed brief whose analysis rests o
     unusable: null,
     claimIds: 1,
     report: { httpStatus: 200, status: "recorded" },
+    strategy: "not_due",
     stoppedAt: null,
   });
   assert.equal(seen.calls.length, 2);
@@ -201,4 +202,119 @@ test("the report is resent as the same bytes on a lost answer or a 5xx, and an u
   const { deps: lost } = ports({ submit: async () => { throw new Error("lost"); } });
   const stopped = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, lost);
   assert.deepEqual(stopped.stoppedAt, { stage: "submit", detail: "outcome_unknown" });
+});
+
+// The weekly plan (owner request 2026-11-03): a third call at the first run of
+// a Brisbane week, read against the accounts, claims and assets offered.
+
+const PLAN_CONTEXT = context({
+  analysis: { enabled: true, strategyDue: true },
+  channels: [
+    { channel: "instagram", accountSlug: "instagram-3", defaultLocale: "ko" },
+    { channel: "facebook", accountSlug: "facebook-3", defaultLocale: "en" },
+  ],
+  assets: [
+    { id: "asset.short-ko", allowedChannels: ["instagram"], altLocales: ["ko"], kind: "video", alt: { ko: "세 답 비교 장면" } },
+    { id: "asset.short-en", allowedChannels: ["instagram"], altLocales: ["en"], kind: "video", alt: { en: "Three answers" } },
+  ],
+});
+
+const PLAN = {
+  headline: "구독 여러 개 대신 한 화면에서 세 모델을 비교",
+  rationale: "대형 3사가 모두 월 US$20 선이다.",
+  goal: "공개 게시로 계정별 반응 기준선을 만든다.",
+  accounts: [
+    {
+      accountSlug: "instagram-3",
+      role: "한국어 인지도",
+      angle: "같은 질문, 세 답",
+      format: "숏폼 영상",
+      posts: 9,
+      days: ["Tue", "thu", "sat", "sun", "mon"],
+      claimIds: ["claim.review-three-models", "claim.made-up"],
+      assetIds: ["asset.short-ko", "asset.short-en"],
+    },
+    { accountSlug: "instagram-3", role: "중복", angle: "중복", format: "글", posts: 1, days: [], claimIds: [], assetIds: [] },
+    { accountSlug: "x-1", role: "없는 계정", angle: "-", format: "글", posts: 2, days: ["mon"], claimIds: [], assetIds: [] },
+    {
+      accountSlug: "facebook-3",
+      role: "설명형",
+      angle: "저장과 공유",
+      format: "텍스트",
+      posts: 2,
+      days: ["mon", "wed"],
+      // Offered only in ko: not this en account's claim.
+      claimIds: ["claim.pro-monthly-price", "claim.review-three-models"],
+      assetIds: ["asset.short-en"],
+    },
+  ],
+  needs: ["zh-Hant 숏폼 1개 추가"],
+  avoid: ["경쟁사 이름을 쓰지 않는다"],
+};
+
+test("when this week has no plan, a third call plans it and the brief carries what survives the checks", async () => {
+  const { deps, seen } = ports({ ctx: PLAN_CONTEXT, answers: [answered(SELF), answered(COMPETITIVE), answered(PLAN)] });
+  const summary = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, deps);
+  assert.equal(summary.calls, 3);
+  assert.equal(summary.strategy, "recorded");
+  assert.equal(summary.stoppedAt, null);
+
+  const planInput = JSON.parse(seen.calls[2].messages[1].content);
+  assert.deepEqual(planInput.brief, { topicId: "side-by-side-answers", claimIds: ["claim.review-three-models"] });
+  assert.deepEqual(
+    planInput.accounts.map((account) => [account.accountSlug, account.weeklyCap, account.assets.map((asset) => asset.id)]),
+    [
+      ["instagram-3", 4, ["asset.short-ko"]],
+      ["facebook-3", 5, []],
+    ],
+  );
+  // The 2026-11-01 run is a Sunday in Brisbane: the week began on the Monday before.
+  assert.deepEqual(planInput.week, { start: "2026-10-26", end: "2026-11-01" });
+
+  const report = marketingGeneratorReportSchema.parse(seen.reports[0]);
+  assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
+  const strategy = report.analysis.strategy;
+  assert.equal(strategy.weekStart, "2026-10-26");
+  assert.deepEqual(
+    strategy.accounts.map((plan) => [plan.accountSlug, plan.posts, plan.days, plan.claimIds, plan.assetIds]),
+    [
+      ["instagram-3", 4, ["tue", "thu", "sat", "sun"], ["claim.review-three-models"], ["asset.short-ko"]],
+      ["facebook-3", 2, ["mon", "wed"], ["claim.review-three-models"], []],
+    ],
+  );
+  // The plan stays with the analysis: A5's brief is the topic and claims alone.
+  assert.deepEqual(Object.keys(report.payload).sort(), ["claimIds", "sourceDigests", "topicIds"]);
+});
+
+test("an unusable plan leaves the brief recorded without one", async () => {
+  for (const content of [answered({ headline: "x" }), answered({ ...PLAN, accounts: [PLAN.accounts[2]] })]) {
+    const { deps, seen } = ports({ ctx: PLAN_CONTEXT, answers: [answered(SELF), answered(COMPETITIVE), content] });
+    const summary = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, deps);
+    assert.equal(summary.strategy, "unusable");
+    assert.deepEqual(summary.report, { httpStatus: 200, status: "recorded" });
+    assert.equal(seen.reports[0].analysis.strategy, undefined);
+  }
+});
+
+test("a plan is not asked for when this week has one, or when the run has no time left for it", async () => {
+  const notDue = ports({ ctx: { ...PLAN_CONTEXT, analysis: { enabled: true, strategyDue: false } } });
+  const first = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, notDue.deps);
+  assert.equal(first.calls, 2);
+  assert.equal(first.strategy, "not_due");
+
+  // Enough for the two analysis calls, not for a third and the report after it.
+  const tight = ports({ ctx: PLAN_CONTEXT });
+  const deadlineAt = new Date(NOW + 100_000).toISOString();
+  const second = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt, market: MARKET }, tight.deps);
+  assert.equal(second.calls, 2);
+  assert.equal(second.strategy, "no_time");
+  assert.deepEqual(second.report, { httpStatus: 200, status: "recorded" });
+});
+
+test("a refused plan call stops the run as the analysis calls do", async () => {
+  const refused = { status: "refused", stage: "reserve", code: "monthly_cap" };
+  const { deps, seen } = ports({ ctx: PLAN_CONTEXT, answers: [answered(SELF), answered(COMPETITIVE), refused] });
+  const summary = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, deps);
+  assert.deepEqual(summary.stoppedAt, { stage: "llm", detail: "reserve:monthly_cap" });
+  assert.equal(seen.reports.length, 0);
 });

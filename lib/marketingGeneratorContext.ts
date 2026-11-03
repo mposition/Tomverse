@@ -15,7 +15,11 @@ import "server-only";
 import { launchHomepageContent } from "@/components/marketing/launchHomepageContent";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
 import { getBillingPlansWithFieldSources } from "@/lib/billingConfig";
-import { MARKETING_ANALYSIS_ENABLED_KEY, marketingAnalysisEnabledFromValue } from "@/lib/marketingAnalysisCore";
+import {
+  MARKETING_ANALYSIS_ENABLED_KEY,
+  marketingAnalysisEnabledFromValue,
+  marketingStrategyWeek,
+} from "@/lib/marketingAnalysisCore";
 import {
   MARKETING_REPORT_PAYLOAD_SCHEMAS,
   type MarketingReportKind,
@@ -98,8 +102,12 @@ export type MarketingGeneratorContext = {
    * competitor text, no URL.
    */
   readonly ownProduct: { readonly pages: Readonly<Record<string, unknown>>; readonly plans: readonly MarketingGeneratorPlan[] };
-  /** Whether the Admin switch lets this run spend on the analysis and brief. Off when unreadable. */
-  readonly analysis: { readonly enabled: boolean };
+  /**
+   * Whether the Admin switch lets this run spend on the analysis and brief
+   * (off when unreadable), and whether the current Brisbane week still has no
+   * stored plan, so this run writes one (lib/marketingStrategyCore.ts).
+   */
+  readonly analysis: { readonly enabled: boolean; readonly strategyDue: boolean };
 };
 
 /**
@@ -352,6 +360,21 @@ const llmContext = async (db: ContextReader, model: string | null): Promise<Mark
   return pin ? { model, pin } : { model: null, pin: null };
 };
 
+/**
+ * Whether the current Brisbane week has no stored plan yet. Keyed on the
+ * week the plan itself names, so a run on Monday writes it and the rest of
+ * the week's runs do not; a run whose plan was unusable leaves it due.
+ */
+async function marketingStrategyDue(db: Pick<ContextReader, "$queryRaw">, now: number): Promise<boolean> {
+  const week = marketingStrategyWeek(now).start;
+  const rows = await db.$queryRaw<Array<{ found: number }>>`
+    SELECT 1 AS "found" FROM "MarketingAnalysis"
+    WHERE "payload"->'strategy'->>'weekStart' = ${week}
+    LIMIT 1
+  `;
+  return rows.length === 0;
+}
+
 export async function readMarketingGeneratorContext(
   db: ContextReader,
 ): Promise<MarketingGeneratorContext> {
@@ -452,6 +475,11 @@ export async function readMarketingGeneratorContext(
     competitors: { tracked, knownIds },
     llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
     ownProduct: { pages: ownPages(), plans: activePlans },
-    analysis: { enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value) },
+    analysis: {
+      enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
+      // Only asked while the switch is on: off, no plan is written either way.
+      strategyDue:
+        marketingAnalysisEnabledFromValue(analysisSetting?.value) && (await marketingStrategyDue(db, Date.now())),
+    },
   };
 }
