@@ -3939,9 +3939,16 @@ export function ChatPageClient({
           // A server read seeds the queue's confirmed state; markConfirmed
           // refuses while local changes are unconfirmed, so a stale read can
           // never masquerade as the server's latest word.
+          //
+          // Seeded with the row's literal lists, not `appliedModels`: the
+          // fallback and the clamp are this screen's own repair, and recording
+          // them as confirmed let the send barrier skip the PATCH when a later
+          // selection (Review's Auto pick) matched the repair -- the preflight
+          // then refused models the row never held (MODEL_NOT_SELECTED,
+          // trace b3ad49ca-7e79-4a54-9380-9bdcdf69d104).
           modelSettingsSyncQueueRef.current.markConfirmed(targetChatId, {
-            models: appliedModels,
-            disabled: nextDisabled,
+            models: normalizeStringArray(data.selectedModels, []),
+            disabled: normalizeStringArray(data.disabledPanels, []),
           });
         }
     }, [clampSelectedModels, userDefaultModelIds]);
@@ -6023,7 +6030,12 @@ export function ChatPageClient({
         const capturedAttachmentIds = capturedDraft.attachments.map(
           (attachment) => attachment.id
         );
-        const draftSendCapture = captureDraftSend(capturedDraft, null);
+        // Frozen in the same whitespace-canonical form an ordinary send uses,
+        // so draft, Message and provider carry one snapshot.
+        const draftSendCapture = captureDraftSend(
+          { ...capturedDraft, text: capturedDraft.text.trim() },
+          null
+        );
         const promise = (async (): Promise<BlankChatAutoSendAuthority | null> => {
           const preparedDraftSend = await prepareDraftSend(draftSendCapture);
           if (!preparedDraftSend) {
@@ -6426,13 +6438,21 @@ export function ChatPageClient({
       autoProductConversationEligible && !skipAutoForThisTurn;
     // Product turns retain exact authored bytes. The browser never substitutes
     // the proposed execution text into the Message or durable draft.
+    //
+    // A new Auto Chat froze its durable draft before the conversation existed.
+    // The Message must carry exactly those bytes: the server consumes a draft
+    // only on a byte-equal match, and the raw-versus-trimmed difference (a
+    // trailing IME newline is enough) was refused with 409 and left every such
+    // send in receipt recovery.
     const authoredPrompt = explicitPromptRefinerDecision
       ? explicitProductSend!.authoredPrompt
-      : promptRefinerAuthoredPromptForSend({
-          rawPrompt: sendInputValue,
-          ordinaryPrompt: trimmed,
-          productTurn: requestAutoPrepare || skipAutoForThisTurn,
-        });
+      : suppliedPreparedDraft
+        ? suppliedPreparedDraft.draft.text
+        : promptRefinerAuthoredPromptForSend({
+            rawPrompt: sendInputValue,
+            ordinaryPrompt: trimmed,
+            productTurn: requestAutoPrepare || skipAutoForThisTurn,
+          });
     if (mountedSurface === "chat" && latestModelSettingsRef.current.models.length !== 1) {
       showToast(t("chat.singleModelRequired"), "info");
       return;
@@ -6627,10 +6647,14 @@ export function ChatPageClient({
             showToast(t("chat.singleModelRequired"), "error");
             return;
           }
-          modelSettingsSyncQueueRef.current.markConfirmed(data.id, {
-            models: createdModels,
-            disabled: createdDisabled,
-          });
+          // Only what the create response itself stored counts as confirmed;
+          // a local fallback is left for the send barrier to PATCH.
+          if (Array.isArray(data.selectedModels)) {
+            modelSettingsSyncQueueRef.current.markConfirmed(data.id, {
+              models: normalizeStringArray(data.selectedModels, []),
+              disabled: normalizeStringArray(data.disabledPanels, []),
+            });
+          }
           // This send follows the answer immediately.
           sendSelectedModels = createdModels;
           sendDisabledPanels = createdDisabled;
