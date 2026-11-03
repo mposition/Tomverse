@@ -15,12 +15,13 @@
  * the sentences actually are, and the test reads each route's page component to
  * prove the mapping is the one that route renders.
  *
- * **`zh-Hant` has no page.** The marketing locales are `en`, `ko`, `zh-Hant`
- * and `zh-Hans`; the site has one `zh`, and its copy is Simplified. Mapping
- * `zh-Hant` onto it would let a Traditional Chinese claim cite a Simplified
- * page as the sentence it renders, which is exactly the drift the
- * "evidence is the page" rule exists to prevent. So `zh-Hant` resolves to no
- * page and a Traditional Chinese feature claim refuses until there is one.
+ * **`zh-Hant` cites the Traditional Chinese page.** The site has had its own
+ * `zh-Hant` locale since 2026-11-01, so a Traditional Chinese claim cites the
+ * Traditional copy, never the Simplified `zh` one -- citing a Simplified page
+ * as the sentence a Traditional post renders is exactly the drift the
+ * "evidence is the page" rule exists to prevent. A page with no `zh-Hant`
+ * copy (the legal pages show English to zh-Hant readers) refuses as
+ * `locale_has_no_page`.
  *
  * Pure: no server-only import, no network, no Prisma.
  */
@@ -59,7 +60,7 @@ export const isMarketingEvidenceRoute = (
 /**
  * The site language a marketing locale's page copy is written in.
  *
- * `null` is a decision, not a gap: see the note above about `zh-Hant`.
+ * Each locale reads its own script: see the note above about `zh-Hant`.
  */
 export const MARKETING_LOCALE_PAGE_LANGUAGE: Readonly<
   Record<MarketingLocale, Language | null>
@@ -68,9 +69,8 @@ export const MARKETING_LOCALE_PAGE_LANGUAGE: Readonly<
   ko: "ko",
   "zh-Hans": "zh",
   // Frozen with the rest: changing this one entry to "zh" would let a
-  // Traditional Chinese claim cite a Simplified page, which is the drift the
-  // null is there to refuse.
-  "zh-Hant": null,
+  // Traditional Chinese claim cite a Simplified page.
+  "zh-Hant": "zh-Hant",
 });
 
 export type MarketingEvidenceRefusal =

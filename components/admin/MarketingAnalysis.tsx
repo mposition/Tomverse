@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { MarketingActionRail, type MarketingAction } from "@/components/admin/MarketingActions";
+import { MarketingStrategyView } from "@/components/admin/MarketingStrategy";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { adminMarketingAnalysisMessages } from "@/lib/adminMessages/marketingAnalysis";
@@ -170,6 +171,7 @@ export function MarketingBriefReport({
           <p className="mt-1 break-all font-mono text-[13px] text-zinc-100">{(payload.claimIds ?? []).join(", ") || "-"}</p>
         </div>
       </div>
+      {analysis?.strategy ? <MarketingStrategyView strategy={analysis.strategy} /> : null}
       {analysis === null ? (
         <p className="text-sm text-zinc-400">{a.noAnalysis}</p>
       ) : (

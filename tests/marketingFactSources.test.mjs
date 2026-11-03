@@ -218,19 +218,27 @@ test("every mapped route is rendered by a page that names that content key", () 
   }
 });
 
-test("zh-Hant resolves to no page, and every marketing locale has an answer", () => {
-  // The site has one `zh` and its copy is Simplified, so a Traditional Chinese
-  // claim has no page whose bytes it could be.
-  assert.equal(MARKETING_LOCALE_PAGE_LANGUAGE["zh-Hant"], null);
+test("zh-Hant cites the Traditional page, and every marketing locale has an answer", () => {
+  // Since the site's own zh-Hant locale (2026-11-01) a Traditional Chinese
+  // claim cites Traditional copy, never the Simplified `zh` page.
+  assert.equal(MARKETING_LOCALE_PAGE_LANGUAGE["zh-Hant"], "zh-Hant");
   for (const locale of MARKETING_LOCALES) {
-    assert.ok(
-      locale in MARKETING_LOCALE_PAGE_LANGUAGE,
-      `${locale} needs an answer, even if it is null`,
-    );
+    assert.ok(locale in MARKETING_LOCALE_PAGE_LANGUAGE, `${locale} needs an answer`);
   }
 
-  const refused = resolveMarketingPageEvidence({
+  const resolved = resolveMarketingPageEvidence({
     pageRoute: "/faq",
+    localeKey: "title",
+    locale: "zh-Hant",
+  });
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.text, infoPages.faq["zh-Hant"].title);
+  assert.notEqual(resolved.text, infoPages.faq.zh.title);
+
+  // The legal pages show English to zh-Hant readers, so there is no
+  // Traditional sentence on them to cite.
+  const refused = resolveMarketingPageEvidence({
+    pageRoute: "/terms",
     localeKey: "title",
     locale: "zh-Hant",
   });
@@ -339,7 +347,7 @@ test("a claim naming a moved sentence is reported per locale", () => {
   assert.deepEqual(unresolvedClaimEvidence(claims), [
     { claimId: "feature.gone", locale: "en", refusal: "key_not_found" },
     { claimId: "feature.gone", locale: "ko", refusal: "key_not_found" },
-    { claimId: "feature.gone", locale: "zh-Hant", refusal: "locale_has_no_page" },
+    { claimId: "feature.gone", locale: "zh-Hant", refusal: "key_not_found" },
     {
       claimId: "feature.noEvidenceAtAll",
       locale: null,

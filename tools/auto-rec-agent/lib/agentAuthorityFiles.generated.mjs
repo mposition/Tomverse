@@ -29,7 +29,7 @@ const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "vendor"
 ];
 const CONVENTION_VERSIONS = {
-  next: "16.4.2",
+  next: "16.4.3",
   typescript: "6.0.3"
 };
 const CONTROL_PLANE_NAME_TOKENS = [
@@ -59,6 +59,7 @@ const CONTROL_PLANE_PATTERNS = [
   "lib/marketingSeoAgentCore.ts",
   "tests/marketingSeoAgentCore.test.mjs",
   "tests/marketingSeoBranchPolicy.test.mjs",
+  "tests/marketingSeoAgentWorkflow.test.mjs",
   "docs/release-gates/**",
   "prisma/**",
   // §4-2: the execution environment. Root files and root dot-directories are

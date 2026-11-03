@@ -1353,6 +1353,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   행이고, 지금 트리의 기록 digest로 다시 검증합니다. 판정이 거절하면 게시물을 읽지 않고
   `status_refused`(`apply_not_permitted`, 닫힌 사유)만 남기며, 우리 계정이 아닌 이벤트는 감사도 남기지
   않습니다. 판정 모듈은 kill switch 값을 받지 못하면 모든 기능을 거절하므로 실제 값을 넘깁니다.
+- **운영 활성화 절차**: `docs/ops/marketing-webhook-production-activation.md`, `scripts/marketing/zernio-webhook-setup.mjs`,
+  `scripts/marketing/mirror-channel-to-staging.mjs`, `tests/marketingWebhookActivationTools.test.mjs`. 도구는 fingerprint 파일 목록 밖입니다.
+  Zernio webhook은 `accountIds`로 한정해 환경별로 따로 등록하고(비면 모든 프로필의 이벤트), 기록의 쌍은 채널 id라 운영 채널은 staging의 mirror 행으로 관측합니다.
 - **S2f 서명**: `lib/marketingWebhookProductionConfigStore.ts`,
   `app/api/admin/marketing/webhook/production-config/route.ts`(POST, 서명),
   `app/api/admin/marketing/webhook/production-config/live/route.ts`(GET, 서명 전 화면이 볼 값),
@@ -1594,9 +1597,11 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **V2 연결(영상 게시물, 운영자 2026-10-31)**: `app/api/_marketing/zernioAdapter.ts`의 `resolveAsset`은 보낼 때 승인된 저장 자산을
   읽어 R2 읽기 URL(3시간)과 종류·AI 출처를 넘깁니다. 승인되지 않았거나 은퇴했거나 파일 등록부에만 있는 자산은 풀리지 않아 보내기 전에
   `asset_unresolved`로 실패합니다. 생성기 문맥의 자산은 `kind`(저장 자산의 image/video, 파일 자산은 null)와 승인된 `alt`를 함께
-  싣고, A5(`a5-social-v2`)는 그 locale의 alt를 자산 설명으로 받아 그 자산이 보여 주는 것에 대해 씁니다. YouTube는 영상 하나에 첫 줄이
-  제목, TikTok은 영상 하나, Instagram은 이미지나 영상이며, 맞는 자산이 없으면 초안을 내지 않습니다. 출처·AI 표시는 생성기에 주지
-  않습니다(Guard가 등록부로 판정).
+  싣고, A5(`a5-social-v5`)는 그 locale의 alt를 자산 설명으로 받아 그 자산이 보여 주는 것에 대해 씁니다. 모든 플랫폼의 게시물은
+  이미지나 영상 하나를 싣고(운영자 2026-11-03), YouTube는 영상 하나에 첫 줄이 제목, TikTok은 영상 하나입니다. 맞는 자산이 없는
+  계정은 LLM을 부르지 않고(`accountsWithoutMedia`; YouTube·TikTok은 영상만, 종류가 없는 파일 등록부 자산은 어디서도 세지 않음),
+  자산 없는 답은 `draft_has_no_asset`으로 버리며, 초안 접수는 자산 없는 초안을 거절하고, 게시기는 미디어 없는 게시물을
+  `media_required`(YouTube는 `youtube_needs_one_video`)로 실패시킵니다. 출처·AI 표시는 생성기에 주지 않습니다(Guard가 등록부로 판정).
 
 # 엔지니어링 Agent
 
