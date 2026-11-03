@@ -23,7 +23,7 @@
  */
 
 import {
-  marketingA5AssetsFor,
+  marketingA5MediaKindFor,
   marketingA5Messages,
   marketingDraftSubmissionBody,
   marketingGeneratorContextSchema,
@@ -108,6 +108,9 @@ export async function runMarketingGeneratorCycle(
   }
 
   const deadline = Date.parse(input.deadlineAt);
+  // The run's UTC day picks each account's media kind for today, so the
+  // video-to-image ratio holds across runs without reading what was posted.
+  const day = Math.floor(deps.now() / 86_400_000);
   const accounts = [...context.channels]
     .filter((channel) => channel.allowedLocales.includes(channel.defaultLocale))
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
@@ -115,14 +118,21 @@ export async function runMarketingGeneratorCycle(
   for (const [callIndex, account] of accounts.entries()) {
     // Every post carries an image or a video, so an account with none to carry
     // would only pay for an answer that has to be dropped.
-    if (marketingA5AssetsFor(context, account.channel, account.defaultLocale).length === 0) {
+    const mediaKind = marketingA5MediaKindFor(context, account.channel, account.defaultLocale, day);
+    if (mediaKind === null) {
       accountsWithoutMedia += 1;
       continue;
     }
     if (deadline - deps.now() < MARKETING_GENERATOR_CALL_BUDGET_MS) {
       return summary({ stage: "deadline", detail: "deadline_too_close" });
     }
-    const scope = { channelId: account.id, locale: account.defaultLocale, count: input.postsPerAccount, callIndex };
+    const scope = {
+      channelId: account.id,
+      locale: account.defaultLocale,
+      count: input.postsPerAccount,
+      mediaKind,
+      callIndex,
+    };
     const requestKey = deps.newId();
     calls += 1;
     const outcome = await deps.callLlm(marketingA5Messages(context, scope), requestKey);
