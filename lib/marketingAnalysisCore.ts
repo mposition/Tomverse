@@ -94,6 +94,70 @@ export type MarketingCompetitiveAnalysis = z.infer<typeof marketingCompetitiveAn
 /** A topic id: lower case words joined by hyphens, a registry id the brief payload accepts. */
 export const MARKETING_BRIEF_TOPIC = /^[a-z0-9]+(?:-[a-z0-9]+){0,9}$/;
 
+// ---------------------------------------------------------------------------
+// The week's plan, as stored (owner request 2026-11-03)
+// ---------------------------------------------------------------------------
+//
+// The call that writes it, and how its answer is read, are in
+// lib/marketingStrategyCore.ts. The stored shape and the week are here, in a
+// module the Admin routes already import, so a route reading a plan reaches
+// nothing new.
+
+export const MARKETING_STRATEGY_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export type MarketingStrategyDay = (typeof MARKETING_STRATEGY_DAYS)[number];
+
+/** Accounts one plan may name. */
+export const MARKETING_STRATEGY_MAX_ACCOUNTS = 12;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const BRISBANE_OFFSET_MS = 10 * 60 * 60 * 1000;
+const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * The Brisbane week (UTC+10, no daylight saving) that `now` falls in, Monday
+ * to Sunday, as calendar dates: the week a plan is for, and the key the app
+ * uses to tell whether this week already has one.
+ */
+export function marketingStrategyWeek(now: number): { readonly start: string; readonly end: string } {
+  const local = now + BRISBANE_OFFSET_MS;
+  const midnight = local - (((local % DAY_MS) + DAY_MS) % DAY_MS);
+  const sinceMonday = (new Date(midnight).getUTCDay() + 6) % 7;
+  const monday = midnight - sinceMonday * DAY_MS;
+  return { start: isoDate(monday), end: isoDate(monday + 6 * DAY_MS) };
+}
+
+const PLAN_ID = /^[A-Za-z0-9._:-]{1,120}$/;
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const accountPlanSchema = z
+  .object({
+    accountSlug: z.string().regex(/^[a-z0-9-]{1,64}$/),
+    role: text(300),
+    angle: text(500),
+    format: text(200),
+    posts: z.number().int().min(0).max(14),
+    days: z.array(z.enum(MARKETING_STRATEGY_DAYS)).max(7),
+    claimIds: z.array(z.string().regex(PLAN_ID)).max(5),
+    assetIds: z.array(z.string().regex(PLAN_ID)).max(5),
+  })
+  .strict();
+
+/** The plan as the app stores it inside the analysis payload. */
+export const marketingWeeklyStrategySchema = z
+  .object({
+    promptVersion: z.string().regex(/^[a-z0-9.-]{1,40}$/),
+    weekStart: isoDay,
+    weekEnd: isoDay,
+    headline: text(400),
+    rationale: text(1000),
+    goal: text(800),
+    accounts: z.array(accountPlanSchema).min(1).max(MARKETING_STRATEGY_MAX_ACCOUNTS),
+    needs: z.array(text(300)).max(6),
+    avoid: z.array(text(300)).max(6),
+  })
+  .strict();
+export type MarketingWeeklyStrategy = z.infer<typeof marketingWeeklyStrategySchema>;
+
 /**
  * The analysis as the app stores it beside the brief it explains
  * (`MarketingAnalysis.payload`). Everything a person reads, and the counts of
@@ -109,6 +173,8 @@ export const marketingAnalysisPayloadSchema = z
     competitorIds: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)).max(50),
     factCount: z.number().int().min(0).max(10_000),
     featureCount: z.number().int().min(0).max(10_000),
+    /** The week's plan, at the first run of a Brisbane week (above; written by lib/marketingStrategyCore.ts). */
+    strategy: marketingWeeklyStrategySchema.optional(),
   })
   .strict();
 export type MarketingAnalysisPayload = z.infer<typeof marketingAnalysisPayloadSchema>;
