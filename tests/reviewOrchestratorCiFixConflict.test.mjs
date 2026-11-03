@@ -74,6 +74,9 @@ test("the guard commits a resolution that keeps everything outside the conflicts
   // Inside it, a gate path takes only its sides' lines; elsewhere a few joined lines are fine.
   assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
   assert.deepEqual(one("package.json", "name: ci\n- run: npm audit\n\"x\": \"1\"\n- run: npm test\n"), ["gate_path_new_line"]);
+  assert.deepEqual(one("lib/adminAuth.ts", "name: ci\n- run: npm audit\nb-branch + b-develop\n- run: npm test\n"), ["gate_path_new_line"]);
+  // The authority manifest is the lane's to hold at merge, not the guard's.
+  assert.deepEqual(one("lib/agentAuthorityFiles.ts", "name: ci\n- run: npm audit\nb-branch + b-develop\n- run: npm test\n"), []);
   const many = Array.from({ length: PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES + 1 }, (_, i) => `new ${i}`).join("\n");
   assert.deepEqual(one("lib/x.ts", `name: ci\n- run: npm audit\n${many}\n- run: npm test\n`), ["too_many_new_lines"]);
 
