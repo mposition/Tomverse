@@ -449,7 +449,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
     비용은 validate의 LLM 호출 1회이며 원장의 운영자 모델·월 상한이 한도다.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
-- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.
+- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake), `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)와 `tests/marketingSeoAgentWorkflow.test.mjs`(실행 환경 workflow 구조)는 사람 소유이며 허용 목록에 없다.
 
 ## 10. 측정
 
