@@ -31,12 +31,16 @@ const context = {
     { id: "chn_a", channel: "linkedin", accountSlug: "tomverse", defaultLocale: "en", allowedLocales: ["en"] },
   ],
   claims: [],
-  assets: [],
+  assets: [
+    { id: "media-card-en", allowedChannels: ["linkedin", "x"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31" },
+  ],
   brief: null,
   marketIntel: null,
 };
 const goodAnswer = JSON.stringify({
-  drafts: [{ renderedText: "Ask once, read three answers.", claimIds: [], assetIds: [], disclosureFlags: ["advertising"] }],
+  drafts: [
+    { renderedText: "Ask once, read three answers.", claimIds: [], assetIds: ["media-card-en"], disclosureFlags: ["advertising"] },
+  ],
 });
 
 function harness({ outcomes = [], submitAnswer, readContext, now } = {}) {
@@ -86,6 +90,27 @@ test("a run asks each account once, in id order, and submits each call's drafts 
     assert.deepEqual(parsed.llmCallRequestKeys, [h.asked[index].requestKey]);
     assert.equal(parsed.submissionId, `call-${index}`);
   }
+});
+
+test("an account with no approved image or video for its platform and locale is not asked at all", async () => {
+  // Every post carries an image or a video (owner decision 2026-11-03), so a
+  // call for an account with none would only pay for drafts to be dropped.
+  const onlyLinkedIn = {
+    ...context,
+    assets: [{ ...context.assets[0], allowedChannels: ["linkedin"] }],
+  };
+  const h = harness({ readContext: async () => onlyLinkedIn });
+  const summary = await cycle(h);
+  assert.equal(summary.stoppedAt, null);
+  assert.equal(summary.calls, 1);
+  assert.equal(summary.accountsWithoutMedia, 1);
+  assert.deepEqual(h.submitted.map((s) => s.drafts[0].channelId), ["chn_a"]);
+
+  const noMedia = harness({ readContext: async () => ({ ...context, assets: [] }) });
+  const none = await cycle(noMedia);
+  assert.equal(none.stoppedAt, null);
+  assert.equal(noMedia.asked.length, 0);
+  assert.equal(none.accountsWithoutMedia, 2);
 });
 
 test("a refused reservation ends the run: no later account is asked", async () => {

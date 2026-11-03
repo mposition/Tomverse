@@ -125,7 +125,7 @@ test("the post count is bounded, and an account or locale outside the context is
 });
 
 test("an answer becomes intake-shaped drafts for this scope, with the service's own ids", () => {
-  const { drafts, dropped } = readMarketingA5Answer(answer([proposal(), proposal({ claimIds: [], assetIds: [] })]), context, SCOPE);
+  const { drafts, dropped } = readMarketingA5Answer(answer([proposal(), proposal({ claimIds: [] })]), context, SCOPE);
   assert.deepEqual(dropped, {});
   assert.deepEqual(
     drafts.map((draft) => draft.logicalDraftId),
@@ -202,6 +202,17 @@ test("an answer that is not the one JSON object asked for is refused whole", () 
   }
 });
 
+test("a draft that carries no image or video is dropped, on every platform", () => {
+  // Owner decision 2026-11-03: there are no text-only posts.
+  const { drafts, dropped } = readMarketingA5Answer(
+    answer([proposal({ assetIds: [] }), proposal()]),
+    context,
+    SCOPE,
+  );
+  assert.deepEqual(dropped, { draft_has_no_asset: 1 });
+  assert.deepEqual(drafts.map((draft) => draft.logicalDraftId), ["c0-d1"]);
+});
+
 test("one malformed draft costs that draft, not the good ones beside it", () => {
   const withoutAssets = proposal();
   delete withoutAssets.assetIds;
@@ -250,7 +261,8 @@ test("an asset reaches the model as its kind and what it shows in this locale, a
   });
   const [system, user] = marketingA5Messages(withVideo, { ...SCOPE, channelId: "chn_yt", locale: "ko" });
   assert.match(system.content, /first line is the video's title/);
-  assert.match(system.content, /return no draft rather than a post without one/);
+  assert.match(system.content, /Every post carries one asset from the assets list, an image or a video, on every platform/);
+  assert.match(system.content, /When no asset fits a post, return no draft/);
   assert.deepEqual(JSON.parse(user.content).assets, [
     {
       id: "media-20261031-compare-ko-short",
