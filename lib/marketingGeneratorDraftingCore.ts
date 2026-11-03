@@ -97,6 +97,8 @@ export type MarketingA5Scope = {
   readonly channelId: string;
   readonly locale: string;
   readonly count: number;
+  /** The kind of media this call's drafts carry (marketingA5MediaKindFor); every kind when absent. */
+  readonly mediaKind?: "image" | "video";
 };
 
 const SYSTEM_PROMPT = [
@@ -143,19 +145,58 @@ const VIDEO_ONLY_CHANNELS: ReadonlySet<string> = new Set(["youtube", "tiktok"]);
  * resolves), and a video on a platform that takes only video. The prompt
  * offers these, an answer may name only these, and an account with none is not
  * asked at all, since every post carries an image or a video (owner decision
- * 2026-11-03).
+ * 2026-11-03). With a kind, only assets of that kind.
  */
 export function marketingA5AssetsFor(
   context: MarketingGeneratorContextAnswer,
   channel: string,
   locale: string,
+  kind?: "image" | "video",
 ): MarketingGeneratorContextAnswer["assets"] {
   return context.assets.filter(
     (asset) =>
       asset.allowedChannels.includes(channel) &&
       asset.altLocales.includes(locale) &&
-      (asset.kind === "video" || (asset.kind === "image" && !VIDEO_ONLY_CHANNELS.has(channel))),
+      (asset.kind === "video" || (asset.kind === "image" && !VIDEO_ONLY_CHANNELS.has(channel))) &&
+      (kind === undefined || asset.kind === kind),
   );
+}
+
+/**
+ * How many of an account's days carry a video, per platform: `video` days in
+ * every `of` (owner decision 2026-11-04, in the weekly caps of policy §7.6).
+ * YouTube and TikTok take only video; a platform not listed carries images.
+ */
+export const MARKETING_VIDEO_DAYS: Readonly<Record<string, { readonly video: number; readonly of: number }>> = {
+  instagram: { video: 2, of: 4 },
+  facebook: { video: 2, of: 5 },
+  linkedin: { video: 1, of: 3 },
+  x: { video: 3, of: 10 },
+  threads: { video: 2, of: 7 },
+  youtube: { video: 1, of: 1 },
+  tiktok: { video: 1, of: 1 },
+};
+
+/**
+ * The kind of media an account's drafts carry on a day, so that the posts a
+ * person approves follow the owner's video-to-image ratio over time. `day` is
+ * whole UTC days since the epoch; day d is a video day when
+ * floor((d + 1) * video / of) > floor(d * video / of), which spaces the video
+ * days evenly. When no approved asset of that kind fits, the other kind stands
+ * in -- a post with an image beats no post. Null when nothing fits at all.
+ */
+export function marketingA5MediaKindFor(
+  context: MarketingGeneratorContextAnswer,
+  channel: string,
+  locale: string,
+  day: number,
+): "image" | "video" | null {
+  const ratio = MARKETING_VIDEO_DAYS[channel] ?? { video: 0, of: 1 };
+  const planned =
+    Math.floor(((day + 1) * ratio.video) / ratio.of) > Math.floor((day * ratio.video) / ratio.of) ? "video" : "image";
+  const other = planned === "video" ? "image" : "video";
+  if (marketingA5AssetsFor(context, channel, locale, planned).length > 0) return planned;
+  return marketingA5AssetsFor(context, channel, locale, other).length > 0 ? other : null;
 }
 
 /**
@@ -188,7 +229,7 @@ export function marketingA5Messages(
         statement: claim.statements?.[scope.locale] ?? null,
         values: claim.values ?? null,
       })),
-    assets: marketingA5AssetsFor(context, account.channel, scope.locale).map((asset) => ({
+    assets: marketingA5AssetsFor(context, account.channel, scope.locale, scope.mediaKind).map((asset) => ({
       id: asset.id,
       kind: asset.kind ?? null,
       description: asset.alt?.[scope.locale] ?? null,
@@ -274,7 +315,7 @@ export function readMarketingA5Answer(
     context.claims.filter((claim) => claim.locales.includes(scope.locale)).map((claim) => claim.id),
   );
   const assetIds = new Set(
-    account ? marketingA5AssetsFor(context, account.channel, scope.locale).map((asset) => asset.id) : [],
+    account ? marketingA5AssetsFor(context, account.channel, scope.locale, scope.mediaKind).map((asset) => asset.id) : [],
   );
 
   const drafts: MarketingGeneratorDraft[] = [];
