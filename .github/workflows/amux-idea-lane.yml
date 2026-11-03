@@ -51,10 +51,16 @@ concurrency:
 env:
   TOMVERSE_APP_URL: https://tomverse.app
 
+# Every job is continue-on-error: this workflow runs on main, and Railway skips
+# a production deploy of a main commit when any workflow run on it fails. A
+# failed lane run is the app's business (it retries the idea), not a release
+# blocker. Because a failed job then reports success in needs.<job>.result, no
+# job below reads that result: publish waits for implement's own ready output.
 jobs:
   claim:
     if: github.repository == 'mposition/Tomverse' && vars.AMUX_IDEA_LANE_ENABLED == 'true'
     runs-on: ubuntu-latest
+    continue-on-error: true
     timeout-minutes: 5
     outputs:
       claimed: ${{ steps.claim.outputs.claimed }}
@@ -106,12 +112,14 @@ jobs:
     needs: claim
     if: needs.claim.outputs.claimed == 'true'
     runs-on: ubuntu-latest
+    continue-on-error: true
     # The app's lease (AMUX_IDEA_LANE_LEASE_MS, 150 minutes) covers this job,
     # publish and the queueing between them.
     timeout-minutes: 80
     outputs:
       failure: ${{ steps.model.outputs.failure }}
       base: ${{ steps.model.outputs.base }}
+      ready: ${{ steps.ready.outputs.ready }}
     steps:
       - name: Fetch the encrypted idea
         uses: actions/download-artifact@v8
@@ -261,10 +269,16 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Mark the change ready to publish
+        id: ready
+        if: steps.model.outputs.failure == ''
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
   publish:
     needs: [claim, implement]
-    if: needs.implement.result == 'success' && needs.implement.outputs.failure == ''
+    if: needs.implement.outputs.ready == 'true'
     runs-on: ubuntu-latest
+    continue-on-error: true
     timeout-minutes: 10
     outputs:
       number: ${{ steps.pr.outputs.number }}
@@ -336,6 +350,7 @@ jobs:
     needs: [claim, implement, publish]
     if: always() && needs.claim.outputs.claimed == 'true'
     runs-on: ubuntu-latest
+    continue-on-error: true
     timeout-minutes: 5
     steps:
       - name: Report the result (sync secret only)
@@ -344,13 +359,14 @@ jobs:
           ATTEMPT: ${{ needs.claim.outputs.attempt }}
           PR_NUMBER: ${{ needs.publish.outputs.number }}
           FAILURE: ${{ needs.implement.outputs.failure }}
-          PUBLISH: ${{ needs.publish.result }}
+          READY: ${{ needs.implement.outputs.ready }}
         run: |
           if [ -n "$PR_NUMBER" ]; then
             payload=$(jq -cn --arg id "$ATTEMPT" --argjson pr "$PR_NUMBER" '{attemptId:$id, outcome:"pr_open", prNumber:$pr}')
           else
+            # A ready change with no PR number means publish ran and did not finish.
             outcome="${FAILURE:-job_failed}"
-            [ -n "$FAILURE" ] || [ "$PUBLISH" != "failure" ] || outcome=push_failed
+            [ -n "$FAILURE" ] || [ "$READY" != "true" ] || outcome=push_failed
             payload=$(jq -cn --arg id "$ATTEMPT" --arg outcome "$outcome" '{attemptId:$id, outcome:$outcome}')
           fi
           echo "Reporting: $(jq -c 'del(.attemptId)' <<<"$payload")"
