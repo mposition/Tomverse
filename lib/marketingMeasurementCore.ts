@@ -53,6 +53,8 @@ export type MarketingMeasurementPost = {
   readonly status: string;
   /** The newest dispatch attempt's number. */
   readonly publishAttempt: number;
+  /** `approval` or `autonomous`: the mode the post was written under. */
+  readonly mode: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly approvedAt: Date | null;
@@ -81,6 +83,16 @@ export type MarketingMeasurementChannel = {
 
 export type MarketingConversionCount = { readonly total: number; readonly attributed: number };
 
+/** Attributed sign-ups of one landing channel (its touch's UTM source, medium and campaign). */
+export type MarketingSignupChannel = {
+  readonly source: string;
+  readonly medium: string;
+  readonly campaign: string;
+  readonly attributed: number;
+  /** Fewer than the minimum: no decision rests on this channel yet (policy §10.3). */
+  readonly held: boolean;
+};
+
 export type MarketingMeasurementLlm = {
   readonly calls: number;
   readonly countedMicroUsd: number;
@@ -100,6 +112,14 @@ export type MarketingMeasurement = {
     readonly outcomeUnknown: number;
     /** Failures recorded before the tool was called: not sends, counted apart. */
     readonly notSent: number;
+    /**
+     * Posts `publishing` now: requests out with no outcome recorded. Not yet
+     * sends -- a send is counted once, in the window its first outcome is
+     * recorded, so it never moves between windows -- and shown apart.
+     */
+    readonly inFlight: number;
+    /** The same counts by the mode each post was written under. */
+    readonly byMode: ReadonlyArray<{ mode: string; sent: number; published: number; failed: number }>;
     /** Verified ÷ sent, or null while fewer than the minimum were sent. */
     readonly successRate: number | null;
     readonly latencyP50Ms: number | null;
@@ -127,6 +147,8 @@ export type MarketingMeasurement = {
   /** Null where the number could not be read; the screen says so instead of zero. */
   readonly touches: number | null;
   readonly signups: MarketingConversionCount | null;
+  /** Attributed sign-ups by landing channel; the sign-up hold is judged per channel. */
+  readonly signupChannels: readonly MarketingSignupChannel[] | null;
   readonly guestLeads: MarketingConversionCount | null;
   readonly llm: MarketingMeasurementLlm | null;
   /** Metrics held for too small a sample. */
@@ -159,6 +181,7 @@ export function summarizeMarketingMeasurement(input: {
   readonly channels: readonly MarketingMeasurementChannel[];
   readonly touches: number | null;
   readonly signups: MarketingConversionCount | null;
+  readonly signupChannels: ReadonlyArray<Omit<MarketingSignupChannel, "held">> | null;
   readonly guestLeads: MarketingConversionCount | null;
   readonly llm: MarketingMeasurementLlm | null;
 }): MarketingMeasurement {
@@ -169,7 +192,7 @@ export function summarizeMarketingMeasurement(input: {
   // published is two sends. Each attempt belongs to the window of its first
   // entry, and its outcome is its newest entry, wherever that falls: an
   // unknown outcome resolved as failed a week later is one send, in the first
-  // week. A post still `publishing` is a send not yet resolved.
+  // week. A post still `publishing` is not yet a send (`inFlight`).
   const resolved: Array<{
     readonly post: MarketingMeasurementPost;
     readonly at: Date;
@@ -202,11 +225,19 @@ export function summarizeMarketingMeasurement(input: {
       resolved.push({ post, at: last.at, outcome: last.outcome, errorCode: last.errorCode });
     }
   }
-  const inFlight = posts.filter((post) => post.status === "publishing" && within(post.updatedAt, window)).length;
+  const inFlight = posts.filter((post) => post.status === "publishing").length;
   const published = resolved.filter((entry) => entry.outcome === "published");
   const failed = resolved.filter((entry) => entry.outcome === "failed");
   const unknown = resolved.filter((entry) => entry.outcome === "outcome_unknown");
-  const sent = resolved.length + inFlight;
+  const sent = resolved.length;
+  const modes = [...new Set(resolved.map((entry) => entry.post.mode))].sort();
+  const signupChannels =
+    input.signupChannels === null
+      ? null
+      : input.signupChannels.map((channel) => ({
+          ...channel,
+          held: channel.attributed < MARKETING_MEASUREMENT_MIN_SIGNUPS,
+        }));
   const verified = published.filter((entry) => entry.post.verifiedPublicAt !== null).length;
   const latencies = published
     .map((entry) => {
@@ -221,7 +252,8 @@ export function summarizeMarketingMeasurement(input: {
   const held: Array<"success_rate" | "latency" | "signups"> = [];
   if (sent < MARKETING_MEASUREMENT_MIN_SENT) held.push("success_rate");
   if (latencies.length === 0) held.push("latency");
-  if (!input.signups || input.signups.attributed < MARKETING_MEASUREMENT_MIN_SIGNUPS) held.push("signups");
+  // Judged per channel: two channels of six each are two held channels, not twelve.
+  if (!signupChannels || !signupChannels.some((channel) => !channel.held)) held.push("signups");
 
   return {
     window: { start: window.start.toISOString(), end: window.end.toISOString() },
@@ -238,6 +270,16 @@ export function summarizeMarketingMeasurement(input: {
       failed: failed.length,
       outcomeUnknown: unknown.length,
       notSent,
+      inFlight,
+      byMode: modes.map((mode) => {
+        const mine = resolved.filter((entry) => entry.post.mode === mode);
+        return {
+          mode,
+          sent: mine.length,
+          published: mine.filter((entry) => entry.outcome === "published").length,
+          failed: mine.filter((entry) => entry.outcome === "failed").length,
+        };
+      }),
       successRate: sent < MARKETING_MEASUREMENT_MIN_SENT ? null : verified / sent,
       latencyP50Ms: marketingPercentile(latencies, 0.5),
       latencyP95Ms: marketingPercentile(latencies, 0.95),
@@ -268,6 +310,7 @@ export function summarizeMarketingMeasurement(input: {
     }),
     touches: input.touches,
     signups: input.signups,
+    signupChannels,
     guestLeads: input.guestLeads,
     llm: input.llm,
     held,

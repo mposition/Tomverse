@@ -35,6 +35,7 @@ const post = (overrides = {}) => ({
   accountSlug: "instagram-3",
   status: "pending_approval",
   publishAttempt: 0,
+  mode: "approval",
   createdAt: at("2026-11-03T00:00:00Z"),
   updatedAt: at("2026-11-03T00:00:00Z"),
   approvedAt: null,
@@ -87,6 +88,7 @@ test("the week's posts, dispatch and queue are counted, and a small sample is he
     channels: CHANNELS,
     touches: 4,
     signups: { total: 3, attributed: 1 },
+    signupChannels: [{ source: "instagram", medium: "social", campaign: "wk45", attributed: 1 }],
     guestLeads: null,
     llm: { calls: 10, countedMicroUsd: 1_500_000, capUsd: 100 },
   });
@@ -131,6 +133,7 @@ test("enough sends give a rate, and an unreadable count stays null rather than z
     channels: [],
     touches: null,
     signups: null,
+    signupChannels: null,
     guestLeads: null,
     llm: null,
   });
@@ -175,10 +178,13 @@ test("sends are attempts: a failure requeued and then published is two sends, an
     channels: CHANNELS,
     touches: 0,
     signups: null,
+    signupChannels: null,
     guestLeads: null,
     llm: null,
   });
-  assert.equal(measurement.dispatch.sent, 4);
+  // The post still publishing is not a send until its outcome is recorded.
+  assert.equal(measurement.dispatch.sent, 3);
+  assert.equal(measurement.dispatch.inFlight, 1);
   assert.equal(measurement.dispatch.published, 1);
   assert.equal(measurement.dispatch.failed, 2);
   assert.equal(measurement.dispatch.outcomeUnknown, 0);
@@ -208,6 +214,7 @@ test("an attempt is counted once, in the week it was sent, with its final outcom
     channels: [],
     touches: 0,
     signups: null,
+    signupChannels: null,
     guestLeads: null,
     llm: null,
   });
@@ -218,6 +225,7 @@ test("an attempt is counted once, in the week it was sent, with its final outcom
     channels: [],
     touches: 0,
     signups: null,
+    signupChannels: null,
     guestLeads: null,
     llm: null,
   });
@@ -247,6 +255,7 @@ test("an unknown outcome a person confirmed as published counts as published, an
     channels: [],
     touches: 0,
     signups: null,
+    signupChannels: null,
     guestLeads: null,
     llm: null,
   });
@@ -263,4 +272,39 @@ test("every code counted as not sent is one the publisher records before its cal
   for (const code of MARKETING_NOT_SENT_ERROR_CODES) {
     assert.ok(source.includes(`errorCode: "${code}"`), code);
   }
+});
+
+test("the sign-up hold is judged per landing channel, and sends are split by mode", () => {
+  const base = {
+    window: WINDOW,
+    channels: [],
+    touches: 0,
+    signups: { total: 12, attributed: 12 },
+    guestLeads: null,
+    llm: null,
+  };
+  const split = summarizeMarketingMeasurement({
+    ...base,
+    posts: [],
+    signupChannels: [
+      { source: "instagram", medium: "social", campaign: "wk45", attributed: 6 },
+      { source: "facebook", medium: "social", campaign: "wk45", attributed: 6 },
+    ],
+  });
+  assert.ok(split.held.includes("signups"));
+  assert.deepEqual(split.signupChannels.map((channel) => channel.held), [true, true]);
+
+  const one = summarizeMarketingMeasurement({
+    ...base,
+    posts: [
+      post({ mode: "approval", attempts: [{ at: at("2026-11-04T00:00:00Z"), attempt: 1, outcome: "published", errorCode: null }] }),
+      post({ mode: "autonomous", attempts: [{ at: at("2026-11-04T00:00:00Z"), attempt: 1, outcome: "failed", errorCode: "x" }] }),
+    ],
+    signupChannels: [{ source: "instagram", medium: "social", campaign: "wk45", attributed: 10 }],
+  });
+  assert.ok(!one.held.includes("signups"));
+  assert.deepEqual(one.dispatch.byMode, [
+    { mode: "approval", sent: 1, published: 1, failed: 0 },
+    { mode: "autonomous", sent: 1, published: 0, failed: 1 },
+  ]);
 });

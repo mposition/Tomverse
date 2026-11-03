@@ -86,10 +86,10 @@ export async function readMarketingMeasurement(
   db: Reader,
   window: MarketingMeasurementWindow,
 ): Promise<MarketingMeasurement> {
-  const [posts, channels, touches, signups, guestLeads, llm] = await Promise.all([
+  const [posts, channels, touches, signups, signupChannels, guestLeads, llm] = await Promise.all([
     db
       .$queryRaw<Array<Omit<MarketingMeasurementPost, "attempts"> & { history: unknown }>>(Prisma.sql`
-        SELECT c."accountSlug", p."status", p."publishAttempt", p."createdAt", p."updatedAt", p."approvedAt", p."scheduledAt",
+        SELECT c."accountSlug", p."status", p."publishAttempt", p."mode", p."createdAt", p."updatedAt", p."approvedAt", p."scheduledAt",
                p."publishedAt", p."verifiedPublicAt", p."outcomeUnknownAt", p."approvalExpiresAt",
                p."errorCode", p."guardCodes", p."history"
         FROM "MarketingPost" p JOIN "MarketingChannel" c ON c."id" = p."channelId"
@@ -109,10 +109,25 @@ export async function readMarketingMeasurement(
       return rows[0]?.count ?? 0;
     }),
     conversions(db, window, "signup_completed", false),
+    settle(() =>
+      db.$queryRaw<Array<{ source: string; medium: string; campaign: string; attributed: number }>>(Prisma.sql`
+        SELECT COALESCE("properties"->>'touch_utm_source', '(direct)') AS "source",
+               COALESCE("properties"->>'touch_utm_medium', '(none)') AS "medium",
+               COALESCE("properties"->>'touch_utm_campaign', '(not set)') AS "campaign",
+               count(*)::int AS "attributed"
+        FROM "ProductAnalyticsEvent"
+        WHERE "eventName" = 'signup_completed'
+          AND "properties"->>'touch_attribution' = 'attributed'
+          AND "occurredAt" >= ${window.start} AND "occurredAt" < ${window.end}
+        GROUP BY 1, 2, 3
+        ORDER BY 4 DESC
+        LIMIT 20
+      `),
+    ),
     conversions(db, window, "first_response_completed", true),
     readMarketingLlmMonth(db),
   ]);
-  return summarizeMarketingMeasurement({ window, posts, channels, touches, signups, guestLeads, llm });
+  return summarizeMarketingMeasurement({ window, posts, channels, touches, signups, signupChannels, guestLeads, llm });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

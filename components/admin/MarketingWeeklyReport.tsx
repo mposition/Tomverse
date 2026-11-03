@@ -143,6 +143,23 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
           )}
           {x.dispatch.notSent > 0 ? ` · ${m.notSent.replace("{count}", String(x.dispatch.notSent))}` : ""}
         </p>
+        <p className="text-xs text-zinc-400">
+          {m.inFlight.replace("{count}", String(x.dispatch.inFlight))}
+          {x.dispatch.byMode.map((row) => ` · ${row.mode}: ${row.published}/${row.sent}`).join("")}
+        </p>
+        {x.signupChannels && x.signupChannels.length > 0 ? (
+          <ul className="grid gap-0.5 text-xs text-zinc-400" data-testid="marketing-weekly-signup-channels">
+            {x.signupChannels.map((channel) => (
+              <li key={`${channel.source}|${channel.medium}|${channel.campaign}`}>
+                <span className="font-mono text-zinc-300">
+                  {channel.source} / {channel.medium} / {channel.campaign}
+                </span>{" "}
+                {channel.attributed}
+                {channel.held ? <span className="ml-1 text-sky-300">{m.held}</span> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </Section>
 
       <Section title={m.secFunnel} testId="marketing-weekly-funnel">
