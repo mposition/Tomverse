@@ -1576,7 +1576,12 @@ export function DesktopChatShell({
               productSwitchDisabled={productSwitchDisabled}
               onProductSwitch={onProductSwitch}
               singleModelSelection={singleTranscript}
-              value={inputValue}
+              // The question is already drawn above while its send prepares
+              // (image intent, Refiner, saving -- many seconds), and the draft
+              // is read-only until it is consumed. Showing it in the composer
+              // as well looked unsent. A send that ends without a payload
+              // drops the echo, and the kept draft reappears.
+              value={sendEcho && durableDraftLocked ? "" : inputValue}
               onChange={setInputValue}
               personalizedPrompt={personalizedPrompt}
               onSubmit={onSubmit}
