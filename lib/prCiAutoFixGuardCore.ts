@@ -59,6 +59,14 @@ const CONTRACT_DOCUMENT = /^docs\/(policy|ui-contracts|release-gates)\//;
  * manifest or npm config wherever it sits (`npm ci` runs install scripts).
  */
 const AUTO_FIX_FENCE = /^(\.github|scripts)\//;
+/**
+ * Admin auth and the system audit actors: the security and audit boundary,
+ * fenced here in its own right. The merge lane's other gate path, the agent
+ * authority manifest, is not: a fix that touches it is pushed so CI runs, and
+ * the lane leaves its merge to a person (owner 2026-11-03, #3190's recorded
+ * `next` version).
+ */
+const SECURITY_FILE = /^lib\/(adminAuth[^/]*|adminAuditSystemActors\.ts)$/;
 const PACKAGE_FILE = /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|\.npmrc)$/i;
 
 /**
@@ -290,6 +298,18 @@ export function testEditProblems(patch: string, paths: ReadonlySet<string>): str
   return [...problems];
 }
 
+/** Whether the merge lane's judgement of one path refuses it for anything but a gate path. */
+function laneRefuses(path: string): boolean {
+  const lane = judgeQaReleaseMergeLaneExclusion({
+    headBranch: "auto-fix",
+    changedFiles: [{ path }],
+    changedFilesComplete: true,
+    policyTestPaths: [],
+    agentOwnPatterns: [],
+  });
+  return lane.excluded && lane.reasons.some((reason) => reason !== "gate_path");
+}
+
 export function judgePrCiAutoFixDiff(input: {
   nameStatus: string;
   numstat: string;
@@ -329,7 +349,9 @@ export function judgePrCiAutoFixDiff(input: {
       // lane may merge one a person wrote (owner 2026-10-23): a model fixing
       // CI must not rewrite another feature's policy to make its change pass.
       if (path && CONTRACT_DOCUMENT.test(path)) reasons.add("gate_path");
-      if (path && (AUTO_FIX_FENCE.test(path) || fencedRoot(path) || PACKAGE_FILE.test(path))) reasons.add("gate_path");
+      if (path && (AUTO_FIX_FENCE.test(path) || SECURITY_FILE.test(path) || fencedRoot(path) || PACKAGE_FILE.test(path))) {
+        reasons.add("gate_path");
+      }
     }
   }
   const lane = judgeQaReleaseMergeLaneExclusion({
@@ -339,7 +361,11 @@ export function judgePrCiAutoFixDiff(input: {
     policyTestPaths: [],
     agentOwnPatterns: [],
   });
-  if (lane.excluded) for (const reason of lane.reasons) if (reason !== "changed_files_empty") reasons.add(reason);
+  // The lane's gate paths decide who merges, not whether CI may run on a fix:
+  // the fences above already hold every one that must not reach a push.
+  if (lane.excluded) {
+    for (const reason of lane.reasons) if (reason !== "changed_files_empty" && reason !== "gate_path") reasons.add(reason);
+  }
   if (editedTests.size > 0) for (const problem of testEditProblems(input.patch ?? "", editedTests)) reasons.add(problem);
 
   let lines = 0;
@@ -525,14 +551,9 @@ export function judgePrCiAutoFixConflict(input: {
       CONTRACT_DOCUMENT.test(file.path) ||
       AUTO_FIX_FENCE.test(file.path) ||
       PACKAGE_FILE.test(file.path) ||
+      SECURITY_FILE.test(file.path) ||
       (!file.path.includes("/") && !(dependabot && PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES.test(file.path))) ||
-      judgeQaReleaseMergeLaneExclusion({
-        headBranch: "auto-fix",
-        changedFiles: [{ path: file.path }],
-        changedFilesComplete: true,
-        policyTestPaths: [],
-        agentOwnPatterns: [],
-      }).excluded;
+      laneRefuses(file.path);
     if (gate && added > 0) reasons.add("gate_path_new_line");
   }
   if (newLines > PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES) reasons.add("too_many_new_lines");

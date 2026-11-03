@@ -6,6 +6,7 @@ import {
   judgePrCiAutoFixDiff,
   judgePrCiAutoFixTarget,
 } from "../lib/prCiAutoFixGuardCore.ts";
+import { judgeQaReleaseMergeLaneExclusion } from "../lib/qaReleaseMergeLaneExclusionCore.ts";
 
 const diff = (nameStatus, numstat) => judgePrCiAutoFixDiff({ nameStatus, numstat });
 
@@ -22,6 +23,8 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
     ["M\tdocs/release-gates/a.yaml", "1\t1\tdocs/release-gates/a.yaml", "gate_path"],
     ["M\tAGENTS.md", "1\t1\tAGENTS.md", "gate_path"],
     ["M\tlib/adminAuth.ts", "1\t1\tlib/adminAuth.ts", "gate_path"],
+    ["M\tlib/adminAuthSession.ts", "1\t1\tlib/adminAuthSession.ts", "gate_path"],
+    ["M\tlib/adminAuditSystemActors.ts", "1\t1\tlib/adminAuditSystemActors.ts", "gate_path"],
     ["M\tpackages/x/package.json", "1\t1\tpackages/x/package.json", "gate_path"],
     // The lane may merge these when a person wrote them; the model still may not touch them.
     ["M\t.github/audits/x.md", "1\t1\t.github/audits/x.md", "gate_path"],
@@ -40,6 +43,19 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
     const verdict = diff(nameStatus, numstat);
     assert.equal(verdict.push, false, nameStatus);
     assert.ok(verdict.reasons.includes(reason), `${nameStatus}: ${verdict.reasons}`);
+  }
+});
+
+test("a fix to the agent authority manifest is pushed so CI runs, and the merge lane leaves its merge to a person", () => {
+  // #3190: a Dependabot `next` bump fails until CONVENTION_VERSIONS records the installed version.
+  const nameStatus = "M\tlib/agentAuthorityFiles.ts\nM\ttools/auto-rec-agent/lib/agentAuthorityFiles.generated.mjs";
+  const numstat = "1\t1\tlib/agentAuthorityFiles.ts\n1\t1\ttools/auto-rec-agent/lib/agentAuthorityFiles.generated.mjs";
+  for (const headBranch of ["dependabot/npm_and_yarn/develop/user-interface-150ef438eb", "claude/to-develop/x"]) {
+    assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus, numstat, headBranch }), { push: true }, headBranch);
+    assert.deepEqual(judgeQaReleaseMergeLaneExclusion({
+      headBranch, changedFiles: [{ path: "lib/agentAuthorityFiles.ts" }], changedFilesComplete: true,
+      policyTestPaths: [], agentOwnPatterns: [],
+    }).excluded, true, headBranch);
   }
 });
 
