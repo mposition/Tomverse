@@ -1670,6 +1670,19 @@ function publishedActions(row: Row, m: Record<string, string>): MarketingAction[
     });
   }
 
+  // Nothing has gone out yet: a person may take the approval back. The store
+  // refuses a post the publisher has already taken.
+  if (status === "approved" || status === "scheduled") {
+    actions.push({
+      id: "withdraw-approval",
+      label: m.actWithdrawApproval,
+      path: POST(row.id, "withdraw"),
+      confirm: m.confirmWithdrawApproval,
+      danger: true,
+      body: () => postCas(row),
+    });
+  }
+
   if (status === "failed") {
     actions.push({
       id: "requeue",
@@ -1696,7 +1709,16 @@ function publishedActions(row: Row, m: Record<string, string>): MarketingAction[
       label: m.actResolvePublished,
       path: POST(row.id, "resolve-outcome"),
       fields: [
-        { name: "externalPostId", label: m.fieldExternalPostId, kind: "text" },
+        {
+          name: "externalPostId",
+          label: m.fieldExternalPostId,
+          kind: "text",
+          // The publisher keeps Zernio's id when it answered with one, and that
+          // is the id this asks for: the webhook, status query and unpublish
+          // all name the post by it.
+          initial: str(row.externalPostId),
+          hint: m.hintExternalPostId,
+        },
         { name: "externalUrl", label: m.fieldExternalUrl, kind: "url" },
         {
           name: "evidenceRef",
