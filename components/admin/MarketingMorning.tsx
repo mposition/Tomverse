@@ -74,7 +74,7 @@ export function MarketingMorningView({ morning }: { morning: MarketingMorningRep
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="marketing-morning-figures">
         <Figure label={m.figPending} value={String(f.pendingApproval)} />
         <Figure label={m.figApprovedWaiting} value={String(f.approvedWaiting)} />
-        <Figure label={m.figPublished} value={`${f.published7d} / ${f.sent7d}`} />
+        <Figure label={m.figPublishedSent} value={`${f.published7d} / ${f.sent7d}`} />
         <Figure label={m.figFailed} value={String(f.failed7d)} />
         <Figure label={m.figTouches} value={f.touches7d === null ? m.unreadable : String(f.touches7d)} />
         <Figure label={m.figSignups} value={f.signupsAttributed7d === null ? m.unreadable : String(f.signupsAttributed7d)} />

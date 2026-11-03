@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
+import { marketingWeekWindow } from "@/lib/marketingMeasurementCore";
 import { prisma } from "@/lib/prisma";
 import { marketingLastFullWeekStart, readMarketingWeeklyReport } from "@/lib/marketingWeeklyReportRead";
 
@@ -21,11 +22,15 @@ export async function GET(req: Request) {
     if (!session?.user?.id || !isAdminSession(session)) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
+    const week = new URL(req.url).searchParams.get("week") ?? marketingLastFullWeekStart(Date.now());
+    const window = marketingWeekWindow(week);
+    if (!window || window.start.getTime() > Date.now()) {
+      return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
     await consumeApiRateLimit(req, session.user.id, "admin-marketing-weekly-report-read", {
       minute: 60,
       day: 600,
     });
-    const week = new URL(req.url).searchParams.get("week") ?? marketingLastFullWeekStart(Date.now());
     const report = await readMarketingWeeklyReport(prisma, week);
     if (!report) return NextResponse.json({ error: "Not found." }, { status: 404 });
     return NextResponse.json(report, { headers: { "cache-control": "private, no-store" } });

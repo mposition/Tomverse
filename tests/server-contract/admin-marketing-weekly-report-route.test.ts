@@ -9,16 +9,23 @@ import { mock, test } from "node:test";
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relative: string) => pathToFileURL(resolve(ROOT, relative)).href;
 
-const world: { session: { user: { id: string } } | null; authorized: boolean; queries: number } = {
+const world: {
+  session: { user: { id: string } } | null;
+  authorized: boolean;
+  queries: number;
+  analysis: { payload: unknown; briefReportId: string; createdAt: Date } | null;
+} = {
   session: { user: { id: "admin-1" } },
   authorized: true,
   queries: 0,
+  analysis: null,
 };
 
 const reset = () => {
   world.session = { user: { id: "admin-1" } };
   world.authorized = true;
   world.queries = 0;
+  world.analysis = null;
 };
 
 let installed = false;
@@ -39,12 +46,17 @@ async function loadRoute(): Promise<{ GET: (request: Request) => Promise<Respons
     mock.module(mod("lib/prisma.ts"), {
       namedExports: {
         prisma: {
-          // Every table empty: no post, report, analysis or event.
-          $queryRaw: async () => {
+          // Every table empty -- no post, report or event -- except the week's
+          // newest analysis when a test sets one.
+          $queryRaw: async (query: { sql?: string; strings?: readonly string[] }) => {
             world.queries += 1;
+            const text = query?.sql ?? query?.strings?.join("?") ?? "";
+            if (world.analysis && text.includes('SELECT "payload", "briefReportId", "createdAt" FROM "MarketingAnalysis"')) {
+              return [world.analysis];
+            }
             return [];
           },
-          marketingCompetitor: { findMany: async () => [] },
+          marketingCompetitor: { findMany: async () => [{ officialHosts: ["poe.com"] }] },
         },
       },
     });
@@ -93,4 +105,35 @@ test("an empty week reads as counted zeros, held metrics and nothing written", a
   const latest = await (await GET(request())).json();
   assert.match(latest.weekStart, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(latest.inProgress, false);
+});
+
+test("the week's analysis is shown with its sources judged against the approved hosts", async () => {
+  reset();
+  const { GET } = await loadRoute();
+  world.analysis = {
+    briefReportId: "brief-1",
+    createdAt: new Date("2026-10-28T21:05:00.000Z"),
+    payload: {
+      promptVersion: "analysis-v1",
+      self: { summary: "s", strengths: ["a"], weaknesses: ["b"], audiences: ["c"] },
+      competitive: {
+        pricePosition: "p",
+        ahead: [{ point: "x", sources: ["https://poe.com/pricing", "https://made-up.example/"] }],
+        behind: [],
+        weeklyMessage: "w",
+      },
+      topicId: "side-by-side-answers",
+      claimIds: ["claim.review-three-models"],
+      competitorIds: ["poe"],
+      factCount: 1,
+      featureCount: 0,
+    },
+  };
+  const body = await (await GET(request("2026-10-26"))).json();
+  assert.equal(body.analysis.topicId, "side-by-side-answers");
+  assert.equal(body.analysis.createdAt, "2026-10-28T21:05:00.000Z");
+  assert.deepEqual(
+    body.analysis.competitive.ahead[0].sources.map((source: { linkable: boolean }) => source.linkable),
+    [true, false],
+  );
 });

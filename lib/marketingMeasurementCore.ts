@@ -46,6 +46,13 @@ export type MarketingMeasurementPost = {
   readonly approvalExpiresAt: Date | null;
   readonly errorCode: string | null;
   readonly guardCodes: readonly string[];
+  /** The dispatch attempts in the post's history (`type: "attempt"` entries). */
+  readonly attempts: ReadonlyArray<{
+    readonly at: Date;
+    readonly attempt: number;
+    readonly outcome: string;
+    readonly errorCode: string | null;
+  }>;
 };
 
 export type MarketingMeasurementChannel = {
@@ -138,15 +145,31 @@ export function summarizeMarketingMeasurement(input: {
 }): MarketingMeasurement {
   const { window, posts } = input;
   const created = posts.filter((post) => within(post.createdAt, window));
-  const published = posts.filter((post) => within(post.publishedAt, window));
-  const failed = posts.filter((post) => post.status === "failed" && within(post.updatedAt, window));
-  const unknown = posts.filter((post) => post.status === "outcome_unknown" && within(post.outcomeUnknownAt, window));
-  const sent = new Set([...published, ...failed, ...unknown]).size;
-  const verified = published.filter((post) => post.verifiedPublicAt !== null).length;
+  // A send is one dispatch attempt of one post: read from the attempt history,
+  // not the post's status now, so a failure that was requeued and then
+  // published counts as two sends, one failed and one published. An attempt's
+  // outcome is its newest entry in the window (an unknown outcome resolved as
+  // failed is one send). A post still `publishing` is a send not yet resolved.
+  const attempts = new Map<string, { post: MarketingMeasurementPost; at: Date; outcome: string; errorCode: string | null }>();
+  posts.forEach((post, index) => {
+    for (const entry of post.attempts) {
+      if (!within(entry.at, window)) continue;
+      const key = `${index}:${entry.attempt}`;
+      const seen = attempts.get(key);
+      if (!seen || seen.at.getTime() <= entry.at.getTime()) attempts.set(key, { post, ...entry });
+    }
+  });
+  const resolved = [...attempts.values()];
+  const inFlight = posts.filter((post) => post.status === "publishing" && within(post.updatedAt, window)).length;
+  const published = resolved.filter((entry) => entry.outcome === "published");
+  const failed = resolved.filter((entry) => entry.outcome === "failed");
+  const unknown = resolved.filter((entry) => entry.outcome === "outcome_unknown");
+  const sent = resolved.length + inFlight;
+  const verified = published.filter((entry) => entry.post.verifiedPublicAt !== null).length;
   const latencies = published
-    .map((post) => {
-      const from = post.scheduledAt ?? post.approvedAt;
-      return from && post.publishedAt ? post.publishedAt.getTime() - from.getTime() : null;
+    .map((entry) => {
+      const from = entry.post.scheduledAt ?? entry.post.approvedAt;
+      return from ? entry.at.getTime() - from.getTime() : null;
     })
     .filter((value): value is number => value !== null && value >= 0)
     .sort((left, right) => left - right);
@@ -175,7 +198,7 @@ export function summarizeMarketingMeasurement(input: {
       successRate: sent < MARKETING_MEASUREMENT_MIN_SENT ? null : verified / sent,
       latencyP50Ms: marketingPercentile(latencies, 0.5),
       latencyP95Ms: marketingPercentile(latencies, 0.95),
-      failuresByCode: tally(failed.map((post) => post.errorCode ?? "unknown")),
+      failuresByCode: tally(failed.map((entry) => entry.errorCode ?? "unknown")),
     },
     queue: {
       pendingApproval: pending.length,
@@ -185,15 +208,17 @@ export function summarizeMarketingMeasurement(input: {
       scheduled: posts.filter((post) => post.status === "scheduled").length,
     },
     accounts: input.channels.map((channel) => {
-      const mine = (rows: readonly MarketingMeasurementPost[]) =>
-        rows.filter((post) => post.accountSlug === channel.accountSlug).length;
+      const mine = (rows: ReadonlyArray<{ readonly accountSlug: string }>) =>
+        rows.filter((row) => row.accountSlug === channel.accountSlug).length;
+      const mineSent = (rows: ReadonlyArray<{ readonly post: MarketingMeasurementPost }>) =>
+        rows.filter((row) => row.post.accountSlug === channel.accountSlug).length;
       return {
         accountSlug: channel.accountSlug,
         channel: channel.channel,
         status: channel.status,
         pauseReasonCode: channel.pauseReasonCode,
-        published: mine(published),
-        failed: mine(failed),
+        published: mineSent(published),
+        failed: mineSent(failed),
         pendingApproval: mine(pending),
         approvedWaiting: mine(approved),
       };

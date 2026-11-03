@@ -41,6 +41,7 @@ const post = (overrides = {}) => ({
   approvalExpiresAt: null,
   errorCode: null,
   guardCodes: ["new_copy"],
+  attempts: [],
   ...overrides,
 });
 
@@ -66,8 +67,15 @@ test("the week's posts, dispatch and queue are counted, and a small sample is he
         scheduledAt: at("2026-11-04T00:00:00Z"),
         publishedAt: at("2026-11-04T00:10:00Z"),
         verifiedPublicAt: at("2026-11-04T01:00:00Z"),
+        attempts: [{ at: at("2026-11-04T00:10:00Z"), attempt: 1, outcome: "published", errorCode: null }],
       }),
-      post({ accountSlug: "facebook-3", status: "failed", updatedAt: at("2026-11-05T00:00:00Z"), errorCode: "rate_limited" }),
+      post({
+        accountSlug: "facebook-3",
+        status: "failed",
+        updatedAt: at("2026-11-05T00:00:00Z"),
+        errorCode: "rate_limited",
+        attempts: [{ at: at("2026-11-05T00:00:00Z"), attempt: 1, outcome: "failed", errorCode: "rate_limited" }],
+      }),
       post({ status: "rejected", updatedAt: at("2026-11-04T00:00:00Z") }),
       // Before the week: counted only as the queue it is still in.
       post({ createdAt: at("2026-10-20T00:00:00Z"), updatedAt: at("2026-10-20T00:00:00Z") }),
@@ -110,6 +118,7 @@ test("enough sends give a rate, and an unreadable count stays null rather than z
       publishedAt: at("2026-11-04T00:00:00Z"),
       approvedAt: at("2026-11-03T23:00:00Z"),
       verifiedPublicAt: index < 4 ? at("2026-11-04T01:00:00Z") : null,
+      attempts: [{ at: at("2026-11-04T00:00:00Z"), attempt: 1, outcome: "published", errorCode: null }],
     }),
   );
   const measurement = summarizeMarketingMeasurement({
@@ -125,4 +134,57 @@ test("enough sends give a rate, and an unreadable count stays null rather than z
   assert.equal(measurement.touches, null);
   assert.ok(measurement.held.includes("signups"));
   assert.ok(!measurement.held.includes("success_rate"));
+});
+
+test("sends are attempts: a failure requeued and then published is two sends, and one in flight is a third", () => {
+  const measurement = summarizeMarketingMeasurement({
+    window: WINDOW,
+    posts: [
+      // Failed, requeued by a person, published: the status now says only "verified".
+      post({
+        status: "verified",
+        approvedAt: at("2026-11-03T00:00:00Z"),
+        scheduledAt: at("2026-11-05T00:00:00Z"),
+        publishedAt: at("2026-11-05T00:05:00Z"),
+        verifiedPublicAt: at("2026-11-05T01:00:00Z"),
+        attempts: [
+          { at: at("2026-11-04T00:00:00Z"), attempt: 1, outcome: "failed", errorCode: "media_rejected" },
+          { at: at("2026-11-05T00:05:00Z"), attempt: 2, outcome: "published", errorCode: null },
+        ],
+      }),
+      // An unknown outcome later resolved as failed is one send, failed.
+      post({
+        status: "failed",
+        updatedAt: at("2026-11-06T00:00:00Z"),
+        attempts: [
+          { at: at("2026-11-04T02:00:00Z"), attempt: 1, outcome: "outcome_unknown", errorCode: "timeout" },
+          { at: at("2026-11-06T00:00:00Z"), attempt: 1, outcome: "failed", errorCode: "not_on_platform" },
+        ],
+      }),
+      post({ status: "publishing", updatedAt: at("2026-11-07T00:00:00Z") }),
+      // An attempt before the week is not this week's send.
+      post({
+        status: "published",
+        attempts: [{ at: at("2026-10-30T00:00:00Z"), attempt: 1, outcome: "published", errorCode: null }],
+      }),
+    ],
+    channels: CHANNELS,
+    touches: 0,
+    signups: null,
+    guestLeads: null,
+    llm: null,
+  });
+  assert.equal(measurement.dispatch.sent, 4);
+  assert.equal(measurement.dispatch.published, 1);
+  assert.equal(measurement.dispatch.failed, 2);
+  assert.equal(measurement.dispatch.outcomeUnknown, 0);
+  assert.equal(measurement.dispatch.verified, 1);
+  assert.deepEqual(
+    measurement.dispatch.failuresByCode.map((entry) => entry.code).sort(),
+    ["media_rejected", "not_on_platform"],
+  );
+  // Measured from the requeued schedule to the attempt that published.
+  assert.equal(measurement.dispatch.latencyP50Ms, 5 * 60 * 1000);
+  assert.equal(measurement.accounts[0].published, 1);
+  assert.equal(measurement.accounts[0].failed, 2);
 });

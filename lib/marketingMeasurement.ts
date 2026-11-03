@@ -24,6 +24,21 @@ import { MARKETING_TOUCH_EVENT } from "@/lib/marketingTouchCore";
 
 type Reader = Pick<PrismaClient, "$queryRaw">;
 
+/**
+ * The dispatch attempts in a post's history. Read leniently: an entry this
+ * does not recognise is not an attempt. Attempts retention has folded into a
+ * summary are past the 24-month window any report reads.
+ */
+export const marketingAttemptsOf = (history: unknown): MarketingMeasurementPost["attempts"] =>
+  (Array.isArray(history) ? history : []).flatMap((entry) => {
+    const value = entry as { type?: unknown; at?: unknown; attempt?: unknown; outcome?: unknown; errorCode?: unknown };
+    if (value?.type !== "attempt" || typeof value.at !== "string" || typeof value.attempt !== "number") return [];
+    if (typeof value.outcome !== "string") return [];
+    const at = new Date(value.at);
+    if (Number.isNaN(at.getTime())) return [];
+    return [{ at, attempt: value.attempt, outcome: value.outcome, errorCode: typeof value.errorCode === "string" ? value.errorCode : null }];
+  });
+
 const settle = async <T>(read: () => Promise<T>): Promise<T | null> => {
   try {
     return await read();
@@ -72,14 +87,16 @@ export async function readMarketingMeasurement(
   window: MarketingMeasurementWindow,
 ): Promise<MarketingMeasurement> {
   const [posts, channels, touches, signups, guestLeads, llm] = await Promise.all([
-    db.$queryRaw<MarketingMeasurementPost[]>(Prisma.sql`
-      SELECT c."accountSlug", p."status", p."createdAt", p."updatedAt", p."approvedAt", p."scheduledAt",
-             p."publishedAt", p."verifiedPublicAt", p."outcomeUnknownAt", p."approvalExpiresAt",
-             p."errorCode", p."guardCodes"
-      FROM "MarketingPost" p JOIN "MarketingChannel" c ON c."id" = p."channelId"
-      WHERE p."updatedAt" >= ${window.start} OR p."createdAt" >= ${window.start}
-         OR p."status" IN ('pending_approval', 'approved', 'scheduled')
-    `),
+    db
+      .$queryRaw<Array<Omit<MarketingMeasurementPost, "attempts"> & { history: unknown }>>(Prisma.sql`
+        SELECT c."accountSlug", p."status", p."createdAt", p."updatedAt", p."approvedAt", p."scheduledAt",
+               p."publishedAt", p."verifiedPublicAt", p."outcomeUnknownAt", p."approvalExpiresAt",
+               p."errorCode", p."guardCodes", p."history"
+        FROM "MarketingPost" p JOIN "MarketingChannel" c ON c."id" = p."channelId"
+        WHERE p."updatedAt" >= ${window.start} OR p."createdAt" >= ${window.start}
+           OR p."status" IN ('pending_approval', 'approved', 'scheduled')
+      `)
+      .then((rows) => rows.map(({ history, ...row }) => ({ ...row, attempts: marketingAttemptsOf(history) }))),
     db.$queryRaw<Array<{ accountSlug: string; channel: string; status: string; pauseReasonCode: string | null }>>(Prisma.sql`
       SELECT "accountSlug", "channel", "status", "pauseReasonCode" FROM "MarketingChannel" ORDER BY "accountSlug"
     `),
