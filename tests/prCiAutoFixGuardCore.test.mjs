@@ -24,7 +24,6 @@ test("any file but the workflows and actions is pushed: tests, deletions, script
     ["A\ttests/new.test.mjs", "30\t0\ttests/new.test.mjs"],
     ["M\ttests/__snapshots__/a.snap", "1\t1\ttests/__snapshots__/a.snap"],
     ["D\tlib/old.ts", "0\t9\tlib/old.ts"],
-    ["R100\ttests/a.mjs\tlib/a.mjs", "0\t0\tlib/a.mjs"],
     ["M\tscripts/merge-train.mjs", "1\t1\tscripts/merge-train.mjs"],
     ["M\tdocs/policy/a.md", "1\t1\tdocs/policy/a.md"],
     ["M\tdocs/ui-contracts/a.md", "1\t1\tdocs/ui-contracts/a.md"],
@@ -47,7 +46,6 @@ test("a change to the workflows or actions is pushed too; only a binary or an em
     ["M\t.github/workflows/x.yml", "1\t1\t.github/workflows/x.yml"],
     ["A\t.github/actions/setup/action.yml", "9\t0\t.github/actions/setup/action.yml"],
     ["D\t.github/workflows/x.yml", "0\t9\t.github/workflows/x.yml"],
-    ["R100\t.github/workflows/x.yml\tdocs/x.yml", "0\t0\tdocs/x.yml"],
   ]) {
     assert.deepEqual(diff(nameStatus, numstat), { push: true }, nameStatus);
   }
@@ -66,8 +64,10 @@ test("paths are read as git -z gives them, and output that does not parse is ref
     const verdict = judgePrCiAutoFixDiff({ nameStatus: `A\0${path}\0`, numstat: `3\t0\t${path}\0` });
     assert.deepEqual(verdict, { push: true }, JSON.stringify(path));
   }
-  // A rename's numstat line ends empty and its two paths follow.
+  // A rename's numstat line ends empty and its two paths follow, as git -z -M writes it.
   assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus: "R090\0lib/a.ts\0lib/b.ts\0", numstat: "1\t1\t\0lib/a.ts\0lib/b.ts\0" }), { push: true });
+  assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus: "R100\0.github/workflows/x.yml\0docs/x.yml\0",
+    numstat: "0\t0\t\0.github/workflows/x.yml\0docs/x.yml\0" }), { push: true });
   // Output that does not parse as -z is refused, not read as no change.
   for (const [nameStatus, numstat] of [
     ["M\tlib/x.ts\n", "1\t1\tlib/x.ts\n"],

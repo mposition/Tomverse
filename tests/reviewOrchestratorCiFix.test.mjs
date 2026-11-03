@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { parse as parseYaml } from "yaml";
 import { dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import {
@@ -139,6 +140,21 @@ test("a head is ready only when every workflow's newest run has finished", () =>
   // Two workflow files may share a name: each is its own workflow (review r-20261103-040234-80d59c).
   const shared = failedRuns([run(6, "CI", "failure", { workflow_id: 10 }), run(7, "CI", "success", { workflow_id: 11 })]);
   assert.deepEqual(shared.failed.map((r) => r.id), [6], "the other file's green run does not hide this one's failure");
+});
+
+test("every run block of the workflow parses as bash", () => {
+  // Review r-20261103-040829-46fc42: an unterminated quote broke the push step.
+  const workflow = parseYaml(read("../.github/workflows/pr-ci-auto-fix.yml"));
+  let blocks = 0;
+  for (const job of Object.values(workflow.jobs)) {
+    for (const step of job.steps ?? []) {
+      if (typeof step.run !== "string") continue;
+      blocks += 1;
+      const checked = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
+      assert.equal(checked.status, 0, `${step.name}: ${checked.stderr}`);
+    }
+  }
+  assert.ok(blocks >= 4);
 });
 
 test("a workflow name reaches the step outputs as plain characters, and the push checks its branch again", () => {

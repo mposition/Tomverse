@@ -249,18 +249,7 @@ jobs:
           WORKFLOWS: ${{ needs.target.outputs.workflows }}
         run: |
           # The target job judged these names; the push checks them again itself.
-          plain='^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}
-          git config user.email "pr-auto-fix@users.noreply.github.com"
-          if [ "$KIND" = conflict ]; then
-            [ -z "$(git diff --name-only --diff-filter=U)" ] || { echo "Conflicts are left."; exit 1; }
-            git commit -q -m "auto-fix(conflict): merge ${BASE_BRANCH} into #${PR_NUMBER}" -m "${BASE_BRANCH} at ${BASE_SHA}. Resolved by Claude Code on the AMUX server; judged and published by .github/workflows/pr-ci-auto-fix.yml."
-          else
-            git add --all
-            git commit -q -m "auto-fix(ci): ${WORKFLOWS} failure on #${PR_NUMBER}" -m "Runs ${RUN_IDS}. Proposed by Claude Code on the AMUX server; published by .github/workflows/pr-ci-auto-fix.yml."
-          fi
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${HEAD_BRANCH}" --force-with-lease="refs/heads/${HEAD_BRANCH}:${HEAD_SHA}"
-          echo "Pushed one ${KIND} auto-fix commit to ${HEAD_BRANCH}." >> "$GITHUB_STEP_SUMMARY"
-
+          plain='^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$'
           [[ "$HEAD_BRANCH" =~ $plain && "$BASE_BRANCH" =~ $plain ]] || { echo "A branch name is not a plain ref."; exit 1; }
           case "$HEAD_BRANCH" in main|develop|test) echo "$HEAD_BRANCH deploys; nothing is pushed to it."; exit 1 ;; esac
           git config user.name "tomverse-pr-auto-fix"
