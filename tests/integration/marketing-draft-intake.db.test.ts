@@ -670,7 +670,8 @@ const submission = (channelId: string) => {
     generatorRunId: "run-1",
     submissionId: "sub-route",
     deadlineAt: inAMinute().toISOString(),
-    drafts: [draft(channelId)],
+    // The route's schema requires an image or a video on every draft.
+    drafts: [draft(channelId, { assets: [{ assetId: "asset_1", altKey: "alt_1" }] })],
     llmCallRequestKeys: [callKey(1)],
   };
   return { ...body, provenance: marketingDraftProvenance(SECRET, body) };
