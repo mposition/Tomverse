@@ -64,7 +64,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
  * conventions, and every change is tier two (rule (h)).
  */
 export const CONVENTION_VERSIONS = {
-  next: "16.4.2",
+  next: "16.4.3",
   typescript: "6.0.3",
 } as const;
 
