@@ -46,6 +46,7 @@ import {
 import { marketingLlmCatalogPinsIn } from "@/lib/marketingLlmModelCatalog";
 import { readMarketingOperations, readMarketingPriceHistory } from "@/lib/marketingMeasurement";
 import type { MarketingTransaction } from "@/lib/marketingStore";
+import { prisma } from "@/lib/prisma";
 
 /**
  * Whether the generator may be given context at all.
@@ -344,6 +345,12 @@ async function marketingStrategyDue(db: Pick<ContextReader, "$queryRaw">, now: n
 
 export async function readMarketingGeneratorContext(
   db: ContextReader,
+  /**
+   * Where the morning report's counts and prices are read: outside the
+   * context's transaction, so a failed read there cannot abort the
+   * transaction the drafts' context is read in.
+   */
+  outside: Pick<typeof prisma, "$queryRaw"> = prisma,
 ): Promise<MarketingGeneratorContext> {
   // Approval mode only: S3 drafts go to a person, and an account that is
   // waiting to connect, paused or disconnected is not one a draft is for.
@@ -416,8 +423,8 @@ export async function readMarketingGeneratorContext(
     ownProduct: { pages: ownPages(), plans: activePlans },
     // Only for the morning report: a read that fails leaves it without its
     // counts (it records "no_data"), never the drafts without their context.
-    operations: analysisOn ? await readMarketingOperations(db).catch(() => null) : null,
-    marketPrices: analysisOn ? await readMarketingPriceHistory(db).catch(() => []) : [],
+    operations: analysisOn ? await readMarketingOperations(outside).catch(() => null) : null,
+    marketPrices: analysisOn ? await readMarketingPriceHistory(outside).catch(() => []) : [],
     analysis: {
       enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
       // Only asked while the switch is on: off, no plan is written either way.

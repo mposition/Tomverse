@@ -18,6 +18,8 @@ import type { MarketingWeeklyReport } from "@/lib/marketingWeeklyReportRead";
  * operator steps back and forward a week at a time.
  */
 
+type Messages = Record<keyof (typeof adminMarketingReportsMessages)["en"], string>;
+
 type Load = { status: "loading" } | { status: "failed" } | { status: "ready"; report: MarketingWeeklyReport };
 
 const HEAD = "py-1.5 pr-4 text-left text-xs font-medium text-zinc-500";
@@ -43,6 +45,84 @@ function Section({ title, children, testId }: { title: string; children: React.R
 }
 
 const minutes = (ms: number | null) => (ms === null ? null : `${Math.round(ms / 60_000)}m`);
+
+/** The send measures; left out entirely for a week retention has partly summarised. */
+function MeasurementSends({ x, m }: { x: MarketingWeeklyReport["measurement"]; m: Messages }) {
+  const held = (key: "success_rate" | "latency") => x.dispatch.held.includes(key);
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Stat
+          label={m.successRate}
+          value={x.dispatch.successRate === null ? "—" : `${Math.round(x.dispatch.successRate * 100)}%`}
+          note={held("success_rate") ? `${m.held} · ${m.heldSent}` : undefined}
+        />
+        <Stat label={m.verified} value={`${x.dispatch.verified} / ${x.dispatch.sent}`} />
+        <Stat
+          label={m.latency}
+          value={held("latency") ? "—" : `${minutes(x.dispatch.latencyP50Ms)} / ${minutes(x.dispatch.latencyP95Ms)}`}
+          note={held("latency") ? `${m.held} · ${m.heldLatency}` : undefined}
+        />
+        <Stat label={m.outcomeUnknown} value={String(x.dispatch.outcomeUnknown)} />
+      </div>
+      <p className="text-xs text-zinc-400">
+        {m.failures}:{" "}
+        {x.dispatch.failuresByCode.length === 0 ? (
+          m.none
+        ) : (
+          <span className="font-mono text-zinc-300">
+            {x.dispatch.failuresByCode.map((entry) => `${entry.code} ${entry.count}`).join(" · ")}
+          </span>
+        )}
+        {x.dispatch.notSent > 0 ? ` · ${m.notSent.replace("{count}", String(x.dispatch.notSent))}` : ""}
+      </p>
+      <p className="text-xs text-zinc-400">
+        {m.inFlight.replace("{count}", String(x.dispatch.inFlight))}
+      </p>
+      {x.dispatch.segments.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] border-collapse" data-testid="marketing-weekly-segments">
+            <thead>
+              <tr className="border-b border-zinc-800">
+                <th className={HEAD}>{m.colAccount}</th>
+                <th className={HEAD}>{m.colMode}</th>
+                <th className={HEAD}>{m.colSent}</th>
+                <th className={HEAD}>{m.published}</th>
+                <th className={HEAD}>{m.failed}</th>
+                <th className={HEAD}>{m.successRate}</th>
+                <th className={HEAD}>{m.latency}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ...x.dispatch.byMode.map((row) => ({ ...row, accountSlug: "*" })),
+                ...x.dispatch.segments,
+              ].map((row) => (
+                <tr key={`${row.mode}|${row.accountSlug}`} className="border-b border-zinc-800/60">
+                  <td className={`${CELL} font-mono text-xs`}>{row.accountSlug}</td>
+                  <td className={`${CELL} font-mono text-xs`}>{row.mode}</td>
+                  <td className={CELL}>{row.sent}</td>
+                  <td className={CELL}>{row.published}</td>
+                  <td className={CELL}>{row.failed}</td>
+                  <td className={CELL}>
+                    {row.successRate === null ? <span className="text-sky-300">{m.held}</span> : `${Math.round(row.successRate * 100)}%`}
+                  </td>
+                  <td className={CELL}>
+                    {row.latencyP50Ms === null ? (
+                      <span className="text-sky-300">{m.held}</span>
+                    ) : (
+                      `${minutes(row.latencyP50Ms)} / ${minutes(row.latencyP95Ms)}`
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </>
+  );
+}
 
 export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyReport }) {
   const m = useAdminMessages(adminMarketingReportsMessages);
@@ -105,20 +185,10 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
           <p className="text-sm text-sky-300" data-testid="marketing-weekly-compacted">
             {m.compacted}
           </p>
-        ) : null}
+        ) : (
+          <MeasurementSends x={x} m={m} />
+        )}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat
-            label={m.successRate}
-            value={x.dispatch.successRate === null ? "—" : `${Math.round(x.dispatch.successRate * 100)}%`}
-            note={held("success_rate") ? `${m.held} · ${m.heldSent}` : undefined}
-          />
-          <Stat label={m.verified} value={`${x.dispatch.verified} / ${x.dispatch.sent}`} />
-          <Stat
-            label={m.latency}
-            value={held("latency") ? "—" : `${minutes(x.dispatch.latencyP50Ms)} / ${minutes(x.dispatch.latencyP95Ms)}`}
-            note={held("latency") ? `${m.held} · ${m.heldLatency}` : undefined}
-          />
-          <Stat label={m.outcomeUnknown} value={String(x.dispatch.outcomeUnknown)} />
           <Stat
             label={m.signups}
             value={pair(x.signups)}
@@ -135,61 +205,6 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
             }
           />
         </div>
-        <p className="text-xs text-zinc-400">
-          {m.failures}:{" "}
-          {x.dispatch.failuresByCode.length === 0 ? (
-            m.none
-          ) : (
-            <span className="font-mono text-zinc-300">
-              {x.dispatch.failuresByCode.map((entry) => `${entry.code} ${entry.count}`).join(" · ")}
-            </span>
-          )}
-          {x.dispatch.notSent > 0 ? ` · ${m.notSent.replace("{count}", String(x.dispatch.notSent))}` : ""}
-        </p>
-        <p className="text-xs text-zinc-400">
-          {m.inFlight.replace("{count}", String(x.dispatch.inFlight))}
-        </p>
-        {x.dispatch.segments.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] border-collapse" data-testid="marketing-weekly-segments">
-              <thead>
-                <tr className="border-b border-zinc-800">
-                  <th className={HEAD}>{m.colAccount}</th>
-                  <th className={HEAD}>{m.colMode}</th>
-                  <th className={HEAD}>{m.colSent}</th>
-                  <th className={HEAD}>{m.published}</th>
-                  <th className={HEAD}>{m.failed}</th>
-                  <th className={HEAD}>{m.successRate}</th>
-                  <th className={HEAD}>{m.latency}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  ...x.dispatch.byMode.map((row) => ({ ...row, accountSlug: "*" })),
-                  ...x.dispatch.segments,
-                ].map((row) => (
-                  <tr key={`${row.mode}|${row.accountSlug}`} className="border-b border-zinc-800/60">
-                    <td className={`${CELL} font-mono text-xs`}>{row.accountSlug}</td>
-                    <td className={`${CELL} font-mono text-xs`}>{row.mode}</td>
-                    <td className={CELL}>{row.sent}</td>
-                    <td className={CELL}>{row.published}</td>
-                    <td className={CELL}>{row.failed}</td>
-                    <td className={CELL}>
-                      {row.successRate === null ? <span className="text-sky-300">{m.held}</span> : `${Math.round(row.successRate * 100)}%`}
-                    </td>
-                    <td className={CELL}>
-                      {row.latencyP50Ms === null ? (
-                        <span className="text-sky-300">{m.held}</span>
-                      ) : (
-                        `${minutes(row.latencyP50Ms)} / ${minutes(row.latencyP95Ms)}`
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
         {x.signupChannels && x.signupChannels.length > 0 ? (
           <ul className="grid gap-0.5 text-xs text-zinc-400" data-testid="marketing-weekly-signup-channels">
             {x.signupChannels.map((channel) => (

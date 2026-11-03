@@ -294,7 +294,15 @@ export function summarizeMarketingMeasurement(input: {
       (span) => span.firstAt.getTime() < window.end.getTime() && span.lastAt.getTime() >= window.start.getTime(),
     ),
   );
-  const sends = marketingSendStats(resolved);
+  // A window retention has partly summarised has an incomplete denominator:
+  // no rate or delay is drawn from what is left, at any level.
+  const measure = (subset: readonly ResolvedSend[]): MarketingSendStats => {
+    const stats = marketingSendStats(subset);
+    return compacted
+      ? { ...stats, successRate: null, latencyP50Ms: null, latencyP95Ms: null, held: ["success_rate", "latency"] }
+      : stats;
+  };
+  const sends = measure(resolved);
   const pending = posts.filter((post) => post.status === "pending_approval");
   const approved = posts.filter((post) => post.status === "approved");
   const modes = [...new Set(resolved.map((entry) => entry.post.mode))].sort();
@@ -321,7 +329,7 @@ export function summarizeMarketingMeasurement(input: {
       notSent,
       compacted,
       inFlight,
-      byMode: modes.map((mode) => ({ mode, ...marketingSendStats(resolved.filter((entry) => entry.post.mode === mode)) })),
+      byMode: modes.map((mode) => ({ mode, ...measure(resolved.filter((entry) => entry.post.mode === mode)) })),
       // Every mode and account the window sent from, each judged on its own sample.
       segments: [...new Set(resolved.map((entry) => JSON.stringify([entry.post.mode, entry.post.accountSlug])))]
         .sort()
@@ -330,9 +338,7 @@ export function summarizeMarketingMeasurement(input: {
           return {
             mode,
             accountSlug,
-            ...marketingSendStats(
-              resolved.filter((entry) => entry.post.mode === mode && entry.post.accountSlug === accountSlug),
-            ),
+            ...measure(resolved.filter((entry) => entry.post.mode === mode && entry.post.accountSlug === accountSlug)),
           };
         }),
     },

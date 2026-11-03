@@ -368,6 +368,14 @@ test("a week whose send history retention has summarised holds every send measur
         status: "verified",
         compactedAttempts: [{ firstAt: at("2026-11-03T00:00:00Z"), lastAt: at("2026-11-03T00:00:00Z") }],
       }),
+      ...Array.from({ length: 6 }, (_, index) =>
+        post({
+          status: "verified",
+          approvedAt: at("2026-11-04T00:00:00Z"),
+          verifiedPublicAt: at("2026-11-04T02:00:00Z"),
+          attempts: [{ at: at(`2026-11-04T01:0${index}:00Z`), attempt: 1, outcome: "published", errorCode: null }],
+        }),
+      ),
     ],
     channels: [],
     touches: 0,
@@ -378,6 +386,9 @@ test("a week whose send history retention has summarised holds every send measur
   });
   assert.equal(measurement.dispatch.compacted, true);
   assert.ok(measurement.held.includes("sends_compacted"));
+  // What is left is not a sample: no rate or delay at any level.
+  assert.equal(measurement.dispatch.successRate, null);
+  assert.ok(measurement.dispatch.segments.every((row) => row.successRate === null && row.latencyP50Ms === null));
   const elsewhere = summarizeMarketingMeasurement({
     window: WINDOW,
     posts: [post({ compactedAttempts: [{ firstAt: at("2026-08-01T00:00:00Z"), lastAt: at("2026-08-02T00:00:00Z") }] })],
