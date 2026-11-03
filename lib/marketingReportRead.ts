@@ -2,9 +2,11 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   marketingAnalysisView,
+  marketingMorningReportSchema,
   marketingStrategyWeek,
   marketingWeeklyStrategySchema,
   type MarketingAnalysisView,
+  type MarketingMorningReport,
   type MarketingWeeklyStrategy,
 } from "@/lib/marketingAnalysisCore";
 import {
@@ -179,5 +181,42 @@ export async function readLatestMarketingStrategy(
     createdAt: rows[0].createdAt.toISOString(),
     briefReportId: rows[0].briefReportId,
     strategy: parsed.data,
+  };
+}
+
+/** The newest morning report, as the Reports tab's morning card reads it. */
+export type MarketingMorningRead =
+  | { readonly status: "none" }
+  | { readonly status: "unreadable" }
+  | {
+      readonly status: "found";
+      /** Whether it was written on today's Brisbane date. */
+      readonly current: boolean;
+      readonly createdAt: string;
+      readonly briefReportId: string;
+      readonly morning: MarketingMorningReport;
+    };
+
+export async function readLatestMarketingMorning(
+  db: Pick<PrismaClient, "$queryRaw">,
+  now: number = Date.now(),
+): Promise<MarketingMorningRead> {
+  const rows = await db.$queryRaw<Array<{ morning: unknown; briefReportId: string; createdAt: Date }>>(Prisma.sql`
+    SELECT "payload"->'morning' AS "morning", "briefReportId", "createdAt"
+    FROM "MarketingAnalysis"
+    WHERE "payload"->'morning' IS NOT NULL
+    ORDER BY "createdAt" DESC
+    LIMIT 1
+  `);
+  if (rows.length === 0) return { status: "none" };
+  const parsed = marketingMorningReportSchema.safeParse(rows[0].morning);
+  if (!parsed.success) return { status: "unreadable" };
+  const today = new Date(now + 10 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return {
+    status: "found",
+    current: parsed.data.date === today,
+    createdAt: rows[0].createdAt.toISOString(),
+    briefReportId: rows[0].briefReportId,
+    morning: parsed.data,
   };
 }

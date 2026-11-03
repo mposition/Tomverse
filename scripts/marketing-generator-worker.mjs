@@ -41,9 +41,10 @@ const A3_SHARE_MS = 20 * 60 * 1000;
 
 /**
  * The analysis and brief's share after A3: two text calls, the week's plan
- * at the first run of a week, and a report. A ceiling: A5 has whatever is left.
+ * at the first run of a week, the morning report, and a report. A ceiling:
+ * A5 has whatever is left.
  */
-const ANALYSIS_SHARE_MS = 7 * 60 * 1000;
+const ANALYSIS_SHARE_MS = 9 * 60 * 1000;
 
 /** Drafts asked of each account per run. */
 const POSTS_PER_ACCOUNT = 3;
