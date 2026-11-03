@@ -599,6 +599,13 @@ export async function mockAuthenticatedApi(
      * /chat's welcome screen starts from DEFAULT_MODEL_ID instead.
      */
     selectedModels?: string[];
+    /**
+     * The detail read's view of the stored list. The real GET runs the row
+     * through the runtime clamp (a retired id comes back as its replacement)
+     * and returns the row's own list beside it as `storedSelectedModels`;
+     * the preflight still checks a send against the row.
+     */
+    presentSelectedModels?: (stored: string[]) => string[];
     language?: Language;
     showSidebarTour?: boolean;
     /**
@@ -732,7 +739,10 @@ export async function mockAuthenticatedApi(
   const conversation = () => ({
     id: "qa-conversation",
     title: state.title,
-    selectedModels: [...state.selectedModels],
+    selectedModels: options.presentSelectedModels
+      ? options.presentSelectedModels([...state.selectedModels])
+      : [...state.selectedModels],
+    storedSelectedModels: [...state.selectedModels],
     disabledPanels: [...state.disabledPanels],
     webSearchMode: options.webSearchMode || "off",
     // §8.1 invariant 1. Stored, not resolved: the fixture has to be able to

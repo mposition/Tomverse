@@ -3847,6 +3847,7 @@ export function ChatPageClient({
 
     const applyConversationSettings = useCallback((data: {
         selectedModels?: unknown;
+        storedSelectedModels?: unknown;
         disabledPanels?: unknown;
         webSearchMode?: unknown;
         memoryMode?: unknown;
@@ -3943,9 +3944,17 @@ export function ChatPageClient({
           // them as confirmed let the send barrier skip the PATCH when a later
           // selection (Review's Auto pick) matched the repair -- the preflight
           // then refused models the row never held (MODEL_NOT_SELECTED,
-          // trace b3ad49ca-7e79-4a54-9380-9bdcdf69d104).
+          // trace b3ad49ca-7e79-4a54-9380-9bdcdf69d104). The detail read's
+          // `selectedModels` is itself clamped on the server, so the row's
+          // own list comes from `storedSelectedModels` when the read has it
+          // (trace d51032a1-ffe7-4e3a-a274-15d4274b461f).
           modelSettingsSyncQueueRef.current.markConfirmed(targetChatId, {
-            models: normalizeStringArray(data.selectedModels, []),
+            models: normalizeStringArray(
+              Array.isArray(data.storedSelectedModels)
+                ? data.storedSelectedModels
+                : data.selectedModels,
+              []
+            ),
             disabled: normalizeStringArray(data.disabledPanels, []),
           });
         }

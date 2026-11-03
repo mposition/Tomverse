@@ -6,11 +6,11 @@ import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
 
-async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3, messages: QaConversationMessage[] = [], imageTriage = false) {
+async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3, messages: QaConversationMessage[] = [], imageTriage = false, presentSelectedModels?: (stored: string[]) => string[]) {
   await page.setViewportSize({ width, height: width > 768 ? 1000 : 932 });
   await prepareGuestPage(page, "ko", "studio");
   const account = await mockAuthenticatedApi(page, {
-    selectedModels: models, productKey: "review", assistantProfiles: [], messages,
+    selectedModels: models, presentSelectedModels, productKey: "review", assistantProfiles: [], messages,
     extraConversations: [{ id: "qa-studio-other", title: "Other Studio task", selectedModels: models,
       messages: [{ id: "other-answer", role: "assistant", content: "The other task's saved answer.", modelId: models[0] }] }],
   });
@@ -338,6 +338,31 @@ test("Easy saves an Auto pick that only replaces a retired stored model before t
   await page.route("**/api/review/route", route => route.fulfill({ json: { kind: "text", preset: "standard",
     choices: ["openai", "anthropic", "google"].map((provider, index) => ({ provider, modelId: THREE_MODELS[index] })) } }));
   await page.getByTestId("chat-textarea").fill("Compare a stored retired model's replacement.");
+  await page.getByTestId("chat-send-button").click();
+  await expect(page.getByText("Answer from gemini-3-6-flash.", { exact: true })).toBeVisible();
+  expect(refused).toBe(0);
+  expect(account.selectedModels).toEqual(THREE_MODELS);
+});
+
+test("Easy saves an Auto pick that matches the server's clamped view of a stale row before the preflight", async ({ page }) => {
+  // The detail read already shows gemini-3-5-flash as its replacement, so the
+  // screen's own state matches the pick; only the row still holds the retired
+  // id. Trace d51032a1-ffe7-4e3a-a274-15d4274b461f.
+  await installChatModelStub(page, Object.fromEntries(THREE_MODELS.map(id => [id, { kind: "success", chunks: [`Answer from ${id}.`] }])));
+  const account = await prepare(page, 1600, "light", ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-5-flash"], 3, [], false,
+    stored => stored.map(id => id === "gemini-3-5-flash" ? "gemini-3-6-flash" : id));
+  let refused = 0;
+  await page.route("**/api/chat/preflight", async route => {
+    const body = route.request().postDataJSON() as { modelIds?: string[] };
+    if ((body.modelIds ?? []).some(id => !account.selectedModels.includes(id))) {
+      refused++;
+      return route.fulfill({ status: 403, json: { error: "One or more comparison models are not selected for this conversation.", code: "MODEL_NOT_SELECTED", traceId: "qa-trace" } });
+    }
+    return route.fallback();
+  });
+  await page.route("**/api/review/route", route => route.fulfill({ json: { kind: "text", preset: "standard",
+    choices: ["openai", "anthropic", "google"].map((provider, index) => ({ provider, modelId: THREE_MODELS[index] })) } }));
+  await page.getByTestId("chat-textarea").fill("Compare against a row the read already repaired.");
   await page.getByTestId("chat-send-button").click();
   await expect(page.getByText("Answer from gemini-3-6-flash.", { exact: true })).toBeVisible();
   expect(refused).toBe(0);
