@@ -161,6 +161,8 @@ export const ko = {
         workspaceError: {
             title: "채팅 작업 공간을 불러오지 못했습니다",
             body: "대화는 안전합니다. 다시 시도하면 대부분 해결됩니다.",
+            workspaceTitle: "이 작업 공간을 불러오지 못했습니다",
+            workspaceBody: "저장된 내용은 그대로입니다. 다시 시도하면 대부분 해결됩니다.",
             reference: "계속 발생하면 고객 지원에 문의할 때 이 참조 번호를 알려 주세요:",
             noReference: "계속 발생하면 고객 지원에 문의해 주세요.",
             retry: "다시 시도",
