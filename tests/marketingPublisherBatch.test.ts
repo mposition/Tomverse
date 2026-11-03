@@ -50,11 +50,12 @@ type Scenario = {
     id: string;
     historyVersion: number;
     requestKey: string;
+    publishAttempt: number;
     externalPostId: string | null;
     externalAccountRef: string;
   }>;
   lookup?: MarketingPublishResult | Error;
-  reconcileAnswer?: { recorded: boolean; reason?: string };
+  reconcileAnswer?: { recorded: boolean; changed?: boolean; reason?: string };
 };
 
 const world = (scenario: Scenario = {}) => {
@@ -130,7 +131,7 @@ const world = (scenario: Scenario = {}) => {
           },
           recordReconciled: async (input: unknown) => {
             note("recordReconciled", input);
-            return scenario.reconcileAnswer ?? { recorded: true };
+            return scenario.reconcileAnswer ?? { recorded: true, changed: true };
           },
         }
       : {}),
@@ -624,6 +625,7 @@ const unknownRow = (overrides: Record<string, unknown> = {}) => ({
   id: "u1",
   historyVersion: 2,
   requestKey: "a".repeat(64),
+  publishAttempt: 1,
   externalPostId: null as string | null,
   externalAccountRef: "acct_ig",
   ...overrides,
@@ -664,6 +666,7 @@ test("an unknown post with Zernio's id is settled published by a status query", 
     id: "u1",
     requestKey: "a".repeat(64),
     expectedHistoryVersion: 2,
+    expectedPublishAttempt: 1,
     finding: {
       kind: "published",
       externalPostId: "zpost_9",
@@ -758,4 +761,46 @@ test("one run asks about a bounded number of unknown posts", async () => {
   const { run, named } = world({ channels: [], unknown: rows });
   await run();
   assert.equal(named("lookupByRequestKey").length, MARKETING_PUBLISHER_RECONCILE_LIMIT);
+});
+
+test("a later attempt without its own id is not looked up by the key every attempt shares", async () => {
+  const { run, named } = world({
+    channels: [],
+    unknown: [unknownRow({ publishAttempt: 2 })],
+    lookup: {
+      outcome: "published",
+      externalPostId: "zpost_first_attempt",
+      externalUrl: "https://www.instagram.com/reel/old/",
+    },
+  });
+  const result = await run();
+  assert.equal(named("lookupByRequestKey").length, 0);
+  assert.equal(named("recordReconciled").length, 0);
+  assert.equal(result.reconciled, 0);
+});
+
+test("a later attempt with its own id is settled by that id, bound to that attempt", async () => {
+  const { run, named } = world({
+    channels: [],
+    unknown: [unknownRow({ publishAttempt: 2, externalPostId: "zpost_second" })],
+    status: { state: "live", externalUrl: "https://www.instagram.com/reel/new/" },
+  });
+  assert.equal((await run()).reconciled, 1);
+  assert.equal((named("recordReconciled")[0]?.input as { expectedPublishAttempt: number }).expectedPublishAttempt, 2);
+});
+
+test("identifying an id the row already holds is not counted again", async () => {
+  const { run } = world({
+    channels: [],
+    unknown: [unknownRow()],
+    lookup: {
+      outcome: "outcome_unknown",
+      errorCode: "provider_still_processing",
+      externalPostId: "zpost_7",
+    } as MarketingPublishResult,
+    reconcileAnswer: { recorded: true, changed: false },
+  });
+  const result = await run();
+  assert.equal(result.reconcileIdentified, 0);
+  assert.deepEqual(result.refused, {});
 });

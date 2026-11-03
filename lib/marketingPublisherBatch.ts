@@ -14,7 +14,8 @@
  *   autonomous (amendment 4). There is no retry, ever.
  * - **An unknown outcome is settled by reading, never by sending.** At the end
  *   of a run, a few `outcome_unknown` posts are looked up -- by the provider's
- *   id when the publish answered with one, otherwise by our exact request key in
+ *   id this attempt's publish answered with, otherwise -- on a first attempt
+ *   only, because every attempt shares the key -- by our exact request key in
  *   the provider's recent list -- and recorded published or failed only when the
  *   provider says so (operator decision 2026-11-03). A post not found, or still
  *   processing, stays unknown; not finding it proves nothing.
@@ -545,7 +546,10 @@ export async function runMarketingPublisherBatch(
           } else if (state.state === "not_live") {
             finding = { kind: "failed", errorCode: "provider_reports_not_live" };
           }
-        } else {
+        } else if (post.publishAttempt === 1) {
+          // Every attempt of a post sends the same key, so only a first attempt
+          // can be told apart by it: a later one could match an earlier
+          // attempt's post. A later attempt with no id stays with a person.
           const found = await adapter.lookupByRequestKey(post.requestKey, post.externalAccountRef);
           const pendingId = marketingPublishResultExternalPostId(found);
           if (found.outcome === "published") {
@@ -564,9 +568,11 @@ export async function runMarketingPublisherBatch(
         id: post.id,
         requestKey: post.requestKey,
         expectedHistoryVersion: post.historyVersion,
+        expectedPublishAttempt: post.publishAttempt,
         finding,
       });
       if (!written.recorded) count(result.refused, `reconcile:${written.reason}`);
+      else if (!written.changed) continue;
       else if (finding.kind === "identified") result.reconcileIdentified += 1;
       else result.reconciled += 1;
     }

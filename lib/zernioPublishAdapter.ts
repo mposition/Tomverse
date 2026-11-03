@@ -496,6 +496,9 @@ export const zernioPublishAdapter = (
       // account's entry is an answer.
       const key = String(requestKey ?? "");
       if (key === "") return { outcome: "outcome_unknown", errorCode: "request_key_not_found" };
+      // Every bounded page is read before answering: one key under two posts,
+      // even on different pages, does not identify one post.
+      const matches: ZernioPost[] = [];
       for (let page = 1; page <= MARKETING_ZERNIO_LOOKUP_PAGES; page += 1) {
         const result = await call(
           `/v1/posts?limit=${MARKETING_ZERNIO_LOOKUP_PAGE_SIZE}&page=${page}`,
@@ -508,17 +511,15 @@ export const zernioPublishAdapter = (
           return { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
         }
         const posts = body.posts as Array<ZernioPost & { metadata?: { requestKey?: unknown } | null }>;
-        const matches = posts.filter((post) => post?.metadata?.requestKey === key);
-        // Two posts under one key would mean the key does not identify one
-        // post, so neither is chosen.
+        matches.push(...posts.filter((post) => post?.metadata?.requestKey === key));
         if (matches.length > 1) {
           return { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
         }
-        if (matches.length === 1) {
-          return resultFromEntry(matches[0], accountEntry(matches[0], externalAccountRef));
-        }
         const pages = Number(body.pagination?.pages);
         if ((Number.isFinite(pages) && page >= pages) || posts.length < MARKETING_ZERNIO_LOOKUP_PAGE_SIZE) break;
+      }
+      if (matches.length === 1) {
+        return resultFromEntry(matches[0], accountEntry(matches[0], externalAccountRef));
       }
       return { outcome: "outcome_unknown", errorCode: "request_key_not_found" };
     },

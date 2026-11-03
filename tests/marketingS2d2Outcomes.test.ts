@@ -461,7 +461,8 @@ test("an unknown outcome keeps the provider's id when the publish answered with 
   assert.equal(seen.posts[0]?.data.publishedAt, undefined);
   const without = fakeDatabase({ channelStatus: "approval_mode" });
   await recordMarketingPostOutcomeUnknown(asTransaction(without.database), { ...base, errorCode: "provider_timeout" });
-  assert.equal("externalPostId" in (without.seen.posts[0]?.data ?? {}), false);
+  // Cleared, not left: an id an earlier attempt left is not this attempt's post.
+  assert.equal(without.seen.posts[0]?.data.externalPostId, null);
 });
 
 const unknownRow = (overrides: Record<string, unknown> = {}) => ({
@@ -477,13 +478,15 @@ const unknownRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const reconcile = { ...base, expectedPublishAttempt: 1 };
+
 test("a provider-confirmed unknown becomes published with the id, URL and database clock", async () => {
   const { database, seen } = fakeDatabase({ unknownRow: unknownRow() });
   const answer = await recordMarketingPostOutcomeReconciled(asTransaction(database), {
-    ...base,
+    ...reconcile,
     finding: { kind: "published", externalPostId: "zpost_9", externalUrl: "https://www.instagram.com/reel/abc/" },
   });
-  assert.deepEqual(answer, { recorded: true });
+  assert.deepEqual(answer, { recorded: true, changed: true });
   assert.deepEqual(seen.posts[0]?.where, {
     id: POST_ID,
     status: "outcome_unknown",
@@ -510,7 +513,7 @@ test("a provider-confirmed unknown becomes published with the id, URL and databa
 test("a provider-confirmed failure appends this attempt's failure and moves the version", async () => {
   const { database, seen } = fakeDatabase({ unknownRow: unknownRow() });
   await recordMarketingPostOutcomeReconciled(asTransaction(database), {
-    ...base,
+    ...reconcile,
     finding: { kind: "failed", errorCode: "provider_reports_failed" },
   });
   const data = seen.posts[0]?.data as Record<string, unknown>;
@@ -525,17 +528,20 @@ test("a provider-confirmed failure appends this attempt's failure and moves the 
 test("an identified post only keeps the id, and the row stays unknown", async () => {
   const { database, seen } = fakeDatabase({ unknownRow: unknownRow() });
   await recordMarketingPostOutcomeReconciled(asTransaction(database), {
-    ...base,
+    ...reconcile,
     finding: { kind: "identified", externalPostId: "zpost_9" },
   });
   assert.deepEqual(seen.posts[0]?.data, { externalPostId: "zpost_9" });
   assert.equal(seen.audits[0]?.action, MARKETING_RECONCILE_ACTIONS.identified);
   // Identifying it again writes nothing.
   const again = fakeDatabase({ unknownRow: unknownRow({ externalPostId: "zpost_9" }) });
-  await recordMarketingPostOutcomeReconciled(asTransaction(again.database), {
-    ...base,
-    finding: { kind: "identified", externalPostId: "zpost_9" },
-  });
+  assert.deepEqual(
+    await recordMarketingPostOutcomeReconciled(asTransaction(again.database), {
+      ...reconcile,
+      finding: { kind: "identified", externalPostId: "zpost_9" },
+    }),
+    { recorded: true, changed: false },
+  );
   assert.equal(again.seen.posts.length, 0);
 });
 
@@ -551,12 +557,14 @@ test("a row a person settled, another key, another id or a lost race is left alo
     [unknownRow({ providerRequestKey: "other" }), "reconcile_conflict", [1]],
     [unknownRow({ historyVersion: 5 }), "reconcile_conflict", [1]],
     [unknownRow({ externalPostId: "zpost_other" }), "reconcile_conflict", [1]],
+    // A requeued post's second attempt: an answer read for the first is not about it.
+    [unknownRow({ publishAttempt: 2 }), "reconcile_conflict", [1]],
     [unknownRow(), "reconcile_conflict", [0]],
   ];
   for (const [row, reason, updates] of cases) {
     const { database, seen } = fakeDatabase({ unknownRow: row, updates });
     assert.deepEqual(
-      await recordMarketingPostOutcomeReconciled(asTransaction(database), { ...base, finding: published }),
+      await recordMarketingPostOutcomeReconciled(asTransaction(database), { ...reconcile, finding: published }),
       { recorded: false, reason },
     );
     assert.equal(seen.audits.length, 0, reason);
@@ -567,14 +575,14 @@ test("a reconcile refuses a non-HTTPS URL or a free-text code, and runs serializ
   const { database } = fakeDatabase({ unknownRow: unknownRow() });
   await assert.rejects(
     recordMarketingPostOutcomeReconciled(asTransaction(database), {
-      ...base,
+      ...reconcile,
       finding: { kind: "published", externalPostId: "zpost_9", externalUrl: "http://example.com/x" },
     }),
     (error) => error instanceof MarketingStoreRefusedError,
   );
   await assert.rejects(
     recordMarketingPostOutcomeReconciled(asTransaction(database), {
-      ...base,
+      ...reconcile,
       finding: { kind: "failed", errorCode: "the platform said no" },
     }),
     (error) => error instanceof MarketingStoreRefusedError,
@@ -582,7 +590,7 @@ test("a reconcile refuses a non-HTTPS URL or a free-text code, and runs serializ
   const loose = fakeDatabase({ unknownRow: unknownRow(), isolation: "read committed" });
   await assert.rejects(
     recordMarketingPostOutcomeReconciled(asTransaction(loose.database), {
-      ...base,
+      ...reconcile,
       finding: { kind: "identified", externalPostId: "zpost_9" },
     }),
     (error) => error instanceof MarketingStoreRefusedError,
