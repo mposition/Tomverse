@@ -4083,6 +4083,20 @@ export async function markMarketingPostReusable(
   requireOne(updated.count, "mark_reusable_conflict", "The post changed before marking");
 }
 
+/**
+ * The audit metadata a schedule must carry, built once for the route that
+ * writes the entry and the store that checks it. The route used to write only
+ * the digest while the store required the history version too, so every
+ * schedule was refused as `metadata_mismatch`.
+ */
+export const marketingScheduleAuditMetadata = (input: {
+  readonly expectedEnvelopeDigest: string;
+  readonly expectedHistoryVersion: number;
+}) => ({
+  digest: input.expectedEnvelopeDigest,
+  historyVersion: input.expectedHistoryVersion,
+});
+
 export async function scheduleMarketingPost(
   database: MarketingDatabase,
   rawInput: {
@@ -4126,10 +4140,7 @@ export async function scheduleMarketingPost(
     auditLogId: input.auditLogId,
     action: MARKETING_S2B1_ACTIONS.postSchedule,
     targetId: input.id,
-    metadata: {
-      digest: input.expectedEnvelopeDigest,
-      historyVersion: input.expectedHistoryVersion,
-    },
+    metadata: marketingScheduleAuditMetadata(input),
   });
   const updated = await database.marketingPost.updateMany({
     where: {
@@ -4409,6 +4420,21 @@ export async function resolveMarketingPostOutcomeUnknown(
   );
 }
 
+/**
+ * The audit metadata an unpublish must carry; shared with the route for the
+ * same reason as {@link marketingScheduleAuditMetadata} -- the route left out
+ * the external post id, so no removal could be recorded.
+ */
+export const marketingUnpublishAuditMetadata = (input: {
+  readonly expectedExternalPostId: string;
+  readonly evidenceRef: string;
+  readonly expectedHistoryVersion: number;
+}) => ({
+  externalPostId: input.expectedExternalPostId,
+  evidenceRef: input.evidenceRef,
+  historyVersion: input.expectedHistoryVersion,
+});
+
 export async function unpublishMarketingPost(
   database: MarketingDatabase,
   rawInput: {
@@ -4454,11 +4480,7 @@ export async function unpublishMarketingPost(
     auditLogId: input.auditLogId,
     action: MARKETING_S2B1_ACTIONS.postUnpublish,
     targetId: input.id,
-    metadata: {
-      externalPostId: input.expectedExternalPostId,
-      evidenceRef: input.evidenceRef,
-      historyVersion: input.expectedHistoryVersion,
-    },
+    metadata: marketingUnpublishAuditMetadata(input),
   });
   const now = await marketingDatabaseNow(database);
   const updated = await database.marketingPost.updateMany({
