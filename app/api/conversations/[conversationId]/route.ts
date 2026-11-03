@@ -305,6 +305,11 @@ export async function GET(
           nextCursor: hasMoreMessages ? messages.at(-1)?.id || null : null,
         },
         selectedModels,
+        // The row's own list, before the runtime clamp above. The preflight and
+        // the chat route check a send against this, not against the clamped
+        // view, so the screen needs it to tell whether its selection is
+        // already saved (trace d51032a1-ffe7-4e3a-a274-15d4274b461f).
+        storedSelectedModels: safeParse(conversation.selectedModels, []),
         disabledPanels: safeParse(conversation.disabledPanels, []).filter(
           (modelId: string) => selectedModels.includes(modelId)
         ),
