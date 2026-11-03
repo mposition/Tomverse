@@ -125,6 +125,34 @@ export function MarketingStrategyView({ strategy }: { strategy: MarketingWeeklyS
           {strategy.avoid.length > 0 ? <List title={a.strategyAvoid} items={strategy.avoid} /> : null}
         </div>
       ) : null}
+      {strategy.paidAds && strategy.paidAds.length > 0 ? (
+        <div data-testid="marketing-strategy-paid-ads">
+          <h4 className="text-sm font-semibold text-zinc-100">{a.strategyPaidAds}</h4>
+          <div className="mt-1 overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse">
+              <thead>
+                <tr className="border-b border-zinc-800">
+                  <th className={HEAD}>{a.colPlatform}</th>
+                  <th className={HEAD}>{a.colObjective}</th>
+                  <th className={HEAD}>{a.colBudget}</th>
+                  <th className={HEAD}>{a.colWhy}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {strategy.paidAds.map((ad, index) => (
+                  <tr key={index} className="border-b border-zinc-800/60">
+                    <td className={CELL}>{ad.platform}</td>
+                    <td className={CELL}>{ad.objective}</td>
+                    <td className={`${CELL} whitespace-nowrap`}>{ad.budget}</td>
+                    <td className={CELL}>{ad.why}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1 text-xs text-amber-300/80">{a.strategyPaidAdsNote}</p>
+        </div>
+      ) : null}
       <p className="text-xs text-zinc-500">
         {a.strategyNote} · {strategy.promptVersion}
       </p>
