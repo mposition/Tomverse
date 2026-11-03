@@ -1865,6 +1865,7 @@ export const de = {
         modelModeExplicit: "Modelle auswählen",
         modelsLimitHint: "Höchstens {max}; das erste ist die Vorgabe.",
         modelsKeepOne: "Wähle „Standard des Kontos übernehmen“, um gar kein Modell festzulegen.",
+        modelUnavailableTag: "nicht mehr verfügbar",
         createHint: "Ein Name und Anweisungen genügen für den Start. Alles Weitere lässt sich später ändern.",
         instructionsPlaceholder: "Zum Beispiel: Antworte kurz und nenne zuerst deine Begründung.",
         nameRequired: "Bitte einen Namen eingeben.",

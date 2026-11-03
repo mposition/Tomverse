@@ -1,3 +1,4 @@
+import { ASSISTANT_PROFILE_MODEL_UNAVAILABLE } from "@/lib/assistantProfileVersioning";
 import { conversationSurface, type ConversationSurface } from "@/lib/continuationRoutes";
 
 export type ChatWorkspaceEntryDecision =
@@ -32,6 +33,19 @@ export function decideChatWorkspaceEntry(input: {
 
 export const CHAT_SINGLE_MODEL_REQUIRED = "CHAT_SINGLE_MODEL_REQUIRED";
 export const CHAT_PROFILE_SINGLE_MODEL_REQUIRED = "CHAT_PROFILE_SINGLE_MODEL_REQUIRED";
+
+/**
+ * The copy for a Chat create refusal the server named, or null for one it did
+ * not. Every create path reads this: the blank Smart Auto path used to show
+ * "could not save the Auto setting" for an assistant the server had refused as
+ * multi-model (2026-11-03), naming a problem the user did not have.
+ */
+export function chatCreateRefusalCopyKey(code: unknown): string | null {
+  if (code === CHAT_PROFILE_SINGLE_MODEL_REQUIRED) return "chat.singleModelProfileRequired";
+  if (code === CHAT_SINGLE_MODEL_REQUIRED) return "chat.singleModelRequired";
+  if (code === ASSISTANT_PROFILE_MODEL_UNAVAILABLE) return "assistantProfiles.noticeModelUnavailable";
+  return null;
+}
 
 /** Only for a new, unbound draft; never apply to a saved conversation/profile. */
 export function newWorkspaceDraftModels(input: {

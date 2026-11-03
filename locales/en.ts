@@ -1876,6 +1876,7 @@ export const en = {
         modelModeExplicit: "Choose models",
         modelsLimitHint: "Up to {max}; the first is the default.",
         modelsKeepOne: "To name no model at all, pick “Follow the account default”.",
+        modelUnavailableTag: "no longer available",
         createHint: "A name and instructions are enough to start using it. Everything else can change later.",
         instructionsPlaceholder: "For example: answer briefly, and give your reasoning first.",
         nameRequired: "Enter a name.",
