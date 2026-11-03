@@ -323,21 +323,25 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/** A claim whose sentence is one of our public pages' own strings. */
+/**
+ * A claim whose sentence is one of our public pages' own strings. `gate` names
+ * the feature flag (lib/marketingClaimGates.ts) a claim about a flagged feature
+ * is true only while it is on.
+ */
 const pageClaim = (
   id: string,
   type: "feature" | "availability",
   pageRoute: string,
   localeKey: string,
+  gate: string | null = null,
 ): MarketingClaim => ({
   id,
   type,
   statementKey: localeKey,
-  // No zh-Hant: the site has no Traditional Chinese page to be the evidence
-  // (lib/marketingEvidencePages.ts).
-  locales: ["en", "ko", "zh-Hans"],
+  // Every locale with its own page copy (lib/marketingEvidencePages.ts).
+  locales: ["en", "ko", "zh-Hans", "zh-Hant"],
   validUntil: "2027-01-31",
-  gate: null,
+  gate,
   planMeaning: null,
   factSource: null,
   evidence: { kind: "page", pageRoute, localeKey },
@@ -372,13 +376,24 @@ const monthlyPriceClaim = (id: string, planId: "pro" | "max", statementKey: stri
  * our public pages already say, and the stored plan prices).
  *
  * Every page claim is a whole string from the FAQ or About page, chosen for
- * what a post can carry: none names a feature behind a flag (Smart Adaptive,
- * question refinement), none says "free" without its condition, and each
+ * what a post can carry: none says "free" without its condition, and each
  * passes the Guard's text hygiene in every locale it lists
- * (tests/marketingRegistries.test.mjs). The Guard still re-reads the page and
- * the price every time it judges a draft, so a sentence the page no longer
- * says, or a price no person saved, refuses the post. Code, not a model,
- * writes this list: a model's output never adds or approves a claim.
+ * (tests/marketingRegistries.test.mjs). A claim about a feature behind a flag
+ * names its gate, so it refuses while the feature is off (owner decision
+ * 2026-11-03: promote Tomverse Chat's own features, not only Review). The
+ * import answer carries the required disclosure of
+ * docs/policy/external-conversation-import-and-memory.md §17 word for word
+ * (lib/marketingMemoryClaims.ts), as every copy that claims import must. No
+ * claim is registered for memory itself, Smart Adaptive or question
+ * refinement: memory waits for the owner to confirm that section's approved wording
+ * against the released feature, and whether the other two are offered is not
+ * one flag a gate could read (refinement also needs its release activation and
+ * an adapter). Each FAQ answer says "where available", because the page is
+ * static and renders whatever the flags are. The Guard
+ * still re-reads the page and the price every time it judges a draft, so a
+ * sentence the page no longer says, or a price no person saved, refuses the
+ * post. Code, not a model, writes this list: a model's output never adds or
+ * approves a claim.
  */
 export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
   pageClaim("claim.chat-and-review", "feature", "/faq", "sections.0.body"),
@@ -388,6 +403,10 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
   pageClaim("claim.save-and-share", "feature", "/faq", "sections.9.body"),
   pageClaim("claim.about-tomverse", "feature", "/about", "description"),
   pageClaim("claim.start-a-question", "feature", "/about", "sections.0.body"),
+  pageClaim("claim.chat-assistants", "feature", "/faq", "sections.10.body", "feature.assistantProfiles"),
+  pageClaim("claim.chat-import-and-continue", "feature", "/faq", "sections.11.body", "feature.externalImportAndContinuation"),
+  pageClaim("claim.chat-image-generation", "feature", "/faq", "sections.12.body", "feature.imageGeneration"),
+  pageClaim("claim.chat-file-questions", "feature", "/faq", "sections.13.body", "feature.attachments"),
   monthlyPriceClaim("claim.pro-monthly-price", "pro", "marketing.claims.proMonthlyPrice"),
   monthlyPriceClaim("claim.max-monthly-price", "max", "marketing.claims.maxMonthlyPrice"),
 ].map(deepFreeze));
@@ -401,9 +420,10 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
  * the same number for every registry there has ever been. Version 1 is the
  * empty registry, which is why the test refuses a non-empty registry still
  * calling itself 1. Version 2 is the first content (2026-11-01); version 3 adds `en` to the
- * plan price claims (2026-11-02).
+ * plan price claims (2026-11-02); version 4 adds `zh-Hant` to the page claims and the
+ * gated Chat feature claims (2026-11-03).
  */
-export const MARKETING_CLAIM_REGISTRY_VERSION = 3;
+export const MARKETING_CLAIM_REGISTRY_VERSION = 4;
 
 export const marketingClaimById = (id: string): MarketingClaim | null =>
   MARKETING_CLAIMS.find((claim) => claim.id === id) ?? null;
