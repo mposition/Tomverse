@@ -381,10 +381,11 @@ const monthlyPriceClaim = (id: string, planId: "pro" | "max", statementKey: stri
  * (tests/marketingRegistries.test.mjs). A claim about a feature behind a flag
  * names its gate, so it refuses while the feature is off (owner decision
  * 2026-11-03: promote Tomverse Chat's own features, not only Review). The
- * import answer carries §17's required disclosure word for word
+ * import answer carries the required disclosure of
+ * docs/policy/external-conversation-import-and-memory.md §17 word for word
  * (lib/marketingMemoryClaims.ts), as every copy that claims import must. No
  * claim is registered for memory itself, Smart Adaptive or question
- * refinement: memory waits for the owner to confirm §17's approved wording
+ * refinement: memory waits for the owner to confirm that section's approved wording
  * against the released feature, and whether the other two are offered is not
  * one flag a gate could read (refinement also needs its release activation and
  * an adapter). Each FAQ answer says "where available", because the page is
