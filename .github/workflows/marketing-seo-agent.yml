@@ -1,0 +1,218 @@
+# Execution environment of the marketing SEO code agent
+# (scripts/marketing-seo-agent.mjs, lib/marketingSeoAgentCore.ts; policy
+# docs/policy/marketing-automation.md 9.2; operator decision 2026-11-03).
+#
+# OFF BY DEFAULT. Nothing runs unless the repository variable
+# MARKETING_SEO_AGENT_ENABLED is exactly "true" and the variable
+# MARKETING_AUTOMATION_KILL_SWITCH is empty. A run is started by a person
+# (workflow_dispatch) with a topic; there is no schedule.
+#
+# One run = one paid LLM call through the marketing cost ledger (purpose "seo",
+# the operator's Admin model and monthly cap, so the ledger is the spending
+# bound), one validated change to the four allowed SEO files, and one pull
+# request into develop: a draft for a person before graduation, and after
+# graduation (MARKETING_SEO_AUTO_PR) a to-develop branch that the standard
+# Auto PR to Develop workflow acts on. GitHub auto-merge is armed only when
+# MARKETING_SEO_AUTO_MERGE is also "true" (policy 9.2).
+#
+# Guardrails that must survive any edit to this file:
+#   - workflow_dispatch only, never a pull-request or push trigger;
+#   - the two phases run in two jobs, so on two different disposable runners
+#     (policy 9.2: separate processes and machines). validate holds the LLM
+#     path (ledger secret, provider key) and the attestation key and never a
+#     GitHub write credential; publish holds the GitHub App token and the
+#     attestation key and never an LLM variable. Every secret is bound to one
+#     step, never to a job;
+#   - validate runs the proposed code in its checks, so they run as a separate
+#     unprivileged user (MARKETING_SEO_CHECK_UID / _GID) that cannot read the
+#     parent's process environment, and the checkout carries no credential
+#     (persist-credentials: false; the job token is read-only);
+#   - validate hands publish only the three files of the --out directory, as an
+#     artifact; publish recomputes the commit, tree and diff from git and
+#     verifies the signature before it pushes (scripts/marketing-seo-agent.mjs);
+#   - the topic reaches the script only through an environment variable;
+#   - the App token is scoped to this repository with Contents and Pull
+#     requests write, and revoked when the job ends;
+#   - nothing under .github/ can be part of a change (the runner's allowed
+#     files are exactly four, none of them here).
+name: Marketing SEO Agent
+
+# The token-level cache control (see amux-idea-lane.yml): this workflow runs on
+# the default branch, whose cache entries every run can restore, so its token
+# gets no write capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: What to improve (becomes the branch name and the model's brief; at most 300 characters)
+        required: true
+        type: string
+        default: Improve structured data and sitemap accuracy for the public marketing pages
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketing-seo-agent
+  cancel-in-progress: false
+
+# Every job is continue-on-error: this workflow runs on main, and Railway skips
+# a production deploy of a main commit when any workflow run on it fails. A
+# refused or failed agent run is the agent's business, not a release blocker.
+# Because a failed job then reports success in needs.<job>.result, no job below
+# reads that result: publish waits for validate's own `validated` output.
+jobs:
+  validate:
+    if: >-
+      github.repository == 'mposition/Tomverse' &&
+      vars.MARKETING_SEO_AGENT_ENABLED == 'true' &&
+      vars.MARKETING_AUTOMATION_KILL_SWITCH == ''
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    outputs:
+      base: ${{ steps.base.outputs.sha }}
+      validated: ${{ steps.out.outputs.validated }}
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: develop
+          # Full history: the validation clones this checkout and reads the
+          # policy tests at the base commit.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Pin the base commit
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          # This job holds credentials and caches nothing (see amux-idea-lane.yml).
+          package-manager-cache: false
+
+      - name: Install dependencies (no secret yet)
+        run: npm ci
+
+      - name: Create the unprivileged check user
+        run: |
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin seo-check
+          # The check user must be able to walk to the checkout and its node_modules
+          # (execute only on the directories above it; it cannot list them).
+          dir="$GITHUB_WORKSPACE"
+          while [ "$dir" != "/" ]; do
+            sudo chmod o+x "$dir"
+            dir=$(dirname "$dir")
+          done
+          mkdir "${RUNNER_TEMP}/seo-out"
+
+      - name: Validate (LLM path and attestation key only in this step)
+        env:
+          MARKETING_SEO_AGENT_ENABLED: ${{ vars.MARKETING_SEO_AGENT_ENABLED }}
+          MARKETING_AUTOMATION_KILL_SWITCH: ${{ vars.MARKETING_AUTOMATION_KILL_SWITCH }}
+          MARKETING_APP_URL: ${{ vars.MARKETING_APP_URL }}
+          MARKETING_GENERATOR_SUBMIT_SECRET: ${{ secrets.MARKETING_GENERATOR_SUBMIT_SECRET }}
+          MARKETING_LLM_API_KEY: ${{ secrets.MARKETING_LLM_API_KEY }}
+          MARKETING_SEO_ATTESTATION_KEY: ${{ secrets.MARKETING_SEO_ATTESTATION_KEY }}
+          TOPIC: ${{ inputs.topic }}
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          # Root runs the parent so that it can switch the checks to the check
+          # user; sudo drops every variable that is not listed, and the secrets
+          # travel in the environment, never in an argument.
+          preserve="MARKETING_SEO_AGENT_ENABLED,MARKETING_AUTOMATION_KILL_SWITCH,MARKETING_APP_URL,MARKETING_GENERATOR_SUBMIT_SECRET,MARKETING_LLM_API_KEY,MARKETING_SEO_ATTESTATION_KEY,CI"
+          sudo --preserve-env="$preserve" env "PATH=$PATH" \
+            "MARKETING_SEO_CHECK_UID=$(id -u seo-check)" "MARKETING_SEO_CHECK_GID=$(id -g seo-check)" \
+            node --experimental-strip-types --no-warnings scripts/marketing-seo-agent.mjs \
+            --phase validate --topic "$TOPIC" --base "$BASE" --out "${RUNNER_TEMP}/seo-out"
+
+      - name: Check what validation produced
+        id: out
+        run: |
+          # Exit 0 also covers a refusal (switch off, no budget): then there is nothing to hand on.
+          names=$(ls -1 "${RUNNER_TEMP}/seo-out" | sort | tr '\n' ' ')
+          if [ "$names" = "attestation.json change.bundle record.json " ]; then
+            echo "validated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing to publish."
+          fi
+
+      - name: Hand the validated change to publish
+        if: steps.out.outputs.validated == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: marketing-seo-agent-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/seo-out/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: validate
+    # Evaluated again when validate is over, so a kill switch set meanwhile stops the push.
+    if: >-
+      needs.validate.outputs.validated == 'true' &&
+      vars.MARKETING_SEO_AGENT_ENABLED == 'true' &&
+      vars.MARKETING_AUTOMATION_KILL_SWITCH == ''
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # Up to 45 minutes of watching an armed pull request (policy 9.2) plus set-up.
+    timeout-minutes: 75
+    steps:
+      - name: Checkout the validated base commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.validate.outputs.base }}
+          # The bundle's prerequisite is the base commit; the compare against develop is the API's.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install dependencies (no secret yet)
+        # The runner's import closure is node:crypto and zod; nothing here needs a lifecycle script.
+        run: npm ci --ignore-scripts
+
+      - name: Fetch the validated change
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: marketing-seo-agent-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/seo-in
+
+      - name: Note the latest the App token can last
+        id: expiry
+        # Taken before the token is created, so it is earlier than the token's real end (one hour).
+        run: echo "at=$(date -u -d '+55 minutes' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Create the repository-only App token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MARKETING_SEO_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MARKETING_SEO_APP_PRIVATE_KEY }}
+          # Only this repository (the default), only what the push, the PR and the arm step need.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Publish (App token and attestation key only in this step)
+        env:
+          MARKETING_SEO_AGENT_ENABLED: ${{ vars.MARKETING_SEO_AGENT_ENABLED }}
+          MARKETING_AUTOMATION_KILL_SWITCH: ${{ vars.MARKETING_AUTOMATION_KILL_SWITCH }}
+          MARKETING_SEO_ATTESTATION_KEY: ${{ secrets.MARKETING_SEO_ATTESTATION_KEY }}
+          MARKETING_SEO_GITHUB_APP_TOKEN: ${{ steps.app.outputs.token }}
+          MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT: ${{ steps.expiry.outputs.at }}
+          MARKETING_SEO_GITHUB_REPOSITORY: ${{ github.repository }}
+          MARKETING_SEO_AUTO_PR: ${{ vars.MARKETING_SEO_AUTO_PR }}
+          MARKETING_SEO_AUTO_MERGE: ${{ vars.MARKETING_SEO_AUTO_MERGE }}
+        run: |
+          node --experimental-strip-types --no-warnings scripts/marketing-seo-agent.mjs \
+            --phase publish --out "${RUNNER_TEMP}/seo-in"
