@@ -1862,6 +1862,7 @@ export const fr = {
         modelModeExplicit: "Choisir des modèles",
         modelsLimitHint: "Jusqu'à {max} ; le premier fait office de modèle par défaut.",
         modelsKeepOne: "Pour n’indiquer aucun modèle, choisissez « Suivre la valeur par défaut du compte ».",
+        modelUnavailableTag: "plus disponible",
         createHint: "Un nom et des instructions suffisent pour commencer. Tout le reste se modifie ensuite.",
         instructionsPlaceholder: "Par exemple : réponds brièvement, et donne d'abord ton raisonnement.",
         nameRequired: "Saisissez un nom.",

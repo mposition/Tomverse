@@ -1863,6 +1863,7 @@ export const ko = {
         modelModeExplicit: "직접 지정",
         modelsLimitHint: "최대 {max}개, 첫 번째가 기본값입니다.",
         modelsKeepOne: "모델을 지정하지 않으려면 ‘계정 기본 모델 따르기’를 선택하세요.",
+        modelUnavailableTag: "더 이상 제공되지 않음",
         createHint: "이름과 지시문만 있으면 바로 쓸 수 있습니다. 나머지는 만든 뒤에 바꿀 수 있습니다.",
         instructionsPlaceholder: "예: 한국어로 짧게 답하고, 근거를 먼저 말해 주세요.",
         nameRequired: "이름을 입력해 주세요.",

@@ -22,7 +22,11 @@ import type {
     AssistantToolPolicy,
 } from "@/lib/assistantProfileVersioning";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
-import { canUseModelWithPlan, type ModelTier } from "@/lib/models";
+import {
+    canUseModelWithPlan,
+    resolveSelectableModelId,
+    type ModelTier,
+} from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 
@@ -146,6 +150,19 @@ const storedMemoryPolicy = (value: unknown): AssistantMemoryPolicy => {
     return { useAccountMemory: record.useAccountMemory === true };
 };
 
+/** The live model a stored id runs as, or the stored entry when none does. */
+const resolveNamedModel = async (modelId: string) => {
+    const catalogue = new Map(
+        (await getRuntimeModels({ includeCatalogDeleted: true })).map(
+            (entry) => [entry.id, entry]
+        )
+    );
+    const resolvedId = resolveSelectableModelId(modelId, (candidateId) =>
+        catalogue.get(candidateId)
+    );
+    return catalogue.get(resolvedId ?? modelId);
+};
+
 export async function buildChatProfileContext(input: {
     /** Null for a guest, who has no profile of their own to run (§14). */
     userId: string | null;
@@ -208,12 +225,17 @@ export async function buildChatProfileContext(input: {
     // Only when there is one to resolve. A version that names no model has no
     // model claim to check (§14.0a), and reading the catalogue to decide
     // nothing would be a query per turn for an answer that is already known.
+    //
+    // Resolved through the replacement chain, as conversation create resolves
+    // the same list. Found in production on 2026-11-03: a version naming
+    // `claude-sonnet-5`, retired with `claude-sonnet-5-5` as its replacement,
+    // started a conversation on 5.5 and then had its instructions, knowledge
+    // and tools dropped on every turn because the retired id itself was not
+    // enabled. The model the conversation runs on is the one to check.
     const model =
         primaryModelId === undefined
             ? undefined
-            : (
-                  await getRuntimeModels({ includeCatalogDeleted: true })
-              ).find((entry) => entry.id === primaryModelId);
+            : await resolveNamedModel(primaryModelId);
     const decision = decideProfileRuntime({
         isAuthenticated: true,
         profilesFlagEnabled: profilesEnabled,
