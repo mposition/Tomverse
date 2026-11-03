@@ -340,8 +340,9 @@ async function openChat(page: Page, options: {
   autoConversationCreateResponseLostAfterCommit?: boolean;
   autoConversationCreateServerErrorAfterCommit?: boolean;
   draftFailurePlan?: Array<{ method: string; scopeKey: string }>;
+  chatAppearance?: "classic" | "studio";
 } = {}) {
-  await prepareGuestPage(page, "en");
+  await prepareGuestPage(page, "en", "classic", options.chatAppearance ?? "classic");
   await mockAuthenticatedApi(page, { selectedModels: [MODEL_A] });
   const userSettingsWrites: Array<Record<string, unknown>> = [];
   if (options.accountDefaults) {
@@ -2005,6 +2006,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       content: string;
     }>;
     expect(providerMessages.at(-1)?.content).toBe("Canonical text-only question.");
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
   });
 
   // The server consumes a draft only when the Message bytes equal it. A new
@@ -2039,7 +2041,51 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       content: string;
     }>;
     expect(providerMessages.at(-1)?.content).toBe("Canonical new Auto question.");
+    // The sent question leaves the composer.
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
   });
+
+  for (const chatAppearance of ["classic", "studio"] as const) {
+    test(`a sent question leaves the ${chatAppearance} composer in new and stored Auto Chats`, async ({ page }) => {
+      await openChat(page, { fresh: true, autoSelectionOffered: true, chatAppearance });
+      await expect(page.getByTestId("composer-auto-routing-toggle"))
+        .toHaveAttribute("aria-checked", "true");
+      await page.getByTestId("chat-textarea").fill("First Auto question.\n");
+      await page.getByTestId("chat-send-button").click();
+      await drive(page, 0, "push", "First Auto answer.");
+      await drive(page, 0, "finish");
+      await expect(message(page, "First Auto answer.")).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+
+      await page.getByTestId("chat-textarea").fill("Second Auto question.");
+      await page.getByTestId("chat-send-button").click();
+      await drive(page, 1, "push", "Second Auto answer.");
+      await drive(page, 1, "finish");
+      await expect(message(page, "Second Auto answer.")).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    });
+  }
+
+  // Preparing a send (image intent, Refiner, saving) can take many seconds.
+  // The question is echoed above meanwhile; the composer must not also hold
+  // it, or the send looks ignored.
+  for (const chatAppearance of ["classic", "studio"] as const) {
+    test(`the ${chatAppearance} composer is empty while a sent question is still being saved`, async ({ page }) => {
+      const state = await openChat(page, { holdMessageSaveBeforeTransaction: true, chatAppearance });
+      const prompt = "Wait for the slow save.";
+      await page.getByTestId("chat-textarea").fill(prompt);
+      await page.getByTestId("chat-send-button").click();
+      await expect.poll(state.messageSaveStarted).toBe(true);
+      await expect(page.getByTestId("chat-send-echo")).toContainText(prompt);
+      await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+
+      state.releaseMessageSave();
+      await drive(page, 0, "push", "Saved slowly.");
+      await drive(page, 0, "finish");
+      await expect(message(page, "Saved slowly.")).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    });
+  }
 
   test("a duplicate live request adopts the durable attempt response without opening a second stream", async ({ page }) => {
     await openChat(page, { durableAttemptResponse: true });
@@ -4270,7 +4316,10 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       const textarea = page.getByTestId("chat-textarea");
       await expect(textarea).toHaveAttribute("readonly", "");
       await textarea.pressSequentially(nextDraft);
-      await expect(textarea).toHaveValue(sentPrompt);
+      // The sent question is echoed above, so the locked composer shows nothing
+      // -- and typing into it changes nothing.
+      await expect(page.getByTestId("chat-send-echo")).toContainText(sentPrompt);
+      await expect(textarea).toHaveValue("");
       release();
       await expect.poll(async () => (await requests(page)).length).toBe(1);
       await expect(textarea).not.toHaveAttribute("readonly", "");
@@ -4578,7 +4627,9 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(() => held).toBe(true);
     await switchToFixtureAccountB(page, state);
     await switchToFixtureAccountA(page, state);
-    await expect(page.getByTestId("chat-textarea")).toHaveValue(privateDraft);
+    // A's pending question is echoed above, not repeated in the locked composer.
+    await expect(page.getByTestId("chat-send-echo")).toContainText(privateDraft);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
     await expect(page.getByTestId("chat-textarea")).toHaveAttribute("readonly", "");
     const writesAtSwitch = state.writes.length;
     await page.waitForTimeout(700);
@@ -4656,7 +4707,9 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     releaseA();
     await page.waitForTimeout(300);
     await expect(page.getByTestId("chat-textarea")).toHaveAttribute("readonly", "");
-    await expect(page.getByTestId("chat-textarea")).toHaveValue(bDraft);
+    // B's pending question stays echoed; A's stale finally did not end it.
+    await expect(page.getByTestId("chat-send-echo")).toContainText(bDraft);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
     expect(await requests(page)).toHaveLength(0);
 
     releaseB();

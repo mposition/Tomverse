@@ -25,7 +25,6 @@ import {
     isAssistantProfilesEnabled,
 } from "@/lib/appSettings";
 import {
-    AssistantProfileError,
     createAssistantProfile,
     listAssistantProfiles,
 } from "@/lib/assistantProfileService";
@@ -34,14 +33,8 @@ import { assistantProfileErrorResponse } from "@/lib/assistantProfileErrorRespon
 // approved ones in the knowledge limits module; the per-field limits are the
 // profile's own.
 import { ASSISTANT_KNOWLEDGE_LIMITS } from "@/lib/assistantKnowledgeLimits";
-import {
-    ASSISTANT_PROFILE_LIMITS,
-    ASSISTANT_PROFILE_MODEL_UNAVAILABLE,
-} from "@/lib/assistantProfileVersioning";
-import {
-    clampSelectedModelsAgainstRuntime,
-    getRuntimeModels,
-} from "@/lib/modelRegistry";
+import { resolveProfileModelIds } from "@/lib/assistantProfileModels";
+import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 
 const createSchema = z
     .object({
@@ -154,44 +147,6 @@ export async function GET(req: Request) {
     }
 }
 
-/**
- * The models a created profile is published with, checked against the
- * catalogue the server actually serves.
- *
- * `clampSelectedModelsAgainstRuntime` *drops* what it cannot resolve, which is
- * right for restoring a stored conversation and wrong here: a create naming a
- * model that does not exist would silently become a create naming fewer, and
- * the owner would find a profile running something they did not choose. So the
- * clamp is used as the check and a shortfall is a refusal.
- *
- * Naming none stays none (§14.0a). Filling in the account's default here was
- * the older behaviour and it pinned a model nobody chose: the profile went on
- * starting conversations on whatever the account's default was on the day it
- * was created, and changing that default later left every existing assistant
- * behind. An empty list means the profile names no model, and
- * `POST /api/conversations` resolves the account's own new-conversation
- * selection at the moment a conversation is actually started.
- */
-const resolveCreateModelIds = async (
-    requested: string[] | undefined
-): Promise<string[]> => {
-    if (requested === undefined || requested.length === 0) return [];
-    const models = await getRuntimeModels();
-    const resolved = clampSelectedModelsAgainstRuntime(
-        requested,
-        models,
-        ASSISTANT_PROFILE_LIMITS.maxModels
-    );
-    if (resolved.length !== new Set(requested).size) {
-        throw new AssistantProfileError(
-            422,
-            ASSISTANT_PROFILE_MODEL_UNAVAILABLE,
-            "One of those models is not available."
-        );
-    }
-    return resolved;
-};
-
 export async function POST(req: Request) {
     try {
         const userId = await requireOwner(req);
@@ -216,7 +171,7 @@ export async function POST(req: Request) {
                     ? undefined
                     : {
                           instructions: body.instructions,
-                          modelIds: await resolveCreateModelIds(body.modelIds),
+                          modelIds: await resolveProfileModelIds(body.modelIds),
                           // The narrow-only defaults (§14). A profile created
                           // from the minimal form asks for nothing beyond
                           // instructions, and a tool it never requested must

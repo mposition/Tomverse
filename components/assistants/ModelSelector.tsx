@@ -3,8 +3,9 @@
 import { useId } from "react";
 
 import { interpolate } from "@/components/imports/importFormatting";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import { modelSelectorOptions } from "@/lib/assistantProfileModelOptions";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
-import { ENABLED_MODELS } from "@/lib/models";
 
 /**
  * The models a profile may start with.
@@ -86,6 +87,7 @@ export function ModelSelector({
 }) {
     const atLimit = selected.length >= ASSISTANT_PROFILE_LIMITS.maxModels;
     const modeName = useId();
+    const options = modelSelectorOptions(useModelCatalog(), selected);
     return (
         <fieldset
             className="flex flex-col gap-2"
@@ -130,7 +132,7 @@ export function ModelSelector({
                             max: ASSISTANT_PROFILE_LIMITS.maxModels,
                         })}
                     </p>
-                    {ENABLED_MODELS.map((model) => {
+                    {options.map((model) => {
                         const checked = selected.includes(model.id);
                         // The last one cannot be unticked, because an empty
                         // explicit selection is not a state this screen has:
@@ -164,7 +166,14 @@ export function ModelSelector({
                                     }
                                     data-testid={`${testIdPrefix}-model-${model.id}`}
                                 />
-                                <span>{model.name}</span>
+                                <span>
+                                    {model.name}
+                                    {model.unavailable && (
+                                        <span className="ml-1 text-xs text-zinc-500">
+                                            ({t("assistantProfiles.modelUnavailableTag")})
+                                        </span>
+                                    )}
+                                </span>
                             </label>
                         );
                     })}
