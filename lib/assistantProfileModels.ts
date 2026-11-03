@@ -24,8 +24,9 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
  * would silently become one naming fewer. So an id with no live model is a
  * refusal rather than a shortfall.
  *
- * Naming none stays none (§14.0a): the conversation resolves the account's own
- * new-conversation selection when it is created.
+ * Naming none stays none (`docs/policy/external-conversation-import-and-memory.md §14.0a`):
+ * the conversation resolves the account's own new-conversation selection when
+ * it is created.
  */
 export async function resolveProfileModelIds(
     requested: readonly string[] | undefined
