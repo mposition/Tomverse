@@ -24,7 +24,13 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { assistantProfilesEnabledFromValue, ASSISTANT_PROFILES_FLAG_KEY } from "@/lib/assistantProfileAccess";
+import {
+  ASSISTANT_KNOWLEDGE_FLAG_KEY,
+  ASSISTANT_PROFILES_FLAG_KEY,
+  assistantKnowledgeEnabledFromValue,
+  assistantKnowledgeUsable,
+  assistantProfilesEnabledFromValue,
+} from "@/lib/assistantProfileAccess";
 import { EXTERNAL_CONTINUATION_FLAG_KEY, externalContinuationEnabledFromValue } from "@/lib/externalContinuationAccess";
 import { EXTERNAL_IMPORT_FLAG_KEY, externalImportEnabledFromValue } from "@/lib/externalImportAccess";
 import { IMAGE_GENERATION_FLAG_KEY, imageGenerationEnabledFromValue } from "@/lib/imageGenerationAccess";
@@ -74,10 +80,14 @@ async function heldSettingValues(
 export const MARKETING_CLAIM_GATES: Readonly<
   Record<string, (database: MarketingClaimGateDatabase) => Promise<boolean>>
 > = Object.freeze({
-  "feature.assistantProfiles": async (database) =>
-    assistantProfilesEnabledFromValue(
-      (await heldSettingValues(database, [ASSISTANT_PROFILES_FLAG_KEY])).get(ASSISTANT_PROFILES_FLAG_KEY),
-    ),
+  // The claim says assistants carry knowledge files, so knowledge must be usable too.
+  "feature.assistantProfiles": async (database) => {
+    const values = await heldSettingValues(database, [ASSISTANT_PROFILES_FLAG_KEY, ASSISTANT_KNOWLEDGE_FLAG_KEY]);
+    return assistantKnowledgeUsable({
+      profilesEnabled: assistantProfilesEnabledFromValue(values.get(ASSISTANT_PROFILES_FLAG_KEY)),
+      knowledgeEnabled: assistantKnowledgeEnabledFromValue(values.get(ASSISTANT_KNOWLEDGE_FLAG_KEY)),
+    });
+  },
   // The claim says both: import, then continue in Tomverse.
   "feature.externalImportAndContinuation": async (database) => {
     const values = await heldSettingValues(database, [EXTERNAL_IMPORT_FLAG_KEY, EXTERNAL_CONTINUATION_FLAG_KEY]);

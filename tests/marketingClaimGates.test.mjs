@@ -46,16 +46,33 @@ test("the registry binds exactly the gates the claims name, and is frozen", () =
 });
 
 test("a rollout gate is on only when its row says true", async () => {
-  for (const [gate, key] of [
-    ["feature.assistantProfiles", "feature.assistantProfilesEnabled"],
-    ["feature.imageGeneration", "feature.imageGenerationEnabled"],
-  ]) {
-    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "true" })), true, gate);
-    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "false" })), false, gate);
-    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({})), false, `${gate} missing row`);
-    // A row the lock did not hold is not one the decision rests on.
-    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({}, { [key]: "true" })), false, `${gate} late row`);
-  }
+  const gate = "feature.imageGeneration";
+  const key = "feature.imageGenerationEnabled";
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "true" })), true);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "false" })), false);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({})), false, "missing row");
+  // A row the lock did not hold is not one the decision rests on.
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({}, { [key]: "true" })), false, "late row");
+});
+
+test("the assistants gate needs profiles and knowledge files, as the claim says both", async () => {
+  const gate = "feature.assistantProfiles";
+  const both = { "feature.assistantProfilesEnabled": "true", "feature.assistantKnowledgeEnabled": "true" };
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase(both)), true);
+  // Profiles on, knowledge off is a real configuration: the claim would promise files nobody can attach.
+  assert.equal(
+    await resolveMarketingClaimGate(gate, settingsDatabase({ ...both, "feature.assistantKnowledgeEnabled": "false" })),
+    false,
+  );
+  assert.equal(
+    await resolveMarketingClaimGate(gate, settingsDatabase({ "feature.assistantProfilesEnabled": "true" })),
+    false,
+    "knowledge row missing",
+  );
+  assert.equal(
+    await resolveMarketingClaimGate(gate, settingsDatabase({ ...both, "feature.assistantProfilesEnabled": "false" })),
+    false,
+  );
 });
 
 test("import and continue needs both flags", async () => {

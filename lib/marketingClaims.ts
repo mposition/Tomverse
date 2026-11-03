@@ -380,10 +380,12 @@ const monthlyPriceClaim = (id: string, planId: "pro" | "max", statementKey: stri
  * passes the Guard's text hygiene in every locale it lists
  * (tests/marketingRegistries.test.mjs). A claim about a feature behind a flag
  * names its gate, so it refuses while the feature is off (owner decision
- * 2026-11-03: promote Tomverse Chat's own features, not only Review). Memory
- * and Smart Adaptive stay out: the memory wording §17 of the import policy
- * permits ("memories you have reviewed and approved") is not how the released
- * feature works, and Smart Adaptive has no flag a gate could read. The Guard
+ * 2026-11-03: promote Tomverse Chat's own features, not only Review). The
+ * import answer carries §17's required disclosure word for word
+ * (lib/marketingMemoryClaims.ts), as every copy that claims import must. No
+ * claim is registered for memory itself or for Smart Adaptive: memory waits
+ * for the owner to confirm §17's approved wording against the released
+ * feature, and Smart Adaptive has no flag a gate could read. The Guard
  * still re-reads the page and the price every time it judges a draft, so a
  * sentence the page no longer says, or a price no person saved, refuses the
  * post. Code, not a model, writes this list: a model's output never adds or
