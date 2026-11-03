@@ -81,6 +81,7 @@ function MeasurementSends({ x, m }: { x: MarketingWeeklyReport["measurement"]; m
       </p>
       {x.dispatch.segments.length > 0 ? (
         <div className="overflow-x-auto">
+          <p className="text-xs text-zinc-400">{m.segmentsLead}</p>
           <table className="w-full min-w-[560px] border-collapse" data-testid="marketing-weekly-segments">
             <thead>
               <tr className="border-b border-zinc-800">
@@ -137,6 +138,7 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
           <Stat label={m.drafts} value={String(x.drafts.created)} />
           <Stat label={m.approved} value={String(x.decisions.approved)} />
           <Stat label={m.rejected} value={String(x.decisions.rejected)} />
+          <Stat label={m.expired} value={String(x.decisions.expired)} />
           <Stat label={m.published} value={String(x.publishedInWindow)} />
         </div>
         <p className="text-xs text-zinc-400">

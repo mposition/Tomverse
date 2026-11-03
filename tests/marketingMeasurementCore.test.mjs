@@ -408,3 +408,27 @@ test("the weekly report's week starts at the instant the stored weekly KPI is wr
   assert.equal(kpi.start.getTime(), marketingWeekWindow("2026-10-26").start.getTime());
   assert.equal(kpi.end.getTime(), marketingWeekWindow("2026-10-26").end.getTime());
 });
+
+test('a post whose old attempt entries were summarised holds the window its remaining entries fall in', () => {
+  // Sent in July as an unknown outcome, resolved as failed in November; the
+  // July entry is summarised, the November one stays.
+  const measurement = summarizeMarketingMeasurement({
+    window: WINDOW,
+    posts: [
+      post({
+        status: 'failed',
+        publishAttempt: 1,
+        compactedAttempts: [{ firstAt: at('2026-07-01T00:00:00Z'), lastAt: at('2026-07-01T00:00:00Z') }],
+        attempts: [{ at: at('2026-11-04T00:00:00Z'), attempt: 1, outcome: 'failed', errorCode: 'not_on_platform' }],
+      }),
+    ],
+    channels: [],
+    touches: 0,
+    signups: null,
+    signupChannels: null,
+    guestLeads: null,
+    llm: null,
+  });
+  assert.equal(measurement.dispatch.compacted, true);
+  assert.equal(measurement.dispatch.successRate, null);
+});

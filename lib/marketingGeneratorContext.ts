@@ -343,14 +343,27 @@ async function marketingStrategyDue(db: Pick<ContextReader, "$queryRaw">, now: n
   return rows.length === 0;
 }
 
+/**
+ * The morning report's counts and prices, added to a context already read.
+ * Called after the context's transaction has committed, through the plain
+ * client: a slow or failed read here cannot hold or abort the transaction the
+ * drafts' context is read in, and a failure leaves the morning report without
+ * its counts (it records "no_data"), never the drafts without their context.
+ */
+export async function withMarketingMorningInputs(
+  context: MarketingGeneratorContext,
+  reader: Pick<typeof prisma, "$queryRaw"> = prisma,
+): Promise<MarketingGeneratorContext> {
+  if (!context.analysis.enabled) return context;
+  const [operations, marketPrices] = await Promise.all([
+    readMarketingOperations(reader).catch(() => null),
+    readMarketingPriceHistory(reader).catch(() => []),
+  ]);
+  return { ...context, operations, marketPrices };
+}
+
 export async function readMarketingGeneratorContext(
   db: ContextReader,
-  /**
-   * Where the morning report's counts and prices are read: outside the
-   * context's transaction, so a failed read there cannot abort the
-   * transaction the drafts' context is read in.
-   */
-  outside: Pick<typeof prisma, "$queryRaw"> = prisma,
 ): Promise<MarketingGeneratorContext> {
   // Approval mode only: S3 drafts go to a person, and an account that is
   // waiting to connect, paused or disconnected is not one a draft is for.
@@ -374,7 +387,6 @@ export async function readMarketingGeneratorContext(
     db.appSetting.findUnique({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, select: { value: true } }),
     getBillingPlansWithFieldSources(db),
   ]);
-  const analysisOn = marketingAnalysisEnabledFromValue(analysisSetting?.value);
   const active = plans.filter((entry) => entry.plan.isActive);
   const activePlans: MarketingGeneratorPlan[] = active.map(({ plan, sources }) => ({
     id: plan.id,
@@ -421,10 +433,9 @@ export async function readMarketingGeneratorContext(
     competitors: { tracked, knownIds },
     llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
     ownProduct: { pages: ownPages(), plans: activePlans },
-    // Only for the morning report: a read that fails leaves it without its
-    // counts (it records "no_data"), never the drafts without their context.
-    operations: analysisOn ? await readMarketingOperations(outside).catch(() => null) : null,
-    marketPrices: analysisOn ? await readMarketingPriceHistory(outside).catch(() => []) : [],
+    // Added after the transaction by `withMarketingMorningInputs`.
+    operations: null,
+    marketPrices: [],
     analysis: {
       enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
       // Only asked while the switch is on: off, no plan is written either way.

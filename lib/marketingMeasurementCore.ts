@@ -289,10 +289,17 @@ export function summarizeMarketingMeasurement(input: {
           ...channel,
           held: channel.attributed < MARKETING_MEASUREMENT_MIN_SIGNUPS,
         }));
-  const compacted = posts.some((post) =>
-    post.compactedAttempts.some(
-      (span) => span.firstAt.getTime() < window.end.getTime() && span.lastAt.getTime() >= window.start.getTime(),
-    ),
+  // Retention summarises old attempt entries but may keep a later entry of the
+  // same attempt (an unknown outcome resolved months on): once a post has a
+  // summary, its remaining entries cannot be placed by when they were sent.
+  // Either way the window's sends are incomplete, and every rate is held.
+  const compacted = posts.some(
+    (post) =>
+      post.compactedAttempts.length > 0 &&
+      (post.compactedAttempts.some(
+        (span) => span.firstAt.getTime() < window.end.getTime() && span.lastAt.getTime() >= window.start.getTime(),
+      ) ||
+        post.attempts.some((entry) => within(entry.at, window))),
   );
   // A window retention has partly summarised has an incomplete denominator:
   // no rate or delay is drawn from what is left, at any level.
