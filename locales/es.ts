@@ -171,6 +171,8 @@ export const es = {
         workspaceError: {
             title: "No se pudo cargar el espacio de chat",
             body: "Tus conversaciones están a salvo. Reintentar suele resolverlo.",
+            workspaceTitle: "No se pudo cargar este espacio de trabajo",
+            workspaceBody: "No se ha perdido nada. Reintentar suele resolverlo.",
             reference: "Si sigue ocurriendo, indica esta referencia al contactar con soporte:",
             noReference: "Si sigue ocurriendo, contacta con soporte.",
             retry: "Reintentar",

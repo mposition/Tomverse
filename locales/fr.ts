@@ -171,6 +171,8 @@ export const fr = {
         workspaceError: {
             title: "Impossible de charger l’espace de discussion",
             body: "Vos conversations sont intactes. Réessayer suffit généralement.",
+            workspaceTitle: "Impossible de charger cet espace de travail",
+            workspaceBody: "Rien n’a été perdu. Réessayer suffit généralement.",
             reference: "Si cela persiste, indiquez cette référence en contactant le support :",
             noReference: "Si cela persiste, contactez le support.",
             retry: "Réessayer",

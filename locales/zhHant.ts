@@ -183,6 +183,8 @@ export const zhHant = {
         workspaceError: {
             title: "無法載入聊天工作區",
             body: "您的對話是安全的。重試通常即可解決。",
+            workspaceTitle: "無法載入這個工作區",
+            workspaceBody: "沒有內容遺失。重試通常即可解決。",
             reference: "如果仍然發生，聯絡客服時請提供此參考編號：",
             noReference: "如果仍然發生，請聯絡客服。",
             retry: "重試",

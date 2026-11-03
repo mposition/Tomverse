@@ -171,6 +171,8 @@ export const pt = {
         workspaceError: {
             title: "Não foi possível carregar o espaço de conversa",
             body: "Suas conversas estão seguras. Tentar novamente costuma resolver.",
+            workspaceTitle: "Não foi possível carregar este espaço de trabalho",
+            workspaceBody: "Nada foi perdido. Tentar novamente costuma resolver.",
             reference: "Se continuar acontecendo, informe esta referência ao contactar o suporte:",
             noReference: "Se continuar acontecendo, contacte o suporte.",
             retry: "Tentar novamente",

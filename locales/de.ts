@@ -160,6 +160,8 @@ export const de = {
         workspaceError: {
             title: "Der Chat-Arbeitsbereich konnte nicht geladen werden",
             body: "Ihre Unterhaltungen sind sicher. Ein erneuter Versuch behebt das meist.",
+            workspaceTitle: "Dieser Arbeitsbereich konnte nicht geladen werden",
+            workspaceBody: "Es ist nichts verloren gegangen. Ein erneuter Versuch behebt das meist.",
             reference: "Wenn es weiterhin auftritt, nennen Sie dem Support diese Referenz:",
             noReference: "Wenn es weiterhin auftritt, wenden Sie sich an den Support.",
             retry: "Erneut versuchen",

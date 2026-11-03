@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import test from "node:test";
 
 /**
@@ -24,12 +24,36 @@ import test from "node:test";
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (relativePath) => readFileSync(resolve(ROOT, relativePath), "utf8");
 
-/** Every `error.tsx`-family boundary in the app, and the prop each retries with. */
-const BOUNDARIES = [
-    "app/global-error.tsx",
-    "app/(site)/(application)/chat/error.tsx",
-    "app/(site)/(application)/admin/error.tsx",
-];
+const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]
+    );
+
+/**
+ * Every `error.tsx`-family boundary in the app, found rather than listed: a
+ * list is what goes stale, and a boundary added without this check is exactly
+ * the one that ships the dead retry button.
+ */
+const BOUNDARIES = walk(resolve(ROOT, "app"))
+    .filter((file) => /(^|[\\/])(error|global-error)\.tsx$/.test(file))
+    .map((file) => relative(ROOT, file).split(sep).join("/"))
+    .sort();
+
+/**
+ * The screens the boundaries delegate their rendering to. A boundary may hand
+ * `retry` to a shared component instead of wiring a button itself, so the
+ * button and the digest sentence are checked here rather than going unchecked.
+ */
+const SHARED_SCREENS = ["components/WorkspaceErrorScreen.tsx"];
+
+test("the boundary scan finds the app's error boundaries", () => {
+    // A scan that stopped matching would make every assertion below pass by
+    // finding nothing.
+    assert.ok(
+        BOUNDARIES.includes("app/global-error.tsx") && BOUNDARIES.length >= 3,
+        `read no plausible boundary set: ${BOUNDARIES.join(", ") || "(none)"}`
+    );
+});
 
 /**
  * The props Next's own error boundary hands to `errorComponent`, read out of
@@ -103,13 +127,26 @@ test("no boundary destructures a prop Next does not pass", () => {
 
 test("every boundary wires its retry control to the prop it declared", () => {
     // A boundary that declares `retry` and then calls something else is the
-    // same defect wearing the fixed name.
+    // same defect wearing the fixed name. The call may be on the button
+    // (`onClick`) or on the prop a shared screen retries through (`onRetry`),
+    // so what is asserted is that the declared prop is the thing invoked.
     for (const file of BOUNDARIES) {
-        const source = read(file);
         assert.match(
-            source,
-            /onClick=\{\(\) => retry\(\)\}/,
-            `${file} has no retry button wired to the \`retry\` prop`
+            read(file),
+            /=\{\(\) => retry\(\)\}/,
+            `${file} has no retry control wired to the \`retry\` prop`
+        );
+    }
+});
+
+test("every shared error screen renders a button that calls its retry prop", () => {
+    // The boundaries that delegate have no button of their own; if the screen
+    // drops the handler, the dead-button defect is back and invisible again.
+    for (const file of SHARED_SCREENS) {
+        assert.match(
+            read(file),
+            /onClick=\{onRetry\}/,
+            `${file} has no retry button wired to its \`onRetry\` prop`
         );
     }
 });
@@ -120,10 +157,10 @@ test("no boundary tells the reader to quote a reference it does not have", () =>
     // sentence "quote reference ... when you contact support", so the reader
     // was being asked to repeat the placeholder to support. The absent digest
     // has to change the sentence, not fill a hole in it.
-    for (const file of BOUNDARIES) {
+    for (const file of [...BOUNDARIES, ...SHARED_SCREENS]) {
         assert.doesNotMatch(
             read(file),
-            /error\.digest\s*(\|\||\?\?)/,
+            /(error\.)?digest\s*(\|\||\?\?)/,
             `${file} still substitutes a placeholder for a missing digest instead of changing the sentence`
         );
     }
