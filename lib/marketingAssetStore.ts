@@ -319,6 +319,36 @@ export async function readApprovedMarketingAssetKinds(db: AssetReader): Promise<
   return new Map(rows.map((row) => [row.id, row.kind]));
 }
 
+/**
+ * What the media CLI may build on (owner decision 2026-11-04): each approved
+ * asset's id, kind, channels, locales and validity -- never its file, its key
+ * or what it says. The box keeps its own source material per asset and makes
+ * new assets only from those a person approved.
+ */
+export async function readApprovedMarketingAssetsForMediaCli(db: AssetReader): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly kind: MarketingAssetKind;
+    readonly allowedChannels: readonly string[];
+    readonly altLocales: readonly string[];
+    readonly validUntil: string;
+  }>
+> {
+  const rows = await db.$queryRaw<
+    Array<{ id: string; kind: MarketingAssetKind; allowedChannels: string[]; alt: Record<string, string>; validUntil: string }>
+  >(Prisma.sql`
+    SELECT "id", "kind", "allowedChannels", "alt", to_char("validUntil", 'YYYY-MM-DD') AS "validUntil"
+      FROM "MarketingAsset" WHERE "status" = 'approved' ORDER BY "id"
+  `);
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    allowedChannels: [...row.allowedChannels],
+    altLocales: Object.keys(row.alt).sort(),
+    validUntil: row.validUntil,
+  }));
+}
+
 /** The rows the Admin console lists: submissions first, then approved, then retired. */
 export async function readMarketingAssetsForConsole(db: AssetReader, limit: number) {
   const rows = await db.$queryRaw<AssetRow[]>(Prisma.sql`

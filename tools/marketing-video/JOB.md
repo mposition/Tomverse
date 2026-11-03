@@ -1,82 +1,80 @@
-# Daily marketing video job
+# Daily marketing media job
 
-You run once a day on the AMUX box, in `tools/marketing-video` of a fresh
-clone. You make videos and submit them to the Tomverse app as assets. You never
-publish anything: a person approves each asset in Admin, and the app's own
-generator writes the post that carries it, through the Guard and a second
-approval. Owner approval for this unattended job: 2026-10-31.
+You run once a day on the AMUX box, in `tools/marketing-video`. You make new
+image cards, and once a week feed videos, **only from assets a person already
+approved**, and submit them to the Tomverse app as assets. You never publish
+anything: a person approves each asset in Admin, and the app's generator writes
+the post that carries it, through the Guard and a second approval. Owner
+approval for this unattended job: 2026-10-31; built on approved assets, and
+not stopped by a rejection: 2026-11-04.
 
 ## Hard rules
 
-- Never post to a social platform, never call Zernio, HeyGen or any paid API,
-  never commit or push to git, never print `MARKETING_MEDIA_SUBMIT_SECRET`.
-- Pictures of the product are real captures only (`node capture.mjs`). Never
-  draw, generate or mock up the product screen.
-- Make no factual claim the app has not registered: no prices, numbers,
-  rankings, model counts, "best", "fastest", "free", comparisons with a named
-  competitor, or promises. Describe what the viewer sees on screen.
-- No URL or domain name in any text; the end card says "Tomverse".
-- In Chinese, put a space after "。" when Latin letters follow ("來看。 AI Review"): the
-  Guard reads "。AI" as a web address ("AI" is a domain suffix) and refuses it.
-- Nothing aimed at people under 16; no urgency ("today only", "hurry").
-- Stop and report rather than guess if a step fails twice.
+- Never post to a social platform, never call Zernio or any paid API, never
+  open the Tomverse app in a browser, never send a question to it (that spends
+  credits), never commit or push to git, never print
+  `MARKETING_MEDIA_SUBMIT_SECRET`.
+- New words are not yours to write. A card's lines are picked from the source
+  pack's `headlines`, `callouts` and `ctas`, which are the approved short's own
+  on-screen lines; `make-card.mjs` refuses any other line. A feed video is the
+  approved short, unchanged.
+- Pictures are the pack's real captures only. Never draw, generate or mock up
+  the product screen, and never make a new Remotion short from scenes (the
+  owner rejected that style on 2026-10-31).
+- Every asset is made in all three locales, `en`, `ko` and `zh-Hant`, each its
+  own asset (owner decision 2026-11-03).
+- **A refusal or a rejection does not stop the job.** If one locale's asset is
+  refused, note it and go on with the next; tomorrow's run goes on as usual.
+  Stop the whole run only when `list-approved.mjs` fails or no pack is usable.
+
+## Inputs
+
+- `job/approved.json`, written by `node list-approved.mjs`: the assets approved
+  now (id, kind, channels, locales). Run it first; if it exits non-zero, stop
+  and report.
+- `job/sources/<asset-id>/pack.json`: the source material of one approved
+  short, kept on the box beside its captures. `locale`, `topic`, `question`
+  (two lines), `images` (`left`, `center`, `right`, `summary`, `logo`),
+  `captureText` (the words in the left, center and right captures) and
+  `summaryText`, `headlines` (pairs of lines), `callouts`, `ctas`, `cardAlt`,
+  and `video` / `videoAsset` (the approved short and its asset file).
+- `job/history.json`: what earlier runs made (`[{date, id, locale, kind,
+  source, headline, callout, refused}]`). Create it as `[]` if missing.
+
+A pack is **usable** when its `assetId` is in `job/approved.json`. Use only
+usable packs.
 
 ## What to make today
 
-1. One topic: something a visitor can see on a public Tomverse page today
-   (asking several AI models the same question, reviewing answers, the model
-   list, image generation). Open the pages with `capture.mjs` and look at what
-   is actually there before you write; pick a different topic from the last
-   three runs if `job/history.json` lists them.
-2. A **short** (`Short`, 15 to 40 seconds) in each of `en`, `ko` and `zh-Hant`:
-   a hook title scene, two to four capture scenes, a CTA scene. Captions are
-   short spoken sentences; write each locale natively, not as a literal
-   translation.
-3. On Monday and Thursday (Brisbane time) also a **long** (`Long`, 2 to 6
-   minutes, `en`): a walkthrough of the same topic with more capture scenes,
-   including screen recordings (`capture.mjs <url> out.webm <orientation> <seconds>`).
-
-## Steps
-
-1. Capture: `node capture.mjs <url> job/<name>.png portrait` (and `landscape`
-   for the long video). Capture the page in the video's language: `https://tomverse.app/...`
-   for `en`, `https://tomverse.app/ko/...` for `ko`, and `https://tomverse.app/zh/...` for
-   `zh-Hant` (the site has Simplified Chinese pages only; owner decision 2026-10-31). Check every capture with the Read tool; retake one that
-   shows a banner, an error or a half-loaded page.
-2. Write `job/<id>.props.json` per video following `src/schema.ts`, then
-   `node render.mjs job/<id>.props.json Short|Long job/<id>.mp4`. Extract two
-   frames with the ffmpeg in `node_modules/@remotion/compositor-*` and read
-   them: text must fit, Korean and Chinese must not break inside a word.
-3. Write `job/<id>.asset.json`:
-
-   ```json
-   {
-     "asset": {
-       "id": "media-<yyyymmdd>-<topic>-<locale>-<short|long>",
-       "provenance": "capture",
-       "allowedChannels": ["instagram", "youtube", "tiktok", "x"],
-       "alt": { "<locale>": "<one sentence describing the video>" },
-       "claimIds": [],
-       "validUntil": "<today + 90 days, YYYY-MM-DD>",
-       "disclosure": { "instagram": "none", "youtube": "none", "tiktok": "none", "x": "none" },
-       "depictsProductInterface": true
-     },
-     "transcript": { "<locale>": "<every caption and on-screen line, in order>" }
-   }
-   ```
-
-   A long video's `allowedChannels` is `["youtube"]` only. Ids are lower case
-   letters, digits and `-`.
-4. Submit: `node submit-asset.mjs job/<id>.mp4 job/<id>.asset.json`.
+1. **Image cards, every day.** Pick one topic that has a usable pack in all
+   three locales; prefer the topic whose last card is oldest in the history.
+   For each locale:
+   - Pick a headline pair, a callout and a call to action from that locale's
+     pack, choosing the headline pair used least recently in the history (never
+     the same pair two days running) and a callout that does not repeat the
+     headline's words.
+   - Write `job/<yyyymmdd>/<id>.spec.json` as
+     `{"id": "...", "headline": ["...", "..."], "callout": "...", "cta": "..."}`
+     with the lines copied exactly. The id is
+     `media-<yyyymmdd>-<topic>-<locale lower case>-card`, with `-2`, `-3`, ...
+     if that id is in the history.
+   - `node make-card.mjs job/sources/<pack-asset-id>/pack.json job/<yyyymmdd>/<id>.spec.json job/<yyyymmdd>`
+   - Read the PNG with the Read tool: every line is whole, nothing overlaps the
+     wrong element, the language is the locale's. If it is not, pick another
+     headline pair and make it again (twice at most).
+2. **Feed videos, on Mondays (Brisbane time).** For each usable pack whose short
+   has no feed video in the history yet, in all three locales:
+   - `node make-feed-video.mjs job/sources/<pack-asset-id>/pack.json media-<yyyymmdd>-<topic>-<locale lower case>-feed job/<yyyymmdd>`
+3. **Submit** each file: `node submit-asset.mjs job/<yyyymmdd>/<id>.<png|mp4> job/<yyyymmdd>/<id>.asset.json`.
    - Exit 0: submitted.
-   - Exit 3: the Guard refused the transcript; it prints the Guard codes.
-     Rewrite the lines that caused them, render again, and resubmit with a new
-     id (`-r2`). At most two rewrites per video.
-   - Exit 1: stop that video and report the step and status it printed.
-5. Append today's topic and asset ids to `job/history.json`, and delete any helper
-   script or scratch file you made in `job/` today (keep the renders, props and history).
+   - Exit 3: the Guard refused the transcript. Record it as refused with its
+     codes and go on; do not change the words.
+   - Exit 1: record the step and status it printed and go on with the next.
+4. Append one entry per asset to `job/history.json`, and delete any helper
+   script or scratch file you made today (keep the PNGs, MP4s, specs and asset
+   files).
 
 ## Report
 
 End with one JSON line:
-`{"job":"marketing-video","date":"<yyyy-mm-dd>","topic":"...","submitted":["media-..."],"refused":[{"id":"...","guardCodes":[...]}],"failed":[{"id":"...","step":"...","status":0}]}`
+`{"job":"marketing-media","date":"<yyyy-mm-dd>","topic":"...","submitted":["media-..."],"refused":[{"id":"...","guardCodes":[...]}],"failed":[{"id":"...","step":"...","status":0}]}`

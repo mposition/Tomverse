@@ -1,4 +1,4 @@
-// Renders one video: node render.mjs <props.json> <Short|Long> <out.mp4>
+// Renders one video: node render.mjs <props.json> <Short|Long|Feed> <out.mp4>
 // Media named in the props are files beside props.json (served as static
 // files) or https URLs. The props are validated by the composition metadata.
 import { readFileSync } from "node:fs";
@@ -9,8 +9,8 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 
 const [propsPath, compositionId, outPath] = process.argv.slice(2);
-if (!propsPath || !["Short", "Long"].includes(compositionId ?? "") || !outPath) {
-  console.error("usage: node render.mjs <props.json> <Short|Long> <out.mp4>");
+if (!propsPath || !["Short", "Long", "Feed"].includes(compositionId ?? "") || !outPath) {
+  console.error("usage: node render.mjs <props.json> <Short|Long|Feed> <out.mp4>");
   process.exit(2);
 }
 const inputProps = JSON.parse(readFileSync(propsPath, "utf8"));
