@@ -19,9 +19,13 @@ import {
 } from "@/lib/amux/workerOverviewCore";
 import {
   AMUX_WORKER_REGISTRY_V31_SEED,
-  amuxWorkerProviderClassOf,
   buildAmuxWorkerRegistryAdminView,
 } from "@/lib/amux/workerRegistryCore";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name: string) =>
+  name.slice(0, name.indexOf("-")) as import("@/lib/amux/workerRegistryCore").AmuxWorkerProviderClass;
+
 
 /**
  * AMUX › Operations settings › Workers, executed: the hook-free view is called
@@ -341,7 +345,7 @@ test("an unknown outcome is said as an alert, and a done change names its worker
 
 test("the first-registration control is folded away, offered to the owner only while something is left", () => {
   const calls: Record<string, unknown[]> = {};
-  const entries = AMUX_WORKER_REGISTRY_V31_SEED.slice(0, 3).map(({ workerName, roleCeiling, desiredState }) => ({ workerName, roleCeiling, desiredState }));
+  const entries = AMUX_WORKER_REGISTRY_V31_SEED.slice(0, 3).map(({ workerName, providerClass, roleCeiling, desiredState }) => ({ workerName, providerClass, roleCeiling, desiredState }));
   const tree = render({ seedEntries: entries, calls });
   const details = byTestId(tree, "amux-workers-seed")[0]!;
   assert.equal(details["open"], undefined, "folded by default");

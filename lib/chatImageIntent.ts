@@ -28,6 +28,9 @@ import {
     type ChatImageDecision,
 } from "@/lib/chatImageIntentCore";
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
+import { imageEditEnabled } from "@/lib/imageEditSource";
+import { IMAGE_QUALITY_BY_PRESET, type ImagePreset } from "@/lib/imageGenerationPricing";
+import { imageEditCredits } from "@/lib/imageModelRegistry";
 import { planAllowsFeature } from "@/lib/billingEntitlements";
 import type { BillingPlanConfig } from "@/lib/billingPlanDefaults";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
@@ -130,8 +133,15 @@ export async function detectChatImageRequest(input: {
     conversationId?: string | null;
     /** The caller's request, whose unlock grant a locked conversation needs. */
     request?: Request;
+    /**
+     * The message carries a photo. Then the call only decides whether to edit
+     * it, among the models that can, and never asks without the edit switch.
+     */
+    attachedPhoto?: boolean;
 }): Promise<ChatImageDecision> {
     if (!chatImageIntentPrompt(input.text)) return NOT_IMAGE;
+    const attachedPhoto = input.attachedPhoto === true;
+    if (attachedPhoto && !imageEditEnabled()) return NOT_IMAGE;
     const configured = await chatImageTriageModelId();
     if (!configured) return NOT_IMAGE;
 
@@ -147,6 +157,26 @@ export async function detectChatImageRequest(input: {
             configured
         );
         candidates = chatImageModelCandidates(imageModels);
+        if (attachedPhoto) {
+            // Only models that can edit, at the square price an edit charges --
+            // the check the reservation makes, applied to the 1024x1024 option
+            // these candidates show. A non-square edit is checked again there.
+            candidates = candidates.flatMap((candidate) => {
+                const model = imageModels.find((entry) => entry.id === candidate.id);
+                const credits = Object.fromEntries(
+                    (Object.keys(candidate.credits) as ImagePreset[]).flatMap((preset) => {
+                        const price = model?.prices.find(
+                            (option) =>
+                                option.size === "1024x1024" &&
+                                option.quality === IMAGE_QUALITY_BY_PRESET[preset]
+                        );
+                        const editCredits = model && price ? imageEditCredits(model, price) : null;
+                        return editCredits === null ? [] : [[preset, editCredits]];
+                    })
+                );
+                return Object.keys(credits).length > 0 ? [{ ...candidate, credits }] : [];
+            });
+        }
     } catch {
         return NOT_IMAGE;
     }
@@ -162,11 +192,12 @@ export async function detectChatImageRequest(input: {
     } catch {
         return NOT_IMAGE;
     }
+    // An attached photo is what the message is about; the previous image is not.
     const previous =
-        input.userId && input.conversationId && input.request
+        !attachedPhoto && input.userId && input.conversationId && input.request
             ? await readPreviousImagePrompt(input.userId, input.conversationId, input.request)
             : null;
-    const prompt = chatImageIntentUserMessage(input.text, candidates, previous);
+    const prompt = chatImageIntentUserMessage(input.text, candidates, previous, attachedPhoto);
     // A follow-up writes a whole prompt, not just a decision.
     const maxOutputTokens = previous
         ? CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS
@@ -212,7 +243,12 @@ export async function detectChatImageRequest(input: {
             }),
             providerOptions: autoLlmRouterProviderOptions(model.provider),
         });
-        decision = parseChatImageIntentOutput(generated.output, candidates, previous !== null);
+        decision = parseChatImageIntentOutput(
+            generated.output,
+            candidates,
+            previous !== null,
+            attachedPhoto
+        );
         outcome = decision.image ? "image" : "chat";
         const usage = generated.usage as
             | { inputTokens?: number; outputTokens?: number }
@@ -240,6 +276,8 @@ export async function detectChatImageRequest(input: {
             imageModelId: decision.image ? decision.modelId : null,
             preset: decision.image ? decision.preset : null,
             followUp: decision.image ? decision.prompt !== null : false,
+            edit: decision.image ? decision.edit : false,
+            attachedPhoto,
             candidateCount: candidates.length,
             latencyMs: Date.now() - startedAt,
         })
@@ -265,6 +303,8 @@ export async function detectChatTurnImage(input: {
     traceId: string;
     /** The chat request, whose unlock grant a locked conversation needs. */
     request: Request;
+    /** The message being sent carries a photo (see detectChatImageRequest). */
+    attachedPhoto?: boolean;
 }): Promise<ChatImageDecision> {
     try {
         if (!input.plan || !planAllowsFeature(input.plan, "imageGeneration")) return NOT_IMAGE;
@@ -276,6 +316,7 @@ export async function detectChatTurnImage(input: {
             userId: input.userId,
             conversationId: input.conversationId,
             request: input.request,
+            attachedPhoto: input.attachedPhoto,
         });
     } catch {
         // A routing aid must not fail the turn; the turn is then chat.

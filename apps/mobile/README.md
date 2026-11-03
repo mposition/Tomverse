@@ -49,6 +49,55 @@ packs are available behind default-off billing switches. See
 [store billing setup](../../docs/ops/mobile-store-billing.md) for configuration,
 verification and activation requirements. Store credit purchases do not expire.
 
+## Android updates
+
+At launch and on return to the foreground, Android checks Google Play for an
+eligible update. The localized banner starts a flexible Play update only after
+the user taps Update. Downloads run alongside the app; completing installation
+requires an explicit Restart. Later postpones the same available version for
+24 hours. A downloaded update is offered again on the next foreground entry.
+The banner waits while Chat or Review is generating. Existing per-account text
+draft persistence also applies across restart. Offline/unowned installs and
+web/iOS never block app use or download an APK from a separate URL.
+
+Run the synthetic UI checks with
+`npm --workspace @tomverse/mobile run test:ui -- app-updates.spec.ts`.
+Android's `:tomverse-mobile-auth:testDebugUnitTest` uses
+Google's FakeAppUpdateManager. Store acceptance still requires a Play-installed
+build containing this feature and an eligible higher version for the same
+account, package and signing key. Older builds need one manual update first.
+See [Google's device testing guide](https://developer.android.com/guide/playcore/in-app-updates/test).
+
+## iOS updates
+
+iOS uses the same localized banner and 24-hour Later choice. At launch and on
+foreground/online entry, a native request looks up Tomverse's public App Store
+record and compares its marketing version and minimum OS with the installed
+app and device. Lookups share a five-minute in-memory cache. Missing, malformed,
+offline or unsupported-OS results leave ordinary Chat and Review available.
+The request uses an ephemeral session, no account credentials and a fixed app ID.
+
+Tapping Update opens Tomverse's fixed App Store product page through UIKit.
+App Store manages installation; iOS does not advertise Play's downloaded/restart
+states. Opening the page is not an installation receipt. Drafts remain in the
+existing account-scoped draft store. TestFlight-only versions are not discoverable
+in the public catalog, and TestFlight installation failures remain a separate
+delivery issue. Device acceptance requires a published higher App Store version.
+
+Local Windows / PowerShell / repository root, installed dependencies and no
+production credentials or payments:
+
+```powershell
+node --import tsx --test tests/iosAppUpdates.test.mjs
+npm --workspace @tomverse/mobile run test:ui:ios -- app-updates.spec.ts
+npm run prepare:ios
+```
+
+The synthetic tests do not compile Swift or open a real store. Swift compilation
+and the actual iPhone/iPad handoff require the remote Mac and signed-device tests.
+See [Apple lookup examples](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/LookupExamples.html)
+and [UIKit URL opening](https://developer.apple.com/documentation/uikit/uiapplication/open(_:options:completionhandler:)).
+
 ## Local development
 
 Automatic current-location intent analysis additionally requires the server-side
@@ -83,6 +132,48 @@ outputs remain ignored. Android builds require JDK 21, Android SDK 36 and Gradle
 run `npm --workspace @tomverse/mobile run build:android` after installing them.
 The iOS MVP targets iOS 17.4+ and requires macOS and Xcode. Signing and real device verification are separate.
 
+## Prepare an iOS build on Windows
+
+Run `npm run prepare:ios` from the repository root to type-check and build the
+production bundle, sync only iOS and validate its resources, local SPM paths,
+permissions, privacy declarations and plugin registrations. Run
+`npm run build:ios -- --dry-run` to inspect the unsigned Xcode command without
+executing it. `npm --workspace @tomverse/mobile run test:ui:ios` runs the existing
+synthetic UI scenarios in desktop WebKit; native permissions still need a device.
+
+On a Mac, `npm run build:ios` builds an unsigned Simulator application with
+Xcode 26+. It does not sign, upload, enroll a service or submit to a store.
+See [remote iOS build handoff](../../docs/ops/ios-remote-build.md) for clean-machine
+setup, output paths, validation evidence and the remaining Mac/device checks.
+
+The repository-root `codemagic.yaml` also provides a manual, unsigned Simulator
+build on a hosted Mac mini M2. See [Codemagic setup](../../docs/ops/ios-codemagic.md)
+for connecting the personal account, selecting the prepared branch and reading
+the artifacts. Apple membership is needed later for TestFlight device distribution.
+
+## Android and iOS design parity (2026-10-27)
+
+The Android design revision `bf48eaf2c` now supplies the same shared React
+screens, styles, artwork and seven-language copy to iOS. This includes the
+illustrated Chat/Review starts, centered brand, conversation return navigation,
+message tools, provider/model lists, all six settings tabs and server-verified
+purchase confirmation. Location controls stay in Tools; the composer has no
+extra location status row. iOS native configuration remains separate.
+
+From the repository root in local PowerShell, without production credentials:
+
+- `npm --workspace @tomverse/mobile run test:ui:ios` checks shared UI in WebKit.
+- `npm --workspace @tomverse/mobile run test:ui:ios-design` checks light/dark
+  layouts on iPhone and iPad 7 portrait/landscape WebKit profiles, including
+  navigation, model selectors, tools, all settings tabs and overflow.
+- `npm run test:ios-billing-ui` checks the Apple billing UI with synthetic
+  native bridges and server responses. No purchase is made.
+- `npm run prepare:ios` rebuilds and synchronizes the local iOS resources.
+
+WebKit previews establish browser layout compatibility. Xcode compilation,
+signed-device permissions, StoreKit purchases and store submission still need
+their Mac/device acceptance steps.
+
 ## Authentication and operational boundary
 
 The primary sign-in action opens the existing web sign-in flow in the system
@@ -92,6 +183,14 @@ an explicit email-code option inside the app. The email form's alternate sign-in
 action uses the same native browser flow; it does not open a standalone website
 login that cannot return a session to the app. Cancelled, expired and unavailable
 browser sign-ins retain the email-code option and show an appropriate message.
+An HTTPS association verification failure gets one fresh Auth Tab attempt with
+new PKCE and state. Only a verified callback can issue the native session;
+cancellation and a second verification failure never exchange a grant.
+
+Continued conversations use the web's source-title display rules in native
+history. Their read-only original endpoint accepts the same owned mobile bearer
+as the conversation itself, behind the existing native parity switch. Snapshot
+locks, conversation locks and account ownership still apply to every read.
 
 After web authentication, the completion page automatically requests one
 short-lived PKCE grant and navigates to the HTTPS callback. There is no extra
@@ -131,9 +230,9 @@ persistence checks remain in place. Cookie requests retain cookie authentication
 and CSRF checks. Live enrollment, paid calls, push, merge, deployment and store
 submission require their separate approvals.
 
-The existing `app.tomverse.shell` identifier is provisional. No production app
-IDs, Apple Team ID or signing certificate have been chosen by the owner. No
-association files are published or fabricated. The native declarations are
+The `app.tomverse.shell` Apple App ID and a Tomverse App Store Connect draft
+were registered on 2026-10-26. Signing certificates/profiles and payment activation
+remain operational setup. No association files are published or fabricated. The native declarations are
 preparation, not proof of verified links. Browser screenshots and sync output
 are not physical-device authentication evidence. iOS uses ASWebAuthenticationSession with an exact HTTPS callback, rather than
 relying on Safari same-domain navigation. Physical app-link and session evidence
@@ -304,6 +403,19 @@ followed by a supported capability response from the actual target server.
 
 ## Foreground location
 
-The current Chat and Review composers offer a Current location switch in Tools. When location is off, a bounded analysis by the configured routing model can identify a location-dependent question and request foreground device permission before the same question is answered. Existing device permission is reused, including after reload; the app does not show another permission dialog of its own. Once enabled, each message reads a fresh approximate fix. Manual off, denial and acquisition failures suppress automatic requests for the current identity session. Location is excluded from stored messages and device drafts. Switching accounts, signing out, or reloading clears in-memory state without changing the browser/device permission setting. Ordinary chat remains available on any analysis or acquisition failure. Analysis uses the existing routing provider operational budget; no new provider, price or budget ceiling is enabled.
+The current Chat and Review composers offer a Current location switch in Tools.
+Native first launch offers an optional foreground-location explanation before
+the system permission request; skipping it leaves ordinary chat available.
+Explicit choices are saved per account, without coordinates. A saved grant is
+restored only after checking existing device permission, without another OS
+prompt. Switching accounts or signing out clears the in-memory fix.
+
+When location is off, the existing, separately gated routing-model analysis can
+identify a location-dependent question and request foreground permission before
+answering. Manual off, denial and acquisition failures suppress automatic
+requests for the current identity session. Each enabled message reads a fresh
+approximate fix; location is excluded from stored messages and drafts. Ordinary
+chat remains available on analysis or acquisition failure. This UI update does
+not enable the analysis switch, a new provider, price or budget ceiling.
 
 The existing native chat enrollment, browser login, secure store and product navigation are unchanged. Run the workspace cap:sync script after dependency changes; its post-sync hook configures foreground coarse Android location and reduced-accuracy iOS usage descriptions. Physical-device permission and GPS observations remain separate from browser fixtures.

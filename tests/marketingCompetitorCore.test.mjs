@@ -62,6 +62,8 @@ test("a candidate is strict, bounded and cites only https evidence", () => {
   for (const bad of [
     candidate({ status: "approved" }),
     candidate({ evidenceUrls: ["http://alpha.example"] }),
+    // A proposal with no evidence is not one a person can check (S3f-R5c).
+    candidate({ evidenceUrls: [] }),
     candidate({ evidenceUrls: Array.from({ length: 6 }, (_, i) => `https://alpha.example/${i}`) }),
     candidate({ rationale: "" }),
     candidate({ rationale: "x".repeat(401) }),

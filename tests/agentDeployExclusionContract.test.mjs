@@ -7,9 +7,6 @@ import { test } from "node:test";
 
 import ts from "typescript";
 
-import { DEPLOY_EXCLUDED_PREFIXES } from
-  "../lib/agentControlPlaneSlice.ts";
-
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sourcePaths = execFileSync("git", ["ls-files", "app", "lib", "packages"],
   { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/)
@@ -59,7 +56,6 @@ test("deploy source exclusion includes only pinned vNext test sources", () => {
   ]);
   assert.deepEqual(patterns, ["tests/*", ...pinnedTests.map((path) =>
     `!${path}`), "playwright.admin.config.ts"]);
-  assert.deepEqual([...DEPLOY_EXCLUDED_PREFIXES], []);
   // This live route reads committed verification records by path.
   assert.match(readFileSync(join(root,
     "lib/marketingWebhookVerification.ts"), "utf8"),

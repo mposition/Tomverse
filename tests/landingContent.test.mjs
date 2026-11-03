@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { landingCopy, interpolate } from "../components/marketing/landingContent.ts";
 
-const languages = ["en", "ko", "zh", "fr", "de", "es", "pt"];
+const languages = ["en", "ko", "zh", "zh-Hant", "fr", "de", "es", "pt"];
 
 // The landing copy table used to be `{ en } & Partial<Record<Language, ...>>`,
 // so a key that no locale overrode silently shipped in English and a key no
@@ -58,6 +58,7 @@ const BOUNDARY_PATTERNS = {
   en: [/compares only the supplied answers/, /separate web check/],
   ko: [/제공된 답변끼리만 비교/, /웹 확인/],
   zh: [/只比较提供的回答/, /网页核实/],
+  "zh-Hant": [/只比較提供的回答/, /網頁查證/],
   fr: [/compare uniquement les réponses fournies/, /vérification web/],
   de: [/vergleicht nur gelieferte Antworten/, /Web-Check/],
   es: [/solo compara las respuestas dadas/, /verificación web/],

@@ -34,8 +34,13 @@ import {
 /** Bumped whenever the tree verification or the tier rules change meaning. */
 export const ENGINEERING_AGENT_VERIFIER_VERSION = 1;
 
-/** Proposed: how long an unconsumed capability stays usable. */
-export const CAPABILITY_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long an unconsumed capability stays usable. The publisher claims every
+ * ten minutes and the capability is issued just after a claim, so a ten-minute
+ * life lapsed before the next claim whenever the schedule ran a little late;
+ * this one outlives two publisher periods with room for that drift.
+ */
+export const CAPABILITY_TTL_MS = 25 * 60 * 1000;
 
 const SHA1 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;

@@ -1,32 +1,47 @@
 import { expect, test } from "@playwright/test";
-import { resolve } from "node:path";
-import { workspaceWelcomeCopy } from "../../locales/workspaceWelcome";
+import { mobileCopy, mobileLanguages } from "../../locales/mobile";
+import { mobileWorkspaceStartCopy } from "../../locales/mobileWorkspaceStart";
+import { selectProduct } from "./workspaceNavigation";
 
 test.beforeEach(async ({ page }) => {
   await page.route("https://tomverse.app/**", route => route.abort());
+});
+
+for (const theme of ["light", "dark"]) for (const language of mobileLanguages) {
+  test(`clean workspaces keep ${language} copy, themed art and an empty draft in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.addInitScript(({ theme, language }) => {
+      localStorage.setItem("tomverse-theme", theme); localStorage.setItem("tomverse-language", language);
+    }, { theme, language });
+    await page.goto("/"); await page.getByRole("button", { name: mobileCopy[language].signIn, exact: true }).click();
+    const c = mobileWorkspaceStartCopy(language);
+    const start = page.getByTestId("workspace-start");
+    await expect(start.getByRole("heading")).toContainText(c.chatLast);
+    await expect(start.getByText(c.chatAutomatic, { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox")).toHaveValue("");
+    await expect(start.locator("article, button")).toHaveCount(0);
+    const visibleArt = start.locator(`.welcome-art-${theme}`);
+    await expect(visibleArt).toBeVisible();
+    await expect.poll(() => visibleArt.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await page.getByRole("textbox").fill("My own question");
+    await selectProduct(page, "review");
+    await expect(start.getByRole("heading")).toContainText(c.reviewLast);
+    await expect(start.getByText(c.reviewDescription, { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox")).toHaveValue("");
+    await expect(start.locator("article, button")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+    await expect(page.getByRole("textbox")).toBeInViewport();
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]").length)).toBe(0);
+  });
+}
+
+test("the welcome does not promise automatic model choice when the server does not offer it", async ({ page }) => {
   await page.route("**/src/main.tsx", async route => {
     const response = await route.fetch(); const source = await response.text();
-    const fixture = `const baseCapability=transport.mobileCapabilities;transport.mobileCapabilities=async()=>({...await baseCapability(),images:{enabled:true,maxModels:3,models:[{id:'fixture-image',name:'Fixture image',provider:'openai',pricingVersion:'v1',prices:[]}]}});transport.voiceConfiguration=async()=>({enabled:true,maxSeconds:900});transport.voiceRequest=async()=>Response.json({code:'QA_CALLS_DISABLED'},{status:503});transport.sendVoice=async()=>{throw Error('No paid calls in visual QA');};`;
-    await route.fulfill({ response, body: source.replace("createRoot(container).render(", fixture + "createRoot(container).render(") });
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", "transport.capabilities=async()=>({offered:false});createRoot(container).render(") });
   });
-});
-for (const theme of ["light", "dark"]) test(`native welcome screens share web copy and starter prompts in ${theme}`, async ({ page }) => {
-  await page.addInitScript(theme => { localStorage.setItem("tomverse-language", "ko"); localStorage.setItem("tomverse-theme", theme); }, theme);
+  await page.addInitScript(() => localStorage.setItem("tomverse-language", "ko"));
   await page.goto("/"); await page.getByRole("button", { name: "Tomverse로 계속" }).click();
-  await expect(page.getByRole("heading", { name: "다시 만나 반가워요. 무엇을 도와드릴까요?" })).toBeVisible();
-  await expect(page.locator(".welcome-card-grid .welcome-card")).toHaveCount(6);
-  await page.screenshot({ path: resolve(process.cwd(), `../../.tmp/native-parity/chat-welcome-${theme}.png`) });
-  await page.getByRole("button", { name: "출처 링크 붙은 답 받기", exact: true }).click();
-  await expect(page.getByRole("textbox")).toHaveValue(workspaceWelcomeCopy.ko.starter.cards.sourcedAnswer.seed);
-  await page.getByRole("button", { name: "세 모델 답 나란히 비교", exact: true }).click();
-  await expect(page.getByTestId("product-switcher")).toHaveValue("review");
-  await expect(page.getByRole("textbox")).toHaveValue(workspaceWelcomeCopy.ko.starter.cards.compareAnswers.seed);
-  await expect(page.getByRole("heading", { name: "질문은 한 번. 관점은 세 가지." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "한 문장으로, 여러 이미지.", exact: true })).toBeVisible();
-  await page.getByRole("textbox").fill("");
-  await page.screenshot({ path: resolve(process.cwd(), `../../.tmp/native-parity/review-welcome-${theme}.png`) });
-  await page.getByRole("button", { name: "같은 자료, 다른 해석.", exact: true }).click();
-  await expect(page.getByRole("textbox")).toHaveValue(workspaceWelcomeCopy.ko.starter.cards.documentQuestions.seed);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]").length)).toBe(0);
-  await expect(page.locator("article.user")).toHaveCount(0);
+  await expect(page.getByText(mobileWorkspaceStartCopy("ko").chatDescription, { exact: true })).toBeVisible();
+  await expect(page.getByText(mobileWorkspaceStartCopy("ko").chatAutomatic, { exact: true })).toHaveCount(0);
 });

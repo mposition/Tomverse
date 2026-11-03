@@ -1,3 +1,59 @@
+import { z } from "zod";
+
+// Review credential configuration shares the existing mobile environment boundary.
+// Code hashing remains in the review-only entry point.
+export const MOBILE_STORE_REVIEW_STATUS = "mobile_store_review";
+export const isMobileStoreReviewAddress = (email: unknown): email is string =>
+  typeof email === "string" && /^(?:play|appstore)-review[-+][a-z0-9-]+@tomverse\.app$/i.test(email);
+
+const credentialSchema = z.object({
+  submissionId: z.string().min(8).max(120),
+  userId: z.string().min(1).max(120),
+  email: z.string().email().transform(value => value.trim().toLowerCase()).refine(isMobileStoreReviewAddress),
+  appId: z.literal("app.tomverse.shell"),
+  buildNumber: z.number().int().positive(),
+  plan: z.enum(["Free", "Max"]).default("Free"),
+  state: z.enum(["prepared", "submitted", "in_review", "unresolved"]),
+  validUntil: z.string().datetime(),
+  salt: z.string().regex(/^[a-f0-9]{64}$/),
+  codeHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type MobileStoreReviewCredential = z.infer<typeof credentialSchema>;
+
+/** One operator-managed, submission-scoped credential; disabled by default. */
+export function readMobileStoreReviewCredential(env: Record<string, string | undefined> = process.env, now = Date.now(), platform: "android" | "ios" = "android"): MobileStoreReviewCredential | null {
+  const enabled = platform === "ios" ? env.MOBILE_STORE_REVIEW_IOS_ENABLED : env.MOBILE_STORE_REVIEW_ENABLED;
+  if (enabled !== "true") return null;
+  try {
+    const input = platform === "ios" ? env.MOBILE_STORE_REVIEW_IOS_CREDENTIAL_JSON : env.MOBILE_STORE_REVIEW_CREDENTIAL_JSON;
+    const parsed = credentialSchema.safeParse(JSON.parse(input || "null"));
+    if (!parsed.success) return null;
+    if (!parsed.data.email.startsWith(platform === "ios" ? "appstore-review" : "play-review")) return null;
+    const expiry = Date.parse(parsed.data.validUntil);
+    if (expiry <= now || expiry > now + 31 * 86_400_000) return null;
+    return parsed.data;
+  } catch { return null; }
+}
+
+export function readMobileStoreReviewCredentials(env: Record<string, string | undefined> = process.env, now = Date.now()) {
+  return (["android", "ios"] as const).flatMap(platform => {
+    const credential = readMobileStoreReviewCredential(env, now, platform);
+    return credential ? [credential] : [];
+  });
+}
+
+/** Checked again for existing access/refresh sessions, including cached snapshots. */
+export function mobileStoreReviewSessionAllowed(user: { id: string; email?: string | null; plan?: unknown; subscriptionStatus?: string | null; periodEndMs?: number | null }, env: Record<string, string | undefined> = process.env, now = Date.now()) {
+  if (!isMobileStoreReviewAddress(user.email)) return true;
+  const credential = readMobileStoreReviewCredentials(env, now).find(item => item.userId === user.id && item.email === user.email?.toLowerCase());
+  const iosPurchasePlan = credential?.email.startsWith("appstore-review") && credential.plan === "Free" &&
+    env.MOBILE_BILLING_ENVIRONMENT !== "SANDBOX" && env.MOBILE_BILLING_IOS_REVIEW_SANDBOX_ENABLED === "true" &&
+    ["Free", "Pro", "Max"].includes(String(user.plan));
+  if (!credential || credential.userId !== user.id || credential.email !== user.email.toLowerCase() || (credential.plan !== user.plan && !iosPurchasePlan)) return false;
+  return credential.plan === "Free" || (user.subscriptionStatus === MOBILE_STORE_REVIEW_STATUS &&
+    typeof user.periodEndMs === "number" && Number.isFinite(user.periodEndMs) && user.periodEndMs > now);
+}
+
 /**
  * The two key rings mobile bearer authentication runs on, and why they are two.
  *

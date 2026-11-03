@@ -87,7 +87,7 @@ test("the primary action changes from a voice waveform to Send in the same 44px 
 test("native voice delegates to the existing Chat and restores answers without completed-session cards after reload", async ({ page }, info) => {
   await page.goto("/"); await page.getByRole("button", { name: "Tomverse로 계속" }).click();
   await page.getByTestId("native-voice-open").click();
-  await expect(page.getByText("Smart Adaptive", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("voice-conversation-panel").getByText("Smart Adaptive", { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("voice-ready.png") });
   await expect(page.getByTestId("voice-conversation-panel")).not.toContainText(/36.*분|분.*36/);
   await page.getByRole("button", { name: "음성 대화 시작", exact: true }).click();

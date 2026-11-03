@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import type { ChatTransport } from "./chatTransport";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import type { MobileLanguage } from "../../../locales/mobile";
-import { NativeBillingPanel } from "./NativeBillingPanel";
 import { storeBillingDeletionNotice } from "../../../locales/storeBilling";
+import { mobileSettingsCopy } from "../../../locales/mobileSettings";
+import { Browser } from "@capacitor/browser";
+import { TOMVERSE_API_ORIGIN } from "./authBridge";
 
 export function AccountScreen({ transport, language, onReauthenticate, onDeleted }: {
   transport: ChatTransport; language: MobileLanguage; onReauthenticate: () => void; onDeleted: () => void;
@@ -15,7 +17,6 @@ export function AccountScreen({ transport, language, onReauthenticate, onDeleted
   const [uncertain, setUncertain] = useState(false);
   const [reauthenticate, setReauthenticate] = useState(false);
   const [message, setMessage] = useState("");
-  const [billingOpen, setBillingOpen] = useState(false);
   useEffect(() => { let active = true; void transport.account().then((value) => { if (active) setAccount(value); }).catch(() => { if (active) setMessage(copy.uncertain); }); return () => { active = false; }; }, [transport, copy.uncertain]);
   async function perform(action: "export" | "delete") {
     if (busy || uncertain || !account?.actionsEnabled) return;
@@ -29,11 +30,9 @@ export function AccountScreen({ transport, language, onReauthenticate, onDeleted
       else { setMessage(copy.uncertain); setUncertain(true); }
     } finally { setBusy(false); }
   }
-  if (billingOpen) return <NativeBillingPanel onClose={() => setBillingOpen(false)} />;
   return <section className="account-data">
     <p>{account?.email}</p>
-    {import.meta.env.VITE_NATIVE_BILLING_ENABLED === "true" && <button onClick={() => setBillingOpen(true)}>Plans & credits</button>}
-    {account && !account.actionsEnabled && <p role="status">{copy.accountUnavailable}</p>}
+    {account && !account.actionsEnabled && <><p role="status">{copy.accountUnavailable}</p><button type="button" onClick={() => { void Browser.open({ url: new URL("/settings/data", TOMVERSE_API_ORIGIN).href }).catch(() => setMessage(copy.uncertain)); }}>{mobileSettingsCopy(language).manageOnWeb}</button></>}
     {message && <p role="status">{message}</p>}
     {uncertain && <button disabled={busy} onClick={() => {
       setBusy(true);

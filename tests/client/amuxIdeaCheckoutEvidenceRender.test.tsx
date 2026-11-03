@@ -12,7 +12,7 @@ import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 const row = (checkoutEvidence: AmuxIdeaProgressRow["checkoutEvidence"]): AmuxIdeaProgressRow => ({
   ...amuxIdeaProgress({ state: "submitted", cancelled: false, chunks: [],
     proposedUnits: 0, cards: [] }),
-  ideaId: "idea-1", requestId: "11111111-1111-4111-8111-111111111111",
+  ideaId: "idea-1", closable: false, requestId: "11111111-1111-4111-8111-111111111111",
   submittedAt: "2026-10-16T00:00:00.000Z", displayKey: null,
   reviewPullRequests: [], taskRows: [], checkoutEvidence, referencePins: null,
 });
@@ -173,6 +173,10 @@ test("a session answer that made no plan says so and why nothing was registered"
   for (const locale of [adminAmuxIdeaProgressMessages.en, adminAmuxIdeaProgressMessages.ko]) {
     assert.ok(locale.sessionReviewQuestionTitle && locale.sessionReviewQuestionHint &&
       locale.sessionReviewNotAPlan && locale.sessionReviewGone && locale.sessionReviewUnavailable);
+  }
+  for (const locale of [adminAmuxIdeaProgressMessages.en, adminAmuxIdeaProgressMessages.ko]) {
+    const place = "units[4] (card) · taskRole · value_not_allowed";
+    assert.ok(locale.sessionReviewNotAPlanAt(place).includes(place), "the schema place is shown as it is");
   }
   const source = fs.readFileSync("components/admin/AmuxSessionReviewPanel.tsx", "utf8");
   assert.ok(source.includes("/api/admin/amux/ideas/session-review?"));

@@ -56,6 +56,9 @@ import {
   findThresholdSet,
   isApprovedThresholdSet,
 } from "../lib/aiReviewQualityThresholds.ts";
+import { findJudgedThresholdSet, judgedThresholdProblems } from "../lib/aiReviewJudgedThresholds.ts";
+import { readAiReviewJudgedRunReport } from "../lib/aiReviewJudgedRunReport.ts";
+import { evaluateAiReviewJudgedGate } from "../lib/aiReviewJudgedGate.ts";
 
 const argValue = (name) => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -245,9 +248,10 @@ for (const connection of AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS) {
   console.log(`       - ${connection}`);
 }
 console.log(
-  "  note the judged contract written to replace this screen " +
-    "(docs/ops/ai-review-eval-scoring-contract.md) is NOT wired to this gate, " +
-    "and connecting it is a decision nobody has made."
+  "  note judged-v3 can replace the two error-rate ceilings only with an explicitly " +
+    "selected, signed judged threshold set and complete judgement evidence. " +
+    "The six floors remain; four of them are keyword diagnostics. The legacy path " +
+    "remains for legacy evidence. No judged threshold set is activated by this command."
 );
 
 // ---------------------------------------------------------------------------
@@ -323,7 +327,7 @@ if (approvedEntries.length === 0) {
  * this artifact yet. Identity is compared against it when it is there; the
  * evidence bundle is verified either way.
  */
-const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVersion, stage = "evidence" }) => {
+const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVersion, stage = "evidence", judgedThresholds = undefined, judgementsDirectory = null }) => {
   const problems = [];
   const notes = [];
   if (!artifactPath) return { problems: ["names no artifact"], notes };
@@ -336,6 +340,13 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
     };
   }
   const summary = artifact.summary ?? {};
+  const judgedMode = judgedThresholds !== undefined;
+  if (judgedMode) {
+    problems.push(...judgedThresholdProblems(judgedThresholds));
+    if (findThresholdSet(judgedThresholds?.version)) problems.push("judged thresholds need a new version; a legacy threshold version cannot be reused");
+    if (!judgementsDirectory) problems.push("insufficient_evidence: judged bundles are required; no keyword fallback");
+  }
+  if (!judgedMode && findJudgedThresholdSet(summary.blindReviewThresholdVersion)) problems.push("judged threshold version requires judged evidence; no keyword fallback");
   // A run that has just finished is not defective for lacking a blind review
   // that happens afterwards. `stage: "run"` asks only what is answerable now.
   problems.push(
@@ -421,9 +432,9 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
     );
   } else {
     const effectiveThresholdVersion =
-      thresholdVersion ?? summary.blindReviewThresholdVersion ?? null;
+      judgedThresholds?.version ?? thresholdVersion ?? summary.blindReviewThresholdVersion ?? null;
     const namedSet = effectiveThresholdVersion
-      ? findThresholdSet(effectiveThresholdVersion)
+      ? (judgedThresholds ?? findThresholdSet(effectiveThresholdVersion) ?? findJudgedThresholdSet(effectiveThresholdVersion))
       : null;
     const approvedBar =
       namedSet && isApprovedThresholdSet(namedSet)
@@ -512,6 +523,16 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
       minimumReviewedCases: approvedBar,
     });
     problems.push(...adjudicatedArtifactProblems({ artifact, bundle }));
+    if (judgedMode && judgementsDirectory && problems.length === 0) {
+      try {
+        const judgedReport = readAiReviewJudgedRunReport({ run: artifactPath, journal: journalPath, dataset: matchingSet.path, judgements: judgementsDirectory });
+        const judgedGate = evaluateAiReviewJudgedGate({ thresholds: judgedThresholds, report: judgedReport, evidence: bundle });
+        problems.push(...judgedGate.problems);
+      } catch (error) {
+        problems.push(`insufficient_evidence: the judged run cannot be read: ${error.message}`);
+      }
+      notes.push("judged-v3: six existing floors and two judged ceilings; the four contradiction/omission floors remain keyword diagnostics");
+    }
   }
   return { problems, notes };
 };
@@ -539,6 +560,8 @@ for (const entry of approvedEntries) {
         expected: run,
         decisionSets: decisionSetsByDigest,
         thresholdVersion: entry.evaluation?.thresholdVersion,
+        judgedThresholds: entry.evaluation?.metricSource === "judged-v3" ? findJudgedThresholdSet(entry.evaluation.thresholdVersion) : undefined,
+        judgementsDirectory: run.judgementsRef,
       });
       report(label, outcome.problems, outcome.notes);
     } catch (error) {
@@ -556,6 +579,11 @@ for (const entry of approvedEntries) {
 // approved-entry path refused it -- a wrong answer at exactly the moment a
 // person is deciding whether a run is worth citing.
 const artifactPath = argValue("artifact");
+const judgedThresholdPath = argValue("judged-thresholds");
+const judgedDirectory = argValue("judgements");
+if ((judgedThresholdPath || judgedDirectory) && (!judgedThresholdPath || !judgedDirectory || !artifactPath)) {
+  report("judged gate inputs", ["--judged-thresholds, --judgements and --artifact are required together"]);
+}
 console.log("\nAI Review evaluation run artifact");
 if (!artifactPath) {
   console.log(
@@ -583,7 +611,9 @@ if (!artifactPath) {
     artifactPath,
     expected: null,
     decisionSets: decisionSetsByDigest,
-    stage: adjudicated ? "evidence" : "run",
+    stage: judgedThresholdPath || adjudicated ? "evidence" : "run",
+    judgedThresholds: judgedThresholdPath ? readJson(judgedThresholdPath) : undefined,
+    judgementsDirectory: judgedDirectory || null,
   });
   report(artifactPath, outcome.problems, outcome.notes);
 }
@@ -592,6 +622,10 @@ if (!artifactPath) {
 // approval is recorded by a human in a commit, and a tool that edited the
 // register would remove the audit trail the register exists to be.
 if (process.argv.includes("--print-approval-block")) {
+  if (judgedThresholdPath) {
+    console.error("Judged admission does not print a legacy approval block; use the verified judged report alongside the signed threshold version.");
+    process.exitCode = 1;
+  } else {
   const artifact = artifactPath ? readJson(artifactPath) : null;
   if (!artifact || artifact.__readError || !artifact.metrics) {
     console.error(
@@ -601,6 +635,7 @@ if (process.argv.includes("--print-approval-block")) {
   } else {
     console.log("\nApproval block generated from the artifact:");
     console.log(JSON.stringify(approvalBlockFromArtifact(artifact), null, 4));
+  }
   }
 }
 

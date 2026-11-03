@@ -372,7 +372,7 @@ export function readRememberedAuthCallbackUrl(): string | null {
  * a slow request must not hold up the redirect, and a failed one only costs
  * the person that round trip.
  */
-export async function declareSignupIntent(provider: "google" | "azure-ad"): Promise<void> {
+export async function declareSignupIntent(provider: "google" | "azure-ad" | "apple"): Promise<void> {
   // A failed declaration costs a round trip: the provider sign-in comes back
   // to the sign-up screen, which asks again.
   await sendSignupIntent({

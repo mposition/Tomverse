@@ -20,7 +20,7 @@ import { mockAuthenticatedApi } from "./support/app-fixtures";
 
 /**
  * Every row the root may show, in the order it must show them: what goes into
- * the message, then who answers it, then the two longer-running tasks.
+ * the message, then who answers it, then deep research.
  */
 const CANONICAL_ORDER = [
   "tools-location-row",
@@ -29,7 +29,6 @@ const CANONICAL_ORDER = [
   "tools-assistant-row",
   "tools-memory-row",
   "tools-deep-research-row",
-  "tools-image-generation-row",
 ];
 
 const toolsMenuTrigger = (page: Page) =>
@@ -52,14 +51,14 @@ const rootActionTestIds = async (page: Page) =>
   );
 
 test.describe("chat context menu shape", () => {
-  test("the root offers at most seven actions including optional location @ui-risk", async ({ page }) => {
+  test("the root offers at most six actions including optional location @ui-risk", async ({ page }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: [] });
     await page.goto("/review?lang=en");
     await openMenu(page);
 
     const ids = await rootActionTestIds(page);
     expect(ids.length).toBeGreaterThan(0);
-    expect(ids.length).toBeLessThanOrEqual(7);
+    expect(ids.length).toBeLessThanOrEqual(6);
 
     // Which rows appear depends on flags, plan and guest state, and always
     // has -- so the assertion is that nothing outside the allowed set gets in

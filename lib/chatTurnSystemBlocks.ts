@@ -54,9 +54,12 @@ import {
 } from "@/lib/appManagedWebSearchPrompt";
 import type { TurnAttachmentDescriptor } from "@/lib/messageAttachmentCore";
 import { buildChatLocationContext, buildChatLocationPrompt, CHAT_LOCATION_INPUT_TOKEN_RESERVE } from "@/lib/chatLocationPrompt";
+import { buildChatCurrentDatePrompt } from "@/lib/chatCurrentDatePrompt";
 import type { ChatLocation } from "@tomverse/chat-core";
 
 export type ChatTurnSystemBlocksInput = {
+  /** The turn's clock, for the date block. Defaults to now; tests pin it. */
+  now?: Date;
   currentLocation?: ChatLocation | null;
   reserveLocationInput?: boolean;
   modelId: string;
@@ -214,11 +217,13 @@ export const buildChatTurnSystemBlocks = (
   });
   const webSearchCapabilityPrompt =
     buildWebSearchCapabilitySystemPrompt(webSearchTurnState);
+  const currentDatePrompt = buildChatCurrentDatePrompt(input.now);
 
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: artifactPlan.systemPrompt },
     { role: "system", content: imageCapabilityPrompt },
     { role: "system", content: locationPrompt },
+    { role: "system", content: currentDatePrompt },
     // Only on a turn that cannot search; an empty block would be a system
     // message saying nothing, priced and sent.
     ...(webSearchCapabilityPrompt
@@ -255,6 +260,7 @@ export const buildChatTurnSystemBlocks = (
   // constants rather than a per-request tokenisation.
   const promptTokens =
     locationTokens +
+    estimateTextTokens(currentDatePrompt) +
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
     estimateTextTokens(webSearchCapabilityPrompt) +

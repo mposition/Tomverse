@@ -58,6 +58,7 @@ const tx = {
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxV22LaneDecision: { findFirst: async () => null },
+  amuxV22TaskQuestion: { findFirst: async () => null },
   amuxWorkItem: {
     findUnique: async () => ({ status: "todo", sourceSystem: "admin-idea-v4",
       cardType: "task", archivedAt: null, owner: null, claimedAt: null,

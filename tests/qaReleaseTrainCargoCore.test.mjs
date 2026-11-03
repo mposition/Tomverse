@@ -9,10 +9,15 @@ import {
   parseQaReleaseTrainEmergencyReason,
   qaReleaseTrainEmergencyAdmissible,
   qaReleaseTrainEmergencyFrom,
+  qaReleaseTrainHiddenFrom,
+  qaReleaseTrainHiddenUpdate,
+  QA_RELEASE_TRAIN_HIDDEN_MAX,
   qaReleaseTrainCarried,
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainReferencedNumbers,
   qaReleaseTrainSelectionFrom,
+  qaReleaseTrainFoundOnMain,
+  qaReleaseTrainWithTrainVerdicts,
 } from "../lib/qaReleaseTrainCargoCore.ts";
 
 const NOW = Date.parse("2026-10-23T00:00:00Z");
@@ -176,8 +181,8 @@ test("what the last train left out rides the next one until a new pick is saved"
     pullRequestNumber: 2948,
     picks: [
       { number: 2912, outcome: "included" },
-      { number: 2763, outcome: "conflict", predecessors: [2598, 2341] },
-      { number: 2742, outcome: "conflict", predecessors: [] },
+      { number: 2763, outcome: "conflict", why: "It needs #2598." },
+      { number: 2742, outcome: "conflict", why: "" },
       { number: 2950, outcome: "over_capacity" },
       { number: 2900, outcome: "changes_workflows" },
       { number: 2759, outcome: "already_in_main" },
@@ -188,17 +193,15 @@ test("what the last train left out rides the next one until a new pick is saved"
     slot: "20261024-1100",
     pullRequestNumber: 2948,
     carried: [
-      { number: 2763, reason: "conflict", predecessors: [2598, 2341] },
-      // It looked and found none.
-      { number: 2742, reason: "conflict", predecessors: [] },
-      { number: 2950, reason: "over_capacity", predecessors: null },
+      { number: 2763, reason: "conflict", why: "It needs #2598." },
+      { number: 2742, reason: "conflict", why: null },
+      { number: 2950, reason: "over_capacity", why: null },
     ],
   });
-  // A train assembled before predecessors were looked up (#2964) named none:
-  // unknown, not "none found".
+  // A train that did not ask the model gives no why.
   assert.deepEqual(
     qaReleaseTrainLastTrainFrom({ slot: "20261024-2300", outcome: "opened", pullRequestNumber: 2964, picks: [{ number: 2913, outcome: "conflict" }] }).carried,
-    [{ number: 2913, reason: "conflict", predecessors: null }],
+    [{ number: 2913, reason: "conflict", why: null }],
   );
   // A train that failed before its pull request opened carries what it had included too.
   assert.deepEqual(
@@ -315,6 +318,61 @@ test("what a release carries is its commits: a merge subject or a cherry-picked 
   );
 });
 
+test("a train's Left out and skipped lists are not mentions: a left-out pull request stays available", () => {
+  // 2026-10-27: #3041, left out of #3046 for a conflict, read as "mentioned · check".
+  const body = [
+    "Release train 20261027-0800 (AEST).",
+    "",
+    "## Included (1)",
+    "",
+    "- #3040 amux all providers",
+    "",
+    "## Left out (1)",
+    "",
+    "- #3041 mcp provider expansion — cherry-pick conflict on main",
+    "",
+    "Already on main, skipped: none.",
+    "",
+    "Already on an open train, skipped: #3039.",
+  ].join("\n");
+  const train = (merged) => ({
+    number: 3046,
+    title: "release: train 20261027-0800 (1 PR)",
+    body,
+    merged_at: merged ? "2026-10-22T05:00:00Z" : null,
+    head: { ref: "release/train-20261027-0800", repo: THIS_REPOSITORY },
+  });
+  for (const merged of [true, false]) {
+    const candidates = qaReleaseTrainCargoCandidates({
+      mergedDevelopJson: [develop(3041, "2026-10-22T04:00:00Z"), develop(3040, "2026-10-22T03:00:00Z")],
+      mergedMainJson: merged ? [train(true)] : [],
+      openMainJson: merged ? [] : [train(false)],
+      files: new Map([
+        [3041, ["lib/a.ts"]],
+        [3040, ["lib/b.ts"]],
+      ]),
+      nowMs: NOW,
+    });
+    assert.deepEqual(
+      candidates.map((c) => [c.number, c.status, c.mainPullRequest]),
+      [
+        [3041, "available", null],
+        [3040, merged ? "on_main" : "in_main_pull_request", 3046],
+      ],
+    );
+  }
+  // A hand-written release's body is still read for mentions.
+  const handWritten = { ...train(true), head: { ref: "release/memory", repo: THIS_REPOSITORY } };
+  const [left] = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [develop(3041, "2026-10-22T04:00:00Z")],
+    mergedMainJson: [handWritten],
+    openMainJson: [],
+    files: new Map([[3041, ["lib/a.ts"]]]),
+    nowMs: NOW,
+  });
+  assert.equal(left.status, "mentioned");
+});
+
 test("a release that cherry-picks a pull request's own commits one by one carries it once every one is there", () => {
   const [a, b, c] = ["a", "b", "c"].map((x) => x.repeat(40));
   const release2943 = { number: 2943, title: "release(mobile): voice", body: "Carries the voice work from #2937.", merged_at: "2026-10-22T05:00:00Z" };
@@ -378,4 +436,73 @@ test("a fork's open main pull request is not believed for what it carries", () =
     ours.map((c) => [c.number, c.status, c.mainPullRequest]),
     [[21, "in_main_pull_request", 990]],
   );
+});
+
+test("an operator's hidden candidates: read back, hidden and shown again, malformed reads as none", () => {
+  assert.deepEqual(qaReleaseTrainHiddenFrom(undefined), []);
+  assert.deepEqual(qaReleaseTrainHiddenFrom(null), []);
+  assert.deepEqual(qaReleaseTrainHiddenFrom("3042"), []);
+  assert.deepEqual(qaReleaseTrainHiddenFrom([3042, -1, 1.5, "7", 3042, 2967]), [3042, 2967]);
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([3042], 2967, true), [3042, 2967]);
+  // Hiding again moves it to the newest end; showing it removes it.
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([3042, 2967], 3042, true), [2967, 3042]);
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([3042, 2967], 3042, false), [2967]);
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([2967], 3042, false), [2967]);
+  // Only the newest are kept.
+  const full = Array.from({ length: QA_RELEASE_TRAIN_HIDDEN_MAX }, (_, i) => i + 1);
+  const next = qaReleaseTrainHiddenUpdate(full, 9999, true);
+  assert.equal(next.length, QA_RELEASE_TRAIN_HIDDEN_MAX);
+  assert.equal(next[0], 2);
+  assert.equal(next.at(-1), 9999);
+});
+
+test("a Dependabot package update is never a candidate: Dependabot opens its own main pull request", () => {
+  const candidates = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [
+      develop(3045),
+      develop(2975, "2026-10-22T00:00:00Z", { user: { login: "dependabot[bot]" }, head: { ref: "dependabot/npm_and_yarn/develop/ajv-8.20.0" } }),
+      develop(2974, "2026-10-22T00:00:00Z", { user: { login: "Dependabot" } }),
+      develop(2973, "2026-10-22T00:00:00Z", { user: { login: "dependabot-preview[bot]" } }),
+    ],
+    mergedMainJson: [],
+    openMainJson: [],
+    files: new Map(),
+    nowMs: NOW,
+  });
+  assert.deepEqual(candidates.map((candidate) => candidate.number), [3045, 2973]);
+});
+
+test("a pull request a train found already on main reads as on main, named by the newest train that found it", () => {
+  // Newest report first, as the store reads them.
+  const found = qaReleaseTrainFoundOnMain([
+    { slot: "20261029-1100", report: { pullRequestNumber: null, picks: [{ number: 2979, outcome: "already_in_main" }, { number: 3001, outcome: "conflict" }] } },
+    {
+      slot: "20261028-2000",
+      report: {
+        pullRequestNumber: 3080,
+        picks: [{ number: 2979, outcome: "already_in_main" }, { number: 2990, outcome: "already_in_main" }, { number: "x", outcome: "already_in_main" }],
+      },
+    },
+    { slot: "20261028-1700", report: { pullRequestNumber: 3070, picks: "not a list" } },
+  ]);
+  assert.deepEqual([...found], [
+    [2979, "20261029-1100"],
+    [2990, "#3080"],
+  ]);
+  const candidate = (number, status, mainPullRequest = null) => ({ number, title: "t", author: "a", mergedAt: "2026-10-25T00:00:00Z", status, mainPullRequest });
+  const verdicts = qaReleaseTrainWithTrainVerdicts(
+    [candidate(2979, "available"), candidate(2990, "mentioned", 3050), candidate(3001, "unchecked"), candidate(2995, "in_main_pull_request", 3090)],
+    new Map([...found, [2995, "#3080"]]),
+  );
+  assert.deepEqual(
+    verdicts.map((c) => [c.number, c.status, c.mainPullRequest, c.foundByTrain]),
+    [
+      [2979, "on_main", null, "20261029-1100"],
+      [2990, "on_main", null, "#3080"],
+      [3001, "unchecked", null, undefined],
+      // A status GitHub's records already settle is kept.
+      [2995, "in_main_pull_request", 3090, undefined],
+    ],
+  );
+  assert.equal(qaReleaseTrainCargoPickable(verdicts[0].status), false);
 });

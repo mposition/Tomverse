@@ -5,8 +5,9 @@
  * 2026-10-20: departures at 08, 11, 14, 17 and 20 AEST (UTC+10, no daylight
  * saving), configurable as one value; the cargo is the merged develop pull
  * requests the operator picked in Admin (2026-10-23; until then a `main:next`
- * label) that are not already on main; a conflicting
- * one is left out and named, never resolved; one open train at a time.
+ * label) that are not already on main; a conflicting one is left out and
+ * named, unless the model resolves it (2026-10-28, lib/qaReleaseTrainResolve.ts,
+ * off by default); one open train at a time.
  *
  * Pure: no clock, network, git or database. The service
  * (lib/qaReleaseTrainService.ts) passes what it read.
@@ -124,15 +125,10 @@ export type QaReleaseTrainPick = {
    * `in_open_train`: an emergency train's pull request already riding an
    * open train; never picked onto a second release branch.
    *
-   * For a conflict: develop pull requests merged before it that changed a
-   * conflicted file, newest first. Some may be on main already; Admin shows
-   * only those that are not.
+   * For a conflict the model was asked about: what it said was missing.
    */
-  predecessors?: number[];
+  why?: string;
 };
-
-/** At most this many predecessors are named for one conflict. */
-export const QA_RELEASE_TRAIN_MAX_PREDECESSORS = 10;
 
 /** The pull request a develop merge commit's subject names (`Merge pull request #2950 from ...`), or null. */
 export function qaReleaseTrainMergedPullNumber(subject: string): number | null {
@@ -178,6 +174,8 @@ export function qaReleaseTrainPullRequest(input: {
   rollbackSha: string;
   /** Requested in Admin outside the departure hours. The operator's reason stays in the audit row, never in this public body. */
   emergency?: boolean;
+  /** Included pull requests whose conflict the model resolved, with the files and what it said. */
+  resolved?: readonly { number: number; files: readonly string[]; why: string }[];
 }): { title: string; body: string } {
   const title = (n: number) => input.candidates.find((c) => c.number === n)?.title.replace(/\s+/g, " ").slice(0, 120) ?? "";
   const included = input.picks.filter((p) => p.outcome === "included");
@@ -187,9 +185,7 @@ export function qaReleaseTrainPullRequest(input: {
   // A scheduled train's left-out pull requests ride the next scheduled train
   // again; an emergency train's do not (its request is spent).
   const reason = {
-    conflict: input.emergency
-      ? "cherry-pick conflict on main; pick it for a later train, with the develop pull requests Admin names it needs first"
-      : "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs first",
+    conflict: input.emergency ? "cherry-pick conflict on main; pick it for a later train" : "cherry-pick conflict on main; it rides the next train again",
     over_capacity: input.emergency ? "train full; pick it for a later train" : "train full; it rides the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;
@@ -198,11 +194,18 @@ export function qaReleaseTrainPullRequest(input: {
     "",
     `## Included (${included.length})`,
     "",
-    ...included.map((p) => `- #${p.number} ${title(p.number)}`),
+    ...included.map((p) => {
+      const resolved = input.resolved?.find((r) => r.number === p.number);
+      return `- #${p.number} ${title(p.number)}${
+        resolved === undefined ? "" : ` (conflicted on main in ${resolved.files.map((f) => `\`${f}\``).join(", ")}; resolved by a model, check it: ${resolved.why})`
+      }`;
+    }),
     "",
     `## Left out (${left.length})`,
     "",
-    ...(left.length === 0 ? ["None."] : left.map((p) => `- #${p.number} ${title(p.number)} — ${reason[p.outcome as keyof typeof reason]}`)),
+    ...(left.length === 0
+      ? ["None."]
+      : left.map((p) => `- #${p.number} ${title(p.number)} — ${reason[p.outcome as keyof typeof reason]}${p.why ? ` (the model: ${p.why})` : ""}`)),
     "",
     `Already on main, skipped: ${already.length === 0 ? "none" : already.map((p) => `#${p.number}`).join(", ")}.`,
     ...(onOpenTrain.length === 0 ? [] : ["", `Already on an open train, skipped: ${onOpenTrain.map((p) => `#${p.number}`).join(", ")}.`]),

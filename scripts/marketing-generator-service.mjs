@@ -17,16 +17,30 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
+import { marketingAiVisibilityDue, marketingAiVisibilityGate } from "../lib/marketingAiVisibilityCore.ts";
+
 /**
  * Forty minutes: A3's twenty-minute share (about thirteen tracked competitors
- * at its ninety-second budget), then nine A5 accounts at the cycle's
- * ninety-second call budget, and room to spare. The ledger's reservation
+ * at its ninety-second budget), the analysis and brief's five, then nine A5
+ * accounts at the cycle's ninety-second call budget, and room to spare. The ledger's reservation
  * lives fifteen minutes and its dispatch an hour, each call's own, so a run
  * this long does not outlive them.
  */
 export const RUN_DEADLINE_MS = 40 * 60 * 1000;
 
 export const DEFAULT_WORKER = fileURLToPath(new URL("./marketing-generator-worker.mjs", import.meta.url));
+
+/**
+ * The weekly AI-exposure measurement (marketing S5): a second supervised
+ * worker after a clean generator run, off unless MARKETING_AI_VISIBILITY_ENABLED
+ * is exactly "true", on the measurement weekday only. Its own deadline, so it
+ * cannot take time from A3 and A5.
+ */
+export const AI_VISIBILITY_WORKER = fileURLToPath(new URL("./marketing-ai-visibility-worker.mjs", import.meta.url));
+export const AI_VISIBILITY_DEADLINE_MS = 25 * 60 * 1000;
+
+/** Whether the measurement stage should start now. Off means no process, no reservation, no call. */
+export const aiVisibilityStageDue = (env, now) => marketingAiVisibilityGate(env).on && marketingAiVisibilityDue(now);
 
 const WORKER_VARIABLES = [
   "MARKETING_APP_URL",
@@ -37,10 +51,10 @@ const WORKER_VARIABLES = [
   "SYSTEMROOT",
 ];
 
-const workerEnvironment = (env) =>
-  Object.fromEntries(
-    WORKER_VARIABLES.filter((name) => typeof env[name] === "string").map((name) => [name, env[name]]),
-  );
+const AI_VISIBILITY_VARIABLES = [...WORKER_VARIABLES, "MARKETING_AI_VISIBILITY_ENABLED", "MARKETING_AUTOMATION_KILL_SWITCH"];
+
+const workerEnvironment = (env, variables = WORKER_VARIABLES) =>
+  Object.fromEntries(variables.filter((name) => typeof env[name] === "string").map((name) => [name, env[name]]));
 
 /**
  * Start one run's worker and kill it at the deadline. Resolves with how the
@@ -52,6 +66,7 @@ export const superviseMarketingGeneratorRun = ({
   deadlineMs = RUN_DEADLINE_MS,
   env = process.env,
   stdio = "inherit",
+  variables = WORKER_VARIABLES,
 } = {}) =>
   new Promise((resolve) => {
     const runId = randomUUID();
@@ -59,7 +74,7 @@ export const superviseMarketingGeneratorRun = ({
 
     const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", worker], {
       env: {
-        ...workerEnvironment(env),
+        ...workerEnvironment(env, variables),
         MARKETING_GENERATOR_RUN_ID: runId,
         MARKETING_GENERATOR_DEADLINE: deadline.toISOString(),
       },
@@ -85,12 +100,26 @@ export const superviseMarketingGeneratorRun = ({
   });
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  superviseMarketingGeneratorRun().then((outcome) => {
+  superviseMarketingGeneratorRun().then(async (outcome) => {
     if (outcome.signal) {
       console.error(`Marketing generator run ${outcome.runId} ended by ${outcome.signal}.`);
       process.exitCode = 1;
-    } else {
-      process.exitCode = outcome.code ?? 1;
+      return;
+    }
+    process.exitCode = outcome.code ?? 1;
+    // Only after a clean run: a run that stopped for a person to look at is not followed by more spending.
+    if (outcome.code === 0 && aiVisibilityStageDue(process.env, new Date())) {
+      const measurement = await superviseMarketingGeneratorRun({
+        worker: AI_VISIBILITY_WORKER,
+        deadlineMs: AI_VISIBILITY_DEADLINE_MS,
+        variables: AI_VISIBILITY_VARIABLES,
+      });
+      if (measurement.signal) {
+        console.error(`AI visibility run ${measurement.runId} ended by ${measurement.signal}.`);
+        process.exitCode = 1;
+      } else if (measurement.code !== 0) {
+        process.exitCode = measurement.code ?? 1;
+      }
     }
   });
 }

@@ -8,6 +8,7 @@ import { fr } from "@/locales/fr";
 import { ko } from "@/locales/ko";
 import { pt } from "@/locales/pt";
 import { zh } from "@/locales/zh";
+import { zhHant } from "@/locales/zhHant";
 
 /**
  * The words a TXT export uses to name an unnamed continuation, in the page's
@@ -18,7 +19,7 @@ import { zh } from "@/locales/zh";
  * shows. The language arrives as a display hint and is validated against the
  * supported languages; anything else is English.
  */
-const DICTIONARIES: Record<Language, typeof en> = { ko, en, zh, fr, de, es, pt };
+const DICTIONARIES: Record<Language, typeof en> = { ko, en, zh, "zh-Hant": zhHant, fr, de, es, pt };
 
 export function continuationExportCopy(request: Request) {
     const hint = request.headers.get(DISPLAY_LANGUAGE_HEADER)?.trim();

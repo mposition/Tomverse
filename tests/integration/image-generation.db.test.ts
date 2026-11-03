@@ -25,6 +25,7 @@ import {
 } from "@/lib/imageGenerationRead";
 import { imageAssetR2Key } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
+import { getUserBillingPlan } from "@/lib/billingEntitlements";
 
 const resetImageTestData = () =>
   prisma.$executeRawUnsafe(`
@@ -467,17 +468,36 @@ test("a missing flag row fails closed and leaves no rows", async () => {
   assert.equal(await prisma.chatUsageBucket.count(), 0);
 });
 
-test("a Free plan is refused by the entitlement gate with no rows", async () => {
+test("a Free plan reserves an image from its existing plan credits without adding credits", async () => {
   await enableImageGeneration();
   const user = await prisma.user.create({
     data: { email: `${randomUUID()}@image-test.local`, plan: "Free" },
   });
+  const result = await requestImageGeneration(requestInput(user.id));
+  const reservation = await prisma.imageCreditReservation.findFirstOrThrow({ where: { generationId: result.generationId } });
+  assert.equal(reservation.reservedCredits, 15);
+  assert.equal(reservation.planReservedCredits, 15);
+  assert.equal(reservation.addOnReservedCredits, 0);
+  assert.equal(await prisma.creditLot.count(), 0);
+  assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).plan, "Free");
+  assert.equal(await prisma.imageGeneration.count(), 1);
+});
+
+test("an exhausted Free allowance refuses image work before any image or reservation exists", async () => {
+  await enableImageGeneration();
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@image-test.local`, plan: "Free" } });
+  const plan = await getUserBillingPlan(user.id);
+  const now = new Date();
+  await prisma.chatUsageBucket.create({ data: {
+    key: getUserChatUsageKey(user.id), period: "month", periodStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), count: plan.monthlyMessageLimit,
+  } });
   await assert.rejects(requestImageGeneration(requestInput(user.id)), (error: Error & { code?: string }) => {
-    assert.equal(error.code, "PLAN_FEATURE_NOT_INCLUDED");
+    assert.equal(error.code, "CREDIT_BALANCE_INSUFFICIENT");
     return true;
   });
   assert.equal(await prisma.conversation.count(), 0);
   assert.equal(await prisma.imageGeneration.count(), 0);
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
 });
 
 test("concurrency limit 1: a second request while the lease is live is refused with no rows", async () => {

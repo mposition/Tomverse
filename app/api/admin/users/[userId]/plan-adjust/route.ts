@@ -14,6 +14,7 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { resolveManualPlanPeriodEnd } from "@/lib/adminPlanAdjustCore";
 import { ADMIN_PLAN_CHANGED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { isMobileStoreReviewAddress, MOBILE_STORE_REVIEW_STATUS } from "@/lib/mobileAuthKeyring";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   apiSecurityResponse,
@@ -75,6 +76,8 @@ export async function PATCH(req: Request, context: RouteContext) {
     if (!before) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
+    const subscriptionStatus = body.plan === "Max" && isMobileStoreReviewAddress(before.email)
+      ? MOBILE_STORE_REVIEW_STATUS : body.subscriptionStatus || "manually_adjusted";
     const paidStorePlan = effectivePlanForAccess({ plan: "Free", webSubscriptionPlan: "Free",
       storeSubscriptionPlan: before.storeSubscriptionPlan, storeSubscriptionExpiresAt: before.storeSubscriptionExpiresAt,
       storeSubscriptionSnapshot: before.storeSubscriptionSnapshot });
@@ -100,21 +103,23 @@ export async function PATCH(req: Request, context: RouteContext) {
         if (["Free", "Pro", "Max"].indexOf(body.plan) < ["Free", "Pro", "Max"].indexOf(currentStorePlan)) {
           throw new ApiSecurityError(409, "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", "The paid store entitlement must be cancelled or refunded by its provider first.");
         }
+        const periodEnd = resolveManualPlanPeriodEnd(body.plan, body.periodEnd);
+        if (subscriptionStatus === MOBILE_STORE_REVIEW_STATUS && (!periodEnd || periodEnd.getTime() <= Date.now() ||
+            periodEnd.getTime() > Date.now() + 31 * 86400000)) {
+          throw new ApiSecurityError(400, "INVALID_REVIEW_PERIOD", "Store review access requires a future expiry within 31 days.");
+        }
         return tx.user.update({
           where: { id: userId },
           data: {
             plan: effectivePlanForAccess({ ...entitlement, plan: body.plan, webSubscriptionPlan: body.plan,
-              subscriptionStatus: body.subscriptionStatus || "manually_adjusted" }),
+              subscriptionStatus, subscriptionCurrentPeriodEnd: periodEnd }),
             webSubscriptionPlan: body.plan,
-            subscriptionStatus: body.subscriptionStatus || "manually_adjusted",
+            subscriptionStatus,
             // Settled here, not in the browser: a clock-derived value in the
             // request body would differ between the first attempt and the
             // post-approval retry, and the approval is bound to the payload
             // hash. Measured from when the change actually takes effect.
-            subscriptionCurrentPeriodEnd: resolveManualPlanPeriodEnd(
-              body.plan,
-              body.periodEnd
-            ),
+            subscriptionCurrentPeriodEnd: periodEnd,
             subscriptionBillingInterval: body.billingInterval || null,
             subscriptionCancelAtPeriodEnd: body.cancelAtPeriodEnd || false,
             ...(body.plan === "Free"

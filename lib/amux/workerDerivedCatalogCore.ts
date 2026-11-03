@@ -1,4 +1,5 @@
 import { amuxWorkerCapabilityWithinCeiling, type AmuxWorkerCapability } from "./workerCapabilityCore.ts";
+import { amuxV22ProviderForClass, type AmuxV22Provider } from "./v22WorkerClaimCore.ts";
 import {
   AMUX_WORKER_CATALOG_EXEMPT,
   amuxWorkerLatchOpen,
@@ -63,7 +64,7 @@ export type AmuxDerivedCatalogEntry = {
 
 /** One v22 profile, overlaid on its legacy entry. */
 export type AmuxDerivedV22CatalogEntry = Omit<AmuxDerivedCatalogEntry, "provider" | "model"> & {
-  provider: "anthropic";
+  provider: AmuxV22Provider;
   model: string;
 };
 
@@ -107,6 +108,8 @@ export function deriveAmuxWorkerCatalog(input: {
   registrations: readonly AmuxWorkerRegistration[] | null;
   capabilities: ReadonlyMap<string, { capability: AmuxWorkerCapability }> | null;
   latches: ReadonlyMap<string, AmuxWorkerLatchEventKind> | null;
+  /** TOMVERSE_AMUX_V22_MULTI_PROVIDER: without it only Claude profiles run v22. */
+  multiProvider?: boolean;
 }): AmuxDerivedCatalog | null {
   if (input.registrations === null || input.capabilities === null || input.latches === null) return null;
   const legacy: AmuxDerivedCatalogEntry[] = [];
@@ -130,10 +133,12 @@ export function deriveAmuxWorkerCatalog(input: {
       blocked: false,
     };
     legacy.push(entry);
-    if (capability.v22 !== null) {
+    const v22Provider = amuxV22ProviderForClass(registration.providerClass);
+    if (capability.v22 !== null && v22Provider !== null &&
+        (v22Provider === "anthropic" || input.multiProvider === true)) {
       v22.push({
         ...entry,
-        provider: "anthropic",
+        provider: v22Provider,
         model: capability.v22.model,
         routing_roles: sortedUnique(capability.v22.roles),
         tool_capabilities: sortedUnique(capability.v22.tools),

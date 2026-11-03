@@ -113,6 +113,19 @@ pub async fn claim_operator_answer(
         )
             .into_response();
     }
+    // A v22 worker's question card is answered in Tomverse Admin: an answer
+    // claimed here would be sent to a session the v22 run never had
+    // (api/dm_relay_v22.rs).
+    if super::dm_relay_v22::refuses_delivery(&state, &id).await.is_err() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "answer this v22 worker question in Tomverse Admin (AMUX cards, View result)",
+                "reason": super::dm_relay_v22::REFUSAL,
+            })),
+        )
+            .into_response();
+    }
     let Some(observed) = observed_revision(&body) else {
         return (
             StatusCode::BAD_REQUEST,

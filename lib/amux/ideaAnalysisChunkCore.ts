@@ -31,6 +31,21 @@ const LOCAL_ID = /^c(0|[1-9][0-9]*):(node|card|evidence)-(0|[1-9][0-9]{0,3})$/;
 const SPOOFING_CHAR = /[\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u034F\u180B-\u180D\u180E\u180F\u17B4\u17B5\u2800\uFE00-\uFE0F\u{E0100}-\u{E01EF}]|(?![\t\n])\p{Cc}/u;
 const byteLength = (value: string) => Buffer.byteLength(value, "utf8");
 
+/** The JSON object of a model answer. The stored answer is the CLI's final
+ * message, and after reading files a model sometimes wraps the object in a code
+ * fence or a sentence despite the prompt (idea e3925f9b, 2026-11-01). Only the
+ * wrapping is dropped; every schema check still applies. Throws when no
+ * candidate parses. */
+export function amuxAnalysisAnswerJson(raw: string): unknown {
+  const fence = /```[A-Za-z]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/.exec(raw);
+  const candidates = [raw, ...(fence ? [fence[1]!] : []),
+    raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)];
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate); } catch { /* next candidate */ }
+  }
+  throw new SyntaxError("no JSON object in the answer");
+}
+
 export const AMUX_TASK_ROLE_PROPOSALS = [
   "design", "implement", "test", "review", "verify", "investigate", "operate",
 ] as const;
@@ -180,44 +195,105 @@ type InspectionCode =
   | "target_ref_unapproved"
   | "metadata_incomplete";
 
+/** Which schema rule refused a chunk. Rules, field names and unit positions
+ * come from this schema, never from the answer, so they may be shown. */
+export const AMUX_ANALYSIS_SCHEMA_RULES = [
+  "json_unparsable", "json_fenced", "not_object", "key_missing", "key_extra", "value_not_allowed",
+  "ref_format", "local_id_format", "metric_not_rating", "header_mismatch",
+  "display_prefix_refused", "initiative_parent", "story_fields", "task_fields",
+  "story_expected_paths", "duplicate_value", "unit_kind", "signal_missing",
+  "prefix_before_schema_4", "task_expected_paths_missing", "task_review_role",
+  "paths_before_schema_5", "local_id_duplicate", "parent_level", "feature_ref_kind",
+  "parent_story_ref", "story_dependency", "dependency_ref_kind",
+  "duplicate_candidate_ref_kind", "evidence_card_ref", "dependency_cycle",
+  "outcome_combination",
+] as const;
+export type AmuxAnalysisSchemaRule = (typeof AMUX_ANALYSIS_SCHEMA_RULES)[number];
+
+export const AMUX_ANALYSIS_SCHEMA_FIELDS = [
+  "chunk", "unit", "node", "card", "evidence", "metrics",
+  "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "continuationKind",
+  "ownerQuestion", "coveredScope", "remainingScope", "units",
+  "kind", "localId", "level", "parentRef", "title", "description", "sourceRefIds",
+  "portfolioSignal", "displayPrefix", "cardType", "storyKind", "problem", "scopeIn", "scopeOut",
+  "completionCriteria", "featureRef", "parentStoryRef", "dependencyRefs", "duplicateCandidateRefs",
+  "taskRole", "executionGrade", "executionBrief", "expectedPaths",
+  "uncertainty", "rationale", "evidenceRefIds", "evidenceType", "summary", "cardRef",
+  "value", "impact", "contribution", "urgency", "dependencyUnlock", "workerCoverage", "effort",
+  "deliveryRisk",
+] as const;
+export type AmuxAnalysisSchemaField = (typeof AMUX_ANALYSIS_SCHEMA_FIELDS)[number];
+
+export type AmuxAnalysisSchemaRejectAt = {
+  rule: AmuxAnalysisSchemaRule;
+  field?: AmuxAnalysisSchemaField;
+  /** Position in the answer's units array, when one unit broke the rule. */
+  unit?: number;
+  kind?: "node" | "card" | "evidence";
+};
+
 export type AmuxAnalysisChunkInspection =
   | { ok: true; chunk: AmuxAnalysisChunk; canonical: string; counts: { nodes: number; cards: number; evidence: number } }
-  | { ok: false; code: InspectionCode };
+  | { ok: false; code: InspectionCode; at?: AmuxAnalysisSchemaRejectAt };
 
 class InspectionFailure extends Error {
   readonly code: InspectionCode;
+  at?: AmuxAnalysisSchemaRejectAt;
 
-  constructor(code: InspectionCode) {
+  constructor(code: InspectionCode, at?: AmuxAnalysisSchemaRejectAt) {
     super(code);
     this.code = code;
+    this.at = at;
   }
 }
 
 const reject = (code: InspectionCode): never => { throw new InspectionFailure(code); };
+const refuse = (rule: AmuxAnalysisSchemaRule, field?: AmuxAnalysisSchemaField): never => {
+  throw new InspectionFailure("schema_rejected", field === undefined ? { rule } : { rule, field });
+};
+const schemaField = (key: string): AmuxAnalysisSchemaField | undefined =>
+  (AMUX_ANALYSIS_SCHEMA_FIELDS as readonly string[]).includes(key) ? key as AmuxAnalysisSchemaField : undefined;
 
-const object = (value: unknown, keys: readonly string[]): Record<string, unknown> => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) reject("schema_rejected");
+/** Pins a failure inside one unit to that unit's position and kind. */
+const atUnit = <T>(index: number, value: unknown, check: () => T): T => {
+  try {
+    return check();
+  } catch (error) {
+    if (error instanceof InspectionFailure && error.at && error.at.unit === undefined) {
+      const kind = value !== null && typeof value === "object" ? (value as { kind?: unknown }).kind : undefined;
+      error.at = { ...error.at, unit: index,
+        ...(kind === "node" || kind === "card" || kind === "evidence" ? { kind } : {}) };
+    }
+    throw error;
+  }
+};
+
+const object = (value: unknown, keys: readonly string[], scope: AmuxAnalysisSchemaField): Record<string, unknown> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) refuse("not_object", scope);
   const record = value as Record<string, unknown>;
   const actual = Object.keys(record).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-    reject("schema_rejected");
+    const missing = expected.find((key) => !Object.hasOwn(record, key));
+    if (missing !== undefined) refuse("key_missing", schemaField(missing));
+    refuse("key_extra", scope);
   }
   return record;
 };
 
-const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T => {
-  if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) reject("schema_rejected");
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[], field: AmuxAnalysisSchemaField): T => {
+  if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) refuse("value_not_allowed", field);
   return value as T;
 };
 
-const ref = (value: unknown): string => {
-  if (typeof value !== "string" || !REF.test(value)) return reject("schema_rejected");
+const ref = (value: unknown, field: AmuxAnalysisSchemaField): string => {
+  if (typeof value !== "string" || !REF.test(value)) return refuse("ref_format", field);
   if (!amuxAnalysisRefSafe(value)) return reject("content_refused");
   return value;
 };
 
-const nullableRef = (value: unknown): string | null => value === null ? null : ref(value);
+const nullableRef = (value: unknown, field: AmuxAnalysisSchemaField): string | null =>
+  value === null ? null : ref(value, field);
 
 const wellFormedUnicode = (value: string): boolean => {
   for (let index = 0; index < value.length; index += 1) {
@@ -243,8 +319,8 @@ export const amuxAnalysisInputTextSafe = (value: string): boolean =>
   wellFormedUnicode(value) && !SPOOFING_CHAR.test(value.replaceAll("\r\n", "\n")) &&
   scanAmuxV4Input(value).ok;
 
-const text = (value: unknown, maxBytes: number): string => {
-  if (typeof value !== "string") return reject("schema_rejected");
+const text = (value: unknown, maxBytes: number, field: AmuxAnalysisSchemaField): string => {
+  if (typeof value !== "string") return refuse("value_not_allowed", field);
   if (value.length === 0 || value.trim() !== value || !/\S/u.test(value)) {
     return reject("metadata_incomplete");
   }
@@ -255,59 +331,60 @@ const text = (value: unknown, maxBytes: number): string => {
   return value;
 };
 
-const nullableText = (value: unknown, maxBytes: number): string | null =>
-  value === null ? null : text(value, maxBytes);
+const nullableText = (value: unknown, maxBytes: number, field: AmuxAnalysisSchemaField): string | null =>
+  value === null ? null : text(value, maxBytes, field);
 
-const singleLineText = (value: unknown, maxBytes: number): string => {
-  const result = text(value, maxBytes);
+const singleLineText = (value: unknown, maxBytes: number, field: AmuxAnalysisSchemaField): string => {
+  const result = text(value, maxBytes, field);
   if (/[\t\n]/u.test(result)) reject("content_refused");
   return result;
 };
 
-const list = <T>(value: unknown, max: number, min: number, parse: (item: unknown) => T): T[] => {
-  if (!Array.isArray(value)) return reject("schema_rejected");
+const list = <T>(value: unknown, max: number, min: number, parse: (item: unknown, index: number) => T,
+  field: AmuxAnalysisSchemaField): T[] => {
+  if (!Array.isArray(value)) return refuse("value_not_allowed", field);
   if (value.length > max) reject("too_large");
   if (value.length < min) reject("metadata_incomplete");
-  return value.map(parse);
+  return value.map((item, index) => parse(item, index));
 };
 
-const uniqueRefs = (value: unknown, max: number, min = 0): string[] => {
-  const refs = list(value, max, min, ref);
-  if (new Set(refs).size !== refs.length) reject("schema_rejected");
+const uniqueRefs = (value: unknown, max: number, field: AmuxAnalysisSchemaField, min = 0): string[] => {
+  const refs = list(value, max, min, (item) => ref(item, field), field);
+  if (new Set(refs).size !== refs.length) refuse("duplicate_value", field);
   return refs;
 };
 
-const sourceRefs = (value: unknown, permitted: ReadonlySet<string>): string[] => {
-  const refs = uniqueRefs(value, 16, 1);
+const sourceRefs = (value: unknown, permitted: ReadonlySet<string>, field: AmuxAnalysisSchemaField): string[] => {
+  const refs = uniqueRefs(value, 16, field, 1);
   if (refs.some((candidate) => !permitted.has(candidate))) reject("source_ref_unapproved");
   return refs;
 };
 
 const localId = (value: unknown, kind: "node" | "card" | "evidence", chunkIndex: number): string => {
-  if (typeof value !== "string") return reject("schema_rejected");
+  if (typeof value !== "string") return refuse("value_not_allowed", "localId");
   const match = LOCAL_ID.exec(value);
   if (!match || match[1] !== String(chunkIndex) || match[2] !== kind) {
-    return reject("schema_rejected");
+    return refuse("local_id_format", "localId");
   }
   return value;
 };
 
 const modelSignal = (value: unknown, metricNames: readonly string[],
   permittedUnitRefs: readonly string[]): AmuxPortfolioModelSignal => {
-  const signal = object(value, ["metrics", "uncertainty", "rationale", "evidenceRefIds"]);
-  const metricValues = object(signal.metrics, metricNames);
+  const signal = object(value, ["metrics", "uncertainty", "rationale", "evidenceRefIds"], "portfolioSignal");
+  const metricValues = object(signal.metrics, metricNames, "metrics");
   const metrics: Record<string, number> = {};
   for (const name of metricNames) {
     const rating = metricValues[name];
     if (!Number.isInteger(rating) || typeof rating !== "number" ||
-        rating < 0 || rating > 5) reject("schema_rejected");
+        rating < 0 || rating > 5) refuse("metric_not_rating", schemaField(name));
     metrics[name] = rating as number;
   }
   return { metrics,
-    uncertainty: oneOf(signal.uncertainty, ["low", "medium", "high"] as const),
-    rationale: text(signal.rationale, 500),
+    uncertainty: oneOf(signal.uncertainty, ["low", "medium", "high"] as const, "uncertainty"),
+    rationale: text(signal.rationale, 500, "rationale"),
     evidenceRefIds: sourceRefs(signal.evidenceRefIds,
-      new Set(permittedUnitRefs)),
+      new Set(permittedUnitRefs), "evidenceRefIds"),
   };
 };
 
@@ -317,23 +394,23 @@ const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   const hasPrefix = value !== null && typeof value === "object" &&
     Object.hasOwn(value, "displayPrefix");
   const data = object(value, ["kind", "localId", "level", "parentRef", "title", "description", "sourceRefIds",
-    ...(hasSignal ? ["portfolioSignal"] : []), ...(hasPrefix ? ["displayPrefix"] : [])]);
-  const level = oneOf(data.level, ["initiative", "epic", "feature"] as const);
+    ...(hasSignal ? ["portfolioSignal"] : []), ...(hasPrefix ? ["displayPrefix"] : [])], "node");
+  const level = oneOf(data.level, ["initiative", "epic", "feature"] as const, "level");
   // amux-intake v17: a Feature's proposed card number prefix, never a reserved
   // registration-path prefix (docs/policy/amux-card-display-key.md §4).
   if (hasPrefix && (level !== "feature" || !isAmuxFeatureDisplayPrefix(data.displayPrefix))) {
-    reject("schema_rejected");
+    refuse("display_prefix_refused", "displayPrefix");
   }
-  const parentRef = nullableRef(data.parentRef);
-  if ((level === "initiative") !== (parentRef === null)) reject("schema_rejected");
-  const unitSources = sourceRefs(data.sourceRefIds, permitted);
+  const parentRef = nullableRef(data.parentRef, "parentRef");
+  if ((level === "initiative") !== (parentRef === null)) refuse("initiative_parent", "parentRef");
+  const unitSources = sourceRefs(data.sourceRefIds, permitted, "sourceRefIds");
   return {
     kind: "node",
     localId: localId(data.localId, "node", chunkIndex),
     level,
     parentRef,
-    title: singleLineText(data.title, 200),
-    description: text(data.description, 2_000),
+    title: singleLineText(data.title, 200, "title"),
+    description: text(data.description, 2_000, "description"),
     sourceRefIds: unitSources,
     ...(hasSignal ? { portfolioSignal: modelSignal(data.portfolioSignal,
       ["value"], unitSources) } : {}),
@@ -351,39 +428,47 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
     "completionCriteria", "featureRef", "parentStoryRef", "dependencyRefs", "duplicateCandidateRefs",
     "taskRole", "executionGrade", "executionBrief", "sourceRefIds",
     ...(hasSignal ? ["portfolioSignal"] : []), ...(hasPaths ? ["expectedPaths"] : []),
-  ]);
-  const cardType = oneOf(data.cardType, ["story", "task"] as const);
-  const storyKind = data.storyKind === null ? null : oneOf(data.storyKind, ["general", "bug"] as const);
-  const taskRole = data.taskRole === null ? null : oneOf(data.taskRole, AMUX_TASK_ROLE_PROPOSALS);
-  const executionGrade = data.executionGrade === null ? null : oneOf(data.executionGrade, AMUX_EXECUTION_GRADE_PROPOSALS);
-  const executionBrief = nullableText(data.executionBrief, 2_000);
-  const parentStoryRef = nullableRef(data.parentStoryRef);
+  ], "card");
+  const cardType = oneOf(data.cardType, ["story", "task"] as const, "cardType");
+  const storyKind = data.storyKind === null ? null : oneOf(data.storyKind, ["general", "bug"] as const, "storyKind");
+  const taskRole = data.taskRole === null ? null : oneOf(data.taskRole, AMUX_TASK_ROLE_PROPOSALS, "taskRole");
+  const executionGrade = data.executionGrade === null ? null :
+    oneOf(data.executionGrade, AMUX_EXECUTION_GRADE_PROPOSALS, "executionGrade");
+  const executionBrief = nullableText(data.executionBrief, 2_000, "executionBrief");
+  const parentStoryRef = nullableRef(data.parentStoryRef, "parentStoryRef");
   if (cardType === "story") {
-    if (storyKind === null || taskRole !== null || executionGrade !== null ||
-        executionBrief !== null || parentStoryRef !== null) reject("schema_rejected");
-  } else if (storyKind !== null || taskRole === null || executionGrade === null || executionBrief === null) {
-    reject("schema_rejected");
+    if (storyKind === null) refuse("story_fields", "storyKind");
+    if (taskRole !== null) refuse("story_fields", "taskRole");
+    if (executionGrade !== null) refuse("story_fields", "executionGrade");
+    if (executionBrief !== null) refuse("story_fields", "executionBrief");
+    if (parentStoryRef !== null) refuse("story_fields", "parentStoryRef");
+  } else {
+    if (storyKind !== null) refuse("task_fields", "storyKind");
+    if (taskRole === null) refuse("task_fields", "taskRole");
+    if (executionGrade === null) refuse("task_fields", "executionGrade");
+    if (executionBrief === null) refuse("task_fields", "executionBrief");
   }
   // amux-intake v20 item 3: a Story has no expected paths.
-  if (hasPaths && cardType !== "task") reject("schema_rejected");
+  if (hasPaths && cardType !== "task") refuse("story_expected_paths", "expectedPaths");
   const expectedPaths = hasPaths ? list(data.expectedPaths, AMUX_TASK_EXPECTED_PATHS_MAX, 1,
-    (item) => singleLineText(item, AMUX_TASK_EXPECTED_PATH_MAX_BYTES)) : null;
-  if (expectedPaths && new Set(expectedPaths).size !== expectedPaths.length) reject("schema_rejected");
-  const unitSources = sourceRefs(data.sourceRefIds, permitted);
+    (item) => singleLineText(item, AMUX_TASK_EXPECTED_PATH_MAX_BYTES, "expectedPaths"), "expectedPaths") : null;
+  if (expectedPaths && new Set(expectedPaths).size !== expectedPaths.length) refuse("duplicate_value", "expectedPaths");
+  const unitSources = sourceRefs(data.sourceRefIds, permitted, "sourceRefIds");
   return {
     kind: "card",
     localId: localId(data.localId, "card", chunkIndex),
     cardType,
     storyKind,
-    title: singleLineText(data.title, 200),
-    problem: text(data.problem, 2_000),
-    scopeIn: list(data.scopeIn, 12, 1, (item) => text(item, 500)),
-    scopeOut: list(data.scopeOut, 12, 0, (item) => text(item, 500)),
-    completionCriteria: list(data.completionCriteria, 12, 1, (item) => text(item, 500)),
-    featureRef: ref(data.featureRef),
+    title: singleLineText(data.title, 200, "title"),
+    problem: text(data.problem, 2_000, "problem"),
+    scopeIn: list(data.scopeIn, 12, 1, (item) => text(item, 500, "scopeIn"), "scopeIn"),
+    scopeOut: list(data.scopeOut, 12, 0, (item) => text(item, 500, "scopeOut"), "scopeOut"),
+    completionCriteria: list(data.completionCriteria, 12, 1, (item) => text(item, 500, "completionCriteria"),
+      "completionCriteria"),
+    featureRef: ref(data.featureRef, "featureRef"),
     parentStoryRef,
-    dependencyRefs: uniqueRefs(data.dependencyRefs, 16),
-    duplicateCandidateRefs: uniqueRefs(data.duplicateCandidateRefs, 8),
+    dependencyRefs: uniqueRefs(data.dependencyRefs, 16, "dependencyRefs"),
+    duplicateCandidateRefs: uniqueRefs(data.duplicateCandidateRefs, 8, "duplicateCandidateRefs"),
     taskRole,
     executionGrade,
     executionBrief,
@@ -397,24 +482,24 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
 };
 
 const parseEvidence = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number): AmuxAnalysisEvidence => {
-  const data = object(value, ["kind", "localId", "evidenceType", "summary", "cardRef", "sourceRefIds"]);
+  const data = object(value, ["kind", "localId", "evidenceType", "summary", "cardRef", "sourceRefIds"], "evidence");
   return {
     kind: "evidence",
     localId: localId(data.localId, "evidence", chunkIndex),
-    evidenceType: oneOf(data.evidenceType, ["observed_error", "source_finding"] as const),
-    summary: text(data.summary, 1_000),
-    cardRef: ref(data.cardRef),
-    sourceRefIds: sourceRefs(data.sourceRefIds, permitted),
+    evidenceType: oneOf(data.evidenceType, ["observed_error", "source_finding"] as const, "evidenceType"),
+    summary: text(data.summary, 1_000, "summary"),
+    cardRef: ref(data.cardRef, "cardRef"),
+    sourceRefIds: sourceRefs(data.sourceRefIds, permitted, "sourceRefIds"),
   };
 };
 
 const parseUnit = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number): AmuxAnalysisChunk["units"][number] => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) reject("schema_rejected");
+  if (value === null || typeof value !== "object" || Array.isArray(value)) refuse("not_object", "unit");
   const kind = (value as Record<string, unknown>).kind;
   if (kind === "node") return parseNode(value, permitted, chunkIndex);
   if (kind === "card") return parseCard(value, permitted, chunkIndex);
   if (kind === "evidence") return parseEvidence(value, permitted, chunkIndex);
-  return reject("schema_rejected");
+  return refuse("unit_kind", "kind");
 };
 
 /** Re-check one digest-verified, stored unit after other units or the 24-hour
@@ -454,45 +539,47 @@ const validateUnitRefs = (units: AmuxAnalysisChunk["units"], permitted: readonly
   }
   const resolve = (value: string): TargetRef => targets.get(value) ?? reject("target_ref_unapproved");
   const localTasks = new Map<string, AmuxAnalysisCard>();
-  for (const unit of units) {
+  units.forEach((unit, index) => atUnit(index, unit, () => {
     if (unit.kind === "node" && unit.parentRef !== null) {
       const parent = resolve(unit.parentRef);
       const expected = unit.level === "epic" ? "initiative" : "epic";
       if (parent.kind !== "node" || parent.level !== expected || unit.parentRef === unit.localId) {
-        reject("schema_rejected");
+        refuse("parent_level", "parentRef");
       }
     } else if (unit.kind === "card") {
       const feature = resolve(unit.featureRef);
-      if (feature.kind !== "node" || feature.level !== "feature") reject("schema_rejected");
+      if (feature.kind !== "node" || feature.level !== "feature") refuse("feature_ref_kind", "featureRef");
       if (unit.parentStoryRef !== null) {
         const story = resolve(unit.parentStoryRef);
         if (story.kind !== "card" || story.cardType !== "story" || story.featureRef !== unit.featureRef) {
-          reject("schema_rejected");
+          refuse("parent_story_ref", "parentStoryRef");
         }
       }
-      if (unit.cardType === "story" && unit.dependencyRefs.length !== 0) reject("schema_rejected");
+      if (unit.cardType === "story" && unit.dependencyRefs.length !== 0) refuse("story_dependency", "dependencyRefs");
       for (const dependencyRef of unit.dependencyRefs) {
         const dependency = resolve(dependencyRef);
         if (dependency.kind !== "card" || dependency.cardType !== "task" || dependencyRef === unit.localId) {
-          reject("schema_rejected");
+          refuse("dependency_ref_kind", "dependencyRefs");
         }
       }
       for (const duplicateRef of unit.duplicateCandidateRefs) {
-        if (resolve(duplicateRef).kind !== "card" || duplicateRef === unit.localId) reject("schema_rejected");
+        if (resolve(duplicateRef).kind !== "card" || duplicateRef === unit.localId) {
+          refuse("duplicate_candidate_ref_kind", "duplicateCandidateRefs");
+        }
       }
       if (unit.cardType === "task") localTasks.set(unit.localId, unit);
     } else if (unit.kind === "evidence") {
       const card = resolve(unit.cardRef);
       if (card.kind !== "card" ||
           (unit.evidenceType === "observed_error" && (card.cardType !== "story" || card.storyKind !== "bug"))) {
-        reject("schema_rejected");
+        refuse("evidence_card_ref", "cardRef");
       }
     }
-  }
+  }));
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const walk = (taskId: string): void => {
-    if (visiting.has(taskId)) reject("schema_rejected");
+    if (visiting.has(taskId)) refuse("dependency_cycle", "dependencyRefs");
     if (visited.has(taskId)) return;
     visiting.add(taskId);
     for (const dependencyRef of localTasks.get(taskId)?.dependencyRefs ?? []) {
@@ -573,43 +660,53 @@ export function inspectAmuxAnalysisChunk(
   if (byteLength(raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES) return { ok: false, code: "too_large" };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = amuxAnalysisAnswerJson(raw);
   } catch {
-    return { ok: false, code: "schema_rejected" };
+    return { ok: false, code: "schema_rejected",
+      at: { rule: raw.trimStart().startsWith("```") ? "json_fenced" : "json_unparsable" } };
   }
   try {
     const data = object(parsed, [
       "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "continuationKind", "ownerQuestion",
       "coveredScope", "remainingScope", "units",
-    ]);
+    ], "chunk");
     if ((data.schemaVersion !== 2 && data.schemaVersion !== 3 && data.schemaVersion !== 4 &&
          data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION) ||
-        (requiredSchemaVersion !== null && data.schemaVersion !== requiredSchemaVersion) ||
-        data.previewId !== expectedPreviewId || data.chunkIndex !== expectedChunkIndex) {
-      reject("schema_rejected");
+        (requiredSchemaVersion !== null && data.schemaVersion !== requiredSchemaVersion)) {
+      refuse("header_mismatch", "schemaVersion");
     }
+    if (data.previewId !== expectedPreviewId) refuse("header_mismatch", "previewId");
+    if (data.chunkIndex !== expectedChunkIndex) refuse("header_mismatch", "chunkIndex");
     const permitted = new Set(sourceRefs);
     const units = list(data.units, AMUX_ANALYSIS_CHUNK_CARD_CAP + AMUX_ANALYSIS_CHUNK_NODE_CAP +
-      AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP, 0, (unit) => parseUnit(unit, permitted, expectedChunkIndex));
+      AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP, 0,
+      (unit, index) => atUnit(index, unit, () => parseUnit(unit, permitted, expectedChunkIndex)), "units");
+    const firstUnit = (broken: (unit: AmuxAnalysisChunk["units"][number]) => boolean,
+      rule: AmuxAnalysisSchemaRule, field: AmuxAnalysisSchemaField): void => {
+      const index = units.findIndex(broken);
+      if (index >= 0) atUnit(index, units[index], () => refuse(rule, field));
+    };
     // Schema 3 made portfolio signals mandatory; schema 4 keeps that.
-    if (data.schemaVersion !== 2 &&
-        units.some((unit) => unit.kind !== "evidence" && !unit.portfolioSignal)) {
-      reject("schema_rejected");
+    if (data.schemaVersion !== 2) {
+      firstUnit((unit) => unit.kind !== "evidence" && !unit.portfolioSignal, "signal_missing", "portfolioSignal");
     }
     // A Feature prefix proposal exists only from schema 4 (amux-intake v17).
-    if ((data.schemaVersion === 2 || data.schemaVersion === 3) &&
-        units.some((unit) => unit.kind === "node" && unit.displayPrefix !== undefined)) {
-      reject("schema_rejected");
+    if (data.schemaVersion === 2 || data.schemaVersion === 3) {
+      firstUnit((unit) => unit.kind === "node" && unit.displayPrefix !== undefined,
+        "prefix_before_schema_4", "displayPrefix");
     }
     // amux-intake v20: from schema 5 every Task names its expected paths and
     // no Task is a review Task; before it, no unit has expected paths. Stored
     // units are re-read by inspectAmuxStoredAnalysisUnit, which keeps both.
-    const tasks = units.filter((unit) => unit.kind === "card" && unit.cardType === "task");
-    if (data.schemaVersion === AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION
-      ? tasks.some((unit) => unit.kind === "card" &&
-          (unit.expectedPaths === undefined || unit.taskRole === "review"))
-      : units.some((unit) => unit.kind === "card" && unit.expectedPaths !== undefined)) {
-      reject("schema_rejected");
+    if (data.schemaVersion === AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION) {
+      const task = (unit: AmuxAnalysisChunk["units"][number]) => unit.kind === "card" && unit.cardType === "task";
+      firstUnit((unit) => task(unit) && unit.kind === "card" && unit.expectedPaths === undefined,
+        "task_expected_paths_missing", "expectedPaths");
+      firstUnit((unit) => task(unit) && unit.kind === "card" && unit.taskRole === "review",
+        "task_review_role", "taskRole");
+    } else {
+      firstUnit((unit) => unit.kind === "card" && unit.expectedPaths !== undefined,
+        "paths_before_schema_5", "expectedPaths");
     }
     const counts = {
       nodes: units.filter((unit) => unit.kind === "node").length,
@@ -618,14 +715,16 @@ export function inspectAmuxAnalysisChunk(
     };
     if (counts.nodes > AMUX_ANALYSIS_CHUNK_NODE_CAP || counts.cards > AMUX_ANALYSIS_CHUNK_CARD_CAP ||
         counts.evidence > AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP) reject("too_large");
-    if (new Set(units.map((unit) => unit.localId)).size !== units.length) reject("schema_rejected");
+    firstUnit((unit) => units.findIndex((other) => other.localId === unit.localId) !== units.indexOf(unit),
+      "local_id_duplicate", "localId");
     validateUnitRefs(units, targetRefs);
-    const outcome = oneOf(data.outcome, ["propose", "needs_information", "reject"] as const);
-    const coverageStatus = oneOf(data.coverageStatus, ["complete", "more", "needs_owner_input"] as const);
+    const outcome = oneOf(data.outcome, ["propose", "needs_information", "reject"] as const, "outcome");
+    const coverageStatus = oneOf(data.coverageStatus, ["complete", "more", "needs_owner_input"] as const,
+      "coverageStatus");
     const continuationKind = data.continuationKind === null ? null :
-      oneOf(data.continuationKind, ["input", "output"] as const);
-    const ownerQuestion = nullableText(data.ownerQuestion, 2_000);
-    const remainingScope = nullableText(data.remainingScope, 2_000);
+      oneOf(data.continuationKind, ["input", "output"] as const, "continuationKind");
+    const ownerQuestion = nullableText(data.ownerQuestion, 2_000, "ownerQuestion");
+    const remainingScope = nullableText(data.remainingScope, 2_000, "remainingScope");
     if ((remainingScope === null) !== (continuationKind === null) ||
         (coverageStatus === "complete" && continuationKind !== null) ||
         (coverageStatus === "more" && continuationKind === null) ||
@@ -639,7 +738,7 @@ export function inspectAmuxAnalysisChunk(
         (outcome === "needs_information") !== (coverageStatus === "needs_owner_input") ||
         (outcome === "reject" && coverageStatus !== "complete") ||
         (outcome === "propose" && units.length === 0) ||
-        (outcome === "reject" && units.length !== 0)) reject("schema_rejected");
+        (outcome === "reject" && units.length !== 0)) refuse("outcome_combination", "outcome");
     const chunk: AmuxAnalysisChunk = {
       schemaVersion: data.schemaVersion as AmuxAnalysisChunk["schemaVersion"],
       previewId: expectedPreviewId,
@@ -648,7 +747,7 @@ export function inspectAmuxAnalysisChunk(
       coverageStatus,
       continuationKind,
       ownerQuestion,
-      coveredScope: text(data.coveredScope, 2_000),
+      coveredScope: text(data.coveredScope, 2_000, "coveredScope"),
       remainingScope,
       units,
     };
@@ -659,7 +758,9 @@ export function inspectAmuxAnalysisChunk(
     // this no-credential parser intentionally returns no plain SHA-256.
     return { ok: true, chunk, canonical, counts };
   } catch (error) {
-    if (error instanceof InspectionFailure) return { ok: false, code: error.code };
+    if (error instanceof InspectionFailure) {
+      return error.at ? { ok: false, code: error.code, at: error.at } : { ok: false, code: error.code };
+    }
     throw error;
   }
 }

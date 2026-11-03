@@ -145,13 +145,39 @@ public class MobileBrowserSignInTest {
         }
         assertEquals(0, plugin.exchanges); assertEquals(0, plugin.cleared);
     }
-    @Test public void cancelledAndUnverifiedAuthTabsRejectWithoutIssuingCredentials() throws Exception {
-        for (int code : new int[] { AuthTabIntent.RESULT_CANCELED, AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT }) {
-            Call call = pending(); plugin.handleBrowserResult(result(code, null)); call.await();
-            assertEquals(code == AuthTabIntent.RESULT_CANCELED ? "LOGIN_CANCELLED" : "LOGIN_VERIFICATION_FAILED", call.error);
+    @Test public void aCancelledAuthTabNeverRetriesOrIssuesCredentials() throws Exception {
+        Call call = pending(); plugin.handleBrowserResult(result(AuthTabIntent.RESULT_CANCELED, null)); call.await();
+        assertEquals("LOGIN_CANCELLED", call.error);
+        assertNull(field("pendingLogin")); assertNull(field("verifier"));
+        assertEquals(0, plugin.exchanges); assertEquals(0, plugin.cleared);
+    }
+    private void awaitLaunches(Launcher launcher, int count) throws Exception {
+        for (int i = 0; i < 500 && launcher.launches < count; i++) { Shadows.shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(10); }
+        assertEquals(count, launcher.launches);
+    }
+    @Test public void verificationFailuresRetryOnlyOnceAndNeverAcceptUnverifiedCredentials() throws Exception {
+        for (int code : new int[] { AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT }) {
+            Launcher launcher = new Launcher(); Call call = launch(launcher);
+            String firstState = launcher.launched.getData().getQueryParameter("state");
+            String firstChallenge = launcher.launched.getData().getQueryParameter("code_challenge");
+            plugin.handleBrowserResult(result(code, null)); awaitLaunches(launcher, 2);
+            assertNotEquals(firstState, launcher.launched.getData().getQueryParameter("state"));
+            assertNotEquals(firstChallenge, launcher.launched.getData().getQueryParameter("code_challenge"));
+            assertEquals(0, plugin.exchanges);
+            plugin.handleBrowserResult(result(code, null)); call.await();
+            assertEquals("LOGIN_VERIFICATION_FAILED", call.error);
+            assertEquals(2, launcher.launches); assertEquals(0, plugin.accepted);
             assertNull(field("pendingLogin")); assertNull(field("verifier"));
         }
-        assertEquals(0, plugin.exchanges); assertEquals(0, plugin.cleared);
+    }
+    @Test public void aVerifiedRetryExchangesOnceAndDoesNotInheritTheFirstTabsTimeout() throws Exception {
+        Launcher launcher = new Launcher(); Call call = launch(launcher);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(120, TimeUnit.SECONDS);
+        plugin.handleBrowserResult(result(AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT, null)); awaitLaunches(launcher, 2);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(60, TimeUnit.SECONDS);
+        assertSame(call, field("pendingLogin")); assertNull(call.error);
+        plugin.handleBrowserResult(result(AuthTabIntent.RESULT_OK, callback(launcher))); call.await();
+        assertNull(call.error); assertEquals(1, plugin.exchanges); assertEquals(1, plugin.accepted);
     }
     @Test public void aCancelledSignInGenerationCannotExchangeALateSuccessfulReturn() throws Exception {
         Call call = pending(); ((AtomicLong) field("signInGeneration")).incrementAndGet();

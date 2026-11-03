@@ -3,8 +3,10 @@
 // Started by scripts/marketing-generator-service.mjs, which gives it the run
 // id and the deadline and kills it at that deadline. A3 runs first: one web
 // search per approved competitor, limited to its official domains, and the
-// facts it finds reported. A5 then reads the app's context -- which now holds those
-// facts -- asks the model once per approval-mode account through the LLM cost
+// facts it finds reported. When the Admin switch is on, two text calls then
+// read Tomverse and its market and record this week's brief with the analysis
+// behind it (2026-11-01). A5 then reads the app's context -- which now holds those
+// facts and the brief -- asks the model once per approval-mode account through the LLM cost
 // ledger, and submits what survives the reading to the draft intake, where
 // the Guard judges it again. It holds the LLM key and the generator's secret
 // and nothing else: no database, publishing, bucket or GitHub credential.
@@ -20,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { marketingLlmPinProblems } from "../lib/marketingLlmBudgetCore.ts";
 import { marketingLlmBudgetHttpPort, runMarketingLlmCall } from "../lib/marketingLlmClientCore.ts";
 import { runMarketingA3Cycle } from "../lib/marketingA3CycleCore.ts";
+import { runMarketingAnalysisCycle } from "../lib/marketingAnalysisCycleCore.ts";
 import {
   marketingGeneratorAppPorts,
   marketingGeneratorPinForContext,
@@ -35,6 +38,9 @@ class StopRun extends Error {}
  * rest (scripts/marketing-generator-service.mjs gives the run forty).
  */
 const A3_SHARE_MS = 20 * 60 * 1000;
+
+/** The analysis and brief's share after A3: two text calls and a report. */
+const ANALYSIS_SHARE_MS = 5 * 60 * 1000;
 
 /** Drafts asked of each account per run. */
 const POSTS_PER_ACCOUNT = 3;
@@ -99,14 +105,23 @@ try {
     signal: a3Signal,
   });
   const a3App = marketingGeneratorAppPorts({ appUrl, secret, generatorRunId: runId, fetch, signal: a3Signal });
+  // What A3 kept, in memory, for the analysis: never logged.
+  let market = { facts: [], features: [] };
   const intel = await runMarketingA3Cycle(
     { generatorRunId: runId, deadlineAt: a3DeadlineAt },
     {
       readContext: a3App.readContext,
       // One web search per competitor, limited to its official domains.
-      callLlm: (messages, requestKey, allowedDomains) =>
+      callLlm: (messages, requestKey, allowedDomains, answerSchema) =>
         runMarketingLlmCall(
-          { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey, webSearch: { allowedDomains } },
+          {
+            pin,
+            generatorRunId: runId,
+            purpose: "market_intel",
+            messages,
+            requestKey,
+            webSearch: { allowedDomains, answerSchema },
+          },
           {
             budget: a3Budget,
             transport: fetch,
@@ -121,6 +136,9 @@ try {
       newId: randomUUID,
       now: Date.now,
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      keep: (kept) => {
+        market = kept;
+      },
     },
   );
   clearTimeout(a3Timer);
@@ -131,6 +149,55 @@ try {
     // stops the whole run, as it stops A5 within its own: a person looks
     // before anything else is sent. Running out of A3's share, or a context
     // A3 cannot read, only means no market facts this run; A5 goes on.
+    process.exitCode = 2;
+    throw new StopRun();
+  }
+
+  // The analysis and brief, when the Admin switch is on (the cycle reads it
+  // from the context; the ledger refuses a `brief` reservation while it is
+  // off). Its own share, enforced as A3's is.
+  const analysisDeadlineAt = new Date(Math.min(Date.parse(deadlineAt), Date.now() + ANALYSIS_SHARE_MS)).toISOString();
+  const analysisController = new AbortController();
+  const analysisTimer = setTimeout(() => analysisController.abort(), Math.max(0, Date.parse(analysisDeadlineAt) - Date.now()));
+  analysisTimer.unref();
+  const analysisSignal = AbortSignal.any([controller.signal, analysisController.signal]);
+  const analysisBudget = marketingLlmBudgetHttpPort({
+    appUrl: appUrl.toString(),
+    secret,
+    deadlineAt: analysisDeadlineAt,
+    fetch,
+    signal: analysisSignal,
+  });
+  const analysisApp = marketingGeneratorAppPorts({ appUrl, secret, generatorRunId: runId, fetch, signal: analysisSignal });
+  const analysis = await runMarketingAnalysisCycle(
+    { generatorRunId: runId, deadlineAt: analysisDeadlineAt, market },
+    {
+      readContext: analysisApp.readContext,
+      callLlm: (messages, requestKey) =>
+        runMarketingLlmCall(
+          { pin, generatorRunId: runId, purpose: "brief", messages, requestKey },
+          {
+            budget: analysisBudget,
+            transport: fetch,
+            apiKey,
+            signal: analysisSignal,
+            proceed: () => Date.parse(analysisDeadlineAt) - Date.now() > 60_000,
+          },
+        ),
+      submitReport: analysisApp.submitReport,
+      secret,
+      newId: randomUUID,
+      now: Date.now,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    },
+  );
+  clearTimeout(analysisTimer);
+  // Counts and the stop reason only: no analysis text, topic or claim.
+  console.log(JSON.stringify({ event: "marketing_generator_analysis", runId, model: pin.model, ...analysis }));
+  if (analysis.stoppedAt !== null && (analysis.stoppedAt.stage === "llm" || analysis.stoppedAt.stage === "submit")) {
+    // As after A3: an unknown outcome or a refused reservation stops the run.
+    // A switch that is off, a context it cannot read or running out of its
+    // share only means no brief this run; A5 goes on.
     process.exitCode = 2;
     throw new StopRun();
   }

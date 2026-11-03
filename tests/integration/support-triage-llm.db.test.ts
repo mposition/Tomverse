@@ -149,20 +149,73 @@ test("deleting the account of a report the model was shown deletes the suggestio
   });
   assert.ok(before.contextFeedbackIds.includes(`${PREFIX}seen`));
   const { deleteSupportTriageDataForAccount } = await import("@/lib/supportTriageAccountDeletion");
-  const counts = await prisma.$transaction((tx) => deleteSupportTriageDataForAccount(tx, [`${PREFIX}seen`]));
+  // As account deletion does: anonymise the report, then delete what was derived from it.
+  const counts = await prisma.$transaction(async (tx) => {
+    await tx.feedback.update({ where: { id: `${PREFIX}seen` }, data: { message: "[deleted account]" } });
+    return deleteSupportTriageDataForAccount(tx, [`${PREFIX}seen`]);
+  });
   // Its own suggestion and the one that was shown it.
   assert.equal(counts.suggestions, 2);
-  assert.equal(await prisma.supportTriageSuggestion.count({ where: { feedbackId: `${PREFIX}a` } }), 0);
+  // In its place, a content-free expired row of the same input.
+  const left = await prisma.supportTriageSuggestion.findMany({
+    where: { feedbackId: `${PREFIX}a` },
+    select: { state: true, replyDraft: true, contextFeedbackIds: true, duplicateOfFeedbackIds: true },
+  });
+  assert.deepEqual(left, [{ state: "expired", replyDraft: null, contextFeedbackIds: [], duplicateOfFeedbackIds: [] }]);
+  // The report that remains is not sent to the model again for the same input.
+  let calls = 0;
+  await runSupportTriageWorker({
+    llm: async () => {
+      calls += 1;
+      return null;
+    },
+  });
+  assert.equal(calls, 0);
+});
+
+test("an answered input that was superseded stays settled after the shown report's account is deleted", async () => {
+  await report("seen", { message: "Something only this person wrote." });
+  await report("a");
+  await runSupportTriageWorker({ llm: answering("other") });
+  // The input changes: the answer for input A is superseded, input B answered.
+  await prisma.feedback.update({ where: { id: `${PREFIX}a` }, data: { type: "feature" } });
+  await runSupportTriageWorker({ llm: answering("other") });
+  const { deleteSupportTriageDataForAccount } = await import("@/lib/supportTriageAccountDeletion");
+  await prisma.$transaction(async (tx) => {
+    await tx.feedback.update({ where: { id: `${PREFIX}seen` }, data: { message: "[deleted account]" } });
+    return deleteSupportTriageDataForAccount(tx, [`${PREFIX}seen`]);
+  });
+  const left = await prisma.supportTriageSuggestion.findMany({
+    where: { feedbackId: `${PREFIX}a` },
+    select: { state: true, contextFeedbackIds: true },
+  });
+  assert.deepEqual(left, [
+    { state: "expired", contextFeedbackIds: [] },
+    { state: "expired", contextFeedbackIds: [] },
+  ]);
+  // Input A comes back: neither input is sent to the model again.
+  await prisma.feedback.update({ where: { id: `${PREFIX}a` }, data: { type: "bug" } });
+  let calls = 0;
+  await runSupportTriageWorker({
+    llm: async () => {
+      calls += 1;
+      return null;
+    },
+  });
+  assert.equal(calls, 0);
 });
 
 test("an answer whose shown report was deleted before the result is written is dropped", async () => {
   await report("seen", { message: "Something only this person wrote." });
   await report("a");
   const { startSupportTriageRun } = await import("@/lib/supportTriageRunStore");
-  const { claimSupportTriageBatch, runTriageLlm, writeSupportTriageResults } = await import("@/lib/supportTriageWorker");
+  const { claimSupportTriageBatch, readDuplicateCandidates, runTriageLlm, writeSupportTriageResults } = await import(
+    "@/lib/supportTriageWorker"
+  );
   const run = await startSupportTriageRun("worker");
-  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`]);
-  const answered = await runTriageLlm(answering("other", "Mentions what seen wrote."), batch.claimed, batch.reports);
+  const pool = await readDuplicateCandidates();
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`], 0);
+  const answered = await runTriageLlm(answering("other", "Mentions what seen wrote."), batch.claimed, batch.reports, pool);
   assert.ok(answered[0].llm?.contextIds.includes(`${PREFIX}seen`));
   // The shown report's account is deleted while the model was answering.
   await prisma.feedback.update({ where: { id: `${PREFIX}seen` }, data: { message: "[deleted account]" } });
@@ -171,6 +224,58 @@ test("an answer whose shown report was deleted before the result is written is d
   const [row] = await rows();
   assert.equal(row.laneSource, "keyword");
   assert.equal(row.replyDraft, null);
+});
+
+test("a report anonymised after the pool and the claim were read is never sent to the model", async () => {
+  await report("seen", { message: "Something only this person wrote." });
+  await report("a");
+  await report("b");
+  await report("c");
+  const { startSupportTriageRun } = await import("@/lib/supportTriageRunStore");
+  const { claimSupportTriageBatch, readDuplicateCandidates, runTriageLlm } = await import("@/lib/supportTriageWorker");
+  const run = await startSupportTriageRun("worker");
+  const pool = await readDuplicateCandidates();
+  assert.ok(pool.some((c) => c.id === `${PREFIX}seen`));
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`, `${PREFIX}b`, `${PREFIX}c`], 0);
+  assert.equal(batch.claimed.length, 3);
+  // Both accounts are deleted after the reads and before the calls: a shown
+  // candidate, and a claimed report itself. Another claimed report is closed.
+  await prisma.feedback.updateMany({
+    where: { id: { in: [`${PREFIX}seen`, `${PREFIX}b`] } },
+    data: { message: "[deleted account]" },
+  });
+  await prisma.feedback.update({ where: { id: `${PREFIX}c` }, data: { status: "resolved" } });
+  const sent: TriageLlmInput[] = [];
+  const answered = await runTriageLlm(
+    async (input) => {
+      sent.push(input);
+      return answering("other")(input);
+    },
+    batch.claimed,
+    batch.reports,
+    pool
+  );
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].report.message, "The answer stops halfway.");
+  assert.ok(sent[0].candidates.every((c) => ![`${PREFIX}seen`, `${PREFIX}b`, `${PREFIX}c`].includes(c.id)));
+  assert.ok(!JSON.stringify(sent).includes("only this person"));
+  assert.equal(answered.find((row) => row.feedbackId === `${PREFIX}b`)?.llm, undefined);
+  assert.equal(answered.find((row) => row.feedbackId === `${PREFIX}c`)?.llm, undefined);
+});
+
+test("the model may raise a money report to trust and safety, which outranks it", async () => {
+  await report("pay", { type: "other", message: "I was charged twice, please refund me." });
+  await runSupportTriageWorker({
+    llm: async (input) => ({
+      contextIds: input.candidates.map((c) => c.id),
+      lane: "trust_safety_human",
+      duplicateOf: [],
+      replyDraft: "",
+    }),
+  });
+  const [row] = await rows();
+  assert.equal(row.lane, "trust_safety_human");
+  assert.equal(row.laneSource, "llm");
 });
 
 test("the model chosen in the Admin console is saved, audited and preferred over the environment", async () => {
@@ -186,6 +291,13 @@ test("the model chosen in the Admin console is saved, audited and preferred over
       setting.SupportTriageModelRefused
     );
     assert.equal(await setting.readSupportTriageLlmModelSetting(), null);
+    // Nothing saved: the environment variable decides.
+    const { supportTriageLlmFromEnv } = await import("@/lib/supportTriageLlm");
+    assert.deepEqual(await setting.resolveSupportTriageLlmModel({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), {
+      modelId: enabled.id,
+      source: "environment",
+    });
+    assert.notEqual(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), null);
     await setting.writeSupportTriageLlmModelSetting({ session: session as never, request, modelId: enabled.id });
     assert.equal(await setting.readSupportTriageLlmModelSetting(), enabled.id);
     const audit = await prisma.adminAuditLog.findFirstOrThrow({
@@ -194,12 +306,15 @@ test("the model chosen in the Admin console is saved, audited and preferred over
     });
     assert.deepEqual(audit.metadata, { modelId: enabled.id });
     // The saved choice wins over an environment variable naming a model that does not exist.
-    const { supportTriageLlmFromEnv } = await import("@/lib/supportTriageLlm");
     assert.notEqual(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: "no-such-model" }), null);
-    // Clearing it hands the decision back to the environment: here, nothing usable.
+    // Off is saved, so an environment variable naming a usable model cannot turn the step back on.
     await setting.writeSupportTriageLlmModelSetting({ session: session as never, request, modelId: null });
-    assert.equal(await setting.readSupportTriageLlmModelSetting(), null);
-    assert.equal(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: "no-such-model" }), null);
+    assert.equal(await setting.readSupportTriageLlmModelSetting(), setting.SUPPORT_TRIAGE_LLM_MODEL_OFF);
+    assert.deepEqual(await setting.resolveSupportTriageLlmModel({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), {
+      modelId: null,
+      source: "admin",
+    });
+    assert.equal(await supportTriageLlmFromEnv({ SUPPORT_TRIAGE_LLM_MODEL_ID: enabled.id }), null);
     assert.equal(await supportTriageLlmFromEnv({}), null);
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: setting.SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY } });

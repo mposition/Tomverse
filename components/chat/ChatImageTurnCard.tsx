@@ -5,6 +5,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { isImageAssetUrlExpired } from "@/lib/imageAssetPayload";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
+import { imageGenerationFeedbackCopy, imageResultQuality } from "@/locales/imageGenerationFeedback";
 
 /**
  * The picture a Tomverse Chat image turn answered with (lib/chatImageTurn.ts),
@@ -24,6 +25,8 @@ type GroupGeneration = {
   status: string;
   modelId: string | null;
   prompt: string;
+  quality?: string;
+  preset?: string;
   assets: GroupAsset[];
 };
 type GroupTarget = { targetId: string; modelId: string; currentGenerationId: string | null };
@@ -40,7 +43,8 @@ const isGroupView = (value: unknown): value is GroupView =>
   Array.isArray((value as GroupView).generations);
 
 export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; modelIds?: string[] }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
+  const feedback = imageGenerationFeedbackCopy[lang];
   const { getModel: getImageModel } = useImageModelCatalog();
   const [group, setGroup] = useState<GroupView | null>(null);
   const [readFailed, setReadFailed] = useState(false);
@@ -156,6 +160,7 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
     >
       {current.map(({ target, generation }) => {
         const modelName = getImageModel(target.modelId)?.name ?? target.modelId;
+        const quality = imageResultQuality(generation?.quality, generation?.preset);
         const asset =
           generation?.assets.find((entry) => entry.role === "original") ??
           generation?.assets[0];
@@ -203,6 +208,12 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
             <figcaption className="mt-1 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
               {modelName}
             </figcaption>
+            {generation?.status === "succeeded" && asset && quality ? (
+              <div data-testid="chat-image-quality" className="mt-3 max-w-md space-y-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+                <span className="inline-block rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">{feedback[quality]}</span>
+                {quality === "medium" ? <><p>{feedback.upgradeHint}</p><p className="text-[11px]">{feedback.costHint}</p></> : null}
+              </div>
+            ) : null}
           </figure>
         );
       })}

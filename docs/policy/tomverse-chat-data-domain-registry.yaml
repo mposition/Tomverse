@@ -168,6 +168,22 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: analyticsUserId
+    prismaModel: Ga4UserId
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      The account's GA4 User-ID (docs/policy/marketing-automation.md §10.2).
+      Account deletion reads it inside the deletion transaction, with the User
+      row locked, and names it in one GA4 deletion request after the commit;
+      the cascade removes the row. Withdrawing analytics consent deletes it the
+      same way without deleting the account.
+
   - domain: account
     prismaModel: Account
     userLinkageRole: subject
@@ -1694,6 +1710,39 @@ domains:
       or any customer's prompt or file. Rows are never changed or removed by
       the application; the database refuses both.
 
+  - domain: amuxCliModelLinkEvent
+    prismaModel: AmuxCliModelLinkEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one link from a worker CLI's model name to the
+        Admin › Models entry that prices it (owner decision 2026-10-27: written
+        only by the owner, under a human audit entry of the same transaction).
+        The row names the administrator who made the link and is retained for
+        security investigation and audit of what AMUX Task costs were priced
+        from. The retention period is not a legal determination; it stays TBD
+        until security and legal approval, and a legal hold outranks any later
+        purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the owner who recorded the link and
+      intentionally has no User foreign key. The row stores a CLI name, a CLI
+      model name and an Admin › Models id, not free text or any customer's
+      prompt or file. Rows are never changed or removed by the application;
+      the database refuses both.
+
   - domain: amuxTaskRecoveryInspectionRequest
     prismaModel: AmuxV22TaskRecoveryInspectionRequest
     userLinkageRole: actor
@@ -2075,6 +2124,26 @@ domains:
       unresolved account-deletion and export decisions. Child chunks have their
       own registered actor link and privacy decision; no session intake route is
       enabled.
+
+  - domain: amuxIdeaLaneAttempt
+    prismaModel: AmuxIdeaLaneAttempt
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7 and v19, AMUX account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      One idea-lane run (lib/amux/ideaLaneCore.ts): claim and lease times, a fixed
+      outcome word and the draft PR number. It stores no idea text, prompt,
+      transcript or change; the row goes with its idea by cascade, so it
+      follows the parent's unresolved account-deletion and export decision.
 
   - domain: amuxIdeaTrackedCheckoutEvidence
     prismaModel: AmuxIdeaTrackedCheckoutEvidence
@@ -2482,6 +2551,25 @@ domains:
       Encrypted Task result text is linked to an operator idea without a direct
       User relation. The approved 90-day body clock does not settle account
       deletion or unified export; public PR publication is a separate gate.
+
+  - domain: amuxTaskOwnerQuestion
+    prismaModel: AmuxV22TaskQuestion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/development-agent-orchestration.md v22 worker owner questions, account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      A v22 worker question to the owner: its digest, state and the answer
+      (the operator's, or a confirmed Decision Maker proposal), held in plain
+      text only until the resumed run settles. The question text stays in the
+      encrypted Task result. Account deletion and unified export are not
+      verified.
 
   - domain: amuxTaskPatch
     prismaModel: AmuxV22TaskPatch

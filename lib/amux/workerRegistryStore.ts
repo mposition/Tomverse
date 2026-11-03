@@ -258,6 +258,7 @@ export async function recordAmuxWorkerRegistryChangeByOwner(
     session: Session;
     request?: Request;
     workerName: unknown;
+    providerClass: unknown;
     roleCeiling: unknown;
     desiredState: unknown;
     expectedRevision: unknown;

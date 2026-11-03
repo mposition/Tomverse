@@ -91,6 +91,7 @@ const tx = {
     },
     updateMany: async () => { taskWrites += 1; return { count: 1 }; },
   },
+  amuxV22TaskQuestion: { findFirst: async () => null },
   amuxV22WorkerAssignment: { findUnique: async () => ({
     id: assignmentId, authorizationAuditLogId: "assignment-audit",
     workItemId: taskId, taskRevision: 5, workerName: worker,
@@ -200,9 +201,6 @@ mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), { namedExports: {
   loadEngineeringAgentV22SettlementPatch: async () => null,
-} });
-mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), { namedExports: {
-  loadEngineeringAgentV22StoredCandidate: async () => null,
 } });
 
 const execution = import(mod("lib/amux/execution.ts"));

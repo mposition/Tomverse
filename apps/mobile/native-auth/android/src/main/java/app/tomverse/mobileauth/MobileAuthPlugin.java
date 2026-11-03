@@ -48,6 +48,7 @@ public class MobileAuthPlugin extends Plugin {
     private volatile boolean browserActive;
     private final AtomicLong signInGeneration = new AtomicLong();
     private long pendingGeneration;
+    private int browserVerificationRetries;
     private BiometricPrompt devicePrompt;
     private long devicePromptGeneration;
     private boolean cancelledRevocationUnconfirmed;
@@ -137,7 +138,7 @@ public class MobileAuthPlugin extends Plugin {
     private String refusalCode(int status, JSONObject body) {
         if (status == 429) return "MOBILE_RATE_LIMITED";
         String code = body.optString("code");
-        if (Arrays.asList("EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED").contains(code)) return code;
+        if (Arrays.asList("EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_SIGNUP_UNAVAILABLE", "MOBILE_SIGNUP_TERMS_REQUIRED", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED").contains(code)) return code;
         return status == 404 || status == 503 || "INVALID_REQUEST_ORIGIN".equals(code) ? "MOBILE_LOGIN_UNAVAILABLE" : "MOBILE_LOGIN_FAILED";
     }
     private JSONObject post(String path, JSONObject body) throws Exception { return request(path, body, null); }
@@ -148,6 +149,10 @@ public class MobileAuthPlugin extends Plugin {
         connection.setRequestMethod(body == null ? "GET" : "POST"); connection.setRequestProperty("Content-Type", "application/json");
         if (language != null && Arrays.asList("en", "ko", "zh", "de", "fr", "es", "pt").contains(language)) connection.setRequestProperty("Accept-Language", language);
         connection.setRequestProperty("Cookie", "");
+        if ("/api/auth/mobile/email".equals(path)) {
+            connection.setRequestProperty("X-Tomverse-App-Id", getContext().getPackageName());
+            connection.setRequestProperty("X-Tomverse-Build", Integer.toString(getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0).versionCode));
+        }
         try {
             if (body != null) { connection.setDoOutput(true); try (var output = connection.getOutputStream()) { output.write(body.toString().getBytes(StandardCharsets.UTF_8)); } }
             int status = connection.getResponseCode();
@@ -194,6 +199,7 @@ public class MobileAuthPlugin extends Plugin {
     @PluginMethod public void signIn(PluginCall call) {
         if (browserActive) { call.reject("Close the previous sign-in window first", "LOGIN_IN_PROGRESS"); return; }
         long generation = nextSignIn();
+        browserVerificationRetries = 0;
         queue.execute(() -> {
             try {
                 if (!request("/api/auth/mobile/email", null, null).optBoolean("browserSignIn")) throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE");
@@ -216,7 +222,8 @@ public class MobileAuthPlugin extends Plugin {
                 tab.intent.setPackage(browser);
                 browserActive = true;
                 tab.launch(browserLauncher, url, Uri.parse(origin).getHost(), "/auth/mobile/callback");
-                main.postDelayed(() -> { if (pendingLogin == call) { pendingLogin = null; verifier = null; state = null; call.reject("Sign-in expired", "LOGIN_EXPIRED"); } }, 180000);
+                String launchedState = state;
+                main.postDelayed(() -> { if (pendingLogin == call && launchedState.equals(state)) { pendingLogin = null; verifier = null; state = null; call.reject("Sign-in expired", "LOGIN_EXPIRED"); } }, 180000);
             } catch (Exception e) { browserActive = false; pendingLogin = null; verifier = null; state = null; call.reject("Could not open sign-in", "LOGIN_UNAVAILABLE"); }
         });
     }
@@ -230,6 +237,18 @@ public class MobileAuthPlugin extends Plugin {
         if (!browserActive) return;
         browserActive = false;
         if (pendingLogin == null) return;
+        // A cold browser can finish web login before its HTTPS association
+        // check completes. Retry once with fresh PKCE; never accept a failed
+        // verification or reuse the first tab's grant.
+        if ((result.resultCode == AuthTabIntent.RESULT_VERIFICATION_FAILED || result.resultCode == AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT)
+            && browserVerificationRetries == 0 && currentSignIn(pendingGeneration)) {
+            browserVerificationRetries++;
+            PluginCall call = pendingLogin;
+            long generation = pendingGeneration;
+            pendingLogin = null; verifier = null; state = null;
+            openBrowser(call, generation);
+            return;
+        }
         if (result.resultCode != AuthTabIntent.RESULT_OK || result.resultUri == null) {
             rejectBrowserSignIn(result.resultCode == AuthTabIntent.RESULT_CANCELED ? "LOGIN_CANCELLED" : "LOGIN_VERIFICATION_FAILED");
             return;
@@ -241,10 +260,14 @@ public class MobileAuthPlugin extends Plugin {
         if (call != null) call.reject("Browser sign-in could not finish", code);
     }
     private void requireEmailSupport() throws Exception {
+        requireEmailSupport(false);
+    }
+    private void requireEmailSupport(boolean signup) throws Exception {
         try {
             JSONObject support = request("/api/auth/mobile/email", null, null);
             if (!support.optBoolean("ok") || !support.optBoolean("emailCode")) throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE");
-        } catch (AuthFailure unsupported) { throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE"); }
+            if (signup && !support.optBoolean("emailSignup")) throw new AuthFailure("MOBILE_SIGNUP_UNAVAILABLE");
+        } catch (AuthFailure unsupported) { throw unsupported; }
     }
     @PluginMethod public void requestEmailCode(PluginCall call) {
         queue.execute(() -> {
@@ -265,8 +288,15 @@ public class MobileAuthPlugin extends Plugin {
             try {
                 String email = call.getString("email"); String code = call.getString("code");
                 if (email == null || email.length() > 320 || code == null || !code.matches("[0-9]{6}")) throw new AuthFailure("EMAIL_CODE_INVALID");
+                JSONObject body = new JSONObject().put("action", "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL);
+                String intent = call.getString("intent");
+                if (intent != null) {
+                    if (!"signup".equals(intent) || !Boolean.TRUE.equals(call.getBoolean("termsAccepted"))) throw new AuthFailure("MOBILE_SIGNUP_TERMS_REQUIRED");
+                    requireEmailSupport(true);
+                    body.put("intent", "signup").put("termsAccepted", true);
+                }
                 clear();
-                acceptSignIn(post("/api/auth/mobile/email", new JSONObject().put("action", "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL)), generation);
+                acceptSignIn(post("/api/auth/mobile/email", body), generation);
                 call.resolve();
             } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Could not verify sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });

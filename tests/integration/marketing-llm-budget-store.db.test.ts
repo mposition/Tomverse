@@ -9,6 +9,7 @@ import {
   MARKETING_LLM_ADAPTER_VERSION,
   MARKETING_LLM_SETTINGS_KEY,
   type MarketingLlmPricePin,
+  type MarketingLlmPurpose,
 } from "@/lib/marketingLlmBudgetCore";
 import {
   MARKETING_LLM_ACTIONS,
@@ -19,6 +20,7 @@ import {
   settleMarketingLlmCall,
   type MarketingLlmBudgetEnvironment,
 } from "@/lib/marketingLlmBudgetStore";
+import { MARKETING_ANALYSIS_ENABLED_KEY } from "@/lib/marketingAnalysisCore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
@@ -40,7 +42,7 @@ beforeEach(async () => {
 });
 after(async () => {
   await reset();
-  await prisma.appSetting.deleteMany({ where: { key: MARKETING_LLM_SETTINGS_KEY } });
+  await prisma.appSetting.deleteMany({ where: { key: { in: [MARKETING_LLM_SETTINGS_KEY, MARKETING_ANALYSIS_ENABLED_KEY] } } });
   await prisma.$disconnect();
 });
 
@@ -75,7 +77,7 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0
 const deadline = (ms = 60_000) => new Date(Date.now() + ms);
 const tx = <T>(fn: (client: Prisma.TransactionClient) => Promise<T>) => prisma.$transaction(fn);
 
-const payload = (n: number, overrides: Partial<{ purpose: "draft" | "brief"; model: string; generatorRunId: string }> = {}) => ({
+const payload = (n: number, overrides: Partial<{ purpose: MarketingLlmPurpose; model: string; generatorRunId: string }> = {}) => ({
   requestKey: uuid(n),
   generatorRunId: overrides.generatorRunId ?? "run-1",
   purpose: overrides.purpose ?? ("draft" as const),
@@ -445,4 +447,35 @@ test("a refused bound leaves the caller's transaction settings untouched", async
   assert.deepEqual(settings.outcome, { status: "refused", code: "timeout_already_armed" });
   assert.equal(settings.after.statement, settings.before);
   assert.equal(settings.after.timer, "20s");
+});
+
+test("the comment monitor's calls are their own purpose in the ledger, and the database holds the list", async () => {
+  const outcome = await reserve(1, OPEN, { purpose: "comment_triage" });
+  assert.equal(outcome.status, "ok");
+  if (outcome.status !== "ok") return;
+  assert.equal((await row(outcome.value.callId)).purpose, "comment_triage");
+  // A purpose the list does not name is refused by the shape CHECK, whoever writes it.
+  await assert.rejects(reserve(2, OPEN, { purpose: "comment_moderation" as MarketingLlmPurpose }), /MarketingLlmCall_shape_check/);
+  assert.equal(await prisma.marketingLlmCall.count(), 1);
+});
+
+test("a brief reservation spends only while the operator's analysis switch is on", async () => {
+  await prisma.appSetting.deleteMany({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY } });
+  // No row, and any value but "true", is off: refused before anything is written.
+  assert.deepEqual(await reserve(1, OPEN, { purpose: "brief" }), { status: "refused", code: "purpose_disabled" });
+  await prisma.appSetting.create({ data: { key: MARKETING_ANALYSIS_ENABLED_KEY, value: "on" } });
+  assert.deepEqual(await reserve(2, OPEN, { purpose: "brief" }), { status: "refused", code: "purpose_disabled" });
+  assert.equal(await prisma.marketingLlmCall.count(), 0);
+  assert.equal(await prisma.adminAuditLog.count(), 0);
+  // A draft is another purpose and does not ask, nor does the SEO code agent's own.
+  assert.equal((await reserve(3)).status, "ok");
+  const seo = await reserve(6, OPEN, { purpose: "seo" });
+  assert.equal(seo.status, "ok");
+  if (seo.status === "ok") assert.equal((await row(seo.value.callId)).purpose, "seo");
+
+  await prisma.appSetting.update({ where: { key: MARKETING_ANALYSIS_ENABLED_KEY }, data: { value: "true" } });
+  assert.equal((await reserve(4, OPEN, { purpose: "brief" })).status, "ok");
+  // Under the same cap: the switch lets the purpose spend, not more.
+  await cap("0.2");
+  assert.deepEqual(await reserve(5, OPEN, { purpose: "brief" }), { status: "refused", code: "budget_exhausted" });
 });

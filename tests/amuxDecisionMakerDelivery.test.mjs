@@ -315,6 +315,7 @@ const recordingTx = ({
   delivery = { judgmentKind: "confirm", delivered: false, outcomeKind: null, notSentReason: null, resolution: null },
   unsettled = { requestId: REQUEST_ID, decidedAtEpochMs: BigInt(NOW - 500) },
   lookup = [{ id: REQUEST_ID }],
+  v22QuestionCard = false,
 } = {}) => {
   const sent = [];
   const tx = {
@@ -341,6 +342,7 @@ const recordingTx = ({
       if (sql.includes("CROSS JOIN LATERAL")) return Promise.resolve(request === null ? [] : [request]);
       if (sql.includes('FROM "AmuxDecisionMakerResultDetail"')) return Promise.resolve(detail === null ? [] : [detail]);
       if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve(bodies);
+      if (sql.includes('FROM "AmuxV22TaskQuestion"')) return Promise.resolve(v22QuestionCard ? [{ found: 1 }] : []);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
     adminAuditLog: {
@@ -419,13 +421,21 @@ test("the delivery read reads the kill switch first and nothing else while it is
   }
 });
 
-test("a ready candidate is five statements in a read boundary of seven: switches, judgment, request, detail, bodies", async () => {
+test("a v22 worker's question card is stepped past, never offered to type into a session", async () => {
+  const { tx, sent } = recordingTx({ v22QuestionCard: true });
+  const read = await readDecisionMakerDeliveryCandidate(tx, { after: null });
+  assert.deepEqual(read, { status: "undeliverable", requestId: REQUEST_ID,
+    judgedAtMs: NOW - 1_000, reason: "v22_question_card" });
+  assert.equal(sent.length, 6);
+});
+
+test("a ready candidate is six statements in a read boundary of eight: switches, judgment, request, detail, bodies, v22 card", async () => {
   const { tx, sent } = recordingTx();
   const candidate = await readDecisionMakerDeliveryCandidate(tx, { after: null });
   assert.equal(candidate.status, "ready");
   assert.equal(candidate.session, "claude-impl");
-  assert.equal(sent.length, 5);
-  const order = [/SELECT DISTINCT ON \("scope"\)/, /FROM "AmuxDecisionMakerJudgment" j/, /CROSS JOIN LATERAL/, /FROM "AmuxDecisionMakerResultDetail"/, /FROM "AmuxDecisionMakerBody"/];
+  assert.equal(sent.length, 6);
+  const order = [/SELECT DISTINCT ON \("scope"\)/, /FROM "AmuxDecisionMakerJudgment" j/, /CROSS JOIN LATERAL/, /FROM "AmuxDecisionMakerResultDetail"/, /FROM "AmuxDecisionMakerBody"/, /FROM "AmuxV22TaskQuestion"/];
   order.forEach((pattern, index) => assert.match(sent[index].sql, pattern, String(index)));
   for (const statement of sent) assert.doesNotMatch(statement.sql, /INSERT|UPDATE|DELETE/);
   assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerDeliveryCandidateRead, {

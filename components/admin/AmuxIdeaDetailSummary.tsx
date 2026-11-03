@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
@@ -22,8 +23,8 @@ const EXCLUSION_REASONS = ["secretPath", "secretContent", "nonRegular",
  * The top of one idea's detail (approved backlog redesign, B3): where the idea
  * is on the six steps, which of them are a person's, and its Tasks with their
  * PRs. Everything here is read from the progress snapshot; there is no action
- * besides opening GitHub, reading its own CLI manifest, cancelling a queued v19 session idea and
- * stopping its in-flight analysis, because
+ * besides opening GitHub, reading its own CLI manifest, cancelling a queued v19 session idea,
+ * stopping its in-flight analysis and closing an idea that waits for the owner, because
  * other human steps have their own panels below and merge is observed here.
  */
 export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
@@ -69,6 +70,7 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
       {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
         // Keyed by idea: another idea's question never shows while the next one loads.
         <AmuxSessionReviewPanel key={row.ideaId} ideaId={row.ideaId} /> : null}
+      {row.closable ? <AmuxIdeaClosePanel key={row.ideaId} mode="single" ideaIds={[row.ideaId]} /> : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?

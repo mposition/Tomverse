@@ -12,6 +12,8 @@ let readbackCalls = 0;
 let heartbeatCalls = 0;
 let settleCalls = 0;
 let settleInput: unknown = null;
+let startInput: { publicationBaseSha?: string | null } | null = null;
+let developHead: () => Promise<string> = async () => "a".repeat(40);
 const noStore = (body: unknown, status = 200) => new Response(
   JSON.stringify(body), { status, headers: { "Cache-Control": "no-store" } });
 const unexpected = () => { startReachedService = true;
@@ -25,8 +27,9 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
   withAmuxRouteBudget: (work: () => Promise<Response>) => work(),
 } });
 mock.module(mod("lib/amux/execution.ts"), { namedExports: {
-  startAmuxV22TaskExecution: async () => {
+  startAmuxV22TaskExecution: async (input: { publicationBaseSha?: string | null }) => {
     startReachedService = true;
+    startInput = input;
     assert.equal(permitStart, true, "disabled start reached a service");
     return { started: true,
       attemptId: "00000000-0000-4000-8000-000000000003",
@@ -41,6 +44,20 @@ mock.module(mod("lib/amux/execution.ts"), { namedExports: {
     settleInput = input;
     return { settled: false, reason: "fenced_out" }; },
 } });
+class EngineeringAgentGitHubReadError extends Error {
+  constructor(readonly code: string) { super(code); }
+}
+mock.module(mod("lib/engineeringAgentGitHubRead.ts"), { namedExports: {
+  EngineeringAgentGitHubReadError,
+  readEngineeringAgentDevelopHead: () => developHead(),
+} });
+mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
+  readEngineeringAgentSwitches: async () => ({ publishAllowed: true }),
+} });
+mock.module(mod("lib/amux/v22PublicPrConsent.ts"), { namedExports: {
+  readAmuxV22PublicPrConsent: async () => true,
+} });
+mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   readLimitedJson: async (request: Request, _limit: number,
     schema: { parse: (value: unknown) => unknown }) =>
@@ -140,6 +157,51 @@ test("v22 exact enabled admission reaches start only after authentication", asyn
     permitStart = false;
     if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
     else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
+  }
+});
+
+test("v22 start logs why publication was skipped and still starts the Task", async () => {
+  const saved = { exec: process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION,
+    publication: process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION };
+  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
+  process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = "enabled";
+  const warnings: string[] = [];
+  const warn = mock.method(console, "warn", (line: string) => { warnings.push(line); });
+  try {
+    const { call } = (await routes).find(({ name }) => name === "start")!;
+    const start = () => call(new Request(
+      "https://tomverse.test/api/internal/amux/v22/execution/start", {
+        method: "POST", body: JSON.stringify({
+          task_id: "task-one",
+          assignment_id: "00000000-0000-4000-8000-000000000001",
+          worker: "worker-one",
+          instance_id: "00000000-0000-4000-8000-000000000002",
+          generation: 1, expected_revision: 1,
+        }),
+      }));
+    authorized = true;
+    permitStart = true;
+    developHead = async () => { throw new EngineeringAgentGitHubReadError("http_error"); };
+    assert.equal((await start()).status, 200);
+    assert.equal(startInput?.publicationBaseSha, null);
+    assert.deepEqual(warnings.map((line) => JSON.parse(line)), [{
+      subsystem: "amux", event: "v22_publication_skipped",
+      taskId: "task-one", reason: "develop_head_http_error" }]);
+    warnings.length = 0;
+    developHead = async () => "b".repeat(40);
+    assert.equal((await start()).status, 200);
+    assert.equal(startInput?.publicationBaseSha, "b".repeat(40));
+    assert.deepEqual(warnings, []);
+  } finally {
+    warn.mock.restore();
+    permitStart = false;
+    developHead = async () => "a".repeat(40);
+    for (const [name, value] of [
+      ["TOMVERSE_AMUX_V22_TASK_EXECUTION", saved.exec],
+      ["TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION", saved.publication]] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
 

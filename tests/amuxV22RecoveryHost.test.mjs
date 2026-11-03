@@ -25,8 +25,11 @@ const request = { inspectionId: "00000000-0000-4000-8000-000000000003",
 const invocationId = "b".repeat(32);
 const unitProof = { rootOwnedUnit: true, controlGroupBound: true, processTreeStopped: true };
 const syntheticJournal = path => readFile(path, "utf8").catch(() => null);
+// The terminal write fsyncs the file and the directory, which can take far
+// longer than a few polls on a slow CI disk; giving up early lets the cleanup
+// rm race the still-running write and hide the real error behind ENOTEMPTY.
 async function finished(handler) {
-  for (let count = 0; count < 100; count += 1) {
+  for (const deadline = Date.now() + 10_000; Date.now() < deadline;) {
     if ((await handler({ op: "readback", attemptId })).kind !== "in_progress") return;
     await new Promise(resolve => setTimeout(resolve, 2));
   }
@@ -88,6 +91,31 @@ test("only current live invocation terminal and exact local binding prove stoppe
     await writeFile(terminalPath, JSON.stringify(terminal));
     assert.equal((await handler({ op: "inspect_recovery", ...request })).reason,
       "legacy_invocation_unbound", "journal tampering never changes the current handler's terminal fact");
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+test("an implement run refused before its CLI started proves stopped on a clean checkout", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-not-started-"));
+  try {
+    let workspace = { ok: true, baseSha: "d".repeat(40) };
+    const inspect = async (result) => {
+      const dir = await mkdtemp(join(stateDir, "run-"));
+      const handler = createAmuxV22SidecarHandler({ worker: execute.worker, stateDir: dir,
+        invocationId, recoveryUnit: async () => unitProof, recoveryJournal: syntheticJournal,
+        recoveryWorkspace: async () => workspace,
+        run: async () => ({ kind: "failed", attemptId, ...result }) });
+      await handler({ ...execute, role: "implement" }); await finished(handler);
+      return handler({ op: "inspect_recovery", ...request });
+    };
+    // Production 2026-11-02: an expired Codex sign-in refused the run before
+    // spawn, and the missing base kept the Task blocked with no way to retry.
+    const refused = await inspect({ cliStarted: false, failure: "channel_auth_refused" });
+    assert.equal(refused.reason, "stopped_proven");
+    assert.equal(refused.proof.workspaceClean, true);
+    assert.notEqual((await inspect({ cliStarted: true })).reason, "stopped_proven",
+      "a started run without its recorded base stays unverified");
+    workspace = { ok: false, reason: "dirty_worktree" };
+    assert.notEqual((await inspect({ cliStarted: false, failure: "channel_auth_refused" })).reason,
+      "stopped_proven", "a dirty checkout is never proof, started or not");
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 test("active, claim-only, legacy and terminal success never permit retry", async () => {

@@ -131,7 +131,7 @@ const register = (userId: string, row: Row) =>
 
 const change = (session: Session, input: { workerName: string; roleCeiling: string; desiredState: string; expectedRevision: number }) =>
   withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryChange, (tx) =>
-    recordAmuxWorkerRegistryChangeByOwner(tx, { session, ...input }),
+    recordAmuxWorkerRegistryChangeByOwner(tx, { session, providerClass: input.workerName.slice(0, input.workerName.indexOf("-")), ...input }),
   );
 
 test("the store registers all thirteen workers of the seed, each under its own audit", async () => {
@@ -176,9 +176,15 @@ test("a later change is the next revision; a stale revision is refused before an
 
 test("the CHECKs refuse a name, class or role outside version 31", async () => {
   const userId = `owner-${randomUUID()}`;
-  await rejectsWith(register(userId, { workerName: "devin-worker", providerClass: "claude", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /worker_name_check|name_class_check/);
-  await rejectsWith(register(userId, { workerName: "claude-impl-2", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /worker_name_check/);
-  await rejectsWith(register(userId, { workerName: "claude-x", providerClass: "codex", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /name_class_check/);
+  // Owner decision 2026-10-27 (migration 20261027120000): a name is free and
+  // does not name the CLI; the engineering runner's name is still refused.
+  await rejectsWith(register(userId, { workerName: "Devin_worker", providerClass: "claude", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /worker_name_check/);
+  await rejectsWith(register(userId, { workerName: "engineering-runner", providerClass: "claude", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /worker_name_check/);
+  await rejectsWith(register(userId, { workerName: "kimi-x", providerClass: "devin", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /provider_class_check/);
+  await register(userId, { workerName: "kimi-x", providerClass: "copilot", roleCeiling: "chore", desiredState: "requested", revision: 1 });
+  await register(userId, { workerName: "claude-x", providerClass: "codex", roleCeiling: "chore", desiredState: "requested", revision: 1 });
+  // The guard still keeps a name on the class it was registered with.
+  await rejectsWith(register(userId, { workerName: "kimi-x", providerClass: "codex", roleCeiling: "chore", desiredState: "active", revision: 2 }), /AMUX_WORKER_REGISTRY_CLASS_CHANGED/);
   await rejectsWith(register(userId, { workerName: "cursor-x", roleCeiling: "contract", desiredState: "requested", revision: 1 }), /class_ceiling_check/);
   await rejectsWith(register(userId, { workerName: "codex-y", roleCeiling: "review", desiredState: "requested", revision: 1 }), /role_ceiling_check/);
   // A first event outside the change rule is the guard's refusal (a BEFORE

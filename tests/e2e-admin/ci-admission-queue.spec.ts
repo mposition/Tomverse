@@ -8,12 +8,14 @@ import { adminFixtureDatabase } from "./support/database";
  */
 
 const KEY = "ci_admission_state";
-const entry = (number: number, base: string, head: string) => ({
+const SHA_901 = "1".repeat(40);
+const SHA_903 = "3".repeat(40);
+const entry = (number: number, base: string, head: string, headSha = "") => ({
   number,
   title: `Pull request ${number}`,
   base,
   head,
-  headSha: "",
+  headSha,
   queuedAt: "2026-10-20T01:00:00.000Z",
   draft: true,
   status: "waiting",
@@ -22,7 +24,11 @@ const seed = {
   version: 3,
   capacity: 40,
   needs: { develop: 15, main: 34, developPush: 18, mainPush: 19 },
-  queue: [entry(901, "develop", "claude/to-develop/a"), entry(902, "main", "release/2026-10-20-b"), entry(903, "develop", "claude/to-develop/c")],
+  queue: [
+    entry(901, "develop", "claude/to-develop/a", SHA_901),
+    entry(902, "main", "release/2026-10-20-b"),
+    entry(903, "develop", "claude/to-develop/c", SHA_903),
+  ],
   released: [],
   pendingStatus: [],
   events: [{ at: "2026-10-20T01:05:00.000Z", kind: "held", number: 903, shadow: false, detail: "no_slot" }],
@@ -34,6 +40,30 @@ const seed = {
     deploys: [{ branch: "develop", sha: "e".repeat(40), title: "Merge pull request #799 from mposition/claude/to-develop/z" }],
   },
 };
+
+// The review server's last status report, with the CI auto-fix's tries
+// (lib/ciAdmissionFixCore.ts): #901's head was tried and not fixed, #903's is
+// being analysed.
+const reviewStatus = () =>
+  JSON.stringify({
+    receivedAt: new Date().toISOString(),
+    snapshot: {
+      schemaVersion: 1,
+      draining: false,
+      pendingJobs: 0,
+      providers: [
+        { id: "claude", vendor: "anthropic", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "available", remaining: 64, unit: "percent" } },
+      ],
+      last24h: { accept: 0, reject: 0, unknown: 0 },
+      ciFix: {
+        queuedLastHour: 2,
+        entries: [
+          { pr: 903, head: SHA_903, kind: "ci", outcome: "started", reason: null, retried: false, ageSeconds: 60 },
+          { pr: 901, head: SHA_901, kind: "ci", outcome: "no_change", reason: "transient", retried: false, ageSeconds: 600 },
+        ],
+      },
+    },
+  });
 
 const storedOrder = async () => {
   const row = await adminFixtureDatabase().appSetting.findUnique({ where: { key: KEY } });
@@ -51,6 +81,11 @@ test("the operator reorders the line by dragging and from the keyboard, and each
     create: { key: KEY, value: JSON.stringify(seed) },
     update: { value: JSON.stringify(seed) },
   });
+  await adminFixtureDatabase().appSetting.upsert({
+    where: { key: "reviewOrchestrator.status" },
+    create: { key: "reviewOrchestrator.status", value: reviewStatus() },
+    update: { value: reviewStatus() },
+  });
   await signInAs("owner");
   await page.goto("/admin/qa-release?tab=ci-admission");
   // The analytics consent banner sits over the bottom of the page until declined.
@@ -64,6 +99,14 @@ test("the operator reorders the line by dragging and from the keyboard, and each
   await expect(section.getByTestId("ci-admission-deploy-eeeeeee")).toContainText("Merge pull request #799");
   await expect(section.getByTestId("ci-admission-deploy-eeeeeee")).toContainText("deploy · develop · 18 runners");
   expect(await shownOrder(page)).toEqual([901, 902, 903]);
+  // The CI auto-fix: the server's state, and each try under its pull request.
+  await expect(section.getByTestId("ci-admission-fix-summary")).toContainText("Claude 64% left");
+  await expect(section.getByTestId("ci-admission-fix-summary")).toContainText("2 / 6 fixes this hour");
+  await expect(section.getByTestId("ci-admission-fix-state-901")).toHaveText("CI failed · not fixed");
+  await expect(section.getByTestId("ci-admission-fix-901")).toContainText("An infrastructure failure with no code cause.");
+  await expect(section.getByTestId("ci-admission-fix-state-903")).toHaveText("CI failed · analysing");
+  await expect(section.getByTestId("ci-admission-fix-again-903")).toHaveCount(0);
+  await expect(section.getByTestId("ci-admission-fix-902")).toHaveCount(0);
   await page.screenshot({ path: "test-results-admin/ci-admission-dark.png", fullPage: true });
 
   // Mouse: drag #903 by its handle above #901.
@@ -103,6 +146,10 @@ test("the operator reorders the line by dragging and from the keyboard, and each
   page.once("dialog", (dialog) => void dialog.accept());
   await section.getByTestId("ci-admission-running-800").getByRole("button", { name: "Stop #800: back to draft and cancel its CI" }).click();
   await expect(section.getByRole("status")).toContainText("Stopping needs the CI admission GitHub App.");
+
+  // Analyse again: the fixture has no GitHub App to put the label on.
+  await section.getByTestId("ci-admission-fix-again-901").click();
+  await expect(section.getByRole("status")).toContainText("Asking again needs the CI admission GitHub App.");
 
   // The same section in the Light console theme.
   await page.context().addCookies([{ name: "tomverse_admin_theme", value: "light", url: page.url() }]);

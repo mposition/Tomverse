@@ -20,7 +20,12 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { finalSignalIsSuccess, reportedHalt } from "../lib/engineeringAgentCore.ts";
+import {
+  ENGINEERING_PUBLISHER_FEATURES_HEADER,
+  ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
+  finalSignalIsSuccess,
+  reportedHalt,
+} from "../lib/engineeringAgentCore.ts";
 import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
@@ -275,11 +280,11 @@ const githubPorts = (token) => ({
     }
     return bindableDiffDigest(Buffer.concat(chunks));
   },
-  createPull: async ({ title, body, head }) => {
+  createPull: async ({ title, body, head, draft }) => {
     let response;
     try {
       response = await githubRequest(token, "POST", `/repos/${OWNER}/${REPOSITORY}/pulls`, {
-        body: { title, body, head, base: "develop", draft: false, maintainer_can_modify: false },
+        body: { title, body, head, base: "develop", draft: draft === true, maintainer_can_modify: false },
       });
     } catch {
       return { status: "unknown" };
@@ -371,7 +376,12 @@ async function main() {
       method: "POST",
       redirect: "error",
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "content-type": "application/json",
+        // Owner review items are handed only to a publisher that opens them as drafts.
+        [ENGINEERING_PUBLISHER_FEATURES_HEADER]: ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
+      },
       body: JSON.stringify(body),
     });
     let json = null;

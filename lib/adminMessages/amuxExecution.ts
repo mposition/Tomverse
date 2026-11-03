@@ -134,6 +134,8 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       `input ${input ?? "unknown"} / output ${output ?? "unknown"} tokens`,
     loadMore: (shown: number, total: number) => `Load more (${shown}/${total})`,
     expand: (title: string) => `Expand or collapse ${title}`,
+    archiveAll: "Archive all cards",
+    archiveAllConfirm: (count: number) => `Archive all ${count} cards on the board? They move to the Archive drawer with their status and history kept.`,
   },
   ko: {
     moveTitle: "이동 처리 내역", moveToQueue: "AMUX 대기열로 이동", dragToQueue: "카드를 AMUX 대기열로 드래그",
@@ -268,5 +270,7 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       `입력 ${input ?? "미확인"} / 출력 ${output ?? "미확인"} 토큰`,
     loadMore: (shown: number, total: number) => `더 보기 (${shown}/${total})`,
     expand: (title: string) => `${title} 펼치기 또는 접기`,
+    archiveAll: "전체 카드 보관",
+    archiveAllConfirm: (count: number) => `보드의 카드 ${count}건을 모두 보관할까요? 상태와 기록은 그대로 두고 보관함으로 옮깁니다.`,
   },
 });

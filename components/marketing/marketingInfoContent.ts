@@ -156,6 +156,57 @@ export const infoPages = {
       "href": "/support/help-centre"
     }
   },
+  "zh-Hant": {
+    "eyebrow": "FAQ",
+    "title": "常見問題",
+    "description": "了解 Chat 與 Review 的差異、免費體驗、模型選擇與點數。",
+    "sections": [
+      {
+        "title": "什麼時候用 Chat，什麼時候用 Review？",
+        "body": "想與一個模型持續對話或取得選擇協助時，用 Chat。想比較同一問題的多個回答、查看差異與遺漏條件時，用 Review。"
+      },
+      {
+        "title": "無需註冊可以體驗什麼？",
+        "body": "Review 可無需註冊先體驗。Chat 在提供訪客體驗的環境中可以使用。訪客可用的模型與用量有限制，儲存、分享及檔案的條件請查看畫面說明。"
+      },
+      {
+        "title": "使用 Smart Adaptive 時還能手動選模型嗎？",
+        "body": "也可以手動選擇模型。Smart Adaptive 會依問題、所需功能、費用與品質協助選擇。可用的模型取決於帳戶與方案。"
+      },
+      {
+        "title": "提問優化建議會自動套用嗎？",
+        "body": "提供建議時，你可以先查看，再決定是否採用。與原意或條件不符的建議可以不套用；缺少的資訊可以自行補充。"
+      },
+      {
+        "title": "AI Review 會選出正確答案嗎？",
+        "body": "AI Review 會比較所提供回答的共識、差異、衝突與遺漏，不進行獨立的事實查證，也不保證答案正確。可依待查證的項目，自行查看原文與來源。"
+      },
+      {
+        "title": "使用多個模型會消耗更多點數嗎？",
+        "body": "每個所選模型的用量都會計算。請查看基礎點數，以及長上下文、檔案的影響，只選擇需要的模型。AI Review 執行前會顯示另外的預估。"
+      },
+      {
+        "title": "附加檔案會在哪裡處理？",
+        "body": "所選的 AI 供應商會處理回答所需的檔案或摘錄。鎖定與私有儲存用於存取控制，並不代表沒有供應商處理。目前的保留與刪除範圍，請查看安全說明及隱私權政策。"
+      },
+      {
+        "title": "我已經在用免費 AI，為什麼還要試 Tomverse？",
+        "body": "如果只問簡單的問題，現有工具可能已經夠用。需要切換模型、比較同一問題的回答，或再次使用資料與對話時，Tomverse 會更有幫助。先體驗，再依需要選擇。"
+      },
+      {
+        "title": "Review 可以比較多少個模型？",
+        "body": "可以並排閱讀最多三個模型對同一問題的回答。請從可用清單中選擇模型，每個所選模型的用量都會計算。"
+      },
+      {
+        "title": "可以儲存或分享對話嗎？",
+        "body": "登入後可以儲存對話，並使用支援的分享和下載功能。連結會顯示分享當時的唯讀快照，之後的訊息不會自動加入。鎖定的對話在分享前需要驗證解鎖。"
+      }
+    ],
+    "cta": {
+      "label": "開始使用",
+      "href": "/support/help-centre"
+    }
+  },
   "fr": {
     "eyebrow": "FAQ",
     "title": "Questions fréquentes",
@@ -703,6 +754,25 @@ export const infoPages = {
       }
     ]
   },
+  "zh-Hant": {
+    "eyebrow": "安全與資料處理",
+    "title": "安全與資料處理",
+    "description": "了解對話存取、分享範圍與 AI 供應商的處理方式，再選擇所需的保護功能。重要回答應結合原始資料與來源查證。",
+    "sections": [
+      {
+        "title": "協助保護使用過程的功能",
+        "body": "模型範圍、用量限制與檔案檢查會說明支援條件。檔案不支援時，可以查看原因並準備可讀取的版本。"
+      },
+      {
+        "title": "安全與資料處理",
+        "body": "所選的 AI 供應商會處理回答所需的問題與資料。鎖定功能控管已儲存對話的存取；分享會產生當時內容的唯讀連結。資料處理的詳情請查看安全說明。"
+      },
+      {
+        "title": "AI 限制與服務狀態",
+        "body": "回答由所選的外部 AI 模型生成，可能有誤或遺漏。AI Review 會比較這些回答，外部查證與網頁搜尋則是獨立的操作。目前的可用狀態請查看服務狀態頁。"
+      }
+    ]
+  },
   "fr": {
     "eyebrow": "Sécurité et traitement des données",
     "title": "Sécurité et traitement des données",
@@ -850,6 +920,29 @@ export const infoPages = {
       }
     ]
   },
+  "zh-Hant": {
+    "eyebrow": "Tomverse",
+    "title": "關於 Tomverse",
+    "description": "我們希望減少選擇模型，以及在不同工具之間複製、比較回答的麻煩。Tomverse Chat 協助選擇模型、讓問題更清楚；Tomverse Review 則把不同的回答放在一起，方便閱讀與比較。",
+    "sections": [
+      {
+        "title": "讓提問更容易開始",
+        "body": "我們希望即使不確定該選哪個模型，也能開始提問與比較，專注於學習、文字表達與理解資料等日常需要的結果。"
+      },
+      {
+        "title": "由你掌握選擇與判斷",
+        "body": "提問優化建議由你查看並決定是否採用，也可以手動選擇模型。在 Review 中，你能以相同的脈絡閱讀回答、查看引文，決定哪些內容需要再深入了解。儲存與再次使用結果，也是這套體驗的一部分。"
+      },
+      {
+        "title": "先體驗，再按需選擇",
+        "body": "先體驗 Chat 和 Review，再依需要選擇方案。免費帳戶可以儲存對話，並使用支援的分享與檔案功能。需要更多用量或更廣的模型範圍時，可比較 Free、Pro、Max 的功能與點數額度。"
+      },
+      {
+        "title": "營運方與聯絡方式",
+        "body": "Tomverse 是 tomverse.app 的服務與營運名稱，旗下營運 Tomverse Review 等 Tomverse 產品。付費交易的法定銷售方標示在 Stripe 結帳頁、收據或發票上。帳戶、帳單、法律或產品問題可寄至 support@tomverse.app 或 tomverse.app/support。"
+      }
+    ]
+  },
   "fr": {
     "eyebrow": "Tomverse",
     "title": "À propos de Tomverse",
@@ -978,6 +1071,16 @@ export const infoPages = {
         { title: "联系支持", body: "对于账户相关问题，请提供账户邮箱、发生时间、浏览器以及产品中显示的追踪 ID。" },
       ],
       cta: { label: "打开 Help Centre", href: "/support/help-centre" },
+    },
+    "zh-Hant": {
+      eyebrow: "支援",
+      title: "支援",
+      description: "取得帳戶、模型存取、檔案、分享、付費訂閱、取消、退款與產品意見回饋方面的協助。",
+      sections: [
+        { title: "Help Centre", body: "常見的設定與疑難排解可先查看 Help Centre。", bullets: ["登入與 OAuth 問題", "檔案上傳疑難排解", "模型存取與限制"] },
+        { title: "聯絡支援", body: "帳戶相關問題，請提供帳戶電子郵件、發生時間、瀏覽器，以及產品中顯示的追蹤 ID。" },
+      ],
+      cta: { label: "開啟 Help Centre", href: "/support/help-centre" },
     },
   },
   helpCentre: {
@@ -1188,6 +1291,76 @@ export const infoPages = {
     ],
     "cta": {
       "label": "联系支持",
+      "href": "/support"
+    }
+  },
+  "zh-Hant": {
+    "eyebrow": "說明中心",
+    "title": "說明中心",
+    "description": "從開始使用 Chat 與 Review，到模型、檔案、儲存與分享：選擇想完成的任務，查看畫面上需要確認的內容。",
+    "sections": [
+      {
+        "title": "開始使用",
+        "body": "同一個問題，可能得到不同的回答。在 Tomverse Review 中並排閱讀最多三個模型的回答，再用 AI Review 搭配引文，查看共識、差異與遺漏條件。要重點閱讀哪一個回答、接下來要問什麼，由你決定。",
+        "bullets": [
+          "想與一個模型持續對話時，可以了解 Tomverse Chat。",
+          "比較多個回答時，在 Review 中選擇最多三個模型。",
+          "儲存、分享與專案功能，請查看登入後的使用條件。"
+        ],
+        "link": {
+          "label": "Review 工作區指南",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "登入與帳戶存取",
+        "body": "如果登入後無法返回 Tomverse，請在同一個瀏覽器重試。問題仍然存在時，請向支援提供登入方式與畫面上的錯誤訊息。",
+        "bullets": [
+          "請確認使用的是帳戶原有的電子郵件與登入方式。",
+          "驗證碼過期時，請在畫面上重新申請新碼。"
+        ]
+      },
+      {
+        "title": "模型與點數",
+        "body": "送出前顯示的是基礎點數預估，由所選模型的基礎消耗加總得出。處理檔案內容與較長的對話紀錄後，最終用量可能會有所變化。",
+        "bullets": [
+          "在選擇器中查看可用的模型與基礎點數。",
+          "每月方案點數與購買的點數會分別顯示。",
+          "在方案頁面比較模型範圍與額度。"
+        ],
+        "link": {
+          "label": "先體驗，再依需要選擇",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "檔案與 Google Drive",
+        "body": "附件可用時，請先確認支援的格式與大小。加密、損壞或沒有可讀文字的掃描 PDF 可能無法處理。可以嘗試一個檔案，或直接貼上關鍵文字。",
+        "bullets": [
+          "支援的訪客附件：每則訊息一個檔案，最多 5MB。連接 Google Drive 需要登入。",
+          "允許附件的登入方案：最多五個檔案，每個 10MB，每次請求合計 25MB。",
+          "帳戶檔案會與對話一起保留。訪客檔案僅為暫時處理，不包含在儲存、分享或匯出中。"
+        ],
+        "link": {
+          "label": "檔案與 Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "沒有收到回答時",
+        "body": "模型可能暫時受限或回答失敗。請查看原因與服務狀態，必要時用推薦的替代模型重試一次。仍然失敗時，請向支援提供追蹤 ID 與模型名稱。"
+      },
+      {
+        "title": "儲存、分享與資料處理",
+        "body": "所選的 AI 供應商會處理回答所需的問題與資料。鎖定功能控管已儲存對話的存取；分享會產生當時內容的唯讀連結。資料處理的詳情請查看安全說明。"
+      },
+      {
+        "title": "聯絡支援",
+        "body": "問題持續時，請提供帳戶電子郵件、大致時間、產品與模型、附件情況及追蹤 ID。透過表單或電子郵件聯絡時，請勿傳送密碼或銀行卡號。"
+      }
+    ],
+    "cta": {
+      "label": "聯絡支援",
       "href": "/support"
     }
   },
@@ -1512,6 +1685,17 @@ export const focusedSafetyPages = {
         }
       ]
     },
+    "zh-Hant": {
+      "eyebrow": "安全與資料處理",
+      "title": "協助保護使用過程的功能",
+      "description": "模型範圍、用量限制及檔案檢查會說明支援條件。檔案不受支援時，可查看原因並準備可讀取的版本。",
+      "sections": [
+        {
+          "title": "協助保護使用過程的功能",
+          "body": "模型範圍、用量限制及檔案檢查會說明支援條件。檔案不受支援時，可查看原因並準備可讀取的版本。"
+        }
+      ]
+    },
     "fr": {
       "eyebrow": "Sécurité et traitement des données",
       "title": "Les contrôles qui protègent votre usage",
@@ -1591,6 +1775,17 @@ export const focusedSafetyPages = {
         }
       ]
     },
+    "zh-Hant": {
+      "eyebrow": "安全與資料處理",
+      "title": "安全與資料處理",
+      "description": "所選的 AI 供應商會處理回答所需的問題與資料。鎖定功能控管已儲存對話的存取；分享會產生當時內容的唯讀連結。資料處理的詳情請查看安全說明。",
+      "sections": [
+        {
+          "title": "安全與資料處理",
+          "body": "所選的 AI 供應商會處理回答所需的問題與資料。鎖定功能控管已儲存對話的存取；分享會產生當時內容的唯讀連結。資料處理的詳情請查看安全說明。"
+        }
+      ]
+    },
     "fr": {
       "eyebrow": "Sécurité et traitement des données",
       "title": "Sécurité et traitement des données",
@@ -1667,6 +1862,17 @@ export const focusedSafetyPages = {
         {
           "title": "AI 局限与服务状态",
           "body": "回答由所选外部 AI 模型生成，可能错误或遗漏。AI Review 比较这些回答，外部核实与网页搜索是独立操作。当前可用状态请查看服务状态页。"
+        }
+      ]
+    },
+    "zh-Hant": {
+      "eyebrow": "安全與資料處理",
+      "title": "AI 限制與服務狀態",
+      "description": "回答由所選的外部 AI 模型生成，可能有誤或遺漏。AI Review 會比較這些回答，外部查證與網頁搜尋則是獨立的操作。目前的可用狀態請查看服務狀態頁。",
+      "sections": [
+        {
+          "title": "AI 限制與服務狀態",
+          "body": "回答由所選的外部 AI 模型生成，可能有誤或遺漏。AI Review 會比較這些回答，外部查證與網頁搜尋則是獨立的操作。目前的可用狀態請查看服務狀態頁。"
         }
       ]
     },

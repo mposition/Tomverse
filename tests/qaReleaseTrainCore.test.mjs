@@ -109,3 +109,22 @@ test("an emergency train is named by its AEST minute, never a scheduled departur
   assert.equal(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T23:50:00Z"), hours), "20261021-0950");
   assert.equal(qaReleaseTrainBranch(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T02:37:00Z"), hours)), "release/train-20261020-1237");
 });
+
+test("a rider the model resolved is named with its files and what it said; a conflict it declined says why", () => {
+  const { body } = qaReleaseTrainPullRequest({
+    slot: "20261028-2000",
+    candidates: [
+      { number: 2702, title: "marketing", mergeCommitSha: A, mergedAt: "2026-10-19T00:00:00Z" },
+      { number: 2746, title: "catalog", mergeCommitSha: A, mergedAt: "2026-10-19T01:00:00Z" },
+    ],
+    picks: [
+      { number: 2702, outcome: "included" },
+      { number: 2746, outcome: "conflict", why: "It needs the llm settings store, which main lacks." },
+    ],
+    rcSha: B,
+    rollbackSha: C,
+    resolved: [{ number: 2702, files: ["AGENTS.md"], why: "The edited paragraph was moved out of AGENTS.md; kept main's text." }],
+  });
+  assert.match(body, /^- #2702 marketing \(conflicted on main in `AGENTS\.md`; resolved by a model, check it: The edited paragraph was moved out of AGENTS\.md; kept main's text\.\)$/m);
+  assert.match(body, /^- #2746 catalog — cherry-pick conflict on main; it rides the next train again \(the model: It needs the llm settings store, which main lacks\.\)$/m);
+});

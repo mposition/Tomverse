@@ -333,7 +333,7 @@ export const SUGGESTION_TERMINAL_STATES: readonly SuggestionState[] = Object.fre
 export const SUGGESTION_TRANSITIONS: readonly (readonly [SuggestionState, SuggestionState])[] =
   Object.freeze([
     ["pending", "claimed"],
-    // Lease reclaim: the claim token is cleared and the attempt counted.
+    // Lease reclaim, allowed by the database; the worker fails expired claims instead.
     ["claimed", "pending"],
     ["claimed", "ready"],
     ["claimed", "failed"],
@@ -355,13 +355,38 @@ export const SUGGESTION_TRANSITIONS: readonly (readonly [SuggestionState, Sugges
 export const isSuggestionTransitionAllowed = (from: SuggestionState, to: SuggestionState) =>
   SUGGESTION_TRANSITIONS.some(([a, b]) => a === from && b === to);
 
+/**
+ * States in which a row settles its input for the worker: live, decided, or
+ * closed after its model call may have run. A superseded or invalidated row
+ * settles it too once it was answered (it has a lane), so an input that comes
+ * back is never paid for again (policy section 2 item 11, section 6).
+ */
+export const SUGGESTION_SETTLING_STATES: readonly SuggestionState[] = Object.freeze([
+  "claimed",
+  "ready",
+  "accepted",
+  "rejected",
+  "expired",
+  "failed",
+]);
+
+export const suggestionSettlesInput = (row: { readonly state: string; readonly lane: string | null }) =>
+  SUGGESTION_SETTLING_STATES.includes(row.state as SuggestionState) || row.lane !== null;
+
+/**
+ * Open states the worker supersedes and retention invalidates. A claimed row
+ * is left to its claim: its model call may be under way, so it ends as failed
+ * when the claim lapses, which settles its input.
+ */
+export const SUGGESTION_CLOSABLE_OPEN_STATES: readonly SuggestionState[] = Object.freeze(["pending", "ready"]);
+
 export const SUGGESTION_FAILURE_CODES = Object.freeze([
   "config_error",
   "internal_error",
   "retry_exhausted",
 ] as const);
 
-/** Reclaims allowed before a claimed suggestion must fail as retry_exhausted. */
+/** The database bound on reclaims; the worker reclaims none (it fails expired claims). */
 export const SUGGESTION_MAX_ATTEMPTS = 3;
 
 /**
@@ -485,6 +510,20 @@ export const DECISION_RECORD_LINKS_MAX = GROUP_MEMBER_CAP;
  */
 export const TERMINAL_SUGGESTION_RETENTION_DAYS = 30;
 export const TERMINAL_GROUP_RETENTION_DAYS = 30;
+/**
+ * The worker triages only reports created within this many days. Retention
+ * deletes a terminal suggestion no earlier than this long after it was
+ * written, and a suggestion is never older than its report, so a report
+ * whose settled row was deleted is already out of reach and is never sent to
+ * the paid model a second time for the same input.
+ */
+export const TRIAGE_REPORT_WINDOW_DAYS = TERMINAL_SUGGESTION_RETENTION_DAYS;
+/**
+ * A suggestion never shown to the owner (ownerQueueState not_queued) leaves
+ * promotion and becomes expired 7 days after it was created (policy section
+ * 5), whether or not its report is still open.
+ */
+export const NOT_QUEUED_SUGGESTION_EXPIRY_DAYS = 7;
 
 /** The classes one retention batch deletes, one statement pair each, in this order. */
 export const RETENTION_CLASSES = Object.freeze(["runs", "suggestions", "groups", "decisionRecords"] as const);
@@ -541,7 +580,7 @@ export const triageLaneFor = (input: {
 /** The worker pass (design section 5.2): claim batches of 10, at most 50 reports per pass. */
 export const WORKER_CLAIM_BATCH_SIZE = 10;
 export const WORKER_PASS_MAX = 50;
-/** Expired claims a pass returns to pending (or fails), at most. */
+/** Expired claims a pass fails, at most. */
 export const WORKER_RECLAIM_MAX = 50;
 /** Reports a pass considers: still awaiting an operator. */
 export const TRIAGE_ELIGIBLE_REPORT_STATUSES = Object.freeze(["open", "reviewing"] as const);

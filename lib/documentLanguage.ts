@@ -1,4 +1,10 @@
-import { SUPPORTED_LANGUAGES, isLanguage, type Language } from "@/lib/language";
+import {
+  SUPPORTED_LANGUAGES,
+  isLanguage,
+  languageFromSegment,
+  languageFromTag,
+  type Language,
+} from "@/lib/language";
 
 /**
  * The language the *document* is served in, resolved before anything renders.
@@ -41,7 +47,7 @@ const fromPathname = (pathname: string | null | undefined): Language | null => {
   const segment = (pathname ?? "").split("/").filter(Boolean)[0]?.toLowerCase();
   if (!segment) return null;
   if (segment in LOCALE_PATH_ALIASES) return LOCALE_PATH_ALIASES[segment];
-  return isLanguage(segment) ? segment : null;
+  return languageFromSegment(segment);
 };
 
 const fromAcceptLanguage = (header: string | null | undefined): Language | null => {
@@ -65,8 +71,8 @@ const fromAcceptLanguage = (header: string | null | undefined): Language | null 
     .sort((a, b) => b.quality - a.quality);
 
   for (const { tag } of ranked) {
-    const base = tag.split("-")[0];
-    if (isLanguage(base)) return base;
+    const language = languageFromTag(tag);
+    if (language) return language;
   }
   return null;
 };

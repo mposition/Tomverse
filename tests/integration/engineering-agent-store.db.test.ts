@@ -33,12 +33,16 @@ import {
   recordEngineeringAgentServiceFinish,
   removeEngineeringAgentReviewer,
   replaceEngineeringAgentBinding,
+  expireEngineeringAgentV22LapsedPublish,
+  resolveEngineeringAgentV22TierPendingDraft,
   runEngineeringAgentTransaction,
   setEngineeringAgentSwitch,
   settleEngineeringAgentWorkItem,
 } from "@/lib/engineeringAgentStore";
 import { readEngineeringAgentLastLook } from "@/lib/engineeringAgentLastLook";
-import { openEngineeringAgentV22Product } from "@/lib/engineeringAgentV22ProductStore";
+import { openEngineeringAgentV22Product,
+  resolveEngineeringAgentV22Product } from "@/lib/engineeringAgentV22ProductStore";
+import { queuedWithoutCapabilityWhere } from "@/lib/engineeringAgentV22TierPromotion";
 import { runIdempotentEngineeringAgentRequest } from "@/lib/engineeringAgentRouteAuth";
 import { prisma } from "@/lib/prisma";
 
@@ -93,6 +97,10 @@ const nextRunId = () => String((runCounter += 1));
 
 const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
   runEngineeringAgentTransaction(prisma, work);
+
+/** 1 when the item waits in the queue with no live capability, as the v22 tier round reads it. */
+const waitingWithoutCapability = (workItemId: string) =>
+  prisma.engineeringAgentWorkItem.count({ where: { id: workItemId, ...queuedWithoutCapabilityWhere() } });
 
 const refusedWith = async (promise: Promise<unknown>, code: string) =>
   assert.rejects(promise, (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === code, code);
@@ -259,47 +267,194 @@ const commitFields = (runId: string, cardRef: string) => ({
   cardRef,
 });
 
-test("v22 publish and its capability commit together, or neither commits", async () => {
+/** A run whose patch settled as a `tier_pending` draft, the run then ended as settlement ends it. */
+const pendingDraftFor = async (seed: string) => {
   const run = await startRun();
-  const patch = { text: "patch", sha256: sha256("patch"), baseSha: sha1("base") };
-  const product = await inTx((tx) => openEngineeringAgentV22Product(tx, {
-    runId: run.runId, taskId: run.cardId, patch, publish: true,
-    candidate: { expectedTreeId: sha1("tree"),
-      baseCommitterDate: "1759000000 +1000" },
+  const patch = { text: seed, sha256: sha256(seed), baseSha: sha1("base") };
+  const draft = await inTx((tx) => openEngineeringAgentV22Product(tx, {
+    runId: run.runId, patch, tierPending: true,
   }));
-  assert.equal(product.kind, "publish");
-  const capability = await prisma.engineeringAgentCapability.findFirstOrThrow({
-    where: { unconsumedWorkItemId: product.id },
-  });
-  assert.equal(capability.consumedAt, null);
-  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
-    workItemId: product.id, mode: "write", leaseMs: 60_000,
-  }));
-  const bound = await settleAndBind(product.id, claim.fencingToken, run.runId);
   await inTx((tx) => endEngineeringAgentRun(tx, {
     runId: run.runId, amuxAttemptId: run.amuxAttemptId,
-    outcome: "t1_queued", halt: "none",
+    outcome: "t2_draft", halt: "none",
   }));
+  return { run, patch, draft };
+};
+
+const promotionInput = (pending: Awaited<ReturnType<typeof pendingDraftFor>>) => ({
+  workItemId: pending.draft.id, runId: pending.run.runId,
+  taskId: pending.run.cardId, patchDigest: pending.patch.sha256,
+  baseSha: pending.patch.baseSha, reason: "tier_two",
+  candidate: { expectedTreeId: sha1("tree"),
+    baseCommitterDate: "1759000000 +1000", imageProofDigest: sha256("image") },
+});
+
+test("a v22 draft settled before its tier is promoted to its run's one publish item", async () => {
+  const pending = await pendingDraftFor("promoted patch");
+  // Started now: once the first is promoted, no run starts in the first T1 window.
+  const waiting = await pendingDraftFor("waiting patch");
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: pending.draft.id } })).reason, "tier_pending");
+  // Without a promoted draft, a finished run makes no publish item.
+  await assert.rejects(inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${pending.run.runId}`,
+    runId: pending.run.runId, patchBody: pending.patch.text,
+    patchDigest: pending.patch.sha256, baseSha: pending.patch.baseSha,
+    expectedTreeId: sha1("tree"),
+  })), /must be the product of an active run/);
+
+  // A capability that cannot be issued leaves the draft pending, nothing opened.
+  await assert.rejects(inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    promotionInput(pending), {
+      resolve: resolveEngineeringAgentV22TierPendingDraft,
+      issue: async () => { throw new Error("injected_capability_failure"); },
+    })), /injected_capability_failure/);
+  const untouched = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: pending.draft.id } });
+  assert.deepEqual([untouched.state, untouched.reason], ["open", "tier_pending"]);
+  assert.equal(await prisma.engineeringAgentWorkItem.count({
+    where: { runId: pending.run.runId, kind: "publish" } }), 0);
+
+  const resolved = await inTx((tx) =>
+    resolveEngineeringAgentV22Product(tx, promotionInput(pending)));
+  assert.ok("publishWorkItemId" in resolved);
+  const promoted = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: pending.draft.id } });
+  assert.deepEqual([promoted.state, promoted.reason], ["expired", "publish_promoted"]);
+  const publish = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: resolved.publishWorkItemId } });
+  assert.deepEqual([publish.kind, publish.state, publish.patchBody, publish.patchDigest],
+    ["publish", "queued", pending.patch.text, pending.patch.sha256]);
+  // Still one product: a second publish item for the run is refused.
+  await assert.rejects(inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${pending.run.runId}:again`,
+    runId: pending.run.runId, patchBody: pending.patch.text,
+    patchDigest: pending.patch.sha256, baseSha: pending.patch.baseSha,
+    expectedTreeId: sha1("tree"),
+  })), /a run has one product/);
+
+  // The first T1 window holds one pull request: a second promotion waits.
+  await assert.rejects(inTx((tx) =>
+    resolveEngineeringAgentV22Product(tx, promotionInput(waiting))),
+  /the owner queue is full/);
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: waiting.draft.id } })).reason, "tier_pending");
+
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
+    workItemId: resolved.publishWorkItemId, mode: "write", leaseMs: 60_000,
+  }));
+  const bound = await settleAndBind(resolved.publishWorkItemId,
+    claim.fencingToken, pending.run.runId);
   await retireBinding(bound.bindingId);
 
-  const rejectedRun = await startRun();
-  await assert.rejects(
-    inTx((tx) => openEngineeringAgentV22Product(tx, {
-      runId: rejectedRun.runId, taskId: rejectedRun.cardId,
-      patch, publish: true,
-      candidate: { expectedTreeId: sha1("tree"),
-        baseCommitterDate: "1759000000 +1000" },
-    }, { open: openEngineeringAgentWorkItem,
-      issue: async () => { throw new Error("injected_capability_failure"); } })),
-    /injected_capability_failure/,
-  );
-  assert.equal(await prisma.engineeringAgentWorkItem.count({
-    where: { causeKey: `publish:${rejectedRun.runId}` },
-  }), 0);
-  await inTx((tx) => endEngineeringAgentRun(tx, {
-    runId: rejectedRun.runId, amuxAttemptId: rejectedRun.amuxAttemptId,
-    outcome: "no_change", halt: "none",
+  // Any other verdict leaves an ordinary owner draft, once.
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    { ...promotionInput(waiting), candidate: null })), { kept: true });
+  const kept = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: waiting.draft.id } });
+  assert.deepEqual([kept.state, kept.reason], ["open", "tier_two"]);
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    promotionInput(waiting))), { kept: false });
+  await inTx((tx) => decideEngineeringAgentT2Draft(tx, {
+    session: owner, workItemId: waiting.draft.id, decision: "rejected",
+    patchDigest: waiting.patch.sha256, baseSha: waiting.patch.baseSha,
   }));
+});
+
+test("a T2 draft promoted for the owner's review opens a review item only a review-draft publisher writes", async () => {
+  const pending = await pendingDraftFor("owner review patch");
+  const resolved = await inTx((tx) => resolveEngineeringAgentV22Product(tx, {
+    ...promotionInput(pending), ownerReview: true,
+    candidate: { ...promotionInput(pending).candidate, imageProofDigest: null },
+  }));
+  assert.ok("publishWorkItemId" in resolved);
+  const publish = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: resolved.publishWorkItemId } });
+  assert.deepEqual([publish.kind, publish.state, publish.causeKey],
+    ["publish", "queued", `publish_review:${pending.run.runId}`]);
+  const promotedAudit = await auditFor(pending.draft.id);
+  assert.ok(promotedAudit.some((row) => (row.metadata as { ownerReview?: boolean } | null)?.ownerReview === true));
+  // The cause key is what tells it apart, and it never changes.
+  await assert.rejects(prisma.engineeringAgentWorkItem.update({ where: { id: publish.id },
+    data: { causeKey: `publish:${pending.run.runId}` } }), /cannot change what it is about/);
+
+  const claimNext = (reviewDrafts?: boolean) => inTx((tx) =>
+    claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, reviewDrafts }));
+  const previous = process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+  try {
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
+    assert.equal(await claimNext(), null, "a publisher that does not open drafts never writes it");
+    assert.equal(await claimNext(false), null);
+    delete process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+    assert.equal(await claimNext(true), null, "the switch off holds it");
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
+    const work = await claimNext(true);
+    assert.ok(work && work.mode === "write");
+    assert.equal(work.workItemId, publish.id);
+    assert.equal(work.ownerReview, true);
+    // Turned off after the claim, the switch still stops the push: the last look refuses.
+    const incidentKey = "amux.incidentMode";
+    const incidentBefore = await prisma.appSetting.findUnique({ where: { key: incidentKey } });
+    try {
+      await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+      await prisma.appSetting.create({ data: { key: incidentKey, value: JSON.stringify({
+        version: 1, state: "normal", transition_id: null, changed_at: new Date().toISOString(),
+        reason: "engineering agent store fixture", ticket: "TEST" }) } });
+      const look = (env: Record<string, string | undefined>) => readEngineeringAgentLastLook(prisma,
+        { workItemId: publish.id, fencingToken: work.fencingToken, commitDigest: work.commitDigest },
+        { ...process.env, ...env });
+      assert.deepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: undefined }),
+        { verdict: "refuse", reason: "review_pr_off" });
+      assert.notDeepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: "on" }),
+        { verdict: "refuse", reason: "review_pr_off" });
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+      if (incidentBefore) await prisma.appSetting.create({ data: { key: incidentKey, value: incidentBefore.value } });
+    }
+    const bound = await settleAndBind(publish.id, work.fencingToken, pending.run.runId);
+    await retireBinding(bound.bindingId);
+  } finally {
+    if (previous === undefined) delete process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+    else process.env.ENGINEERING_AGENT_V22_REVIEW_PR = previous;
+  }
+});
+
+test("a v22 publish item never claimed closes only without a live capability", async () => {
+  const live = await startRun();
+  const liveItem = await inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${live.runId}`, runId: live.runId,
+    patchBody: "live patch", patchDigest: sha256("live patch"),
+    baseSha: sha1("base"), expectedTreeId: sha1("tree"),
+  }));
+  await inTx((tx) => issueEngineeringAgentCapability(tx, { workItemId: liveItem.workItemId,
+    capability: { baseSha: sha1("base"), patchDigest: sha256("live patch"),
+      expectedTreeId: sha1("tree"), commit: commitFields(live.runId, live.cardId) } }));
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId: liveItem.workItemId, reason: "tier_changed" })), { expired: false });
+  await refusedWith(inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId: liveItem.workItemId, reason: "Tier 2" })), "reason_invalid");
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
+    workItemId: liveItem.workItemId, mode: "write", leaseMs: 60_000 }));
+  const bound = await settleAndBind(liveItem.workItemId, claim.fencingToken, live.runId);
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: live.runId,
+    amuxAttemptId: live.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  await retireBinding(bound.bindingId);
+
+  // No live capability (here none was ever issued; a lapsed one is the same).
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${run.runId}`, runId: run.runId,
+    patchBody: "lapsed patch", patchDigest: sha256("lapsed patch"),
+    baseSha: sha1("base"), expectedTreeId: sha1("tree"),
+  }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId,
+    amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId, reason: "tier_changed" })), { expired: true });
+  const closed = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } });
+  assert.deepEqual([closed.state, closed.reason], ["expired", "tier_changed"]);
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId, reason: "tier_changed" })), { expired: false });
 });
 
 test("a publish consumes its one capability on the write claim, and settles where the core says", async () => {
@@ -610,14 +765,42 @@ test("work proven unwritten returns to the queue, and its next claim runs on a n
   assert.equal(requeued.state, "queued");
   const spent = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: first.capabilityId } });
   assert.ok(spent.consumedAt, "the first capability stays consumed");
+  // Nothing can claim it now, so the tier round finds it for a new capability.
+  assert.equal(await waitingWithoutCapability(workItemId), 1);
 
   const second = await issue(workItemId);
   assert.notEqual(second.capabilityId, first.capabilityId);
+  assert.equal(await waitingWithoutCapability(workItemId), 0);
   const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
   assert.equal(again.fencingToken, BigInt(2));
   const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
   await retireBinding(bound.bindingId);
+});
+
+test("a publish item proven unwritten after its claim may still close when judged again", async () => {
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) => openEngineeringAgentWorkItem(tx, {
+    kind: "publish", causeKey: `publish:${run.runId}:rejudged`, runId: run.runId,
+    patchBody: "rejudged patch", patchDigest: sha256("rejudged patch"),
+    baseSha: sha1("base"), expectedTreeId: sha1("tree"),
+  }));
+  const first = await inTx((tx) => issueEngineeringAgentCapability(tx, { workItemId,
+    capability: { baseSha: sha1("base"), patchDigest: sha256("rejudged patch"),
+      expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) } }));
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
+    workItemId, mode: "write", leaseMs: 60_000 }));
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId,
+    fencingToken: claim.fencingToken, outcome: "refused_before_write" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId,
+    amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  assert.deepEqual(await inTx((tx) => expireEngineeringAgentV22LapsedPublish(tx,
+    { workItemId, reason: "tier_changed" })), { expired: true });
+  const closed = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } });
+  assert.deepEqual([closed.state, closed.reason], ["expired", "tier_changed"]);
+  const spent = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: first.capabilityId } });
+  assert.ok(spent.consumedAt, "the spent capability stays consumed");
+  assert.equal(await waitingWithoutCapability(workItemId), 0);
 });
 
 test("the switches refuse claims, capabilities and publishes, but never the record of what happened", async () => {
@@ -684,6 +867,7 @@ test("the publisher claims its next work, and the last look can only refuse", as
   assert.equal(work.patchBody, "patch");
   assert.equal(work.commitDigest, issued.commitDigest);
   assert.equal(work.branch, `agent/engineering/${run.runId}`);
+  assert.equal(work.ownerReview, false, "an ordinary item is no review item");
   assert.equal(await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 })), null, "nothing else to do");
 
   const look = (fencingToken: bigint, commitDigest: string) =>
@@ -847,7 +1031,10 @@ test("a claim whose lease passed goes to a lookup, and a lost answer can be foun
     settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: lookup.fencingToken, outcome: "lookup_no_prior_write" }),
   );
   assert.equal(requeued.state, "queued");
+  // Its capability was spent on the lost claim: only a new one lets it be claimed.
+  assert.equal(await waitingWithoutCapability(workItemId), 1);
   await issue();
+  assert.equal(await waitingWithoutCapability(workItemId), 0);
   const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
   const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
   await retireBinding(bound.bindingId);

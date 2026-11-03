@@ -1,0 +1,3613 @@
+{
+  "observedAt": "2026-10-26",
+  "providers": [
+    {
+      "id": "activecampaign",
+      "name": "ActiveCampaign",
+      "category": "productivity",
+      "logo": "/plugins/providers/activecampaign.png",
+      "docs": "https://www.activecampaign.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "activecampaign"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "activecampaign"
+      ],
+      "logoOwner": "ActiveCampaign",
+      "origins": [
+        "https://mcp.app-us1.com"
+      ]
+    },
+    {
+      "id": "adobe",
+      "name": "Adobe",
+      "category": "design",
+      "logo": "/plugins/providers/adobe.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/adobe",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "adobe"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "adobe",
+        "adobe-for-creativity"
+      ],
+      "logoOwner": "adobe",
+      "origins": [
+        "https://adobe-creativity.adobe.io"
+      ]
+    },
+    {
+      "id": "aikido",
+      "name": "Aikido",
+      "category": "security",
+      "logo": "/plugins/providers/aikido.jpg",
+      "docs": "https://github.com/AikidoSec/aikido-claude-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "aikido"
+      ],
+      "logoOwner": "AikidoSec",
+      "origins": []
+    },
+    {
+      "id": "airtable",
+      "name": "Airtable",
+      "category": "productivity",
+      "logo": "/plugins/providers/airtable.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/airtable",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "airtable"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "airtable"
+      ],
+      "logoOwner": "Airtable",
+      "origins": [
+        "https://mcp.airtable.com"
+      ]
+    },
+    {
+      "id": "airwallex",
+      "name": "Airwallex",
+      "category": "productivity",
+      "logo": "/plugins/providers/airwallex.png",
+      "docs": "https://www.airwallex.com/docs",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "airwallex",
+        "airwallex-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "airwallex-agentos",
+        "airwallex-dev"
+      ],
+      "logoOwner": "airwallex",
+      "origins": [
+        "https://mcp.sandbox.airwallex.com",
+        "https://mcp.airwallex.com"
+      ]
+    },
+    {
+      "id": "aiven",
+      "name": "Aiven",
+      "category": "data",
+      "logo": "/plugins/providers/aiven.png",
+      "docs": "https://aiven.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "aiven"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "aiven"
+      ],
+      "logoOwner": "aiven",
+      "origins": [
+        "https://mcp.aiven.live"
+      ]
+    },
+    {
+      "id": "alloydb",
+      "name": "AlloyDB",
+      "category": "data",
+      "logo": "/plugins/providers/alloydb.png",
+      "docs": "https://cloud.google.com/alloydb",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "alloydb"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "alloydb-omni",
+      "name": "AlloyDB Omni",
+      "category": "data",
+      "logo": "/plugins/providers/alloydb-omni.png",
+      "docs": "https://github.com/gemini-cli-extensions/alloydb-omni",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "alloydb-omni"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "amazon-location-service",
+      "name": "Amazon Location Service",
+      "category": "data",
+      "logo": "/plugins/providers/amazon-location-service.png",
+      "docs": "https://github.com/awslabs/agent-plugins",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "amazon-location-service"
+      ],
+      "logoOwner": "awslabs",
+      "origins": []
+    },
+    {
+      "id": "amazon-selling-partner",
+      "name": "Amazon Selling Partner",
+      "category": "productivity",
+      "logo": "/plugins/providers/amazon-selling-partner.png",
+      "docs": "https://github.com/amzn/selling-partner-agentic-toolkit",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "amazon-selling-partner"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "amazon-selling-partner"
+      ],
+      "logoOwner": "amzn",
+      "origins": [
+        "https://sellingpartner-ai.amazon.com"
+      ]
+    },
+    {
+      "id": "amplitude",
+      "name": "Amplitude",
+      "category": "monitoring",
+      "logo": "/plugins/providers/amplitude.png",
+      "docs": "https://github.com/amplitude/mcp-marketplace",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "amplitude"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "amplitude"
+      ],
+      "logoOwner": "amplitude",
+      "origins": [
+        "https://mcp.amplitude.com"
+      ]
+    },
+    {
+      "id": "apollo",
+      "name": "Apollo",
+      "category": "productivity",
+      "logo": "/plugins/providers/apollo.png",
+      "docs": "https://www.apollo.io/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "apollo"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "apollo"
+      ],
+      "logoOwner": "apolloio",
+      "origins": [
+        "https://mcp.apollo.io"
+      ]
+    },
+    {
+      "id": "apollo-graphql",
+      "name": "Apollo GraphQL",
+      "category": "development",
+      "logo": "/plugins/providers/apollo-graphql.png",
+      "docs": "https://www.apollographql.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "apollo-graphql"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "apollo-skills"
+      ],
+      "logoOwner": "apollographql",
+      "origins": [
+        "https://mcp.apollographql.com"
+      ]
+    },
+    {
+      "id": "appwrite",
+      "name": "Appwrite",
+      "category": "development",
+      "logo": "/plugins/providers/appwrite.png",
+      "docs": "https://appwrite.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "appwrite"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "appwrite"
+      ],
+      "logoOwner": "appwrite",
+      "origins": [
+        "https://mcp.appwrite.io"
+      ]
+    },
+    {
+      "id": "asana",
+      "name": "Asana",
+      "category": "productivity",
+      "logo": "/plugins/providers/asana.png",
+      "docs": "https://developers.asana.com/docs/connecting-mcp-clients-to-asanas-v2-server",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "asana"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "asana"
+      ],
+      "logoOwner": "Asana",
+      "origins": [
+        "https://mcp.asana.com"
+      ]
+    },
+    {
+      "id": "atlan",
+      "name": "Atlan",
+      "category": "data",
+      "logo": "/plugins/providers/atlan.png",
+      "docs": "https://docs.atlan.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "atlan"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "atlan"
+      ],
+      "logoOwner": "atlanhq",
+      "origins": [
+        "https://mcp.atlan.com"
+      ]
+    },
+    {
+      "id": "atlassian",
+      "name": "Atlassian",
+      "category": "productivity",
+      "logo": "/plugins/providers/atlassian.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/atlassian-rovo",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "atlassian",
+        "atlassian-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "atlassian-rovo",
+        "atlassian"
+      ],
+      "logoOwner": "atlassian",
+      "origins": [
+        "https://mcp.atlassian.com"
+      ]
+    },
+    {
+      "id": "aws",
+      "name": "AWS",
+      "category": "development",
+      "logo": "/plugins/providers/aws.png",
+      "docs": "https://github.com/aws/agent-toolkit-for-aws",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "aws"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "aws-agents",
+        "databases-on-aws",
+        "deploy-on-aws",
+        "migration-to-aws"
+      ],
+      "logoOwner": "awslabs",
+      "origins": [
+        "https://knowledge-mcp.global.api.aws"
+      ]
+    },
+    {
+      "id": "aws-amplify",
+      "name": "Aws Amplify",
+      "category": "development",
+      "logo": "/plugins/providers/aws-amplify.png",
+      "docs": "https://github.com/awslabs/agent-plugins",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "aws-amplify"
+      ],
+      "logoOwner": "awslabs",
+      "origins": []
+    },
+    {
+      "id": "aws-core",
+      "name": "Aws Core",
+      "category": "development",
+      "logo": "/plugins/providers/aws-core.png",
+      "docs": "https://github.com/aws/agent-toolkit-for-aws",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "aws-core"
+      ],
+      "logoOwner": "aws",
+      "origins": []
+    },
+    {
+      "id": "aws-data-analytics",
+      "name": "Aws Data Analytics",
+      "category": "development",
+      "logo": "/plugins/providers/aws-data-analytics.png",
+      "docs": "https://github.com/aws/agent-toolkit-for-aws",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "aws-data-analytics"
+      ],
+      "logoOwner": "aws",
+      "origins": []
+    },
+    {
+      "id": "aws-serverless",
+      "name": "Aws Serverless",
+      "category": "development",
+      "logo": "/plugins/providers/aws-serverless.png",
+      "docs": "https://github.com/awslabs/agent-plugins",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "aws-serverless"
+      ],
+      "logoOwner": "awslabs",
+      "origins": []
+    },
+    {
+      "id": "aws-startup-advisor",
+      "name": "Aws Startup Advisor",
+      "category": "development",
+      "logo": "/plugins/providers/aws-startup-advisor.png",
+      "docs": "https://github.com/aws/agent-toolkit-for-aws",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "aws-startup-advisor"
+      ],
+      "logoOwner": "aws",
+      "origins": []
+    },
+    {
+      "id": "aws-transform",
+      "name": "Aws Transform",
+      "category": "development",
+      "logo": "/plugins/providers/aws-transform.png",
+      "docs": "https://github.com/awslabs/agent-plugins",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "aws-transform"
+      ],
+      "logoOwner": "awslabs",
+      "origins": []
+    },
+    {
+      "id": "azure",
+      "name": "Azure",
+      "category": "development",
+      "logo": "/plugins/providers/azure.png",
+      "docs": "https://github.com/microsoft/azure-skills",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "azure"
+      ],
+      "logoOwner": "microsoft",
+      "origins": []
+    },
+    {
+      "id": "bigdata",
+      "name": "Bigdata",
+      "category": "data",
+      "logo": "/plugins/providers/bigdata.png",
+      "docs": "https://docs.bigdata.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "bigdata"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "bigdata-com"
+      ],
+      "logoOwner": "Bigdata-com",
+      "origins": [
+        "https://mcp.bigdata.com"
+      ]
+    },
+    {
+      "id": "bigquery",
+      "name": "BigQuery",
+      "category": "data",
+      "logo": "/plugins/providers/bigquery.png",
+      "docs": "https://github.com/gemini-cli-extensions/bigquery-data-analytics",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "bigquery-data-analytics"
+      ],
+      "logoOwner": "googlecloudplatform",
+      "origins": []
+    },
+    {
+      "id": "blackrock",
+      "name": "BlackRock",
+      "category": "productivity",
+      "logo": "/plugins/providers/blackrock.png",
+      "docs": "https://github.com/blackrock/advisor-center-agent-skills",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "blackrock"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "blackrock-advisor-center-plugin"
+      ],
+      "logoOwner": "blackrock",
+      "origins": [
+        "https://ac360-mcp.blackrock.com"
+      ]
+    },
+    {
+      "id": "box",
+      "name": "Box",
+      "category": "productivity",
+      "logo": "/plugins/providers/box.png",
+      "docs": "https://github.com/box/skills",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "box"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "box"
+      ],
+      "logoOwner": "box",
+      "origins": [
+        "https://mcp.box.com"
+      ]
+    },
+    {
+      "id": "browser-use",
+      "name": "Browser Use",
+      "category": "productivity",
+      "logo": "/plugins/providers/browser-use.png",
+      "docs": "https://browser-use.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "browser-use"
+      ],
+      "logoOwner": "browser-use",
+      "origins": []
+    },
+    {
+      "id": "build-ios-apps",
+      "name": "Build Ios Apps",
+      "category": "development",
+      "logo": "/plugins/providers/build-ios-apps.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/build-ios-apps",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "build-ios-apps"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "buildkite",
+      "name": "Buildkite",
+      "category": "development",
+      "logo": "/plugins/providers/buildkite.png",
+      "docs": "https://buildkite.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "buildkite"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "buildkite"
+      ],
+      "logoOwner": "buildkite",
+      "origins": [
+        "https://mcp.buildkite.com"
+      ]
+    },
+    {
+      "id": "canva",
+      "name": "Canva",
+      "category": "design",
+      "logo": "/plugins/providers/canva.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/canva",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "canva"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "canva"
+      ],
+      "logoOwner": "canva-sdks",
+      "origins": [
+        "https://mcp.canva.com"
+      ]
+    },
+    {
+      "id": "chrome-devtools-mcp",
+      "name": "Chrome DevTools",
+      "category": "development",
+      "logo": "/plugins/providers/chrome-devtools-mcp.png",
+      "docs": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "chrome-devtools-mcp"
+      ],
+      "logoOwner": "ChromeDevTools",
+      "origins": []
+    },
+    {
+      "id": "circle-skills",
+      "name": "Circle Skills",
+      "category": "development",
+      "logo": "/plugins/providers/circle-skills.png",
+      "docs": "https://www.circle.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "circle-skills"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "circle-skills"
+      ],
+      "logoOwner": "circlefin",
+      "origins": [
+        "https://api.circle.com"
+      ]
+    },
+    {
+      "id": "circleback",
+      "name": "Circleback",
+      "category": "productivity",
+      "logo": "/plugins/providers/circleback.png",
+      "docs": "https://github.com/circlebackai/claude-code-plugin.git",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "circleback"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "circleback"
+      ],
+      "logoOwner": "circlebackai",
+      "origins": [
+        "https://circleback.ai"
+      ]
+    },
+    {
+      "id": "clickhouse",
+      "name": "ClickHouse",
+      "category": "data",
+      "logo": "/plugins/providers/clickhouse.png",
+      "docs": "https://github.com/ClickHouse/clickhouse-claude-code-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "clickhouse"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "clickhouse"
+      ],
+      "logoOwner": "ClickHouse",
+      "origins": [
+        "https://mcp.clickhouse.cloud"
+      ]
+    },
+    {
+      "id": "clickup",
+      "name": "Clickup",
+      "category": "productivity",
+      "logo": "/plugins/providers/clickup.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/clickup",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "clickup"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "clickup"
+      ],
+      "logoOwner": null,
+      "origins": [
+        "https://mcp.clickup.com"
+      ]
+    },
+    {
+      "id": "cloud-sql-mysql",
+      "name": "Cloud Sql Mysql",
+      "category": "data",
+      "logo": "/plugins/providers/cloud-sql-mysql.png",
+      "docs": "https://github.com/gemini-cli-extensions/cloud-sql-mysql",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "cloud-sql-mysql"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "cloud-sql-postgresql",
+      "name": "Cloud Sql Postgresql",
+      "category": "data",
+      "logo": "/plugins/providers/cloud-sql-postgresql.png",
+      "docs": "https://cloud.google.com/sql",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "cloud-sql-postgresql"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "cloud-sql-sqlserver",
+      "name": "Cloud Sql Sqlserver",
+      "category": "data",
+      "logo": "/plugins/providers/cloud-sql-sqlserver.png",
+      "docs": "https://github.com/gemini-cli-extensions/cloud-sql-sqlserver",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "cloud-sql-sqlserver"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "category": "development",
+      "logo": "/plugins/providers/cloudflare.svg",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/cloudflare",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "cloudflare"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "cloudflare"
+      ],
+      "logoOwner": "cloudflare",
+      "origins": [
+        "https://mcp.cloudflare.com"
+      ]
+    },
+    {
+      "id": "cloudinary",
+      "name": "Cloudinary",
+      "category": "design",
+      "logo": "/plugins/providers/cloudinary.jpg",
+      "docs": "https://cloudinary.com/documentation",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "cloudinary",
+        "cloudinary-2",
+        "cloudinary-3",
+        "cloudinary-4",
+        "cloudinary-5"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "cloudinary"
+      ],
+      "logoOwner": "cloudinary-devs",
+      "origins": [
+        "https://asset-management.mcp.cloudinary.com",
+        "https://environment-config.mcp.cloudinary.com",
+        "https://structured-metadata.mcp.cloudinary.com",
+        "https://analysis.mcp.cloudinary.com",
+        "https://mediaflows.mcp.cloudinary.com"
+      ]
+    },
+    {
+      "id": "cockroachdb",
+      "name": "CockroachDB",
+      "category": "data",
+      "logo": "/plugins/providers/cockroachdb.png",
+      "docs": "https://github.com/cockroachdb/claude-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "cockroachdb"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "cockroachdb"
+      ],
+      "logoOwner": "cockroachdb",
+      "origins": [
+        "https://cockroachlabs.cloud"
+      ]
+    },
+    {
+      "id": "codex-security",
+      "name": "Codex Security",
+      "category": "security",
+      "logo": "/plugins/providers/codex-security.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/codex-security",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "codex-security"
+      ],
+      "logoOwner": "openai",
+      "origins": []
+    },
+    {
+      "id": "codspeed",
+      "name": "Codspeed",
+      "category": "development",
+      "logo": "/plugins/providers/codspeed.png",
+      "docs": "https://codspeed.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "codspeed"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "codspeed"
+      ],
+      "logoOwner": "CodSpeedHQ",
+      "origins": [
+        "https://mcp.codspeed.io"
+      ]
+    },
+    {
+      "id": "confidence",
+      "name": "Confidence",
+      "category": "development",
+      "logo": "/plugins/providers/confidence.png",
+      "docs": "https://confidence.spotify.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "confidence",
+        "confidence-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "confidence"
+      ],
+      "logoOwner": "spotify",
+      "origins": [
+        "https://mcp.confidence.dev"
+      ]
+    },
+    {
+      "id": "consensus",
+      "name": "Consensus",
+      "category": "data",
+      "logo": null,
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/consensus",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "consensus"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "consensus"
+      ],
+      "logoOwner": null,
+      "origins": [
+        "https://mcp.consensus.app"
+      ]
+    },
+    {
+      "id": "context7",
+      "name": "Context7",
+      "category": "development",
+      "logo": "/plugins/providers/context7.png",
+      "docs": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/context7",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "context7"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "context7"
+      ],
+      "logoOwner": "upstash",
+      "origins": [
+        "https://mcp.context7.com"
+      ]
+    },
+    {
+      "id": "convex",
+      "name": "Convex",
+      "category": "data",
+      "logo": null,
+      "docs": "https://github.com/get-convex/convex-backend-skill",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "convex"
+      ],
+      "logoOwner": "get-convex",
+      "origins": []
+    },
+    {
+      "id": "creative-production",
+      "name": "Creative Production",
+      "category": "design",
+      "logo": "/plugins/providers/creative-production.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/creative-production",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "creative-production"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "data-agent-kit",
+      "name": "Data Agent Kit",
+      "category": "development",
+      "logo": "/plugins/providers/data-agent-kit.png",
+      "docs": "https://cloud.google.com/products/data-agent-kit",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "data-agent-kit"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "data-analytics",
+      "name": "Data Analytics",
+      "category": "data",
+      "logo": "/plugins/providers/data-analytics.svg",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/data-analytics",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "data-analytics"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "datadog",
+      "name": "Datadog",
+      "category": "development",
+      "logo": "/plugins/providers/datadog.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/datadog",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "datadog"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "datadog"
+      ],
+      "logoOwner": null,
+      "origins": [
+        "https://mcp.datadoghq.com"
+      ]
+    },
+    {
+      "id": "dataproc",
+      "name": "Dataproc",
+      "category": "data",
+      "logo": "/plugins/providers/dataproc.png",
+      "docs": "https://github.com/gemini-cli-extensions/dataproc",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "dataproc"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "desktop-commander",
+      "name": "Desktop Commander",
+      "category": "productivity",
+      "logo": null,
+      "docs": "https://desktopcommander.app",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "desktop-commander"
+      ],
+      "logoOwner": "wonderwhy-er",
+      "origins": []
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "category": "productivity",
+      "logo": "/plugins/providers/discord.png",
+      "docs": "https://github.com/anthropics/claude-plugins-official/tree/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/discord",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "discord"
+      ],
+      "logoOwner": "discord",
+      "origins": []
+    },
+    {
+      "id": "dominodatalab",
+      "name": "Dominodatalab",
+      "category": "development",
+      "logo": "/plugins/providers/dominodatalab.png",
+      "docs": "https://www.domino.ai",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "dominodatalab"
+      ],
+      "logoOwner": "dominodatalab",
+      "origins": []
+    },
+    {
+      "id": "dropbox",
+      "name": "Dropbox",
+      "category": "productivity",
+      "logo": "/plugins/providers/dropbox.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/dropbox",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "dropbox",
+        "dropbox-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "dropbox"
+      ],
+      "logoOwner": "dropbox",
+      "origins": [
+        "https://mcp.dropbox.com"
+      ]
+    },
+    {
+      "id": "exa",
+      "name": "Exa",
+      "category": "productivity",
+      "logo": "/plugins/providers/exa.png",
+      "docs": "https://exa.ai/docs/reference/exa-mcp",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "exa"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "exa"
+      ],
+      "logoOwner": "exa-labs",
+      "origins": [
+        "https://mcp.exa.ai"
+      ]
+    },
+    {
+      "id": "expo",
+      "name": "Expo",
+      "category": "development",
+      "logo": "/plugins/providers/expo.png",
+      "docs": "https://github.com/expo/skills/blob/main/plugins/expo/README.md",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "expo"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "expo"
+      ],
+      "logoOwner": "expo",
+      "origins": [
+        "https://mcp.expo.dev"
+      ]
+    },
+    {
+      "id": "fakechat",
+      "name": "Fakechat",
+      "category": "development",
+      "logo": null,
+      "docs": "https://github.com/anthropics/claude-plugins-official/tree/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/fakechat",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "fakechat"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "fiftyone",
+      "name": "Fiftyone",
+      "category": "data",
+      "logo": "/plugins/providers/fiftyone.png",
+      "docs": "https://docs.voxel51.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "fiftyone"
+      ],
+      "logoOwner": "voxel51",
+      "origins": []
+    },
+    {
+      "id": "figma",
+      "name": "Figma",
+      "category": "design",
+      "logo": "/plugins/providers/figma.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/figma",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "figma"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "figma"
+      ],
+      "logoOwner": "figma",
+      "origins": [
+        "https://mcp.figma.com"
+      ]
+    },
+    {
+      "id": "firebase",
+      "name": "Firebase",
+      "category": "data",
+      "logo": "/plugins/providers/firebase.png",
+      "docs": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/firebase",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "firebase"
+      ],
+      "logoOwner": "firebase",
+      "origins": []
+    },
+    {
+      "id": "firecrawl",
+      "name": "Firecrawl",
+      "category": "development",
+      "logo": "/plugins/providers/firecrawl.png",
+      "docs": "https://github.com/firecrawl/firecrawl-claude-plugin.git",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "firecrawl"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "firecrawl"
+      ],
+      "logoOwner": "firecrawl",
+      "origins": [
+        "https://mcp.firecrawl.dev"
+      ]
+    },
+    {
+      "id": "firestore-native",
+      "name": "Firestore",
+      "category": "data",
+      "logo": "/plugins/providers/firestore-native.png",
+      "docs": "https://github.com/gemini-cli-extensions/firestore-native",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "firestore-native"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "forge-skills",
+      "name": "Forge Skills",
+      "category": "development",
+      "logo": "/plugins/providers/forge-skills.png",
+      "docs": "https://developer.atlassian.com/platform/forge/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "forge-skills",
+        "forge-skills-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "forge-skills"
+      ],
+      "logoOwner": "atlassian",
+      "origins": [
+        "https://mcp.atlassian.com"
+      ]
+    },
+    {
+      "id": "fullstory",
+      "name": "Fullstory",
+      "category": "monitoring",
+      "logo": "/plugins/providers/fullstory.jpg",
+      "docs": "https://www.fullstory.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "fullstory"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "fullstory"
+      ],
+      "logoOwner": "fullstorydev",
+      "origins": [
+        "https://api.fullstory.com"
+      ]
+    },
+    {
+      "id": "gc-ai",
+      "name": "GC AI",
+      "category": "productivity",
+      "logo": "/plugins/providers/gc-ai.png",
+      "docs": "https://docs.gc.ai/api-reference/mcp/overview",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "gc-ai"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "gc-ai"
+      ],
+      "logoOwner": "GC-AI-Inc",
+      "origins": [
+        "https://app.gc.ai"
+      ]
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "category": "development",
+      "logo": "/plugins/providers/github.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/github",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "github"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "github"
+      ],
+      "logoOwner": "github",
+      "origins": [
+        "https://api.githubcopilot.com"
+      ]
+    },
+    {
+      "id": "gitkraken",
+      "name": "Gitkraken",
+      "category": "development",
+      "logo": "/plugins/providers/gitkraken.png",
+      "docs": "https://www.gitkraken.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "gitkraken"
+      ],
+      "logoOwner": "gitkraken",
+      "origins": []
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "category": "productivity",
+      "logo": "/plugins/providers/gitlab.png",
+      "docs": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/gitlab",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "gitlab"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "gitlab"
+      ],
+      "logoOwner": "gitlabhq",
+      "origins": [
+        "https://gitlab.com"
+      ]
+    },
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "category": "productivity",
+      "logo": "/plugins/providers/gmail.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/gmail",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "gmail"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "gmail"
+      ],
+      "logoOwner": "google",
+      "origins": [
+        "https://gmailmcp.googleapis.com"
+      ]
+    },
+    {
+      "id": "google-calendar",
+      "name": "Google Calendar",
+      "category": "productivity",
+      "logo": "/plugins/providers/google-calendar.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-calendar",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "google-calendar"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "google-calendar"
+      ],
+      "logoOwner": "google",
+      "origins": [
+        "https://calendarmcp.googleapis.com"
+      ]
+    },
+    {
+      "id": "knowledge-catalog",
+      "name": "Google Cloud Knowledge Catalog",
+      "category": "data",
+      "logo": "/plugins/providers/knowledge-catalog.png",
+      "docs": "https://github.com/gemini-cli-extensions/knowledge-catalog",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "knowledge-catalog"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "google-cloud-storage",
+      "name": "Google Cloud Storage",
+      "category": "development",
+      "logo": "/plugins/providers/google-cloud-storage.png",
+      "docs": "https://cloud.google.com/storage",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "google-cloud-storage"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "google-drive",
+      "name": "Google Drive",
+      "category": "productivity",
+      "logo": "/plugins/providers/google-drive.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-drive",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "google-drive"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "google-drive"
+      ],
+      "logoOwner": "google",
+      "origins": [
+        "https://drivemcp.googleapis.com"
+      ]
+    },
+    {
+      "id": "govtribe",
+      "name": "GovTribe",
+      "category": "productivity",
+      "logo": "/plugins/providers/govtribe.jpg",
+      "docs": "https://govtribe.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "govtribe"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "govtribe"
+      ],
+      "logoOwner": "GovTribe",
+      "origins": [
+        "https://govtribe.com"
+      ]
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana",
+      "category": "monitoring",
+      "logo": "/plugins/providers/grafana.jpg",
+      "docs": "https://grafana.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "grafana"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "grafana-cloud-mcp",
+        "grafana-mcp"
+      ],
+      "logoOwner": "grafana",
+      "origins": [
+        "https://mcp.grafana.com"
+      ]
+    },
+    {
+      "id": "granola",
+      "name": "Granola",
+      "category": "productivity",
+      "logo": "/plugins/providers/granola.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/granola",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "granola"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "granola"
+      ],
+      "logoOwner": null,
+      "origins": [
+        "https://mcp.granola.ai"
+      ]
+    },
+    {
+      "id": "greptile",
+      "name": "Greptile",
+      "category": "development",
+      "logo": "/plugins/providers/greptile.png",
+      "docs": "https://www.greptile.com/docs/mcp-v2/overview",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "greptile"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "greptile"
+      ],
+      "logoOwner": "greptileai",
+      "origins": [
+        "https://api.greptile.com"
+      ]
+    },
+    {
+      "id": "higgsfield",
+      "name": "Higgsfield",
+      "category": "design",
+      "logo": null,
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/higgsfield",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "higgsfield"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "higgsfield"
+      ],
+      "logoOwner": null,
+      "origins": [
+        "https://mcp.higgsfield.ai"
+      ]
+    },
+    {
+      "id": "honeycomb",
+      "name": "Honeycomb",
+      "category": "monitoring",
+      "logo": "/plugins/providers/honeycomb.png",
+      "docs": "https://www.honeycomb.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "honeycomb"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "honeycomb"
+      ],
+      "logoOwner": "honeycombio",
+      "origins": [
+        "https://mcp.honeycomb.io"
+      ]
+    },
+    {
+      "id": "hostinger",
+      "name": "Hostinger",
+      "category": "development",
+      "logo": "/plugins/providers/hostinger.png",
+      "docs": "https://www.hostinger.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "hostinger"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "hostinger"
+      ],
+      "logoOwner": "hostinger",
+      "origins": [
+        "https://mcp.hostinger.com"
+      ]
+    },
+    {
+      "id": "hubspot",
+      "name": "HubSpot",
+      "category": "productivity",
+      "logo": "/plugins/providers/hubspot.png",
+      "docs": "https://www.hubspot.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "hubspot"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "hubspot-sales"
+      ],
+      "logoOwner": "HubSpot",
+      "origins": [
+        "https://mcp.hubspot.com"
+      ]
+    },
+    {
+      "id": "hugging-face",
+      "name": "Hugging Face",
+      "category": "development",
+      "logo": "/plugins/providers/hugging-face.png",
+      "docs": "https://github.com/huggingface/skills.git",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "hugging-face"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "huggingface-skills"
+      ],
+      "logoOwner": "huggingface",
+      "origins": [
+        "https://huggingface.co"
+      ]
+    },
+    {
+      "id": "hunter",
+      "name": "Hunter",
+      "category": "productivity",
+      "logo": "/plugins/providers/hunter.png",
+      "docs": "https://hunter.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "hunter"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "hunter"
+      ],
+      "logoOwner": "hunter-io",
+      "origins": [
+        "https://mcp.hunter.io"
+      ]
+    },
+    {
+      "id": "imessage",
+      "name": "Imessage",
+      "category": "productivity",
+      "logo": null,
+      "docs": "https://github.com/anthropics/claude-plugins-official/tree/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/imessage",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "imessage"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "incident-io",
+      "name": "incident.io",
+      "category": "monitoring",
+      "logo": "/plugins/providers/incident-io.png",
+      "docs": "https://incident.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "incident-io"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "incident-io"
+      ],
+      "logoOwner": "incident-io",
+      "origins": [
+        "https://mcp.incident.io"
+      ]
+    },
+    {
+      "id": "intercom",
+      "name": "Intercom",
+      "category": "productivity",
+      "logo": "/plugins/providers/intercom.png",
+      "docs": "https://github.com/intercom/claude-plugin-external",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "intercom"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "intercom"
+      ],
+      "logoOwner": "intercom",
+      "origins": [
+        "https://mcp.intercom.com"
+      ]
+    },
+    {
+      "id": "laravel-boost",
+      "name": "Laravel Boost",
+      "category": "development",
+      "logo": null,
+      "docs": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/laravel-boost",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "laravel-boost"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "leadfeeder",
+      "name": "Leadfeeder",
+      "category": "productivity",
+      "logo": "/plugins/providers/leadfeeder.png",
+      "docs": "https://www.leadfeeder.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "leadfeeder"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "leadfeeder"
+      ],
+      "logoOwner": "Leadfeeder",
+      "origins": [
+        "https://mcp.leadfeeder.com"
+      ]
+    },
+    {
+      "id": "legalzoom",
+      "name": "LegalZoom",
+      "category": "productivity",
+      "logo": "/plugins/providers/legalzoom.jpg",
+      "docs": "https://www.legalzoom.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "legalzoom"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "legalzoom"
+      ],
+      "logoOwner": "legalzoom",
+      "origins": [
+        "https://www.legalzoom.com"
+      ]
+    },
+    {
+      "id": "linear",
+      "name": "Linear",
+      "category": "productivity",
+      "logo": "/plugins/providers/linear.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/linear",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "linear"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "linear"
+      ],
+      "logoOwner": "linear",
+      "origins": [
+        "https://mcp.linear.app"
+      ]
+    },
+    {
+      "id": "linq-alpha",
+      "name": "Linq Alpha",
+      "category": "productivity",
+      "logo": "/plugins/providers/linq-alpha.png",
+      "docs": "https://www.linqalpha.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "linq-alpha"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "linq-alpha"
+      ],
+      "logoOwner": "linq-lab",
+      "origins": [
+        "https://api.linqalpha.com"
+      ]
+    },
+    {
+      "id": "logfire",
+      "name": "Logfire",
+      "category": "monitoring",
+      "logo": "/plugins/providers/logfire.png",
+      "docs": "https://github.com/pydantic/skills/tree/main/plugins/logfire",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "logfire"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "logfire"
+      ],
+      "logoOwner": "pydantic",
+      "origins": [
+        "https://logfire-us.pydantic.dev"
+      ]
+    },
+    {
+      "id": "logrocket",
+      "name": "LogRocket",
+      "category": "monitoring",
+      "logo": "/plugins/providers/logrocket.png",
+      "docs": "https://logrocket.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "logrocket"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "logrocket"
+      ],
+      "logoOwner": "LogRocket",
+      "origins": [
+        "https://mcp.logrocket.com"
+      ]
+    },
+    {
+      "id": "looker",
+      "name": "Looker",
+      "category": "data",
+      "logo": "/plugins/providers/looker.png",
+      "docs": "https://github.com/gemini-cli-extensions/looker",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "looker"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "lovable",
+      "name": "Lovable",
+      "category": "development",
+      "logo": "/plugins/providers/lovable.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/lovable",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "lovable"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "lovable"
+      ],
+      "logoOwner": "lovablelabs",
+      "origins": [
+        "https://mcp.lovable.dev"
+      ]
+    },
+    {
+      "id": "lumen",
+      "name": "Lumen",
+      "category": "development",
+      "logo": "/plugins/providers/lumen.png",
+      "docs": "https://www.ory.sh",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "lumen"
+      ],
+      "logoOwner": "ory",
+      "origins": []
+    },
+    {
+      "id": "lusha",
+      "name": "Lusha",
+      "category": "productivity",
+      "logo": "/plugins/providers/lusha.png",
+      "docs": "https://www.lusha.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "lusha",
+        "lusha-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "lusha"
+      ],
+      "logoOwner": "lusha-oss",
+      "origins": [
+        "https://mcp.lusha.com"
+      ]
+    },
+    {
+      "id": "mapbox",
+      "name": "Mapbox",
+      "category": "data",
+      "logo": "/plugins/providers/mapbox.png",
+      "docs": "https://www.mapbox.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "mapbox",
+        "mapbox-2",
+        "mapbox-3"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "mapbox"
+      ],
+      "logoOwner": "mapbox",
+      "origins": [
+        "https://mcp-devkit.mapbox.com",
+        "https://mcp.mapbox.com",
+        "https://mcp-docs.mapbox.com"
+      ]
+    },
+    {
+      "id": "mercadopago",
+      "name": "Mercado Pago",
+      "category": "development",
+      "logo": "/plugins/providers/mercadopago.png",
+      "docs": "https://github.com/mercadopago/mercadopago-claude-marketplace/tree/main/plugins/mercadopago",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "mercadopago"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "mercadopago"
+      ],
+      "logoOwner": "mercadopago",
+      "origins": [
+        "https://mcp.mercadopago.com"
+      ]
+    },
+    {
+      "id": "microsoft-learn",
+      "name": "Microsoft Learn",
+      "category": "development",
+      "logo": "/plugins/providers/microsoft-learn.png",
+      "docs": "https://github.com/microsoftdocs/mcp",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "microsoft-learn"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "microsoft-docs"
+      ],
+      "logoOwner": "microsoft",
+      "origins": [
+        "https://learn.microsoft.com"
+      ]
+    },
+    {
+      "id": "teams",
+      "name": "Microsoft Teams",
+      "category": "productivity",
+      "logo": "/plugins/providers/teams.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/teams",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "teams"
+      ],
+      "logoOwner": "microsoft",
+      "origins": []
+    },
+    {
+      "id": "mintlify",
+      "name": "Mintlify",
+      "category": "development",
+      "logo": "/plugins/providers/mintlify.png",
+      "docs": "https://www.mintlify.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "mintlify"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "mintlify"
+      ],
+      "logoOwner": "mintlify",
+      "origins": [
+        "https://mintlify.com"
+      ]
+    },
+    {
+      "id": "miro",
+      "name": "Miro",
+      "category": "design",
+      "logo": "/plugins/providers/miro.png",
+      "docs": "https://miro.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "miro"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "miro"
+      ],
+      "logoOwner": "miroapp",
+      "origins": [
+        "https://mcp.miro.com"
+      ]
+    },
+    {
+      "id": "monday",
+      "name": "monday.com",
+      "category": "productivity",
+      "logo": "/plugins/providers/monday.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/monday-com",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "monday"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "monday-com",
+        "monday-crm"
+      ],
+      "logoOwner": "mondaycom",
+      "origins": [
+        "https://mcp.monday.com"
+      ]
+    },
+    {
+      "id": "mongodb",
+      "name": "MongoDB",
+      "category": "data",
+      "logo": "/plugins/providers/mongodb.jpg",
+      "docs": "https://www.mongodb.com/docs/mcp-server/overview/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "mongodb"
+      ],
+      "logoOwner": "mongodb",
+      "origins": []
+    },
+    {
+      "id": "mongodb-atlas",
+      "name": "MongoDB Atlas",
+      "category": "data",
+      "logo": "/plugins/providers/mongodb-atlas.jpg",
+      "docs": "https://www.mongodb.com/docs/mcp-server/get-started/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "mongodb-atlas"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "mongodb-atlas"
+      ],
+      "logoOwner": "mongodb",
+      "origins": [
+        "https://mcp.mongodb.com"
+      ]
+    },
+    {
+      "id": "neon",
+      "name": "Neon",
+      "category": "data",
+      "logo": "/plugins/providers/neon.png",
+      "docs": "https://github.com/neondatabase/agent-skills/tree/main/plugins/neon-postgres",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "neon"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "neon"
+      ],
+      "logoOwner": "neondatabase",
+      "origins": [
+        "https://mcp.neon.tech"
+      ]
+    },
+    {
+      "id": "netlify",
+      "name": "Netlify",
+      "category": "development",
+      "logo": "/plugins/providers/netlify.png",
+      "docs": "https://github.com/netlify/context-and-tools",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "netlify"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "netlify-skills"
+      ],
+      "logoOwner": "netlify",
+      "origins": [
+        "https://netlify-mcp.netlify.app"
+      ]
+    },
+    {
+      "id": "newrelic",
+      "name": "New Relic",
+      "category": "monitoring",
+      "logo": "/plugins/providers/newrelic.jpg",
+      "docs": "https://newrelic.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "newrelic"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "newrelic"
+      ],
+      "logoOwner": "newrelic",
+      "origins": [
+        "https://mcp.newrelic.com"
+      ]
+    },
+    {
+      "id": "nimble",
+      "name": "Nimble",
+      "category": "data",
+      "logo": "/plugins/providers/nimble.jpg",
+      "docs": "https://docs.nimbleway.com/integrations/agent-skills/plugin-installation",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "nimble"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "nimble"
+      ],
+      "logoOwner": "Nimbleway",
+      "origins": [
+        "https://mcp.nimbleway.com"
+      ]
+    },
+    {
+      "id": "notion",
+      "name": "Notion",
+      "category": "productivity",
+      "logo": "/plugins/providers/notion.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/notion",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "notion"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "notion"
+      ],
+      "logoOwner": "makenotion",
+      "origins": [
+        "https://mcp.notion.com"
+      ]
+    },
+    {
+      "id": "openai-developers",
+      "name": "OpenAI Developers",
+      "category": "development",
+      "logo": "/plugins/providers/openai-developers.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/openai-developers",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "openai-developers"
+      ],
+      "logoOwner": "openai",
+      "origins": []
+    },
+    {
+      "id": "oracledb",
+      "name": "Oracle Database",
+      "category": "data",
+      "logo": null,
+      "docs": "https://github.com/gemini-cli-extensions/oracledb",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "oracledb"
+      ],
+      "logoOwner": "gemini-cli-extensions",
+      "origins": []
+    },
+    {
+      "id": "outlook-calendar",
+      "name": "Outlook Calendar",
+      "category": "productivity",
+      "logo": "/plugins/providers/outlook-calendar.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/outlook-calendar",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "outlook-calendar"
+      ],
+      "logoOwner": "microsoft",
+      "origins": []
+    },
+    {
+      "id": "outlook-email",
+      "name": "Outlook Email",
+      "category": "productivity",
+      "logo": "/plugins/providers/outlook-email.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/outlook-email",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "outlook-email"
+      ],
+      "logoOwner": "microsoft",
+      "origins": []
+    },
+    {
+      "id": "pagerduty",
+      "name": "PagerDuty",
+      "category": "monitoring",
+      "logo": "/plugins/providers/pagerduty.png",
+      "docs": "https://github.com/PagerDuty/claude-code-plugins",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "pagerduty"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "pagerduty"
+      ],
+      "logoOwner": "PagerDuty",
+      "origins": [
+        "https://mcp.pagerduty.com"
+      ]
+    },
+    {
+      "id": "paypal",
+      "name": "Paypal",
+      "category": "development",
+      "logo": "/plugins/providers/paypal.png",
+      "docs": "https://developer.paypal.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "adapter",
+      "aliases": [
+        "paypal"
+      ],
+      "logoOwner": "paypal",
+      "origins": []
+    },
+    {
+      "id": "pendo",
+      "name": "Pendo",
+      "category": "productivity",
+      "logo": "/plugins/providers/pendo.png",
+      "docs": "https://github.com/pendo-io/claude-pendo-plugin/tree/main/plugins/pendo-analytics",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "pendo",
+        "pendo-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "pendo-analytics",
+        "pendo-guides",
+        "pendo-orchestrate"
+      ],
+      "logoOwner": "pendo-io",
+      "origins": [
+        "https://app.pendo.io",
+        "https://novus-api.pendo.io"
+      ]
+    },
+    {
+      "id": "pigment",
+      "name": "Pigment",
+      "category": "productivity",
+      "logo": "/plugins/providers/pigment.png",
+      "docs": "https://www.pigment.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "pigment"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "pigment"
+      ],
+      "logoOwner": "gopigment",
+      "origins": [
+        "https://pigment.app"
+      ]
+    },
+    {
+      "id": "pinecone",
+      "name": "Pinecone",
+      "category": "data",
+      "logo": "/plugins/providers/pinecone.png",
+      "docs": "https://github.com/pinecone-io/pinecone-claude-code-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "pinecone"
+      ],
+      "logoOwner": "pinecone-io",
+      "origins": []
+    },
+    {
+      "id": "planetscale",
+      "name": "PlanetScale",
+      "category": "data",
+      "logo": "/plugins/providers/planetscale.png",
+      "docs": "https://planetscale.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "planetscale"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "planetscale"
+      ],
+      "logoOwner": "planetscale",
+      "origins": [
+        "https://mcp.pscale.dev"
+      ]
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "category": "development",
+      "logo": "/plugins/providers/playwright.png",
+      "docs": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/playwright",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "playwright"
+      ],
+      "logoOwner": "microsoft",
+      "origins": []
+    },
+    {
+      "id": "posthog",
+      "name": "PostHog",
+      "category": "monitoring",
+      "logo": "/plugins/providers/posthog.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/posthog",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "posthog"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "posthog"
+      ],
+      "logoOwner": "PostHog",
+      "origins": [
+        "https://mcp.posthog.com"
+      ]
+    },
+    {
+      "id": "postiz",
+      "name": "Postiz",
+      "category": "productivity",
+      "logo": "/plugins/providers/postiz.png",
+      "docs": "https://postiz.com/agent",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "postiz"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "postiz"
+      ],
+      "logoOwner": "gitroomhq",
+      "origins": [
+        "https://mcp.postiz.com"
+      ]
+    },
+    {
+      "id": "postman",
+      "name": "Postman",
+      "category": "development",
+      "logo": "/plugins/providers/postman.png",
+      "docs": "https://github.com/postmanlabs/postman-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "postman"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "postman"
+      ],
+      "logoOwner": "postmanlabs",
+      "origins": [
+        "https://mcp.postman.com"
+      ]
+    },
+    {
+      "id": "prisma",
+      "name": "Prisma",
+      "category": "development",
+      "logo": "/plugins/providers/prisma.png",
+      "docs": "https://prisma.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "prisma"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "prisma"
+      ],
+      "logoOwner": "prisma",
+      "origins": [
+        "https://mcp.prisma.io"
+      ]
+    },
+    {
+      "id": "public-equity-investing",
+      "name": "Public Equity Investing",
+      "category": "finance",
+      "logo": "/plugins/providers/public-equity-investing.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/public-equity-investing",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "public-equity-investing"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "qt-development-skills",
+      "name": "Qt Development Skills",
+      "category": "development",
+      "logo": "/plugins/providers/qt-development-skills.png",
+      "docs": "https://www.qt.io/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "qt-development-skills"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "qt-development-skills"
+      ],
+      "logoOwner": "TheQtCompanyRnD",
+      "origins": [
+        "https://qt-docs-mcp.qt.io"
+      ]
+    },
+    {
+      "id": "quarkus-agent",
+      "name": "Quarkus Agent",
+      "category": "development",
+      "logo": "/plugins/providers/quarkus-agent.png",
+      "docs": "https://quarkus.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "quarkus-agent"
+      ],
+      "logoOwner": "quarkusio",
+      "origins": []
+    },
+    {
+      "id": "railway",
+      "name": "Railway",
+      "category": "development",
+      "logo": "/plugins/providers/railway.png",
+      "docs": "https://docs.railway.com/ai/claude-code-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "railway"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "railway"
+      ],
+      "logoOwner": "railwayapp",
+      "origins": [
+        "https://mcp.railway.com"
+      ]
+    },
+    {
+      "id": "render",
+      "name": "Render",
+      "category": "development",
+      "logo": "/plugins/providers/render.png",
+      "docs": "https://render.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "render"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "render"
+      ],
+      "logoOwner": "render-oss",
+      "origins": [
+        "https://mcp.render.com"
+      ]
+    },
+    {
+      "id": "resend",
+      "name": "Resend",
+      "category": "development",
+      "logo": "/plugins/providers/resend.jpg",
+      "docs": "https://resend.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "resend"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "resend"
+      ],
+      "logoOwner": "resend",
+      "origins": [
+        "https://mcp.resend.com"
+      ]
+    },
+    {
+      "id": "revenuecat",
+      "name": "RevenueCat",
+      "category": "development",
+      "logo": "/plugins/providers/revenuecat.png",
+      "docs": "https://www.revenuecat.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "revenuecat"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "revenuecat",
+        "rc"
+      ],
+      "logoOwner": "RevenueCat",
+      "origins": [
+        "https://mcp.revenuecat.ai"
+      ]
+    },
+    {
+      "id": "rootly",
+      "name": "Rootly",
+      "category": "monitoring",
+      "logo": "/plugins/providers/rootly.png",
+      "docs": "https://rootly.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "rootly"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "rootly"
+      ],
+      "logoOwner": "Rootly-AI-Labs",
+      "origins": [
+        "https://mcp.rootly.com"
+      ]
+    },
+    {
+      "id": "sagemaker-ai",
+      "name": "Sagemaker Ai",
+      "category": "development",
+      "logo": "/plugins/providers/sagemaker-ai.png",
+      "docs": "https://github.com/awslabs/agent-plugins",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "sagemaker-ai"
+      ],
+      "logoOwner": "awslabs",
+      "origins": []
+    },
+    {
+      "id": "salesforce-development",
+      "name": "Salesforce Development",
+      "category": "development",
+      "logo": "/plugins/providers/salesforce-development.png",
+      "docs": "https://github.com/forcedotcom/sf-skills/tree/main/plugins/builder/salesforce-development",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "salesforce-development"
+      ],
+      "logoOwner": "forcedotcom",
+      "origins": []
+    },
+    {
+      "id": "sanity",
+      "name": "Sanity",
+      "category": "development",
+      "logo": "/plugins/providers/sanity.png",
+      "docs": "https://www.sanity.io",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "sanity"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "sanity"
+      ],
+      "logoOwner": "sanity-io",
+      "origins": [
+        "https://mcp.sanity.io"
+      ]
+    },
+    {
+      "id": "sap-cds-mcp",
+      "name": "SAP Cloud Application Programming",
+      "category": "development",
+      "logo": "/plugins/providers/sap-cds-mcp.png",
+      "docs": "https://cap.cloud.sap/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "sap-cds-mcp",
+        "cds-mcp"
+      ],
+      "logoOwner": "cap-js",
+      "origins": []
+    },
+    {
+      "id": "sap-fiori-mcp-server",
+      "name": "SAP Fiori",
+      "category": "development",
+      "logo": "/plugins/providers/sap-fiori-mcp-server.png",
+      "docs": "https://github.com/SAP/open-ux-tools/tree/main/packages/fiori-mcp-server",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "sap-fiori-mcp-server"
+      ],
+      "logoOwner": "SAP",
+      "origins": []
+    },
+    {
+      "id": "sap-hana-cli",
+      "name": "SAP HANA",
+      "category": "data",
+      "logo": "/plugins/providers/sap-hana-cli.png",
+      "docs": "https://github.com/SAP-samples/hana-cli-claude-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "sap-hana-cli"
+      ],
+      "logoOwner": "SAP-samples",
+      "origins": []
+    },
+    {
+      "id": "sap-mdk-server",
+      "name": "SAP Mobile Development Kit",
+      "category": "development",
+      "logo": "/plugins/providers/sap-mdk-server.png",
+      "docs": "https://help.sap.com/docs/MDK",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "sap-mdk-server"
+      ],
+      "logoOwner": "SAP",
+      "origins": []
+    },
+    {
+      "id": "semgrep",
+      "name": "Semgrep",
+      "category": "security",
+      "logo": "/plugins/providers/semgrep.png",
+      "docs": "https://github.com/semgrep/mcp-marketplace.git",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "semgrep"
+      ],
+      "logoOwner": "semgrep",
+      "origins": []
+    },
+    {
+      "id": "sentry",
+      "name": "Sentry",
+      "category": "development",
+      "logo": "/plugins/providers/sentry.svg",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/sentry",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "sentry"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "sentry"
+      ],
+      "logoOwner": "getsentry",
+      "origins": [
+        "https://mcp.sentry.dev"
+      ]
+    },
+    {
+      "id": "serena",
+      "name": "Serena",
+      "category": "development",
+      "logo": null,
+      "docs": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/serena",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "serena"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "sharepoint",
+      "name": "SharePoint",
+      "category": "productivity",
+      "logo": "/plugins/providers/sharepoint.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/sharepoint",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [],
+      "kind": "managed",
+      "aliases": [
+        "sharepoint"
+      ],
+      "logoOwner": "microsoft",
+      "origins": []
+    },
+    {
+      "id": "shippo",
+      "name": "Shippo",
+      "category": "productivity",
+      "logo": "/plugins/providers/shippo.png",
+      "docs": "https://docs.goshippo.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "shippo"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "shippo"
+      ],
+      "logoOwner": "goshippo",
+      "origins": [
+        "https://mcp.shippo.com"
+      ]
+    },
+    {
+      "id": "shopify",
+      "name": "Shopify",
+      "category": "finance",
+      "logo": "/plugins/providers/shopify.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/shopify",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "shopify"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "shopify"
+      ],
+      "logoOwner": null,
+      "origins": [
+        "https://setup.shopify.com"
+      ]
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "category": "productivity",
+      "logo": "/plugins/providers/slack.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/slack",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "slack"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "slack"
+      ],
+      "logoOwner": "slackapi",
+      "origins": [
+        "https://mcp.slack.com"
+      ]
+    },
+    {
+      "id": "sonarqube",
+      "name": "Sonarqube",
+      "category": "security",
+      "logo": "/plugins/providers/sonarqube.png",
+      "docs": "https://www.sonarsource.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "sonarqube"
+      ],
+      "logoOwner": "SonarSource",
+      "origins": []
+    },
+    {
+      "id": "sonatype-guide",
+      "name": "Sonatype",
+      "category": "security",
+      "logo": "/plugins/providers/sonatype-guide.png",
+      "docs": "https://github.com/sonatype/sonatype-guide-claude-plugin.git",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "sonatype-guide"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "sonatype-guide"
+      ],
+      "logoOwner": "sonatype",
+      "origins": [
+        "https://mcp.guide.sonatype.com"
+      ]
+    },
+    {
+      "id": "spanner",
+      "name": "Spanner",
+      "category": "data",
+      "logo": "/plugins/providers/spanner.png",
+      "docs": "https://github.com/gemini-cli-extensions/spanner",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "spanner"
+      ],
+      "logoOwner": "GoogleCloudPlatform",
+      "origins": []
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "category": "finance",
+      "logo": "/plugins/providers/stripe.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/stripe",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "stripe"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "stripe"
+      ],
+      "logoOwner": "stripe",
+      "origins": [
+        "https://mcp.stripe.com"
+      ]
+    },
+    {
+      "id": "sumup",
+      "name": "SumUp",
+      "category": "development",
+      "logo": "/plugins/providers/sumup.png",
+      "docs": "https://www.sumup.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "sumup"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "sumup"
+      ],
+      "logoOwner": "sumup",
+      "origins": [
+        "https://mcp.sumup.com"
+      ]
+    },
+    {
+      "id": "supabase",
+      "name": "Supabase",
+      "category": "development",
+      "logo": "/plugins/providers/supabase.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/supabase",
+      "sources": [
+        "openai"
+      ],
+      "profiles": [
+        "supabase"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "supabase"
+      ],
+      "logoOwner": null,
+      "origins": [
+        "https://mcp.supabase.com"
+      ]
+    },
+    {
+      "id": "synthflow",
+      "name": "Synthflow",
+      "category": "productivity",
+      "logo": "/plugins/providers/synthflow.png",
+      "docs": "https://synthflow.ai",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "synthflow",
+        "synthflow-2"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "synthflow"
+      ],
+      "logoOwner": "SynthFlowAI",
+      "origins": [
+        "https://mcp.synthflow.ai",
+        "https://docs.synthflow.ai"
+      ]
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "category": "productivity",
+      "logo": null,
+      "docs": "https://github.com/anthropics/claude-plugins-official/tree/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/telegram",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "telegram"
+      ],
+      "logoOwner": null,
+      "origins": []
+    },
+    {
+      "id": "temporal",
+      "name": "Temporal",
+      "category": "development",
+      "logo": null,
+      "docs": "https://docs.temporal.io/ai",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "temporal"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "temporal"
+      ],
+      "logoOwner": "temporalio",
+      "origins": [
+        "https://temporal.mcp.kapa.ai"
+      ]
+    },
+    {
+      "id": "terraform",
+      "name": "Terraform",
+      "category": "development",
+      "logo": "/plugins/providers/terraform.png",
+      "docs": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/terraform",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "terraform"
+      ],
+      "logoOwner": "hashicorp",
+      "origins": []
+    },
+    {
+      "id": "twilio-developer-kit",
+      "name": "Twilio",
+      "category": "development",
+      "logo": "/plugins/providers/twilio-developer-kit.svg",
+      "docs": "https://www.twilio.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "twilio-developer-kit"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "twilio-developer-kit"
+      ],
+      "logoOwner": "twilio",
+      "origins": [
+        "https://mcp.twilio.com"
+      ]
+    },
+    {
+      "id": "ui5",
+      "name": "Ui5",
+      "category": "development",
+      "logo": "/plugins/providers/ui5.png",
+      "docs": "https://github.com/UI5/plugins-coding-agents",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "ui5"
+      ],
+      "logoOwner": "UI5",
+      "origins": []
+    },
+    {
+      "id": "ui5-modernization",
+      "name": "Ui5 Modernization",
+      "category": "development",
+      "logo": "/plugins/providers/ui5-modernization.png",
+      "docs": "https://github.com/UI5/plugins-coding-agents",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "ui5-modernization"
+      ],
+      "logoOwner": "UI5",
+      "origins": []
+    },
+    {
+      "id": "valtown",
+      "name": "Val Town",
+      "category": "development",
+      "logo": "/plugins/providers/valtown.png",
+      "docs": "https://val.town",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "valtown"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "valtown"
+      ],
+      "logoOwner": "val-town",
+      "origins": [
+        "https://api.val.town"
+      ]
+    },
+    {
+      "id": "vanguard-advisor-tools",
+      "name": "Vanguard Advisor Tools",
+      "category": "productivity",
+      "logo": "/plugins/providers/vanguard-advisor-tools.png",
+      "docs": "https://advisors.vanguard.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "vanguard-advisor-tools"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "vanguard-advisor-tools"
+      ],
+      "logoOwner": "Vanguard-oss",
+      "origins": [
+        "https://mcp.vanguard.com"
+      ]
+    },
+    {
+      "id": "vanta",
+      "name": "Vanta",
+      "category": "security",
+      "logo": "/plugins/providers/vanta.png",
+      "docs": "https://help.vanta.com/en/articles/14094979-connecting-to-vanta-mcp#h_887ce3f337",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "vanta",
+        "vanta-2",
+        "vanta-3"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "vanta",
+        "vanta-mcp-plugin"
+      ],
+      "logoOwner": "VantaInc",
+      "origins": [
+        "https://mcp.vanta.com",
+        "https://mcp.eu.vanta.com",
+        "https://mcp.aus.vanta.com"
+      ]
+    },
+    {
+      "id": "vercel",
+      "name": "Vercel",
+      "category": "development",
+      "logo": "/plugins/providers/vercel.png",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/vercel",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "vercel"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "vercel"
+      ],
+      "logoOwner": "vercel",
+      "origins": [
+        "https://mcp.vercel.com"
+      ]
+    },
+    {
+      "id": "windsor-ai",
+      "name": "Windsor.ai",
+      "category": "productivity",
+      "logo": "/plugins/providers/windsor-ai.png",
+      "docs": "https://windsor.ai",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "windsor-ai"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "windsor-ai"
+      ],
+      "logoOwner": "windsor-ai",
+      "origins": [
+        "https://mcp.windsor.ai"
+      ]
+    },
+    {
+      "id": "wingspan",
+      "name": "Wingspan",
+      "category": "productivity",
+      "logo": "/plugins/providers/wingspan.jpg",
+      "docs": "https://github.com/wingspanHQ/mcp-claude-plugin",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "wingspan"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "wingspan"
+      ],
+      "logoOwner": "wingspanHQ",
+      "origins": [
+        "https://api.wingspan.app"
+      ]
+    },
+    {
+      "id": "wix",
+      "name": "Wix",
+      "category": "development",
+      "logo": "/plugins/providers/wix.jpg",
+      "docs": "https://dev.wix.com/docs/wix-cli/guides/development/about-wix-skills",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "wix"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "wix"
+      ],
+      "logoOwner": "wix",
+      "origins": [
+        "https://mcp.wix.com"
+      ]
+    },
+    {
+      "id": "workos",
+      "name": "WorkOS",
+      "category": "security",
+      "logo": "/plugins/providers/workos.png",
+      "docs": "https://workos.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "workos"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "workos"
+      ],
+      "logoOwner": "workos",
+      "origins": [
+        "https://mcp.workos.com"
+      ]
+    },
+    {
+      "id": "you-com",
+      "name": "You.com",
+      "category": "productivity",
+      "logo": "/plugins/providers/you-com.jpg",
+      "docs": "https://you.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "you-com",
+        "you-com-2",
+        "you-com-3"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "youdotcom-agent-skills"
+      ],
+      "logoOwner": "youdotcom-oss",
+      "origins": [
+        "https://api.you.com"
+      ]
+    },
+    {
+      "id": "zapier",
+      "name": "Zapier",
+      "category": "productivity",
+      "logo": "/plugins/providers/zapier.png",
+      "docs": "https://github.com/zapier/zapier-mcp/tree/main/plugins/zapier",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "zapier"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "zapier"
+      ],
+      "logoOwner": "zapier",
+      "origins": [
+        "https://mcp.zapier.com"
+      ]
+    },
+    {
+      "id": "zocks-advisor",
+      "name": "Zocks",
+      "category": "productivity",
+      "logo": "/plugins/providers/zocks-advisor.png",
+      "docs": "https://github.com/zocks-communications/zocks-agent-plugins",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "zocks-advisor"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "zocks-advisor"
+      ],
+      "logoOwner": "zocks-communications",
+      "origins": [
+        "https://mcp.zocks.io"
+      ]
+    },
+    {
+      "id": "zoho-catalyst",
+      "name": "Zoho Catalyst",
+      "category": "development",
+      "logo": "/plugins/providers/zoho-catalyst.png",
+      "docs": "https://catalyst.zoho.com/",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "zoho-catalyst"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "catalyst-by-zoho"
+      ],
+      "logoOwner": "catalystbyzoho",
+      "origins": [
+        "https://catalyst.zohomcp.com"
+      ]
+    },
+    {
+      "id": "zoom",
+      "name": "Zoom",
+      "category": "productivity",
+      "logo": "/plugins/providers/zoom.svg",
+      "docs": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/zoom",
+      "sources": [
+        "openai",
+        "claude"
+      ],
+      "profiles": [
+        "zoom",
+        "zoom-2",
+        "zoom-3",
+        "zoom-4",
+        "zoom-5",
+        "zoom-6",
+        "zoom-7"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "zoom",
+        "zoom-plugin"
+      ],
+      "logoOwner": "zoom",
+      "origins": [
+        "https://mcp.zoom.us"
+      ]
+    },
+    {
+      "id": "zoominfo",
+      "name": "ZoomInfo",
+      "category": "productivity",
+      "logo": "/plugins/providers/zoominfo.png",
+      "docs": "https://www.zoominfo.com",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [
+        "zoominfo"
+      ],
+      "kind": "remote",
+      "aliases": [
+        "zoominfo"
+      ],
+      "logoOwner": "Zoominfo",
+      "origins": [
+        "https://mcp.zoominfo.com"
+      ]
+    },
+    {
+      "id": "zscaler",
+      "name": "Zscaler",
+      "category": "security",
+      "logo": "/plugins/providers/zscaler.png",
+      "docs": "https://github.com/zscaler/zscaler-mcp-server",
+      "sources": [
+        "claude"
+      ],
+      "profiles": [],
+      "kind": "local",
+      "aliases": [
+        "zscaler"
+      ],
+      "logoOwner": "zscaler",
+      "origins": []
+    }
+  ]
+}

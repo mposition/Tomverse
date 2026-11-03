@@ -101,8 +101,9 @@ export const amuxReviewApprovalHasEvidence = (input: {
   input.cardType === "task" &&
     (input.reviewPrNumber !== null ?
     input.artifactAvailable :
+    // A test Task leaves a patch and completes through its PR (2026-10-30).
     input.v4EvidenceVerified &&
-      ["design", "test", "review", "verify", "investigate", "operate"]
+      ["design", "review", "verify", "investigate", "operate"]
         .includes(input.taskRole ?? "")) : input.artifactAvailable);
 
 export const amuxV4ReviewEvidenceMatches = (input: {

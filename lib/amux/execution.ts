@@ -1,5 +1,6 @@
 import "server-only";
 
+import { amuxV22ExecutionRole, amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
@@ -43,7 +44,7 @@ import { AmuxV4TaskCatalogApprovalError,
 import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
-import { classifyAmuxExecutionPath,
+import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
@@ -64,18 +65,15 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   AMUX_V22_TASK_EXECUTION_ENV, amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
+  v22ExecutionSourceForProvider,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
-import { loadEngineeringAgentV22StoredCandidate } from
-  "@/lib/engineeringAgentV22StoredCandidate";
-import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
+import { v22PublishPreflightEligible } from
   "@/lib/engineeringAgentV22PublicationDecision";
 import { openEngineeringAgentV22Product } from
   "@/lib/engineeringAgentV22ProductStore";
-import { currentEngineeringAgentV22ImageProofDigest } from
-  "@/lib/engineeringAgentV22ImageEvidence";
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
 import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority,
@@ -93,6 +91,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxV22ReadOnlyApiUsageProjection,
   recordAmuxV22ReadOnlyApiUsage } from "@/lib/amux/cliUsageLedgerStore";
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
+import { amuxV22OwnerQuestionSettlementPlan } from "@/lib/amux/v22OwnerQuestionCore";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
@@ -499,7 +498,7 @@ export async function startAmuxV22TaskExecution(input: {
         return { started: false as const, reason: "cost_unverified" as const };
       }
       let publicationRunId: string | null = null;
-      if (publicationBaseSha && card.taskRole === "implement" &&
+      if (publicationBaseSha && amuxV22TaskWritesPatch(card.taskRole) &&
           (await readEngineeringAgentSwitches(tx)).publishAllowed) {
         try {
           // The engineering row is optional for Task execution. A full owner
@@ -510,6 +509,9 @@ export async function startAmuxV22TaskExecution(input: {
             1_000_000_000_000));
         } catch (error) {
           if (!(error instanceof EngineeringAgentStoreRefusedError)) throw error;
+          console.warn(JSON.stringify({ subsystem: "amux",
+            event: "v22_publication_skipped", taskId: input.taskId,
+            reason: `run_admission_${error.code}` }));
         }
       }
       const changed = await tx.amuxWorkItem.updateMany({ where: {
@@ -1277,8 +1279,8 @@ export async function recordAmuxV52Review(input: {
       if (!gradeGuard || !assignmentAudit?.entryHash ||
           assignmentAudit.action !== "amux.v22.worker.assigned" ||
           assignmentAudit.targetId !== assignment?.id ||
-          assignment?.role !== "implement" ||
-          assignment.grade !== task.executionGrade ||
+          !amuxV22TaskWritesPatch(assignment?.role) ||
+          assignment!.grade !== task.executionGrade ||
           assignment.provider !== evidence.authorVendor)
         return { recorded: false as const,
           reason: "review_assignment_unverified" as const };
@@ -1350,19 +1352,18 @@ export async function settleAmuxV22TaskExecution(input: {
 }) {
   const patch = input.outcome === "succeeded" ?
     await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
-  // Tier work and GitHub reads happen outside the short settlement transaction.
-  // Any missing evidence keeps the result private; it never becomes a worker
-  // assertion that the patch is T1.
-  const publication = v22PublishPreflightEligible({
+  // Settlement reads no tier: a patch the run may still publish is stored as
+  // a `tier_pending` draft, and the publisher's round reads its tier with
+  // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
+  const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 43 };
+  const publicationEligible = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
     patchPresent: patch !== null,
     publicationEnabled: amuxV22EngineeringPublicationEnabled(
       process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
-  }) ?
-    await loadEngineeringAgentV22StoredCandidate(input.attemptId)
-      .catch(() => null) : null;
-  return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 },
+  });
+  return withAmuxDbBoundary(settleBoundary,
     async (tx, context) => {
       const now = context.dbNow;
       const runtime = await lockRuntime(tx, input.worker);
@@ -1383,6 +1384,14 @@ export async function settleAmuxV22TaskExecution(input: {
           task.status !== "doing" || task.owner !== input.worker ||
           task.revision !== input.taskRevision)
         return { settled: false as const, reason: "fenced_out" as const };
+      // A run that ended with an owner question (recorded with its result)
+      // is not finished: no review, no publication product, no grade
+      // decision on its partial change. The Task waits for the answer.
+      const recordedQuestion = await tx.amuxV22TaskQuestion.findUnique({
+        where: { attemptId: attempt.id }, select: { id: true, state: true } });
+      const ownerQuestion = input.outcome === "succeeded" ?
+        recordedQuestion : null;
+      const questionPlan = amuxV22OwnerQuestionSettlementPlan(ownerQuestion);
       const settlementAssignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
         select: { id: true, role: true, provider: true, grade: true,
@@ -1407,12 +1416,15 @@ export async function settleAmuxV22TaskExecution(input: {
         return { settled: false as const,
           reason: "assignment_audit_unverified" as const };
       const pathDecision = gradeGuard && settlementAssignment &&
-        input.outcome !== "blocked" ?
+        input.outcome !== "blocked" && !ownerQuestion ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
           input.changedPaths, patch?.files ?? null) : "pass";
-      const reviewRequired = gradeGuard &&
-        settlementAssignment?.role === "implement" &&
-        input.outcome === "succeeded" && pathDecision === "pass";
+      const reviewRequired = !ownerQuestion && amuxV52ReviewRequired({ gradeGuard,
+        role: settlementAssignment ?
+          amuxV22ExecutionRole(settlementAssignment.role) : null,
+        outcome: input.outcome,
+        pathDecision, patchPresent: patch !== null,
+        changedPaths: input.changedPaths });
       const reviewRecord = reviewRequired ?
         await tx.amuxV52ReviewRecord.findUnique({
           where: { attemptId: attempt.id },
@@ -1422,7 +1434,7 @@ export async function settleAmuxV22TaskExecution(input: {
         }) : null;
       if (reviewRequired && (!reviewRecord?.auditLog.entryHash ||
           !patch || reviewRecord.baseSha !== patch.baseSha ||
-          reviewRecord.authorVendor !== settlementAssignment.provider ||
+          reviewRecord.authorVendor !== settlementAssignment?.provider ||
           !["accept", "reject", "unknown"].includes(reviewRecord.verdict)))
         return { settled: false as const, reason: "review_unverified" as const };
       const priorReviewRejections = reviewRecord ?
@@ -1520,8 +1532,11 @@ export async function settleAmuxV22TaskExecution(input: {
         budgetBound: !!settlementRecovery?.riskAcceptanceId,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
+        // The assignment's provider names the CLI that ran it; an unknown
+        // provider matches no source and never settles.
         expectedExecutionSource: apiExecutionReceipt ?
-          "anthropic_messages_api" : "claude_result",
+          "anthropic_messages_api" :
+          v22ExecutionSourceForProvider(settlementAssignment?.provider ?? "anthropic"),
       }) && (!apiExecutionReceipt || (events.length === 1 &&
         v22ReadOnlyApiReceiptMatchesUsage({ attemptId: attempt.id,
           outcome: input.outcome,
@@ -1539,7 +1554,7 @@ export async function settleAmuxV22TaskExecution(input: {
           bodyPurgedAt: true },
       });
       if (!v22SettlementPatchMatches({ taskId: task.id,
-        readPatch: patch, storedPatch }))
+        outcome: input.outcome, readPatch: patch, storedPatch }))
         return { settled: false as const,
           reason: "publication_state_changed" as const };
       let escalationReceipt: Awaited<ReturnType<
@@ -1582,7 +1597,7 @@ export async function settleAmuxV22TaskExecution(input: {
         where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
         select: { id: true, kind: true, patchDigest: true, baseSha: true },
       }) : null;
-      if (patch && effectivePathDecision === "pass" &&
+      if (patch && !ownerQuestion && effectivePathDecision === "pass" &&
           (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({
           where: { id: attempt.v22AssignmentId },
@@ -1592,8 +1607,8 @@ export async function settleAmuxV22TaskExecution(input: {
             !["shadow", "t1"].includes(run.modeAtStart) ||
             run.cardId !== task.id || run.baseSha !== patch.baseSha ||
             patch.taskId !== task.id ||
-            assignment?.role !== "implement" ||
-            assignment.workItemId !== task.id)
+            !amuxV22TaskWritesPatch(assignment?.role) ||
+            assignment!.workItemId !== task.id)
           return { settled: false as const,
             reason: "publication_state_changed" as const };
         if (product && (product.patchDigest !== patch.sha256 ||
@@ -1601,23 +1616,14 @@ export async function settleAmuxV22TaskExecution(input: {
           return { settled: false as const,
             reason: "publication_product_conflict" as const };
         if (!product) {
-          const publish = v22PublishCandidateMatches({
-            policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
-            modeAtStart: run.modeAtStart, runId: run.id,
-            taskId: task.id, baseSha: patch.baseSha,
-            patchDigest: patch.sha256, publication,
-            currentImageProofDigest:
-              currentEngineeringAgentV22ImageProofDigest(),
-          }) &&
-            amuxV22EngineeringPublicationEnabled(
-              process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
+          const tierPending = publicationEligible &&
+            run.modeAtStart === "t1" &&
             (await readEngineeringAgentSwitches(tx)).publishAllowed &&
             await readAmuxV22PublicPrConsent(task.id, tx);
           const engineeringTx = engineeringAgentTransactionInAmux(
             context.attachedTransaction);
           product = await openEngineeringAgentV22Product(engineeringTx, {
-            runId: run.id, taskId: task.id, patch, publish,
-            candidate: publication?.ok ? publication.candidate : null,
+            runId: run.id, patch, tierPending,
           });
         }
       }
@@ -1634,7 +1640,8 @@ export async function settleAmuxV22TaskExecution(input: {
         });
       }
       const budget = settlementDestinationForBudget({
-        requested_status: effectivePathDecision === "escalate" ? "todo" :
+        requested_status: questionPlan ? questionPlan.toStatus :
+          effectivePathDecision === "escalate" ? "todo" :
           reviewDisposition ? reviewDisposition.status :
           input.outcome === "succeeded" ? "review" :
           input.outcome === "failed" ? "todo" : "blocked",
@@ -1648,7 +1655,8 @@ export async function settleAmuxV22TaskExecution(input: {
         budget.to_status;
       const gradeEscalated = effectivePathDecision === "escalate" &&
         next === "todo";
-      const blockedReason = effectivePathDecision === "escalate" ?
+      const blockedReason = questionPlan ? questionPlan.reason :
+        effectivePathDecision === "escalate" ?
         "attempt_budget_exhausted" :
         effectivePathDecision === "blocked" ?
           (pathDecision === "escalate" ? escalationBlockReason :
@@ -1691,8 +1699,11 @@ export async function settleAmuxV22TaskExecution(input: {
         workerName: input.worker, instanceId: input.instanceId,
         generation: input.generation, status: "busy",
       }, data: { status: "idle", dispatchReady: false } });
-      if ((next === "review" && (!reviewRequired ||
-          product?.kind !== "publish")) || next === "blocked")
+      // An open owner question waits for its answer, not for a person to
+      // recover the Task; only a question over the limit opens escalation.
+      if (((next === "review" && (!reviewRequired ||
+          product?.kind !== "publish")) || next === "blocked") &&
+          (!questionPlan || questionPlan.openEscalation))
         await openAmuxHumanEscalation(tx, { taskId: task.id,
           specialty: next === "review" ? AMUX_DEFAULT_REVIEW_SPECIALTY :
             "execution-recovery",
@@ -1700,6 +1711,16 @@ export async function settleAmuxV22TaskExecution(input: {
             blockedReason,
           openedBy: input.worker });
       await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
+      // A question whose run this settlement does not park is closed, so it
+      // never holds the Task's one live question slot.
+      if (recordedQuestion?.state === "open" && !ownerQuestion)
+        await tx.amuxV22TaskQuestion.update({ where: { id: recordedQuestion.id },
+          data: { state: "cancelled" } });
+      // The answer a resumed run read is kept until a run of the Task settles,
+      // so a resumed run that died first still hands it to the next one.
+      await tx.amuxV22TaskQuestion.updateMany({ where: {
+        taskId: task.id, state: "resumed",
+        answerText: { not: null } }, data: { answerText: null } });
       await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.v22.execution.settled", targetType: "AmuxWorkItem",
         targetId: task.id, summary: "Settled an assignment-bound AMUX v22 Task.",
@@ -1713,8 +1734,7 @@ export async function settleAmuxV22TaskExecution(input: {
               effectivePathDecision) : null,
           v52ReviewJobId: reviewRecord?.jobId ?? null,
           v52ReviewVerdict: reviewRecord?.verdict ?? null,
-          imageProofDigest: product?.kind === "publish" &&
-            publication?.ok ? publication.imageProofDigest : null },
+          ownerQuestionId: ownerQuestion?.id ?? null },
       });
       if (run?.status === "active") {
         await endEngineeringAgentRun(
@@ -1749,7 +1769,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
     const changed = await withAmuxDbBoundary(
       { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
         prismaCallCeiling:
-          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 10 },
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 11 },
       async (tx, context) => {
         const now = context.dbNow;
         const runtime = await lockRuntime(tx, candidate.worker);
@@ -1773,6 +1793,10 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             endedBy: "system:amux-v22-execution-reaper",
             reason: "outcome_unknown" },
         });
+        // An owner question this run recorded is not parked by an unknown
+        // outcome; it is closed so it never holds the Task's question slot.
+        await tx.amuxV22TaskQuestion.updateMany({ where: {
+          attemptId: attempt.id, state: "open" }, data: { state: "cancelled" } });
         if (runtime?.instanceId === attempt.workerInstanceId &&
             runtime.generation === attempt.workerGeneration &&
             runtime.status === "busy")

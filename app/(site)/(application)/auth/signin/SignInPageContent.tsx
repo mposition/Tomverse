@@ -1,6 +1,6 @@
 "use client";
 
-import { signIn, useSession } from "next-auth/react";
+import { getProviders, signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -46,6 +46,7 @@ import {
 export type AuthScreenMode = "signin" | "signup";
 
 const OAUTH_PROVIDER_LABELS: Record<string, string> = {
+    apple: "Apple",
     google: "Google",
     "azure-ad": "Microsoft",
 };
@@ -399,7 +400,14 @@ function SignInButtons({
         }
     };
 
-    const startOAuth = async (provider: "google" | "azure-ad") => {
+    const [appleAvailable, setAppleAvailable] = useState(false);
+    useEffect(() => {
+        let active = true;
+        void getProviders().then(providers => { if (active) setAppleAvailable(Boolean(providers?.apple)); }).catch(() => {});
+        return () => { active = false; };
+    }, []);
+
+    const startOAuth = async (provider: "google" | "azure-ad" | "apple") => {
         markSignupStarted(provider);
         rememberAuthCallbackUrl(callbackUrl);
         let attemptId: string | null = null;
@@ -415,7 +423,7 @@ function SignInButtons({
         await signIn(
             provider,
             { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
-            oauthAuthorizationParams
+            provider === "apple" ? undefined : oauthAuthorizationParams
         );
     };
 
@@ -527,6 +535,14 @@ function SignInButtons({
                     onChange={setConsentChoice}
                 />
             ) : null}
+
+            {appleAvailable && (
+                <button type="button" onClick={() => void startOAuth("apple")} className={providerButtonClass}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/auth/apple.svg" className="h-5 w-5" alt="Apple" />
+                    {t("auth.apple")}
+                </button>
+            )}
 
             {/* Google */}
             <button

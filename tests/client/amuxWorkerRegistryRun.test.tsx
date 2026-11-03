@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   runAmuxWorkerRegistryReread,
   runAmuxWorkerSeedRegistration,
+  runAmuxWorkerRegistration,
   runAmuxWorkerStateChange,
   type AmuxWorkerChangeRequest,
   type AmuxWorkerRegistryIo,
@@ -12,11 +13,15 @@ import {
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import {
   AMUX_WORKER_REGISTRY_V31_SEED,
-  amuxWorkerProviderClassOf,
   buildAmuxWorkerRegistryAdminView,
   parseAmuxWorkerRegistryAdminView,
   type AmuxWorkerRegistryAdminView,
 } from "@/lib/amux/workerRegistryCore";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name: string) =>
+  name.slice(0, name.indexOf("-")) as import("@/lib/amux/workerRegistryCore").AmuxWorkerProviderClass;
+
 
 /**
  * The requests behind AMUX › Operations settings › Workers, executed with a
@@ -62,7 +67,7 @@ const NETWORK: AdminApiFailure = { kind: "network", message: "network" } as unkn
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-const SEED = AMUX_WORKER_REGISTRY_V31_SEED.map(({ workerName, roleCeiling, desiredState }) => ({ workerName, roleCeiling, desiredState }));
+const SEED = AMUX_WORKER_REGISTRY_V31_SEED.map(({ workerName, providerClass, roleCeiling, desiredState }) => ({ workerName, providerClass, roleCeiling, desiredState }));
 
 const receipt = (entry: AmuxWorkerChangeRequest) =>
   json(200, { workerName: entry.workerName, revision: 1, action: "amux.worker.register", eventId: "event-1", sequence: "1", createdAt: "2026-10-12T00:00:00.000Z" });
@@ -203,7 +208,8 @@ test("the GET body is accepted only in its exact shape", () => {
     "x",
     { ...body, writesLatch: "yes" },
     { ...body, rows: [{ ...body.rows[0], desiredState: "autonomous" }] },
-    { ...body, rows: [{ ...body.rows[0], providerClass: "codex" }] },
+    { ...body, rows: [{ ...body.rows[0], providerClass: "devin" }] },
+    { ...body, seed: body.seed.map((entry: { providerClass: string }, index: number) => (index === 0 ? { ...entry, providerClass: "codex" } : entry)) },
     { ...body, rows: [{ ...body.rows[0], reasons: ["because"] }] },
     { ...body, seed: body.seed.slice(1) },
     { ...body, seed: body.seed.map((entry: { desiredState: string }, index: number) => (index === 7 ? { ...entry, desiredState: "active" } : entry)) },
@@ -218,6 +224,7 @@ test("the GET body is accepted only in its exact shape", () => {
 
 const REQUEST: AmuxWorkerChangeRequest = {
   workerName: "cursor-impl",
+  providerClass: "cursor",
   roleCeiling: "implementation",
   desiredState: "active",
   expectedRevision: 1,
@@ -295,3 +302,23 @@ for (const [label, answer] of [
     assert.equal(last("notice"), "outcome_unknown");
   });
 }
+
+test("registering a new worker sends its chosen CLI once, waiting to be turned on, at revision 0", async () => {
+  // Owner decision 2026-10-27: the name does not carry the CLI.
+  const posted: AmuxWorkerChangeRequest[] = [];
+  const io: AmuxWorkerRegistryIo = {
+    post: async (request) => {
+      posted.push(request);
+      return json(200, { workerName: request.workerName, revision: 1, action: "amux.worker.register", eventId: "event-1" });
+    },
+    read: async () => FULL,
+    failureOf: async () => FAILURE,
+    networkFailure: () => NETWORK,
+  };
+  const updates: AmuxWorkerRegistryUpdate[] = [];
+  await runAmuxWorkerRegistration({ workerName: "kimi-impl", providerClass: "copilot", roleCeiling: "implementation" }, io,
+    (changes) => updates.push(changes));
+  assert.deepEqual(posted, [{ workerName: "kimi-impl", providerClass: "copilot", roleCeiling: "implementation",
+    desiredState: "requested", expectedRevision: 0 }]);
+  assert.equal([...updates].reverse().find((changes) => "notice" in changes)?.notice, "done");
+});

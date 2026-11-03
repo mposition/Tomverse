@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 import {
   listSupportTriageModelOptions,
-  readSupportTriageLlmModelSetting,
+  resolveSupportTriageLlmModel,
   resolveSupportTriageEnabled,
   SupportTriageModelRefused,
   writeSupportTriageEnabledSetting,
@@ -20,7 +20,7 @@ import {
 /**
  * The support-triage switch and LLM model, set in the Admin console. GET for
  * any administrator; PUT for the owner with a recent sign-in, audited. A null
- * model id clears the choice (the environment variable applies again).
+ * model id saves Off, which the environment variable cannot turn back on.
  */
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 // Either field or both; an absent field is left as it is.
@@ -39,13 +39,19 @@ export async function GET(request: Request) {
       minute: 30,
       day: 600,
     });
-    const [modelId, options, switchState] = await Promise.all([
-      readSupportTriageLlmModelSetting(),
+    const [model, options, switchState] = await Promise.all([
+      resolveSupportTriageLlmModel(process.env),
       listSupportTriageModelOptions(),
       resolveSupportTriageEnabled(process.env),
     ]);
     return Response.json(
-      { modelId, options, enabled: switchState.enabled, enabledSource: switchState.source },
+      {
+        modelId: model.modelId,
+        modelSource: model.source,
+        options,
+        enabled: switchState.enabled,
+        enabledSource: switchState.source,
+      },
       { headers }
     );
   } catch (error) {

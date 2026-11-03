@@ -10,13 +10,18 @@ import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
-import { AMUX_V22_TASK_EXECUTION_ENV,
+import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
   AMUX_V22_SEALED_DELIVERY_MARKER,
+  amuxV22DeliveryBaseShaEnabled,
   amuxV22DeliveryBudgetMicrousd,
   amuxV22TaskExecutionEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
   "@/lib/amux/v22ExternalAuthorityCore";
+import { AMUX_V22_OWNER_QUESTION_RULES, buildAmuxV22ResumeSection } from
+  "@/lib/amux/v22OwnerQuestionCore";
+import { AMUX_V22_RESUME_ROWS_PRISMA_CALLS, openAmuxV22ResumeContext,
+  readAmuxV22ResumeRows } from "@/lib/amux/v22OwnerQuestionService";
 import { amuxV22WorkerSafeStopFenced } from
   "@/lib/amux/v22LegacySafeStopFence";
 import { readAmuxV22RecoveryAuthority } from
@@ -36,6 +41,8 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
+import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
+  amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -265,9 +272,10 @@ export type AmuxPulledDelivery =
           modelId: string;
           role: string;
           budgetMicrousd: number;
+          baseSha?: string;
           gradeGuard?: true;
           executionGrade?: string;
-          reviewAuthor?: "claude";
+          reviewAuthor?: string;
           reviewAuthorVendor?: string;
           reviewScope?: string;
           reviewFeedbackJobId?: string;
@@ -293,8 +301,10 @@ export async function pullAmuxWorkDelivery(input: {
   // another Task's sealed brief with stale keys.
   const v22Enabled = amuxV22TaskExecutionEnabled(
     process.env[AMUX_V22_TASK_EXECUTION_ENV]);
-  const { sealedCandidate, candidateCard } = v22Enabled ?
-    await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.deliveryKeyRead, async (tx) => {
+  const { sealedCandidate, candidateCard, resumeRows } = v22Enabled ?
+    await withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.deliveryKeyRead,
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryKeyRead.prismaCallCeiling +
+        AMUX_V22_RESUME_ROWS_PRISMA_CALLS }, async (tx) => {
       const sealedCandidate = await tx.amuxWorkDelivery.findFirst({
         where: { worker: input.worker, prompt: AMUX_V22_SEALED_DELIVERY_MARKER,
           status: { in: ["queued", "leased"] }, acknowledgedAt: null,
@@ -309,15 +319,20 @@ export async function pullAmuxWorkDelivery(input: {
             authorizationAuditLog: { select: { action: true, targetId: true,
               metadata: true } } } } },
       }) : null;
-      return { sealedCandidate, candidateCard };
-    }) : { sealedCandidate: null, candidateCard: null };
+      // A Task answered after its owner question resumes with that question,
+      // the answer and the previous change (v22OwnerQuestionCore.ts).
+      const resumeRows = sealedCandidate ? await readAmuxV22ResumeRows(tx,
+        sealedCandidate.taskId) : null;
+      return { sealedCandidate, candidateCard, resumeRows };
+    }) : { sealedCandidate: null, candidateCard: null, resumeRows: null };
   const snapshot = candidateCard?.sourceSnapshot;
   const ideaId = snapshot && typeof snapshot === "object" &&
     !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
       snapshot.ideaId : null;
   const candidateAssignment = candidateCard?.v22AcceptedAssignment;
   const candidateAudit = candidateAssignment?.authorizationAuditLog;
-  const needReviewKeys = candidateAssignment?.role === "implement" &&
+  const needReviewKeys = !!candidateAssignment &&
+    amuxV22TaskWritesPatch(candidateAssignment.role) &&
     candidateAudit?.action === "amux.v22.worker.assigned" &&
     candidateAudit.targetId === candidateAssignment.id &&
     !!candidateAudit.metadata && typeof candidateAudit.metadata === "object" &&
@@ -333,6 +348,7 @@ export async function pullAmuxWorkDelivery(input: {
           subjectId: sealedCandidate.taskId },
       ] : []),
     ]) : null;
+  const resume = resumeRows ? await openAmuxV22ResumeContext(resumeRows) : null;
   const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow, now: Date,
     protocolCapabilities: readonly string[]) => {
@@ -396,6 +412,16 @@ export async function pullAmuxWorkDelivery(input: {
     if (assignmentAudit?.action !== "amux.v22.worker.assigned" ||
         assignmentAudit.targetId !== assignment.id)
       throw new Error("v22 delivery assignment audit is invalid");
+    // Settlement accepts a patch only on the base its publication run was
+    // pinned to at start, so the sidecar checks that commit out first.
+    const publicationRun = amuxV22TaskWritesPatch(assignment.role) &&
+      amuxV22DeliveryBaseShaEnabled(process.env[AMUX_V22_DELIVERY_BASE_SHA_ENV]) ?
+      await tx.engineeringAgentRun.findUnique({
+        where: { amuxAttemptId: delivery.attemptId },
+        select: { baseSha: true },
+      }) : null;
+    const baseSha = publicationRun && /^[0-9a-f]{40}$/.test(publicationRun.baseSha) ?
+      publicationRun.baseSha : null;
     const gradeGuard = !!assignmentAudit.metadata &&
       typeof assignmentAudit.metadata === "object" &&
       !Array.isArray(assignmentAudit.metadata) &&
@@ -494,7 +520,7 @@ export async function pullAmuxWorkDelivery(input: {
         throw new Error("v22 sealed delivery digest mismatch");
       let reviewScope: string | undefined;
       let reviewFeedbackJobId: string | undefined;
-      if (gradeGuard && assignment.role === "implement") {
+      if (gradeGuard && amuxV22TaskWritesPatch(assignment.role)) {
         if (!card.v4TitleCiphertext || !card.v4TitleKeyId ||
             !card.v4TitleKeyVersion || !card.v4TitleDigest ||
             !card.v4TitleDigestKeyId || !card.v4BodyCiphertext ||
@@ -533,18 +559,43 @@ export async function pullAmuxWorkDelivery(input: {
         reviewFeedbackJobId = prior?.verdict === "reject" ?
           prior.jobId ?? undefined : undefined;
       }
+      const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
+        `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n`;
+      const tail = `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
+        `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` +
+        AMUX_V22_WORKER_AUTHORITY_NOTICE;
+      const section = resume ? buildAmuxV22ResumeSection({
+        ...resume, promptBytesWithoutSection:
+          Buffer.byteLength(head + tail, "utf8") }) : "";
+      // A Task resumed without its answer would repeat the question or guess,
+      // so the delivery is refused instead. The answer was bounded beside the
+      // brief when it was given; only a brief that grew since gets here.
+      if (section === null) throw new Error("v22 resume answer does not fit the prompt");
+      const resumeSection = section ? `${section}\n` : "";
+      // The question this delivery resumes is marked once, by the pull that
+      // first carries it; a pull of the same attempt again finds it resumed.
+      if (resumeRows?.question.state === "answered") {
+        const marked = await tx.amuxV22TaskQuestion.updateMany({ where: {
+          id: resumeRows.question.id, taskId: delivery.taskId,
+          state: "answered" }, data: { state: "resumed",
+          resumedAttemptId: delivery.attemptId } });
+        if (marked.count !== 1) throw new Error("v22 resume question changed");
+      }
       return {
-        prompt: `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
-          `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n` +
-          `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
-          AMUX_V22_WORKER_AUTHORITY_NOTICE,
-        v22Execution: { modelId: assignment.modelId, role: assignment.role,
+        prompt: head + resumeSection + tail,
+        // The sidecar runs the execution role; the assignment keeps the Task's.
+        v22Execution: { modelId: assignment.modelId,
+          role: amuxV22ExecutionRole(assignment.role),
           budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
+          ...(baseSha ? { baseSha } : {}),
           ...(gradeGuard ? { gradeGuard: true as const,
             executionGrade: assignment.grade,
             ...(reviewScope ? {
-              // The approved v22 one-shot catalog uses the fixed Claude CLI.
-              reviewAuthor: "claude" as const,
+              // The review server's author is the CLI that wrote the change.
+              reviewAuthor: (() => {
+                const provider = amuxV22Provider(assignment.provider);
+                return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
+              })(),
               reviewAuthorVendor: assignment.provider,
               reviewScope,
               ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
@@ -563,7 +614,9 @@ export async function pullAmuxWorkDelivery(input: {
       // + 3: the base counts the canonical audit as one call, but appending it
       // takes four (chain lock, clock, previous entry, insert). A recovery
       // delivery makes 22 calls; 19 refused it on 2026-10-15 at the 20th.
-      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 + 3 + 1 },
+      // + 1: an implement delivery reads its publication run's base.
+      // + 1: a resumed delivery marks its owner question resumed.
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 + 3 + 1 + 1 + 1 },
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       // Safe-stop request and all ownership/start/delivery writers share this

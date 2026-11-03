@@ -3,19 +3,25 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import { amuxIdeaProgress, type AmuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
+import { amuxIdeaLaneState, type AmuxIdeaLaneAttemptFact, type AmuxIdeaLaneState } from "@/lib/amux/ideaLaneCore";
+import { amuxIdeaOwnerClosableState } from "@/lib/amux/ideaOwnerCloseCore";
+import { amuxIdeaProgress, type AmuxIdeaProgress, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 
-/** How many of the owner's newest ideas the Ideas tab lists. */
+/** How many of the owner's newest open ideas the Ideas tab lists. */
 export const AMUX_IDEA_PROGRESS_LIMIT = 20;
 
 export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   ideaId: string;
   /** A session idea has no per-idea execution approval. */
   submissionOrigin?: "owner" | "session";
+  /** Waiting for the owner (after analysis, or before execution approval); the owner may close it. */
+  closable: boolean;
   requestId: string;
   submittedAt: string;
   /** The first registered card's display key, the only plaintext label an idea has. */
   displayKey: string | null;
+  /** The idea lane's state, when the lane took the idea (absent: never taken). */
+  lane?: AmuxIdeaLaneState | null;
   /** Task PRs waiting for GitHub review or merge. */
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
   /** The idea's Task cards in registration order, for its detail view. */
@@ -91,9 +97,13 @@ type SqlIdea = {
   referencePins: unknown;
   referencePinAuditStatus: "declared" | "legacy" | null;
   checkoutEvidence: SqlCheckoutEvidence[] | null;
+  laneAttempts: AmuxIdeaLaneAttemptFact[] | null;
 };
 
 const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+/** An owner idea before analysis ends waits on one of these execution approvals. */
+const WAITS_FOR_EXECUTION_APPROVAL: ReadonlySet<AmuxIdeaWaitingFor> =
+  new Set(["execution_approval", "continuation", "owner_input"]);
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   actorUserId: string, now: Date): Promise<AmuxIdeaProgressRow[]> {
@@ -101,13 +111,16 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   // instant is converted to a naive UTC value before it is compared, and every
   // timestamp leaves as epoch milliseconds (a double, never a session-zone
   // string). An expired proposal can no longer be approved, so it waits for
-  // nobody. Chunks keep their index order and cards their registration order.
+  // nobody; neither does an evidence unit, which no approval ever decides.
+  // Chunks keep their index order and cards their registration order.
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
       SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
         "submissionAuditLogId"
       FROM "AmuxIdeaSubmission"
-      WHERE "actorUserId" = ${actorUserId}
+      -- A closed or cancelled idea leaves the list, so the bound is spent on
+      -- ideas still in progress.
+      WHERE "actorUserId" = ${actorUserId} AND "cancelledAt" IS NULL
       ORDER BY "submittedAt" DESC, "id" ASC
       LIMIT ${AMUX_IDEA_PROGRESS_LIMIT}
     )
@@ -120,6 +133,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       (n."cancelledAt" IS NOT NULL) AS "cancelled",
       (SELECT count(*)::int FROM "AmuxIdeaDraftUnit" u
         WHERE u."ideaId" = n."id" AND u."state" = 'proposed'
+          AND u."unitKind" IN ('node', 'card')
           AND u."expiresAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')) AS "proposedUnits",
       (SELECT json_agg(json_build_object(
           'chunkIndex', c."chunkIndex", 'state', c."state", 'coverageStatus', c."coverageStatus",
@@ -167,7 +181,13 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
             WHERE m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"))
           ORDER BY e."referenceOrdinal")
         FROM "AmuxIdeaTrackedCheckoutEvidence" e
-        WHERE e."ideaId" = n."id") AS "checkoutEvidence"
+        WHERE e."ideaId" = n."id") AS "checkoutEvidence",
+      (SELECT json_agg(json_build_object(
+          'claimedAtMs', (extract(epoch FROM l."claimedAt") * 1000)::double precision,
+          'leaseUntilMs', (extract(epoch FROM l."leaseUntil") * 1000)::double precision,
+          'outcome', l."outcome", 'prNumber', l."prNumber"))
+        FROM "AmuxIdeaLaneAttempt" l
+        WHERE l."ideaId" = n."id") AS "laneAttempts"
     FROM newest n
     ORDER BY n."submittedAt" DESC, n."id" ASC
   `;
@@ -175,6 +195,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   return ideas.map((idea) => {
     const own = idea.cards ?? [];
     const pins = idea.referencePins;
+    const lane = amuxIdeaLaneState(idea.laneAttempts ?? [], now.getTime());
     const progress = amuxIdeaProgress({
       state: idea.state,
       submissionOrigin: idea.submissionOrigin,
@@ -183,17 +204,27 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       proposedUnits: idea.proposedUnits,
       cards: own.map((card) => ({ cardType: card.cardType, status: card.status,
         reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
+      lane,
     });
     return {
       ...progress,
       ideaId: idea.id,
       submissionOrigin: idea.submissionOrigin,
+      // An owner idea before analysis ends counts only while it waits for an
+      // execution approval: a page running, or one already approved, is analysis.
+      // A lane idea can be closed whenever no run holds it (the close refuses a live one).
+      closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
+        (idea.state === "awaiting_owner" || (progress.waitingFor !== null &&
+          WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor)) ||
+          lane?.state === "pr_open" || lane?.state === "queued" || lane?.state === "failed"),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
       reviewPullRequests: own.filter((card) => card.cardType !== "story" && !card.terminal &&
         card.status === "review" && card.reviewPrNumber !== null)
-        .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey })),
+        .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey }))
+        .concat(lane?.state === "pr_open" && lane.prNumber !== null ? [{ number: lane.prNumber, displayKey: null }] : []),
+      lane,
       taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
         status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
       referencePins: Array.isArray(pins) && pins.every((sha) =>

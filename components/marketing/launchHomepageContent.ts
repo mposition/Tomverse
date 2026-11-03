@@ -58,6 +58,12 @@ export const launchReviewEntryCopy: Record<Language, {
     plansBody: "先在Review体验回答比较。免费账户可保存对话并使用支持的分享与文件功能。需要更多积分或其他模型时，可比较Free、Pro、Max；Chat当前使用条件请看产品说明。",
     guestBody: "在 Review 中比较不同模型的视角。了解 Chat 的模型选择与提问优化功能，再从可用产品和套餐中选择适合自己的方式。",
   },
+  "zh-Hant": {
+    chatInfo: "認識 Chat",
+    heroAccess: "Review 可無需註冊即開始。請在下方了解 Chat 支援的功能與使用條件。",
+    plansBody: "先在 Review 體驗回答比較。免費帳戶可儲存對話，並使用支援的分享與檔案功能。需要更多點數或其他模型時，可比較 Free、Pro、Max；Chat 目前的使用條件請見產品說明。",
+    guestBody: "在 Review 中比較不同模型的觀點。了解 Chat 的模型選擇與提問優化功能，再從可用的產品與方案中選擇適合自己的使用方式。",
+  },
   fr: {
     chatInfo: "Découvrir Chat",
     heroAccess: "Commencez Review sans compte. Découvrez ci-dessous les fonctions et les conditions d’accès à Chat.",
@@ -104,6 +110,12 @@ export const launchAccountEntryCopy: Record<Language, {
     plansBody: "先体验 Chat 和 Review，再按需要选择套餐。免费账户可以保存对话，并使用支持的分享与文件功能。需要更多用量或更广的模型范围时，可比较 Free、Pro、Max 的功能与积分额度。",
     guestTitle: "适合您的 AI，从一个地方开始。",
     guestBody: "在 Chat 中继续提问，或在 Review 中比较不同回答的视角。了解账号可用的产品与功能，根据问题和所需结果选择适合自己的方式。",
+  },
+  "zh-Hant": {
+    heroAccess: "在 Chat 中繼續提問，需要不同觀點時在 Review 中比較回答。",
+    plansBody: "先體驗 Chat 和 Review，再依需要選擇方案。免費帳戶可以儲存對話，並使用支援的分享與檔案功能。需要更多用量或更廣的模型範圍時，可比較 Free、Pro、Max 的功能與點數額度。",
+    guestTitle: "適合您的 AI，從一個地方開始。",
+    guestBody: "在 Chat 中繼續提問，或在 Review 中比較不同回答的觀點。了解帳號可用的產品與功能，依問題和所需結果選擇適合自己的方式。",
   },
   fr: {
     heroAccess: "Poursuivez dans Chat et comparez les réponses dans Review pour un autre point de vue.",
@@ -214,6 +226,20 @@ export const launchHomepageContent: Record<Language, LaunchHomepageCopy> = {
     tools: { title: ["曾经到处寻找的 AI 工具。", "现在，都在这里。"], columns: [ { label: "示例：从通知中整理日期、需带物品和回复截止时间", title: "文档与文件", body: "上传支持的文档和图片，提出问题或整理长资料的要点。减少在工具间反复复制内容的麻烦，从概述到核查细节、继续追问，都可以在同一段对话中完成。" }, { label: "示例：查看最新信息的来源与待确认项", title: "网页搜索与研究", body: "需要最新信息时可以使用网页搜索；需要广泛调查多个来源时，可在支持的套餐中使用 Deep Research。亲自检查回答中提供的来源，并根据所需证据继续提问。" }, { label: "示例：回到保存的学习笔记继续提问", title: "保存与分享", body: "登录后可以保存对话，稍后继续，也可以通过链接分享结果。从旅行行程、学习笔记到完成的文章，让已有的成果成为下一项工作的起点。" } ], note: "支持的模型、功能和额度因套餐及登录状态而异。" },
     plans: { title: "从您需要的程度开始。", body: "先体验 Chat 和 Review，再按需要选择套餐。免费账户可以保存对话，并使用支持的分享与文件功能。需要更多用量或更广的模型范围时，可比较 Free、Pro、Max 的功能与积分额度。", trustTitle: "清楚了解资料的去向。", trustBody: "您选择的 AI 提供商会处理回答所需的内容。数据处理范围以及锁定、分享功能详情，请查看安全页面。" },
     guest: { title: "无需注册，从第一个问题开始。", body: "向 Chat 提出好奇的问题，或在 Review 中比较多个模型的视角。亲自体验后，再选择适合自己的使用方式与套餐。" },
+  },
+  "zh-Hant": {
+    actions: { chat: "開始 Chat", review: "開始 Review", reviewInfo: "認識 Review", pricing: "查看方案", safety: "了解安全與資料處理", motionOff: "關閉首屏動畫", motionOn: "開啟首屏動畫" },
+    hero: { title: ["該用哪一個 AI，","讓 Tomverse 幫你選。"], body: "在同一個地方使用 GPT、Claude 和 Gemini，不必來回切換。Tomverse Chat 的 Smart Adaptive 會綜合考量問題所需的功能、模型費用與品質，協助選擇模型；提問優化建議則由你查看並決定是否採用。想聽聽不同觀點時，可以在 Tomverse Review 中並排閱讀回答，再借助 AI Review 的回答引文，比較差異與遺漏。", access: "Chat 和 Review 都可以無需註冊直接開始。", modelNote: "在一處選擇", question: "我要準備一場三分鐘的英語演講，主題是我喜歡的興趣。請用簡單的英語整理發言順序和練習方法。", responseTitle: "先確定興趣，\n再整理發言順序。", responseBody: "告訴我興趣的名稱，我就能依開場、喜歡的原因、簡短經歷和結尾來起草。大聲練習、計時，再修改難以說出口的句子。", followup: "指出我草稿中不好說出口的句子", demo: "產品說明示例，並非模型評測或真實使用者對話。" },
+    adaptive: { title: ["依問題選擇模型。", "同時考量費用。"], body: "不同的問題可能適合不同的模型。Smart Adaptive 會綜合任務、所需功能、費用與品質訊號，協助選擇。你可以查看讓問題更清楚的建議，自行決定是否採用，也可以直接選擇模型。", emphasis: "同時考量模型費用與品質的選擇。", original: "我想在兩週內每個工作日花 30 分鐘複習英文單字，重點放在已經學過的字。", refiner: "Prompt Refiner · 提供建議時可查看並採用", refined: "請幫我制定兩週的複習計畫，複習我已經學過的英文單字。每個工作日可用時間為 30 分鐘，重點是複習，而不是學新字。", selectionTitle: "為這個問題，\n選出合適的模型。", criteria: ["問題類型 · 支援的功能", "品質訊號 · 預估費用"], outcome: ["一個模型，一段對話。", "也可以繼續自行選擇模型。"], note: "實際費用與回答品質，取決於所選模型、問題與用量。" },
+    gallery: { title: ["規劃行程、學習知識，", "也讓表達更貼切。"], body: "安排旅行、理解艱深的概念，或潤飾傳達心意的文字。把生活中的問題直接說出來，切換下方的示例，看看 Tomverse 能帶來怎樣的結果。", navTitle: "從你的問題開始。", navBody: "選一個示例，看看結果如何改變。", questionLabel: "問題示例", demo: "以下為產品說明示例，未使用真實模型回答或使用者對話。", examples: [
+      { label: "旅行規劃", description: "少走路，多休息。打造適合家人情況的行程。", question: "我想和父母去慶州旅行三天。請安排少走路的行程，住宿還沒決定。", type: "旅遊行程", title: "三天兩夜，每天一個區域。", intro: "這份慶州行程草案減少步行並留出休息時間。住宿尚未決定，請在選好住宿後確認交通時間，再調整具體地點與順序。", rows: [ { label: "第一天", title: "抵達當天輕鬆些", body: "先逛住宿附近的地方，晚上充分休息，為隔天做準備。" }, { label: "第二天", title: "集中遊覽一個區域", body: "上午與下午各安排一個地點，中間留出充足的用餐與休息時間。" }, { label: "第三天", title: "從容收尾", body: "早上的行程放輕鬆，為收拾行李與返程預留時間。" } ], followupTitle: "用下一個問題讓計畫更具體。", followup: "選定住宿後，補上位置，請 AI 整理包含交通時間與休息點的慶州行程。" },
+      { label: "理解艱深的內容", description: "把陌生的概念轉成熟悉的說法與生活例子，逐步確認自己是否理解。", question: "請用日常生活的例子，簡單解釋光合作用。", type: "學習筆記", title: "光合作用，植物的小廚房。", intro: "光合作用是植物利用光，把水和二氧化碳轉化為自身養分的過程。就像廚房把食材做成一餐，葉片利用光能製造植物生長所需的養分。", rows: [ { label: "能量與材料", title: "光 · 水 · 二氧化碳", body: "光提供能量；根部吸收的水與空氣中的二氧化碳則是材料。" }, { label: "結果", title: "植物生長所需的養分", body: "植物把製造出的養分用於生長，並在過程中釋放氧氣。" } ], followupTitle: "檢查你的說明還缺了什麼。", followup: "我把光合作用理解為「利用光製造養分」。請指出我的說明中，水和二氧化碳各自的作用還缺了什麼。" },
+      { label: "潤飾訊息", description: "保留清楚的原意，同時讓對方更容易閱讀。", question: "請幫我把婉拒朋友請託的訊息改得溫和又清楚。", type: "訊息草稿", title: "拒絕要明確，語氣要溫和。", intro: "這是在不改變原意的前提下，讓訊息更容易被接受的示例。使用前請自行修改不符合實際情況的句子。", rows: [ { label: "原句", title: "這週行程已經排滿，沒辦法幫你。", body: "" }, { label: "修改後", title: "謝謝你想到我。這週我的行程已經排滿，恐怕幫不上忙。這次無法一起參與，希望一切順利。", body: "" } ], followupTitle: "保留原意，潤飾語氣。", followup: "明確的拒絕仍然保留，並加上感謝與鼓勵。不必做出勉強的承諾，也能溫和地表達心意。" },
+    ] },
+    review: { title: ["同一個問題，不同觀點。", "比較得更深入。"], body: "同一個問題，可能得到不同的回答。在 Tomverse Review 中並排閱讀最多三個模型的回答，再用 AI Review 搭配引文，查看共識、差異與遺漏的條件。要重點閱讀哪一個回答、接下來問什麼，由你決定。", question: "我在比較兩款虛構的筆電。A 重 1.2 公斤、記憶體 8GB、售價 700 澳幣；B 重 1.7 公斤、記憶體 16GB、售價 900 澳幣。預算 900 澳幣，每天攜帶，主要處理文件和觀看影片。該看哪些標準，還需要確認什麼？", answers: [{"title":"日常攜帶的重量","body":"兩款都在預算內。每天攜帶的話，可以先看較輕的 A。還需要確認 8GB 是否足以應付你的任務。","quote":"較輕的 A"},{"title":"任務與記憶體需求","body":"兩款都在預算內。同時處理多項任務時，可先比較 16GB 的 B。但要確認每天攜帶 1.7 公斤是否方便。","quote":"16GB 的 B"},{"title":"仍缺少的產品資訊","body":"兩款都在預算內。不要只憑重量和記憶體決定，也要確認續航力、螢幕和 CPU，並結合攜帶便利性與實際任務比較。","quote":"續航力、螢幕和 CPU"}], synthesisTitle: "從不同的回答中，\n找出判斷的線索。", findings: [ { label: "共同點", title: "", body: "三個回答都說明兩款虛構產品在預算內。" }, { label: "觀點差異", title: "", body: "在這個示例中，A 關注攜帶重量，B 關注記憶體，C 關注缺少的規格。這是選擇重點不同，而非事實上的矛盾。" }, { label: "接下來查證", title: "", body: "回答 C 提到的續航力、螢幕和 CPU 不在問題中。確認這些資訊後，再結合日常攜帶與任務需求比較。" } ], note: "以虛構產品與編輯過的回答製作的說明示例，並非模型評測或購買建議。請對照原文查看 AI Review 的引文與整理內容。" },
+    tools: { title: ["曾經四處尋找的 AI 工具，", "現在，都在這裡。"], columns: [ { label: "示例：從通知中整理日期、需攜帶的物品與回覆期限", title: "文件 · 檔案", body: "附上支援的文件與圖片，提出問題或整理長篇資料的重點。減少在工具之間反覆複製內容的麻煩，從摘要到核對細節、再到追問，都能在同一段對話中完成。" }, { label: "示例：查看最新資訊的來源與待確認事項", title: "網頁搜尋 · 研究", body: "問題需要最新資訊時，可以使用網頁搜尋；需要廣泛調查多個來源時，可在支援的方案中使用 Deep Research。請親自檢查回答中提供的來源，並依所需的證據繼續提問。" }, { label: "示例：回到儲存的學習筆記，接著提問", title: "儲存 · 分享", body: "登入後可以儲存對話，稍後再接續，也可以透過分享連結把結果傳給他人。從旅行行程、學習筆記到完成的文章，讓已經做好的成果成為下一項工作的起點。" } ], note: "支援的模型、功能與提供量，依方案及登入狀態而有所不同。" },
+    plans: { title: "從您需要的程度開始。", body: "先體驗 Chat 和 Review，再依需要選擇方案。免費帳戶可以儲存對話，並使用支援的分享與檔案功能。需要更多用量或更廣的模型範圍時，可比較 Free、Pro、Max 的功能與點數額度。", trustTitle: "清楚掌握資料的去向。", trustBody: "您選擇的 AI 供應商會處理回答所需的內容。資料處理範圍，以及鎖定與分享功能的詳細說明，請查看安全頁面。" },
+    guest: { title: "無需註冊，從第一個問題開始。", body: "向 Chat 提出你好奇的問題，或在 Review 中比較多個模型的觀點。親身體驗後，再選擇適合自己的使用方式與方案。" },
   },
   fr: {
     actions: { chat: "Démarrer Chat", review: "Démarrer Review", reviewInfo: "Découvrir Review", pricing: "Voir les offres", safety: "Sécurité et données", motionOff: "Désactiver les animations d’accueil", motionOn: "Activer les animations d’accueil" },

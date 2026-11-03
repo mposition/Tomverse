@@ -160,6 +160,10 @@ test("the relay writes the local AMUX only through the relay's own routes, outsi
     // Stage S2-2b4: two reads by POST, the operator's answer records and one decision's records.
     "/api/dm-relay/answers/operator",
     "/api/dm-relay/answers/receipt",
+    // A v22 worker's question filed and closed as a typed-ask card (operator
+    // decision 2026-10-30): writes under the same prefix and token.
+    "/api/dm-relay/v22-questions",
+    "/api/dm-relay/v22-questions/close",
   ]);
   for (const path of local) assert.equal(path.includes("/api/board"), false);
   const server = read("vendor/amux/crates/amux-server/src/api/dm_relay.rs");
@@ -170,6 +174,8 @@ test("the relay writes the local AMUX only through the relay's own routes, outsi
   assert.match(server, /\.route\("\/answers\/unknown", post\(answer_unknown\)\)/);
   assert.match(server, /\.route\("\/answers\/operator", post\(operator_answers\)\)/);
   assert.match(server, /\.route\("\/answers\/receipt", post\(answer_receipt\)\)/);
+  assert.match(server, /\.route\("\/v22-questions", post\(super::dm_relay_v22::file\)\)/);
+  assert.match(server, /\.route\("\/v22-questions\/close", post\(super::dm_relay_v22::close\)\)/);
   // The one local read under the relay's prefix: every marker, for a restart.
   assert.equal(stringConstant(flow, "LOCAL_MARKER_LIST_PATH"), "/api/dm-relay/pending");
   const routeTable = read("vendor/amux/crates/amux-server/src/api/request_log.rs");
@@ -180,6 +186,8 @@ test("the relay writes the local AMUX only through the relay's own routes, outsi
     "/api/dm-relay/answers/unknown",
     "/api/dm-relay/answers/operator",
     "/api/dm-relay/answers/receipt",
+    "/api/dm-relay/v22-questions",
+    "/api/dm-relay/v22-questions/close",
   ]) {
     assert.ok(routeTable.includes(`RouteEntry { path: "${path}", methods: &["POST"] }`), path);
   }

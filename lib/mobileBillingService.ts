@@ -7,7 +7,7 @@ import { getCreditPack } from "@/lib/creditPacks";
 import { getBillingPlans } from "@/lib/billingConfig";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { increaseCreditDebt, lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { effectivePlanForAccess, FOUNDING_TESTER_PASS_STATUS } from "@/lib/foundingTesterPassCore";
 import { getStripe } from "@/lib/stripe";
 import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
 import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
@@ -18,6 +18,7 @@ import {
   type MobileBillingState, type MobileStore, type revenueCatWebhookSchema,
 } from "@/lib/mobileBillingCore";
 import type { z } from "zod";
+import { mobileSubscriptionEnvironment } from "@/lib/mobileBillingReview";
 
 export const mobileBillingProducts = () => parseMobileBillingProducts(process.env.MOBILE_BILLING_PRODUCTS_JSON);
 
@@ -42,18 +43,19 @@ async function readRevenueCatCustomer(billingId: string) {
 
 export async function syncMobileSubscription(userId: string, billingId: string) {
   assertMobileOwnershipConfigured();
-  const products = mobileBillingProducts();
+  const environment = await mobileSubscriptionEnvironment(userId);
+  const products = mobileBillingProducts().filter(product => environment === mobileBillingEnvironment() || (product.store === "app_store" && product.kind === "subscription"));
   // Timestamp before HTTP; stale responses cannot replace newer provider state.
   const observedAt = new Date();
   const providerSnapshot = await readRevenueCatCustomer(billingId);
-  const candidates = resolveMobileSubscriptions(providerSnapshot || { subscriber: { subscriptions: {} } }, products, mobileBillingEnvironment());
+  const candidates = resolveMobileSubscriptions(providerSnapshot || { subscriber: { subscriptions: {} } }, products, environment);
   const owned: typeof candidates = [];
   let ownershipConflict = false;
   const conflictingProducts = new Set<string>();
   for (const candidate of candidates) {
     if (!candidate.transactionId) continue;
     const ownership = await prisma.mobileStoreOwnership.findUnique({ where: {
-      store_environment_transactionHash: { store: candidate.store, environment: mobileBillingEnvironment(), transactionHash: mobileStoreTransactionHash(candidate.transactionId) },
+      store_environment_transactionHash: { store: candidate.store, environment, transactionHash: mobileStoreTransactionHash(candidate.transactionId) },
     } });
     if (!ownership) continue;
     if (ownership.ownerHash !== mobileStoreOwnerHash(billingId) || ownership.kind !== "subscription") {
@@ -119,6 +121,9 @@ export async function readMobileBillingState(userId: string, store: MobileStore)
   const active = nativeActive || webActive;
   return {
     billingId: user.mobileBillingId, plan, subscriptionStore: nativeActive ? subscriptionStore : webActive ? "web" : null,
+    promotionPasses: process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" && process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true",
+    accessPass: user.subscriptionStatus === FOUNDING_TESTER_PASS_STATUS && user.subscriptionCurrentPeriodEnd && user.subscriptionCurrentPeriodEnd > new Date()
+      ? { expiresAt: user.subscriptionCurrentPeriodEnd.toISOString() } : null,
     productId: native?.productId || user.subscriptionStoreProductId,
     interval: native?.interval || (nativeActive ? user.storeSubscriptionBillingInterval : user.subscriptionBillingInterval),
     expiresAt: native?.expiresAt || (nativeActive ? user.storeSubscriptionExpiresAt : webActive ? user.subscriptionCurrentPeriodEnd : null)?.toISOString() || null,

@@ -10,13 +10,23 @@ let status = "active";
 let suspendedUntil: Date | null = null;
 let delivered = true;
 let limited = false;
+let reviewHandled = false;
+let expectedIntent = "signin";
 const calls: string[] = [];
 mock.module(mod("lib/mobileAccessToken.ts"), { namedExports: { mobileAuthReady: () => available } });
 mock.module(mod("lib/mobileAuthRoute.ts"), { namedExports: {
   enforceMobileAuthAdmission: async () => { calls.push("admission"); if (limited) throw Error("limit"); },
   mobileApiSecurityResponse: (error: Error & { status?: number }) => error.message === "limit" ? Response.json({ code: "MOBILE_RATE_LIMITED" }, { status: 429, headers: { "Retry-After": "60" } }) : error.status ? Response.json({ ok: false }, { status: error.status }) : null,
 } });
-mock.module(mod("lib/emailLogin.ts"), { namedExports: { verifyEmailLoginCode: async (_request: Request, email: string, code: string, intent: string) => { calls.push("proof"); assert.equal(email, "user@example.com"); assert.equal(code, "123456"); assert.equal(intent, "signin"); return proof; } } });
+mock.module(mod("lib/emailLogin.ts"), { namedExports: { verifyEmailLoginCode: async (_request: Request, email: string, code: string, intent: string) => { calls.push("proof"); assert.equal(email, "user@example.com"); assert.equal(code, "123456"); assert.equal(intent, expectedIntent); return proof; } } });
+mock.module(mod("lib/mobileStoreReview.ts"), { namedExports: {
+  requestMobileStoreReviewCode: async () => reviewHandled,
+  verifyMobileStoreReviewCode: async (_request: Request, input: { appId?: string; buildNumber?: number }) => {
+    if (!reviewHandled) return null;
+    assert.equal(input.appId, "app.tomverse.shell"); assert.equal(input.buildNumber, 16);
+    calls.push("review-proof"); return proof;
+  },
+} });
 mock.module(mod("lib/mobileAuthService.ts"), { namedExports: { issueMobileSession: async (input: { userId: string }) => { calls.push("issue"); assert.equal(input.userId, "verified-user"); return { tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-native-only", expiresIn: 600, deviceId: "device" } }; } } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { user: {
   findUnique: async () => { calls.push("account"); return { accountStatus: status, accountSuspendedUntil: suspendedUntil }; },
@@ -37,7 +47,7 @@ let api: typeof import("../../app/api/auth/mobile/email/route");
 before(async () => { api = await import("../../app/api/auth/mobile/email/route"); });
 const POST = (request: Request) => api.POST(request);
 const GET = () => api.GET();
-beforeEach(() => { process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true"; available = true; status = "active"; suspendedUntil = null; delivered = true; limited = false; proof = { ok: true, userId: "verified-user" }; calls.length = 0; });
+beforeEach(() => { process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true"; delete process.env.TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED; expectedIntent = "signin"; available = true; status = "active"; suspendedUntil = null; delivered = true; limited = false; reviewHandled = false; proof = { ok: true, userId: "verified-user" }; calls.length = 0; });
 const request = (body: object, origin?: string) => POST(new Request("https://tomverse.app/api/auth/mobile/email", {
   method: "POST", headers: { "content-type": "application/json", "accept-language": "ko", cookie: "forged-session", ...(origin ? { origin } : {}) }, body: JSON.stringify(body),
 }));
@@ -71,4 +81,56 @@ test("delegating a smaller email body removes the outer content-length and cooki
   const result = await POST(new Request("https://tomverse.app/api/auth/mobile/email", { method: "POST", headers: { "content-type": "application/json", "content-length": "3000", "accept-language": "ko", cookie: "untrusted" }, body: JSON.stringify({ action: "request", email: "user@example.com" }) }));
   assert.equal(result.status, 200); assert.ok(calls.includes("delivery"));
 });
-test("client cannot submit signup intent or substitute user identity", async () => { const result = await request({ ...verify, userId: "forged", intent: "signup" }); assert.equal(result.status, 400); assert.ok(!calls.includes("proof")); });
+test("client cannot substitute a user identity while requesting signup", async () => { const result = await request({ ...verify, userId: "forged", intent: "signup", termsAccepted: true }); assert.equal(result.status, 400); assert.ok(!calls.includes("proof")); });
+
+test("signup is default-off without consuming a code or issuing a session", async () => {
+  assert.equal((await GET().json()).emailSignup, false);
+  const response = await request({ ...verify, intent: "signup", termsAccepted: true });
+  assert.equal(response.status, 503); assert.equal((await response.json()).code, "MOBILE_SIGNUP_UNAVAILABLE");
+  assert.deepEqual(calls, ["admission"]);
+});
+
+for (const termsAccepted of [undefined, false]) test(`signup requires explicit terms acceptance: ${termsAccepted}`, async () => {
+  process.env.TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED = "true";
+  const response = await request({ ...verify, intent: "signup", termsAccepted });
+  assert.equal(response.status, 400); assert.equal((await response.json()).code, "MOBILE_SIGNUP_TERMS_REQUIRED");
+  assert.deepEqual(calls, ["admission"]);
+});
+
+test("explicit signup reuses verified email signup and the same active-account session boundary", async () => {
+  process.env.TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED = "true"; expectedIntent = "signup";
+  assert.equal((await GET().json()).emailSignup, true);
+  const response = await request({ ...verify, intent: "signup", termsAccepted: true });
+  assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(calls, ["admission", "proof", "account", "issue"]);
+});
+
+for (const reason of ["invalid_or_expired", "locked"]) test(`signup cannot bypass ${reason} mailbox proof`, async () => {
+  process.env.TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED = "true"; expectedIntent = "signup"; proof = { ok: false, reason };
+  assert.equal((await request({ ...verify, intent: "signup", termsAccepted: true })).status, 401);
+  assert.deepEqual(calls, ["admission", "proof"]);
+});
+
+test("signup never bypasses account suspension or deletion", async () => {
+  process.env.TOMVERSE_NATIVE_EMAIL_SIGNUP_ENABLED = "true"; expectedIntent = "signup"; status = "pending_deletion";
+  assert.equal((await request({ ...verify, intent: "signup", termsAccepted: true })).status, 403);
+  assert.ok(!calls.includes("issue"));
+});
+test("store reviewer follows the same active-account and native session boundary", async () => {
+  reviewHandled = true;
+  const make = () => POST(new Request("https://tomverse.app/api/auth/mobile/email", { method: "POST", headers: { "content-type": "application/json", "x-tomverse-app-id": "app.tomverse.shell", "x-tomverse-build": "16" }, body: JSON.stringify(verify) }));
+  assert.equal((await make()).status, 200);
+  assert.deepEqual(calls, ["admission", "review-proof", "account", "issue"]);
+  calls.length = 0; status = "pending_deletion";
+  assert.equal((await make()).status, 403); assert.ok(!calls.includes("issue"));
+});
+test("configured store reviewer request does not send mail or return the code", async () => {
+  reviewHandled = true;
+  const result = await request({ action: "request", email: "user@example.com" });
+  assert.deepEqual(await result.json(), { ok: true }); assert.deepEqual(calls, ["admission"]);
+});
+test("a refused store credential never falls back to ordinary OTP proof", async () => {
+  reviewHandled = true; proof = { ok: false, reason: "invalid_or_expired" };
+  const result = await POST(new Request("https://tomverse.app/api/auth/mobile/email", { method: "POST", headers: { "content-type": "application/json", "x-tomverse-app-id": "app.tomverse.shell", "x-tomverse-build": "16" }, body: JSON.stringify(verify) }));
+  assert.equal(result.status, 401); assert.deepEqual(calls, ["admission", "review-proof"]);
+});

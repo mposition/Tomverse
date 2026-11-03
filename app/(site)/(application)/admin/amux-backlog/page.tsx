@@ -55,6 +55,8 @@ import {
   AMUX_V4_ANALYSIS_RESULT_READ_ENV,
   amuxV4AnalysisResultReadEnabled,
 } from "@/lib/amux/ideaAnalysisResultReadCore";
+import { AMUX_ANALYSIS_TRANSLATION_ENV, amuxAnalysisTranslationEnabled } from
+  "@/lib/amux/ideaAnalysisTranslationCore";
 import { AMUX_SESSION_INTAKE_READBACK_ENV, amuxSessionIntakeReadbackEnabled } from
   "@/lib/amux/ideaSessionIntakeReadbackCore";
 import { AMUX_SESSION_INTAKE_ENV, amuxSessionIntakeWritePermitted } from
@@ -193,6 +195,8 @@ export default async function AdminAmuxBacklogPage({
           transferConfirmAvailable={transferConfirmAvailable}
           analysisResultAvailable={amuxV4AnalysisResultReadEnabled(
             process.env[AMUX_V4_ANALYSIS_RESULT_READ_ENV])}
+          analysisTranslationAvailable={amuxAnalysisTranslationEnabled(
+            process.env[AMUX_ANALYSIS_TRANSLATION_ENV])}
           analysisBudgetAvailable={transferConfirmAvailable &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_READ === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE === "enabled" &&

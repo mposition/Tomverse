@@ -60,7 +60,10 @@ import {
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { detectChatTurnImage } from "@/lib/chatImageIntent";
-import { latestUserTurnHasAttachments } from "@/lib/chatImageIntentCore";
+import {
+    latestUserTurnHasAttachments,
+    latestUserTurnHasImageAttachment,
+} from "@/lib/chatImageIntentCore";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
 import { autoLlmRouterCandidates, previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
@@ -2103,8 +2106,10 @@ async function handleChatPost(
             !admissionToken &&
             !deepResearchDepth &&
             !promptRefinerDecision &&
-            // This message's own attachments, not the conversation's.
-            !latestUserTurnHasAttachments(autoRoutingMessages);
+            // This message's own attachments, not the conversation's. A photo
+            // is the one attachment the image turn can use: it may be edited.
+            (!latestUserTurnHasAttachments(autoRoutingMessages) ||
+                latestUserTurnHasImageAttachment(autoRoutingMessages));
         const autoImageDecisionPromise = autoImageTurnEligible
             ? detectChatTurnImage({
                   userId: session!.user!.id!,
@@ -2113,6 +2118,7 @@ async function handleChatPost(
                   plan: accountPlan,
                   traceId,
                   request: req,
+                  attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages),
               })
             : Promise.resolve({ image: false } as const);
         // Per prompt: a small model reads this message and reorders the
@@ -2939,6 +2945,7 @@ async function handleChatPost(
                         modelIds: autoImageDecision.modelId ? [autoImageDecision.modelId] : [],
                         preset: autoImageDecision.preset,
                         ...(autoImageDecision.prompt ? { prompt: autoImageDecision.prompt } : {}),
+                        ...(autoImageDecision.edit ? { edit: true } : {}),
                     },
                 }),
                 {

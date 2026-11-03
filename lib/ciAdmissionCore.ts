@@ -42,6 +42,10 @@
  * - Stacked pull requests (base other than develop or main), forks, and pull
  *   requests labelled ci:hold are not handled: they are not in the line
  *   (owner, 2026-10-25), and runners their CI holds count as other workflows'.
+ *   Nor are the engineering agent's pull requests (head under
+ *   `agent/engineering/`, owner 2026-10-30): an owner review draft runs its
+ *   code with the repository's secrets once ready, so only a person marks it
+ *   ready, and a label would come too late -- the head is fixed on opening.
  *
  * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.
@@ -68,6 +72,8 @@ export const CI_ADMISSION_HOLD_GRACE_MS = 10 * 60 * 1000;
 export const CI_ADMISSION_UPDATE_RETRY_MS = 10 * 60 * 1000;
 /** A pull request with this label is left out of the line: admission never marks it ready. */
 export const CI_ADMISSION_HOLD_LABEL = "ci:hold";
+/** The engineering agent's branch namespace (lib/engineeringAgentCore.ts BRANCH_NAMESPACE): never in the line. */
+export const CI_ADMISSION_AGENT_HEAD_PREFIX = "agent/engineering/";
 /** How many drafts at the top of the line a round checks for conflicts and lag. */
 export const CI_ADMISSION_CHECK_LIMIT = 6;
 const MAX_EVENTS = 50;
@@ -136,21 +142,41 @@ export function ciRunnerCount(need: number, owner: Pick<CiRunnerOwner, "running"
 }
 
 /**
- * Whether admission may bring a pull request's branch up to date: only one
- * into develop from a working branch. Updating a branch merges its base into
- * it, so a pull request into main (a release or hotfix) or from develop or
- * main would merge one deploy branch into another -- the operator's merge
- * and deploy, never admission's.
+ * Whether admission may bring a pull request's branch up to date. Updating a
+ * branch merges its base into it, so:
+ * - into develop, from a working branch: yes;
+ * - into main, from a release train (`release/train-*`): yes (owner,
+ *   2026-10-27) -- the train service cut that branch from main, nobody
+ *   verified a commit of it by hand, and main merges only what is up to date,
+ *   so #3047 sat behind until someone pressed "Update branch";
+ * - anything else: no. From develop or main it would merge one deploy branch
+ *   into another; a hand-made `release/**` or `hotfix/**` may be the commit
+ *   staging verified -- the operator's merge and deploy, never admission's.
+ *   A Dependabot branch is not updated either (owner 2026-11-01): one commit
+ *   by anyone else stops Dependabot rebasing it for good, which left #2969,
+ *   #2971 and #2976 in conflict. It is released behind instead
+ *   (ciAdmissionReleasesBehind).
  */
 export function ciAdmissionUpdatesBranchOf(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
+  if (pull.fork) return false;
+  if (pull.base === "main") return /^release\/train-\d{8}-\d{4}$/.test(pull.head);
   return (
-    !pull.fork &&
     pull.base === "develop" &&
     pull.head !== "develop" &&
     pull.head !== "main" &&
     !pull.head.startsWith("release/") &&
-    !pull.head.startsWith("hotfix/")
+    !pull.head.startsWith("hotfix/") &&
+    !ciAdmissionReleasesBehind(pull)
   );
+}
+
+/**
+ * A Dependabot update into develop runs its CI behind develop: a pull_request
+ * run tests the merge with the base, and Dependabot rebases its own branch
+ * when it conflicts. Whoever merges it brings it up to date first.
+ */
+export function ciAdmissionReleasesBehind(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
+  return !pull.fork && pull.base === "develop" && pull.head.startsWith("dependabot/");
 }
 
 /** What GitHub says about a draft before it is marked ready; null where it could not tell. */
@@ -361,7 +387,8 @@ export type CiAdmissionEvaluation = {
 export function ciAdmissionOrder(stored: readonly Pick<CiAdmissionQueueEntry, "number">[], openPulls: readonly CiAdmissionPull[]): CiAdmissionPull[] {
   const handled = new Map(
     openPulls
-      .filter((pull) => ciAdmissionUnits(pull) !== null && !(pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL))
+      .filter((pull) => ciAdmissionUnits(pull) !== null && !(pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL) &&
+        !pull.head.startsWith(CI_ADMISSION_AGENT_HEAD_PREFIX))
       .map((pull) => [pull.number, pull]),
   );
   const kept = stored.map((entry) => handled.get(entry.number)).filter((pull): pull is CiAdmissionPull => pull !== undefined);
@@ -519,7 +546,7 @@ export function evaluateCiAdmission(input: {
       status.set(pull.number, "conflict");
       continue;
     }
-    if (check.behind === true) {
+    if (check.behind === true && !ciAdmissionReleasesBehind(pull)) {
       const asked = updating.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
       const updates = input.updateBranches !== false && ciAdmissionUpdatesBranchOf(pull);
       if (updates && !asked) {

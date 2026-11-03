@@ -109,7 +109,7 @@ test("a second pass over unchanged reports does nothing; a changed input superse
 test("a result whose claim was lost is not written and is counted stale", async () => {
   await report("a");
   const run = await startSupportTriageRun("worker");
-  const batch = await claimSupportTriageBatch(run, ["fb-w-a"]);
+  const batch = await claimSupportTriageBatch(run, ["fb-w-a"], 0);
   assert.equal(batch.claimed.length, 1);
   // The lease expires and another pass reclaims and claims the row.
   await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" DISABLE TRIGGER "SupportTriageSuggestion_guard"`);
@@ -120,26 +120,38 @@ test("a result whose claim was lost is not written and is counted stale", async 
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" ENABLE TRIGGER "SupportTriageSuggestion_guard"`);
   }
-  const { ready, stale, groups } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
+  const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
   assert.deepEqual({ ready, stale }, { ready: 0, stale: 1 });
-  assert.equal(groups.groupsCreated, 0);
   assert.equal((await suggestions())[0].state, "claimed");
+});
+
+test("a claim that would leave less than its reserve rolls back and claims nothing", async () => {
+  await report("a");
+  const run = await startSupportTriageRun("worker");
+  // 30 seconds left, but the model call and the write need 60.
+  const late = { ...run, deadlineAt: new Date(Date.now() + 30_000) };
+  await assert.rejects(claimSupportTriageBatch(late, ["fb-w-a"], 60_000), /support_triage_deadline_passed/);
+  assert.deepEqual(await suggestions(), []);
+  // With the reserve available the same claim commits.
+  const batch = await claimSupportTriageBatch(run, ["fb-w-a"], 60_000);
+  assert.equal(batch.claimed.length, 1);
 });
 
 test("a report closed between claim and result is not written", async () => {
   await report("a");
   const run = await startSupportTriageRun("worker");
-  const batch = await claimSupportTriageBatch(run, ["fb-w-a"]);
+  const batch = await claimSupportTriageBatch(run, ["fb-w-a"], 0);
   await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { status: "closed" } });
   const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
   assert.deepEqual({ ready, stale }, { ready: 0, stale: 1 });
 });
 
-test("expired claims return to pending and are claimed again; after the last attempt they fail", async () => {
+test("an expired claim fails and its report is not called again, whatever its attempt count", async () => {
   await report("a");
   await report("b");
   const run = await startSupportTriageRun("worker");
-  await claimSupportTriageBatch(run, ["fb-w-a", "fb-w-b"]);
+  // The pass that claimed these may have paid for their model calls before it stopped.
+  await claimSupportTriageBatch(run, ["fb-w-a", "fb-w-b"], 0);
   await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" DISABLE TRIGGER "SupportTriageSuggestion_guard"`);
   try {
     await prisma.$executeRawUnsafe(
@@ -149,16 +161,23 @@ test("expired claims return to pending and are claimed again; after the last att
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" ENABLE TRIGGER "SupportTriageSuggestion_guard"`);
   }
-  const result = await runSupportTriageWorker();
-  assert.equal(result.reclaimed, 1);
-  assert.equal(result.exhausted, 1);
+  let calls = 0;
+  const llm = async () => {
+    calls += 1;
+    return null;
+  };
+  const result = await runSupportTriageWorker({ llm });
+  assert.equal(result.exhausted, 2);
+  assert.equal(result.claimed, 0);
+  assert.equal(await runSupportTriageWorker({ llm }).then((next) => next.claimed), 0);
+  assert.equal(calls, 0);
   const rows = await prisma.supportTriageSuggestion.findMany({
     where: { feedbackId: { startsWith: "fb-w-" } },
     orderBy: { feedbackId: "asc" },
     select: { feedbackId: true, state: true, attemptCount: true, failureCode: true },
   });
   assert.deepEqual(rows, [
-    { feedbackId: "fb-w-a", state: "ready", attemptCount: 1, failureCode: null },
+    { feedbackId: "fb-w-a", state: "failed", attemptCount: 0, failureCode: "retry_exhausted" },
     { feedbackId: "fb-w-b", state: "failed", attemptCount: 3, failureCode: "retry_exhausted" },
   ]);
 });
@@ -185,35 +204,104 @@ test("the run route answers enabled false and writes nothing while triage is off
     env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET, SUPPORT_TRIAGE_ENABLED: "true" },
   });
   assert.equal(on.status, 200);
-  assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "reclaimed", "result", "stale", "superseded"]);
+  assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "result", "stale", "superseded"]);
   assert.equal(on.body.ready, 1);
 });
 
-test("an input that comes back gets a new suggestion, and the other input's proposal is superseded", async () => {
+test("an input that comes back after it was answered is not paid for again; one never answered is", async () => {
+  let calls = 0;
+  const llm = async () => {
+    calls += 1;
+    return null;
+  };
   await report("a");
-  await runSupportTriageWorker();
+  await runSupportTriageWorker({ llm });
   await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "feature" } });
-  await runSupportTriageWorker();
+  await runSupportTriageWorker({ llm });
+  assert.equal(calls, 2);
+  // Input A comes back: its answer was superseded, not lost, so no new call.
   await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "bug" } });
-  const result = await runSupportTriageWorker();
+  const result = await runSupportTriageWorker({ llm });
   assert.equal(result.superseded, 1);
-  assert.equal(result.ready, 1);
+  assert.equal(result.claimed, 0);
+  assert.equal(calls, 2);
   assert.deepEqual(
     (await suggestions()).map((s) => [s.state, s.lane]),
     [
       ["superseded", "bug_unverified"],
       ["superseded", "feature_request"],
-      ["ready", "bug_unverified"],
     ]
   );
-  // Settled: a further pass does nothing.
-  assert.equal((await runSupportTriageWorker()).claimed, 0);
+  assert.equal((await runSupportTriageWorker({ llm })).claimed, 0);
+  assert.equal(calls, 2);
+  // A proposal of the current input closed before it was answered (pending
+  // to superseded, no lane) does not settle it: that input was never paid for.
+  await report("b");
+  const run = await startSupportTriageRun("worker");
+  await claimSupportTriageBatch(run, ["fb-w-b"], 0);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" DISABLE TRIGGER "SupportTriageSuggestion_guard"`);
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "SupportTriageSuggestion" SET "state" = 'superseded', "claimToken" = NULL, "leaseExpiresAt" = NULL
+        WHERE "feedbackId" = 'fb-w-b'`
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" ENABLE TRIGGER "SupportTriageSuggestion_guard"`);
+  }
+  const unanswered = await runSupportTriageWorker({ llm });
+  assert.equal(unanswered.claimed, 1);
+  assert.equal(unanswered.ready, 1);
+  assert.equal(calls, 3);
+});
+
+test("a claim of an older input is left to lapse, and its input is not paid for again", async () => {
+  let calls = 0;
+  const llm = async () => {
+    calls += 1;
+    return null;
+  };
+  await report("a");
+  const run = await startSupportTriageRun("worker");
+  // A pass claims input A and may be paying for its call when the input changes.
+  await claimSupportTriageBatch(run, ["fb-w-a"], 0);
+  await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "feature" } });
+  const next = await runSupportTriageWorker({ llm });
+  assert.equal(next.superseded, 0);
+  assert.equal(next.ready, 1);
+  assert.deepEqual(
+    (await suggestions()).map((s) => [s.state, s.lane]),
+    [
+      ["claimed", null],
+      ["ready", "feature_request"],
+    ]
+  );
+  await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" DISABLE TRIGGER "SupportTriageSuggestion_guard"`);
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "SupportTriageSuggestion" SET "leaseExpiresAt" = (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 second'
+        WHERE "state" = 'claimed'`
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" ENABLE TRIGGER "SupportTriageSuggestion_guard"`);
+  }
+  await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "bug" } });
+  const back = await runSupportTriageWorker({ llm });
+  assert.equal(back.exhausted, 1);
+  assert.equal(back.claimed, 0);
+  assert.equal(calls, 1);
+  assert.deepEqual(
+    (await suggestions()).map((s) => [s.state, s.lane]),
+    [
+      ["failed", null],
+      ["superseded", "feature_request"],
+    ]
+  );
 });
 
 test("a result for an input changed after the claim is not written; the next pass proposes for the new input", async () => {
   await report("a");
   const run = await startSupportTriageRun("worker");
-  const batch = await claimSupportTriageBatch(run, ["fb-w-a"]);
+  const batch = await claimSupportTriageBatch(run, ["fb-w-a"], 0);
   assert.equal(batch.claimed[0].lane, "bug_unverified");
   await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { message: "Please delete my account." } });
   const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
@@ -242,4 +330,26 @@ test("an input that comes back after it was decided or failed is not proposed ag
       ["superseded", "feature_request"],
     ]
   );
+});
+
+test("a report older than the triage window is not triaged, so a deleted settled row is never paid for again", async () => {
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
+  // Retention deletes a settled suggestion 30 days after it was written; by
+  // then its report is past the window and the worker leaves it alone.
+  await report("old", { createdAt: daysAgo(31) });
+  await report("recent", { createdAt: daysAgo(29) });
+  const result = await runSupportTriageWorker();
+  assert.equal(result.claimed, 1);
+  assert.deepEqual((await suggestions()).map((s) => s.feedbackId), ["fb-w-recent"]);
+  // The claim's own lock refuses it too.
+  const run = await startSupportTriageRun("worker");
+  assert.equal((await claimSupportTriageBatch(run, ["fb-w-old"], 0)).claimed.length, 0);
+  // An answer already claimed is still written when its report crosses the
+  // window during the call.
+  await report("edge", { createdAt: daysAgo(29) });
+  const batch = await claimSupportTriageBatch(run, ["fb-w-edge"], 0);
+  assert.equal(batch.claimed.length, 1);
+  await prisma.feedback.update({ where: { id: "fb-w-edge" }, data: { createdAt: daysAgo(31) } });
+  const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
+  assert.deepEqual({ ready, stale }, { ready: 1, stale: 0 });
 });

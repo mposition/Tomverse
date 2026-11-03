@@ -42,14 +42,21 @@ export type QaReleaseTrainPorts = {
   git: {
     /**
      * On a fresh clone of main: a branch with each commit cherry-picked with
-     * -m 1, in order, a conflict aborted and left out, an already applied one
-     * skipped; once `capacity` have ridden, the rest are over capacity without
-     * being picked. Returns main's head before the picks and the branch head after.
+     * -m 1, in order, a conflict resolved by the model when it is switched on
+     * and otherwise aborted and left out, an already applied one skipped;
+     * once `capacity` have ridden, the rest are over capacity without being
+     * picked. Returns main's head before the picks and the branch head after.
      */
-    assemble(branch: string, cargo: readonly QaReleaseTrainCandidate[], capacity: number): Promise<{
+    assemble(
+      branch: string,
+      cargo: readonly QaReleaseTrainCandidate[],
+      capacity: number,
+    ): Promise<{
       mainSha: string;
       headSha: string;
       picks: QaReleaseTrainPick[];
+      /** Riders whose conflict the model resolved, with the files and what it said; absent or empty: none. */
+      resolved?: { number: number; files: string[]; why: string }[];
     }>;
     push(branch: string): Promise<void>;
   };
@@ -122,7 +129,7 @@ export async function runQaReleaseTrainRound(
   // admitted and reported empty without a clone, spending the request, and
   // the round goes on to a due scheduled departure. One that is assembled
   // and carries nothing ends the round: a second clone could outrun the
-  // service's ten-minute limit after the scheduled pick was spent.
+  // service's time limit after the scheduled pick was spent.
   let departure: { slot: string; emergency: boolean; emergencyRequestId?: string };
   let branch: string;
   let cargo: QaReleaseTrainCandidate[] = [];
@@ -178,7 +185,8 @@ export async function runQaReleaseTrainRound(
       step = "branch";
       if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
       step = "open_trains";
-      openTrains = (await ports.github.openTrains()).count;
+      const open = await ports.github.openTrains();
+      openTrains = open.count;
       step = "cargo";
       cargo = openTrains > 0 || selection.numbers.length === 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.cargo(selection.numbers));
     }
@@ -253,6 +261,7 @@ export async function runQaReleaseTrainRound(
     rcSha: assembled.headSha,
     rollbackSha: assembled.mainSha,
     emergency: departure.emergency,
+    resolved: assembled.resolved,
   });
   let number: number;
   try {

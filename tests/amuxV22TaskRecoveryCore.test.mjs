@@ -170,6 +170,9 @@ test("unknown cost can stay held but every stopped proof and external-effect gua
   assert.equal(amuxV22RecoveryProofReason(success, "design"), "terminal_success");
   const dirty = report(); dirty.proof.workspaceClean = false;
   assert.equal(amuxV22RecoveryProofReason(dirty, "implement"), "workspace_unverified");
+  // A test Task writes in its worktree too (implement execution, 2026-10-30).
+  assert.equal(amuxV22RecoveryProofReason(dirty, "test"), "workspace_unverified");
+  assert.notEqual(amuxV22RecoveryProofReason(dirty, "verify"), "workspace_unverified");
 });
 const receipt = { role: "design", grade: "small", catalogVersion: "catalog-1", catalogDigest: "c".repeat(64),
   pricingVersion: "price-1", gradeRulesVersion: "grade-1", calculatedAtIso: "2026-10-13T01:00:00.000Z",

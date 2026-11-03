@@ -537,6 +537,158 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
     "exampleOutputLabel": "与原文核对的演示回答",
     "exampleOutput": "活动：11月7日下午2点 — “读书会于11月7日下午2点开始。”\n准备：一本书和笔记 — “请带一本读过的书和笔记。”\n回复：11月3日前 — “请在11月3日前确认是否参加。”\n地点：未定 — “地点稍后通知。”"
   },
+  "zh-Hant": {
+    stepProgress: (current, total) => `第 ${current} 步，共 ${total} 步`,
+    "eyebrow": "我的 AI 助手 + Knowledge",
+    "title": "用自己的資料與回答方式建立 AI 助手",
+    "description": "透過實際的繁體中文 Tomverse 介面，把你希望的回答方式與常用資料放進一個只供自己使用的 AI 助手。",
+    "outcomeLabel": "完成本指南後",
+    "outcomeTitle": "你將擁有一個能參考自己資料回答的專屬助手",
+    "outcomeItems": [
+      "已儲存回答方式的 AI 助手",
+      "與問題相關的 Knowledge 摘錄",
+      "可在新對話中直接選擇的設定"
+    ],
+    "videoLabel": "中文介面 · 中文語音",
+    "videoHint": "關閉聲音後，仍可透過中文字幕獲得相同說明。",
+    "demoEyebrow": "點擊練習",
+    "demoTitle": "點擊按鈕，熟悉實際操作順序",
+    "demoDescription": "這是不會修改帳戶或上傳檔案的練習畫面。點擊每個高亮控制項即可繼續。",
+    "supademoLabel": "分步介面練習",
+    "nativeDemoLabel": "Tomverse 分步練習",
+    "nativeDemoNote": "使用按鈕或鍵盤練習儲存與提問的順序，不會修改真實帳戶或檔案。",
+    "demoPrevious": "上一步",
+    "demoNext": "下一步",
+    "demoRestart": "重新開始",
+    "steps": [
+      {
+        "id": "create_assistant",
+        "label": "第 1 步",
+        "title": "建立助手",
+        "body": "在「設定」的「我的 AI 設定」中建立新設定。",
+        "screenTitle": "設定 / 我的 AI 設定",
+        "screenHint": "在這裡建立助手，或匯入外部設定。",
+        "targetLabel": "新增設定",
+        "result": "系統會開啟用於填寫名稱與說明的編輯頁面。"
+      },
+      {
+        "id": "add_knowledge",
+        "label": "第 2 步",
+        "title": "新增 Knowledge 並儲存",
+        "body": "設定回答方式、選擇檔案，然後儲存新的修訂版本。",
+        "screenTitle": "編輯 AI 設定",
+        "screenHint": "範例：只整理原文中的日期與準備物品，缺少的資訊標為未定，並附上依據句子。",
+        "targetLabel": "新增檔案 → 儲存指令與模型",
+        "result": "處理完成的檔案會被選為目前修訂版本的 Knowledge。"
+      },
+      {
+        "id": "start_chat",
+        "label": "第 3 步",
+        "title": "在對話中使用",
+        "body": "從對話工具中選擇已儲存的助手，並送出第一個問題。",
+        "screenTitle": "新對話 / AI 助手",
+        "screenHint": "系統只會把與問題相關的摘錄作為參考上下文。",
+        "targetLabel": "選擇讀書會助手",
+        "result": "回答下方會顯示使用了多少條 Knowledge 摘錄。"
+      }
+    ],
+    "choosePathEyebrow": "選擇開始方式",
+    "choosePathTitle": "從頭建立，或匯入你已在使用的設定",
+    "choosePathDescription": "只選擇取得第一個有效回答所需的路徑。進階設定可以稍後再調整。",
+    "createPath": {
+      "label": "從頭建立",
+      "title": "從名稱與指令開始",
+      "body": "如果沒有現有設定，只需三個簡短步驟，即可取得第一個以資料為依據的回答。",
+      "steps": [
+        "填寫名稱與回答方式",
+        "新增一個 Knowledge 檔案",
+        "在對話中選擇並提問"
+      ]
+    },
+    "importPath": {
+      "label": "匯入現有設定",
+      "title": "匯入 Agent Skill 或 Tomverse 套件",
+      "body": "先審閱套件內容，再把其中的指令與資料候選轉換為助手。",
+      "steps": [
+        "選擇 ZIP 或 Tomverse 套件",
+        "確認無法帶入的項目",
+        "檢查 Knowledge 與模型後發布"
+      ]
+    },
+    "importAvailableLabel": "此帳戶可以使用匯入功能",
+    "importUnavailableLabel": "匯入功能正逐步開放",
+    "importAvailableBody": "前往「設定 → 我的 AI 設定」，選擇「匯入外部設定」。",
+    "importUnavailableBody": "如果沒有該按鈕，請手動建立：填寫名稱與指令，再新增資料。",
+    "importBoundary": "Tomverse 支援包含 SKILL.md、references 與部分 assets 的 Agent Skill 套件，以及 Tomverse 原生套件。系統不會執行腳本，也不會自動連接外部工具或模型。目前尚不支援自動轉換 ChatGPT GPT 設定檔。",
+    "detailsEyebrow": "逐畫面說明",
+    "detailsTitle": "去哪裡、點擊什麼",
+    "detailsDescription": "如果影片太快，或某一步沒有成功，請對照下方的路徑與儲存結果。",
+    "detailedSteps": [
+      {
+        "number": "01",
+        "title": "建立助手",
+        "where": "設定 → 我的 AI 設定",
+        "action": "輸入新設定的名稱與說明。",
+        "result": "Tomverse 會建立一份可編輯的草稿。"
+      },
+      {
+        "number": "02",
+        "title": "指定回答方式",
+        "where": "編輯 AI 設定 → 指令",
+        "action": "具體說明輸出結構與判斷順序，而不只是語氣。",
+        "result": "儲存後，新回答會採用相同方式。"
+      },
+      {
+        "number": "03",
+        "title": "連接 Knowledge",
+        "where": "編輯 AI 設定 → 此帳戶可使用的知識檔案",
+        "action": "新增檔案，等待狀態變為就緒，然後選取它。",
+        "result": "已儲存的修訂版本會固定使用所選檔案。"
+      },
+      {
+        "number": "04",
+        "title": "傳送第一個問題",
+        "where": "對話 → AI 助手",
+        "action": "選擇剛儲存的設定，並提出與資料相關的問題。",
+        "result": "你可以確認回答是否使用了 Knowledge。"
+      }
+    ],
+    "boundariesEyebrow": "開始前須知",
+    "boundariesTitle": "內容僅限你的帳戶，但重要回答仍需核對原文",
+    "boundaryItems": [
+      "助手與 Knowledge 不會公開，也不會與其他使用者共用。",
+      "相關的 Knowledge 摘錄會作為參考資料，傳送給生成回答的 AI 供應商。",
+      "檔案中的文字會被當作參考資料，而不是給助手的指令。",
+      "重要數字與決定請回到原始文件再次確認。"
+    ],
+    "helpEyebrow": "遇到問題時",
+    "helpTitle": "三種常見情況",
+    "helpItems": [
+      {
+        "title": "無法選取檔案",
+        "body": "仍在處理中的檔案無法選取。請等待狀態變為「已就緒」後再試。"
+      },
+      {
+        "title": "對話中找不到助手",
+        "body": "請確認已儲存指令與模型。只有草稿、尚未發布修訂版本的設定無法用於對話。"
+      },
+      {
+        "title": "回答沒有使用我的資料",
+        "body": "請寫明文件主題、檔名或希望查找的具體用語，然後再次提問。"
+      }
+    ],
+    "ctaAuthenticated": "在 Tomverse 中親自建立",
+    "ctaGuest": "登入並親自建立",
+    "ctaHint": "產品內指南會依照實際儲存結果，從下一步接續。",
+    "exampleTitle": "使用自己資料的虛構範例",
+    "exampleMaterialLabel": "用於 Knowledge 的虛構資料",
+    "examplePromptLabel": "第一個問題",
+    "exampleMaterial": "虛構通知：讀書會於11月7日下午2點開始。請攜帶一本讀過的書與筆記。請於11月3日前確認是否參加。地點稍後公布。",
+    "examplePrompt": "請參考社團通知，列出活動日期、準備物品與回覆截止時間。地點尚未確定時請明確說明，並為每一項附上依據句子。",
+    "exampleNote": "這是虛構資料與編輯示範回答，不是真實模型結果，也不代表會自動訓練檔案。原影片展示的是現有介面路徑。",
+    "exampleOutputLabel": "與原文核對的示範回答",
+    "exampleOutput": "活動：11月7日下午2點 — 「讀書會於11月7日下午2點開始。」\n準備：一本書與筆記 — 「請攜帶一本讀過的書與筆記。」\n回覆：11月3日前 — 「請於11月3日前確認是否參加。」\n地點：未定 — 「地點稍後公布。」"
+  },
   "fr": {
     stepProgress: (current, total) => `Étape ${current} sur ${total}`,
     "eyebrow": "Mon assistant d’IA + Knowledge",
