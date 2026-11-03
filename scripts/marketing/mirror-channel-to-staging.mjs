@@ -27,6 +27,7 @@ export async function main(argv, env = process.env) {
   const flag = (name) => argv.flatMap((arg, index) => (arg === `--${name}` && argv[index + 1] ? [argv[index + 1]] : []))[0];
   const { marketingWebhookIsStaging } = await import("../../lib/marketingWebhookCore.ts");
   const { prisma } = await import("../../lib/prisma.ts");
+  const { insertMirroredMarketingChannel } = await import("../../lib/marketingStore.ts");
   try {
     const existingChannels = await prisma.marketingChannel.findMany({
       select: { id: true, accountSlug: true, provider: true, externalAccountRef: true },
@@ -51,12 +52,9 @@ export async function main(argv, env = process.env) {
       console.log("Dry run. Add --execute to insert this row (it can never be deleted).");
       return 0;
     }
-    await prisma.marketingChannel.create({
-      data: {
-        ...plan.row,
-        scopesDigest: createHash("sha256").update(`mirror:${plan.row.id}`).digest("hex"),
-        status: "connect_pending",
-      },
+    await insertMirroredMarketingChannel(prisma, {
+      ...plan.row,
+      scopesDigest: createHash("sha256").update(`mirror:${plan.row.id}`).digest("hex"),
     });
     console.log("Inserted.");
     return 0;
