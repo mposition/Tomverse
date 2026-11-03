@@ -3,9 +3,11 @@ import test from "node:test";
 
 // docs/policy/marketing-automation.md §14 S6: the consent gate for the GA4
 // User-ID. Nothing is created or sent without explicit consent, without the
-// published notice, or with the switch off -- each on its own -- and the
-// shipped build can do neither, because the notice has not been revised yet
-// (§10.2). Declining while signed in withdraws the stored id.
+// published notice, or with the switch off -- each on its own. The notice is
+// published (the privacy policy revision that describes the identifier ships
+// with GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED = true, §10.2), so the switch is the
+// gate that keeps the shipped build from creating or sending anything until the
+// owner turns it on. Declining while signed in withdraws the stored id.
 
 const policy = await import("../lib/ga4UserIdPolicy.ts");
 const server = await import("../lib/ga4UserId.ts");
@@ -40,31 +42,46 @@ test("transmission needs notice, switch, explicit consent, a session and a tag",
   }
 });
 
-test("the shipped build cannot create or send a User-ID: the privacy notice is not revised yet", () => {
-  assert.equal(policy.GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED, false);
+test("the notice is published, and the default switch still leaves a User-ID uncreated and unsent", () => {
+  assert.equal(policy.GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED, true);
+  // Everything else is satisfied; only the switch differs. Anything but the
+  // string "true" (any case, trimmed) is off, including a boolean.
+  for (const switchValue of [undefined, null, "", "false", "0", "no", "off", "enabled", false, true, 1]) {
+    assert.equal(
+      policy.ga4UserIdTransmissionAllowed({
+        ...allOn,
+        noticePublished: policy.GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+        switchValue,
+      }),
+      false,
+      `switch ${JSON.stringify(switchValue)}`,
+    );
+  }
+  // The server reads the real constant by default and agrees: without the
+  // switch it hands out nothing.
+  assert.equal(server.ga4UserIdServerEnabled({}), false, "switch unset");
+  assert.equal(server.ga4UserIdServerEnabled({ NEXT_PUBLIC_GA4_USER_ID_ENABLED: "" }), false);
+  assert.equal(server.ga4UserIdServerEnabled({ NEXT_PUBLIC_GA4_USER_ID_ENABLED: "false" }), false);
+  assert.equal(server.ga4UserIdServerEnabled({ NEXT_PUBLIC_GA4_USER_ID_ENABLED: "true" }), true);
+  assert.equal(server.ga4UserIdServerEnabled({ NEXT_PUBLIC_GA4_USER_ID_ENABLED: " TRUE " }), true);
+  // And the switch alone is not enough: the notice is still a condition.
   assert.equal(
-    policy.ga4UserIdTransmissionAllowed({
-      ...allOn,
-      noticePublished: policy.GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
-    }),
+    server.ga4UserIdServerEnabled({ NEXT_PUBLIC_GA4_USER_ID_ENABLED: "true" }, false),
     false,
   );
-  const env = { NEXT_PUBLIC_GA4_USER_ID_ENABLED: "true" };
-  assert.equal(server.ga4UserIdServerEnabled(env), false, "the server agrees by default");
-  assert.equal(server.ga4UserIdServerEnabled(env, true), true);
-  assert.equal(
-    server.ga4UserIdServerEnabled({ NEXT_PUBLIC_GA4_USER_ID_ENABLED: "false" }, true),
-    false,
-  );
-  assert.equal(server.ga4UserIdServerEnabled({}, true), false, "switch unset");
-  assert.equal(
-    policy.ga4UserIdWithdrawalApplies({
-      noticePublished: policy.GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
-      signedIn: true,
-    }),
-    false,
-    "and with nothing ever created, there is nothing to withdraw",
-  );
+  // The notice alone does not enable it either; consent, a session and a tag
+  // stay conditions on top of the switch.
+  for (const missing of ["consent", "signedIn", "measurementId"]) {
+    assert.equal(
+      policy.ga4UserIdTransmissionAllowed({
+        ...allOn,
+        noticePublished: policy.GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+        [missing]: missing === "signedIn" ? false : null,
+      }),
+      false,
+      missing,
+    );
+  }
 });
 
 test("declining withdraws for a signed-in visitor once the notice is out, switch or not", () => {
@@ -277,6 +294,35 @@ test("the request that creates an id states the explicit consent it acts on", as
   assert.equal(requests[0].init.method, "POST");
   assert.deepEqual(JSON.parse(requests[0].init.body), { consent: "accepted" });
   assert.deepEqual(userIdCommands(), [ID]);
+});
+
+test("notice published, switch off: the provider's decision issues no request and sets no id", async () => {
+  for (const switchValue of [undefined, "", "false"]) {
+    client.disableAnalyticsClient();
+    win.dataLayer = [];
+    configure("G-TEST1234");
+    const allowed = policy.ga4UserIdTransmissionAllowed({
+      ...allOn,
+      noticePublished: policy.GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+      switchValue,
+    });
+    assert.equal(allowed, false, `switch ${JSON.stringify(switchValue)}`);
+    const requests = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({ analyticsUserId: ID }), { status: 200 });
+    };
+    try {
+      client.syncGa4UserId(allowed);
+      await flush();
+      await flush();
+    } finally {
+      globalThis.fetch = original;
+    }
+    assert.deepEqual(requests, [], `switch ${JSON.stringify(switchValue)}`);
+    assert.deepEqual(userIdCommands(), [], `switch ${JSON.stringify(switchValue)}`);
+  }
 });
 
 test("not asked for, no request at all: nothing is created before consent", async () => {

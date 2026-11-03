@@ -26,7 +26,8 @@
  * `contentSha256` is what keeps that true. It is the digest of exactly what
  * the page renders from -- the component (LF line endings), then
  * `lib/providerDataDestinations.ts` (LF line endings, because the table reads
- * it), followed by each locale's `privacyPolicy` object as JSON, in the order
+ * it), then `lib/privacyNoticeStatus.ts` (which decides whether the comment
+ * section is shown), followed by each locale's `privacyPolicy` object as JSON, in the order
  * en, ko, zh, fr, de, es, pt -- and `tests/sitemapLastModified.test.mjs`
  * recomputes it. Changing the policy text or a destination fact therefore
  * fails that test until someone decides whether the change moves the
