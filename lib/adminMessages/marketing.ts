@@ -219,6 +219,8 @@ export const adminMarketingMessages = defineAdminMessages({
     colFile: "File:",
     colTranscript: "What it says",
     notUploaded: "Not uploaded yet",
+    postAssets: "Attached files:",
+    postNoAssets: "No files attached",
     createCompetitorTitle: "Add a competitor",
     createCompetitorNote:
       "Approved as it is added. Its hosts become sources for market facts from the next report on.",
@@ -660,6 +662,8 @@ export const adminMarketingMessages = defineAdminMessages({
     colFile: "파일:",
     colTranscript: "대본",
     notUploaded: "아직 업로드되지 않음",
+    postAssets: "첨부 파일:",
+    postNoAssets: "첨부된 파일 없음",
     createCompetitorTitle: "경쟁사 추가",
     createCompetitorNote: "추가하는 즉시 승인됩니다. 다음 보고서부터 이 host가 시장 사실의 출처가 됩니다.",
     actCreateCompetitor: "추가하고 승인",

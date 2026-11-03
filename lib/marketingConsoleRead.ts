@@ -442,6 +442,10 @@ export async function readMarketingConsole(
         guardCodes: true,
         guardRuleIds: true,
         envelope: true,
+        // The files the draft carries, by id. The excerpt is text only, so
+        // without these a person approving a post cannot see that it has a
+        // video attached.
+        assetIds: true,
         approvalExpiresAt: true,
         createdAt: true,
         channel: { select: { accountSlug: true, channel: true } },
@@ -476,6 +480,7 @@ export async function readMarketingConsole(
         guardDecision: post.guardDecision,
         guardCodes: post.guardCodes,
         guardRuleIds: post.guardRuleIds,
+        assetIds: post.assetIds,
         excerpt: excerpt(post.envelope),
         // How many registry claims the draft cites: a count, not the claims.
         claimCount: Array.isArray((post.envelope as { claimIds?: unknown } | null)?.claimIds)
@@ -506,6 +511,7 @@ export async function readMarketingConsole(
         legalHold: true,
         reusableAsTemplate: true,
         scheduledAt: true,
+        assetIds: true,
         externalPostId: true,
         externalUrl: true,
         publishedAt: true,
@@ -542,6 +548,7 @@ export async function readMarketingConsole(
         // were, and the only outcome was a 409.
         reusableAsTemplate: post.reusableAsTemplate,
         scheduledAt: post.scheduledAt?.toISOString() ?? null,
+        assetIds: post.assetIds,
         // The id the unpublish writer compares against, not a link: an
         // operator saying a post is gone has to be saying it about the post
         // the row names.
