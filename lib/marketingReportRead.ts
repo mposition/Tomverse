@@ -1,6 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { marketingAnalysisView, type MarketingAnalysisView } from "@/lib/marketingAnalysisCore";
+import {
+  marketingAnalysisView,
+  marketingStrategyWeek,
+  marketingWeeklyStrategySchema,
+  type MarketingAnalysisView,
+  type MarketingWeeklyStrategy,
+} from "@/lib/marketingAnalysisCore";
 import {
   MARKETING_REPORT_KINDS,
   parseMarketingReportPayload,
@@ -132,5 +138,46 @@ export async function readMarketingReportForConsole(
       competitorNames,
       ...(analysis === undefined ? {} : { analysis }),
     },
+  };
+}
+
+/** The newest weekly plan, as the Reports tab's strategy card reads it. */
+export type MarketingStrategyRead =
+  | { readonly status: "none" }
+  | { readonly status: "unreadable" }
+  | {
+      readonly status: "found";
+      /** Whether the plan is for the Brisbane week `now` falls in. */
+      readonly current: boolean;
+      readonly createdAt: string;
+      readonly briefReportId: string;
+      readonly strategy: MarketingWeeklyStrategy;
+    };
+
+/**
+ * The newest stored plan (lib/marketingStrategyCore.ts), from the analysis
+ * rows that carry one. A plan that no longer parses is reported as
+ * unreadable, not drawn loosely.
+ */
+export async function readLatestMarketingStrategy(
+  db: Pick<PrismaClient, "$queryRaw">,
+  now: number = Date.now(),
+): Promise<MarketingStrategyRead> {
+  const rows = await db.$queryRaw<Array<{ strategy: unknown; briefReportId: string; createdAt: Date }>>(Prisma.sql`
+    SELECT "payload"->'strategy' AS "strategy", "briefReportId", "createdAt"
+    FROM "MarketingAnalysis"
+    WHERE "payload"->'strategy' IS NOT NULL
+    ORDER BY "createdAt" DESC
+    LIMIT 1
+  `);
+  if (rows.length === 0) return { status: "none" };
+  const parsed = marketingWeeklyStrategySchema.safeParse(rows[0].strategy);
+  if (!parsed.success) return { status: "unreadable" };
+  return {
+    status: "found",
+    current: parsed.data.weekStart === marketingStrategyWeek(now).start,
+    createdAt: rows[0].createdAt.toISOString(),
+    briefReportId: rows[0].briefReportId,
+    strategy: parsed.data,
   };
 }
