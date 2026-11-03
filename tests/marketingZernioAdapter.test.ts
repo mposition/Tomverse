@@ -400,6 +400,17 @@ test("a key that is not exactly ours, another account, or two matches is no answ
   }
 });
 
+test("one key under two posts on different pages is no answer either", async () => {
+  const first = Array.from({ length: 49 }, (_, index) => listed(`other-${index}`, publishedEntry));
+  const { adapter, calls } = adapterWith([
+    { status: 200, body: page([...first, listed(request.requestKey, publishedEntry)], 3) },
+    { status: 200, body: page([listed(request.requestKey, publishedEntry, { _id: "zpost_8" })], 3) },
+  ]);
+  const result = await adapter.lookupByRequestKey(request.requestKey, "acct_9");
+  assert.equal(result.outcome, "outcome_unknown");
+  assert.equal(calls.length, 2);
+});
+
 test("a list that cannot be read is unknown", async () => {
   for (const response of [
     { status: 500, body: null },

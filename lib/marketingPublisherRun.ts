@@ -768,6 +768,7 @@ export const marketingPublisherOperations = (client: PrismaClient) => ({
     readonly id: string;
     readonly requestKey: string;
     readonly expectedHistoryVersion: number;
+    readonly expectedPublishAttempt: number;
     readonly finding: MarketingReconcileFinding;
   }) =>
     runBoundedMarketingTransaction(client, (tx) => recordMarketingPostOutcomeReconciled(tx, input)),

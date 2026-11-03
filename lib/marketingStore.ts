@@ -5360,7 +5360,10 @@ async function recordMarketingPostOutcome(
     // query, when the provider gave the post's id (operator decision
     // 2026-11-03).
     data.errorCode = outcome.errorCode;
-    if (outcome.externalPostId) data.externalPostId = outcome.externalPostId;
+    // **This attempt's id, or none.** A requeue and a dispatch leave the column
+    // as it was, so an id a failed earlier attempt left would otherwise be read
+    // later as this attempt's post.
+    data.externalPostId = outcome.externalPostId ?? null;
   }
 
   const recorded = await database.marketingPost.updateMany({
@@ -5541,11 +5544,22 @@ export type MarketingReconcileFinding =
   | { readonly kind: "identified"; readonly externalPostId: string };
 
 /**
- * `outcome_unknown` posts the publisher may ask the provider about, oldest
- * first. A read: the write locks the row and checks it again.
+ * How long an unknown outcome stays one the publisher asks about (seven days);
+ * after it, a person settles it. A literal, not `7 * 24 * ...`: the webhook
+ * fingerprint keeps any declaration it cannot prove free of load-time effects.
+ */
+export const MARKETING_RECONCILE_WINDOW_MS = 604_800_000;
+
+/**
+ * `outcome_unknown` posts the publisher may ask the provider about, newest
+ * first and within {@link MARKETING_RECONCILE_WINDOW_MS}, so rows that never
+ * resolve cannot keep a new post from being looked at. A read: the write locks
+ * the row and checks it again.
  *
  * The request key comes back because a row without the provider's id is looked
- * up by it; the id, when there is one, is asked about directly.
+ * up by it; the id, when there is one, is asked about directly. The attempt
+ * comes back because an answer is only evidence about the attempt it was read
+ * for.
  */
 export async function listMarketingPostsOutcomeUnknown(
   database: MarketingTransaction,
@@ -5555,16 +5569,19 @@ export async function listMarketingPostsOutcomeUnknown(
     readonly id: string;
     readonly historyVersion: number;
     readonly requestKey: string;
+    readonly publishAttempt: number;
     readonly externalPostId: string | null;
     readonly externalAccountRef: string;
   }>
 > {
   const take = Math.max(0, Math.min(Math.floor(Number(limit) || 0), 50));
   if (take === 0) return [];
+  const now = await marketingDatabaseNow(database);
   const rows = await database.marketingPost.findMany({
     where: {
       status: "outcome_unknown",
       publishedAt: null,
+      outcomeUnknownAt: { gte: new Date(now.getTime() - MARKETING_RECONCILE_WINDOW_MS) },
       providerRequestKey: { not: null },
       channel: { externalAccountRef: { not: null } },
     },
@@ -5572,10 +5589,11 @@ export async function listMarketingPostsOutcomeUnknown(
       id: true,
       historyVersion: true,
       providerRequestKey: true,
+      publishAttempt: true,
       externalPostId: true,
       channel: { select: { externalAccountRef: true } },
     },
-    orderBy: [{ outcomeUnknownAt: "asc" }, { id: "asc" }],
+    orderBy: [{ outcomeUnknownAt: "desc" }, { id: "asc" }],
     take,
   });
   return rows.flatMap((row) =>
@@ -5585,6 +5603,7 @@ export async function listMarketingPostsOutcomeUnknown(
             id: row.id,
             historyVersion: Number(row.historyVersion),
             requestKey: row.providerRequestKey,
+            publishAttempt: Number(row.publishAttempt),
             externalPostId: row.externalPostId,
             externalAccountRef: row.channel.externalAccountRef,
           },
@@ -5602,8 +5621,10 @@ export async function listMarketingPostsOutcomeUnknown(
  * failed with the failure appended for this attempt. `identified` only keeps the
  * provider's id on a post still processing, so the next run asks about it by id.
  *
- * Bound to the request key the dispatch sent and the history version read with
- * the list, so a person's resolution in between wins and this writes nothing.
+ * Bound to the request key the dispatch sent, the history version read with
+ * the list and **the attempt the answer was read for**: every attempt of a post
+ * shares its key, so an answer about another attempt is not evidence about this
+ * one, and a person's resolution in between wins and this writes nothing.
  * Nothing is ever sent from here; this is the record of a read.
  */
 export async function recordMarketingPostOutcomeReconciled(
@@ -5612,15 +5633,18 @@ export async function recordMarketingPostOutcomeReconciled(
     readonly id: string;
     readonly requestKey: string;
     readonly expectedHistoryVersion: number;
+    readonly expectedPublishAttempt: number;
     readonly finding: MarketingReconcileFinding;
   },
 ): Promise<
-  | { readonly recorded: true }
+  /** `changed` is false only for an id the row already holds. */
+  | { readonly recorded: true; readonly changed: boolean }
   | { readonly recorded: false; readonly reason: "post_not_found" | "post_not_unknown" | "reconcile_conflict" }
 > {
   const id = String(rawInput.id);
   const requestKey = String(rawInput.requestKey);
   const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const expectedPublishAttempt = Number(rawInput.expectedPublishAttempt);
   const finding = rawInput.finding;
   if (requestKey.length === 0) {
     throw new MarketingStoreRefusedError(
@@ -5677,7 +5701,11 @@ export async function recordMarketingPostOutcomeReconciled(
   if (post.status !== "outcome_unknown" || post.publishedAt !== null) {
     return { recorded: false, reason: "post_not_unknown" };
   }
-  if (post.providerRequestKey !== requestKey || Number(post.historyVersion) !== expectedHistoryVersion) {
+  if (
+    post.providerRequestKey !== requestKey ||
+    Number(post.historyVersion) !== expectedHistoryVersion ||
+    Number(post.publishAttempt) !== expectedPublishAttempt
+  ) {
     return { recorded: false, reason: "reconcile_conflict" };
   }
   // An id already kept is the one this finding must be about: a different id
@@ -5690,11 +5718,14 @@ export async function recordMarketingPostOutcomeReconciled(
     return { recorded: false, reason: "reconcile_conflict" };
   }
   if (finding.kind === "identified" && post.externalPostId === finding.externalPostId) {
-    return { recorded: true };
+    return { recorded: true, changed: false };
   }
 
   const attempt = Number(post.publishAttempt);
   let data: Prisma.MarketingPostUpdateManyMutationInput;
+  // As a person's resolution: published moves no history (the unknown attempt
+  // is already there), failed appends this attempt's failure, which the
+  // trigger requires of every move to `failed`.
   if (finding.kind === "published") {
     data = {
       status: "published",
@@ -5763,7 +5794,7 @@ export async function recordMarketingPostOutcomeReconciled(
       ...(finding.kind === "published" ? { externalUrl: finding.externalUrl } : {}),
     },
   });
-  return { recorded: true };
+  return { recorded: true, changed: true };
 }
 
 /**
