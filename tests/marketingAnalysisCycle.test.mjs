@@ -325,6 +325,7 @@ test("a refused plan call stops the run as the analysis calls do", async () => {
 
 const OPERATIONS = {
   measurement: {
+    publishedInWindow: 0,
     dispatch: { sent: 0, published: 0, failed: 0, verified: 0 },
     queue: { pendingApproval: 9, approvedWaiting: 3, nextApprovalExpiryAt: "2026-11-30T07:02:00.000Z", scheduled: 0 },
     touches: 0,

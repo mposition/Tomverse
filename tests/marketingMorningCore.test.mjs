@@ -14,6 +14,8 @@ import {
 
 const OPERATIONS = marketingMorningOperationsSchema.parse({
   measurement: {
+    // Two went out in the seven days by publishedAt; one of the sends placed here published.
+    publishedInWindow: 2,
     dispatch: { sent: 2, published: 1, failed: 1 },
     queue: { pendingApproval: 9, approvedWaiting: 3, nextApprovalExpiryAt: null },
     touches: null,
@@ -26,7 +28,7 @@ const OPERATIONS = marketingMorningOperationsSchema.parse({
 test("the date is Brisbane's, and the figures come from the counts, unknowns kept unknown", () => {
   assert.equal(marketingBrisbaneDate(Date.parse("2026-11-03T21:00:00Z")), "2026-11-04");
   assert.deepEqual(marketingMorningFigures(OPERATIONS), {
-    published7d: 1,
+    published7d: 2,
     sent7d: 2,
     failed7d: 1,
     pendingApproval: 9,

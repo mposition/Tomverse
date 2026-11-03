@@ -101,6 +101,11 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
       </Section>
 
       <Section title={m.secMeasurement} testId="marketing-weekly-measurement">
+        {x.dispatch.compacted ? (
+          <p className="text-sm text-sky-300" data-testid="marketing-weekly-compacted">
+            {m.compacted}
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat
             label={m.successRate}

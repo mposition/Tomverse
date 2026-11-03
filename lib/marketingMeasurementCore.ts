@@ -66,6 +66,12 @@ export type MarketingMeasurementPost = {
   readonly errorCode: string | null;
   readonly guardCodes: readonly string[];
   /** The dispatch attempts in the post's history (`type: "attempt"` entries). */
+  /**
+   * The spans of attempt entries retention has folded into a summary
+   * (`retention_summary` entries, after ninety days): sends in them can no
+   * longer be counted one by one.
+   */
+  readonly compactedAttempts: ReadonlyArray<{ readonly firstAt: Date; readonly lastAt: Date }>;
   readonly attempts: ReadonlyArray<{
     readonly at: Date;
     readonly attempt: number;
@@ -110,6 +116,12 @@ export type MarketingMeasurement = {
     /** Failures recorded before the tool was called: not sends, counted apart. */
     readonly notSent: number;
     /**
+     * Whether retention has already folded some of the window's attempts into
+     * summaries. Then the send measures are incomplete: every one of them is
+     * held, never shown as a count or a rate.
+     */
+    readonly compacted: boolean;
+    /**
      * Posts `publishing` now: requests out with no outcome recorded. Not yet
      * sends -- a send is counted once, in the window its first outcome is
      * recorded, so it never moves between windows -- and shown apart.
@@ -146,7 +158,7 @@ export type MarketingMeasurement = {
   readonly guestLeads: MarketingConversionCount | null;
   readonly llm: MarketingMeasurementLlm | null;
   /** Metrics held for too small a sample. */
-  readonly held: ReadonlyArray<"success_rate" | "latency" | "signups">;
+  readonly held: ReadonlyArray<"success_rate" | "latency" | "signups" | "sends_compacted">;
 };
 
 const within = (date: Date | null, window: MarketingMeasurementWindow) =>
@@ -277,12 +289,18 @@ export function summarizeMarketingMeasurement(input: {
           ...channel,
           held: channel.attributed < MARKETING_MEASUREMENT_MIN_SIGNUPS,
         }));
+  const compacted = posts.some((post) =>
+    post.compactedAttempts.some(
+      (span) => span.firstAt.getTime() < window.end.getTime() && span.lastAt.getTime() >= window.start.getTime(),
+    ),
+  );
   const sends = marketingSendStats(resolved);
   const pending = posts.filter((post) => post.status === "pending_approval");
   const approved = posts.filter((post) => post.status === "approved");
   const modes = [...new Set(resolved.map((entry) => entry.post.mode))].sort();
 
-  const held: Array<"success_rate" | "latency" | "signups"> = [...sends.held];
+  const held: Array<"success_rate" | "latency" | "signups" | "sends_compacted"> = [...sends.held];
+  if (compacted) held.push("sends_compacted");
   // Judged per channel: two channels of six each are two held channels, not twelve.
   if (!signupChannels || !signupChannels.some((channel) => !channel.held)) held.push("signups");
 
@@ -301,6 +319,7 @@ export function summarizeMarketingMeasurement(input: {
     dispatch: {
       ...sends,
       notSent,
+      compacted,
       inFlight,
       byMode: modes.map((mode) => ({ mode, ...marketingSendStats(resolved.filter((entry) => entry.post.mode === mode)) })),
       // Every mode and account the window sent from, each judged on its own sample.

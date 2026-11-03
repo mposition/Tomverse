@@ -414,8 +414,10 @@ export async function readMarketingGeneratorContext(
     competitors: { tracked, knownIds },
     llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
     ownProduct: { pages: ownPages(), plans: activePlans },
-    operations: analysisOn ? await readMarketingOperations(db) : null,
-    marketPrices: analysisOn ? await readMarketingPriceHistory(db) : [],
+    // Only for the morning report: a read that fails leaves it without its
+    // counts (it records "no_data"), never the drafts without their context.
+    operations: analysisOn ? await readMarketingOperations(db).catch(() => null) : null,
+    marketPrices: analysisOn ? await readMarketingPriceHistory(db).catch(() => []) : [],
     analysis: {
       enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
       // Only asked while the switch is on: off, no plan is written either way.

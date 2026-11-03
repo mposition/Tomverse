@@ -19,15 +19,29 @@ import { MARKETING_TOUCH_EVENT } from "@/lib/marketingTouchCore";
  * The rows lib/marketingMeasurementCore.ts counts: the posts a window or the
  * queue can see, the accounts, the touches and attributed conversions, and
  * this UTC month's LLM ledger. Read-only and counts only -- no post text, no
- * person, no URL. Each part fails on its own and reads as null, never zero.
+ * person, no URL. The touches, conversions and ledger fail on their own and
+ * read as null, never zero; the posts and accounts are the report itself, so
+ * their failure fails the read.
  */
 
 type Reader = Pick<PrismaClient, "$queryRaw">;
 
+/** The spans of attempt entries retention folded into `retention_summary` entries. */
+export const marketingCompactedAttemptsOf = (history: unknown): MarketingMeasurementPost["compactedAttempts"] =>
+  (Array.isArray(history) ? history : []).flatMap((entry) => {
+    const value = entry as { type?: unknown; summarises?: unknown; firstAt?: unknown; lastAt?: unknown };
+    if (value?.type !== "retention_summary" || value.summarises !== "attempt") return [];
+    if (typeof value.firstAt !== "string" || typeof value.lastAt !== "string") return [];
+    const firstAt = new Date(value.firstAt);
+    const lastAt = new Date(value.lastAt);
+    if (Number.isNaN(firstAt.getTime()) || Number.isNaN(lastAt.getTime())) return [];
+    return [{ firstAt, lastAt }];
+  });
+
 /**
  * The dispatch attempts in a post's history. Read leniently: an entry this
  * does not recognise is not an attempt. Attempts retention has folded into a
- * summary are past the 24-month window any report reads.
+ * summary after ninety days are read by `marketingCompactedAttemptsOf`.
  */
 export const marketingAttemptsOf = (history: unknown): MarketingMeasurementPost["attempts"] =>
   (Array.isArray(history) ? history : []).flatMap((entry) => {
@@ -96,7 +110,13 @@ export async function readMarketingMeasurement(
         WHERE p."updatedAt" >= ${window.start} OR p."createdAt" >= ${window.start}
            OR p."status" IN ('pending_approval', 'approved', 'scheduled', 'publishing')
       `)
-      .then((rows) => rows.map(({ history, ...row }) => ({ ...row, attempts: marketingAttemptsOf(history) }))),
+      .then((rows) =>
+        rows.map(({ history, ...row }) => ({
+          ...row,
+          attempts: marketingAttemptsOf(history),
+          compactedAttempts: marketingCompactedAttemptsOf(history),
+        })),
+      ),
     db.$queryRaw<Array<{ accountSlug: string; channel: string; status: string; pauseReasonCode: string | null }>>(Prisma.sql`
       SELECT "accountSlug", "channel", "status", "pauseReasonCode" FROM "MarketingChannel" ORDER BY "accountSlug"
     `),

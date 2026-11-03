@@ -39,6 +39,7 @@ export const marketingMorningOperationsSchema = z
   .object({
     measurement: z
       .object({
+        publishedInWindow: z.number(),
         dispatch: z.object({ sent: z.number(), published: z.number(), failed: z.number() }).passthrough(),
         queue: z
           .object({
@@ -67,7 +68,7 @@ export function marketingMorningFigures(operations: MarketingMorningOperations):
   const { measurement, switches } = operations;
   const whole = (value: number) => Math.max(0, Math.round(value));
   return {
-    published7d: whole(measurement.dispatch.published),
+    published7d: whole(measurement.publishedInWindow),
     sent7d: whole(measurement.dispatch.sent),
     failed7d: whole(measurement.dispatch.failed),
     pendingApproval: whole(measurement.queue.pendingApproval),

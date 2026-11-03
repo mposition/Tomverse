@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { readFileSync } from "node:fs";
 
+import { marketingKpiWeek } from "@/lib/marketingWeeklyKpiCore";
 import {
   MARKETING_NOT_SENT_ERROR_CODES,
   marketingPercentile,
@@ -47,6 +48,7 @@ const post = (overrides = {}) => ({
   errorCode: null,
   guardCodes: ["new_copy"],
   attempts: [],
+  compactedAttempts: [],
   ...overrides,
 });
 
@@ -356,4 +358,42 @@ test("each mode and account is judged on its own sample, and weekly published fo
   assert.deepEqual(rate, { "facebook-3": null, "instagram-3": 1 });
   assert.equal(measurement.dispatch.sent, 6);
   assert.equal(measurement.publishedInWindow, 7);
+});
+
+test("a week whose send history retention has summarised holds every send measure", () => {
+  const measurement = summarizeMarketingMeasurement({
+    window: WINDOW,
+    posts: [
+      post({
+        status: "verified",
+        compactedAttempts: [{ firstAt: at("2026-11-03T00:00:00Z"), lastAt: at("2026-11-03T00:00:00Z") }],
+      }),
+    ],
+    channels: [],
+    touches: 0,
+    signups: null,
+    signupChannels: null,
+    guestLeads: null,
+    llm: null,
+  });
+  assert.equal(measurement.dispatch.compacted, true);
+  assert.ok(measurement.held.includes("sends_compacted"));
+  const elsewhere = summarizeMarketingMeasurement({
+    window: WINDOW,
+    posts: [post({ compactedAttempts: [{ firstAt: at("2026-08-01T00:00:00Z"), lastAt: at("2026-08-02T00:00:00Z") }] })],
+    channels: [],
+    touches: 0,
+    signups: null,
+    signupChannels: null,
+    guestLeads: null,
+    llm: null,
+  });
+  assert.equal(elsewhere.dispatch.compacted, false);
+});
+
+test("the weekly report's week starts at the instant the stored weekly KPI is written for", () => {
+  // lib/marketingWeeklyKpi.ts stores periodStart = marketingKpiWeek(now).start.
+  const kpi = marketingKpiWeek(new Date("2026-11-03T03:02:00Z"));
+  assert.equal(kpi.start.getTime(), marketingWeekWindow("2026-10-26").start.getTime());
+  assert.equal(kpi.end.getTime(), marketingWeekWindow("2026-10-26").end.getTime());
 });
