@@ -1,5 +1,6 @@
 /**
- * The marketing measurement both reports read (owner request 2026-11-03):
+ * The marketing measurement both reports read (owner request 2026-11-03;
+ * `docs/policy/marketing-automation.md`):
  * the weekly report (policy §10.3's 120-day metrics for one week) and the
  * morning report's figures. Counting, not judging: what the post ledger,
  * the analytics events and the LLM ledger say about one window, plus the

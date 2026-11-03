@@ -14,7 +14,7 @@ import { marketingWeekWindow, type MarketingMeasurement } from "@/lib/marketingM
 
 /**
  * The weekly marketing report (owner request 2026-11-03; the A1 weekly report
- * policy §3 and §10.3 describe): one Brisbane week on one page -- the
+ * `docs/policy/marketing-automation.md` §3 and §10.3 describe): one Brisbane week on one page -- the
  * week's posts and the 120-day metrics counted for it, the analysis and
  * brief written in it, the plan made for it, and what the market reports and
  * experiments recorded. Assembled when read, from the tables that already

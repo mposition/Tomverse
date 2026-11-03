@@ -157,7 +157,7 @@ export const marketingWeeklyStrategySchema = z
     /**
      * Paid advertising the model proposes when it judges it worth it (owner
      * 2026-11-03): a proposal for a person, never a spend -- running ads stays
-     * a human action (policy §7.5). Absent in plans written before it.
+     * a human action (`docs/policy/marketing-automation.md` §7.5). Absent in plans written before it.
      */
     paidAds: z
       .array(
