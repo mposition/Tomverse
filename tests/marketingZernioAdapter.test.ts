@@ -1,8 +1,8 @@
 // The Zernio adapter: what it does with each answer, and what it refuses to call.
 //
-// Contract: the S2 plan's "S2d2", plus amendment 4 (approved 2026-09-28) which
-// records that Zernio cannot be asked about our own request key and what the
-// adapter does instead.
+// Contract: the S2 plan's "S2d2", amendment 4 (approved 2026-09-28), and the
+// operator decision of 2026-11-03: the lookup by our own key reads the recent
+// post list and accepts only an exact key on this account's entry.
 //
 // Two response shapes carry most of the risk, and both come from the S0
 // verification record rather than from guesswork:
@@ -123,7 +123,9 @@ test("a 201 with an identified object is published", async () => {
   assert.equal(calls[0]?.headers["Idempotency-Key"], uuid);
 });
 
-test("a 201 whose post or platform is not published is not proof", async () => {
+test("a 201 whose post or platform is not published is not proof, and keeps Zernio's id", async () => {
+  // Instagram video answers 201 while still processing. The post exists, so its
+  // id comes back with the unknown outcome for the next run's status query.
   for (const body of [
     created({ status: "publishing" }),
     created({ status: "draft" }),
@@ -138,12 +140,20 @@ test("a 201 whose post or platform is not published is not proof", async () => {
       ],
     }),
   ]) {
-    const { adapter } = adapterWith([{ status: 201, body }]);
+    const { adapter, calls } = adapterWith([{ status: 201, body }]);
     assert.deepEqual(await adapter.publish(request), {
       outcome: "outcome_unknown",
-      errorCode: "provider_unreadable_response",
+      errorCode: "provider_still_processing",
+      externalPostId: "zpost_1",
     });
+    assert.equal(calls.length, 1, "one call, never a second");
   }
+  // Without an id there is nothing to ask about later.
+  const { adapter } = adapterWith([{ status: 201, body: created({ _id: undefined, status: "publishing" }) }]);
+  assert.deepEqual(await adapter.publish(request), {
+    outcome: "outcome_unknown",
+    errorCode: "provider_unreadable_response",
+  });
 });
 
 test("the post id falls back to `id` when `_id` is absent, as the S0 probe reads it", async () => {
@@ -303,27 +313,149 @@ test("a channel with no Zernio platform is refused without a call", async () => 
 });
 
 // ---------------------------------------------------------------------------
-// lookupByRequestKey — the one that cannot be asked
+// lookupByRequestKey — the recent list, by our exact key
 // ---------------------------------------------------------------------------
 
-test("the lookup by our own key makes no call and says it cannot answer", async () => {
-  // Amendment 4, option A. `GET /v1/posts` has no metadata filter and the
-  // x-request-id window is both short and, per C6, ambiguous when it hits. Paging
-  // the list endpoint would spend the rate limit to produce a guess that looks
-  // like proof, so the adapter answers honestly instead.
-  const { adapter, calls } = adapterWith([{ status: 200, body: null }]);
+const listed = (
+  requestKey: string,
+  entry: Record<string, unknown>,
+  overrides: Record<string, unknown> = {},
+) => ({
+  _id: "zpost_7",
+  status: entry.status,
+  metadata: { requestKey, locale: "en" },
+  // The list nests the account as an object, as production returns it.
+  platforms: [{ platform: "instagram", accountId: { _id: "acct_9", platform: "instagram" }, ...entry }],
+  ...overrides,
+});
+const page = (posts: unknown[], pages = 1) => ({
+  posts,
+  pagination: { page: 1, limit: 50, total: posts.length, pages },
+});
+const publishedEntry = {
+  status: "published",
+  platformPostUrl: "https://www.instagram.com/reel/abc/",
+};
+
+test("the lookup finds our exact key on this account and reads its result", async () => {
+  const { adapter, calls } = adapterWith([
+    { status: 200, body: page([listed("someone-else", publishedEntry), listed(request.requestKey, publishedEntry)]) },
+  ]);
   assert.deepEqual(await adapter.lookupByRequestKey(request.requestKey, "acct_9"), {
-    outcome: "outcome_unknown",
-    errorCode: "no_lookup_by_request_key",
+    outcome: "published",
+    externalPostId: "zpost_7",
+    externalUrl: "https://www.instagram.com/reel/abc/",
   });
-  assert.deepEqual(calls, [], "there is nothing to call");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.method, "GET");
+  assert.equal(calls[0]?.url, "https://zernio.test/api/v1/posts?limit=50&page=1");
+  assert.equal(calls[0]?.body, undefined, "a read sends nothing");
+  assert.equal(calls[0]?.headers["Idempotency-Key"], undefined);
 });
 
-test("capabilities says so, rather than leaving a caller to find out", async () => {
+test("a match still processing keeps its id; a platform failure is a failure", async () => {
+  const processing = adapterWith([{ status: 200, body: page([listed(request.requestKey, { status: "publishing" })]) }]);
+  assert.deepEqual(await processing.adapter.lookupByRequestKey(request.requestKey, "acct_9"), {
+    outcome: "outcome_unknown",
+    errorCode: "provider_still_processing",
+    externalPostId: "zpost_7",
+  });
+  const failed = adapterWith([{ status: 200, body: page([listed(request.requestKey, { status: "failed" })]) }]);
+  assert.deepEqual(await failed.adapter.lookupByRequestKey(request.requestKey, "acct_9"), {
+    outcome: "failed",
+    errorCode: "provider_reports_failed",
+  });
+});
+
+test("not finding our key is unknown, never a failure, and reads a bounded number of pages", async () => {
+  const full = Array.from({ length: 50 }, (_, index) => listed(`other-${index}`, publishedEntry));
+  const { adapter, calls } = adapterWith([{ status: 200, body: page(full, 99) }]);
+  assert.deepEqual(await adapter.lookupByRequestKey(request.requestKey, "acct_9"), {
+    outcome: "outcome_unknown",
+    errorCode: "request_key_not_found",
+  });
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    [1, 2, 3].map((n) => `https://zernio.test/api/v1/posts?limit=50&page=${n}`),
+  );
+  // A short last page ends the reading early.
+  const short = adapterWith([{ status: 200, body: page([listed("other", publishedEntry)], 4) }]);
+  await short.adapter.lookupByRequestKey(request.requestKey, "acct_9");
+  assert.equal(short.calls.length, 1);
+});
+
+test("a key that is not exactly ours, another account, or two matches is no answer", async () => {
+  const cases = [
+    // A prefix of our key is not our key.
+    page([listed(request.requestKey.slice(0, -1), publishedEntry)]),
+    // Our key on another account's entry is not this account's post.
+    page([listed(request.requestKey, { ...publishedEntry, accountId: { _id: "acct_other" } })]),
+    // One key under two posts does not identify one post.
+    page([listed(request.requestKey, publishedEntry), listed(request.requestKey, publishedEntry, { _id: "zpost_8" })]),
+  ];
+  for (const body of cases) {
+    const { adapter } = adapterWith([{ status: 200, body }]);
+    const result = await adapter.lookupByRequestKey(request.requestKey, "acct_9");
+    assert.equal(result.outcome, "outcome_unknown");
+  }
+});
+
+test("one key under two posts on different pages is no answer either", async () => {
+  const first = Array.from({ length: 49 }, (_, index) => listed(`other-${index}`, publishedEntry));
+  const { adapter, calls } = adapterWith([
+    { status: 200, body: page([...first, listed(request.requestKey, publishedEntry)], 3) },
+    { status: 200, body: page([listed(request.requestKey, publishedEntry, { _id: "zpost_8" })], 3) },
+  ]);
+  const result = await adapter.lookupByRequestKey(request.requestKey, "acct_9");
+  assert.equal(result.outcome, "outcome_unknown");
+  assert.equal(calls.length, 2);
+});
+
+test("the pages of one lookup share a single call budget", async () => {
+  const full = Array.from({ length: 50 }, (_, index) => listed(`other-${index}`, publishedEntry));
+  const budgets: number[] = [];
+  let clock = 0;
+  const realNow = Date.now;
+  Date.now = () => clock;
+  try {
+    const { adapter } = adapterWith([{ status: 200, body: page(full, 9) }], {
+      callBudgetMs: 30_000,
+      fetch: (async (_input: URL | RequestInfo, init?: RequestInit) => {
+        // Each page takes 20 seconds of the budget.
+        budgets.push(clock);
+        clock += 20_000;
+        void init;
+        return { status: 200, json: async () => page(full, 9) } as Response;
+      }) as typeof fetch,
+    });
+    assert.deepEqual(await adapter.lookupByRequestKey(request.requestKey, "acct_9"), {
+      outcome: "outcome_unknown",
+      errorCode: "provider_timeout",
+    });
+    // Two pages fit in 30 seconds; the third is never started.
+    assert.equal(budgets.length, 2);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("a list that cannot be read is unknown", async () => {
+  for (const response of [
+    { status: 500, body: null },
+    { status: 200, body: { nothing: true } },
+    { throws: Object.assign(new Error("reset"), { name: "TypeError" }) },
+  ]) {
+    const { adapter } = adapterWith([response]);
+    assert.equal((await adapter.lookupByRequestKey(request.requestKey, "acct_9")).outcome, "outcome_unknown");
+  }
+});
+
+test("capabilities reports the lookup for a channel Zernio carries", async () => {
   const { adapter } = adapterWith([]);
   const capabilities = await adapter.capabilities("linkedin");
-  assert.equal(capabilities.canLookupByRequestKey, false);
+  assert.equal(capabilities.canLookupByRequestKey, true);
   assert.equal(capabilities.canRetract, true);
+  assert.equal((await adapter.capabilities("rednote")).canLookupByRequestKey, false);
 });
 
 test("a channel Zernio has no platform for can retract nothing", async () => {
