@@ -98,11 +98,15 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
 > = {
   // Here rather than in the sitemap's table while its effective date is in the
   // future (lib/sitemapContentDates.ts).
-  // Observed page includes the memory rewrite and optional-location disclosure.
-  // This is evidence of current content, not approval to publish the amendment.
+  // Observed page includes the memory rewrite, the optional-location disclosure
+  // and (2026-11-03) the comment-monitoring and GA4 User-ID notices
+  // (docs/policy/marketing-privacy-dpia-checklist.md). This is evidence of
+  // current content, not approval to publish the amendment: the approved list
+  // above is unchanged, and the owner's pending approval of the changed page now
+  // covers these sections as well.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "bb29c4f289d4e1f37d02a658410fb03ba26b02845d87bcf86d88f1a4068f91e6",
+    contentSha256: "74e5bbb630404d8e2fc52337e12d8e63826d20acd00b1d2e5ddff4880d29e3e1",
   },
   "/terms": {
     date: "2026-11-16",
