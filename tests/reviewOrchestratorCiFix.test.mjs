@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
 import { dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { parse as parseYaml } from "yaml";
 import {
   CI_FIX_AGAIN_LABEL,
   CI_FIX_ANSWER_CHARS,
