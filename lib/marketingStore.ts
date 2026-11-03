@@ -4421,6 +4421,120 @@ export async function resolveMarketingPostOutcomeUnknown(
 }
 
 /**
+ * The audit action for withdrawing an approval (operator decision 2026-11-03).
+ *
+ * Its own constant and its own refusal class, as the account-languages action
+ * is: `MARKETING_S2B1_ACTIONS` and `MARKETING_REFUSAL_STATUS` are reached by
+ * the webhook modules, and a new entry in either moves the webhook pipeline
+ * fingerprint for a change that decides no webhook event.
+ */
+export const MARKETING_POST_WITHDRAW_APPROVAL_ACTION = "marketing_post.withdraw_approval";
+
+export class MarketingPostWithdrawRefusedError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = "MarketingPostWithdrawRefusedError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
+ * The audit metadata a withdrawal carries, built once for the route that writes
+ * the entry and the store that checks it ({@link marketingScheduleAuditMetadata}).
+ */
+export const marketingWithdrawApprovalAuditMetadata = (input: {
+  readonly expectedEnvelopeDigest: string;
+  readonly expectedHistoryVersion: number;
+}) => ({
+  digest: input.expectedEnvelopeDigest,
+  historyVersion: input.expectedHistoryVersion,
+});
+
+/**
+ * A person takes back an approval before the post has gone anywhere.
+ *
+ * `approved` or `scheduled` -> `approval_expired`, the end state the schema
+ * already has for an approval that no longer stands (the status whitelist has
+ * no `approved -> rejected`). Only while nothing has been sent: `publishAttempt`
+ * is zero, and a scheduled post is not held by a live publisher claim. A post
+ * the publisher has taken is refused -- its outcome is the publisher's to
+ * record. The claim and the day it took are cleared, because a post that never
+ * went out spent no slot.
+ */
+export async function withdrawMarketingPostApproval(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    (row.status !== "approved" && row.status !== "scheduled") ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion
+  ) {
+    throw new MarketingPostWithdrawRefusedError(
+      "withdraw_conflict",
+      409,
+      "Only an unchanged approved or scheduled post can have its approval withdrawn",
+    );
+  }
+  const claim = await database.marketingPost.findUnique({
+    where: { id: input.id },
+    select: { claimToken: true, leaseUntil: true },
+  });
+  const now = await marketingDatabaseNow(database);
+  if (
+    row.publishAttempt !== 0 ||
+    (claim?.claimToken != null &&
+      (claim.leaseUntil === null || claim.leaseUntil.getTime() > now.getTime()))
+  ) {
+    throw new MarketingPostWithdrawRefusedError(
+      "withdraw_publisher_holds_post",
+      409,
+      "The publisher has taken this post; its outcome is the publisher's to record",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_POST_WITHDRAW_APPROVAL_ACTION,
+    targetId: input.id,
+    metadata: marketingWithdrawApprovalAuditMetadata(input),
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: row.status,
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+      publishAttempt: 0,
+      OR: [{ claimToken: null }, { leaseUntil: { lte: now } }],
+    },
+    data: { status: "approval_expired", claimToken: null, leaseUntil: null, slotDate: null },
+  });
+  if (updated.count !== 1) {
+    throw new MarketingPostWithdrawRefusedError(
+      "withdraw_conflict",
+      409,
+      "The post changed before the approval was withdrawn",
+    );
+  }
+}
+
+/**
  * The audit metadata an unpublish must carry; shared with the route for the
  * same reason as {@link marketingScheduleAuditMetadata} -- the route left out
  * the external post id, so no removal could be recorded.
@@ -5079,7 +5193,12 @@ type MarketingOutcome =
       readonly externalUrl: string;
     }
   | { readonly kind: "failed"; readonly errorCode: string }
-  | { readonly kind: "outcome_unknown"; readonly errorCode: string };
+  | {
+      readonly kind: "outcome_unknown";
+      readonly errorCode: string;
+      /** The provider's id, when it answered with one but not with a result. */
+      readonly externalPostId?: string;
+    };
 
 type MarketingOutcomeRefusal =
   | "post_not_found"
@@ -5237,8 +5356,11 @@ async function recordMarketingPostOutcome(
     // state where something may exist on the platform that this system cannot
     // see, and clearing the claim would let the next run treat the row as free.
     // It is a person who resolves this, through
-    // `marketing_post.resolve_outcome_unknown`.
+    // `marketing_post.resolve_outcome_unknown` -- or the next run's status
+    // query, when the provider gave the post's id (operator decision
+    // 2026-11-03).
     data.errorCode = outcome.errorCode;
+    if (outcome.externalPostId) data.externalPostId = outcome.externalPostId;
   }
 
   const recorded = await database.marketingPost.updateMany({
@@ -5314,6 +5436,9 @@ async function recordMarketingPostOutcome(
         ? { externalPostId: outcome.externalPostId, externalUrl: outcome.externalUrl }
         : { errorCode: outcome.errorCode }),
       ...(outcome.kind === "outcome_unknown" ? { accountPaused: paused } : {}),
+      ...(outcome.kind === "outcome_unknown" && outcome.externalPostId
+        ? { externalPostId: outcome.externalPostId }
+        : {}),
     },
   });
 
@@ -5376,14 +5501,269 @@ export async function recordMarketingPostOutcomeUnknown(
     readonly requestKey: string;
     readonly expectedHistoryVersion: number;
     readonly errorCode: string;
+    /** The provider's id, when the post exists and its result is pending. */
+    readonly externalPostId?: string | null;
   },
 ) {
+  const externalPostId = input.externalPostId ? String(input.externalPostId) : "";
   return recordMarketingPostOutcome(database, {
     id: input.id,
     requestKey: input.requestKey,
     expectedHistoryVersion: input.expectedHistoryVersion,
-    outcome: { kind: "outcome_unknown", errorCode: input.errorCode },
+    outcome: {
+      kind: "outcome_unknown",
+      errorCode: input.errorCode,
+      ...(externalPostId !== "" ? { externalPostId } : {}),
+    },
   });
+}
+
+/**
+ * The publisher's own audit actions for settling an unknown outcome from what
+ * the provider says (operator decision 2026-11-03, docs/policy/
+ * marketing-automation.md §4). Their own constant: the S2D2 and S2B1 tables
+ * are reached by the webhook modules, and a new entry there would move the
+ * webhook pipeline fingerprint for a change that decides no webhook event.
+ * A plain literal, not `Object.freeze`: a call runs at load time, and the
+ * fingerprint keeps every declaration with a load-time effect.
+ */
+export const MARKETING_RECONCILE_ACTIONS = {
+  published: "marketing_post.reconciled_published",
+  failed: "marketing_post.reconciled_failed",
+  identified: "marketing_post.outcome_identified",
+} as const;
+
+/** What a reconciliation found for one unknown outcome. */
+export type MarketingReconcileFinding =
+  | { readonly kind: "published"; readonly externalPostId: string; readonly externalUrl: string }
+  | { readonly kind: "failed"; readonly errorCode: string }
+  /** The post exists under this id and has no result yet: remembered, not settled. */
+  | { readonly kind: "identified"; readonly externalPostId: string };
+
+/**
+ * `outcome_unknown` posts the publisher may ask the provider about, oldest
+ * first. A read: the write locks the row and checks it again.
+ *
+ * The request key comes back because a row without the provider's id is looked
+ * up by it; the id, when there is one, is asked about directly.
+ */
+export async function listMarketingPostsOutcomeUnknown(
+  database: MarketingTransaction,
+  limit: number,
+): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly historyVersion: number;
+    readonly requestKey: string;
+    readonly externalPostId: string | null;
+    readonly externalAccountRef: string;
+  }>
+> {
+  const take = Math.max(0, Math.min(Math.floor(Number(limit) || 0), 50));
+  if (take === 0) return [];
+  const rows = await database.marketingPost.findMany({
+    where: {
+      status: "outcome_unknown",
+      publishedAt: null,
+      providerRequestKey: { not: null },
+      channel: { externalAccountRef: { not: null } },
+    },
+    select: {
+      id: true,
+      historyVersion: true,
+      providerRequestKey: true,
+      externalPostId: true,
+      channel: { select: { externalAccountRef: true } },
+    },
+    orderBy: [{ outcomeUnknownAt: "asc" }, { id: "asc" }],
+    take,
+  });
+  return rows.flatMap((row) =>
+    row.providerRequestKey && row.channel.externalAccountRef
+      ? [
+          {
+            id: row.id,
+            historyVersion: Number(row.historyVersion),
+            requestKey: row.providerRequestKey,
+            externalPostId: row.externalPostId,
+            externalAccountRef: row.channel.externalAccountRef,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
+ * Settle an `outcome_unknown` post from what the provider says about it.
+ *
+ * The same columns a person's resolution writes
+ * (`resolveMarketingPostOutcomeUnknown`), from a provider answer instead of a
+ * person's look: published with the provider's id and the platform URL, or
+ * failed with the failure appended for this attempt. `identified` only keeps the
+ * provider's id on a post still processing, so the next run asks about it by id.
+ *
+ * Bound to the request key the dispatch sent and the history version read with
+ * the list, so a person's resolution in between wins and this writes nothing.
+ * Nothing is ever sent from here; this is the record of a read.
+ */
+export async function recordMarketingPostOutcomeReconciled(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly finding: MarketingReconcileFinding;
+  },
+): Promise<
+  | { readonly recorded: true }
+  | { readonly recorded: false; readonly reason: "post_not_found" | "post_not_unknown" | "reconcile_conflict" }
+> {
+  const id = String(rawInput.id);
+  const requestKey = String(rawInput.requestKey);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const finding = rawInput.finding;
+  if (requestKey.length === 0) {
+    throw new MarketingStoreRefusedError(
+      "outcome_request_key_empty",
+      "An outcome names the request it answers, and an empty key names nothing",
+    );
+  }
+  if (finding.kind === "published") {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(finding.externalUrl);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || parsed.protocol !== "https:" || String(finding.externalPostId).length === 0) {
+      throw new MarketingStoreRefusedError(
+        "published_evidence_invalid",
+        "Confirmed publication needs an external id and HTTPS URL",
+      );
+    }
+  } else if (finding.kind === "identified") {
+    if (String(finding.externalPostId).length === 0) {
+      throw new MarketingStoreRefusedError(
+        "published_external_id_empty",
+        "An identified post has an id at the provider",
+      );
+    }
+  } else if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u.test(String(finding.errorCode))) {
+    throw new MarketingStoreRefusedError(
+      "failure_code_invalid",
+      "Confirmed failure needs a bounded error code",
+    );
+  }
+
+  await requireSerializableTransaction(database, "reconcile");
+  await takeAuditChainLock(database);
+
+  const now = await marketingDatabaseNow(database);
+  const post = await database.marketingPost.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      channelId: true,
+      status: true,
+      providerRequestKey: true,
+      publishAttempt: true,
+      externalPostId: true,
+      publishedAt: true,
+      history: true,
+      historyVersion: true,
+    },
+  });
+  if (!post) return { recorded: false, reason: "post_not_found" };
+  if (post.status !== "outcome_unknown" || post.publishedAt !== null) {
+    return { recorded: false, reason: "post_not_unknown" };
+  }
+  if (post.providerRequestKey !== requestKey || Number(post.historyVersion) !== expectedHistoryVersion) {
+    return { recorded: false, reason: "reconcile_conflict" };
+  }
+  // An id already kept is the one this finding must be about: a different id
+  // under the same key is not the post the row knows.
+  if (
+    finding.kind !== "failed" &&
+    post.externalPostId !== null &&
+    post.externalPostId !== finding.externalPostId
+  ) {
+    return { recorded: false, reason: "reconcile_conflict" };
+  }
+  if (finding.kind === "identified" && post.externalPostId === finding.externalPostId) {
+    return { recorded: true };
+  }
+
+  const attempt = Number(post.publishAttempt);
+  let data: Prisma.MarketingPostUpdateManyMutationInput;
+  if (finding.kind === "published") {
+    data = {
+      status: "published",
+      externalPostId: finding.externalPostId,
+      externalUrl: finding.externalUrl,
+      publishedAt: now,
+      errorCode: null,
+      // The attempt has concluded, so the claim describes nothing.
+      claimToken: null,
+      leaseUntil: null,
+    };
+  } else if (finding.kind === "failed") {
+    const history = marketingHistorySchema.parse(post.history);
+    const entry: MarketingHistoryEntry = {
+      at: now.toISOString(),
+      type: "attempt",
+      attempt,
+      outcome: "failed",
+      errorCode: finding.errorCode,
+    };
+    marketingHistoryEntrySchema.parse(entry);
+    data = {
+      status: "failed",
+      errorCode: finding.errorCode,
+      history: asJson([...history, entry]),
+      historyVersion: expectedHistoryVersion + 1,
+      claimToken: null,
+      leaseUntil: null,
+    };
+  } else {
+    data = { externalPostId: finding.externalPostId };
+  }
+
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id,
+      status: "outcome_unknown",
+      providerRequestKey: requestKey,
+      historyVersion: expectedHistoryVersion,
+      publishAttempt: attempt,
+      publishedAt: null,
+    },
+    data,
+  });
+  if (updated.count !== 1) return { recorded: false, reason: "reconcile_conflict" };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_RECONCILE_ACTIONS[finding.kind],
+    targetType: "MarketingPost",
+    targetId: id,
+    summary:
+      finding.kind === "published"
+        ? "The provider showed the unconfirmed post went out."
+        : finding.kind === "failed"
+          ? "The provider showed the unconfirmed post was refused by the platform."
+          : "The provider identified the unconfirmed post; its result is still pending.",
+    metadata: {
+      channelId: post.channelId,
+      attempt,
+      requestKey,
+      ...(finding.kind === "failed"
+        ? { errorCode: finding.errorCode }
+        : { externalPostId: finding.externalPostId }),
+      ...(finding.kind === "published" ? { externalUrl: finding.externalUrl } : {}),
+    },
+  });
+  return { recorded: true };
 }
 
 /**
@@ -5400,11 +5780,13 @@ export async function recordMarketingPostOutcomeUnknown(
  * - a `published` or `verified` row whose object the platform has taken down:
  *   removed by the platform, which is not a failure of ours and not a deletion.
  *
- * **Polling never resolves an `outcome_unknown`.** That is the plan's sentence
- * and it is load-bearing: an unknown outcome means something may exist that this
- * system cannot see, and a lookup that fails to find it has not established that
- * it does not exist. Only a person moves a row out of `outcome_unknown`, through
- * the S2b1 action that exists for it.
+ * **A lookup that fails to find a post never resolves an `outcome_unknown`.** An
+ * unknown outcome means something may exist that this system cannot see, and not
+ * finding it has not established that it does not exist. What does move a row
+ * out of `outcome_unknown` is a person, through the S2b1 action that exists for
+ * it, or the provider positively placing the post -- by its id, or by our exact
+ * request key -- through `recordMarketingPostOutcomeReconciled` (operator
+ * decision 2026-11-03).
  */
 export async function recordMarketingPostPolledPublished(
   database: MarketingTransaction,

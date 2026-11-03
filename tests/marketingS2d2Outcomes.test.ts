@@ -12,7 +12,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MARKETING_RECONCILE_ACTIONS,
   recordMarketingPostFailed,
+  recordMarketingPostOutcomeReconciled,
   recordMarketingPostOutcomeUnknown,
   recordMarketingPostPublished,
   MarketingStoreRefusedError,
@@ -83,6 +85,8 @@ const fakeDatabase = (
     updates?: number[];
     channelUpdates?: number[];
     isolation?: string;
+    /** The row `recordMarketingPostOutcomeReconciled` reads. */
+    unknownRow?: Record<string, unknown> | null;
   } = {},
 ) => {
   const {
@@ -115,6 +119,7 @@ const fakeDatabase = (
       throw new Error(`unexpected raw statement: ${sql}`);
     },
     marketingPost: {
+      findUnique: async () => options.unknownRow ?? null,
       updateMany: async (input: Updated) => {
         seen.posts.push(input);
         const count = updates[postUpdate] ?? 0;
@@ -435,4 +440,151 @@ test("an empty request key names nothing and is refused", async () => {
     MarketingStoreRefusedError,
   );
   assert.deepEqual(seen.sql, []);
+});
+
+// ---------------------------------------------------------------------------
+// The provider's id kept with an unknown outcome, and settling it later
+// (operator decision 2026-11-03)
+// ---------------------------------------------------------------------------
+
+test("an unknown outcome keeps the provider's id when the publish answered with one", async () => {
+  const { database, seen } = fakeDatabase({ channelStatus: "approval_mode" });
+  await recordMarketingPostOutcomeUnknown(asTransaction(database), {
+    ...base,
+    errorCode: "provider_still_processing",
+    externalPostId: "zpost_9",
+  });
+  assert.equal(seen.posts[0]?.data.status, "outcome_unknown");
+  assert.equal(seen.posts[0]?.data.externalPostId, "zpost_9");
+  // Still no URL and no publication time: nothing is confirmed yet.
+  assert.equal(seen.posts[0]?.data.externalUrl, undefined);
+  assert.equal(seen.posts[0]?.data.publishedAt, undefined);
+  const without = fakeDatabase({ channelStatus: "approval_mode" });
+  await recordMarketingPostOutcomeUnknown(asTransaction(without.database), { ...base, errorCode: "provider_timeout" });
+  assert.equal("externalPostId" in (without.seen.posts[0]?.data ?? {}), false);
+});
+
+const unknownRow = (overrides: Record<string, unknown> = {}) => ({
+  id: POST_ID,
+  channelId: CHANNEL_ID,
+  status: "outcome_unknown",
+  providerRequestKey: REQUEST_KEY,
+  publishAttempt: 1,
+  externalPostId: null,
+  publishedAt: null,
+  history: [],
+  historyVersion: 4,
+  ...overrides,
+});
+
+test("a provider-confirmed unknown becomes published with the id, URL and database clock", async () => {
+  const { database, seen } = fakeDatabase({ unknownRow: unknownRow() });
+  const answer = await recordMarketingPostOutcomeReconciled(asTransaction(database), {
+    ...base,
+    finding: { kind: "published", externalPostId: "zpost_9", externalUrl: "https://www.instagram.com/reel/abc/" },
+  });
+  assert.deepEqual(answer, { recorded: true });
+  assert.deepEqual(seen.posts[0]?.where, {
+    id: POST_ID,
+    status: "outcome_unknown",
+    providerRequestKey: REQUEST_KEY,
+    historyVersion: 4,
+    publishAttempt: 1,
+    publishedAt: null,
+  });
+  assert.deepEqual(seen.posts[0]?.data, {
+    status: "published",
+    externalPostId: "zpost_9",
+    externalUrl: "https://www.instagram.com/reel/abc/",
+    publishedAt: NOW,
+    errorCode: null,
+    claimToken: null,
+    leaseUntil: null,
+  });
+  assert.equal(seen.audits.length, 1);
+  assert.equal(seen.audits[0]?.action, MARKETING_RECONCILE_ACTIONS.published);
+  // It reads and writes the row; it never takes a channel or pauses anything.
+  assert.equal(seen.channels.length, 0);
+});
+
+test("a provider-confirmed failure appends this attempt's failure and moves the version", async () => {
+  const { database, seen } = fakeDatabase({ unknownRow: unknownRow() });
+  await recordMarketingPostOutcomeReconciled(asTransaction(database), {
+    ...base,
+    finding: { kind: "failed", errorCode: "provider_reports_failed" },
+  });
+  const data = seen.posts[0]?.data as Record<string, unknown>;
+  assert.equal(data.status, "failed");
+  assert.equal(data.historyVersion, 5);
+  assert.deepEqual(data.history, [
+    { at: NOW.toISOString(), type: "attempt", attempt: 1, outcome: "failed", errorCode: "provider_reports_failed" },
+  ]);
+  assert.equal(seen.audits[0]?.action, MARKETING_RECONCILE_ACTIONS.failed);
+});
+
+test("an identified post only keeps the id, and the row stays unknown", async () => {
+  const { database, seen } = fakeDatabase({ unknownRow: unknownRow() });
+  await recordMarketingPostOutcomeReconciled(asTransaction(database), {
+    ...base,
+    finding: { kind: "identified", externalPostId: "zpost_9" },
+  });
+  assert.deepEqual(seen.posts[0]?.data, { externalPostId: "zpost_9" });
+  assert.equal(seen.audits[0]?.action, MARKETING_RECONCILE_ACTIONS.identified);
+  // Identifying it again writes nothing.
+  const again = fakeDatabase({ unknownRow: unknownRow({ externalPostId: "zpost_9" }) });
+  await recordMarketingPostOutcomeReconciled(asTransaction(again.database), {
+    ...base,
+    finding: { kind: "identified", externalPostId: "zpost_9" },
+  });
+  assert.equal(again.seen.posts.length, 0);
+});
+
+test("a row a person settled, another key, another id or a lost race is left alone", async () => {
+  const published = {
+    kind: "published" as const,
+    externalPostId: "zpost_9",
+    externalUrl: "https://www.instagram.com/reel/abc/",
+  };
+  const cases: Array<[Record<string, unknown> | null, string, number[]]> = [
+    [null, "post_not_found", [1]],
+    [unknownRow({ status: "published", publishedAt: NOW }), "post_not_unknown", [1]],
+    [unknownRow({ providerRequestKey: "other" }), "reconcile_conflict", [1]],
+    [unknownRow({ historyVersion: 5 }), "reconcile_conflict", [1]],
+    [unknownRow({ externalPostId: "zpost_other" }), "reconcile_conflict", [1]],
+    [unknownRow(), "reconcile_conflict", [0]],
+  ];
+  for (const [row, reason, updates] of cases) {
+    const { database, seen } = fakeDatabase({ unknownRow: row, updates });
+    assert.deepEqual(
+      await recordMarketingPostOutcomeReconciled(asTransaction(database), { ...base, finding: published }),
+      { recorded: false, reason },
+    );
+    assert.equal(seen.audits.length, 0, reason);
+  }
+});
+
+test("a reconcile refuses a non-HTTPS URL or a free-text code, and runs serializable", async () => {
+  const { database } = fakeDatabase({ unknownRow: unknownRow() });
+  await assert.rejects(
+    recordMarketingPostOutcomeReconciled(asTransaction(database), {
+      ...base,
+      finding: { kind: "published", externalPostId: "zpost_9", externalUrl: "http://example.com/x" },
+    }),
+    (error) => error instanceof MarketingStoreRefusedError,
+  );
+  await assert.rejects(
+    recordMarketingPostOutcomeReconciled(asTransaction(database), {
+      ...base,
+      finding: { kind: "failed", errorCode: "the platform said no" },
+    }),
+    (error) => error instanceof MarketingStoreRefusedError,
+  );
+  const loose = fakeDatabase({ unknownRow: unknownRow(), isolation: "read committed" });
+  await assert.rejects(
+    recordMarketingPostOutcomeReconciled(asTransaction(loose.database), {
+      ...base,
+      finding: { kind: "identified", externalPostId: "zpost_9" },
+    }),
+    (error) => error instanceof MarketingStoreRefusedError,
+  );
 });

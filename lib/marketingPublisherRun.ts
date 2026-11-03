@@ -31,9 +31,11 @@ import {
   claimDueMarketingPost,
   evaluateMarketingAutoPause,
   listMarketingPostsAwaitingVerification,
+  listMarketingPostsOutcomeUnknown,
   listMarketingPostsPublishingPastLease,
   listPublishingMarketingChannels,
   recordMarketingPostFailed,
+  recordMarketingPostOutcomeReconciled,
   recordMarketingPostOutcomeUnknown,
   recordMarketingPostPollVerified,
   recordMarketingPostPublished,
@@ -42,6 +44,7 @@ import {
   startMarketingPostDispatch,
   type MarketingClaimReleaseReason,
   type MarketingHealthObservation,
+  type MarketingReconcileFinding,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
 
@@ -751,10 +754,23 @@ export const marketingPublisherOperations = (client: PrismaClient) => ({
     readonly requestKey: string;
     readonly expectedHistoryVersion: number;
     readonly errorCode: string;
+    readonly externalPostId?: string;
   }) =>
     runBoundedMarketingTransaction(client, (tx) =>
       recordMarketingPostOutcomeUnknown(tx, input),
     ),
+
+  /** Unknown outcomes the provider may now answer (operator decision 2026-11-03). */
+  listOutcomeUnknown: (limit: number) =>
+    runBoundedMarketingTransaction(client, (tx) => listMarketingPostsOutcomeUnknown(tx, limit)),
+
+  recordReconciled: (input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly finding: MarketingReconcileFinding;
+  }) =>
+    runBoundedMarketingTransaction(client, (tx) => recordMarketingPostOutcomeReconciled(tx, input)),
 
   recordVerified: (input: { readonly id: string; readonly expectedHistoryVersion: number }) =>
     runBoundedMarketingTransaction(client, (tx) =>

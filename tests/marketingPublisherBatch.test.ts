@@ -11,6 +11,7 @@ import test from "node:test";
 
 import {
   MARKETING_PUBLISHER_DISPATCH_ROOM_MS,
+  MARKETING_PUBLISHER_RECONCILE_LIMIT,
   MARKETING_PUBLISHER_VERIFY_LIMIT,
   MarketingPublisherOutcomeNotRecordedError,
   runMarketingPublisherBatch,
@@ -44,6 +45,16 @@ type Scenario = {
   /** What each outcome writer answers, when a test needs it to refuse. */
   recordAnswer?: { recorded: boolean; reason?: string };
   stale?: Array<{ id: string; requestKey: string; historyVersion: number }>;
+  /** `outcome_unknown` rows the reconcile step lists; absent leaves the step out. */
+  unknown?: Array<{
+    id: string;
+    historyVersion: number;
+    requestKey: string;
+    externalPostId: string | null;
+    externalAccountRef: string;
+  }>;
+  lookup?: MarketingPublishResult | Error;
+  reconcileAnswer?: { recorded: boolean; reason?: string };
 };
 
 const world = (scenario: Scenario = {}) => {
@@ -111,6 +122,18 @@ const world = (scenario: Scenario = {}) => {
       note("recordVerified", input);
       return { recorded: true };
     },
+    ...(scenario.unknown
+      ? {
+          listOutcomeUnknown: async (limit: number) => {
+            note("listOutcomeUnknown", limit);
+            return scenario.unknown ?? [];
+          },
+          recordReconciled: async (input: unknown) => {
+            note("recordReconciled", input);
+            return scenario.reconcileAnswer ?? { recorded: true };
+          },
+        }
+      : {}),
   };
   const adapter: MarketingPublishAdapter = {
     provider: "zernio",
@@ -133,9 +156,11 @@ const world = (scenario: Scenario = {}) => {
       if (answer instanceof Error) throw answer;
       return answer;
     },
-    lookupByRequestKey: async (requestKey) => {
-      note("lookupByRequestKey", requestKey);
-      return { outcome: "outcome_unknown", errorCode: "no_lookup_by_request_key" };
+    lookupByRequestKey: async (requestKey, externalAccountRef) => {
+      note("lookupByRequestKey", { requestKey, externalAccountRef });
+      const answer = scenario.lookup ?? { outcome: "outcome_unknown", errorCode: "request_key_not_found" };
+      if (answer instanceof Error) throw answer;
+      return answer;
     },
     lookupStatus: async (externalPostId) => {
       note("lookupStatus", externalPostId);
@@ -207,7 +232,8 @@ test("a confirmed failure is recorded as failed", async () => {
 });
 
 test("an unanswered publish is outcome_unknown, with no retry and no lookup", async () => {
-  // Amendment 4: Zernio cannot be asked about our key, so silence stays silence.
+  // The dispatch makes one call. Looking the post up is a later step, for rows
+  // already recorded unknown, and it only ever reads.
   const { run, named } = world({
     publish: { outcome: "outcome_unknown", errorCode: "provider_timeout" },
   });
@@ -588,4 +614,148 @@ test("an approval that expired after the dispatch committed is not sent", async 
     (named("recordFailed")[0]?.input as { errorCode: string }).errorCode,
     "approval_expired_before_call",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Unknown outcomes settled by reading (operator decision 2026-11-03)
+// ---------------------------------------------------------------------------
+
+const unknownRow = (overrides: Record<string, unknown> = {}) => ({
+  id: "u1",
+  historyVersion: 2,
+  requestKey: "a".repeat(64),
+  externalPostId: null as string | null,
+  externalAccountRef: "acct_ig",
+  ...overrides,
+});
+
+test("a 201 still processing is recorded unknown with Zernio's id, and nothing is re-sent", async () => {
+  const { run, named } = world({
+    publish: {
+      outcome: "outcome_unknown",
+      errorCode: "provider_still_processing",
+      externalPostId: "zpost_9",
+    } as MarketingPublishResult,
+  });
+  const result = await run();
+  assert.equal(result.outcomeUnknown, 1);
+  assert.equal(named("publish").length, 1);
+  assert.deepEqual(named("recordOutcomeUnknown")[0]?.input, {
+    id: "p1",
+    requestKey: "linkedin/linkedin-1/en/2026-10-01/launch",
+    expectedHistoryVersion: 4,
+    errorCode: "provider_still_processing",
+    externalPostId: "zpost_9",
+  });
+});
+
+test("an unknown post with Zernio's id is settled published by a status query", async () => {
+  const { run, named } = world({
+    channels: [],
+    unknown: [unknownRow({ externalPostId: "zpost_9" })],
+    status: { state: "live", externalUrl: "https://www.instagram.com/reel/abc/" },
+  });
+  const result = await run();
+  assert.equal(result.reconciled, 1);
+  assert.deepEqual(named("lookupStatus").map((call) => call.input), ["zpost_9"]);
+  assert.equal(named("lookupByRequestKey").length, 0);
+  assert.equal(named("publish").length, 0, "settling an unknown never sends");
+  assert.deepEqual(named("recordReconciled")[0]?.input, {
+    id: "u1",
+    requestKey: "a".repeat(64),
+    expectedHistoryVersion: 2,
+    finding: {
+      kind: "published",
+      externalPostId: "zpost_9",
+      externalUrl: "https://www.instagram.com/reel/abc/",
+    },
+  });
+});
+
+test("a status query that says the post is not up settles it failed; still pending leaves it", async () => {
+  const failed = world({ channels: [], unknown: [unknownRow({ externalPostId: "zpost_9" })], status: { state: "not_live" } });
+  assert.equal((await failed.run()).reconciled, 1);
+  assert.deepEqual((failed.named("recordReconciled")[0]?.input as { finding: unknown }).finding, {
+    kind: "failed",
+    errorCode: "provider_reports_not_live",
+  });
+  const pending = world({ channels: [], unknown: [unknownRow({ externalPostId: "zpost_9" })], status: { state: "unknown" } });
+  const result = await pending.run();
+  assert.equal(result.reconciled, 0);
+  assert.equal(pending.named("recordReconciled").length, 0);
+});
+
+test("an unknown post without an id is looked up by its exact request key", async () => {
+  const { run, named } = world({
+    channels: [],
+    unknown: [unknownRow()],
+    lookup: {
+      outcome: "published",
+      externalPostId: "zpost_7",
+      externalUrl: "https://www.instagram.com/reel/xyz/",
+    },
+  });
+  const result = await run();
+  assert.equal(result.reconciled, 1);
+  assert.deepEqual(named("lookupByRequestKey")[0]?.input, {
+    requestKey: "a".repeat(64),
+    externalAccountRef: "acct_ig",
+  });
+  assert.equal(named("publish").length, 0);
+  assert.deepEqual((named("recordReconciled")[0]?.input as { finding: unknown }).finding, {
+    kind: "published",
+    externalPostId: "zpost_7",
+    externalUrl: "https://www.instagram.com/reel/xyz/",
+  });
+});
+
+test("a key lookup that finds the post still processing keeps its id for the next run", async () => {
+  const { run, named } = world({
+    channels: [],
+    unknown: [unknownRow()],
+    lookup: {
+      outcome: "outcome_unknown",
+      errorCode: "provider_still_processing",
+      externalPostId: "zpost_7",
+    } as MarketingPublishResult,
+  });
+  const result = await run();
+  assert.equal(result.reconcileIdentified, 1);
+  assert.equal(result.reconciled, 0);
+  assert.deepEqual((named("recordReconciled")[0]?.input as { finding: unknown }).finding, {
+    kind: "identified",
+    externalPostId: "zpost_7",
+  });
+});
+
+test("not finding the key, or a lookup that throws, writes nothing and proves nothing", async () => {
+  for (const lookup of [
+    { outcome: "outcome_unknown", errorCode: "request_key_not_found" } as MarketingPublishResult,
+    new Error("socket hang up"),
+  ]) {
+    const { run, named } = world({ channels: [], unknown: [unknownRow()], lookup });
+    const result = await run();
+    assert.equal(result.reconciled, 0);
+    assert.equal(named("recordReconciled").length, 0);
+    assert.equal(named("publish").length, 0);
+  }
+});
+
+test("a reconcile write that loses to a person is counted, not thrown", async () => {
+  const { run } = world({
+    channels: [],
+    unknown: [unknownRow({ externalPostId: "zpost_9" })],
+    status: { state: "live", externalUrl: "https://www.instagram.com/reel/abc/" },
+    reconcileAnswer: { recorded: false, reason: "reconcile_conflict" },
+  });
+  const result = await run();
+  assert.equal(result.reconciled, 0);
+  assert.deepEqual(result.refused, { "reconcile:reconcile_conflict": 1 });
+});
+
+test("one run asks about a bounded number of unknown posts", async () => {
+  const rows = Array.from({ length: 12 }, (_, index) => unknownRow({ id: `u${index}` }));
+  const { run, named } = world({ channels: [], unknown: rows });
+  await run();
+  assert.equal(named("lookupByRequestKey").length, MARKETING_PUBLISHER_RECONCILE_LIMIT);
 });

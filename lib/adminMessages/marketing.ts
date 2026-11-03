@@ -107,6 +107,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actSchedule: "Schedule",
     actRequeue: "Send back to the queue",
     actMarkReusable: "Mark reusable as a template",
+    actWithdrawApproval: "Withdraw approval",
     actResolvePublished: "Resolve: it published",
     actResolveFailed: "Resolve: it failed",
     actUnpublish: "Record it as taken down",
@@ -147,10 +148,14 @@ export const adminMarketingMessages = defineAdminMessages({
     confirmMarkReusable:
       "Mark this as reusable? Later drafts may inherit its approval as a template.",
     confirmDisconnect: "Disconnect this account?",
+    confirmWithdrawApproval:
+      "Withdraw the approval? This post will not go out, and it cannot be approved again.",
     fieldApprovalExpires: "Approval expires",
     fieldRenderedText: "The words that go out",
     fieldScheduledAt: "Goes out at",
-    fieldExternalPostId: "Post id on the platform",
+    fieldExternalPostId: "Zernio post ID",
+    hintExternalPostId:
+      "The id Zernio gave the post (in its dashboard or API), not the id on Instagram or Facebook.",
     fieldExternalUrl: "Public link",
     fieldEvidenceRef: "What you looked at",
     fieldErrorCode: "Error code",
@@ -555,6 +560,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actSchedule: "예약",
     actRequeue: "큐로 되돌리기",
     actMarkReusable: "템플릿으로 재사용 표시",
+    actWithdrawApproval: "승인 철회",
     actResolvePublished: "판정: 게시됨",
     actResolveFailed: "판정: 실패",
     actUnpublish: "내려간 것으로 기록",
@@ -595,10 +601,14 @@ export const adminMarketingMessages = defineAdminMessages({
     confirmMarkReusable:
       "재사용 가능으로 표시할까요? 이후 초안이 이것의 승인을 템플릿으로 물려받을 수 있습니다.",
     confirmDisconnect: "이 계정의 연결을 해제할까요?",
+    confirmWithdrawApproval:
+      "승인을 철회할까요? 이 게시물은 나가지 않으며 다시 승인할 수 없습니다.",
     fieldApprovalExpires: "승인 만료 시각",
     fieldRenderedText: "실제로 나가는 문구",
     fieldScheduledAt: "게시 시각",
-    fieldExternalPostId: "플랫폼의 게시물 id",
+    fieldExternalPostId: "Zernio 게시물 ID",
+    hintExternalPostId:
+      "Zernio가 게시물에 붙인 ID입니다(대시보드나 API에서 확인). Instagram·Facebook의 게시물 ID가 아닙니다.",
     fieldExternalUrl: "공개 링크",
     fieldEvidenceRef: "무엇을 보고 판단했는지",
     fieldErrorCode: "오류 코드",

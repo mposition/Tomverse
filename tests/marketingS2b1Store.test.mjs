@@ -24,11 +24,14 @@ import {
   lowerMarketingChannelCaps,
   markMarketingPostReusable,
   MarketingStoreRefusedError,
+  MarketingPostWithdrawRefusedError,
+  MARKETING_POST_WITHDRAW_APPROVAL_ACTION,
   MARKETING_REFUSAL_STATUS,
   MARKETING_S2B1_ACTIONS,
   requeueMarketingPostAfterFailure,
   resumeMarketingChannelToAutonomous,
   scheduleMarketingPost,
+  withdrawMarketingPostApproval,
 } from "../lib/marketingStore.ts";
 
 const DIGEST = "b".repeat(64);
@@ -3287,5 +3290,145 @@ test("an identity change on a disconnected account refuses instead of failing", 
     // Refused before the expiry, so a disconnected account is not half-drained
     // on its way to a refusal.
     assert.equal(writes, 0);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Withdrawing an approval (operator decision 2026-11-03)
+// ---------------------------------------------------------------------------
+
+/** The row, then the claim, then the clock: the three reads a withdrawal makes. */
+const withdrawDatabase = ({ row, claim = { claimToken: null, leaseUntil: null }, audit, writes = [], count = 1 }) => {
+  let reads = 0;
+  return {
+    $queryRaw: async () => (reads++ === 0 ? [row] : [{ now: SCHEDULE_NOW }]),
+    adminAuditLog: auditReader(audit),
+    marketingPost: {
+      findUnique: async () => claim,
+      updateMany: async (args) => {
+        writes.push(args);
+        return { count };
+      },
+    },
+  };
+};
+
+const withdrawAudit = (row, metadata = { digest: DIGEST, historyVersion: row.historyVersion }) =>
+  signedAudit({ action: MARKETING_POST_WITHDRAW_APPROVAL_ACTION, targetId: row.id, metadata });
+
+const withdrawInput = (row, audit) => ({
+  id: row.id,
+  expectedEnvelopeDigest: DIGEST,
+  expectedHistoryVersion: row.historyVersion,
+  auditLogId: audit.id,
+});
+
+const withdrawRefused = (code) => (error) =>
+  error instanceof MarketingPostWithdrawRefusedError && error.code === code && error.status === 409;
+
+test("an approved post's approval is withdrawn to approval_expired, slot and claim cleared", async () => {
+  const row = approvedPost(null);
+  const audit = withdrawAudit(row);
+  const writes = [];
+  await withAuditKey(() =>
+    withdrawMarketingPostApproval(withdrawDatabase({ row, audit, writes }), withdrawInput(row, audit)),
+  );
+  assert.equal(writes.length, 1);
+  const [{ where, data }] = writes;
+  // The schema has no approved -> rejected; approval_expired is the end state
+  // it already has for an approval that no longer stands.
+  assert.deepEqual(data, { status: "approval_expired", claimToken: null, leaseUntil: null, slotDate: null });
+  assert.equal(where.status, "approved");
+  assert.equal(where.publishAttempt, 0);
+  assert.equal(where.envelopeDigest, DIGEST);
+  assert.equal(where.historyVersion, row.historyVersion);
+  assert.deepEqual(where.OR, [{ claimToken: null }, { leaseUntil: { lte: SCHEDULE_NOW } }]);
+});
+
+test("a scheduled post whose claim has lapsed can be withdrawn", async () => {
+  const row = { ...approvedPost(null), status: "scheduled", scheduledAt: SLOT };
+  const audit = withdrawAudit(row);
+  const writes = [];
+  await withAuditKey(() =>
+    withdrawMarketingPostApproval(
+      withdrawDatabase({
+        row,
+        audit,
+        writes,
+        claim: { claimToken: "marketing-publisher:old", leaseUntil: new Date(SCHEDULE_NOW.getTime() - 1) },
+      }),
+      withdrawInput(row, audit),
+    ),
+  );
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].where.status, "scheduled");
+});
+
+test("a post the publisher holds or has sent is refused, and nothing is written", async () => {
+  const scheduled = { ...approvedPost(null), status: "scheduled", scheduledAt: SLOT };
+  const cases = [
+    // A live claim: the publisher may be about to send it.
+    [scheduled, { claimToken: "marketing-publisher:run", leaseUntil: new Date(SCHEDULE_NOW.getTime() + 60_000) }],
+    // An attempt has gone out.
+    [{ ...scheduled, publishAttempt: 1 }, { claimToken: null, leaseUntil: null }],
+  ];
+  for (const [row, claim] of cases) {
+    const audit = withdrawAudit(row);
+    const writes = [];
+    await assert.rejects(
+      withAuditKey(() =>
+        withdrawMarketingPostApproval(withdrawDatabase({ row, audit, writes, claim }), withdrawInput(row, audit)),
+      ),
+      withdrawRefused("withdraw_publisher_holds_post"),
+    );
+    assert.equal(writes.length, 0);
+  }
+});
+
+test("only approved or scheduled posts, unchanged, can have an approval withdrawn", async () => {
+  for (const row of [
+    pendingPost(),
+    { ...approvedPost(null), status: "published", publishAttempt: 1 },
+    { ...approvedPost(null), status: "approval_expired" },
+    { ...approvedPost(null), envelopeDigest: "c".repeat(64) },
+  ]) {
+    const audit = withdrawAudit(row);
+    const writes = [];
+    await assert.rejects(
+      withAuditKey(() =>
+        withdrawMarketingPostApproval(withdrawDatabase({ row, audit, writes }), withdrawInput(row, audit)),
+      ),
+      withdrawRefused("withdraw_conflict"),
+    );
+    assert.equal(writes.length, 0);
+  }
+});
+
+test("a withdrawal needs an audit entry naming this digest and version, and loses a race cleanly", async () => {
+  const row = approvedPost(null);
+  const wrong = withdrawAudit(row, { digest: DIGEST, historyVersion: row.historyVersion + 1 });
+  const writes = [];
+  await assert.rejects(
+    withAuditKey(() =>
+      withdrawMarketingPostApproval(withdrawDatabase({ row, audit: wrong, writes }), withdrawInput(row, wrong)),
+    ),
+    (error) => error instanceof MarketingStoreRefusedError && error.code.startsWith("audit_evidence_"),
+  );
+  assert.equal(writes.length, 0);
+
+  const audit = withdrawAudit(row);
+  await assert.rejects(
+    withAuditKey(() =>
+      withdrawMarketingPostApproval(withdrawDatabase({ row, audit, count: 0 }), withdrawInput(row, audit)),
+    ),
+    withdrawRefused("withdraw_conflict"),
+  );
+});
+
+test("the withdrawal action and refusals stay out of the tables the webhook reaches", () => {
+  assert.equal(MARKETING_POST_WITHDRAW_APPROVAL_ACTION, "marketing_post.withdraw_approval");
+  assert.ok(!Object.values(MARKETING_S2B1_ACTIONS).includes(MARKETING_POST_WITHDRAW_APPROVAL_ACTION));
+  for (const code of ["withdraw_conflict", "withdraw_publisher_holds_post"]) {
+    assert.ok(!Object.hasOwn(MARKETING_REFUSAL_STATUS, code), code);
   }
 });
