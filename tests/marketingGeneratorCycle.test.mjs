@@ -113,6 +113,30 @@ test("an account with no approved image or video for its platform and locale is 
   assert.equal(none.accountsWithoutMedia, 2);
 });
 
+test("the run's day decides whether an account is offered its videos or its images", async () => {
+  // Instagram alternates image and video days (owner decision 2026-11-04).
+  const instagram = {
+    ...context,
+    channels: [{ id: "chn_ig", channel: "instagram", accountSlug: "tomverse.ko", defaultLocale: "en", allowedLocales: ["en"] }],
+    assets: [
+      { id: "media-card", allowedChannels: ["instagram"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+      { id: "media-short", allowedChannels: ["instagram"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+    ],
+  };
+  const DAY = 86_400_000;
+  const offeredOn = async (time) => {
+    const h = harness({ readContext: async () => instagram, now: () => time });
+    await runMarketingGeneratorCycle(
+      { generatorRunId: "run-1", deadlineAt: new Date(time + 20 * 60 * 1000).toISOString(), postsPerAccount: 3 },
+      h.deps,
+    );
+    return JSON.parse(h.asked[0].messages[1].content).assets.map((asset) => asset.id);
+  };
+  const evenDay = Math.floor(NOW / DAY) % 2 === 0 ? NOW : NOW + DAY;
+  assert.deepEqual(await offeredOn(evenDay), ["media-card"]);
+  assert.deepEqual(await offeredOn(evenDay + DAY), ["media-short"]);
+});
+
 test("a refused reservation ends the run: no later account is asked", async () => {
   const h = harness({ outcomes: [{ status: "refused", stage: "reserve", code: "model_not_pinned" }] });
   const summary = await cycle(h);

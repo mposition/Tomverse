@@ -281,6 +281,11 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 초안을 받지 않으며, 게시기는 미디어가 없는 게시물을 보내기 전에 `media_required`로 실패시킨다(YouTube는 영상 하나가 아니면
 `youtube_needs_one_video`). YouTube·TikTok 계정에는 영상 자산만, 나머지 계정에는 저장된 이미지·영상 자산만 초안 후보가 된다.
 
+영상·이미지 비율(운영자 결정 2026-11-04, 주간 상한 기준): Instagram 영상 2·이미지 2, Facebook 영상 2·이미지 3, LinkedIn
+이미지 2·영상 1, X 이미지 7·영상 3, Threads 이미지 5·영상 2, YouTube·TikTok 영상만. 생성기는 계정마다 날짜(UTC)로 그날의
+종류를 정해 이 비율대로 영상의 날과 이미지의 날을 고르게 나누고(`MARKETING_VIDEO_DAYS`), 그날은 그 종류의 승인 자산만 초안
+후보로 준다. 그 종류의 자산이 없으면 다른 종류로 대신한다.
+
 상한은 코드 상수이고 운영 설정으로는 **내리기만** 한다. 게시 시간창은 대상 시장 현지 09:00~20:00,
 같은 claim은 계정당 14일 안에 다시 쓰지 않는다(생성기 입력과 프롬프트로 지킨다. 4.2 참조).
 
