@@ -23,7 +23,6 @@ Sentry.init({
   // under production while the same process answered "staging".
   environment: resolveSentryEnvironmentTag(),
   release: process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA,
-  sendDefaultPii: false,
   enableLogs: true,
   tracesSampleRate:
     Number.isFinite(tracesSampleRate) && tracesSampleRate >= 0
