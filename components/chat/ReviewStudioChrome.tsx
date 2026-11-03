@@ -9,6 +9,7 @@ import { usagePercent } from "./UsagePercentGauge";
 import { chatProductUiCopy, localizedProductHref, type ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 import { ArrowRight, BarChart3, Check, ChevronDown, Moon, Puzzle, X } from "lucide-react";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -115,7 +116,7 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
       <button className="review-navigation-history" ref={trigger} type="button" onClick={() => setOpen(true)} aria-expanded={open}><Icon file="c8527" /><span>{c.history}</span></button>
       <Link href={`/plugins?lang=${lang}`} className="review-navigation-plugins" data-testid="navigation-plugins" aria-current={product === "plugins" ? "page" : undefined} aria-disabled={locked || undefined} onClick={event => { if (locked) event.preventDefault(); }}><Puzzle size={22} aria-hidden="true" /><span>{mcpConnectorCopy[lang].title}</span></Link>
       <div className="review-nav-spacer" />
-      <Link href="/help"><Icon file="2b087" /><span>{c.help}</span></Link>
+      <Link href={helpCentreHref(lang)} data-testid="navigation-help"><Icon file="2b087" /><span>{c.help}</span></Link>
       <button type="button" onClick={() => settings("preferences")}><Icon file="f3fe6" /><span>{c.settings}</span></button>
       <button type="button" className="review-avatar" onClick={() => settings("account")} aria-label={c.settings}>T</button>
     </nav>
