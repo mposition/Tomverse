@@ -83,7 +83,7 @@ export function MarketingMorningView({ morning }: { morning: MarketingMorningRep
           value={
             f.llmCountedMicroUsd === null
               ? m.unreadable
-              : `${usd(f.llmCountedMicroUsd)}${f.llmCapUsd === null ? "" : ` / US${f.llmCapUsd.toFixed(2)}`}`
+              : `${usd(f.llmCountedMicroUsd)}${f.llmCapUsd === null ? "" : ` / US$${f.llmCapUsd.toFixed(2)}`}`
           }
         />
         <Figure label={m.figPublish} value={f.publishEnabled === null ? m.unreadable : f.publishEnabled ? m.on : m.off} />

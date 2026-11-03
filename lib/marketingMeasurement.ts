@@ -94,7 +94,7 @@ export async function readMarketingMeasurement(
                p."errorCode", p."guardCodes", p."history"
         FROM "MarketingPost" p JOIN "MarketingChannel" c ON c."id" = p."channelId"
         WHERE p."updatedAt" >= ${window.start} OR p."createdAt" >= ${window.start}
-           OR p."status" IN ('pending_approval', 'approved', 'scheduled')
+           OR p."status" IN ('pending_approval', 'approved', 'scheduled', 'publishing')
       `)
       .then((rows) => rows.map(({ history, ...row }) => ({ ...row, attempts: marketingAttemptsOf(history) }))),
     db.$queryRaw<Array<{ accountSlug: string; channel: string; status: string; pauseReasonCode: string | null }>>(Prisma.sql`

@@ -108,10 +108,18 @@ test("the week's posts, dispatch and queue are counted, and a small sample is he
   assert.equal(measurement.queue.approvedWaiting, 1);
   assert.equal(measurement.queue.nextApprovalExpiryAt, "2026-11-30T00:00:00.000Z");
   assert.deepEqual(
-    measurement.accounts.map((row) => [row.accountSlug, row.published, row.failed, row.pendingApproval, row.pauseReasonCode]),
+    measurement.accounts.map((row) => [row.accountSlug, row.published, row.pendingApproval, row.pauseReasonCode]),
     [
-      ["instagram-3", 1, 0, 3, null],
-      ["facebook-3", 0, 1, 0, "outcome_unknown"],
+      ["instagram-3", 1, 3, null],
+      ["facebook-3", 0, 0, "outcome_unknown"],
+    ],
+  );
+  assert.equal(measurement.publishedInWindow, 1);
+  assert.deepEqual(
+    measurement.dispatch.segments.map((row) => [row.mode, row.accountSlug, row.sent, row.published, row.failed]),
+    [
+      ["approval", "facebook-3", 1, 0, 1],
+      ["approval", "instagram-3", 1, 1, 0],
     ],
   );
   assert.deepEqual([...measurement.held].sort(), ["signups", "success_rate"]);
@@ -196,7 +204,7 @@ test("sends are attempts: a failure requeued and then published is two sends, an
   // Measured from the requeued schedule to the attempt that published.
   assert.equal(measurement.dispatch.latencyP50Ms, 5 * 60 * 1000);
   assert.equal(measurement.accounts[0].published, 1);
-  assert.equal(measurement.accounts[0].failed, 2);
+  assert.equal(measurement.dispatch.segments[0].failed, 2);
 });
 
 test("an attempt is counted once, in the week it was sent, with its final outcome", () => {
@@ -303,8 +311,49 @@ test("the sign-up hold is judged per landing channel, and sends are split by mod
     signupChannels: [{ source: "instagram", medium: "social", campaign: "wk45", attributed: 10 }],
   });
   assert.ok(!one.held.includes("signups"));
-  assert.deepEqual(one.dispatch.byMode, [
-    { mode: "approval", sent: 1, published: 1, failed: 0 },
-    { mode: "autonomous", sent: 1, published: 0, failed: 1 },
-  ]);
+  assert.deepEqual(
+    one.dispatch.byMode.map((row) => [row.mode, row.sent, row.published, row.failed, row.successRate, [...row.held]]),
+    [
+      ["approval", 1, 1, 0, null, ["success_rate", "latency"]],
+      ["autonomous", 1, 0, 1, null, ["success_rate", "latency"]],
+    ],
+  );
+});
+
+test("each mode and account is judged on its own sample, and weekly published follows publishedAt", () => {
+  const send = (accountSlug, index) =>
+    post({
+      accountSlug,
+      mode: "autonomous",
+      status: "verified",
+      approvedAt: at("2026-11-03T00:00:00Z"),
+      publishedAt: at("2026-11-03T00:10:00Z"),
+      verifiedPublicAt: at("2026-11-03T01:00:00Z"),
+      attempts: [{ at: at(`2026-11-03T00:1${index}:00Z`), attempt: 1, outcome: "published", errorCode: null }],
+    });
+  const measurement = summarizeMarketingMeasurement({
+    window: WINDOW,
+    posts: [
+      ...Array.from({ length: 5 }, (_, index) => send("instagram-3", index)),
+      send("facebook-3", 0),
+      // Sent last week as an unknown outcome, confirmed published this week:
+      // last week's send, this week's publication.
+      post({
+        status: "verified",
+        publishAttempt: 1,
+        publishedAt: at("2026-11-03T05:00:00Z"),
+        attempts: [{ at: at("2026-10-31T00:00:00Z"), attempt: 1, outcome: "outcome_unknown", errorCode: "timeout" }],
+      }),
+    ],
+    channels: CHANNELS,
+    touches: 0,
+    signups: null,
+    signupChannels: null,
+    guestLeads: null,
+    llm: null,
+  });
+  const rate = Object.fromEntries(measurement.dispatch.segments.map((row) => [row.accountSlug, row.successRate]));
+  assert.deepEqual(rate, { "facebook-3": null, "instagram-3": 1 });
+  assert.equal(measurement.dispatch.sent, 6);
+  assert.equal(measurement.publishedInWindow, 7);
 });

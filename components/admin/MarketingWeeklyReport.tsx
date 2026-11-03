@@ -57,7 +57,7 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
           <Stat label={m.drafts} value={String(x.drafts.created)} />
           <Stat label={m.approved} value={String(x.decisions.approved)} />
           <Stat label={m.rejected} value={String(x.decisions.rejected)} />
-          <Stat label={m.published} value={String(x.dispatch.published)} />
+          <Stat label={m.published} value={String(x.publishedInWindow)} />
         </div>
         <p className="text-xs text-zinc-400">
           {m.queueNow
@@ -80,7 +80,6 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
                 <th className={HEAD}>{m.colAccount}</th>
                 <th className={HEAD}>{m.colStatus}</th>
                 <th className={HEAD}>{m.published}</th>
-                <th className={HEAD}>{m.failed}</th>
                 <th className={HEAD}>{m.pendingNow}</th>
               </tr>
             </thead>
@@ -93,7 +92,6 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
                     {account.pauseReasonCode ? ` · ${account.pauseReasonCode}` : ""}
                   </td>
                   <td className={CELL}>{account.published}</td>
-                  <td className={CELL}>{account.failed}</td>
                   <td className={CELL}>{account.pendingApproval + account.approvedWaiting}</td>
                 </tr>
               ))}
@@ -128,7 +126,7 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
             value={
               x.llm === null
                 ? m.unreadable
-                : `US${(x.llm.countedMicroUsd / 1_000_000).toFixed(2)}${x.llm.capUsd === null ? "" : ` / US${x.llm.capUsd.toFixed(2)}`}`
+                : `US$${(x.llm.countedMicroUsd / 1_000_000).toFixed(2)}${x.llm.capUsd === null ? "" : ` / US$${x.llm.capUsd.toFixed(2)}`}`
             }
           />
         </div>
@@ -145,8 +143,48 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
         </p>
         <p className="text-xs text-zinc-400">
           {m.inFlight.replace("{count}", String(x.dispatch.inFlight))}
-          {x.dispatch.byMode.map((row) => ` · ${row.mode}: ${row.published}/${row.sent}`).join("")}
         </p>
+        {x.dispatch.segments.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] border-collapse" data-testid="marketing-weekly-segments">
+              <thead>
+                <tr className="border-b border-zinc-800">
+                  <th className={HEAD}>{m.colAccount}</th>
+                  <th className={HEAD}>{m.colMode}</th>
+                  <th className={HEAD}>{m.colSent}</th>
+                  <th className={HEAD}>{m.published}</th>
+                  <th className={HEAD}>{m.failed}</th>
+                  <th className={HEAD}>{m.successRate}</th>
+                  <th className={HEAD}>{m.latency}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ...x.dispatch.byMode.map((row) => ({ ...row, accountSlug: "*" })),
+                  ...x.dispatch.segments,
+                ].map((row) => (
+                  <tr key={`${row.mode}|${row.accountSlug}`} className="border-b border-zinc-800/60">
+                    <td className={`${CELL} font-mono text-xs`}>{row.accountSlug}</td>
+                    <td className={`${CELL} font-mono text-xs`}>{row.mode}</td>
+                    <td className={CELL}>{row.sent}</td>
+                    <td className={CELL}>{row.published}</td>
+                    <td className={CELL}>{row.failed}</td>
+                    <td className={CELL}>
+                      {row.successRate === null ? <span className="text-sky-300">{m.held}</span> : `${Math.round(row.successRate * 100)}%`}
+                    </td>
+                    <td className={CELL}>
+                      {row.latencyP50Ms === null ? (
+                        <span className="text-sky-300">{m.held}</span>
+                      ) : (
+                        `${minutes(row.latencyP50Ms)} / ${minutes(row.latencyP95Ms)}`
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
         {x.signupChannels && x.signupChannels.length > 0 ? (
           <ul className="grid gap-0.5 text-xs text-zinc-400" data-testid="marketing-weekly-signup-channels">
             {x.signupChannels.map((channel) => (

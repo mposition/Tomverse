@@ -104,12 +104,9 @@ export type MarketingMeasurement = {
   readonly window: { readonly start: string; readonly end: string };
   readonly drafts: { readonly created: number; readonly guardCodes: ReadonlyArray<{ code: string; count: number }> };
   readonly decisions: { readonly approved: number; readonly rejected: number; readonly expired: number };
-  readonly dispatch: {
-    readonly sent: number;
-    readonly published: number;
-    readonly verified: number;
-    readonly failed: number;
-    readonly outcomeUnknown: number;
+  /** Posts that went out in the window, by `publishedAt` (the stored weekly KPI's count). */
+  readonly publishedInWindow: number;
+  readonly dispatch: MarketingSendStats & {
     /** Failures recorded before the tool was called: not sends, counted apart. */
     readonly notSent: number;
     /**
@@ -118,13 +115,10 @@ export type MarketingMeasurement = {
      * recorded, so it never moves between windows -- and shown apart.
      */
     readonly inFlight: number;
-    /** The same counts by the mode each post was written under. */
-    readonly byMode: ReadonlyArray<{ mode: string; sent: number; published: number; failed: number }>;
-    /** Verified ÷ sent, or null while fewer than the minimum were sent. */
-    readonly successRate: number | null;
-    readonly latencyP50Ms: number | null;
-    readonly latencyP95Ms: number | null;
-    readonly failuresByCode: ReadonlyArray<{ code: string; count: number }>;
+    /** The same measures by the mode each post was written under (policy §10.3). */
+    readonly byMode: ReadonlyArray<MarketingSendStats & { readonly mode: string }>;
+    /** And by mode and account, each held on its own sample. */
+    readonly segments: ReadonlyArray<MarketingSendStats & { readonly mode: string; readonly accountSlug: string }>;
   };
   /** The queue now, whatever the window. */
   readonly queue: {
@@ -139,8 +133,8 @@ export type MarketingMeasurement = {
     readonly channel: string;
     readonly status: string;
     readonly pauseReasonCode: string | null;
+    /** Went out in the window, by `publishedAt`. */
     readonly published: number;
-    readonly failed: number;
     readonly pendingApproval: number;
     readonly approvedWaiting: number;
   }>;
@@ -170,6 +164,61 @@ const tally = (values: readonly string[]) =>
     .map(([code, count]) => ({ code, count }))
     .sort((left, right) => right.count - left.count || (left.code < right.code ? -1 : 1));
 
+/**
+ * The policy §10.3 measures of a set of sends: counts by outcome, verified
+ * public, the success rate (verified ÷ sent) and the publish delay, each held
+ * when its sample is too small. A send's verification is the post's: one
+ * verified after the window is still a verified send of it.
+ */
+export type MarketingSendStats = {
+  readonly sent: number;
+  readonly published: number;
+  readonly verified: number;
+  readonly failed: number;
+  readonly outcomeUnknown: number;
+  /** Verified ÷ sent, or null while fewer than the minimum were sent. */
+  readonly successRate: number | null;
+  readonly latencyP50Ms: number | null;
+  readonly latencyP95Ms: number | null;
+  readonly failuresByCode: ReadonlyArray<{ code: string; count: number }>;
+  readonly held: ReadonlyArray<"success_rate" | "latency">;
+};
+
+type ResolvedSend = {
+  readonly post: MarketingMeasurementPost;
+  readonly at: Date;
+  readonly outcome: string;
+  readonly errorCode: string | null;
+};
+
+function marketingSendStats(sends: readonly ResolvedSend[]): MarketingSendStats {
+  const published = sends.filter((entry) => entry.outcome === "published");
+  const failed = sends.filter((entry) => entry.outcome === "failed");
+  const verified = published.filter((entry) => entry.post.verifiedPublicAt !== null).length;
+  const latencies = published
+    .map((entry) => {
+      const from = entry.post.scheduledAt ?? entry.post.approvedAt;
+      return from ? entry.at.getTime() - from.getTime() : null;
+    })
+    .filter((value): value is number => value !== null && value >= 0)
+    .sort((left, right) => left - right);
+  const held: Array<"success_rate" | "latency"> = [];
+  if (sends.length < MARKETING_MEASUREMENT_MIN_SENT) held.push("success_rate");
+  if (latencies.length === 0) held.push("latency");
+  return {
+    sent: sends.length,
+    published: published.length,
+    verified,
+    failed: failed.length,
+    outcomeUnknown: sends.filter((entry) => entry.outcome === "outcome_unknown").length,
+    successRate: sends.length < MARKETING_MEASUREMENT_MIN_SENT ? null : verified / sends.length,
+    latencyP50Ms: marketingPercentile(latencies, 0.5),
+    latencyP95Ms: marketingPercentile(latencies, 0.95),
+    failuresByCode: tally(failed.map((entry) => entry.errorCode ?? "unknown")),
+    held,
+  };
+}
+
 const earliest = (dates: ReadonlyArray<Date | null>) => {
   const times = dates.filter((date): date is Date => date !== null).map((date) => date.getTime());
   return times.length === 0 ? null : new Date(Math.min(...times)).toISOString();
@@ -193,12 +242,7 @@ export function summarizeMarketingMeasurement(input: {
   // entry, and its outcome is its newest entry, wherever that falls: an
   // unknown outcome resolved as failed a week later is one send, in the first
   // week. A post still `publishing` is not yet a send (`inFlight`).
-  const resolved: Array<{
-    readonly post: MarketingMeasurementPost;
-    readonly at: Date;
-    readonly outcome: string;
-    readonly errorCode: string | null;
-  }> = [];
+  const resolved: ResolvedSend[] = [];
   let notSent = 0;
   for (const post of posts) {
     const byAttempt = new Map<number, MarketingMeasurementPost["attempts"][number][]>();
@@ -226,11 +270,6 @@ export function summarizeMarketingMeasurement(input: {
     }
   }
   const inFlight = posts.filter((post) => post.status === "publishing").length;
-  const published = resolved.filter((entry) => entry.outcome === "published");
-  const failed = resolved.filter((entry) => entry.outcome === "failed");
-  const unknown = resolved.filter((entry) => entry.outcome === "outcome_unknown");
-  const sent = resolved.length;
-  const modes = [...new Set(resolved.map((entry) => entry.post.mode))].sort();
   const signupChannels =
     input.signupChannels === null
       ? null
@@ -238,20 +277,12 @@ export function summarizeMarketingMeasurement(input: {
           ...channel,
           held: channel.attributed < MARKETING_MEASUREMENT_MIN_SIGNUPS,
         }));
-  const verified = published.filter((entry) => entry.post.verifiedPublicAt !== null).length;
-  const latencies = published
-    .map((entry) => {
-      const from = entry.post.scheduledAt ?? entry.post.approvedAt;
-      return from ? entry.at.getTime() - from.getTime() : null;
-    })
-    .filter((value): value is number => value !== null && value >= 0)
-    .sort((left, right) => left - right);
+  const sends = marketingSendStats(resolved);
   const pending = posts.filter((post) => post.status === "pending_approval");
   const approved = posts.filter((post) => post.status === "approved");
+  const modes = [...new Set(resolved.map((entry) => entry.post.mode))].sort();
 
-  const held: Array<"success_rate" | "latency" | "signups"> = [];
-  if (sent < MARKETING_MEASUREMENT_MIN_SENT) held.push("success_rate");
-  if (latencies.length === 0) held.push("latency");
+  const held: Array<"success_rate" | "latency" | "signups"> = [...sends.held];
   // Judged per channel: two channels of six each are two held channels, not twelve.
   if (!signupChannels || !signupChannels.some((channel) => !channel.held)) held.push("signups");
 
@@ -263,27 +294,28 @@ export function summarizeMarketingMeasurement(input: {
       rejected: posts.filter((post) => post.status === "rejected" && within(post.updatedAt, window)).length,
       expired: posts.filter((post) => post.status === "approval_expired" && within(post.updatedAt, window)).length,
     },
+    // By when the post went out, as the stored weekly KPI counts it -- apart
+    // from the sends below, which are placed by when their outcome was first
+    // recorded.
+    publishedInWindow: posts.filter((post) => within(post.publishedAt, window)).length,
     dispatch: {
-      sent,
-      published: published.length,
-      verified,
-      failed: failed.length,
-      outcomeUnknown: unknown.length,
+      ...sends,
       notSent,
       inFlight,
-      byMode: modes.map((mode) => {
-        const mine = resolved.filter((entry) => entry.post.mode === mode);
-        return {
-          mode,
-          sent: mine.length,
-          published: mine.filter((entry) => entry.outcome === "published").length,
-          failed: mine.filter((entry) => entry.outcome === "failed").length,
-        };
-      }),
-      successRate: sent < MARKETING_MEASUREMENT_MIN_SENT ? null : verified / sent,
-      latencyP50Ms: marketingPercentile(latencies, 0.5),
-      latencyP95Ms: marketingPercentile(latencies, 0.95),
-      failuresByCode: tally(failed.map((entry) => entry.errorCode ?? "unknown")),
+      byMode: modes.map((mode) => ({ mode, ...marketingSendStats(resolved.filter((entry) => entry.post.mode === mode)) })),
+      // Every mode and account the window sent from, each judged on its own sample.
+      segments: [...new Set(resolved.map((entry) => JSON.stringify([entry.post.mode, entry.post.accountSlug])))]
+        .sort()
+        .map((key) => {
+          const [mode, accountSlug] = JSON.parse(key) as [string, string];
+          return {
+            mode,
+            accountSlug,
+            ...marketingSendStats(
+              resolved.filter((entry) => entry.post.mode === mode && entry.post.accountSlug === accountSlug),
+            ),
+          };
+        }),
     },
     queue: {
       pendingApproval: pending.length,
@@ -295,15 +327,13 @@ export function summarizeMarketingMeasurement(input: {
     accounts: input.channels.map((channel) => {
       const mine = (rows: ReadonlyArray<{ readonly accountSlug: string }>) =>
         rows.filter((row) => row.accountSlug === channel.accountSlug).length;
-      const mineSent = (rows: ReadonlyArray<{ readonly post: MarketingMeasurementPost }>) =>
-        rows.filter((row) => row.post.accountSlug === channel.accountSlug).length;
       return {
         accountSlug: channel.accountSlug,
         channel: channel.channel,
         status: channel.status,
         pauseReasonCode: channel.pauseReasonCode,
-        published: mineSent(published),
-        failed: mineSent(failed),
+        published: posts.filter((post) => post.accountSlug === channel.accountSlug && within(post.publishedAt, window))
+          .length,
         pendingApproval: mine(pending),
         approvedWaiting: mine(approved),
       };
