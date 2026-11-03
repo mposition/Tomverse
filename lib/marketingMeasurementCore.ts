@@ -43,6 +43,8 @@ export function marketingWeekWindow(weekStart: string): MarketingMeasurementWind
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
   const start = new Date(`${weekStart}T00:00:00+10:00`);
   if (Number.isNaN(start.getTime())) return null;
+  // A date that does not exist (2026-02-30) rolls over; it is not a week.
+  if (new Date(start.getTime() + 10 * 60 * 60 * 1000).toISOString().slice(0, 10) !== weekStart) return null;
   // The Brisbane weekday of a Brisbane midnight is the UTC weekday ten hours on.
   if (new Date(start.getTime() + 10 * 60 * 60 * 1000).getUTCDay() !== 1) return null;
   return { start, end: new Date(start.getTime() + 7 * DAY_MS) };

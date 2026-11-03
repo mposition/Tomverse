@@ -20,6 +20,9 @@ test("a week is a Brisbane Monday to the next, and nothing else is a week", () =
   assert.equal(window.end.toISOString(), "2026-11-08T14:00:00.000Z");
   assert.equal(marketingWeekWindow("2026-11-03"), null);
   assert.equal(marketingWeekWindow("not-a-date"), null);
+  // 2026-02-30 would roll over to Monday 2026-03-02.
+  assert.equal(marketingWeekWindow("2026-02-30"), null);
+  assert.ok(marketingWeekWindow("2026-03-02"));
 });
 
 test("percentiles are nearest-rank", () => {
