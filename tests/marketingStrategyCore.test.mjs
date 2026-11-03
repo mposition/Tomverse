@@ -82,6 +82,37 @@ test("the post count is the number of distinct days named", () => {
   assert.deepEqual([read.accounts[0].posts, read.accounts[0].days], [1, ["mon"]]);
 });
 
+test("paid advertising is a proposal: complete ones are kept, cut to their stored length, at most three", () => {
+  const ad = (overrides = {}) => ({
+    platform: "Meta",
+    objective: "호주 영어 시장 도달 시험",
+    budget: "AUD 50~100, 7일",
+    why: "승인된 영상이 있다",
+    ...overrides,
+  });
+  const read = readMarketingWeeklyStrategy(
+    answer([plan()], { paidAds: [ad({ platform: "x".repeat(120) }), ad({ why: "" }), ad(), ad(), ad()] }),
+    { week: WEEK, accounts: ACCOUNTS, claims: CLAIMS },
+  );
+  assert.equal(read.paidAds.length, 3);
+  assert.equal(read.paidAds[0].platform.length, 80);
+  assert.equal(read.promptVersion, "strategy-v2");
+  const none = readMarketingWeeklyStrategy(answer([plan()]), { week: WEEK, accounts: ACCOUNTS, claims: CLAIMS });
+  assert.deepEqual(none.paidAds, []);
+});
+
+test("the model is told a paid ad is a proposal, never a spend", () => {
+  const [system] = marketingStrategyMessages({
+    week: WEEK,
+    analysis: {},
+    brief: { topicId: "t", claimIds: [] },
+    accounts: ACCOUNTS,
+    claims: CLAIMS,
+  });
+  assert.match(system.content, /paidAds/u);
+  assert.match(system.content, /never placed automatically/u);
+});
+
 test("an answer that is not a plan, or plans no offered account, is not kept", () => {
   const input = { week: WEEK, accounts: ACCOUNTS, claims: CLAIMS };
   assert.equal(readMarketingWeeklyStrategy("not json", input), null);
