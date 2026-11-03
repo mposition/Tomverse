@@ -218,7 +218,14 @@ const v4SecretPattern = (value: string): boolean =>
  * credential detector, never the bounded idea-input validator. */
 export const amuxV4RepositoryContainsSecret = v4SecretPattern;
 
-const emailPattern = (value: string): boolean => /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value);
+// Tomverse's own published support mailbox (lib/accountEmails.ts) is product
+// copy, not personal data: a product-research suggestion that names it must not
+// be refused. Only that exact address is set aside, never a longer one that
+// contains it, so a.support@tomverse.app or support@tomverse.app.evil.com still counts.
+const PUBLIC_SUPPORT_EMAIL = /(?<![A-Za-z0-9._%+-])support@tomverse\.app(?![A-Za-z0-9-]|\.[A-Za-z0-9])/gi;
+
+const emailPattern = (value: string): boolean =>
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value.replace(PUBLIC_SUPPORT_EMAIL, " "));
 
 const phonePattern = (value: string): boolean => /\b\d{3}[-. ]\d{3}[-. ]\d{4}\b/.test(value);
 
