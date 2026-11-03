@@ -18,6 +18,7 @@ import {
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import { amuxIdeaLaneEnabled } from "@/lib/amux/ideaLaneCore";
 import {
   AMUX_SESSION_INTAKE_READBACK_ENV,
   amuxSessionIntakeReadbackEnabled,
@@ -137,7 +138,13 @@ export async function POST(request: Request) {
       day: 20,
     });
     const raw = await readLimitedText(request, AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES);
-    if (sessionIntakeOn()) {
+    // The idea lane's test entry: saved as an owner idea with no analysis,
+    // which is what the lane claims, even while session intake is on.
+    const toLane = new URL(request.url).searchParams.get("target") === "lane";
+    if (toLane && !amuxIdeaLaneEnabled()) {
+      return NextResponse.json({ error: "lane_disabled" }, { status: 503, headers: noStore });
+    }
+    if (!toLane && sessionIntakeOn()) {
       let envelope: unknown;
       try { envelope = JSON.parse(raw); } catch { envelope = null; }
       const body = envelope && typeof envelope === "object" && !Array.isArray(envelope)
