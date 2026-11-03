@@ -225,3 +225,48 @@ test("with session intake off, the Admin input keeps the v4 owner path", () =>
     assert.equal(world.v4Calls, 1);
     assert.equal(world.sessionCalls.length, 0);
   }));
+
+// The idea lane's test entry: `?target=lane` saves through the v4 owner path,
+// the only ideas the lane claims, even while session intake is on.
+const postToLane = (input: unknown) =>
+  new Request("https://tomverse.test/api/admin/amux/ideas/submissions?target=lane", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ version: 1, requestId, input }) });
+
+async function withLane<T>(value: string | undefined, fn: () => Promise<T>) {
+  const old = process.env.AMUX_IDEA_LANE_ENABLED;
+  if (value === undefined) delete process.env.AMUX_IDEA_LANE_ENABLED;
+  else process.env.AMUX_IDEA_LANE_ENABLED = value;
+  try { return await fn(); }
+  finally {
+    if (old === undefined) delete process.env.AMUX_IDEA_LANE_ENABLED;
+    else process.env.AMUX_IDEA_LANE_ENABLED = old;
+  }
+}
+
+test("with the lane on, a lane entry is an owner idea even while session intake is on", () =>
+  withSwitches(SWITCHES, () => withLane("true", async () => {
+    world.sessionCalls = []; world.v4Calls = 0; world.sessionError = null;
+    const { POST } = await loadRoute();
+    const response = await POST(postToLane(idea(["mposition/Tomverse"])));
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.equal(body.ideaId, "v4-idea");
+    assert.equal(body.origin, undefined, "an owner idea, not a session one");
+    assert.equal(world.v4Calls, 1);
+    assert.equal(world.sessionCalls.length, 0, "the session queue never sees it");
+  })));
+
+test("with the lane off, a lane entry is refused before anything is written", () =>
+  withSwitches(SWITCHES, async () => {
+    for (const value of [undefined, "false", "1"]) {
+      await withLane(value, async () => {
+        world.sessionCalls = []; world.v4Calls = 0;
+        const { POST } = await loadRoute();
+        const response = await POST(postToLane(idea(["mposition/Tomverse"])));
+        assert.equal(response.status, 503);
+        assert.deepEqual(await response.json(), { error: "lane_disabled" });
+        assert.equal(world.v4Calls + world.sessionCalls.length, 0);
+      });
+    }
+  }));

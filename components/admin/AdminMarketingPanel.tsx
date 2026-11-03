@@ -12,6 +12,7 @@ import {
   type MarketingAction,
 } from "@/components/admin/MarketingActions";
 import { MarketingAnalysisSwitch, MarketingBriefReport } from "@/components/admin/MarketingAnalysis";
+import { MarketingWeeklyStrategyCard } from "@/components/admin/MarketingStrategy";
 import { MarketingWebhookProduction } from "@/components/admin/MarketingWebhookProduction";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -271,6 +272,7 @@ export function AdminMarketingPanel({
               {view.section === "competitors" && view.canWrite ? (
                 <MarketingCompetitorCreate section={view.section} onDone={done} m={m} />
               ) : null}
+              {view.section === "reports" ? <MarketingWeeklyStrategyCard /> : null}
               {view.section === "experiments" && view.experiments ? (
                 <MarketingExperimentTop view={view} experiments={view.experiments} onDone={done} m={m} />
               ) : null}

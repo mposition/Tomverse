@@ -61,7 +61,7 @@ test("only an exact successful submission response confirms the idea", () => {
     origin: "session" });
   for (const [code, status] of [["references_required", 400], ["outside_scope", 409],
     ["model_not_approved", 409], ["scope_unavailable", 409],
-    ["reference_snapshot_unavailable", 503]]) {
+    ["reference_snapshot_unavailable", 503], ["lane_disabled", 503]]) {
     assert.deepEqual(classifyIdeaSubmissionPost({ status, body: { error: code } }, requestId),
       { kind: "refused", code });
   }
