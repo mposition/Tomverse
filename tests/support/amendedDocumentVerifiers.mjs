@@ -53,6 +53,7 @@ export const AMENDED_DOCUMENT_VERIFIERS = {
       const digest = createHash("sha256");
       digest.update(source("components/legal/PrivacyPolicy.tsx"));
       digest.update(source("lib/providerDataDestinations.ts"));
+      digest.update(source("lib/privacyNoticeStatus.ts"));
       for (const copy of Object.values(PRIVACY_LOCALES)) {
         digest.update(JSON.stringify(copy.privacyPolicy));
       }

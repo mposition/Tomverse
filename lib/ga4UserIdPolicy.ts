@@ -10,9 +10,10 @@
  * 1. **Notice.** The privacy notice that tells people about it is published.
  *    That is this constant, flipped in the same pull request that ships the
  *    revised notice in every locale -- so no environment variable can turn
- *    the feature on ahead of the text that discloses it. Today's notice
- *    (locales `privacy.sections.analytics`) does not describe a cross-device
- *    identifier, so this is false.
+ *    the feature on ahead of the text that discloses it. The notice (locales
+ *    `privacyPolicy.analyticsUserId1` to `analyticsUserId6`) describes the
+ *    identifier, so this is true. It is the notice only: with the switch below
+ *    off, nothing is created or sent.
  * 2. **Switch.** `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true`, default off. Public
  *    because the browser decides whether to ask for an id at all; a build-time
  *    value, so changing it takes a redeploy.
@@ -28,7 +29,7 @@
  *    gets a new one.
  */
 
-export const GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED = false as boolean;
+export const GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED = true as boolean;
 
 export const GA4_USER_ID_SWITCH_ENV = "NEXT_PUBLIC_GA4_USER_ID_ENABLED";
 
