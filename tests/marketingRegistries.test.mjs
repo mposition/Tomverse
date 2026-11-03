@@ -530,7 +530,7 @@ test("every registry a Guard decision reads is frozen", () => {
   // of these is asserted at runtime rather than believed. A writable table here
   // is a decision somebody outside this module gets to make: flipping
   // `zh-Hant` to `zh` would let a Traditional Chinese claim cite a Simplified
-  // page, which is the drift the null exists to refuse.
+  // page.
   const frozen = [
     ["MARKETING_CLAIMS", MARKETING_CLAIMS],
     ["MARKETING_CLAIM_TYPES", MARKETING_CLAIM_TYPES],
@@ -548,7 +548,7 @@ test("every registry a Guard decision reads is frozen", () => {
     },
     TypeError,
   );
-  assert.equal(MARKETING_LOCALE_PAGE_LANGUAGE["zh-Hant"], null);
+  assert.equal(MARKETING_LOCALE_PAGE_LANGUAGE["zh-Hant"], "zh-Hant");
 
   assert.throws(
     () => {

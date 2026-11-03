@@ -139,6 +139,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - 결과는 `brief` 보고서 하나로 기록되고, 분석 본문은 `MarketingAnalysis`에 같은 트랜잭션으로 저장된다. 사람은 보고서 탭에서 읽는다. 모델이 쓴 출처는 https이면서 승인된 경쟁사 공식 host일 때만 링크로, 그 밖은 텍스트로 보인다.
 - A5는 brief의 topic id·claim id와 claim의 문장(페이지 문자열)·가격 값만 받는다. 분석 본문과 경쟁사 사실은 받지 않는다. 생성기는 맥락에 없는 claim id를 brief에서 빼고, 추적 중인 경쟁사 이름이 들어간 topic은 버린다. 앱은 레지스트리에 없는 claim을 담은 brief를 거절한다.
 - claim은 코드(`lib/marketingClaims.ts`)에 사람이 등록한다. 모델 출력은 claim을 만들거나 승인하지 않는다.
+- Chat과 Review를 고르게 다룬다(운영자 결정 2026-11-03). FAQ에 Chat 기능 문장(어시스턴트·대화 가져오기와 이어가기·이미지 생성·파일 질문, 정적 페이지라 모두 "제공되는 환경에서" 조건을 붙인다)을 두고 claim으로 등록하며, flag 뒤 기능의 claim은 `gate`로 묶어 flag가 꺼지면 생성기 맥락에서 빠지고 Guard가 거절한다. 페이지 claim은 zh-Hant 사이트 문구가 생긴 뒤(2026-11-01) zh-Hant도 인용한다. 생성기에는 계정별 최근 14일에 쓴 claim id와 최근 brief 주제 4개를 주고, 프롬프트로 다른 claim·다른 주제를 고르게 한다(7.6의 14일 규칙은 결정적 게이트가 아니라 이 입력으로 지킨다).
 
 ## 5. 데이터 (마케팅 전용 테이블 8개)
 
@@ -283,7 +284,7 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 후보로 준다. 그 종류의 자산이 없으면 다른 종류로 대신한다.
 
 상한은 코드 상수이고 운영 설정으로는 **내리기만** 한다. 게시 시간창은 대상 시장 현지 09:00~20:00,
-같은 claim은 계정당 14일 안에 다시 쓰지 않는다.
+같은 claim은 계정당 14일 안에 다시 쓰지 않는다(생성기 입력과 프롬프트로 지킨다. 4.2 참조).
 
 ## 8. 게시와 상태
 
@@ -315,6 +316,9 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 
 **범위.** 허용 범위는 운영자가 서명한 검증 기록에 **실제로 관측된 `event type × MarketingChannel` 조합의 부분집합**이다.
 검증하지 않은 채널·계정이나 event type으로 통과를 넓히지 않는다. 넓히려면 그 조합을 새로 검증해 기록한다.
+기록의 쌍은 채널 **id**로 적히고 id는 DB마다 다르다. production 범위에 쓸 채널은 staging이 **그 운영 채널의 id와 Zernio 계정**으로 관측해야 하며,
+Test 전용 채널의 관측으로는 운영 채널을 허용할 수 없다(절차: `docs/ops/marketing-webhook-production-activation.md`).
+production 수신기는 서명된 설정 세대가 있으면 범위 밖 이벤트도 서명 검증 뒤 받지만, 게시물을 읽지 않고 `apply_not_permitted` 감사 행만 남긴다(수신만).
 
 **통과 조건 — 활성화할 범위의 event type마다 아래가 모두 staging에서 관측될 것:**
 1. 유효 서명(`X-Zernio-Signature`, raw body HMAC-SHA256)의 Zernio 이벤트는 수락되고 shadow 기록에 남는다.
@@ -437,9 +441,29 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   게시 단계(`--phase publish`)는 신뢰된 checkout과 자기 의존성에서 돌고, GitHub App 토큰(`MARKETING_SEO_GITHUB_APP_TOKEN`, `MARKETING_SEO_GITHUB_REPOSITORY`)과 서명 키만 가지며 LLM 변수가 있으면 시작을 거부한다.
   서명이 맞고, base가 원격 develop의 조상이며, 부모가 base이고, tree·diff를 git에서 다시 계산해 일치할 때만 push하고, push 뒤 원격 tree를 다시 읽어 일치할 때만 PR(draft)을 연다.
   졸업 기록이 정확히 `true`가 아니면(비어 있음·다른 값·읽기 실패) 졸업 전으로 취급해 `marketing-agent/<topic>` 초안 PR만 연다.
+- 실행 환경(2026-11-03 운영자 결정, 정책 버전 변경 없음): `.github/workflows/marketing-seo-agent.yml`. **GitHub Actions workflow 하나에 job 둘**로 정했다
+  (Railway 서비스가 아니다 — 실행마다 새로 뜨는 VM이 일회용성을, job마다 다른 VM이 기계 분리를, step 단위 비밀 바인딩이 자격증명 분리를 주고,
+  비특권 사용자를 만들 root가 있으며 새 서비스·이미지·상시 비용이 없다). 상시 서비스로 옮길 이유는 아직 없다.
+  - 기본 꺼짐: 두 job 모두 저장소 변수 `MARKETING_SEO_AGENT_ENABLED`가 정확히 `true`이고 변수 `MARKETING_AUTOMATION_KILL_SWITCH`가 비어 있을 때만 돈다.
+    꺼져 있으면 job이 건너뛰어져 실패 실행도 남지 않는다. publish job은 validate가 끝난 뒤 이 조건을 다시 본다. 트리거는 `workflow_dispatch`(주제 입력)뿐이라
+    사람이 한 번 시작하는 실행이고, 스케줄·PR·push 트리거는 없다(스케줄은 새 자율 권한이므로 켤 때 운영자가 따로 정한다).
+    GitHub 변수 `MARKETING_AUTOMATION_KILL_SWITCH`는 workflow의 입장 조건일 뿐이고 원장의 예약 거절은 앱의 같은 이름 환경변수가 한다. 긴급 정지는 둘 다 건다.
+  - validate job: `develop` 전체 이력을 자격증명 없이(`persist-credentials: false`, job 토큰은 읽기 전용) checkout하고 base 커밋을 고정한 뒤 `npm ci`까지는 비밀 없이 하고,
+    `seo-check` 시스템 사용자를 만들어 검사가 그 사용자로 돈다. 비밀은 `--phase validate` step 하나에만 환경변수로 들어간다 — 원장 앱 `MARKETING_APP_URL`(변수),
+    `MARKETING_GENERATOR_SUBMIT_SECRET`, `MARKETING_LLM_API_KEY`(생성기·댓글 모니터와 같은 값, 같은 마케팅 원장 경유, 목적 `seo`), 서명 키 `MARKETING_SEO_ATTESTATION_KEY`.
+    부모는 `sudo --preserve-env=<목록>`으로 root로 돌고(검사를 비특권 사용자로 바꾸려면 필요하다) 비밀은 인자가 아니라 환경으로만 간다. GitHub 쓰기 자격증명은 없다.
+    결과(`--out`의 정확히 3개 파일)는 보존 1일의 artifact로만 넘긴다.
+  - publish job: 다른 VM에서 validate가 고정한 base 커밋을 checkout해(자기 의존성으로 `npm ci --ignore-scripts`) artifact를 받고,
+    `actions/create-github-app-token`(커밋 SHA 고정)으로 이 저장소 한정 설치 토큰(Contents·Pull requests write만, job이 끝나면 폐기)을 `--phase publish` step 하나에만 준다.
+    서명 키와 졸업 기록(`MARKETING_SEO_AUTO_PR`)·auto-merge 스위치(`MARKETING_SEO_AUTO_MERGE`)도 이 job에만 있고 LLM 변수는 하나도 없다. 토큰 끝 시각은 만들기 전에 잰
+    55분 뒤를 `MARKETING_SEO_GITHUB_APP_TOKEN_EXPIRES_AT`로 준다(실제 끝보다 이르다). 게시 단계가 졸업 뒤 스스로 `--phase arm`을 이어 돌리며 최대 45분 지켜본다.
+  - 모든 job은 `continue-on-error`다(이 workflow는 main에서 돌고, Railway는 main 커밋에 실패한 workflow가 하나라도 있으면 배포를 건너뛰기 때문이다). 구조는
+    `tests/marketingSeoAgentWorkflow.test.mjs`가 지킨다.
+  - 구현 한계: 이 환경은 Linux 러너에서 아직 한 번도 돈 적이 없다. 첫 실행은 검사 사용자 권한(작업 트리·`node_modules` 읽기 경로)에서 실패할 수 있고, 실패해도 닫힌 쪽(게시 없음)이다.
+    비용은 validate의 LLM 호출 1회이며 원장의 운영자 모델·월 상한이 한도다.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
-- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake)와 `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)는 사람 소유이며 허용 목록에 없다.
+- 시험: `tests/marketingSeoAgentCore.test.mjs`(검증기·제안·전 과정 fake), `tests/marketingSeoBranchPolicy.test.mjs`(브랜치 정책 shell)와 `tests/marketingSeoAgentWorkflow.test.mjs`(실행 환경 workflow 구조)는 사람 소유이며 허용 목록에 없다.
 
 ## 10. 측정
 
@@ -469,8 +493,8 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   (`lib/ga4UserId.ts`, migration `20261102100000_ga4_user_id`, 값 형식은 DB CHECK로 강제). 저장하는 이유는 철회다 —
   행을 지우면 Tomverse 안에서 그 값을 계정에 잇는 것이 없어져 GA4와의 연결이 끊긴다. 다시 동의하면 새 값을 만든다.
   이전 HMAC 방식의 id는 고지 상수가 한 번도 `true`가 된 적이 없어 발급·전송된 적이 없으므로 그 삭제 경로는 두지 않는다.
-- 생성·전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
-  고지 개정 PR에서만 바꾼다) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
+- 생성·전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 개정 고지 PR에서 `true`로 바꿨다 —
+  이 상수는 고지 개정 PR에서만 바꾼다. `true`여도 스위치가 꺼져 있으면 아무것도 만들지도 보내지도 않는다, `tests/ga4UserIdConsentGate.test.mjs`) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
   로그인 · GA4 측정 id. 식별자는 이 조건이 모두 충족된 뒤의 첫 요청에서만 만든다 — 브라우저가 요청 본문에 명시 동의를 적고,
   서버는 고지·스위치·로그인이 맞고 그 진술이 있을 때만 만든다(`app/api/analytics/user-id/route.ts` POST). 브라우저의 gtag
   `user_id`로만 보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃은 `user_id`를 `null`로 해제한다.
@@ -522,9 +546,11 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 ### 12.1 댓글 모니터링
 - 댓글은 본 앱이 게시 도구로 조회하고, 댓글 모니터 서비스가 **본문만** 받아(작성자·글·시각·링크 없음) **메모리에서만** 분류한다.
   모델에도 그 본문만 보낸다. 로그에 본문·handle·댓글 URL을 남기지 않는다.
-- 저장은 게시물 단위 알림(건수·위험 코드·최초 감지 시각, 게시물 URL)뿐이며 90일 후 삭제한다.
+- 저장은 게시물 단위 알림(건수·위험 코드·최초 감지 시각, 게시물 URL의 host)뿐이며 90일 후 삭제한다. 같은 건수·위험 코드를 적은 시스템 감사 한 줄이 따로 남는다.
 - **선행 조건(사람):** lawful basis·DPIA 검토, 게시 도구의 처리자 지위·DPA·하위처리자·데이터 위치, 호주 APP 8 해외 이전,
   GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있고, **댓글 모니터링 없이는 졸업이 없다.**
+  개정 문안 초안(2026-11-03)은 `privacyPolicy.comments*`이고 확인 필요 항목이 자리표시로 남아 있어, 확인이 끝나 `COMMENTS_PRIVACY_NOTICE_CONFIRMED`(`lib/privacyNoticeStatus.ts`)가 `true`가 될 때까지 페이지가 그 절을 그리지 않는다. 사람이 할 일의 목록과 순서는
+  [DPIA 초안 체크리스트](marketing-privacy-dpia-checklist.md)에 있다. 문안이 게시돼도 스위치는 그 체크리스트가 끝나기 전에 켜지 않는다.
 
 **S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다(건강 판정을 묻는 웹 앱·게시기와 모니터를 돌리는 서비스 모두에 같은 값을 둔다). 꺼져 있으면
 `runMarketingCommentsMonitor()`는 DB·게시 도구·모델 어느 것도 건드리지 않고 돌아온다. 켜진 실행은 최근 14일 안에 게시된 글의 댓글을

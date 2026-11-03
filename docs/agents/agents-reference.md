@@ -1353,6 +1353,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   행이고, 지금 트리의 기록 digest로 다시 검증합니다. 판정이 거절하면 게시물을 읽지 않고
   `status_refused`(`apply_not_permitted`, 닫힌 사유)만 남기며, 우리 계정이 아닌 이벤트는 감사도 남기지
   않습니다. 판정 모듈은 kill switch 값을 받지 못하면 모든 기능을 거절하므로 실제 값을 넘깁니다.
+- **운영 활성화 절차**: `docs/ops/marketing-webhook-production-activation.md`, `scripts/marketing/zernio-webhook-setup.mjs`,
+  `scripts/marketing/mirror-channel-to-staging.mjs`, `tests/marketingWebhookActivationTools.test.mjs`. 도구는 fingerprint 파일 목록 밖입니다.
+  Zernio webhook은 `accountIds`로 한정해 환경별로 따로 등록하고(비면 모든 프로필의 이벤트), 기록의 쌍은 채널 id라 운영 채널은 staging의 mirror 행으로 관측합니다.
 - **S2f 서명**: `lib/marketingWebhookProductionConfigStore.ts`,
   `app/api/admin/marketing/webhook/production-config/route.ts`(POST, 서명),
   `app/api/admin/marketing/webhook/production-config/live/route.ts`(GET, 서명 전 화면이 볼 값),

@@ -128,6 +128,21 @@ test("the session panel shows the model picker and sends the choice only when on
   assert.match(panel(true), /data-testid="amux-idea-session-model"/);
   assert.doesNotMatch(panel(false), /amux-idea-session-model/);
   const source = readFileSync("components/admin/AmuxIdeaInputPanel.tsx", "utf8");
-  assert.match(source, /\.\.\.\(sessionModelBody && sessionModelBody !== "incomplete" \? \{ model: sessionModelBody \} : \{\}\)/);
+  // A lane entry is an owner idea, so it never carries the session model.
+  assert.match(source, /\.\.\.\(!toLane && sessionModelBody && sessionModelBody !== "incomplete" \? \{ model: sessionModelBody \} : \{\}\)/);
   assert.match(source, /sessionModelBody === "incomplete"/, "an incomplete choice blocks the save");
+});
+
+test("the idea lane's test button shows only while the lane is on, beside either intake", () => {
+  const withLane = (sessionIntake: boolean) => renderToStaticMarkup(
+    <AmuxIdeaInputPanel submissionAvailable sourceScopePreviewAvailable initialPlanAvailable frontierModelsAvailable
+      transferPreviewAvailable transferConfirmAvailable analysisResultAvailable analysisBudgetAvailable
+      analysisStopAvailable operatorId="owner-1" sessionIntake={sessionIntake} laneAvailable />);
+  for (const sessionIntake of [true, false]) {
+    const html = withLane(sessionIntake);
+    assert.match(html, /data-testid="amux-idea-lane-submit"/);
+    assert.match(html, /Send to the idea lane \(test\)/);
+    assert.match(html, /opens a draft PR into develop/, "it says what saving does");
+    assert.doesNotMatch(panel(sessionIntake), /amux-idea-lane-submit/, "absent while the lane is off");
+  }
 });

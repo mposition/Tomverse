@@ -66,6 +66,24 @@ test("the model is given a fixed instruction and only this account's slice of th
   assert.doesNotMatch(user.content, /poe\.com/u);
 });
 
+test("A5 is told Tomverse has two products and which claims this account used recently", () => {
+  const [system, user] = marketingA5Messages(context, SCOPE);
+  assert.match(system.content, /Tomverse Chat/);
+  assert.match(system.content, /fair turns/);
+  assert.match(system.content, /recentClaimIds/);
+  // An answer from an app deployed before the field reads as nothing used.
+  assert.deepEqual(JSON.parse(user.content).recentClaimIds, []);
+
+  const used = marketingGeneratorContextSchema.parse({
+    ...context,
+    channels: [{ ...context.channels[0], recentClaimIds: ["claim_compare"] }],
+  });
+  const data = JSON.parse(marketingA5Messages(used, SCOPE)[1].content);
+  assert.deepEqual(data.recentClaimIds, ["claim_compare"]);
+  // Guidance only: the claim is still offered, so a post that needs it can use it.
+  assert.deepEqual(data.claims.map((claim) => claim.id), ["claim_compare"]);
+});
+
 test("a claim reaches A5 as what a post making it must say in this locale, and the brief as ids", () => {
   const withWords = marketingGeneratorContextSchema.parse({
     ...context,
