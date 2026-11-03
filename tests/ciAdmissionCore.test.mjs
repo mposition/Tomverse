@@ -422,9 +422,14 @@ test("a branch is brought up to date into develop from a working branch, or into
   assert.equal(statuses(updating)[2], "updating");
 });
 
-test("a Dependabot update behind develop is released as it is, never merged into: Dependabot keeps rebasing its own branch", () => {
+test("a Dependabot update behind its base is released as it is, never merged into: Dependabot keeps rebasing its own branch", () => {
   assert.equal(ciAdmissionReleasesBehind({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false }), true);
-  for (const change of [{ base: "main" }, { head: "claude/to-develop/x" }, { fork: true }]) {
+  // #3085: a Dependabot update into main is never updated either, so it too is released behind.
+  assert.equal(ciAdmissionReleasesBehind({ base: "main", head: "dependabot/cargo/rustls-0.23.46", fork: false }), true);
+  const intoMain = [pull(3, { base: "main", head: "dependabot/cargo/rustls-0.23.46" })];
+  const released = judge({ state: state({ queue: lineOf(3) }), openPulls: intoMain, checks: new Map([[3, { conflict: false, behind: true }]]) });
+  assert.deepEqual(kinds(released), ["release:3"]);
+  for (const change of [{ head: "claude/to-develop/x" }, { fork: true }]) {
     assert.equal(ciAdmissionReleasesBehind({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false, ...change }), false,
       JSON.stringify(change));
   }

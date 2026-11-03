@@ -171,12 +171,14 @@ export function ciAdmissionUpdatesBranchOf(pull: Pick<CiAdmissionPull, "base" | 
 }
 
 /**
- * A Dependabot update into develop runs its CI behind develop: a pull_request
- * run tests the merge with the base, and Dependabot rebases its own branch
- * when it conflicts. Whoever merges it brings it up to date first.
+ * A Dependabot update runs its CI behind its base, develop or main: a
+ * pull_request run tests the merge with the base, and Dependabot rebases its
+ * own branch when it conflicts. Whoever merges it brings it up to date first.
+ * Into main too (owner 2026-11-03): #3085 waited six days behind main, since
+ * admission neither updates a Dependabot branch nor releases one behind.
  */
 export function ciAdmissionReleasesBehind(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
-  return !pull.fork && pull.base === "develop" && pull.head.startsWith("dependabot/");
+  return !pull.fork && pull.head.startsWith("dependabot/");
 }
 
 /** What GitHub says about a draft before it is marked ready; null where it could not tell. */
