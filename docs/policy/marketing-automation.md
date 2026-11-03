@@ -488,8 +488,8 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   (`lib/ga4UserId.ts`, migration `20261102100000_ga4_user_id`, 값 형식은 DB CHECK로 강제). 저장하는 이유는 철회다 —
   행을 지우면 Tomverse 안에서 그 값을 계정에 잇는 것이 없어져 GA4와의 연결이 끊긴다. 다시 동의하면 새 값을 만든다.
   이전 HMAC 방식의 id는 고지 상수가 한 번도 `true`가 된 적이 없어 발급·전송된 적이 없으므로 그 삭제 경로는 두지 않는다.
-- 생성·전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 현재 `false` —
-  고지 개정 PR에서만 바꾼다) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
+- 생성·전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 개정 고지 PR에서 `true`로 바꿨다 —
+  이 상수는 고지 개정 PR에서만 바꾼다. `true`여도 스위치가 꺼져 있으면 아무것도 만들지도 보내지도 않는다, `tests/ga4UserIdConsentGate.test.mjs`) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
   로그인 · GA4 측정 id. 식별자는 이 조건이 모두 충족된 뒤의 첫 요청에서만 만든다 — 브라우저가 요청 본문에 명시 동의를 적고,
   서버는 고지·스위치·로그인이 맞고 그 진술이 있을 때만 만든다(`app/api/analytics/user-id/route.ts` POST). 브라우저의 gtag
   `user_id`로만 보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃은 `user_id`를 `null`로 해제한다.
@@ -541,9 +541,11 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 ### 12.1 댓글 모니터링
 - 댓글은 본 앱이 게시 도구로 조회하고, 댓글 모니터 서비스가 **본문만** 받아(작성자·글·시각·링크 없음) **메모리에서만** 분류한다.
   모델에도 그 본문만 보낸다. 로그에 본문·handle·댓글 URL을 남기지 않는다.
-- 저장은 게시물 단위 알림(건수·위험 코드·최초 감지 시각, 게시물 URL)뿐이며 90일 후 삭제한다.
+- 저장은 게시물 단위 알림(건수·위험 코드·최초 감지 시각, 게시물 URL의 host)뿐이며 90일 후 삭제한다. 같은 건수·위험 코드를 적은 시스템 감사 한 줄이 따로 남는다.
 - **선행 조건(사람):** lawful basis·DPIA 검토, 게시 도구의 처리자 지위·DPA·하위처리자·데이터 위치, 호주 APP 8 해외 이전,
   GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있고, **댓글 모니터링 없이는 졸업이 없다.**
+  개정 문안 초안(2026-11-03)은 `privacyPolicy.comments*`이고 확인 필요 항목이 자리표시로 남아 있어, 확인이 끝나 `COMMENTS_PRIVACY_NOTICE_CONFIRMED`(`lib/privacyNoticeStatus.ts`)가 `true`가 될 때까지 페이지가 그 절을 그리지 않는다. 사람이 할 일의 목록과 순서는
+  [DPIA 초안 체크리스트](marketing-privacy-dpia-checklist.md)에 있다. 문안이 게시돼도 스위치는 그 체크리스트가 끝나기 전에 켜지 않는다.
 
 **S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다(건강 판정을 묻는 웹 앱·게시기와 모니터를 돌리는 서비스 모두에 같은 값을 둔다). 꺼져 있으면
 `runMarketingCommentsMonitor()`는 DB·게시 도구·모델 어느 것도 건드리지 않고 돌아온다. 켜진 실행은 최근 14일 안에 게시된 글의 댓글을

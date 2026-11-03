@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, MapPin, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, MapPin, MessageSquare, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
     MarketingFooter,
     MarketingHeader,
 } from "@/components/marketing/MarketingChrome";
+import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 import {
     PROVIDER_DATA_DESTINATIONS,
     disclosableDataDestinations,
@@ -52,6 +53,39 @@ const PROVIDER_TRANSFER_ITEMS = [
     "providerTransfer5",
     "providerTransfer6",
     "providerTransfer7",
+] as const;
+
+/**
+ * How the comment monitor handles a public comment under one of Tomverse's own
+ * posts, itemized like the voice notice because the question a commenter or a
+ * regulator asks is item-by-item: what is read, what is kept, who receives it,
+ * on what basis, for how long (docs/policy/marketing-automation.md section
+ * 12.1). Only what the code does is stated; facts not yet confirmed carry an
+ * operator-confirmation placeholder in the locale text.
+ */
+const COMMENTS_ITEMS = [
+    "commentsTransfer1",
+    "commentsTransfer2",
+    "commentsTransfer3",
+    "commentsTransfer4",
+    "commentsTransfer5",
+    "commentsTransfer6",
+    "commentsTransfer7",
+    "commentsTransfer8",
+] as const;
+
+/**
+ * The GA4 User-ID, itemized for the same reason. It is created and sent only
+ * when the notice is published, the switch is on, analytics was explicitly
+ * accepted and the visitor is signed in (lib/ga4UserIdPolicy.ts).
+ */
+const ANALYTICS_USER_ID_ITEMS = [
+    "analyticsUserId1",
+    "analyticsUserId2",
+    "analyticsUserId3",
+    "analyticsUserId4",
+    "analyticsUserId5",
+    "analyticsUserId6",
 ] as const;
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -215,6 +249,10 @@ const sections = [
     // Above analytics because a mail preference is a processing purpose rather
     // than a measurement one, and below the features whose data it describes.
     ["emailTitle", "email", Mail],
+    // Its own section: it concerns people who comment on Tomverse's posts,
+    // whether or not they have an account, so it is not a line under a feature
+    // an account holder uses (docs/policy/marketing-automation.md section 12.1).
+    ["commentsTitle", "comments", MessageSquare],
     ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],
     ["sharingTitle", "sharing", Share2],
@@ -227,6 +265,11 @@ export function PrivacyPolicy() {
     const { t, lang } = useLanguage();
     const localizedContentAvailable = lang === "en" || lang === "ko" || lang === "zh";
     const destinations = disclosableDataDestinations();
+    // The comment-monitoring section is shown only once its operator-confirmation
+    // placeholders are resolved (lib/privacyNoticeStatus.ts).
+    const visibleSections = sections.filter(
+        ([, bodyKey]) => bodyKey !== "comments" || COMMENTS_PRIVACY_NOTICE_CONFIRMED
+    );
     const showProviderTable =
         destinations.length > 0 &&
         destinations.length === PROVIDER_DATA_DESTINATIONS.length;
@@ -251,7 +294,7 @@ export function PrivacyPolicy() {
                 </div>
 
                 <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                    {sections.map(([titleKey, bodyKey, Icon]) => (
+                    {visibleSections.map(([titleKey, bodyKey, Icon]) => (
                         <section
                             key={titleKey}
                             id={bodyKey === "rights" ? "account-deletion" : undefined}
@@ -289,6 +332,34 @@ export function PrivacyPolicy() {
                                         {showProviderTable ? (
                                             <ProviderDestinationTable rows={destinations} t={t} />
                                         ) : null}
+                                    </>
+                                )}
+                                {bodyKey === "comments" && (
+                                    <>
+                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
+                                            {t("privacyPolicy.commentsTransferTitle")}
+                                        </h3>
+                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                                            {COMMENTS_ITEMS.map((itemKey) => (
+                                                <li key={itemKey}>
+                                                    {t(`privacyPolicy.${itemKey}`)}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </>
+                                )}
+                                {bodyKey === "analytics" && (
+                                    <>
+                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
+                                            {t("privacyPolicy.analyticsUserIdTitle")}
+                                        </h3>
+                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                                            {ANALYTICS_USER_ID_ITEMS.map((itemKey) => (
+                                                <li key={itemKey}>
+                                                    {t(`privacyPolicy.${itemKey}`)}
+                                                </li>
+                                            ))}
+                                        </ul>
                                     </>
                                 )}
                                 {bodyKey === "voiceInput" && (
