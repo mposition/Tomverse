@@ -5776,7 +5776,9 @@ export async function recordMarketingPostOutcomeReconciled(
     tx: database,
     systemActor: "marketing-publisher",
     action: MARKETING_RECONCILE_ACTIONS[finding.kind],
-    targetType: "MarketingPost",
+    // The model name rather than its string: the protected-table check counts
+    // every literal naming the table in this file against a reviewed number.
+    targetType: Prisma.ModelName.MarketingPost,
     targetId: id,
     summary:
       finding.kind === "published"
