@@ -23,10 +23,23 @@ import { marketingWeekWindow, type MarketingMeasurement } from "@/lib/marketingM
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How far back a week can be read: the shortest retention among the rows it
+ * counts. Rejected and expired drafts are deleted, and dispatch attempts
+ * summarised, after ninety days (analytics events last 400), so an older week
+ * would show deletions as zeros. A week that began before this is not read.
+ */
+export const MARKETING_WEEKLY_REPORT_HORIZON_MS = 84 * DAY_MS;
+
+/** Whether a week beginning at `start` can still be read whole at `now`. */
+export const marketingWeekReadable = (start: Date, now: number): boolean =>
+  start.getTime() <= now && now - start.getTime() <= MARKETING_WEEKLY_REPORT_HORIZON_MS;
+
 export type MarketingWeeklyReport = {
   readonly weekStart: string;
   readonly weekEnd: string;
-  readonly previousWeekStart: string;
+  /** Null when the week before is past what can still be read whole. */
+  readonly previousWeekStart: string | null;
   /** Null when the next week has not begun. */
   readonly nextWeekStart: string | null;
   /** Whether the week is still running. */
@@ -58,7 +71,7 @@ export async function readMarketingWeeklyReport(
   now: number = Date.now(),
 ): Promise<MarketingWeeklyReport | null> {
   const window = marketingWeekWindow(weekStart);
-  if (!window || window.start.getTime() > now) return null;
+  if (!window || !marketingWeekReadable(window.start, now)) return null;
   const [measurement, analyses, strategies, intel, experiments, kpi] = await Promise.all([
     readMarketingMeasurement(db, window),
     db.$queryRaw<Array<{ payload: unknown; briefReportId: string; createdAt: Date }>>(Prisma.sql`
@@ -107,7 +120,9 @@ export async function readMarketingWeeklyReport(
   return {
     weekStart,
     weekEnd: isoDate(new Date(window.end.getTime() - DAY_MS)),
-    previousWeekStart: isoDate(new Date(window.start.getTime() - 7 * DAY_MS)),
+    previousWeekStart: marketingWeekReadable(new Date(window.start.getTime() - 7 * DAY_MS), now)
+      ? isoDate(new Date(window.start.getTime() - 7 * DAY_MS))
+      : null,
     nextWeekStart: next.getTime() > now ? null : isoDate(next),
     inProgress: window.end.getTime() > now,
     measurement,

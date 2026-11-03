@@ -7,14 +7,19 @@ import { isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { marketingWeekWindow } from "@/lib/marketingMeasurementCore";
 import { prisma } from "@/lib/prisma";
-import { marketingLastFullWeekStart, readMarketingWeeklyReport } from "@/lib/marketingWeeklyReportRead";
+import {
+  marketingLastFullWeekStart,
+  marketingWeekReadable,
+  readMarketingWeeklyReport,
+} from "@/lib/marketingWeeklyReportRead";
 
 /**
  * GET ?week=YYYY-MM-DD (a Brisbane Monday; default the last full week): the
  * weekly marketing report, assembled from the tables when read
  * (lib/marketingWeeklyReportRead.ts). Read-only and ordinary admin
  * authentication, like the other report routes: nothing is written or
- * audited. A week that is not a Monday or has not begun is 404.
+ * audited. A week that is not a Monday, has not begun, or is past what the
+ * tables still hold whole (MARKETING_WEEKLY_REPORT_HORIZON_MS) is 404.
  */
 export async function GET(req: Request) {
   try {
@@ -24,7 +29,7 @@ export async function GET(req: Request) {
     }
     const week = new URL(req.url).searchParams.get("week") ?? marketingLastFullWeekStart(Date.now());
     const window = marketingWeekWindow(week);
-    if (!window || window.start.getTime() > Date.now()) {
+    if (!window || !marketingWeekReadable(window.start, Date.now())) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
     await consumeApiRateLimit(req, session.user.id, "admin-marketing-weekly-report-read", {

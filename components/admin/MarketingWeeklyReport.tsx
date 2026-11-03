@@ -317,8 +317,8 @@ export function MarketingWeeklyReportCard() {
           <button
             type="button"
             className={button}
-            disabled={!report}
-            onClick={() => report && setWeek(report.previousWeekStart)}
+            disabled={!report?.previousWeekStart}
+            onClick={() => report?.previousWeekStart && setWeek(report.previousWeekStart)}
           >
             {m.weeklyPrevious}
           </button>

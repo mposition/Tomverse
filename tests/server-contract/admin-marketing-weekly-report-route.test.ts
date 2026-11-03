@@ -64,6 +64,16 @@ async function loadRoute(): Promise<{ GET: (request: Request) => Promise<Respons
   return import(mod("app/api/admin/marketing/weekly-report/route.ts"));
 }
 
+// Weeks relative to today, so the test does not age out of the readable range.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const monday = (offsetWeeks: number) => {
+  const local = Date.now() + 10 * 60 * 60 * 1000;
+  const midnight = local - (local % DAY_MS);
+  const sinceMonday = (new Date(midnight).getUTCDay() + 6) % 7;
+  return new Date(midnight - sinceMonday * DAY_MS + offsetWeeks * 7 * DAY_MS).toISOString().slice(0, 10);
+};
+const LAST = monday(-1);
+
 const request = (week?: string) =>
   new Request(`https://tomverse.test/api/admin/marketing/weekly-report${week ? `?week=${week}` : ""}`);
 
@@ -71,30 +81,35 @@ test("a person who is not an admin is told nothing and nothing is read", async (
   reset();
   const { GET } = await loadRoute();
   world.authorized = false;
-  const response = await GET(request("2026-10-26"));
+  const response = await GET(request(LAST));
   assert.equal(response.status, 404);
   assert.equal(world.queries, 0);
 });
 
-test("a date that is not a Monday, or a week not begun, is not a report", async () => {
+test("a date that is not a Monday, a week not begun, or one past retention, is not a report", async () => {
   reset();
   const { GET } = await loadRoute();
   assert.equal((await GET(request("2026-10-27"))).status, 404);
   assert.equal((await GET(request("2099-01-05"))).status, 404);
+  // Past the shortest retention, a week would show deletions as zeros.
+  assert.equal((await GET(request(monday(-20)))).status, 404);
   assert.equal(world.queries, 0);
 });
 
 test("an empty week reads as counted zeros, held metrics and nothing written", async () => {
   reset();
   const { GET } = await loadRoute();
-  const response = await GET(request("2026-10-26"));
+  const response = await GET(request(LAST));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   const body = await response.json();
-  assert.equal(body.weekStart, "2026-10-26");
-  assert.equal(body.weekEnd, "2026-11-01");
-  assert.equal(body.previousWeekStart, "2026-10-19");
-  assert.equal(body.nextWeekStart, "2026-11-02");
+  assert.equal(body.weekStart, LAST);
+  assert.equal(body.previousWeekStart, monday(-2));
+  assert.equal(body.nextWeekStart, monday(0));
+  // The oldest readable week offers no earlier one.
+  const oldest = await (await GET(request(monday(-11)))).json();
+  assert.equal(oldest.weekStart, monday(-11));
+  assert.equal(oldest.previousWeekStart, null);
   assert.equal(body.measurement.dispatch.sent, 0);
   assert.deepEqual([...body.measurement.held].sort(), ["latency", "signups", "success_rate"]);
   assert.equal(body.analysis, null);
@@ -129,7 +144,7 @@ test("the week's analysis is shown with its sources judged against the approved 
       featureCount: 0,
     },
   };
-  const body = await (await GET(request("2026-10-26"))).json();
+  const body = await (await GET(request(LAST))).json();
   assert.equal(body.analysis.topicId, "side-by-side-answers");
   assert.equal(body.analysis.createdAt, "2026-10-28T21:05:00.000Z");
   assert.deepEqual(

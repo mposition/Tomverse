@@ -182,7 +182,10 @@ export function MarketingMorningCard() {
       const usable =
         body.status === "none" ||
         body.status === "unreadable" ||
-        (body.status === "found" && Array.isArray(body.morning?.decisions) && typeof body.morning.verdict === "string");
+        (body.status === "found" &&
+          Array.isArray(body.morning?.decisions) &&
+          typeof body.morning.verdict === "string" &&
+          typeof body.morning.figures?.pendingApproval === "number");
       setLoad(usable ? body : { status: "failed" });
     } catch {
       setLoad({ status: "failed" });
