@@ -15,21 +15,52 @@
  * So a gate is a claim-facing id bound to the real reader, and a gate nobody
  * bound resolves to unreadable.
  *
- * **The registry is empty**, for the same reason `MARKETING_CLAIMS` is: no
- * claim exists yet, so no claim names a gate, and binding one in advance would
- * be a decision about copy nobody has written. A gate is added here in the same
- * change as the claim that needs it.
+ * A gate is bound here in the same change as the claim that needs it, and
+ * only the gates a registered claim names are bound
+ * (tests/marketingClaimGates.test.mjs).
  */
 
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
+import { assistantProfilesEnabledFromValue, ASSISTANT_PROFILES_FLAG_KEY } from "@/lib/assistantProfileAccess";
+import { EXTERNAL_CONTINUATION_FLAG_KEY, externalContinuationEnabledFromValue } from "@/lib/externalContinuationAccess";
+import { EXTERNAL_IMPORT_FLAG_KEY, externalImportEnabledFromValue } from "@/lib/externalImportAccess";
+import { IMAGE_GENERATION_FLAG_KEY, imageGenerationEnabledFromValue } from "@/lib/imageGenerationAccess";
+import { PROMPT_REFINER_FLAG_KEY, promptRefinerAvailable } from "@/lib/promptRefinerAccess";
+
 /**
  * The client a gate reads through: the caller's transaction, so a flag is read
- * in the same snapshot as the facts it gates (S3 plan, S3a2). Settings only.
+ * in the same snapshot as the facts it gates (S3 plan, S3a2). Settings only,
+ * and the raw query that locks them.
  */
-export type MarketingClaimGateDatabase = Pick<Prisma.TransactionClient, "appSetting">;
+export type MarketingClaimGateDatabase = Pick<Prisma.TransactionClient, "appSetting" | "$queryRaw">;
+
+/** `OPERATIONAL_FLAG_KEYS.attachmentsEnabled` in lib/appSettings.ts. */
+const ATTACHMENTS_FLAG_KEY = "feature.attachmentsEnabled";
+
+/**
+ * The stored values of these settings, locked FOR SHARE first. Only a row the
+ * lock took counts: one inserted after it was not held, so it reads as absent,
+ * the way the fact resolver treats a plan row it did not lock.
+ */
+async function heldSettingValues(
+  database: MarketingClaimGateDatabase,
+  keys: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  const held = new Set(
+    (
+      await database.$queryRaw<Array<{ key: string }>>`SELECT "key" FROM "AppSetting" WHERE "key" = ANY(${[...keys]}::text[]) ORDER BY "key" FOR SHARE`
+    ).map((row) => row.key),
+  );
+  if (held.size === 0) return new Map();
+  const rows = await database.appSetting.findMany({
+    where: { key: { in: [...held] } },
+    select: { key: true, value: true },
+  });
+  return new Map(rows.map((row) => [row.key, row.value]));
+}
 
 /**
  * Gate id -> the reader that owns it.
@@ -42,7 +73,34 @@ export type MarketingClaimGateDatabase = Pick<Prisma.TransactionClient, "appSett
  */
 export const MARKETING_CLAIM_GATES: Readonly<
   Record<string, (database: MarketingClaimGateDatabase) => Promise<boolean>>
-> = Object.freeze({});
+> = Object.freeze({
+  "feature.assistantProfiles": async (database) =>
+    assistantProfilesEnabledFromValue(
+      (await heldSettingValues(database, [ASSISTANT_PROFILES_FLAG_KEY])).get(ASSISTANT_PROFILES_FLAG_KEY),
+    ),
+  // The claim says both: import, then continue in Tomverse.
+  "feature.externalImportAndContinuation": async (database) => {
+    const values = await heldSettingValues(database, [EXTERNAL_IMPORT_FLAG_KEY, EXTERNAL_CONTINUATION_FLAG_KEY]);
+    return (
+      externalImportEnabledFromValue(values.get(EXTERNAL_IMPORT_FLAG_KEY)) &&
+      externalContinuationEnabledFromValue(values.get(EXTERNAL_CONTINUATION_FLAG_KEY))
+    );
+  },
+  "feature.imageGeneration": async (database) =>
+    imageGenerationEnabledFromValue(
+      (await heldSettingValues(database, [IMAGE_GENERATION_FLAG_KEY])).get(IMAGE_GENERATION_FLAG_KEY),
+    ),
+  // A kill switch, on unless the row says "false" (`enabledFromValue` in
+  // lib/appSettings.ts): a missing row is the product's "on".
+  "feature.attachments": async (database) =>
+    (await heldSettingValues(database, [ATTACHMENTS_FLAG_KEY])).get(ATTACHMENTS_FLAG_KEY) !== "false",
+  // The rollout flag and the environment kill switch, as the product reads them.
+  "feature.promptRefiner": async (database) =>
+    promptRefinerAvailable({
+      storedFlagValue: (await heldSettingValues(database, [PROMPT_REFINER_FLAG_KEY])).get(PROMPT_REFINER_FLAG_KEY),
+      env: process.env,
+    }),
+});
 
 /**
  * Whether the gate is on, off, or could not be read.

@@ -6,17 +6,34 @@ import {
   readGateSafely,
   resolveMarketingClaimGate,
 } from "@/lib/marketingClaimGates";
-import { marketingClaimUsable } from "@/lib/marketingClaims";
+import { MARKETING_CLAIMS, marketingClaimUsable } from "@/lib/marketingClaims";
 
 // A gate the registry does not bind never reaches its client.
 const NO_DATABASE = {};
 
+/**
+ * Settings as a transaction sees them: `rows` exist when the lock runs, and
+ * `lateRows` appear between the lock and the read, which the lock did not hold.
+ */
+const settingsDatabase = (rows, lateRows = {}) => ({
+  $queryRaw: async (strings, keys) => {
+    assert.match(strings.join("?"), /FOR SHARE/);
+    return keys.filter((key) => Object.hasOwn(rows, key)).sort().map((key) => ({ key }));
+  },
+  appSetting: {
+    findMany: async ({ where }) => {
+      const all = { ...rows, ...lateRows };
+      return where.key.in.filter((key) => Object.hasOwn(all, key)).map((key) => ({ key, value: all[key] }));
+    },
+  },
+});
+
 // The S1 plan's S1e fact-source list: "feature public: claim `gate` resolves
 // via existing production flag reader; unreadable -> not public".
 
-test("the registry is empty, and frozen so a caller cannot add to it", () => {
-  // Empty for the same reason MARKETING_CLAIMS is: no claim names a gate yet.
-  assert.deepEqual(Object.keys(MARKETING_CLAIM_GATES), []);
+test("the registry binds exactly the gates the claims name, and is frozen", () => {
+  const named = [...new Set(MARKETING_CLAIMS.map((claim) => claim.gate).filter(Boolean))].sort();
+  assert.deepEqual(Object.keys(MARKETING_CLAIM_GATES).sort(), named);
 
   assert.throws(
     () => {
@@ -26,6 +43,53 @@ test("the registry is empty, and frozen so a caller cannot add to it", () => {
     TypeError,
     "a gate is bound in the same change as the claim that needs it",
   );
+});
+
+test("a rollout gate is on only when its row says true", async () => {
+  for (const [gate, key] of [
+    ["feature.assistantProfiles", "feature.assistantProfilesEnabled"],
+    ["feature.imageGeneration", "feature.imageGenerationEnabled"],
+  ]) {
+    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "true" })), true, gate);
+    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ [key]: "false" })), false, gate);
+    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({})), false, `${gate} missing row`);
+    // A row the lock did not hold is not one the decision rests on.
+    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({}, { [key]: "true" })), false, `${gate} late row`);
+  }
+});
+
+test("import and continue needs both flags", async () => {
+  const gate = "feature.externalImportAndContinuation";
+  const both = {
+    "feature.externalConversationImportEnabled": "true",
+    "feature.externalConversationContinuationEnabled": "true",
+  };
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase(both)), true);
+  for (const key of Object.keys(both)) {
+    assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ ...both, [key]: "false" })), false, key);
+  }
+});
+
+test("the attachments gate is a kill switch: only \"false\" turns it off", async () => {
+  const gate = "feature.attachments";
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({})), true);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ "feature.attachmentsEnabled": "true" })), true);
+  assert.equal(await resolveMarketingClaimGate(gate, settingsDatabase({ "feature.attachmentsEnabled": "false" })), false);
+});
+
+test("the question-refinement gate also honours the environment kill switch", async () => {
+  const gate = "feature.promptRefiner";
+  const on = settingsDatabase({ "feature.promptRefinerEnabled": "true" });
+  const saved = process.env.PROMPT_REFINER_KILL_SWITCH;
+  try {
+    delete process.env.PROMPT_REFINER_KILL_SWITCH;
+    assert.equal(await resolveMarketingClaimGate(gate, on), true);
+    process.env.PROMPT_REFINER_KILL_SWITCH = "1";
+    assert.equal(await resolveMarketingClaimGate(gate, on), false);
+  } finally {
+    if (saved === undefined) delete process.env.PROMPT_REFINER_KILL_SWITCH;
+    else process.env.PROMPT_REFINER_KILL_SWITCH = saved;
+  }
 });
 
 test("an unbound gate is unreadable, not off", () => {

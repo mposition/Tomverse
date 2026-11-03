@@ -138,6 +138,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - 결과는 `brief` 보고서 하나로 기록되고, 분석 본문은 `MarketingAnalysis`에 같은 트랜잭션으로 저장된다. 사람은 보고서 탭에서 읽는다. 모델이 쓴 출처는 https이면서 승인된 경쟁사 공식 host일 때만 링크로, 그 밖은 텍스트로 보인다.
 - A5는 brief의 topic id·claim id와 claim의 문장(페이지 문자열)·가격 값만 받는다. 분석 본문과 경쟁사 사실은 받지 않는다. 생성기는 맥락에 없는 claim id를 brief에서 빼고, 추적 중인 경쟁사 이름이 들어간 topic은 버린다. 앱은 레지스트리에 없는 claim을 담은 brief를 거절한다.
 - claim은 코드(`lib/marketingClaims.ts`)에 사람이 등록한다. 모델 출력은 claim을 만들거나 승인하지 않는다.
+- Chat과 Review를 고르게 다룬다(운영자 결정 2026-11-03). FAQ에 Chat 기능 문장(어시스턴트·대화 가져오기와 이어가기·이미지 생성·파일 질문)을 두고 claim으로 등록하며, flag 뒤 기능의 claim은 `gate`로 묶어 flag가 꺼지면 생성기 맥락에서 빠지고 Guard가 거절한다. 페이지 claim은 zh-Hant 사이트 문구가 생긴 뒤(2026-11-01) zh-Hant도 인용한다. 생성기에는 계정별 최근 14일에 쓴 claim id와 최근 brief 주제 4개를 주고, 프롬프트로 다른 claim·다른 주제를 고르게 한다(7.6의 14일 규칙은 결정적 게이트가 아니라 이 입력으로 지킨다).
 
 ## 5. 데이터 (마케팅 전용 테이블 8개)
 
@@ -272,7 +273,7 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 | RedNote | zh-Hans | 이미지+텍스트 | 수동 |
 
 상한은 코드 상수이고 운영 설정으로는 **내리기만** 한다. 게시 시간창은 대상 시장 현지 09:00~20:00,
-같은 claim은 계정당 14일 안에 다시 쓰지 않는다.
+같은 claim은 계정당 14일 안에 다시 쓰지 않는다(생성기 입력과 프롬프트로 지킨다. 4.2 참조).
 
 ## 8. 게시와 상태
 

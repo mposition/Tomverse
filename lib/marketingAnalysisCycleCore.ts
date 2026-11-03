@@ -94,6 +94,8 @@ const contextSchema = z.object({
     .optional(),
   ownProduct: z.object({ plans: z.unknown() }).passthrough().optional(),
   analysis: z.object({ enabled: z.boolean() }).optional(),
+  // Optional so a service deployed before the app still reads an older answer.
+  recentBriefTopics: z.array(z.string()).optional(),
 });
 
 const canonical = (value: unknown): unknown => {
@@ -223,6 +225,7 @@ export async function runMarketingAnalysisCycle(
         statement: claim.statements?.en ?? null,
         values: claim.values ?? null,
       })),
+      recentTopics: context.recentBriefTopics ?? [],
     }),
   );
   if ("stop" in competitive) return competitive.stop;

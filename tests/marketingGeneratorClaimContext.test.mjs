@@ -6,7 +6,35 @@ import test from "node:test";
 
 import { MARKETING_CLAIMS } from "@/lib/marketingClaims";
 import { resolveMarketingPageEvidence } from "@/lib/marketingEvidencePages";
-import { generatorClaimContext } from "@/lib/marketingGeneratorContext";
+import {
+  generatorClaimContext,
+  marketingClaimsWithOpenGates,
+  marketingRecentClaimIds,
+} from "@/lib/marketingGeneratorContext";
+
+test("a gated claim reaches the generator only while its gate reads as on", () => {
+  const gated = MARKETING_CLAIMS.filter((claim) => claim.gate !== null);
+  assert.ok(gated.length > 0);
+  const ungated = MARKETING_CLAIMS.filter((claim) => claim.gate === null).map((claim) => claim.id);
+  const gates = (value) => new Map(gated.map((claim) => [claim.gate, value]));
+
+  assert.deepEqual(marketingClaimsWithOpenGates(MARKETING_CLAIMS, gates(true)).map((claim) => claim.id), MARKETING_CLAIMS.map((claim) => claim.id));
+  // Off and unreadable are both left out: a post making the claim would be refused.
+  assert.deepEqual(marketingClaimsWithOpenGates(MARKETING_CLAIMS, gates(false)).map((claim) => claim.id), ungated);
+  assert.deepEqual(marketingClaimsWithOpenGates(MARKETING_CLAIMS, gates(null)).map((claim) => claim.id), ungated);
+  assert.deepEqual(marketingClaimsWithOpenGates(MARKETING_CLAIMS, new Map()).map((claim) => claim.id), ungated);
+});
+
+test("an account's recent claims are its own, without repeats", () => {
+  const recent = marketingRecentClaimIds([
+    { channelId: "a", claimIds: ["claim.b", "claim.a"] },
+    { channelId: "a", claimIds: ["claim.a"] },
+    { channelId: "b", claimIds: [] },
+  ]);
+  assert.deepEqual(recent.get("a"), ["claim.a", "claim.b"]);
+  assert.deepEqual(recent.get("b"), []);
+  assert.equal(recent.get("c"), undefined);
+});
 
 const STORED = new Set(["name", "monthlyPriceCents", "currency", "maxModels"]);
 const PLANS = new Map([
