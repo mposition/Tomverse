@@ -1598,7 +1598,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   이미지나 영상 하나를 싣고(운영자 2026-11-03), YouTube는 영상 하나에 첫 줄이 제목, TikTok은 영상 하나입니다. 맞는 자산이 없는
   계정은 LLM을 부르지 않고(`accountsWithoutMedia`; YouTube·TikTok은 영상만, 종류가 없는 파일 등록부 자산은 어디서도 세지 않음),
   자산 없는 답은 `draft_has_no_asset`으로 버리며, 초안 접수는 자산 없는 초안을 거절하고, 게시기는 미디어 없는 게시물을
-  `media_required`(YouTube는 `youtube_needs_one_video`)로 실패시킵니다. 출처·AI 표시는 생성기에 주지 않습니다(Guard가 등록부로 판정).
+  `media_required`(YouTube는 `youtube_needs_one_video`)로 실패시킵니다. 영상·이미지 비율은 `MARKETING_VIDEO_DAYS`(운영자
+  2026-11-04)로, 실행일(UTC)마다 계정의 종류를 `marketingA5MediaKindFor`가 고르고 그 종류의 자산만 제시합니다(없으면 다른 종류).
+  출처·AI 표시는 생성기에 주지 않습니다(Guard가 등록부로 판정).
 
 # 엔지니어링 Agent
 
