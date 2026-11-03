@@ -59,6 +59,7 @@ const CONTROL_PLANE_PATTERNS = [
   "lib/marketingSeoAgentCore.ts",
   "tests/marketingSeoAgentCore.test.mjs",
   "tests/marketingSeoBranchPolicy.test.mjs",
+  "tests/marketingSeoAgentWorkflow.test.mjs",
   "docs/release-gates/**",
   "prisma/**",
   // §4-2: the execution environment. Root files and root dot-directories are
