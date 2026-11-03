@@ -144,7 +144,7 @@ import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages
 import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import { guestAutoClientExecutionState } from "@/lib/guestAutoClientExecution";
 import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
-import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
+import { chatCreateRefusalCopyKey, chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
@@ -3849,6 +3849,7 @@ export function ChatPageClient({
 
     const applyConversationSettings = useCallback((data: {
         selectedModels?: unknown;
+        storedSelectedModels?: unknown;
         disabledPanels?: unknown;
         webSearchMode?: unknown;
         memoryMode?: unknown;
@@ -3945,9 +3946,17 @@ export function ChatPageClient({
           // them as confirmed let the send barrier skip the PATCH when a later
           // selection (Review's Auto pick) matched the repair -- the preflight
           // then refused models the row never held (MODEL_NOT_SELECTED,
-          // trace b3ad49ca-7e79-4a54-9380-9bdcdf69d104).
+          // trace b3ad49ca-7e79-4a54-9380-9bdcdf69d104). The detail read's
+          // `selectedModels` is itself clamped on the server, so the row's
+          // own list comes from `storedSelectedModels` when the read has it
+          // (trace d51032a1-ffe7-4e3a-a274-15d4274b461f).
           modelSettingsSyncQueueRef.current.markConfirmed(targetChatId, {
-            models: normalizeStringArray(data.selectedModels, []),
+            models: normalizeStringArray(
+              Array.isArray(data.storedSelectedModels)
+                ? data.storedSelectedModels
+                : data.selectedModels,
+              []
+            ),
             disabled: normalizeStringArray(data.disabledPanels, []),
           });
         }
@@ -6706,10 +6715,7 @@ export function ChatPageClient({
           fetchConversations();
         } else {
           const refusal = await res.json().catch(() => null);
-          showToast(t(refusal?.code === "CHAT_PROFILE_SINGLE_MODEL_REQUIRED"
-            ? "chat.singleModelProfileRequired"
-            : refusal?.code === "CHAT_SINGLE_MODEL_REQUIRED"
-              ? "chat.singleModelRequired" : "chat.chatCreateFailed"), "error");
+          showToast(t(chatCreateRefusalCopyKey(refusal?.code) ?? "chat.chatCreateFailed"), "error");
           return;
         }
       } catch (error) {
@@ -8418,7 +8424,9 @@ export function ChatPageClient({
             return false;
           }
           if (!response.ok) {
-            await discardResponseBody(response);
+            const refusal = (await response.json().catch(() => null)) as
+              | { code?: unknown }
+              | null;
             if (originStillCurrent()) {
               // Creating a Chat can fail after the row committed while the
               // response is being formatted. A 5xx is therefore unknown and
@@ -8429,7 +8437,12 @@ export function ChatPageClient({
               } else if (response.status === 403 || response.status === 404) {
                 setAutoSelectionOffered(false);
               }
-              showToast(t("chat.autoSelectionFailed"), "error");
+              // A refusal the server named is about the selection, not about
+              // Auto: say what it was.
+              showToast(
+                t(chatCreateRefusalCopyKey(refusal?.code) ?? "chat.autoSelectionFailed"),
+                "error"
+              );
             }
             return false;
           }

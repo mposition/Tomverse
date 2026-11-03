@@ -49,7 +49,7 @@ export class MarketingAnalysisSettingsRefusedError extends Error {
 }
 
 /** Recorded with each analysis, so a change to what the model is asked is a new version. */
-export const MARKETING_ANALYSIS_PROMPT_VERSION = "analysis-v1";
+export const MARKETING_ANALYSIS_PROMPT_VERSION = "analysis-v2";
 
 /** Claims one brief may name. */
 export const MARKETING_BRIEF_MAX_CLAIMS = 5;
@@ -154,9 +154,87 @@ export const marketingWeeklyStrategySchema = z
     accounts: z.array(accountPlanSchema).min(1).max(MARKETING_STRATEGY_MAX_ACCOUNTS),
     needs: z.array(text(300)).max(6),
     avoid: z.array(text(300)).max(6),
+    /**
+     * Paid advertising the model proposes when it judges it worth it (owner
+     * 2026-11-03): a proposal for a person, never a spend -- running ads stays
+     * a human action (`docs/policy/marketing-automation.md` §7.5). Absent in plans written before it.
+     */
+    paidAds: z
+      .array(
+        z
+          .object({ platform: text(80), objective: text(300), budget: text(200), why: text(600) })
+          .strict(),
+      )
+      .max(3)
+      .optional(),
   })
   .strict();
 export type MarketingWeeklyStrategy = z.infer<typeof marketingWeeklyStrategySchema>;
+
+// ---------------------------------------------------------------------------
+// The morning report, as stored (owner request 2026-11-03)
+// ---------------------------------------------------------------------------
+//
+// Written by lib/marketingMorningCore.ts at every analysis run: what the
+// operator decides today, what worked, what to stop or grow, and the market
+// changes that need an action. The figures beside it are counted by code
+// from the app's context, not written by the model.
+
+/** The console sections a decision may send the operator to. */
+export const MARKETING_MORNING_SECTIONS = [
+  "queue",
+  "published",
+  "accounts",
+  "assets",
+  "competitors",
+  "reports",
+  "experiments",
+  "comments",
+] as const;
+export const MARKETING_MORNING_ACTIONS = ["stop", "reduce", "increase", "keep"] as const;
+
+const count = z.number().int().min(0).max(10_000_000);
+
+export const marketingMorningFiguresSchema = z
+  .object({
+    published7d: count,
+    sent7d: count,
+    failed7d: count,
+    pendingApproval: count,
+    approvedWaiting: count,
+    nextApprovalExpiryAt: z.string().datetime().nullable(),
+    touches7d: count.nullable(),
+    signupsAttributed7d: count.nullable(),
+    llmCountedMicroUsd: z.number().int().min(0).max(1_000_000_000_000).nullable(),
+    llmCapUsd: z.number().min(0).max(1_000_000).nullable(),
+    publishEnabled: z.boolean().nullable(),
+  })
+  .strict();
+export type MarketingMorningFigures = z.infer<typeof marketingMorningFiguresSchema>;
+
+export const marketingMorningReportSchema = z
+  .object({
+    promptVersion: z.string().regex(/^[a-z0-9.-]{1,40}$/),
+    date: isoDay,
+    verdict: text(600),
+    decisions: z
+      .array(z.object({ title: text(200), why: text(500), section: z.enum(MARKETING_MORNING_SECTIONS) }).strict())
+      .max(3),
+    worked: text(800),
+    adjust: z
+      .array(z.object({ action: z.enum(MARKETING_MORNING_ACTIONS), what: text(200), why: text(500) }).strict())
+      .max(4),
+    marketChanges: z
+      .array(
+        z
+          .object({ competitorId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/), change: text(300), action: text(300) })
+          .strict(),
+      )
+      .max(3),
+    figures: marketingMorningFiguresSchema,
+  })
+  .strict();
+export type MarketingMorningReport = z.infer<typeof marketingMorningReportSchema>;
 
 /**
  * The analysis as the app stores it beside the brief it explains
@@ -175,6 +253,8 @@ export const marketingAnalysisPayloadSchema = z
     featureCount: z.number().int().min(0).max(10_000),
     /** The week's plan, at the first run of a Brisbane week (above; written by lib/marketingStrategyCore.ts). */
     strategy: marketingWeeklyStrategySchema.optional(),
+    /** This run's morning report (above; written by lib/marketingMorningCore.ts). */
+    morning: marketingMorningReportSchema.optional(),
   })
   .strict();
 export type MarketingAnalysisPayload = z.infer<typeof marketingAnalysisPayloadSchema>;
@@ -233,6 +313,7 @@ const COMPETITIVE_PROMPT = [
   "Write for the person who runs Tomverse's marketing. pricePosition compares Tomverse's prices and allowances with the competitors' in a few sentences, naming plans and amounts. ahead lists where Tomverse is ahead and behind where it is behind; each point is one or two sentences and lists the source URLs it rests on, copied exactly from the data, or none when it rests on Tomverse's own plans or reading. weeklyMessage says what Tomverse should stress in this week's posts, and why, in two to four sentences.",
   "Use only the data. When a competitor has no facts, say nothing about it; when no competitor has any, say the comparison has no data this week. A Tomverse price whose monthlyPriceStored or annualPriceStored flag is false is built in or computed, not confirmed: say so rather than compare it as a current price.",
   "Then choose this week's topic for the posts: topicId is two to six lower case English words joined by hyphens naming the Tomverse capability or benefit to focus on, never another product or company. claimIds lists one to five ids from the claims list that best carry that topic, most important first.",
+  "Tomverse has two products, Tomverse Chat (working with a model and its features) and Tomverse Review (comparing answers). recentTopics are the topics of the last few weeks, newest first: choose a topic that is not one of them, and move between Chat's features and Review from week to week.",
   'Answer with one JSON object and nothing else: {"pricePosition":string,"ahead":[{"point":string,"sources":[string]}],"behind":[{"point":string,"sources":[string]}],"weeklyMessage":string,"topicId":string,"claimIds":[string]}.',
 ].join("\n");
 
@@ -270,8 +351,11 @@ export function marketingCompetitiveAnalysisMessages(input: {
   readonly facts: readonly MarketingAnalysisMarketFact[];
   readonly features: readonly MarketingAnalysisMarketFeature[];
   readonly claims: readonly MarketingAnalysisClaim[];
+  /** The latest briefs' topics, newest first. */
+  readonly recentTopics?: readonly string[];
 }): MarketingLlmMessage[] {
   const data = {
+    recentTopics: input.recentTopics ?? [],
     tomverse: { plans: input.plans, reading: input.self },
     competitors: input.competitors.map((competitor) => ({
       id: competitor.competitorId,

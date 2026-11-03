@@ -71,7 +71,8 @@ const request: MarketingPublishRequest = {
   externalAccountRef: "acct_9",
   locale: "en",
   renderedText: "A sentence about the product.",
-  assetIds: [],
+  // Every post carries an image or a video (owner decision 2026-11-03).
+  assetIds: ["card_1"],
   finalUrl: null,
 };
 
@@ -114,6 +115,7 @@ test("a 201 with an identified object is published", async () => {
     content: request.renderedText,
     platforms: [{ platform: "linkedin", accountId: "acct_9" }],
     publishNow: true,
+    mediaItems: [{ type: "image", url: "https://assets.test/card_1.jpg" }],
     metadata: { requestKey: request.requestKey, locale: "en" },
   });
   // The post's own logical key is the idempotency key end to end -- as the
@@ -303,6 +305,20 @@ test("an asset resolved to a non-HTTPS URL is refused too", async () => {
     "failed",
   );
   assert.deepEqual(calls, []);
+});
+
+test("a post with no image or video is refused on every platform before anything leaves", async () => {
+  // Owner decision 2026-11-03: no platform gets a text-only post, including the
+  // ones whose API would take one.
+  for (const channel of ["linkedin", "x", "facebook", "threads", "instagram", "tiktok"] as const) {
+    const { adapter, calls } = adapterWith([{ status: 201, body: created() }]);
+    assert.deepEqual(
+      await adapter.publish({ ...request, channel, assetIds: [] }),
+      { outcome: "failed", errorCode: "media_required" },
+      channel,
+    );
+    assert.deepEqual(calls, [], channel);
+  }
 });
 
 test("a channel with no Zernio platform is refused without a call", async () => {

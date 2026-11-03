@@ -9,6 +9,7 @@ import {
   MARKETING_GENERATOR_CONTEXT_MAX_BYTES,
   marketingGeneratorContextAllowed,
   readMarketingGeneratorContext,
+  withMarketingMorningInputs,
 } from "@/lib/marketingGeneratorContext";
 import {
   marketingGeneratorAuthorized,
@@ -78,6 +79,8 @@ export async function POST(request: Request) {
     });
     return json({ code: "context_unavailable" }, 500);
   }
+  // Outside the transaction: the morning report's counts (best effort).
+  context = await withMarketingMorningInputs(context);
   const answer = { context };
   if (Buffer.byteLength(JSON.stringify(answer), "utf8") > MARKETING_GENERATOR_CONTEXT_MAX_BYTES) {
     return json({ code: "context_too_large" }, 500);

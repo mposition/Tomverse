@@ -32,7 +32,7 @@ import { MARKETING_CHANNEL_CAPS } from "./marketingAutomationSchema.ts";
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each plan, so a change to what the model is asked is a new version. */
-export const MARKETING_STRATEGY_PROMPT_VERSION = "strategy-v1";
+export const MARKETING_STRATEGY_PROMPT_VERSION = "strategy-v2";
 
 /** An account as the plan is offered it: where it posts, its cap, and what it may carry. */
 export type MarketingStrategyAccount = {
@@ -60,8 +60,9 @@ const PROMPT = [
   "headline is the week's strategy in one sentence. rationale says why, in two to four sentences, resting only on the analysis. goal says what this week should achieve and how it will be judged at the end of the week, in one to three sentences; no result is known yet, so do not state one.",
   "accounts has one entry per account you plan to post on, each slug at most once: role is what the account is for this week; angle is the message angle of its posts; format is the post form (for example short video, image, text), and names a video or image only when the account's assets offer one; posts is how many posts this week, never above the account's weeklyCap; days are the weekdays (mon, tue, wed, thu, fri, sat, sun) they go out, one per post; claimIds lists one to three ids from the claims list whose locales include the account's locale, favouring the brief's claims; assetIds lists ids from that account's assets, or none.",
   "needs lists what the operator must prepare or decide this week for the plan to work (for example an asset to make or approve). avoid lists what this week's posts must not do. Posts never name a competitor, never compare prices with anyone, never say free without its condition and never claim availability in mainland China; every post goes to a person for approval before it is published.",
+  "paidAds: judge whether paid advertising would help this week (for example a small test to reach the Australian English market, or boosting a post that carries an approved video). If it would, propose up to three, each with the platform, the objective, a suggested budget range in AUD with its duration, and why it is worth it now; if not, leave paidAds empty. A proposal is for the operator to decide: nothing is spent by this plan, and ads are never placed automatically.",
   "Use only the data: no account, claim, asset, metric or result that is not in it.",
-  'Answer with one JSON object and nothing else: {"headline":string,"rationale":string,"goal":string,"accounts":[{"accountSlug":string,"role":string,"angle":string,"format":string,"posts":number,"days":[string],"claimIds":[string],"assetIds":[string]}],"needs":[string],"avoid":[string]}.',
+  'Answer with one JSON object and nothing else: {"headline":string,"rationale":string,"goal":string,"accounts":[{"accountSlug":string,"role":string,"angle":string,"format":string,"posts":number,"days":[string],"claimIds":[string],"assetIds":[string]}],"needs":[string],"avoid":[string],"paidAds":[{"platform":string,"objective":string,"budget":string,"why":string}]}.',
 ].join("\n");
 
 /** The messages for the plan: a fixed instruction, and everything else as data. */
@@ -106,6 +107,10 @@ const answerSchema = z
       .max(40),
     needs: z.array(z.string()).max(20),
     avoid: z.array(z.string()).max(20),
+    paidAds: z
+      .array(z.object({ platform: z.string(), objective: z.string(), budget: z.string(), why: z.string() }))
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -178,6 +183,16 @@ export function readMarketingWeeklyStrategy(
     accounts: accounts.slice(0, MARKETING_STRATEGY_MAX_ACCOUNTS),
     needs: parsed.data.needs.filter((entry) => entry.length > 0).slice(0, 6),
     avoid: parsed.data.avoid.filter((entry) => entry.length > 0).slice(0, 6),
+    // A proposal with an empty field is not a proposal; the rest are kept as written.
+    paidAds: (parsed.data.paidAds ?? [])
+      .filter((ad) => ad.platform && ad.objective && ad.budget && ad.why)
+      .slice(0, 3)
+      .map((ad) => ({
+        platform: ad.platform.slice(0, 80).trim(),
+        objective: ad.objective.slice(0, 300).trim(),
+        budget: ad.budget.slice(0, 200).trim(),
+        why: ad.why.slice(0, 600).trim(),
+      })),
   });
   return strategy.success ? strategy.data : null;
 }

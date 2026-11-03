@@ -187,3 +187,15 @@ for (const shell of ["DesktopChatShell", "MobileChatShell"]) {
       node.moduleSpecifier.text === "@/lib/chatModelPickerEvents").length > 0);
   });
 }
+test("every Chat create path names the refusal the server gave, Smart Auto included", async () => {
+  const { chatCreateRefusalCopyKey } = await import("../lib/chatWorkspaceEntry.ts");
+  assert.equal(chatCreateRefusalCopyKey("CHAT_PROFILE_SINGLE_MODEL_REQUIRED"), "chat.singleModelProfileRequired");
+  assert.equal(chatCreateRefusalCopyKey("CHAT_SINGLE_MODEL_REQUIRED"), "chat.singleModelRequired");
+  assert.equal(chatCreateRefusalCopyKey("ASSISTANT_PROFILE_MODEL_UNAVAILABLE"), "assistantProfiles.noticeModelUnavailable");
+  assert.equal(chatCreateRefusalCopyKey(undefined), null);
+  assert.equal(chatCreateRefusalCopyKey("SOMETHING_ELSE"), null);
+  // The blank Smart Auto create reads the code instead of discarding the body.
+  const source = readFileSync(new URL("../app/(site)/(application)/chat/ChatPageClient.tsx", import.meta.url), "utf8");
+  assert.match(source, /chatCreateRefusalCopyKey\(refusal\?\.code\) \?\? "chat\.autoSelectionFailed"/);
+  assert.match(source, /chatCreateRefusalCopyKey\(refusal\?\.code\) \?\? "chat\.chatCreateFailed"/);
+});

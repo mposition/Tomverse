@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The daily marketing video job on the AMUX box (owner approval 2026-10-31).
+# The daily marketing media job on the AMUX box (owner approval 2026-10-31;
+# cards and feed videos made only from approved assets, 2026-11-04).
 # Run from cron with MARKETING_APP_URL and MARKETING_MEDIA_SUBMIT_SECRET in the
 # environment (an env file the operator keeps on the box, never in git).
 # The Claude Code CLI follows JOB.md; it may run node, npx and file tools here

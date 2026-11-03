@@ -1,6 +1,7 @@
 import React from "react";
 import { Composition } from "remotion";
 
+import { FeedVideo, feedFrames, type FeedProps } from "./Feed";
 import { MarketingVideo } from "./Video";
 import { FPS, totalFrames, videoSchema, type VideoProps } from "./schema";
 
@@ -13,7 +14,7 @@ const calculateMetadata = ({ props }: { props: VideoProps }) => ({
   durationInFrames: totalFrames(videoSchema.parse(props)),
 });
 
-/** One scene list, two frames: short (9:16) and long (16:9). */
+/** One scene list, two frames: short (9:16) and long (16:9); and the 4:5 feed version of a short. */
 export function Root() {
   return (
     <>
@@ -36,6 +37,16 @@ export function Root() {
         durationInFrames={FPS * 3}
         defaultProps={sample}
         calculateMetadata={calculateMetadata}
+      />
+      <Composition
+        id="Feed"
+        component={FeedVideo}
+        width={1080}
+        height={1350}
+        fps={FPS}
+        durationInFrames={FPS * 3}
+        defaultProps={{ video: "short.mp4", seconds: 3 }}
+        calculateMetadata={({ props }: { props: FeedProps }) => ({ durationInFrames: feedFrames(props) })}
       />
     </>
   );

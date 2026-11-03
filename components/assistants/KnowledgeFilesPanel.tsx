@@ -92,8 +92,13 @@ export function KnowledgeFilesPanel({
     publishedManifest: ManifestEntry[];
     selectedFileIds: string[];
     onToggleFile: (fileId: string, next: boolean) => void;
-    /** Reload the profile: the file list and the manifest both move. */
-    onChanged: () => void | Promise<void>;
+    /**
+     * Re-read the file list after an upload or a removal. An upload passes the
+     * new file id so the editor can select it once it is processed. It must
+     * not reload the editor's own fields: an owner who picks a model and then
+     * adds a file has not saved the model yet.
+     */
+    onChanged: (addedFileId?: string) => void | Promise<void>;
 }) {
     const { t } = useLanguage();
     const inputId = useId();
@@ -205,10 +210,14 @@ export function KnowledgeFilesPanel({
                     setUpload({ kind: "refused", code: body?.code ?? "UNKNOWN" });
                     return;
                 }
-                await discardResponseBody(finalized);
+                const added = (await finalized
+                    .json()
+                    .catch(() => null)) as { file?: { id?: unknown } } | null;
                 trackProductEvent("assistant_knowledge_upload_completed");
                 setUpload({ kind: "idle" });
-                await onChanged();
+                await onChanged(
+                    typeof added?.file?.id === "string" ? added.file.id : undefined
+                );
                 await readCapacity();
             } catch {
                 setUpload({ kind: "failed" });

@@ -1877,7 +1877,8 @@ export function MobileChatShell({
             productSwitchDisabled={productSwitchDisabled}
             onProductSwitch={onProductSwitch}
             singleModelSelection={singleTranscript}
-            value={inputValue}
+            // See DesktopChatShell: the echoed question is not shown twice.
+            value={sendEcho && durableDraftLocked ? "" : inputValue}
             onChange={setInputValue}
             personalizedPrompt={personalizedPrompt}
             onSubmit={onSubmit}
