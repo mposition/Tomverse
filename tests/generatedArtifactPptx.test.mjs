@@ -70,7 +70,7 @@ test("an independent reader gets every slide's words back", async () => {
     extractAttachments: false,
     ocr: false,
   });
-  const text = document.toText();
+  const text = (await document.to("text")).value;
   for (const expected of [
     "Tomverse Review",
     "2026년 제품 소개",

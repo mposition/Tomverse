@@ -71,7 +71,7 @@ test("an independent reader gets the words back", async () => {
     extractAttachments: false,
     ocr: false,
   });
-  const text = document.toText();
+  const text = (await document.to("text")).value;
   for (const expected of [
     "2026년 분기 보고서",
     "요약",

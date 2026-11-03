@@ -182,7 +182,7 @@ test("every generated document reopens in a Word-compatible parser", async () =>
       extractAttachments: false,
       ocr: false,
     });
-    const text = parsed.toText();
+    const text = (await parsed.to("text")).value;
     const name = `직원${String(index + 1).padStart(2, "0")}`;
     assert.match(text, new RegExp(name));
     assert.match(text, /근로계약서/);
