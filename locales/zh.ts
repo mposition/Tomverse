@@ -188,6 +188,8 @@ export const zh = {
         workspaceError: {
             title: "无法加载聊天工作区",
             body: "您的对话是安全的。重试通常即可解决。",
+            workspaceTitle: "无法加载此工作区",
+            workspaceBody: "没有内容丢失。重试通常即可解决。",
             reference: "如果仍然发生，联系客服时请提供此参考编号：",
             noReference: "如果仍然发生，请联系客服。",
             retry: "重试",
@@ -1854,6 +1856,7 @@ export const zh = {
         modelModeExplicit: "指定模型",
         modelsLimitHint: "最多 {max} 个，第一个为默认。",
         modelsKeepOne: "若不指定任何模型，请选择“跟随账户默认”。",
+        modelUnavailableTag: "已不再提供",
         createHint: "只需名称和指令即可开始使用。其余内容之后都能修改。",
         instructionsPlaceholder: "例如：简短作答，并先说明理由。",
         nameRequired: "请输入名称。",

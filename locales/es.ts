@@ -171,6 +171,8 @@ export const es = {
         workspaceError: {
             title: "No se pudo cargar el espacio de chat",
             body: "Tus conversaciones están a salvo. Reintentar suele resolverlo.",
+            workspaceTitle: "No se pudo cargar este espacio de trabajo",
+            workspaceBody: "No se ha perdido nada. Reintentar suele resolverlo.",
             reference: "Si sigue ocurriendo, indica esta referencia al contactar con soporte:",
             noReference: "Si sigue ocurriendo, contacta con soporte.",
             retry: "Reintentar",
@@ -1862,6 +1864,7 @@ export const es = {
         modelModeExplicit: "Elegir modelos",
         modelsLimitHint: "Hasta {max}; el primero es el predeterminado.",
         modelsKeepOne: "Para no indicar ningún modelo, elige «Seguir el valor predeterminado de la cuenta».",
+        modelUnavailableTag: "ya no disponible",
         createHint: "Con un nombre y unas instrucciones ya puedes usarlo. Todo lo demás se cambia después.",
         instructionsPlaceholder: "Por ejemplo: responde brevemente y explica primero tu razonamiento.",
         nameRequired: "Escribe un nombre.",

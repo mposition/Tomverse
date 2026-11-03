@@ -160,6 +160,8 @@ export const de = {
         workspaceError: {
             title: "Der Chat-Arbeitsbereich konnte nicht geladen werden",
             body: "Ihre Unterhaltungen sind sicher. Ein erneuter Versuch behebt das meist.",
+            workspaceTitle: "Dieser Arbeitsbereich konnte nicht geladen werden",
+            workspaceBody: "Es ist nichts verloren gegangen. Ein erneuter Versuch behebt das meist.",
             reference: "Wenn es weiterhin auftritt, nennen Sie dem Support diese Referenz:",
             noReference: "Wenn es weiterhin auftritt, wenden Sie sich an den Support.",
             retry: "Erneut versuchen",
@@ -1865,6 +1867,7 @@ export const de = {
         modelModeExplicit: "Modelle auswählen",
         modelsLimitHint: "Höchstens {max}; das erste ist die Vorgabe.",
         modelsKeepOne: "Wähle „Standard des Kontos übernehmen“, um gar kein Modell festzulegen.",
+        modelUnavailableTag: "nicht mehr verfügbar",
         createHint: "Ein Name und Anweisungen genügen für den Start. Alles Weitere lässt sich später ändern.",
         instructionsPlaceholder: "Zum Beispiel: Antworte kurz und nenne zuerst deine Begründung.",
         nameRequired: "Bitte einen Namen eingeben.",

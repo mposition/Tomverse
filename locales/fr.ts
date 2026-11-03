@@ -171,6 +171,8 @@ export const fr = {
         workspaceError: {
             title: "Impossible de charger l’espace de discussion",
             body: "Vos conversations sont intactes. Réessayer suffit généralement.",
+            workspaceTitle: "Impossible de charger cet espace de travail",
+            workspaceBody: "Rien n’a été perdu. Réessayer suffit généralement.",
             reference: "Si cela persiste, indiquez cette référence en contactant le support :",
             noReference: "Si cela persiste, contactez le support.",
             retry: "Réessayer",
@@ -1862,6 +1864,7 @@ export const fr = {
         modelModeExplicit: "Choisir des modèles",
         modelsLimitHint: "Jusqu'à {max} ; le premier fait office de modèle par défaut.",
         modelsKeepOne: "Pour n’indiquer aucun modèle, choisissez « Suivre la valeur par défaut du compte ».",
+        modelUnavailableTag: "plus disponible",
         createHint: "Un nom et des instructions suffisent pour commencer. Tout le reste se modifie ensuite.",
         instructionsPlaceholder: "Par exemple : réponds brièvement, et donne d'abord ton raisonnement.",
         nameRequired: "Saisissez un nom.",

@@ -39,7 +39,12 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 // Still needed after the control moved out: the editor seeds the explicit mode
 // with the account default, which is a question about this screen's state
 // rather than about how the list renders.
-import { ENABLED_MODELS } from "@/lib/models";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import {
+    KNOWLEDGE_AWAIT_MAX_POLLS,
+    KNOWLEDGE_AWAIT_POLL_MS,
+    settleAwaitedKnowledgeFiles,
+} from "@/lib/assistantKnowledgeAwait";
 
 /**
  * Creating and editing one profile (Release C, slice C3b).
@@ -250,6 +255,7 @@ export function AssistantProfileEditor({
      * left every existing assistant starting conversations on the old one.
      */
     const [modelMode, setModelMode] = useState<ModelMode>("account-default");
+    const { publicModels } = useModelCatalog();
     const [webSearch, setWebSearch] = useState(false);
     const [deepResearch, setDeepResearch] = useState(false);
     // §14's narrow-only default. A new profile asks for nothing it was not
@@ -275,9 +281,9 @@ export function AssistantProfileEditor({
         setModelMode(next);
         if (next === "explicit" && selectedModelIds.length === 0) {
             const seed =
-                ENABLED_MODELS.find(
+                publicModels.find(
                     (model) => model.id === APP_DEFAULTS.defaultModelId
-                ) ?? ENABLED_MODELS[0];
+                ) ?? publicModels[0];
             if (seed) setSelectedModelIds([seed.id]);
         }
     };
@@ -359,6 +365,83 @@ export function AssistantProfileEditor({
             setLoading(false);
         }
     }, [profileId]);
+
+    /**
+     * Uploads waiting to be selected, and whether a poll is already running.
+     * Refs, because they steer the refresh below rather than the render.
+     */
+    const awaitingFileIds = useRef(new Set<string>());
+    const pollingFiles = useRef(false);
+    const mounted = useRef(true);
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+        };
+    }, []);
+
+    /**
+     * Re-reads the file list without touching what the owner is editing.
+     *
+     * This used to be `load()`, which also reset the model selection, the
+     * instructions and the file ticks to the stored revision: on 2026-11-03 a
+     * model picked before uploading a file was silently undone, the new file
+     * was left unticked, and Save then reported that nothing had changed.
+     *
+     * An upload's file id is waited for and ticked once it is `ready`.
+     */
+    const refreshFiles = useCallback(
+        async (addedFileId?: string) => {
+            if (!profileId) return;
+            if (addedFileId) awaitingFileIds.current.add(addedFileId);
+            const loop = !pollingFiles.current;
+            if (loop) pollingFiles.current = true;
+            try {
+                for (let poll = 1; ; poll += 1) {
+                    const response = await fetch(
+                        `/api/assistant-profiles/${profileId}`,
+                        { cache: "no-store" }
+                    );
+                    if (!response.ok) {
+                        await discardResponseBody(response);
+                        return;
+                    }
+                    const data = (await response.json()) as {
+                        profile: LoadedProfile;
+                    };
+                    if (!mounted.current) return;
+                    setProfile(data.profile);
+                    const { ready, stillAwaiting } = settleAwaitedKnowledgeFiles(
+                        awaitingFileIds.current,
+                        data.profile.knowledgeFiles
+                    );
+                    awaitingFileIds.current = new Set(stillAwaiting);
+                    if (ready.length > 0) {
+                        setSelectedFileIds((current) => [
+                            ...current,
+                            ...ready.filter((fileId) => !current.includes(fileId)),
+                        ]);
+                    }
+                    if (
+                        !loop ||
+                        stillAwaiting.length === 0 ||
+                        poll >= KNOWLEDGE_AWAIT_MAX_POLLS
+                    ) {
+                        return;
+                    }
+                    await new Promise((resolve) =>
+                        window.setTimeout(resolve, KNOWLEDGE_AWAIT_POLL_MS)
+                    );
+                    if (!mounted.current) return;
+                }
+            } catch {
+                setNotice({ kind: "failed" });
+            } finally {
+                if (loop) pollingFiles.current = false;
+            }
+        },
+        [profileId]
+    );
 
     useEffect(() => {
         // Deferred, as the other settings screens defer their loads: a state
@@ -1022,7 +1105,7 @@ export function AssistantProfileEditor({
                                                           )
                                                 )
                                             }
-                                            onChanged={load}
+                                            onChanged={refreshFiles}
                                         />
                                     )}
                                 </div>

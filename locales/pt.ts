@@ -171,6 +171,8 @@ export const pt = {
         workspaceError: {
             title: "Não foi possível carregar o espaço de conversa",
             body: "Suas conversas estão seguras. Tentar novamente costuma resolver.",
+            workspaceTitle: "Não foi possível carregar este espaço de trabalho",
+            workspaceBody: "Nada foi perdido. Tentar novamente costuma resolver.",
             reference: "Se continuar acontecendo, informe esta referência ao contactar o suporte:",
             noReference: "Se continuar acontecendo, contacte o suporte.",
             retry: "Tentar novamente",
@@ -1862,6 +1864,7 @@ export const pt = {
         modelModeExplicit: "Escolher modelos",
         modelsLimitHint: "Até {max}; o primeiro é o predefinido.",
         modelsKeepOne: "Para não indicar qualquer modelo, escolha «Seguir a predefinição da conta».",
+        modelUnavailableTag: "já não disponível",
         createHint: "Um nome e instruções bastam para começar. Tudo o resto pode mudar depois.",
         instructionsPlaceholder: "Por exemplo: responde de forma breve e apresenta primeiro o teu raciocínio.",
         nameRequired: "Introduza um nome.",

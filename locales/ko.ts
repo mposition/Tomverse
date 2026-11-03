@@ -161,6 +161,8 @@ export const ko = {
         workspaceError: {
             title: "채팅 작업 공간을 불러오지 못했습니다",
             body: "대화는 안전합니다. 다시 시도하면 대부분 해결됩니다.",
+            workspaceTitle: "이 작업 공간을 불러오지 못했습니다",
+            workspaceBody: "저장된 내용은 그대로입니다. 다시 시도하면 대부분 해결됩니다.",
             reference: "계속 발생하면 고객 지원에 문의할 때 이 참조 번호를 알려 주세요:",
             noReference: "계속 발생하면 고객 지원에 문의해 주세요.",
             retry: "다시 시도",
@@ -1863,6 +1865,7 @@ export const ko = {
         modelModeExplicit: "직접 지정",
         modelsLimitHint: "최대 {max}개, 첫 번째가 기본값입니다.",
         modelsKeepOne: "모델을 지정하지 않으려면 ‘계정 기본 모델 따르기’를 선택하세요.",
+        modelUnavailableTag: "더 이상 제공되지 않음",
         createHint: "이름과 지시문만 있으면 바로 쓸 수 있습니다. 나머지는 만든 뒤에 바꿀 수 있습니다.",
         instructionsPlaceholder: "예: 한국어로 짧게 답하고, 근거를 먼저 말해 주세요.",
         nameRequired: "이름을 입력해 주세요.",

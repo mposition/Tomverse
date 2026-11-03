@@ -152,12 +152,17 @@ export const en = {
         singleModelRequired: "Chat uses one answer model. Select a model to replace the current selection.",
         singleModelProfileRequired: "This assistant uses multiple models. Choose a single-model assistant for Chat.",
         restoreDraftNotEmpty: "Your draft was kept. Clear or send it before restoring this question.",
-        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
-        // It renders below the (application) layout, so LanguageProvider is
-        // mounted; global-error.tsx replaces that layout and stays English.
+        // The application workspace error boundaries (chat, review, plugins),
+        // all rendering components/WorkspaceErrorScreen.tsx. They render below
+        // the (application) layout, so LanguageProvider is mounted;
+        // global-error.tsx replaces that layout and stays English.
+        // `workspaceTitle`/`workspaceBody` are the wording for a workspace that
+        // is not the chat transcript (Review, connectors).
         workspaceError: {
             title: "The chat workspace could not be loaded",
             body: "Your conversations are safe. Retrying usually resolves this.",
+            workspaceTitle: "This workspace could not be loaded",
+            workspaceBody: "Nothing was lost. Retrying usually resolves this.",
             reference: "If it keeps happening, quote this reference when you contact support:",
             noReference: "If it keeps happening, contact support.",
             retry: "Try again",
@@ -1876,6 +1881,7 @@ export const en = {
         modelModeExplicit: "Choose models",
         modelsLimitHint: "Up to {max}; the first is the default.",
         modelsKeepOne: "To name no model at all, pick “Follow the account default”.",
+        modelUnavailableTag: "no longer available",
         createHint: "A name and instructions are enough to start using it. Everything else can change later.",
         instructionsPlaceholder: "For example: answer briefly, and give your reasoning first.",
         nameRequired: "Enter a name.",
