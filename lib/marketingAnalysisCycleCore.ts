@@ -126,6 +126,8 @@ const contextSchema = z.object({
   analysis: z.object({ enabled: z.boolean(), strategyDue: z.boolean().optional() }).optional(),
   /** The app's counts for the morning report (lib/marketingMeasurementCore.ts); read by its own schema. */
   operations: z.unknown().optional(),
+  /** This week's stored plan, when one was written on an earlier run. */
+  currentPlan: z.object({ headline: z.string(), goal: z.string() }).nullable().optional(),
   marketPrices: z
     .array(
       z.object({
@@ -361,7 +363,7 @@ export async function runMarketingAnalysisCycle(
         brief: {
           topicId: read.topicId,
           weeklyMessage: read.competitive.weeklyMessage,
-          plan: strategy ? { headline: strategy.headline, goal: strategy.goal } : null,
+          plan: strategy ? { headline: strategy.headline, goal: strategy.goal } : (context.currentPlan ?? null),
         },
         competitors,
         marketPrices: context.marketPrices ?? [],

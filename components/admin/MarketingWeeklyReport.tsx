@@ -136,9 +136,9 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
       <Section title={m.secPosts} testId="marketing-weekly-posts">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label={m.drafts} value={String(x.drafts.created)} />
-          <Stat label={m.approved} value={String(x.decisions.approved)} />
-          <Stat label={m.rejected} value={String(x.decisions.rejected)} />
-          <Stat label={m.expired} value={String(x.decisions.expired)} />
+          <Stat label={m.approved} value={x.decisions ? String(x.decisions.approved) : m.unreadable} />
+          <Stat label={m.rejected} value={x.decisions ? String(x.decisions.rejected) : m.unreadable} />
+          <Stat label={m.expired} value={x.decisions ? String(x.decisions.expired) : m.unreadable} />
           <Stat label={m.published} value={String(x.publishedInWindow)} />
         </div>
         <p className="text-xs text-zinc-400">

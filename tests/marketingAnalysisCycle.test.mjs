@@ -419,3 +419,11 @@ test("the plan and the morning report both run at the first run of a week, plan 
   const morningInput = JSON.parse(seen.calls[3].messages[1].content);
   assert.equal(morningInput.brief.plan.headline, PLAN.headline);
 });
+
+test('on the days after the plan was written, the morning report is given the stored plan', async () => {
+  const ctx = { ...MORNING_CONTEXT, currentPlan: { headline: '저장된 계획', goal: '저장된 목표' } };
+  const { deps, seen } = ports({ ctx, answers: [answered(SELF), answered(COMPETITIVE), answered(MORNING)] });
+  const summary = await runMarketingAnalysisCycle({ generatorRunId: 'run-1', deadlineAt: DEADLINE, market: MARKET }, deps);
+  assert.equal(summary.morning, 'recorded');
+  assert.deepEqual(JSON.parse(seen.calls[2].messages[1].content).brief.plan, { headline: '저장된 계획', goal: '저장된 목표' });
+});

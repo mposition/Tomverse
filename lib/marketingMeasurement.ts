@@ -13,6 +13,7 @@ import {
   type MarketingMeasurementPost,
   type MarketingMeasurementWindow,
 } from "@/lib/marketingMeasurementCore";
+import { MARKETING_S2B1_ACTIONS } from "@/lib/marketingStore";
 import { MARKETING_TOUCH_EVENT } from "@/lib/marketingTouchCore";
 
 /**
@@ -100,7 +101,7 @@ export async function readMarketingMeasurement(
   db: Reader,
   window: MarketingMeasurementWindow,
 ): Promise<MarketingMeasurement> {
-  const [posts, channels, touches, signups, signupChannels, guestLeads, llm] = await Promise.all([
+  const [posts, channels, touches, signups, signupChannels, guestLeads, llm, decisions] = await Promise.all([
     db
       .$queryRaw<Array<Omit<MarketingMeasurementPost, "attempts"> & { history: unknown }>>(Prisma.sql`
         SELECT c."accountSlug", p."status", p."publishAttempt", p."mode", p."createdAt", p."updatedAt", p."approvedAt", p."scheduledAt",
@@ -146,8 +147,34 @@ export async function readMarketingMeasurement(
     ),
     conversions(db, window, "first_response_completed", true),
     readMarketingLlmMonth(db),
+    // Each decision writes one audit row for its post, at the time it was made.
+    settle(async () => {
+      const approve = [MARKETING_S2B1_ACTIONS.postApprove, MARKETING_S2B1_ACTIONS.postRequeueAfterFailure];
+      const reject = [MARKETING_S2B1_ACTIONS.postReject];
+      const expire = [MARKETING_S2B1_ACTIONS.postApprovalExpiredOnResume];
+      const rows = await db.$queryRaw<Array<{ action: string; count: number }>>(Prisma.sql`
+        SELECT "action", count(*)::int AS "count" FROM "AdminAuditLog"
+        WHERE "targetType" = 'MarketingPost'
+          AND "action" IN (${Prisma.join([...approve, ...reject, ...expire])})
+          AND "createdAt" >= ${window.start} AND "createdAt" < ${window.end}
+        GROUP BY "action"
+      `);
+      const total = (actions: readonly string[]) =>
+        rows.filter((row) => actions.includes(row.action)).reduce((sum, row) => sum + row.count, 0);
+      return { approved: total(approve), rejected: total(reject), expired: total(expire) };
+    }),
   ]);
-  return summarizeMarketingMeasurement({ window, posts, channels, touches, signups, signupChannels, guestLeads, llm });
+  return summarizeMarketingMeasurement({
+    window,
+    posts,
+    channels,
+    touches,
+    signups,
+    signupChannels,
+    guestLeads,
+    llm,
+    decisions,
+  });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

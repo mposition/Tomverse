@@ -45,6 +45,7 @@ import {
 } from "@/lib/marketingLlmBudgetCore";
 import { marketingLlmCatalogPinsIn } from "@/lib/marketingLlmModelCatalog";
 import { readMarketingOperations, readMarketingPriceHistory } from "@/lib/marketingMeasurement";
+import { readLatestMarketingStrategy } from "@/lib/marketingReportRead";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -107,6 +108,8 @@ export type MarketingGeneratorContext = {
   readonly operations: Awaited<ReturnType<typeof readMarketingOperations>> | null;
   /** Competitor prices from the two newest market reports, newest first; empty while the switch is off. */
   readonly marketPrices: Awaited<ReturnType<typeof readMarketingPriceHistory>>;
+  /** This week's stored plan, for the morning report on the days after it was written. */
+  readonly currentPlan?: { readonly headline: string; readonly goal: string } | null;
 };
 
 /**
@@ -355,11 +358,14 @@ export async function withMarketingMorningInputs(
   reader: Pick<typeof prisma, "$queryRaw"> = prisma,
 ): Promise<MarketingGeneratorContext> {
   if (!context.analysis.enabled) return context;
-  const [operations, marketPrices] = await Promise.all([
+  const [operations, marketPrices, plan] = await Promise.all([
     readMarketingOperations(reader).catch(() => null),
     readMarketingPriceHistory(reader).catch(() => []),
+    readLatestMarketingStrategy(reader).catch(() => null),
   ]);
-  return { ...context, operations, marketPrices };
+  const currentPlan =
+    plan?.status === "found" && plan.current ? { headline: plan.strategy.headline, goal: plan.strategy.goal } : null;
+  return { ...context, operations, marketPrices, currentPlan };
 }
 
 export async function readMarketingGeneratorContext(

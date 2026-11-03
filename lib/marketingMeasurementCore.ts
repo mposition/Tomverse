@@ -89,6 +89,8 @@ export type MarketingMeasurementChannel = {
 
 export type MarketingConversionCount = { readonly total: number; readonly attributed: number };
 
+export type MarketingDecisionCount = { readonly approved: number; readonly rejected: number; readonly expired: number };
+
 /** Attributed sign-ups of one landing channel (its touch's UTM source, medium and campaign). */
 export type MarketingSignupChannel = {
   readonly source: string;
@@ -109,7 +111,12 @@ export type MarketingMeasurementLlm = {
 export type MarketingMeasurement = {
   readonly window: { readonly start: string; readonly end: string };
   readonly drafts: { readonly created: number; readonly guardCodes: ReadonlyArray<{ code: string; count: number }> };
-  readonly decisions: { readonly approved: number; readonly rejected: number; readonly expired: number };
+  /**
+   * Approvals (re-approvals after a failure included), rejections and expiries
+   * in the window, by the audit record each decision wrote -- not the post's
+   * columns, which a later decision overwrites. Null when it cannot be read.
+   */
+  readonly decisions: MarketingDecisionCount | null;
   /** Posts that went out in the window, by `publishedAt` (the stored weekly KPI's count). */
   readonly publishedInWindow: number;
   readonly dispatch: MarketingSendStats & {
@@ -216,7 +223,7 @@ function marketingSendStats(sends: readonly ResolvedSend[]): MarketingSendStats 
     .sort((left, right) => left - right);
   const held: Array<"success_rate" | "latency"> = [];
   if (sends.length < MARKETING_MEASUREMENT_MIN_SENT) held.push("success_rate");
-  if (latencies.length === 0) held.push("latency");
+  if (latencies.length < MARKETING_MEASUREMENT_MIN_SENT) held.push("latency");
   return {
     sent: sends.length,
     published: published.length,
@@ -245,6 +252,7 @@ export function summarizeMarketingMeasurement(input: {
   readonly signupChannels: ReadonlyArray<Omit<MarketingSignupChannel, "held">> | null;
   readonly guestLeads: MarketingConversionCount | null;
   readonly llm: MarketingMeasurementLlm | null;
+  readonly decisions: MarketingDecisionCount | null;
 }): MarketingMeasurement {
   const { window, posts } = input;
   const created = posts.filter((post) => within(post.createdAt, window));
@@ -322,11 +330,7 @@ export function summarizeMarketingMeasurement(input: {
   return {
     window: { start: window.start.toISOString(), end: window.end.toISOString() },
     drafts: { created: created.length, guardCodes: tally(created.flatMap((post) => post.guardCodes)) },
-    decisions: {
-      approved: posts.filter((post) => within(post.approvedAt, window)).length,
-      rejected: posts.filter((post) => post.status === "rejected" && within(post.updatedAt, window)).length,
-      expired: posts.filter((post) => post.status === "approval_expired" && within(post.updatedAt, window)).length,
-    },
+    decisions: input.decisions,
     // By when the post went out, as the stored weekly KPI counts it -- apart
     // from the sends below, which are placed by when their outcome was first
     // recorded.

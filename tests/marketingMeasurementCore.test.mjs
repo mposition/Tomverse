@@ -93,6 +93,7 @@ test("the week's posts, dispatch and queue are counted, and a small sample is he
     signupChannels: [{ source: "instagram", medium: "social", campaign: "wk45", attributed: 1 }],
     guestLeads: null,
     llm: { calls: 10, countedMicroUsd: 1_500_000, capUsd: 100 },
+    decisions: { approved: 2, rejected: 1, expired: 0 },
   });
 
   assert.equal(measurement.drafts.created, 6);
@@ -124,7 +125,8 @@ test("the week's posts, dispatch and queue are counted, and a small sample is he
       ["approval", "instagram-3", 1, 1, 0],
     ],
   );
-  assert.deepEqual([...measurement.held].sort(), ["signups", "success_rate"]);
+  // One delay is not a sample: held with the rate.
+  assert.deepEqual([...measurement.held].sort(), ["latency", "signups", "success_rate"]);
 });
 
 test("enough sends give a rate, and an unreadable count stays null rather than zero", () => {
@@ -146,6 +148,7 @@ test("enough sends give a rate, and an unreadable count stays null rather than z
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   assert.equal(measurement.dispatch.successRate, 0.8);
   assert.equal(measurement.touches, null);
@@ -191,6 +194,7 @@ test("sends are attempts: a failure requeued and then published is two sends, an
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   // The post still publishing is not a send until its outcome is recorded.
   assert.equal(measurement.dispatch.sent, 3);
@@ -227,6 +231,7 @@ test("an attempt is counted once, in the week it was sent, with its final outcom
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   assert.equal(thisWeek.dispatch.sent, 0);
   const lastWeek = summarizeMarketingMeasurement({
@@ -238,6 +243,7 @@ test("an attempt is counted once, in the week it was sent, with its final outcom
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   assert.equal(lastWeek.dispatch.sent, 1);
   assert.equal(lastWeek.dispatch.failed, 1);
@@ -268,6 +274,7 @@ test("an unknown outcome a person confirmed as published counts as published, an
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   assert.equal(measurement.dispatch.sent, 1);
   assert.equal(measurement.dispatch.published, 1);
@@ -292,6 +299,7 @@ test("the sign-up hold is judged per landing channel, and sends are split by mod
     signups: { total: 12, attributed: 12 },
     guestLeads: null,
     llm: null,
+    decisions: null,
   };
   const split = summarizeMarketingMeasurement({
     ...base,
@@ -353,6 +361,7 @@ test("each mode and account is judged on its own sample, and weekly published fo
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   const rate = Object.fromEntries(measurement.dispatch.segments.map((row) => [row.accountSlug, row.successRate]));
   assert.deepEqual(rate, { "facebook-3": null, "instagram-3": 1 });
@@ -383,6 +392,7 @@ test("a week whose send history retention has summarised holds every send measur
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   assert.equal(measurement.dispatch.compacted, true);
   assert.ok(measurement.held.includes("sends_compacted"));
@@ -398,6 +408,7 @@ test("a week whose send history retention has summarised holds every send measur
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   assert.equal(elsewhere.dispatch.compacted, false);
 });
@@ -428,6 +439,7 @@ test('a post whose old attempt entries were summarised holds the window its rema
     signupChannels: null,
     guestLeads: null,
     llm: null,
+    decisions: null,
   });
   assert.equal(measurement.dispatch.compacted, true);
   assert.equal(measurement.dispatch.successRate, null);
