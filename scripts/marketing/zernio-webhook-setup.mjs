@@ -129,7 +129,10 @@ export async function main(argv, env = process.env) {
     }
     const created = await call(key, "POST", "/webhooks/settings", { ...plan.body, secret: env.ZERNIO_WEBHOOK_SECRET });
     if (created.status !== 200 || !created.json?.webhook) {
-      console.error(`Zernio answered ${created.status}; check with the status command before retrying.`);
+      // Zernio's own reason, e.g. "A profile-scoped API key cannot manage
+      // webhooks" (403): without it a refusal reads like a transient failure.
+      const reason = created.json?.error ? ` (${created.json.code ?? "error"}: ${created.json.error})` : "";
+      console.error(`Zernio answered ${created.status}${reason}; check with the status command before retrying.`);
       return 1;
     }
     console.log(JSON.stringify(redactWebhook(created.json.webhook)));

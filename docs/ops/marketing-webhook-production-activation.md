@@ -60,6 +60,12 @@ secret과 API key는 Railway가 환경으로 넣어 주며 출력되지 않습�
 | A5 | 감사 행 확인 | Admin › Audit에서 action `marketing_webhook.status_refused`, 사유 `apply_not_permitted` | 읽기 |
 
 A3 전에 확인할 것: Zernio 대시보드의 같은 URL 중복이 없을 것(스크립트가 거절함), 오늘 Instagram 게시 전에 등록해야 첫 게시의 이벤트를 받습니다.
+
+**A3이 403 `insufficient_permissions`로 거절되면(2026-11-03 관측):** 운영·Test의 `ZERNIO_API_KEY`는 프로필 범위 키라
+"A profile-scoped API key cannot manage webhooks"로 거절됩니다. 아무것도 만들어지지 않으므로 A1으로 확인만 하고 다시 보내지 않습니다.
+대신 Zernio 대시보드 → Webhooks에서 A2 미리보기와 같은 이름·URL·event 7개·계정을 넣어 만들고, Secret에는 Railway production
+`Tomverse` 서비스의 `ZERNIO_WEBHOOK_SECRET` 값을 그대로 넣습니다(대화·로그에 붙이지 않습니다). 워크스페이스 범위 키를 새로 만들어
+스크립트로 등록할 수도 있지만 권한이 넓은 키가 하나 더 생기므로 대시보드를 권합니다. 만든 뒤 A1으로 확인합니다.
 되돌리기: Zernio 대시보드에서 해당 webhook 삭제 또는 비활성. 앱 쪽 상태는 바뀌지 않습니다.
 
 **A 이후 하지 말 것:** `ZERNIO_WEBHOOK_SECRET`·`ZERNIO_API_KEY`·`APP_ENV`·`RAILWAY_ENVIRONMENT_NAME`·`TOMVERSE_DEPLOY_ENV` 교체,
