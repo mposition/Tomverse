@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -163,7 +163,7 @@ test("a sent fix is settled from the pull request's new head: its own commit, or
 });
 
 /** A base branch (develop unless named) and a branch that both changed one line of app.js after they parted. */
-function conflictFixture({ base = "develop" } = {}) {
+function conflictFixture({ base = "develop", baseAdds = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ci-fix-conflict-"));
   const source = join(root, "source");
   mkdirSync(source);
@@ -187,7 +187,12 @@ function conflictFixture({ base = "develop" } = {}) {
   const head = sh(source, "rev-parse", "HEAD");
   sh(source, "checkout", "-q", base);
   writeFileSync(join(source, "lib", "app.js"), "const a = 1;\nconst b = 2 + develop;\nconst c = 3;\n");
-  sh(source, "commit", "-q", "-am", "develop change");
+  for (const [path, text] of Object.entries(baseAdds)) {
+    mkdirSync(join(source, path, ".."), { recursive: true });
+    writeFileSync(join(source, path), text);
+  }
+  sh(source, "add", "-A");
+  sh(source, "commit", "-q", "-m", "develop change");
   const develop = sh(source, "rev-parse", "HEAD");
   const config = validateConfig({
     stateDir: join(root, "state"),
@@ -490,18 +495,22 @@ test("the guard writes through no link: a conflicted path that is one is refused
 });
 
 test("a pull request into main is merged with main, against develop's instruction files", async () => {
-  const f = conflictFixture({ base: "main" });
+  // Review r-20261103-035414-7e52e9: a settings file only the base has must not survive the merge.
+  const f = conflictFixture({ base: "main", baseAdds: { ".claude/settings.local.json": "{\"hooks\":{}}\n", "AGENTS.md": "base instructions\n" } });
   const env = { GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0: process.env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: process.env.GIT_CONFIG_VALUE_0 };
   Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.autocrlf", GIT_CONFIG_VALUE_0: "false" });
   try {
     const seen = [];
     const result = await pass(f, ({ cwd, prompt }) => {
-      seen.push({ prompt, instructions: readFileSync(join(cwd, "CLAUDE.md"), "utf8") });
+      seen.push({ prompt, instructions: readFileSync(join(cwd, "CLAUDE.md"), "utf8"),
+        settings: existsSync(join(cwd, ".claude", "settings.local.json")), agents: existsSync(join(cwd, "AGENTS.md")) });
       writeFileSync(join(cwd, "lib", "app.js"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
       return { ok: true, timedOut: false, tail: "RESULT: fixed" };
     });
     assert.deepEqual(result, { outcome: "queued", pr: 51 });
     assert.equal(seen[0].instructions, "develop instructions\n", "the base merges; only develop instructs");
+    assert.equal(seen[0].settings, false, "the base's own settings file is gone before the model starts");
+    assert.equal(seen[0].agents, false, "and so is an instruction file only the base has");
     assert.equal(seen[0].prompt, conflictPrompt({ files: ["lib/app.js"], base: "main" }));
     assert.match(seen[0].prompt, /with main merged in/);
     const request = normaliseDispatchRequest(JSON.parse(readFileSync(join(f.outbox, `${f.head}.json`), "utf8")), `${f.head}.json`);

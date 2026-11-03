@@ -30,6 +30,12 @@ export const CI_FIX_INSTRUCTION_REF = "refs/heads/develop";
 export const CI_FIX_DEPLOYED_BRANCHES = Object.freeze(["main", "develop", "test"]);
 export const CI_FIX_BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 export const CI_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
+/**
+ * The run ids a request names, which the workflow checks one by one: the
+ * sender takes at most eight. With every workflow served a head can fail
+ * more; the model still reads them all, and the oldest eight go along.
+ */
+export const CI_FIX_MAX_RUN_IDS = 8;
 /** workflow_dispatch takes 65,535 characters of inputs in all. */
 export const CI_FIX_MAX_PATCH_CHARS = 60_000;
 export const CI_FIX_MAX_LOG_CHARS = 60_000;
@@ -1178,7 +1184,7 @@ async function fixFailedCi(pass, chosen) {
     }
     const queuedAt = clock();
     writeDispatchRequest(outbox, {
-      prNumber: pull.number, headSha: sha, runIds: failed.map((run) => run.id), patchGzB64: encoded, now: queuedAt,
+      prNumber: pull.number, headSha: sha, runIds: failed.slice(0, CI_FIX_MAX_RUN_IDS).map((run) => run.id), patchGzB64: encoded, now: queuedAt,
     });
     record(sha, { outcome: "queued", queuedAt, reason, answer: said });
     return { outcome: "queued", pr: pull.number };
@@ -1220,8 +1226,9 @@ async function fixConflict(pass, chosen) {
       addWorktree(repo.mirror, worktree, sha);
       git(["-c", "user.name=ci-fix", "-c", "user.email=ci-fix@localhost", "merge", "--no-commit", "--no-ff", base], { cwd: worktree, allowFailure: true });
       ({ conflicted, unsupported } = conflictedFiles(worktree));
-      // Merged with its base, instructed only by develop's files.
-      isolateInstructionFiles(worktree, CI_FIX_INSTRUCTION_REF, sha);
+      // Merged with its base, instructed only by develop's files: the base's own,
+      // which the merge brought in, go too (review r-20261103-035414-7e52e9).
+      isolateInstructionFiles(worktree, CI_FIX_INSTRUCTION_REF, sha, [base]);
       removeTreeSymlinks(worktree);
     });
     if (conflicted.length === 0 || unsupported) {

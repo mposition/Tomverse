@@ -22,6 +22,7 @@ import {
   CI_FIX_REPORT_ENTRIES,
   CI_FIX_MAX_PATCH_CHARS,
   CI_FIX_MAX_QUEUED_PER_HOUR,
+  CI_FIX_MAX_RUN_IDS,
   answerLine,
   ciFixAbility,
   ciFixReport,
@@ -143,6 +144,8 @@ test("a patch is gzip+base64 and refused when it would not fit in a dispatch", (
   const noise = randomBytes(80_000);
   assert.equal(encodePatch(noise), null);
   assert.ok(CI_FIX_MAX_PATCH_CHARS <= 65_535);
+  // A request names no more runs than the sender takes (review r-20261103-035414-7e52e9).
+  assert.ok(read("../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs").includes(`const MAX_RUN_IDS = ${CI_FIX_MAX_RUN_IDS};`));
 });
 
 test("the ledger forgets heads after 14 days and starts empty", () => {
