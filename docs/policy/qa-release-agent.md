@@ -17,6 +17,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 7 | 2026-10-07 mposition | 버전 5·6의 재기록, 본문 변경 없음 — 버전 6 승인 기록(#2102)이 2026-10-06 22:18 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 병합할 UTC 날짜로 다시 기록함 |
 | 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
 | 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): 릴리스 열차(1절 5항, 8절 12항) — `main:next` 라벨, AEST 출발 시각, `release/train-*` push와 main PR 생성, 기본 꺼진 `QA_RELEASE_TRAIN_ENABLED` |
+| 7 (버전 유지) | 2026-11-03 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): CI 자동 수정은 예외 없이 모든 열린 PR을 고침 — workflow·action 파일도, PR당 시도 상한도 없음(8절 3항). 레인의 제외 목록은 그대로 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
@@ -188,9 +189,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      **이것이 전부입니다**(운영자 결정 2026-10-23 "최소한의 장치만": revert로 되돌릴 수 없는 것과 Agent가 자기 게이트를 넓힐 수
      있는 것만 남김). 나머지 `.github/**`(감사 기록 등), `scripts/**`, 저장소 루트 설정, `package.json`·lock 파일, 다른 기능의
      정책·UI 계약 문서는 되돌릴 수 있는 코드로 보고 레인이 병합합니다 — PR의 CI가 이미 그 내용으로 돌았습니다. CI 자동 수정은
-     모델이 쓰는 변경이므로 이전의 넓은 경계(`.github/**`, `scripts/**`, 루트 파일, package 파일, 계약 문서)를 그대로 둡니다
-     (`lib/prCiAutoFixGuardCore.ts`). 예외는 하나입니다: develop으로 가는 Dependabot PR(`dependabot/**`, 작성자 `dependabot[bot]`)의 수정은 루트의 앱
-     빌드·계측 설정(`next.config.ts|mjs|js`, `sentry.client|server|edge.config.ts`, `instrumentation.ts`, `instrumentation-client.ts`)만 고칠 수 있습니다(운영자 결정 2026-10-26).
+     예외 없이 모든 열린 PR의 CI를 고칩니다(운영자 결정 2026-11-03, workflow·action 파일 포함, `lib/prCiAutoFixGuardCore.ts`). 자동 수정이 게이트 파일을 고친 PR도 이 목록에 따라 레인이 병합하지 않고 사람에게 남깁니다.
      같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
    - 변경 경로에 이 Agent 자신의 파일(부록 A, 판정은 PR base의 목록으로).
    - 이 Agent의 테이블(`AgentDigestItem`, `QaRelease`로 시작하는 테이블)을 이름 대는 migration. 판정은 변경된
