@@ -12,7 +12,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  listMarketingPostsOutcomeUnknown,
   MARKETING_RECONCILE_ACTIONS,
+  MARKETING_RECONCILE_WINDOW_MS,
   recordMarketingPostFailed,
   recordMarketingPostOutcomeReconciled,
   recordMarketingPostOutcomeUnknown,
@@ -595,4 +597,38 @@ test("a reconcile refuses a non-HTTPS URL or a free-text code, and runs serializ
     }),
     (error) => error instanceof MarketingStoreRefusedError,
   );
+});
+
+test("the unknown list is the last seven days, newest first, bounded, with the attempt", async () => {
+  type FindManyArgs = { where: Record<string, unknown>; orderBy: unknown; take: number };
+  let args: FindManyArgs | null = null;
+  const database = {
+    async $queryRaw() {
+      return [{ now: NOW }];
+    },
+    marketingPost: {
+      findMany: async (input: FindManyArgs) => {
+        args = input;
+        return [
+          { id: "a", historyVersion: 3, providerRequestKey: "k1", publishAttempt: 2, externalPostId: "z1", channel: { externalAccountRef: "acct" } },
+          // A row the read cannot ask about is dropped, not passed on.
+          { id: "b", historyVersion: 1, providerRequestKey: null, publishAttempt: 1, externalPostId: null, channel: { externalAccountRef: "acct" } },
+        ];
+      },
+    },
+  };
+  const rows = await listMarketingPostsOutcomeUnknown(asTransaction(database), 500);
+  assert.deepEqual(rows, [
+    { id: "a", historyVersion: 3, requestKey: "k1", publishAttempt: 2, externalPostId: "z1", externalAccountRef: "acct" },
+  ]);
+  const where = (args as unknown as FindManyArgs).where;
+  assert.equal(where.status, "outcome_unknown");
+  assert.equal(where.publishedAt, null);
+  assert.deepEqual(where.outcomeUnknownAt, { gte: new Date(NOW.getTime() - MARKETING_RECONCILE_WINDOW_MS) });
+  assert.deepEqual(where.providerRequestKey, { not: null });
+  assert.deepEqual(where.channel, { externalAccountRef: { not: null } });
+  assert.deepEqual((args as unknown as FindManyArgs).orderBy, [{ outcomeUnknownAt: "desc" }, { id: "asc" }]);
+  assert.equal((args as unknown as FindManyArgs).take, 50);
+  assert.equal(MARKETING_RECONCILE_WINDOW_MS, 7 * 24 * 60 * 60 * 1000);
+  assert.deepEqual(await listMarketingPostsOutcomeUnknown(asTransaction(database), 0), []);
 });
