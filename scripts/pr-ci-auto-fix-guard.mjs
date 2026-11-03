@@ -30,6 +30,8 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const pages = JSON.parse(readFileSync(commitsPath, "utf8"));
   const commits = Array.isArray(pages) ? pages.flat() : [];
   verdict = judgePrCiAutoFixTarget({
+    headBranch: String(pr.head?.ref ?? ""),
+    baseBranch: String(pr.base?.ref ?? ""),
     sameRepository: pr.head?.repo?.full_name === pr.base?.repo?.full_name,
     commitMessages: commits.map((c) => String(c.commit?.message ?? "")),
     commitCount: pr.commits,

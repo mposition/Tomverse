@@ -96,7 +96,8 @@ test("two conflicts in one file are each replaced, the text between them kept", 
 });
 
 test("a conflict counts its own attempts, and its commit names the base it merged", () => {
-  const target = (extra) => judgePrCiAutoFixTarget({ sameRepository: true, commitMessages: ["work"], commitCount: 1, ...extra });
+  const target = (extra) => judgePrCiAutoFixTarget({ headBranch: "claude/to-develop/x", baseBranch: "main", sameRepository: true,
+    commitMessages: ["work"], commitCount: 1, ...extra });
   assert.deepEqual(target({ kind: "conflict" }), { push: true });
   const twice = [`${PR_CI_AUTO_FIX_CONFLICT_PREFIX}one`, `${PR_CI_AUTO_FIX_CONFLICT_PREFIX}two`];
   assert.deepEqual(target({ kind: "conflict", commitMessages: twice, commitCount: 2 }), { push: false, reasons: ["attempts_exhausted"] });

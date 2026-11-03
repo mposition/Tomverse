@@ -512,8 +512,10 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 **예외 없이 고칩니다(운영자 결정 2026-11-03).** 대상은 열린 PR 전부입니다(main으로 가는 PR, release·hotfix·Dependabot
 브랜치, draft 포함). 모델은 테스트, 삭제, `scripts/`, 정책·계약 문서, `package.json`·lock, 루트 설정, `.github/`의
 다른 파일까지 고칠 수 있고 크기 상한도 없습니다. 병합은 그대로 사람이 합니다. merge lane은 Dependabot 브랜치와
-게이트 경로를 건드린 PR을 병합하지 않습니다. 남은 제한은 넷입니다.
+게이트 경로를 건드린 PR을 병합하지 않습니다. 남은 제한은 다섯입니다.
 - `.github/workflows/**`, `.github/actions/**`: 저장소 비밀값을 이름으로 꺼낼 수 있는 파일이라 고치지 않습니다.
+- head가 배포되는 브랜치(`main`, `develop`, `test`)인 PR(예: main→develop back-merge): 그 브랜치에 push하면 사람이
+  승인하지 않은 병합·배포가 되므로 push하지 않습니다. 브랜치 이름은 평범한 ref(`A-Za-z0-9._/-`)여야 합니다.
 - PR당 종류별 시도 2회.
 - binary 변경, fork 브랜치(push할 수 없음).
 - 전송 상한 60KB(`workflow_dispatch` 입력 한계).

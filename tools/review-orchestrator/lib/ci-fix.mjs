@@ -19,6 +19,9 @@ import { reviewerEnv } from "./env.mjs";
 // GitHub token at most: the model runs as the same account.
 
 export const CI_FIX_DEPENDABOT_BRANCH = /^dependabot\/[A-Za-z0-9._/-]+$/;
+/** lib/prCiAutoFixGuardCore.ts PR_CI_AUTO_FIX_DEPLOYED_BRANCHES and _BRANCH_NAME; the workflow judges with those. */
+export const CI_FIX_DEPLOYED_BRANCHES = Object.freeze(["main", "develop", "test"]);
+export const CI_FIX_BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 export const CI_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
 export const CI_FIX_MAX_ATTEMPTS = 2;
 /** workflow_dispatch takes 65,535 characters of inputs in all. */
@@ -333,24 +336,31 @@ export function ciFixReport(ledger, now) {
 
 /**
  * Every open pull request the workflow can push to, oldest first: any base,
- * any branch, drafts too (owner 2026-11-03). A fork's branch takes no push.
+ * any branch, drafts too (owner 2026-11-03). A fork's branch takes no push,
+ * nor a branch that deploys (a back-merge's head).
  */
 export function servedPulls(pulls) {
   return pulls
     .filter((pull) => pull?.head?.repo?.full_name === pull?.base?.repo?.full_name
-      && typeof pull.head?.ref === "string" && typeof pull.base?.ref === "string" && /^[0-9a-f]{40}$/.test(pull.head?.sha ?? ""))
+      && CI_FIX_BRANCH_NAME.test(pull.head?.ref ?? "") && CI_FIX_BRANCH_NAME.test(pull.base?.ref ?? "")
+      && !CI_FIX_DEPLOYED_BRANCHES.includes(pull.head.ref) && /^[0-9a-f]{40}$/.test(pull.head?.sha ?? ""))
     .sort((a, b) => a.number - b.number);
 }
 
-/** Every open pull request, all pages: a pass picks the oldest, which the first page may not hold. */
-export async function openPulls(github, maxPages = 5) {
+/**
+ * Every open pull request, all pages: a pass picks the oldest, which the
+ * first page may not hold. Past maxPages the rest is read on no pass, so it
+ * says so.
+ */
+export async function openPulls(github, maxPages = 20, log = () => {}) {
   const pulls = [];
   for (let page = 1; page <= maxPages; page += 1) {
     const list = await github.json(`/pulls?state=open&per_page=100&page=${page}`);
-    if (!Array.isArray(list)) break;
+    if (!Array.isArray(list)) return pulls;
     pulls.push(...list);
-    if (list.length < 100) break;
+    if (list.length < 100) return pulls;
   }
+  log(`ci-fix: more than ${maxPages * 100} open pull requests; only the first ${maxPages * 100} are read`);
   return pulls;
 }
 
@@ -392,7 +402,10 @@ Find the root cause and apply the smallest correct fix. You may edit any file --
 End your answer with exactly one line: "RESULT: fixed" when you changed files to fix it, "RESULT: transient" for an infrastructure failure with no code cause, "RESULT: outside_rules" when the fix needs a file these rules forbid, or "RESULT: not_found" when you could not find the cause.`;
 }
 
-const IMAGE_PIN = new RegExp(`([a-z0-9][a-z0-9.-]*\\.[a-z]{2,}(?::\\d{1,5})?)/([a-z0-9][a-z0-9._/-]*):([A-Za-z0-9_][A-Za-z0-9._-]{0,127})@sha256:${CI_FIX_DIGEST_PLACEHOLDER}\\b`, "g");
+// host/repository:tag as the OCI distribution grammar spells them: repository
+// components joined by single separators, so no `..` reaches the request URL.
+const COMPONENT = "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
+const IMAGE_PIN = new RegExp(`([a-z0-9][a-z0-9.-]*\\.[a-z]{2,}(?::\\d{1,5})?)/(${COMPONENT}(?:/${COMPONENT})*):([A-Za-z0-9_][A-Za-z0-9._-]{0,127})@sha256:${CI_FIX_DIGEST_PLACEHOLDER}\\b`, "g");
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const MANIFEST_TYPES = [
   "application/vnd.oci.image.index.v1+json",
@@ -427,10 +440,14 @@ export async function registryDigest(host, repository, tag, { fetchImpl = fetch 
  * registry did not answer with a digest.
  */
 export async function resolveImageDigests(worktree, paths, { fetchImpl = fetch } = {}) {
+  const root = realpathSync(worktree);
   for (const path of paths) {
+    const full = join(root, path);
+    // A regular file inside the checkout only: never a link a write would follow, nor a path through one.
     let text;
     try {
-      text = readFileSync(join(worktree, path), "utf8");
+      if (!lstatSync(full).isFile() || !realpathSync(dirname(full)).startsWith(root)) continue;
+      text = readFileSync(full, "utf8");
     } catch {
       continue;
     }
@@ -444,7 +461,7 @@ export async function resolveImageDigests(worktree, paths, { fetchImpl = fetch }
       if (!digest) return "digest_unresolved";
       text = text.replace(pin, () => `${host}/${repository}:${tag}@${digest}`);
     }
-    writeFileSync(join(worktree, path), text);
+    writeFileSync(full, text);
   }
   return null;
 }
@@ -1001,7 +1018,7 @@ export async function runCiFix({
     writeJsonAtomic(ledgerPath, ledger);
   };
 
-  const pulls = await openPulls(github);
+  const pulls = await openPulls(github, undefined, log);
   await settleSentFixes({ ledger, pulls, github, record, now });
 
   const queuedLastHour = Object.values(ledger).filter((entry) => now - (entry?.queuedAt ?? -Infinity) < 3_600_000).length;

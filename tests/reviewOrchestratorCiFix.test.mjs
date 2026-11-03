@@ -15,6 +15,8 @@ import { gunzipSync } from "node:zlib";
 import {
   CI_FIX_AGAIN_LABEL,
   CI_FIX_ANSWER_CHARS,
+  CI_FIX_BRANCH_NAME,
+  CI_FIX_DEPLOYED_BRANCHES,
   CI_FIX_IMAGE_REGISTRIES,
   CI_FIX_INSTALL_TIMEOUT_MS,
   CI_FIX_REPORT_ENTRIES,
@@ -49,7 +51,7 @@ import {
   servedPulls,
   writeDispatchRequest,
 } from "../tools/review-orchestrator/lib/ci-fix.mjs";
-import { judgePrCiAutoFixDiff } from "../lib/prCiAutoFixGuardCore.ts";
+import { PR_CI_AUTO_FIX_BRANCH_NAME, PR_CI_AUTO_FIX_DEPLOYED_BRANCHES, judgePrCiAutoFixDiff } from "../lib/prCiAutoFixGuardCore.ts";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import {
   DISPATCH_TOKEN_ENV as PASS_DISPATCH_ENV, READ_TOKEN_ENV, ciFixSettings, knownSecrets, within,
@@ -92,8 +94,17 @@ test("every open same-repository pull request is served, any base, branch or dra
     // A fork's branch takes no push, and a head that is not a commit id is not one GitHub reported.
     pull(6, "claude/to-develop/fork", SHA_A, { head: { ref: "claude/to-develop/fork", sha: SHA_A, repo: { full_name: "fork/r" } } }),
     pull(8, "claude/to-develop/bad-sha", "abc"),
+    // A branch that deploys is never pushed to: a back-merge of main into develop.
+    pull(13, "main", SHA_A),
+    { ...pull(14, "develop", SHA_A), base: { ref: "main", repo: { full_name: "o/r" } } },
+    pull(15, "x$(id)", SHA_A),
   ]);
   assert.deepEqual(served.map((p) => p.number), [3, 4, 5, 7, 9, 10, 11, 12]);
+});
+
+test("the proposer skips exactly the branches the workflow's guard refuses", () => {
+  assert.deepEqual([...CI_FIX_DEPLOYED_BRANCHES], [...PR_CI_AUTO_FIX_DEPLOYED_BRANCHES]);
+  assert.equal(CI_FIX_BRANCH_NAME.source, PR_CI_AUTO_FIX_BRANCH_NAME.source);
 });
 
 test("open pull requests are read across pages", async () => {
@@ -106,6 +117,11 @@ test("open pull requests are read across pages", async () => {
   const pulls = await openPulls(github);
   assert.equal(pulls.length, 107);
   assert.deepEqual(asked, ["/pulls?state=open&per_page=100&page=1", "/pulls?state=open&per_page=100&page=2"]);
+  // Past the cap it says so rather than drop the rest unseen.
+  const lines = [];
+  const full = { json: async () => Array.from({ length: 100 }, (_, i) => pull(i + 1, "x", SHA_A)) };
+  assert.equal((await openPulls(full, 2, (line) => lines.push(line))).length, 200);
+  assert.deepEqual(lines, ["ci-fix: more than 200 open pull requests; only the first 200 are read"]);
 });
 
 test("a head is ready only when every workflow's newest run has finished", () => {
@@ -189,8 +205,9 @@ test("a placeholder digest is filled from an allowed registry's manifest header"
     assert.equal(await resolveImageDigests(dir, [file], { fetchImpl }), null);
     assert.equal(asked.length, 0);
 
-    // Another registry, or a placeholder naming no host, is refused before any request.
+    // Another registry, a placeholder naming no host, or a repository path with a dot segment is refused before any request.
     for (const text of ["FROM docker.io/library/node:22@sha256:RESOLVE\n", "FROM node:22@sha256:RESOLVE\n",
+      "FROM mcr.microsoft.com/../x:1@sha256:RESOLVE\n", "FROM mcr.microsoft.com/a//b:1@sha256:RESOLVE\n",
       "FROM mcr.microsoft.com/a:1@sha256:RESOLVE\nFROM ghcr.io/b/c:2@sha256:RESOLVE\n"]) {
       write(text);
       asked.length = 0;
@@ -211,6 +228,31 @@ test("a placeholder digest is filled from an allowed registry's manifest header"
       assert.equal(await resolveImageDigests(dir, [file], { fetchImpl: answer }), "digest_unresolved");
     }
     assert.equal(await registryDigest("mcr.microsoft.com", "playwright", "v1", { fetchImpl: async () => manifestResponse(DIGEST) }), DIGEST);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a placeholder behind a link is neither read nor written", { skip: process.platform === "win32" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ci-fix-digest-link-"));
+  try {
+    const outside = join(dir, "outside.Dockerfile");
+    writeFileSync(outside, "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
+    const tree = join(dir, "tree");
+    mkdirSync(tree);
+    symlinkSync(outside, join(tree, "Dockerfile"));
+    mkdirSync(join(dir, "elsewhere"));
+    writeFileSync(join(dir, "elsewhere", "D"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
+    symlinkSync(join(dir, "elsewhere"), join(tree, "via"));
+    let asked = 0;
+    const fetchImpl = async () => {
+      asked += 1;
+      return { ok: true, headers: new Map([["docker-content-digest", `sha256:${"a".repeat(64)}`]]) };
+    };
+    assert.equal(await resolveImageDigests(tree, ["Dockerfile", "via/D"], { fetchImpl }), null);
+    assert.equal(asked, 0);
+    assert.equal(readFileSync(outside, "utf8"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
+    assert.equal(readFileSync(join(dir, "elsewhere", "D"), "utf8"), "FROM mcr.microsoft.com/p:v1@sha256:RESOLVE\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -24,7 +24,9 @@
 # Every input is untrusted: whoever can dispatch can send any patch. So:
 # - target: a trusted checkout of the default branch re-decides everything
 #   from GitHub's own records -- the pull request is open at exactly head_sha,
-#   its branch is in this repository, every commit was read and it has fewer
+#   its branch is in this repository and is not one that deploys (main,
+#   develop, test: a push there would be an unapproved merge), both branch
+#   names are plain refs, every commit was read and it has fewer
 #   than two auto-fix commits of the kind, and each named run is a failed
 #   pull_request run on that same commit and the newest run of its workflow
 #   there; a conflict is one GitHub shows, and base_sha is on the pull
@@ -141,6 +143,8 @@ jobs:
             # a commit of the pull request's base branch, not one from anywhere else.
             [ "$(jq -r .mergeable /tmp/pr.json)" = false ] || refuse "GitHub does not show the pull request conflicting."
             base_ref=$(jq -r .base.ref /tmp/pr.json)
+            # A plain ref name before it reaches a URL (the guard below checks both names again).
+            [[ "$base_ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]] || refuse "The base branch name is not a plain ref."
             relation=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${base_ref}" --jq .status) || refuse "base_sha cannot be compared with ${base_ref}."
             [ "$relation" = identical ] || [ "$relation" = ahead ] || refuse "base_sha is not on ${base_ref}."
           else

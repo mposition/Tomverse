@@ -67,11 +67,23 @@ test("a fix to a gate path is pushed so CI runs, and the merge lane still leaves
 });
 
 test("every same-repository pull request is served, whatever its base, branch or draft state, at most twice per kind", () => {
-  const base = { sameRepository: true, commitMessages: ["feat: a"], commitCount: 1 };
+  const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", sameRepository: true, commitMessages: ["feat: a"], commitCount: 1 };
   assert.deepEqual(judgePrCiAutoFixTarget(base), { push: true });
   assert.deepEqual(judgePrCiAutoFixTarget({ ...base, kind: "conflict" }), { push: true });
+  for (const [headBranch, baseBranch] of [["dependabot/cargo/rustls-0.23.46", "main"], ["release/train-20261103-0800", "main"],
+    ["hotfix/x", "main"], ["feature/anything", "develop"]]) {
+    assert.deepEqual(judgePrCiAutoFixTarget({ ...base, headBranch, baseBranch }), { push: true }, headBranch);
+  }
   for (const [change, reason] of [
     [{ sameRepository: false }, "fork"],
+    // A push to a branch that deploys is a merge and a deployment no person approved (review r-20261103-025639-fa099b).
+    [{ headBranch: "develop", baseBranch: "main" }, "deployed_branch"],
+    [{ headBranch: "main", baseBranch: "develop" }, "deployed_branch"],
+    [{ headBranch: "test" }, "deployed_branch"],
+    // Names the workflow writes to its outputs and into a URL are plain refs.
+    [{ headBranch: "x$(id)" }, "branch_name"],
+    [{ baseBranch: "main\nserved=true" }, "branch_name"],
+    [{ headBranch: "" }, "branch_name"],
     [{ commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`, "feat: b", `${PR_CI_AUTO_FIX_COMMIT_PREFIX}c`], commitCount: 3 }, "attempts_exhausted"],
     [{ kind: "conflict", commitMessages: [`${PR_CI_AUTO_FIX_CONFLICT_PREFIX}a`, `${PR_CI_AUTO_FIX_CONFLICT_PREFIX}b`], commitCount: 2 }, "attempts_exhausted"],
     // A list cut short by paging cannot prove the attempt count.

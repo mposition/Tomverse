@@ -8,8 +8,9 @@
  * included. A person still merges: the merge lane leaves Dependabot branches
  * and gate paths to the operator. Refused are only what a push cannot take
  * back or the dispatch cannot carry: a change to the workflows or actions
- * (they read the repository's secrets by name), a binary, an empty diff, a
- * fork's branch, and more than PR_CI_AUTO_FIX_MAX_ATTEMPTS tries of a kind.
+ * (they read the repository's secrets by name), a push to a branch that
+ * deploys, a binary, an empty diff, a fork's branch, and more than
+ * PR_CI_AUTO_FIX_MAX_ATTEMPTS tries of a kind.
  * Pure: the caller passes `git diff --name-status` and `--numstat` output.
  */
 
@@ -25,6 +26,14 @@ const CONFLICT_MARKER = /^(<{7}|>{7})( |$)|^={7}$|^\|{7}( |$)/m;
 
 /** The workflows and actions: what CI runs with the repository's secrets. */
 export const PR_CI_AUTO_FIX_SECRET_PATH = /^\.github\/(workflows|actions)\//;
+/**
+ * Branches that deploy (docs/ops/dev-test-lanes.md): a push there is a merge
+ * and a deployment no person approved, so a pull request whose head is one
+ * (a back-merge of main into develop) is never pushed to.
+ */
+export const PR_CI_AUTO_FIX_DEPLOYED_BRANCHES: readonly string[] = ["main", "develop", "test"];
+/** A branch name the workflow passes on: a plain ref, nothing a shell or an output file reads otherwise. */
+export const PR_CI_AUTO_FIX_BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 
 export type PrCiAutoFixVerdict = { push: true } | { push: false; reasons: string[] };
 
@@ -48,6 +57,8 @@ export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: strin
 
 /** Whether a pull request's branch can take the auto-fix's push, and still has attempts left. */
 export function judgePrCiAutoFixTarget(input: {
+  headBranch: string;
+  baseBranch: string;
   sameRepository: boolean;
   commitMessages: readonly string[];
   /** The number of commits GitHub says the pull request has; the attempt count is only trusted when every one was read. */
@@ -57,6 +68,8 @@ export function judgePrCiAutoFixTarget(input: {
 }): PrCiAutoFixVerdict {
   const reasons: string[] = [];
   if (!input.sameRepository) reasons.push("fork");
+  if (PR_CI_AUTO_FIX_DEPLOYED_BRANCHES.includes(input.headBranch)) reasons.push("deployed_branch");
+  if (![input.headBranch, input.baseBranch].every((name) => PR_CI_AUTO_FIX_BRANCH_NAME.test(name ?? ""))) reasons.push("branch_name");
   if (!Number.isInteger(input.commitCount) || input.commitMessages.length !== input.commitCount) reasons.push("commits_incomplete");
   const prefix = input.kind === "conflict" ? PR_CI_AUTO_FIX_CONFLICT_PREFIX : PR_CI_AUTO_FIX_COMMIT_PREFIX;
   const attempts = input.commitMessages.filter((m) => m.startsWith(prefix)).length;
