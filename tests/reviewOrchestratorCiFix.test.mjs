@@ -1258,7 +1258,7 @@ test("a Dependabot pass reads the installed packages and queues only the applica
   }
 });
 
-test("a draft into main is tried like any other, against main's instruction files", async () => {
+test("a draft into main is tried like any other, against develop's instruction files, never its base's", async () => {
   // #3085: a Dependabot cargo draft into main (owner 2026-11-03).
   const f = passFixture({ branch: "dependabot/cargo/rustls-0.23.46", author: "dependabot[bot]", base: "main", draft: true });
   try {
@@ -1271,7 +1271,8 @@ test("a draft into main is tried like any other, against main's instruction file
     const quota = async () => ({ state: "available", remainingPercent: 80 });
     const result = await runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0, quota, claude, clock: () => 1, log: () => {} });
     assert.deepEqual(result, { outcome: "queued", pr: 41 });
-    assert.deepEqual(seen, ["main instructions\n"], "the branch's instruction files are its base's");
+    // Review r-20261103-034611-998356: a base can be any branch, so only develop instructs the model.
+    assert.deepEqual(seen, ["develop instructions\n"], "the instruction files are develop's, not main's");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

@@ -20,6 +20,13 @@ import { reviewerEnv } from "./env.mjs";
 
 export const CI_FIX_DEPENDABOT_BRANCH = /^dependabot\/[A-Za-z0-9._/-]+$/;
 /** lib/prCiAutoFixGuardCore.ts PR_CI_AUTO_FIX_DEPLOYED_BRANCHES and _BRANCH_NAME; the workflow judges with those. */
+/**
+ * Where the model's instruction and CLI settings files come from: develop,
+ * which only a person's merge moves. Never the pull request's base, which can
+ * be any branch now (owner 2026-11-03): a branch someone pushed could carry a
+ * settings hook that runs as this account (review r-20261103-034611-998356).
+ */
+export const CI_FIX_INSTRUCTION_REF = "refs/heads/develop";
 export const CI_FIX_DEPLOYED_BRANCHES = Object.freeze(["main", "develop", "test"]);
 export const CI_FIX_BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 export const CI_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
@@ -1112,8 +1119,8 @@ async function fixFailedCi(pass, chosen) {
     await withLock(mirrorLock, () => {
       ensureMirror(repo);
       addWorktree(repo.mirror, worktree, sha);
-      // The branch must not instruct the model: its instruction files are its base's.
-      isolateInstructionFiles(worktree, `refs/heads/${pull.base.ref}`, sha);
+      // The branch must not instruct the model: its instruction files are develop's.
+      isolateInstructionFiles(worktree, CI_FIX_INSTRUCTION_REF, sha);
       links = removeTreeSymlinks(worktree);
     });
     // A fix is made against the packages' API, which only the installed
@@ -1213,8 +1220,8 @@ async function fixConflict(pass, chosen) {
       addWorktree(repo.mirror, worktree, sha);
       git(["-c", "user.name=ci-fix", "-c", "user.email=ci-fix@localhost", "merge", "--no-commit", "--no-ff", base], { cwd: worktree, allowFailure: true });
       ({ conflicted, unsupported } = conflictedFiles(worktree));
-      // The branch must not instruct the model: its instruction files are its base's.
-      isolateInstructionFiles(worktree, base, sha);
+      // Merged with its base, instructed only by develop's files.
+      isolateInstructionFiles(worktree, CI_FIX_INSTRUCTION_REF, sha);
       removeTreeSymlinks(worktree);
     });
     if (conflicted.length === 0 || unsupported) {

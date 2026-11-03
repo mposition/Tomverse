@@ -101,7 +101,7 @@ if (mode === "target" && args.length === 1) {
   }
 } else {
   console.error(
-    "usage: pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> [ci|conflict] | diff <checkout-dir> | conflict <checkout-dir> <resolution.json>",
+    "usage: pr-ci-auto-fix-guard.mjs target <pr.json> | diff <checkout-dir> | conflict <checkout-dir> <resolution.json>",
   );
   process.exit(2);
 }

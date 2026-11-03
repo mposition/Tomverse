@@ -174,6 +174,13 @@ function conflictFixture({ base = "develop" } = {}) {
   writeFileSync(join(source, "lib", "other.js"), "export {};\n");
   sh(source, "add", "-A");
   sh(source, "commit", "-q", "-m", "base");
+  // The model's instruction files always come from develop, whatever the base.
+  if (base !== "develop") {
+    sh(source, "checkout", "-q", "-b", "develop");
+    writeFileSync(join(source, "CLAUDE.md"), "develop instructions\n");
+    sh(source, "commit", "-q", "-am", "develop instructions");
+    sh(source, "checkout", "-q", base);
+  }
   sh(source, "checkout", "-q", "-b", "claude/to-develop/both");
   writeFileSync(join(source, "lib", "app.js"), "const a = 1;\nconst b = 2 + branch;\nconst c = 3;\n");
   sh(source, "commit", "-q", "-am", "branch change");
@@ -482,7 +489,7 @@ test("the guard writes through no link: a conflicted path that is one is refused
   }
 });
 
-test("a pull request into main is merged with main, against main's instruction files", async () => {
+test("a pull request into main is merged with main, against develop's instruction files", async () => {
   const f = conflictFixture({ base: "main" });
   const env = { GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0: process.env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: process.env.GIT_CONFIG_VALUE_0 };
   Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.autocrlf", GIT_CONFIG_VALUE_0: "false" });
@@ -494,7 +501,7 @@ test("a pull request into main is merged with main, against main's instruction f
       return { ok: true, timedOut: false, tail: "RESULT: fixed" };
     });
     assert.deepEqual(result, { outcome: "queued", pr: 51 });
-    assert.equal(seen[0].instructions, "main instructions\n");
+    assert.equal(seen[0].instructions, "develop instructions\n", "the base merges; only develop instructs");
     assert.equal(seen[0].prompt, conflictPrompt({ files: ["lib/app.js"], base: "main" }));
     assert.match(seen[0].prompt, /with main merged in/);
     const request = normaliseDispatchRequest(JSON.parse(readFileSync(join(f.outbox, `${f.head}.json`), "utf8")), `${f.head}.json`);
