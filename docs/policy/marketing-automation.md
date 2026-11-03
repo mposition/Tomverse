@@ -52,7 +52,7 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 | O3 | 졸업 조건(계정·표면 단위, 모두 충족): 첫 실행 성공 후 7일(서버가 기록한 불변 시각) · 승인 3건 이상 · 수정률 1/3 이하(분모는 사람이 승인한 글, 반려는 분모에 넣지 않음) · 운영자 확인 1회 |
 | O4 | 자율 모드의 문구는 **승인된 템플릿·문구 라이브러리만**. 새 문구는 모드와 무관하게 승인 큐 |
 | O5 | 게시 인프라는 Zernio, 교체 가능한 어댑터 뒤. 계정·게시·오류 상태의 원장은 Tomverse DB |
-| O6 | 연결 계정 9개: LinkedIn 1, X 1, Facebook 1, YouTube 1, TikTok 1, Instagram 3(en/ko/zh-Hant), Threads 1(zh-Hant). RedNote 1은 수동 |
+| O6 | 연결 계정 11개: LinkedIn 1, X 1, Facebook 3(en/ko/zh-Hant), YouTube 1, TikTok 1, Instagram 3(en/ko/zh-Hant), Threads 1(zh-Hant). RedNote 1은 수동 |
 | O7 | 언어: ko·en·zh-Hant(대만). RedNote만 zh-Hans(해외 화교) |
 | O8 | 중국 본토는 출시·마케팅 대상이 아니다(법률 검토). "중국에서 사용 가능" 류 주장 금지 |
 | O9 | 120일 성과 측정과 채널별 직접 연동 판단 기준 6개(§11) |
@@ -264,14 +264,19 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 ### 7.6 채널별 초기값
 | 채널·계정 | 언어 | 필수 형식 | 일/주 상한 |
 |---|---|---|---|
-| LinkedIn | en(ko 보조) | 텍스트(±이미지) | 1/3 |
-| X | en | 텍스트(±이미지) | 2/10 |
-| Facebook | en + zh-Hant | 텍스트(±이미지) | 1/5 |
+| LinkedIn | en(ko 보조) | 이미지·영상+텍스트 | 1/3 |
+| X | en | 이미지·영상+텍스트 | 2/10 |
+| Facebook ×3 | en / ko / zh-Hant | 이미지·영상+텍스트 | 1/5 |
 | YouTube | en(제목·설명·자막 ko·zh-Hant) | 영상 | 1/2 |
 | TikTok | en(자막 3언어) | 영상 | 1/5 |
 | Instagram ×3 | en / ko / zh-Hant | 이미지·영상 | 1/4 |
-| Threads | zh-Hant | 텍스트(±이미지) | 2/7 |
+| Threads | zh-Hant | 이미지·영상+텍스트 | 2/7 |
 | RedNote | zh-Hans | 이미지+텍스트 | 수동 |
+
+모든 채널의 게시물은 이미지나 영상을 하나 이상 싣는다. 글만 있는 게시물은 없다(운영자 결정 2026-11-03).
+이미지가 최소선이고 영상이 가장 좋다. 생성기는 맞는 승인 자산이 없는 계정의 초안을 만들지 않고, 초안 접수는 자산이 없는
+초안을 받지 않으며, 게시기는 미디어가 없는 게시물을 보내기 전에 `media_required`로 실패시킨다(YouTube는 영상 하나가 아니면
+`youtube_needs_one_video`). YouTube·TikTok 계정에는 영상 자산만, 나머지 계정에는 저장된 이미지·영상 자산만 초안 후보가 된다.
 
 상한은 코드 상수이고 운영 설정으로는 **내리기만** 한다. 게시 시간창은 대상 시장 현지 09:00~20:00,
 같은 claim은 계정당 14일 안에 다시 쓰지 않는다(생성기 입력과 프롬프트로 지킨다. 4.2 참조).
