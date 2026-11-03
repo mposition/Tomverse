@@ -7,6 +7,7 @@ import {
 } from "@/lib/marketingDraftIntakeCore";
 import {
   MARKETING_A5_MAX_DRAFTS_PER_CALL,
+  marketingA5AssetsFor,
   marketingA5Messages,
   marketingDraftSubmissionBody,
   marketingGeneratorContextSchema,
@@ -24,8 +25,8 @@ const context = marketingGeneratorContextSchema.parse({
     { id: "claim_ko_only", type: "feature", statementKey: "ko", locales: ["ko"], validUntil: "2099-12-31", gate: null, planMeaning: null },
   ],
   assets: [
-    { id: "asset_hero", allowedChannels: ["linkedin"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31" },
-    { id: "asset_tiktok", allowedChannels: ["tiktok"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31" },
+    { id: "asset_hero", allowedChannels: ["linkedin"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+    { id: "asset_tiktok", allowedChannels: ["tiktok"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
   ],
   brief: { topicIds: ["topic_compare"], claimIds: [], sourceDigests: [] },
   marketIntel: null,
@@ -213,6 +214,22 @@ test("a draft that carries no image or video is dropped, on every platform", () 
   assert.deepEqual(drafts.map((draft) => draft.logicalDraftId), ["c0-d1"]);
 });
 
+test("an account is offered only media the publisher can send there: a stored file, and a video where only video goes", () => {
+  const mixed = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [
+      { id: "media-card", allowedChannels: ["linkedin", "youtube"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+      { id: "media-short", allowedChannels: ["youtube"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+      // A hand-kept registry entry has no stored file and never resolves.
+      { id: "asset_hand_kept", allowedChannels: ["linkedin"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31" },
+    ],
+  });
+  assert.deepEqual(marketingA5AssetsFor(mixed, "linkedin", "en").map((asset) => asset.id), ["media-card"]);
+  assert.deepEqual(marketingA5AssetsFor(mixed, "youtube", "en").map((asset) => asset.id), ["media-short"]);
+  assert.deepEqual(marketingA5AssetsFor(mixed, "tiktok", "en"), []);
+  assert.deepEqual(marketingA5AssetsFor(mixed, "linkedin", "ko"), []);
+});
+
 test("one malformed draft costs that draft, not the good ones beside it", () => {
   const withoutAssets = proposal();
   delete withoutAssets.assetIds;
@@ -272,13 +289,25 @@ test("an asset reaches the model as its kind and what it shows in this locale, a
       validUntil: "2099-12-31",
     },
   ]);
-  // A context from an app deployed before kinds were sent still reads, with no kind or description.
-  const [, older] = marketingA5Messages(context, SCOPE);
-  assert.deepEqual(JSON.parse(older.content).assets[0], {
+  // An image with no alt text in this locale still reaches the model, with no description.
+  const [, plain] = marketingA5Messages(context, SCOPE);
+  assert.deepEqual(JSON.parse(plain.content).assets[0], {
     id: "asset_hero",
-    kind: null,
+    kind: "image",
     description: null,
     claimIds: [],
     validUntil: "2099-12-31",
   });
+  // An asset that names no kind -- a hand-kept registry entry, or a context from an
+  // app deployed before kinds were sent -- has no file the publisher can send, so it
+  // is not offered at all.
+  const older = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: context.assets.map((asset) => {
+      const withoutKind = { ...asset };
+      delete withoutKind.kind;
+      return withoutKind;
+    }),
+  });
+  assert.deepEqual(JSON.parse(marketingA5Messages(older, SCOPE)[1].content).assets, []);
 });

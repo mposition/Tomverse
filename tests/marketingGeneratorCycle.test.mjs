@@ -32,7 +32,7 @@ const context = {
   ],
   claims: [],
   assets: [
-    { id: "media-card-en", allowedChannels: ["linkedin", "x"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31" },
+    { id: "media-card-en", allowedChannels: ["linkedin", "x"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
   ],
   brief: null,
   marketIntel: null,

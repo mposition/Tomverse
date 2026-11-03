@@ -130,18 +130,29 @@ function briefFor(brief: unknown): { readonly topics: string[]; readonly claimId
   return read.success ? { topics: read.data.topicIds, claimIds: read.data.claimIds } : null;
 }
 
+/** Platforms whose post is a video and nothing else. */
+const VIDEO_ONLY_CHANNELS: ReadonlySet<string> = new Set(["youtube", "tiktok"]);
+
 /**
  * The assets one account may carry in one locale: those its platform is
- * allowed and that have alt text in that locale. The prompt offers these, an
- * answer may name only these, and an account with none is not asked at all,
- * since every post carries an image or a video (owner decision 2026-11-03).
+ * allowed, that have alt text in that locale, and that the publisher can send
+ * there -- a stored file (a hand-kept registry entry names no kind and never
+ * resolves), and a video on a platform that takes only video. The prompt
+ * offers these, an answer may name only these, and an account with none is not
+ * asked at all, since every post carries an image or a video (owner decision
+ * 2026-11-03).
  */
 export function marketingA5AssetsFor(
   context: MarketingGeneratorContextAnswer,
   channel: string,
   locale: string,
 ): MarketingGeneratorContextAnswer["assets"] {
-  return context.assets.filter((asset) => asset.allowedChannels.includes(channel) && asset.altLocales.includes(locale));
+  return context.assets.filter(
+    (asset) =>
+      asset.allowedChannels.includes(channel) &&
+      asset.altLocales.includes(locale) &&
+      (asset.kind === "video" || (asset.kind === "image" && !VIDEO_ONLY_CHANNELS.has(channel))),
+  );
 }
 
 /**
