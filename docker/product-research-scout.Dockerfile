@@ -13,7 +13,7 @@
 # lifecycle scripts; the probe needs none of them.
 # tests/productResearchScoutDockerfile.test.mjs holds this file to that.
 
-FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
 
 WORKDIR /probe
 
