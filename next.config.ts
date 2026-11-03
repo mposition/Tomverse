@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 // A relative path, not the `@/` alias: this file is loaded by Next's config
 // loader rather than by the app's module graph, so tsconfig paths do not
 // apply here.
