@@ -202,8 +202,13 @@ function realParents(root, rel) {
   }
 }
 
-export function isolateInstructionFiles(worktree, base, head) {
-  const roots = new Set(lsTree(worktree, head).filter((e) => isInstructionPath(e.path)).map((e) => instructionRoot(e.path)));
+/**
+ * Replaces the instruction files of `head` -- and of each commit in `merged`,
+ * whose tree was merged into the worktree -- with `base`'s.
+ */
+export function isolateInstructionFiles(worktree, base, head, merged = []) {
+  const roots = new Set([head, ...merged].flatMap((commit) => lsTree(worktree, commit))
+    .filter((e) => isInstructionPath(e.path)).map((e) => instructionRoot(e.path)));
   for (const root of roots) rmSync(join(worktree, root), { recursive: true, force: true });
   for (const entry of lsTree(worktree, base)) {
     if (!isInstructionPath(entry.path)) continue;

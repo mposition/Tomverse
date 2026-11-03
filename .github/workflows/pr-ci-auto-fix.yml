@@ -1,9 +1,9 @@
-# CI auto-fix for develop pull requests from agent sessions: the publish half.
+# CI auto-fix for every pull request: the publish half.
 #
 # The model runs on the AMUX server, not here. tools/review-orchestrator/bin/
-# pr-ci-auto-fix.mjs polls for a ready develop pull request from
-# claude/to-develop/**, codex/to-develop/** or dependabot/** (owner
-# 2026-10-26) whose required CI failed, asks
+# pr-ci-auto-fix.mjs polls for an open pull request of this repository, any
+# base and any branch, drafts too (owner 2026-11-03: "fix CI with no
+# exception"), whose CI failed, asks
 # the Claude Code CLI signed in to the server's subscription for the smallest
 # fix, and leaves the patch in an outbox; bin/pr-ci-auto-fix-sender.mjs, under
 # its own account with the only token that can dispatch, dispatches this
@@ -14,35 +14,30 @@
 # permission). Off unless the repository variable PR_AUTO_FIX_ENABLED is
 # exactly "true". workflow_dispatch runs from the default branch.
 #
-# Conflicts with develop (owner 2026-10-27, kind "conflict"): the server
-# merges develop into the branch, the model resolves the markers, and the
-# resolution -- the lines that replace each conflict (a lockfile does not fit
-# whole), or a file's contents -- comes here with the develop commit it was
-# made against. Off unless PR_AUTO_FIX_CONFLICTS_ENABLED is
+# Conflicts with the base (owner 2026-10-27, kind "conflict"): the server
+# merges the pull request's base into the branch, the model resolves the
+# markers, and the resolution -- the lines that replace each conflict (a
+# lockfile does not fit whole), or a file's contents -- comes here with the
+# base commit it was made against. Off unless PR_AUTO_FIX_CONFLICTS_ENABLED is
 # exactly "true" as well.
 #
 # Every input is untrusted: whoever can dispatch can send any patch. So:
 # - target: a trusted checkout of the default branch re-decides everything
-#   from GitHub's own records -- the pull request is open at exactly head_sha
-#   and served (same repository, develop base, not draft unless a conflict,
-#   served branch, every commit read, fewer than two auto-fix commits of the
-#   kind), and each named run is a failed pull_request run of a required
-#   workflow on that same commit and the newest run of that workflow there; a
-#   conflict is one GitHub shows, and base_sha is on develop.
+#   from GitHub's own records -- the pull request is open at exactly head_sha,
+#   its branch is in this repository and is not one that deploys (main,
+#   develop, test: a push there would be an unapproved merge), both branch
+#   names are plain refs, and each named run is a failed
+#   pull_request run on that same commit and the newest run of its workflow
+#   there; a conflict is one GitHub shows, and base_sha is on the pull
+#   request's base branch.
 # - publish: a fresh runner with a trusted checkout runs
 #   scripts/pr-ci-auto-fix-guard.mjs against the patch applied to a clean
-#   checkout of the pull request (no gate path -- the merge lane's own list --,
-#   no test file, no deletion, no binary, at most 400 changed lines; a root
-#   file only for a Dependabot head, and only the app's own build and
-#   instrumentation config; with PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED exactly
-#   "true", a Dependabot head's existing test file outside the merge lane's
-#   policy tests, its tests, assertions and literals all kept and nothing
-#   skipped), or, for a conflict, merges base_sha itself and
-#   judges the resolution (exactly the conflicted files, regular files on
-#   both sides and written through no link, everything git merged outside the
-#   conflicts kept in order, no marker left, no line on none of a conflict's
-#   sides in a gate path, at most 40 such lines in all), and
-#   only then pushes with GH_AUTOMATION_PAT, leased to the commit judged. It
+#   checkout of the pull request (any file, workflows included -- owner
+#   2026-11-03; no binary), or, for
+#   a conflict, merges base_sha itself and judges the resolution (exactly the
+#   conflicted files, regular files on both sides and written through no
+#   link, everything git merged outside the conflicts kept in order, no marker
+#   left), and only then pushes with GH_AUTOMATION_PAT, leased to the commit judged. It
 #   installs and runs nothing from the pull request.
 #
 # Why both jobs carry `continue-on-error`: a dispatch runs on main, so this
@@ -79,12 +74,12 @@ on:
         required: true
         type: string
       kind:
-        description: ci (a failed CI) or conflict (a conflict with develop)
+        description: ci (a failed CI) or conflict (a conflict with the base branch)
         required: false
         type: string
         default: ci
       base_sha:
-        description: For a conflict, the develop commit the resolution merges
+        description: For a conflict, the base branch commit the resolution merges
         required: false
         type: string
         default: ""
@@ -115,6 +110,7 @@ jobs:
     outputs:
       served: ${{ steps.decide.outputs.served }}
       head_branch: ${{ steps.decide.outputs.head_branch }}
+      base_branch: ${{ steps.decide.outputs.base_branch }}
       workflows: ${{ steps.decide.outputs.workflows }}
     steps:
       - name: Trusted checkout of the default branch
@@ -153,10 +149,13 @@ jobs:
           workflows=""
           if [ "$KIND" = conflict ]; then
             # A conflict GitHub shows (null: still computing, so not shown), and
-            # a develop commit, not one from anywhere else.
+            # a commit of the pull request's base branch, not one from anywhere else.
             [ "$(jq -r .mergeable /tmp/pr.json)" = false ] || refuse "GitHub does not show the pull request conflicting."
-            relation=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...develop" --jq .status) || refuse "base_sha cannot be compared with develop."
-            [ "$relation" = identical ] || [ "$relation" = ahead ] || refuse "base_sha is not on develop."
+            base_ref=$(jq -r .base.ref /tmp/pr.json)
+            # A plain ref name before it reaches a URL (the guard below checks both names again).
+            [[ "$base_ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]] || refuse "The base branch name is not a plain ref."
+            relation=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${base_ref}" --jq .status) || refuse "base_sha cannot be compared with ${base_ref}."
+            [ "$relation" = identical ] || [ "$relation" = ahead ] || refuse "base_sha is not on ${base_ref}."
           else
             # Every pull_request run on this commit: a named run must be the newest
             # of its workflow here, or a later green run (reopen, ready for
@@ -166,20 +165,21 @@ jobs:
               gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" > /tmp/run.json
               ok=$(jq -r --arg sha "$HEAD_SHA" --arg repo "$GITHUB_REPOSITORY" '
                 .head_sha == $sha and .conclusion == "failure" and .event == "pull_request"
-                and .head_repository.full_name == $repo
-                and (.name | IN("PR Fast Gate", "Admin Console E2E", "Credit Finance DB Integration", "Orchestrator Rust"))' /tmp/run.json)
-              [ "$ok" = true ] || refuse "Run ${id} is not a failed required pull_request run on ${HEAD_SHA}."
+                and .head_repository.full_name == $repo' /tmp/run.json)
+              [ "$ok" = true ] || refuse "Run ${id} is not a failed pull_request run on ${HEAD_SHA}."
               newest=$(jq -r --argjson wf "$(jq .workflow_id /tmp/run.json)" \
                 '[.[].workflow_runs[] | select(.workflow_id == $wf)] | max_by(.id) | .id // empty' /tmp/head-runs.json)
               [ "$newest" = "$id" ] || refuse "Run ${id} is not the newest run of its workflow on ${HEAD_SHA}."
-              workflows="${workflows:+${workflows}, }$(jq -r .name /tmp/run.json)"
+              # Any workflow is served now, so its name is the repository's text: kept to
+              # plain characters, it can carry no newline into GITHUB_OUTPUT.
+              workflows="${workflows:+${workflows}, }$(jq -r '.name | gsub("[^A-Za-z0-9 ._()/-]"; "")' /tmp/run.json)"
             done
           fi
-          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits?per_page=100" > /tmp/commits.json
-          node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json /tmp/commits.json "$KIND" || refuse "The pull request is not served."
+          node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json || refuse "The pull request is not served."
           {
             echo "served=true"
             echo "head_branch=$(jq -r .head.ref /tmp/pr.json)"
+            echo "base_branch=$(jq -r .base.ref /tmp/pr.json)"
             echo "workflows=${workflows}"
           } >> "$GITHUB_OUTPUT"
 
@@ -202,7 +202,7 @@ jobs:
           ref: ${{ inputs.head_sha }}
           path: pr
           persist-credentials: false
-          # A conflict merges develop here: the whole history, so base_sha is present.
+          # A conflict merges the base here: the whole history, so base_sha is present.
           fetch-depth: ${{ inputs.kind == 'conflict' && '0' || '1' }}
 
       - name: Setup Node.js
@@ -216,29 +216,24 @@ jobs:
         if: inputs.kind != 'conflict'
         env:
           PATCH_GZ_B64: ${{ inputs.patch_gz_b64 }}
-          # From the target job's read of the pull request, not from the dispatch.
-          HEAD_BRANCH: ${{ needs.target.outputs.head_branch }}
-          # Off unless exactly "true" (owner 2026-11-01): a Dependabot fix may edit a test's call to a changed API.
-          PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED: ${{ vars.PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED }}
         run: |
           mkdir -p patch
-          # A bounded read: the guard's 400-line cap is far below this.
+          # A bounded read: a dispatch carries at most 60 KB of gzip, far below this.
           printf '%s' "$PATCH_GZ_B64" | base64 -d | gunzip | head -c 4000000 > patch/fix.patch
           if [ ! -s patch/fix.patch ]; then echo "The patch is empty."; echo "push=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           git -C pr apply --binary --index "$GITHUB_WORKSPACE/patch/fix.patch"
-          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs diff pr "$HEAD_BRANCH"; then
+          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs diff pr; then
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
             echo "push=false" >> "$GITHUB_OUTPUT"
             git -C pr diff --cached --stat HEAD >> "$GITHUB_STEP_SUMMARY" || true
           fi
 
-      - name: Merge develop and judge the resolution
+      - name: Merge the base and judge the resolution
         id: resolve
         if: inputs.kind == 'conflict'
         env:
           PATCH_GZ_B64: ${{ inputs.patch_gz_b64 }}
-          HEAD_BRANCH: ${{ needs.target.outputs.head_branch }}
         run: |
           mkdir -p patch
           printf '%s' "$PATCH_GZ_B64" | base64 -d | gunzip | head -c 8000000 > patch/resolution.json
@@ -249,7 +244,7 @@ jobs:
             echo "push=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs conflict pr "$GITHUB_WORKSPACE/patch/resolution.json" "$HEAD_BRANCH"; then
+          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs conflict pr "$GITHUB_WORKSPACE/patch/resolution.json"; then
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
             echo "push=false" >> "$GITHUB_OUTPUT"
@@ -262,13 +257,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
           HEAD_BRANCH: ${{ needs.target.outputs.head_branch }}
+          BASE_BRANCH: ${{ needs.target.outputs.base_branch }}
           WORKFLOWS: ${{ needs.target.outputs.workflows }}
         run: |
+          # The target job judged these names; the push checks them again itself.
+          plain='^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$'
+          [[ "$HEAD_BRANCH" =~ $plain && "$BASE_BRANCH" =~ $plain ]] || { echo "A branch name is not a plain ref."; exit 1; }
+          case "$HEAD_BRANCH" in main|develop|test) echo "$HEAD_BRANCH deploys; nothing is pushed to it."; exit 1 ;; esac
           git config user.name "tomverse-pr-auto-fix"
           git config user.email "pr-auto-fix@users.noreply.github.com"
           if [ "$KIND" = conflict ]; then
             [ -z "$(git diff --name-only --diff-filter=U)" ] || { echo "Conflicts are left."; exit 1; }
-            git commit -q -m "auto-fix(conflict): merge develop into #${PR_NUMBER}" -m "develop at ${BASE_SHA}. Resolved by Claude Code on the AMUX server; judged and published by .github/workflows/pr-ci-auto-fix.yml."
+            git commit -q -m "auto-fix(conflict): merge ${BASE_BRANCH} into #${PR_NUMBER}" -m "${BASE_BRANCH} at ${BASE_SHA}. Resolved by Claude Code on the AMUX server; judged and published by .github/workflows/pr-ci-auto-fix.yml."
           else
             git add --all
             git commit -q -m "auto-fix(ci): ${WORKFLOWS} failure on #${PR_NUMBER}" -m "Runs ${RUN_IDS}. Proposed by Claude Code on the AMUX server; published by .github/workflows/pr-ci-auto-fix.yml."

@@ -62,7 +62,7 @@ const isAbsolute = (path) => typeof path === "string" && path.startsWith("/") &&
 /**
  * The request rebuilt from an outbox file, or null when it is not one. A
  * failed-CI fix names its failed runs; a conflict resolution (`kind:
- * "conflict"`) names the develop commit to merge and no runs.
+ * "conflict"`) names the base commit to merge and no runs.
  */
 export function normaliseDispatchRequest(value, fileName) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
