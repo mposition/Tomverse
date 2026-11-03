@@ -3,14 +3,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AMUX_IDEA_OWNER_CLOSABLE_STATE, AMUX_IDEA_OWNER_CLOSE_LIMIT,
+import { AMUX_IDEA_OWNER_CLOSE_LIMIT, amuxIdeaOwnerClosableState,
   inspectAmuxIdeaOwnerClose } from "../lib/amux/ideaOwnerCloseCore.ts";
 
 const read = (path) => readFileSync(join(process.cwd(), path), "utf8");
 const id = (n) => `idea-${String(n).padStart(8, "0")}`;
 
 test("an owner close names 1 to 20 distinct ideas and a 3 to 500 character reason", () => {
-  assert.equal(AMUX_IDEA_OWNER_CLOSABLE_STATE, "awaiting_owner");
+  assert.deepEqual([
+    amuxIdeaOwnerClosableState("awaiting_owner", "session"),
+    amuxIdeaOwnerClosableState("awaiting_owner", "owner"),
+    amuxIdeaOwnerClosableState("submitted", "owner"),
+    amuxIdeaOwnerClosableState("submitted", "session"),
+    amuxIdeaOwnerClosableState("analyzing", "owner"),
+    amuxIdeaOwnerClosableState("analyzing", "session"),
+    amuxIdeaOwnerClosableState("completed", "owner"),
+    amuxIdeaOwnerClosableState("cancelled", "owner"),
+  ], [true, true, true, false, true, false, false, false],
+  "after analysis, or an owner idea before an execution approval; session ideas run on their own");
   assert.equal(AMUX_IDEA_OWNER_CLOSE_LIMIT, 20);
   assert.deepEqual(inspectAmuxIdeaOwnerClose({ ideaIds: [id(1), id(2)], reason: "Not needed" }),
     { ok: true, ideaIds: [id(1), id(2)], reason: "Not needed" });
@@ -50,8 +60,10 @@ test("a close writes through the audit writer only, and leaves retention clocks 
   assert.ok(service.indexOf("takeAuditChainLock(tx)") < service.indexOf("FOR UPDATE"),
     "the audit lock is taken before the row lock, as every other writer does");
   assert.equal((service.match(/\.update(Many)?\(/g) ?? []).length, 1, "one write besides the audit");
-  assert.ok(service.includes(`data: { state: "cancelled", cancelledAt: now },`),
-    "the raw purge clock and unit expiry are not moved");
+  assert.ok(service.includes(`data: { state: "cancelled", cancelledAt: now, rawPurgeAfter },`),
+    "unit expiry is not moved; the body purge time only moves up to the close");
+  assert.ok(service.includes("idea.rawPurgeAfter && idea.rawPurgeAfter <= now"),
+    "a purge time already due is kept, never pushed later");
   assert.equal(/\.delete(Many)?\(/.test(service), false, "nothing deleted");
   // A unit decision re-checks the idea under the same lock (see the DB suite).
   const store = read("lib/amux/ideaUnitDecisionStore.ts");

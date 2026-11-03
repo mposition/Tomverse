@@ -4,7 +4,7 @@ import { adminProductAnalyticsMessages } from "@/lib/adminMessages/productAnalyt
 import type { ProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
 
 const eventGroups = [
-  { label: "acquisition", events: ["landing_view", "cta_start_click", "pricing_view", "plan_selected"] },
+  { label: "acquisition", events: ["landing_view", "marketing_touch", "cta_start_click", "pricing_view", "plan_selected"] },
   { label: "onboarding", events: ["onboarding_shown", "onboarding_completed", "onboarding_skipped"] },
   { label: "modelFinder", events: ["model_finder_viewed", "model_finder_started", "model_finder_completed", "model_finder_skipped", "recommended_model_accepted", "recommended_model_changed", "advanced_model_suggested", "advanced_model_selected"] },
   { label: "modelPicker", events: ["model_picker_opened", "model_picker_all_opened", "model_picker_search_used", "model_picker_filter_opened", "model_picker_filter_applied", "model_picker_selection_confirmed", "model_picker_max_reached", "model_picker_abandoned"] },
@@ -44,6 +44,7 @@ export async function AdminProductAnalyticsPanel({
   const counts = new Map(
     dashboard.funnel30d.map((item) => [item.eventName, item.count])
   );
+  const touch = dashboard.touchAttribution30d;
 
   return (
     <section className="flex flex-col gap-4">
@@ -92,6 +93,44 @@ export async function AdminProductAnalyticsPanel({
           <Metric label={m.checkout} value={`${dashboard.reviewFunnel30d.checkoutRate.toFixed(1)}%`} detail={m.afterReview(dashboard.reviewFunnel30d.checkoutUsers)} />
           <Metric label={m.purchase} value={`${dashboard.reviewFunnel30d.purchaseRate.toFixed(1)}%`} detail={m.afterReview(dashboard.reviewFunnel30d.purchaseUsers)} />
         </div>
+      </div>
+
+      <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6" data-testid="marketing-touch-attribution">
+        <h3 className="text-xl font-black text-white">{m.touchTitle}</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-200">{m.touchEvidence}</p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500">{m.touchWindow}</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          {([
+            [m.touchSignups, touch.signups],
+            [m.touchGuestLeads, touch.guestLeads],
+          ] as const).flatMap(([label, summary]) => [
+            <Metric key={`${label}-a`} label={label} value={String(summary.attributed)} detail={m.touchAttributed} />,
+            <Metric key={`${label}-u`} label={label} value={String(summary.unattributed)} detail={m.touchUnattributed} />,
+            <Metric
+              key={`${label}-o`}
+              label={label}
+              value={summary.unobserved === null ? "-" : String(summary.unobserved)}
+              detail={summary.unobserved === null ? `${m.touchUnobserved} · ${m.touchUnobservedUnknown}` : m.touchUnobserved}
+            />,
+          ])}
+        </div>
+        <p className="mt-5 text-xs font-bold uppercase tracking-[0.14em] text-zinc-300">{m.touchChannels}</p>
+        {touch.signups.channels.length ? (
+          <div className="mt-3 space-y-2">
+            {touch.signups.channels.map((channel) => (
+              <div key={`${channel.source}:${channel.medium}:${channel.campaign}:${channel.content ?? ""}`} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+                <div className="flex justify-between gap-3 text-xs">
+                  <span className="font-bold text-zinc-200">{channel.campaign}</span>
+                  <span className="font-black text-white">{channel.count}</span>
+                </div>
+                <p className="mt-1 truncate text-xs text-zinc-500">
+                  {channel.source} / {channel.medium}{channel.content ? ` / ${channel.content}` : ""}
+                  {channel.held ? ` · ${m.touchHeld}` : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : <p className="mt-3 text-sm text-zinc-500">{m.touchNoChannels}</p>}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">

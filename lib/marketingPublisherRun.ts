@@ -29,6 +29,7 @@ import {
 import { resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
 import {
   claimDueMarketingPost,
+  evaluateMarketingAutoPause,
   listMarketingPostsAwaitingVerification,
   listMarketingPostsPublishingPastLease,
   listPublishingMarketingChannels,
@@ -677,6 +678,13 @@ export const marketingPublisherOperations = (client: PrismaClient) => ({
     runBoundedMarketingTransaction(client, (tx) =>
       listMarketingPostsAwaitingVerification(tx, limit),
     ),
+
+  /**
+   * Whether this account has crossed a limit that stops it (S4a, policy 8.3),
+   * decided and applied in one bounded transaction before anything is claimed.
+   */
+  evaluateAutoPause: (channelId: string) =>
+    runBoundedMarketingTransaction(client, (tx) => evaluateMarketingAutoPause(tx, { channelId })),
 
   claim: (input: {
     readonly channelId: string;

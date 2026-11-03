@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
 import { POST } from "@/app/api/internal/marketing-drafts/route";
+import { MARKETING_ANALYSIS_ENABLED_KEY } from "@/lib/marketingAnalysisCore";
 import { MARKETING_DRAFTS_KEY } from "@/lib/marketingAutomationAccess";
 import {
   marketingDraftProvenance,
@@ -34,7 +35,10 @@ const SECRET = "g".repeat(48);
 // Two of these are the asset registry's read of the approved stored assets and
 // the registry version (lib/marketingAssetStore.ts, 2026-10-31).
 const PINNED_PLAIN_CALLS = 23;
-const PINNED_WITH_IDS_CALLS = 23;
+// The rejected draft also asks whether the account crossed a stop limit (S4a):
+// the chain lock, the channel lock, the window marker, the removal count, the
+// attempt read and the draft read.
+const PINNED_WITH_IDS_CALLS = 29;
 const DIGEST = "b".repeat(64);
 
 const OPEN: MarketingDraftIntakeReaders = {
@@ -607,6 +611,12 @@ test("a call that is missing, another run's, not a draft's or still open is refu
   const row = await approvedChannel();
   await draftsOn();
   await ledgerCall(2, { run: "run-2" });
+  // The ledger reserves a brief call only while the analysis switch is on.
+  await prisma.appSetting.upsert({
+    where: { key: MARKETING_ANALYSIS_ENABLED_KEY },
+    create: { key: MARKETING_ANALYSIS_ENABLED_KEY, value: "true" },
+    update: { value: "true" },
+  });
   await ledgerCall(3, { purpose: "brief" });
   await ledgerCall(4, { until: "dispatched" });
   await ledgerCall(5, { until: "reserved" });
@@ -711,4 +721,41 @@ test("without a long enough secret the route refuses everything", async () => {
     if (previous === undefined) delete process.env.MARKETING_GENERATOR_SUBMIT_SECRET;
     else process.env.MARKETING_GENERATOR_SUBMIT_SECRET = previous;
   }
+});
+
+// ---------------------------------------------------------------------------
+// S4a: the account stops in the transaction of the draft that crosses the limit
+// ---------------------------------------------------------------------------
+
+test("the seventh rejected draft stops the account in its own transaction; the sixth does not", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const rejectedDraft = (n: number) =>
+    draft(row.id, { logicalDraftId: `rejected-${n}`, claimIds: ["claim_1"] });
+  for (let n = 1; n <= 6; n += 1) {
+    if (n > 1) await ledgerCall(n);
+    const outcome = await intake(rejectedDraft(n), OPEN, {
+      submissionId: `sub-reject-${n}`,
+      llmCallRequestKeys: [callKey(n)],
+    });
+    assert.equal(outcome.status, "rejected");
+  }
+  assert.equal((await prisma.marketingChannel.findUniqueOrThrow({ where: { id: row.id } })).status, "approval_mode");
+
+  await ledgerCall(7);
+  const seventh = await intake(rejectedDraft(7), OPEN, {
+    submissionId: "sub-reject-7",
+    llmCallRequestKeys: [callKey(7)],
+  });
+  assert.equal(seventh.status, "rejected");
+  const stopped = await prisma.marketingChannel.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(stopped.status, "paused");
+  assert.equal(stopped.pauseReasonCode, "guard_rejection_rate");
+  // The trigger, not the caller, recorded where the pause came from.
+  assert.equal(stopped.pausedFromMode, "approval_mode");
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: "marketing_account.auto_paused", targetId: row.id },
+    select: { metadata: true },
+  });
+  assert.equal(audits.length, 1);
 });

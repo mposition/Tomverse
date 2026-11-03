@@ -1823,10 +1823,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingStore.ts",
     table: "MarketingPost",
-    tableMentions: 30,
+    tableMentions: 32,
     writeVerbs: 13,
     reason:
-      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable. S2f production webhook apply adds three mentions and one verb: one constant SELECT ... FOR UPDATE that locks the post the event names by provider post id and channel, and the two audit targetType names of its applied and refused entries. Its one write is a delegate updateMany bound by id, status and history version that appends a webhook_event entry and may move a live post to removed_by_platform. The decision-refusal writer adds one more mention, its audit targetType name; it reads and writes no post. S3h1 adds the twenty-fourth mention: the retention writer's table union and target type, which name the table a deleted row came from for its audit entry; the delete itself is the delegate's deleteMany by id. S3h2 adds six more, three in each of its two writers for posts that are kept: the audit targetType, the audit metadata's table and the retention_run report's table, which together say which table a purged content or a compacted history belongs to. Neither writer has raw SQL naming the table: the content purge is a delegate updateMany by id setting envelope to NULL and contentPurgedAt, and the compaction is a delegate updateMany by id and history version writing the summarised history.",
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable. S2f production webhook apply adds three mentions and one verb: one constant SELECT ... FOR UPDATE that locks the post the event names by provider post id and channel, and the two audit targetType names of its applied and refused entries. Its one write is a delegate updateMany bound by id, status and history version that appends a webhook_event entry and may move a live post to removed_by_platform. The decision-refusal writer adds one more mention, its audit targetType name; it reads and writes no post. S3h1 adds the twenty-fourth mention: the retention writer's table union and target type, which name the table a deleted row came from for its audit entry; the delete itself is the delegate's deleteMany by id. S3h2 adds six more, three in each of its two writers for posts that are kept: the audit targetType, the audit metadata's table and the retention_run report's table, which together say which table a purged content or a compacted history belongs to. Neither writer has raw SQL naming the table: the content purge is a delegate updateMany by id setting envelope to NULL and contentPurgedAt, and the compaction is a delegate updateMany by id and history version writing the summarised history. S4a adds the thirty-first and thirty-second mentions: one constant SELECT over the account's attempt history that reads the newest publish attempts for the automatic stop, and its check that no retention summary reaches into their span; it names no write.",
   },
   {
     path: "lib/marketingStore.ts",
@@ -3267,6 +3267,22 @@ export const RAW_SQL_ALLOWLIST = [
       "Replaces the ledger's shape check in one ALTER so a catalog model's 1.05M window and a reservation up to the monthly cap ceiling fit. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
   },
   {
+    path: "prisma/migrations/20261102090000_marketing_llm_comment_triage_purpose/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "Replaces the ledger's shape check in one ALTER to add the comment monitor's comment_triage purpose; every other predicate is unchanged. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261102110000_marketing_llm_seo_purpose/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "Replaces the ledger's shape check in one ALTER to add the SEO code agent's seo purpose; every other predicate is unchanged. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
+  },
+  {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     table: "MarketingLlmCall",
     tableMentions: 5,
@@ -3873,10 +3889,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "d6221d28efaf5d8a47e79d0587a56b8e093863937c460ea94b8692fa339bfca2",
+    sha256: "102cf9de0f1bb1c294b1336d3c8aaa86c08f95479694f69192fceb9c068dc6f9",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. A function replacement compares the read prosrc digest with the header's prior digest and, when the header names one, the digest of the body the migration writes; the query is unchanged. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
@@ -4882,6 +4898,12 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 // a publication nobody approved.
 
 export const RETENTION_SETTING_ALLOWLIST = [
+  {
+    path: "lib/marketingAnalysisStore.ts",
+    count: 2,
+    reason:
+      "The marketing analysis table's retention writer (2026-11-01): it imports the setting's constant and sets it for its own transaction before deleting analyses past their 24 months, each with its audit row. The table's delete trigger is the shared marketing_retained_row_delete_is_bounded, which still refuses a row before its retentionUntil.",
+  },
   {
     path: "lib/marketingLlmBudgetStore.ts",
     count: 2,

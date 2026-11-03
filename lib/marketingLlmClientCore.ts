@@ -22,8 +22,9 @@
  *   (docs/policy/marketing-automation.md §5; agent foundation rule 7).
  * - **The request is the allowlist.** `model`, `messages`,
  *   `max_completion_tokens` (the pin's output cap), the ledger's service tier,
- *   `store: false`, `stream: false` -- nothing else, and the tier is the one the
- *   reservation's config snapshot records.
+ *   `store: false`, `stream: false` -- nothing else but, when the caller gives
+ *   one, the strict JSON schema its answer must follow -- and the tier is the
+ *   one the reservation's config snapshot records.
  * - **Web search is one more allowlist.** A call given `webSearch` goes to the
  *   Responses API with one `web_search` tool limited to the given domains and
  *   `max_tool_calls` set to the pin's search cap, which the reservation priced;
@@ -59,10 +60,16 @@ export type MarketingLlmMessage = { readonly role: "system" | "user"; readonly c
 /** The JSON schema a web-search answer is held to (`text.format`, strict). */
 export type MarketingLlmAnswerSchema = { readonly name: string; readonly schema: Readonly<Record<string, unknown>> };
 
-/** The provider request body: the allowlist of S3 plan §2, and nothing else. */
+/**
+ * The provider request body: the allowlist of S3 plan §2, and nothing else --
+ * except, when the caller gives one, the JSON schema the answer must follow
+ * (strict Structured Outputs), as a web-search call may carry. It changes
+ * the shape of the answer, not what the call can cost.
+ */
 export function marketingLlmRequestBody(
   pin: MarketingLlmPricePin,
   messages: readonly MarketingLlmMessage[],
+  answerSchema?: MarketingLlmAnswerSchema,
 ): Record<string, unknown> {
   return {
     model: pin.model,
@@ -71,6 +78,14 @@ export function marketingLlmRequestBody(
     service_tier: MARKETING_LLM_SERVICE_TIER,
     store: false,
     stream: false,
+    ...(answerSchema
+      ? {
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: answerSchema.name, strict: true, schema: answerSchema.schema },
+          },
+        }
+      : {}),
   };
 }
 
@@ -170,6 +185,12 @@ export type MarketingLlmCallOutcome =
       readonly content: string;
       /** The URLs the provider cited in a web-search answer; empty for a text call. */
       readonly citations: readonly string[];
+      /**
+       * Only the URLs the answer text itself cites (`url_citation`), a subset of
+       * `citations`, which also holds every page the searches returned or opened.
+       * Absent for a text call.
+       */
+      readonly answerCitations?: readonly string[];
       /** Always `settled`: any other ledger state comes back as `retained`. */
       readonly ledgerState: "settled";
     }
@@ -205,6 +226,7 @@ export type MarketingLlmCallOutcome =
 type ProviderAnswer = {
   readonly content: string;
   readonly citations: readonly string[];
+  readonly answerCitations?: readonly string[];
   readonly model: string;
   readonly serviceTier: string;
   readonly inputTokens: number;
@@ -286,7 +308,10 @@ export function readMarketingLlmWebSearchAnswer(body: unknown): ProviderAnswer |
   ) {
     return null;
   }
-  return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
+  const served = () => {
+    return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
+  };
+  return { ...served(), answerCitations: [...new Set(cited)] } as ProviderAnswer;
 }
 
 const ok = (answer: MarketingLlmBudgetAnswer) => answer.httpStatus === 200 && answer.body.status === "ok";
@@ -301,6 +326,8 @@ export async function runMarketingLlmCall(
     readonly messages: readonly MarketingLlmMessage[];
     /** Run the provider's web search, limited to these domains (the web-search profile). */
     readonly webSearch?: { readonly allowedDomains: readonly string[]; readonly answerSchema?: MarketingLlmAnswerSchema };
+    /** The JSON schema a text call's answer must follow (strict Structured Outputs). */
+    readonly answerSchema?: MarketingLlmAnswerSchema;
     /** A key chosen by the caller makes a resend of the same call the same reservation. */
     readonly requestKey?: string;
   },
@@ -395,7 +422,7 @@ export async function runMarketingLlmCall(
       body: JSON.stringify(
         input.webSearch
           ? marketingLlmWebSearchRequestBody(input.pin, input.messages, input.webSearch.allowedDomains, input.webSearch.answerSchema)
-          : marketingLlmRequestBody(input.pin, input.messages),
+          : marketingLlmRequestBody(input.pin, input.messages, input.answerSchema),
       ),
       signal: deps.signal,
     });
@@ -422,7 +449,15 @@ export async function runMarketingLlmCall(
     if (!ok(settled)) return stop("settle", callId, answer.content);
     const ledgerState = String(settled.body.state ?? "");
     if (ledgerState !== "settled") return { status: "retained", callId, requestKey, ledgerState };
-    return { status: "answered", callId, requestKey, content: answer.content, citations: answer.citations, ledgerState: "settled" };
+    return {
+      status: "answered",
+      callId,
+      requestKey,
+      content: answer.content,
+      citations: answer.citations,
+      ...(answer.answerCitations ? { answerCitations: answer.answerCitations } : {}),
+      ledgerState: "settled",
+    };
   } catch {
     return stop("settle", callId, answer.content);
   }

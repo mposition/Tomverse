@@ -33,7 +33,7 @@ export const localeLaunchPolicy = {
   zh: {
     marketTier: "limited",
     paidMarketingEligible: false,
-    selectorLabel: "中文 · 有限支持",
+    selectorLabel: "简体中文 · 有限支持",
     badge: "中文有限支持",
     // UX-020. This once claimed Chinese covered the product interface when it
     // did not, and was corrected to say the chat interface and model finder
@@ -47,6 +47,20 @@ export const localeLaunchPolicy = {
       "中文目前涵盖营销页面、价格、聊天界面、模型推荐，以及已翻译的法律和帮助页面。尚未审校的少数页面仍会显示英文。客户支持仅提供书面渠道，回复可能使用英语，暂不提供电话支持。",
     englishFallbackNotice:
       "此页面尚无经过审核的中文版本，因此当前显示英文内容。完整支持请使用 English 或 한국어。",
+  },
+  // Traditional Chinese for Taiwan and Hong Kong (owner decision 2026-11-01).
+  // Converted from the Simplified copy, so it covers exactly what `zh` covers
+  // and carries the same limited tier; paid marketing stays off until the
+  // owner decides otherwise.
+  "zh-Hant": {
+    marketTier: "limited",
+    paidMarketingEligible: false,
+    selectorLabel: "繁體中文 · 有限支援",
+    badge: "繁體中文有限支援",
+    scopeNotice:
+      "繁體中文目前涵蓋行銷頁面、價格、聊天介面、模型推薦，以及已翻譯的法律和說明頁面。尚未審閱的少數頁面仍會顯示英文。客戶支援僅提供書面管道，回覆可能使用英文，暫不提供電話支援。",
+    englishFallbackNotice:
+      "此頁面尚無經過審閱的中文版本，因此目前顯示英文內容。完整支援請使用 English 或 한국어。",
   },
   fr: {
     marketTier: "preview",

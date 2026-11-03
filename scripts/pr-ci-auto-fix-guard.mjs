@@ -6,21 +6,39 @@
 //   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs conflict <checkout-dir> <resolution.json> [<head-branch>]
 //
 // `diff` takes the head branch the target job read from GitHub; without it no
-// root file is allowed.
+// root file is allowed. With PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED=true in the
+// environment (the repository variable) a Dependabot head's fix may edit a test
+// file, judged by its patch and by the tests the merge lane leaves to a person,
+// which this reads from its own trusted checkout.
 //
 // `target` reads the pull request and its commits as `gh api --paginate
 // --slurp` returned them; `diff` reads the diff against HEAD of another
 // checkout. `conflict` reads a checkout where the workflow has merged develop
 // and stopped on conflicts, and the proposed resolution ({ files: { path:
-// base64 } }); only when the resolution passes does it write the files there.
+// base64 | { merged: sha256, hunks: lines[][] } } }); only when the resolution
+// passes does it write the files there.
 // The workflow runs this file from a trusted checkout, never from the tree the
 // model or the pull request could change. Prints the verdict as one JSON line
 // and exits 0 to proceed, 1 to stop.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, constants, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { judgePrCiAutoFixConflict, judgePrCiAutoFixDiff, judgePrCiAutoFixTarget } from "../lib/prCiAutoFixGuardCore.ts";
+import { judgePrCiAutoFixConflict, judgePrCiAutoFixDiff, judgePrCiAutoFixTarget, rebuildConflictResolution } from "../lib/prCiAutoFixGuardCore.ts";
+import { isQaReleasePolicyDocument, qaReleasePolicyTestPaths } from "../lib/qaReleaseMergeLanePolicyInputsCore.ts";
+
+/** The tests the merge lane leaves to a person, named in its policy documents in this trusted checkout; null when unread. */
+function trustedPolicyTestPaths() {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  try {
+    const documents = execFileSync("git", ["-C", root, "ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(isQaReleasePolicyDocument);
+    return documents.length === 0 ? null : qaReleasePolicyTestPaths(documents.map((path) => readFileSync(join(root, path), "utf8")));
+  } catch {
+    return null;
+  }
+}
 
 const [mode, ...args] = process.argv.slice(2);
 let verdict;
@@ -44,10 +62,14 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const [checkoutDir, headBranch] = args;
   const git = (gitArgs) => execFileSync("git", ["-C", checkoutDir, ...gitArgs], { encoding: "utf8" });
   git(["add", "--intent-to-add", "--all"]);
+  const dependabotTests = process.env.PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED === "true";
   verdict = judgePrCiAutoFixDiff({
     nameStatus: git(["diff", "--name-status", "-M", "HEAD"]),
     numstat: git(["diff", "--numstat", "-M", "HEAD"]),
     headBranch,
+    dependabotTests,
+    policyTestPaths: dependabotTests ? trustedPolicyTestPaths() : [],
+    patch: dependabotTests ? git(["diff", "-U0", "-M", "--no-color", "--no-ext-diff", "HEAD"]) : undefined,
   });
 } else if (mode === "conflict" && (args.length === 2 || args.length === 3)) {
   const [checkoutDir, resolutionPath, headBranch] = args;
@@ -77,12 +99,21 @@ if (mode === "target" && (args.length === 2 || args.length === 3)) {
   const conflicted = [...stages.keys()].sort();
   const resolution = JSON.parse(readFileSync(resolutionPath, "utf8"));
   const proposed = resolution && typeof resolution.files === "object" && resolution.files !== null ? resolution.files : {};
-  const text = (path) => (typeof proposed[path] === "string" ? Buffer.from(proposed[path], "base64").toString("utf8") : null);
+  // A whole file (base64), or { merged, hunks }: the lines for each conflict,
+  // put back only into the very file the server resolved (its sha256), since
+  // another conflict style would place them differently.
+  const text = (path, merged) => {
+    const entry = proposed[path];
+    if (typeof entry === "string") return Buffer.from(entry, "base64").toString("utf8");
+    if (entry === null || typeof entry !== "object" || merged === null) return null;
+    if (entry.merged !== createHash("sha256").update(merged, "utf8").digest("hex")) return null;
+    return rebuildConflictResolution(merged, entry.hunks);
+  };
   const files = conflicted.map((path) => {
     const ok = regular(path);
     // What git left in the file, markers and all: the resolution keeps its text outside the conflicts.
     const merged = ok && stages.get(path)["2"] && stages.get(path)["3"] ? readFileSync(fullPath(path), "utf8") : null;
-    return { path, regular: ok, merged, resolved: text(path) };
+    return { path, regular: ok, merged, resolved: text(path, merged) };
   });
   verdict = judgePrCiAutoFixConflict({ files, proposed: Object.keys(proposed), headBranch });
   if (verdict.push) {

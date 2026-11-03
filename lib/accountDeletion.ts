@@ -8,9 +8,11 @@ import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { requestGa4UserIdDeletion } from "@/lib/ga4UserDeletion";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
+import { revokeAppleAccountTokens } from "@/lib/appleAccountDeletion";
 import {
   deleteSupportTriageDataForAccount,
   flushSupportTriageDeletionAudit,
@@ -160,11 +162,13 @@ export async function deleteTomverseAccount(
 
   if (!user) return { deleted: false as const };
 
+  await revokeAppleAccountTokens(user.id);
+
   if (options?.cancelSubscription !== false) {
     await cancelStripeSubscription(user.stripeSubscriptionId);
   }
 
-  await prisma.$transaction(async (tx) => {
+  const ga4UserIdToDelete = await prisma.$transaction(async (tx) => {
     await tx.session.deleteMany({
       where: { userId: user.id },
     });
@@ -299,6 +303,22 @@ export async function deleteTomverseAccount(
     // de-identified row is written here, before the User row goes.
     await recordMobileSessionsEndedByDeletion(tx, user.id);
 
+    // The account's GA4 User-ID goes with the cascade below; it is read here so
+    // the follow-up after the commit can name it to GA4
+    // (docs/policy/marketing-automation.md §10.2). The User row is locked
+    // first: creating an id inserts a row that references it, which now waits
+    // for this transaction and then fails its foreign key, so no id can be
+    // created between this read and the delete and leave with the cascade
+    // without ever being named.
+    await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${user.id} FOR UPDATE`;
+    const ga4UserId =
+      (
+        await tx.ga4UserId.findUnique({
+          where: { userId: user.id },
+          select: { analyticsUserId: true },
+        })
+      )?.analyticsUserId ?? null;
+
     await tx.user.delete({
       where: { id: user.id },
     });
@@ -306,7 +326,20 @@ export async function deleteTomverseAccount(
     // Last, so the audit chain lock is held for one statement, not for this
     // whole transaction.
     await flushSupportTriageDeletionAudit(tx, supportTriageDeleted);
+
+    return ga4UserId;
   });
+
+  // A follow-up to the deletion, never a part of it
+  // (docs/policy/marketing-automation.md §10.2, §12.2): after the commit, so a rolled-back deletion never asks GA4 to drop
+  // a live account's data, and unable to fail it -- the request reports its
+  // own failure and never throws, and the catch is the second guarantee. No
+  // stored id means none was ever created, so nothing can have been sent.
+  if (ga4UserIdToDelete) {
+    await requestGa4UserIdDeletion(ga4UserIdToDelete, "account_deletion").catch(
+      () => undefined
+    );
+  }
 
   return { deleted: true as const, email: user.email };
 }

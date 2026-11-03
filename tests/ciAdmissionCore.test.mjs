@@ -11,6 +11,7 @@ import {
   ciAdmissionDraftsToCheck,
   ciAdmissionOrder,
   ciAdmissionUnits,
+  ciAdmissionReleasesBehind,
   ciAdmissionUpdatesBranchOf,
   ciRunKey,
   ciRunnerCount,
@@ -399,8 +400,7 @@ test("shadow records the branch update it would ask for; a stored state from bef
 
 test("a branch is brought up to date into develop from a working branch, or into main from a release train: never a deploy branch or a hand-made release", () => {
   assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "claude/to-develop/x", fork: false }), true);
-  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false }), true);
-  for (const head of ["main", "develop", "release/2026-10-25", "hotfix/x"]) {
+  for (const head of ["main", "develop", "release/2026-10-25", "hotfix/x", "dependabot/npm_and_yarn/x"]) {
     assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head, fork: false }), false, head);
   }
   // The train service's branch into main (2026-10-27: #3047); a look-alike name is not one.
@@ -420,6 +420,23 @@ test("a branch is brought up to date into develop from a working branch, or into
   const updating = judge({ state: state({ queue: lineOf(2) }), openPulls: train, checks: new Map([[2, { conflict: false, behind: true }]]) });
   assert.deepEqual(kinds(updating), ["update_branch:2"]);
   assert.equal(statuses(updating)[2], "updating");
+});
+
+test("a Dependabot update behind develop is released as it is, never merged into: Dependabot keeps rebasing its own branch", () => {
+  assert.equal(ciAdmissionReleasesBehind({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false }), true);
+  for (const change of [{ base: "main" }, { head: "claude/to-develop/x" }, { fork: true }]) {
+    assert.equal(ciAdmissionReleasesBehind({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false, ...change }), false,
+      JSON.stringify(change));
+  }
+  const open = [pull(1, { head: "dependabot/npm_and_yarn/develop/x" }), pull(2)];
+  const behind = new Map([[1, { conflict: false, behind: true }], [2, { conflict: false, behind: true }]]);
+  const judged = judge({ state: state({ queue: lineOf(1, 2) }), openPulls: open, checks: behind });
+  assert.deepEqual(kinds(judged), ["release:1", "update_branch:2"]);
+  assert.deepEqual(statuses(judged), { 1: "next", 2: "updating" });
+  // A conflict still waits: Dependabot resolves its own.
+  const conflict = judge({ state: state({ queue: lineOf(1) }), openPulls: [open[0]], checks: new Map([[1, { conflict: true, behind: true }]]) });
+  assert.deepEqual(kinds(conflict), []);
+  assert.equal(statuses(conflict)[1], "conflict");
 });
 
 test("a ci:hold pull request out of the line still counts the runners its CI holds when GitHub's jobs are unread", () => {

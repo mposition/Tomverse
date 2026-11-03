@@ -2,7 +2,7 @@ import type { AiModel } from "@/lib/models";
 import { modelWebSearchIsDispatchable } from "@/lib/webSearchCapability";
 import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 
-export type ModelPickerLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
+export type ModelPickerLanguage = "en" | "ko" | "zh" | "zh-Hant" | "fr" | "de" | "es" | "pt";
 export type ModelPickerCapability = "all" | "favorites" | "recommended" | "fast" | "reasoning" | "search";
 export type ModelPickerUsageBand = "all" | "light" | "medium" | "heavy" | "intensive";
 export type ModelPickerFeature = "image" | "reasoning" | "search" | "code";
@@ -108,6 +108,7 @@ export const modelPickerCopy: Record<
   en: { recommendedModels: "Recommended models", personalizedRecommendations: "Recommended for you", tomverseRecommendations: "Tomverse recommends", allModels: "All models", searchPlaceholder: "Search model names or tasks", providerAll: "Provider: All", recommended: "Recommended", fast: "Fast answers", deepReasoning: "Deep reasoning", webSearch: "Web search", allCapabilities: "All purposes", usageAll: "Usage: All", light: "Light · 1", medium: "Medium · 4", heavy: "Heavy · 8", intensive: "Intensive · 12+", filters: "More filters", imageInputOnly: "Image input", availableOnPlan: "Available on my plan", selectedModelsLabel: "Selected", baseEstimate: "base estimate", estimatedUsage: "Estimated", multiplierApplied: "long input or files included", done: "Done", estimatedUsageTitle: "Estimated usage", total: "Total" },
   ko: { recommendedModels: "추천 모델", personalizedRecommendations: "나에게 추천", tomverseRecommendations: "Tomverse 추천", allModels: "전체 모델", searchPlaceholder: "모델 이름 또는 작업 검색", providerAll: "Provider: 전체", recommended: "추천", fast: "빠른 답변", deepReasoning: "깊은 추론", webSearch: "웹 검색", allCapabilities: "모든 용도", usageAll: "사용량: 전체", light: "Light · 1", medium: "Medium · 4", heavy: "Heavy · 8", intensive: "Intensive · 12+", filters: "추가 필터", imageInputOnly: "이미지 입력", availableOnPlan: "내 플랜에서 사용 가능", selectedModelsLabel: "선택한 모델", baseEstimate: "기본 예상", estimatedUsage: "예상", multiplierApplied: "긴 대화·파일 입력 반영", done: "선택 완료", estimatedUsageTitle: "예상 사용량", total: "합계" },
   zh: { recommendedModels: "推荐模型", personalizedRecommendations: "为你推荐", tomverseRecommendations: "Tomverse 推荐", allModels: "全部模型", searchPlaceholder: "搜索模型名称或任务", providerAll: "提供商：全部", recommended: "推荐", fast: "快速回答", deepReasoning: "深度推理", webSearch: "网页搜索", allCapabilities: "全部用途", usageAll: "用量：全部", light: "轻量 · 1", medium: "中等 · 4", heavy: "高 · 8", intensive: "密集 · 12+", filters: "更多筛选", imageInputOnly: "图像输入", availableOnPlan: "我的套餐可用", selectedModelsLabel: "已选模型", baseEstimate: "基础预估", estimatedUsage: "预计", multiplierApplied: "已计入长对话或文件", done: "完成", estimatedUsageTitle: "预计用量", total: "合计" },
+  "zh-Hant": { recommendedModels: "推薦模型", personalizedRecommendations: "為你推薦", tomverseRecommendations: "Tomverse 推薦", allModels: "全部模型", searchPlaceholder: "搜尋模型名稱或任務", providerAll: "提供者：全部", recommended: "推薦", fast: "快速回答", deepReasoning: "深度推理", webSearch: "網頁搜尋", allCapabilities: "全部用途", usageAll: "用量：全部", light: "輕量 · 1", medium: "中等 · 4", heavy: "高 · 8", intensive: "密集 · 12+", filters: "更多篩選", imageInputOnly: "圖像輸入", availableOnPlan: "我的方案可用", selectedModelsLabel: "已選模型", baseEstimate: "基礎預估", estimatedUsage: "預計", multiplierApplied: "已計入長對話或檔案", done: "完成", estimatedUsageTitle: "預計用量", total: "合計" },
   fr: { recommendedModels: "Modèles recommandés", personalizedRecommendations: "Recommandés pour vous", tomverseRecommendations: "Recommandés par Tomverse", allModels: "Tous les modèles", searchPlaceholder: "Rechercher un modèle ou une tâche", providerAll: "Fournisseur : tous", recommended: "Recommandés", fast: "Réponses rapides", deepReasoning: "Raisonnement approfondi", webSearch: "Recherche web", allCapabilities: "Tous les usages", usageAll: "Usage : tous", light: "Léger · 1", medium: "Moyen · 4", heavy: "Élevé · 8", intensive: "Intensif · 12+", filters: "Plus de filtres", imageInputOnly: "Entrée image", availableOnPlan: "Disponible avec mon forfait", selectedModelsLabel: "Sélectionnés", baseEstimate: "estimation de base", estimatedUsage: "Estimation", multiplierApplied: "conversation longue ou fichiers inclus", done: "Terminé", estimatedUsageTitle: "Utilisation estimée", total: "Total" },
   de: { recommendedModels: "Empfohlene Modelle", personalizedRecommendations: "Für dich empfohlen", tomverseRecommendations: "Tomverse empfiehlt", allModels: "Alle Modelle", searchPlaceholder: "Modellnamen oder Aufgaben suchen", providerAll: "Anbieter: Alle", recommended: "Empfohlen", fast: "Schnelle Antworten", deepReasoning: "Tiefes Denken", webSearch: "Websuche", allCapabilities: "Alle Zwecke", usageAll: "Nutzung: Alle", light: "Leicht · 1", medium: "Mittel · 4", heavy: "Hoch · 8", intensive: "Intensiv · 12+", filters: "Weitere Filter", imageInputOnly: "Bildeingabe", availableOnPlan: "In meinem Tarif verfügbar", selectedModelsLabel: "Ausgewählt", baseEstimate: "Basisschätzung", estimatedUsage: "Geschätzt", multiplierApplied: "lange Eingabe oder Dateien enthalten", done: "Fertig", estimatedUsageTitle: "Geschätzte Nutzung", total: "Gesamt" },
   es: { recommendedModels: "Modelos recomendados", personalizedRecommendations: "Recomendados para ti", tomverseRecommendations: "Tomverse recomienda", allModels: "Todos los modelos", searchPlaceholder: "Buscar modelos o tareas", providerAll: "Proveedor: todos", recommended: "Recomendados", fast: "Respuestas rápidas", deepReasoning: "Razonamiento profundo", webSearch: "Búsqueda web", allCapabilities: "Todos los usos", usageAll: "Uso: todo", light: "Ligero · 1", medium: "Medio · 4", heavy: "Alto · 8", intensive: "Intensivo · 12+", filters: "Más filtros", imageInputOnly: "Entrada de imagen", availableOnPlan: "Disponible en mi plan", selectedModelsLabel: "Seleccionados", baseEstimate: "estimación base", estimatedUsage: "Estimado", multiplierApplied: "entrada larga o archivos incluidos", done: "Listo", estimatedUsageTitle: "Uso estimado", total: "Total" },
@@ -121,6 +122,7 @@ export const modelPickerFeatureLabels: Record<
   en: { image: "Image input", reasoning: "Deep reasoning", search: "Web search", code: "Code focused" },
   ko: { image: "이미지 입력", reasoning: "깊은 추론", search: "웹 검색", code: "코드 특화" },
   zh: { image: "图像输入", reasoning: "深度推理", search: "网页搜索", code: "代码专用" },
+  "zh-Hant": { image: "圖像輸入", reasoning: "深度推理", search: "網頁搜尋", code: "程式碼專用" },
   fr: { image: "Entrée image", reasoning: "Raisonnement approfondi", search: "Recherche web", code: "Spécialisé code" },
   de: { image: "Bildeingabe", reasoning: "Tiefes Denken", search: "Websuche", code: "Code-Spezialist" },
   es: { image: "Entrada de imagen", reasoning: "Razonamiento profundo", search: "Búsqueda web", code: "Especializado en código" },
@@ -230,6 +232,30 @@ export const modelPickerStepCopy: Record<
     sortRecommended: "推荐顺序",
     sortCredits: "额度从低到高",
     sortName: "名称（A–Z）",
+  },
+  "zh-Hant": {
+    recommendedTitle: "適合這類工作的推薦",
+    recommendedSubtitle: "先選一個開始。隨時可以更換模型，不消耗點數。",
+    recommendedEmpty: "目前沒有可用的推薦模型。請開啟全部模型自行選擇。",
+    openAllModels: "全部模型",
+    openAllModelsHint: "使用搜尋與篩選瀏覽完整目錄",
+    allModelsTitle: "全部模型",
+    backToRecommended: "返回推薦",
+    filterSheetTitle: "篩選",
+    openFilters: "篩選",
+    resetAllFilters: "全部重設",
+    resultCount: "{count} 個模型",
+    taskAll: "任務：全部",
+    searchResultsTitle: "搜尋結果",
+    clearSearch: "清除搜尋",
+    signInToUse: "登入後即可使用",
+    upgradeToUse: "升級方案後即可使用",
+    maxReached: "最多可比較 {max} 個模型。移除一個即可加入其他模型。",
+    activeFilters: "篩選 {count}",
+    sortLabel: "排序",
+    sortRecommended: "推薦順序",
+    sortCredits: "點數由低到高",
+    sortName: "名稱（A–Z）",
   },
   fr: {
     recommendedTitle: "Recommandés pour ce type de travail",
@@ -385,6 +411,18 @@ export const modelPickerUseCaseLabels: Record<
     favorite: "你收藏的模型",
     personalized: "符合你的回答",
     recent: "你最近用过",
+  },
+  "zh-Hant": {
+    everyday: "快速的日常提問",
+    writing: "快速摘要與初稿",
+    analysis: "複雜分析",
+    multimodal: "圖像與檔案分析",
+    coding: "程式設計與技術工作",
+    search: "最新網路資訊檢索",
+    value: "高性價比之選",
+    favorite: "你收藏的模型",
+    personalized: "符合你的回答",
+    recent: "你最近用過",
   },
   fr: {
     everyday: "Questions quotidiennes rapides",

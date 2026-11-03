@@ -5,7 +5,7 @@ import {
   buildAccountDeletionScheduledEmail,
   buildAccountRestoredEmail,
 } from "../lib/accountEmails.ts";
-import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
+import { EMAIL_COPY_LANGUAGES } from "../lib/language.ts";
 import { storeBillingDeletionNotice } from "../locales/storeBilling.ts";
 
 // The two account lifecycle notices, in every language this product speaks.
@@ -27,16 +27,16 @@ const deletion = (language) =>
   buildAccountDeletionScheduledEmail({ scheduledFor: SCHEDULED_FOR, language });
 
 test("deletion emails and the app disclose separate store cancellation in every language", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const notice = storeBillingDeletionNotice(language);
     assert.ok(deletion(language).text.includes(notice), `${language} omits the store cancellation disclosure`);
   }
 });
 
 test("the deletion notice renders in every supported language", () => {
-  assert.equal(SUPPORTED_LANGUAGES.length, 7);
+  assert.equal(EMAIL_COPY_LANGUAGES.length, 7);
   const subjects = new Set();
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const { subject, text, html } = deletion(language);
     assert.ok(subject.length > 0, `${language} subject`);
     // The date is the one fact the recipient has to act before.
@@ -53,7 +53,7 @@ test("the deletion notice renders in every supported language", () => {
 
 test("the restoration notice renders in every supported language", () => {
   const subjects = new Set();
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const { subject, text, html } = buildAccountRestoredEmail({ language });
     assert.ok(subject.length > 0, `${language} subject`);
     assert.ok(text.length > 40, `${language} body`);
@@ -72,7 +72,7 @@ test("an absent or unknown language is English, not a crash", () => {
 });
 
 test("the deletion notice states all four facts in every language", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     const { text } = deletion(language);
     const paragraphs = text.split("\n\n").filter(Boolean);
     // Access stopped and the date; renewal; how to cancel; what to do if it
@@ -110,7 +110,7 @@ test("no locale apologises or hurries the recipient", () => {
     "act now",
     "지금 조치하지 않으면",
   ];
-  for (const language of SUPPORTED_LANGUAGES) {
+  for (const language of EMAIL_COPY_LANGUAGES) {
     for (const build of [deletion(language), buildAccountRestoredEmail({ language })]) {
       const body = `${build.subject}\n${build.text}`.toLowerCase();
       for (const word of forbidden) {

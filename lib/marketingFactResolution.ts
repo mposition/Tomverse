@@ -473,11 +473,20 @@ async function readMarketingFacts(
               })),
             )
           : { ok: false as const };
+        // The stored values an English post is held to (only when stored).
+        const priceMinor =
+          decision.ok && factSource.fields.includes("monthlyPriceCents")
+            ? plan?.plan.monthlyPriceCents
+            : undefined;
+        const planName =
+          decision.ok && factSource.fields.includes("name") ? plan?.plan.name : undefined;
         return {
           ...fact,
           priceSourcesAllStored: decision.ok,
           currency: plan?.plan.currency,
           targetsAustralia: factSource.targetsAustralia,
+          ...(typeof priceMinor === "number" ? { priceMinor } : {}),
+          ...(typeof planName === "string" ? { planName } : {}),
         };
       }
       if (factSource?.kind === "localized_catalogue") {

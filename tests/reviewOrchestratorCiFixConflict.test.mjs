@@ -16,6 +16,7 @@ import {
   CI_FIX_CONFLICT_COMMIT_PREFIX,
   CI_FIX_PUBLISH_WAIT_MS,
   ciFixReport,
+  conflictHunks,
   conflictPrompt,
   readLedger,
   runCiFix,
@@ -29,6 +30,7 @@ import {
   PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES,
   judgePrCiAutoFixConflict,
   judgePrCiAutoFixTarget,
+  rebuildConflictResolution,
 } from "../lib/prCiAutoFixGuardCore.ts";
 
 const SHA_A = "a".repeat(40);
@@ -72,6 +74,9 @@ test("the guard commits a resolution that keeps everything outside the conflicts
   // Inside it, a gate path takes only its sides' lines; elsewhere a few joined lines are fine.
   assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
   assert.deepEqual(one("package.json", "name: ci\n- run: npm audit\n\"x\": \"1\"\n- run: npm test\n"), ["gate_path_new_line"]);
+  assert.deepEqual(one("lib/adminAuth.ts", "name: ci\n- run: npm audit\nb-branch + b-develop\n- run: npm test\n"), ["gate_path_new_line"]);
+  // The authority manifest is the lane's to hold at merge, not the guard's.
+  assert.deepEqual(one("lib/agentAuthorityFiles.ts", "name: ci\n- run: npm audit\nb-branch + b-develop\n- run: npm test\n"), []);
   const many = Array.from({ length: PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES + 1 }, (_, i) => `new ${i}`).join("\n");
   assert.deepEqual(one("lib/x.ts", `name: ci\n- run: npm audit\n${many}\n- run: npm test\n`), ["too_many_new_lines"]);
 
@@ -212,6 +217,10 @@ const pass = (f, claude, extra = {}) => runCiFix({
 
 test("a conflicting draft is merged with develop, resolved by the model, and the guard commits that resolution", async () => {
   const f = conflictFixture();
+  // The server's worktree as on its Linux host: a Windows git converting to
+  // CRLF would leave a merge the workflow's checkout does not reproduce.
+  const env = { GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0: process.env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: process.env.GIT_CONFIG_VALUE_0 };
+  Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.autocrlf", GIT_CONFIG_VALUE_0: "false" });
   try {
     const seen = [];
     const claude = ({ cwd, prompt }) => {
@@ -236,6 +245,8 @@ test("a conflicting draft is merged with develop, resolved by the model, and the
     assert.equal(request.baseSha, f.develop);
     const resolution = JSON.parse(gunzipSync(Buffer.from(request.patchGzB64, "base64")).toString("utf8"));
     assert.deepEqual(Object.keys(resolution.files), ["lib/app.js"], "only the conflicted file leaves");
+    assert.deepEqual(resolution.files["lib/app.js"].hunks, [["const b = 2 + branch + develop;"]], "only the lines that replace its conflict");
+    assert.match(resolution.files["lib/app.js"].merged, /^[0-9a-f]{64}$/);
 
     // What the workflow does with it: a clean checkout at the head, develop's
     // commit merged there, and the trusted guard judging and writing it.
@@ -260,11 +271,48 @@ test("a conflicting draft is merged with develop, resolved by the model, and the
     const refused = spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "conflict", again, forged], { encoding: "utf8" });
     assert.equal(refused.status, 1);
     assert.match(refused.stdout, /not_conflicted/);
+    // Lines made against another merge of the file are not put back into this one.
+    const tampered = join(f.root, "tampered.json");
+    writeFileSync(tampered, JSON.stringify({ files: { "lib/app.js": { ...resolution.files["lib/app.js"], merged: "0".repeat(64) } } }));
+    const stale = spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "conflict", again, tampered], { encoding: "utf8" });
+    assert.equal(stale.status, 1);
+    assert.match(stale.stdout, /unresolved/);
     // (A Windows clone may check it out with CRLF.)
     assert.equal(readFileSync(join(again, "lib", "other.js"), "utf8").replace(/\r\n/g, "\n"), "export {};\n");
   } finally {
+    for (const [name, value] of Object.entries(env)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
     rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+test("a resolution leaves as the lines for each conflict, which rebuild the file only where git left it the same", () => {
+  const merged = [
+    "{", '  "a": 1,', "<<<<<<< HEAD", '  "b": 2,', "=======", '  "b": 3,', ">>>>>>> dev",
+    '  "c": 4,', "<<<<<<< HEAD", '  "d": 5', "=======", '  "d": 6', ">>>>>>> dev", "}", "",
+  ].join("\n");
+  const resolved = ["{", '  "a": 1,', '  "b": 3,', '  "c": 4,', '  "d": 5,', '  "e": 7', "}", ""].join("\n");
+  const hunks = conflictHunks(merged, resolved);
+  assert.deepEqual(hunks, [['  "b": 3,'], ['  "d": 5,', '  "e": 7']]);
+  assert.equal(rebuildConflictResolution(merged, hunks), resolved, "the workflow rebuilds exactly what the model wrote");
+  // A lockfile: megabytes outside the conflict, one line inside it.
+  const big = Array.from({ length: 200_000 }, (_, i) => `  "pkg-${i}": "${i}.0.${i % 7}",`);
+  const lock = ["{", ...big, "<<<<<<< HEAD", '  "x": "1"', "=======", '  "x": "2"', ">>>>>>> dev", "}", ""].join("\n");
+  const lockResolved = ["{", ...big, '  "x": "2"', "}", ""].join("\n");
+  assert.deepEqual(conflictHunks(lock, lockResolved), [['  "x": "2"']]);
+  assert.equal(rebuildConflictResolution(lock, [['  "x": "2"']]), lockResolved);
+  // And with the long text after the conflict, past the argument limit of a spread call.
+  const tailLock = ["{", "<<<<<<< HEAD", '  "x": "1"', "=======", '  "x": "2"', ">>>>>>> dev", ...big, "}", ""].join("\n");
+  const tailResolved = ["{", '  "x": "2"', ...big, "}", ""].join("\n");
+  assert.deepEqual(conflictHunks(tailLock, tailResolved), [['  "x": "2"']]);
+  assert.equal(rebuildConflictResolution(tailLock, [['  "x": "2"']]), tailResolved);
+  // Not found when the text outside the conflicts changed, or the markers do not parse.
+  assert.equal(conflictHunks(merged, resolved.replace('"a": 1', '"a": 9')), null);
+  assert.equal(conflictHunks(merged, resolved.replace('"c": 4', '"c": 0')), null);
+  assert.equal(conflictHunks("no markers\n", "no markers\n"), null);
+  // And not rebuilt from the wrong number of conflicts, or lines that are not strings.
+  assert.equal(rebuildConflictResolution(merged, [['  "b": 3,']]), null);
+  assert.equal(rebuildConflictResolution(merged, [['  "b": 3,'], [5]]), null);
+  assert.equal(rebuildConflictResolution(merged, "x"), null);
 });
 
 test("one head carries one request: a conflict waits while a CI fix for that head is under way or sent", async () => {

@@ -512,7 +512,10 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
 
 **develop과의 충돌(운영자 결정 2026-10-27, 기본 꺼짐).** 실패한 CI가 없을 때, 같은 대상 브랜치의 PR(draft 포함)이
 GitHub에서 develop과 충돌하면 이 서버가 mirror의 develop을 그 head에 merge하고(커밋하지 않음) 모델이
-충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 충돌 파일들의 내용과 merge한 develop 커밋뿐이고,
+충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 각 충돌 구간을 대신할 줄과 merge한 develop 커밋뿐이고,
+workflow는 자기가 merge한 같은 파일(sha256이 같아야 합니다)에 그 줄을 다시 끼워 넣습니다. 파일 전체를 보내면
+`package-lock.json` 충돌이 전송 상한(60KB)을 넘어 `patch_too_large`로 멈췄습니다(#2969, #2976). 줄을 찾지 못하면
+예전처럼 파일 전체를 보냅니다.
 workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(conflict):` merge 커밋으로 push합니다.
 - 충돌 파일만 바꿨는지, 충돌 표시가 남지 않았는지 봅니다.
 - git이 충돌 구간 밖에 합쳐 둔 내용은 공백까지, 순서까지 그대로 남아야 합니다. 바뀌는 것은 충돌 구간뿐입니다.
@@ -538,6 +541,30 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 - 수정은 업데이트된 패키지에 맞춰 앱 코드를 고치는 것입니다. 패키지 버전과 `package.json`·lock은 그대로 둡니다.
 - 루트에서는 앱 빌드·계측 설정(`next.config.ts|mjs|js`, `sentry.client|server|edge.config.ts`, `instrumentation.ts`, `instrumentation-client.ts`)만 고칠 수 있습니다.
   `proxy.ts`와 검사 설정(`tsconfig`, `eslint`, `playwright` 등)은 계속 막힙니다.
+- **테스트의 API 호출 수정(기본 꺼짐, 운영자 결정 2026-11-01).** 업데이트가 API를 없애거나 이름을 바꾸면
+  그 API를 부르는 테스트도 깨집니다(#3192: officeparser 8이 `toText()`를 없앰). 이 스위치가 켜지면 모델은 이미 있는
+  `*.test.*`·`*.spec.*` 파일에서 그 호출만 새 API로 바꿀 수 있습니다. workflow guard(`testEditProblems`)는 그 파일의 diff를
+  줄 단위로 짝지어 토큰을 비교하고, 다음 중 하나라도 있으면 거부합니다.
+  - 지운 줄 수와 더한 줄 수가 다릅니다. 줄을 끼워 넣거나 뺄 수 없습니다(`test_edit_shape`).
+  - 고친 줄이 그 자체로 완결된 문장이 아닙니다. 이름으로 시작하지 않거나(앞 줄의 호출을 잇는 `(…)`, `.toBe(…)`),
+    여는 괄호를 닫지 않거나(블록을 여는 `{`로 끝나는 줄은 예외), 첫 토큰이나 마지막 토큰이 바뀌었습니다(`test_edit_context`).
+    한 줄만 보고 판정하기 때문에, 여러 줄에 걸친 호출의 가운데 줄은 고칠 수 없습니다.
+  - 지운 토큰이 속성·메서드 이름(`x.toText`의 `toText`)이 아닙니다. 변수, literal, 정규식, 주석, 구두점,
+    `assert`·`expect`로 시작하는 체인의 이름(`assert.strict.equal`의 `equal`, `expect(x).toEqual`의 `toEqual`), `test`·`it`·`describe`는
+    지울 수 없습니다(`test_edit_removed`).
+  - 더한 토큰이 제어 흐름을 바꾸지 않는 이름, `.`·`(`·`)`, 따옴표 문자열 중 하나가 아닙니다. 주석, `return`·`if`·`throw`,
+    `skip`·`todo`·`only`·`not`, `typeof`·`instanceof`·`new` 같은 연산자 키워드, `!`·`||`, `true`·`false`, `,`·`[`·`]`, 객체 literal은 더할 수 없습니다(`test_edit_added`).
+  - 호출되는 쪽(`assert.equal(`, `expect(…).toBe(`, `test(`)에 무엇이 끼어들었거나(`test.bind(`), 그 호출의 인자 개수가 바뀌었습니다
+    (`assert.ok((x, message))`). 인자 안의 식은 고칠 수 있습니다. API를 바꾸는 곳이 거기이기 때문입니다(`test_edit_added`).
+
+  예: `const text = document.toText();` → `const text = (await document.to("text")).value;`와 콜백에 `async`를 붙이는 것은 통과합니다.
+  값을 함수로 감싸는 식의 약화까지 모두 막지는 못하므로, 사람이 병합 전에 diff를 봅니다.
+
+  새 테스트 파일, 이름 바꾸기, 삭제, fixture·snapshot은 계속 막힙니다. merge lane이 사람에게 남기는 정책 테스트(AGENTS.md,
+  CLAUDE.md, `docs/policy/qa-release-agent.md`가 이름을 대는 테스트)도 막히는데, 2026-11-01 현재 그 목록은 비어 있습니다.
+  병합은 사람이 하므로 그 PR의 테스트 diff는 병합 전에 사람이 봅니다.
+  켜는 방법(둘 다 필요): `read.env`에 `PR_CI_AUTO_FIX_DEPENDABOT_TESTS=on`, 그리고 저장소 변수
+  `PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이 main에 들어간 뒤에 켭니다.
 - 다른 계정의 커밋이 들어간 PR은 Dependabot이 더 이상 자동 rebase하지 않습니다. `@dependabot recreate`를
   쓰면 자동 수정 커밋은 지워집니다.
 - merge lane은 `dependabot/**`를 병합하지 않으므로, 수정된 Dependabot PR의 병합은 사람이 합니다.
@@ -568,10 +595,13 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
     "package.json과 맞지 않는다"(`Missing: @tomverse/mobile-auth`)고 거부합니다. 그래서 설치 전에 `npm --version`을 읽고,
     10 미만이면 `npm_too_old:<버전>`으로 기록한 뒤 설치하지 않습니다.
   - unit의 PATH는 auto-fix 전용 npm(`/usr/local/lib/pr-ci-auto-fix-npm/bin`)을 맨 앞에 둡니다. 다른 계정의 npm은 바뀌지 않습니다.
-    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다.
+    관리 계정에서 한 번 설치합니다. root 소유라 review 계정은 바꿀 수 없습니다. 관리 계정의 umask가 077이면
+    폴더가 root만 읽는 `drwx------`로 생기고, review 계정은 그것을 건너뛰어 9.2를 씁니다(2026-11-02). 그래서
+    `chmod`로 읽기와 실행만 엽니다. 확인 줄은 `10.9.9`여야 합니다.
 
     ```bash
     sudo npm install -g --prefix /usr/local/lib/pr-ci-auto-fix-npm --ignore-scripts --no-audit --no-fund npm@10.9.9
+    sudo chmod -R go+rX,go-w /usr/local/lib/pr-ci-auto-fix-npm
     sudo -u review env PATH=/usr/local/lib/pr-ci-auto-fix-npm/bin:/usr/bin:/bin npm --version
     ```
 
@@ -597,7 +627,15 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   실행이 실패하면 stderr도 `stderr`에 남습니다. `no_change`의 이유는 여기서 봅니다.
   답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
   Admin › QA·릴리스 › CI 입장 화면에 PR별로 보입니다(2026-10-27). 모델의 문장 자체는 앱으로 가지 않습니다.
-- **다시 분석.** 같은 head는 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
+- **기능이 바뀌면 저절로 다시 시도.** ledger는 시도마다 그때의 능력(`ability`)을 남깁니다. 이 모듈
+  (`lib/ci-fix.mjs`, 프롬프트와 설치 경로)의 내용과, 그 head에 닿는 스위치의 digest입니다. Dependabot
+  스위치 두 개(`PR_CI_AUTO_FIX_DEPENDABOT_TESTS`, `PR_CI_AUTO_FIX_INSTALL`)는 Dependabot head에만 닿습니다.
+  고치지 못했거나 검사에 거부된 head도, 그 뒤 능력이 바뀌면 라벨 없이 **한 번 더** 시도합니다. 스위치를
+  켜거나 서버 checkout을 갱신한 경우입니다. 같은 능력으로는 다시 시도하지 않습니다. 보낸 수정과 시도 2회
+  소진은 대상이 아니고, 한 pass에 하나·시간당 상한·quota는 그대로입니다. 이 기록이 없던 예전 항목은 첫
+  갱신 뒤에 한 번 다시 시도합니다(운영자 결정 2026-11-02: 운영자가 라벨을 붙여야만 다시 시도하는 것은
+  자동화가 아니다).
+- **다시 분석.** 같은 head는 같은 능력으로 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
   PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
   서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 시도보다 **나중에** 붙은 라벨만 요청으로 봅니다.
   그래서 예전 head에서 남은 라벨은 새 head를 다시 시도하게 하지 않습니다. 고치지 못함·분석 실패·검사 거부만

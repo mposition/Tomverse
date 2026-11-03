@@ -24,9 +24,8 @@
  * registry -- a competitor comparison stores a URL and a scope, and the reading
  * of it is a human's.
  *
- * The registry is empty. Claims are added by a person with the evidence in
- * front of them, which is why this ships as a validated shape and a resolver
- * rather than as content.
+ * Claims are added by a person with the evidence in front of them, in code
+ * review; `MARKETING_CLAIMS` below says which and why.
  *
  * Pure: no server-only import, no network, no Prisma.
  */
@@ -315,16 +314,83 @@ export const marketingClaimRegistrySchema = z
     }
   });
 
+/** Frozen all the way down: a claim's evidence key changed at runtime is a different claim. */
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const inner of Object.values(value)) deepFreeze(inner);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/** A claim whose sentence is one of our public pages' own strings. */
+const pageClaim = (
+  id: string,
+  type: "feature" | "availability",
+  pageRoute: string,
+  localeKey: string,
+): MarketingClaim => ({
+  id,
+  type,
+  statementKey: localeKey,
+  // No zh-Hant: the site has no Traditional Chinese page to be the evidence
+  // (lib/marketingEvidencePages.ts).
+  locales: ["en", "ko", "zh-Hans"],
+  validUntil: "2027-01-31",
+  gate: null,
+  planMeaning: null,
+  factSource: null,
+  evidence: { kind: "page", pageRoute, localeKey },
+});
+
+/** A plan's monthly price, read from the stored billing plan when a post is judged. */
+const monthlyPriceClaim = (id: string, planId: "pro" | "max", statementKey: string): MarketingClaim => ({
+  id,
+  type: "pricing",
+  statementKey,
+  // The Korean and Taiwanese markets (policy O7), and `en` since the owner's
+  // decision of 2026-11-02: an English post may state this price only as the
+  // stored amount in the stored currency, naming the currency and the plan, and
+  // an AUD price stays refused (§7.2 rules 3 and 9; the Guard reads the words in
+  // `englishPriceProblems()`). Not `zh-Hans`: RedNote's overseas readers
+  // include Australia.
+  locales: ["en", "ko", "zh-Hant"],
+  validUntil: "2027-01-31",
+  gate: null,
+  planMeaning: null,
+  factSource: {
+    kind: "billing_plan",
+    planId,
+    fields: ["name", "monthlyPriceCents", "currency"],
+    targetsAustralia: false,
+  },
+  evidence: null,
+});
+
 /**
- * The registered claims.
+ * The registered claims (operator decision 2026-11-01: register the sentences
+ * our public pages already say, and the stored plan prices).
  *
- * Empty, and not a placeholder: a claim is added by a person who has the
- * evidence in front of them, and S1 ships the shape and the resolver rather
- * than content nobody has checked. The Guard refuses a draft whose claim ids
- * are not here, so an empty registry means no claim-bearing copy publishes --
- * which is the correct state before anybody has approved one.
+ * Every page claim is a whole string from the FAQ or About page, chosen for
+ * what a post can carry: none names a feature behind a flag (Smart Adaptive,
+ * question refinement), none says "free" without its condition, and each
+ * passes the Guard's text hygiene in every locale it lists
+ * (tests/marketingRegistries.test.mjs). The Guard still re-reads the page and
+ * the price every time it judges a draft, so a sentence the page no longer
+ * says, or a price no person saved, refuses the post. Code, not a model,
+ * writes this list: a model's output never adds or approves a claim.
  */
-export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([]);
+export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
+  pageClaim("claim.chat-and-review", "feature", "/faq", "sections.0.body"),
+  pageClaim("claim.review-without-account", "availability", "/faq", "sections.1.body"),
+  pageClaim("claim.why-tomverse", "feature", "/faq", "sections.7.body"),
+  pageClaim("claim.review-three-models", "feature", "/faq", "sections.8.body"),
+  pageClaim("claim.save-and-share", "feature", "/faq", "sections.9.body"),
+  pageClaim("claim.about-tomverse", "feature", "/about", "description"),
+  pageClaim("claim.start-a-question", "feature", "/about", "sections.0.body"),
+  monthlyPriceClaim("claim.pro-monthly-price", "pro", "marketing.claims.proMonthlyPrice"),
+  monthlyPriceClaim("claim.max-monthly-price", "max", "marketing.claims.maxMonthlyPrice"),
+].map(deepFreeze));
 
 /**
  * The registry version, which a post records so a later read knows what it saw.
@@ -334,9 +400,10 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([]);
  * post, and a version that never moves answers "what did this post see" with
  * the same number for every registry there has ever been. Version 1 is the
  * empty registry, which is why the test refuses a non-empty registry still
- * calling itself 1.
+ * calling itself 1. Version 2 is the first content (2026-11-01); version 3 adds `en` to the
+ * plan price claims (2026-11-02).
  */
-export const MARKETING_CLAIM_REGISTRY_VERSION = 1;
+export const MARKETING_CLAIM_REGISTRY_VERSION = 3;
 
 export const marketingClaimById = (id: string): MarketingClaim | null =>
   MARKETING_CLAIMS.find((claim) => claim.id === id) ?? null;

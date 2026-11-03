@@ -2,16 +2,25 @@
 
 import Script from "next/script";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { createContext, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { useSession } from "next-auth/react";
+import {
+  GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+  ga4UserIdTransmissionAllowed,
+  ga4UserIdWithdrawalApplies,
+} from "@/lib/ga4UserIdPolicy";
 import {
   analyticsConsent,
   configureAnalyticsClient,
   consumeSignupStarted,
   disableAnalyticsClient,
+  observeMarketingTouch,
   setAnalyticsConsent,
+  syncGa4UserId,
+  withdrawGa4UserId,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
 import {
@@ -226,6 +235,24 @@ const consentCopy: Record<
     turnOff: "关闭分析",
     turnOffShort: "关闭",
   },
+  "zh-Hant": {
+    title: "保護隱私的產品分析",
+    body: "經您同意，Tomverse 會衡量產品使用與活動歸因。絕不會收集提示詞、回覆、檔案名稱或檔案內容。",
+    mobileBody: "協助改進 Tomverse。絕不收集提示詞和檔案內容。",
+    accept: "允許分析",
+    acceptShort: "允許",
+    decline: "拒絕",
+    declineShort: "拒絕",
+    privacy: "隱私權政策",
+    settings: "分析設定",
+    noticeTitle: "隱私保護分析已開啟",
+    noticeBody: "在此地區，Tomverse 會啟動資料最小化的產品分析，並提供明確的退出選項。絕不會包含提示詞、回覆、檔案名稱或檔案內容，廣告儲存仍保持關閉。",
+    noticeMobileBody: "分析已開啟。不會收集提示詞或檔案。",
+    keepOn: "保持開啟",
+    keepOnShort: "開啟",
+    turnOff: "關閉分析",
+    turnOffShort: "關閉",
+  },
   fr: {
     title: "Analyse produit respectueuse de la vie privée",
     body: "Avec votre accord, Tomverse mesure l’usage du produit et l’attribution des campagnes. Les prompts, réponses, noms et contenus de fichiers ne sont jamais inclus.",
@@ -300,6 +327,26 @@ const consentCopy: Record<
   },
 };
 
+/**
+ * Marketing touch (docs/policy/marketing-automation.md §10.1): the current
+ * URL's UTM values, reported once per
+ * distinct link per tab -- on a full load and on a client navigation that
+ * changes only the query. Consent is applied inside the client exactly as for
+ * every other event: declined sends nothing, undecided waits. A change of
+ * consent re-observes too, so a visitor who had declined and allows analytics
+ * on the page they landed on is not missing that link. Behind its own
+ * Suspense boundary so reading the query never opts the page out of static
+ * rendering.
+ */
+function MarketingTouchObserver({ consent }: { consent: string }) {
+  const pathname = usePathname();
+  const search = useSearchParams()?.toString() ?? "";
+  useEffect(() => {
+    observeMarketingTouch();
+  }, [pathname, search, consent]);
+  return null;
+}
+
 export function AnalyticsProvider({
   children,
   country,
@@ -332,6 +379,9 @@ export function AnalyticsProvider({
         : null
     );
   const [analyticsClientReady, setAnalyticsClientReady] = useState(false);
+  // Counts configureAnalyticsClient runs. Each one clears the GA4 User-ID
+  // before its page_view, so the User-ID effect re-runs after every one.
+  const [analyticsConfigureCount, setAnalyticsConfigureCount] = useState(0);
   const [showPreferences, setShowPreferences] = useState(false);
   const [chatConsentReady, setChatConsentReady] = useState(false);
   const [isMobileChatTextEntryActive, setIsMobileChatTextEntryActive] =
@@ -585,12 +635,14 @@ export function AnalyticsProvider({
     let cancelled = false;
     const runtime = configureAnalyticsClient({
       country: resolvedPolicy.country,
-      language: lang,
+      language: lang === "zh-Hant" ? "zh" : lang,
       measurementId,
       plan: initialPlan,
     });
     queueMicrotask(() => {
-      if (!cancelled) setAnalyticsClientReady(true);
+      if (cancelled) return;
+      setAnalyticsClientReady(true);
+      setAnalyticsConfigureCount((count) => count + 1);
     });
     if (!lifecycleCheckedRef.current) {
       lifecycleCheckedRef.current = true;
@@ -631,6 +683,31 @@ export function AnalyticsProvider({
     };
   }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
 
+  // GA4 User-ID (docs/policy/marketing-automation.md §10.2): asked for only
+  // when the notice is published, the switch is on, the visitor explicitly
+  // accepted analytics and is signed in. Any of those going away -- signing
+  // out included -- clears it on the tag.
+  const { data: sessionData, status: sessionStatus } = useSession();
+  const sessionUserId =
+    sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;
+  const ga4UserIdAllowed =
+    !disabled &&
+    analyticsClientReady &&
+    ga4UserIdTransmissionAllowed({
+      noticePublished: GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+      switchValue: process.env.NEXT_PUBLIC_GA4_USER_ID_ENABLED,
+      consent: consent === "loading" ? null : consent,
+      signedIn: Boolean(sessionUserId),
+      measurementId,
+    });
+  // Re-run on an account change -- the previous account's id is cleared before
+  // the next one is asked for (syncGa4UserId) -- and after every analytics
+  // (re)configuration, which clears it itself before its page_view.
+  useEffect(
+    () => syncGa4UserId(ga4UserIdAllowed),
+    [ga4UserIdAllowed, sessionUserId, analyticsConfigureCount]
+  );
+
   // `useCallback` rather than plain closures: both read the remembered opener
   // through `closePreferences`, and a ref read from a function created during
   // render is exactly what `react-hooks/refs` (correctly) refuses.
@@ -643,9 +720,20 @@ export function AnalyticsProvider({
   const decline = useCallback(() => {
     setAnalyticsConsent("declined");
     disableAnalyticsClient();
+    // Declining while signed in withdraws the account's GA4 User-ID: the
+    // server names it to GA4 for deletion and then forgets it, so a later
+    // consent gets a new one (docs/policy/marketing-automation.md §10.2).
+    if (
+      ga4UserIdWithdrawalApplies({
+        noticePublished: GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED,
+        signedIn: Boolean(sessionUserId),
+      })
+    ) {
+      void withdrawGa4UserId();
+    }
     setConsent("declined");
     closePreferences();
-  }, [closePreferences]);
+  }, [closePreferences, sessionUserId]);
 
   const consentPromptReady = !isChatWorkspacePath(pathname) || chatConsentReady;
   const defaultEnabledNotice =
@@ -804,6 +892,11 @@ export function AnalyticsProvider({
       <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
         <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
         {children}
+        {disabled ? null : (
+          <Suspense fallback={null}>
+            <MarketingTouchObserver consent={consent} />
+          </Suspense>
+        )}
         {analyticsEnabled && analyticsClientReady && measurementId ? (
           <Script
             id="tomverse-ga4"

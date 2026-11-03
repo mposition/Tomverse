@@ -23,6 +23,7 @@ import {
   CI_FIX_MAX_PATCH_CHARS,
   CI_FIX_MAX_QUEUED_PER_HOUR,
   answerLine,
+  ciFixAbility,
   ciFixReport,
   autoFixAttempts,
   ciFixPrompt,
@@ -41,6 +42,7 @@ import {
   readLedger,
   readTail,
   resultCode,
+  retryable,
   runCiFix,
   runClaude,
   servedPulls,
@@ -154,6 +156,23 @@ test("a Dependabot prompt names only root files the guard allows it", () => {
       headBranch: "dependabot/npm_and_yarn/develop/g" }), { push: true }, path);
   }
   assert.match(prompt, /never change the package versions/);
+});
+
+test("only a Dependabot prompt with the switch on lets the model move a test to a changed API", () => {
+  const fenced = /do not edit or delete any test file, fixture or snapshot/;
+  const opened = /You may edit an existing \*\.test\.\* or \*\.spec\.\* file only where it calls an API the update removed or renamed/;
+  const prompt = (headBranch, dependabotTests) => ciFixPrompt({ workflows: ["PR Fast Gate"], logFile: "/x/ci.log", headBranch, dependabotTests });
+  for (const [headBranch, on] of [["dependabot/npm_and_yarn/develop/g", false], ["claude/to-develop/x", true], ["codex/to-develop/x", true]]) {
+    assert.match(prompt(headBranch, on), fenced, headBranch);
+    assert.doesNotMatch(prompt(headBranch, on), opened, headBranch);
+  }
+  const text = prompt("dependabot/npm_and_yarn/develop/g", true);
+  assert.doesNotMatch(text, fenced);
+  assert.match(text, opened);
+  // What the guard refuses is named, so the model does not spend the attempt on it.
+  assert.match(text, /do not add, rename or delete a test file, and do not edit a fixture or snapshot/);
+  assert.match(text, /rewrite those lines in place without adding or removing a line or a comment, keep every test, every assertion and every expected value, skip nothing/);
+  assert.match(text, /AGENTS\.md or docs\/policy\/qa-release-agent\.md/);
 });
 
 test("what the proposing half writes is exactly what the sender accepts, and the inputs are the workflow's", () => {
@@ -307,11 +326,13 @@ test("settings: the sender needs its token and absolute paths; the proposing hal
   const mine = { [READ_TOKEN_ENV]: TOKEN, PR_CI_AUTO_FIX_REPO: "o/r", PR_CI_AUTO_FIX_OUTBOX: "/var/lib/fix/outbox",
     PR_CI_AUTO_FIX_WORK: "/var/lib/fix/work", HOME: "/home/review" };
   assert.deepEqual(ciFixSettings(mine, config), { token: TOKEN, repo: "o/r", outbox: "/var/lib/fix/outbox",
-    workDir: "/var/lib/fix/work", home: "/home/review", model: "sonnet", minRemainingPercent: 30, conflicts: false, install: false });
+    workDir: "/var/lib/fix/work", home: "/home/review", model: "sonnet", minRemainingPercent: 30, conflicts: false, install: false, dependabotTests: false });
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "on" }, config).conflicts, true, "conflicts only when switched on");
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "true" }, config).conflicts, false);
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_INSTALL: "on" }, config).install, true, "packages only when switched on");
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_INSTALL: "1" }, config).install, false);
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_DEPENDABOT_TESTS: "on" }, config).dependabotTests, true, "test edits only when switched on");
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_DEPENDABOT_TESTS: "true" }, config).dependabotTests, false);
   assert.match(ciFixSettings({ ...mine, [DISPATCH_TOKEN_ENV]: TOKEN }, config).error, /sender's account/);
   assert.match(ciFixSettings(mine, { ...config, providers: [{ id: "claude", passEnv: [READ_TOKEN_ENV] }] }).error, /passEnv must not carry/);
   // The model is denied these, so its checkout must lie outside them.
@@ -846,6 +867,77 @@ test("an operator's label tries a head once more, and only once", async () => {
   }
 });
 
+test("a head given up on is tried once more, unasked, when the pass can do more for it", async () => {
+  const branch = "dependabot/npm_and_yarn/develop/officeparser-8.4.0";
+  const f = passFixture({ branch, author: "dependabot[bot]" });
+  try {
+    let calls = 0;
+    const claude = () => {
+      calls += 1;
+      return { ok: true, timedOut: false, tail: "The test calls a removed API.\nRESULT: outside_rules" };
+    };
+    const pass = (at, dependabotTests) => runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0, dependabotTests,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => at, log: () => {} });
+    const ledgerPath = join(f.config.stateDir, "ci-fix", "ledger.json");
+
+    assert.equal((await pass(1000, false)).outcome, "no_change");
+    assert.equal((await pass(2000, false)).outcome, "nothing_to_fix", "the same pass does not try the same head twice");
+    assert.equal(calls, 1);
+
+    // The operator turns test edits on: no label, and the head is tried again.
+    assert.equal((await pass(3000, true)).outcome, "no_change");
+    assert.equal(calls, 2);
+    const entry = readLedger(ledgerPath)[f.sha];
+    assert.equal(entry.at, 3000, "the retry starts the entry afresh");
+    assert.equal(entry.retried, undefined, "an ability retry leaves the label's one retry for the operator");
+    assert.equal(entry.ability, ciFixAbility({ kind: "ci", headBranch: branch, dependabotTests: true }));
+
+    assert.equal((await pass(4000, true)).outcome, "nothing_to_fix", "one try per ability");
+    assert.equal(calls, 2);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("an entry written before abilities were recorded is tried once more; a Dependabot switch leaves agent heads alone", async () => {
+  const f = passFixture();
+  try {
+    let calls = 0;
+    const claude = () => {
+      calls += 1;
+      return { ok: true, timedOut: false, tail: "RESULT: not_found" };
+    };
+    const ledgerPath = join(f.config.stateDir, "ci-fix", "ledger.json");
+    mkdirSync(dirname(ledgerPath), { recursive: true });
+    writeFileSync(ledgerPath, JSON.stringify({ [f.sha]: { pr: 41, kind: "ci", outcome: "no_change", reason: "not_found", at: 500 } }));
+    const pass = (at, dependabotTests) => runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0, dependabotTests,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => at, log: () => {} });
+
+    assert.equal((await pass(1000, false)).outcome, "no_change", "the older code's verdict is not the newer code's");
+    assert.equal(calls, 1);
+    assert.equal((await pass(2000, true)).outcome, "nothing_to_fix", "a Dependabot switch does nothing for an agent head");
+    assert.equal(calls, 1);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("an ability retry never revisits a head whose fix was sent or used up its attempts", () => {
+  const ability = ciFixAbility({ kind: "ci", headBranch: "claude/to-develop/x" });
+  for (const outcome of ["queued", "pushed", "superseded", "attempts_exhausted"]) {
+    assert.equal(retryable({ outcome, at: 1, ability: "old" }, null, 10, ability), false, outcome);
+  }
+  assert.equal(retryable({ outcome: "patch_refused", at: 1, ability: "old" }, null, 10, ability), "ability");
+  assert.equal(retryable({ outcome: "patch_refused", at: 1, ability }, null, 10, ability), false, "same ability, no label");
+  assert.equal(retryable({ outcome: "started", at: 1, ability: "old" }, null, 10, ability), false, "a running try is not stale yet");
+  assert.equal(retryable({ outcome: "no_change", at: 1, ability }, 5, 10, ability), "label");
+  assert.notEqual(ciFixAbility({ kind: "ci", headBranch: "dependabot/a", dependabotTests: true }),
+    ciFixAbility({ kind: "ci", headBranch: "dependabot/a", dependabotTests: false }));
+  assert.equal(ciFixAbility({ kind: "ci", headBranch: "claude/to-develop/a", install: true, dependabotTests: true }),
+    ciFixAbility({ kind: "ci", headBranch: "claude/to-develop/a" }));
+  assert.notEqual(ciFixAbility({ kind: "conflict" }), ciFixAbility({ kind: "ci" }));
+});
+
 test("the report carries numbers, commit ids and fixed names only, newest first", () => {
   const ledger = {
     [SHA_A]: { pr: 41, kind: "ci", outcome: "no_change", reason: "not_found", answer: "secret-ish model words", at: 1000 },
@@ -1068,6 +1160,30 @@ test("a Dependabot pass reads the installed packages and queues only the applica
     assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[f.sha].packages, "installed");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("the test-edit switch reaches a Dependabot head's prompt and nothing else", async () => {
+  const quota = async () => ({ state: "available", remainingPercent: 80 });
+  const opened = /You may edit an existing \*\.test\.\* or \*\.spec\.\* file/;
+  for (const [options, dependabotTests, expected] of [
+    [{ branch: "dependabot/npm_and_yarn/develop/x", author: "dependabot[bot]" }, true, true],
+    [{ branch: "dependabot/npm_and_yarn/develop/x", author: "dependabot[bot]" }, false, false],
+    [{}, true, false],
+  ]) {
+    const f = passFixture(options);
+    try {
+      const prompts = [];
+      await runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0, quota, dependabotTests, clock: () => 1, log: () => {},
+        claude: ({ prompt }) => {
+          prompts.push(prompt);
+          return { ok: true, timedOut: false, tail: "RESULT: not_found" };
+        } });
+      assert.equal(prompts.length, 1);
+      assert.equal(opened.test(prompts[0]), expected, JSON.stringify(options));
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
   }
 });
 

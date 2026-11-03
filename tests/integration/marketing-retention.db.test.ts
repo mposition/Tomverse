@@ -26,7 +26,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const reset = () =>
   resetTestFixture(
     prisma,
-    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun" RESTART IDENTITY CASCADE`,
+    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun", "MarketingAnalysis" RESTART IDENTITY CASCADE`,
   );
 
 beforeEach(reset);
@@ -157,6 +157,7 @@ test("expired reports and old rejected drafts go, each with its audit row, and t
     AiVisibilityRun: 0,
     MarketingPost: 1,
     MarketingLlmCall: 0,
+    MarketingAnalysis: 0,
     MarketingPostContent: 0,
     MarketingPostHistory: 0,
   });
@@ -202,6 +203,7 @@ test("a run with nothing due writes nothing", async () => {
     AiVisibilityRun: 0,
     MarketingPost: 0,
     MarketingLlmCall: 0,
+    MarketingAnalysis: 0,
     MarketingPostContent: 0,
     MarketingPostHistory: 0,
   });
@@ -398,4 +400,31 @@ test("outside retention the same content purge is refused by the database", asyn
     }),
     /only purged by retention/,
   );
+});
+
+test("an analysis past its 24 months goes with its audit row, and a fresh one stays", async () => {
+  await prisma.$executeRaw`
+    INSERT INTO "MarketingAnalysis" ("id", "briefReportId", "payload", "sourceVersion")
+    VALUES ('a-fresh', 'brief-fresh', '{}'::jsonb, 'marketing-analysis-v1')
+  `;
+  // Dated into the past with its date trigger off, as the post fixture above is.
+  await prisma.$executeRawUnsafe(`ALTER TABLE "MarketingAnalysis" DISABLE TRIGGER "marketing_analysis_sets_its_retention"`);
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "MarketingAnalysis" ("id", "briefReportId", "payload", "sourceVersion", "createdAt", "retentionUntil")
+      VALUES ('a-old', 'brief-old', '{}'::jsonb, 'marketing-analysis-v1',
+              date_trunc('milliseconds', now() AT TIME ZONE 'UTC') - INTERVAL '25 months',
+              date_trunc('milliseconds', now() AT TIME ZONE 'UTC') - INTERVAL '1 month')
+    `;
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "MarketingAnalysis" ENABLE TRIGGER "marketing_analysis_sets_its_retention"`);
+  }
+  const result = await ran();
+  assert.equal(result.MarketingAnalysis, 1);
+  const left = await prisma.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "MarketingAnalysis" ORDER BY "id"`;
+  assert.deepEqual(left.map((row) => row.id), ["a-fresh"]);
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: MARKETING_RETENTION_ACTIONS.rowPurged, targetType: "MarketingAnalysis" },
+  });
+  assert.deepEqual(audits.map((audit) => audit.targetId), ["a-old"]);
 });

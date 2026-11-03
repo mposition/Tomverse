@@ -61,6 +61,10 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "UserMemorySettings",
     state: "included",
   },
+  // The account's GA4 User-ID and when it was created: an identifier held
+  // about the person, so they are told it exists
+  // (docs/policy/marketing-automation.md §10.2).
+  { domain: "analyticsUserId", publicName: "analytics_user_id", prismaModel: "Ga4UserId", state: "included" },
   { domain: "conversation", publicName: "conversations", prismaModel: "Conversation", state: "included" },
   {
     domain: "conversationProject",
@@ -820,6 +824,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxIdeaSessionResultOrphanKeyRetirement",
     publicName: "amux_idea_session_result_orphan_key_retirements",
     prismaModel: "AmuxIdeaSessionResultOrphanKeyRetirement",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaLaneAttempt",
+    publicName: "amux_idea_lane_attempt",
+    prismaModel: "AmuxIdeaLaneAttempt",
     state: "unverified",
   },
   {

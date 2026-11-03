@@ -6,6 +6,7 @@ import {
   judgePrCiAutoFixDiff,
   judgePrCiAutoFixTarget,
 } from "../lib/prCiAutoFixGuardCore.ts";
+import { judgeQaReleaseMergeLaneExclusion } from "../lib/qaReleaseMergeLaneExclusionCore.ts";
 
 const diff = (nameStatus, numstat) => judgePrCiAutoFixDiff({ nameStatus, numstat });
 
@@ -22,6 +23,8 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
     ["M\tdocs/release-gates/a.yaml", "1\t1\tdocs/release-gates/a.yaml", "gate_path"],
     ["M\tAGENTS.md", "1\t1\tAGENTS.md", "gate_path"],
     ["M\tlib/adminAuth.ts", "1\t1\tlib/adminAuth.ts", "gate_path"],
+    ["M\tlib/adminAuthSession.ts", "1\t1\tlib/adminAuthSession.ts", "gate_path"],
+    ["M\tlib/adminAuditSystemActors.ts", "1\t1\tlib/adminAuditSystemActors.ts", "gate_path"],
     ["M\tpackages/x/package.json", "1\t1\tpackages/x/package.json", "gate_path"],
     // The lane may merge these when a person wrote them; the model still may not touch them.
     ["M\t.github/audits/x.md", "1\t1\t.github/audits/x.md", "gate_path"],
@@ -40,6 +43,19 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
     const verdict = diff(nameStatus, numstat);
     assert.equal(verdict.push, false, nameStatus);
     assert.ok(verdict.reasons.includes(reason), `${nameStatus}: ${verdict.reasons}`);
+  }
+});
+
+test("a fix to the agent authority manifest is pushed so CI runs, and the merge lane leaves its merge to a person", () => {
+  // #3190: a Dependabot `next` bump fails until CONVENTION_VERSIONS records the installed version.
+  const nameStatus = "M\tlib/agentAuthorityFiles.ts\nM\ttools/auto-rec-agent/lib/agentAuthorityFiles.generated.mjs";
+  const numstat = "1\t1\tlib/agentAuthorityFiles.ts\n1\t1\ttools/auto-rec-agent/lib/agentAuthorityFiles.generated.mjs";
+  for (const headBranch of ["dependabot/npm_and_yarn/develop/user-interface-150ef438eb", "claude/to-develop/x"]) {
+    assert.deepEqual(judgePrCiAutoFixDiff({ nameStatus, numstat, headBranch }), { push: true }, headBranch);
+    assert.deepEqual(judgeQaReleaseMergeLaneExclusion({
+      headBranch, changedFiles: [{ path: "lib/agentAuthorityFiles.ts" }], changedFilesComplete: true,
+      policyTestPaths: [], agentOwnPatterns: [],
+    }).excluded, true, headBranch);
   }
 });
 
@@ -91,4 +107,103 @@ test("a Dependabot fix may change the app's own build and instrumentation config
   // A rename onto an allowed name from a fenced one is still refused.
   assert.equal(judgePrCiAutoFixDiff({ nameStatus: "R100\ttsconfig.json\tnext.config.ts", numstat: "0\t0\tnext.config.ts",
     headBranch: dependabot }).push, false);
+});
+
+test("with the switch on, a Dependabot fix may move an existing test to a changed API and take nothing away", () => {
+  const dependabot = "dependabot/npm_and_yarn/develop/officeparser-8.4.0";
+  const path = "tests/generatedArtifactDocx.test.mjs";
+  const hunk = (removed, added) =>
+    `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -74 +74 @@\n${removed.map((l) => `-${l}`).join("\n")}\n${added.map((l) => `+${l}`).join("\n")}\n`;
+  const officeparser = hunk(
+    ["  const text = document.toText();", '  assert.match(parsed.toText(), /매출 보고/);'],
+    ['  const text = (await document.to("text")).value;', '  assert.match((await parsed.to("text")).value, /매출 보고/);'],
+  );
+  const judge = (patch, overrides = {}) => judgePrCiAutoFixDiff({
+    nameStatus: `M\t${path}\nM\tlib/officeSecurity.ts`, numstat: `2\t2\t${path}\n1\t1\tlib/officeSecurity.ts`,
+    headBranch: dependabot, dependabotTests: true, policyTestPaths: ["tests/prCiAutoFixGuardCore.test.mjs"], patch, ...overrides,
+  });
+  assert.deepEqual(judge(officeparser), { push: true });
+
+  // Off, on an agent branch, or without the policy tests or the patch read: the old fence.
+  for (const overrides of [{ dependabotTests: false }, { dependabotTests: undefined }, { headBranch: "claude/to-develop/x" },
+    { policyTestPaths: null }, { patch: undefined }]) {
+    assert.deepEqual(judge(officeparser, overrides), { push: false, reasons: ["test_file"] }, JSON.stringify(overrides));
+  }
+  // A test the merge lane leaves to a person stays fenced.
+  assert.deepEqual(judge(officeparser, { policyTestPaths: [path] }), { push: false, reasons: ["policy_test"] });
+
+  // What the edit may not do: each of these weakens, skips or loosens a check.
+  for (const [removed, added, reason] of [
+    ["  assert.equal(text, \"a\");", "  void text;", "test_edit_removed"],
+    ["  assert.equal(text, \"a\");", "  assert.equal(text, \"b\");", "test_edit_removed"],
+    ["  assert.equal(count, 3);", "  assert.equal(count, 4);", "test_edit_removed"],
+    ["  assert.deepEqual(rows, expected);", "  assert.equal(rows, expected);", "test_edit_removed"],
+    ["  assert.equal(rows, expected);", "  assert.equal(rows, rows);", "test_edit_removed"],
+    // Review r-20261101-020811-97785e: a comment, an early return and a looser regular expression.
+    ["  assert.match(text, /매출 보고/);", "  // assert.match(text, /매출 보고/);", "test_edit_added"],
+    ["  assert.match(text, /매출 보고/);", "  /* assert.match(text, /매출 보고/); */", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "test(\"reads the words\", async () => { return;", "test_edit_added"],
+    ["  assert.match(text, /매출 보고/);", "  assert.match(text, /.*/);", "test_edit_removed"],
+    ["  assert.ok(found);", "  assert.ok(!found);", "test_edit_added"],
+    ["  assert.ok(found);", "  assert.ok(found || true);", "test_edit_added"],
+    ["  assert.ok(found);", "  assert.ok([found]);", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "test.skip(\"reads the words\", async () => {", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "test(\"reads the words\", { skip: true }, async () => {", "test_edit_added"],
+    ["test(\"reads the words\", async () => {", "{", "test_edit_removed"],
+    // Review r-20261101-021735-beed8a: an expect matcher swapped or negated, through the chain.
+    ["  expect(posts).toEqual([]);", "  expect(posts).toBeTruthy([]);", "test_edit_removed"],
+    ["  expect(status).toBe(200);", "  expect(status).not.toBe(200);", "test_edit_added"],
+    ["  await expect(page.getByRole(\"button\")).toBeVisible();", "  await expect(page.getByRole(\"button\")).toBeAttached();", "test_edit_removed"],
+    ["  assert.strict.equal(a, b);", "  assert.strict.ok(a, b);", "test_edit_removed"],
+    ["  t.assert.deepEqual(a, b);", "  t.assert.ok(a, b);", "test_edit_removed"],
+    // Review r-20261101-022243-2f595c: a chain continued from the line before starts from what this line cannot show.
+    ["    .toBe(1);", "    .toBeGreaterThan(1);", "test_edit_removed"],
+    ["  )).toEqual([]);", "  )).toBeTruthy([]);", "test_edit_removed"],
+    ["    rows].length, 3);", "    rows].size, 3);", "test_edit_removed"],
+    // Review r-20261101-022453-3fb249: a name put into what is called, so the call never runs.
+    ["test(\"reads\", async () => {", "test.bind(\"reads\", async () => {", "test_edit_added"],
+    ["  assert.equal(actual, expected);", "  assert.equal.bind(actual, expected);", "test_edit_added"],
+    ["  await expect(page).toHaveURL(\"/a\");", "  await expect(page).toHaveURL.bind(\"/a\");", "test_edit_added"],
+    ["  assert.equal(actual, expected);", "  noop.assert.equal(actual, expected);", "test_edit_added"],
+    // ... or the arguments it is given folded into one.
+    ["  assert.ok(found, \"the row is there\");", "  assert.ok((found, \"the row is there\"));", "test_edit_added"],
+    // Review r-20261101-023258-31d3aa: no argument and one are different arities.
+    ["  assert.ok();", "  assert.ok(\"passes\");", "test_edit_added"],
+    ["  expect(rows).toHaveLength();", "  expect(rows).toHaveLength(\"0\");", "test_edit_added"],
+    ["  assert.equal(kind, \"string\");", "  assert.equal(typeof kind, \"string\");", "test_edit_added"],
+    // Review r-20261101-022844-527642: a line of a call that starts on the line before, or that the next line continues.
+    ["    (actual, expected);", "    .bind(actual, expected);", "test_edit_context"],
+    ["    actual.toText(), expected);", "    actual.text, expected);", "test_edit_context"],
+    ["  assert.equal(", "  assert.equal.bind(", "test_edit_context"],
+    ["  const text = document.toText();", "  const text = document.to(\"text\").", "test_edit_context"],
+  ]) {
+    const verdict = judge(hunk([removed], [added]));
+    assert.equal(verdict.push, false, added);
+    assert.ok(verdict.reasons.includes(reason), `${added}: ${verdict.reasons}`);
+  }
+  // A line added or dropped, rather than one rewritten, is refused.
+  assert.deepEqual(judge(hunk(["  const text = document.toText();"], ["  return;", "  const text = document.toText();"])),
+    { push: false, reasons: ["test_edit_shape"] });
+  // A renamed API inside what an expect checks is still a rewrite; the matcher is kept.
+  assert.deepEqual(judge(hunk(["  await expect(page.getByLabelText(\"Name\")).toBeVisible();"],
+    ["  await expect(page.getByLabel(\"Name\")).toBeVisible();"])), { push: true });
+  // Making a callback async to await the new API is a rewrite.
+  assert.deepEqual(judge(hunk(["test(\"reads\", () => {", "  const text = document.toText();"],
+    ["test(\"reads\", async () => {", "  const text = (await document.to(\"text\")).value;"])), { push: true });
+  // An edited test the patch does not show was not read.
+  assert.deepEqual(judge(""), { push: false, reasons: ["test_patch_unread"] });
+  // Lines that only look like a diff header inside a hunk are still judged.
+  assert.equal(judge(hunk(["-- assert.ok(x);"], ["-- x;"])).push, false);
+
+  // Only an existing test file is opened: a new, renamed, deleted file, a fixture or a snapshot stays fenced.
+  for (const [nameStatus, numstat] of [
+    ["A\ttests/new.test.mjs", "3\t0\ttests/new.test.mjs"],
+    ["R090\ttests/a.test.mjs\ttests/b.test.mjs", "1\t1\ttests/b.test.mjs"],
+    ["M\ttests/fixtures/report.json", "1\t1\ttests/fixtures/report.json"],
+    ["M\ttests/__snapshots__/a.snap", "1\t1\ttests/__snapshots__/a.snap"],
+  ]) {
+    const verdict = judge(officeparser, { nameStatus, numstat });
+    assert.equal(verdict.push, false, nameStatus);
+    assert.ok(verdict.reasons.includes("test_file"), nameStatus);
+  }
 });

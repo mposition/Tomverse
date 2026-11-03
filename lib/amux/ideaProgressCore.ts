@@ -1,3 +1,4 @@
+import type { AmuxIdeaLaneState } from "./ideaLaneCore.ts";
 import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
 
 /**
@@ -44,6 +45,8 @@ export type AmuxIdeaProgressFacts = {
   /** The idea's own registered cards (stories and tasks). */
   /** `merged`: v4TerminalAt is set (the merge was observed); a cancelled card is closed but not merged. */
   cards: Array<{ cardType: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
+  /** The idea lane's runs (ideaLaneCore.ts), null when the lane never took the idea. */
+  lane?: AmuxIdeaLaneState | null;
 };
 
 export type AmuxIdeaProgress = {
@@ -79,6 +82,12 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     ({ stage, waitingFor: attention ? null : waitingFor, attention, tasks: counts });
 
   if (facts.cancelled || facts.state === "cancelled") return at("cancelled");
+  // The lane skips analysis and approvals: its run is the execution, its
+  // draft PR the review, and a run out of attempts needs the owner's look.
+  if (facts.lane) {
+    return { stage: facts.lane.state === "pr_open" ? "review" : "execution", waitingFor: null,
+      attention: facts.lane.state === "failed", tasks: counts };
+  }
   if (latest && (latest.state === "in_flight" ||
     (latest.previewState !== null && ACTIVE_PREVIEW.has(latest.previewState)) ||
     (latest.holdStatus !== null && ACTIVE_HOLD.has(latest.holdStatus)))) {
@@ -100,7 +109,12 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   if (latest && latest.chunkIndex > 0 && NOT_YET_SENT.has(latest.state)) {
     return at("execution_approval", "continuation");
   }
-  if (facts.proposedUnits > 0) return at("plan_approval", "plan_approval");
+  // System registration (v19) registers the whole plan and marks the idea
+  // completed, leaving its draft units proposed: nothing is left to approve,
+  // and the plan approval read refuses a completed idea.
+  if (facts.proposedUnits > 0 && facts.state !== "completed") {
+    return at("plan_approval", "plan_approval");
+  }
 
   if (counts.total > 0) {
     if (tasks.every(closed)) return at(counts.done > 0 ? "done" : "cancelled");

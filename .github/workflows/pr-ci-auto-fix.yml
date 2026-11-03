@@ -16,8 +16,9 @@
 #
 # Conflicts with develop (owner 2026-10-27, kind "conflict"): the server
 # merges develop into the branch, the model resolves the markers, and the
-# resolution -- the conflicted files' contents -- comes here with the develop
-# commit it was made against. Off unless PR_AUTO_FIX_CONFLICTS_ENABLED is
+# resolution -- the lines that replace each conflict (a lockfile does not fit
+# whole), or a file's contents -- comes here with the develop commit it was
+# made against. Off unless PR_AUTO_FIX_CONFLICTS_ENABLED is
 # exactly "true" as well.
 #
 # Every input is untrusted: whoever can dispatch can send any patch. So:
@@ -33,7 +34,10 @@
 #   checkout of the pull request (no gate path -- the merge lane's own list --,
 #   no test file, no deletion, no binary, at most 400 changed lines; a root
 #   file only for a Dependabot head, and only the app's own build and
-#   instrumentation config), or, for a conflict, merges base_sha itself and
+#   instrumentation config; with PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED exactly
+#   "true", a Dependabot head's existing test file outside the merge lane's
+#   policy tests, its tests, assertions and literals all kept and nothing
+#   skipped), or, for a conflict, merges base_sha itself and
 #   judges the resolution (exactly the conflicted files, regular files on
 #   both sides and written through no link, everything git merged outside the
 #   conflicts kept in order, no marker left, no line on none of a conflict's
@@ -202,6 +206,8 @@ jobs:
           PATCH_GZ_B64: ${{ inputs.patch_gz_b64 }}
           # From the target job's read of the pull request, not from the dispatch.
           HEAD_BRANCH: ${{ needs.target.outputs.head_branch }}
+          # Off unless exactly "true" (owner 2026-11-01): a Dependabot fix may edit a test's call to a changed API.
+          PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED: ${{ vars.PR_AUTO_FIX_DEPENDABOT_TESTS_ENABLED }}
         run: |
           mkdir -p patch
           # A bounded read: the guard's 400-line cap is far below this.

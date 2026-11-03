@@ -81,7 +81,7 @@ Configure these names in the existing Codemagic personal account before running:
 |---|---|
 | Apple Developer Portal API integration | `Tomverse Codemagic Signing` |
 | Apple Distribution certificate reference | `tomverse-apple-distribution` |
-| App Store profile reference for `app.tomverse.shell` | `tomverse-app-store` |
+| App Store profile reference for `app.tomverse.shell` | `tomverse-app-store-apple-signin` |
 
 The registered App ID and provisioning profile must include Associated Domains
 for the existing `applinks:tomverse.app` and `webcredentials:tomverse.app`
@@ -335,6 +335,44 @@ delivery and actual installation are recorded separately from local tests;
 upload success alone cannot establish resolution of the earlier Apple
 install-data HTTP 404.
 
+## Browser sign-in domain association (2026-11-01)
+
+The owner reported that iPad 7th generation on TestFlight
+1.0.21 (6) immediately showed the browser-cancelled message without presenting
+Safari. Email-code sign-in succeeded. The production association endpoint and
+Apple's CDN both returned HTTP 404 while browser sign-in capability was enabled.
+The signed app already carries `applinks:tomverse.app` and
+`webcredentials:tomverse.app`, but the corresponding website proof was missing.
+
+`/.well-known/apple-app-site-association` now returns public JSON for the existing
+signed application identifier `F9KS3F6G9F.app.tomverse.shell`. Universal links
+claim only `/auth/mobile/callback`; shared web credentials use the same app.
+The identifier was read back from `application-identifier` in the embedded
+provisioning profile of the downloaded 1.0.21 (6) IPA, rather than inferred from
+the API key or team name. Callback URLs only finish an active native sign-in;
+opening a callback link alone does not create or recover an authentication session.
+The existing claimed HTTPS callback, state check, PKCE exchange and native token
+storage remain unchanged. Production deployment and an Apple CDN readback are
+needed before this can resolve installed-device sign-in.
+
+After deployment, verify direct HTTP 200 JSON without a redirect at the origin
+and at `https://app-site-association.cdn-apple.com/a/v1/tomverse.app`. Apple's CDN
+can retain a failed association, and installed devices can retain their previous
+result. Once the CDN serves the correct association, updating the app or
+reinstalling it refreshes the device association; do not ask the owner to delete
+the app while the production endpoint or CDN still returns 404. Reinstallation
+can discard local drafts and signs the user out. A successful endpoint check is
+not proof of a native browser login: observe the consent sheet, browser, callback
+and return to the signed-in app on the actual iPad.
+
+The local Next development server returned HTTP 200 `application/json` without
+a redirect through the real proxy. The deployed production response and Apple
+CDN still require separate readback, including the effective cache headers.
+
+References: [HTTPS callback requirements](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/callback/https(host:path:)),
+[association setup and caching](https://developer.apple.com/documentation/xcode/supporting-associated-domains),
+[Apple's association troubleshooting](https://developer.apple.com/documentation/technotes/tn3155-debugging-universal-links).
+
 ## Local verification
 
 Machine: local Windows PC. Shell: PowerShell. Directory: repository root.
@@ -360,6 +398,25 @@ the build's billing UI stays behind the existing build flag and actual Apple SDK
 key. See [native store billing](mobile-store-billing.md#ios-preparation-and-remaining-store-setup)
 for account/product registration, server configuration and signed-device payment
 acceptance. A successful unsigned compile does not complete those steps.
+
+## App Store submission candidate
+
+Enabling Sign in with Apple invalidated the old profile on 2026-11-02. The
+replacement `tomverse-app-store-apple-signin` reuses the existing distribution
+certificate and includes Apple sign-in and Associated Domains. All signed
+workflows use this active profile; no new distribution certificate was created.
+
+The manual `ios-app-store` workflow builds an App Store submission candidate
+against `https://tomverse.app` with the existing Apple billing SDK key group.
+It reuses the accepted signing identities and verification steps, and exports
+with `testFlightInternalTestingOnly=false`. Existing internal workflows retain
+their internal-only export. Uploading this candidate does not submit a review
+or release it publicly; attach the verified build and first subscription group
+and products in App Store Connect, and select the owner's release option before submission.
+The owner authorized production preparation, a submission build and App Review
+submission on 2026-11-02, then explicitly selected automatic public release
+after Apple approval in the same chat. The submitted version uses
+`AFTER_APPROVAL`; uploading a candidate still does not submit it for review.
 
 ## Official references
 

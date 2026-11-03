@@ -72,6 +72,7 @@ model User {
   emailLoginEnabled             Boolean       @default(true)
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
+  ga4UserId                     Ga4UserId?
 
   accounts                             Account[]
   sessions                             Session[]
@@ -1042,6 +1043,20 @@ model ComparisonReviewRunAttempt {
   @@index([reviewerModelId, createdAt])
   @@index([status, createdAt])
   @@index([createdAt])
+}
+
+/// The GA4 User-ID of an account (docs/policy/marketing-automation.md §10.2):
+/// 128 random bits with no relation to the account id, at most one per
+/// account. Created on the first request made after the visitor explicitly
+/// accepted analytics, never before. Withdrawing consent deletes it, after one
+/// GA4 deletion request naming it; so does deleting the account, through the
+/// cascade. Deleting the row is what cuts the account off from whatever GA4
+/// holds under the value, and a later consent gets a new one.
+model Ga4UserId {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyticsUserId String   @unique
+  createdAt       DateTime @default(now())
 }
 
 model ProductAnalyticsEvent {
@@ -7735,6 +7750,24 @@ model MarketingAsset {
   @@index([status])
 }
 
+/// The analysis behind one marketing brief report (operator decision
+/// 2026-11-01): written in the brief's transaction, read by a person in the
+/// Reports tab, never given to A5. `briefReportId` is a plain column rather
+/// than a relation, so MarketingReport -- watched by the webhook pipeline
+/// fingerprint -- gains no back relation. The migration's triggers set both
+/// dates from the database clock, refuse every update, and let retention
+/// alone delete a row past `retentionUntil`.
+model MarketingAnalysis {
+  id             String   @id
+  briefReportId  String   @unique
+  payload        Json
+  sourceVersion  String
+  retentionUntil DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@index([retentionUntil])
+}
+
 model AmuxWorkerRuntime {
   workerName     String   @id
   instanceId     String
@@ -10291,6 +10324,7 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
+  laneAttempts        AmuxIdeaLaneAttempt[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
@@ -10319,6 +10353,25 @@ model AmuxIdeaSubmission {
   @@index([state, analysisDeadlineAt])
   @@index([rawPurgeAfter, rawPurgedAt])
   @@index([actorUserId, submittedAt])
+}
+
+/// One run of the idea lane (lib/amux/ideaLaneCore.ts): a GitHub Actions job
+/// that implements an owner idea in one Claude Code session and opens a draft
+/// PR into develop. A run without an outcome past its lease died; the next
+/// claim counts it and tries again, up to the lane's attempt limit.
+model AmuxIdeaLaneAttempt {
+  id         String    @id
+  ideaId     String
+  claimedAt  DateTime
+  leaseUntil DateTime
+  finishedAt DateTime?
+  /// pr_open, or a fixed failure word (AMUX_IDEA_LANE_FAILURES).
+  outcome    String?
+  prNumber   Int?
+  idea       AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+
+  @@index([ideaId, claimedAt])
+  @@index([claimedAt])
 }
 
 /// Intake v19 queue identity created atomically with one session submission.

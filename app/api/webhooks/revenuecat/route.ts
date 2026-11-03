@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+import { iosReviewSandboxWebhookAllowed } from "@/lib/mobileBillingReview";
 
 import { timingSafeEqual } from "node:crypto";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
       return Response.json({ received: true, ignored: "UNSUPPORTED_STORE_EVENT" });
     }
     const expectedApp = envelope.event.store === "APP_STORE" ? process.env.REVENUECAT_APPLE_APP_ID : process.env.REVENUECAT_GOOGLE_APP_ID;
-    if (!expectedApp || envelope.event.app_id !== expectedApp || envelope.event.environment !== mobileBillingEnvironment()) {
+    if (!expectedApp || envelope.event.app_id !== expectedApp || (envelope.event.environment !== mobileBillingEnvironment() && !await iosReviewSandboxWebhookAllowed(envelope.event))) {
       console.warn("Store notification ignored for a different app or environment.");
       return Response.json({ received: true, ignored: "STORE_ENVIRONMENT_MISMATCH" });
     }

@@ -8,7 +8,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
-import { AMUX_IDEA_OWNER_CLOSABLE_STATE, AMUX_IDEA_OWNER_CLOSE_ACTION,
+import { AMUX_IDEA_OWNER_CLOSE_ACTION, amuxIdeaOwnerClosableState,
   inspectAmuxIdeaOwnerClose, type AmuxIdeaOwnerCloseOutcome } from
   "./ideaOwnerCloseCore.ts";
 
@@ -22,13 +22,15 @@ export class AmuxIdeaOwnerCloseError extends Error {
 /**
  * Closes each idea in its own transaction, so one refusal or failure leaves
  * the others' outcomes intact. Every close takes the audit chain lock and the
- * idea row lock first: unit approval, unit rejection and unattended
- * registration take the same lock and re-check the idea afterwards, so none
- * of them can commit against an idea this closed.
+ * idea row lock first: unit approval, unit rejection, unattended registration,
+ * transfer confirmation and budget reservation take the same lock and
+ * re-check the idea afterwards, so none of them can commit against an idea
+ * this closed.
  *
- * The row, its encrypted body and its draft units stay. `rawPurgeAfter` is
- * not moved: the body leaves on its seven-day clock and proposed units on
- * their own expiry, exactly as for an idea nobody closed.
+ * The row and its draft units stay, and proposed units expire on their own
+ * clock. The encrypted body keeps its purge time when that is already due
+ * (every idea after analysis); an idea closed before an execution approval
+ * becomes due for purge at the close, as a cancelled idea must be.
  */
 export async function closeAmuxIdeasForOwner(input: {
   session: Session; request: Request; ideaIds: unknown; reason: unknown;
@@ -70,9 +72,9 @@ async function closeOne(input: {
       await takeAuditChainLock(tx);
       const locked = await tx.$queryRaw<Array<{ actorUserId: string; state: string;
         cancelledAt: Date | null; requestId: string; submissionOrigin: string;
-        now: Date }>>`
+        rawPurgeAfter: Date | null; now: Date }>>`
         SELECT "actorUserId", "state", "cancelledAt", "requestId"::text AS "requestId",
-               "submissionOrigin",
+               "submissionOrigin", "rawPurgeAfter",
                (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
         FROM "AmuxIdeaSubmission" WHERE "id" = ${ideaId} FOR UPDATE
       `;
@@ -82,13 +84,42 @@ async function closeOne(input: {
         return { ideaId, result: "not_found" };
       }
       if (idea.state === "cancelled") return { ideaId, result: "already_closed" };
-      if (idea.state !== AMUX_IDEA_OWNER_CLOSABLE_STATE || idea.cancelledAt !== null) {
+      if (!amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) ||
+          idea.cancelledAt !== null) {
         return { ideaId, result: "not_closable" };
+      }
+      if (idea.state === "submitted" || idea.state === "analyzing") {
+        // Execution approval already set a paid analysis going: a confirmed
+        // or running preview, or a held budget, keeps its own path (claim,
+        // stop, release of an unused hold). Confirmation, reservation and
+        // claim take the same two locks first, so none can land between this
+        // read and the close. A running idea-lane run is the same: its claim
+        // took this row's lock, and the run would still open its PR.
+        const started = await tx.$queryRaw<Array<{ started: boolean }>>`
+          SELECT (EXISTS (
+            SELECT 1 FROM "AmuxIdeaTransferPreview" p
+            LEFT JOIN "AmuxIdeaAnalysisBudgetHold" h ON h."previewId" = p."id"
+            WHERE p."ideaId" = ${ideaId}
+              AND (p."state" IN ('confirmed', 'in_flight', 'outcome_unknown')
+                OR h."status" IN ('reserved', 'in_flight', 'outcome_unknown'))
+          ) OR EXISTS (
+            SELECT 1 FROM "AmuxIdeaLaneAttempt" a
+            WHERE a."ideaId" = ${ideaId} AND a."outcome" IS NULL
+              AND a."leaseUntil" > (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3)
+          )) AS "started"
+        `;
+        if (started[0]?.started !== false) return { ideaId, result: "not_closable" };
       }
       const now = idea.now;
       if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
         throw new AmuxIdeaOwnerCloseError("integrity_unavailable");
       }
+      // A cancelled idea's body must already be due for purge
+      // (AmuxIdeaSubmission_raw_purge_bound_check). After analysis it is, by
+      // analysisCompletedAt; before an execution approval the close makes it due
+      // now, as the queued session cancel does, and the purge worker retires it.
+      const rawPurgeAfter = idea.rawPurgeAfter && idea.rawPurgeAfter <= now
+        ? idea.rawPurgeAfter : now;
       // The reason is the owner's free text and may quote the idea, so the
       // audit keeps only its keyed digest (as a unit rejection does).
       const reason = amuxContentDigest(Buffer.from(input.reason, "utf8"),
@@ -100,12 +131,13 @@ async function closeOne(input: {
         metadata: { requestId: idea.requestId,
           submissionOrigin: idea.submissionOrigin,
           previousState: idea.state, cancelledAt: now.toISOString(),
+          rawPurgeAfter: rawPurgeAfter.toISOString(),
           reasonDigest: reason.digest, reasonDigestKeyId: reason.digestKeyId,
           batchSize: input.batchSize } });
       const updated = await tx.amuxIdeaSubmission.updateMany({
         where: { id: ideaId, actorUserId: input.actorUserId,
-          state: AMUX_IDEA_OWNER_CLOSABLE_STATE, cancelledAt: null },
-        data: { state: "cancelled", cancelledAt: now },
+          state: idea.state, cancelledAt: null },
+        data: { state: "cancelled", cancelledAt: now, rawPurgeAfter },
       });
       if (updated.count !== 1) {
         throw new AmuxIdeaOwnerCloseError("integrity_unavailable");

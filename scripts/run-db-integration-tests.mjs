@@ -223,6 +223,7 @@ run(
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
     "tests/integration/mobile-store-billing.db.test.ts",
+    "tests/integration/ios-review-billing.db.test.ts",
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
@@ -354,6 +355,9 @@ run(
     // boundary (the seven-read version failed the 100 ms idle-in-transaction
     // timeout), newest first, bounded and owner scoped.
     "tests/integration/amux-idea-progress.db.test.ts",
+    // The idea lane: attempt limit, a claim scan finished ideas cannot crowd
+    // out, results recorded once, the outcome CHECK.
+    "tests/integration/amux-idea-lane.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.
@@ -563,6 +567,7 @@ run(
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
+    "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
     // Durable Chat recovery is a database coordination contract: duplicate
@@ -753,6 +758,9 @@ run(
     // transaction_timeout armed against the service's deadline -- which only a
     // real PostgreSQL 17 can show.
     "tests/integration/marketing-draft-intake.db.test.ts",
+    "tests/integration/marketing-auto-pause.db.test.ts",
+    "tests/integration/marketing-comment-alerts.db.test.ts",
+    "tests/integration/marketing-graduation.db.test.ts",
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
@@ -790,6 +798,9 @@ run(
     // one writer, compare-and-set on the row, only a pinned model, the cap
     // within its ceiling, and a refused save that writes nothing.
     "tests/integration/marketing-llm-settings.db.test.ts",
+    // The marketing analysis and brief switch (2026-11-01): default off, one
+    // writer, compare-and-set on the row, and a save that changes nothing refused.
+    "tests/integration/marketing-analysis-setting.db.test.ts",
     // The Scout's spending stop: a call reserved against the model and cap as
     // they are under the ledger lock, so turning the model off or lowering the
     // cap stops every later call, and racing reservations stay within the cap.
@@ -946,6 +957,10 @@ run(
     "tests/integration/account-data-export.db.test.ts",
     "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/account-anonymisation.db.test.ts",
+    // docs/policy/marketing-automation.md §10.1: the event-name check admits
+    // marketing_touch, and the
+    // attribution query's seven-day window is inclusive at both ends.
+    "tests/integration/marketing-touch-attribution.db.test.ts",
     // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.
     "tests/integration/routing-attempt-manifest.db.test.ts",
     "tests/integration/routing-dispatch-instrumentation.db.test.ts",
@@ -1013,6 +1028,16 @@ run(
     "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
     "--test-concurrency=1", "tests/integration/chat-c16-lifecycle.db.test.ts"],
   "Running Chat sharing, export and deletion lifecycle scenarios"
+);
+// The stored GA4 User-ID: one per account under racing first requests, the
+// CHECK on its form, withdrawal and account deletion leaving no row, and the
+// deletion lock against a racing creation. Its own process because it replaces
+// the GA4 request module, so nothing reaches Google.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/ga4-user-id.db.test.ts"],
+  "Running the GA4 User-ID creation, withdrawal and account deletion scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
