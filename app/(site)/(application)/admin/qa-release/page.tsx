@@ -89,6 +89,7 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
             failure: report.failure,
             picks: report.picks,
           }))}
+          laneRounds={laneRounds}
           nowMs={now.getTime()}
         />
       )}
