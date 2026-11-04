@@ -8,11 +8,13 @@ import {
   CHIP,
   NEUTRAL_CHIP,
   SEVERITY_CHIP,
+  SCOUT_SEND_SPACING_MS,
   SEVERITY_RANK,
   STATE_CHIP,
   compactNumber,
   fill,
   localTime,
+  nextScoutSendBatch,
   scoutState,
 } from "@/lib/adminScoutDisplay";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
@@ -141,7 +143,8 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
     const queue = initial.open.filter((row) => selected.has(row.id) && rows[row.id]?.kind !== "done");
     let done = 0;
     setBulk({ kind: "running", action, done, total: queue.length });
-    for (const row of queue) {
+    for (const [index, row] of queue.entries()) {
+      if (action === "send" && index > 0) await new Promise((resolve) => setTimeout(resolve, SCOUT_SEND_SPACING_MS));
       const failure = await act(row, action);
       if (failure) {
         setBulk({ kind: "finished", done, total: queue.length, failure });
@@ -163,6 +166,7 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
       return next;
     });
   const selectable = (row: ScoutConsoleSuggestion) => rows[row.id]?.kind !== "done" && (initial.canDismiss || initial.canSend);
+  const batch = nextScoutSendBatch(visible.filter(selectable));
 
   const renderRow = (suggestion: ScoutConsoleSuggestion, showSubject: boolean) => {
     const row = rows[suggestion.id] ?? { kind: "idle" as const };
@@ -365,6 +369,20 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {initial.canSend && batch.length > 0 ? (
+            <button
+              type="button"
+              className="min-h-9 px-2 text-xs font-medium text-blue-300 hover:text-blue-200 disabled:opacity-50"
+              data-testid="admin-product-research-scout-select-batch"
+              disabled={bulk.kind === "running"}
+              onClick={() => {
+                setSelected(new Set(batch));
+                setBulk({ kind: "idle" });
+              }}
+            >
+              {fill(m.selectBatch, { count: batch.length })}
+            </button>
+          ) : null}
           {view === "subject" ? (
             <button
               type="button"
@@ -470,7 +488,10 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
         >
           <div className="min-w-0 flex-1" role="status">
             {bulk.kind === "running" ? (
-              <p className="text-sm font-semibold text-zinc-50">{fill(m.bulkProgress, { done: bulk.done, total: bulk.total })}</p>
+              <>
+                <p className="text-sm font-semibold text-zinc-50">{fill(m.bulkProgress, { done: bulk.done, total: bulk.total })}</p>
+                {bulk.action === "send" ? <p className="text-xs text-zinc-400">{m.bulkSendNote}</p> : null}
+              </>
             ) : (
               <>
                 {selectedCount > 0 ? <p className="text-sm font-semibold text-zinc-50">{fill(m.selected, { count: selectedCount })}</p> : null}

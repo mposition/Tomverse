@@ -8,15 +8,17 @@ import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
+import { ideaSendPath } from "@/lib/amux/ideaSendPath";
+import { amuxIdeaSessionPrewriteStatus } from "@/lib/amux/ideaSessionSubmissionCore";
+import { AmuxIdeaSessionSubmissionError } from "@/lib/amux/ideaSessionSubmissionService";
 import {
   AMUX_V4_IDEA_READBACK_ENV,
   AMUX_V4_IDEA_SUBMISSION_ENV,
   ideaSubmissionReadBackPermitted,
   ideaSubmissionWritePermitted,
-  inspectAmuxIdeaSubmission,
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
-import { IdeaSubmissionError, readIdeaSubmissionByDerivedRequestId, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { authOptions } from "@/lib/auth";
 import { suggestionIdeaText, suggestionSendRequestId } from "@/lib/productResearchScoutCore";
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
@@ -28,9 +30,9 @@ import { closeSuggestion, readSuggestion } from "@/lib/productResearchScoutStore
 //   { "action": "dismiss" }   owner or ops
 //   { "action": "send" }      owner
 //
-// Sending makes an AMUX idea from the suggestion through the same v4 path the
-// idea form uses -- its gates, its content scan, its audit -- and then marks
-// the suggestion sent. The request id is derived from the suggestion id on the
+// Sending makes an AMUX idea from the suggestion through the same intake the
+// idea form uses (lib/amux/ideaSendPath.ts) -- its gates, its content scan, its
+// audit -- and then marks the suggestion sent. The request id is derived from the suggestion id on the
 // server (suggestionSendRequestId), so a lost answer, a second tab or a second
 // owner all name the same request: AMUX takes it once and the rest read it
 // back, by any owner, which also finishes a send whose idea was made but whose
@@ -54,6 +56,12 @@ const admin = async (roles: readonly string[]): Promise<Session | NextResponse> 
 };
 
 const failure = (error: unknown): Response => {
+  if (error instanceof AmuxIdeaSessionSubmissionError) {
+    // Anything but a refusal before the write is finished by sending again,
+    // which reads the idea back by its request id.
+    const status = amuxIdeaSessionPrewriteStatus(error.code);
+    return json({ error: status ? error.code : "outcome_unknown" }, status ?? 503);
+  }
   if (error instanceof IdeaSubmissionError) {
     return json({ error: error.code, ...(error.ideaId ? { ideaId: error.ideaId } : {}) }, error.status);
   }
@@ -98,16 +106,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
     }
     await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-suggestion-send", { minute: 5, day: 50 });
 
-    const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
-      version: 1,
+    const path = await ideaSendPath({
+      session,
+      request,
       requestId,
-      input: { version: 1, idea: suggestionIdeaText(suggestion), repositories: [], pullRequests: [] },
-    }));
-    if (!inspected.ok) return json({ error: inspected.code }, 400);
+      idea: suggestionIdeaText(suggestion),
+      sessionDisplay: "Scout suggestion",
+    });
+    if (!path.ok) return json({ error: path.code }, path.status);
     const result = await sendScoutSuggestion({
-      readBack: () => readIdeaSubmissionByDerivedRequestId(session, requestId),
-      submit: () => submitIdea({ session, request, inspected }),
-      isAlreadySeen: (error) => error instanceof IdeaSubmissionError && error.code === "request_already_seen",
+      readBack: path.readBack,
+      submit: path.submit,
+      isAlreadySeen: path.isAlreadySeen,
       close: (ideaId) => closeSuggestion({ session, request, id: suggestionId, next: { status: "sent", amuxIdeaId: ideaId } }),
     });
     if (result.kind === "partial") return json({ error: "idea_partial", ideaId: result.ideaId }, 409);
