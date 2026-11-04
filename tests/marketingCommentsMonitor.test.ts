@@ -200,7 +200,6 @@ test("the health reader does not query the database with the variable off, and r
     },
   };
   const before = process.env[MARKETING_COMMENTS_MONITOR_ENV];
-  process.env[MARKETING_COMMENTS_MONITOR_ENV] = "true";
   try {
     // The notice constant is true, so the variable is what decides.
     delete process.env[MARKETING_COMMENTS_MONITOR_ENV];
