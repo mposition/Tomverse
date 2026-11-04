@@ -256,7 +256,8 @@ test("the two steps against the real store: collect writes nothing, judge record
     let now = readAt;
     const deps = {
       env: { [MARKETING_COMMENTS_MONITOR_ENV]: "true" },
-      enabled: commentsMonitorEnabled,
+      // As if the privacy notice's comments section were published; the constant is false until it is.
+      enabled: (env: Readonly<Record<string, string | undefined>>) => commentsMonitorEnabled(env, true),
       now: () => now,
       fetchComments: async (target: { externalPostId: string }) =>
         target.externalPostId === post.externalPostId

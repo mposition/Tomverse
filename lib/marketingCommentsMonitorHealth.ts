@@ -4,6 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { prisma } from "@/lib/prisma";
+import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 
 /**
  * Whether the comment monitor is switched on and has recently worked (policy
@@ -15,7 +16,14 @@ import { prisma } from "@/lib/prisma";
  * privacy assessment, the posting tool's data-processing terms and a revised
  * privacy notice first (policy 12.1). Until a person has done those and set
  * `MARKETING_COMMENTS_MONITOR_ENABLED=true`, nothing here reads a comment and
- * nothing calls the posting tool. The same variable has to be set on every service
+ * nothing calls the posting tool.
+ *
+ * **The variable alone is not enough (operator decision 2026-11-04).** The
+ * published notice is the first of those steps, and its constant
+ * (`COMMENTS_PRIVACY_NOTICE_CONFIRMED`) is the code's record that the notice
+ * now carries the comments section. While it is false the monitor is off
+ * whatever the variable says: this one predicate is what the route, the run,
+ * the health reading, the graduation and the admission all ask. The same variable has to be set on every service
  * that asks whether the monitor is healthy -- the web app (console and graduation)
  * and the publisher (autonomous admission) as well as the service that runs the
  * monitor -- or they read it as unhealthy, which is the safe way to be wrong.
@@ -30,11 +38,19 @@ export const MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY = "marketing_comments_monit
 export const MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS = 3 * 60 * 60 * 1000;
 
 /**
- * On only when its own switch says true and the global kill switch is clear: the
- * kill switch stops everything but reading the record (policy 6.1), and a
- * monitor that kept calling the posting tool under it would not be stopped.
+ * On only when the privacy notice is published, its own switch says true and
+ * the global kill switch is clear: the kill switch stops everything but
+ * reading the record (policy 6.1), and a monitor that kept calling the posting
+ * tool under it would not be stopped.
+ *
+ * `noticeConfirmed` is the published constant; a test passes the other value
+ * rather than the constant being something a variable can flip.
  */
-export const commentsMonitorEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
+export const commentsMonitorEnabled = (
+  env: Readonly<Record<string, string | undefined>>,
+  noticeConfirmed: boolean = COMMENTS_PRIVACY_NOTICE_CONFIRMED,
+): boolean =>
+  noticeConfirmed === true &&
   (env[MARKETING_COMMENTS_MONITOR_ENV] ?? "").trim().toLowerCase() === "true" &&
   (env[MARKETING_AUTOMATION_KILL_SWITCH_ENV] ?? "").trim() === "";
 
@@ -43,8 +59,9 @@ export const commentsMonitorHealthyFromValue = (
   lastRunValue: string | undefined,
   now: Date,
   env: Readonly<Record<string, string | undefined>>,
+  noticeConfirmed: boolean = COMMENTS_PRIVACY_NOTICE_CONFIRMED,
 ): boolean => {
-  if (!commentsMonitorEnabled(env) || lastRunValue === undefined) return false;
+  if (!commentsMonitorEnabled(env, noticeConfirmed) || lastRunValue === undefined) return false;
   const lastRun = new Date(lastRunValue);
   const age = now.getTime() - lastRun.getTime();
   return Number.isFinite(age) && age >= 0 && age <= MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS;

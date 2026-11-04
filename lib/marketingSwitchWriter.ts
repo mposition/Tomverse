@@ -6,6 +6,7 @@ import { MARKETING_CONFIG_GENERATION_KEY } from "@/lib/appSettings";
 import {
   MARKETING_AUTO_PUBLISH_KEY,
   MARKETING_DRAFTS_KEY,
+  MARKETING_EXPERIMENTS_KEY,
   MARKETING_PUBLISH_KEY,
   marketingAutomationEnabledFromValue,
 } from "@/lib/marketingAutomationAccess";
@@ -13,7 +14,8 @@ import { type MarketingConsoleSwitch } from "@/lib/marketingConsoleSections";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
- * The only writer of the three marketing switches, and of the generation that
+ * The only writer of the four marketing switches (drafts, publishing,
+ * autonomous publishing and landing experiments), and of the generation that
  * every admission-affecting change moves.
  *
  * It lived in `lib/appSettings.ts` until 2026-09-23, which was the wrong
@@ -43,10 +45,12 @@ const switchKey = (name: MarketingConsoleSwitch) =>
     ? MARKETING_DRAFTS_KEY
     : name === "publish"
       ? MARKETING_PUBLISH_KEY
-      : MARKETING_AUTO_PUBLISH_KEY;
+      : name === "experiments"
+        ? MARKETING_EXPERIMENTS_KEY
+        : MARKETING_AUTO_PUBLISH_KEY;
 
 /**
- * Turns one of the three marketing switches on or off, under compare-and-set.
+ * Turns one of the four marketing switches on or off, under compare-and-set.
  *
  * The caller says what it believed the switch was, and a change that no longer
  * matches is refused rather than applied: two consoles open on the same screen
@@ -114,7 +118,7 @@ const readConfigGeneration = (value: string | undefined): number => {
 };
 
 /**
- * Turns one of the three marketing switches on or off, under compare-and-set.
+ * Turns one of the four marketing switches on or off, under compare-and-set.
  *
  * The caller says which configuration generation its screen read, and a
  * generation that has moved is refused. That is the version token the plan
@@ -160,6 +164,7 @@ export async function writeMarketingAutomationSwitch(
           MARKETING_DRAFTS_KEY,
           MARKETING_PUBLISH_KEY,
           MARKETING_AUTO_PUBLISH_KEY,
+          MARKETING_EXPERIMENTS_KEY,
           MARKETING_CONFIG_GENERATION_KEY,
         ],
       },

@@ -128,15 +128,6 @@ const READ_ONLY_KEYS = {
       "account, after the consent copy and the confirmation flag are live. " +
       "An operator step recorded by writing the row, not a screen toggle.",
   },
-  MARKETING_EXPERIMENTS_KEY: {
-    reason:
-      "The audited start and stop routes (app/api/admin/marketing/experiments) " +
-      "write the experiment configuration, not this switch. Turning landing " +
-      "experiments on is an operator step -- writing this row -- taken after " +
-      "the pre-registration and the copy bundle are settled and the " +
-      "shared-cache bypass for the assignment cookie is in place " +
-      "(docs/policy/marketing-automation.md 9.1).",
-  },
   VOICE_INPUT_FLAG_KEY: {
     reason:
       "docs/policy/voice-input.md §14: enabling voice input starts paying a " +
@@ -264,6 +255,14 @@ test("the revocation key is writable, which is what §12.1 requires", () => {
   // so many words, and it is the reason the sweep exists.
   assert.ok(readKeys.has("MEMORY_EXTRACTION_REVOKED_PAIRS_KEY"));
   assert.ok(writtenKeys.has("MEMORY_EXTRACTION_REVOKED_PAIRS_KEY"));
+});
+
+test("the landing experiments switch is writable from the console (2026-11-04)", () => {
+  // It was a registered read-only key until the operator decision of that
+  // date; the writer is the console switch writer, audited by its route.
+  assert.ok(readKeys.has("MARKETING_EXPERIMENTS_KEY"));
+  assert.ok(writtenKeys.has("MARKETING_EXPERIMENTS_KEY"));
+  assert.equal("MARKETING_EXPERIMENTS_KEY" in READ_ONLY_KEYS, false);
 });
 
 test("every read-only entry carries a reason a reviewer can check", () => {

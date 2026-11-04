@@ -10,11 +10,13 @@ import test from "node:test";
 
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import {
-  commentsMonitorEnabled,
-  commentsMonitorHealthyFromValue,
+  commentsMonitorEnabled as commentsMonitorEnabledWith,
+  commentsMonitorHealthyFromValue as commentsMonitorHealthyFromValueWith,
   MARKETING_COMMENTS_MONITOR_ENV,
   MARKETING_COMMENTS_MONITOR_HEALTHY_WINDOW_MS,
+  readMarketingCommentsMonitorHealthy,
 } from "@/lib/marketingCommentsMonitorHealth";
+import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 import {
   MARKETING_COMMENT_BODY_MAX_CHARS,
   runMarketingCommentsMonitor,
@@ -34,6 +36,18 @@ import {
 const NOW = new Date("2026-11-02T09:00:00.000Z");
 const ON = { [MARKETING_COMMENTS_MONITOR_ENV]: "true" };
 
+// Almost all of this file is about a monitor that is allowed to run, so it asks
+// the predicate as if the privacy notice's comments section were published.
+// The constant itself is false until the notice revision lands; what it does
+// is pinned once, under "The privacy notice", with the real default.
+const commentsMonitorEnabled = (env: Readonly<Record<string, string | undefined>>) =>
+  commentsMonitorEnabledWith(env, true);
+const commentsMonitorHealthyFromValue = (
+  value: string | undefined,
+  now: Date,
+  env: Readonly<Record<string, string | undefined>>,
+) => commentsMonitorHealthyFromValueWith(value, now, env, true);
+
 const post = (id: string) => ({
   id,
   channelId: `chn-${id}`,
@@ -47,6 +61,7 @@ type Calls = string[];
 const monitor = (
   options: {
     env?: Record<string, string | undefined>;
+    enabled?: MarketingCommentsMonitorDeps["enabled"];
     classifier?: MarketingCommentsMonitorDeps["classifier"];
     posts?: ReturnType<typeof post>[];
     comments?: Record<string, ReturnType<typeof comment>[] | "unavailable">;
@@ -67,7 +82,7 @@ const monitor = (
   const runs: Date[] = [];
   const deps: MarketingCommentsMonitorDeps = {
     env: options.env ?? ON,
-    enabled: commentsMonitorEnabled,
+    enabled: options.enabled ?? commentsMonitorEnabled,
     classifier:
       options.classifier === undefined
         ? async (bodies) => {
@@ -126,6 +141,72 @@ test("with the switch not set, no dependency is touched", async () => {
     const { deps, calls } = monitor({ env });
     assert.deepEqual(await runMarketingCommentsMonitor(deps), { ran: false, reason: "switch_off" });
     assert.deepEqual(calls, []);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The privacy notice (operator decision 2026-11-04; policy 12.1)
+// ---------------------------------------------------------------------------
+
+test("the published constant is false, so the real predicate is off with the variable on", () => {
+  // The default argument is the constant itself. When the notice revision
+  // flips it, this test is the one that has to be read with the revision.
+  assert.equal(COMMENTS_PRIVACY_NOTICE_CONFIRMED, false);
+  assert.equal(commentsMonitorEnabledWith(ON), false);
+  assert.equal(commentsMonitorEnabledWith(ON, false), false);
+  assert.equal(commentsMonitorEnabledWith(ON, true), true);
+});
+
+test("variable on, notice unconfirmed: nothing is touched, whether the constant is the default or passed", async () => {
+  for (const enabled of [
+    // What the route and the service wire in: the predicate with its default.
+    (env: Readonly<Record<string, string | undefined>>) => commentsMonitorEnabledWith(env),
+    (env: Readonly<Record<string, string | undefined>>) => commentsMonitorEnabledWith(env, false),
+  ]) {
+    const { deps, calls } = monitor({ env: ON, enabled });
+    assert.deepEqual(await runMarketingCommentsMonitor(deps), { ran: false, reason: "switch_off" });
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("variable on, notice confirmed: the monitor runs as before", async () => {
+  const { deps, calls, classified } = monitor({
+    env: ON,
+    enabled: (env) => commentsMonitorEnabledWith(env, true),
+    comments: { p1: [comment("please help")] },
+  });
+  const result = await runMarketingCommentsMonitor(deps);
+  assert.equal(result.ran && result.complete, true);
+  assert.ok(calls.includes("fetch:p1"), calls.join(","));
+  assert.deepEqual(classified, [["please help"]]);
+});
+
+test("an unconfirmed notice reads as an unhealthy monitor for graduation and admission", () => {
+  const recent = new Date(NOW.getTime() - 60_000).toISOString();
+  assert.equal(commentsMonitorHealthyFromValueWith(recent, NOW, ON, true), true);
+  assert.equal(commentsMonitorHealthyFromValueWith(recent, NOW, ON, false), false);
+  // The default argument is the constant, which is false.
+  assert.equal(commentsMonitorHealthyFromValueWith(recent, NOW, ON), false);
+});
+
+test("the health reader does not even query the database while the notice is unconfirmed", async () => {
+  let queried = 0;
+  const client = {
+    appSetting: {
+      findUnique: async () => {
+        queried += 1;
+        return { value: new Date().toISOString() };
+      },
+    },
+  };
+  const before = process.env[MARKETING_COMMENTS_MONITOR_ENV];
+  process.env[MARKETING_COMMENTS_MONITOR_ENV] = "true";
+  try {
+    assert.equal(await readMarketingCommentsMonitorHealthy(client as never), false);
+    assert.equal(queried, 0);
+  } finally {
+    if (before === undefined) delete process.env[MARKETING_COMMENTS_MONITOR_ENV];
+    else process.env[MARKETING_COMMENTS_MONITOR_ENV] = before;
   }
 });
 

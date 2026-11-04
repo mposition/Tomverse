@@ -5,6 +5,7 @@ import { MARKETING_CONFIG_GENERATION_KEY } from "../lib/appSettings.ts";
 import {
   MARKETING_AUTO_PUBLISH_KEY,
   MARKETING_DRAFTS_KEY,
+  MARKETING_EXPERIMENTS_KEY,
   MARKETING_PUBLISH_KEY,
 } from "../lib/marketingAutomationAccess.ts";
 import type { MarketingTransaction } from "../lib/marketingStore.ts";
@@ -81,4 +82,56 @@ test("a stale screen is refused before anything is written", async () => {
     (error: unknown) => error instanceof MarketingSwitchRefusedError && error.code === "switch_conflict",
   );
   assert.equal(rows.has(MARKETING_PUBLISH_KEY), false);
+});
+
+test("landing experiments switch on with nothing else on, and move the generation", async () => {
+  // Operator decision 2026-11-04. Unlike autonomous publishing it depends on
+  // no other switch: it only lets a pre-registered experiment run, and the
+  // start route still asks the access resolver for the rest.
+  const { tx, rows } = fakeTransaction({ [MARKETING_CONFIG_GENERATION_KEY]: generation(2) });
+  const result = await writeMarketingAutomationSwitch(tx, {
+    name: "experiments",
+    enabled: true,
+    expectedConfigGeneration: 2,
+  });
+  assert.equal(result.configGeneration, 3);
+  assert.equal(rows.get(MARKETING_EXPERIMENTS_KEY), "true");
+  assert.equal(rows.get(MARKETING_CONFIG_GENERATION_KEY), generation(3));
+  // Only its own key and the generation were written.
+  assert.equal(rows.has(MARKETING_DRAFTS_KEY), false);
+  assert.equal(rows.has(MARKETING_PUBLISH_KEY), false);
+  assert.equal(rows.has(MARKETING_AUTO_PUBLISH_KEY), false);
+});
+
+test("landing experiments switch off, which is the safe direction", async () => {
+  const { tx, rows } = fakeTransaction({
+    [MARKETING_EXPERIMENTS_KEY]: "true",
+    [MARKETING_CONFIG_GENERATION_KEY]: generation(5),
+  });
+  const result = await writeMarketingAutomationSwitch(tx, {
+    name: "experiments",
+    enabled: false,
+    expectedConfigGeneration: 5,
+  });
+  assert.equal(result.configGeneration, 6);
+  assert.equal(rows.get(MARKETING_EXPERIMENTS_KEY), "false");
+});
+
+test("an experiments change that changes nothing, or reads a stale screen, writes nothing", async () => {
+  const noop = fakeTransaction({
+    [MARKETING_EXPERIMENTS_KEY]: "true",
+    [MARKETING_CONFIG_GENERATION_KEY]: generation(1),
+  });
+  await assert.rejects(
+    writeMarketingAutomationSwitch(noop.tx, { name: "experiments", enabled: true, expectedConfigGeneration: 1 }),
+    (error: unknown) => error instanceof MarketingSwitchRefusedError && error.code === "switch_change_is_noop",
+  );
+  assert.equal(noop.rows.get(MARKETING_CONFIG_GENERATION_KEY), generation(1));
+
+  const stale = fakeTransaction({ [MARKETING_CONFIG_GENERATION_KEY]: generation(4) });
+  await assert.rejects(
+    writeMarketingAutomationSwitch(stale.tx, { name: "experiments", enabled: true, expectedConfigGeneration: 3 }),
+    (error: unknown) => error instanceof MarketingSwitchRefusedError && error.code === "switch_conflict",
+  );
+  assert.equal(stale.rows.has(MARKETING_EXPERIMENTS_KEY), false);
 });

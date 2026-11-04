@@ -103,7 +103,9 @@ const experimentActivationDecision = (switchValue: string | undefined) =>
  * The experiments switch, read and nothing else. Its own declaration on
  * purpose: `tests/appSettingWriters.test.mjs` counts a key as written when one
  * declaration both names it and writes some row, and this feature has no
- * writer for the switch (policy 9.1: turning experiments on is an operator step).
+ * writer for the switch. The console switch writer
+ * (`lib/marketingSwitchWriter.ts`, operator decision 2026-11-04, policy 9.1)
+ * is the only one.
  */
 const readExperimentsSwitchValue = async (tx: MarketingTransaction) =>
   (

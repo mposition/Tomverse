@@ -163,7 +163,8 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
   (스위치는 `lib/appSettings.ts`가 읽고 `lib/marketingAutomationAccess.ts`가 이름을 가지며, LLM 설정은
   `lib/marketingLlmBudgetCore.ts`, 랜딩 실험 설정·카운터·사용 id 기록은 `lib/marketingExperimentContract.ts`),
   각 key가 감사 기록을 남기는 writer 또는 명시적 read-only 사유를 가진다. 스위치 key는
-  `tests/appSettingWriters.test.mjs`가, 랜딩 실험 key는 `tests/marketingExperimentWriters.test.mjs`가 검사한다
+  `tests/appSettingWriters.test.mjs`가, 랜딩 실험 설정 key는 `tests/marketingExperimentWriters.test.mjs`가 검사한다
+  (랜딩 실험 **스위치** key는 2026-11-04부터 스위치 writer `lib/marketingSwitchWriter.ts`가 쓰므로 앞의 시험이 검사한다)
   (`lib/appSettings.ts`는 Prompt Refiner 실행 closure라 새 key를 거기 두지 않는다 — 2026-11-01 서술 정정).
 
 ## 6. 승인·권한·감사
@@ -396,6 +397,11 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - 사전 등록(가설·주 지표·최소 표본·고정 기간·중단 규칙) 없이는 시작하지 않는다. 승자의 영구 반영은 PR.
 - 구현 전 캐시·CSP·rewrite 스파이크를 E2E로 통과해야 하며, 실패하면 실험은 연기한다.
 
+**실험 스위치를 켜는 곳 (2026-11-04, 운영자 결정 — 구현 설명이며 위 구속 조건과 정책 버전을 바꾸지 않는다)**
+- 실험 스위치(`marketingAutomation.experimentsEnabled`)는 DB를 직접 고치는 운영자 단계가 아니라, Admin 마케팅 화면의 자동화 스위치 줄에서 `marketing:write` + step-up으로 켜고 끈다. 초안·게시·자율 스위치와 같은 route(`PATCH /api/admin/marketing/settings`)와 같은 compare-and-set 설정 세대를 쓰고, 사람 감사 기록(`marketing_setting.experiments_changed`)을 같은 트랜잭션에 남긴다. 켜는 변경은 kill switch가 거절하고, 끄는 변경은 어떤 것도 거절하지 않는다(§6.1 표의 "실험 활성화" 행은 그대로다: 켜진 스위치는 허용일 뿐, 시작은 여전히 사전 등록·스파이크 기록·`marketing:write` + step-up을 모두 요구한다).
+- 켜기 전 조건(사전 등록과 문구 확정, 공유 캐시의 `tv_exp` 우회)은 여전히 사람이 확인할 몫이며 화면의 확인 문구가 그것을 묻는다.
+- 끄면 진행 중인 실험은 읽기에서 `switch_off`로 비활성이 되어 모든 방문자가 다음 랜딩 화면부터(활성 실험 조회 캐시 15초 안에) 기본 문구로 돌아간다. 설정·집계 행과 사용한 실험 id는 지우지 않으므로 같은 기간 안에 다시 켜면 이어지고, 결과 보고서를 남기고 끝내려면 Stop을 누른다. 안전한 방향으로만 작동한다.
+
 **현재 구현 (2026-11-01, 운영자 지시로 정함 — 구현 설명이며 위 구속 조건을 바꾸지 않는다)**
 - 스파이크: `tests/e2e/landing-experiment-spike.spec.ts`(동의 없음→기본 문구·쿠키 없음, 동의+배정→변형, 사용자 간 캐시 혼입 0건, CSP 해시·위반 0건). 통과 기록은 `lib/marketingExperimentCore.ts`의 `MARKETING_EXPERIMENT_SPIKE`이고, 시험이 그 E2E 파일의 존재를 확인한다.
 - proxy는 DB를 읽지 않는다. 배정 쿠키(`tv_exp=<실험id>.<번들id>.<arm>.<언어들>`, 언어는 사전 등록된 언어를 붙여 쓴 `enko`)가 rewrite의 유일한 근거이며, 쿠키는 배정 route가 분석 동의(동의 provider와 같은 규칙: 수락, 또는 미결정이면서 notice_opt_out 국가)와 활성 실험을 확인했을 때만 발급한다. 문서 요청(`Accept: text/html`, Flight 요청 제외)의 홈(`/`, `/{locale}`)만 rewrite하고, 대상 HTML이 이 빌드에 없으면 기본 페이지를 낸다. 규칙은 `lib/marketingRoutes.ts`에 있다(proxy가 새 로컬 import를 얻으면 Prompt Refiner 실행 closure가 커지기 때문).
@@ -560,6 +566,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있고, **댓글 모니터링 없이는 졸업이 없다.**
   개정 문안 초안(2026-11-03)은 `privacyPolicy.comments*`이고 확인 필요 항목이 자리표시로 남아 있어, 확인이 끝나 `COMMENTS_PRIVACY_NOTICE_CONFIRMED`(`lib/privacyNoticeStatus.ts`)가 `true`가 될 때까지 페이지가 그 절을 그리지 않는다. 사람이 할 일의 목록과 순서는
   [DPIA 초안 체크리스트](marketing-privacy-dpia-checklist.md)에 있다. 문안이 게시돼도 스위치는 그 체크리스트가 끝나기 전에 켜지 않는다.
+- **고지 상수가 모니터의 첫 조건이다 (2026-11-04, 운영자 결정 — 구현 설명이며 위 구속 조건과 정책 버전을 바꾸지 않는다).** `COMMENTS_PRIVACY_NOTICE_CONFIRMED`가 `false`이면 `MARKETING_COMMENTS_MONITOR_ENABLED=true`여도 모니터는 꺼져 있다. 앱의 판정 하나(`commentsMonitorEnabled`, `lib/marketingCommentsMonitorHealth.ts`)에 상수가 들어 있어, 내부 route는 두 단계 모두 `off`로 답하고 DB·게시 도구에 닿지 않으며, 실행(`runMarketingCommentsMonitor`)도 같고, 건강 판정(`commentsMonitorHealthy`)은 거짓이라 졸업·자율 게시 판정도 막힌다. 서비스(`marketingCommentsMonitorGate`)는 같은 상수를 보고 worker를 띄우지 않으며 로그에 `privacy_notice_unconfirmed`를 남긴다(app의 `off` 응답 모양은 서비스가 엄격히 읽으므로 그대로다). 상수는 고지 개정 PR에서만 `true`로 바꾸고, 그 뒤에도 변수와 체크리스트는 별도 결정이다.
 
 **S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다(건강 판정을 묻는 웹 앱·게시기와 모니터를 돌리는 서비스 모두에 같은 값을 둔다). 꺼져 있으면
 `runMarketingCommentsMonitor()`는 DB·게시 도구·모델 어느 것도 건드리지 않고 돌아온다. 켜진 실행은 최근 14일 안에 게시된 글의 댓글을

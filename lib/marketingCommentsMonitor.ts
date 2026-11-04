@@ -9,9 +9,11 @@
  * ## Off means off
  *
  * `MARKETING_COMMENTS_MONITOR_ENABLED` is not set to `true` by default and the
- * legal steps in 12.1 are a person's. When it is not true, `runMarketingCommentsMonitor()`
- * returns before it touches any dependency: no database read, no call to the
- * posting tool, no model.
+ * legal steps in 12.1 are a person's. When it is not true -- or while the
+ * published privacy notice is unconfirmed (`COMMENTS_PRIVACY_NOTICE_CONFIRMED`,
+ * operator decision 2026-11-04), whatever the variable says --
+ * `runMarketingCommentsMonitor()` returns before it touches any dependency: no
+ * database read, no call to the posting tool, no model.
  *
  * ## The model
  *

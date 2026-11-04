@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 import { MARKETING_CONSOLE_SWITCH_NAMES } from "@/lib/marketingConsoleSections";
+import { MARKETING_EXPERIMENT_SWITCH_ACTION } from "@/lib/marketingExperimentContract";
 import {
   MarketingSwitchRefusedError,
   writeMarketingAutomationSwitch,
@@ -29,6 +30,7 @@ const ACTION = {
   drafts: MARKETING_S2B1_ACTIONS.settingDraftsChanged,
   publish: MARKETING_S2B1_ACTIONS.settingPublishChanged,
   autonomous: MARKETING_S2B1_ACTIONS.settingAutonomousChanged,
+  experiments: MARKETING_EXPERIMENT_SWITCH_ACTION,
 } as const;
 
 const REFUSAL_STATUS: Record<string, number> = {
@@ -39,8 +41,9 @@ const REFUSAL_STATUS: Record<string, number> = {
 };
 
 /**
- * PATCH: an operator turns one of the three marketing switches on or off
- * (docs/policy/marketing-automation.md §6.1).
+ * PATCH: an operator turns one of the four marketing switches on or off
+ * (docs/policy/marketing-automation.md §6.1; the landing experiments switch
+ * joined on 2026-11-04, §9.1).
  *
  * Turning one *off* is an operator narrowing what can happen, so the kill
  * switch does not refuse it -- a switch that can be turned on and never off is

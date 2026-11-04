@@ -31,6 +31,7 @@
 import { z } from "zod";
 
 import { MARKETING_COMMENT_CLASSIFIER_BATCH, MARKETING_COMMENT_RISK_CODES } from "./marketingCommentsMonitor.ts";
+import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "./privacyNoticeStatus.ts";
 import type { MarketingLlmAnswerSchema, MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 export const MARKETING_COMMENTS_MONITOR_SWITCH_ENV = "MARKETING_COMMENTS_MONITOR_ENABLED";
@@ -41,14 +42,24 @@ export const MARKETING_COMMENTS_MONITOR_KILL_SWITCH_ENV = "MARKETING_AUTOMATION_
  * The service's own reading of the switch, before any request: the rule of
  * `commentsMonitorEnabled` (lib/marketingCommentsMonitorHealth.ts), which a test
  * holds this to. The app reads its own copy of the switch as well.
+ *
+ * The published privacy notice is part of the rule (operator decision
+ * 2026-11-04, policy 12.1): while `COMMENTS_PRIVACY_NOTICE_CONFIRMED` is false
+ * the service starts no worker even with the variable set, and says why. The
+ * reason is last, so it is only named once the variable is set, which is the
+ * case that would otherwise look like a fault.
  */
 export const marketingCommentsMonitorGate = (
   env: Readonly<Record<string, string | undefined>>,
-): { readonly on: true } | { readonly on: false; readonly reason: "kill_switch" | "switch_off" } => {
+  noticeConfirmed: boolean = COMMENTS_PRIVACY_NOTICE_CONFIRMED,
+):
+  | { readonly on: true }
+  | { readonly on: false; readonly reason: "kill_switch" | "switch_off" | "privacy_notice_unconfirmed" } => {
   if ((env[MARKETING_COMMENTS_MONITOR_KILL_SWITCH_ENV] ?? "").trim() !== "") return { on: false, reason: "kill_switch" };
   if ((env[MARKETING_COMMENTS_MONITOR_SWITCH_ENV] ?? "").trim().toLowerCase() !== "true") {
     return { on: false, reason: "switch_off" };
   }
+  if (noticeConfirmed !== true) return { on: false, reason: "privacy_notice_unconfirmed" };
   return { on: true };
 };
 
