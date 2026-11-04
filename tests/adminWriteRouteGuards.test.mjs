@@ -116,8 +116,10 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 // Re-pinned for intake v19 session results: lib/amux/ideaKeyStore.ts now also
 // fences an orphan analysis-result key. The preview services only load keys
 // (loadAmuxContentUnitKeys); the closure file list is unchanged.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "a905558c830f5209832ff49b22c35f1c5d484b3f735da18001003a40ba4ebc77";
-const SOURCE_SCOPE_DISABLED_DIGEST = "26199694df292f77f04179ecd6ffa2af408c3c7018f3513f4d80959af7629554";
+// localIntakeCore's e-mail check sets aside the published support@tomverse.app
+// (2026-11-04); a pure regex, no import, writer or outbound call. Same 13 files.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "646dbafb012c572b908f4d2961dd24c17d9d5866b9496a9199ef2690b23ea8e6";
+const SOURCE_SCOPE_DISABLED_DIGEST = "a06b46b3c880348fbb4ad58a65d672c9c2cffb6b022173bd2757c4c355fa6dc4";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -182,8 +184,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // parsing, no import, writer or outbound call. Same 17-file closure.
 // It then reads the JSON object out of a fenced or sentence-wrapped answer
 // (2026-11-01); same pure parsing, same 17-file closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "0bfea2c87a3da3ea7cfa8345b9168e4370bda2bfeac62607ea08fda324efdcc6";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "68390067b02837c6339d98d76c56907d3300626aa5147a16580a7e47cfeae96b";
+// Re-pinned with the source-scope digests above for the same localIntakeCore
+// support-mailbox change (2026-11-04). Same 17-file closure.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "692dfb26fd43ba6d146ed4415d5689c7236895db38e6bb58ef4b9c4d13e4c983";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "1679246ba1bc86d87bf4d035e764df0300f3c76388e88ead53e57285bc733531";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

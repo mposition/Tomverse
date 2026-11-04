@@ -167,6 +167,27 @@ test("secret and private path refuse before any adapter call", async () => {
   assert.equal(scanLocalIntakeInput("mail me at owner@example.com").code, "personal_data");
 });
 
+test("Tomverse's published support mailbox is not personal data, and nothing that only contains it passes", () => {
+  for (const value of [
+    "Offer a link to support@tomverse.app beside the error.",
+    "Contact SUPPORT@tomverse.app.",
+    "(support@tomverse.app)",
+  ]) {
+    assert.deepEqual(scanLocalIntakeInput(value), { ok: true }, value);
+    assert.deepEqual(scanAmuxV4Input(value), { ok: true }, value);
+  }
+  for (const value of [
+    "mail a.support@tomverse.app",
+    "mail xsupport@tomverse.app",
+    "mail support@tomverse.app.evil.com",
+    "mail support@tomverse.apps.example",
+    "support@tomverse.app and owner@example.com",
+  ]) {
+    assert.equal(scanLocalIntakeInput(value).code, "personal_data", value);
+    assert.equal(scanAmuxV4Input(value).code, "personal_data", value);
+  }
+});
+
 test("v4 secret scanning is separate from the already enabled v3 scanner", () => {
   assert.equal(parseLocalIntakePackage(body(pkg())).ok, true);
   for (const value of [
