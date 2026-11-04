@@ -21,7 +21,7 @@
 // current keys to these keys owes with owedMessages() -- the rules
 // evaluateKey() applies -- and reserves only items in that set.
 
-import { BUDGET_SIGNAL, REOPEN_WINDOW_MS, S2_PAGE_KEYS, S2_PAGE_SIGNALS, initialKeyState, signalForKey } from "./classify-core.mjs";
+import { BUDGET_SIGNAL, REOPEN_WINDOW_MS, S2_PAGE_SIGNALS, initialKeyState, signalForKey } from "./classify-core.mjs";
 import { ITEM_ORIGINS, MESSAGE_KINDS } from "./delivery-core.mjs";
 import { keysAreValid } from "./keys-schema-core.mjs";
 import { admissibleReservationDates } from "./owner-date-core.mjs";
