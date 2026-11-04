@@ -84,6 +84,7 @@ test("the privacy page renders the provider table only when every row is disclos
     const labels = [
         "providerTableTitle",
         "providerTableIntro",
+        "providerTableScrollHint",
         "colProvider",
         "colRecipient",
         "colStorage",
@@ -132,4 +133,23 @@ test("the privacy page renders the provider table only when every row is disclos
             assert.ok(value.trim().length > 0, `${name}.privacyPolicy.${key} empty`);
         }
     }
+});
+
+/**
+ * The table is wider than a phone on purpose, so it has to be the only part of
+ * the section that is wide: the body column keeps `min-w-0` (otherwise the
+ * 720px table sets the grid item's minimum size and the section's sentences
+ * stop wrapping), and the scroller is a named, focusable region so the columns
+ * past "Storage" are reachable from the keyboard. The rendered geometry is
+ * measured in tests/e2e/privacy-provider-table-reflow.spec.ts.
+ */
+test("the wide provider table scrolls on its own without widening the section", () => {
+    const source = readFileSync("components/legal/PrivacyPolicy.tsx", "utf8");
+    assert.match(source, /className="min-w-0 text-sm/);
+    const scroller = source.match(/<div\s+className="mt-3 overflow-x-auto[\s\S]*?>/);
+    assert.ok(scroller, "the table is not inside a horizontal scroller");
+    assert.match(scroller[0], /role="region"/);
+    assert.match(scroller[0], /aria-label=\{t\("privacyPolicy\.providerTableTitle"\)\}/);
+    assert.match(scroller[0], /tabIndex=\{0\}/);
+    assert.match(source, /t\("privacyPolicy\.providerTableScrollHint"\)/);
 });

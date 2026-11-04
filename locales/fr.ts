@@ -2253,6 +2253,7 @@ export const fr = {
         changes: "Nous pouvons mettre à jour cette politique lorsque le service ou les exigences légales changent et afficherons la nouvelle date d'entrée en vigueur.",
         providerTableTitle: "Où chaque fournisseur reçoit le contenu du chat",
         providerTableIntro: "Ce tableau nomme la société qui reçoit le contenu du chat, où ce contenu est stocké et traité, s'il sert à entraîner des modèles, combien de temps il est conservé, et si la vente ou la publicité est interdite. Quand un contrat ne nomme ni un lieu ni une durée, le tableau le dit.",
+        providerTableScrollHint: "Ce tableau est plus large qu'un écran étroit : faites défiler horizontalement pour lire les autres colonnes.",
         colProvider: "Fournisseur",
         colRecipient: "Destinataire",
         colStorage: "Stockage",

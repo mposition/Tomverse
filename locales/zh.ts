@@ -2236,6 +2236,7 @@ export const zh = {
         changes: "当服务或法律要求发生变化时，我们可能更新本政策，并显示修订后的生效日期。",
         providerTableTitle: "各提供方接收聊天内容的情况",
         providerTableIntro: "本表列出接收聊天内容的公司、内容的存储地和处理地、是否用于模型训练、内容保留多久，以及是否禁止出售或广告。合同未写明地点或期限时，表中也照此写明。",
+        providerTableScrollHint: "本表宽于窄屏：横向滚动即可查看其余列。",
         colProvider: "提供方",
         colRecipient: "接收方",
         colStorage: "存储",

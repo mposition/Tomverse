@@ -2269,6 +2269,7 @@ export const en = {
         changes: "We may update this policy when the service or legal requirements change and will display the revised effective date.",
         providerTableTitle: "Where each provider receives chat content",
         providerTableIntro: "This table names the company that receives chat content, where that content is stored and processed, whether it is used to train models, how long the content is kept, and whether sale or advertising is prohibited. When a contract does not name a place or a period, the table says so.",
+        providerTableScrollHint: "This table is wider than a narrow screen: scroll it sideways to read the remaining columns.",
         colProvider: "Provider",
         colRecipient: "Recipient",
         colStorage: "Storage",

@@ -2254,6 +2254,7 @@ export const ko = {
         changes: "서비스 또는 법적 요구사항이 변경되면 이 방침을 업데이트하고 개정된 시행일을 표시할 수 있습니다.",
         providerTableTitle: "공급자별 채팅 내용의 이전",
         providerTableIntro: "이 표는 채팅 내용을 받는 법인, 저장 위치와 처리 위치, 모델 학습에 쓰는지, 내용을 얼마나 보관하는지, 판매나 광고가 금지되는지를 적습니다. 계약이 장소나 기간을 정하지 않으면 표에도 그렇게 적습니다.",
+        providerTableScrollHint: "이 표는 좁은 화면보다 넓습니다. 가로로 스크롤하면 나머지 열을 읽을 수 있습니다.",
         colProvider: "공급자",
         colRecipient: "수신자",
         colStorage: "저장",
