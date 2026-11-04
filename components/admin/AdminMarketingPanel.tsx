@@ -1428,7 +1428,7 @@ function experimentActions(row: Row, m: Record<string, string>): MarketingAction
  * be a 409 -- offering "approve" on something already approved teaches an
  * operator that this screen's buttons are guesses.
  */
-function rowActions(
+export function rowActions(
   section: MarketingConsoleSection,
   row: Row,
   m: Record<string, string>
@@ -1673,8 +1673,55 @@ const MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES = new Set([
 function publishedActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];
   const status = str(row.status);
+  // A hand-posted account is never carried by the publisher, so its approved
+  // post is not scheduled: the person posts it, then records it here.
+  const postedByHand = str(row.provider) === "manual";
 
-  if (status === "approved") {
+  if (status === "approved" && postedByHand) {
+    actions.push({
+      id: "record-manual-publish",
+      primary: true,
+      label: m.actRecordManualPublish,
+      path: POST(row.id, "record-manual"),
+      confirm: m.confirmRecordManualPublish,
+      fields: [
+        {
+          name: "externalUrl",
+          label: m.fieldExternalUrl,
+          kind: "url",
+          required: true,
+          hint: m.hintManualPublishUrl,
+        },
+        {
+          name: "evidenceRef",
+          label: m.fieldEvidenceRef,
+          kind: "text",
+          required: true,
+          hint: m.hintEvidence,
+        },
+      ],
+      body: (values) => ({
+        ...postCas(row),
+        externalUrl: values.externalUrl.trim(),
+        evidenceRef: values.evidenceRef.trim(),
+      }),
+      // The record stands when it is over a cap, and the operator is told.
+      describe: (result) => {
+        const warnings =
+          typeof result === "object" && result !== null && "warnings" in result
+            ? (result as { warnings?: unknown }).warnings
+            : null;
+        const list = Array.isArray(warnings) ? warnings : [];
+        return [
+          m.recordManualPublishDone,
+          list.includes("daily_cap_exceeded") ? m.recordManualPublishDailyOver : "",
+          list.includes("weekly_cap_exceeded") ? m.recordManualPublishWeeklyOver : "",
+        ].join("");
+      },
+    });
+  }
+
+  if (status === "approved" && !postedByHand) {
     actions.push({
       id: "schedule",
       primary: true,

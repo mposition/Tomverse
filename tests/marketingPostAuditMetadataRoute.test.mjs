@@ -55,3 +55,14 @@ test("a withdrawal's audit entry carries everything the store requires of it", (
   assert.deepEqual(routes.withdraw.required, { digest: "a".repeat(64), historyVersion: 2 });
   covers(routes.withdraw.written, routes.withdraw.required);
 });
+
+test("a hand-posted record's audit entry carries everything the store requires of it", () => {
+  assert.equal(routes.recordManual.action, "marketing_post.record_manual_publish");
+  assert.deepEqual(routes.recordManual.required, {
+    digest: "a".repeat(64),
+    historyVersion: 4,
+    externalUrl: "https://x.com/tomverse/status/1",
+    evidenceRef: "opened the link while signed out",
+  });
+  covers(routes.recordManual.written, routes.recordManual.required);
+});
