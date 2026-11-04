@@ -54,8 +54,9 @@ export function marketingSectionAvailability(): MarketingSectionAvailability {
 }
 
 /**
- * The three switches the console may change, each paired with the name the
- * settings writer knows it by.
+ * The four switches the console may change, each paired with the name the
+ * settings writer knows it by. The landing experiments switch joined the
+ * other three on 2026-11-04 (operator decision, policy 9.1).
  *
  * Two names for one thing, and they are genuinely two: the payload calls the
  * autonomous switch `autonomous`, and the console's switch strip has always
@@ -68,6 +69,7 @@ export const MARKETING_CONSOLE_SWITCH_NAMES = [
   "drafts",
   "publish",
   "autonomous",
+  "experiments",
 ] as const;
 
 export type MarketingConsoleSwitch =
@@ -80,4 +82,5 @@ export const MARKETING_CONSOLE_SWITCH_CONTROLS: readonly {
   { state: "drafts", name: "drafts" },
   { state: "publish", name: "publish" },
   { state: "autoPublish", name: "autonomous" },
+  { state: "experiments", name: "experiments" },
 ];
