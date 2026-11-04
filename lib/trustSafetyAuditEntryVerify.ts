@@ -1,0 +1,94 @@
+/**
+ * Verifying one audit entry for the trust-safety observer's activation
+ * derivation (docs/policy/trust-safety-compliance-agent.md §6, checks 3 and 7).
+ *
+ * §6 asks whether *this* entry's signature verifies and, when a successor
+ * exists, whether that one verifies too. The repository already had
+ * `verifyAdminAuditIntegrity()`, but it walks the whole chain in batches and
+ * answers a different question; asking it about two rows would read the entire
+ * table, and the observer's transactions are bounded in statements (§5.5).
+ *
+ * **No second hash implementation.** The digest, the key-order history and the
+ * key list all come from `lib/adminAuditIntegrityCore.ts` — the same functions
+ * the writer signs with. A local HMAC here would be a second answer to "is
+ * this entry authentic", and the two would drift at the next key rotation.
+ *
+ * This module reads the integrity keys from the environment, so it is not a
+ * pure core: `lib/trustSafetyActivationCore.ts` takes the verdict as an input
+ * and stays testable without secrets.
+ */
+import {
+  ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
+  adminAuditEntryHashVariants,
+  adminAuditIntegrityKeys,
+  type AdminAuditHashInput,
+} from "@/lib/adminAuditIntegrityCore";
+
+/** The entry fields the digest is computed over, plus the stored hashes. */
+export type TrustSafetyAuditEntryRow = {
+  readonly actorUserId: string | null;
+  readonly actorEmail: string | null;
+  readonly action: string;
+  readonly targetType: string;
+  readonly targetId: string | null;
+  readonly summary: string;
+  readonly metadata: unknown;
+  readonly ipAddress: string | null;
+  readonly userAgent: string | null;
+  readonly createdAt: Date;
+  readonly previousHash: string | null;
+  readonly entryHash: string | null;
+};
+
+/**
+ * Whether the entry's stored hash is one this build can reproduce.
+ *
+ * Returns `null` for "could not be checked" rather than `false`, because §6
+ * treats the two the same but the caller reports them differently: an entry
+ * with no hash is `unhashed_entry_present`, and no key configured is a
+ * deployment that cannot judge activation at all. Collapsing them into `false`
+ * would describe a missing key as a failed signature.
+ *
+ * Every key is tried, newest first, and every verification key order within
+ * each — that is what lets a chain survive a key rotation or the signing order
+ * moving, which is why those helpers exist rather than one `createHmac` call.
+ */
+export const verifyTrustSafetyAuditEntry = ({
+  row,
+  env,
+}: {
+  readonly row: TrustSafetyAuditEntryRow;
+  readonly env: {
+    ADMIN_AUDIT_INTEGRITY_KEY?: string;
+    ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS?: string;
+    NEXTAUTH_SECRET?: string;
+  };
+}): boolean | null => {
+  if (row.entryHash === null || row.entryHash === "") return null;
+  const keys = adminAuditIntegrityKeys(env);
+  if (keys.length === 0) return null;
+
+  const input: AdminAuditHashInput = {
+    previousHash: row.previousHash,
+    actorUserId: row.actorUserId,
+    actorEmail: row.actorEmail,
+    action: row.action,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    summary: row.summary,
+    // The writer passes `entry.metadata || null`, so a row stored without
+    // metadata must be offered as null here or the digest will not reproduce.
+    metadata: row.metadata ?? null,
+    ipAddress: row.ipAddress,
+    userAgent: row.userAgent,
+    createdAt: row.createdAt.toISOString(),
+  };
+
+  for (const key of keys) {
+    const variants = adminAuditEntryHashVariants(input, key);
+    for (const order of ADMIN_AUDIT_VERIFICATION_KEY_ORDERS) {
+      if (variants[order] === row.entryHash) return true;
+    }
+  }
+  return false;
+};
