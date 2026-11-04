@@ -22,13 +22,23 @@ import { prepareGuestPage } from "./support/app-fixtures";
 const SWITCH_ACCOUNT_BUTTON = "Sign out and use another account";
 const UNMATCHED_ADMIN_PATH = "/admin/unmatched/deep/path";
 
-test("an ordinary 404 keeps its own copy and offers no account switch", async ({
+test("an unmatched URL is a 404 with somewhere to go, not a server error", async ({
   page,
 }) => {
   await prepareGuestPage(page, "en");
   const response = await page.goto("/this-route-does-not-exist");
 
+  // This app has two root layouts, so an unmatched URL has none to compose
+  // `app/not-found.tsx` with and Next answered every one of them with a 500
+  // (`not-found.tsx doesn't have a root layout`). `app/global-not-found.tsx`
+  // is the 404 that needs no layout; the status is the whole point of it.
   expect(response?.status()).toBe(404);
+  // It renders its own document, so the stylesheet and the guide links are
+  // the parts that go missing if that file stops being served.
+  await expect(
+    page.getByRole("link", { name: /help centre/i })
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: /contact support/i })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: /couldn't find that page/i })
   ).toBeVisible();
@@ -41,6 +51,17 @@ test("an ordinary 404 keeps its own copy and offers no account switch", async ({
   ).toHaveCount(0);
   // The homepage stays the page's primary action there.
   await expect(page.getByRole("link", { name: /homepage/i })).toBeVisible();
+});
+
+test("/help reaches the help centre instead of an error", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  // The product calls it "Help" in the sidebar and the marketing nav, so
+  // `/help` is the URL a visitor types; it was never a route, and before the
+  // routing-level 404 it was one of the paths answering 500.
+  const response = await page.goto("/help");
+
+  expect(response?.status()).toBe(200);
+  await expect(page).toHaveURL(/\/support\/help-centre$/);
 });
 
 test("a 404 under /admin offers the account switch and keeps the destination", async ({
