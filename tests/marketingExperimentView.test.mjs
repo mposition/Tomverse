@@ -47,7 +47,7 @@ test("the experiments section is a section of its own now, not a future-stage pl
   assert.deepEqual(marketingSectionAvailability(), { available: true });
 });
 
-test("with nothing stored the section has no row and offers every bundle", () => {
+test("with nothing stored the section has no row and offers every real bundle, never the example", () => {
   const { rows, experiments } = buildExperimentsConsole(
     { configRaw: null, version: null, config: null, counts: null },
     new Date(start)
@@ -58,9 +58,17 @@ test("with nothing stored the section has no row and offers every bundle", () =>
   assert.equal(experiments.hasRunning, false);
   assert.equal(experiments.spikePassed, true);
   assert.deepEqual(experiments.bundles, [
-    { bundleId: "home-hero-v1", variantId: "b", locales: ["en", "ko"] },
     { bundleId: "home-hero-v2", variantId: "b", locales: ["en", "ko"] },
   ]);
+});
+
+test("a stored experiment on the example bundle still shows as a row", () => {
+  const { rows, experiments } = buildExperimentsConsole(snapshot(), new Date(start + DAY));
+  assert.equal(rows[0].bundleId, "home-hero-v1");
+  assert.equal(
+    experiments.bundles.some((bundle) => bundle.bundleId === "home-hero-v1"),
+    false
+  );
 });
 
 test("a stored row this build cannot read is reported as unreadable, never as an experiment", () => {
