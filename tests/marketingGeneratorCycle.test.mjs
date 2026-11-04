@@ -240,6 +240,34 @@ test("an answer with nothing usable submits nothing and goes on to the next acco
   assert.equal(h.submitted.length, 1);
 });
 
+test("hashtags taken out of kept drafts are summed across the run's calls", async () => {
+  const tagged = JSON.stringify({
+    drafts: [
+      {
+        renderedText: "Ask once, read three answers.\n\n#AI #Tomverse #ChatGPT #AIcomparison",
+        claimIds: [],
+        assetIds: ["media-card-en"],
+        disclosureFlags: ["advertising"],
+      },
+    ],
+  });
+  const h = harness({
+    outcomes: [
+      { status: "answered", content: tagged, ledgerState: "settled" },
+      { status: "answered", content: tagged, ledgerState: "settled" },
+    ],
+  });
+  const summary = await cycle(h);
+  assert.equal(summary.stoppedAt, null);
+  assert.equal(summary.draftsSubmitted, 2);
+  // LinkedIn keeps three of the four, X two; #ChatGPT goes from both.
+  assert.deepEqual(summary.hashtagsRemoved, { hashtag_forbidden: 2, hashtag_over_limit: 1 });
+  assert.deepEqual(
+    h.submitted.map((submission) => submission.drafts[0].renderedText),
+    ["Ask once, read three answers.\n\n#AI #Tomverse #AIcomparison", "Ask once, read three answers.\n\n#AI #Tomverse"],
+  );
+});
+
 test("no context, or too little time for another call, is a stop before any call", async () => {
   const noContext = harness({ readContext: async () => ({ channels: "nope" }) });
   assert.deepEqual((await cycle(noContext)).stoppedAt, { stage: "context", detail: "context_unreadable" });
