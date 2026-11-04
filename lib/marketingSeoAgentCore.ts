@@ -54,7 +54,11 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import { z } from "zod";
 
-import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
+import type {
+  MarketingLlmAnswerSchema,
+  MarketingLlmCallOutcome,
+  MarketingLlmMessage,
+} from "./marketingLlmClientCore.ts";
 
 /** The only files a change may touch, exactly. */
 export const SEO_AGENT_ALLOWED_FILES = [
@@ -375,6 +379,108 @@ export function applySeoProposal(
   const changed = Object.fromEntries(Object.entries(next).filter(([path, text]) => text !== files[path]));
   if (Object.keys(changed).length === 0) return { ok: false, refusal: "no_change" };
   return { ok: true, summary: parsed.summary, files: changed };
+}
+
+/**
+ * The JSON schema the proposal call asks the provider to follow (strict
+ * Structured Outputs), so the answer is one JSON object by construction rather
+ * than by the prompt's request. It carries the same four keys as
+ * `proposalSchema`; the length limits cannot be stated in a strict schema, and
+ * `applySeoProposal` still enforces them.
+ */
+export const SEO_AGENT_PROPOSAL_SCHEMA: MarketingLlmAnswerSchema = {
+  name: "seo_agent_proposal",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "edits"],
+    properties: {
+      summary: { type: "string" },
+      edits: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "find", "replace"],
+          properties: {
+            path: { type: "string" },
+            find: { type: "string" },
+            replace: { type: "string" },
+          },
+        },
+      },
+    },
+  },
+};
+
+export type SeoUnreadableDiagnosis = {
+  /** `empty`: no text at all. `not_json`: the text does not parse. `schema`: it parses but is not a proposal. */
+  readonly kind: "empty" | "not_json" | "schema";
+  /** Characters in the answer as the provider returned it. */
+  readonly length: number;
+  /** The answer was wrapped in a code fence, which the reader removes. */
+  readonly fenced: boolean;
+  /** Where the first schema issue is (`edits.2.replace`), or null for the other kinds. */
+  readonly issuePath: string | null;
+  /** The parser's or the schema's first complaint, redacted and cut. */
+  readonly issueMessage: string | null;
+  /** The first 300 characters, redacted. */
+  readonly head: string;
+  /** The last 100 characters, redacted, when the answer is longer than the head; a cut-off answer shows here. */
+  readonly tail: string | null;
+};
+
+const DIAGNOSIS_HEAD_CHARS = 300;
+const DIAGNOSIS_TAIL_CHARS = 100;
+const DIAGNOSIS_MESSAGE_CHARS = 200;
+
+/**
+ * The answer is code the model wrote and holds no secret by design, but a log
+ * line is kept, so anything shaped like a credential is replaced first: known
+ * token prefixes, bearer values, private key blocks, and any unbroken 32+
+ * character run of token characters.
+ */
+export function redactSeoLogText(text: string): string {
+  return String(text)
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, "[redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}/g, "[redacted]")
+    .replace(/\b(?:gh[pousr]_|github_pat_|xox[abprs]-|AKIA|AIza)[A-Za-z0-9_-]{8,}/g, "[redacted]")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]");
+}
+
+/**
+ * Why `applySeoProposal` would call this answer `unreadable`, for the run log;
+ * null when the answer is readable. It reads the answer exactly as
+ * `applySeoProposal` does (same fence removal, same schema) and decides
+ * nothing: the refusal itself is still `applySeoProposal`'s.
+ */
+export function diagnoseSeoAnswer(answer: string): SeoUnreadableDiagnosis | null {
+  const text = typeof answer === "string" ? answer : "";
+  const unwrapped = unwrapJson(text);
+  const base = {
+    length: text.length,
+    fenced: unwrapped !== text.trim(),
+    head: redactSeoLogText(text.slice(0, DIAGNOSIS_HEAD_CHARS)),
+    tail: text.length > DIAGNOSIS_HEAD_CHARS ? redactSeoLogText(text.slice(-DIAGNOSIS_TAIL_CHARS)) : null,
+  };
+  if (unwrapped === "") return { kind: "empty", ...base, issuePath: null, issueMessage: null };
+  let json: unknown;
+  try {
+    json = JSON.parse(unwrapped);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "parse failed";
+    return { kind: "not_json", ...base, issuePath: null, issueMessage: redactSeoLogText(message).slice(0, DIAGNOSIS_MESSAGE_CHARS) };
+  }
+  const result = proposalSchema.safeParse(json);
+  if (result.success) return null;
+  const issue = result.error.issues[0];
+  return {
+    kind: "schema",
+    ...base,
+    issuePath: issue ? issue.path.join(".") : "",
+    issueMessage: redactSeoLogText(issue?.message ?? "").slice(0, DIAGNOSIS_MESSAGE_CHARS),
+  };
 }
 
 // ---------------------------------------------------------------------------
