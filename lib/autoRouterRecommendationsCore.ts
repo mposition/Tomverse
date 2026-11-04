@@ -5,8 +5,8 @@
  * recommendations of three kinds. A `guidance` one is already part of the same
  * cycle's proposed guidance. A `code` or `setting` one is only displayed, so it
  * gets a status an operator sets in Admin -- open (the default), done, or
- * dismissed -- and a deterministic work instruction to paste into a coding
- * session. No model is called here, and nothing leaves Admin.
+ * dismissed -- and an owner can send it to AMUX as an idea, built from a
+ * deterministic work instruction. No model is called here.
  *
  * The status rides in the cycle's summary JSON as
  * `recommendationStatus: { "<index>": { status, at, by } }`, where the index
@@ -29,7 +29,25 @@ export type RecommendationStatus = (typeof RECOMMENDATION_STATUSES)[number];
  */
 export const AGENT_RECOMMENDATION_STATUSES = ["claimed", "pr_opened", "failed"] as const;
 export type AgentRecommendationStatus = (typeof AGENT_RECOMMENDATION_STATUSES)[number];
-export type StoredRecommendationStatus = RecommendationStatus | AgentRecommendationStatus;
+
+/**
+ * Set when an owner sends the recommendation to AMUX as an idea. AMUX has the
+ * work now, so it leaves the open list and the coding agent does not take it.
+ */
+export const RECOMMENDATION_SENT_STATUS = "sent_to_amux" as const;
+
+/**
+ * Reserved before the idea is submitted, under the lock the agent claims under,
+ * so a recommendation is never both in AMUX and with the agent. It stays set if
+ * the send stops midway: the outcome may be unknown, so nothing releases it by
+ * itself. Sending again names the same AMUX request, or a person reopens it.
+ */
+export const RECOMMENDATION_SENDING_STATUS = "sending_to_amux" as const;
+export type StoredRecommendationStatus =
+    | RecommendationStatus
+    | AgentRecommendationStatus
+    | typeof RECOMMENDATION_SENT_STATUS
+    | typeof RECOMMENDATION_SENDING_STATUS;
 
 /**
  * As shown: a claim whose lease ran out with no result is needs_lookup. It is
@@ -42,6 +60,8 @@ export type DisplayedRecommendationStatus = StoredRecommendationStatus | "needs_
 const STORED_RECOMMENDATION_STATUSES: readonly string[] = [
     ...RECOMMENDATION_STATUSES,
     ...AGENT_RECOMMENDATION_STATUSES,
+    RECOMMENDATION_SENT_STATUS,
+    RECOMMENDATION_SENDING_STATUS,
 ];
 
 /** How long the agent holds a claim before it shows as needs_lookup. */
@@ -102,6 +122,8 @@ export type RecommendationStatusEntry = {
     prUrl?: string;
     /** failed only. */
     reason?: RecommendationFailureReason;
+    /** sent_to_amux only. */
+    amuxIdeaId?: string;
 };
 
 export type ActionableRecommendation = {
@@ -114,6 +136,7 @@ export type ActionableRecommendation = {
     by: string | null;
     prUrl: string | null;
     reason: string | null;
+    amuxIdeaId: string | null;
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -140,6 +163,7 @@ export const recommendationStatusEntries = (summary: unknown): Map<number, Recom
             ...((RECOMMENDATION_FAILURE_REASONS as readonly unknown[]).includes(value.reason)
                 ? { reason: value.reason as RecommendationFailureReason }
                 : {}),
+            ...(typeof value.amuxIdeaId === "string" ? { amuxIdeaId: value.amuxIdeaId } : {}),
         });
     }
     return entries;
@@ -177,6 +201,7 @@ export const actionableRecommendations = (summary: unknown, now: number = Date.n
                 by: entry?.by ?? null,
                 prUrl: entry?.prUrl ?? null,
                 reason: entry?.reason ?? null,
+                amuxIdeaId: entry?.amuxIdeaId ?? null,
             },
         ];
     });
@@ -206,7 +231,7 @@ export type OpenRecommendation = ActionableRecommendation & { cycleId: string; c
 
 /**
  * The recommendations that still need a person or the agent -- everything not
- * marked done or dismissed -- newest cycle first and in report order within
+ * marked done or dismissed or sent to AMUX -- newest cycle first and in report order within
  * one. The caller says how many cycles it read: the list is only as wide as
  * that (docs/ui-contracts/admin-console-ia.md rule 6).
  */
@@ -218,7 +243,7 @@ export const openRecommendations = (
         .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
         .flatMap((cycle) =>
             actionableRecommendations(cycle.summary, now)
-                .filter((item) => item.status !== "done" && item.status !== "dismissed")
+                .filter((item) => item.status !== "done" && item.status !== "dismissed" && item.status !== RECOMMENDATION_SENT_STATUS)
                 .map((item) => ({ ...item, cycleId: cycle.id, createdAt: cycle.createdAt }))
         );
 
@@ -269,22 +294,13 @@ export const recommendationResultDecision = (
 };
 
 /**
- * Copies text with the browser clipboard, or says it could not. A missing
- * clipboard (an insecure page) and a refused write both end the same way: the
- * caller shows the text in a box the operator can select.
+ * Whether an owner may send it to AMUX: waiting for someone, the agent gave up
+ * on it, or a send that did not finish. Not while the agent holds it or after it
+ * opened a PR, and not an expired claim -- the agent may have pushed, so a person
+ * looks and reopens it.
  */
-export const copyToClipboard = async (
-    clipboard: { writeText: (text: string) => Promise<void> } | undefined,
-    text: string
-): Promise<"copied" | "manual"> => {
-    try {
-        if (!clipboard) return "manual";
-        await clipboard.writeText(text);
-        return "copied";
-    } catch {
-        return "manual";
-    }
-};
+export const isRecommendationSendable = (status: DisplayedRecommendationStatus) =>
+    status === "open" || status === "failed" || status === RECOMMENDATION_SENDING_STATUS;
 
 /** Where in the repository a recommendation of each kind is usually carried out. */
 export const RECOMMENDATION_FILE_HINTS: Record<ActionableRecommendationKind, readonly string[]> = {
@@ -317,7 +333,7 @@ export type RecommendationInstructionLabels = {
 };
 
 /**
- * The instruction an operator pastes into a coding session. Built from the
+ * The instruction a coding session or AMUX works from. Built from the
  * stored report only -- the recommendation, the cycle's findings, where the
  * cycle is and where such work usually lands -- so it carries no user message
  * and needs no model call. The report was admitted without any quote of a
