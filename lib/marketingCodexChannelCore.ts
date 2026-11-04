@@ -175,16 +175,6 @@ const urlsIn = (text: string): string[] =>
   (text.match(/https?:\/\/[^\s"'<>\\)\]]+/g) ?? []).map((url) => url.replace(/[.,;:]+$/, ""));
 
 /**
- * The parts of one run's `--json` events the ledger and the caller need, or
- * null when the run did not finish with an answer. The last message is the
- * answer: the ones before it are the model saying what it will do.
- *
- * The API gives two lists and so does this: `citations` are the pages the
- * searches returned or opened, and `answerCitations` are those the answer also
- * names. Both come from the search events only. A URL that appears only in the
- * model's text is its own claim, and A3's source check exists to refuse that.
- */
-/**
  * Why a finished run gave no answer, for the journal: the provider's or the CLI's
  * own error line, which names the refusal (a lost login, a bad schema) and carries
  * no prompt or answer. Null when no event says.
@@ -203,6 +193,16 @@ export function marketingCodexFailure(stdout: string): string | null {
   return null;
 }
 
+/**
+ * The parts of one run's `--json` events the ledger and the caller need, or
+ * null when the run did not finish with an answer. The last message is the
+ * answer: the ones before it are the model saying what it will do.
+ *
+ * The API gives two lists and so does this: `citations` are the pages the
+ * searches returned or opened, and `answerCitations` are those the answer also
+ * names. Both come from the search events only. A URL that appears only in the
+ * model's text is its own claim, and A3's source check exists to refuse that.
+ */
 export function readMarketingCodexEvents(stdout: string): MarketingLlmChannelAnswer | null {
   let content: string | null = null;
   let inputTokens: unknown;
