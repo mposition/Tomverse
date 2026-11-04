@@ -79,9 +79,12 @@ test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no
   const walker = read("scripts/agents/product-research-scout.mjs");
   const names = [...new Set([...walker.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]))].sort();
   assert.deepEqual(names, [
+    "PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID",
+    "PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_SECRET",
     "PRODUCT_RESEARCH_SCOUT_ENABLED",
     "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
     "PRODUCT_RESEARCH_SCOUT_INGEST_URL",
+    "PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN",
     "PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK",
   ]);
 

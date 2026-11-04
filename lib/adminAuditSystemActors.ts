@@ -100,6 +100,8 @@ export type EngineeringAgentSystemAuditActor =
 export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
   "product-research-observer",
   "product-research-retention",
+  // Issues the Scout's short-lived test account session (§14), and nothing else.
+  "product-research-scout",
 ] as const;
 export type ProductResearchSystemAuditActor =
   (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
@@ -424,7 +426,10 @@ export const amuxSessionIntakeSystemAuditScope = (
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
-  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) &&
+  isSystemAuditActor(actor) &&
+  (actor !== "product-research-scout" ||
+    (action === "product_research.scout.test_session_issued" && targetType === "User")) &&
+  marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) &&
   (actor !== AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.inspected" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&
