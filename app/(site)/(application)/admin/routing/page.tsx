@@ -41,7 +41,7 @@ export default async function AdminRoutingPage() {
         {m.routingMoved.after}
       </p>
       <AdminAutoLlmRouterPanel />
-      <AdminAutoRouterOptimizerPanel />
+      <AdminAutoRouterOptimizerPanel canSendToAmux={getAdminRole(session) === "owner"} />
       <AdminAutoRewriteOptimizerPanel />
       {getAdminRole(session) === "owner" && <AdminAdaptiveStatisticsPanel />}
       <AdminRoutingShadowPanel />
