@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getPublicRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelRuntimeAvailability } from "@/lib/modelAvailability";
+import { resolveReplacementModel } from "@/lib/models";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { selectFallbackCandidates } from "@/lib/providerFallbackCandidates";
@@ -31,31 +32,46 @@ const isTransientStatusDbError = (error: unknown) => {
 // way, so every model reports `providerStatus: "unknown"` rather than an
 // unearned "operational". The model's own registry lifecycle is still
 // authoritative for its availability.
-const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRuntimeModels>>) => ({
-  generatedAt: new Date().toISOString(),
-  models: publicModels.map((model) => ({
-    id: model.id,
-    provider: model.provider,
-    status: resolveModelRuntimeAvailability(model),
-    statusSource:
-      resolveModelRuntimeAvailability(model) === "available"
-        ? ("none" as const)
-        : ("registry" as const),
-    modelIncident: false,
-    providerIncident: false,
-    providerStatus: "unknown" as const,
-    providerStatusReason: "Provider health data is unavailable.",
-    fallbackModelIds: model.replacementModelId
-      ? [model.replacementModelId]
-      : [],
-    // RECON-OPS-001: with no dashboard there is no evidence about the
-    // replacement either, so it is offered as unverified rather than as a
-    // safe swap.
-    fallbackHealth: "unknown" as const,
-    recentFailureCount5m: 0,
-    recentErrorCode: null,
-  })),
-});
+const fallbackModelStatus = (
+  publicModels: Awaited<ReturnType<typeof getPublicRuntimeModels>>
+) => {
+  // The registry lifecycle is readable with or without a dashboard, so the
+  // replacement offered here is still judged against it: a link left pointing
+  // at a model that was itself retired is a dead end, and having no provider
+  // health is not a reason to print one. Walked rather than read one hop, for
+  // the same reason the chat route walks it.
+  const publicModelsById = new Map(
+    publicModels.map((model) => [model.id, model])
+  );
+  return {
+    generatedAt: new Date().toISOString(),
+    models: publicModels.map((model) => {
+      const replacement = resolveReplacementModel(model, (candidateId) =>
+        publicModelsById.get(candidateId)
+      );
+      return {
+        id: model.id,
+        provider: model.provider,
+        status: resolveModelRuntimeAvailability(model),
+        statusSource:
+          resolveModelRuntimeAvailability(model) === "available"
+            ? ("none" as const)
+            : ("registry" as const),
+        modelIncident: false,
+        providerIncident: false,
+        providerStatus: "unknown" as const,
+        providerStatusReason: "Provider health data is unavailable.",
+        fallbackModelIds: replacement ? [replacement.id] : [],
+        // RECON-OPS-001: with no dashboard there is no evidence about the
+        // replacement either, so it is offered as unverified rather than as a
+        // safe swap.
+        fallbackHealth: "unknown" as const,
+        recentFailureCount5m: 0,
+        recentErrorCode: null,
+      };
+    }),
+  };
+};
 
 export async function GET(req: Request) {
   try {
@@ -99,6 +115,9 @@ export async function GET(req: Request) {
     );
 
     const publicModelIds = new Set(publicModels.map((model) => model.id));
+    const publicModelsById = new Map(
+      publicModels.map((model) => [model.id, model])
+    );
 
     // STG-R002: what actually decided a model's status, so a caller can tell
     // "this one model is failing" apart from "this provider is down". They
@@ -160,7 +179,13 @@ export async function GET(req: Request) {
       const { fallbackModelIds, fallbackHealth } =
         status === "unavailable"
           ? selectFallbackCandidates({
-              replacementModelId: model.replacementModelId,
+              // The first selectable model in the retirement chain, not the
+              // raw link: a successor that has since been retired itself is
+              // dropped here anyway, and skipping past it keeps the live
+              // model behind it from being lost with it.
+              replacementModelId: resolveReplacementModel(model, (candidateId) =>
+                publicModelsById.get(candidateId)
+              )?.id,
               recommendedModelIds: provider?.fallback.recommendedModelIds,
               isPublicModel: (modelId) => publicModelIds.has(modelId),
               statusOf: (modelId) => modelStatuses.get(modelId)?.status,

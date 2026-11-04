@@ -8,6 +8,7 @@ import {
   isPubliclySelectableModel,
   isRetiredModel,
   isWithdrawnFromOfferModel,
+  resolveReplacementModel,
   resolveSelectableModelId,
   type AiModel,
 } from "../lib/models";
@@ -285,6 +286,68 @@ test("replacement resolution follows bounded chains and rejects cycles", () => {
   assert.equal(resolveSelectableModelId("old", lookup), "live");
   assert.equal(resolveSelectableModelId("cycle-a", lookup), undefined);
   assert.equal(resolveSelectableModelId("missing", lookup), undefined);
+});
+
+// The runtime registry's links rot in a way the static catalogue's cannot:
+// an administrator retires A onto B, B is retired onto C months later, and
+// nothing ever revisits A. Reading one hop then hands the user B -- a model
+// that is not in the picker -- or, when B names nobody, a notice that the
+// model is "temporarily" unavailable when support for it has ended.
+test("a replacement is resolved past successors that were themselves retired", () => {
+  const retired = (id: string, replacementModelId?: string) =>
+    model({
+      id,
+      enabled: false,
+      status: "disabled",
+      publiclyListed: false,
+      ...(replacementModelId ? { replacementModelId } : {}),
+    });
+  const entries = new Map([
+    ["first", retired("first", "second")],
+    ["second", retired("second", "third")],
+    ["third", model({ id: "third" })],
+    ["dead-end", retired("dead-end", "gone")],
+    ["gone", retired("gone")],
+    ["unlinked", retired("unlinked")],
+    ["self", retired("self", "self")],
+    ["loop-a", retired("loop-a", "loop-b")],
+    ["loop-b", retired("loop-b", "loop-a")],
+    ["degraded-link", retired("degraded-link", "degraded")],
+    ["degraded", model({ id: "degraded", status: "limited" })],
+    ["missing-link", retired("missing-link", "never-registered")],
+  ]);
+  const lookup = (id: string) => entries.get(id);
+  const replacementFor = (id: string) =>
+    resolveReplacementModel(entries.get(id)!, lookup)?.id;
+
+  assert.equal(replacementFor("first"), "third");
+  // Nothing selectable in the chain: the caller has to say "no longer
+  // available, pick another" rather than name any of these.
+  assert.equal(replacementFor("dead-end"), undefined);
+  assert.equal(replacementFor("unlinked"), undefined);
+  assert.equal(replacementFor("self"), undefined);
+  assert.equal(replacementFor("loop-a"), undefined);
+  assert.equal(replacementFor("missing-link"), undefined);
+  // A limited model is degraded, not unreachable. Somebody told to pick it
+  // can, so it is still named.
+  assert.equal(replacementFor("degraded-link"), "degraded");
+});
+
+test("every retired catalogue model resolves to the same replacement either way", () => {
+  // The import-time check in lib/models.ts requires a direct live link, so
+  // the walk must agree with it on every row the catalogue actually carries.
+  // A disagreement would mean the two rules drifted apart.
+  const byId = new Map(CATALOG.map((entry) => [entry.id, entry]));
+  const retired = CATALOG.filter(isRetiredModel);
+  assert.ok(retired.length > 0);
+
+  for (const entry of retired) {
+    assert.equal(
+      resolveReplacementModel(entry, (id) => byId.get(id))?.id,
+      entry.replacementModelId,
+      entry.id
+    );
+  }
 });
 
 test("Kimi K3 and Kimi K2.7 are two distinct models, not a rename", () => {
