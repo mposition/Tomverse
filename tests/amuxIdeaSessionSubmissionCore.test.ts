@@ -92,6 +92,19 @@ test("session email refusal preserves its existing address boundaries", () => {
   }
 });
 
+test("the published support mailbox is product copy, and only that exact address", () => {
+  assert.equal(inspectAmuxIdeaSessionSubmission(submission(idea({
+    idea: "The page names support@tomverse.app twice: SUPPORT@tomverse.app." }))).ok, true);
+  for (const value of [
+    "a.support@tomverse.app",
+    "support@tomverse.app.evil.example",
+    "support@tomverse.app and person@example.test",
+  ]) {
+    assert.deepEqual(inspectAmuxIdeaSessionSubmission(submission(idea({ idea: value }))),
+      { ok: false, code: "content_refused" });
+  }
+});
+
 test("a sealed v1 body retains its intake-time content decision", () => {
   const stored = idea({ idea: "person@example.test" });
   assert.deepEqual(inspectAmuxIdeaSessionInput(stored),
