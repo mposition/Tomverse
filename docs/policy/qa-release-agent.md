@@ -182,11 +182,13 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    건너뛰고 다음으로 오래된 PR을 봅니다. 그래서 제외 대상이든 실패 PR이든 **뒤의 PR을 막지 않습니다.**
 3. **제외.** 아래 PR은 레인이 **병합하지 않고** Admin에 "사람 처리 대상"으로 표시만 합니다. 사람이 GitHub에서 각자의 계약대로
    처리합니다.
-   - 변경 경로에 게이트 파일: `.github/workflows/**`, `.github/actions/**`(CI가 비밀값을 들고 도는 곳), 정책 테스트(PR base의
+   - 변경 경로에 게이트 파일: `.github/workflows/**`, `.github/actions/**`(CI가 비밀값을 들고 도는 곳), 저장소 루트의 `package.json`(운영자와
+     CI가 실행하는 script 이름을 정함)·`tsconfig*.json`·`next.config.*`(셋 다 루트에 있는 것만; 뒤의 둘은 import가 어느 파일로
+     풀리는지 정함), 정책 테스트(PR base의
      `AGENTS.md`·`CLAUDE.md`·`docs/policy/qa-release-agent.md`가 경로로 이름 댄 `tests/**` 파일), `AGENTS.md`, `CLAUDE.md`,
      `docs/policy/qa-release-agent.md`, `lib/adminAuth*`, `lib/adminAuditSystemActors.ts`, `lib/agentAuthorityFiles.ts`.
      **이것이 전부입니다**(운영자 결정 2026-10-23 "최소한의 장치만": revert로 되돌릴 수 없는 것과 Agent가 자기 게이트를 넓힐 수
-     있는 것만 남김). 나머지 `.github/**`(감사 기록 등), `scripts/**`, 저장소 루트 설정, `package.json`·lock 파일, 다른 기능의
+     있는 것만 남김). 나머지 `.github/**`(감사 기록 등), 부록 A 밖의 `scripts/**`, 그 밖의 저장소 루트 설정, 하위 패키지의 `package.json`과 lock 파일, 다른 기능의
      정책·UI 계약 문서는 되돌릴 수 있는 코드로 보고 레인이 병합합니다 — PR의 CI가 이미 그 내용으로 돌았습니다. CI 자동 수정은
      예외 없이 모든 열린 PR의 CI를 고칩니다(운영자 결정 2026-11-03, workflow·action 파일 포함, `lib/prCiAutoFixGuardCore.ts`). 자동 수정이 게이트 파일을 고친 PR도 이 목록에 따라 레인이 병합하지 않고 사람에게 남깁니다.
      같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
@@ -412,26 +414,19 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 패턴에서 `**`는 디렉터리를 넘고, `*`는 한 경로 조각 안에서 맞추되 **패턴 끝의 `*`는 그 이름으로 시작하는 더 깊은 경로까지**
 맞춥니다(`lib/qaRelease*`는 `lib/qaRelease` 디렉터리 아래 파일도 맞춤). 8절 3항의 `lib/adminAuth*`도 같습니다.
 목록을 바꾸는 것은 이 정책 문서를 바꾸는 것이고, 정책 문서는 게이트 파일입니다. 2026-10-23 운영자 결정("최소한의 장치만")으로
-레인이 **스스로를 바꾸거나 자기를 통제하는 장치를 바꾸는 파일**만 남깁니다: 병합을 판단하고 실행하는 코드와 그 API 진입점,
-운영자 제어(레인 스위치·래치 해제·열차 선택)의 권한 검사와 쓰기 API, 감사 기록을 쓰는 store, push 자격증명을 쓰는 열차,
-서비스의 변수 허용 목록과 시작 검사, 정책 승인 판정, Agent 서비스의 IaC(독립 검토 반영, 2026-10-23). QA 화면·digest 표시·
-테스트 같은 나머지 이 Agent의 파일은 레인이 병합합니다.
+이 Agent의 **서버 쪽 코드 전체**만 남깁니다: 병합과 열차, 운영자 제어와 그 Admin API, 서비스 진입점과 그 runner, 비밀값을 실어
+보내는 목적지 허용 목록, 감사 기록 store와 그 비밀값 검사·정규화, GitHub ruleset 생성, 운영자 merge train script, IaC. 이 파일들은
+비밀값이나 감사 기록, GitHub 설정처럼 revert로 되돌릴 수 없는 것에 닿거나 레인 자신을 통제합니다(독립 검토 두 차례 반영).
+**QA 화면 컴포넌트, Admin 문구, 테스트는 레인이 병합합니다.**
 
 ```
-lib/qaReleaseMergeLane*
-lib/qaReleaseTrain*
-lib/qaReleaseOperatorControl*
-lib/qaRelease*Store.ts
-lib/qaReleaseMonitor.ts
-lib/qaReleaseDigestIntake.ts
-lib/qaReleaseServiceEnvCore.ts
-lib/qaReleaseRouteAuthCore.ts
-lib/agentDigestStore.ts
+lib/qaRelease*
+lib/agentDigest*
 lib/agentPolicyApproval*
 lib/prCiAutoFixGuardCore.ts
 app/api/internal/agents/qa-release/**
 app/api/admin/agent-digests/qa-release/**
-scripts/merge-train-core.mjs
+scripts/merge-train*
 scripts/qa-release-*
 .railway/**
 ```
