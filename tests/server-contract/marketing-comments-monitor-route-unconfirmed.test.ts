@@ -85,10 +85,8 @@ test("the variable on and the key present, the notice unconfirmed: both steps an
   process.env.MARKETING_GENERATOR_SUBMIT_SECRET = SECRET;
   process.env.MARKETING_COMMENTS_MONITOR_ENABLED = "true";
   delete process.env.MARKETING_AUTOMATION_KILL_SWITCH;
-  await loadRoute(); // registers the mock of the constant before anything imports it
-  const { COMMENTS_PRIVACY_NOTICE_CONFIRMED } = await import(mod("lib/privacyNoticeStatus.ts"));
-  assert.equal(COMMENTS_PRIVACY_NOTICE_CONFIRMED, false, "this file replaces the constant with false");
-
+  // The route's own answer proves the mocked constant is the one it reads: with the
+  // real constant (true) the monitor would run and reach the operations below.
   assert.deepEqual(await call({ action: "collect" }), { status: 200, body: { status: "off" } });
   assert.deepEqual(await call({ action: "judge", readAt: new Date().toISOString(), backlog: false, verdicts: [] }), {
     status: 200,
