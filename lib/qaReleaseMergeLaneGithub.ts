@@ -391,14 +391,13 @@ export function createQaReleaseGithubPorts(input: {
       // unknown, which latches. Anything else -- a 5xx, a timeout, a 200 that
       // does not say merged -- is unknown too.
       if (response.status === 405 || response.status === 409 || response.status === 422) return { result: "refused" };
-      if (response.status >= 400 && response.status < 500) return { result: "unknown" };
-      if (response.status !== 200) return { result: "unknown" };
+      if (response.status !== 200) return { result: "unknown", httpStatus: response.status };
       try {
         const body = record(parseJson(response.text));
         const sha = str(body.sha).toLowerCase();
-        return body.merged === true && SHA.test(sha) ? { result: "merged", sha } : { result: "unknown" };
+        return body.merged === true && SHA.test(sha) ? { result: "merged", sha } : { result: "unknown", httpStatus: 200 };
       } catch {
-        return { result: "unknown" };
+        return { result: "unknown", httpStatus: 200 };
       }
     },
 
