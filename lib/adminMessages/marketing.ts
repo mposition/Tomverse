@@ -258,7 +258,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actStartExperiment: "Start experiment",
     fieldExpId: "Experiment id",
     hintExpId: "Lower case letters, digits and dashes, 3 to 48 characters. An id is never reused.",
-    fieldExpBundle: "Bundle and variant",
+    fieldExpBundle: "Bundle and variant (pick one)",
     fieldExpLocales: "Locales",
     hintExpLocales: "Comma separated. Only languages the variant has copy for (shown in the list).",
     fieldExpShare: "Variant share (%)",
@@ -273,6 +273,9 @@ export const adminMarketingMessages = defineAdminMessages({
     hintExpStopDrop: "5 to 100, relative to the control's click rate.",
     fieldExpStopAfter: "Not before exposures per arm",
     hintExpStopAfter: "50 or more in each arm.",
+    confirmStartExperiment:
+      "Start the experiment with {bundle}? Visitors in {locales} will see this copy: {share}% of them, for {days} days.",
+    expStartedDone: "Experiment {id} started with {bundle}.",
     actStopExperiment: "Stop experiment",
     confirmStopExperiment:
       "Stop the experiment and record its figures as reports? Visitors return to the default copy on their next visit.",
@@ -709,7 +712,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actStartExperiment: "실험 시작",
     fieldExpId: "실험 id",
     hintExpId: "영어 소문자, 숫자, -로 3~48자. id는 다시 쓸 수 없습니다.",
-    fieldExpBundle: "번들과 변형",
+    fieldExpBundle: "번들과 변형 (직접 선택)",
     fieldExpLocales: "언어",
     hintExpLocales: "쉼표로 구분합니다. 변형에 문구가 있는 언어만 쓸 수 있습니다(목록에 표시).",
     fieldExpShare: "변형 비율 (%)",
@@ -724,6 +727,9 @@ export const adminMarketingMessages = defineAdminMessages({
     hintExpStopDrop: "5~100, 대조군 클릭률 대비 상대값입니다.",
     fieldExpStopAfter: "arm당 노출이 이 수에 이르기 전에는 중단하지 않음",
     hintExpStopAfter: "각 arm 50 이상.",
+    confirmStartExperiment:
+      "실험을 시작할까요? 번들: {bundle}. {locales} 방문자의 {share}%에게 {days}일 동안 이 문구가 보입니다.",
+    expStartedDone: "실험을 시작했습니다. id: {id}, 번들: {bundle}",
     actStopExperiment: "실험 중단",
     confirmStopExperiment:
       "실험을 중단하고 수치를 보고서로 기록할까요? 방문자는 다음 방문부터 기본 문구로 돌아갑니다.",

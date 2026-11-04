@@ -226,7 +226,7 @@ test("the shared rail asks before a form is sent, not only before a plain button
   const { readFileSync } = await import("node:fs");
   const source = readFileSync("components/admin/MarketingActions.tsx", "utf8");
   const submit = source.slice(source.indexOf("onSubmit={(event) => {"));
-  const confirmAt = submit.indexOf("window.confirm(opened.confirm)");
+  const confirmAt = submit.indexOf("window.confirm(confirmText(opened, values))");
   const sendAt = submit.indexOf("send(opened");
   assert.ok(confirmAt > 0 && sendAt > confirmAt, "the form asks before it sends");
 });

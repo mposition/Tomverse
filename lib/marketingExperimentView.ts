@@ -81,12 +81,15 @@ export function buildExperimentsConsole(
   /** What the visitor-facing read also checks before it serves anything. */
   gates: { switchOn: boolean; killSwitch: boolean } = { switchOn: true, killSwitch: false }
 ): { rows: ExperimentRowView[]; experiments: ExperimentsConsoleView } {
-  const bundles = LANDING_EXPERIMENT_BUNDLES.flatMap((bundle) =>
-    Object.entries(bundle.variants).map(([variantId, locales]) => ({
-      bundleId: bundle.id,
-      variantId,
-      locales: Object.keys(locales),
-    }))
+  // Example bundles stay buildable but are not offered: a start form that
+  // lists one first once started the example by accident (2026-11-04).
+  const bundles = LANDING_EXPERIMENT_BUNDLES.filter((bundle) => !bundle.example).flatMap(
+    (bundle) =>
+      Object.entries(bundle.variants).map(([variantId, locales]) => ({
+        bundleId: bundle.id,
+        variantId,
+        locales: Object.keys(locales),
+      }))
   );
   const { config, counts } = snapshot;
   const base = {
