@@ -1,8 +1,5 @@
 import type { Session } from "next-auth";
 
-import { prisma } from "@/lib/prisma";
-
-import { AMUX_IDEA_STANDARD_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import { AMUX_SESSION_INTAKE_READBACK_ENV, amuxSessionIntakeReadbackEnabled } from "./ideaSessionIntakeReadbackCore.ts";
 import {
   AMUX_SESSION_INTAKE_ENV,
@@ -15,7 +12,6 @@ import {
   readAmuxIdeaSessionSubmissionRequest,
   submitAmuxIdeaFromSession,
 } from "./ideaSessionSubmissionService.ts";
-import { readAmuxOperatingScopeAuthority } from "./ideaOperatingScopeStore.ts";
 import {
   AMUX_V4_IDEA_READBACK_ENV,
   AMUX_V4_IDEA_SUBMISSION_ENV,
@@ -28,9 +24,10 @@ import { IdeaSubmissionError, readIdeaSubmissionByDerivedRequestId, submitIdea }
  * is the Admin idea form's choice (app/api/admin/amux/ideas/submissions): while
  * session intake is on, the idea is a session idea, so it is analysed, gets its
  * cards and reaches the workers; otherwise it stays on the v4 path. A session
- * idea reads its references from pinned checkouts and must name at least one,
- * so it names every repository in the owner's operating scope, the form's
- * default. Its model is the scope's.
+ * idea reads its references from pinned checkouts and must name at least one:
+ * what these screens report on lives in this repository, which the owner's
+ * operating scope must include (the intake refuses it otherwise). Its model is
+ * the scope's.
  */
 export type IdeaSendPath =
   | { readonly ok: false; readonly code: string; readonly status: number }
@@ -43,16 +40,17 @@ export type IdeaSendPath =
       readonly isAlreadySeen: (error: unknown) => boolean;
     };
 
+const REPOSITORY = "mposition/Tomverse";
+
 const sessionWriteOn = () =>
   amuxSessionIntakeWritePermitted(process.env[AMUX_SESSION_INTAKE_ENV], process.env[AMUX_V4_IDEA_SUBMISSION_ENV]);
 const sessionReadBackOn = () =>
   amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV], process.env[AMUX_V4_IDEA_READBACK_ENV]);
 
-/** The session submission a send makes: the operator's click, naming the scope's repositories. */
+/** The session submission a send makes: the operator's click, naming this repository. */
 export function inspectIdeaSendForSession(input: {
   requestId: string;
   idea: string;
-  repositories: readonly string[];
   sessionDisplay: string;
 }) {
   const source: AmuxIdeaSessionSource = {
@@ -63,7 +61,7 @@ export function inspectIdeaSendForSession(input: {
   return inspectAmuxIdeaSessionSubmission({
     version: 1,
     requestId: input.requestId,
-    input: { version: 1, idea: input.idea, repositories: input.repositories, pullRequests: [] },
+    input: { version: 1, idea: input.idea, repositories: [REPOSITORY], pullRequests: [] },
     source,
   });
 }
@@ -90,16 +88,7 @@ export async function ideaSendPath(input: {
     error.code === "request_already_seen";
 
   if (sessionWriteOn() && sessionReadBackOn()) {
-    const authority = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx), {
-      ...AMUX_IDEA_STANDARD_TRANSACTION,
-    });
-    if (!authority) return { ok: false, code: "scope_unavailable", status: 409 };
-    const inspected = inspectIdeaSendForSession({
-      requestId,
-      idea,
-      repositories: authority.scope.repositories,
-      sessionDisplay: input.sessionDisplay,
-    });
+    const inspected = inspectIdeaSendForSession({ requestId, idea, sessionDisplay: input.sessionDisplay });
     if (!inspected.ok) return { ok: false, code: inspected.code, status: 400 };
     return { ok: true, readBack, isAlreadySeen, submit: () => submitAmuxIdeaFromSession({ inspected }) };
   }

@@ -1096,12 +1096,11 @@ test("a send from another Admin screen enters as a session idea while session in
     assert.equal(path.isAlreadySeen(new AmuxIdeaSessionSubmissionError("request_already_seen")), true);
     assert.equal(path.isAlreadySeen(new AmuxIdeaSessionSubmissionError("outcome_unknown")), false);
 
-    // It names the whole saved scope, without which analysis would have nothing to read.
+    // It names this repository, without which analysis would have nothing to read.
     const inspected = inspectIdeaSendForSession({ requestId: randomUUID(), idea: "Synthetic",
-      repositories: authority.scope.repositories, sessionDisplay: "Scout suggestion" });
+      sessionDisplay: "Scout suggestion" });
     assert.ok(inspected.ok);
-    assert.deepEqual(inspected.input.repositories, authority.scope.repositories);
-    assert.ok(inspected.counts.repositoryCount > 0);
+    assert.deepEqual(inspected.input.repositories, ["mposition/Tomverse"]);
     assert.deepEqual(inspected.source, { toolName: "tomverse-admin", modelProvider: "operator",
       sessionDisplay: "Scout suggestion" });
 
