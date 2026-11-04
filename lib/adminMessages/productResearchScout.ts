@@ -67,6 +67,8 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
     bulkProgress: "{done} of {total}…",
     bulkDone: "{done} of {total} done.",
     bulkStopped: "Stopped after {done} of {total}. The rest are still selected.",
+    selectBatch: "Select next {count}",
+    bulkSendNote: "Keep this screen open. Sends go about 13 seconds apart to stay inside the limit.",
 
     nowHeading: "Now",
     factSwitch: "Switch",
@@ -228,6 +230,8 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
     bulkProgress: "{total}건 중 {done}건…",
     bulkDone: "{total}건 중 {done}건을 마쳤습니다.",
     bulkStopped: "{total}건 중 {done}건에서 멈췄습니다. 나머지는 선택된 채로 남아 있습니다.",
+    selectBatch: "다음 {count}건 선택",
+    bulkSendNote: "이 화면을 열어 두세요. 제한에 걸리지 않도록 13초쯤 간격으로 보냅니다.",
 
     nowHeading: "지금 상태",
     factSwitch: "스위치",
