@@ -135,6 +135,14 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
     loadMore: (shown: number, total: number) => `Load more (${shown}/${total})`,
     expand: (title: string) => `Expand or collapse ${title}`,
     archiveAll: "Archive all cards",
+    ideaLane: {
+      badge: "Lane", group: (count: number) => "Idea lane · " + count,
+      state: { queued: "Waiting for the lane", running: "Running", pr_open: "Draft PR open", merged: "Merged",
+        pr_closed: "PR closed", failed: "Attempts used up" },
+      attempts: (count: number) => count === 1 ? "1 run" : count + " runs",
+      recentMerged: (count: number) => "Idea lane merged in the last 7 days · " + count,
+      unavailable: "Idea lane work could not be read. Backlog › Ideas lists it.",
+    },
     archiveAllConfirm: (count: number) => `Archive all ${count} cards on the board? They move to the Archive drawer with their status and history kept.`,
   },
   ko: {
@@ -271,6 +279,14 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
     loadMore: (shown: number, total: number) => `더 보기 (${shown}/${total})`,
     expand: (title: string) => `${title} 펼치기 또는 접기`,
     archiveAll: "전체 카드 보관",
+    ideaLane: {
+      badge: "레인", group: (count: number) => `아이디어 레인 · ${count}건`,
+      state: { queued: "레인 대기", running: "실행 중", pr_open: "초안 PR 열림", merged: "병합됨",
+        pr_closed: "PR 닫힘", failed: "시도 소진" },
+      attempts: (count: number) => `실행 ${count}회`,
+      recentMerged: (count: number) => `최근 7일 병합된 레인 아이디어 · ${count}건`,
+      unavailable: "아이디어 레인 작업을 읽지 못했습니다. 백로그 › 아이디어에서 볼 수 있습니다.",
+    },
     archiveAllConfirm: (count: number) => `보드의 카드 ${count}건을 모두 보관할까요? 상태와 기록은 그대로 두고 보관함으로 옮깁니다.`,
   },
 });

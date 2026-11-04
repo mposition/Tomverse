@@ -633,6 +633,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       {!view.configured && view.mode !== "off" ? <p className="text-sm text-amber-300">{m.notConfigured}</p> : null}
 
       {/* Slots */}
+      <SaturationRecord record={state.saturation} capacity={state.capacity} />
+
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4" data-testid="ci-admission-slots">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] font-medium text-zinc-300">{m.running}</span>
@@ -943,5 +945,37 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * How full the runners were, hour by hour: whether CI is slow because the
+ * runners are full. Read from what each round already recorded.
+ */
+function SaturationRecord({ record, capacity }: { record: CiAdmissionState["saturation"]; capacity: number }) {
+  const m = useAdminMessages(adminCiAdmissionMessages);
+  if (record.length === 0) return null;
+  const samples = record.reduce((sum, hour) => sum + hour.samples, 0);
+  const full = record.reduce((sum, hour) => sum + hour.full, 0);
+  const queued = record.reduce((sum, hour) => sum + hour.queued, 0);
+  const peak = Math.max(...record.map((hour) => hour.peak));
+  const percent = (part: number) => (samples === 0 ? 0 : Math.round((part / samples) * 100));
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950 p-4" data-testid="ci-admission-saturation">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[13px] font-medium text-zinc-300">{fill(m.saturationTitle, { hours: record.length })}</span>
+        <span className="text-xs text-zinc-400">{fill(m.saturationSummary, { full: percent(full), queued: percent(queued), peak, capacity })}</span>
+      </div>
+      <ol className="flex h-10 items-end gap-px" aria-hidden="true">
+        {record.map((hour) => (
+          <li
+            key={hour.hour}
+            className={`min-w-0 flex-1 rounded-sm ${hour.full > 0 ? "bg-rose-400" : hour.queued > 0 ? "bg-amber-300" : "bg-emerald-400/70"}`}
+            style={{ height: `${Math.max(8, Math.min(100, Math.round((hour.peak / capacity) * 100)))}%` }}
+            title={fill(m.saturationHour, { hour: `${hour.hour.slice(5, 10)} ${hour.hour.slice(11, 13)}:00 UTC`, peak: hour.peak, full: hour.full, samples: hour.samples })}
+          />
+        ))}
+      </ol>
+    </div>
   );
 }

@@ -292,8 +292,14 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 빠진다. 생성기 맥락의 계정별 `usedAssetIds`를 `marketingA5AssetsFor`가 결정적으로 거르고(모델 판단이 아님), 남은 자산이 없는
 계정은 호출하지 않는다(`accountsWithoutMedia`). 초안 접수도 그 계정이 이미 쓴 자산이 붙은 초안을
 `intake_asset_already_used`로 거절한다(아무것도 쓰지 않고, 호출도 소비하지 않는다). 이 사유는 S2B1 refusal 목록 밖의 접수 전용 문자열이다.
-자산이 브리프 주제와 맞지 않아도 계정에 주어진 자산이 하나라도 있으면 초안을 만든다. 프롬프트(`a5-social-v6`)는 그 경우 자산 설명이
+자산이 브리프 주제와 맞지 않아도 계정에 주어진 자산이 하나라도 있으면 초안을 만든다. 프롬프트(`a5-social-v7`)는 그 경우 자산 설명이
 보여 주는 내용으로만 쓰게 한다.
+
+해시태그(운영자 결정 2026-11-04): 도움이 될 때만, Instagram·TikTok·RedNote 3~5, YouTube 설명에 2~3(`#Shorts` 포함), LinkedIn
+2~3, X 1~2, Facebook 0~2, Threads 최대 1. `#Tomverse` 하나를 권장하고 개수에 넣는다. 그 계정 locale의 언어와 문자로 쓰고, 다른
+회사·제품 이름 태그와 과장·가격 암시 태그(`#best`, `#free`, `#최고`, `#무료` 등)는 쓰지 않는다. 판단은 프롬프트가 모델에 맡기고
+(`a5-social-v7`, 범위는 `task.hashtags`), 생성기의 초안 읽기가 금지 태그와 상한을 넘는 태그를 결정적으로 지운다(`lib/marketingHashtags.ts`,
+초안은 버리지 않고 `hashtagsRemoved`로 센다). Guard는 태그를 포함한 전체 글을 그대로 읽는다.
 
 상한은 코드 상수이고 운영 설정으로는 **내리기만** 한다. 게시 시간창은 대상 시장 현지 09:00~20:00,
 같은 claim은 계정당 14일 안에 다시 쓰지 않는다(생성기 입력과 프롬프트로 지킨다. 4.2 참조).

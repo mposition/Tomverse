@@ -20,7 +20,6 @@ import { join } from "node:path";
 import { unzipSync, strFromU8 } from "fflate";
 import { installCdpRules, launch, resolverRules, ruledContext, sandboxHost } from "../../lib/productResearchScoutBrowser.mjs";
 import {
-  AbortTally,
   SCOUT_LOCALES,
   SCOUT_PAGE_ORIGIN,
   SCOUT_PAGES,
@@ -125,14 +124,8 @@ async function capturePage(browser, rules, target) {
   const sameOriginErrors = [];
   let documentLang = null;
   for (const viewport of VIEWPORTS) {
-    rules.tally = new AbortTally();
     rules.stops = [];
-    const { context } = await ruledContext(browser, {
-      allowedOrigins: [SCOUT_PAGE_ORIGIN],
-      locale: SCOUT_LOCALES[target.lang],
-      playwrightRoute: false,
-      tally: rules.tally,
-    });
+    const context = await ruledContext(browser, { locale: SCOUT_LOCALES[target.lang] });
     try {
       await context.setDefaultTimeout(PAGE_TIMEOUT_MS);
       const page = await context.newPage();

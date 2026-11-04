@@ -25,10 +25,15 @@ import {
   type MarketingGeneratorDraft,
 } from "./marketingDraftIntakeCore.ts";
 import { marketingTextHygiene } from "./marketingGuardNormalise.ts";
+import {
+  marketingHashtagRange,
+  marketingHashtagsWithinBounds,
+  type MarketingHashtagRemoval,
+} from "./marketingHashtags.ts";
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each run, so a change to what the model is asked is a new version. */
-export const MARKETING_A5_PROMPT_VERSION = "a5-social-v6";
+export const MARKETING_A5_PROMPT_VERSION = "a5-social-v7";
 
 /** Drafts one call may propose for one account. */
 export const MARKETING_A5_MAX_DRAFTS_PER_CALL = 5;
@@ -118,6 +123,9 @@ const SYSTEM_PROMPT = [
   "Do not invent prices, numbers, dates, comparisons with other products, testimonials or urgency. Do not name another product or company.",
   "An asset is an image or a video; its description says what it shows. A post that carries an asset is about what that asset shows, and says nothing the description does not support.",
   "Every post carries one asset from the assets list, an image or a video, on every platform. On youtube and tiktok it is a video; on youtube the post's first line is the video's title, at most 100 characters, and the lines after it are the description.",
+  "Hashtags help people find a post; add them only where they do. task.hashtags gives this platform's range: never more than its max, usually at least its min, and fewer or none when a tag would not help the post (a min of 0 means none is fine). #Tomverse once is recommended, and it counts toward the range.",
+  "Write each hashtag in the post's language and script, with no space inside it (Traditional Chinese for zh-Hant, Simplified for zh-Hans), as broad topic words such as #AI, #AIassistant or #AIcomparison in English and #AI, #인공지능 or #AI비교 in Korean. Never a hashtag that names another product or company, and never one that boasts or hints at a price, such as #best, #free, #최고 or #무료.",
+  "Put the hashtags at the end of the post. On youtube they go in the description, never the title line, and one of them is #Shorts. On threads use at most one. On x the hashtags count toward the post's 280 characters.",
   "The assets list holds only assets this account has not used yet. Give each post a different asset; when there are fewer assets than posts, write fewer posts rather than carry an asset twice.",
   "When no asset fits the brief's topic, do not skip the post: write it about what an asset you were given shows, using only its description. Whenever the assets list holds at least one asset, write at least one post; return no draft only when the list is empty, since a post without an image or a video is never published. Never write what an asset's description does not support, even to stay on the brief's topic.",
   'Answer with one JSON object and nothing else: {"drafts":[{"renderedText":string,"claimIds":[string],"assetIds":[string],"disclosureFlags":["advertising"]}]}.',
@@ -229,7 +237,13 @@ export function marketingA5Messages(
   if (!account.allowedLocales.includes(scope.locale)) throw new Error("The account does not post in that locale");
   const count = Math.max(1, Math.min(Math.floor(scope.count), MARKETING_A5_MAX_DRAFTS_PER_CALL));
   const data = {
-    task: { platform: account.channel, locale: scope.locale, posts: count },
+    task: {
+      platform: account.channel,
+      locale: scope.locale,
+      posts: count,
+      // Owner decision 2026-11-04; readMarketingA5Answer removes any past the max.
+      hashtags: marketingHashtagRange(account.channel),
+    },
     brief: briefFor(context.brief),
     recentClaimIds: account.recentClaimIds ?? [],
     // What each claim says in this locale: the page's sentence, or a price's values.
@@ -297,29 +311,36 @@ export type MarketingA5Refusal =
  * refused when it is not the one JSON object asked for; a draft within it is
  * dropped, and counted by reason, when it has a link, carries no image or
  * video, names an id the context did not offer, or does not fit the intake's
- * schema.
+ * schema. A hashtag that names another company or boasts, or one past the
+ * platform's maximum, is taken out of the draft and counted
+ * (lib/marketingHashtags.ts); the draft is kept.
  */
 export function readMarketingA5Answer(
   content: string,
   context: MarketingGeneratorContextAnswer,
   scope: MarketingA5Scope & { readonly callIndex: number },
-): { readonly drafts: MarketingGeneratorDraft[]; readonly dropped: Partial<Record<MarketingA5Refusal, number>> } {
+): {
+  readonly drafts: MarketingGeneratorDraft[];
+  readonly dropped: Partial<Record<MarketingA5Refusal, number>>;
+  readonly hashtagsRemoved: Partial<Record<MarketingHashtagRemoval, number>>;
+} {
   const dropped: Partial<Record<MarketingA5Refusal, number>> = {};
   const drop = (reason: MarketingA5Refusal) => {
     dropped[reason] = (dropped[reason] ?? 0) + 1;
   };
+  const hashtagsRemoved: Partial<Record<MarketingHashtagRemoval, number>> = {};
 
   let raw: unknown;
   try {
     raw = JSON.parse(content);
   } catch {
     drop("answer_not_json");
-    return { drafts: [], dropped };
+    return { drafts: [], dropped, hashtagsRemoved };
   }
   const parsed = answerSchema.safeParse(raw);
   if (!parsed.success) {
     drop("answer_shape");
-    return { drafts: [], dropped };
+    return { drafts: [], dropped, hashtagsRemoved };
   }
 
   const account = context.channels.find((channel) => channel.id === scope.channelId);
@@ -332,6 +353,9 @@ export function readMarketingA5Answer(
       : [],
   );
 
+  // The competitor registry's names, so a tag naming a tracked company goes too.
+  const competitorNames = (context.competitors?.tracked ?? []).map((competitor) => competitor.displayName);
+
   const drafts: MarketingGeneratorDraft[] = [];
   parsed.data.drafts.forEach((item, index) => {
     const read = proposalSchema.safeParse(item);
@@ -341,13 +365,14 @@ export function readMarketingA5Answer(
     if (proposal.assetIds.length === 0) return drop("draft_has_no_asset");
     if (proposal.claimIds.some((id) => !claimIds.has(id))) return drop("draft_names_unknown_claim");
     if (proposal.assetIds.some((id) => !assetIds.has(id))) return drop("draft_names_unknown_asset");
+    const tagged = marketingHashtagsWithinBounds(proposal.renderedText, account?.channel ?? "", competitorNames);
     const draft = marketingGeneratorDraftSchema.safeParse({
       // The service's own id: stable for a resend of the same run and call.
       logicalDraftId: `c${scope.callIndex}-d${index}`,
       kind: "social",
       channelId: scope.channelId,
       locale: scope.locale,
-      renderedText: proposal.renderedText,
+      renderedText: tagged.text,
       claimIds: [...new Set(proposal.claimIds)],
       // The alt text is the registry's, per locale; the key names that locale.
       assets: [...new Set(proposal.assetIds)].map((assetId) => ({ assetId, altKey: scope.locale })),
@@ -357,9 +382,12 @@ export function readMarketingA5Answer(
       disclosureFlags: [...new Set(["advertising", ...proposal.disclosureFlags])],
     });
     if (!draft.success) return drop("draft_shape");
+    for (const [reason, count] of Object.entries(tagged.removed) as [MarketingHashtagRemoval, number][]) {
+      hashtagsRemoved[reason] = (hashtagsRemoved[reason] ?? 0) + count;
+    }
     drafts.push(draft.data);
   });
-  return { drafts, dropped };
+  return { drafts, dropped, hashtagsRemoved };
 }
 
 /**
