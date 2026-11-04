@@ -140,6 +140,84 @@ test("the context names approval-mode accounts, claims without evidence, and fac
     assert.equal(/https?:\/\//.test(text), false, "no URL reaches the generator");
   }));
 
+
+/** A post in `status` naming `assetIds` (the insert trigger that starts every post as a draft is off for the one insert). */
+async function postNaming(channelId: string, status: string, assetIds: string[], createdAt?: Date) {
+  const key = `post-${Math.random().toString(36).slice(2)}`;
+  await prisma.$executeRawUnsafe(`ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`);
+  try {
+    return await prisma.marketingPost.create({
+      data: {
+        channelId,
+        locale: "en",
+        kind: "social",
+        logicalKey: key,
+        ...(createdAt ? { createdAt } : {}),
+        envelope: {
+          channel: "linkedin",
+          accountSlug: "linkedin-1",
+          locale: "en",
+          renderedText: "Three models, three answers, side by side.",
+          claimIds: [],
+          assets: assetIds.map((assetId) => ({ assetId, altKey: "en" })),
+          finalUrl: null,
+          scheduledAt: null,
+          disclosureFlags: ["advertising"],
+        },
+        envelopeDigest: DIGEST,
+        rendererVersion: "r1",
+        claimIds: [],
+        assetIds,
+        claimRegistryVersion: 1,
+        assetRegistryVersion: 1,
+        factSnapshot: { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] },
+        factsDigest: DIGEST,
+        // What the table's CHECKs ask of a post in each state.
+        ...(["approved", "scheduled", "publishing", "published", "verified"].includes(status)
+          ? { approvalAuditLogId: `audit-${key}`, approvedDigest: DIGEST, approvedAt: new Date() }
+          : {}),
+        ...(["publishing", "published", "verified", "outcome_unknown", "failed"].includes(status)
+          ? { providerRequestKey: key, publishAttempt: 1 }
+          : {}),
+        ...(["published", "verified"].includes(status) ? { publishedAt: new Date() } : {}),
+        guardDecision: status === "guard_rejected" ? "reject" : "approval_required",
+        guardCodes: [],
+        guardRuleIds: [],
+        status,
+        mode: "approval",
+        history: [{ at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST }],
+        historyVersion: 0,
+      },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`);
+  }
+}
+
+test("the context lists, per account, the assets it has used in any state but a rejected, refused or expired draft, whatever their age", () =>
+  withSecret(async () => {
+    const one = await channelIn("approval_mode");
+    const two = await channelIn("approval_mode", "x");
+    await postNaming(one.id, "published", ["media-published", "media-both"]);
+    await postNaming(one.id, "pending_approval", ["media-pending"]);
+    await postNaming(one.id, "approved", ["media-both"]);
+    await postNaming(one.id, "rejected", ["media-rejected"]);
+    await postNaming(one.id, "guard_rejected", ["media-guard"]);
+    await postNaming(one.id, "approval_expired", ["media-expired"]);
+    // Long past the claims' two-week window: an asset stays used.
+    await postNaming(one.id, "verified", ["media-old"], new Date(Date.now() - 400 * 24 * 60 * 60 * 1000));
+    await postNaming(two.id, "scheduled", ["media-elsewhere"]);
+
+    const response = await call({ generatorRunId: "run-1" });
+    assert.equal(response.status, 200);
+    const { context } = (await response.json()) as {
+      context: { channels: { id: string; usedAssetIds: string[] }[] };
+    };
+    const used = Object.fromEntries(context.channels.map((channel) => [channel.id, channel.usedAssetIds]));
+    assert.deepEqual(used[one.id], ["media-both", "media-old", "media-pending", "media-published"]);
+    assert.deepEqual(used[two.id], ["media-elsewhere"]);
+  }));
+
 test("the kill switch stops the context, even for the right secret", () =>
   withSecret(async () => {
     await channelIn("approval_mode");

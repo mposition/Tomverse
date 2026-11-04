@@ -35,6 +35,8 @@ import {
 } from "@/lib/marketingLlmBudgetCore";
 import { consumeMarketingLlmCallsForSubmission } from "@/lib/marketingLlmBudgetStore";
 import {
+  MARKETING_ASSET_RELEASED_POST_STATUSES,
+  MARKETING_ASSET_REUSE_REFUSAL_CODE,
   marketingDraftProvenanceDigest,
   marketingGeneratorDraftIntakeDigest,
   marketingGeneratorDraftLogicalKey,
@@ -319,6 +321,18 @@ export async function intakeMarketingGeneratorDraft(
     disclosureFlags: [...draft.disclosureFlags],
   };
   const assetIds = envelope.assets.map((asset) => asset.assetId);
+  // An account does not carry an asset it has already used (owner decision
+  // 2026-11-04). The generator is not offered such assets, so this is the
+  // second line: a draft that names one is refused before anything is written.
+  const reused = await tx.marketingPost.findFirst({
+    where: {
+      channelId: draft.channelId,
+      assetIds: { hasSome: assetIds },
+      status: { notIn: [...MARKETING_ASSET_RELEASED_POST_STATUSES] },
+    },
+    select: { id: true },
+  });
+  if (reused) return { status: "refused", reasons: [MARKETING_ASSET_REUSE_REFUSAL_CODE] };
   // S3a2: the facts, their clock and the rows they rest on are read in this
   // transaction, and the snapshot stored with the post is the one the Guard's
   // decision is bound to.
