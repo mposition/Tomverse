@@ -2197,7 +2197,11 @@ function MarketingRow({
             </MarketingTag>
           </span>
         </div>
-        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-100">{text(row.excerpt) ?? m.none}</p>
+        {/* The whole post as it will go out, line breaks included: a person
+            approves these words, so the queue does not shorten them. */}
+        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-100" data-testid="marketing-queue-text">
+          {text(row.renderedText) ?? text(row.excerpt) ?? m.none}
+        </p>
         <MarketingPostAssets assetIds={row.assetIds} m={m} />
         <p className="mt-3 text-xs text-zinc-500" title={`${stamp(row.createdAt) ?? ""} UTC`}>
           {m.queueMeta
