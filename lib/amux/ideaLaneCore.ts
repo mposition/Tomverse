@@ -68,7 +68,8 @@ export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], 
     .reduce<AmuxIdeaLaneAttemptFact | null>((last, item) => !last || item.claimedAtMs > last.claimedAtMs ? item : last, null);
   const base = { attempts: attempts.length, lastOutcome };
   // A retry's second PR may be left open; the one that merged settles the idea.
-  const merged = attempts.find((item) => item.outcome === "pr_open" && item.mergedAtMs);
+  const merged = attempts.filter((item) => item.outcome === "pr_open" && item.mergedAtMs)
+    .reduce<AmuxIdeaLaneAttemptFact | null>((first, item) => !first || item.mergedAtMs! < first.mergedAtMs! ? item : first, null);
   if (merged) return { ...base, state: "merged", prNumber: merged.prNumber };
   if (opened) return { ...base, state: opened.prClosedAtMs ? "pr_closed" : "pr_open", prNumber: opened.prNumber };
   if (attempts.some(live)) return { ...base, state: "running", prNumber: null };

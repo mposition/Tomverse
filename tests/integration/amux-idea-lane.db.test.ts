@@ -177,7 +177,7 @@ test("a run may publish only while its idea is open and its lease live, and the 
   await removeIdeas();
 });
 
-test("the PR observer records how a lane PR ended, once, only for the run's own branch into develop", async () => {
+test("the PR observer records how a lane PR stands, only for the run's own branch into develop", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const now = new Date();
   const open = async (prNumber: number) => {
@@ -193,34 +193,39 @@ test("the PR observer records how a lane PR ended, once, only for the run's own 
   const unreadable = await open(9_000_004);
   const closed = await open(9_000_005);
   const mergedAt = new Date("2026-11-03T23:52:28Z");
-  type Pull = { state: "open" | "closed"; merged: boolean; mergedAt: Date | null; baseRef: string; headRef: string };
+  const closedAt = new Date("2026-11-03T20:00:00Z");
+  type Pull = { state: "open" | "closed"; merged: boolean; mergedAt: Date | null; closedAt: Date | null;
+    baseRef: string; headRef: string };
+  const pull = (attemptId: string, end: "open" | "closed" | "merged", headRef = `amux-idea/${attemptId}`): Pull => ({
+    state: end === "open" ? "open" : "closed", merged: end === "merged", mergedAt: end === "merged" ? mergedAt : null,
+    closedAt: end === "open" ? null : end === "merged" ? mergedAt : closedAt, baseRef: "develop", headRef });
   const pulls: Record<number, Pull> = {
-    9_000_001: { state: "closed", merged: true, mergedAt, baseRef: "develop", headRef: `amux-idea/${merged.id}` },
-    9_000_002: { state: "open", merged: false, mergedAt: null, baseRef: "develop", headRef: `amux-idea/${waiting.id}` },
-    9_000_003: { state: "closed", merged: true, mergedAt, baseRef: "develop", headRef: "someone/else" },
-    9_000_005: { state: "closed", merged: false, mergedAt: null, baseRef: "develop", headRef: `amux-idea/${closed.id}` },
+    9_000_001: pull(merged.id, "merged"),
+    9_000_002: pull(waiting.id, "open"),
+    9_000_003: pull(foreign.id, "merged", "someone/else"),
+    9_000_005: pull(closed.id, "closed"),
   };
   const read = async (prNumber: number) => {
-    const pull = pulls[prNumber];
-    if (!pull) throw new EngineeringAgentGitHubReadError("http_error");
-    return pull;
+    const found = pulls[prNumber];
+    if (!found) throw new EngineeringAgentGitHubReadError("http_error");
+    return found;
   };
-  const outcomes = new Map((await observeAmuxIdeaLaneMerges(read)).map((row) => [row.attemptId, row.outcome]));
+  const round = async () => new Map((await observeAmuxIdeaLaneMerges(read)).map((row) => [row.attemptId, row.outcome]));
+  const outcomes = await round();
   assert.equal(outcomes.get(merged.id), "merged");
   assert.equal(outcomes.get(waiting.id), "waiting");
   assert.equal(outcomes.get(foreign.id), "not_the_lane_pr", "a number that is not this run's branch decides nothing");
   assert.equal(outcomes.get(unreadable.id), "unreadable");
   assert.equal(outcomes.get(closed.id), "closed");
-  const stored = await prisma.amuxIdeaLaneAttempt.findMany({
-    where: { id: { in: [merged.id, waiting.id, foreign.id, closed.id] } } });
-  assert.deepEqual(stored.filter((row) => row.mergedAt !== null).map((row) => [row.id, row.mergedAt?.toISOString()]),
-    [[merged.id, mergedAt.toISOString()]]);
-  assert.deepEqual(stored.filter((row) => row.prClosedAt !== null).map((row) => row.id), [closed.id]);
-  const again = new Set((await observeAmuxIdeaLaneMerges(read)).map((row) => row.attemptId));
-  assert.ok(!again.has(merged.id) && !again.has(closed.id), "an ended PR is not read again");
-  assert.ok(again.has(waiting.id), "an open one still is");
+  const stored = new Map((await prisma.amuxIdeaLaneAttempt.findMany({
+    where: { id: { in: [merged.id, waiting.id, foreign.id, unreadable.id, closed.id] } } })).map((row) => [row.id, row]));
+  assert.equal(stored.get(merged.id)?.mergedAt?.toISOString(), mergedAt.toISOString(), "GitHub's merge time");
+  assert.equal(stored.get(closed.id)?.prClosedAt?.toISOString(), closedAt.toISOString(), "GitHub's close time");
+  assert.ok([waiting.id, foreign.id, unreadable.id].every((id) => !stored.get(id)?.mergedAt && !stored.get(id)?.prClosedAt));
+  assert.ok([...stored.values()].every((row) => row.prObservedAt !== null), "every read is stamped");
+  assert.equal((await round()).has(merged.id), false, "a recorded merge is not read again");
 
-  const rows = await readAmuxIdeaProgressForOwner(owner);
+  let rows = await readAmuxIdeaProgressForOwner(owner);
   const done = rows.find((row) => row.ideaId === merged.ideaId);
   assert.equal(done?.stage, "done");
   assert.equal(done?.lane?.state, "merged");
@@ -229,13 +234,38 @@ test("the PR observer records how a lane PR ended, once, only for the run's own 
   assert.equal(rows.find((row) => row.ideaId === waiting.ideaId)?.stage, "review");
   const shut = rows.find((row) => row.ideaId === closed.ideaId);
   assert.deepEqual([shut?.stage, shut?.attention, shut?.closable, shut?.lane?.state], ["review", true, true, "pr_closed"]);
+
+  pulls[9_000_005] = pull(closed.id, "open");
+  assert.equal((await round()).get(closed.id), "waiting");
+  rows = await readAmuxIdeaProgressForOwner(owner);
+  assert.equal(rows.find((row) => row.ideaId === closed.ideaId)?.lane?.state, "pr_open", "a reopened PR is back in review");
+  pulls[9_000_005] = pull(closed.id, "merged");
+  assert.equal((await round()).get(closed.id), "merged");
+  rows = await readAmuxIdeaProgressForOwner(owner);
+  assert.equal(rows.find((row) => row.ideaId === closed.ideaId)?.stage, "done", "and its later merge is seen");
+
   assert.equal(await amuxIdeaLaneTook(merged.ideaId), true);
   assert.equal(await amuxIdeaLaneTook(await seedIdea(owner, new Date(OLD))), false);
-
   await assert.rejects(prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: merged.ideaId,
     claimedAt: now, leaseUntil: now, finishedAt: now, outcome: "no_change", mergedAt } }),
     "only an opened PR can merge");
   await assert.rejects(prisma.amuxIdeaLaneAttempt.update({ where: { id: merged.id }, data: { prClosedAt: now } }),
-    "a PR ends one way");
+    "a merged PR is not closed as well");
+  await removeIdeas();
+});
+
+test("every lane PR gets its turn, however many wait", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const now = new Date();
+  const ideaId = await seedIdea(owner, new Date(OLD));
+  const ids = Array.from({ length: 70 }, () => randomUUID());
+  await prisma.amuxIdeaLaneAttempt.createMany({ data: ids.map((id, index) => ({ id, ideaId, claimedAt: now,
+    leaseUntil: now, finishedAt: now, outcome: "pr_open", prNumber: 9_100_000 + index })) });
+  const unreadable = async () => { throw new EngineeringAgentGitHubReadError("http_error"); };
+  const seen = new Set<string>();
+  for (let round = 0; round < 2; round += 1) {
+    for (const row of await observeAmuxIdeaLaneMerges(unreadable)) seen.add(row.attemptId);
+  }
+  assert.ok(ids.every((id) => seen.has(id)), "PRs that stay unreadable never crowd out the rest");
   await removeIdeas();
 });

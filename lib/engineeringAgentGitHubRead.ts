@@ -572,7 +572,8 @@ async function readRequiredChecks(
 export async function readEngineeringAgentPullMerge(
   prNumber: number,
   deps: Deps = {},
-): Promise<{ state: "open" | "closed"; merged: boolean; mergedAt: Date | null; baseRef: string; headRef: string }> {
+): Promise<{ state: "open" | "closed"; merged: boolean; mergedAt: Date | null; closedAt: Date | null;
+  baseRef: string; headRef: string }> {
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
   const pull = record(await githubJson(`/pulls/${prNumber}`, withDefaults(deps)));
   const state = pull?.state;
@@ -580,11 +581,13 @@ export async function readEngineeringAgentPullMerge(
   const headRef = record(pull?.head)?.ref;
   const merged = pull?.merged === true;
   const mergedAt = merged ? instant(pull?.merged_at) : null;
+  const closedAt = state === "closed" ? instant(pull?.closed_at) : null;
   if (pull?.number !== prNumber || (state !== "open" && state !== "closed") || typeof baseRef !== "string" ||
-      typeof headRef !== "string" || (merged && (mergedAt === null || state !== "closed"))) {
+      typeof headRef !== "string" || (state === "closed" && closedAt === null) ||
+      (merged && (mergedAt === null || state !== "closed"))) {
     throw new EngineeringAgentGitHubReadError("invalid_response");
   }
-  return { state, merged, mergedAt, baseRef, headRef };
+  return { state, merged, mergedAt, closedAt, baseRef, headRef };
 }
 
 /**
