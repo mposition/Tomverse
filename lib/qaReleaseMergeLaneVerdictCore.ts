@@ -9,7 +9,7 @@
  * guessed as clear or excluded.
  */
 import { refusalReason } from "../scripts/merge-train-core.mjs";
-import type { QaReleaseLanePullRequest } from "./qaReleaseMergeLaneCandidateCore.ts";
+import { qaReleaseLaneOrder, type QaReleaseLanePullRequest } from "./qaReleaseMergeLaneCandidateCore.ts";
 import type { QaReleaseExclusion, QaReleaseExclusionReason } from "./qaReleaseMergeLaneExclusionCore.ts";
 
 export type QaReleaseLaneVerdictStatus =
@@ -61,11 +61,13 @@ export function qaReleaseLaneVerdicts(input: {
   exclusions: ReadonlyMap<number, QaReleaseExclusion>;
   excludingFiles: ReadonlyMap<number, { path: string; reasons: QaReleaseExclusionReason[] }[]>;
   pickNumber: number | null;
+  /** The operator's priority from CI admission, so the screen lists them in the order the lane takes them. */
+  priority?: readonly number[];
 }): QaReleaseLaneVerdict[] {
-  return input.pulls
-    .filter((pull) => pull.baseRefName === "develop")
-    .slice()
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.number - b.number)
+  return qaReleaseLaneOrder(
+    input.pulls.filter((pull) => pull.baseRefName === "develop"),
+    input.priority,
+  )
     .slice(0, MAX_LISTED)
     .map((pull): QaReleaseLaneVerdict => {
       const base = {

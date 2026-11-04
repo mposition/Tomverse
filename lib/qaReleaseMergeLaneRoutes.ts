@@ -9,6 +9,7 @@ import {
   readQaReleaseMergeLaneState,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
+import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
 import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
 
@@ -162,5 +163,11 @@ export async function handleQaReleaseMergeReport(request: Request, env: Env = pr
 export async function handleQaReleaseMergeLaneState(request: Request, env: Env = process.env) {
   const auth = authenticate(request, env);
   if (!auth) return answer(401, { error: "unauthorized" });
-  return guarded(async () => answer(200, { ...(await readQaReleaseMergeLaneState()) }));
+  return guarded(async () => {
+    // The operator's priority (Admin › QA and release › CI admission). Unread, the lane takes the oldest first.
+    const priority = await readCiAdmissionAdminView()
+      .then((view) => view.state.queue.map((entry) => entry.number))
+      .catch(() => [] as number[]);
+    return answer(200, { ...(await readQaReleaseMergeLaneState()), priority });
+  });
 }

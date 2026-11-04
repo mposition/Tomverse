@@ -361,3 +361,14 @@ test("a failed newest develop deploy stops new merges until a later deploy succe
   const healed = ports({ deployments: [deployment("SUCCESS", 1, "e".repeat(40)), deployment("FAILED", 3, "d".repeat(40))] });
   assert.notEqual((await runQaReleaseMergeLaneRound(ENV, healed.ports)).outcome, "dev_deploy_failed");
 });
+
+test("the lane merges in the operator's priority, and skips what it leaves to a person", async () => {
+  const older = pull(7, { createdAt: "2026-10-01T00:00:00Z" });
+  const newer = pull(8, { createdAt: "2026-10-03T00:00:00Z" });
+  const { ports: p, calls } = ports({ state: { dbNowMs: NOW, latched: false, openAttempt: null, priority: [8, 7] }, pulls: [older, newer], issue: { issued: false, reason: "lane_off" } });
+  assert.equal((await runQaReleaseMergeLaneRound(ENV, p)).pullRequestNumber, 8);
+  assert.equal(calls.filter((c) => c[0] === "exclusion").length, 1);
+  // Without a priority, the oldest.
+  const plain = ports({ pulls: [newer, older], issue: { issued: false, reason: "lane_off" } });
+  assert.equal((await runQaReleaseMergeLaneRound(ENV, plain.ports)).pullRequestNumber, 7);
+});
