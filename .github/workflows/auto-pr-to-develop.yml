@@ -124,9 +124,9 @@ jobs:
       # not arm auto-merge. It used to, once at creation; but GitHub merges an
       # armed PR the moment its checks pass, whatever Railway is doing, so two
       # green PRs merged minutes apart stacked two "Wait for CI" deployments on
-      # staging. Merging is now the operator-run merge train's job
-      # (scripts/merge-train.mjs), which holds while the environment has a
-      # deployment in flight. tests/autoPrAutoMergeArming.test.mjs pins that no
+      # staging. Merging develop is now the QA-release merge lane's job
+      # (docs/policy/qa-release-agent.md section 8), which holds while a
+      # deployment waits for CI. tests/autoPrAutoMergeArming.test.mjs pins that no
       # step here can merge or arm.
       - name: Create PR to develop if missing
         id: create-pr
@@ -143,7 +143,7 @@ jobs:
             --head "$BRANCH" \
             --base develop \
             --title "$BRANCH -> develop" \
-            --body "Auto-created by the Auto PR to Develop workflow. Auto-merge is not armed: green PRs are merged one Railway deployment at a time by the operator-run merge train (npm run merge-train)."; then
+            --body "Auto-created by the Auto PR to Develop workflow. Auto-merge is not armed: green PRs are merged one at a time by the QA-release merge lane; one it leaves to a person is listed in Admin with the reason."; then
             echo "::error::gh pr create failed for $BRANCH -> develop."
             exit 1
           fi
