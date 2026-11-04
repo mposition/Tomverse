@@ -35,6 +35,13 @@ import {
   resumeMarketingChannelToApproval,
   runMarketingTransaction,
 } from "@/lib/marketingStore";
+import {
+  MARKETING_POST_RECORD_MANUAL_ACTION,
+  MarketingManualPostRefusedError,
+  marketingRecordManualPublishAuditMetadata,
+  recordManualMarketingPostPublication,
+  scheduleMarketingPost,
+} from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import {
   MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
@@ -3506,4 +3513,165 @@ test("production: an event about an account that is not ours is not even audited
   } finally {
     await cleanProductionSettings();
   }
+});
+
+// ---------------------------------------------------------------------------
+// A hand-posted account's posts (operator decision 2026-11-04)
+// ---------------------------------------------------------------------------
+
+const MANUAL_URL = "https://x.com/tomverse/status/1";
+const MANUAL_EVIDENCE = "opened the link while signed out";
+
+/** An approved post on a manual X account: no external account reference. */
+async function manualApprovedPost() {
+  const account = await approvedChannel({
+    channel: "x",
+    provider: "manual",
+    externalAccountRef: null,
+  });
+  const draft = await post(account.id);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+  await step({ status: "pending_approval" });
+  const approved = await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-manual",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+    approvalExpiresAt: new Date(Date.now() + DAY),
+  });
+  return { account, postId: approved.id, historyVersion: approved.historyVersion };
+}
+
+const recordManual = async (postId: string, historyVersion: number) => {
+  const auditLogId = await postAuditEntry(
+    MARKETING_POST_RECORD_MANUAL_ACTION,
+    postId,
+    marketingRecordManualPublishAuditMetadata({
+      expectedEnvelopeDigest: DIGEST,
+      expectedHistoryVersion: historyVersion,
+      externalUrl: MANUAL_URL,
+      evidenceRef: MANUAL_EVIDENCE,
+    }),
+  );
+  return prisma.$transaction((tx) =>
+    recordManualMarketingPostPublication(tx, {
+      id: postId,
+      expectedEnvelopeDigest: DIGEST,
+      expectedHistoryVersion: historyVersion,
+      externalUrl: MANUAL_URL,
+      evidenceRef: MANUAL_EVIDENCE,
+      auditLogId,
+    }),
+  );
+};
+
+test("a hand-posted post is recorded through the ledger's own triggers and spends today's slot", async () => {
+  const { account, postId, historyVersion } = await manualApprovedPost();
+  const before = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+
+  const result = await recordManual(postId, historyVersion);
+  assert.deepEqual(result.warnings, []);
+
+  const after = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(after.status, "verified");
+  assert.equal(after.verificationMethod, "operator_sample");
+  assert.ok(after.verifiedPublicAt);
+  assert.ok(after.publishedAt);
+  assert.equal(after.externalUrl, MANUAL_URL);
+  assert.equal(after.externalPostId, `manual:${postId}`);
+  // What the CHECK and the trigger require of any dispatched row.
+  assert.equal(after.publishAttempt, 1);
+  assert.equal(after.providerRequestKey, before.logicalKey);
+  assert.equal(after.claimToken, null);
+  assert.equal(after.leaseUntil, null);
+  // The approval is untouched.
+  assert.equal(after.approvalAuditLogId, before.approvalAuditLogId);
+  assert.equal(after.approvedDigest, before.approvedDigest);
+  // One attempt entry, appended once, and the version moved by one.
+  assert.equal(after.historyVersion, before.historyVersion + 1);
+  const history = after.history as Array<Record<string, unknown>>;
+  assert.equal(history.length, (before.history as unknown[]).length + 1);
+  assert.deepEqual(
+    { ...history.at(-1), at: undefined },
+    { at: undefined, type: "attempt", attempt: 1, outcome: "published", errorCode: null },
+  );
+  // The slot is the database clock's UTC day, and it counts toward the account.
+  assert.equal(after.slotDate?.toISOString().slice(0, 10), result.slotDate);
+  const counted = await prisma.marketingPost.count({
+    where: { channelId: account.id, slotDate: { not: null } },
+  });
+  assert.equal(counted, 1);
+
+  // A verified post cannot be recorded again, by this or by anything else.
+  await assert.rejects(recordManual(postId, after.historyVersion), (error: unknown) =>
+    error instanceof MarketingManualPostRefusedError &&
+    error.code === "manual_publish_conflict",
+  );
+});
+
+test("a record over the day's cap is made and says so", async () => {
+  const { account, postId, historyVersion } = await manualApprovedPost();
+  const [{ day }] = await prisma.$queryRaw<Array<{ day: string }>>(
+    Prisma.sql`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "day"`,
+  );
+  // X allows two a day: two posts already hold today.
+  for (let index = 0; index < 2; index += 1) {
+    await post(account.id, { slotDate: new Date(`${day}T00:00:00.000Z`) });
+  }
+
+  const result = await recordManual(postId, historyVersion);
+  assert.deepEqual(result.warnings, ["daily_cap_exceeded"]);
+  const after = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(after.status, "verified");
+  assert.equal(after.slotDate?.toISOString().slice(0, 10), day);
+});
+
+test("a hand-posted account's post is not scheduled, and the publisher never claims it", async () => {
+  const { account, postId, historyVersion } = await manualApprovedPost();
+
+  // Not scheduled by a person: refused with a reason, and the row stays approved.
+  await assert.rejects(
+    prisma.$transaction((tx) =>
+      scheduleMarketingPost(tx, {
+        id: postId,
+        expectedEnvelopeDigest: DIGEST,
+        expectedHistoryVersion: historyVersion,
+        scheduledAt: new Date(Date.now() + DAY),
+        auditLogId: "not-read",
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof MarketingManualPostRefusedError &&
+      error.code === "manual_channel_not_schedulable",
+  );
+  assert.equal(
+    (await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } })).status,
+    "approved",
+  );
+
+  // Not claimed even if a post of this account is scheduled and due by another
+  // route: X has caps, so only the account's provider holds the claim back.
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { status: "scheduled", scheduledAt: new Date(Date.now() - 60_000) },
+  });
+  const claim = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: async () => ({ publish: true }),
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(claim, { claimed: false, reason: "channel_posts_by_hand" });
+  const held = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(held.claimToken, null);
+  assert.equal(held.slotDate, null);
+  assert.equal(
+    await prisma.adminAuditLog.count({ where: { action: "marketing_post.claimed", targetId: postId } }),
+    0,
+  );
 });

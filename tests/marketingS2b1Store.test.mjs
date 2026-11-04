@@ -23,8 +23,12 @@ import {
   createMarketingChannel,
   lowerMarketingChannelCaps,
   markMarketingPostReusable,
+  marketingRecordManualPublishAuditMetadata,
+  recordManualMarketingPostPublication,
   MarketingStoreRefusedError,
+  MarketingManualPostRefusedError,
   MarketingPostWithdrawRefusedError,
+  MARKETING_POST_RECORD_MANUAL_ACTION,
   MARKETING_POST_WITHDRAW_APPROVAL_ACTION,
   MARKETING_REFUSAL_STATUS,
   MARKETING_S2B1_ACTIONS,
@@ -3429,6 +3433,314 @@ test("the withdrawal action and refusals stay out of the tables the webhook reac
   assert.equal(MARKETING_POST_WITHDRAW_APPROVAL_ACTION, "marketing_post.withdraw_approval");
   assert.ok(!Object.values(MARKETING_S2B1_ACTIONS).includes(MARKETING_POST_WITHDRAW_APPROVAL_ACTION));
   for (const code of ["withdraw_conflict", "withdraw_publisher_holds_post"]) {
+    assert.ok(!Object.hasOwn(MARKETING_REFUSAL_STATUS, code), code);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// A hand-posted account's posts (operator decision 2026-11-04)
+// ---------------------------------------------------------------------------
+
+const MANUAL_NOW = new Date("2026-11-04T05:00:00.000Z");
+const MANUAL_URL = "https://x.com/tomverse/status/1";
+const MANUAL_EVIDENCE = "opened the link while signed out";
+
+const manualPost = (overrides = {}) => ({
+  ...approvedPost(null),
+  provider: "manual",
+  channel: "x",
+  accountSlug: "x-1",
+  history: [{ at: "2026-11-01T00:00:00.000Z", type: "draft", envelopeDigest: DIGEST }],
+  ...overrides,
+});
+
+const manualRecordMetadata = (row, overrides = {}) =>
+  marketingRecordManualPublishAuditMetadata({
+    expectedEnvelopeDigest: DIGEST,
+    expectedHistoryVersion: row.historyVersion,
+    externalUrl: MANUAL_URL,
+    evidenceRef: MANUAL_EVIDENCE,
+    ...overrides,
+  });
+
+const manualAudit = (row, metadata = manualRecordMetadata(row)) =>
+  signedAudit({ action: MARKETING_POST_RECORD_MANUAL_ACTION, targetId: row.id, metadata });
+
+const manualInput = (row, audit, overrides = {}) => ({
+  id: row.id,
+  expectedEnvelopeDigest: DIGEST,
+  expectedHistoryVersion: row.historyVersion,
+  externalUrl: MANUAL_URL,
+  evidenceRef: MANUAL_EVIDENCE,
+  auditLogId: audit.id,
+  ...overrides,
+});
+
+/**
+ * Answers what a record reads: the row, the clock, the counts, the channel and
+ * the post's key. `failAt` makes that numbered update (1-4) match no row.
+ */
+const manualDatabase = ({ row, audit, writes = [], today = 0, week = 0, failAt = null }) => {
+  let updates = 0;
+  return {
+    $queryRaw: async (query) => {
+      const sql = Array.isArray(query) ? query.join("?") : (query.strings ?? []).join("?");
+      if (sql.includes("FOR UPDATE OF p")) return [row];
+      if (sql.includes("clock_timestamp")) return [{ now: MANUAL_NOW, day: "2026-11-04" }];
+      if (sql.includes("count(*) FILTER")) return [{ today: BigInt(today), week: BigInt(week) }];
+      throw new Error(`unexpected raw statement: ${sql}`);
+    },
+    adminAuditLog: auditReader(audit),
+    marketingChannel: {
+      findUnique: async () => ({ channel: "x", dailyCapOverride: null, weeklyCapOverride: null }),
+    },
+    marketingPost: {
+      findUnique: async () => ({ logicalKey: "logical-1" }),
+      updateMany: async (args) => {
+        updates += 1;
+        writes.push(args);
+        return { count: failAt === updates ? 0 : 1 };
+      },
+    },
+  };
+};
+
+const manualRefused = (code, status = 409) => (error) =>
+  error instanceof MarketingManualPostRefusedError && error.code === code && error.status === status;
+
+test("scheduling a hand-posted account's post is refused with a plain reason, before any write", async () => {
+  const row = { ...approvedPost(null), provider: "manual" };
+  const audit = scheduleAudit(row);
+  const writes = [];
+  await assert.rejects(
+    withAuditKey(() =>
+      scheduleMarketingPost(scheduleDatabase({ row, audit, writes }), scheduleInput(row, audit)),
+    ),
+    (error) =>
+      manualRefused("manual_channel_not_schedulable")(error) &&
+      /post it by hand, then record it as posted/u.test(error.message),
+  );
+  assert.equal(writes.length, 0);
+
+  // The same post on an account the publisher carries still schedules.
+  const carried = { ...approvedPost(null), provider: "zernio" };
+  const carriedAudit = scheduleAudit(carried);
+  await withAuditKey(() =>
+    scheduleMarketingPost(
+      scheduleDatabase({ row: carried, audit: carriedAudit, writes }),
+      scheduleInput(carried, carriedAudit),
+    ),
+  );
+  assert.equal(writes.length, 1);
+});
+
+test("a hand-posted post is recorded as verified by an operator, through the ledger's own transitions", async () => {
+  const row = manualPost();
+  const audit = manualAudit(row);
+  const writes = [];
+  const result = await withAuditKey(() =>
+    recordManualMarketingPostPublication(manualDatabase({ row, audit, writes }), manualInput(row, audit)),
+  );
+  assert.deepEqual(result, { slotDate: "2026-11-04", warnings: [] });
+
+  // One transition per statement: the status whitelist has no shorter path.
+  assert.deepEqual(
+    writes.map((write) => write.data.status),
+    ["scheduled", "publishing", "published", "verified"],
+  );
+  assert.deepEqual(
+    writes.map((write) => write.where.status),
+    ["approved", "scheduled", "publishing", "published"],
+  );
+  const [scheduled, dispatched, published, verified] = writes.map((write) => write.data);
+  // The slot is today's UTC day, so the post counts toward the day and the week.
+  assert.deepEqual(scheduled.slotDate, new Date("2026-11-04T00:00:00.000Z"));
+  assert.deepEqual(scheduled.scheduledAt, MANUAL_NOW);
+  // What the trigger and the CHECK require of a dispatched row.
+  assert.equal(dispatched.providerRequestKey, "logical-1");
+  assert.equal(dispatched.publishAttempt, 1);
+  assert.equal(published.externalUrl, MANUAL_URL);
+  assert.equal(published.externalPostId, "manual:post-1");
+  assert.deepEqual(published.publishedAt, MANUAL_NOW);
+  assert.equal(published.historyVersion, row.historyVersion + 1);
+  assert.deepEqual(published.history.at(-1), {
+    at: MANUAL_NOW.toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "published",
+    errorCode: null,
+  });
+  assert.equal(published.history.length, row.history.length + 1);
+  // `operator_sample` is the CHECK's value for a person who looked.
+  assert.equal(verified.verificationMethod, "operator_sample");
+  assert.deepEqual(verified.verifiedPublicAt, MANUAL_NOW);
+  assert.equal(writes[3].where.historyVersion, row.historyVersion + 1);
+  // Each statement is conditional on the digest or version it was decided against.
+  assert.equal(writes[0].where.envelopeDigest, DIGEST);
+  assert.equal(writes[0].where.historyVersion, row.historyVersion);
+});
+
+test("a record over the cap is made, and the overage comes back as a warning", async () => {
+  // X is 2 a day and 10 a week; two and ten are already counted.
+  const row = manualPost();
+  const audit = manualAudit(row);
+  const writes = [];
+  const result = await withAuditKey(() =>
+    recordManualMarketingPostPublication(
+      manualDatabase({ row, audit, writes, today: 2, week: 10 }),
+      manualInput(row, audit),
+    ),
+  );
+  assert.deepEqual(result.warnings, ["daily_cap_exceeded", "weekly_cap_exceeded"]);
+  assert.equal(writes.length, 4);
+
+  // One below the cap is not a warning.
+  const within = await withAuditKey(() =>
+    recordManualMarketingPostPublication(
+      manualDatabase({ row, audit, today: 1, week: 9 }),
+      manualInput(row, audit),
+    ),
+  );
+  assert.deepEqual(within.warnings, []);
+});
+
+test("only an unchanged approved post of a hand-posted account can be recorded", async () => {
+  const cases = [
+    [manualPost({ provider: "zernio" }), "manual_publish_not_a_manual_channel"],
+    [manualPost({ status: "scheduled" }), "manual_publish_conflict"],
+    [manualPost({ status: "pending_approval" }), "manual_publish_conflict"],
+    [manualPost({ status: "verified" }), "manual_publish_conflict"],
+    [manualPost({ envelopeDigest: "c".repeat(64) }), "manual_publish_conflict"],
+    [manualPost({ approvedDigest: "c".repeat(64) }), "manual_publish_conflict"],
+    [manualPost({ publishAttempt: 1 }), "manual_publish_conflict"],
+    [manualPost({ externalPostId: "ext-1" }), "manual_publish_conflict"],
+    [manualPost({ deletedAt: MANUAL_NOW }), "manual_publish_conflict"],
+    [manualPost({ contentPurgedAt: MANUAL_NOW }), "manual_publish_conflict"],
+  ];
+  for (const [row, code] of cases) {
+    const audit = manualAudit(row);
+    const writes = [];
+    await assert.rejects(
+      withAuditKey(() =>
+        recordManualMarketingPostPublication(manualDatabase({ row, audit, writes }), manualInput(row, audit)),
+      ),
+      manualRefused(code),
+      `${row.status} ${code}`,
+    );
+    assert.equal(writes.length, 0);
+  }
+
+  // A page that read an older version of the post.
+  const row = manualPost();
+  const audit = manualAudit(row);
+  const writes = [];
+  await assert.rejects(
+    withAuditKey(() =>
+      recordManualMarketingPostPublication(
+        manualDatabase({ row, audit, writes }),
+        manualInput(row, audit, { expectedHistoryVersion: row.historyVersion - 1 }),
+      ),
+    ),
+    manualRefused("manual_publish_conflict"),
+  );
+  assert.equal(writes.length, 0);
+});
+
+test("a record needs an https link and what the person looked at, and writes nothing without them", async () => {
+  const row = manualPost();
+  const audit = manualAudit(row);
+  const bad = [
+    "http://x.com/tomverse/status/1",
+    "HTTPS://x.com/tomverse/status/1",
+    // Assembled here so no credential-shaped literal sits in the source.
+    ["https://user", "pw@x.com/tomverse/status/1"].join(":"),
+    "x.com/tomverse/status/1",
+    `https://x.com/${"a".repeat(2_100)}`,
+  ];
+  for (const externalUrl of bad) {
+    const writes = [];
+    await assert.rejects(
+      withAuditKey(() =>
+        recordManualMarketingPostPublication(
+          manualDatabase({ row, audit, writes }),
+          manualInput(row, audit, { externalUrl }),
+        ),
+      ),
+      manualRefused("manual_publish_url_invalid", 400),
+      externalUrl.slice(0, 40),
+    );
+    assert.equal(writes.length, 0);
+  }
+  for (const evidenceRef of ["", "   ", "e".repeat(501)]) {
+    const writes = [];
+    await assert.rejects(
+      withAuditKey(() =>
+        recordManualMarketingPostPublication(
+          manualDatabase({ row, audit, writes }),
+          manualInput(row, audit, { evidenceRef }),
+        ),
+      ),
+      manualRefused("manual_publish_evidence_missing", 400),
+    );
+    assert.equal(writes.length, 0);
+  }
+});
+
+test("a record needs an audit entry naming this digest, version, link and evidence", async () => {
+  const row = manualPost();
+  for (const metadata of [
+    manualRecordMetadata(row, { expectedHistoryVersion: row.historyVersion + 1 }),
+    manualRecordMetadata(row, { externalUrl: "https://x.com/tomverse/status/2" }),
+    manualRecordMetadata(row, { evidenceRef: "something else" }),
+  ]) {
+    const audit = manualAudit(row, metadata);
+    const writes = [];
+    await assert.rejects(
+      withAuditKey(() =>
+        recordManualMarketingPostPublication(manualDatabase({ row, audit, writes }), manualInput(row, audit)),
+      ),
+      (error) => error instanceof MarketingStoreRefusedError && error.code.startsWith("audit_evidence_"),
+    );
+    assert.equal(writes.length, 0);
+  }
+  // An entry for a different action is not evidence of this one.
+  const other = signedAudit({
+    action: MARKETING_S2B1_ACTIONS.postSchedule,
+    targetId: row.id,
+    metadata: manualRecordMetadata(row),
+  });
+  await assert.rejects(
+    withAuditKey(() =>
+      recordManualMarketingPostPublication(manualDatabase({ row, audit: other }), manualInput(row, other)),
+    ),
+    (error) => error instanceof MarketingStoreRefusedError && error.code.startsWith("audit_evidence_"),
+  );
+});
+
+test("losing a race at any step is a conflict, which rolls the whole record back", async () => {
+  const row = manualPost();
+  const audit = manualAudit(row);
+  for (const failAt of [1, 2, 3, 4]) {
+    await assert.rejects(
+      withAuditKey(() =>
+        recordManualMarketingPostPublication(manualDatabase({ row, audit, failAt }), manualInput(row, audit)),
+      ),
+      manualRefused("manual_publish_conflict"),
+      `update ${failAt}`,
+    );
+  }
+});
+
+test("the record's action and refusals stay out of the tables the webhook reaches", () => {
+  assert.equal(MARKETING_POST_RECORD_MANUAL_ACTION, "marketing_post.record_manual_publish");
+  assert.ok(!Object.values(MARKETING_S2B1_ACTIONS).includes(MARKETING_POST_RECORD_MANUAL_ACTION));
+  for (const code of [
+    "manual_channel_not_schedulable",
+    "manual_publish_conflict",
+    "manual_publish_evidence_missing",
+    "manual_publish_not_a_manual_channel",
+    "manual_publish_url_invalid",
+  ]) {
     assert.ok(!Object.hasOwn(MARKETING_REFUSAL_STATUS, code), code);
   }
 });
