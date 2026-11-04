@@ -3,7 +3,9 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import { amuxIdeaLaneState, type AmuxIdeaLaneAttemptFact, type AmuxIdeaLaneState } from "@/lib/amux/ideaLaneCore";
+import {
+  amuxIdeaLaneEnabled, amuxIdeaLaneView, type AmuxIdeaLaneAttemptFact, type AmuxIdeaLaneState,
+} from "@/lib/amux/ideaLaneCore";
 import { amuxIdeaOwnerClosableState } from "@/lib/amux/ideaOwnerCloseCore";
 import { amuxIdeaProgress, type AmuxIdeaProgress, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 
@@ -22,7 +24,7 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   displayKey: string | null;
   /** The body's first line (lib/amux/ideaTitleCore.ts); null once the body is purged. */
   title?: string | null;
-  /** The idea lane's state, when the lane took the idea (absent: never taken). */
+  /** The idea lane's state, when the lane took the idea or will take it next (absent: neither). */
   lane?: AmuxIdeaLaneState | null;
   /** Task PRs waiting for GitHub review or merge. */
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
@@ -56,7 +58,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  * eight such gaps, and over the production round trip the Ideas list failed
  * to read; a single statement has the same two gaps as every other boundary.
  *
- * It reads no idea text, title or body (all encrypted or purged); a failed read
+ * It reads no idea body or digest, only the plaintext title kept with the body
+ * (lib/amux/ideaTitleCore.ts); a failed read
  * throws, and the page shows it as unavailable, never as an empty list. One
  * more attempt is made after a failure, which is safe because nothing was
  * written. Outside a route budget (the page has none) the boundary does not
@@ -100,6 +103,7 @@ type SqlIdea = {
   referencePinAuditStatus: "declared" | "legacy" | null;
   checkoutEvidence: SqlCheckoutEvidence[] | null;
   laneAttempts: AmuxIdeaLaneAttemptFact[] | null;
+  analysisDeadlineMs: number; sourcePlan: boolean; rawReadable: boolean;
 };
 
 const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -118,7 +122,12 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
       SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
-        "submissionAuditLogId", "title"
+        "submissionAuditLogId", "analysisDeadlineAt", ("currentSourcePlanRevisionId" IS NOT NULL) AS "sourcePlan",
+        -- The lane's claim (ideaLaneService.ts) needs the raw text kept. Its key
+        -- is set exactly when the encrypted text is (raw_key_pair_check), so this read
+        -- never names a text or digest column; intake writes the digest with them.
+        -- The plaintext title is the one exception, cleared with the body.
+        ("rawPurgedAt" IS NULL AND "rawKeyId" IS NOT NULL) AS "rawReadable", "title"
       FROM "AmuxIdeaSubmission"
       -- A closed or cancelled idea leaves the list, so the bound is spent on
       -- ideas still in progress.
@@ -134,6 +143,9 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       n."title" AS "title",
       (extract(epoch FROM n."submittedAt") * 1000)::double precision AS "submittedAtMs",
       (n."cancelledAt" IS NOT NULL) AS "cancelled",
+      (extract(epoch FROM n."analysisDeadlineAt") * 1000)::double precision AS "analysisDeadlineMs",
+      n."sourcePlan" AS "sourcePlan",
+      n."rawReadable" AS "rawReadable",
       (SELECT count(*)::int FROM "AmuxIdeaDraftUnit" u
         WHERE u."ideaId" = n."id" AND u."state" = 'proposed'
           AND u."unitKind" IN ('node', 'card')
@@ -198,7 +210,11 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   return ideas.map((idea) => {
     const own = idea.cards ?? [];
     const pins = idea.referencePins;
-    const lane = amuxIdeaLaneState(idea.laneAttempts ?? [], now.getTime());
+    const lane = amuxIdeaLaneView(idea.laneAttempts ?? [], now.getTime(), {
+      submissionOrigin: idea.submissionOrigin, state: idea.state, cancelled: idea.cancelled,
+      rawReadable: idea.rawReadable, analysisDeadlineMs: idea.analysisDeadlineMs, sourcePlan: idea.sourcePlan,
+      chunks: idea.chunks?.length ?? 0,
+    }, amuxIdeaLaneEnabled());
     const progress = amuxIdeaProgress({
       state: idea.state,
       submissionOrigin: idea.submissionOrigin,

@@ -2253,6 +2253,7 @@ export const pt = {
         changes: "Podemos atualizar esta política quando o serviço ou requisitos legais mudarem e exibiremos a data revisada.",
         providerTableTitle: "Para onde cada fornecedor recebe o conteúdo do chat",
         providerTableIntro: "Esta tabela nomeia a empresa que recebe o conteúdo do chat, onde ele é armazenado e processado, se é usado para treinar modelos, por quanto tempo é guardado, e se a venda ou a publicidade é proibida. Quando um contrato não nomeia um lugar nem um prazo, a tabela diz isso.",
+        providerTableScrollHint: "Esta tabela é mais larga do que uma tela estreita: role na horizontal para ler as colunas restantes.",
         colProvider: "Fornecedor",
         colRecipient: "Destinatário",
         colStorage: "Armazenamento",
