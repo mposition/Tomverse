@@ -20,14 +20,14 @@ ALTER TABLE "AmuxIdeaSubmission" ADD CONSTRAINT "AmuxIdeaSubmission_title_check"
 -- Backfill only ideas sent from a product-research suggestion: that row keeps
 -- the plaintext title the idea's first line was made from (suggestionIdeaText,
 -- lib/productResearchScoutCore.ts). Same rule as amuxIdeaTitleFromText: first
--- line, control characters and runs of white space to one space, trimmed, cut
--- to 79 characters and an ellipsis past 80. Every other idea stays NULL, and a
--- purged body gets no title.
+-- non-blank line, control characters and runs of white space to one space,
+-- trimmed, cut to 79 characters and an ellipsis past 80. Every other idea stays
+-- NULL, and a purged body gets no title.
 WITH source AS (
     SELECT DISTINCT ON (s."amuxIdeaId")
         s."amuxIdeaId" AS "ideaId",
         btrim(regexp_replace(
-            split_part(replace(s."title", E'\r', E'\n'), E'\n', 1),
+            split_part(btrim(replace(s."title", E'\r', E'\n'), E' \t\n'), E'\n', 1),
             '[[:cntrl:][:space:]]+', ' ', 'g')) AS "title"
     FROM "ProductResearchSuggestion" s
     WHERE s."amuxIdeaId" IS NOT NULL

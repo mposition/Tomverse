@@ -339,8 +339,9 @@ test("the title backfill copies a sent Scout suggestion's title onto a live idea
   const suggestion = (amuxIdeaId: string, title: string) => prisma.productResearchSuggestion.create({
     data: { kind: "page", subject: "home.en", title, area: "copy", severity: "low",
       evidence: "SYNTHETIC", suggestion: "SYNTHETIC", status: "sent", amuxIdeaId } });
-  await suggestion(live, `  ${long}
-second line`);
+  // A blank line before the text is skipped, as amuxIdeaTitleFromText skips it.
+  const sentTitle = `\n \t\n  ${long}\nsecond line`;
+  await suggestion(live, sentTitle);
   await suggestion(purgedId, "SYNTHETIC purged");
   // The UPDATE of the migration, run again over these rows: it only fills NULL titles.
   const sql = readFileSync("prisma/migrations/20261104130000_amux_idea_title/migration.sql", "utf8");
@@ -348,7 +349,7 @@ second line`);
   await prisma.$executeRawUnsafe(backfill);
   const read = (id: string) => prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id } })
     .then((row) => row.title);
-  assert.equal(await read(live), amuxIdeaTitleFromText(long));
+  assert.equal(await read(live), amuxIdeaTitleFromText(sentTitle));
   assert.equal(await read(live), `${"가".repeat(79)}…`);
   assert.equal(await read(purgedId), null);
   assert.equal(await read(untouched), null);
