@@ -32,9 +32,12 @@ import { prisma } from "@/lib/prisma";
 // The generator's secret, by the generator's rule: the service is the
 // generator's sibling and the bearer of the same key.
 //
-// Off is off: with MARKETING_COMMENTS_MONITOR_ENABLED not true, or the marketing
-// kill switch set, the answer is `off` before the database or the posting tool
-// is touched.
+// Off is off: with MARKETING_COMMENTS_MONITOR_ENABLED not true, the marketing
+// kill switch set, or the privacy notice's comments section not yet published
+// (COMMENTS_PRIVACY_NOTICE_CONFIRMED, operator decision 2026-11-04), the answer
+// is `off` before the database or the posting tool is touched. The answer is
+// the bare `off` the comments service parses strictly; the reason is the
+// service's own log line (lib/marketingCommentsClassifierCore.ts).
 
 /** One Zernio page request; a slower one is unavailable and its post unread. */
 const ZERNIO_CALL_BUDGET_MS = 10_000;

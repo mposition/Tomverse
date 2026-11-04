@@ -247,7 +247,7 @@ export const adminMarketingMessages = defineAdminMessages({
     expCreateNote:
       "Shows a different home headline to part of the visitors who allowed analytics. The words are a bundle in the repository; here you pre-register how the result will be judged. Nothing starts without all of it.",
     expSwitchOff:
-      "The experiments switch is off, so a start is refused. An operator turns it on in the database once the pre-registration and the copy are settled and the shared cache bypasses the assignment cookie (policy 9.1).",
+      "The experiments switch is off, so a start is refused. Turn it on in the Automation switches once the pre-registration and the copy are settled and the shared cache bypasses the assignment cookie (policy 9.1).",
     expRunningNote:
       "An experiment is already stored as running. Stop it to record its result before starting another.",
     expUnreadable:
@@ -333,6 +333,8 @@ export const adminMarketingMessages = defineAdminMessages({
     switchDraftsHint: "Takes the generator's drafts into the approval queue.",
     switchPublishHint: "Sends approved posts to the platforms.",
     switchAutoPublishHint: "Publishes without a person approving each post.",
+    switchExperimentsHint:
+      "Lets a landing experiment run. Off shows every visitor the default copy; the counts are kept.",
     llmModelsTitle: "Models ({count})",
     status_drafted: "Drafted",
     status_guard_rejected: "Refused by Guard",
@@ -694,7 +696,7 @@ export const adminMarketingMessages = defineAdminMessages({
     expCreateNote:
       "분석을 허용한 방문자 일부에게 다른 홈 헤드라인을 보여 줍니다. 문구는 저장소의 번들이고, 여기서는 결과를 어떻게 판단할지 미리 등록합니다. 전부 채우지 않으면 시작되지 않습니다.",
     expSwitchOff:
-      "실험 스위치가 꺼져 있어 시작은 거절됩니다. 사전 등록과 문구가 정해지고, 공유 캐시가 배정 쿠키를 우회하도록 설정된 뒤 운영자가 DB에서 켭니다(정책 9.1).",
+      "실험 스위치가 꺼져 있어 시작은 거절됩니다. 사전 등록과 문구가 정해지고, 공유 캐시가 배정 쿠키를 우회하도록 설정된 뒤 자동화 스위치에서 켭니다(정책 9.1).",
     expRunningNote:
       "이미 실행 중으로 저장된 실험이 있습니다. 다른 실험을 시작하기 전에 중단해서 결과를 기록하세요.",
     expUnreadable:
@@ -780,6 +782,8 @@ export const adminMarketingMessages = defineAdminMessages({
     switchDraftsHint: "생성기 초안을 받아 승인 대기열에 넣습니다.",
     switchPublishHint: "승인된 게시물을 플랫폼에 보냅니다.",
     switchAutoPublishHint: "게시물마다 사람이 승인하지 않아도 게시합니다.",
+    switchExperimentsHint:
+      "랜딩 실험을 돌릴 수 있게 합니다. 끄면 모든 방문자에게 기본 문구를 보여 주고, 집계는 남습니다.",
     llmModelsTitle: "모델 ({count})",
     status_drafted: "초안",
     status_guard_rejected: "Guard 거절",
