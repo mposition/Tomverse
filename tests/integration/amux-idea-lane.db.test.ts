@@ -251,6 +251,8 @@ test("the PR observer records how a lane PR stands, only for the run's own branc
     "only an opened PR can merge");
   await assert.rejects(prisma.amuxIdeaLaneAttempt.update({ where: { id: merged.id }, data: { prClosedAt: now } }),
     "a merged PR is not closed as well");
+  await assert.rejects(prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: merged.ideaId,
+    claimedAt: now, leaseUntil: now, prObservedAt: now } }), "a run still going has no PR to read");
   await removeIdeas();
 });
 

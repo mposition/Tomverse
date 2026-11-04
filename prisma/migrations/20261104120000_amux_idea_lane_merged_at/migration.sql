@@ -12,4 +12,5 @@ ALTER TABLE "AmuxIdeaLaneAttempt" ADD COLUMN "mergedAt" TIMESTAMP(3),
 
 ALTER TABLE "AmuxIdeaLaneAttempt" ADD CONSTRAINT "AmuxIdeaLaneAttempt_pr_end_check"
     CHECK (("mergedAt" IS NULL AND "prClosedAt" IS NULL AND "prObservedAt" IS NULL)
-      OR ("outcome" = 'pr_open' AND ("mergedAt" IS NULL OR "prClosedAt" IS NULL)));
+      -- IS NOT DISTINCT FROM: a run still going (outcome NULL) must not pass as unknown.
+      OR ("outcome" IS NOT DISTINCT FROM 'pr_open' AND ("mergedAt" IS NULL OR "prClosedAt" IS NULL)));
