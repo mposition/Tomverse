@@ -97,6 +97,7 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   const calls = [];
   const rows = [{
     id: "idea-1", requestId: "11111111-1111-4111-8111-111111111111", state: "awaiting_owner",
+    title: "Synthetic first line",
     submittedAtMs: Date.parse("2026-10-15T00:00:00.123Z"), cancelled: false, proposedUnits: 0,
     chunks: [{ chunkIndex: 0, state: "decided", coverageStatus: "complete", previewState: "completed", holdStatus: "succeeded" }],
     cards: [
@@ -127,7 +128,11 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   const [row, empty, damaged] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
   assert.equal(calls.length, 1, "one statement, however many ideas");
   const { sql, values } = calls[0];
-  assert.equal(/Ciphertext|"title"|"body"|bodyDigest|rawDigest/i.test(sql), false, "no idea text or digest is read");
+  assert.equal(/Ciphertext|"body"|bodyDigest|rawDigest/i.test(sql), false, "no idea body or digest is read");
+  // The one plaintext it reads is the submission's own title (owner decision 2026-11-04).
+  assert.deepEqual(sql.match(/\w+\."title"/g), ['n."title"']);
+  assert.ok(sql.includes(`"submissionAuditLogId", "title"`) && sql.includes(`n."title" AS "title"`));
+  assert.equal(row.title, "Synthetic first line");
   assert.ok(values.includes("owner-1") && values.includes(AMUX_IDEA_PROGRESS_LIMIT), "owner scoped and bounded");
   assert.ok(sql.includes(`AND "cancelledAt" IS NULL`), "a closed or cancelled idea leaves the list");
   assert.ok(values.includes(now.toISOString()), "the proposal expiry is compared with the database clock");

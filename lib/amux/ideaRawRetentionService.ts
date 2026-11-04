@@ -105,7 +105,8 @@ export async function commitAmuxDueRawIdeaPurge(tx: Prisma.TransactionClient,
   const changed = await tx.amuxIdeaSubmission.updateMany({
     where: { id: ideaId, rawCiphertext: { not: null }, rawPurgedAt: null,
       rawPurgeAfter: { lte: now }, state: { in: TERMINAL_STATES } },
-    data: { rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+    // The plaintext title is the body's first line; it goes with the body.
+    data: { rawCiphertext: null, rawKeyId: null, rawKeyVersion: null, title: null,
       sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
       sourceProvenanceKeyVersion: null,
       rawPurgedAt: now },

@@ -18,8 +18,10 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   closable: boolean;
   requestId: string;
   submittedAt: string;
-  /** The first registered card's display key, the only plaintext label an idea has. */
+  /** The first registered card's display key, the idea's label when it has one. */
   displayKey: string | null;
+  /** The body's first line (lib/amux/ideaTitleCore.ts); null once the body is purged. */
+  title?: string | null;
   /** The idea lane's state, when the lane took the idea (absent: never taken). */
   lane?: AmuxIdeaLaneState | null;
   /** Task PRs waiting for GitHub review or merge. */
@@ -92,7 +94,7 @@ type SqlCheckoutEvidence = {
 };
 type SqlIdea = {
   id: string; requestId: string; state: string; submissionOrigin: "owner" | "session";
-  submittedAtMs: number; cancelled: boolean;
+  title: string | null; submittedAtMs: number; cancelled: boolean;
   proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
   referencePins: unknown;
   referencePinAuditStatus: "declared" | "legacy" | null;
@@ -116,7 +118,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
       SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
-        "submissionAuditLogId"
+        "submissionAuditLogId", "title"
       FROM "AmuxIdeaSubmission"
       -- A closed or cancelled idea leaves the list, so the bound is spent on
       -- ideas still in progress.
@@ -129,6 +131,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       n."requestId"::text AS "requestId",
       n."state" AS "state",
       n."submissionOrigin" AS "submissionOrigin",
+      n."title" AS "title",
       (extract(epoch FROM n."submittedAt") * 1000)::double precision AS "submittedAtMs",
       (n."cancelledAt" IS NOT NULL) AS "cancelled",
       (SELECT count(*)::int FROM "AmuxIdeaDraftUnit" u
@@ -220,6 +223,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
+      title: idea.title,
       reviewPullRequests: own.filter((card) => card.cardType !== "story" && !card.terminal &&
         card.status === "review" && card.reviewPrNumber !== null)
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey }))

@@ -2120,7 +2120,10 @@ domains:
       system actor. Encrypted raw idea text and encrypted source provenance may
       contain third-party data even though there is no typed customer subject
       link, and the same raw-content purge clears both ciphertexts before their
-      shared external key is retired. The approved clocks are separate from the
+      shared external key is retired. The plaintext title (the body's first
+      line, at most 80 characters, owner decision 2026-11-04) is part of the
+      body: that purge clears it too, and a CHECK refuses a title on a purged
+      row. The approved clocks are separate from the
       unresolved account-deletion and export decisions. Child chunks have their
       own registered actor link and privacy decision; no session intake route is
       enabled.

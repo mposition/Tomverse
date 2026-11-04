@@ -299,6 +299,9 @@ test("session submission encrypts idea and provenance under the scope owner with
   assert.equal(row.actorUserId, ownerId);
   assert.equal(row.sessionOperatingScopeSettingId, authority.settingId);
   assert.equal(row.submissionAuditLogId, audit.id);
+  // The session path stores the same plaintext list title as the owner path.
+  assert.ok(row.title?.startsWith("Synthetic session idea " + committedIdeaId));
+  assert.ok(Array.from(row.title ?? "").length <= 80);
   assert.equal(row.sourceProvenanceKeyId, row.rawKeyId);
   assert.equal(row.sourceProvenanceKeyVersion, row.rawKeyVersion);
   assert.notEqual(row.sourceProvenanceDigest, row.rawDigest);
@@ -2219,7 +2222,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
         // clock moves with the synthetic submission clock.
         ...(targetId === ideaId ? { analysisCompletedAt:
           new Date(oldDeadline.getTime() - 60_000) } : {}),
-        rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+        rawCiphertext: null, rawKeyId: null, rawKeyVersion: null, title: null,
         sourceProvenanceCiphertext: null,
         sourceProvenanceKeyId: null, sourceProvenanceKeyVersion: null,
         rawPurgedAt: new Date(),

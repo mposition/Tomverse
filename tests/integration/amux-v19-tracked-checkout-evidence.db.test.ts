@@ -510,7 +510,7 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
     await tx.amuxIdeaSubmission.update({ where: { id: ideaId }, data: {
       submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt,
-      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null, title: null,
       sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
       sourceProvenanceKeyVersion: null, rawPurgedAt: new Date(),
     } });
@@ -644,7 +644,7 @@ test("a full pending-key batch leaves due manifest bodies for the next tick", as
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
     await tx.amuxIdeaSubmission.update({ where: { id: batchIdeaId }, data: {
       submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt,
-      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null, title: null,
       sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
       sourceProvenanceKeyVersion: null, rawPurgedAt: new Date(),
     } });

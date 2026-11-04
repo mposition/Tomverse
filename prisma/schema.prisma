@@ -10313,6 +10313,9 @@ model AmuxIdeaSubmission {
   rawKeyVersion       Int?
   rawDigest           String?
   rawDigestKeyId      String?
+  /// Plaintext list label: the body's first line, at most 80 characters
+  /// (lib/amux/ideaTitleCore.ts). Cleared with the body by the raw purge.
+  title               String?
   submittedAt         DateTime
   analysisDeadlineAt  DateTime
   analysisCompletedAt DateTime?

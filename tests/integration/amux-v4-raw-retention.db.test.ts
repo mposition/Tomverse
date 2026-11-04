@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
+import { amuxIdeaTitleFromText } from "@/lib/amux/ideaTitleCore";
 import { commitAmuxDueRawIdeaPurge, readAmuxRawIdeaPurgeOutcome,
   retirePurgedAmuxRawIdeaKey } from "@/lib/amux/ideaRawRetentionService";
 import { commitAmuxDueTransferPayloadPurge, commitAmuxDueFreeformPurge,
@@ -45,7 +47,7 @@ const ownerRequest = new Request("https://tomverse.test/api/admin/amux/ideas/ret
 after(async () => { await prisma.$disconnect(); });
 
 async function idea(input?: { due?: boolean; keyId?: string;
-  submittedAgeDays?: number; completedAgeDays?: number }) {
+  submittedAgeDays?: number; completedAgeDays?: number; title?: string }) {
   const id = randomUUID();
   const submittedAt = new Date(Date.now() - (input?.submittedAgeDays ?? 2) *
     24 * 60 * 60_000);
@@ -59,7 +61,7 @@ async function idea(input?: { due?: boolean; keyId?: string;
     rawKeyId: input?.keyId ?? amuxContentUnitKeyId({ ideaId: id,
       purpose: "idea_raw", subjectId: id }), rawKeyVersion: 1,
     rawDigest: "a".repeat(64), rawDigestKeyId: "synthetic-digest",
-    submittedAt, analysisDeadlineAt: new Date(submittedAt.getTime() +
+    title: input?.title ?? null, submittedAt, analysisDeadlineAt: new Date(submittedAt.getTime() +
       7 * 24 * 60 * 60_000), analysisCompletedAt: due ? completedAt : null,
     rawPurgeAfter: due ? completedAt : new Date(submittedAt.getTime() +
       7 * 24 * 60 * 60_000),
@@ -68,12 +70,15 @@ async function idea(input?: { due?: boolean; keyId?: string;
 }
 
 test("due idea body purge and external key retirement are distinct audited steps", async () => {
-  const id = await idea();
+  const id = await idea({ title: "SYNTHETIC first line" });
   assert.equal(await prisma.$transaction((tx) => commitAmuxDueRawIdeaPurge(tx, id)), "purged");
   assert.equal(await readAmuxRawIdeaPurgeOutcome(id), "purged");
   const purged = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id } });
   assert.equal(purged.rawCiphertext, null);
   assert.equal(purged.rawKeyId, null);
+  assert.equal(purged.title, null, "the plaintext title goes with the body");
+  await assert.rejects(prisma.amuxIdeaSubmission.update({ where: { id },
+    data: { title: "SYNTHETIC restored title" } }), /AmuxIdeaSubmission_title_check/);
   await assert.rejects(prisma.amuxIdeaSubmission.update({ where: { id },
     data: { rawPurgedAt: null, rawCiphertext: Buffer.from("restored"),
       rawKeyId: amuxContentUnitKeyId({ ideaId: id, purpose: "idea_raw",
@@ -323,4 +328,28 @@ test("owner hold pauses the original purge clock and release makes it due again"
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueRawIdeaPurge(tx, id)), "purged");
   assert.equal(await readAmuxRawIdeaPurgeOutcome(id), "purged");
+});
+
+test("the title backfill copies a sent Scout suggestion's title onto a live idea only", async () => {
+  const live = await idea({ due: false });
+  const purgedId = await idea();
+  assert.equal(await prisma.$transaction((tx) => commitAmuxDueRawIdeaPurge(tx, purgedId)), "purged");
+  const untouched = await idea({ due: false });
+  const long = "가".repeat(85);
+  const suggestion = (amuxIdeaId: string, title: string) => prisma.productResearchSuggestion.create({
+    data: { kind: "page", subject: "home.en", title, area: "copy", severity: "low",
+      evidence: "SYNTHETIC", suggestion: "SYNTHETIC", status: "sent", amuxIdeaId } });
+  await suggestion(live, `  ${long}
+second line`);
+  await suggestion(purgedId, "SYNTHETIC purged");
+  // The UPDATE of the migration, run again over these rows: it only fills NULL titles.
+  const sql = readFileSync("prisma/migrations/20261104130000_amux_idea_title/migration.sql", "utf8");
+  const backfill = sql.slice(sql.indexOf("WITH source AS"));
+  await prisma.$executeRawUnsafe(backfill);
+  const read = (id: string) => prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id } })
+    .then((row) => row.title);
+  assert.equal(await read(live), amuxIdeaTitleFromText(long));
+  assert.equal(await read(live), `${"가".repeat(79)}…`);
+  assert.equal(await read(purgedId), null);
+  assert.equal(await read(untouched), null);
 });
