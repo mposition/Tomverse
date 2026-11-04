@@ -215,6 +215,9 @@ export function marketingGeneratorWorkerConfig(
     : MARKETING_GENERATOR_WORKER_VARIABLES;
   const missing = needed.filter((name) => !env[name]);
   if (missing.length > 0) return { ok: false, reason: `missing: ${missing.join(", ")}` };
+  if (subscription && !(env.MARKETING_CODEX_BIN as string).startsWith("/")) {
+    return { ok: false, reason: "MARKETING_CODEX_BIN is not an absolute path" };
+  }
   const secret = env.MARKETING_GENERATOR_SUBMIT_SECRET as string;
   if (secret.length < 32) return { ok: false, reason: "MARKETING_GENERATOR_SUBMIT_SECRET is shorter than 32 characters" };
   let appUrl: URL;

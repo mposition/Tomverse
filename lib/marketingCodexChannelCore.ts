@@ -20,6 +20,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { MARKETING_LLM_MAX_WEB_SEARCH_CALLS } from "./marketingLlmBudgetCore.ts";
 import type {
   MarketingLlmAnswerSchema,
   MarketingLlmChannelAnswer,
@@ -43,6 +44,21 @@ const CODEX_CHILD_VARIABLES = ["HOME", "CODEX_HOME", "PATH", "LANG"] as const;
  * reaches it is an unknown outcome, like any other answer that did not come back.
  */
 export const MARKETING_CODEX_CALL_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Whether one line of the CLI's stream starts a search. The prompt asks for the
+ * pin's count, which the model may pass by a little; this is what actually stops
+ * a run of searches, at the most the ledger allows one call
+ * (`MARKETING_LLM_MAX_WEB_SEARCH_CALLS`).
+ */
+export function marketingCodexLineStartsSearch(line: string): boolean {
+  try {
+    const event = JSON.parse(line) as { type?: unknown; item?: { type?: unknown } };
+    return event.type === "item.started" && event.item?.type === "web_search";
+  } catch {
+    return false;
+  }
+}
 
 /** How much of a failure the journal keeps. */
 const MAX_FAILURE_CHARS = 300;
@@ -260,6 +276,11 @@ export const runMarketingCodexProcess: MarketingCodexRunner = (input) =>
     const chunks: Buffer[] = [];
     let bytes = 0;
     let lost = false;
+    let stopped: "aborted" | "timeout" | "too_many_searches" | "too_much_output" | null = null;
+    const stop = (reason: NonNullable<typeof stopped>) => () => {
+      stopped ??= reason;
+      kill();
+    };
     const kill = () => {
       lost = true;
       try {
@@ -268,23 +289,38 @@ export const runMarketingCodexProcess: MarketingCodexRunner = (input) =>
         child.kill("SIGKILL");
       }
     };
-    const timer = setTimeout(kill, input.timeoutMs);
-    input.signal?.addEventListener("abort", kill, { once: true });
+    const timer = setTimeout(stop("timeout"), input.timeoutMs);
+    const onAbort = stop("aborted");
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    let settled = false;
     const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      input.signal?.removeEventListener("abort", kill);
+      input.signal?.removeEventListener("abort", onAbort);
       resolve(value);
     };
+    let searches = 0;
+    let partial = "";
     child.stdout.on("data", (chunk: Buffer) => {
       bytes += chunk.length;
       if (bytes > MAX_STDOUT_BYTES) {
-        kill();
+        stop("too_much_output")();
         return;
       }
       chunks.push(chunk);
+      const lines = `${partial}${chunk.toString("utf8")}`.split("\n");
+      partial = lines.pop() ?? "";
+      searches += lines.filter(marketingCodexLineStartsSearch).length;
+      if (searches > MARKETING_LLM_MAX_WEB_SEARCH_CALLS) stop("too_many_searches")();
     });
-    child.on("error", () => finish(null));
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      // A binary that cannot start has no exit code to report: name why here.
+      console.error(JSON.stringify({ event: "marketing_codex_call_failed", failure: error.code ?? "spawn_failed" }));
+      finish(null);
+    });
     child.on("close", (code, signal) => {
+      if (settled) return;
       const stdout = Buffer.concat(chunks).toString("utf8");
       if (code === 0 && !lost) {
         finish(stdout);
@@ -293,10 +329,10 @@ export const runMarketingCodexProcess: MarketingCodexRunner = (input) =>
       // Without this a lost login looks the same as a hung CLI: an unknown call.
       console.error(
         JSON.stringify({
-          event: "marketing_codex_call_failed",
+          event: stopped === "aborted" ? "marketing_codex_call_aborted" : "marketing_codex_call_failed",
           code,
           signal,
-          lost,
+          stopped,
           failure: marketingCodexFailure(stdout) ?? lastError.trim(),
         }),
       );

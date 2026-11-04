@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -7,12 +9,15 @@ import {
   marketingCodexArguments,
   marketingCodexChannel,
   marketingCodexFailure,
+  marketingCodexLineStartsSearch,
   marketingCodexPrompt,
   marketingLlmChannelFromEnv,
   readMarketingCodexEvents,
+  runMarketingCodexProcess,
 } from "@/lib/marketingCodexChannelCore";
 import { marketingGeneratorWorkerConfig } from "@/lib/marketingGeneratorCycleCore";
 import { runMarketingLlmCall } from "@/lib/marketingLlmClientCore";
+import { superviseMarketingGeneratorRun } from "../scripts/marketing-generator-service.mjs";
 
 const SECRET = "x".repeat(40);
 const PIN = {
@@ -156,6 +161,13 @@ test("a URL only the model's text names is not a retrieved page or a citation", 
   );
   assert.deepEqual(withSearch.citations, ["https://example.com/pricing", "https://example.com/blog"]);
   assert.deepEqual(withSearch.answerCitations, []);
+});
+
+test("only a search's start counts toward the hard limit", () => {
+  assert.equal(marketingCodexLineStartsSearch(JSON.stringify({ type: "item.started", item: { type: "web_search" } })), true);
+  assert.equal(marketingCodexLineStartsSearch(JSON.stringify({ type: "item.completed", item: { type: "web_search" } })), false);
+  assert.equal(marketingCodexLineStartsSearch(JSON.stringify({ type: "item.started", item: { type: "agent_message" } })), false);
+  assert.equal(marketingCodexLineStartsSearch("not json"), false);
 });
 
 test("a failure names the provider's or the CLI's error line, bounded", () => {
@@ -308,9 +320,38 @@ test("the worker's configuration needs the CLI instead of the API key on the cha
   assert.equal(configured.ok, true);
   assert.equal(configured.config.apiKey, "");
   assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_CODEX_BIN: undefined }).reason, /MARKETING_CODEX_BIN/);
+  assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_CODEX_BIN: "codex" }).reason, /absolute/);
   // Without the channel, the API key is required as it always was.
   assert.match(
     marketingGeneratorWorkerConfig({ ...env, MARKETING_LLM_CHANNEL: undefined }).reason,
     /MARKETING_LLM_API_KEY/,
   );
+});
+
+// Node on POSIX only: these start a real child, a stand-in for the CLI.
+const posix = process.platform !== "win32";
+
+test("the process is killed at the search limit, and a stopped run is no answer", { skip: !posix }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "marketing-codex-test-"));
+  const fake = join(directory, "codex");
+  const started = JSON.stringify({ type: "item.started", item: { type: "web_search" } });
+  writeFileSync(fake, `#!/bin/sh\nwhile true; do echo '${started}'; sleep 0.01; done\n`, { mode: 0o755 });
+  const stdout = await runMarketingCodexProcess({ bin: fake, args: [], prompt: "", cwd: directory, env: {}, timeoutMs: 20_000 });
+  assert.equal(stdout, null);
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test("a binary that cannot start is no answer, not a crash", { skip: !posix }, async () => {
+  const stdout = await runMarketingCodexProcess({ bin: "/nonexistent/codex", args: [], prompt: "", cwd: tmpdir(), env: {}, timeoutMs: 1_000 });
+  assert.equal(stdout, null);
+});
+
+test("the worker gets the type-stripping flag only when the service has it", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "marketing-worker-flag-"));
+  const worker = join(directory, "worker.mjs");
+  writeFileSync(worker, 'process.exit(process.execArgv.includes("--experimental-strip-types") ? 7 : 0);\n');
+  const outcome = await superviseMarketingGeneratorRun({ worker, deadlineMs: 20_000, env: {}, stdio: "ignore" });
+  assert.equal(process.execArgv.includes("--experimental-strip-types"), false);
+  assert.equal(outcome.code, 0);
+  rmSync(directory, { recursive: true, force: true });
 });
