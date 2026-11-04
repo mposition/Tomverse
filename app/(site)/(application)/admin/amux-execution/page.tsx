@@ -28,6 +28,7 @@ import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
 import { countDecisionMakerAttention, readDecisionMakerAttentionForAdmin } from "@/lib/amux/decisionMakerAttention";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
+import { readAmuxIdeaLaneBoardForOwner } from "@/lib/amux/ideaLaneBoardRead";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -108,10 +109,12 @@ export default async function AdminAmuxExecutionPage({
     // Authorization for the section, decided here and not by the route
     // table's `viewRoles`, exactly as the page it replaced decided it.
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-    const [{ rows, total, limit }, usage, decisionMaker] = await Promise.all([
+    const [{ rows, total, limit }, usage, decisionMaker, laneIdeas] = await Promise.all([
       listAmuxCardsForAdmin(),
       readAmuxCliUsageSummaryForAdmin().catch(() => null),
       readDecisionMakerAttentionForAdmin({ withBodies: canJudge }).catch(() => null),
+      // Display rows beside the cards; a failed read shows none (the Ideas tab has them).
+      readAmuxIdeaLaneBoardForOwner(session.user.id).catch(() => null),
     ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
@@ -123,7 +126,7 @@ export default async function AdminAmuxExecutionPage({
             {m.testCardIntake}
           </Link>
         ) : null}
-        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} initialTaskId={typeof query.taskId === "string" &&
+        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>
           <AmuxCardListPanel rows={rows} total={total} limit={limit} />
