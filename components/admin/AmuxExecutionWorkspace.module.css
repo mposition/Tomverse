@@ -130,3 +130,10 @@
 .dmProposal span:first-child { color:var(--amux-dm); font-size:11px; font-weight:600; }
 .dmMeta { display:flex; align-items:center; gap:4px; color:var(--amux-muted); font-size:11px; }
 .dmMore { color:var(--amux-muted); font-size:11px; line-height:1.5; }
+/* Idea lane display cards: the whole card opens the idea; the PR link stays clickable above it. */
+.laneCard { position:relative; }
+.laneCardLink::after { content:""; position:absolute; inset:0; border-radius:9px; }
+.lanePr { position:relative; z-index:1; }
+.laneChip { display:inline-flex; align-items:center; gap:4px; min-height:22px; padding:2px 8px; border:1px solid var(--amux-blue); border-radius:999px; background:var(--amux-selected); color:var(--amux-blue); font-size:11px; font-weight:600; }
+.groupHeadingLane { color:var(--amux-blue); }
+.laneDone { max-height:none; }
