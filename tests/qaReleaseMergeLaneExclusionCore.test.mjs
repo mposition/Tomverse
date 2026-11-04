@@ -46,6 +46,10 @@ test("each gate path excludes", () => {
   for (const path of [
     ".github/workflows/pr-fast-gate.yml",
     ".github/actions/setup/action.yml",
+    "package.json",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    "next.config.ts",
     "AGENTS.md",
     "CLAUDE.md",
     "docs/policy/qa-release-agent.md",
@@ -58,18 +62,16 @@ test("each gate path excludes", () => {
   }
 });
 
-test("only the minimum is a gate: scripts, root config, manifests and audit records are the lane's (owner, 2026-10-23)", () => {
+test("only the minimum is a gate: scripts, other root config, workspace manifests and audit records are the lane's (owner, 2026-10-23)", () => {
   for (const path of [
     "scripts/security-regression-check.mjs",
     "scripts/deep/nested/run.mjs",
-    "package.json",
     "package-lock.json",
     "packages/ui-tokens/package.json",
     "apps/mobile/.npmrc",
     "eslint.config.mjs",
-    "tsconfig.json",
-    "next.config.ts",
     ".gitattributes",
+    "packages/chat-core/tsconfig.json",
     ".github/audits/ui-test-tiers.md",
     ".github/RELEASE_CHECKLIST.md",
     "docs/policy/marketing-automation.md",

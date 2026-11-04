@@ -193,7 +193,8 @@ test("the merge is PUT on the merge API with the head pinned, and its answer is 
   }
   for (const answer of [json(401, {}), json(403, {}), json(429, {}), json(500, {}), json(502, {}), json(200, { merged: false }), { status: 200, text: "<html>" }]) {
     const unknown = ports([[is("PUT", `${REPO}/pulls/12/merge`), answer]]);
-    assert.deepEqual(await unknown.github.merge(12, HEAD), { result: "unknown" });
+    // Still unknown, and now the status that made it so reaches the log.
+    assert.deepEqual(await unknown.github.merge(12, HEAD), { result: "unknown", httpStatus: answer.status });
   }
   const thrown = ports([[is("PUT", `${REPO}/pulls/12/merge`), () => { throw new Error("timeout"); }]]);
   assert.deepEqual(await thrown.github.merge(12, HEAD), { result: "unknown" });
@@ -254,7 +255,7 @@ test("exclusion inputs: every changed file to the last page, migration text at t
     { path: "lib/b.ts", previousPath: "lib/old.ts" },
   ]);
   assert.ok(input.policyTestPaths.includes("tests/autoPrAutoMergeArming.test.mjs"));
-  assert.ok(input.agentOwnPatterns.includes("lib/qaReleaseMergeLane*"));
+  assert.ok(input.agentOwnPatterns.includes("lib/qaRelease*"));
   assert.equal(calls.find((call) => call.url.includes("/contents/")).headers.accept, "application/vnd.github.raw+json");
 
   // Read once per round, however many candidates.
