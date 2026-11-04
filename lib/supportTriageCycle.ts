@@ -19,13 +19,9 @@ import "server-only";
 
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
-import {
-  SUPPORT_TRIAGE_RUN_RETENTION_DAYS,
-  supportTriageHeartbeatStale,
-  type SupportTriageRunKind,
-} from "@/lib/supportTriageCore";
+import { supportTriageHeartbeatStale, type SupportTriageRunKind } from "@/lib/supportTriageCore";
 import { resolveSupportTriageEnabled } from "@/lib/supportTriageLlmSetting";
-import { runSupportTriageRetention } from "@/lib/supportTriageRetention";
+import { overdueState, runSupportTriageRetention } from "@/lib/supportTriageRetention";
 import { SupportTriageTransactionRefused } from "@/lib/supportTriageTransaction";
 import { runSupportTriageWorker, type WorkerPassResult } from "@/lib/supportTriageWorker";
 import type { TriageLlm } from "@/lib/supportTriageLlm";
@@ -35,7 +31,6 @@ type Env = Readonly<Record<string, string | undefined>>;
 /** Under the 30-minute cadence by one tick's jitter, so a late cron does not skip a turn. */
 export const SUPPORT_TRIAGE_CYCLE_CADENCE_MS = 25 * 60_000;
 const INCIDENT_COOLDOWN_MS = 6 * 60 * 60_000;
-const DAY_MS = 24 * 60 * 60_000;
 
 type StepOutcome = "off" | "not_due" | "ran" | "daily_cap" | "refused" | "failed";
 
@@ -57,15 +52,13 @@ const isDue = async (kind: SupportTriageRunKind, now: Date) => {
   return !latest || now.getTime() - latest.createdAt.getTime() >= SUPPORT_TRIAGE_CYCLE_CADENCE_MS;
 };
 
-const retentionHasWork = async (now: Date) => {
-  const [suggestion, oldRun] = await Promise.all([
+/** A suggestion can still come due; every class's overdue row is retention's own count. */
+const retentionHasWork = async () => {
+  const [suggestion, overdue] = await Promise.all([
     prisma.supportTriageSuggestion.findFirst({ select: { id: true } }),
-    prisma.supportTriageRun.findFirst({
-      where: { createdAt: { lte: new Date(now.getTime() - SUPPORT_TRIAGE_RUN_RETENTION_DAYS * DAY_MS) } },
-      select: { id: true },
-    }),
+    overdueState(),
   ]);
-  return suggestion !== null || oldRun !== null;
+  return suggestion !== null || overdue.overdueRemaining > 0;
 };
 
 const stepFailure = async (kind: SupportTriageRunKind, error: unknown): Promise<StepOutcome> => {
@@ -108,7 +101,7 @@ export const runSupportTriageCycleQuietly = async ({
 
   let retention: SupportTriageCycleResult["retention"];
   try {
-    if (!enabled && !(await retentionHasWork(now))) {
+    if (!enabled && !(await retentionHasWork())) {
       retention = { outcome: "off" };
     } else if (!(await isDue("retention", now))) {
       retention = { outcome: "not_due" };
