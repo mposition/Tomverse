@@ -7,12 +7,6 @@ import { isAmuxIdeaAnalysisProvider, type AmuxIdeaAnalysisProvider } from
 export type SessionShadowBudgetBasis = {
   mode: "subscription_cli";
   provider: AmuxIdeaAnalysisProvider;
-  asOfIso: string;
-  pricingVerifiedAt: string;
-  pricingExpiresAt: string;
-  inputMicroUsdPerMillion: number;
-  outputMicroUsdPerMillion: number;
-  worstTierVerified: boolean;
   billableToolsDisabled: boolean;
   consumedMicroUsd: string;
   reservedMicroUsd: string;
@@ -22,20 +16,16 @@ export type SessionShadowBudgetBasis = {
 };
 
 const AMOUNT = /^(0|[1-9][0-9]*)$/;
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const validAmount = (value: unknown): value is string =>
   typeof value === "string" && value.length <= 19 && AMOUNT.test(value) &&
   BigInt(value) <= BigInt("9223372036854775807");
-const validInstant = (value: unknown): value is string =>
-  typeof value === "string" && ISO.test(value) &&
-  Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const positiveRate = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 
 export type SessionShadowBudgetDecision =
   | { decision: "occupy_headroom"; reservedMicroUsd: string;
       amountMeaning: "cli_shadow_headroom_not_ceiling" }
-  | { decision: "hold"; reason: "basis_invalid" | "price_unverified" |
+  | { decision: "hold"; reason: "basis_invalid" |
       "non_token_cost_unbounded" | "usage_unknown" | "monthly_shadow_reached" };
 
 export function assessSessionShadowBudget(raw: unknown): SessionShadowBudgetDecision {
@@ -43,8 +33,7 @@ export function assessSessionShadowBudget(raw: unknown): SessionShadowBudgetDeci
     { decision: "hold" }>["reason"]): SessionShadowBudgetDecision =>
     ({ decision: "hold", reason });
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return hold("basis_invalid");
-  const keys = ["mode", "provider", "asOfIso", "pricingVerifiedAt", "pricingExpiresAt",
-    "inputMicroUsdPerMillion", "outputMicroUsdPerMillion", "worstTierVerified",
+  const keys = ["mode", "provider",
     "billableToolsDisabled", "consumedMicroUsd", "reservedMicroUsd",
     "shadowOverrunMicroUsd", "monthlyLimitMicroUsd", "usageState"];
   let value: Record<string, unknown>;
@@ -56,21 +45,13 @@ export function assessSessionShadowBudget(raw: unknown): SessionShadowBudgetDeci
     for (const key of keys) value[key] = descriptors[key]!.value;
   } catch { return hold("basis_invalid"); }
   if (value.mode !== "subscription_cli" || !isAmuxIdeaAnalysisProvider(value.provider) ||
-      !validInstant(value.asOfIso) || !validInstant(value.pricingVerifiedAt) ||
-      !validInstant(value.pricingExpiresAt) ||
       !validAmount(value.consumedMicroUsd) || !validAmount(value.reservedMicroUsd) ||
       !validAmount(value.shadowOverrunMicroUsd) || !validAmount(value.monthlyLimitMicroUsd) ||
       BigInt(value.monthlyLimitMicroUsd) === BigInt(0) ||
-      !positiveRate(value.inputMicroUsdPerMillion) ||
-      !positiveRate(value.outputMicroUsdPerMillion) ||
-      typeof value.worstTierVerified !== "boolean" ||
       typeof value.billableToolsDisabled !== "boolean" ||
       (value.usageState !== "known" && value.usageState !== "unknown")) return hold("basis_invalid");
   if (value.usageState === "unknown") return hold("usage_unknown");
   if (!value.billableToolsDisabled) return hold("non_token_cost_unbounded");
-  if (!value.worstTierVerified || value.pricingVerifiedAt > value.asOfIso ||
-      value.pricingExpiresAt <= value.asOfIso ||
-      value.pricingExpiresAt <= value.pricingVerifiedAt) return hold("price_unverified");
   const used = BigInt(value.consumedMicroUsd) + BigInt(value.reservedMicroUsd) +
     BigInt(value.shadowOverrunMicroUsd);
   const limit = BigInt(value.monthlyLimitMicroUsd);
