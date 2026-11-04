@@ -361,3 +361,11 @@ test("a failed newest develop deploy stops new merges until a later deploy succe
   const healed = ports({ deployments: [deployment("SUCCESS", 1, "e".repeat(40)), deployment("FAILED", 3, "d".repeat(40))] });
   assert.notEqual((await runQaReleaseMergeLaneRound(ENV, healed.ports)).outcome, "dev_deploy_failed");
 });
+
+test("an unknown merge says which status made it so, and still latches", async () => {
+  const { ports: p, calls } = ports({ merge: { result: "unknown", httpStatus: 403 } });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, p), { exitCode: 0, outcome: "reported", report: "merge", detail: "merge_unknown_403" });
+  assert.deepEqual(reports(calls), [{ kind: "merge", result: "unknown" }]);
+  const silent = ports({ merge: { result: "unknown" } });
+  assert.equal((await runQaReleaseMergeLaneRound(ENV, silent.ports)).detail, "merge_unknown");
+});
