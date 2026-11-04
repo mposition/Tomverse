@@ -10,6 +10,7 @@ import {
   amuxIdeaLaneDailyAttempts,
   amuxIdeaLaneEnabled,
   amuxIdeaLaneState,
+  amuxIdeaLaneView,
   inspectAmuxIdeaLaneFence,
   inspectAmuxIdeaLaneResult,
 } from "../lib/amux/ideaLaneCore.ts";
@@ -40,6 +41,24 @@ test("an idea's runs decide whether the lane runs it again", () => {
   assert.deepEqual(opened, { state: "pr_open", attempts: 2, prNumber: 42, lastOutcome: "pr_open" });
   assert.equal(amuxIdeaLaneClaimable(opened), false, "an opened PR ends the lane's work");
   assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([run()], NOW)), false, "never two runs at once");
+});
+
+test("an observed merge of the lane's PR settles the idea as done", () => {
+  const opened = (prNumber, mergedAtMs = null, minutesAgo = 30) => run({ claimedAtMs: NOW - minutesAgo * 60_000,
+    leaseUntilMs: NOW - 1, outcome: "pr_open", prNumber, mergedAtMs });
+  assert.deepEqual(amuxIdeaLaneState([opened(42, NOW - 1)], NOW),
+    { state: "merged", attempts: 1, prNumber: 42, lastOutcome: "pr_open" });
+  assert.equal(amuxIdeaLaneState([opened(42, null)], NOW).state, "pr_open", "an unmerged PR is still in review");
+  assert.deepEqual(amuxIdeaLaneState([opened(42, NOW - 1, 60), opened(43, null, 10)], NOW).prNumber, 42,
+    "a retry's PR left open does not hide the one that merged");
+  const view = (lane) => { const result = amuxIdeaProgress({ state: "submitted", submissionOrigin: "owner",
+    cancelled: false, chunks: [], proposedUnits: 0, cards: [], lane }); return [result.stage, result.waitingFor, result.attention]; };
+  assert.deepEqual(view(amuxIdeaLaneState([opened(42, NOW - 1)], NOW)), ["done", null, false]);
+  const closed = amuxIdeaLaneState([run({ claimedAtMs: NOW - 60_000, leaseUntilMs: NOW - 1, outcome: "pr_open",
+    prNumber: 44, prClosedAtMs: NOW - 1 })], NOW);
+  assert.equal(closed.state, "pr_closed");
+  assert.deepEqual(view(closed), ["review", null, true], "a PR closed without a merge is flagged for the owner");
+  assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([opened(42, NOW - 1)], NOW)), false);
 });
 
 test("the switch is off unless set, and the daily limit stays bounded", () => {
@@ -85,6 +104,37 @@ test("a lane idea skips analysis and approvals on the Ideas list", () => {
   assert.deepEqual(view(amuxIdeaLaneState([run({ outcome: "pr_open", prNumber: 7 })], NOW)), ["review", null, false]);
   assert.deepEqual(view(amuxIdeaLaneState([failed(3), failed(2), failed(1)], NOW)), ["execution", null, true],
     "out of attempts is flagged for the owner");
+});
+
+test("an owner idea the lane will take next waits for the lane's turn, not an execution approval", () => {
+  const candidate = (overrides = {}) => ({ submissionOrigin: "owner", state: "submitted", cancelled: false,
+    rawReadable: true, analysisDeadlineMs: NOW + 60_000, sourcePlan: false, chunks: 0, ...overrides });
+  const view = (facts, enabled) => {
+    const lane = amuxIdeaLaneView([], NOW, facts, enabled);
+    const result = amuxIdeaProgress({ state: facts.state, submissionOrigin: facts.submissionOrigin,
+      cancelled: facts.cancelled, chunks: [], proposedUnits: 0, cards: [], lane });
+    return [lane?.state ?? null, lane?.attempts ?? null, result.stage, result.waitingFor];
+  };
+  assert.deepEqual(view(candidate(), true), ["queued", 0, "execution", null], "the lane's turn asks nobody");
+  assert.deepEqual(view(candidate(), false), [null, null, "execution_approval", "execution_approval"],
+    "with the lane off nothing changes");
+  for (const [why, overrides] of [
+    ["a source plan", { sourcePlan: true }],
+    ["a session idea", { submissionOrigin: "session" }],
+    ["an analysis page", { chunks: 1 }],
+    ["a passed deadline", { analysisDeadlineMs: NOW }],
+    ["purged raw text", { rawReadable: false }],
+    ["a cancelled idea", { cancelled: true }],
+    ["an idea past submission", { state: "analyzing" }],
+  ]) {
+    assert.equal(amuxIdeaLaneView([], NOW, candidate(overrides), true), null, `the claim never takes ${why}`);
+  }
+  const plan = candidate({ sourcePlan: true });
+  assert.deepEqual(view(plan, true), [null, null, "execution_approval", "execution_approval"], "a source plan keeps its approval");
+  assert.deepEqual(view(candidate({ submissionOrigin: "session" }), true), [null, null, "analysis", null],
+    "a session idea stays on the v19 queue");
+  assert.deepEqual(amuxIdeaLaneView([failed(5)], NOW, candidate(), false), amuxIdeaLaneState([failed(5)], NOW),
+    "an idea the lane ran shows its runs whatever the switch");
 });
 
 test("the claim and result routes answer only the lane's own secret, and only while the lane is on", async () => {

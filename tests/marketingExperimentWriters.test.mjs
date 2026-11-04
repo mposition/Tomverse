@@ -122,8 +122,10 @@ test("experiment counters are incremented in one place, with one statement", () 
 });
 
 test("the experiments switch has no writer in this feature", () => {
-  // Turning landing experiments on is an operator step (policy 9.1); the start
-  // route only reads the switch through the shared access resolver.
+  // The switch is written by the console switch writer
+  // (lib/marketingSwitchWriter.ts, operator decision 2026-11-04, policy 9.1),
+  // never by this feature's start and stop store: the start route only reads
+  // the switch through the shared access resolver.
   const writers = sources
     .filter((source) => source.path.startsWith("lib/marketingExperiment"))
     .filter((source) =>

@@ -15,6 +15,7 @@ const world = {
   sessionError: null as null | { code: string; readBack?: string },
   seen: { status: "absent" } as Record<string, unknown>,
   owned: { requestId, status: "absent" } as Record<string, unknown>,
+  laneTook: false,
 };
 
 class SessionError extends Error {
@@ -47,6 +48,8 @@ async function loadRoute(): Promise<{
       submitIdea: async () => { world.v4Calls += 1;
         return { ideaId: "v4-idea", requestId, auditId: "a" }; },
       readIdeaSubmissionRequest: async () => world.owned } });
+    mock.module(mod("lib/amux/ideaLaneService.ts"), { namedExports: {
+      amuxIdeaLaneTook: async () => world.laneTook } });
     mock.module(mod("lib/amux/ideaSessionSubmissionService.ts"), { namedExports: {
       AmuxIdeaSessionSubmissionError: SessionError,
       submitAmuxIdeaFromSession: async (input: unknown) => {
@@ -211,7 +214,12 @@ test("a row that is not a session idea still reads back through the v4 owner pat
       const response = await GET(new Request(
         `https://tomverse.test/api/admin/amux/ideas/submissions?requestId=${requestId}`));
       assert.deepEqual(await response.json(), { requestId, status: "committed", ideaId: "v4-idea" });
-    } finally { world.owned = { requestId, status: "absent" }; }
+      world.laneTook = true;
+      const lane = await GET(new Request(
+        `https://tomverse.test/api/admin/amux/ideas/submissions?requestId=${requestId}`));
+      assert.deepEqual(await lane.json(), { requestId, status: "committed", ideaId: "v4-idea", lane: true },
+        "an idea the lane took says so, so the input hides its v4 steps");
+    } finally { world.owned = { requestId, status: "absent" }; world.laneTook = false; }
   }));
 
 test("with session intake off, the Admin input keeps the v4 owner path", () =>

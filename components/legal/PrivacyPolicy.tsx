@@ -165,7 +165,22 @@ function ProviderDestinationTable({
                 {t("privacyPolicy.providerTableTitle")}
             </h3>
             <p className="mt-2">{t("privacyPolicy.providerTableIntro")}</p>
-            <div className="mt-3 overflow-x-auto">
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                {t("privacyPolicy.providerTableScrollHint")}
+            </p>
+            {/*
+                The table is wider than a phone, so it is the only part of this
+                section that scrolls sideways. A scroll container needs to be
+                focusable and named or a keyboard-only reader cannot reach the
+                columns past "Storage" (WCAG 2.1.1), the same treatment the plan
+                comparison table gets on the pricing page.
+            */}
+            <div
+                className="mt-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400"
+                role="region"
+                aria-label={t("privacyPolicy.providerTableTitle")}
+                tabIndex={0}
+            >
                 <table className="w-full min-w-[720px] border-collapse text-left">
                     <caption className="sr-only">{t("privacyPolicy.providerTableTitle")}</caption>
                     <thead>
@@ -304,7 +319,15 @@ export function PrivacyPolicy() {
                                 <Icon className="h-4 w-4 text-blue-500" />
                                 {t(`privacyPolicy.${titleKey}`)}
                             </h2>
-                            <div className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                            {/*
+                                min-w-0: without it this grid item takes the
+                                720px min-width of the provider table as its own
+                                minimum, so the whole section -- paragraphs and
+                                list included -- grew past a 320px viewport and
+                                its sentences were cut off instead of wrapping.
+                                With it, only the table scrolls.
+                            */}
+                            <div className="min-w-0 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                                 <p>{t(`privacyPolicy.${bodyKey}`)}</p>
                                 {bodyKey === "rights" && (
                                     <div className="mt-5 space-y-3">
