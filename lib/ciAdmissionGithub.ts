@@ -151,6 +151,8 @@ export type CiAdmissionGithub = {
   check(pull: CiAdmissionPull): Promise<CiAdmissionCheck>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
+  /** Of these pull requests, those whose last move to ready was a person's, not a bot's. */
+  personReady(numbers: readonly number[]): Promise<Set<number>>;
   /** Merges the base into the pull request's branch (GitHub's update-branch), only while its head is still the one judged. */
   updateBranch(pull: CiAdmissionPull): Promise<void>;
   /**
@@ -302,6 +304,29 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/qa-release?tab=ci-admission` } : {}),
       });
       if (answer.status !== 201) throw new Error(`github_status_${answer.status}`);
+    },
+    async personReady(numbers) {
+      if (numbers.length === 0) return new Set<number>();
+      const [owner, name] = CI_ADMISSION_REPOSITORY.split("/");
+      const fields = numbers
+        .map((number) => `p${Math.trunc(number)}: pullRequest(number: ${Math.trunc(number)}) { timelineItems(last: 1, itemTypes: [READY_FOR_REVIEW_EVENT]) { nodes { ... on ReadyForReviewEvent { actor { __typename } } } } }`)
+        .join(" ");
+      const answer = await call("POST", `${API}/graphql`, await installationToken(), {
+        query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`,
+        variables: { owner, name },
+      });
+      if (answer.status !== 200) throw new Error(`github_graphql_${answer.status}`);
+      const body = record(answer.json());
+      if (body.errors !== undefined) throw new Error("github_graphql_errors");
+      const repository = record(record(body.data).repository);
+      const out = new Set<number>();
+      for (const number of numbers) {
+        const nodes = list(record(record(repository[`p${Math.trunc(number)}`]).timelineItems).nodes);
+        const actor = nodes.length > 0 ? record(nodes[nodes.length - 1]).actor : null;
+        // A pull request opened ready has no such event, and a deleted account no actor: not a person's move.
+        if (actor !== null && actor !== undefined && record(actor).__typename === "User") out.add(number);
+      }
+      return out;
     },
     async openPulls() {
       const pulls: CiAdmissionPull[] = [];

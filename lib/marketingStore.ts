@@ -991,6 +991,8 @@ export async function updateMarketingChannel(
 type LockedMarketingChannel = {
   id: string;
   channel: MarketingChannelName;
+  /** Who carries the post: `manual` is a person posting by hand. */
+  provider: MarketingProvider;
   status: MarketingChannelStatus;
   /** The account to post from, as the platform knows it. Read under the lock. */
   externalAccountRef: string | null;
@@ -1016,7 +1018,7 @@ async function lockMarketingChannel(
 ): Promise<LockedMarketingChannel> {
   const rows = await database.$queryRaw<LockedMarketingChannel[]>(Prisma.sql`
     SELECT
-      "id", "channel", "status", "connectionGeneration", "scopesDigest",
+      "id", "channel", "provider", "status", "connectionGeneration", "scopesDigest",
       "policyVersion", "graduationEpoch", "graduatedAt", "graduationSnapshot",
       "pausedAt", "pausedFromMode", "pauseReasonCode", "lastResumeAuditLogId",
       "dailyCapOverride", "weeklyCapOverride", "externalAccountRef",
@@ -3269,6 +3271,15 @@ export async function claimDueMarketingPost(
   if (channel.status !== "autonomous_mode" && channel.status !== "approval_mode") {
     return { claimed: false, reason: "channel_not_publishing" };
   }
+  // A manual account is posted by a person, whatever its platform's caps say
+  // (operator decision 2026-11-04). Caps are per platform, so X has them and a
+  // manual X account used to be claimed anyway -- and then failed in the adapter
+  // for want of an account reference, three times, into the automatic pause.
+  // Judged from the account's provider before the clock, the admission resolver
+  // and the post are touched: nothing here can be due for the publisher.
+  if (channel.provider === "manual") {
+    return { claimed: false, reason: "channel_posts_by_hand" };
+  }
 
   // One evaluation of the clock, returned twice: as the instant, for lease
   // arithmetic and comparisons, and as the UTC calendar day, as text. The day
@@ -3683,6 +3694,8 @@ type LockedMarketingPost = {
   id: string;
   channelId: string;
   channel: MarketingChannelName;
+  /** Who carries this post's account: `manual` is a person posting by hand. */
+  provider: MarketingProvider;
   accountSlug: string;
   locale: MarketingLocale;
   status: MarketingPostStatus;
@@ -3716,7 +3729,7 @@ async function lockMarketingPost(
 ): Promise<LockedMarketingPost> {
   const rows = await database.$queryRaw<LockedMarketingPost[]>(Prisma.sql`
     SELECT
-      p."id", p."channelId", c."channel", c."accountSlug", p."locale",
+      p."id", p."channelId", c."channel", c."provider", c."accountSlug", p."locale",
       p."status", p."envelope", p."envelopeDigest", p."approvedDigest",
       p."approvalAuditLogId", p."approvedAt", p."approvalExpiresAt",
       p."reusableAsTemplate", p."scheduledAt", p."publishAttempt",
@@ -4107,6 +4120,57 @@ export async function markMarketingPostReusable(
 }
 
 /**
+ * Posts that a person puts up by hand (operator decision 2026-11-04).
+ *
+ * An account whose provider is `manual` is never carried by the publisher: it
+ * has no external account reference, so a scheduled post would be claimed, fail
+ * in the adapter, and count toward the automatic pause. So it is not scheduled
+ * at all ({@link scheduleMarketingPost}) and is not claimed
+ * ({@link claimDueMarketingPost}); the person posts it and records the fact here.
+ *
+ * Their own action constant and refusal class, as the withdrawal's are:
+ * `MARKETING_S2B1_ACTIONS` and `MARKETING_REFUSAL_STATUS` are reached by the
+ * webhook modules, and a new entry in either moves the webhook pipeline
+ * fingerprint for a change that decides no webhook event.
+ */
+export const MARKETING_POST_RECORD_MANUAL_ACTION = "marketing_post.record_manual_publish";
+
+/** What the console says when an operator tries to schedule a hand-posted account's post. */
+export const MARKETING_MANUAL_CHANNEL_SCHEDULE_MESSAGE =
+  "A manual account's posts are not scheduled: post it by hand, then record it as posted";
+
+export class MarketingManualPostRefusedError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = "MarketingManualPostRefusedError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
+ * The audit metadata recording a hand-posted publication must carry, built once
+ * for the route that writes the entry and the store that checks it
+ * ({@link marketingScheduleAuditMetadata}). The person's own words are in it --
+ * the URL they posted to and what they looked at to say so -- because the entry
+ * is the only place that says who vouched for a post this system never sent.
+ */
+export const marketingRecordManualPublishAuditMetadata = (input: {
+  readonly expectedEnvelopeDigest: string;
+  readonly expectedHistoryVersion: number;
+  readonly externalUrl: string;
+  readonly evidenceRef: string;
+}) => ({
+  digest: input.expectedEnvelopeDigest,
+  historyVersion: input.expectedHistoryVersion,
+  externalUrl: input.externalUrl,
+  evidenceRef: input.evidenceRef,
+});
+
+/**
  * The audit metadata a schedule must carry, built once for the route that
  * writes the entry and the store that checks it. The route used to write only
  * the digest while the store required the history version too, so every
@@ -4138,6 +4202,13 @@ export async function scheduleMarketingPost(
     auditLogId: String(rawInput.auditLogId),
   };
   const row = await lockMarketingPost(database, input.id);
+  if (row.provider === "manual") {
+    throw new MarketingManualPostRefusedError(
+      "manual_channel_not_schedulable",
+      409,
+      MARKETING_MANUAL_CHANNEL_SCHEDULE_MESSAGE,
+    );
+  }
   const envelope = marketingEnvelopeSchema.safeParse(row.envelope);
   const now = await marketingDatabaseNow(database);
   if (
@@ -4635,6 +4706,271 @@ export async function unpublishMarketingPost(
     },
   });
   requireOne(updated.count, "unpublish_conflict", "The post changed before removal commit");
+}
+
+/** The longest public URL recorded for a hand-posted publication. */
+export const MARKETING_MANUAL_PUBLISH_URL_MAX = 2_048;
+/** The longest note on what the person looked at. */
+export const MARKETING_MANUAL_PUBLISH_EVIDENCE_MAX = 500;
+/** The id a hand-posted publication carries where a platform would give its own. */
+export const marketingManualExternalPostId = (postId: string): string => `manual:${postId}`;
+
+export type MarketingManualPublishCapWarning = "daily_cap_exceeded" | "weekly_cap_exceeded";
+
+/**
+ * A person says an approved post of a hand-posted account is up on the platform
+ * (operator decision 2026-11-04).
+ *
+ * The publisher sent nothing, so there is no platform answer to record; there is
+ * a person's statement -- the public URL and what they looked at -- and the
+ * audit entry that carries it. The post walks the ledger's own transitions in
+ * this one transaction, because the status whitelist has no shorter way:
+ * `approved -> scheduled -> publishing -> published -> verified`. It ends
+ * `verified`, by `operator_sample`, rather than `published`: the person looked at
+ * the live post, and the status query that would otherwise confirm it has no
+ * account to ask about (`listMarketingPostsAwaitingVerification` skips accounts
+ * without a reference), so a `published` row would wait there for ever.
+ *
+ * **The day is spent, and a cap is a warning rather than a refusal.** `slotDate`
+ * is today (UTC, from the database clock), so the post counts toward the day and
+ * the week like any other. If that goes past the account's cap the record is
+ * still made: the post is already public, a refusal would leave the ledger saying
+ * something false, and a cap exists to stop the publisher from sending, which is
+ * not what happened here. The overage is returned so the console can say so.
+ *
+ * **A lapsed approval does not refuse the record either**, unlike a schedule:
+ * `approvalExpiresAt` bounds when the publisher may send, and the publisher sent
+ * nothing. A post whose approval ran out before the sweep moved it to
+ * `approval_expired` is still approved content that is now public, and the
+ * ledger should say so; once the sweep has moved it, the status check refuses.
+ */
+export async function recordManualMarketingPostPublication(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    externalUrl: string;
+    evidenceRef: string;
+    auditLogId: string;
+  },
+): Promise<{
+  readonly slotDate: string;
+  readonly warnings: readonly MarketingManualPublishCapWarning[];
+}> {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    externalUrl: String(rawInput.externalUrl).trim(),
+    evidenceRef: String(rawInput.evidenceRef).trim(),
+    auditLogId: String(rawInput.auditLogId),
+  };
+
+  // The `externalUrl` column's own CHECK is a case-sensitive `https://%`, which
+  // `new URL()` is not, so the literal prefix is tested as well.
+  let parsedUrl: URL | null = null;
+  try {
+    parsedUrl = new URL(input.externalUrl);
+  } catch {
+    parsedUrl = null;
+  }
+  if (
+    parsedUrl === null ||
+    !input.externalUrl.startsWith("https://") ||
+    parsedUrl.protocol !== "https:" ||
+    parsedUrl.username !== "" ||
+    parsedUrl.password !== "" ||
+    input.externalUrl.length > MARKETING_MANUAL_PUBLISH_URL_MAX
+  ) {
+    throw new MarketingManualPostRefusedError(
+      "manual_publish_url_invalid",
+      400,
+      "Record the public https URL of the post, without a user name or password in it",
+    );
+  }
+  if (
+    input.evidenceRef.length === 0 ||
+    input.evidenceRef.length > MARKETING_MANUAL_PUBLISH_EVIDENCE_MAX
+  ) {
+    throw new MarketingManualPostRefusedError(
+      "manual_publish_evidence_missing",
+      400,
+      "Say what you looked at to confirm the post is public",
+    );
+  }
+
+  const row = await lockMarketingPost(database, input.id);
+  if (row.provider !== "manual") {
+    throw new MarketingManualPostRefusedError(
+      "manual_publish_not_a_manual_channel",
+      409,
+      "Only a post of a hand-posted account is recorded this way; the publisher carries the others",
+    );
+  }
+  if (
+    row.status !== "approved" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.approvedDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.publishAttempt !== 0 ||
+    row.externalPostId !== null ||
+    row.deletedAt !== null ||
+    row.contentPurgedAt !== null
+  ) {
+    throw new MarketingManualPostRefusedError(
+      "manual_publish_conflict",
+      409,
+      "Only an unchanged approved post that has not been sent can be recorded as posted by hand",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_POST_RECORD_MANUAL_ACTION,
+    targetId: input.id,
+    metadata: marketingRecordManualPublishAuditMetadata(input),
+  });
+
+  // One read of the clock, as the claim takes it: the instant and the UTC day
+  // from the same evaluation, so the day counted and the day written are one.
+  const clock = await database.$queryRaw<Array<{ now: Date; day: string }>>(Prisma.sql`
+    SELECT t AS "now", to_char(t, 'YYYY-MM-DD') AS "day"
+    FROM (
+      SELECT (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS t
+    ) AS clock
+  `);
+  const now = clock[0]?.now;
+  const day = clock[0]?.day;
+  if (!now || !day) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+
+  const channel = await database.marketingChannel.findUnique({
+    where: { id: row.channelId },
+    select: { channel: true, dailyCapOverride: true, weeklyCapOverride: true },
+  });
+  if (!channel) {
+    throw new MarketingStoreRefusedError(
+      "channel_not_found",
+      "The marketing account does not exist",
+    );
+  }
+  const caps = marketingChannelCaps(channel);
+  const warnings: MarketingManualPublishCapWarning[] = [];
+  if (caps !== null) {
+    // Counted the way the claim counts, without this row, so the answer is what
+    // the claim would have decided for the same slot.
+    const used = await database.$queryRaw<Array<{ today: bigint; week: bigint }>>(
+      Prisma.sql`
+        SELECT
+          count(*) FILTER (WHERE "slotDate" = ${day}::date) AS "today",
+          count(*) FILTER (WHERE "slotDate" > ${day}::date - 7) AS "week"
+        FROM "MarketingPost"
+        WHERE "channelId" = ${row.channelId}
+          AND "slotDate" IS NOT NULL
+          AND "id" <> ${input.id}
+      `,
+    );
+    if (Number(used[0]?.today ?? 0) >= caps.daily) warnings.push("daily_cap_exceeded");
+    if (Number(used[0]?.week ?? 0) >= caps.weekly) warnings.push("weekly_cap_exceeded");
+  }
+
+  const identity = await database.marketingPost.findUnique({
+    where: { id: input.id },
+    select: { logicalKey: true },
+  });
+  if (!identity) {
+    throw new MarketingStoreRefusedError("post_not_found", "The marketing post does not exist");
+  }
+  const history = marketingHistorySchema.parse(row.history);
+  const conflict = () =>
+    new MarketingManualPostRefusedError(
+      "manual_publish_conflict",
+      409,
+      "The post changed before it was recorded as posted by hand",
+    );
+
+  // The ledger's own path, one transition per statement; the trigger judges each.
+  const scheduled = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "approved",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      approvedDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+      deletedAt: null,
+      contentPurgedAt: null,
+    },
+    data: {
+      status: "scheduled",
+      scheduledAt: row.scheduledAt ?? now,
+      slotDate: new Date(`${day}T00:00:00.000Z`),
+    },
+  });
+  if (scheduled.count !== 1) throw conflict();
+
+  const dispatched = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "scheduled",
+      historyVersion: input.expectedHistoryVersion,
+      publishAttempt: 0,
+    },
+    data: {
+      status: "publishing",
+      providerRequestKey: identity.logicalKey,
+      publishAttempt: 1,
+    },
+  });
+  if (dispatched.count !== 1) throw conflict();
+
+  const published = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "publishing",
+      providerRequestKey: identity.logicalKey,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: {
+      status: "published",
+      externalPostId: marketingManualExternalPostId(input.id),
+      externalUrl: input.externalUrl,
+      publishedAt: now,
+      claimToken: null,
+      leaseUntil: null,
+      history: asJson([
+        ...history,
+        {
+          at: now.toISOString(),
+          type: "attempt" as const,
+          attempt: 1,
+          outcome: "published" as const,
+          errorCode: null,
+        },
+      ]),
+      historyVersion: input.expectedHistoryVersion + 1,
+    },
+  });
+  if (published.count !== 1) throw conflict();
+
+  const verified = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "published",
+      historyVersion: input.expectedHistoryVersion + 1,
+    },
+    data: {
+      status: "verified",
+      verifiedPublicAt: now,
+      verificationMethod: "operator_sample",
+    },
+  });
+  if (verified.count !== 1) throw conflict();
+
+  return { slotDate: day, warnings };
 }
 
 // ---------------------------------------------------------------------------

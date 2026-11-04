@@ -26,6 +26,7 @@ import {
 } from "@/lib/amux/ideaSessionIntakeReadbackCore";
 import {
   AMUX_SESSION_INTAKE_ENV,
+  amuxIdeaSessionPrewriteStatus,
   amuxSessionIntakeWritePermitted,
   inspectAmuxIdeaSessionSubmission,
   inspectAmuxSessionModelChoice,
@@ -78,22 +79,9 @@ const sessionReadbackOn = () =>
 const ADMIN_SOURCE = Object.freeze({ toolName: "tomverse-admin",
   modelProvider: "operator", sessionDisplay: "Admin idea input" });
 
-/** Refused before the intake transaction starts, so nothing was written. */
-const SESSION_PREWRITE_STATUS: Partial<Record<AmuxIdeaSessionSubmissionError["code"], number>> = {
-  submission_disabled: 503,
-  audit_unavailable: 503,
-  scope_unavailable: 409,
-  outside_scope: 409,
-  model_not_approved: 409,
-  model_not_launchable: 409,
-  reference_snapshot_unavailable: 503,
-  // key_store_unavailable stays a read-back: the shared UI table treats it so
-  // on the v4 path, where a key outcome can be uncertain.
-};
-
 const failure = (error: unknown): Response => {
   if (error instanceof AmuxIdeaSessionSubmissionError) {
-    const status = SESSION_PREWRITE_STATUS[error.code];
+    const status = amuxIdeaSessionPrewriteStatus(error.code);
     // An uncertain or already-seen write is read back by its request id.
     return NextResponse.json(status ? { error: error.code }
       : { error: "outcome_unknown", ...(error.readBack ? { readBack: error.readBack } : {}) },

@@ -458,9 +458,8 @@ test("the sre-ops page service declares the supervisor's page list at S1b, produ
   assert.equal(PRODUCTION_ORIGIN, "https://tomverse.app");
   assert.deepEqual(
     [...page.environments.production].sort(),
-    SERVICE_VARIABLES.page.filter((name) => name !== "OPS_OBSERVER_PAGE_WEBHOOK_URL").sort(),
+    [...SERVICE_VARIABLES.page].sort(),
   );
-  assert.equal(page.environments.production.includes("OPS_OBSERVER_PAGE_WEBHOOK_URL"), false);
 });
 
 test("the sre-ops digest service declares the supervisor's digest list, daily at 07:00 Brisbane, production only", async () => {

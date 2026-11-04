@@ -49,6 +49,7 @@ import {
   inspectAmuxIdeaSessionSubmission,
   type AmuxIdeaSessionSubmissionInspection,
 } from "@/lib/amux/ideaSessionSubmissionCore";
+import { ideaSendPath, inspectIdeaSendForSession } from "@/lib/amux/ideaSendPath";
 import { prepareIdeaSubmissionStorage } from "@/lib/amux/ideaSubmissionService";
 import { AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
   amuxSessionAnalysisReservationAuditMetadata } from
@@ -116,6 +117,8 @@ import { AmuxSessionBudgetResolutionError,
   "@/lib/amux/ideaSessionAnalysisBudgetResolutionService";
 import { commitAmuxIdeaAnalysisPriceApproval } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
+import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID } from
+  "@/lib/amux/ideaAnalysisApprovedCostProfile";
 import { readAmuxIdeaAnalysisFailureStreak } from
   "@/lib/amux/ideaAnalysisFailureStreakService";
 import { commitAnalysisBudgetSetting, readAnalysisBudgetSnapshot } from
@@ -1078,6 +1081,49 @@ test("reservation store refuses duplicate and superseded-scope attempts", async 
   assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), scopeCount);
 });
 
+test("a send from another Admin screen enters as a session idea while session intake is on", async () => {
+  const switches = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
+    "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
+  const saved = switches.map((name) => process.env[name]);
+  const send = (requestId: string) => ideaSendPath({ session, request, requestId,
+    idea: "[Scout 제안] Synthetic suggestion", sessionDisplay: "Scout suggestion" });
+  try {
+    for (const name of switches) process.env[name] = "enabled";
+    const path = await send(committedRequestId);
+    assert.ok(path.ok);
+    // A stored session idea reads back committed, so a second click makes no second idea.
+    const seen = await path.readBack();
+    assert.equal(seen.status, "committed");
+    assert.equal(seen.status === "committed" && seen.ideaId, committedIdeaId);
+    assert.equal(path.isAlreadySeen(new AmuxIdeaSessionSubmissionError("request_already_seen")), true);
+    assert.equal(path.isAlreadySeen(new AmuxIdeaSessionSubmissionError("outcome_unknown")), false);
+
+    // It names this repository, without which analysis would have nothing to read.
+    const inspected = inspectIdeaSendForSession({ requestId: randomUUID(), idea: "Synthetic",
+      sessionDisplay: "Scout suggestion" });
+    assert.ok(inspected.ok);
+    assert.deepEqual(inspected.input.repositories, ["mposition/Tomverse"]);
+    assert.deepEqual(inspected.source, { toolName: "tomverse-admin", modelProvider: "operator",
+      sessionDisplay: "Scout suggestion" });
+
+    const refused = await ideaSendPath({ session, request, requestId: randomUUID(),
+      idea: "Contact person@example.test", sessionDisplay: "Scout suggestion" });
+    assert.deepEqual(refused, { ok: false, code: "content_refused", status: 400 });
+
+    // With session intake off the idea stays on the v4 path, and its read
+    // still finds the session idea rather than making another.
+    process.env.TOMVERSE_AMUX_SESSION_INTAKE = "disabled";
+    const off = await send(committedRequestId);
+    assert.ok(off.ok);
+    assert.equal((await off.readBack()).status, "committed");
+  } finally {
+    switches.forEach((name, index) => {
+      if (saved[index] === undefined) delete process.env[name];
+      else process.env[name] = saved[index];
+    });
+  }
+});
+
 test("request collision and references outside the saved scope are read-only refusals", async () => {
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaSessionSubmission(tx, {
@@ -1676,20 +1722,8 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       submissionAuditId: submission.auditId, authority: maxAuthority,
     });
   });
-  const priceVersionId = randomUUID();
-  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
-    session, request, approval: {
-      id: priceVersionId, provider: "anthropic", modelId: maxModelId,
-      mode: "subscription_cli", expectedPreviousVersion: 0,
-      inputTokensCap: 1, outputTokensCap: 1,
-      inputMicroUsdPerMillion: 1_000_000_000,
-      outputMicroUsdPerMillion: 1_000_000_000,
-      evidenceDigest: randomBytes(32).toString("hex"),
-      ownerConfirmedWorstTier: true,
-      verifiedAt: new Date(Date.now() - 60_000),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
-    },
-  }));
+  // A subscription claim needs no approved price (owner decision 2026-11-04).
+  const priceVersionId = AMUX_V19_SUBSCRIPTION_NO_PRICE_ID;
   const priceReadSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
   const oldPriceReadSecret = process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
   const oldPriceReadSwitch = process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
@@ -1714,20 +1748,6 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       delete process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
     else process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ = oldPriceReadSwitch;
   }
-  const apiPriceVersionId = randomUUID();
-  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
-    session, request, approval: {
-      id: apiPriceVersionId, provider: "anthropic", modelId: maxModelId,
-      mode: "api", expectedPreviousVersion: 0,
-      inputTokensCap: 1, outputTokensCap: 1,
-      inputMicroUsdPerMillion: 1_000_000_000,
-      outputMicroUsdPerMillion: 1_000_000_000,
-      evidenceDigest: randomBytes(32).toString("hex"),
-      ownerConfirmedWorstTier: true,
-      verifiedAt: new Date(Date.now() - 60_000),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
-    },
-  }));
   const maxLauncherIdentity = { ideaId, provider: "anthropic", modelId: maxModelId,
     reasoningEffort: "high",
     authEvidenceDigest: randomBytes(32).toString("hex") };
@@ -1748,15 +1768,6 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       maxSubscriptionAuthenticated: true },
   })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
     error.code === "not_ready", "Max claim rejects a different idea");
-  await assert.rejects(prisma.$transaction((tx) => commitAmuxSessionBudgetClaim(tx, {
-    claimId: randomUUID(), requestId: randomUUID(),
-    reservationId: reservation.reservationId, invocationOrdinal: 0,
-    priceVersionId: apiPriceVersionId,
-    maxLauncherIdentity,
-    runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
-      maxSubscriptionAuthenticated: true },
-  })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
-    error.code === "budget_hold" && error.reason === "price_unverified");
   const launcherSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
   const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE",
@@ -2012,13 +2023,13 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'Australia/Brisbane'");
       // The answer must come from the claim's own channel.
       await assert.rejects(commitAmuxMaxSessionResult(tx, { ...resultIdentity,
-        rawModelOutput: "{\"units\":[]}", inputTokens: 1001, outputTokens: 1,
+        rawModelOutput: "{\"units\":[]}", inputTokens: 200000, outputTokens: 1,
         cliAttestation: { provider: "cursor", modelAttestation: "requested",
           cliSha256: "f".repeat(64) }, keys: resultKeys }),
       (error: unknown) => error instanceof AmuxMaxSessionResultError &&
         error.code === "invalid_result");
       return commitAmuxMaxSessionResult(tx, { ...resultIdentity,
-        rawModelOutput: "{\"units\":[]}", inputTokens: 1001,
+        rawModelOutput: "{\"units\":[]}", inputTokens: 200000,
         outputTokens: 1, cliAttestation: { provider: "anthropic",
           modelAttestation: "served", cliSha256: "f".repeat(64) },
         keys: resultKeys });
@@ -2042,7 +2053,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     where: { claimId: claim.claimId },
   });
   assert.ok(storedResult.ciphertext && storedResult.ciphertext.length > 0);
-  assert.equal(storedResult.inputTokens, 1001);
+  assert.equal(storedResult.inputTokens, 200000);
   assert.equal(storedResult.outputTokens, 1);
   // An answer that is not a schema-valid plan page still settles, but it
   // leaves the queue for the operator instead of buying another invocation.
@@ -2074,7 +2085,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
         body: JSON.stringify({ claimId: claim.claimId,
           requestId: claim.requestId, reservationId: claim.reservationId,
           ideaId, invocationOrdinal: 0, outcome: "verified_success",
-          inputTokens: 1001, outputTokens: 1 }),
+          inputTokens: 200000, outputTokens: 1 }),
       }));
     assert.equal(response.status, 409,
       "a settled claim cannot be re-POSTed through the usage-only writer");
@@ -2112,19 +2123,19 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     readAmuxV19MaxIdeaInTx(tx, { reservationId: reservation.reservationId,
       ideaId, claimId }, keysFor(ideaId))), null,
   "settled claim cannot read plaintext again");
-  assert.equal(outcome.settledMicroUsd, "1002000");
+  assert.equal(outcome.settledMicroUsd, "1600020");
   const row = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
     where: { id: claim.claimId },
   });
   assert.equal(row.budgetMode, "max_shadow");
-  assert.equal(row.settledMicroUsd, BigInt("1002000"));
+  assert.equal(row.settledMicroUsd, BigInt("1600020"));
   const after = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
   assert.equal(after.reservedMicroUsd, "0");
   assert.equal(after.remainingMicroUsd, "0");
   assert.equal(BigInt(after.shadowOverrunMicroUsd),
-    BigInt("1002000") - BigInt(claim.reservedMicroUsd));
+    BigInt("1600020") - BigInt(claim.reservedMicroUsd));
   assert.equal(BigInt(after.spentMicroUsd),
-    BigInt(before.spentMicroUsd) + BigInt("1002000"));
+    BigInt(before.spentMicroUsd) + BigInt("1600020"));
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.update({
     where: { namespace_monthStart: { namespace: "agent/amux-intake",
       monthStart: new Date(after.monthStart) } },

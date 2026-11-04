@@ -372,3 +372,11 @@ test("the lane merges in the operator's priority, and skips what it leaves to a 
   const plain = ports({ pulls: [newer, older], issue: { issued: false, reason: "lane_off" } });
   assert.equal((await runQaReleaseMergeLaneRound(ENV, plain.ports)).pullRequestNumber, 7);
 });
+
+test("an unknown merge says which status made it so, and still latches", async () => {
+  const { ports: p, calls } = ports({ merge: { result: "unknown", httpStatus: 403 } });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, p), { exitCode: 0, outcome: "reported", report: "merge", detail: "merge_unknown_403" });
+  assert.deepEqual(reports(calls), [{ kind: "merge", result: "unknown" }]);
+  const silent = ports({ merge: { result: "unknown" } });
+  assert.equal((await runQaReleaseMergeLaneRound(ENV, silent.ports)).detail, "merge_unknown");
+});

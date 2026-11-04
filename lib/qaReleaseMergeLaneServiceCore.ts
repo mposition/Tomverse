@@ -76,7 +76,8 @@ export type QaReleasePullRead = QaReleaseLanePullRequest & {
   mergeCommitSha: string | null;
 };
 
-export type QaReleaseMergeCall = { result: "merged"; sha: string } | { result: "refused" } | { result: "unknown" };
+/** `httpStatus` says why an unknown merge is unknown, for the log; absent when GitHub gave no answer. */
+export type QaReleaseMergeCall = { result: "merged"; sha: string } | { result: "refused" } | { result: "unknown"; httpStatus?: number };
 
 export type QaReleaseMergeLanePorts = {
   app: {
@@ -470,7 +471,11 @@ async function laneRound(
     if (refusedPull.merged) return rereadAttempt(ports, { id: attemptId, pullRequestNumber: pick.number });
     return sendReport(ports, attemptId, { kind: "merge", result: "refused" }, "merge_refused");
   }
-  if (call.result === "unknown") return sendReport(ports, attemptId, { kind: "merge", result: "unknown" }, "merge_unknown");
+  if (call.result === "unknown") {
+    // 2026-11-04: two merges of #3304 latched the lane and the status that said why was thrown away.
+    const detail = call.httpStatus === undefined ? "merge_unknown" : `merge_unknown_${call.httpStatus}`;
+    return sendReport(ports, attemptId, { kind: "merge", result: "unknown" }, detail);
+  }
 
   // Where did it land (section 3 step 4)? Anything but a clear yes latches.
   const after = await ports.github.readPull(pick.number).catch(() => null);
