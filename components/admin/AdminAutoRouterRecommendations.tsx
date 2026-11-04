@@ -1,14 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Check, ClipboardCopy, RotateCcw, X } from "lucide-react";
+import { Check, RotateCcw, Send, X } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import {
-  buildRecommendationInstruction,
-  copyToClipboard,
+  isRecommendationSendable,
   openRecommendations,
-  reportFindings,
   type ActionableRecommendation,
   type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
@@ -19,51 +16,29 @@ export type RecommendationCycle = { id: string; createdAt: string; summary: unkn
 export const optimizerCycleAnchor = (cycleId: string) => `optimizer-cycle-${cycleId}`;
 
 type SetStatus = (cycleId: string, index: number, status: RecommendationStatus) => void;
+type SendToAmux = (cycleId: string, index: number) => void;
 
 /**
- * One code or setting recommendation's status, its buttons, and the copy of a
- * work instruction. The instruction is assembled here from the stored report
- * (lib/autoRouterRecommendationsCore.ts): no model call, no user message, and
- * nothing is sent -- the operator pastes it into a coding session.
+ * One code or setting recommendation's status and its buttons. An owner can send
+ * it to AMUX as an idea; the server builds the idea from the stored report
+ * (app/api/admin/auto-llm-router/optimizer/recommendations/send/route.ts).
  */
 export function RecommendationControls({
   cycle,
   item,
   busy,
+  canSend,
   onSetStatus,
+  onSend,
 }: {
   cycle: RecommendationCycle;
   item: ActionableRecommendation;
   busy: boolean;
+  canSend: boolean;
   onSetStatus: SetStatus;
+  onSend: SendToAmux;
 }) {
   const m = useAdminMessages(adminAutoRouterOptimizerMessages);
-  const [copied, setCopied] = useState(false);
-  const [manualText, setManualText] = useState<string | null>(null);
-  const manualRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    // Selected for the operator, who only has to copy it.
-    if (manualText !== null) manualRef.current?.select();
-  }, [manualText]);
-
-  const copyInstruction = async () => {
-    const text = buildRecommendationInstruction({
-      labels: m.instruction,
-      recommendation: { kind: item.kind, text: item.text },
-      findings: reportFindings(cycle.summary),
-      cycle: { id: cycle.id, createdAt: cycle.createdAt },
-      link: `${window.location.origin}/admin/routing#${optimizerCycleAnchor(cycle.id)}`,
-    });
-    if ((await copyToClipboard(navigator.clipboard, text)) === "copied") {
-      setManualText(null);
-      setCopied(true);
-    } else {
-      setCopied(false);
-      setManualText(text);
-    }
-  };
-
   const buttonClass =
     "inline-flex min-h-11 items-center gap-1 rounded-xl border border-zinc-600 px-3 text-xs font-bold text-zinc-200 disabled:opacity-50";
 
@@ -78,6 +53,7 @@ export function RecommendationControls({
           {m.recommendationStatuses[item.status]}
           {item.at ? ` · ${new Date(item.at).toLocaleString()}` : ""}
           {item.reason ? ` · ${(m.recommendationFailureReasons as Record<string, string>)[item.reason] ?? item.reason}` : ""}
+          {item.amuxIdeaId ? ` · ${item.amuxIdeaId}` : ""}
         </span>
         {item.prUrl ? (
           <a
@@ -129,32 +105,20 @@ export function RecommendationControls({
             {m.reopen}
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={() => void copyInstruction()}
-          data-testid="admin-auto-router-recommendation-copy"
-          className={buttonClass}
-        >
-          <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
-          {copied ? m.copied : m.copyInstruction}
-        </button>
+        {isRecommendationSendable(item.status) ? (
+          <button
+            type="button"
+            onClick={() => onSend(cycle.id, item.index)}
+            disabled={busy || !canSend}
+            title={canSend ? undefined : m.sendNotAllowed}
+            data-testid="admin-auto-router-recommendation-send"
+            className={buttonClass}
+          >
+            <Send className="h-3.5 w-3.5" aria-hidden />
+            {m.sendToAmux}
+          </button>
+        ) : null}
       </div>
-      {manualText !== null ? (
-        <label className="mt-2 block text-xs font-bold text-zinc-300">
-          {m.instructionBoxLabel}
-          <p role="status" className="mt-1 font-normal text-amber-200">
-            {m.copyFailed}
-          </p>
-          <textarea
-            ref={manualRef}
-            readOnly
-            value={manualText}
-            rows={10}
-            data-testid="admin-auto-router-recommendation-manual"
-            className="mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 font-mono text-xs font-normal text-zinc-200"
-          />
-        </label>
-      ) : null}
     </div>
   );
 }
@@ -167,11 +131,15 @@ export function RecommendationControls({
 export function OpenRecommendationsInbox({
   cycles,
   busy,
+  canSend,
   onSetStatus,
+  onSend,
 }: {
   cycles: readonly RecommendationCycle[];
   busy: boolean;
+  canSend: boolean;
   onSetStatus: SetStatus;
+  onSend: SendToAmux;
 }) {
   const m = useAdminMessages(adminAutoRouterOptimizerMessages);
   const items = openRecommendations(cycles);
@@ -209,7 +177,7 @@ export function OpenRecommendationsInbox({
                   {m.cycleLink}
                 </a>
               </p>
-              <RecommendationControls cycle={cycle} item={item} busy={busy} onSetStatus={onSetStatus} />
+              <RecommendationControls cycle={cycle} item={item} busy={busy} canSend={canSend} onSetStatus={onSetStatus} onSend={onSend} />
             </li>
           );
         })}

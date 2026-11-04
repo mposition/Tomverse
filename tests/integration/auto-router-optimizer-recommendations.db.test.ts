@@ -4,7 +4,7 @@ import { after, beforeEach, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
-import { setRecommendationStatus } from "@/lib/autoRouterRecommendations";
+import { markRecommendationSentToAmux, readRecommendationForSend, setRecommendationStatus } from "@/lib/autoRouterRecommendations";
 import { actionableRecommendations } from "@/lib/autoRouterRecommendationsCore";
 
 // An operator's status for a cycle's code and setting recommendations, on a
@@ -252,4 +252,32 @@ test("a result for a recommendation an operator reopened is refused and changes 
     { refused: "not_found" }
   );
   assert.equal((await summaryOf(cycle.id)).recommendationStatus, undefined);
+});
+
+test("a recommendation sent to AMUX records its idea with an audit entry, once, and only while sendable", async () => {
+  const cycle = await seed();
+  const sentRows = () =>
+    prisma.adminAuditLog.findMany({ where: { targetId: cycle.id, action: "auto.llm_router_recommendation.sent_to_amux" } });
+
+  const found = await readRecommendationForSend({ cycleId: cycle.id, index: 1 });
+  assert.equal(found?.recommendation.status, "open");
+  assert.deepEqual(found?.findings, REPORT.findings);
+
+  assert.equal(await markRecommendationSentToAmux(actor, { cycleId: cycle.id, index: 1, ideaId: "idea-1" }), true);
+  const item = actionableRecommendations(await summaryOf(cycle.id)).find((entry) => entry.index === 1);
+  assert.equal(item?.status, "sent_to_amux");
+  assert.equal(item?.amuxIdeaId, "idea-1");
+  assert.equal((await sentRows()).length, 1);
+
+  // A second send, or one that finds another status, changes nothing.
+  assert.equal(await markRecommendationSentToAmux(actor, { cycleId: cycle.id, index: 1, ideaId: "idea-2" }), false);
+  await setRecommendationStatus(actor, { cycleId: cycle.id, index: 2, status: "dismissed" });
+  assert.equal(await markRecommendationSentToAmux(actor, { cycleId: cycle.id, index: 2, ideaId: "idea-3" }), false);
+  assert.equal((await sentRows()).length, 1);
+
+  // A guidance recommendation, an unknown cycle and a running cycle have nothing to send.
+  assert.equal(await readRecommendationForSend({ cycleId: cycle.id, index: 0 }), null);
+  assert.equal(await readRecommendationForSend({ cycleId: "missing", index: 1 }), null);
+  const running = await seed({ status: "running" });
+  assert.equal(await readRecommendationForSend({ cycleId: running.id, index: 1 }), null);
 });

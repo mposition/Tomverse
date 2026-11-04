@@ -6,6 +6,9 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizer";
 import {
     actionableRecommendations,
+    isRecommendationSendable,
+    RECOMMENDATION_SENT_STATUS,
+    reportFindings,
     withRecommendationStatus,
     type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
@@ -77,6 +80,68 @@ export async function setRecommendationStatus(
             },
         });
         return { ok: true as const, changed: true };
+    });
+}
+
+/** What sending a recommendation to AMUX needs from its cycle; the send starts from this read. */
+export async function readRecommendationForSend(input: { cycleId: string; index: number }) {
+    const cycle = await prisma.autoRouterOptimizerCycle.findUnique({
+        where: { id: input.cycleId },
+        select: { status: true, summary: true, createdAt: true },
+    });
+    if (!cycle || cycle.status === "running") return null;
+    const recommendation = actionableRecommendations(cycle.summary).find((item) => item.index === input.index);
+    if (!recommendation) return null;
+    return { recommendation, findings: reportFindings(cycle.summary), createdAt: cycle.createdAt.toISOString() };
+}
+
+/**
+ * Marks a recommendation sent to AMUX, with the idea and its audit entry in one
+ * commit. False when it is no longer sendable: the idea stands, and whoever
+ * changed the status meanwhile keeps it. Locks as setRecommendationStatus does.
+ */
+export async function markRecommendationSentToAmux(
+    actor: { session: Session; request: Request },
+    input: { cycleId: string; index: number; ideaId: string }
+): Promise<boolean> {
+    const by = actor.session.user?.id;
+    if (!by) return false;
+    return prisma.$transaction(async (tx) => {
+        await takeAuditChainLock(tx);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
+        const cycle = await tx.autoRouterOptimizerCycle.findUnique({
+            where: { id: input.cycleId },
+            select: { summary: true },
+        });
+        const recommendation =
+            cycle && actionableRecommendations(cycle.summary).find((item) => item.index === input.index);
+        if (!cycle || !recommendation || !isRecommendationSendable(recommendation.status)) return false;
+        await tx.autoRouterOptimizerCycle.update({
+            where: { id: input.cycleId },
+            data: {
+                summary: withRecommendationStatus(cycle.summary, input.index, {
+                    status: RECOMMENDATION_SENT_STATUS,
+                    at: new Date().toISOString(),
+                    by,
+                    amuxIdeaId: input.ideaId,
+                }) as Prisma.InputJsonObject,
+            },
+        });
+        await writeAdminAuditLog({
+            ...actor,
+            tx,
+            action: "auto.llm_router_recommendation.sent_to_amux",
+            targetType: "AutoRouterOptimizerCycle",
+            targetId: input.cycleId,
+            summary: "Sent an Auto router optimizer recommendation to AMUX.",
+            metadata: {
+                index: input.index,
+                kind: recommendation.kind,
+                before: recommendation.status,
+                amuxIdeaId: input.ideaId,
+            },
+        });
+        return true;
     });
 }
 
