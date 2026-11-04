@@ -1,21 +1,22 @@
 import { expect, test } from "@playwright/test";
 import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import { AVAILABLE_MODELS } from "@/lib/models";
-import { scoutTurnWrites } from "@/lib/productResearchScoutBrowserPolicy.mjs";
+import { SCOUT_ALLOWED_METHODS, decideScoutRequest, scoutTurnWrites } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 import { toPublicCatalogModel } from "@/lib/publicModelCatalog";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
 // The Scout makes a real file by typing into this composer with its browser
-// shut to every POST except what one chat turn makes (scoutTurnWrites,
-// docs/policy/product-research-agent.md §14). This sends through the real page
-// under the same rule, with the walker's own timing: nothing may write until
-// send is pressed. If the send path gains a call the rule does not know, this
-// fails here instead of costing the Scout every file in production.
+// shut to every write except what one chat turn makes (scoutTurnWrites,
+// docs/policy/product-research-agent.md §14). This sends a new conversation's
+// turn through the real page under the walker's own decision function and
+// timing: nothing may write until send is pressed. If that path gains a call the
+// rule does not know, this fails here instead of costing the Scout every file in
+// production.
 
 const MODEL_ID = "gpt-5-6-luna";
 
-test("a file turn through the real composer needs only what the Scout's rule allows", async ({ page }) => {
+test("a file turn through the real composer needs only what the Scout's rule allows", async ({ page, baseURL }) => {
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page, {
     selectedModels: [MODEL_ID],
@@ -61,26 +62,24 @@ test("a file turn through the real composer needs only what the Scout's rule all
     });
   });
 
-  let allowWrite: ((url: string) => boolean) | null = null;
+  let allowWrite: ((method: string, url: string) => boolean) | null = null;
   const beforeTheTurn: string[] = [];
   const refusedInTheTurn: string[] = [];
   const madeInTheTurn: string[] = [];
-  // Registered last, so it sees every POST before the mocks above, as the
+  // Registered last, so it sees every request before the mocks above, as the
   // walker's CDP rule sees it before it leaves the browser.
   await page.route("**/*", (route) => {
     const request = route.request();
-    if (request.method() !== "POST") return route.fallback();
-    const { pathname } = new URL(request.url());
-    if (!allowWrite) {
-      beforeTheTurn.push(pathname);
-      return route.abort("blockedbyclient");
+    const method = request.method();
+    const { allow } = decideScoutRequest({ method, url: request.url(), allowedOrigins: [new URL(baseURL!).origin], allowWrite });
+    const isWrite = !(SCOUT_ALLOWED_METHODS as readonly string[]).includes(method);
+    const write = `${method} ${new URL(request.url()).pathname}`;
+    if (allow) {
+      if (isWrite) madeInTheTurn.push(write);
+      return route.fallback();
     }
-    if (!allowWrite(request.url())) {
-      refusedInTheTurn.push(pathname);
-      return route.abort("blockedbyclient");
-    }
-    madeInTheTurn.push(pathname);
-    return route.fallback();
+    if (isWrite) (allowWrite ? refusedInTheTurn : beforeTheTurn).push(write);
+    return route.abort("blockedbyclient");
   });
 
   await page.goto("/chat");
@@ -97,8 +96,8 @@ test("a file turn through the real composer needs only what the Scout's rule all
   });
 
   expect(refusedInTheTurn).toEqual([]);
-  expect(madeInTheTurn).toContain("/api/products/chat/conversations");
-  expect(madeInTheTurn).toContain("/api/chat");
+  expect(madeInTheTurn).toContain("POST /api/products/chat/conversations");
+  expect(madeInTheTurn).toContain("POST /api/chat");
 
   // The walker reads the file the way the card's own button does: a GET, with the turn closed.
   const download = page.getByTestId("generated-artifact-download").first();

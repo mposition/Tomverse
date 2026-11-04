@@ -149,7 +149,7 @@ needsBrowser("nothing writes outside the turn, or to a path the turn does not ma
   const subject = await generateFile(browser, rules, { id: "generated.pdf", prompt: "STRAYS" }, walkPlace());
   const posts = seen.filter((request) => request.method === "POST").map((request) => request.pathname);
   assert.deepEqual(posts, ["/api/chat"], "not on load, not to another route, not after the answer settled");
-  assert.match(subject.signals, /refused these POSTs during the turn[^]*\/api\/chat\/voice/);
+  assert.match(subject.signals, /refused these writes during the turn[^]*POST \/api\/chat\/voice/);
   assert.equal(rules.allowWrite, null);
 });
 

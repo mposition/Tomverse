@@ -61,17 +61,16 @@ test("POST is open only during a turn, and only to an allowed origin", () => {
   for (let index = 0; index < 20; index += 1) {
     assert.deepEqual(decideScoutRequest({ ...post, method: "GET", allowWrite }), { allow: true });
   }
-  assert.equal(allowWrite("https://tomverse.app/api/chat"), true);
+  assert.equal(allowWrite("POST", "https://tomverse.app/api/chat"), true);
 });
 
 test("a turn reaches only its own paths, a bounded number of times", () => {
   const origin = "https://tomverse.app";
   const allowWrite = scoutTurnWrites();
-  for (let index = 0; index < 3; index += 1) assert.equal(allowWrite(`${origin}/api/chat`), true, `chat post ${index}`);
-  assert.equal(allowWrite(`${origin}/api/chat`), false, "no more than one a model");
+  for (let index = 0; index < 3; index += 1) assert.equal(allowWrite("POST", `${origin}/api/chat`), true, `chat post ${index}`);
+  assert.equal(allowWrite("POST", `${origin}/api/chat`), false, "no more than one a model");
   for (const path of [
     "/api/products/chat/conversations",
-    "/api/products/chat/drafts/scope-1",
     "/api/chat/preflight",
     "/api/chat/availability",
     "/api/chat/concurrency",
@@ -84,8 +83,16 @@ test("a turn reaches only its own paths, a bounded number of times", () => {
     "/api/conversations/c1/messages/receipt",
     "/api/conversations/c1/generate-title",
   ]) {
-    assert.equal(scoutTurnWrites()(`${origin}${path}`), true, path);
+    assert.equal(scoutTurnWrites()("POST", `${origin}${path}`), true, path);
   }
+  // The composer saves its draft before it sends, and drops it after.
+  for (const method of ["PUT", "DELETE"]) {
+    assert.equal(scoutTurnWrites()(method, `${origin}/api/products/chat/drafts/scope-1`), true, method);
+    assert.equal(scoutTurnWrites()(method, `${origin}/api/conversations/c1`), false, `${method} a conversation`);
+    assert.equal(scoutTurnWrites()(method, `${origin}/api/chat`), false, `${method} the turn`);
+  }
+  assert.equal(scoutTurnWrites()("POST", `${origin}/api/products/chat/drafts/scope-1`), false);
+  assert.equal(scoutTurnWrites()("PATCH", `${origin}/api/products/chat/drafts/scope-1`), false);
   // Every other paid or state-changing route stays shut during the turn.
   for (const path of [
     "/api/chat/voice",
@@ -102,11 +109,11 @@ test("a turn reaches only its own paths, a bounded number of times", () => {
     "/api/billing/checkout",
     "/api/account/delete",
   ]) {
-    assert.equal(scoutTurnWrites()(`${origin}${path}`), false, path);
+    assert.equal(scoutTurnWrites()("POST", `${origin}${path}`), false, path);
   }
   const support = scoutTurnWrites();
-  for (let index = 0; index < 40; index += 1) assert.equal(support(`${origin}/api/chat/context`), true);
-  assert.equal(support(`${origin}/api/chat/context`), false, "the composer's own calls are bounded too");
+  for (let index = 0; index < 40; index += 1) assert.equal(support("POST", `${origin}/api/chat/context`), true);
+  assert.equal(support("POST", `${origin}/api/chat/context`), false, "the composer's own calls are bounded too");
 });
 
 test("the session goes only to the origin whose app issued it, as a secure cookie", () => {
