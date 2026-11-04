@@ -68,6 +68,32 @@ export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], 
 
 export const amuxIdeaLaneClaimable = (state: AmuxIdeaLaneState | null) => state === null || state.state === "queued";
 
+/** What the claim's candidate query (ideaLaneService.ts) filters an idea on. */
+export type AmuxIdeaLaneCandidateFacts = {
+  submissionOrigin: "owner" | "session"; state: string; cancelled: boolean;
+  /** The raw text is kept: rawPurgedAt is null and the ciphertext, its key and digest are set. */
+  rawReadable: boolean;
+  analysisDeadlineMs: number;
+  /** currentSourcePlanRevisionId is set. */
+  sourcePlan: boolean;
+  chunks: number;
+};
+
+/**
+ * The lane state the Ideas list shows. An idea the lane has not run yet is
+ * queued while the lane is on and its claim would take the idea: it waits for
+ * the lane's turn, not for an execution approval it never needs. The attempt
+ * conditions of the claim hold trivially with no attempts.
+ */
+export function amuxIdeaLaneView(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number,
+  candidate: AmuxIdeaLaneCandidateFacts, enabled: boolean): AmuxIdeaLaneState | null {
+  const state = amuxIdeaLaneState(attempts, nowMs);
+  if (state || !enabled) return state;
+  const takes = candidate.submissionOrigin === "owner" && candidate.state === "submitted" && !candidate.cancelled &&
+    candidate.rawReadable && candidate.analysisDeadlineMs > nowMs && !candidate.sourcePlan && candidate.chunks === 0;
+  return takes ? { state: "queued", attempts: 0, prNumber: null, lastOutcome: null } : null;
+}
+
 /** The public branch a run pushes: the attempt id only, never idea text. */
 export const amuxIdeaLaneBranch = (attemptId: string) => `amux-idea/${attemptId}`;
 

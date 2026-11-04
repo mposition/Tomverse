@@ -95,6 +95,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     tasks: (done: number, total: number) => `Task ${done}/${total}`,
     inReview: (count: number) => `GitHub review ${count}`,
     lane: {
+      waiting: "Waiting for the auto run lane",
       running: (attempt: number, max: number) => `Auto run in progress (attempt ${attempt} of ${max})`,
       queued: (attempts: number, max: number, outcome: string) => `Auto run will retry (${attempts} of ${max} failed, last: ${outcome})`,
       prOpen: (pr: number) => `Auto run opened draft PR #${pr}`,
@@ -251,6 +252,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     tasks: (done: number, total: number) => `Task ${done}/${total}`,
     inReview: (count: number) => `GitHub 리뷰 ${count}`,
     lane: {
+      waiting: "레인 대기 · 자동 실행 차례를 기다리는 중",
       running: (attempt: number, max: number) => `자동 실행 중 (${max}회 중 ${attempt}회째)`,
       queued: (attempts: number, max: number, outcome: string) => `자동 재시도 대기 (${max}회 중 ${attempts}회 실패, 마지막: ${outcome})`,
       prOpen: (pr: number) => `자동 실행이 draft PR #${pr}을 열었습니다`,
