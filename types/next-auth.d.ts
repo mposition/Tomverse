@@ -31,6 +31,12 @@ declare module "next-auth/jwt" {
          */
         sessionIssuedAt?: number;
         /**
+         * Epoch milliseconds a session ends at for good, on the Scout's test
+         * account session only. It survives NextAuth's re-encoding, which resets
+         * `exp` to the normal session length (lib/sessionRevocationCore.ts).
+         */
+        absoluteExpiresAt?: number;
+        /**
          * True only on the token of the sign-in that created the account. The
          * sign-up screen's choice is consumed by that session and no other: an
          * account another tab created is signed into here with this false.

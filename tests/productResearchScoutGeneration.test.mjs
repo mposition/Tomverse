@@ -26,8 +26,10 @@ const chatPage = `<!doctype html><html lang="ko"><body>
 <div id="out"></div>
 <script>
 const out = document.getElementById("out");
+fetch("/api/background", { method: "POST", body: "on load" }).catch(() => {});
 document.querySelector('[data-testid="chat-send-button"]').onclick = async () => {
   const prompt = document.querySelector('[data-testid="chat-textarea"]').value;
+  if (prompt.includes("STRAYS")) await fetch("/api/chat/voice", { method: "POST", body: "stray" }).catch(() => {});
   const answer = await (await fetch("/api/chat", { method: "POST", body: prompt })).json();
   if (answer.failure) {
     out.innerHTML = '<span data-testid="generated-artifact-failure">' + answer.failure + "</span>";
@@ -39,6 +41,7 @@ document.querySelector('[data-testid="chat-send-button"]').onclick = async () =>
       link.href = URL.createObjectURL(blob);
       link.download = "file";
       link.click();
+      await fetch("/api/after-the-turn", { method: "POST", body: "late" }).catch(() => {});
     };
   }
 };
@@ -139,6 +142,15 @@ needsBrowser("a real PDF comes back through the card's download, with its first 
     assert.match(request.cookie, /fixture-session/, request.pathname);
     assert.equal(request.access, "fixture-id", request.pathname);
   }
+});
+
+needsBrowser("nothing writes outside the turn, or to a path the turn does not make", async () => {
+  seen.length = 0;
+  const subject = await generateFile(browser, rules, { id: "generated.pdf", prompt: "STRAYS" }, walkPlace());
+  const posts = seen.filter((request) => request.method === "POST").map((request) => request.pathname);
+  assert.deepEqual(posts, ["/api/chat"], "not on load, not to another route, not after the answer settled");
+  assert.match(subject.signals, /refused these POSTs during the turn[^]*\/api\/chat\/voice/);
+  assert.equal(rules.allowWrite, null);
 });
 
 needsBrowser("POST closes again after the turn, so a later page cannot write", async () => {

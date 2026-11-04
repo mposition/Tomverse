@@ -43,8 +43,11 @@ export async function issueScoutSignedInAccess(
 ): Promise<ScoutSignedInAccess> {
   const secret = process.env.NEXTAUTH_SECRET;
   if (!secret) return { refused: "session_secret_missing" };
-  const user = await prisma.user.findUnique({
-    where: { email },
+  // Case-insensitive, as an OAuth sign-up can store a mixed-case address; two
+  // accounts that differ only by case do not name one test account.
+  const users = await prisma.user.findMany({
+    where: { email: { equals: email, mode: "insensitive" } },
+    take: 2,
     select: {
       id: true,
       email: true,
@@ -57,16 +60,19 @@ export async function issueScoutSignedInAccess(
       ...STORE_ENTITLEMENT_SELECT,
     },
   });
+  const user = users.length === 1 ? users[0] : null;
   if (!user) return { refused: "test_account_missing" };
   if (user.accountStatus !== "active") return { refused: "test_account_inactive" };
   const adminAccess = getAdminSessionAccessState({
-    expires: new Date(now.getTime() + SCOUT_TEST_SESSION_SECONDS * 1_000).toISOString(),
+    expires: now.toISOString(),
     user: { id: user.id, email: user.email, authenticatedAt: now.toISOString() },
   });
   if (adminAccess !== "not-authorized") return { refused: "test_account_is_admin" };
 
+  const expiresAt = new Date(now.getTime() + SCOUT_TEST_SESSION_SECONDS * 1_000);
   // The same claims a sign-in writes in lib/auth.ts; the session callback then
-  // applies the same revocation and account checks to it on every request.
+  // applies the same revocation and account checks to it on every request, and
+  // ends it at absoluteExpiresAt however often NextAuth re-encodes it.
   const value = await encode({
     secret,
     maxAge: SCOUT_TEST_SESSION_SECONDS,
@@ -79,6 +85,7 @@ export async function issueScoutSignedInAccess(
       createdAt: user.createdAt?.toISOString(),
       authenticatedAt: now.toISOString(),
       sessionIssuedAt: now.getTime(),
+      absoluteExpiresAt: expiresAt.getTime(),
     },
   });
   const permits = await reserveScoutGenerations(requestedGenerations, (tx, granted) =>
@@ -97,7 +104,7 @@ export async function issueScoutSignedInAccess(
     session: {
       name: SESSION_COOKIE_NAMES[secure ? 0 : 1],
       value,
-      expiresAt: new Date(now.getTime() + SCOUT_TEST_SESSION_SECONDS * 1_000).toISOString(),
+      expiresAt: expiresAt.toISOString(),
     },
     permits,
   };

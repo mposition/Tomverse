@@ -16,7 +16,7 @@ import {
 } from "@/lib/productResearchScoutSettings";
 import { issueScoutSignedInAccess } from "@/lib/productResearchScoutSignedIn";
 import { invalidateSessionSecuritySnapshot } from "@/lib/sessionSecurity";
-import { decode } from "next-auth/jwt";
+import { decode, encode } from "next-auth/jwt";
 
 import { resetTestFixture } from "./resetTestFixture";
 
@@ -94,6 +94,15 @@ test("real generations come from their own cap, as many as it still allows, and 
   assert.deepEqual(await reserveScoutGenerations(asked, noAudit), ["generated.pdf"]);
 });
 
+test("no permit is granted when nothing would judge the result", async () => {
+  await reset();
+  await writeScoutSettings({ modelId: null, dailyCallCap: 10, generationDailyCap: 5 }, noAudit);
+  assert.deepEqual(await reserveScoutGenerations(["generated.pdf"], noAudit), [], "the model is off");
+  await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 0, generationDailyCap: 5 }, noAudit);
+  assert.deepEqual(await reserveScoutGenerations(["generated.pdf"], noAudit), [], "the model-call cap is zero");
+  assert.equal((await scoutUsageToday()).generations, 0);
+});
+
 test("the audit runs in the permits' transaction: a refused audit grants nothing", async () => {
   await reset();
   await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 1, generationDailyCap: 5 }, noAudit);
@@ -116,6 +125,11 @@ test("the test account gets a short session a sign-in would honour; an administr
   try {
     assert.deepEqual(await issueScoutSignedInAccess("nobody@example.invalid", []), { refused: "test_account_missing" });
 
+    // An address stored in mixed case still names the account.
+    await prisma.user.update({ where: { id: user.id }, data: { email: email.replace("scout", "Scout") } });
+    assert.ok("session" in (await issueScoutSignedInAccess(email, [])));
+    await prisma.user.update({ where: { id: user.id }, data: { email } });
+
     const now = new Date();
     const access = await issueScoutSignedInAccess(email, ["generated.pdf", "generated.image"], now);
     assert.ok("session" in access);
@@ -132,10 +146,19 @@ test("the test account gets a short session a sign-in would honour; an administr
     const resolve = async () =>
       (await authOptions.callbacks!.session!({ session: { user: {}, expires: access.session.expiresAt }, token: token! } as never)) as { user?: { id?: string } };
     assert.equal((await resolve()).user?.id, user.id);
-    const audit = await prisma.adminAuditLog.findFirst({ where: { action: "product_research.scout.test_session_issued", targetId: user.id } });
+    assert.equal(token?.absoluteExpiresAt, now.getTime() + 3_600_000);
+
+    // However NextAuth re-encodes it, as it does on every session read, the hour is the end.
+    const reissued = await encode({ secret, maxAge: 7 * 24 * 60 * 60, token: { ...token!, absoluteExpiresAt: Date.now() - 1 } });
+    const late = await decode({ token: reissued, secret });
+    assert.ok(Number(late?.exp) - Date.now() / 1000 > 6 * 24 * 60 * 60, "the token itself still has days left");
+    const lateSession = (await authOptions.callbacks!.session!({ session: { user: {}, expires: access.session.expiresAt }, token: late! } as never)) as { user?: { id?: string } };
+    assert.equal(lateSession.user?.id, undefined, "past its absolute end the session is gone");
+
+    const audits = await prisma.adminAuditLog.findMany({ where: { action: "product_research.scout.test_session_issued", targetId: user.id } });
+    const audit = audits.find((row) => (row.metadata as Record<string, unknown>).generationPermits === 1);
     assert.equal((audit?.metadata as Record<string, unknown>).systemActor, "product-research-scout");
-    assert.equal((audit?.metadata as Record<string, unknown>).generationPermits, 1);
-    assert.equal(JSON.stringify(audit).includes(access.session.value), false, "the session is not in the audit row");
+    assert.equal(JSON.stringify(audits).includes(access.session.value), false, "the session is not in the audit rows");
 
     await prisma.user.update({ where: { id: user.id }, data: { sessionsRevokedAt: new Date(now.getTime() + 1_000) } });
     invalidateSessionSecuritySnapshot(user.id);

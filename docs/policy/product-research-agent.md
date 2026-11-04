@@ -323,17 +323,19 @@ Chromium sandbox가 떴는지(`on`), 재시도로 sandbox 없이 떴는지(`off`
 코드는 있고 기본으로 꺼져 있습니다. 켜는 일은 자격증명과 비용을 정하므로 owner가 합니다.
 
 - **들어가는 방법**: walker가 앱의 `POST /api/internal/product-research/scout/signed-in`에 제출 secret으로 요청하면, 앱이
-  `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL` 계정의 1시간짜리 session을 만들어 줍니다(`lib/productResearchScoutSignedIn.ts`). walker에는
-  비밀번호도 오래가는 토큰도 없어 교체할 것이 없고, 변수를 지우면 다음 실행부터 끝납니다. 발급은 감사 체인에 남습니다.
+  `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL` 계정의 1시간짜리 session을 만들어 줍니다(`lib/productResearchScoutSignedIn.ts`). 1시간은 token 안의
+  절대 만료(`absoluteExpiresAt`)가 지킵니다. NextAuth가 session을 읽으며 token을 일반 7일로 다시 만들어도 session callback이 이 시각에 끝냅니다. walker에는
+  비밀번호도 오래가는 토큰도 없어 교체할 것이 없고, 변수를 지우면 늦어도 1시간 안에 끝납니다. 발급은 감사 체인에 남습니다.
 - **경계**: 관리자 계정은 거부합니다(`test_account_is_admin`). 활성 계정이 아니면 거부합니다. session cookie는 답을 준 앱과 같은 origin에만
   넣습니다. 테스트 계정에는 실제 사용자의 데이터를 넣지 않습니다.
 - **로그인 화면**(§12 표): 공개 page와 같이 GET·HEAD로만 보고, 모델 호출 상한을 함께 씁니다.
 - **실제 생성**: 파일 4종은 채팅 입력창에 고정 문장을 넣어 보내고 카드의 다운로드 버튼으로 받으며, 이미지는 이미지 route로 만듭니다
-  (`SCOUT_GENERATIONS`). 이 한 턴 동안만 같은 origin의 POST를 허용합니다. 모델은 요청한 내용, 걸린 시간, 채팅 화면, PDF 첫 쪽 또는 Office 본문,
+  (`SCOUT_GENERATIONS`). POST는 전송 버튼을 누를 때부터 답이 끝날 때까지만, 채팅 턴이 쓰는 경로(`scoutTurnWrites`: `/api/chat` 최대 3회와 그 주변 호출)에만
+  허용합니다. 음성·Review·이미지 턴 같은 다른 유료 경로로는 나가지 못하고, 막힌 경로는 모델에게 알립니다. 모델은 요청한 내용, 걸린 시간, 채팅 화면, PDF 첫 쪽 또는 Office 본문,
   이미지를 보고 결과가 요청을 충족하는지 판정합니다. 파일이 오지 않은 것도 제안 대상입니다.
 - **비용**: owner가 Admin에서 정한 하루 횟수(UTC 하루, 기본 0, 최대 20)만큼 walker가 허가를 받습니다. 허가는 쓰기 전에 원장에 한 줄씩 남고
   (`permit.` 접두어, 모델 호출 상한과 따로 셉니다), 쓰지 못한 허가도 돌려주지 않습니다. 이 경로는 제품 경로 그대로이므로 **테스트 계정의 크레딧을
-  쓰고 Chat 비용에 잡힙니다.** 크레딧이 떨어지면 생성이 멈추므로, 계정에 넣은 크레딧이 실제 상한입니다. 판정할 모델이 없거나 호출 상한을 다 쓴 날은
-  생성하지 않습니다.
+  쓰고 Chat 비용에 잡힙니다.** 크레딧이 떨어지면 생성이 멈추므로, 계정에 넣은 크레딧이 실제 상한입니다. 판정할 모델이 없거나 호출 상한이 0이면 허가를 내주지
+  않고, 실행 중에 모델이 꺼지거나 호출 상한을 다 쓰면 남은 생성을 하지 않습니다.
 
 켜는 순서는 `docs/ops/product-research-agent.md`의 "Scout 테스트 계정 켜기"를 따릅니다.

@@ -269,7 +269,8 @@ async function walkSignedIn(browser, rules) {
     }
   }
   for (const id of access.permits) {
-    if (capReached) {
+    // The model went off or the cap ran out during this run: stop paying for what nothing will judge.
+    if (capReached || outcomes.modelOff > 0) {
       outcomes.capped += 1;
       continue;
     }

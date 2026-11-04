@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
-  SCOUT_ALLOWED_METHODS,
-  SCOUT_GENERATION_METHODS,
   SCOUT_GENERATIONS,
   SCOUT_PAGE_ORIGIN,
   SCOUT_PAGE_ORIGINS,
   SCOUT_SIGNED_IN_PAGES,
   decideScoutRequest,
   isSignedOutPath,
+  scoutTurnWrites,
   scoutWalkTarget,
   signedInAccess,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
@@ -45,18 +44,41 @@ test("dev and Test need the whole Access token, and no other origin can be chose
   assert.equal(SCOUT_PAGE_ORIGINS.length, 3);
 });
 
-test("POST is open only with the generation methods, and only to an allowed origin", () => {
+test("POST is open only during a turn, and only to an allowed origin", () => {
   const post = { method: "POST", url: "https://tomverse.app/api/chat", allowedOrigins: ["https://tomverse.app"] };
   assert.deepEqual(decideScoutRequest(post), { allow: false, reason: "method" });
-  assert.deepEqual(decideScoutRequest({ ...post, allowedMethods: SCOUT_ALLOWED_METHODS }), { allow: false, reason: "method" });
-  assert.deepEqual(decideScoutRequest({ ...post, allowedMethods: SCOUT_GENERATION_METHODS }), { allow: true });
+  assert.deepEqual(decideScoutRequest({ ...post, allowWrite: null }), { allow: false, reason: "method" });
+  assert.deepEqual(decideScoutRequest({ ...post, allowWrite: scoutTurnWrites() }), { allow: true });
   assert.deepEqual(
-    decideScoutRequest({ ...post, url: "https://example.com/collect", allowedMethods: SCOUT_GENERATION_METHODS }),
+    decideScoutRequest({ ...post, url: "https://example.com/api/chat", allowWrite: scoutTurnWrites() }),
     { allow: false, reason: "origin" },
   );
   for (const method of ["PUT", "PATCH", "DELETE"]) {
-    assert.deepEqual(decideScoutRequest({ ...post, method, allowedMethods: SCOUT_GENERATION_METHODS }), { allow: false, reason: "method" });
+    assert.deepEqual(decideScoutRequest({ ...post, method, allowWrite: scoutTurnWrites() }), { allow: false, reason: "method" });
   }
+  // A read is not the turn's to count.
+  const allowWrite = scoutTurnWrites();
+  for (let index = 0; index < 20; index += 1) {
+    assert.deepEqual(decideScoutRequest({ ...post, method: "GET", allowWrite }), { allow: true });
+  }
+  assert.equal(allowWrite("https://tomverse.app/api/chat"), true);
+});
+
+test("a turn reaches only its own paths, a bounded number of times", () => {
+  const origin = "https://tomverse.app";
+  const allowWrite = scoutTurnWrites();
+  for (let index = 0; index < 3; index += 1) assert.equal(allowWrite(`${origin}/api/chat`), true, `chat post ${index}`);
+  assert.equal(allowWrite(`${origin}/api/chat`), false, "no more than one a model");
+  for (const path of ["/api/chat/availability", "/api/chat/context", "/api/chat/image-intent", "/api/conversations/c1/messages", "/api/conversations/c1/generate-title"]) {
+    assert.equal(scoutTurnWrites()(`${origin}${path}`), true, path);
+  }
+  // Every other paid or state-changing route stays shut during the turn.
+  for (const path of ["/api/chat/voice", "/api/chat/deep-research/status", "/api/images/generations", "/api/conversations/c1/image-turn", "/api/conversations/c1/delete", "/api/review", "/api/billing/checkout", "/api/account/delete"]) {
+    assert.equal(scoutTurnWrites()(`${origin}${path}`), false, path);
+  }
+  const support = scoutTurnWrites();
+  for (let index = 0; index < 12; index += 1) assert.equal(support(`${origin}/api/chat/context`), true);
+  assert.equal(support(`${origin}/api/chat/context`), false, "the composer's own calls are bounded too");
 });
 
 test("the session goes only to the origin whose app issued it, as a secure cookie", () => {
@@ -128,11 +150,12 @@ test("every signed-in screen the walker opens is a page the app has", () => {
 
 test("the POST opening is scoped to the file turn and closed again", () => {
   const walker = read("lib/productResearchScoutGeneration.mjs");
-  const opened = walker.indexOf("rules.allowedMethods = SCOUT_GENERATION_METHODS;");
-  const closed = walker.indexOf("rules.allowedMethods = SCOUT_ALLOWED_METHODS;");
-  assert.ok(opened > 0 && closed > opened);
-  assert.equal(walker.split("rules.allowedMethods = SCOUT_GENERATION_METHODS;").length, 2);
-  assert.match(walker.slice(closed - 60, closed), /finally \{/);
+  const opened = walker.indexOf("rules.allowWrite = scoutTurnWrites();");
+  assert.ok(opened > 0);
+  assert.equal(walker.split("rules.allowWrite = scoutTurnWrites();").length, 2, "opened once");
+  assert.ok(opened < walker.indexOf('getByTestId("chat-send-button").click()'), "opened as send is pressed");
+  assert.ok(walker.indexOf('getByTestId("chat-textarea").fill') < opened, "typing cannot write");
+  assert.match(walker, /finally \{\n    rules\.allowWrite = null;/);
 });
 
 test("nothing the session route answers is logged", () => {

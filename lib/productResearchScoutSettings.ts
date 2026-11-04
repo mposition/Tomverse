@@ -131,8 +131,10 @@ export async function startScoutCall(input: {
  * Takes real generations from today's cap (UTC day), as many of those asked for
  * as it still allows, under the same lock as the settings: a ledger row each,
  * written before the walker spends anything, so an owner lowering the cap stops
- * every run after the change. A permit a run did not use stays spent. `audit`
- * runs in the same transaction with what was granted.
+ * every run after the change. A permit a run did not use stays spent. No permit
+ * is granted while the model is off or the model-call cap is zero: nothing would
+ * judge what the money made. `audit` runs in the same transaction with what was
+ * granted.
  */
 export async function reserveScoutGenerations(
   requested: readonly string[],
@@ -140,9 +142,10 @@ export async function reserveScoutGenerations(
 ): Promise<string[]> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SCOUT_CALL_LOCK})`;
-    const { generationDailyCap } = await settingsFrom(tx);
+    const { modelId, dailyCallCap, generationDailyCap } = await settingsFrom(tx);
     const used = await tx.productResearchScoutLlmCall.count({ where: { createdAt: { gte: startOfUtcDay(new Date()) }, ...GENERATION_PERMITS } });
-    const granted = requested.slice(0, Math.max(0, generationDailyCap - used));
+    const allowed = modelId === null || dailyCallCap === 0 ? 0 : Math.max(0, generationDailyCap - used);
+    const granted = requested.slice(0, allowed);
     if (granted.length > 0) {
       await tx.productResearchScoutLlmCall.createMany({
         data: granted.map((id) => ({
