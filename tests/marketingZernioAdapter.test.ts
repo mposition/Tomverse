@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  zernioPlatformFields,
   zernioPublishAdapter,
   zernioRequestUuid,
   type ZernioAdapterPorts,
@@ -799,4 +800,33 @@ test("an asset lookup that throws fails the post before anything is sent, rather
   const result = await adapter.publish({ ...request, assetIds: ["clip"] });
   assert.deepEqual(result, { outcome: "failed", errorCode: "asset_unresolved" });
   assert.equal(calls.length, 0);
+});
+
+test("hashtags reach each platform's text as written, and on YouTube stay in the description", () => {
+  const image = [{ type: "image" as const }];
+  const video = [{ type: "video" as const }];
+  const post = "Ask once, read three answers side by side.\n\n#AI #AIcomparison #Tomverse";
+  for (const [platform, media] of [
+    ["instagram", image],
+    ["instagram", video],
+    ["tiktok", video],
+    ["linkedin", image],
+    ["x", image],
+    ["facebook", image],
+    ["threads", image],
+  ] as const) {
+    const fields = zernioPlatformFields(platform, post, media, false);
+    assert.ok("content" in fields, platform);
+    assert.equal(fields.content, post, platform);
+  }
+
+  const short = zernioPlatformFields(
+    "youtube",
+    "Three answers to one question\nAsk once and compare.\n#Shorts #AI #Tomverse",
+    video,
+    true,
+  );
+  assert.ok("content" in short);
+  assert.equal(short.data?.title, "Three answers to one question");
+  assert.equal(short.content, "Ask once and compare.\n#Shorts #AI #Tomverse");
 });
