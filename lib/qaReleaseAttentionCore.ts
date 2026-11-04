@@ -7,6 +7,7 @@
  */
 import type { AgentDigestConsole, AgentDigestConsoleRow } from "@/lib/agentDigestConsoleRead";
 import type { QaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesCore";
+import type { QaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 
 export type QaReleaseAttentionItem =
   | { kind: "lane_latched"; reason: string | null; pullRequestNumber: number | null }
@@ -14,6 +15,8 @@ export type QaReleaseAttentionItem =
   | { kind: "production_behind"; servingSha: string | null; mainHeadSha: string | null }
   | { kind: "main_refused"; numbers: number[] }
   | { kind: "main_unread"; failure: string | null }
+  /** Open develop pull requests the merge lane leaves to a person. */
+  | { kind: "lane_human"; numbers: number[] }
   | { kind: "ci_failed"; count: number }
   | { kind: "checks_failed"; count: number }
   | { kind: "digest_stale"; lastAt: string | null }
@@ -33,6 +36,7 @@ export function qaReleaseAttentionItems(input: {
   main: QaReleaseMainCandidates;
   /** Newest first. */
   trains: readonly QaReleaseTrainOutcome[];
+  laneRounds?: QaReleaseLaneRounds;
   nowMs: number;
 }): QaReleaseAttentionItem[] {
   const { control, digests, mergeLane } = input.console;
@@ -54,6 +58,9 @@ export function qaReleaseAttentionItems(input: {
     if (refused.length > 0) items.push({ kind: "main_refused", numbers: refused });
   }
 
+  const human = (input.laneRounds?.verdicts?.list ?? []).filter((verdict) => verdict.status === "human").map((verdict) => verdict.number);
+  if (human.length > 0) items.push({ kind: "lane_human", numbers: human });
+
   const latest = latestReadableDigest(digests);
   if (latest?.summary) {
     if (latest.summary.failedCiJobs > 0) items.push({ kind: "ci_failed", count: latest.summary.failedCiJobs });
@@ -71,6 +78,40 @@ export function qaReleaseAttentionItems(input: {
   if (train?.outcome === "failed") items.push({ kind: "train_failed", slot: train.slot, failure: train.failure });
 
   return items;
+}
+
+/** Where work stands from a develop pull request to production, from what the page already read. */
+export type QaReleaseFlow = {
+  /** Open develop pull requests by what the lane does with them; null until the lane has judged them. */
+  pulls: { lane: number; human: number; fix: number; waiting: number; draft: number } | null;
+  latched: boolean;
+  lastTrain: { slot: string; outcome: QaReleaseTrainOutcome["outcome"] } | null;
+  /** Open main pull requests; null when GitHub could not be read. */
+  mainPulls: number | null;
+  mainHeadSha: string | null;
+  servingSha: string | null;
+  servesMainHead: boolean | null;
+};
+
+export function qaReleaseFlow(input: {
+  main: QaReleaseMainCandidates;
+  latched: boolean;
+  /** Newest first. */
+  trains: readonly QaReleaseTrainOutcome[];
+  laneRounds?: QaReleaseLaneRounds;
+}): QaReleaseFlow {
+  const list = input.laneRounds?.verdicts?.list ?? null;
+  const count = (...statuses: string[]) => (list ?? []).filter((verdict) => statuses.includes(verdict.status)).length;
+  const train = input.trains[0] ?? null;
+  return {
+    pulls: list === null ? null : { lane: count("next", "queued"), human: count("human"), fix: count("fix"), waiting: count("waiting"), draft: count("draft") },
+    latched: input.latched,
+    lastTrain: train === null ? null : { slot: train.slot, outcome: train.outcome },
+    mainPulls: input.main.pullRequests === null ? null : input.main.pullRequests.length,
+    mainHeadSha: input.main.production.mainHeadSha,
+    servingSha: input.main.production.servingSha,
+    servesMainHead: input.main.production.servesMainHead,
+  };
 }
 
 export type QaReleaseStatusFigures = {
