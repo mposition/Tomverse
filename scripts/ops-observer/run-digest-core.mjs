@@ -34,6 +34,8 @@ export const SLACK_WEBHOOK_PREFIX = "https://hooks.slack.com/";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const HEARTBEAT_RETRY_DELAY_MS = 2_000;
+
 /** The digest submission's answers; anything else is logged as unknown. */
 const DIGEST_RESULTS = Object.freeze(["created", "replayed", "refused", "untrusted"]);
 
@@ -52,7 +54,13 @@ export function slackNoticeBody(text) {
  * injected so tests drive every branch. Resolves to { exitCode, outcome } and
  * logs one line.
  */
-export async function runDigest({ env, fetchImpl = globalThis.fetch, now = Date.now, log = console.log }) {
+export async function runDigest({
+  env,
+  fetchImpl = globalThis.fetch,
+  now = Date.now,
+  log = console.log,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}) {
   const startedAt = now();
   const deadline = startedAt + RUN_DEADLINE_MS;
   const runDeadline = new Date(deadline).toISOString();
@@ -123,8 +131,13 @@ export async function runDigest({ env, fetchImpl = globalThis.fetch, now = Date.
   }
 
   // 4. The heartbeat.
-  const beat = await request(env.OPS_OBSERVER_DIGEST_HEARTBEAT_URL, { method: "GET" });
+  let beat = await request(env.OPS_OBSERVER_DIGEST_HEARTBEAT_URL, { method: "GET" });
+  if (beat.failed) {
+    // A ping is a read: one retry when the connection failed (see run-page-core).
+    await sleep(HEARTBEAT_RETRY_DELAY_MS);
+    beat = await request(env.OPS_OBSERVER_DIGEST_HEARTBEAT_URL, { method: "GET" });
+  }
   if (beat.late) return finish(1, "late");
-  if (!(beat.status >= 200 && beat.status < 300)) return finish(1, "heartbeat_failed");
+  if (!(beat.status >= 200 && beat.status < 300)) return finish(1, "heartbeat_failed", { httpStatus: beat.status ?? null });
   return finish(0, result);
 }

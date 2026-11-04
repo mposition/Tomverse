@@ -105,7 +105,9 @@ S1b의 page 실행 한 번은 이 두 route와 advance(때로 confirm)를 부르
 - DB 부하(Neon CPU)는 이 기록에 수치가 없습니다(**미기록**). 소유자가 범위를 승인하면서 이 항목을 막지 않기로 했습니다.
 
 - S1a → S1b 전환: **전환**(소유자, 2026-10-23)
-- S1b 시작: 2026-10-23T05:15Z(AEST 15:15). 두 실행 서비스(`Ops Observer`, `Ops Observer Digest`)의 production
-  `OPS_OBSERVER_ENABLED`를 `true`로 설정한 시각입니다. 14일 관측(§8 S1b 전환 조건)은 이 시각부터 셉니다.
+- 스위치: 2026-10-23T05:15Z(AEST 15:15)에 두 실행 서비스(`Ops Observer`, `Ops Observer Digest`)의 production
+  `OPS_OBSERVER_ENABLED`를 `true`로 설정했습니다.
+- S1b 시작: **2026-10-24T09:02Z(AEST 19:02).** 스위치 뒤 구성 오류(#2912)와 T3a 판정 오류(#2949)로 실행이 끝나지 못했고, 이
+  시각에 첫 실행이 `mode=shadow`로 정상 종료했습니다. 14일 관측(§8 S1b 전환 조건)은 이 시각부터 셉니다.
 - 6절의 "알림 대상: (실행자 기록)"은 여전히 비어 있습니다. heartbeat monitor의 알림 대상은 소유자가 등록한 값이며
   이 기록에는 적지 않았습니다.
