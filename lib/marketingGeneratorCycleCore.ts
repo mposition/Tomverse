@@ -61,7 +61,7 @@ export type MarketingGeneratorCycleDeps = {
 
 export type MarketingGeneratorCycleSummary = {
   readonly calls: number;
-  /** Accounts not asked because no approved image or video fits their platform and locale. */
+  /** Accounts not asked because no approved image or video fits their platform and locale, or all of them were used. */
   readonly accountsWithoutMedia: number;
   readonly draftsProposed: number;
   readonly draftsSubmitted: number;
@@ -117,8 +117,9 @@ export async function runMarketingGeneratorCycle(
 
   for (const [callIndex, account] of accounts.entries()) {
     // Every post carries an image or a video, so an account with none to carry
-    // would only pay for an answer that has to be dropped.
-    const mediaKind = marketingA5MediaKindFor(context, account.channel, account.defaultLocale, day);
+    // -- none its platform takes, or none it has not already used -- would only
+    // pay for an answer that has to be dropped.
+    const mediaKind = marketingA5MediaKindFor(context, account.channel, account.defaultLocale, day, account.id);
     if (mediaKind === null) {
       accountsWithoutMedia += 1;
       continue;

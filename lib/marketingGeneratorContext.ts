@@ -36,6 +36,7 @@ import {
   type MarketingClaim,
   type MarketingClaimProjection,
 } from "@/lib/marketingClaims";
+import { MARKETING_ASSET_RELEASED_POST_STATUSES } from "@/lib/marketingDraftIntakeCore";
 import { resolveMarketingPageEvidence } from "@/lib/marketingEvidencePages";
 import { readApprovedMarketingAssetKinds } from "@/lib/marketingAssetStore";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
@@ -83,6 +84,14 @@ export type MarketingGeneratorContext = {
      * within 14 days). Guidance for the model, not a gate.
      */
     readonly recentClaimIds: readonly string[];
+    /**
+     * The assets this account has already used: every asset named by one of
+     * its posts that was not rejected, refused by the Guard or left to expire,
+     * however long ago. A5 does not offer them again (owner decision
+     * 2026-11-04) and the draft intake refuses a draft that names one. A rule
+     * of code, not guidance for the model.
+     */
+    readonly usedAssetIds: readonly string[];
   }>;
   /** Claims whose gate is off or unreadable are left out: a post making one would be refused. */
   readonly claims: readonly MarketingGeneratorClaim[];
@@ -304,6 +313,19 @@ export function marketingRecentClaimIds(
   return new Map([...byChannel].map(([channelId, ids]) => [channelId, [...ids].sort()]));
 }
 
+/** Each account's used asset ids, sorted and without repeats. */
+export function marketingUsedAssetIds(
+  rows: ReadonlyArray<{ readonly channelId: string; readonly assetIds: readonly string[] }>,
+): ReadonlyMap<string, readonly string[]> {
+  const byChannel = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const ids = byChannel.get(row.channelId) ?? new Set<string>();
+    for (const id of row.assetIds) ids.add(id);
+    byChannel.set(row.channelId, ids);
+  }
+  return new Map([...byChannel].map(([channelId, ids]) => [channelId, [...ids].sort()]));
+}
+
 /** The claims a post may make today: no gate, or a gate that read as on. */
 export function marketingClaimsWithOpenGates<T extends { readonly gate: string | null }>(
   claims: readonly T[],
@@ -426,7 +448,7 @@ export async function readMarketingGeneratorContext(
       allowedLocales: true,
     },
   });
-  const [brief, marketIntel, tracked, knownIds, llmSetting, analysisSetting, plans, recentPosts, recentBriefs] = await Promise.all([
+  const [brief, marketIntel, tracked, knownIds, llmSetting, analysisSetting, plans, recentPosts, usedAssetPosts, recentBriefs] = await Promise.all([
     latestReport(db, "brief"),
     latestReport(db, "market_intel"),
     readMarketingCompetitorsForGenerator(db),
@@ -444,6 +466,15 @@ export async function readMarketingGeneratorContext(
       take: MARKETING_RECENT_POSTS_MAX,
       select: { channelId: true, claimIds: true },
     }),
+    // No time window: an asset an account has used stays used. Bounded by the
+    // posts the accounts ever made, and read as ids only.
+    db.marketingPost.findMany({
+      where: {
+        channelId: { in: channels.map((row) => row.id) },
+        status: { notIn: [...MARKETING_ASSET_RELEASED_POST_STATUSES] },
+      },
+      select: { channelId: true, assetIds: true },
+    }),
     db.marketingReport.findMany({
       where: { kind: "brief" },
       orderBy: [{ periodEnd: "desc" }, { createdAt: "desc" }],
@@ -452,6 +483,7 @@ export async function readMarketingGeneratorContext(
     }),
   ]);
   const recentClaims = marketingRecentClaimIds(recentPosts);
+  const usedAssets = marketingUsedAssetIds(usedAssetPosts);
   const recentBriefTopics = recentBriefs.flatMap((row) => {
     // The registry types every schema as `z.ZodType`; the brief's has `topicIds: string[]`.
     const parsed = MARKETING_REPORT_PAYLOAD_SCHEMAS.brief.safeParse(row.payload);
@@ -486,6 +518,7 @@ export async function readMarketingGeneratorContext(
       defaultLocale: row.defaultLocale,
       allowedLocales: [...row.allowedLocales],
       recentClaimIds: [...(recentClaims.get(row.id) ?? [])],
+      usedAssetIds: [...(usedAssets.get(row.id) ?? [])],
     })),
     claims: generatorClaimContext(
       marketingClaimsWithOpenGates(MARKETING_CLAIMS, gates),

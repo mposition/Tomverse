@@ -113,6 +113,36 @@ test("an account with no approved image or video for its platform and locale is 
   assert.equal(none.accountsWithoutMedia, 2);
 });
 
+test("an account that has used every asset is not asked, and one that has not is", async () => {
+  // Owner decision 2026-11-04: an account never carries an asset it has used.
+  const used = {
+    ...context,
+    channels: [
+      { ...context.channels[0], usedAssetIds: [] },
+      { ...context.channels[1], usedAssetIds: ["media-card-en"] },
+    ],
+  };
+  const h = harness({ readContext: async () => used });
+  const summary = await cycle(h);
+  assert.equal(summary.stoppedAt, null);
+  assert.equal(summary.calls, 1);
+  assert.equal(summary.accountsWithoutMedia, 1);
+  // chn_a sorts first and is the one whose asset was used.
+  assert.deepEqual(h.submitted.map((s) => s.drafts[0].channelId), ["chn_b"]);
+  assert.deepEqual(JSON.parse(h.asked[0].messages[1].content).assets.map((asset) => asset.id), ["media-card-en"]);
+
+  const allUsed = harness({
+    readContext: async () => ({
+      ...context,
+      channels: context.channels.map((channel) => ({ ...channel, usedAssetIds: ["media-card-en"] })),
+    }),
+  });
+  const none = await cycle(allUsed);
+  assert.equal(none.stoppedAt, null);
+  assert.equal(allUsed.asked.length, 0);
+  assert.equal(none.accountsWithoutMedia, 2);
+});
+
 test("the run's day decides whether an account is offered its videos or its images", async () => {
   // Instagram alternates image and video days (owner decision 2026-11-04).
   const instagram = {
