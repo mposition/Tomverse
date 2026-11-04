@@ -10,7 +10,7 @@
  */
 
 /** A suggestion is asked for once in this long; a failed ask waits the same. */
-export const QA_RELEASE_CI_ADVICE_EVERY_MS = 20 * 60 * 60 * 1000;
+export const QA_RELEASE_CI_ADVICE_EVERY_MS = 24 * 60 * 60 * 1000;
 export const QA_RELEASE_CI_ADVICE_COMMITS = 3;
 export const QA_RELEASE_CI_ADVICE_MAX_JOBS = 30;
 export const QA_RELEASE_CI_ADVICE_MAX_SUGGESTIONS = 5;

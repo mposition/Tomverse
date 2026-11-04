@@ -1,8 +1,7 @@
 /**
  * The daily CI suggestion round (lib/qaReleaseCiAdviceCore.ts), run by the train
  * service after its other rounds, on the train's own key. At most one paid call
- * a day: the ask is recorded whatever comes of it, and a failed one is not
- * repeated until the next day. Its failure never changes the train's outcome.
+ * in 24 hours: the ask is recorded before the call, so no failure repeats it. Its failure never changes the train's outcome.
  */
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_TRAIN_REPOSITORY } from "./qaReleaseTrainCore.ts";
@@ -41,9 +40,13 @@ export async function runQaReleaseCiAdviceRound(ports: QaReleaseCiAdvicePorts, n
     const input = qaReleaseCiAdviceInput({ checksByCommit: await ports.checks(), saturation: state.saturation, budget: state.budget });
     if (input === null) return "no_data";
     const at = new Date(nowMs).toISOString();
+    // The ask is recorded before it is paid for: if this fails nothing is
+    // called, and if anything after it fails the next round does not call again.
+    await ports.app.save(at, null);
     const suggestions = await ports.ask(input).catch(() => null);
+    if (suggestions === null) return "unanswered";
     await ports.app.save(at, suggestions);
-    return suggestions === null ? "unanswered" : "answered";
+    return "answered";
   } catch {
     return "failed";
   }

@@ -20,8 +20,8 @@ export function QaReleaseCiAdviceSection({ advice }: { advice: QaReleaseCiAdvice
         <p className="text-sm text-zinc-400">{m.ciAdviceNone}</p>
       ) : (
         <ol className="flex flex-col divide-y divide-zinc-800">
-          {advice.suggestions.map((suggestion) => (
-            <li key={suggestion.title} className="flex min-w-0 flex-col gap-1 py-3 first:pt-0 last:pb-0">
+          {advice.suggestions.map((suggestion, index) => (
+            <li key={index} className="flex min-w-0 flex-col gap-1 py-3 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-baseline gap-2">
                 <span className="min-w-0 break-words text-sm font-medium text-zinc-100">{suggestion.title}</span>
                 {suggestion.savesMinutes !== null ? (

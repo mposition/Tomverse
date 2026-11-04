@@ -60,7 +60,9 @@ test("at most one paid call a day, and a failed one still moves the clock", asyn
   const fresh = ports();
   assert.equal(await runQaReleaseCiAdviceRound(fresh.ports, T), "answered");
   assert.equal(fresh.calls.asked, 1);
-  assert.equal(fresh.calls.saved[0][1].length, 1);
+  // Recorded before the call, then answered.
+  assert.deepEqual(fresh.calls.saved.map(([, suggestions]) => suggestions === null), [true, false]);
+  assert.equal(fresh.calls.saved[1][1].length, 1);
 
   const recent = ports({ state: { askedAt: new Date(T - 60_000).toISOString() } });
   assert.equal(await runQaReleaseCiAdviceRound(recent.ports, T), "not_due");
@@ -74,6 +76,20 @@ test("at most one paid call a day, and a failed one still moves the clock", asyn
   const quiet = ports({ checks: async () => [] });
   assert.equal(await runQaReleaseCiAdviceRound(quiet.ports, T), "no_data");
   assert.equal(quiet.calls.asked, 0);
+
+  // The ask could not be recorded: it is not paid for.
+  const unrecorded = ports();
+  unrecorded.ports.app.save = async () => { throw new Error("app_500"); };
+  assert.equal(await runQaReleaseCiAdviceRound(unrecorded.ports, T), "failed");
+  assert.equal(unrecorded.calls.asked, 0);
+
+  // The answer could not be saved: the clock has moved, so the next round does not pay again.
+  const lost = ports();
+  let saves = 0;
+  lost.ports.app.save = async () => { saves += 1; if (saves === 2) throw new Error("app_500"); };
+  assert.equal(await runQaReleaseCiAdviceRound(lost.ports, T), "failed");
+  assert.equal(lost.calls.asked, 1);
+  assert.equal(saves, 2);
 
   const down = ports({ checks: async () => { throw new Error("github_500"); } });
   assert.equal(await runQaReleaseCiAdviceRound(down.ports, T), "failed");
