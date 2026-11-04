@@ -92,6 +92,8 @@ export const adminMarketingMessages = defineAdminMessages({
     switchTurnOn: "Turn {switch} on",
     switchTurnOff: "Turn {switch} off",
     switchConfirmOn: "Turn this on?",
+    switchConfirmExperimentsOn:
+      "Turn landing experiments on? Check first that the pre-registration and the copy are settled and that the shared cache bypasses the tv_exp cookie.",
     switchNoGeneration:
       "The configuration version could not be read, so no switch can be changed from here right now.",
     switchAutonomousNeedsBoth: "Needs drafts and publishing both on first.",
@@ -547,6 +549,8 @@ export const adminMarketingMessages = defineAdminMessages({
     switchTurnOn: "{switch} 켜기",
     switchTurnOff: "{switch} 끄기",
     switchConfirmOn: "켤까요?",
+    switchConfirmExperimentsOn:
+      "랜딩 실험을 켤까요? 사전 등록과 문구가 정해졌는지, 공유 캐시가 tv_exp 쿠키를 우회하는지 먼저 확인하세요.",
     switchNoGeneration:
       "설정 버전을 읽지 못해 지금은 여기서 스위치를 바꿀 수 없습니다.",
     switchAutonomousNeedsBoth: "초안 접수와 게시가 모두 켜져야 켤 수 있습니다.",
