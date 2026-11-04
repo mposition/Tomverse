@@ -294,12 +294,9 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
 - **GitHub에 아무것도 쓰지 않습니다.** 이슈·label·comment·PR·check 전부. 토큰은
   읽기 전용이고, 쓰기 권한이 붙은 토큰을 넣으면 그 자체가 정책 위반입니다.
 
-## 개선 탐색 S0 probe (정책 §12)
+## 개선 탐색 Chromium sandbox (정책 §12)
 
-`npm run agent:product-research-scout-s0-probe -- fixture|pages|renderers`는 browser 규칙과 렌더러를 **로컬에서** 재는
-도구입니다(2026-10-13 측정의 근거). fixture는 로컬 서버 두 개로 금지된 요청이 실제로 도달하는지 세고, pages는 production
-공개 page 20개를 GET·HEAD로만 열며, renderers는 고정 명세 파일을 만들고 검사합니다. 출력에 page 원문·경로·비밀값이 없어
-그대로 붙여도 안전합니다. Railway 서비스는 따로 두지 않습니다. Railway 호스트 일부는 Chromium sandbox를 거부합니다
+Railway 호스트 일부는 Chromium sandbox를 거부합니다
 (`product_research_scout_browser_launch_failed`의 `source`·`fatal`). 그때 walker는 sandbox 없이 한 번 더 띄우고
 `product_research_scout_browser_unsandboxed`와 실행 줄의 `sandbox: off`를 남깁니다(정책 §12). 재시도를 끄려면 walker에
 `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off`를 넣습니다.
