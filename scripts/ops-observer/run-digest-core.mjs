@@ -16,7 +16,7 @@
 //      the dead-man monitor says the notice did not arrive.
 //   4. The heartbeat.
 //
-// No request is retried. One JSON log line per run: enums, the owner date and
+// Only the heartbeat ping retries, once, when the connection failed. One JSON log line per run: enums, the owner date and
 // whether a notice went out -- no URL, secret, id or response body.
 
 import { checkNotification, isCanonicalItemId, renderDigestNotice } from "./content-guard-core.mjs";
