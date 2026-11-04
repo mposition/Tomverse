@@ -7,7 +7,9 @@ import {
 } from "@/lib/marketingDraftIntakeCore";
 import {
   MARKETING_A5_MAX_DRAFTS_PER_CALL,
+  MARKETING_VIDEO_DAYS,
   marketingA5AssetsFor,
+  marketingA5MediaKindFor,
   marketingA5Messages,
   marketingDraftSubmissionBody,
   marketingGeneratorContextSchema,
@@ -246,6 +248,68 @@ test("an account is offered only media the publisher can send there: a stored fi
   assert.deepEqual(marketingA5AssetsFor(mixed, "youtube", "en").map((asset) => asset.id), ["media-short"]);
   assert.deepEqual(marketingA5AssetsFor(mixed, "tiktok", "en"), []);
   assert.deepEqual(marketingA5AssetsFor(mixed, "linkedin", "ko"), []);
+});
+
+test("each platform's video days follow the owner's ratio, spread evenly, with the other kind standing in", () => {
+  // Owner decision 2026-11-04: Instagram video 2 of 4, Facebook 2 of 5,
+  // LinkedIn 1 of 3, X 3 of 10, Threads 2 of 7; YouTube and TikTok video only.
+  const both = (channel) =>
+    marketingGeneratorContextSchema.parse({
+      ...context,
+      assets: [
+        { id: "media-card", allowedChannels: [channel], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+        { id: "media-short", allowedChannels: [channel], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+      ],
+    });
+  for (const [channel, video, of] of [
+    ["instagram", 2, 4],
+    ["facebook", 2, 5],
+    ["linkedin", 1, 3],
+    ["x", 3, 10],
+    ["threads", 2, 7],
+    ["youtube", 1, 1],
+    ["tiktok", 1, 1],
+  ]) {
+    assert.deepEqual(MARKETING_VIDEO_DAYS[channel], { video, of }, channel);
+    // Any run of `of` consecutive days holds exactly `video` video days.
+    for (const start of [0, 20_400, 20_761]) {
+      const kinds = Array.from({ length: of }, (_, index) => marketingA5MediaKindFor(both(channel), channel, "en", start + index));
+      assert.equal(kinds.filter((kind) => kind === "video").length, video, `${channel} from day ${start}`);
+    }
+  }
+  // Instagram alternates rather than bunching its video days.
+  const instagram = Array.from({ length: 4 }, (_, index) => marketingA5MediaKindFor(both("instagram"), "instagram", "en", index));
+  assert.deepEqual(instagram, ["image", "video", "image", "video"]);
+
+  // No approved video for Facebook: its video days carry an image instead.
+  const imagesOnly = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [{ id: "media-card", allowedChannels: ["facebook"], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "image" }],
+  });
+  for (let day = 0; day < 5; day += 1) assert.equal(marketingA5MediaKindFor(imagesOnly, "facebook", "ko", day), "image");
+  // Nothing that fits at all.
+  assert.equal(marketingA5MediaKindFor(imagesOnly, "facebook", "en", 0), null);
+  assert.equal(marketingA5MediaKindFor(imagesOnly, "youtube", "ko", 0), null);
+});
+
+test("a call for one kind offers and accepts only assets of that kind", () => {
+  const mixed = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [
+      { id: "media-card", allowedChannels: ["linkedin"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+      { id: "media-short", allowedChannels: ["linkedin"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+    ],
+  });
+  const videoScope = { ...SCOPE, mediaKind: "video" };
+  const offered = JSON.parse(marketingA5Messages(mixed, videoScope)[1].content).assets.map((asset) => asset.id);
+  assert.deepEqual(offered, ["media-short"]);
+  const { drafts, dropped } = readMarketingA5Answer(
+    answer([proposal({ assetIds: ["media-card"] }), proposal({ assetIds: ["media-short"] })]),
+    mixed,
+    videoScope,
+  );
+  assert.deepEqual(dropped, { draft_names_unknown_asset: 1 });
+  assert.deepEqual(drafts.map((draft) => draft.assets[0].assetId), ["media-short"]);
 });
 
 test("one malformed draft costs that draft, not the good ones beside it", () => {

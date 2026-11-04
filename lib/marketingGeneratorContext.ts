@@ -45,7 +45,10 @@ import {
   type MarketingLlmPricePin,
 } from "@/lib/marketingLlmBudgetCore";
 import { marketingLlmCatalogPinsIn } from "@/lib/marketingLlmModelCatalog";
+import { readMarketingOperations, readMarketingPriceHistory } from "@/lib/marketingMeasurement";
+import { readLatestMarketingStrategy } from "@/lib/marketingReportRead";
 import type { MarketingTransaction } from "@/lib/marketingStore";
+import { prisma } from "@/lib/prisma";
 
 /**
  * Whether the generator may be given context at all.
@@ -108,6 +111,16 @@ export type MarketingGeneratorContext = {
    * stored plan, so this run writes one (lib/marketingStrategyCore.ts).
    */
   readonly analysis: { readonly enabled: boolean; readonly strategyDue: boolean };
+  /**
+   * The last seven days counted and the switches, for the morning report
+   * (lib/marketingMorningCore.ts); null while the analysis switch is off.
+   * Counts only: no post text, person or URL.
+   */
+  readonly operations: Awaited<ReturnType<typeof readMarketingOperations>> | null;
+  /** Competitor prices from the two newest market reports, newest first; empty while the switch is off. */
+  readonly marketPrices: Awaited<ReturnType<typeof readMarketingPriceHistory>>;
+  /** This week's stored plan, for the morning report on the days after it was written. */
+  readonly currentPlan?: { readonly headline: string; readonly goal: string } | null;
 };
 
 /**
@@ -375,6 +388,28 @@ async function marketingStrategyDue(db: Pick<ContextReader, "$queryRaw">, now: n
   return rows.length === 0;
 }
 
+/**
+ * The morning report's counts and prices, added to a context already read.
+ * Called after the context's transaction has committed, through the plain
+ * client: a slow or failed read here cannot hold or abort the transaction the
+ * drafts' context is read in, and a failure leaves the morning report without
+ * its counts (it records "no_data"), never the drafts without their context.
+ */
+export async function withMarketingMorningInputs(
+  context: MarketingGeneratorContext,
+  reader: Pick<typeof prisma, "$queryRaw"> = prisma,
+): Promise<MarketingGeneratorContext> {
+  if (!context.analysis.enabled) return context;
+  const [operations, marketPrices, plan] = await Promise.all([
+    readMarketingOperations(reader).catch(() => null),
+    readMarketingPriceHistory(reader).catch(() => []),
+    readLatestMarketingStrategy(reader).catch(() => null),
+  ]);
+  const currentPlan =
+    plan?.status === "found" && plan.current ? { headline: plan.strategy.headline, goal: plan.strategy.goal } : null;
+  return { ...context, operations, marketPrices, currentPlan };
+}
+
 export async function readMarketingGeneratorContext(
   db: ContextReader,
 ): Promise<MarketingGeneratorContext> {
@@ -475,6 +510,9 @@ export async function readMarketingGeneratorContext(
     competitors: { tracked, knownIds },
     llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
     ownProduct: { pages: ownPages(), plans: activePlans },
+    // Added after the transaction by `withMarketingMorningInputs`.
+    operations: null,
+    marketPrices: [],
     analysis: {
       enabled: marketingAnalysisEnabledFromValue(analysisSetting?.value),
       // Only asked while the switch is on: off, no plan is written either way.

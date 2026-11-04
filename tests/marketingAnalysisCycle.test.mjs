@@ -101,6 +101,7 @@ test("with the switch on, two calls make one signed brief whose analysis rests o
     claimIds: 1,
     report: { httpStatus: 200, status: "recorded" },
     strategy: "not_due",
+    morning: "no_data",
     stoppedAt: null,
   });
   assert.equal(seen.calls.length, 2);
@@ -317,4 +318,112 @@ test("a refused plan call stops the run as the analysis calls do", async () => {
   const summary = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, deps);
   assert.deepEqual(summary.stoppedAt, { stage: "llm", detail: "reserve:monthly_cap" });
   assert.equal(seen.reports.length, 0);
+});
+
+// The morning report (owner request 2026-11-03): a call at every run, from
+// the app's counts; the figures are code's, the sentences the model's.
+
+const OPERATIONS = {
+  measurement: {
+    publishedInWindow: 0,
+    dispatch: { sent: 0, published: 0, failed: 0, verified: 0 },
+    queue: { pendingApproval: 9, approvedWaiting: 3, nextApprovalExpiryAt: "2026-11-30T07:02:00.000Z", scheduled: 0 },
+    touches: 0,
+    signups: { total: 2, attributed: 0 },
+    guestLeads: null,
+    llm: { calls: 90, countedMicroUsd: 12_340_000, capUsd: 100 },
+    accounts: [{ accountSlug: "instagram-3", status: "approval_mode" }],
+  },
+  switches: { publishEnabled: false, draftsEnabled: true, autoPublishEnabled: false },
+};
+
+const MORNING = {
+  verdict: "아직 나간 게시물이 없습니다. 게시 스위치를 켜는 것이 오늘 가장 큰 일입니다.",
+  decisions: [
+    { title: "승인된 3건 게시", why: "게시 스위치가 꺼져 있습니다.", section: "queue" },
+    { title: "없는 섹션", why: "x", section: "settings" },
+  ],
+  worked: "발송이 0건이라 판단할 수 없습니다.",
+  adjust: [
+    { action: "stop", what: "경쟁사 이름", why: "Guard 표시 22건" },
+    { action: "pause", what: "x", why: "y" },
+  ],
+  marketChanges: [
+    { competitorId: "poe", change: "연간 요금 변경", action: "행동 없음" },
+    { competitorId: "made-up", change: "x", action: "y" },
+  ],
+};
+
+const MORNING_CONTEXT = context({
+  operations: OPERATIONS,
+  marketPrices: [{ reportCreatedAt: "2026-11-01T21:06:05.093Z", prices: [{ competitorId: "poe", factType: "plan_price_annual", value: { kind: "money", currency: "GBP", amountMinor: 4999 } }] }],
+});
+
+test("with counts in the context, a morning call writes the report the brief carries, figures counted by code", async () => {
+  const { deps, seen } = ports({ ctx: MORNING_CONTEXT, answers: [answered(SELF), answered(COMPETITIVE), answered(MORNING)] });
+  const summary = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, deps);
+  assert.equal(summary.calls, 3);
+  assert.equal(summary.morning, "recorded");
+  assert.equal(summary.strategy, "not_due");
+
+  const input = JSON.parse(seen.calls[2].messages[1].content);
+  assert.equal(input.date, "2026-11-01");
+  assert.equal(input.operations.measurement.queue.pendingApproval, 9);
+  assert.equal(input.marketPrices.length, 1);
+  assert.equal(input.brief.topicId, "side-by-side-answers");
+
+  const report = marketingGeneratorReportSchema.parse(seen.reports[0]);
+  assert.equal(marketingGeneratorReportProvenanceMatches(SECRET, report), true);
+  const morning = report.analysis.morning;
+  assert.deepEqual(morning.decisions.map((entry) => entry.section), ["queue"]);
+  assert.deepEqual(morning.adjust.map((entry) => entry.action), ["stop"]);
+  assert.deepEqual(morning.marketChanges.map((entry) => entry.competitorId), ["poe"]);
+  assert.deepEqual(morning.figures, {
+    published7d: 0,
+    sent7d: 0,
+    failed7d: 0,
+    pendingApproval: 9,
+    approvedWaiting: 3,
+    nextApprovalExpiryAt: "2026-11-30T07:02:00.000Z",
+    touches7d: 0,
+    signupsAttributed7d: 0,
+    llmCountedMicroUsd: 12_340_000,
+    llmCapUsd: 100,
+    publishEnabled: false,
+  });
+  // Nothing of it reaches A5's brief.
+  assert.deepEqual(Object.keys(report.payload).sort(), ["claimIds", "sourceDigests", "topicIds"]);
+});
+
+test("an unusable morning answer leaves the brief recorded without it; a refused call stops the run", async () => {
+  const unusable = ports({ ctx: MORNING_CONTEXT, answers: [answered(SELF), answered(COMPETITIVE), answered({ verdict: "" })] });
+  const first = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, unusable.deps);
+  assert.equal(first.morning, "unusable");
+  assert.deepEqual(first.report, { httpStatus: 200, status: "recorded" });
+  assert.equal(unusable.seen.reports[0].analysis.morning, undefined);
+
+  const refused = { status: "refused", stage: "reserve", code: "monthly_cap" };
+  const stopped = ports({ ctx: MORNING_CONTEXT, answers: [answered(SELF), answered(COMPETITIVE), refused] });
+  const second = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, stopped.deps);
+  assert.deepEqual(second.stoppedAt, { stage: "llm", detail: "reserve:monthly_cap" });
+  assert.equal(stopped.seen.reports.length, 0);
+});
+
+test("the plan and the morning report both run at the first run of a week, plan first", async () => {
+  const ctx = { ...PLAN_CONTEXT, operations: OPERATIONS, marketPrices: [] };
+  const { deps, seen } = ports({ ctx, answers: [answered(SELF), answered(COMPETITIVE), answered(PLAN), answered(MORNING)] });
+  const summary = await runMarketingAnalysisCycle({ generatorRunId: "run-1", deadlineAt: DEADLINE, market: MARKET }, deps);
+  assert.equal(summary.calls, 4);
+  assert.equal(summary.strategy, "recorded");
+  assert.equal(summary.morning, "recorded");
+  const morningInput = JSON.parse(seen.calls[3].messages[1].content);
+  assert.equal(morningInput.brief.plan.headline, PLAN.headline);
+});
+
+test('on the days after the plan was written, the morning report is given the stored plan', async () => {
+  const ctx = { ...MORNING_CONTEXT, currentPlan: { headline: '저장된 계획', goal: '저장된 목표' } };
+  const { deps, seen } = ports({ ctx, answers: [answered(SELF), answered(COMPETITIVE), answered(MORNING)] });
+  const summary = await runMarketingAnalysisCycle({ generatorRunId: 'run-1', deadlineAt: DEADLINE, market: MARKET }, deps);
+  assert.equal(summary.morning, 'recorded');
+  assert.deepEqual(JSON.parse(seen.calls[2].messages[1].content).brief.plan, { headline: '저장된 계획', goal: '저장된 목표' });
 });
