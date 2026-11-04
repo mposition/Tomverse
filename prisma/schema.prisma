@@ -11957,7 +11957,7 @@ model TrustSafetyObserverRun {
   id String @id
   /// Always "succeeded"; a CHECK allows nothing else.
   outcome String
-  /// Relayed by the app (§11-5); a CHECK refuses a value after recordedAt.
+  /// Relayed by the app (docs/policy/trust-safety-compliance-agent.md §11-5); a CHECK refuses a value after recordedAt.
   observedAt DateTime @db.Timestamptz(3)
   /// Written by a BEFORE INSERT trigger from the database clock; the application cannot set it.
   recordedAt DateTime @db.Timestamptz(3)
@@ -11967,8 +11967,9 @@ model TrustSafetyObserverRun {
   deadlineAt DateTime @db.Timestamptz(3)
 }
 
-/// The observer's activation row, written only by a person's Admin action (§5.1 item 1, §6).
-/// Not the authority on its own: §6 derives the mode from the newest audit entry for
+/// The observer's activation row, written only by a person's Admin action
+/// (docs/policy/trust-safety-compliance-agent.md §5.1 item 1 and §6).
+/// Not the authority on its own: that §6 derives the mode from the newest audit entry for
 /// `trust_safety.observer_activation_changed` and accepts this row's mode only when all seven checks
 /// pass, so a replayed historical tuple cannot turn observation on. Single row by CHECK; triggers
 /// refuse a version that does not move forward, a mode that does not change, and DELETE.
