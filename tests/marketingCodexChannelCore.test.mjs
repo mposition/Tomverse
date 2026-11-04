@@ -6,6 +6,7 @@ import {
   MARKETING_CODEX_DISABLED_FEATURES,
   marketingCodexArguments,
   marketingCodexChannel,
+  marketingCodexFailure,
   marketingCodexPrompt,
   marketingLlmChannelFromEnv,
   readMarketingCodexEvents,
@@ -120,6 +121,9 @@ test("the prompt carries both roles, the search limit, and that a page's text is
   );
   assert.ok(prompt.indexOf("SYSTEM") < prompt.indexOf("at most 3"));
   assert.ok(prompt.indexOf("data") < prompt.indexOf("USER"));
+  assert.ok(prompt.indexOf("</instructions>") < prompt.lastIndexOf("<request>"));
+  assert.ok(prompt.lastIndexOf("<request>") < prompt.indexOf("USER"));
+  assert.ok(prompt.indexOf("USER") < prompt.indexOf("</request>"));
   assert.doesNotMatch(marketingCodexPrompt([{ role: "user", content: "USER" }]), /at most/);
 });
 
@@ -133,11 +137,32 @@ test("the events give the last message, its cited URLs, every retrieved page and
 });
 
 test("a link in the answer's text is cited without its markdown or punctuation", () => {
-  const text = "See [the docs](https://example.com/docs), then https://example.com/a.";
+  const text = "See [the docs](https://example.com/docs), then https://example.com/blog.";
   const answer = readMarketingCodexEvents(
+    events(SEARCH, OPENED, { type: "item.completed", item: { type: "agent_message", text } }, COMPLETED),
+  );
+  assert.deepEqual(answer.answerCitations, ["https://example.com/docs", "https://example.com/blog"]);
+});
+
+test("a URL only the model's text names is not a retrieved page or a citation", () => {
+  const text = JSON.stringify({ facts: [{ claim: "Free forever.", source: "https://example.com/invented" }] });
+  const withoutSearch = readMarketingCodexEvents(
     events({ type: "item.completed", item: { type: "agent_message", text } }, COMPLETED),
   );
-  assert.deepEqual(answer.answerCitations, ["https://example.com/docs", "https://example.com/a"]);
+  assert.deepEqual(withoutSearch.citations, []);
+  assert.deepEqual(withoutSearch.answerCitations, []);
+  const withSearch = readMarketingCodexEvents(
+    events(SEARCH, { type: "item.completed", item: { type: "agent_message", text } }, COMPLETED),
+  );
+  assert.deepEqual(withSearch.citations, ["https://example.com/pricing", "https://example.com/blog"]);
+  assert.deepEqual(withSearch.answerCitations, []);
+});
+
+test("a failure names the provider's or the CLI's error line, bounded", () => {
+  assert.equal(marketingCodexFailure(STDOUT), null);
+  assert.equal(marketingCodexFailure(events({ type: "turn.failed", error: { message: "login expired" } })), "login expired");
+  assert.equal(marketingCodexFailure(events({ type: "error", message: "refused" })), "refused");
+  assert.equal(marketingCodexFailure(events({ type: "error", message: "x".repeat(1_000) })).length, 300);
 });
 
 test("a run that did not finish with an answer is no answer", () => {
