@@ -273,7 +273,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    업데이트(update-branch)하기 위해서입니다. 2026-10-30 운영자 결정으로 엔지니어링 에이전트 게시 App(`tomverse-engineering-publisher`,
    integration 5224114)을 같은 bypass에 `always`로 더했습니다 — `creation` 규칙이 이 App의 `agent/engineering/*` 브랜치 생성을 거절해
    게시가 한 번도 되지 않았기 때문입니다. 병합 레인 App은 여전히 넣지 않습니다.
-8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
+8. **병합 주체의 전환(2026-11-04 완료).** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
 9. **develop의 직접 push도 막습니다.** 필수 check는 이미 check를 통과한 commit의 직접 push를 막지 못합니다. 그래서 develop에
@@ -361,7 +361,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       그 회차는 출발할 정기 열차를 이어서 출발시킵니다.
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
-      — 운영자가 `npm run merge-train`으로 합니다. label·comment·status는 쓰지 않습니다.
+      — 운영자가 GitHub나 `npm run merge-train -- --include-main`으로 합니다. label·comment·status는 쓰지 않습니다.
     - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 30분마다, `.railway/agent-runners.ts`)에서 `QA_RELEASE_TRAIN_ENABLED`가 정확히
       `true`일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
       레인을 함께 멈추지 않게 하기 위해서입니다. 레인의 App과 앱 secret을 같이 쓰므로 앱 쪽에 새로 둘 것은 없습니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
