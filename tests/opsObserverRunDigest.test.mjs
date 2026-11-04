@@ -73,7 +73,7 @@ test("a created digest is announced once on Slack with the fixed sentence and it
 test("a failed heartbeat ping is retried once; the digest submission and the notice are not", async () => {
   let beats = 0;
   const calls = [];
-  const fetchImpl = async (url, init) => {
+  const fetchImpl = async (url) => {
     calls.push(url);
     if (url === HEARTBEAT) {
       beats += 1;
