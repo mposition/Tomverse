@@ -2416,9 +2416,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageDeletionManifest.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 5,
+    writeVerbs: 2,
     reason:
-      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears only as account-deletion action names (delete, delete_parent_record) and in comments about them. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
+      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears only as the account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
   },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
