@@ -63,19 +63,20 @@ Report implemented and tested behavior separately from documentation, review, me
   (`scripts/auto-pr-branch-policy.mjs`). 기능은 develop으로 보냅니다.
 - main으로 가는 PR은 `develop`(release), `release/**`, `hotfix/**`(체크리스트 7.9.2)와 각자
   게이트가 있는 자동화 브랜치뿐입니다(`scripts/main-pr-source-policy.mjs`).
-- dev에서 확인을 마친 develop PR의 release PR은 직접 열지 않습니다. 운영자가 Admin › Agent digests ›
-  QA·릴리스의 "다음 열차"에서 실을 PR을 고르고, QA·릴리스 에이전트의 릴리스 열차가 정해진 시각(AEST
+- dev에서 확인을 마친 develop PR의 release PR은 직접 열지 않습니다. 운영자가 Admin › QA·릴리스 ›
+  릴리스 열차 탭의 "다음 열차"에서 실을 PR을 고르고, QA·릴리스 에이전트의 릴리스 열차가 정해진 시각(AEST
   08·11·14·17·20시)에 그 PR들로 `release/train-*` main PR 하나를 엽니다(`docs/policy/qa-release-agent.md`
   8절 12항). `main:next` 라벨은 더 읽지 않습니다. 급한 수정은 `hotfix/**`입니다.
-- workflow는 PR을 열기만 하고 병합하거나 auto-merge를 켜지 않습니다. 병합은 운영자의
-  `npm run merge-train`이 합니다. 사람이 끈 스위치를 자동화가 다시 켜지 않습니다. 예외는 하나뿐입니다:
+- workflow는 PR을 열기만 하고 병합하거나 auto-merge를 켜지 않습니다. develop 병합은 QA·릴리스
+  병합 레인이 합니다(레인이 사람 몫으로 남긴 PR은 Admin › QA·릴리스 › 병합 레인 탭에 이유와 함께 보이고 운영자가
+  GitHub에서 병합합니다). main 병합은 운영자가 GitHub나 `npm run merge-train -- --include-main`으로 합니다. 사람이 끈 스위치를 자동화가 다시 켜지 않습니다. 예외는 하나뿐입니다:
   졸업한 마케팅 SEO 코드 에이전트의 `marketing-agent/to-develop/<topic>` PR에 한해 그 에이전트의 실행기가 develop
   auto-merge를 켤 수 있습니다(기본 꺼짐 `MARKETING_SEO_AUTO_MERGE`, 운영자 결정 2026-11-02, `docs/policy/marketing-automation.md §9.2`).
 - PR은 draft로 시작하고 끝나면 ready로 바꿉니다(draft는 CI가 돌지 않습니다). develop은 dev
   환경에, Test는 `test` 브랜치에 배포됩니다(`docs/ops/dev-test-lanes.md`).
 - **CI 입장 관리**: head 커밋의 `CI admission` 상태가 pending인 PR은 대기열에서 차례를 기다리는 중입니다.
   다시 ready로 바꾸거나 CI를 re-run하지 않습니다 — 칸이 나면 자동으로 ready가 되고, 순서는 운영자가
-  Admin › Agent digests에서 정합니다. push 직후 같은 순간에 ready로 바꾸지 말고, push의 CI 실행이 생긴 뒤에
+  Admin › QA·릴리스 › CI 입장 탭에서 정합니다. push 직후 같은 순간에 ready로 바꾸지 말고, push의 CI 실행이 생긴 뒤에
   바꿉니다(두 이벤트가 겹치면 draft 시점의 skipped 실행만 남을 수 있습니다).
 
 # 독립 검토와 모델 역할
