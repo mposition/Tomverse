@@ -131,6 +131,10 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `external-conversation-continuation.spec.ts` |
 | `conversation-export.spec.ts` |
 | `help-guide.spec.ts` |
+| `privacy-provider-table-reflow.spec.ts` |
+
+`privacy-provider-table-reflow.spec.ts`는 2026-11-04에 합류했습니다(+1 test). 320px에서
+개인정보 처리방침의 provider 표가 섹션을 넓히지 않고 표만 스크롤되는지 확인합니다.
 
 `compact-composer.spec.ts`가 2026-10-13에 합류했습니다. 승인된 축소 Composer의
 PC 두 줄 입력 공간, 모바일·키보드 상태의 높이와 입력 폭, coarse pointer의
