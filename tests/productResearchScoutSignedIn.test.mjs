@@ -69,15 +69,43 @@ test("a turn reaches only its own paths, a bounded number of times", () => {
   const allowWrite = scoutTurnWrites();
   for (let index = 0; index < 3; index += 1) assert.equal(allowWrite(`${origin}/api/chat`), true, `chat post ${index}`);
   assert.equal(allowWrite(`${origin}/api/chat`), false, "no more than one a model");
-  for (const path of ["/api/chat/availability", "/api/chat/context", "/api/chat/image-intent", "/api/conversations/c1/messages", "/api/conversations/c1/generate-title"]) {
+  for (const path of [
+    "/api/products/chat/conversations",
+    "/api/products/chat/drafts/scope-1",
+    "/api/chat/preflight",
+    "/api/chat/availability",
+    "/api/chat/concurrency",
+    "/api/chat/context",
+    "/api/chat/conversation-title",
+    "/api/chat/image-intent",
+    "/api/chat/location-intent",
+    "/api/chat/prompt-refiner/prepare",
+    "/api/conversations/c1/messages",
+    "/api/conversations/c1/messages/receipt",
+    "/api/conversations/c1/generate-title",
+  ]) {
     assert.equal(scoutTurnWrites()(`${origin}${path}`), true, path);
   }
   // Every other paid or state-changing route stays shut during the turn.
-  for (const path of ["/api/chat/voice", "/api/chat/deep-research/status", "/api/images/generations", "/api/conversations/c1/image-turn", "/api/conversations/c1/delete", "/api/review", "/api/billing/checkout", "/api/account/delete"]) {
+  for (const path of [
+    "/api/chat/voice",
+    "/api/chat/voice-transcription",
+    "/api/chat/deep-research/status",
+    "/api/chat/compare-summary",
+    "/api/chat/comparison-review",
+    "/api/images/generations",
+    "/api/conversations/c1/image-turn",
+    "/api/conversations/c1/generations",
+    "/api/conversations/c1/share",
+    "/api/conversations/c1/compare-summary",
+    "/api/user/settings",
+    "/api/billing/checkout",
+    "/api/account/delete",
+  ]) {
     assert.equal(scoutTurnWrites()(`${origin}${path}`), false, path);
   }
   const support = scoutTurnWrites();
-  for (let index = 0; index < 12; index += 1) assert.equal(support(`${origin}/api/chat/context`), true);
+  for (let index = 0; index < 40; index += 1) assert.equal(support(`${origin}/api/chat/context`), true);
   assert.equal(support(`${origin}/api/chat/context`), false, "the composer's own calls are bounded too");
 });
 
