@@ -4,8 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
 import { AdminScoutSuggestionsPanel } from "@/components/admin/AdminScoutSuggestionsPanel";
-import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
 import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch } from "@/lib/adminScoutDisplay";
+import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
 import { SCOUT_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
 import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
