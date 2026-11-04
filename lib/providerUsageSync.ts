@@ -259,7 +259,9 @@ const failedResult = ({
         ? redactProviderDiagnostic(cause.message)
         : null,
   };
-  console.warn("Provider usage sync failed", log);
+  // One line: Railway stores a multi-line object as separate, reordered entries,
+  // so a log filter would find the event without its provider or error code.
+  console.warn("Provider usage sync failed", JSON.stringify(log));
   return {
     provider,
     displayName: PROVIDER_DISPLAY_NAMES[provider],
@@ -350,6 +352,7 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
               await wait(
                 openAiCostsRetryDelayMs({
                   attempt: pageAttempt,
+                  status: response.status,
                   retryAfter: response.headers.get("retry-after"),
                   retryAfterMs: response.headers.get("retry-after-ms"),
                 })
