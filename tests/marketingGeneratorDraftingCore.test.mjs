@@ -7,6 +7,7 @@ import {
 } from "@/lib/marketingDraftIntakeCore";
 import {
   MARKETING_A5_MAX_DRAFTS_PER_CALL,
+  MARKETING_A5_PROMPT_VERSION,
   MARKETING_VIDEO_DAYS,
   marketingA5AssetsFor,
   marketingA5MediaKindFor,
@@ -361,7 +362,7 @@ test("an asset reaches the model as its kind and what it shows in this locale, a
   const [system, user] = marketingA5Messages(withVideo, { ...SCOPE, channelId: "chn_yt", locale: "ko" });
   assert.match(system.content, /first line is the video's title/);
   assert.match(system.content, /Every post carries one asset from the assets list, an image or a video, on every platform/);
-  assert.match(system.content, /When no asset fits a post, return no draft/);
+  assert.doesNotMatch(system.content, /When no asset fits a post, return no draft/);
   assert.deepEqual(JSON.parse(user.content).assets, [
     {
       id: "media-20261031-compare-ko-short",
@@ -392,4 +393,61 @@ test("an asset reaches the model as its kind and what it shows in this locale, a
     }),
   });
   assert.deepEqual(JSON.parse(marketingA5Messages(older, SCOPE)[1].content).assets, []);
+});
+
+test("an asset an account has already used is not offered to it again, and an account on the same platform keeps it", () => {
+  // Owner decision 2026-11-04: the same video went out on one account twice.
+  const asset = (id, kind) => ({ id, allowedChannels: ["instagram"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind });
+  const twoAccounts = marketingGeneratorContextSchema.parse({
+    ...context,
+    channels: [
+      { id: "chn_ig1", channel: "instagram", accountSlug: "one", defaultLocale: "en", allowedLocales: ["en"], usedAssetIds: ["media-short"] },
+      { id: "chn_ig2", channel: "instagram", accountSlug: "two", defaultLocale: "en", allowedLocales: ["en"], usedAssetIds: [] },
+    ],
+    assets: [asset("media-card", "image"), asset("media-short", "video")],
+  });
+  const ids = (list) => list.map((entry) => entry.id);
+  assert.deepEqual(ids(marketingA5AssetsFor(twoAccounts, "instagram", "en", undefined, "chn_ig1")), ["media-card"]);
+  assert.deepEqual(ids(marketingA5AssetsFor(twoAccounts, "instagram", "en", undefined, "chn_ig2")), ["media-card", "media-short"]);
+  // Without an account the platform's assets are all listed, as before.
+  assert.deepEqual(ids(marketingA5AssetsFor(twoAccounts, "instagram", "en")), ["media-card", "media-short"]);
+
+  // What the model is offered, and what an answer may name.
+  const offered = (channelId) =>
+    JSON.parse(marketingA5Messages(twoAccounts, { ...SCOPE, channelId })[1].content).assets.map((entry) => entry.id);
+  assert.deepEqual(offered("chn_ig1"), ["media-card"]);
+  assert.deepEqual(offered("chn_ig2"), ["media-card", "media-short"]);
+  const reuse = answer([proposal({ claimIds: [], assetIds: ["media-short"] })]);
+  const first = readMarketingA5Answer(reuse, twoAccounts, { ...SCOPE, channelId: "chn_ig1" });
+  assert.deepEqual(first.drafts, []);
+  assert.deepEqual(first.dropped, { draft_names_unknown_asset: 1 });
+  assert.equal(readMarketingA5Answer(reuse, twoAccounts, { ...SCOPE, channelId: "chn_ig2" }).drafts.length, 1);
+
+  // The day's kind gives way to the kind that is left: the used video is not a candidate.
+  const videoDay = Array.from({ length: 4 }, (_, day) => day).find(
+    (day) => marketingA5MediaKindFor(twoAccounts, "instagram", "en", day, "chn_ig2") === "video",
+  );
+  assert.notEqual(videoDay, undefined);
+  assert.equal(marketingA5MediaKindFor(twoAccounts, "instagram", "en", videoDay, "chn_ig1"), "image");
+
+  // A context from an app deployed before the field still parses and filters nothing.
+  const older = marketingGeneratorContextSchema.parse({
+    ...twoAccounts,
+    channels: twoAccounts.channels.map((channel) => Object.fromEntries(Object.entries(channel).filter(([key]) => key !== "usedAssetIds"))),
+  });
+  assert.deepEqual(ids(marketingA5AssetsFor(older, "instagram", "en", undefined, "chn_ig1")), ["media-card", "media-short"]);
+});
+
+test("the instruction tells the model to write from the assets it was given when none fits the brief", () => {
+  const [system] = marketingA5Messages(context, SCOPE);
+  assert.match(system.content, /When no asset fits the brief's topic, do not skip the post/);
+  assert.match(system.content, /write it about what an asset you were given shows, using only its description/);
+  assert.match(system.content, /Whenever the assets list holds at least one asset, write at least one post/);
+  assert.match(system.content, /return no draft only when the list is empty/);
+  assert.match(system.content, /Never write what an asset's description does not support/);
+  assert.match(system.content, /only assets this account has not used yet/);
+  assert.match(system.content, /Give each post a different asset/);
+  // The old rule that skipped a post is gone, and the version says the instruction changed.
+  assert.doesNotMatch(system.content, /return no draft: a post without/);
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v6");
 });

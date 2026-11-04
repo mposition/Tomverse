@@ -1601,7 +1601,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **V2 연결(영상 게시물, 운영자 2026-10-31)**: `app/api/_marketing/zernioAdapter.ts`의 `resolveAsset`은 보낼 때 승인된 저장 자산을
   읽어 R2 읽기 URL(3시간)과 종류·AI 출처를 넘깁니다. 승인되지 않았거나 은퇴했거나 파일 등록부에만 있는 자산은 풀리지 않아 보내기 전에
   `asset_unresolved`로 실패합니다. 생성기 문맥의 자산은 `kind`(저장 자산의 image/video, 파일 자산은 null)와 승인된 `alt`를 함께
-  싣고, A5(`a5-social-v5`)는 그 locale의 alt를 자산 설명으로 받아 그 자산이 보여 주는 것에 대해 씁니다. 모든 플랫폼의 게시물은
+  싣고, A5(`a5-social-v6`)는 그 locale의 alt를 자산 설명으로 받아 그 자산이 보여 주는 것에 대해 씁니다(브리프 주제에 맞는 자산이 없어도 주어진 자산이 있으면 그 설명이 뒷받침하는 내용으로 씁니다).
+  계정이 이미 쓴 자산(반려·Guard 거절·만료가 아닌 상태의 게시물이 이름 댄 것, 기간 제한 없음)은 맥락의 `usedAssetIds`로 후보에서 빠지고 초안 접수가 `intake_asset_already_used`로 거절합니다(운영자 2026-11-04). 모든 플랫폼의 게시물은
   이미지나 영상 하나를 싣고(운영자 2026-11-03), YouTube는 영상 하나에 첫 줄이 제목, TikTok은 영상 하나입니다. 맞는 자산이 없는
   계정은 LLM을 부르지 않고(`accountsWithoutMedia`; YouTube·TikTok은 영상만, 종류가 없는 파일 등록부 자산은 어디서도 세지 않음),
   자산 없는 답은 `draft_has_no_asset`으로 버리며, 초안 접수는 자산 없는 초안을 거절하고, 게시기는 미디어 없는 게시물을
