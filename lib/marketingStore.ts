@@ -4737,6 +4737,12 @@ export type MarketingManualPublishCapWarning = "daily_cap_exceeded" | "weekly_ca
  * still made: the post is already public, a refusal would leave the ledger saying
  * something false, and a cap exists to stop the publisher from sending, which is
  * not what happened here. The overage is returned so the console can say so.
+ *
+ * **A lapsed approval does not refuse the record either**, unlike a schedule:
+ * `approvalExpiresAt` bounds when the publisher may send, and the publisher sent
+ * nothing. A post whose approval ran out before the sweep moved it to
+ * `approval_expired` is still approved content that is now public, and the
+ * ledger should say so; once the sweep has moved it, the status check refuses.
  */
 export async function recordManualMarketingPostPublication(
   database: MarketingDatabase,
