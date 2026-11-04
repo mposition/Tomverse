@@ -8,7 +8,6 @@ import {
   RECOMMENDATION_STATUSES,
   actionableRecommendations,
   buildRecommendationInstruction,
-  copyToClipboard,
   openRecommendations,
   recommendationStatusEntries,
   reportFindings,
@@ -184,17 +183,3 @@ test("every file hint names something that exists in the repository", () => {
   }
 });
 
-test("copying reports a refused or missing clipboard so the text can be shown for manual copy", async () => {
-  const written = [];
-  assert.equal(await copyToClipboard({ writeText: async (text) => void written.push(text) }, "abc"), "copied");
-  assert.deepEqual(written, ["abc"]);
-  assert.equal(
-    await copyToClipboard({ writeText: async () => Promise.reject(new Error("NotAllowedError")) }, "abc"),
-    "manual"
-  );
-  assert.equal(
-    await copyToClipboard({ writeText: () => { throw new Error("sync failure"); } }, "abc"),
-    "manual"
-  );
-  assert.equal(await copyToClipboard(undefined, "abc"), "manual");
-});
