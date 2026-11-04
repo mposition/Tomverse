@@ -1,0 +1,113 @@
+import Link from "next/link";
+import { headers } from "next/headers";
+import { SignOutAndSwitchAccountButton } from "@/components/auth/SignOutAndSwitchAccountButton";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { HELP_CENTRE_PATH } from "@/lib/localizedHelpHref";
+import {
+  accountSwitchSignInHref,
+  isAdminPathname,
+} from "@/lib/adminReauthenticationCore";
+
+/**
+ * The body of the 404 page, rendered by both of the files that can serve one:
+ * `app/not-found.tsx` (a `notFound()` thrown inside a route, composed with
+ * that route's root layout) and `app/global-not-found.tsx` (a URL no route
+ * matches, which renders its own document because there is no single root
+ * layout to compose with -- see that file).
+ *
+ * ## The account-switch path
+ *
+ * `/admin/**` answers a signed-in non-administrator with this page rather than
+ * a 403, so the console never confirms it exists. That is the right answer and
+ * it stays, but on its own it left a visitor stranded: the only account they
+ * could use was the one that had just been refused, and the sign-in page
+ * forwards an authenticated visitor straight back to where they came from --
+ * the same 404.
+ *
+ * So a request under `/admin` also offers a way out of the current session.
+ * The decision reads the request path and nothing else -- not the session, not
+ * whether the path is a real route -- so every visitor to every `/admin` URL
+ * sees one identical page. Nothing here names the console, a role or an
+ * allowlist.
+ */
+export function NotFoundBody({
+  signInHref,
+}: {
+  /**
+   * The sign-in destination offered to a visitor whose account may be the
+   * reason they are here, or null when the path says nothing about an account.
+   * Already normalized by `accountSwitchSignInHref`.
+   */
+  signInHref: string | null;
+}) {
+  const secondaryLinkClass =
+    "rounded-xl border border-zinc-300 px-4 py-2 text-sm font-bold text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800";
+
+  return (
+    <main className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 py-16 text-center">
+      <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+        404
+      </p>
+      <h1 className="text-balance text-2xl font-bold text-zinc-900 dark:text-zinc-50">
+        We couldn&apos;t find that page
+      </h1>
+      <p className="max-w-md text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+        {signInHref
+          ? // "Nothing is wrong with your account" is not true here: the
+            // account really can be the reason, and telling the visitor
+            // otherwise is what sent them looking for a fault elsewhere.
+            "The link may be out of date, the page may have moved, or you may need to use a different account."
+          : "The link may be out of date, or the page may have moved. Nothing is wrong with your account."}
+      </p>
+      {signInHref ? (
+        <div className="mt-2 w-full">
+          <SignOutAndSwitchAccountButton signInHref={signInHref} />
+        </div>
+      ) : null}
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+        <Link
+          href="/"
+          className={
+            signInHref
+              ? secondaryLinkClass
+              : "rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-500"
+          }
+        >
+          Go to the homepage
+        </Link>
+        <Link href={REVIEW_WORKSPACE_PATH} className={secondaryLinkClass}>
+          Open the chat workspace
+        </Link>
+        {/*
+          A visitor who guessed a help URL -- `/help` is the one that surfaced
+          this page's own 500 -- lands here, so the page names where the guides
+          actually are instead of leaving "support" to stand for both.
+        */}
+        <Link href={HELP_CENTRE_PATH} className={secondaryLinkClass}>
+          Browse the help centre
+        </Link>
+        <Link href="/support" className={secondaryLinkClass}>
+          Contact support
+        </Link>
+      </div>
+    </main>
+  );
+}
+
+/** {@link NotFoundBody} with the recovery decision taken from the request. */
+export async function NotFoundContent() {
+  const requestHeaders = await headers();
+  // Set by proxy.ts. A server component cannot read the request URL, and
+  // `usePathname()` would move this decision to the client and flash the wrong
+  // copy first.
+  const pathname = requestHeaders.get("x-tomverse-pathname") || "";
+  const search = requestHeaders.get("x-tomverse-search") || "";
+  // Both halves are raw request input; `accountSwitchSignInHref` normalizes
+  // them and falls back to /admin/overview for anything that is not an
+  // internal admin path.
+  const signInHref = isAdminPathname(pathname)
+    ? accountSwitchSignInHref(`${pathname}${search}`)
+    : null;
+
+  return <NotFoundBody signInHref={signInHref} />;
+}

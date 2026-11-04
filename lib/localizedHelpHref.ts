@@ -1,6 +1,7 @@
 import type { Language } from "@/components/LanguageProvider";
 
-const HELP_CENTRE_PATH = "/support/help-centre";
+/** Where the guides live. `/help` is redirected here by next.config.ts. */
+export const HELP_CENTRE_PATH = "/support/help-centre";
 const CHAT_WORKSPACE_GUIDE_PATH = `${HELP_CENTRE_PATH}/chat-workspace`;
 
 const withLanguage = (path: string, lang: Language, section?: string) => {

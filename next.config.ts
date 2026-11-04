@@ -77,6 +77,32 @@ const nextConfig: NextConfig = {
     sri: {
       algorithm: "sha384",
     },
+    // app/global-not-found.tsx. Two root layouts mean an unmatched URL has no
+    // root layout to compose app/not-found.tsx with, and Next answered every
+    // one of them with a 500 rather than a 404. This flag is what makes the
+    // routing level serve that file instead; without it the file is dead code.
+    globalNotFound: true,
+  },
+  async redirects() {
+    return [
+      {
+        // The sidebar and the marketing nav both call it "Help", so `/help` is
+        // the URL a visitor types. It was never a route: before
+        // app/global-not-found.tsx it answered 500, and it would now answer a
+        // 404 for a page that does exist under a longer name. The literal is
+        // duplicated from HELP_CENTRE_PATH for the same reason as
+        // CANONICAL_SITE_ORIGIN above -- importing the app's module graph into
+        // the config loader -- and the two are compared in
+        // tests/globalNotFoundRouting.test.mjs.
+        source: "/help",
+        destination: "/support/help-centre",
+        // Not permanent. A 308 is cached by the browser indefinitely, so a
+        // later move of the help centre could not take this mapping back; the
+        // marketing routes move often enough that that is a real cost, and a
+        // 307 costs one request.
+        permanent: false,
+      },
+    ];
   },
   async headers() {
     return [
