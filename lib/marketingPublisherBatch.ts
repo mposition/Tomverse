@@ -11,8 +11,14 @@
  *
  * - **One call per dispatch, never a second.** A publish that did not come back
  *   with proof is `outcome_unknown`, and the account pauses if it was
- *   autonomous (amendment 4). There is no retry and no lookup that could turn a
- *   silence into a success: Zernio cannot be asked about our key.
+ *   autonomous (amendment 4). There is no retry, ever.
+ * - **An unknown outcome is settled by reading, never by sending.** At the end
+ *   of a run, a few `outcome_unknown` posts are looked up -- by the provider's
+ *   id this attempt's publish answered with, otherwise -- on a first attempt
+ *   only, because every attempt shares the key -- by our exact request key in
+ *   the provider's recent list -- and recorded published or failed only when the
+ *   provider says so (operator decision 2026-11-03). A post not found, or still
+ *   processing, stays unknown; not finding it proves nothing.
  * - **A dispatch that was recorded is answered.** Once `dispatch_started` has
  *   committed, the post is `publishing` and some outcome must be written for it
  *   -- published, failed or unknown. Anything thrown between the two becomes
@@ -54,6 +60,7 @@ import type {
   MarketingClaimReleaseReason,
   MarketingDispatchRefusal,
   MarketingHealthObservation,
+  MarketingReconcileFinding,
 } from "@/lib/marketingStore";
 
 /**
@@ -114,6 +121,29 @@ const requireRecorded = (
 export const MARKETING_PUBLISHER_VERIFY_LIMIT = 5;
 
 /**
+ * How many `outcome_unknown` posts one run asks the provider about, and how
+ * many it lists to rotate through, so a post that never resolves does not keep
+ * the same slot from the ones that can.
+ */
+export const MARKETING_PUBLISHER_RECONCILE_LIMIT = 5;
+export const MARKETING_PUBLISHER_RECONCILE_LIST_LIMIT = 20;
+
+/**
+ * The provider's post id an `outcome_unknown` result carries, when the
+ * provider answered with the post but not yet with its result (Instagram video
+ * processing after a 201). An extra field on the shared result, not a change to
+ * `MarketingPublishResult`: the webhook receiver reaches that declaration and
+ * the webhook pipeline fingerprint hashes it.
+ */
+export const marketingPublishResultExternalPostId = (
+  result: MarketingPublishResult,
+): string | null => {
+  if (result.outcome !== "outcome_unknown" || !("externalPostId" in result)) return null;
+  const value = (result as { readonly externalPostId?: unknown }).externalPostId;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+};
+
+/**
  * What a refused dispatch gives back, and why.
  *
  * Only the refusals where this worker still holds the claim release it. A claim
@@ -142,7 +172,9 @@ export type MarketingPublisherBatchDeps = {
     | "recordOutcomeUnknown"
     | "recordVerified"
   > &
-    Partial<Pick<MarketingPublisherOperations, "evaluateAutoPause">>;
+    Partial<
+      Pick<MarketingPublisherOperations, "evaluateAutoPause" | "listOutcomeUnknown" | "recordReconciled">
+    >;
   readonly adapter: MarketingPublishAdapter;
   /** The database's clock, read outside any transaction this run holds. */
   readonly databaseNow: () => Promise<Date>;
@@ -165,6 +197,10 @@ export type MarketingPublisherBatchResult = {
   outcomeUnknown: number;
   verified: number;
   verificationMismatched: number;
+  /** Unknown outcomes the provider settled this run, published or failed. */
+  reconciled: number;
+  /** Unknown outcomes whose provider id was found and kept, result still pending. */
+  reconcileIdentified: number;
   releaseFailed: number;
   refused: Record<string, number>;
   /**
@@ -222,6 +258,8 @@ export async function runMarketingPublisherBatch(
     outcomeUnknown: 0,
     verified: 0,
     verificationMismatched: 0,
+    reconciled: 0,
+    reconcileIdentified: 0,
     releaseFailed: 0,
     refused: {},
     stopped: null,
@@ -429,9 +467,14 @@ export async function runMarketingPublisherBatch(
       );
       result.failed += 1;
     } else {
+      const externalPostId = marketingPublishResultExternalPostId(outcome);
       requireRecorded(
         "outcome_unknown",
-        await operations.recordOutcomeUnknown({ ...recorded, errorCode: outcome.errorCode }),
+        await operations.recordOutcomeUnknown({
+          ...recorded,
+          errorCode: outcome.errorCode,
+          ...(externalPostId ? { externalPostId } : {}),
+        }),
       );
       result.outcomeUnknown += 1;
     }
@@ -470,6 +513,77 @@ export async function runMarketingPublisherBatch(
     });
     if (verified.recorded) result.verified += 1;
     else count(result.refused, `verify:${verified.reason}`);
+  }
+
+  // Unknown outcomes the provider can now answer. Reads and conditional writes
+  // only: nothing here sends, and a post the provider cannot place stays
+  // unknown for a person.
+  if (operations.listOutcomeUnknown && operations.recordReconciled) {
+    const listedUnknown = await operations.listOutcomeUnknown(MARKETING_PUBLISHER_RECONCILE_LIST_LIMIT);
+    const start =
+      listedUnknown.length === 0
+        ? 0
+        : Math.floor(deadline / MARKETING_PUBLISHER_CRON_PERIOD_MS) % listedUnknown.length;
+    const unknown = [...listedUnknown.slice(start), ...listedUnknown.slice(0, start)].slice(
+      0,
+      MARKETING_PUBLISHER_RECONCILE_LIMIT,
+    );
+    for (const post of unknown) {
+      if (!(await deps.heartbeat())) {
+        result.stopped = "heartbeat";
+        return result;
+      }
+      if (!(await roomLeft(MARKETING_PUBLISHER_DISPATCH_ROOM_MS)).enough) {
+        result.stopped = "deadline";
+        return result;
+      }
+      let finding: MarketingReconcileFinding | null = null;
+      try {
+        if (post.externalPostId) {
+          const state = await adapter.lookupStatus(post.externalPostId, post.externalAccountRef);
+          if (state.state === "live") {
+            finding = { kind: "published", externalPostId: post.externalPostId, externalUrl: state.externalUrl };
+          } else if (state.state === "not_live") {
+            finding = { kind: "failed", errorCode: "provider_reports_not_live" };
+          }
+        } else if (post.publishAttempt === 1) {
+          // Every attempt of a post sends the same key, so only a first attempt
+          // can be told apart by it: a later one could match an earlier
+          // attempt's post. A later attempt with no id stays with a person.
+          const found = await adapter.lookupByRequestKey(post.requestKey, post.externalAccountRef);
+          const pendingId = marketingPublishResultExternalPostId(found);
+          if (found.outcome === "published") {
+            finding = { kind: "published", externalPostId: found.externalPostId, externalUrl: found.externalUrl };
+          } else if (found.outcome === "failed") {
+            finding = { kind: "failed", errorCode: found.errorCode };
+          } else if (pendingId) {
+            finding = { kind: "identified", externalPostId: pendingId };
+          }
+        }
+      } catch {
+        finding = null;
+      }
+      if (!finding) continue;
+      // Nothing was sent, so a write that throws leaves nothing unanswered: it
+      // is counted and the row stays unknown, rather than stopping the run.
+      let written: Awaited<ReturnType<NonNullable<typeof operations.recordReconciled>>>;
+      try {
+        written = await operations.recordReconciled({
+          id: post.id,
+          requestKey: post.requestKey,
+          expectedHistoryVersion: post.historyVersion,
+          expectedPublishAttempt: post.publishAttempt,
+          finding,
+        });
+      } catch {
+        count(result.refused, "reconcile:write_threw");
+        continue;
+      }
+      if (!written.recorded) count(result.refused, `reconcile:${written.reason}`);
+      else if (!written.changed) continue;
+      else if (finding.kind === "identified") result.reconcileIdentified += 1;
+      else result.reconciled += 1;
+    }
   }
 
   return result;

@@ -49,3 +49,9 @@ test("an unpublish's audit entry carries everything the store requires of it", (
   covers(routes.unpublish.written, routes.unpublish.required);
   assert.equal(routes.unpublish.written.expectedStatus, "published");
 });
+
+test("a withdrawal's audit entry carries everything the store requires of it", () => {
+  assert.equal(routes.withdraw.action, "marketing_post.withdraw_approval");
+  assert.deepEqual(routes.withdraw.required, { digest: "a".repeat(64), historyVersion: 2 });
+  covers(routes.withdraw.written, routes.withdraw.required);
+});

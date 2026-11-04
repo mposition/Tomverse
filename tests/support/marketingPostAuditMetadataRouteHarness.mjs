@@ -1,5 +1,5 @@
-// Calls the schedule and unpublish routes with the shared mutation wrapper and
-// the store's writers stood in for, and prints, for each, the metadata the
+// Calls the schedule, unpublish and withdraw routes with the shared mutation
+// wrapper and the store's writers stood in for, and prints, for each, the metadata the
 // route hands the wrapper next to the metadata the store will require of that
 // audit entry. Needs --experimental-test-module-mocks
 // (tests/marketingPostAuditMetadataRoute.test.mjs).
@@ -29,6 +29,12 @@ mock.module(mod("lib/marketingStore.ts"), {
     MARKETING_S2B1_ACTIONS: real.MARKETING_S2B1_ACTIONS,
     marketingScheduleAuditMetadata: real.marketingScheduleAuditMetadata,
     marketingUnpublishAuditMetadata: real.marketingUnpublishAuditMetadata,
+    MARKETING_POST_WITHDRAW_APPROVAL_ACTION: real.MARKETING_POST_WITHDRAW_APPROVAL_ACTION,
+    MarketingPostWithdrawRefusedError: real.MarketingPostWithdrawRefusedError,
+    marketingWithdrawApprovalAuditMetadata: real.marketingWithdrawApprovalAuditMetadata,
+    withdrawMarketingPostApproval: async (_tx, input) => {
+      storeCalls.push(input);
+    },
     scheduleMarketingPost: async (_tx, input) => {
       storeCalls.push(input);
     },
@@ -71,6 +77,11 @@ const results = {
       removalConfirmed: true,
     },
     real.marketingUnpublishAuditMetadata,
+  ),
+  withdraw: await call(
+    "withdraw",
+    { expectedEnvelopeDigest: digest, expectedHistoryVersion: 2 },
+    real.marketingWithdrawApprovalAuditMetadata,
   ),
 };
 
