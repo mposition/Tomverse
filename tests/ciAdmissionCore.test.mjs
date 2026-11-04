@@ -456,12 +456,11 @@ test("a ci:hold pull request out of the line still counts the runners its CI hol
 });
 
 test("a pull request a person marked ready is never sent back, and still takes its runners", () => {
-  const owner = (p, running) => ({ key: `pr:${p.number}`, title: "", number: p.number, base: "develop", sha: p.headSha, running, queued: 0, startedAt: new Date(T0 - 3_600_000).toISOString() });
   const top = pull(1, { draft: false });
   const over = pull(2, { draft: false });
   const below = pull(3);
   const open = [top, over, below];
-  const input = { state: state({ capacity: 5, queue: lineOf(1, 2, 3) }), openPulls: open, running: runs(top, over), checks: checksFor(open), runners: [owner(top, 4), owner(over, 4)] };
+  const input = { state: state({ capacity: 5, queue: lineOf(1, 2, 3) }), openPulls: open, running: runs(top, over), checks: checksFor(open), runners: [owner(ciRunnerOwnerKey.pull(1), 4), owner(ciRunnerOwnerKey.pull(2), 4)] };
   // Over the budget, no person: sent back as before.
   const sent = judge({ ...input, personReady: new Set() });
   assert.equal(sent.actions.some((action) => action.kind === "hold" && action.pull.number === 2), true);
