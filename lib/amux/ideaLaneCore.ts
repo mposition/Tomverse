@@ -42,11 +42,13 @@ export function amuxIdeaLaneDailyAttempts(env: NodeJS.ProcessEnv = process.env):
 
 export type AmuxIdeaLaneAttemptFact = {
   claimedAtMs: number; leaseUntilMs: number; outcome: string | null; prNumber: number | null;
+  /** Set once the PR observer saw the draft PR merged. */
+  mergedAtMs?: number | null;
 };
 
 export type AmuxIdeaLaneState = {
-  /** running: a run holds its lease; queued: the next claim retries it; failed: out of attempts. */
-  state: "running" | "queued" | "pr_open" | "failed";
+  /** running: a run holds its lease; queued: the next claim retries it; failed: out of attempts; merged: its PR merged. */
+  state: "running" | "queued" | "pr_open" | "merged" | "failed";
   attempts: number;
   prNumber: number | null;
   /** The newest run's outcome, lease_expired for one that never reported, null while it runs. */
@@ -61,6 +63,9 @@ export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], 
   const opened = attempts.filter((item) => item.outcome === "pr_open")
     .reduce<AmuxIdeaLaneAttemptFact | null>((last, item) => !last || item.claimedAtMs > last.claimedAtMs ? item : last, null);
   const base = { attempts: attempts.length, lastOutcome };
+  // A retry's second PR may be left open; the one that merged settles the idea.
+  const merged = attempts.find((item) => item.outcome === "pr_open" && item.mergedAtMs);
+  if (merged) return { ...base, state: "merged", prNumber: merged.prNumber };
   if (opened) return { ...base, state: "pr_open", prNumber: opened.prNumber };
   if (attempts.some(live)) return { ...base, state: "running", prNumber: null };
   return { ...base, state: attempts.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS ? "failed" : "queued", prNumber: null };

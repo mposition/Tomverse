@@ -42,6 +42,20 @@ test("an idea's runs decide whether the lane runs it again", () => {
   assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([run()], NOW)), false, "never two runs at once");
 });
 
+test("an observed merge of the lane's PR settles the idea as done", () => {
+  const opened = (prNumber, mergedAtMs = null, minutesAgo = 30) => run({ claimedAtMs: NOW - minutesAgo * 60_000,
+    leaseUntilMs: NOW - 1, outcome: "pr_open", prNumber, mergedAtMs });
+  assert.deepEqual(amuxIdeaLaneState([opened(42, NOW - 1)], NOW),
+    { state: "merged", attempts: 1, prNumber: 42, lastOutcome: "pr_open" });
+  assert.equal(amuxIdeaLaneState([opened(42, null)], NOW).state, "pr_open", "an unmerged PR is still in review");
+  assert.deepEqual(amuxIdeaLaneState([opened(42, NOW - 1, 60), opened(43, null, 10)], NOW).prNumber, 42,
+    "a retry's PR left open does not hide the one that merged");
+  const view = (lane) => { const result = amuxIdeaProgress({ state: "submitted", submissionOrigin: "owner",
+    cancelled: false, chunks: [], proposedUnits: 0, cards: [], lane }); return [result.stage, result.waitingFor, result.attention]; };
+  assert.deepEqual(view(amuxIdeaLaneState([opened(42, NOW - 1)], NOW)), ["done", null, false]);
+  assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([opened(42, NOW - 1)], NOW)), false);
+});
+
 test("the switch is off unless set, and the daily limit stays bounded", () => {
   assert.equal(amuxIdeaLaneEnabled({}), false);
   assert.equal(amuxIdeaLaneEnabled({ AMUX_IDEA_LANE_ENABLED: "1" }), false);

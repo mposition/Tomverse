@@ -10368,6 +10368,9 @@ model AmuxIdeaLaneAttempt {
   /// pr_open, or a fixed failure word (AMUX_IDEA_LANE_FAILURES).
   outcome    String?
   prNumber   Int?
+  /// GitHub's merge time of the draft PR, recorded once by the engineering
+  /// agent's PR observer round; the idea is then done.
+  mergedAt   DateTime?
   idea       AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Cascade)
 
   @@index([ideaId, claimedAt])

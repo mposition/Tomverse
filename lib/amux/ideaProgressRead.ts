@@ -185,7 +185,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       (SELECT json_agg(json_build_object(
           'claimedAtMs', (extract(epoch FROM l."claimedAt") * 1000)::double precision,
           'leaseUntilMs', (extract(epoch FROM l."leaseUntil") * 1000)::double precision,
-          'outcome', l."outcome", 'prNumber', l."prNumber"))
+          'outcome', l."outcome", 'prNumber', l."prNumber",
+          'mergedAtMs', (extract(epoch FROM l."mergedAt") * 1000)::double precision))
         FROM "AmuxIdeaLaneAttempt" l
         WHERE l."ideaId" = n."id") AS "laneAttempts"
     FROM newest n

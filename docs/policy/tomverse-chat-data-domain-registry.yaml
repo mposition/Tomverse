@@ -2141,7 +2141,7 @@ domains:
     inUnifiedExport: unverified
     note: >-
       One idea-lane run (lib/amux/ideaLaneCore.ts): claim and lease times, a fixed
-      outcome word and the draft PR number. It stores no idea text, prompt,
+      outcome word, the draft PR number and its observed merge time. It stores no idea text, prompt,
       transcript or change; the row goes with its idea by cascade, so it
       follows the parent's unresolved account-deletion and export decision.
 

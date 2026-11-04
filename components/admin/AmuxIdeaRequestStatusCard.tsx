@@ -13,7 +13,7 @@ export type AmuxIdeaRequestCardState =
   | { kind: "saving"; requestId: string }
   | { kind: "checking"; requestId: string }
   | { kind: "unknown"; requestId: string }
-  | { kind: "saved"; requestId: string; ideaId: string }
+  | { kind: "saved"; requestId: string; ideaId: string; /** The idea lane took it: no v4 steps follow. */ lane?: boolean }
   | { kind: "locked" };
 
 const tone = {
@@ -41,7 +41,7 @@ export function AmuxIdeaRequestStatusCard({ state, children }: {
       state.kind === "saved" ? m.statusSavedTitle : m.statusLockedTitle;
   const body = state.kind === "saving" ? m.statusSavingBody : state.kind === "checking" ? m.statusCheckingBody :
     state.kind === "unknown" ? m.statusUnknownBody :
-      state.kind === "saved" ? m.statusSavedBody : m.recoveryUnavailable;
+      state.kind === "saved" ? (state.lane ? m.statusSavedLaneBody : m.statusSavedBody) : m.recoveryUnavailable;
   return (
     <section className={`space-y-3 rounded-xl border p-4 text-sm ${tone[state.kind]}`}
       role={state.kind === "unknown" || state.kind === "locked" ? "alert" : "status"}

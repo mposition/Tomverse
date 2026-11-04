@@ -90,7 +90,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
   analysisStopAvailable, sessionIntake = false, analysisTranslationAvailable = false,
-  openRequestId = null, progressRows, laneAvailable = false }: {
+  openRequestId = null, progressRows, laneAvailable = false, openedByLane = false }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
@@ -107,6 +107,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   progressRows?: AmuxIdeaProgressRows;
   /** The idea lane is on (AMUX_IDEA_LANE_ENABLED): a test button saves an owner idea for it. */
   laneAvailable?: boolean;
+  /** The opened idea is one the lane took (it has a run): no v4 steps follow it. */
+  openedByLane?: boolean;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -150,6 +152,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   // The request the lane test button sent: once saved, the idea waits for the lane, not for the v4 steps.
   const [laneRequestId, setLaneRequestId] = useState<string | null>(null);
   const laneQueued = submission.kind === "submitted" && submission.requestId === laneRequestId;
+  // An opened idea the lane took has no v4 steps either.
+  const laneTaken = laneQueued || (submission.kind === "submitted" && openedByLane &&
+    submission.requestId === openRequestId);
   const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
   const [continuationChunkIndex, setContinuationChunkIndex] = useState(0);
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
@@ -500,7 +505,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         ? { kind: "checking", requestId: submission.requestId }
         : { kind: "unknown", requestId: submission.requestId }) :
         submission.kind === "submitted"
-          ? { kind: "saved", requestId: submission.requestId, ideaId: submission.ideaId } :
+          ? { kind: "saved", requestId: submission.requestId, ideaId: submission.ideaId, lane: laneTaken } :
           submission.kind === "recovery_unavailable" ? { kind: "locked" } : null;
   const setAsideControls = submission.kind === "outcome_unknown" || submission.kind === "recovery_unavailable" ? (
     <div className="w-full space-y-2 border-t pt-3 border-zinc-700" data-testid="amux-idea-set-aside">
@@ -816,22 +821,22 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <p role="status" className="rounded-xl border p-4 text-sm border-emerald-500/30 text-zinc-200"
           data-testid="amux-idea-lane-queued">{messages.laneQueued}</p>
       ) : null}
-      {submission.kind === "submitted" && submission.origin !== "session" && !laneQueued ? <AmuxInitialPlanPanel
+      {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? <AmuxInitialPlanPanel
         key={submission.ideaId}
         ideaId={submission.ideaId}
         operatorId={operatorId} available={initialPlanAvailable}
         declaredExternalSources={submission.hasExternalSources}
         onCommitted={onInitialPlanCommitted}
       /> : null}
-      {submission.kind === "submitted" && submission.origin !== "session" && !laneQueued ? composePanel : null}
-      {analysisResultAvailable && submission.kind === "submitted" && !laneQueued ?
+      {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? composePanel : null}
+      {analysisResultAvailable && submission.kind === "submitted" && !laneTaken ?
         <AmuxIdeaAnalysisResultPanel key={submission.ideaId}
           ideaId={submission.ideaId}
           watchToken={analysisWatch?.ideaId === submission.ideaId ? analysisWatch.token : 0}
           watchChunk={continuationChunkIndex}
           onContinuationReady={setContinuationChunkIndex}
           translationAvailable={analysisTranslationAvailable} /> : null}
-      {submission.kind === "submitted" && submission.origin !== "session" && !laneQueued ? (
+      {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? (
         <section className="space-y-3 rounded-xl border p-4 border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-100">{messages.sourceScopeTitle}</h3>
           <p className="text-sm text-zinc-300">{messages.sourceScopeHint}</p>

@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
+import { EngineeringAgentGitHubReadError, readEngineeringAgentPullMerge } from "@/lib/engineeringAgentGitHubRead";
 import { prisma } from "@/lib/prisma";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
@@ -164,6 +165,60 @@ export async function recordAmuxIdeaLaneResult(result: AmuxIdeaLaneResult): Prom
     data: { outcome: result.outcome, prNumber: result.prNumber, finishedAt: now },
   });
   return count === 1;
+}
+
+/** How long after a run opened its PR the observer still looks for the merge. */
+const MERGE_WATCH_MS = 30 * 86_400_000;
+const MERGE_WATCH_LIMIT = 50;
+
+export type AmuxIdeaLaneMergeOutcome = "merged" | "waiting" | "unreadable" | "not_the_lane_pr";
+
+/**
+ * The lane's part of the engineering agent's PR observer round
+ * (observe/pull-requests): each opened lane PR not yet seen merged is read
+ * from GitHub, and a merge of this run's own branch into develop is recorded
+ * once with GitHub's merge time, which makes the idea done. No approval is
+ * judged; the PR merges by the release train like any develop PR. A PR closed
+ * without a merge stays as it is (the owner can close the idea).
+ */
+export async function observeAmuxIdeaLaneMerges(
+  read: typeof readEngineeringAgentPullMerge = (prNumber) => readEngineeringAgentPullMerge(prNumber),
+): Promise<Array<{ attemptId: string; outcome: AmuxIdeaLaneMergeOutcome }>> {
+  const now = await prisma.$transaction((tx) => databaseNow(tx));
+  const watched = await prisma.amuxIdeaLaneAttempt.findMany({
+    where: { outcome: "pr_open", mergedAt: null, prNumber: { not: null },
+      finishedAt: { gt: new Date(now.getTime() - MERGE_WATCH_MS) } },
+    select: { id: true, prNumber: true },
+    orderBy: [{ finishedAt: "desc" }, { id: "asc" }],
+    take: MERGE_WATCH_LIMIT,
+  });
+  const results: Array<{ attemptId: string; outcome: AmuxIdeaLaneMergeOutcome }> = [];
+  for (const attempt of watched) {
+    const prNumber = attempt.prNumber as number;
+    let pull: Awaited<ReturnType<typeof readEngineeringAgentPullMerge>>;
+    try {
+      pull = await read(prNumber);
+    } catch (error) {
+      if (!(error instanceof EngineeringAgentGitHubReadError)) throw error;
+      results.push({ attemptId: attempt.id, outcome: "unreadable" });
+      continue;
+    }
+    // The number came from the workflow; only this run's own branch into develop counts.
+    if (pull.headRef !== amuxIdeaLaneBranch(attempt.id) || pull.baseRef !== "develop") {
+      results.push({ attemptId: attempt.id, outcome: "not_the_lane_pr" });
+      continue;
+    }
+    if (!pull.merged || !pull.mergedAt) {
+      results.push({ attemptId: attempt.id, outcome: "waiting" });
+      continue;
+    }
+    const { count } = await prisma.amuxIdeaLaneAttempt.updateMany({
+      where: { id: attempt.id, outcome: "pr_open", prNumber, mergedAt: null },
+      data: { mergedAt: pull.mergedAt },
+    });
+    results.push({ attemptId: attempt.id, outcome: count === 1 ? "merged" : "waiting" });
+  }
+  return results;
 }
 
 async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {

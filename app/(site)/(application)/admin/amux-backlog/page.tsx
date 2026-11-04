@@ -188,6 +188,7 @@ export default async function AdminAmuxBacklogPage({
         {ideaProgress !== undefined && !openedIdea ? <AmuxIdeaInbox rows={ideaProgress} /> : null}
         <AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}
           progressRows={openedIdea ? undefined : ideaProgress}
+          openedByLane={!!openedIdea?.lane}
           submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}

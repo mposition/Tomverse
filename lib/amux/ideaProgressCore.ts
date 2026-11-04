@@ -83,9 +83,11 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
 
   if (facts.cancelled || facts.state === "cancelled") return at("cancelled");
   // The lane skips analysis and approvals: its run is the execution, its
-  // draft PR the review, and a run out of attempts needs the owner's look.
+  // draft PR the review, its observed merge done, and a run out of attempts
+  // needs the owner's look.
   if (facts.lane) {
-    return { stage: facts.lane.state === "pr_open" ? "review" : "execution", waitingFor: null,
+    const laneStage = facts.lane.state === "merged" ? "done" : facts.lane.state === "pr_open" ? "review" : "execution";
+    return { stage: laneStage, waitingFor: null,
       attention: facts.lane.state === "failed", tasks: counts };
   }
   if (latest && (latest.state === "in_flight" ||

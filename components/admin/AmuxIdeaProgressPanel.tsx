@@ -231,10 +231,12 @@ function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   running: (attempt: number, max: number) => string;
   queued: (attempts: number, max: number, outcome: string) => string;
   prOpen: (pr: number) => string;
+  merged: (pr: number) => string;
   failed: (max: number, outcome: string) => string;
 } }): string {
   const max = AMUX_IDEA_LANE_MAX_ATTEMPTS;
   const last = lane.lastOutcome ?? "-";
+  if (lane.state === "merged" && lane.prNumber !== null) return m.lane.merged(lane.prNumber);
   if (lane.state === "pr_open" && lane.prNumber !== null) return m.lane.prOpen(lane.prNumber);
   if (lane.state === "running") return m.lane.running(lane.attempts, max);
   if (lane.state === "queued") return m.lane.queued(lane.attempts, max, last);
