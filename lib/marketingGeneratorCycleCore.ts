@@ -208,7 +208,12 @@ export type MarketingGeneratorWorkerConfig = {
 export function marketingGeneratorWorkerConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): { readonly ok: true; readonly config: MarketingGeneratorWorkerConfig } | { readonly ok: false; readonly reason: string } {
-  const missing = MARKETING_GENERATOR_WORKER_VARIABLES.filter((name) => !env[name]);
+  const subscription = env.MARKETING_LLM_CHANNEL === "codex-subscription";
+  // The subscription channel holds no API key and names the CLI instead.
+  const needed: readonly string[] = subscription
+    ? ["MARKETING_APP_URL", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_CODEX_BIN"]
+    : MARKETING_GENERATOR_WORKER_VARIABLES;
+  const missing = needed.filter((name) => !env[name]);
   if (missing.length > 0) return { ok: false, reason: `missing: ${missing.join(", ")}` };
   const secret = env.MARKETING_GENERATOR_SUBMIT_SECRET as string;
   if (secret.length < 32) return { ok: false, reason: "MARKETING_GENERATOR_SUBMIT_SECRET is shorter than 32 characters" };
@@ -220,7 +225,7 @@ export function marketingGeneratorWorkerConfig(
   }
   const local = appUrl.hostname === "localhost" || appUrl.hostname === "127.0.0.1";
   if (appUrl.protocol !== "https:" && !local) return { ok: false, reason: "MARKETING_APP_URL must use HTTPS" };
-  return { ok: true, config: { appUrl, secret, apiKey: env.MARKETING_LLM_API_KEY as string } };
+  return { ok: true, config: { appUrl, secret, apiKey: subscription ? "" : (env.MARKETING_LLM_API_KEY as string) } };
 }
 
 /**

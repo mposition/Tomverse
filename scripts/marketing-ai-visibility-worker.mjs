@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 
 import { marketingAiVisibilityGate, runMarketingAiVisibilityCycle } from "../lib/marketingAiVisibilityCore.ts";
 import { marketingLlmPinProblems } from "../lib/marketingLlmBudgetCore.ts";
+import { marketingLlmChannelFromEnv } from "../lib/marketingCodexChannelCore.ts";
 import { marketingLlmBudgetHttpPort, runMarketingLlmCall } from "../lib/marketingLlmClientCore.ts";
 import {
   marketingGeneratorAppPorts,
@@ -50,6 +51,7 @@ if (!configured.ok) {
   process.exit(1);
 }
 const { appUrl, secret, apiKey } = configured.config;
+const channel = marketingLlmChannelFromEnv(process.env);
 
 // Aborted a little before the deadline, so the run can say it ran out of time
 // rather than vanish when the supervisor's SIGKILL lands.
@@ -82,12 +84,12 @@ try {
         callAnswer: (messages, requestKey) =>
           runMarketingLlmCall(
             { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey, webSearch: { allowedDomains: [] } },
-            { budget, transport: fetch, apiKey, signal: controller.signal },
+            { budget, transport: fetch, apiKey, channel, signal: controller.signal },
           ),
         callJudge: (messages, requestKey) =>
           runMarketingLlmCall(
             { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey },
-            { budget, transport: fetch, apiKey, signal: controller.signal },
+            { budget, transport: fetch, apiKey, channel, signal: controller.signal },
           ),
         submitReport: app.submitReport,
         secret,

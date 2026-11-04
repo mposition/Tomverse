@@ -7,7 +7,7 @@
 // the same process is advice, a SIGKILL from the parent is not
 // (agent foundation section 6.2a).
 //
-// The worker gets its four variables and what Node itself needs -- not the
+// The worker gets its variables and what Node itself needs -- not the
 // rest of this process's environment, which Railway fills with its own.
 //
 // Not yet wired into .railway/agent-runners.ts: the service needs the
@@ -46,6 +46,11 @@ const WORKER_VARIABLES = [
   "MARKETING_APP_URL",
   "MARKETING_GENERATOR_SUBMIT_SECRET",
   "MARKETING_LLM_API_KEY",
+  // The subscription channel on the AMUX box: which CLI, and the home its login lives in.
+  "MARKETING_LLM_CHANNEL",
+  "MARKETING_CODEX_BIN",
+  "HOME",
+  "CODEX_HOME",
   "PATH",
   "SystemRoot",
   "SYSTEMROOT",
