@@ -17,11 +17,12 @@ import { newAnalyticsUserId } from "../lib/ga4UserId.ts";
 // The privacy policy sections for comment monitoring and the GA4 User-ID
 // (docs/policy/marketing-automation.md sections 10.2 and 12.1). The text is
 // public, so what it states about the code is held to the code's own
-// constants, and what is not yet confirmed carries a placeholder that is
-// listed here, in one place, until the operator resolves it. While any
-// placeholder is left the page does not render the comment section
+// constants, and a fact that is not yet confirmed carries a placeholder that is
+// listed in PENDING_CONFIRMATIONS, in one place, until the operator resolves it.
+// While any placeholder is left the page must not render the comment section
 // (lib/privacyNoticeStatus.ts), and the section cannot be marked confirmed with
-// one still in it.
+// one still in it. The operator confirmed the three facts on 2026-11-04, so the
+// list is empty and the constant is true.
 
 const LOCALES = { en, ko, zh, fr, de, es, pt };
 
@@ -40,13 +41,11 @@ const USER_ID_KEYS = [
  * The facts the operator still has to confirm. Each is a placeholder in the
  * locale text, and each locale carries the same ones. Resolve one by writing
  * the confirmed fact into every locale and removing it from this list; the
- * checklist is docs/policy/marketing-privacy-dpia-checklist.md.
+ * checklist is docs/policy/marketing-privacy-dpia-checklist.md. Empty since
+ * 2026-11-04 (Zernio's entity and country, the legal basis, and how long
+ * Zernio and OpenAI keep the text were all confirmed that day).
  */
-const PENDING_CONFIRMATIONS = {
-    commentsTransfer3: "Zernio's legal entity and country",
-    commentsTransfer6: "legal basis for reading public comments",
-    commentsTransfer7: "how long Zernio and OpenAI keep the comment text",
-};
+const PENDING_CONFIRMATIONS = {};
 const PLACEHOLDER = /\[(?:운영자 확인 필요|OPERATOR CONFIRMATION REQUIRED)\]/;
 
 test("every locale carries every comment-monitoring and User-ID key, non-empty", () => {
@@ -83,6 +82,29 @@ test("placeholders are exactly the listed pending confirmations, the same in eve
             .map(([key]) => key)
             .sort();
         assert.deepEqual(found, expected, name);
+    }
+});
+
+test("the comment section is confirmed, and says who, on what basis and for how long", () => {
+    assert.equal(COMMENTS_PRIVACY_NOTICE_CONFIRMED, true);
+    assert.deepEqual(Object.keys(PENDING_CONFIRMATIONS), []);
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        const copy = bundle.privacyPolicy;
+        // Processor: entity and country, and the sub-processor location it was told with.
+        assert.match(copy.commentsTransfer3, /ZERNIO SOFTWARE SL/, `${name}: processor entity`);
+        assert.match(copy.commentsTransfer3, /OpenAI OpCo, LLC/, `${name}: model provider`);
+        // Retention at both vendors: OpenAI's 30 days for abuse monitoring, and a contract-bound deletion at Zernio.
+        assert.match(copy.commentsTransfer7, /\b30\b/, `${name}: OpenAI abuse-monitoring period`);
+        // Legal basis is stated, not blank.
+        assert.ok(copy.commentsTransfer6.trim().length > 40, `${name}: legal basis`);
+    }
+    // The private agreement is not quoted: only that it exists, the entity, the country and the regions.
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        assert.doesNotMatch(
+            bundle.privacyPolicy.commentsTransfer3 + bundle.privacyPolicy.commentsTransfer7,
+            /SOC ?2|(?:clause|section|Anlage|annexe|annex)\s*\d/i,
+            name
+        );
     }
 });
 
