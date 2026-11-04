@@ -21,7 +21,7 @@
 // current keys to these keys owes with owedMessages() -- the rules
 // evaluateKey() applies -- and reserves only items in that set.
 
-import { REOPEN_WINDOW_MS, S2_PAGE_KEYS, S2_PAGE_SIGNALS } from "./classify-core.mjs";
+import { BUDGET_SIGNAL, REOPEN_WINDOW_MS, S2_PAGE_KEYS, S2_PAGE_SIGNALS, initialKeyState, signalForKey } from "./classify-core.mjs";
 import { ITEM_ORIGINS, MESSAGE_KINDS } from "./delivery-core.mjs";
 import { keysAreValid } from "./keys-schema-core.mjs";
 import { admissibleReservationDates } from "./owner-date-core.mjs";
@@ -122,6 +122,13 @@ export function owedMessages(previousKeys, nextKeys, ownerDate) {
       if (kind) owed.push({ signal: signal.id, scope, kind, openedAt: nextKeys[key].openedAt });
     }
   }
+  // S3 budget keys, in a fixed order: a key the chain does not hold yet starts
+  // closed, and a key dropped by the switch owes nothing.
+  const budgetPrefix = `${BUDGET_SIGNAL.id}#`;
+  for (const key of Object.keys(nextKeys).filter((name) => name.startsWith(budgetPrefix)).sort()) {
+    const kind = owedMessage(BUDGET_SIGNAL, previousKeys[key] ?? initialKeyState(), nextKeys[key], ownerDate);
+    if (kind) owed.push({ signal: BUDGET_SIGNAL.id, scope: key.slice(budgetPrefix.length), kind, openedAt: nextKeys[key].openedAt });
+  }
   return owed;
 }
 
@@ -145,7 +152,7 @@ function parseReservation(reservation, keys, nowMs) {
   // (docs/policy/sre-ops.md §5, §9 T-1).
   if (!admissibleReservationDates(nowMs).includes(ownerDate)) return refuse("owner_date_refused");
   // Something must be sent; one key's move owes one message, so one item per key.
-  if (items.length > S2_PAGE_KEYS.length || (items.length === 0 && !channelCheck)) return refuse("reservation_invalid");
+  if (items.length > Object.keys(keys).length || (items.length === 0 && !channelCheck)) return refuse("reservation_invalid");
   const seen = new Set();
   const parsed = [];
   for (const item of items) {
@@ -155,10 +162,10 @@ function parseReservation(reservation, keys, nowMs) {
     if (!MESSAGE_KINDS.includes(kind) || !ITEM_ORIGINS.includes(origin)) return refuse("shape");
     if (!Number.isSafeInteger(openedAt) || openedAt < 0 || openedAt > MAX_DATE_MS) return refuse("shape");
     const key = `${signal}#${scope}`;
-    if (!S2_PAGE_KEYS.includes(key)) return refuse("reservation_invalid");
+    const signalDef = signalForKey(key);
+    if (signalDef === null || signalDef.id !== signal) return refuse("reservation_invalid");
     if (seen.has(key)) return refuse("reservation_invalid");
     seen.add(key);
-    const signalDef = S2_PAGE_SIGNALS.find((s) => s.id === signal);
     if (!itemMatchesKey(signalDef, item, keys[key], ownerDate)) return refuse("reservation_invalid");
     parsed.push({ signal, scope, kind, origin, openedAt: new Date(openedAt) });
   }

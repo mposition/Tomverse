@@ -33,9 +33,9 @@
 // URL, no secret, no key state, no response body.
 
 import { incidentOrigin, owedMessages } from "./advance-request-core.mjs";
-import { S2_PAGE_SIGNALS, evaluateKey } from "./classify-core.mjs";
+import { BUDGET_KEY_LIMIT, BUDGET_SIGNAL, S2_PAGE_SIGNALS, evaluateKey, initialKeyState, signalForKey } from "./classify-core.mjs";
 import { checkNotification, isCanonicalItemId, renderChannelCheckMessage, renderPageMessage } from "./content-guard-core.mjs";
-import { observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
+import { budgetObservations, observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
 import { admitOwedItems, planRunMessage } from "./notification-budget-core.mjs";
 import { RUN_DEADLINE_MS } from "./transaction-bounds-core.mjs";
 import { OWNER_TIME_ZONE, ownerDateOf } from "./owner-date-core.mjs";
@@ -93,12 +93,24 @@ export function runIdOf(ms, random) {
  * observations. Pure. Returns { keys, reservation, deferred } where
  * `reservation` is null or the advance request's reservation.
  */
-export function planAdvance({ state, observations, nowMs, ownerDate, channelCheckDue = false }) {
+export function planAdvance({ state, observations, nowMs, ownerDate, channelCheckDue = false, budgetPages = false }) {
   const keys = {};
   for (const signal of S2_PAGE_SIGNALS) {
     for (const scope of signal.scopes) {
       const key = `${signal.id}#${scope}`;
       keys[key] = evaluateKey(signal, state.keys[key], observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
+    }
+  }
+  if (budgetPages) {
+    // Every window the chain holds or the snapshot reports; one that has gone
+    // from the report stays as it is rather than recovering.
+    const prefix = `${BUDGET_SIGNAL.id}#`;
+    const names = [...new Set([...Object.keys(state.keys), ...Object.keys(observations)])]
+      .filter((name) => name.startsWith(prefix) && signalForKey(name) !== null)
+      .sort()
+      .slice(0, BUDGET_KEY_LIMIT);
+    for (const key of names) {
+      keys[key] = evaluateKey(BUDGET_SIGNAL, state.keys[key] ?? initialKeyState(), observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
     }
   }
   const owed = owedMessages(state.keys, keys, ownerDate);
@@ -210,7 +222,12 @@ export async function runPage({
       snapshot = parsed.ok ? parsed.snapshot : null;
     }
   }
-  const observations = observationsFromSnapshot({ healthOk, snapshot });
+  // S3's budget pages stay off until the owner sets this switch (policy §8).
+  const budgetPages = env.OPS_OBSERVER_S3_BUDGET_PAGES === "true";
+  const observations = {
+    ...observationsFromSnapshot({ healthOk, snapshot }),
+    ...(budgetPages && healthOk ? budgetObservations(snapshot) : {}),
+  };
 
   // 3. The state. Only trusted goes on.
   const state = await read("/api/internal/ops-observer/state", { body: { runDeadline, ownerDate } });
@@ -237,6 +254,7 @@ export async function runPage({
     nowMs: startedAt,
     ownerDate,
     channelCheckDue: live && inChannelCheckWindow(startedAt),
+    budgetPages,
   });
   record.deferred = plan.deferred;
   record.reservedItems = plan.reservation ? plan.reservation.items.length : 0;

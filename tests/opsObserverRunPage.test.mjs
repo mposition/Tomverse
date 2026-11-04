@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { parseAdvanceRequest } from "../scripts/ops-observer/advance-request-core.mjs";
 import { S2_PAGE_KEYS, initialKeyState } from "../scripts/ops-observer/classify-core.mjs";
 import { renderChannelCheckMessage, renderPageMessage } from "../scripts/ops-observer/content-guard-core.mjs";
 import { OWNER_TIME_ZONE, inChannelCheckWindow, ownerDateOf, planAdvance, runIdOf, runPage } from "../scripts/ops-observer/run-page-core.mjs";
@@ -231,6 +232,66 @@ test("in the window a page carries the check; a check already taken or a shadow 
   assert.equal(shadow.calls.find((call) => call.path === "/api/internal/ops-observer/advance").body.reservation, null);
 });
 
+const budgetSnapshot = (band) => {
+  const used = { ">=95": 96, exhausted: 100, "<70": 10 }[band];
+  return buildSnapshot({
+    readiness: { status: "fulfilled", value: { checks: { database: true, securityEnvironment: true, providerBudgets: true,
+      emailSnapshotKeyring: true, emailSendingIdentity: true } } },
+    jobs: { status: "fulfilled", value: [
+      { key: "credit_reservation_reconciliation", status: "success", delayed: false, lastRunAt: null, lastSuccessAt: null, consecutiveFailures: 0 },
+      { key: "standard_email_drain", status: "success", delayed: false, lastRunAt: null, lastSuccessAt: null, consecutiveFailures: 0 },
+    ] },
+    budgets: { status: "fulfilled", value: { usageUnavailable: false, providers: [{ provider: "openai", periods: [
+      { period: "day", usedMicroUsd: used, limitMicroUsd: 100, resetAt: new Date(START + 3_600_000).toISOString() },
+    ] }] } },
+    now: new Date(START),
+    commitSha: "a".repeat(40),
+  }).snapshot;
+};
+const BUDGET_KEY = "P-B#openai_day";
+
+test("budget pages are off without the switch, and a bad window opens one with it", async () => {
+  const routes = liveRoutes({
+    "/api/internal/ops-snapshot": [200, budgetSnapshot(">=95")],
+    "/api/internal/ops-observer/state": [200, trusted()],
+    "/api/internal/ops-observer/confirm": [200, { result: "shadowed" }],
+  });
+  const off = fakeFetch(routes);
+  await run(off);
+  const offBody = off.calls.find((call) => call.path.endsWith("/advance")).body;
+  assert.equal(Object.hasOwn(offBody.keys, BUDGET_KEY), false);
+  assert.equal(offBody.reservation, null);
+
+  const on = fakeFetch(routes);
+  await run(on, { env: { ...ENV, OPS_OBSERVER_S3_BUDGET_PAGES: "true" } });
+  const onBody = on.calls.find((call) => call.path.endsWith("/advance")).body;
+  assert.equal(onBody.keys[BUDGET_KEY].status, "open");
+  assert.deepEqual(onBody.reservation.items.map((item) => [item.signal, item.scope, item.kind]), [["P-B", "openai_day", "new_open"]]);
+  const parsed = parseAdvanceRequest(JSON.stringify(onBody), START);
+  assert.equal(parsed.ok, true, JSON.stringify(parsed));
+});
+
+test("a budget key worsens at exhausted, recovers after two good runs, and holds when the report is gone", () => {
+  const plan = (keys, band) => planAdvance({
+    state: trusted({ keys }),
+    observations: band === null ? {} : { [BUDGET_KEY]: band === "<70" ? "ok" : band },
+    nowMs: START,
+    ownerDate: "2026-10-08",
+    budgetPages: true,
+  });
+  const opened = plan(initial(), ">=95");
+  assert.equal(opened.keys[BUDGET_KEY].status, "open");
+  const worse = plan(opened.keys, "exhausted");
+  assert.deepEqual(worse.reservation.items.map((item) => item.kind), ["worsening"]);
+  const held = plan(worse.keys, null);
+  assert.equal(held.keys[BUDGET_KEY].status, "open");
+  assert.equal(held.reservation, null);
+  const first = plan(held.keys, "<70");
+  assert.equal(first.keys[BUDGET_KEY].status, "open");
+  const second = plan(first.keys, "<70");
+  assert.deepEqual(second.reservation.items.map((item) => item.kind), ["recovery"]);
+});
+
 test("a stalled read is retried once on a new attempt; writes and answers are not", async () => {
   // A failed state read followed by a good one finishes the run.
   let stateCalls = 0;
@@ -368,7 +429,7 @@ test("the run's log line carries enums and counts, never the secret or a URL", a
 });
 
 test("what the run sends is what the routes' own parsers accept", async () => {
-  const { parseAdvanceRequest } = await import("../scripts/ops-observer/advance-request-core.mjs");
+
   const { parseOpsObserverRequest } = await import("../scripts/ops-observer/request-schema-core.mjs");
   const fake = fakeFetch({
     "/api/health": [200, {}],

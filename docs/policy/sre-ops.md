@@ -173,7 +173,8 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
   직전 genesis 뒤 7일 안의 genesis는 전송 대신 침묵을 만들므로, 한 달력일에 전송이 가능한 genesis는 최대 하나입니다(결정 D5b).
   S2 시작일은 activation genesis 날이므로 그날 최대 31입니다.
 - 본 앱 store가 예약 트랜잭션 안에서 사건·종류 unique와 날짜별 개수를 다시 세고, 넘으면 advance 전체를 거절합니다.
-  S3에서 키가 늘면 최대값을 다시 계산해 정책 버전을 올립니다.
+  S3에서 키가 늘면 최대값을 다시 계산해 정책 버전을 올립니다. 예산 키는 provider마다 일·월 2개이고 모두 악화 구간을 가지므로,
+  provider가 n개이면 하루 최대는 `15 + 4n`입니다(2026-11-04 기준 12개면 63). 실제로는 95%를 넘은 window만 메시지를 만듭니다.
 - 채널 점검은 소유자 날짜당 1회. check-in monitor는 주기 7일 + 유예 2일이며, 채널이 죽은 뒤 최대 9일 안에 탐지합니다.
 - dead-man monitor 셋(page heartbeat, digest heartbeat, 점검 check-in)의 알림 대상은 **page 채널이 아닌 경로**여야 합니다.
 
@@ -244,7 +245,7 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 
 | 서비스 | 가진 것 |
 |---|---|
-| `Ops Observer`(page) | `OPS_OBSERVER_SECRET`(32자 이상, 본 앱 route Bearer), `OPS_OBSERVER_HEARTBEAT_URL`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`(**S2부터만**), `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
+| `Ops Observer`(page) | `OPS_OBSERVER_SECRET`(32자 이상, 본 앱 route Bearer), `OPS_OBSERVER_HEARTBEAT_URL`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`(**S2부터만**), `OPS_OBSERVER_S3_BUDGET_PAGES`(**S3부터만**, `true`일 때 예산 키를 page), `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
 | `Ops Observer Digest` | `OPS_OBSERVER_DIGEST_SECRET`(32자 이상, advance·confirm은 거절), `OPS_OBSERVER_DIGEST_WEBHOOK_URL`, `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`, `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
 
 - 두 서비스 모두 제품 DB 자격증명·GitHub 토큰·admin session·LLM 키·Railway 쓰기 토큰·maintenance secret·감사 무결성 키를
