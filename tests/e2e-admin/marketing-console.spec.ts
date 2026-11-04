@@ -83,6 +83,10 @@ test.describe("marketing console", () => {
     // Every marketing switch is default-off, and the strip says so rather than
     // leaving it to be inferred from an empty queue.
     await expect(strip.locator("dd[data-state='off']")).toHaveCount(5);
+    // Four switches a person can move sit in the open; only the two read-only
+    // states (webhook shadow, apply scope) are folded away. Landing
+    // experiments moved out of the fold on 2026-11-04.
+    await expect(strip.locator("details dd")).toHaveCount(2);
     // The apply scope is a stored document, not a boolean. It reports the
     // document's state, judged by the schema that judges it for real -- a
     // stored `"not json"` is invalid here rather than a working configuration.

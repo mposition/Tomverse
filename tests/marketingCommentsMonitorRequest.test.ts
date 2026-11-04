@@ -15,7 +15,10 @@ import {
   MARKETING_COMMENT_MONITOR_OVERLAP_MS,
   type MarketingCommentsMonitorDeps,
 } from "@/lib/marketingCommentsMonitor";
-import { commentsMonitorEnabled, MARKETING_COMMENTS_MONITOR_ENV } from "@/lib/marketingCommentsMonitorHealth";
+import {
+  commentsMonitorEnabled as commentsMonitorEnabledWith,
+  MARKETING_COMMENTS_MONITOR_ENV,
+} from "@/lib/marketingCommentsMonitorHealth";
 import {
   MARKETING_COMMENTS_READ_AT_MAX_AGE_MS,
   answerMarketingCommentsMonitorRequest,
@@ -26,6 +29,12 @@ import {
 
 const NOW = new Date("2026-11-02T10:00:00.000Z");
 const ON = { [MARKETING_COMMENTS_MONITOR_ENV]: "true" };
+
+// The steps under test are the ones of a monitor that is allowed to run, so the
+// predicate is asked as if the privacy notice's comments section were
+// published. The unconfirmed case is the "off" test below.
+const commentsMonitorEnabled = (env: Readonly<Record<string, string | undefined>>) =>
+  commentsMonitorEnabledWith(env, true);
 
 type Comment = { text: string; createdAt: Date | null };
 const comment = (text: string, createdAt: string | null = "2026-11-02T09:30:00.000Z"): Comment => ({
@@ -115,6 +124,14 @@ test("off: neither step reads anything", async () => {
     assert.deepEqual(await judge(world.deps, NOW.toISOString(), []), { status: 200, body: { status: "off" } });
     assert.deepEqual(world.calls, []);
   }
+});
+
+test("off with the variable on but the privacy notice unconfirmed: neither step reads anything", async () => {
+  const world = app({ comments: { p1: [comment("x")] } });
+  const deps = { ...world.deps, enabled: (env: Readonly<Record<string, string | undefined>>) => commentsMonitorEnabledWith(env, false) };
+  assert.deepEqual(await collect(deps), { status: 200, body: { status: "off" } });
+  assert.deepEqual(await judge(deps, NOW.toISOString(), []), { status: 200, body: { status: "off" } });
+  assert.deepEqual(world.calls, []);
 });
 
 test("collect hands over distinct, bounded bodies with their ids and nothing else, and writes nothing", async () => {

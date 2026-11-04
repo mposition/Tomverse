@@ -51,9 +51,10 @@ export type LandingExperimentBundle = {
 };
 
 /**
- * An example only. The operator decides real copy and adds it as a new bundle
- * id; this one exists so the route, the rewrite and the tests have a variant
- * to build.
+ * `home-hero-v1` is an example only: it exists so the route, the rewrite and
+ * the tests have a variant to build. `home-hero-v2` is the operator's first
+ * real experiment (2026-11-04): the default hero describes the feature, the
+ * variant opens with the visitor's question of which answer to trust.
  */
 export const LANDING_EXPERIMENT_BUNDLES: readonly LandingExperimentBundle[] = [
   {
@@ -68,6 +69,24 @@ export const LANDING_EXPERIMENT_BUNDLES: readonly LandingExperimentBundle[] = [
         ko: {
           title: ["질문은 하나,", "AI 답변은 여럿."],
           body: "한 번 질문하고 여러 AI 모델의 답변을 나란히 읽어 보세요. Tomverse Review가 답변이 어디서 같고 다르고 빠졌는지 살펴보도록 도와 주니, 다음에 무엇을 더 알아볼지 직접 정할 수 있습니다.",
+        },
+      },
+    },
+  },
+  {
+    id: "home-hero-v2",
+    surface: "home",
+    variants: {
+      b: {
+        en: {
+          title: ["Not sure which AI is right?", "See where they agree."],
+          body: "Ask once and read GPT, Claude and Gemini side by side. Spot what they agree on, where they differ and what one of them missed before you rely on an answer.",
+          cta: "Compare answers now",
+        },
+        ko: {
+          title: ["어떤 AI 답이 맞을까?", "나란히 놓고 보면 보입니다."],
+          body: "한 번 질문하면 GPT·Claude·Gemini 답을 나란히 보여 드려요. 같은 점, 다른 점, 한쪽이 놓친 부분까지 확인하고 답을 믿어 보세요.",
+          cta: "지금 비교해 보기",
         },
       },
     },

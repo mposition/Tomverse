@@ -631,7 +631,7 @@ function SpendMeter({ percent, label }: { percent: number; label: string }) {
 }
 
 /**
- * What is switched on, on every section, and the three an operator may change.
+ * What is switched on, on every section, and the four an operator may change.
  *
  * docs/policy/marketing-automation.md §6.1 makes each capability its own
  * switch, and the page's job is to answer "why did nothing publish".
@@ -645,7 +645,7 @@ function SpendMeter({ percent, label }: { percent: number; label: string }) {
  * without the generation there is nothing to compare and set against, and a
  * control whose only outcome is 409 is not a control.
  */
-function MarketingSwitchStrip({
+export function MarketingSwitchStrip({
   switches,
   canWrite,
   configGeneration,
@@ -660,16 +660,16 @@ function MarketingSwitchStrip({
   onDone: () => void;
   m: Record<string, string>;
 }) {
-  // The three an operator can move, each with what it does and a switch, then
-  // the three that are only read here, folded away: they matter when something
+  // The four an operator can move, each with what it does and a switch, then
+  // the two that are only read here, folded away: they matter when something
   // looks wrong, not on every visit.
   const main: { key: string; name: (typeof MARKETING_CONSOLE_SWITCH_CONTROLS)[number]["name"]; label: string; hint: string }[] = [
     { key: "drafts", name: "drafts", label: m.switchDrafts, hint: m.switchDraftsHint },
     { key: "publish", name: "publish", label: m.switchPublish, hint: m.switchPublishHint },
     { key: "autoPublish", name: "autonomous", label: m.switchAutoPublish, hint: m.switchAutoPublishHint },
+    { key: "experiments", name: "experiments", label: m.switchExperiments, hint: m.switchExperimentsHint },
   ];
   const advanced: [string, string][] = [
-    ["experiments", m.switchExperiments],
     ["webhookShadow", m.switchWebhookShadow],
     ["webhookApplyScope", m.switchWebhookApply],
   ];
@@ -721,7 +721,14 @@ function MarketingSwitchStrip({
         (switches.drafts !== "on" || switches.publish !== "on")
           ? m.switchAutonomousNeedsBoth
           : undefined,
-      confirm: turningOn ? m.switchConfirmOn : undefined,
+      // Experiments show visitors different copy, and what has to be true first
+      // (settled pre-registration, shared-cache bypass of the cookie) is not
+      // something the writer can check, so the confirm names it (policy 9.1).
+      confirm: turningOn
+        ? control.name === "experiments"
+          ? m.switchConfirmExperimentsOn
+          : m.switchConfirmOn
+        : undefined,
       body: () => ({
         switch: control.name,
         enabled: turningOn,

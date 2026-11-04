@@ -18,6 +18,10 @@ const mod = (relativePath: string) => pathToFileURL(resolve(ROOT, relativePath))
 const SECRET = "g".repeat(48);
 const BODY = "My lawyer will be in touch about this post";
 
+// The published privacy-notice constant is false until the notice revision
+// lands (lib/privacyNoticeStatus.ts). Every test below is about a monitor that
+// may run, so this file replaces it with true; the unconfirmed case, with the
+// real constant, is tests/server-contract/marketing-comments-monitor-route-unconfirmed.test.ts.
 const world = {
   touched: [] as string[],
   listThrows: null as Error | null,
@@ -28,6 +32,7 @@ const world = {
 let routePromise: Promise<{ POST: (request: Request) => Promise<Response> }> | null = null;
 const loadRoute = () => {
   if (!routePromise) {
+    mock.module(mod("lib/privacyNoticeStatus.ts"), { namedExports: { COMMENTS_PRIVACY_NOTICE_CONFIRMED: true } });
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
     mock.module(mod("lib/marketingCommentsMonitorOperations.ts"), {
       namedExports: {
