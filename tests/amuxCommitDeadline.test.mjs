@@ -314,6 +314,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261104130000_amux_idea_title",
   // A lane run that did one part of a larger idea: one defaulted column and a CHECK.
   "20261104150000_amux_idea_lane_continues",
+  // A subscription claim names no price row (owner decision 2026-11-04).
+  "20261104150000_amux_v19_subscription_claim_no_price",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

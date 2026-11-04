@@ -85,6 +85,13 @@ export async function POST(req: Request) {
         synced: results.filter((result) => result.status === "synced").length,
         skipped: results.filter((result) => result.status === "skipped").length,
         failed: results.filter((result) => result.status === "failed").length,
+        failures: results
+          .filter((result) => result.status === "failed")
+          .map((result) => ({
+            provider: result.provider,
+            httpStatus: result.diagnostic?.httpStatus ?? null,
+            errorCode: result.diagnostic?.errorCode ?? null,
+          })),
         slackDelivered: notification?.delivered ?? null,
         infrastructureSlackDelivered:
           infrastructureNotification?.delivered ?? null,

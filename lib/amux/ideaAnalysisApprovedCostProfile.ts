@@ -21,6 +21,10 @@ export const AMUX_V4_CLAUDE_OPUS_55_PRICE_EVIDENCE = Object.freeze({
   approvedBy: "mposition",
 });
 
+/** What the runner carries where a price id was: a subscription CLI call has no
+ * per-call price (owner decision 2026-11-04). The claim stores no price row. */
+export const AMUX_V19_SUBSCRIPTION_NO_PRICE_ID = "subscription-no-price";
+
 export function amuxV4ApprovedCliPriceEvidenceDigest(): string {
   return createHash("sha256").update(JSON.stringify({
     profile: { ...AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE,
@@ -51,22 +55,6 @@ export function amuxV4ApprovedCliCostProfileMatches(row: PriceRow,
   const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
   return row.provider === profile.provider && row.modelId === profile.modelId &&
     row.mode === mode && row.status === "approved" &&
-    row.inputTokensCap === profile.inputTokensCap &&
-    row.outputTokensCap === profile.outputTokensCap &&
-    row.inputMicroUsdPerMillion === profile.inputMicroUsdPerMillion &&
-    row.outputMicroUsdPerMillion === profile.outputMicroUsdPerMillion;
-}
-
-/** amux-intake v19 subscription channels (owner decision 2026-10-20): the
- * subscription_cli price of any approved Frontier model, on any of the four
- * CLI channels, is the reviewed Opus 5.5 rates and caps above, recorded as a
- * conservative API-conversion estimate. Provider and model are the row's own;
- * only the numbers are fixed. The v4 API path keeps the function above. */
-export function amuxSubscriptionCliCostProfileMatches(row: PriceRow,
-  expected: { provider: string; modelId: string }): boolean {
-  const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
-  return row.provider === expected.provider && row.modelId === expected.modelId &&
-    row.mode === "subscription_cli" && row.status === "approved" &&
     row.inputTokensCap === profile.inputTokensCap &&
     row.outputTokensCap === profile.outputTokensCap &&
     row.inputMicroUsdPerMillion === profile.inputMicroUsdPerMillion &&

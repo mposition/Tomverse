@@ -520,7 +520,7 @@ export async function readMarketingConsole(
         errorCode: true,
         outcomeUnknownAt: true,
         publishAttempt: true,
-        channel: { select: { accountSlug: true, channel: true } },
+        channel: { select: { accountSlug: true, channel: true, provider: true } },
       },
     });
     return {
@@ -538,6 +538,9 @@ export async function readMarketingConsole(
         id: post.id,
         accountSlug: post.channel.accountSlug,
         channel: post.channel.channel,
+        // `manual` is a hand-posted account: the console draws no schedule
+        // button for its posts and offers to record the post instead.
+        provider: post.channel.provider,
         locale: post.locale,
         status: post.status,
         mode: post.mode,

@@ -70,6 +70,25 @@ test("a created digest is announced once on Slack with the fixed sentence and it
   assert.equal(result.line.notified, true);
 });
 
+test("a failed heartbeat ping is retried once; the digest submission and the notice are not", async () => {
+  let beats = 0;
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url === HEARTBEAT) {
+      beats += 1;
+      if (beats === 1) throw new Error("stalled");
+      return { status: 200, text: async () => "" };
+    }
+    if (url === WEBHOOK) return { status: 200, text: async () => "ok" };
+    return { status: 200, text: async () => JSON.stringify({ result: "created", itemId: "22222222-2222-4222-8222-222222222222" }) };
+  };
+  const result = await runDigest({ env: ENV, fetchImpl, now: () => START, log: () => {}, sleep: async () => {} });
+  assert.deepEqual([result.exitCode, result.outcome, beats], [0, "created", 2]);
+  assert.equal(calls.filter((url) => url === HEARTBEAT).length, 2);
+  assert.equal(calls.filter((url) => url === WEBHOOK).length, 1);
+});
+
 test("a replayed digest is not announced again; the heartbeat still goes", async () => {
   const fake = fakeFetch({ [DIGEST]: [200, { result: "replayed", itemId: ITEM }], [HEARTBEAT]: [200] });
   const result = await run(fake);
