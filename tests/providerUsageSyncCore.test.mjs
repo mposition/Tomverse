@@ -191,6 +191,17 @@ test("OpenAI Costs retry policy covers transient statuses and honors retry heade
   );
 });
 
+test("OpenAI Costs retries a 429 across the per-minute rate limit window", () => {
+  const delay = openAiCostsRetryDelayMs({ attempt: 1, status: 429 });
+  assert.equal(delay, 30_000);
+  assert.ok(delay * 2 >= 60_000, "two retries must outlast a one-minute window");
+  assert.equal(
+    openAiCostsRetryDelayMs({ attempt: 1, status: 429, retryAfter: "1" }),
+    30_000
+  );
+  assert.equal(openAiCostsRetryDelayMs({ attempt: 1, status: 503 }), 500);
+});
+
 test("OpenAI Costs parser sums every USD line item", () => {
   const parsed = parseOpenAiCostsPage({
     data: [
