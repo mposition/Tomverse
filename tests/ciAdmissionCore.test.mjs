@@ -454,3 +454,23 @@ test("a ci:hold pull request out of the line still counts the runners its CI hol
   assert.deepEqual(judged.state.lastRound.running.map((r) => r.number).sort(), [1, 2]);
   assert.equal(judged.state.lastRound.running.find((r) => r.number === 1).title, "Pull 1");
 });
+
+test("a pull request a person marked ready is never sent back, and still takes its runners", () => {
+  const owner = (p, running) => ({ key: `pr:${p.number}`, title: "", number: p.number, base: "develop", sha: p.headSha, running, queued: 0, startedAt: new Date(T0 - 3_600_000).toISOString() });
+  const top = pull(1, { draft: false });
+  const over = pull(2, { draft: false });
+  const below = pull(3);
+  const open = [top, over, below];
+  const input = { state: state({ capacity: 5, queue: lineOf(1, 2, 3) }), openPulls: open, running: runs(top, over), checks: checksFor(open), runners: [owner(top, 4), owner(over, 4)] };
+  // Over the budget, no person: sent back as before.
+  assert.deepEqual(kinds(judge({ ...input, personReady: new Set() })), ["hold:2", "cancel:2"].slice(0, kinds(judge({ ...input, personReady: new Set() })).length));
+  assert.equal(statuses(judge({ ...input, personReady: new Set() }))[2], "held");
+  // A person marked it ready: left alone, and the draft below waits for its runners.
+  const kept = judge({ ...input, personReady: new Set([2]) });
+  assert.equal(statuses(kept)[2], "running");
+  assert.equal(statuses(kept)[3], "waiting");
+  assert.equal(kept.actions.some((action) => action.kind === "hold"), false);
+  // Who marked it could not be read: nothing is sent back this round.
+  const unread = judge({ ...input, personReady: null });
+  assert.equal(unread.actions.some((action) => action.kind === "hold"), false);
+});

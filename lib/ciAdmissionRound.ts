@@ -163,6 +163,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
   let deploys: CiAdmissionDeploy[];
   const checks = new Map<number, CiAdmissionCheck>();
   let runners: CiRunnerOwner[] | null = null;
+  let personReady: ReadonlySet<number> | null = null;
   try {
     openPulls = await github.openPulls();
     ({ keys: running, bases: runningBases, deploys } = await github.runningPulls());
@@ -172,6 +173,11 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     }
     // Who holds runners now, per pull request; unread, every CI counts at its need.
     runners = await github.runnerUsage().catch(() => null);
+    // Who marked the running ones ready; unread, nothing is sent back this round.
+    const runningNumbers = new Set([...running].map((key) => Number(key.split("@")[0])));
+    personReady = await github
+      .personReady(openPulls.filter((pull) => !pull.draft && runningNumbers.has(pull.number)).map((pull) => pull.number))
+      .catch(() => null);
   } catch (error) {
     scheduleRecheck(RETRY_AFTER_FAILURE_MS);
     return { outcome: "read_failed", failure: code(error) };
@@ -183,7 +189,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, nowMs: now(), shadow: mode === "shadow", updateBranches: ciAdmissionUpdatesBranches() });
+      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, personReady, nowMs: now(), shadow: mode === "shadow", updateBranches: ciAdmissionUpdatesBranches() });
       // Shadow keeps what it would have done out of the reservations and statuses.
       await writeState(
         tx,
