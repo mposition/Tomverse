@@ -226,9 +226,10 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
   );
 }
 
-/** One line for an idea the lane took (lib/amux/ideaLaneCore.ts). */
+/** One line for an idea the lane took or will take next (lib/amux/ideaLaneCore.ts). */
 function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   running: (attempt: number, max: number) => string;
+  waiting: string;
   queued: (attempts: number, max: number, outcome: string) => string;
   prOpen: (pr: number) => string;
   failed: (max: number, outcome: string) => string;
@@ -237,6 +238,7 @@ function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   const last = lane.lastOutcome ?? "-";
   if (lane.state === "pr_open" && lane.prNumber !== null) return m.lane.prOpen(lane.prNumber);
   if (lane.state === "running") return m.lane.running(lane.attempts, max);
+  if (lane.state === "queued" && lane.attempts === 0) return m.lane.waiting;
   if (lane.state === "queued") return m.lane.queued(lane.attempts, max, last);
   return m.lane.failed(max, last);
 }
