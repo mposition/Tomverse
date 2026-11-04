@@ -74,6 +74,10 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
             'prClosedAtMs', (extract(epoch FROM a."prClosedAt") * 1000)::double precision))
           FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id") AS "attempts"
       FROM "AmuxIdeaSubmission" i
+      -- Where the current part starts: after the newest merged PR that named more work.
+      CROSS JOIN LATERAL (SELECT COALESCE(max(b."claimedAt"), '-infinity'::timestamp) AS "partStart"
+        FROM "AmuxIdeaLaneAttempt" b WHERE b."ideaId" = i."id" AND b."outcome" = 'pr_open'
+          AND b."continues" AND b."mergedAt" IS NOT NULL) p
       WHERE i."submissionOrigin" = 'owner' AND i."state" = 'submitted'
         AND (${actor}::text IS NULL OR i."actorUserId" = ${actor})
         AND i."cancelledAt" IS NULL AND i."rawPurgedAt" IS NULL AND i."rawCiphertext" IS NOT NULL
@@ -83,17 +87,15 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
         AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaAnalysisChunk" c WHERE c."ideaId" = i."id")
         -- Ideas the lane is done with (PR opened, out of attempts) or running now
         -- are left out before the LIMIT, so they can never crowd out a new idea.
-        -- A PR that did one part and named more is done with only once it
-        -- merged: the idea then comes back for its next part, and not before.
+        -- Only the current part counts (runs after the newest merged PR that
+        -- named more work, as amuxIdeaLaneState): a part's PR holds the idea
+        -- until it merges, and an earlier part's leftover retry PR never does.
         AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
-          AND ((a."outcome" = 'pr_open' AND NOT (a."continues" AND a."mergedAt" IS NOT NULL))
+          AND ((a."outcome" = 'pr_open' AND a."claimedAt" > p."partStart")
             OR (a."outcome" IS NULL
               AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
-        -- The attempt limit counts the runs of the current part only.
         AND (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
-          AND a."claimedAt" > COALESCE((SELECT max(b."claimedAt") FROM "AmuxIdeaLaneAttempt" b
-            WHERE b."ideaId" = i."id" AND b."outcome" = 'pr_open' AND b."continues"
-              AND b."mergedAt" IS NOT NULL), '-infinity'::timestamp)) < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
+          AND a."claimedAt" > p."partStart") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
       ORDER BY i."submittedAt" ASC, i."id" ASC
       LIMIT ${CANDIDATES}
     `;

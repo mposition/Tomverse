@@ -346,3 +346,22 @@ test("a run records that its PR names more work, and the table keeps that to an 
   /AmuxIdeaLaneAttempt_continues_check/);
   await removeIdeas();
 });
+
+test("an earlier part's leftover retry PR never holds the next part back", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const idea = await seedIdea(owner, new Date(OLD));
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+  // Part 1 opened a PR that was closed unmerged, then a retry opened one that
+  // named more and merged. The closed PR keeps outcome pr_open with no merge.
+  await prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea, claimedAt: at(300),
+    leaseUntil: at(299), finishedAt: at(299), outcome: "pr_open", prNumber: 50, prClosedAt: at(250),
+    prObservedAt: at(250) } });
+  await prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea, claimedAt: at(200),
+    leaseUntil: at(199), finishedAt: at(199), outcome: "pr_open", prNumber: 51, continues: true,
+    mergedAt: at(10), prObservedAt: at(10) } });
+  const [queued] = await readAmuxIdeaProgressForOwner(owner);
+  assert.deepEqual([queued.lane?.state, queued.lane?.part, queued.lane?.previousPrNumber], ["queued", 2, 51]);
+  await claimAmuxIdeaLane({ actorUserId: owner });
+  assert.equal((await attemptsOf(idea)).length, 3, "the claim takes part 2, as the state says");
+  await removeIdeas();
+});

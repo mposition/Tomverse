@@ -112,6 +112,7 @@ jobs:
           fi
           part=$(jq -r '.part // 1' <<<"$response")
           previous=$(jq -r '.previousPrNumber // empty' <<<"$response")
+          # Up to part 999: past that the claim fails closed, as a malformed one.
           if ! [[ "$part" =~ ^[1-9][0-9]{0,2}$ ]] || { [ "$part" -gt 1 ] && ! [[ "$previous" =~ ^[1-9][0-9]{0,6}$ ]]; }; then
             echo "The claim is malformed."
             exit 1
@@ -123,6 +124,10 @@ jobs:
             remaining=$(gh pr view "$previous" --repo "$GITHUB_REPOSITORY" --json body -q .body \
               | awk '/^## Remaining work \(next lane run\)$/ {on=1; next} /^---$/ && on {exit} on {print}')
             if [ -z "$(tr -d '[:space:]' <<<"$remaining")" ]; then
+              # Fails closed: the attempt the app just recorded reads as a run
+              # that never reported, so the idea waits out its lease and counts
+              # one try of this part, like a crash. A person who edited the
+              # section out of the merged PR can close the idea.
               echo "PR #${previous} names no remaining work; nothing was handed on."
               exit 1
             fi
@@ -271,7 +276,8 @@ jobs:
             do from develop with this part merged (files, behaviour, tests). It
             is published under its own heading in the same public PR, so the
             same rule holds: describe code, do not quote the request. No
-            headings and no line that is only "---". Leave it unwritten when
+            headings, no line that is only "---", and under 15,000
+            characters (the PR body under 30,000). Leave it unwritten when
             the request is done.
           PROMPT
           )
@@ -403,14 +409,21 @@ jobs:
           title=$(head -n 1 "${in}/title.txt" | tr -d '\000-\037' | cut -c 1-100)
           [ -n "$title" ] || title="feat: implement an AMUX idea"
           body="${RUNNER_TEMP}/pr-body.md"
-          { head -c 50000 "${in}/body.md"
+          # GitHub takes a PR body of up to 65,536 characters: 40,000 for the
+          # body, 20,000 for the remaining work, the rest for the footer.
+          { head -c 40000 "${in}/body.md" | grep -v -x -e '## Remaining work (next lane run)' || true
             # The next part's claim reads this section back from the merged PR
-            # (the claim job), up to the line that is only "---".
+            # (the claim job), from its heading (only here, so the body above may
+            # not carry it) up to the line that is only "---".
             if [ "$CONTINUES" = "true" ]; then
               printf '\n\n## Remaining work (next lane run)\n\n'
               head -c 20000 "${in}/next.md" | grep -v -x -e '---' -e '## Remaining work (next lane run)' || true
+              if [ "$(wc -c < "${in}/next.md")" -gt 20000 ]; then
+                # Said where the next part reads it, never cut silently.
+                printf '\n\n(The remaining work was cut at 20,000 bytes here; the next part should check what is still missing.)\n'
+              fi
             fi
-            printf '\n\n---\nOpened by the AMUX idea lane (attempt `%s`, part %s%s). A draft: a person reviews and merges it.\n\n' \
+            printf '\n\n---\nOpened by the AMUX idea lane (attempt `%s`, part %s%s). A draft into develop.\n\n' \
               "$ATTEMPT" "${PART:-1}" "$([ "$CONTINUES" = "true" ] && echo '; the next part runs after this merges')"
             printf '🤖 Generated with [Claude Code](https://claude.com/claude-code)\n'; } > "$body"
           git checkout -q -b "$BRANCH"

@@ -253,9 +253,10 @@ function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   nextPartWaiting: (pr: number) => string;
 } }): string {
   const line = laneStateLine(lane, m);
-  // A larger idea runs in parts, each after the one before merged.
+  // A larger idea runs in parts, each after the one before merged. A part's
+  // PR closed without a merge stops the chain, so only an open one promises more.
   const parted = lane.part > 1 || lane.continues ? `${m.lane.part(lane.part)} · ${line}` : line;
-  return lane.continues ? `${parted} · ${m.lane.continuesAfterMerge}` : parted;
+  return lane.continues && lane.state === "pr_open" ? `${parted} · ${m.lane.continuesAfterMerge}` : parted;
 }
 
 function laneStateLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: Parameters<typeof laneLine>[1]): string {
