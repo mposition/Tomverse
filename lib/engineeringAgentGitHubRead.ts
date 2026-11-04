@@ -566,6 +566,31 @@ async function readRequiredChecks(
 }
 
 /**
+ * A pull request's merge and its branches, from one read: enough to tell
+ * whether an idea lane PR (amux-idea/<attemptId> into develop) merged.
+ */
+export async function readEngineeringAgentPullMerge(
+  prNumber: number,
+  deps: Deps = {},
+): Promise<{ state: "open" | "closed"; merged: boolean; mergedAt: Date | null; closedAt: Date | null;
+  baseRef: string; headRef: string }> {
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
+  const pull = record(await githubJson(`/pulls/${prNumber}`, withDefaults(deps)));
+  const state = pull?.state;
+  const baseRef = record(pull?.base)?.ref;
+  const headRef = record(pull?.head)?.ref;
+  const merged = pull?.merged === true;
+  const mergedAt = merged ? instant(pull?.merged_at) : null;
+  const closedAt = state === "closed" ? instant(pull?.closed_at) : null;
+  if (pull?.number !== prNumber || (state !== "open" && state !== "closed") || typeof baseRef !== "string" ||
+      typeof headRef !== "string" || (state === "closed" && closedAt === null) ||
+      (merged && (mergedAt === null || state !== "closed"))) {
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+  return { state, merged, mergedAt, closedAt, baseRef, headRef };
+}
+
+/**
  * One published pull request with what the approval judgement needs: its
  * state and merge, its reviews, its head's required checks and its diff
  * digest. Reads only; a list that is not whole is a refusal, not a shorter

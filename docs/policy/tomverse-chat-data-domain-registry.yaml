@@ -2120,7 +2120,10 @@ domains:
       system actor. Encrypted raw idea text and encrypted source provenance may
       contain third-party data even though there is no typed customer subject
       link, and the same raw-content purge clears both ciphertexts before their
-      shared external key is retired. The approved clocks are separate from the
+      shared external key is retired. The plaintext title (the body's first
+      line, at most 80 characters, owner decision 2026-11-04) is part of the
+      body: that purge clears it too, and a CHECK refuses a title on a purged
+      row. The approved clocks are separate from the
       unresolved account-deletion and export decisions. Child chunks have their
       own registered actor link and privacy decision; no session intake route is
       enabled.
@@ -2141,7 +2144,7 @@ domains:
     inUnifiedExport: unverified
     note: >-
       One idea-lane run (lib/amux/ideaLaneCore.ts): claim and lease times, a fixed
-      outcome word and the draft PR number. It stores no idea text, prompt,
+      outcome word, the draft PR number and when it merged, closed or was last read. It stores no idea text, prompt,
       transcript or change; the row goes with its idea by cascade, so it
       follows the parent's unresolved account-deletion and export decision.
 

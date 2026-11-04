@@ -12,6 +12,7 @@ import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { AMUX_IDEA_LANE_MAX_ATTEMPTS } from "@/lib/amux/ideaLaneCore";
 import { amuxIdeaProgressStep, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
+import { amuxIdeaName, amuxIdeaNameText } from "@/lib/amux/ideaTitleCore";
 
 const REPOSITORY_URL = "https://github.com/mposition/Tomverse";
 const BRISBANE = new Intl.DateTimeFormat("en-AU", {
@@ -39,8 +40,19 @@ function useDraftGuard() {
   };
 }
 
-const label = (row: AmuxIdeaProgressRow, untitled: string) =>
-  row.displayKey ?? `${untitled} ${row.requestId.slice(0, 8)}`;
+const label = amuxIdeaNameText;
+
+/** An idea's name: card display key, else its title with the short id small beside it, else the id. */
+export function AmuxIdeaName({ row, untitled }: {
+  row: Pick<AmuxIdeaProgressRow, "displayKey" | "title" | "requestId">; untitled: string;
+}) {
+  const name = amuxIdeaName(row, untitled);
+  return <>
+    {name.primary}
+    {name.shortId ? <>{" "}<span className="font-mono text-xs font-normal text-zinc-400"
+      data-testid="amux-idea-short-id">{name.shortId}</span></> : null}
+  </>;
+}
 
 /**
  * "Decide now" of the approved v49 backlog redesign: it lifts only the human
@@ -89,7 +101,7 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
                 <p className="font-semibold text-zinc-100">
                   {decision[row.waitingFor as AmuxIdeaWaitingFor][0]}
                 </p>
-                <p className="text-zinc-200">{label(row, m.untitled)} · {m.savedAt(when(row.submittedAt))}</p>
+                <p className="text-zinc-200"><AmuxIdeaName row={row} untitled={m.untitled} /> · {m.savedAt(when(row.submittedAt))}</p>
                 <p className="text-xs text-zinc-400">
                   {decision[row.waitingFor as AmuxIdeaWaitingFor][1]}
                 </p>
@@ -104,7 +116,7 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
               <span aria-hidden="true" className="w-1 self-stretch rounded-full bg-blue-500" />
               <div className="min-w-0 flex-1 space-y-1 text-sm">
                 <p className="font-semibold text-zinc-100">{m.githubReview}</p>
-                <p className="text-zinc-200">PR #{pr.number} · {pr.displayKey ?? label(row, m.untitled)}</p>
+                <p className="text-zinc-200">PR #{pr.number} · {pr.displayKey ?? <AmuxIdeaName row={row} untitled={m.untitled} />}</p>
                 <p className="text-xs text-zinc-400">{m.githubReviewHint}</p>
               </div>
               <a href={`${REPOSITORY_URL}/pull/${pr.number}`} target="_blank" rel="noreferrer" className={BUTTON_SECONDARY}>
@@ -182,13 +194,14 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                     className={`block min-h-11 min-w-0 flex-1 space-y-2 rounded-lg border p-3 text-sm hover:bg-zinc-800/60 ${FOCUS} ${active
                       ? "border-blue-400 ring-1 ring-blue-400" : "border-zinc-800"}`}
                     data-testid="amux-idea-progress-row" data-stage={row.stage}>
-                    <span className="block font-semibold text-zinc-100">{label(row, m.untitled)}</span>
+                    <span className="block font-semibold text-zinc-100"><AmuxIdeaName row={row} untitled={m.untitled} /></span>
                     <span className="flex flex-wrap items-center gap-2 text-xs">
                       <span className={`rounded-full border px-2 py-0.5 ${row.attention
                         ? "border-red-500/40 bg-red-500/10 text-red-200"
                         : human ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
                           : "border-blue-500/40 bg-blue-500/10 text-blue-200"}`}>
-                        {row.attention ? (row.lane ? m.lane.badgeFailed : m.attention) : m.stages[row.stage]}
+                        {row.attention ? (row.lane ? (row.lane.state === "pr_closed" ? m.lane.badgePrClosed : m.lane.badgeFailed)
+                          : m.attention) : m.stages[row.stage]}
                       </span>
                       <span className="text-zinc-400">
                         {step ? m.stepOf(step) : null}{step ? " · " : ""}{human ? m.human : m.automatic}
@@ -226,17 +239,23 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
   );
 }
 
-/** One line for an idea the lane took (lib/amux/ideaLaneCore.ts). */
+/** One line for an idea the lane took or will take next (lib/amux/ideaLaneCore.ts). */
 function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   running: (attempt: number, max: number) => string;
+  waiting: string;
   queued: (attempts: number, max: number, outcome: string) => string;
   prOpen: (pr: number) => string;
+  merged: (pr: number) => string;
+  prClosed: (pr: number) => string;
   failed: (max: number, outcome: string) => string;
 } }): string {
   const max = AMUX_IDEA_LANE_MAX_ATTEMPTS;
   const last = lane.lastOutcome ?? "-";
+  if (lane.state === "merged" && lane.prNumber !== null) return m.lane.merged(lane.prNumber);
+  if (lane.state === "pr_closed" && lane.prNumber !== null) return m.lane.prClosed(lane.prNumber);
   if (lane.state === "pr_open" && lane.prNumber !== null) return m.lane.prOpen(lane.prNumber);
   if (lane.state === "running") return m.lane.running(lane.attempts, max);
+  if (lane.state === "queued" && lane.attempts === 0) return m.lane.waiting;
   if (lane.state === "queued") return m.lane.queued(lane.attempts, max, last);
   return m.lane.failed(max, last);
 }

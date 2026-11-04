@@ -13,6 +13,7 @@ import { sealAmuxContent, type AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { analysisDeadlineAt } from "./ideaRetentionCore.ts";
+import { amuxIdeaTitleFromText } from "./ideaTitleCore.ts";
 import {
   AMUX_V4_IDEA_SUBMISSION_ENV,
   ideaSubmissionWritePermitted,
@@ -83,6 +84,8 @@ export function prepareIdeaSubmissionStorage(input: {
       rawKeyVersion: sealed.keyVersion,
       rawDigest: sealed.digest,
       rawDigestKeyId: sealed.digestKeyId,
+      // Plaintext list label; the raw purge clears it with the body.
+      title: amuxIdeaTitleFromText(input.inspected.input.idea),
       submittedAt: input.submittedAt,
       analysisDeadlineAt: analysisDeadline,
       // This is eligibility, not the 24-hour latest-compliant SLA time.

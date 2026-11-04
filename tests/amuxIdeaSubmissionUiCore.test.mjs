@@ -101,7 +101,10 @@ test("absent, partial, malformed and failed read-back all remain unknown", () =>
     status: 200, body: { requestId, status: "committed", ideaId: "idea-1",
       hasExternalSources: false },
   }, requestId), { kind: "submitted", ideaId: "idea-1", hasExternalSources: false,
-    origin: "owner" });
+    origin: "owner", lane: false });
+  assert.equal(classifyIdeaSubmissionReadBack({ status: 200, body: { requestId, status: "committed",
+    ideaId: "idea-1", hasExternalSources: false, lane: true } }, requestId).lane, true,
+  "an idea the lane took is read back as one, so its v4 steps stay hidden");
   for (const reply of [
     { status: 200, body: { requestId, status: "absent" } },
     { status: 200, body: { requestId, status: "partial", ideaId: "idea-1" } },
