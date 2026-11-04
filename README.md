@@ -265,7 +265,21 @@ If all attempts end before response headers arrive, the Admin Console reports a
 connection-stage failure. That result cannot validate the key or its permissions;
 check Railway outbound DNS/TLS and HTTPS access to `api.openai.com` first. A
 received HTTP 401/403 instead means connectivity succeeded and the Admin API key
-or its Organization Owner permissions must be corrected.
+or its Organization Owner permissions must be corrected. An HTTP 429 waits 30
+seconds between attempts, because the Costs API limit is counted per minute.
+
+The daily run syncs only the previous UTC day, so a day that failed stays empty
+until it is synced again. The Costs API still has those days. To fill a range,
+run this from a local PC in the repository root (PowerShell). It reads the
+production Cron service's variables, needs a Railway login, writes production
+`ProviderDailyUsage` rows and sends no Slack report. It accepts at most 31 days,
+and repeating a day overwrites it:
+
+```text
+railway run --service "Provider Usage Sync" --environment production npm run maintenance:provider-usage -- --from 2026-10-24 --to 2026-11-03
+```
+
+The Admin usage reconciliation panel also syncs one chosen date at a time.
 
 The OpenAI adapter calls `/v1/organization/costs` for one exact UTC day, follows
 bounded pagination, and stores the net total of all USD line items. Signed
