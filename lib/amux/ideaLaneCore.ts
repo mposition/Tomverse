@@ -17,11 +17,12 @@ export const AMUX_IDEA_LANE_DAILY_ENV = "AMUX_IDEA_LANE_MAX_ATTEMPTS_PER_DAY";
 export const AMUX_IDEA_LANE_MAX_ATTEMPTS = 3;
 export const AMUX_IDEA_LANE_DEFAULT_DAILY_ATTEMPTS = 10;
 /**
- * The workflow's implement (80 min) and publish (10 min) timeouts plus an hour
+ * The workflow's implement (150 min) and publish (10 min) timeouts plus an hour
  * for queueing between jobs. A run still going past it may overlap a retry; the
  * worst case is a second draft PR for the idea, which a person closes.
+ * (Raised from 80 min of implement on 2026-11-04: a real idea timed out.)
  */
-export const AMUX_IDEA_LANE_LEASE_MS = 150 * 60_000;
+export const AMUX_IDEA_LANE_LEASE_MS = 220 * 60_000;
 /**
  * The publish fence (ideaLaneService.ts) keeps a run's lease at least this far
  * ahead, longer than the publish job's 10-minute timeout: the owner cannot
@@ -45,6 +46,8 @@ export type AmuxIdeaLaneAttemptFact = {
   /** Set once the PR observer saw the draft PR merged, or closed unmerged. */
   mergedAtMs?: number | null;
   prClosedAtMs?: number | null;
+  /** The run did one part of a larger idea; its PR names the remaining work. */
+  continues?: boolean;
 };
 
 export type AmuxIdeaLaneState = {
@@ -53,27 +56,51 @@ export type AmuxIdeaLaneState = {
    * merged / pr_closed: its PR merged, or was closed without a merge.
    */
   state: "running" | "queued" | "pr_open" | "merged" | "pr_closed" | "failed";
+  /** Runs of the current part (each part has its own attempt limit). */
   attempts: number;
   prNumber: number | null;
   /** The newest run's outcome, lease_expired for one that never reported, null while it runs. */
   lastOutcome: string | null;
+  /** Which part of the idea this is: 1, or more once a part that continues has merged. */
+  part: number;
+  /** pr_open: the open PR did one part and names the remaining work for the next. */
+  continues: boolean;
+  /** The merged PR of the part before this one, whose body names this part's work; null for part 1. */
+  previousPrNumber: number | null;
 };
+
+/** A merged run that did one part and named more: the next part starts after it. */
+const isPartBoundary = (item: AmuxIdeaLaneAttemptFact) =>
+  item.outcome === "pr_open" && item.continues === true && !!item.mergedAtMs;
 
 export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number): AmuxIdeaLaneState | null {
   if (attempts.length === 0) return null;
-  const newest = attempts.reduce((last, item) => item.claimedAtMs > last.claimedAtMs ? item : last);
+  // A larger idea runs in parts, one PR each, a part only after the one before
+  // it merged. Everything before the newest merged part is settled history.
+  const boundaries = attempts.filter(isPartBoundary);
+  const boundary = boundaries.reduce<AmuxIdeaLaneAttemptFact | null>((last, item) =>
+    !last || item.claimedAtMs > last.claimedAtMs ? item : last, null);
+  const current = boundary ? attempts.filter((item) => item.claimedAtMs > boundary.claimedAtMs) : attempts;
+  const partBase = { part: boundaries.length + 1, previousPrNumber: boundary?.prNumber ?? null, continues: false };
+  if (current.length === 0) {
+    return { ...partBase, state: "queued", attempts: 0, prNumber: null, lastOutcome: null };
+  }
+  const newest = current.reduce((last, item) => item.claimedAtMs > last.claimedAtMs ? item : last);
   const live = (item: AmuxIdeaLaneAttemptFact) => item.outcome === null && item.leaseUntilMs > nowMs;
   const lastOutcome = newest.outcome ?? (live(newest) ? null : "lease_expired");
-  const opened = attempts.filter((item) => item.outcome === "pr_open")
+  const opened = current.filter((item) => item.outcome === "pr_open")
     .reduce<AmuxIdeaLaneAttemptFact | null>((last, item) => !last || item.claimedAtMs > last.claimedAtMs ? item : last, null);
-  const base = { attempts: attempts.length, lastOutcome };
-  // A retry's second PR may be left open; the one that merged settles the idea.
-  const merged = attempts.filter((item) => item.outcome === "pr_open" && item.mergedAtMs)
+  const base = { ...partBase, attempts: current.length, lastOutcome };
+  // A retry's second PR may be left open; the one that merged settles the part.
+  const merged = current.filter((item) => item.outcome === "pr_open" && item.mergedAtMs)
     .reduce<AmuxIdeaLaneAttemptFact | null>((first, item) => !first || item.mergedAtMs! < first.mergedAtMs! ? item : first, null);
   if (merged) return { ...base, state: "merged", prNumber: merged.prNumber };
-  if (opened) return { ...base, state: opened.prClosedAtMs ? "pr_closed" : "pr_open", prNumber: opened.prNumber };
-  if (attempts.some(live)) return { ...base, state: "running", prNumber: null };
-  return { ...base, state: attempts.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS ? "failed" : "queued", prNumber: null };
+  if (opened) {
+    return { ...base, state: opened.prClosedAtMs ? "pr_closed" : "pr_open", prNumber: opened.prNumber,
+      continues: opened.continues === true };
+  }
+  if (current.some(live)) return { ...base, state: "running", prNumber: null };
+  return { ...base, state: current.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS ? "failed" : "queued", prNumber: null };
 }
 
 export const amuxIdeaLaneClaimable = (state: AmuxIdeaLaneState | null) => state === null || state.state === "queued";
@@ -101,7 +128,8 @@ export function amuxIdeaLaneView(attempts: readonly AmuxIdeaLaneAttemptFact[], n
   if (state || !enabled) return state;
   const takes = candidate.submissionOrigin === "owner" && candidate.state === "submitted" && !candidate.cancelled &&
     candidate.rawReadable && candidate.analysisDeadlineMs > nowMs && !candidate.sourcePlan && candidate.chunks === 0;
-  return takes ? { state: "queued", attempts: 0, prNumber: null, lastOutcome: null } : null;
+  return takes ? { state: "queued", attempts: 0, prNumber: null, lastOutcome: null, part: 1,
+    continues: false, previousPrNumber: null } : null;
 }
 
 /** The public branch a run pushes: the attempt id only, never idea text. */
@@ -116,17 +144,23 @@ export function inspectAmuxIdeaLaneFence(body: unknown): string | null {
   return Object.keys(rest).length === 0 && typeof attemptId === "string" && UUID.test(attemptId) ? attemptId : null;
 }
 
-export type AmuxIdeaLaneResult = { attemptId: string; outcome: "pr_open" | AmuxIdeaLaneFailure; prNumber: number | null };
+export type AmuxIdeaLaneResult = {
+  attemptId: string; outcome: "pr_open" | AmuxIdeaLaneFailure; prNumber: number | null;
+  /** pr_open only: the run did one part and its PR names the remaining work. */
+  continues?: boolean;
+};
 
 /** A result body as the workflow sends it, or null when it is not one. */
 export function inspectAmuxIdeaLaneResult(body: unknown): AmuxIdeaLaneResult | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-  const { attemptId, outcome, prNumber, ...rest } = body as Record<string, unknown>;
+  const { attemptId, outcome, prNumber, continues, ...rest } = body as Record<string, unknown>;
   if (Object.keys(rest).length > 0 || typeof attemptId !== "string" || !UUID.test(attemptId)) return null;
+  if (continues !== undefined && typeof continues !== "boolean") return null;
   if (outcome === "pr_open") {
     return Number.isSafeInteger(prNumber) && (prNumber as number) > 0 && (prNumber as number) < 10_000_000
-      ? { attemptId, outcome, prNumber: prNumber as number } : null;
+      ? { attemptId, outcome, prNumber: prNumber as number, continues: continues === true } : null;
   }
+  if (continues === true) return null;
   if (prNumber !== undefined && prNumber !== null) return null;
   return (AMUX_IDEA_LANE_FAILURES as readonly unknown[]).includes(outcome)
     ? { attemptId, outcome: outcome as AmuxIdeaLaneFailure, prNumber: null } : null;

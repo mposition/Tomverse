@@ -298,3 +298,51 @@ test("every lane PR gets its turn, however many wait", async () => {
   assert.ok(ids.every((id) => seen.has(id)), "PRs that stay unreadable never crowd out the rest");
   await removeIdeas();
 });
+
+test("a part that names more work holds the idea until its PR merges, and the next part has its own attempt limit", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const idea = await seedIdea(owner, new Date(OLD));
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+  // Part 1: two failed tries, then a PR that did a first part and named more.
+  for (const minutesAgo of [300, 280]) {
+    await prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea, claimedAt: at(minutesAgo),
+      leaseUntil: at(minutesAgo - 1), finishedAt: at(minutesAgo - 1), outcome: "cli_failed" } });
+  }
+  const partOne = randomUUID();
+  await prisma.amuxIdeaLaneAttempt.create({ data: { id: partOne, ideaId: idea, claimedAt: at(200),
+    leaseUntil: at(199), finishedAt: at(199), outcome: "pr_open", prNumber: 41, continues: true } });
+  await claimAmuxIdeaLane({ actorUserId: owner });
+  assert.equal((await attemptsOf(idea)).length, 3, "part 2 never starts while part 1's PR is open");
+  const [waiting] = await readAmuxIdeaProgressForOwner(owner);
+  assert.deepEqual([waiting.lane?.state, waiting.lane?.part, waiting.lane?.continues, waiting.stage],
+    ["pr_open", 1, true, "review"]);
+
+  await prisma.amuxIdeaLaneAttempt.update({ where: { id: partOne }, data: { mergedAt: at(10), prObservedAt: at(10) } });
+  const [queued] = await readAmuxIdeaProgressForOwner(owner);
+  assert.deepEqual([queued.lane?.state, queued.lane?.part, queued.lane?.previousPrNumber, queued.stage],
+    ["queued", 2, 41, "execution"], "a merged part is not the idea done");
+  // Part 1's two failed tries do not count: part 2 gets the full attempt limit.
+  for (let index = 0; index < AMUX_IDEA_LANE_MAX_ATTEMPTS + 1; index += 1) {
+    await claimAmuxIdeaLane({ actorUserId: owner });
+  }
+  const after = await attemptsOf(idea);
+  assert.equal(after.length, 3 + AMUX_IDEA_LANE_MAX_ATTEMPTS);
+  const [spent] = await readAmuxIdeaProgressForOwner(owner);
+  assert.deepEqual([spent.lane?.state, spent.lane?.part], ["failed", 2]);
+  await removeIdeas();
+});
+
+test("a run records that its PR names more work, and the table keeps that to an opened PR", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const idea = await seedIdea(owner, new Date(OLD));
+  const id = randomUUID();
+  await prisma.amuxIdeaLaneAttempt.create({ data: { id, ideaId: idea, claimedAt: new Date(),
+    leaseUntil: new Date(Date.now() + 60_000) } });
+  assert.equal(await recordAmuxIdeaLaneResult({ attemptId: id, outcome: "pr_open", prNumber: 77, continues: true }), true);
+  const [row] = await attemptsOf(idea);
+  assert.deepEqual([row.outcome, row.prNumber, row.continues], ["pr_open", 77, true]);
+  await assert.rejects(prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea,
+    claimedAt: new Date(), leaseUntil: new Date(), finishedAt: new Date(), outcome: "no_change", continues: true } }),
+  /AmuxIdeaLaneAttempt_continues_check/);
+  await removeIdeas();
+});

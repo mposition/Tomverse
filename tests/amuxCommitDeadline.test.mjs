@@ -312,6 +312,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261104120000_amux_idea_lane_merged_at",
   // A readable title for an idea: one additive column, no commit-deadline trigger.
   "20261104130000_amux_idea_title",
+  // A lane run that did one part of a larger idea: one defaulted column and a CHECK.
+  "20261104150000_amux_idea_lane_continues",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

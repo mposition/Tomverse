@@ -20,6 +20,7 @@ import {
   amuxIdeaLaneState,
   type AmuxIdeaLaneAttemptFact,
   type AmuxIdeaLaneResult,
+  type AmuxIdeaLaneState,
 } from "./ideaLaneCore.ts";
 
 const MIN_SECRET_LENGTH = 32;
@@ -38,10 +39,14 @@ export function isAmuxIdeaLaneAuthorized(request: Request, env: NodeJS.ProcessEn
 type Candidate = {
   id: string; rawCiphertext: Uint8Array; rawKeyId: string; rawKeyVersion: number;
   rawDigest: string; rawDigestKeyId: string;
-  attempts: Array<{ claimedAtMs: number; leaseUntilMs: number; outcome: string | null; prNumber: number | null }> | null;
+  attempts: AmuxIdeaLaneAttemptFact[] | null;
 };
 
-export type AmuxIdeaLaneClaim = { ideaId: string; attemptId: string; branch: string; idea: string };
+export type AmuxIdeaLaneClaim = {
+  ideaId: string; attemptId: string; branch: string; idea: string;
+  /** Which part of the idea this run does; past 1, the PR of the part before names its work. */
+  part: number; previousPrNumber: number | null;
+};
 
 /**
  * Claims the oldest owner idea the lane may run, or null. Owner ideas only:
@@ -64,7 +69,9 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
         (SELECT json_agg(json_build_object(
             'claimedAtMs', (extract(epoch FROM a."claimedAt") * 1000)::double precision,
             'leaseUntilMs', (extract(epoch FROM a."leaseUntil") * 1000)::double precision,
-            'outcome', a."outcome", 'prNumber', a."prNumber"))
+            'outcome', a."outcome", 'prNumber', a."prNumber", 'continues', a."continues",
+            'mergedAtMs', (extract(epoch FROM a."mergedAt") * 1000)::double precision,
+            'prClosedAtMs', (extract(epoch FROM a."prClosedAt") * 1000)::double precision))
           FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id") AS "attempts"
       FROM "AmuxIdeaSubmission" i
       WHERE i."submissionOrigin" = 'owner' AND i."state" = 'submitted'
@@ -76,17 +83,26 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
         AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaAnalysisChunk" c WHERE c."ideaId" = i."id")
         -- Ideas the lane is done with (PR opened, out of attempts) or running now
         -- are left out before the LIMIT, so they can never crowd out a new idea.
+        -- A PR that did one part and named more is done with only once it
+        -- merged: the idea then comes back for its next part, and not before.
         AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
-          AND (a."outcome" = 'pr_open' OR (a."outcome" IS NULL
-            AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
-        AND (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
+          AND ((a."outcome" = 'pr_open' AND NOT (a."continues" AND a."mergedAt" IS NOT NULL))
+            OR (a."outcome" IS NULL
+              AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
+        -- The attempt limit counts the runs of the current part only.
+        AND (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
+          AND a."claimedAt" > COALESCE((SELECT max(b."claimedAt") FROM "AmuxIdeaLaneAttempt" b
+            WHERE b."ideaId" = i."id" AND b."outcome" = 'pr_open' AND b."continues"
+              AND b."mergedAt" IS NOT NULL), '-infinity'::timestamp)) < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
       ORDER BY i."submittedAt" ASC, i."id" ASC
       LIMIT ${CANDIDATES}
     `;
     const nowMs = now.getTime();
     let pick: Candidate | null = null;
+    let pickState: AmuxIdeaLaneState | null = null;
     for (const idea of candidates) {
-      if (!amuxIdeaLaneClaimable(amuxIdeaLaneState((idea.attempts ?? []) as AmuxIdeaLaneAttemptFact[], nowMs))) continue;
+      const state = amuxIdeaLaneState(idea.attempts ?? [], nowMs);
+      if (!amuxIdeaLaneClaimable(state)) continue;
       // The owner's close (ideaOwnerCloseService.ts) and the analysis path's
       // first source plan lock this row too, so
       // what is read after the lock is final: an idea closed or put into
@@ -99,6 +115,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
       `;
       if (locked?.open) {
         pick = idea;
+        pickState = state;
         break;
       }
     }
@@ -106,17 +123,17 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
     const attemptId = randomUUID();
     await tx.amuxIdeaLaneAttempt.create({ data: { id: attemptId, ideaId: pick.id, claimedAt: now,
       leaseUntil: new Date(nowMs + AMUX_IDEA_LANE_LEASE_MS) } });
-    return { attemptId, idea: pick };
+    return { attemptId, idea: pick, part: pickState?.part ?? 1, previousPrNumber: pickState?.previousPrNumber ?? null };
   }, { timeout: 10_000 });
   if (!claimed) return null;
-  const { attemptId, idea } = claimed;
+  const { attemptId, idea, part, previousPrNumber } = claimed;
   const text = await openIdeaText(idea).catch(() => null);
   if (text === null) {
     // Counted as a failed run, so an unreadable idea stops at the attempt limit.
     await recordAmuxIdeaLaneResult({ attemptId, outcome: "job_failed", prNumber: null });
     return null;
   }
-  return { ideaId: idea.id, attemptId, branch: amuxIdeaLaneBranch(attemptId), idea: text };
+  return { ideaId: idea.id, attemptId, branch: amuxIdeaLaneBranch(attemptId), idea: text, part, previousPrNumber };
 }
 
 async function openIdeaText(idea: Candidate): Promise<string | null> {
@@ -162,7 +179,8 @@ export async function recordAmuxIdeaLaneResult(result: AmuxIdeaLaneResult): Prom
   const now = await prisma.$transaction((tx) => databaseNow(tx));
   const { count } = await prisma.amuxIdeaLaneAttempt.updateMany({
     where: { id: result.attemptId, outcome: null },
-    data: { outcome: result.outcome, prNumber: result.prNumber, finishedAt: now },
+    data: { outcome: result.outcome, prNumber: result.prNumber, finishedAt: now,
+      continues: result.outcome === "pr_open" && result.continues === true },
   });
   return count === 1;
 }
