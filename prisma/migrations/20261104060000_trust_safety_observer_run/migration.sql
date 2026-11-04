@@ -72,6 +72,13 @@ CREATE TABLE "TrustSafetyObserverRun" (
     -- cannot set it. The column is NOT NULL and the trigger always assigns,
     -- so an insert that omits it is still complete.
     "recordedAt" TIMESTAMPTZ(3) NOT NULL,
+    -- The deadline this round must commit inside, taken from the setting at
+    -- INSERT and fixed here. The deferred trigger reads this column and never
+    -- the setting: re-reading it would let the transaction extend its own
+    -- deadline, and deriving the deadline from `recordedAt` instead would let
+    -- a round that inserted late overrun the real one. Both were found by
+    -- independent review; §5.3 records why the column exists.
+    "deadlineAt" TIMESTAMPTZ(3) NOT NULL,
 
     CONSTRAINT "TrustSafetyObserverRun_pkey" PRIMARY KEY ("id")
 );
@@ -116,7 +123,17 @@ BEGIN
   IF claimed > clock_timestamp() + interval '9 seconds' THEN
     RAISE EXCEPTION 'trust_safety_run_deadline_too_far' USING ERRCODE = 'TS004';
   END IF;
+  -- A deadline already in the past is refused here rather than at COMMIT. The
+  -- reach check above only bounds how far ahead it may be, so without this an
+  -- expired deadline would insert and the row would be judged against a
+  -- deadline that never had any time left.
+  IF claimed <= clock_timestamp() THEN
+    RAISE EXCEPTION 'trust_safety_run_deadline_expired' USING ERRCODE = 'TS002';
+  END IF;
   NEW."recordedAt" := clock_timestamp();
+  -- Fixed from the value just validated. The application's value is
+  -- overwritten, so it cannot supply its own deadline.
+  NEW."deadlineAt" := claimed;
   RETURN NEW;
 END $$;
 
@@ -148,19 +165,13 @@ DECLARE
 BEGIN
   now_utc := clock_timestamp();
 
-  -- The deadline is taken from the row, not from the setting. Re-reading
-  -- `trust_safety.run_deadline` here would let the same transaction extend it:
-  -- insert under a valid 9-second deadline, call set_config with a distant
-  -- one, and commit ten seconds later -- the new value is not past, so the
-  -- round would be recorded as a success. `recordedAt` is written by the
-  -- BEFORE INSERT trigger from the database clock and the row is append-only,
-  -- so `recordedAt + 9s` is a deadline nothing in the transaction can move.
-  --
-  -- 9 seconds is the run row's approved deadline (§12 (1) table C). The
-  -- setting is still required at INSERT: §5.4 wants a write that named no
-  -- deadline to fail rather than go unchecked, and that is what makes a write
-  -- outside the wrapper a failed write.
-  IF now_utc > NEW."recordedAt" + interval '9 seconds' THEN
+  -- The deadline that was validated at INSERT, read from the row. Two other
+  -- shapes were tried and each had a hole: re-reading the setting let the
+  -- transaction extend its own deadline, and `recordedAt + 9s` let a round
+  -- that inserted eight seconds in overrun the real deadline by committing two
+  -- seconds later. The column is written by the BEFORE INSERT trigger and the
+  -- row is append-only, so this value is both the real deadline and immovable.
+  IF now_utc > NEW."deadlineAt" THEN
     RAISE EXCEPTION 'trust_safety_run_late_commit' USING ERRCODE = 'TS002';
   END IF;
 

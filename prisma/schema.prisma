@@ -11961,6 +11961,10 @@ model TrustSafetyObserverRun {
   observedAt DateTime @db.Timestamptz(3)
   /// Written by a BEFORE INSERT trigger from the database clock; the application cannot set it.
   recordedAt DateTime @db.Timestamptz(3)
+  /// The deadline this round must commit inside, taken from the transaction-local setting at
+  /// INSERT and fixed by the same trigger; a caller's value is overwritten. The deferred trigger
+  /// reads this column and never the setting, so the transaction cannot extend its own deadline.
+  deadlineAt DateTime @db.Timestamptz(3)
 }
 
 /// The observer's activation row, written only by a person's Admin action (§5.1 item 1, §6).

@@ -448,12 +448,24 @@ fixture를 그대로 두면 첫 올바른 구현이 그 테스트를 깬다.**
 
 ### 5.3 회차 행이 담는 것과 담지 않는 것
 
-컬럼은 넷이다 — `id`, `outcome`, `observedAt`, `recordedAt`. **`outcome`의 허용값은 CHECK로
-하나(`succeeded`)뿐이고**, 그것이 "이 테이블은 성공만 담는다"를 schema가 말하게 하려는
-것이다. **자유 텍스트·사유·count·오류 메시지·사용자 참조 컬럼이 없다.**
+컬럼은 다섯이다 — `id`, `outcome`, `observedAt`, `recordedAt`, `deadlineAt`.
+**`outcome`의 허용값은 CHECK로 하나(`succeeded`)뿐이고**, 그것이 "이 테이블은 성공만
+담는다"를 schema가 말하게 하려는 것이다. **자유 텍스트·사유·count·오류 메시지·사용자 참조
+컬럼이 없다** — 이 금지가 컬럼 수보다 중요하고, 다섯째는 그 금지의 어느 항목도 아니다.
+
+**다섯째가 필요한 이유**(2026-11-04, 구현이 서술을 고친 자리): §5.4를 컬럼 없이
+만족시키는 구현이 없다. deferred trigger가 마감을 `current_setting`에서 다시 읽으면
+**같은 트랜잭션이 자기 마감을 늘릴 수 있고**(유효한 마감으로 INSERT한 뒤 `set_config`로 먼
+미래를 지정하고 늦게 commit), `recordedAt`에서 유도하면 **INSERT가 늦게 일어난 회차가 원래
+마감을 넘겨도 통과한다**(마감 +9초를 설정하고 8초 뒤 INSERT, 2초 뒤 commit). 두 형태가 각각
+독립 검토에서 major로 잡혔다. 최초에 검증한 마감 값을 행에 고정하는 것이 두 구멍을 함께
+닫는 유일한 방법이고, 행이 append-only이므로 그 값은 트랜잭션이 움직일 수 없다.
 
 - `recordedAt`은 `BEFORE INSERT` trigger가 DB 시계로 덮으므로 **앱이 정할 수 없고**,
   `CHECK ("observedAt" <= "recordedAt")`가 미래 시각을 거절한다.
+- `deadlineAt`도 같은 trigger가 쓴다 — 앱이 보낸 값은 덮이고, trigger가 `current_setting`의
+  마감이 **이미 지나지 않았고 상한(9초) 안인지** 확인한 뒤 그 값을 넣는다. deferred trigger는
+  이 컬럼만 읽는다.
 - **멱등 키를 두지 않는다.** 겹친 회차는 행 둘이 되고 그 둘은 각각 참인 문장이므로 중복이
   거짓을 만들지 않는다. 그래서 **행 수는 "성공한 회차의 수"이고 "주기의 수"가 아니며,
   분모를 만들지 않는다**(§11의 맺음 문단 "셀 수 없는 것은 셀 수 없다"). **§11-5가
