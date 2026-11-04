@@ -429,6 +429,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - 검증 단계: 허용 파일 정확히 4개(`lib/seo.ts`, `components/seo/StructuredData.tsx`, `app/sitemap.ts`, `app/llms.txt/route.ts` — 마지막은 환경변수 `LLMS_TXT_ENABLED=true`일 때만 응답하는 기본 꺼진 실험 route이고, 문구·링크는 `tests/llmsTxtRoute.test.mjs`가 판정한다)
   밖의 변경·rename·삭제·바이너리·symlink·mode 변경 거부, 500줄 이하, lint·typecheck·테스트, **base 커밋의 정책 테스트로** 판정.
   판정 테스트는 사람 소유 파일이며 허용 목록에 없다.
+  제안 호출은 엄격한 구조화 출력(JSON schema)으로 `{summary, edits[]}`를 받고, 읽을 수 없는 답은 `unreadable`로 거절하면서 종류·길이·첫 issue·앞 300자(자격증명처럼 보이는 문자열은 지움)를 실행 로그에 남긴다(2026-11-04 운영자 결정, 정책 버전 변경 없음).
 - PR 생성: 이 저장소 전용 GitHub App 토큰, 검증 산출 tree hash와 push 내용 일치 시에만.
 - 브랜치: 졸업 전 `marketing-agent/<topic>`(자동화 권한 없음, 사람 병합). 졸업 후
   `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다
@@ -576,6 +577,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있고, **댓글 모니터링 없이는 졸업이 없다.**
   개정 문안 초안(2026-11-03)은 `privacyPolicy.comments*`이고 확인 필요 항목이 자리표시로 남아 있어, 확인이 끝나 `COMMENTS_PRIVACY_NOTICE_CONFIRMED`(`lib/privacyNoticeStatus.ts`)가 `true`가 될 때까지 페이지가 그 절을 그리지 않는다. 사람이 할 일의 목록과 순서는
   [DPIA 초안 체크리스트](marketing-privacy-dpia-checklist.md)에 있다. 문안이 게시돼도 스위치는 그 체크리스트가 끝나기 전에 켜지 않는다.
+  **운영자 결정 2026-11-04:** Zernio(ZERNIO SOFTWARE SL, 스페인)와 DPA를 체결했고, 처리 근거는 정당한 이익이며, 보관 문구를 7개 locale에 채우고 `COMMENTS_PRIVACY_NOTICE_CONFIRMED`를 `true`로 바꾼다. 체크리스트의 보완 요청은 회신 없이 진행하며 잔여 위험은 운영자가 받아들였다(정책 버전 변경 없음; 기록은 체크리스트 §5). 스위치 `MARKETING_COMMENTS_MONITOR_ENABLED`는 별개 결정으로 그대로 꺼져 있다.
 - **고지 상수가 모니터의 첫 조건이다 (2026-11-04, 운영자 결정 — 구현 설명이며 위 구속 조건과 정책 버전을 바꾸지 않는다).** `COMMENTS_PRIVACY_NOTICE_CONFIRMED`가 `false`이면 `MARKETING_COMMENTS_MONITOR_ENABLED=true`여도 모니터는 꺼져 있다. 앱의 판정 하나(`commentsMonitorEnabled`, `lib/marketingCommentsMonitorHealth.ts`)에 상수가 들어 있어, 내부 route는 두 단계 모두 `off`로 답하고 DB·게시 도구에 닿지 않으며, 실행(`runMarketingCommentsMonitor`)도 같고, 건강 판정(`commentsMonitorHealthy`)은 거짓이라 졸업·자율 게시 판정도 막힌다. 서비스(`marketingCommentsMonitorGate`)는 같은 상수를 보고 worker를 띄우지 않으며 로그에 `privacy_notice_unconfirmed`를 남긴다(app의 `off` 응답 모양은 서비스가 엄격히 읽으므로 그대로다). 상수는 고지 개정 PR에서만 `true`로 바꾸고, 그 뒤에도 변수와 체크리스트는 별도 결정이다.
 
 **S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다(건강 판정을 묻는 웹 앱·게시기와 모니터를 돌리는 서비스 모두에 같은 값을 둔다). 꺼져 있으면

@@ -44,6 +44,11 @@ export type LandingExperimentBundle = {
   /** `home-` prefix: the proxy rewrites only home pages for these. */
   id: string;
   surface: "home";
+  /**
+   * A fixture for the route, the rewrite and the tests. The console does not
+   * list it and a start refuses it, so an operator never runs it by accident.
+   */
+  example?: true;
   /** Variant id -> copy per locale. A locale without copy keeps the default page. */
   variants: Readonly<
     Record<string, Partial<Record<LandingExperimentLocale, LandingSurfaceCopy>>>
@@ -60,6 +65,7 @@ export const LANDING_EXPERIMENT_BUNDLES: readonly LandingExperimentBundle[] = [
   {
     id: "home-hero-v1",
     surface: "home",
+    example: true,
     variants: {
       b: {
         en: {

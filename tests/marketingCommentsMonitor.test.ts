@@ -38,8 +38,9 @@ const ON = { [MARKETING_COMMENTS_MONITOR_ENV]: "true" };
 
 // Almost all of this file is about a monitor that is allowed to run, so it asks
 // the predicate as if the privacy notice's comments section were published.
-// The constant itself is false until the notice revision lands; what it does
-// is pinned once, under "The privacy notice", with the real default.
+// The constant itself is true since the operator confirmed the comments section
+// (2026-11-04); what it does is pinned once, under "The privacy notice", with
+// the real default.
 const commentsMonitorEnabled = (env: Readonly<Record<string, string | undefined>>) =>
   commentsMonitorEnabledWith(env, true);
 const commentsMonitorHealthyFromValue = (
@@ -148,25 +149,24 @@ test("with the switch not set, no dependency is touched", async () => {
 // The privacy notice (operator decision 2026-11-04; policy 12.1)
 // ---------------------------------------------------------------------------
 
-test("the published constant is false, so the real predicate is off with the variable on", () => {
-  // The default argument is the constant itself. When the notice revision
-  // flips it, this test is the one that has to be read with the revision.
-  assert.equal(COMMENTS_PRIVACY_NOTICE_CONFIRMED, false);
-  assert.equal(commentsMonitorEnabledWith(ON), false);
+test("the published constant is true, so the real predicate follows the variable", () => {
+  // The default argument is the constant itself. If it is ever set back to
+  // false, this test is the one that has to be read with that change.
+  assert.equal(COMMENTS_PRIVACY_NOTICE_CONFIRMED, true);
+  assert.equal(commentsMonitorEnabledWith(ON), true);
+  assert.equal(commentsMonitorEnabledWith({}), false);
   assert.equal(commentsMonitorEnabledWith(ON, false), false);
   assert.equal(commentsMonitorEnabledWith(ON, true), true);
 });
 
-test("variable on, notice unconfirmed: nothing is touched, whether the constant is the default or passed", async () => {
-  for (const enabled of [
-    // What the route and the service wire in: the predicate with its default.
-    (env: Readonly<Record<string, string | undefined>>) => commentsMonitorEnabledWith(env),
-    (env: Readonly<Record<string, string | undefined>>) => commentsMonitorEnabledWith(env, false),
-  ]) {
-    const { deps, calls } = monitor({ env: ON, enabled });
-    assert.deepEqual(await runMarketingCommentsMonitor(deps), { ran: false, reason: "switch_off" });
-    assert.deepEqual(calls, []);
-  }
+test("variable on, notice unconfirmed: nothing is touched", async () => {
+  // The constant is true now; this holds the behaviour if it is ever set back.
+  const { deps, calls } = monitor({
+    env: ON,
+    enabled: (env) => commentsMonitorEnabledWith(env, false),
+  });
+  assert.deepEqual(await runMarketingCommentsMonitor(deps), { ran: false, reason: "switch_off" });
+  assert.deepEqual(calls, []);
 });
 
 test("variable on, notice confirmed: the monitor runs as before", async () => {
@@ -185,11 +185,11 @@ test("an unconfirmed notice reads as an unhealthy monitor for graduation and adm
   const recent = new Date(NOW.getTime() - 60_000).toISOString();
   assert.equal(commentsMonitorHealthyFromValueWith(recent, NOW, ON, true), true);
   assert.equal(commentsMonitorHealthyFromValueWith(recent, NOW, ON, false), false);
-  // The default argument is the constant, which is false.
-  assert.equal(commentsMonitorHealthyFromValueWith(recent, NOW, ON), false);
+  // The default argument is the constant, which is true.
+  assert.equal(commentsMonitorHealthyFromValueWith(recent, NOW, ON), true);
 });
 
-test("the health reader does not even query the database while the notice is unconfirmed", async () => {
+test("the health reader does not query the database with the variable off, and reads the last run with it on", async () => {
   let queried = 0;
   const client = {
     appSetting: {
@@ -200,10 +200,14 @@ test("the health reader does not even query the database while the notice is unc
     },
   };
   const before = process.env[MARKETING_COMMENTS_MONITOR_ENV];
-  process.env[MARKETING_COMMENTS_MONITOR_ENV] = "true";
   try {
+    // The notice constant is true, so the variable is what decides.
+    delete process.env[MARKETING_COMMENTS_MONITOR_ENV];
     assert.equal(await readMarketingCommentsMonitorHealthy(client as never), false);
     assert.equal(queried, 0);
+    process.env[MARKETING_COMMENTS_MONITOR_ENV] = "true";
+    assert.equal(await readMarketingCommentsMonitorHealthy(client as never), true);
+    assert.equal(queried, 1);
   } finally {
     if (before === undefined) delete process.env[MARKETING_COMMENTS_MONITOR_ENV];
     else process.env[MARKETING_COMMENTS_MONITOR_ENV] = before;

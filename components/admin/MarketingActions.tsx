@@ -35,6 +35,12 @@ type FieldKind =
   | "select"
   | "checkbox";
 
+const confirmText = (
+  action: { confirm?: string | ((values: Record<string, string>) => string) },
+  values: Record<string, string>
+): string =>
+  typeof action.confirm === "function" ? action.confirm(values) : (action.confirm ?? "");
+
 /** What a ticked box sends. */
 export const MARKETING_CHECKED = "yes";
 
@@ -47,6 +53,8 @@ export type MarketingActionField = {
   hint?: string;
   /** Required for `select`, and the only values it will offer. */
   options?: readonly string[];
+  /** The form does not submit while this field is empty (no default pick). */
+  required?: boolean;
 };
 
 export type MarketingAction = {
@@ -75,8 +83,11 @@ export type MarketingAction = {
   unavailable?: string;
   /** Turns a successful result into a sentence, when the result says something. */
   describe?: (result: unknown) => string | null;
-  /** Said before the request, not after: this is the last chance to stop. */
-  confirm?: string;
+  /**
+   * Said before the request, not after: this is the last chance to stop. A
+   * function sees the form values, so the question can name what was picked.
+   */
+  confirm?: string | ((values: Record<string, string>) => string);
   danger?: boolean;
   /** The row's main decision (approve, confirm): drawn as the one filled button. */
   primary?: boolean;
@@ -231,7 +242,7 @@ export function MarketingActionRail({
         );
         return;
       }
-      if (action.confirm && !window.confirm(action.confirm)) return;
+      if (action.confirm && !window.confirm(confirmText(action, {}))) return;
       void send(action, action.body({}));
     },
     [open, send]
@@ -347,7 +358,16 @@ export function MarketingActionRail({
             // opens this form instead of sending, and the question used to be
             // skipped on that path -- so an action whose warning was the whole
             // point (arming a deliberate 503) sent without it.
-            if (opened.confirm && !window.confirm(opened.confirm)) return;
+            // A required field left empty never reaches the server: the
+            // browser blocks it first, and this holds where it does not.
+            if (
+              (opened.fields ?? []).some(
+                (field) => field.required && !(values[field.name] ?? "").trim()
+              )
+            ) {
+              return;
+            }
+            if (opened.confirm && !window.confirm(confirmText(opened, values))) return;
             void send(opened, opened.body(values));
           }}
         >
@@ -373,6 +393,7 @@ export function MarketingActionRail({
                 </span>
               ) : field.kind === "select" ? (
                 <select
+                  required={field.required}
                   value={values[field.name] ?? ""}
                   onChange={(event) =>
                     setValues((previous) => ({
