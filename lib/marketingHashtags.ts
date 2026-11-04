@@ -144,9 +144,9 @@ export function marketingHashtagIsForbidden(tag: string, competitorNames: readon
 
 /**
  * The text with its forbidden tags, and every tag past the platform's maximum,
- * taken out, with how many of each. Only a removed tag and the spaces beside
- * it change; every other character, a claim's statement included, is left as
- * it was.
+ * taken out, with how many of each. Only a removed tag, the spaces beside it
+ * and, when anything was removed, whitespace at the very end change; every
+ * other character, a claim's statement included, is left as it was.
  */
 export function marketingHashtagsWithinBounds(
   text: string,
