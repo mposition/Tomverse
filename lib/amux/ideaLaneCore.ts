@@ -42,11 +42,17 @@ export function amuxIdeaLaneDailyAttempts(env: NodeJS.ProcessEnv = process.env):
 
 export type AmuxIdeaLaneAttemptFact = {
   claimedAtMs: number; leaseUntilMs: number; outcome: string | null; prNumber: number | null;
+  /** Set once the PR observer saw the draft PR merged, or closed unmerged. */
+  mergedAtMs?: number | null;
+  prClosedAtMs?: number | null;
 };
 
 export type AmuxIdeaLaneState = {
-  /** running: a run holds its lease; queued: the next claim retries it; failed: out of attempts. */
-  state: "running" | "queued" | "pr_open" | "failed";
+  /**
+   * running: a run holds its lease; queued: the next claim retries it; failed: out of attempts;
+   * merged / pr_closed: its PR merged, or was closed without a merge.
+   */
+  state: "running" | "queued" | "pr_open" | "merged" | "pr_closed" | "failed";
   attempts: number;
   prNumber: number | null;
   /** The newest run's outcome, lease_expired for one that never reported, null while it runs. */
@@ -61,7 +67,11 @@ export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], 
   const opened = attempts.filter((item) => item.outcome === "pr_open")
     .reduce<AmuxIdeaLaneAttemptFact | null>((last, item) => !last || item.claimedAtMs > last.claimedAtMs ? item : last, null);
   const base = { attempts: attempts.length, lastOutcome };
-  if (opened) return { ...base, state: "pr_open", prNumber: opened.prNumber };
+  // A retry's second PR may be left open; the one that merged settles the idea.
+  const merged = attempts.filter((item) => item.outcome === "pr_open" && item.mergedAtMs)
+    .reduce<AmuxIdeaLaneAttemptFact | null>((first, item) => !first || item.mergedAtMs! < first.mergedAtMs! ? item : first, null);
+  if (merged) return { ...base, state: "merged", prNumber: merged.prNumber };
+  if (opened) return { ...base, state: opened.prClosedAtMs ? "pr_closed" : "pr_open", prNumber: opened.prNumber };
   if (attempts.some(live)) return { ...base, state: "running", prNumber: null };
   return { ...base, state: attempts.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS ? "failed" : "queued", prNumber: null };
 }
