@@ -12,7 +12,7 @@ import { AMUX_V4_ANALYSIS_NAMESPACE } from "@/lib/amux/ideaAnalysisBudgetCore";
 import { readAnalysisMonthlyBudgetSetting } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { AmuxIdeaAnalysisPriceApprovalError,
   commitAmuxIdeaAnalysisPriceApproval } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
-import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID } from
+import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID, AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE } from
   "@/lib/amux/ideaAnalysisApprovedCostProfile";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
@@ -146,7 +146,7 @@ async function queueIdea(authority: AmuxOperatingScopeAuthority) {
 /** The claim service's own writes, by hand, so a wrong profile reaches the
  * database guard that the service would never let through. */
 async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
-  channel: Channel; ideaId: string; reservationId: string; maxAuthProfile: string; priceless?: boolean; budgetMode?: string;
+  channel: Channel; ideaId: string; reservationId: string; maxAuthProfile: string; priceless?: boolean; budgetMode?: string; inputRate?: number;
 }) {
   await takeAuditChainLock(tx);
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -165,6 +165,7 @@ async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
     window.shadowOverrunMicroUsd;
   const price = await tx.amuxIdeaAnalysisPriceVersion.findUniqueOrThrow({
     where: { id: input.channel.priceVersionId } });
+  const rates = input.priceless ? AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE : price;
   const claimId = randomUUID();
   const requestId = randomUUID();
   const auditId = await writeSystemAuditLog({ tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
@@ -183,9 +184,9 @@ async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
     id: claimId, requestId, reservationId: input.reservationId,
     namespace: AMUX_V4_ANALYSIS_NAMESPACE, invocationOrdinal: 0, monthStart,
     priceVersionId: input.priceless ? null : price.id, provider: input.channel.provider, modelId: input.channel.modelId,
-    inputTokensCap: price.inputTokensCap, outputTokensCap: price.outputTokensCap,
-    inputMicroUsdPerMillion: price.inputMicroUsdPerMillion,
-    outputMicroUsdPerMillion: price.outputMicroUsdPerMillion,
+    inputTokensCap: rates.inputTokensCap, outputTokensCap: rates.outputTokensCap,
+    inputMicroUsdPerMillion: input.inputRate ?? rates.inputMicroUsdPerMillion,
+    outputMicroUsdPerMillion: rates.outputMicroUsdPerMillion,
     reservedMicroUsd: reserved, budgetMode: input.budgetMode ?? "max_shadow", status: "in_flight",
     claimAuditLogId: auditId } });
 }
@@ -314,6 +315,11 @@ for (const [index, [provider]] of CHANNELS.entries()) {
     await assert.rejects(prisma.$transaction((tx) => insertShadowClaimByHand(tx, { channel, ...queued,
       maxAuthProfile: AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider], priceless: true,
       budgetMode: "bounded" })), (error: unknown) => sqlState(error) === "23514");
+    // Without a price row the conversion rates are the fixed ones, so a claim
+    // cannot under-record its shadow usage.
+    await assert.rejects(prisma.$transaction((tx) => insertShadowClaimByHand(tx, { channel, ...queued,
+      maxAuthProfile: AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider], priceless: true,
+      inputRate: 1 })), (error: unknown) => sqlState(error) === "23514");
     for (const wrong of Object.values(AMUX_SUBSCRIPTION_AUTH_PROFILES)
       .filter((profile) => profile !== AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider])
       .concat([""])) {

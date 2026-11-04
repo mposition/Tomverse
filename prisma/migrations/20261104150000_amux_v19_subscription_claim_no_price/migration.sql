@@ -1,4 +1,4 @@
--- baseline-check: replace-function-if-body-sha256 "amux_v19_session_budget_claim_guard" "b600d96fe3c9e5fb39ca8163319e17df37fff7ce3b54228493f2afcade0920b1" "e173f35ad8a7585ab63a00e8c129953045a6339bda6a75be5572aee44865fdc7"
+-- baseline-check: replace-function-if-body-sha256 "amux_v19_session_budget_claim_guard" "b600d96fe3c9e5fb39ca8163319e17df37fff7ce3b54228493f2afcade0920b1" "c576f8330cbd721c199372c2ac376eba815d95db1644b55ee8afb7ceda212bb5"
 -- Owner decision 2026-11-04: a subscription CLI call has no per-call price, so
 -- a max_shadow session claim needs no approved price row. Its stored rates only
 -- convert observed tokens into the shadow estimate. A claim that names a price
@@ -72,7 +72,12 @@ BEGIN
        reservation_row."modelProvider" IS DISTINCT FROM NEW."provider" OR
        reservation_row."modelId" IS DISTINCT FROM NEW."modelId" OR
        -- A subscription claim has no price row (owner decision 2026-11-04).
-       (NEW."priceVersionId" IS NULL AND NEW."budgetMode" IS DISTINCT FROM 'max_shadow') OR
+       -- Its fixed rates are lib/amux/ideaAnalysisApprovedCostProfile.ts.
+       (NEW."priceVersionId" IS NULL AND
+         (NEW."budgetMode" IS DISTINCT FROM 'max_shadow' OR
+          ROW(NEW."inputTokensCap", NEW."outputTokensCap",
+              NEW."inputMicroUsdPerMillion", NEW."outputMicroUsdPerMillion") IS DISTINCT FROM
+          ROW(1000000, 128000, 8000000, 20000000))) OR
        (NEW."priceVersionId" IS NOT NULL AND (
          price_row."status" IS DISTINCT FROM 'approved' OR
          price_row."mode" IS DISTINCT FROM 'subscription_cli' OR

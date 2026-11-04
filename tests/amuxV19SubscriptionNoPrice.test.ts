@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID } from
+import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID, AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE } from
   "../lib/amux/ideaAnalysisApprovedCostProfile.ts";
 import { readAmuxV19MaxPriceSelection } from
   "../lib/amux/ideaSessionMaxPriceSelectionRead.ts";
@@ -33,6 +34,15 @@ test("a queued subscription reservation is ready with no approved price row", as
 
 test("the runner's own id check still accepts the fixed id", () => {
   assert.match(AMUX_V19_SUBSCRIPTION_NO_PRICE_ID, /^[A-Za-z0-9:_-]{1,128}$/);
+});
+
+test("the claim guard's fixed rates are the code's fixed rates", () => {
+  const guard = readFileSync(new URL(
+    "../prisma/migrations/20261104150000_amux_v19_subscription_claim_no_price/migration.sql",
+    import.meta.url), "utf8");
+  const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
+  assert.ok(guard.includes(`ROW(${profile.inputTokensCap}, ${profile.outputTokensCap}, ${
+    profile.inputMicroUsdPerMillion}, ${profile.outputMicroUsdPerMillion})`));
 });
 
 test("reservation state still holds the claim", async () => {
