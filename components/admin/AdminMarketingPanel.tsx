@@ -721,7 +721,14 @@ export function MarketingSwitchStrip({
         (switches.drafts !== "on" || switches.publish !== "on")
           ? m.switchAutonomousNeedsBoth
           : undefined,
-      confirm: turningOn ? m.switchConfirmOn : undefined,
+      // Experiments show visitors different copy, and what has to be true first
+      // (settled pre-registration, shared-cache bypass of the cookie) is not
+      // something the writer can check, so the confirm names it (policy 9.1).
+      confirm: turningOn
+        ? control.name === "experiments"
+          ? m.switchConfirmExperimentsOn
+          : m.switchConfirmOn
+        : undefined,
       body: () => ({
         switch: control.name,
         enabled: turningOn,

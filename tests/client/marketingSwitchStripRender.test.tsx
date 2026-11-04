@@ -86,7 +86,10 @@ test("the experiments switch is turned on by PATCH against the generation shown,
   assert.equal(action?.path, "/api/admin/marketing/settings");
   assert.equal(action?.method, "PATCH");
   assert.equal(action?.checked, false);
-  assert.ok(action?.confirm, "turning it on is confirmed first");
+  assert.equal(action?.confirm, m.switchConfirmExperimentsOn, "turning it on is confirmed first, with its own words");
+  // The other switches keep the plain question.
+  const drafts = actionsOf(render()).find((a) => a.id === "switch-drafts");
+  assert.equal(drafts?.confirm, m.switchConfirmOn);
   assert.deepEqual(action?.body({}), { switch: "experiments", enabled: true, expectedConfigGeneration: 7 });
 });
 

@@ -57,8 +57,9 @@ export const MARKETING_EXPERIMENT_STOP_ACTION = "marketing_experiment.stopped";
 /**
  * The audit action for the experiments switch (operator decision 2026-11-04).
  * Declared here beside the start and stop actions, not in
- * `MARKETING_S2B1_ACTIONS`: that list sits in the store, which a route may not
- * reach, and the webhook pipeline fingerprint hashes what the receiver loads.
+ * `MARKETING_S2B1_ACTIONS`: that list is in `lib/marketingStore.ts`, which the
+ * webhook receiver loads, so a new entry there is a change to code the
+ * pipeline fingerprint covers and would stale the signed verification record.
  */
 export const MARKETING_EXPERIMENT_SWITCH_ACTION =
   "marketing_setting.experiments_changed";

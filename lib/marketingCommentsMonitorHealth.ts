@@ -23,10 +23,12 @@ import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
  * (`COMMENTS_PRIVACY_NOTICE_CONFIRMED`) is the code's record that the notice
  * now carries the comments section. While it is false the monitor is off
  * whatever the variable says: this one predicate is what the route, the run,
- * the health reading, the graduation and the admission all ask. The same variable has to be set on every service
- * that asks whether the monitor is healthy -- the web app (console and graduation)
- * and the publisher (autonomous admission) as well as the service that runs the
- * monitor -- or they read it as unhealthy, which is the safe way to be wrong.
+ * the health reading, the graduation and the admission all ask.
+ *
+ * The same variable has to be set on every service that asks whether the
+ * monitor is healthy -- the web app (console and graduation) and the publisher
+ * (autonomous admission) as well as the service that runs the monitor -- or
+ * they read it as unhealthy, which is the safe way to be wrong.
  *
  * The health is a timestamp the monitor writes when a whole run finished with
  * every read answered, kept as an app setting so the autonomous admission can
