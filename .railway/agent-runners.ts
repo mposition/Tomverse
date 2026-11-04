@@ -252,16 +252,18 @@ const SUPPORT_TRIAGE_WORKER_VARIABLES = ["SUPPORT_TRIAGE_RUN_SECRET"] as const;
 const SUPPORT_TRIAGE_RETENTION_VARIABLES = ["SUPPORT_TRIAGE_RETENTION_SECRET"] as const;
 
 /**
- * The sre-ops page service's variables at S1b (docs/policy/sre-ops.md §7, §8):
- * the page service's list in scripts/ops-observer/runtime-variables-core.mjs
- * without OPS_OBSERVER_PAGE_WEBHOOK_URL, which exists from S2 only. The
- * supervisor refuses to start on any other name; the IaC test holds the two
- * lists to that difference. RAILWAY_DOCKERFILE_PATH points the build at
+ * The sre-ops page service's variables (docs/policy/sre-ops.md §7, §8): the
+ * page service's list in scripts/ops-observer/runtime-variables-core.mjs, all
+ * of it. OPS_OBSERVER_PAGE_WEBHOOK_URL is declared so an apply keeps it; only
+ * the owner sets it, at S2, and a preserved name creates nothing until then.
+ * The supervisor refuses to start on any other name; the IaC test holds the two
+ * lists equal. RAILWAY_DOCKERFILE_PATH points the build at
  * docker/ops-observer.Dockerfile, which the operator sets.
  */
-const OPS_OBSERVER_PAGE_S1B_VARIABLES = [
+const OPS_OBSERVER_PAGE_VARIABLES = [
   "OPS_OBSERVER_SECRET",
   "OPS_OBSERVER_HEARTBEAT_URL",
+  "OPS_OBSERVER_PAGE_WEBHOOK_URL",
   "OPS_OBSERVER_ENABLED",
   "OPS_OBSERVER_APP_URL",
   "RAILWAY_DOCKERFILE_PATH",
@@ -546,7 +548,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     startCommand: "node scripts/ops-observer/supervise.mjs page",
     cronSchedule: "*/10 * * * *",
     environments: {
-      production: OPS_OBSERVER_PAGE_S1B_VARIABLES,
+      production: OPS_OBSERVER_PAGE_VARIABLES,
     },
   },
   {
