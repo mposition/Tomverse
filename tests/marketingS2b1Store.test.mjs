@@ -3067,7 +3067,7 @@ test("the console switch controls name switches the writer accepts", () => {
   );
   assert.deepEqual(
     MARKETING_CONSOLE_SWITCH_CONTROLS.map((control) => control.state),
-    ["drafts", "publish", "autoPublish"],
+    ["drafts", "publish", "autoPublish", "experiments"],
   );
 });
 
