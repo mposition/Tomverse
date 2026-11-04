@@ -4,6 +4,7 @@ import { z } from "zod";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import {
   MARKETING_S2B1_ACTIONS,
+  MarketingManualPostRefusedError,
   marketingScheduleAuditMetadata,
   scheduleMarketingPost,
 } from "@/lib/marketingStore";
@@ -36,6 +37,12 @@ export async function POST(req: Request, context: RouteContext) {
     bucket: "admin-marketing-post-schedule",
     schema,
     metadata: (body) => marketingScheduleAuditMetadata(body),
+    // A hand-posted account's post is not scheduled (operator decision
+    // 2026-11-04); the store says so in words the console shows as they are.
+    refusal: (error) =>
+      error instanceof MarketingManualPostRefusedError
+        ? { code: error.code, status: error.status, message: error.message }
+        : null,
     run: async (tx, { body, auditLogId }) => {
       await scheduleMarketingPost(tx, {
         id: postId,
