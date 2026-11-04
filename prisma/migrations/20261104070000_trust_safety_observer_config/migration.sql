@@ -71,3 +71,77 @@ END $$;
 CREATE TRIGGER trust_safety_observer_config_version_forward
     BEFORE UPDATE ON "TrustSafetyObserverConfig"
     FOR EACH ROW EXECUTE FUNCTION trust_safety_observer_config_version_forward();
+
+-- §5.4 requires the deadline judgement on both writing paths, and this is the
+-- other one: "사람의 activation 쓰기: DEFERRABLE INITIALLY DEFERRED constraint
+-- trigger가 COMMIT 처리 중 DB 시계로 마감을 판정한다". Without it a write that
+-- named no deadline, or one held open for minutes, would still commit as long
+-- as the mode and version were right.
+--
+-- 24 seconds is this kind's approved deadline (§12 (1) table C: the activation
+-- write's C_deadline = its C_guarded = 8 x 3s), and the reach is fixed at
+-- statement time for the same reason as the run row -- checking it at COMMIT
+-- would measure what is left rather than what was granted.
+CREATE FUNCTION trust_safety_observer_config_deadline_reach() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  named   text;
+  claimed timestamptz;
+BEGIN
+  named := current_setting('trust_safety.activation_deadline', true);
+  IF named IS NULL OR named = '' THEN
+    RAISE EXCEPTION 'trust_safety_activation_deadline_missing' USING ERRCODE = 'TS001';
+  END IF;
+  -- Called with its schema named, as the other observer triggers do: this
+  -- function runs with search_path pinned to pg_catalog, so an unqualified
+  -- call cannot find a function in the table's own schema.
+  EXECUTE format('SELECT %I.trust_safety_parse_deadline($1)', TG_TABLE_SCHEMA)
+    INTO claimed USING named;
+  IF claimed > clock_timestamp() + interval '24 seconds' THEN
+    RAISE EXCEPTION 'trust_safety_activation_deadline_too_far' USING ERRCODE = 'TS004';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER trust_safety_observer_config_deadline_reach
+    BEFORE INSERT OR UPDATE ON "TrustSafetyObserverConfig"
+    FOR EACH ROW EXECUTE FUNCTION trust_safety_observer_config_deadline_reach();
+
+CREATE FUNCTION trust_safety_observer_config_deadline_check() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  named   text;
+  claimed timestamptz;
+BEGIN
+  named := current_setting('trust_safety.activation_deadline', true);
+  IF named IS NULL OR named = '' THEN
+    RAISE EXCEPTION 'trust_safety_activation_deadline_missing' USING ERRCODE = 'TS001';
+  END IF;
+  -- Called with its schema named, as the other observer triggers do: this
+  -- function runs with search_path pinned to pg_catalog, so an unqualified
+  -- call cannot find a function in the table's own schema.
+  EXECUTE format('SELECT %I.trust_safety_parse_deadline($1)', TG_TABLE_SCHEMA)
+    INTO claimed USING named;
+  IF clock_timestamp() > claimed THEN
+    RAISE EXCEPTION 'trust_safety_activation_late_commit' USING ERRCODE = 'TS002';
+  END IF;
+  RETURN NULL;
+END $$;
+
+CREATE CONSTRAINT TRIGGER trust_safety_observer_config_deadline_check
+    AFTER INSERT OR UPDATE ON "TrustSafetyObserverConfig"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION trust_safety_observer_config_deadline_check();
+
+-- No delete path: §7's retention schedule is not approved, so the activation
+-- history is not pruned here either. Turning the observer off is an UPDATE
+-- with its own audit entry, never a delete.
+CREATE FUNCTION trust_safety_observer_config_no_delete() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  RAISE EXCEPTION 'trust_safety_config_delete_refused' USING ERRCODE = 'TS007';
+END $$;
+
+CREATE TRIGGER trust_safety_observer_config_no_delete
+    BEFORE DELETE ON "TrustSafetyObserverConfig"
+    FOR EACH ROW EXECUTE FUNCTION trust_safety_observer_config_no_delete();

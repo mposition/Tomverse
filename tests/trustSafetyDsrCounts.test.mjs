@@ -186,3 +186,19 @@ test("the module reads only the seven allowed fields", () => {
     assert.ok(!source.includes(forbidden), `${forbidden} is not on the allowlist`);
   }
 });
+
+test("an unreadable date is refused rather than counted only in observed", () => {
+  // Review finding, 2026-11-04 (copilot/moonshot, minor): a NaN date fails
+  // every comparison, so the row landed in `observed` and in no bucket -- an
+  // overdue request could leave `overdue` with nothing saying so.
+  assert.throws(
+    () => count([row({ dueAt: new Date("nonsense") })]),
+    /unreadable dueAt/,
+  );
+  assert.throws(
+    () => count([row({ dueAt: at(-5), completedAt: new Date("nonsense") })]),
+    /unreadable completedAt/,
+  );
+  // A null completedAt is the ordinary open request, not an unreadable one.
+  assert.equal(count([row({ dueAt: at(-1), completedAt: null })]).overdue.total, 1);
+});

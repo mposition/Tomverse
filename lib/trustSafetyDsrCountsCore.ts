@@ -110,8 +110,18 @@ export const countDsrDeadlines = ({
   let worstLateMs: number | null = null;
 
   for (const row of rows) {
-    add(observed, row);
+    // An unreadable date fails every comparison below, so the row would land
+    // in `observed` and in none of the buckets -- an overdue request could
+    // disappear from `overdue` with nothing saying so. Refusing is the only
+    // answer that cannot under-report.
     const due = row.dueAt.getTime();
+    if (!Number.isFinite(due)) {
+      throw new TypeError(`Request ${row.id} has an unreadable dueAt.`);
+    }
+    if (row.completedAt !== null && !Number.isFinite(row.completedAt.getTime())) {
+      throw new TypeError(`Request ${row.id} has an unreadable completedAt.`);
+    }
+    add(observed, row);
     if (row.completedAt === null) {
       if (due <= instant) add(overdue, row);
       else if (due <= windowEnd) add(imminent, row);

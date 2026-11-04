@@ -45,6 +45,21 @@
 --
 -- Nothing is turned on here. No row is written and no service reads this.
 
+-- The deadline is read from one place, and its format is constrained rather
+-- than described. `named::timestamptz` alone resolves an offset-less string in
+-- the session's TimeZone, which would make the late-commit judgement depend on
+-- a session setting -- the same value would be early in one session and late
+-- in another. Requiring an explicit offset removes that: a value without one
+-- is refused rather than guessed.
+CREATE FUNCTION trust_safety_parse_deadline(named text) RETURNS timestamptz
+LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  IF named !~ '(Z|[+-][0-9]{2}(:?[0-9]{2})?)$' THEN
+    RAISE EXCEPTION 'trust_safety_deadline_offset_missing' USING ERRCODE = 'TS008';
+  END IF;
+  RETURN named::timestamptz;
+END $$;
+
 CREATE TABLE "TrustSafetyObserverRun" (
     "id" TEXT NOT NULL,
     "outcome" TEXT NOT NULL,
@@ -73,9 +88,30 @@ ALTER TABLE "TrustSafetyObserverRun"
 -- re-interpreted in the session time zone, and the cast to TIMESTAMP(3) also
 -- rounds, which has made `>` comparisons against clock_timestamp() flake here
 -- before.
+-- The deadline's reach is fixed here, at statement time, and only its expiry
+-- is judged at COMMIT. Checking "at most 9 seconds ahead" in the deferred
+-- trigger instead would not enforce the approved deadline at all: a caller
+-- could name a deadline 30 seconds out, insert, and commit 25 seconds later --
+-- 5 seconds still remain, so the deferred check passes and the transaction
+-- occupied far longer than table C allows.
 CREATE FUNCTION trust_safety_observer_run_recorded_at() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  named   text;
+  claimed timestamptz;
 BEGIN
+  named := current_setting('trust_safety.run_deadline', true);
+  IF named IS NULL OR named = '' THEN
+    RAISE EXCEPTION 'trust_safety_run_deadline_missing' USING ERRCODE = 'TS001';
+  END IF;
+  -- Called with its schema named, as the other observer triggers do: this
+  -- function runs with search_path pinned to pg_catalog, so an unqualified
+  -- call cannot find a function in the table's own schema.
+  EXECUTE format('SELECT %I.trust_safety_parse_deadline($1)', TG_TABLE_SCHEMA)
+    INTO claimed USING named;
+  IF claimed > clock_timestamp() + interval '9 seconds' THEN
+    RAISE EXCEPTION 'trust_safety_run_deadline_too_far' USING ERRCODE = 'TS004';
+  END IF;
   NEW."recordedAt" := clock_timestamp();
   RETURN NEW;
 END $$;
@@ -83,6 +119,22 @@ END $$;
 CREATE TRIGGER trust_safety_observer_run_recorded_at
     BEFORE INSERT ON "TrustSafetyObserverRun"
     FOR EACH ROW EXECUTE FUNCTION trust_safety_observer_run_recorded_at();
+
+-- Append-only. §5.3 calls the row a record and says no judgement reads this
+-- table, so there is nothing to amend; §7's retention schedule is not approved
+-- yet and "예외가 지금 면제하는 삭제는 하나도 없다", so no delete path is opened
+-- either. Without these, an UPDATE would reach neither the clock overwrite nor
+-- the deadline checks above, and a recorded success could be rewritten after
+-- the fact.
+CREATE FUNCTION trust_safety_observer_run_append_only() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  RAISE EXCEPTION 'trust_safety_run_is_append_only' USING ERRCODE = 'TS007';
+END $$;
+
+CREATE TRIGGER trust_safety_observer_run_append_only
+    BEFORE UPDATE OR DELETE ON "TrustSafetyObserverRun"
+    FOR EACH ROW EXECUTE FUNCTION trust_safety_observer_run_append_only();
 
 -- The §5.4 judgement, at COMMIT.
 CREATE FUNCTION trust_safety_observer_run_deadline_check() RETURNS trigger
@@ -96,15 +148,17 @@ BEGIN
   IF named IS NULL OR named = '' THEN
     RAISE EXCEPTION 'trust_safety_run_deadline_missing' USING ERRCODE = 'TS001';
   END IF;
-  claimed := named::timestamptz;
+  -- Called with its schema named, as the other observer triggers do: this
+  -- function runs with search_path pinned to pg_catalog, so an unqualified
+  -- call cannot find a function in the table's own schema.
+  EXECUTE format('SELECT %I.trust_safety_parse_deadline($1)', TG_TABLE_SCHEMA)
+    INTO claimed USING named;
   now_utc := clock_timestamp();
 
-  -- The caller names the deadline but does not get to choose how far ahead it
-  -- is: 9 seconds is the run row's approved deadline (§12 (1) table C).
-  IF claimed > now_utc + interval '9 seconds' THEN
-    RAISE EXCEPTION 'trust_safety_run_deadline_too_far' USING ERRCODE = 'TS004';
-  END IF;
-
+  -- Only expiry is judged here. The deadline's reach was fixed at statement
+  -- time by the BEFORE INSERT trigger; re-checking "9 seconds ahead" at COMMIT
+  -- would measure the remaining time instead of the granted window, and a
+  -- distant deadline would pass simply by being committed late enough.
   IF now_utc > claimed THEN
     RAISE EXCEPTION 'trust_safety_run_late_commit' USING ERRCODE = 'TS002';
   END IF;

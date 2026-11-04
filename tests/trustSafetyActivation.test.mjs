@@ -40,7 +40,7 @@ test("all seven checks passing with mode on permits the count and the ping", () 
 test("mode off is not a fault, and permits neither count nor ping", () => {
   const state = derive({
     config: { mode: "off", version: 5 },
-    newestEntry: { id: "e5", toMode: "off", version: 5, entryHash: "h5", hmacValid: true },
+    newestEntry: { id: "e5", toMode: "off", version: 5, hmacValid: true },
     maxEntryVersion: 5,
   });
   assert.deepEqual(state, {
@@ -115,16 +115,16 @@ test("an entry with no hash anywhere in this action stops the count", () => {
 
 test("a successor must point at the bound entry and verify itself", () => {
   for (const successor of [
-    { previousHash: "something-else", entryHash: "h5", hmacValid: true },
-    { previousHash: "h4", entryHash: "h5", hmacValid: false },
-    { previousHash: "h4", entryHash: "h5", hmacValid: null },
-    { previousHash: null, entryHash: "h5", hmacValid: true },
+    { previousHash: "something-else", hmacValid: true },
+    { previousHash: "h4", hmacValid: false },
+    { previousHash: "h4", hmacValid: null },
+    { previousHash: null, hmacValid: true },
   ]) {
     assert.equal(derive({ successor }).fault, "chain_broken");
   }
   // A successor that points at it and verifies leaves the state believable.
   assert.equal(
-    derive({ successor: { previousHash: "h4", entryHash: "h5", hmacValid: true } }).fault,
+    derive({ successor: { previousHash: "h4", hmacValid: true } }).fault,
     null,
   );
 });
@@ -133,7 +133,7 @@ test("a chain cut right after the bound entry is caught", () => {
   // Checking only the bound entry would accept this: the entry itself verifies,
   // and the break is one link later.
   const state = derive({
-    successor: { previousHash: "h3", entryHash: "h5", hmacValid: true },
+    successor: { previousHash: "h3", hmacValid: true },
   });
   assert.equal(state.fault, "chain_broken");
   assert.equal(state.countPermitted, false);
@@ -157,7 +157,7 @@ test("off with no ping URL is not a fault", () => {
   // for it to report.
   const state = derive({
     config: { mode: "off", version: 5 },
-    newestEntry: { id: "e5", toMode: "off", version: 5, entryHash: "h5", hmacValid: true },
+    newestEntry: { id: "e5", toMode: "off", version: 5, hmacValid: true },
     maxEntryVersion: 5,
     pingUrlPresent: false,
   });
@@ -203,4 +203,17 @@ test("only off to on and on to off are allowed transitions", () => {
     assert.equal(activationTransitionAllowed({ fromMode: "off", toMode: bad }), false);
     assert.equal(activationTransitionAllowed({ fromMode: bad, toMode: "on" }), false);
   }
+});
+
+test("a stored mode outside the two reports the config fault, not a broken chain", () => {
+  // Review finding, 2026-11-04 (copilot/moonshot, nit): the mode guard ran
+  // after the successor check, so a row written around the database CHECK
+  // surfaced as `chain_broken` and sent the reader to the audit log for a
+  // fault that is in the config row.
+  const state = derive({
+    config: { mode: "paused", version: 4 },
+    successor: { previousHash: "wrong", hmacValid: true },
+  });
+  assert.equal(state.fault, "binding_mismatch");
+  assert.equal(state.mode, null);
 });

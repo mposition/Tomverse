@@ -64,9 +64,15 @@ export type ActivationAuditEntry = {
   readonly hmacValid: boolean | null;
 };
 
+/**
+ * The entry chained after the bound one.
+ *
+ * Only `previousHash` and `hmacValid` are read, and the type says so: an
+ * `entryHash` field here would look like part of check 7 without being used,
+ * and the next reader would have to work out that it is not.
+ */
 export type ActivationSuccessorEntry = {
   readonly previousHash: string | null;
-  readonly entryHash: string | null;
   readonly hmacValid: boolean | null;
 };
 
@@ -127,6 +133,12 @@ export const deriveTrustSafetyActivation = (input: ActivationInput): ActivationS
     return refuse("signature_unverified");
   }
 
+  // A stored mode outside the two is judged here, before the chain checks. It
+  // is a row written around the database CHECK, not a broken chain, and
+  // reporting it as `chain_broken` would send someone to look at the audit
+  // log for a fault that is in the config row.
+  if (!isMode(input.config.mode)) return refuse("binding_mismatch");
+
   // 4. binding: the entry's toMode and version are the config row's, and
   // 5. the newest entry holds the largest version.
   if (
@@ -151,13 +163,6 @@ export const deriveTrustSafetyActivation = (input: ActivationInput): ActivationS
     if (previousHash !== entry.entryHash || hmacValid !== true) {
       return refuse("chain_broken");
     }
-  }
-
-  if (!isMode(input.config.mode)) {
-    // A stored value outside the two is not a third mode; it is a row that
-    // cannot be believed. The database CHECK should refuse it, so reaching
-    // here means the row was written around that constraint.
-    return refuse("binding_mismatch");
   }
 
   // The mode is believed. The sixth fault applies only when it is on: an
