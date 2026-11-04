@@ -1,4 +1,4 @@
-// Calls the schedule, unpublish and withdraw routes with the shared mutation
+// Calls the schedule, unpublish, withdraw and record-manual routes with the shared mutation
 // wrapper and the store's writers stood in for, and prints, for each, the metadata the
 // route hands the wrapper next to the metadata the store will require of that
 // audit entry. Needs --experimental-test-module-mocks
@@ -30,6 +30,15 @@ mock.module(mod("lib/marketingStore.ts"), {
     marketingScheduleAuditMetadata: real.marketingScheduleAuditMetadata,
     marketingUnpublishAuditMetadata: real.marketingUnpublishAuditMetadata,
     MARKETING_POST_WITHDRAW_APPROVAL_ACTION: real.MARKETING_POST_WITHDRAW_APPROVAL_ACTION,
+    MARKETING_POST_RECORD_MANUAL_ACTION: real.MARKETING_POST_RECORD_MANUAL_ACTION,
+    MARKETING_MANUAL_PUBLISH_EVIDENCE_MAX: real.MARKETING_MANUAL_PUBLISH_EVIDENCE_MAX,
+    MARKETING_MANUAL_PUBLISH_URL_MAX: real.MARKETING_MANUAL_PUBLISH_URL_MAX,
+    MarketingManualPostRefusedError: real.MarketingManualPostRefusedError,
+    marketingRecordManualPublishAuditMetadata: real.marketingRecordManualPublishAuditMetadata,
+    recordManualMarketingPostPublication: async (_tx, input) => {
+      storeCalls.push(input);
+      return { slotDate: "2026-11-04", warnings: [] };
+    },
     MarketingPostWithdrawRefusedError: real.MarketingPostWithdrawRefusedError,
     marketingWithdrawApprovalAuditMetadata: real.marketingWithdrawApprovalAuditMetadata,
     withdrawMarketingPostApproval: async (_tx, input) => {
@@ -82,6 +91,16 @@ const results = {
     "withdraw",
     { expectedEnvelopeDigest: digest, expectedHistoryVersion: 2 },
     real.marketingWithdrawApprovalAuditMetadata,
+  ),
+  recordManual: await call(
+    "record-manual",
+    {
+      expectedEnvelopeDigest: digest,
+      expectedHistoryVersion: 4,
+      externalUrl: "https://x.com/tomverse/status/1",
+      evidenceRef: "opened the link while signed out",
+    },
+    real.marketingRecordManualPublishAuditMetadata,
   ),
 };
 

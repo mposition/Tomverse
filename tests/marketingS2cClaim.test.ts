@@ -755,3 +755,41 @@ test("the S2c actions are their own two names", () => {
     "marketing_post.claim_released",
   ]);
 });
+
+test("a manual account is never claimed, whatever its platform's caps say", async () => {
+  // X has caps (2 a day, 10 a week), so the caps check alone never held a manual
+  // X account back: its due post was claimed, failed in the adapter for want of
+  // an account reference, and three of those paused the account.
+  assert.ok(MARKETING_CHANNEL_CAPS.x);
+  for (const channel of ["x", "rednote", "linkedin"]) {
+    const { database, seen } = fakeDatabase({
+      channel: { ...channelRow({ channel, status: "approval_mode" }), provider: "manual" } as ChannelRow,
+    });
+    assert.deepEqual(
+      await claimDueMarketingPost(asTransaction(database), {
+        channelId: CHANNEL_ID,
+        claimToken: TOKEN,
+        resolveAdmission: admits,
+      }),
+      { claimed: false, reason: "channel_posts_by_hand" },
+      channel,
+    );
+    // Nothing was looked for and nothing was written: no due post was locked,
+    // no slot was counted, no claim and no audit entry exist.
+    assert.equal(seen.sql.some((statement) => statement.includes("SKIP LOCKED")), false);
+    assert.equal(seen.sql.some((statement) => statement.includes("count(*) FILTER")), false);
+    assert.equal(seen.updates.length, 0);
+    assert.equal(seen.audits.length, 0);
+  }
+
+  // The same account on a provider that carries it is still claimed.
+  const carried = fakeDatabase({
+    channel: { ...channelRow({ channel: "x", status: "approval_mode" }), provider: "zernio" } as ChannelRow,
+  });
+  const result = await claimDueMarketingPost(asTransaction(carried.database), {
+    channelId: CHANNEL_ID,
+    claimToken: TOKEN,
+    resolveAdmission: admits,
+  });
+  assert.ok(result.claimed);
+});

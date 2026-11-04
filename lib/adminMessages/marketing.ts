@@ -110,6 +110,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actRequeue: "Send back to the queue",
     actMarkReusable: "Mark reusable as a template",
     actWithdrawApproval: "Withdraw approval",
+    actRecordManualPublish: "Record what I posted by hand",
     actResolvePublished: "Resolve: it published",
     actResolveFailed: "Resolve: it failed",
     actUnpublish: "Record it as taken down",
@@ -152,6 +153,15 @@ export const adminMarketingMessages = defineAdminMessages({
     confirmDisconnect: "Disconnect this account?",
     confirmWithdrawApproval:
       "Withdraw the approval? This post will not go out, and it cannot be approved again.",
+    confirmRecordManualPublish:
+      "Record this post as live? The record says you posted it and saw it public at that link. Nothing is sent from here.",
+    recordManualPublishDone: "Recorded as posted by hand.",
+    recordManualPublishDailyOver:
+      " It is over this account's daily cap; the record stands because the post is already public.",
+    recordManualPublishWeeklyOver:
+      " It is over this account's weekly cap; the record stands because the post is already public.",
+    hintManualPublishUrl:
+      "Post it yourself first, then paste the link where it is public (https). The publisher never sends this account's posts.",
     fieldApprovalExpires: "Approval expires",
     fieldRenderedText: "The words that go out",
     fieldScheduledAt: "Goes out at",
@@ -570,6 +580,7 @@ export const adminMarketingMessages = defineAdminMessages({
     actRequeue: "큐로 되돌리기",
     actMarkReusable: "템플릿으로 재사용 표시",
     actWithdrawApproval: "승인 철회",
+    actRecordManualPublish: "손으로 게시한 것 기록",
     actResolvePublished: "판정: 게시됨",
     actResolveFailed: "판정: 실패",
     actUnpublish: "내려간 것으로 기록",
@@ -612,6 +623,15 @@ export const adminMarketingMessages = defineAdminMessages({
     confirmDisconnect: "이 계정의 연결을 해제할까요?",
     confirmWithdrawApproval:
       "승인을 철회할까요? 이 게시물은 나가지 않으며 다시 승인할 수 없습니다.",
+    confirmRecordManualPublish:
+      "이 게시물을 게시된 것으로 기록할까요? 직접 올렸고 그 링크에서 공개된 것을 확인했다는 기록이 남습니다. 여기서 무언가를 보내지는 않습니다.",
+    recordManualPublishDone: "손으로 게시한 것으로 기록했습니다.",
+    recordManualPublishDailyOver:
+      " 이 계정의 일 상한을 넘었습니다. 이미 공개된 게시물이라 기록은 그대로 남깁니다.",
+    recordManualPublishWeeklyOver:
+      " 이 계정의 주 상한을 넘었습니다. 이미 공개된 게시물이라 기록은 그대로 남깁니다.",
+    hintManualPublishUrl:
+      "먼저 직접 게시한 뒤, 공개된 링크(https)를 붙여 넣으세요. 이 계정의 게시물은 게시 작업이 보내지 않습니다.",
     fieldApprovalExpires: "승인 만료 시각",
     fieldRenderedText: "실제로 나가는 문구",
     fieldScheduledAt: "게시 시각",
