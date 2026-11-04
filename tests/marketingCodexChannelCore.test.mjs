@@ -11,6 +11,7 @@ import {
   marketingCodexFailure,
   marketingCodexLineStartsSearch,
   marketingCodexSearchLimit,
+  marketingCodexSearchesSpent,
   marketingCodexPrompt,
   marketingLlmChannelFromEnv,
   readMarketingCodexEvents,
@@ -167,6 +168,14 @@ test("a URL only the model's text names is not a retrieved page or a citation", 
 test("the search limit is what the reservation priced, and none for a text call", () => {
   assert.equal(marketingCodexSearchLimit(3), 4);
   assert.equal(marketingCodexSearchLimit(undefined), 0);
+});
+
+test("the call ends at the last search its reservation priced, not one past it", () => {
+  assert.equal(marketingCodexSearchesSpent(0, 4), false);
+  assert.equal(marketingCodexSearchesSpent(3, 4), false, "the pin's three searches finish normally");
+  assert.equal(marketingCodexSearchesSpent(4, 4), true);
+  assert.equal(marketingCodexSearchesSpent(0, 0), false, "a text call that searches nothing");
+  assert.equal(marketingCodexSearchesSpent(1, 0), true, "a text call that searches at all");
 });
 
 test("a stray line of the CLI's does not lose the answer", () => {

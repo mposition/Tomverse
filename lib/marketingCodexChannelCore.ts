@@ -46,13 +46,21 @@ const CODEX_CHILD_VARIABLES = ["HOME", "CODEX_HOME", "PATH", "LANG"] as const;
 export const MARKETING_CODEX_CALL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * The searches one call may start before its process is killed: what its
+ * The searches one call may start, the last of them ending its process: what its
  * reservation priced, the pin's count and the overshoot the API may bill. A text
  * call reserved none. The prompt asks for the pin's count, and six real A3 calls
  * kept to it (2 or 3 searches); this is what holds it if one does not.
  */
 export const marketingCodexSearchLimit = (maxWebSearchCalls: number | undefined): number =>
   (maxWebSearchCalls ?? 0) + (maxWebSearchCalls === undefined ? 0 : MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE);
+
+/**
+ * Whether a call has started all the searches it may. The one that reaches the
+ * limit is already on its way and cannot be recalled, so the process is killed
+ * then, inside what the reservation priced, not after one past it.
+ */
+export const marketingCodexSearchesSpent = (searches: number, limit: number): boolean =>
+  searches > 0 && searches >= limit;
 
 /** Whether one line of the CLI's stream starts a search. */
 export function marketingCodexLineStartsSearch(line: string): boolean {
@@ -321,7 +329,7 @@ export const runMarketingCodexProcess: MarketingCodexRunner = (input) =>
       const lines = `${partial}${chunk.toString("utf8")}`.split("\n");
       partial = lines.pop() ?? "";
       searches += lines.filter(marketingCodexLineStartsSearch).length;
-      if (searches > input.searchLimit) stop("too_many_searches")();
+      if (marketingCodexSearchesSpent(searches, input.searchLimit)) stop("too_many_searches")();
     });
     child.on("error", (error: NodeJS.ErrnoException) => {
       // A binary that cannot start has no exit code to report: name why here.
