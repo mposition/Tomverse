@@ -172,6 +172,9 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
   const setRecommendation = (cycleId: string, index: number, status: RecommendationStatus) =>
     void send({ action: "set_recommendation", cycleId, index, status });
 
+  const reason = (code: string | null) =>
+    code ? (m.reasons as Record<string, string>)[code] ?? code : null;
+
   const sendToAmux = async (cycleId: string, index: number) => {
     setBusy(true);
     setRefusal(null);
@@ -188,7 +191,9 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
         return;
       }
       if (!response.ok) {
-        setFailure(await readAdminApiFailure(response, { fallback: m.actionFailed, locale: apiLocale }));
+        // The send route answers its other refusals with a code too.
+        const failed = await readAdminApiFailure(response, { fallback: m.actionFailed, locale: apiLocale });
+        setFailure({ ...failed, message: reason(failed.message) ?? failed.message });
         return;
       }
       await load();
@@ -199,8 +204,6 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
     }
   };
 
-  const reason = (code: string | null) =>
-    code ? (m.reasons as Record<string, string>)[code] ?? code : null;
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
   const verdict = (value: string) => (m.verdicts as Record<string, string>)[value] ?? value;
   const comparisonVerdict = (value: string) =>
