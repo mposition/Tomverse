@@ -4,6 +4,8 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 
 import {
+  MARKETING_ASSET_RELEASED_POST_STATUSES,
+  MARKETING_ASSET_REUSE_REFUSAL_CODE,
   MARKETING_DRAFT_INTAKE_MAX_DRAFTS,
   MARKETING_DRAFT_INTAKE_MAX_LLM_CALLS,
   canonicalMarketingDraftJson,
@@ -14,6 +16,8 @@ import {
   marketingGeneratorDraftIntakeDigest,
   marketingGeneratorDraftLogicalKey,
 } from "../lib/marketingDraftIntakeCore.ts";
+
+import { MARKETING_POST_STATUSES } from "../lib/marketingAutomationSchema.ts";
 
 const SECRET = "s".repeat(40);
 
@@ -158,4 +162,28 @@ test("the stored key is derived from where a draft came from, and the digest fro
     }),
     digest,
   );
+});
+
+test("only a post that never reached anyone gives its assets back to the account", () => {
+  // Owner decision 2026-11-04: rejected, Guard-refused and expired drafts free their assets;
+  // everything that is, was or may become a post on a platform keeps them used.
+  assert.deepEqual([...MARKETING_ASSET_RELEASED_POST_STATUSES].sort(), ["approval_expired", "guard_rejected", "rejected"]);
+  for (const status of MARKETING_ASSET_RELEASED_POST_STATUSES) assert.ok(MARKETING_POST_STATUSES.includes(status), status);
+  const used = MARKETING_POST_STATUSES.filter((status) => !MARKETING_ASSET_RELEASED_POST_STATUSES.includes(status));
+  for (const status of [
+    "pending_approval",
+    "approved",
+    "scheduled",
+    "publishing",
+    "published",
+    "verified",
+    "outcome_unknown",
+    "failed",
+    "removed_by_platform",
+    "deleted",
+  ]) {
+    assert.ok(used.includes(status), status);
+  }
+  // Its own reason, outside the S2B1 refusal names.
+  assert.equal(MARKETING_ASSET_REUSE_REFUSAL_CODE, "intake_asset_already_used");
 });
