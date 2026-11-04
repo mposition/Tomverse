@@ -17,6 +17,7 @@ import {
   inspectAmuxIdeaSubmission,
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
+import { amuxIdeaLaneTook } from "@/lib/amux/ideaLaneService";
 import { IdeaSubmissionError, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
 import { amuxIdeaLaneEnabled } from "@/lib/amux/ideaLaneCore";
 import {
@@ -222,7 +223,9 @@ export async function GET(request: Request) {
       }
     }
     const owned = await readIdeaSubmissionRequest(session, requestId);
-    return NextResponse.json(owned, { headers: noStore });
+    // An idea the lane took has no v4 steps; the input hides them however it was opened.
+    const lane = owned.status === "committed" && await amuxIdeaLaneTook(owned.ideaId);
+    return NextResponse.json(lane ? { ...owned, lane } : owned, { headers: noStore });
   } catch (error) {
     return failure(error);
   }
