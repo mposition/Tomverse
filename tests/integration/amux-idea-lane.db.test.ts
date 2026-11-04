@@ -116,6 +116,33 @@ test("ideas the lane is done with never crowd out a new one, and an idea already
   await removeIdeas();
 });
 
+test("an idea the lane will take next shows as the lane's turn while the lane is on", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const fresh = await seedIdea(owner, new Date(OLD));
+  const analysed = await seedIdea(owner, new Date(OLD + 1_000));
+  await prisma.amuxIdeaAnalysisChunk.create({
+    data: { ideaId: analysed, actorUserId: owner, chunkIndex: 0, state: "awaiting_preview", attempt: 0, leaseGeneration: 0 },
+  });
+  const expired = await seedIdea(owner, new Date(Date.now() - 8 * DAY_MS));
+  const view = async () => Object.fromEntries((await readAmuxIdeaProgressForOwner(owner)).map((row) =>
+    [row.ideaId, [row.lane?.state ?? null, row.lane?.attempts ?? null, row.stage, row.waitingFor]]));
+  const previous = process.env.AMUX_IDEA_LANE_ENABLED;
+  try {
+    process.env.AMUX_IDEA_LANE_ENABLED = "true";
+    const on = await view();
+    assert.deepEqual(on[fresh], ["queued", 0, "execution", null], "the lane's turn, not an execution approval");
+    assert.equal(on[analysed][0], null, "an idea whose analysis started stays on that path");
+    assert.equal(on[expired][0], null, "the claim never takes an idea past its analysis deadline");
+    process.env.AMUX_IDEA_LANE_ENABLED = "false";
+    assert.deepEqual((await view())[fresh], [null, null, "execution_approval", "execution_approval"],
+      "with the lane off nothing changes");
+  } finally {
+    if (previous === undefined) delete process.env.AMUX_IDEA_LANE_ENABLED;
+    else process.env.AMUX_IDEA_LANE_ENABLED = previous;
+  }
+  await removeIdeas();
+});
+
 test("a run's result is recorded once, and the table refuses an unknown outcome", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const idea = await seedIdea(owner, new Date(OLD));

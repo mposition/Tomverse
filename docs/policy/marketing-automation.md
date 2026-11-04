@@ -504,7 +504,9 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
   이전 HMAC 방식의 id는 고지 상수가 한 번도 `true`가 된 적이 없어 발급·전송된 적이 없으므로 그 삭제 경로는 두지 않는다.
 - 생성·전송 조건(`lib/ga4UserIdPolicy.ts`): 고지 개정 배포(코드 상수 `GA4_USER_ID_PRIVACY_NOTICE_PUBLISHED`, 개정 고지 PR에서 `true`로 바꿨다 —
   이 상수는 고지 개정 PR에서만 바꾼다. `true`여도 스위치가 꺼져 있으면 아무것도 만들지도 보내지도 않는다, `tests/ga4UserIdConsentGate.test.mjs`) · 스위치 `NEXT_PUBLIC_GA4_USER_ID_ENABLED=true` · 분석 **명시 동의**(고지 지역의 미결정은 제외) ·
-  로그인 · GA4 측정 id. 식별자는 이 조건이 모두 충족된 뒤의 첫 요청에서만 만든다 — 브라우저가 요청 본문에 명시 동의를 적고,
+  로그인 · GA4 측정 id. **개정 고지 이전에 받은 분석 동의도 이 명시 동의로 인정한다(운영자 결정 2026-11-04, G2 선택지 (a), 정책 버전 변경 없음).**
+  동의 저장에는 버전·시각이 없으므로 개정 전 동의자도 스위치를 켠 뒤 다음 로그인에서 User-ID를 받는다. 동의 버전 도입은 하지 않는다.
+  식별자는 이 조건이 모두 충족된 뒤의 첫 요청에서만 만든다 — 브라우저가 요청 본문에 명시 동의를 적고,
   서버는 고지·스위치·로그인이 맞고 그 진술이 있을 때만 만든다(`app/api/analytics/user-id/route.ts` POST). 브라우저의 gtag
   `user_id`로만 보내고 서버 Measurement Protocol에는 붙이지 않는다(서버는 동의 상태를 모른다). 로그아웃은 `user_id`를 `null`로 해제한다.
 - 동의 철회: 로그인 상태에서 분석을 거절하면 브라우저가 `user_id`를 `null`로 해제하고 철회를 요청한다(route DELETE). 서버는 저장된
