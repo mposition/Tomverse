@@ -26,6 +26,24 @@ export const MARKETING_DRAFT_INTAKE_MAX_DRAFTS = 20;
 /** Where a stored key says a draft came from. */
 export const MARKETING_DRAFT_INTAKE_SOURCE = "marketing-generator";
 
+/**
+ * The post states in which an account has NOT used the assets a post names:
+ * the post never reached anyone and cannot be sent without a new draft. Every
+ * other state -- pending, approved, scheduled, publishing, published, verified,
+ * unknown, failed (which a person can re-queue), removed or deleted -- counts
+ * as the account having used its assets, and an asset an account has used is
+ * not offered to it again, whatever the time since (owner decision
+ * 2026-11-04). Listed as the exceptions so a state added later counts as used
+ * until someone decides otherwise.
+ */
+export const MARKETING_ASSET_RELEASED_POST_STATUSES = ["guard_rejected", "rejected", "approval_expired"] as const;
+
+/**
+ * The intake's refusal when a draft carries an asset its account has used. A
+ * plain reason string of this module, not an S2B1 action or refusal name.
+ */
+export const MARKETING_ASSET_REUSE_REFUSAL_CODE = "intake_asset_already_used";
+
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const isoInstant = z.string().datetime({ offset: false });
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/);

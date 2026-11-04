@@ -21,6 +21,7 @@ import {
   settleMarketingLlmCall,
   type MarketingLlmBudgetEnvironment,
 } from "@/lib/marketingLlmBudgetStore";
+import { MARKETING_ASSET_REUSE_REFUSAL_CODE } from "@/lib/marketingDraftIntakeCore";
 import {
   MARKETING_S3_ACTIONS,
   intakeMarketingGeneratorDraft,
@@ -34,11 +35,12 @@ import { resetTestFixture } from "./resetTestFixture";
 const SECRET = "g".repeat(48);
 // Two of these are the asset registry's read of the approved stored assets and
 // the registry version (lib/marketingAssetStore.ts, 2026-10-31).
-const PINNED_PLAIN_CALLS = 23;
+// The check that the account has not used the draft's assets is one more.
+const PINNED_PLAIN_CALLS = 24;
 // The rejected draft also asks whether the account crossed a stop limit (S4a):
 // the chain lock, the channel lock, the window marker, the removal count, the
 // attempt read and the draft read.
-const PINNED_WITH_IDS_CALLS = 29;
+const PINNED_WITH_IDS_CALLS = 30;
 const DIGEST = "b".repeat(64);
 
 const OPEN: MarketingDraftIntakeReaders = {
@@ -386,6 +388,107 @@ test("a draft resting on claims and assets is judged on them and stored with wha
   assert.deepEqual(envelope.assets, [{ assetId: "asset_1", altKey: "alt_1" }]);
   const codes = (post.history as { type: string; codes?: string[] }[]).find((entry) => entry.type === "guard_result")?.codes ?? [];
   assert.ok(codes.length > 0, "the rejection names why");
+});
+
+
+/** A post in `status` naming `assetIds` (the insert trigger that starts every post as a draft is off for the one insert). */
+async function postNaming(channelId: string, status: string, assetIds: string[]) {
+  const key = `post-${Math.random().toString(36).slice(2)}`;
+  await prisma.$executeRawUnsafe(`ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`);
+  try {
+    return await prisma.marketingPost.create({
+      data: {
+        channelId,
+        locale: "en",
+        kind: "social",
+        logicalKey: key,
+        envelope: {
+          channel: "linkedin",
+          accountSlug: "linkedin-1",
+          locale: "en",
+          renderedText: "Three models, three answers, side by side.",
+          claimIds: [],
+          assets: assetIds.map((assetId) => ({ assetId, altKey: "en" })),
+          finalUrl: null,
+          scheduledAt: null,
+          disclosureFlags: ["advertising"],
+        },
+        envelopeDigest: DIGEST,
+        rendererVersion: "r1",
+        claimIds: [],
+        assetIds,
+        claimRegistryVersion: 1,
+        assetRegistryVersion: 1,
+        factSnapshot: { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] },
+        factsDigest: DIGEST,
+        // What the table's CHECKs ask of a post in each state.
+        ...(["approved", "scheduled", "publishing", "published", "verified"].includes(status)
+          ? { approvalAuditLogId: `audit-${key}`, approvedDigest: DIGEST, approvedAt: new Date() }
+          : {}),
+        ...(["publishing", "published", "verified", "outcome_unknown", "failed"].includes(status)
+          ? { providerRequestKey: key, publishAttempt: 1 }
+          : {}),
+        ...(["published", "verified"].includes(status) ? { publishedAt: new Date() } : {}),
+        guardDecision: status === "guard_rejected" ? "reject" : "approval_required",
+        guardCodes: [],
+        guardRuleIds: [],
+        status,
+        mode: "approval",
+        history: [{ at: new Date().toISOString(), type: "draft", envelopeDigest: DIGEST }],
+        historyVersion: 0,
+      },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`);
+  }
+}
+
+test("a draft naming an asset its account has already used is refused before anything is written, and another account may use it", async () => {
+  // Owner decision 2026-11-04: an account never carries the same asset twice.
+  const row = await approvedChannel();
+  const other = await approvedChannel();
+  await draftsOn();
+  await postNaming(row.id, "pending_approval", ["media-short"]);
+  const before = await prisma.marketingPost.count();
+  const outcome = await intake(
+    draft(row.id, { assets: [{ assetId: "media-short", altKey: "en" }] }),
+    OPEN,
+  );
+  assert.deepEqual(outcome, { status: "refused", reasons: [MARKETING_ASSET_REUSE_REFUSAL_CODE] });
+  assert.equal(await prisma.marketingPost.count(), before);
+  // Nothing was consumed: the call is still free for a draft that can be taken.
+  assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { requestKey: callKey(1) } })).consumerDigest, null);
+
+  // The same asset on another account is not a reuse, and neither is another asset on this one.
+  const elsewhere = await intake(draft(other.id, { assets: [{ assetId: "media-short", altKey: "en" }] }), OPEN);
+  assert.equal(elsewhere.status, "rejected");
+  await ledgerCall(2);
+  const another = await intake(
+    draft(row.id, { logicalDraftId: "draft-2", assets: [{ assetId: "media-card", altKey: "en" }] }),
+    OPEN,
+    { submissionId: "sub-2", llmCallRequestKeys: [callKey(2)] },
+  );
+  assert.equal(another.status, "rejected");
+});
+
+test("every state that is or may become a post keeps its assets used; a rejected, refused or expired draft gives them back", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const used = ["pending_approval", "approved", "scheduled", "published", "verified", "outcome_unknown"];
+  const released = ["guard_rejected", "rejected", "approval_expired"];
+  for (const [index, status] of [...used, ...released].entries()) {
+    await postNaming(row.id, status, [`media-${status}`]);
+    await ledgerCall(10 + index);
+    const outcome = await intake(
+      draft(row.id, { logicalDraftId: `draft-${status}`, assets: [{ assetId: `media-${status}`, altKey: "en" }] }),
+      OPEN,
+      { submissionId: `sub-${status}`, llmCallRequestKeys: [callKey(10 + index)] },
+    );
+    // A released asset reaches the Guard (which refuses an unknown asset, as `rejected`);
+    // a used one never gets that far.
+    if (used.includes(status)) assert.deepEqual(outcome, { status: "refused", reasons: [MARKETING_ASSET_REUSE_REFUSAL_CODE] }, status);
+    else assert.equal(outcome.status, "rejected", status);
+  }
 });
 
 /**
