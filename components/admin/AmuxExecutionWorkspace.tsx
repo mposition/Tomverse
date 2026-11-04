@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
-import { AlertTriangle, ArrowRight, Bot, Clock, GripVertical, MoveRight } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, Clock, GitPullRequest, GripVertical, MoveRight } from "lucide-react";
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
 import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
@@ -25,6 +25,9 @@ import {
   type AmuxExecutionLane,
 } from "@/lib/amux/adminExecutionViewCore";
 import type { AmuxTaskFeedbackProjection } from "@/lib/amux/v22TaskFeedbackCore";
+import {
+  amuxIdeaLaneBoardHref, type AmuxIdeaLaneBoardCard, type AmuxIdeaLaneBoardColumn,
+} from "@/lib/amux/ideaLaneBoardCore";
 
 type Card = {
   id: string; title: string | null; displayKey: string | null; sourceKey: string | null;
@@ -166,8 +169,34 @@ function DecisionMakerAttentionCard({ item, nowMs }: { item: DmAttentionItem; no
   </Link></li>;
 }
 
+const PR_URL = "https://github.com/mposition/Tomverse/pull/";
+
+/**
+ * An idea the idea lane runs without cards (lib/amux/ideaLaneBoardCore.ts):
+ * display only, with no move, approval or archive control; it opens the
+ * idea's detail on the Ideas tab.
+ */
+function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
+  const m = useAdminMessages(adminAmuxExecutionMessages);
+  const attention = card.column === "attention";
+  return <li className={styles.card + " " + styles.laneCard + (attention ? " " + styles.attention : "")}
+    data-testid={"amux-lane-idea-" + card.requestId} data-lane-state={card.state}>
+    <div className={styles.identity}>
+      <span className={styles.laneChip}><GitPullRequest size={12} aria-hidden="true" />{m.ideaLane.badge}</span>
+      {card.prNumber !== null && <a href={PR_URL + card.prNumber} target="_blank" rel="noopener noreferrer"
+        className={styles.cardId + " " + styles.lanePr}>#{card.prNumber}</a>}
+    </div>
+    {attention && <span className={styles.reasonChip}>{m.ideaLane.state[card.state]}</span>}
+    <Link href={amuxIdeaLaneBoardHref(card.requestId)} prefetch={false}
+      className={styles.cardTitle + " " + styles.laneCardLink}>
+      {amuxVisibleInspectionText(card.title ?? card.requestId.slice(0, 8))}</Link>
+    <p className={styles.cardMeta}>{[attention ? null : m.ideaLane.state[card.state],
+      card.attempts > 0 ? m.ideaLane.attempts(card.attempts) : null].filter(Boolean).join(" · ")}</p>
+  </li>;
+}
+
 export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
-  canReviewCards = false, decisionMaker }: {
+  canReviewCards = false, decisionMaker, laneIdeas }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
   /** Whether a card waiting on the owner opens on its owner review. */
   canReviewCards?: boolean;
@@ -177,6 +206,12 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
    * read failed, which the lane says instead of showing none.
    */
   decisionMaker?: DmAttention | null;
+  /**
+   * Idea lane work read by the page (lib/amux/ideaLaneBoardRead.ts), shown
+   * beside the cards and never counted, paged or archived with them. Absent:
+   * not offered; null: the read failed.
+   */
+  laneIdeas?: AmuxIdeaLaneBoardCard[] | null;
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
@@ -377,6 +412,12 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       value?.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))) &&
     (!workerFilter || (workerFilter === "__unassigned" ? !card.worker : card.worker === workerFilter)) &&
     (!priorityFilter || card.priority === priorityFilter));
+  // A lane idea has no worker or priority, so those filters leave it out.
+  const laneCardsFor = (column: AmuxIdeaLaneBoardColumn | AmuxExecutionLane) => workerFilter || priorityFilter ? [] :
+    (laneIdeas ?? []).filter((card) => card.column === column && (!query.trim() ||
+      [card.title, card.requestId].some((value) =>
+        value?.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))));
+  const laneDone = laneCardsFor("done");
   const adjacent = selected ? uniqueCards.findIndex((card) => card.id === selected.id) : -1;
   const ownerEscalation = canReviewCards ? selected?.escalations[0] ?? null : null;
   const tabs = ownerEscalation ?
@@ -599,6 +640,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         </li>)}
       </ul>
     </details>}
+    {laneIdeas === null && <p role="status" className={styles.hint}>{m.ideaLane.unavailable}</p>}
     {error && <p role="alert" className="rounded border border-red-500 p-2 text-sm">
       {error === "reauth" ? <Link className="underline"
         href={adminRecentAuthenticationHref("/admin/amux-execution?tab=cards")}>{m.reauth}</Link> :
@@ -624,6 +666,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
             const column = board.lanes.find((item) => item.lane === lane);
             const cards = column?.cards ?? [];
             const matches = filtered(cards);
+            const laneCards = laneCardsFor(lane);
             const attention = lane === "attention";
             const laneCount = board.counts[lane] + (attention ? dmTotal : 0);
             return <section key={lane} aria-label={m.lane[lane]} data-amux-lane={lane} tabIndex={attention ? -1 : undefined}
@@ -710,7 +753,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                         m.scoreUnavailable}
                   </p>
                 </li>)}</ol>
-              {matches.length === 0 && !(attention && cards.length === 0 && dmTotal > 0) &&
+              {laneCards.length > 0 && <>
+                <h4 className={styles.groupHeading + " " + styles.groupHeadingLane}>
+                  <GitPullRequest size={14} aria-hidden="true" />{m.ideaLane.group(laneCards.length)}</h4>
+                <ol className={styles.cards} data-testid={"amux-lane-ideas-" + lane}>
+                  {laneCards.map((card) => <IdeaLaneCard key={card.requestId} card={card} />)}</ol>
+              </>}
+              {matches.length === 0 && laneCards.length === 0 && !(attention && cards.length === 0 && dmTotal > 0) &&
                 <p className={styles.empty}>{cards.length === 0 ? m.empty : m.noMatches}</p>}
               {(query || workerFilter || priorityFilter) && <p className={styles.hint}>{m.matchCount(matches.length, cards.length)}</p>}
               {cards.length < board.counts[lane] && <button type="button"
@@ -724,6 +773,12 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       <details className={styles.archive}>
         <summary className="cursor-pointer text-sm font-semibold">{m.archive}
           {board ? ` (${board.counts.archive})` : ""}</summary>
+        {laneDone.length > 0 && <>
+          <h4 className={styles.groupHeading + " " + styles.groupHeadingLane}>
+            <GitPullRequest size={14} aria-hidden="true" />{m.ideaLane.recentMerged(laneDone.length)}</h4>
+          <ol className={styles.cards + " " + styles.laneDone} data-testid="amux-lane-ideas-done">
+            {laneDone.map((card) => <IdeaLaneCard key={card.requestId} card={card} />)}</ol>
+        </>}
         <ul className="mt-3 space-y-2 text-sm">{archive.map((card) => <li key={card.id}>
           <span className="font-mono text-xs" data-testid="amux-archive-card-label">
             {amuxVisibleInspectionText(amuxCardLabel(card))}
