@@ -56,7 +56,7 @@ test("the model is given a fixed instruction and only this account's slice of th
   assert.match(system.content, /Never write a URL/);
   assert.match(system.content, /space after the ideographic full stop/);
   const data = JSON.parse(user.content);
-  assert.deepEqual(data.task, { platform: "linkedin", locale: "en", posts: 3 });
+  assert.deepEqual(data.task, { platform: "linkedin", locale: "en", posts: 3, hashtags: { min: 2, max: 3 } });
   assert.deepEqual(data.claims.map((claim) => claim.id), ["claim_compare"]);
   assert.deepEqual(data.assets.map((asset) => asset.id), ["asset_hero"]);
   assert.deepEqual(data.brief, { topics: ["topic_compare"], claimIds: [] });
@@ -214,6 +214,7 @@ test("an answer that is not the one JSON object asked for is refused whole", () 
   assert.deepEqual(readMarketingA5Answer("Here are your posts:", context, SCOPE), {
     drafts: [],
     dropped: { answer_not_json: 1 },
+    hashtagsRemoved: {},
   });
   for (const content of [
     JSON.stringify({ drafts: [proposal()], verdict: "approve" }),
@@ -449,5 +450,64 @@ test("the instruction tells the model to write from the assets it was given when
   assert.match(system.content, /Give each post a different asset/);
   // The old rule that skipped a post is gone, and the version says the instruction changed.
   assert.doesNotMatch(system.content, /return no draft: a post without/);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v6");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v7");
+});
+
+test("A5 is told when hashtags help, how many each platform takes, and which tags never to write", () => {
+  const [system, user] = marketingA5Messages(context, SCOPE);
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v7");
+  assert.match(system.content, /task\.hashtags gives this platform's range/);
+  assert.match(system.content, /fewer or none when a tag would not help/);
+  assert.match(system.content, /#Tomverse once is recommended/);
+  assert.match(system.content, /Traditional Chinese for zh-Hant, Simplified for zh-Hans/);
+  assert.match(system.content, /names another product or company/);
+  assert.match(system.content, /#best, #free, #최고 or #무료/);
+  assert.match(system.content, /on youtube they go in the description, never the title line, and one of them is #Shorts/i);
+  assert.match(system.content, /On threads use at most one/);
+  assert.deepEqual(JSON.parse(user.content).task.hashtags, { min: 2, max: 3 });
+
+  const ranges = Object.fromEntries(
+    ["instagram", "tiktok", "youtube", "x", "linkedin", "facebook", "threads", "rednote"].map((platform) => {
+      const scoped = marketingGeneratorContextSchema.parse({
+        ...context,
+        channels: [{ ...context.channels[0], channel: platform }],
+        assets: [{ ...context.assets[0], allowedChannels: [platform], kind: "video" }],
+      });
+      return [platform, JSON.parse(marketingA5Messages(scoped, SCOPE)[1].content).task.hashtags];
+    }),
+  );
+  assert.deepEqual(ranges, {
+    instagram: { min: 3, max: 5 },
+    tiktok: { min: 3, max: 5 },
+    youtube: { min: 2, max: 3 },
+    x: { min: 1, max: 2 },
+    linkedin: { min: 2, max: 3 },
+    facebook: { min: 0, max: 2 },
+    threads: { min: 0, max: 1 },
+    rednote: { min: 3, max: 5 },
+  });
+});
+
+test("a draft keeps its words and allowed tags; a forbidden tag or one past the maximum is taken out and counted", () => {
+  const statement = "Ask once, read three answers side by side.";
+  const { drafts, dropped, hashtagsRemoved } = readMarketingA5Answer(
+    answer([
+      proposal({ renderedText: `${statement}\n\n#AI #ChatGPT #Tomverse #AIcomparison #AItools` }),
+      // The registry's competitor, and boasts in two languages.
+      proposal({ renderedText: `${statement} #Poe #bestAI #무료체험 #AI` }),
+      proposal({ renderedText: statement }),
+    ]),
+    context,
+    SCOPE,
+  );
+  assert.deepEqual(dropped, {});
+  assert.deepEqual(
+    drafts.map((draft) => draft.renderedText),
+    [`${statement}\n\n#AI #Tomverse #AIcomparison`, `${statement} #AI`, statement],
+  );
+  assert.deepEqual(hashtagsRemoved, { hashtag_forbidden: 4, hashtag_over_limit: 1 });
+});
+
+test("a refused answer removes no hashtags", () => {
+  assert.deepEqual(readMarketingA5Answer("not json", context, SCOPE).hashtagsRemoved, {});
 });
