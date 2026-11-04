@@ -134,8 +134,8 @@ export function observationsFromSnapshot({ healthOk, snapshot }) {
 
 /**
  * The S3 budget observations, one per provider window the snapshot reported:
- * a bad band as itself, a computed lower band as ok, no band as unknown. A
- * provider whose name cannot be a key is left out rather than guessed at.
+ * a bad band as itself, any lower band as ok. A provider whose name cannot be
+ * a key is left out rather than guessed at.
  */
 export function budgetObservations(snapshot) {
   const out = {};
@@ -143,8 +143,7 @@ export function budgetObservations(snapshot) {
   for (const budget of snapshot.providerBudgets) {
     const key = `${BUDGET_SIGNAL.id}#${budget.provider}_${budget.scope}`;
     if (signalForKey(key) === null) continue;
-    const band = budget.utilisationBand;
-    out[key] = band === null ? "unknown" : BUDGET_SIGNAL.bands.includes(band) ? band : "ok";
+    out[key] = BUDGET_SIGNAL.bands.includes(budget.utilisationBand) ? budget.utilisationBand : "ok";
   }
   return out;
 }

@@ -292,6 +292,51 @@ test("a budget key worsens at exhausted, recovers after two good runs, and holds
   assert.deepEqual(second.reservation.items.map((item) => item.kind), ["recovery"]);
 });
 
+test("switching budget pages off keeps an open key, and switching back on does not announce it again", () => {
+  const plan = (keys, budgetPages, band) => planAdvance({
+    state: trusted({ keys }),
+    observations: band ? { [BUDGET_KEY]: band } : {},
+    nowMs: START,
+    ownerDate: "2026-10-08",
+    budgetPages,
+  });
+  const opened = plan(initial(), true, ">=95");
+  assert.deepEqual(opened.reservation.items.map((item) => item.kind), ["new_open"]);
+  const off = plan(opened.keys, false, ">=95");
+  assert.deepEqual(off.keys[BUDGET_KEY], opened.keys[BUDGET_KEY]);
+  assert.equal(off.reservation, null);
+  const on = plan(off.keys, true, ">=95");
+  assert.deepEqual(on.keys[BUDGET_KEY].openedAt, opened.keys[BUDGET_KEY].openedAt);
+  assert.equal(on.reservation, null);
+});
+
+test("a held budget key survives past the limit; only new windows are left out", () => {
+  const held = Object.fromEntries(Array.from({ length: 64 }, (_, i) => [`P-B#p${i}_day`, initialKeyState()]));
+  const planned = planAdvance({
+    state: trusted({ keys: { ...initial(), ...held } }),
+    observations: { "P-B#aaa_day": ">=95" },
+    nowMs: START,
+    ownerDate: "2026-10-08",
+    budgetPages: true,
+  });
+  assert.equal(Object.keys(planned.keys).filter((key) => key.startsWith("P-B#")).length, 64);
+  assert.equal(Object.hasOwn(planned.keys, "P-B#aaa_day"), false);
+});
+
+test("a reservation for a budget key the body does not hold is refused, not a crash", async () => {
+  const fake = fakeFetch(liveRoutes({
+    "/api/internal/ops-snapshot": [200, budgetSnapshot(">=95")],
+    "/api/internal/ops-observer/state": [200, trusted()],
+    "/api/internal/ops-observer/confirm": [200, { result: "shadowed" }],
+  }));
+  await run(fake, { env: { ...ENV, OPS_OBSERVER_S3_BUDGET_PAGES: "true" } });
+  const body = fake.calls.find((call) => call.path.endsWith("/advance")).body;
+  delete body.keys[BUDGET_KEY];
+  const parsed = parseAdvanceRequest(JSON.stringify(body), START);
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.error, "reservation_invalid");
+});
+
 test("a stalled read is retried once on a new attempt; writes and answers are not", async () => {
   // A failed state read followed by a good one finishes the run.
   let stateCalls = 0;

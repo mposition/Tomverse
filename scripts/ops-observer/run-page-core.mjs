@@ -101,15 +101,18 @@ export function planAdvance({ state, observations, nowMs, ownerDate, channelChec
       keys[key] = evaluateKey(signal, state.keys[key], observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
     }
   }
+  // Budget keys the chain holds are never dropped: with the switch off they stay
+  // exactly as they are, so switching back on cannot re-announce an open incident.
+  // A window that has gone from the report holds too, rather than recovering.
+  const prefix = `${BUDGET_SIGNAL.id}#`;
+  const held = Object.keys(state.keys).filter((name) => name.startsWith(prefix) && signalForKey(name) !== null).sort();
+  for (const key of held) keys[key] = state.keys[key];
   if (budgetPages) {
-    // Every window the chain holds or the snapshot reports; one that has gone
-    // from the report stays as it is rather than recovering.
-    const prefix = `${BUDGET_SIGNAL.id}#`;
-    const names = [...new Set([...Object.keys(state.keys), ...Object.keys(observations)])]
-      .filter((name) => name.startsWith(prefix) && signalForKey(name) !== null)
+    const fresh = Object.keys(observations)
+      .filter((name) => name.startsWith(prefix) && signalForKey(name) !== null && !held.includes(name))
       .sort()
-      .slice(0, BUDGET_KEY_LIMIT);
-    for (const key of names) {
+      .slice(0, Math.max(0, BUDGET_KEY_LIMIT - held.length));
+    for (const key of [...held, ...fresh]) {
       keys[key] = evaluateKey(BUDGET_SIGNAL, state.keys[key] ?? initialKeyState(), observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
     }
   }

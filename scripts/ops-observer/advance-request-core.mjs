@@ -122,8 +122,7 @@ export function owedMessages(previousKeys, nextKeys, ownerDate) {
       if (kind) owed.push({ signal: signal.id, scope, kind, openedAt: nextKeys[key].openedAt });
     }
   }
-  // S3 budget keys, in a fixed order: a key the chain does not hold yet starts
-  // closed, and a key dropped by the switch owes nothing.
+  // S3 budget keys, in a fixed order: a key the chain does not hold yet starts closed.
   const budgetPrefix = `${BUDGET_SIGNAL.id}#`;
   for (const key of Object.keys(nextKeys).filter((name) => name.startsWith(budgetPrefix)).sort()) {
     const kind = owedMessage(BUDGET_SIGNAL, previousKeys[key] ?? initialKeyState(), nextKeys[key], ownerDate);
@@ -163,7 +162,7 @@ function parseReservation(reservation, keys, nowMs) {
     if (!Number.isSafeInteger(openedAt) || openedAt < 0 || openedAt > MAX_DATE_MS) return refuse("shape");
     const key = `${signal}#${scope}`;
     const signalDef = signalForKey(key);
-    if (signalDef === null || signalDef.id !== signal) return refuse("reservation_invalid");
+    if (signalDef === null || signalDef.id !== signal || !Object.hasOwn(keys, key)) return refuse("reservation_invalid");
     if (seen.has(key)) return refuse("reservation_invalid");
     seen.add(key);
     if (!itemMatchesKey(signalDef, item, keys[key], ownerDate)) return refuse("reservation_invalid");
