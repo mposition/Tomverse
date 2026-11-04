@@ -31,6 +31,7 @@ import {
   type MarketingA5Refusal,
 } from "./marketingGeneratorDraftingCore.ts";
 import type { MarketingDraftSubmission } from "./marketingDraftIntakeCore.ts";
+import type { MarketingHashtagRemoval } from "./marketingHashtags.ts";
 import type { MarketingGeneratorReport } from "./marketingIntelReportCore.ts";
 import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
@@ -66,6 +67,8 @@ export type MarketingGeneratorCycleSummary = {
   readonly draftsProposed: number;
   readonly draftsSubmitted: number;
   readonly dropped: Partial<Record<MarketingA5Refusal, number>>;
+  /** Hashtags taken out of drafts that were kept: forbidden, or past the platform's maximum. */
+  readonly hashtagsRemoved: Partial<Record<MarketingHashtagRemoval, number>>;
   /** Per submitted draft, the intake's answer: queued, rejected, refused or conflict. */
   readonly intake: Partial<Record<string, number>>;
   /** Where the run ended early, or null when every account was asked. */
@@ -87,6 +90,7 @@ export async function runMarketingGeneratorCycle(
   let draftsProposed = 0;
   let draftsSubmitted = 0;
   const dropped: Partial<Record<MarketingA5Refusal, number>> = {};
+  const hashtagsRemoved: Partial<Record<MarketingHashtagRemoval, number>> = {};
   const intake: Partial<Record<string, number>> = {};
   const summary = (stoppedAt: MarketingGeneratorCycleSummary["stoppedAt"]): MarketingGeneratorCycleSummary => ({
     calls,
@@ -94,6 +98,7 @@ export async function runMarketingGeneratorCycle(
     draftsProposed,
     draftsSubmitted,
     dropped,
+    hashtagsRemoved,
     intake,
     stoppedAt,
   });
@@ -143,6 +148,10 @@ export async function runMarketingGeneratorCycle(
     const read = readMarketingA5Answer(outcome.content, context, scope);
     for (const [reason, count] of Object.entries(read.dropped)) {
       dropped[reason as MarketingA5Refusal] = (dropped[reason as MarketingA5Refusal] ?? 0) + (count ?? 0);
+    }
+    for (const [reason, count] of Object.entries(read.hashtagsRemoved)) {
+      const key = reason as MarketingHashtagRemoval;
+      hashtagsRemoved[key] = (hashtagsRemoved[key] ?? 0) + (count ?? 0);
     }
     draftsProposed += read.drafts.length;
     if (read.drafts.length === 0) continue;
