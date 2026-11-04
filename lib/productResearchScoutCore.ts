@@ -44,7 +44,7 @@ export const SCOUT_LLM_CALL_OUTCOMES = ["started", "ok", "failed"] as const;
 /** Bounds for the daily model-call cap an owner sets in Admin. 0 means no calls. */
 export const SCOUT_DAILY_CALL_CAP_MAX = 500;
 
-/** Bounds for the daily cap on real generations as the test account (§14). 0 means none. */
+/** Bounds for the daily cap on real generations as the test account (docs/policy/product-research-agent.md §14). 0 means none. */
 export const SCOUT_GENERATION_DAILY_CAP_MAX = 20;
 
 /** Ledger subjects of generation permits, which the model-call cap does not count. */

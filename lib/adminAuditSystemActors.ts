@@ -100,7 +100,7 @@ export type EngineeringAgentSystemAuditActor =
 export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
   "product-research-observer",
   "product-research-retention",
-  // Issues the Scout's short-lived test account session (§14), and nothing else.
+  // Issues the Scout's short-lived test account session (docs/policy/product-research-agent.md §14), and nothing else.
   "product-research-scout",
 ] as const;
 export type ProductResearchSystemAuditActor =

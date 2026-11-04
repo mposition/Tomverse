@@ -132,7 +132,7 @@ const PRODUCT_RESEARCH_SCOUT_VARIABLES = [
   "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
   // Optional: `off` stops the unsandboxed retry (docs/policy/product-research-agent.md §12).
   "PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK",
-  // Optional: dev or Test walks its own screens behind Cloudflare Access (§12, §13).
+  // Optional: dev or Test walks its own screens behind Cloudflare Access (docs/policy/product-research-agent.md §12, §13).
   "PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN",
   "PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID",
   "PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_SECRET",
