@@ -51,6 +51,7 @@ const WORKER_VARIABLES = [
   "MARKETING_CODEX_BIN",
   "HOME",
   "CODEX_HOME",
+  "LANG",
   "PATH",
   "SystemRoot",
   "SYSTEMROOT",
@@ -77,7 +78,9 @@ export const superviseMarketingGeneratorRun = ({
     const runId = randomUUID();
     const deadline = new Date(Date.now() + deadlineMs);
 
-    const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", worker], {
+    // Railway runs the .ts sources and so starts this service with the flag. The box runs a bundle, which needs none.
+    const typeStripping = process.execArgv.filter((flag) => flag === "--experimental-strip-types");
+    const child = spawn(process.execPath, [...typeStripping, "--no-warnings", worker], {
       env: {
         ...workerEnvironment(env, variables),
         MARKETING_GENERATOR_RUN_ID: runId,

@@ -37,7 +37,7 @@ SEO Agent(GitHub Actions)와 Comments Monitor는 옮기지 않습니다. Comment
 전제: 이 기능이 main에 있어야 합니다. 앱 쪽 변경은 없으므로 앱 배포를 기다릴 필요는 없습니다. 번들은 그 main에서 만듭니다.
 
 1. 로컬 PC의 main checkout에서 번들을 만들어 박스에 올립니다. 박스의 `/usr/bin/node`는 TypeScript 지원 없이
-   빌드돼 있어(`process.features.typescript`가 false) 저장소의 `.ts`를 바로 실행할 수 없습니다.
+   빌드돼 있어 `.ts`를 읽으면 `ERR_NO_TYPESCRIPT`로 끝납니다. 그래서 저장소의 소스를 바로 실행할 수 없습니다.
 
    ```bash
    npm run build:marketing-generator-box
