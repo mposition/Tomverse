@@ -282,7 +282,7 @@ export const runMarketingCodexProcess: MarketingCodexRunner = (input) =>
     }
     const child = spawn(input.bin, [...input.args], {
       cwd: input.cwd,
-      env: { ...input.env },
+      env: { ...input.env } as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
       detached: true,
     });
