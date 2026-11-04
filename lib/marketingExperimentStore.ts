@@ -147,6 +147,12 @@ export async function startMarketingExperiment(
       "That bundle or variant is not in this build",
     );
   }
+  if (bundle.example) {
+    throw new MarketingExperimentRefusedError(
+      "experiment_config_invalid",
+      "That bundle is an example and cannot be started",
+    );
+  }
 
   const candidate = {
     version: 1,

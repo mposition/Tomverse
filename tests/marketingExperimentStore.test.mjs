@@ -69,7 +69,7 @@ const makeTx = (settings = {}) => {
 
 const body = (overrides = {}) => ({
   experimentId: "spring-hero",
-  bundleId: "home-hero-v1",
+  bundleId: "home-hero-v2",
   variantId: "b",
   locales: ["en", "ko"],
   variantRatioPercent: 20,
@@ -170,6 +170,8 @@ test("a start is refused for anything the build or the schema does not stand beh
     [{ locales: ["en", "en"] }, "experiment_config_invalid"],
     [{ variantRatioPercent: 60 }, "experiment_config_invalid"],
     [{ bundleId: "pricing-hero-v1" }, "experiment_config_invalid"],
+    // The example bundle builds for the route and the tests but never starts.
+    [{ bundleId: "home-hero-v1" }, "experiment_config_invalid"],
   ]) {
     const tx = makeTx(on);
     const error = await refusal(startMarketingExperiment(tx, body(overrides), NOW));
