@@ -233,7 +233,9 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
    신호, 그리고 같은 대상에 이미 낸 제안 제목들(반복을 막기 위해서)이고, 출력은 제안 최대 5개(제목·영역·심각도·근거·제안)의
    JSON입니다. 판정 경계는 `lib/productResearchScoutCore.ts`가 검사합니다.
 4. 제안은 `ProductResearchSuggestion` 표에 쌓이고, Admin › 제품 리서치 › "개선 제안" 탭에서 운영자가 **거절**하거나
-   **AMUX로 보내기**를 누릅니다(한 건씩 또는 골라서 한꺼번에). 보낸 뒤의 분석·카드는 AMUX intake 규칙을 따릅니다.
+   **AMUX로 보내기**를 누릅니다(한 건씩 또는 골라서 한꺼번에). Admin 아이디어 입력과 같은 입구로 들어갑니다. session intake가
+   켜져 있으면 operating scope의 저장소 전체를 참조로 삼는 session 아이디어가 되어 분석·카드·worker로 이어지고, 꺼져 있으면 v4
+   owner 아이디어가 됩니다. 보낸 뒤의 분석·카드는 AMUX intake 규칙을 따릅니다.
 
 ## 11. 지키는 것 (개선 탐색)
 
