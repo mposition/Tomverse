@@ -103,6 +103,8 @@ import {
   SEO_AGENT_GRADUATED_VARIABLE_ENV,
   SEO_AGENT_JUNIT_PLACEHOLDER,
   SEO_AGENT_POLICY_TESTS,
+  SEO_AGENT_PROPOSAL_SCHEMA,
+  diagnoseSeoAnswer,
   runSeoAgentArmLoop,
   runSeoAgentPublish,
   runSeoAgentValidate,
@@ -192,7 +194,8 @@ if (option("--stage") === "llm" && process.argv[1] && fileURLToPath(import.meta.
   }
   // The agent's own purpose: "brief" spends only while the market analysis switch is on.
   const outcome = await runMarketingLlmCall(
-    { pin: chosen.pin, generatorRunId: runId, purpose: "seo", messages },
+    // The answer follows the proposal's JSON schema (strict Structured Outputs): no preamble, fence or stray key.
+    { pin: chosen.pin, generatorRunId: runId, purpose: "seo", messages, answerSchema: SEO_AGENT_PROPOSAL_SCHEMA },
     {
       budget: marketingLlmBudgetHttpPort({ appUrl: appUrl.toString(), secret, deadlineAt, fetch, signal: controller.signal }),
       transport: fetch,
@@ -263,6 +266,34 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
 
   const identity = ["-c", "user.name=marketing-agent", "-c", "user.email=marketing-agent@users.noreply.github.com"];
 
+  const proposeOnce = async (messages) => {
+    if (proposalFile) {
+      return { status: "answered", callId: "local", requestKey: "local", content: readFileSync(proposalFile, "utf8"), citations: [], ledgerState: "settled" };
+    }
+    const input = join(scratch, "llm-input.json");
+    writeFileSync(input, JSON.stringify({ messages }));
+    return await new Promise((resolveOutcome) => {
+      const unreadable = { status: "stopped", stage: "settle", callId: null, requestKey: "unreadable" };
+      const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", self, "--stage", "llm", "--input", input], {
+        env: seoAgentStageEnvironment(process.env, "llm"),
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      let out = "";
+      child.stdout.on("data", (chunk) => (out += chunk));
+      const killer = setTimeout(() => child.kill("SIGKILL"), LLM_STAGE_TIMEOUT_MS);
+      child.on("error", () => resolveOutcome(unreadable));
+      // 'close', not 'exit': stdout is complete only when its stream has ended.
+      child.on("close", () => {
+        clearTimeout(killer);
+        try {
+          resolveOutcome(JSON.parse(out.trim().split("\n").pop()));
+        } catch {
+          resolveOutcome(unreadable);
+        }
+      });
+    });
+  };
+
   const ports = {
     prepareWorkspace: async (base) => {
       // A clone of its own, so the proposed code cannot reach the main clone's refs, config or hooks.
@@ -278,31 +309,14 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
         SEO_AGENT_ALLOWED_FILES.map((path) => [path, existsSync(join(dir, path)) ? readFileSync(join(dir, path), "utf8") : null]),
       ),
     propose: async (messages) => {
-      if (proposalFile) {
-        return { status: "answered", callId: "local", requestKey: "local", content: readFileSync(proposalFile, "utf8"), citations: [], ledgerState: "settled" };
+      const outcome = await proposeOnce(messages);
+      // An answer the reader cannot use ends the run as `unreadable` with no reason; the log gets the reason.
+      // It is the model's code proposal, with anything credential-shaped replaced, and it decides nothing.
+      if (outcome.status === "answered") {
+        const diagnosis = diagnoseSeoAnswer(outcome.content);
+        if (diagnosis) console.log(JSON.stringify({ event: "marketing_seo_agent_proposal_unreadable", callId: outcome.callId, ...diagnosis }));
       }
-      const input = join(scratch, "llm-input.json");
-      writeFileSync(input, JSON.stringify({ messages }));
-      return await new Promise((resolveOutcome) => {
-        const unreadable = { status: "stopped", stage: "settle", callId: null, requestKey: "unreadable" };
-        const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", self, "--stage", "llm", "--input", input], {
-          env: seoAgentStageEnvironment(process.env, "llm"),
-          stdio: ["ignore", "pipe", "inherit"],
-        });
-        let out = "";
-        child.stdout.on("data", (chunk) => (out += chunk));
-        const killer = setTimeout(() => child.kill("SIGKILL"), LLM_STAGE_TIMEOUT_MS);
-        child.on("error", () => resolveOutcome(unreadable));
-        // 'close', not 'exit': stdout is complete only when its stream has ended.
-        child.on("close", () => {
-          clearTimeout(killer);
-          try {
-            resolveOutcome(JSON.parse(out.trim().split("\n").pop()));
-          } catch {
-            resolveOutcome(unreadable);
-          }
-        });
-      });
+      return outcome;
     },
     writeFiles: async (dir, files) => {
       for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);

@@ -1296,7 +1296,7 @@ function MarketingCompetitorCreate({
  * The form is drawn only for a person who may write and only while no
  * experiment is stored as running. The server decides all of it again.
  */
-function MarketingExperimentTop({
+export function MarketingExperimentTop({
   view,
   experiments,
   onDone,
@@ -1313,13 +1313,31 @@ function MarketingExperimentTop({
     label: m.actStartExperiment,
     path: "/api/admin/marketing/experiments",
     primary: true,
+    // Names what is about to go live, so a wrong pick is caught before it starts.
+    confirm: (values) =>
+      m.confirmStartExperiment
+        .replace("{bundle}", values.bundle ?? "")
+        .replace("{locales}", values.locales ?? "")
+        .replace("{share}", values.share ?? "")
+        .replace("{days}", values.days ?? ""),
+    describe: (result) => {
+      const started = result as { experimentId?: unknown; bundleId?: unknown; variantId?: unknown } | null;
+      return typeof started?.experimentId === "string" &&
+        typeof started.bundleId === "string" &&
+        typeof started.variantId === "string"
+        ? m.expStartedDone
+            .replace("{id}", started.experimentId)
+            .replace("{bundle}", `${started.bundleId} / ${started.variantId}`)
+        : null;
+    },
     fields: [
       { name: "experimentId", label: m.fieldExpId, kind: "text", hint: m.hintExpId },
       {
         name: "bundle",
         label: m.fieldExpBundle,
         kind: "select",
-        initial: bundleOptions[0],
+        // No default: a person picks the bundle, or nothing is submitted.
+        required: true,
         options: bundleOptions,
         hint: experiments.bundles.map((bundle) => `${bundle.bundleId} / ${bundle.variantId}: ${bundle.locales.join(", ")}`).join(" · "),
       },

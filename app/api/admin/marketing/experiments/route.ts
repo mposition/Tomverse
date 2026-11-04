@@ -56,6 +56,8 @@ export async function POST(req: Request) {
       const started = await startMarketingExperiment(tx, body);
       return {
         experimentId: started.config.experimentId,
+        bundleId: started.config.bundleId,
+        variantId: started.config.variantId,
         startsAt: started.config.startsAt,
         endsAt: started.config.endsAt,
         version: started.version,
