@@ -94,13 +94,13 @@ export function classifyIdeaSubmissionPost(reply: Reply, requestId: string): Pos
  * in flight. Only a canonical submission plus its audit confirms success. */
 export function classifyIdeaSubmissionReadBack(reply: Reply, requestId: string):
   { kind: "submitted"; ideaId: string; hasExternalSources: boolean;
-    origin: IdeaSubmissionOrigin } | { kind: "outcome_unknown" } {
+    origin: IdeaSubmissionOrigin; lane: boolean } | { kind: "outcome_unknown" } {
   const body = record(reply.body);
   if (reply.status === 200 && body?.status === "committed" && body.requestId === requestId &&
       typeof body.ideaId === "string" && body.ideaId.length > 0 &&
       typeof body.hasExternalSources === "boolean") {
     return { kind: "submitted", ideaId: body.ideaId, hasExternalSources: body.hasExternalSources,
-      origin: originOf(body) };
+      origin: originOf(body), lane: body.lane === true };
   }
   return { kind: "outcome_unknown" };
 }

@@ -67,7 +67,7 @@ type SubmissionState =
   | { kind: "idle" }
   | { kind: "pending"; requestId: string }
   | { kind: "submitted"; requestId: string; ideaId: string; hasExternalSources: boolean;
-      origin: IdeaSubmissionOrigin }
+      origin: IdeaSubmissionOrigin; /** Read back as an idea the lane took. */ lane?: boolean }
   | { kind: "outcome_unknown"; requestId: string }
   | { kind: "recovery_unavailable" }
   | { kind: "refused"; code: string };
@@ -90,7 +90,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
   analysisStopAvailable, sessionIntake = false, analysisTranslationAvailable = false,
-  openRequestId = null, progressRows, laneAvailable = false, openedByLane = false }: {
+  openRequestId = null, progressRows, laneAvailable = false }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
@@ -107,8 +107,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   progressRows?: AmuxIdeaProgressRows;
   /** The idea lane is on (AMUX_IDEA_LANE_ENABLED): a test button saves an owner idea for it. */
   laneAvailable?: boolean;
-  /** The opened idea is one the lane took (it has a run): no v4 steps follow it. */
-  openedByLane?: boolean;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -152,9 +150,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   // The request the lane test button sent: once saved, the idea waits for the lane, not for the v4 steps.
   const [laneRequestId, setLaneRequestId] = useState<string | null>(null);
   const laneQueued = submission.kind === "submitted" && submission.requestId === laneRequestId;
-  // An opened idea the lane took has no v4 steps either.
-  const laneTaken = laneQueued || (submission.kind === "submitted" && openedByLane &&
-    submission.requestId === openRequestId);
+  // An idea read back as one the lane took (a list row, a receipt, a typed id) has no v4 steps either.
+  const laneTaken = laneQueued || (submission.kind === "submitted" && submission.lane === true);
   const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
   const [continuationChunkIndex, setContinuationChunkIndex] = useState(0);
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
@@ -262,7 +259,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
         setContinuationChunkIndex(0);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
-          hasExternalSources: decision.hasExternalSources, origin: decision.origin });
+          hasExternalSources: decision.hasExternalSources, origin: decision.origin, lane: decision.lane });
       } else {
         setSubmission({ kind: "outcome_unknown", requestId });
       }
@@ -291,7 +288,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       setSourceRepository(""); setSourceCommitSha(""); setSourcePath("");
       setSourceScopeResult({ kind: "idle" });
       setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
-        hasExternalSources: decision.hasExternalSources, origin: decision.origin });
+        hasExternalSources: decision.hasExternalSources, origin: decision.origin, lane: decision.lane });
     } catch { setSavedRequestError(true); }
     finally { setReadBackPending(false); }
   }, [operatorId]);

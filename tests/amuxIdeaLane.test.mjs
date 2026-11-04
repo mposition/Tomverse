@@ -53,6 +53,10 @@ test("an observed merge of the lane's PR settles the idea as done", () => {
   const view = (lane) => { const result = amuxIdeaProgress({ state: "submitted", submissionOrigin: "owner",
     cancelled: false, chunks: [], proposedUnits: 0, cards: [], lane }); return [result.stage, result.waitingFor, result.attention]; };
   assert.deepEqual(view(amuxIdeaLaneState([opened(42, NOW - 1)], NOW)), ["done", null, false]);
+  const closed = amuxIdeaLaneState([run({ claimedAtMs: NOW - 60_000, leaseUntilMs: NOW - 1, outcome: "pr_open",
+    prNumber: 44, prClosedAtMs: NOW - 1 })], NOW);
+  assert.equal(closed.state, "pr_closed");
+  assert.deepEqual(view(closed), ["review", null, true], "a PR closed without a merge is flagged for the owner");
   assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([opened(42, NOW - 1)], NOW)), false);
 });
 

@@ -188,7 +188,8 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                         ? "border-red-500/40 bg-red-500/10 text-red-200"
                         : human ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
                           : "border-blue-500/40 bg-blue-500/10 text-blue-200"}`}>
-                        {row.attention ? (row.lane ? m.lane.badgeFailed : m.attention) : m.stages[row.stage]}
+                        {row.attention ? (row.lane ? (row.lane.state === "pr_closed" ? m.lane.badgePrClosed : m.lane.badgeFailed)
+                          : m.attention) : m.stages[row.stage]}
                       </span>
                       <span className="text-zinc-400">
                         {step ? m.stepOf(step) : null}{step ? " · " : ""}{human ? m.human : m.automatic}
@@ -232,11 +233,13 @@ function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   queued: (attempts: number, max: number, outcome: string) => string;
   prOpen: (pr: number) => string;
   merged: (pr: number) => string;
+  prClosed: (pr: number) => string;
   failed: (max: number, outcome: string) => string;
 } }): string {
   const max = AMUX_IDEA_LANE_MAX_ATTEMPTS;
   const last = lane.lastOutcome ?? "-";
   if (lane.state === "merged" && lane.prNumber !== null) return m.lane.merged(lane.prNumber);
+  if (lane.state === "pr_closed" && lane.prNumber !== null) return m.lane.prClosed(lane.prNumber);
   if (lane.state === "pr_open" && lane.prNumber !== null) return m.lane.prOpen(lane.prNumber);
   if (lane.state === "running") return m.lane.running(lane.attempts, max);
   if (lane.state === "queued") return m.lane.queued(lane.attempts, max, last);

@@ -186,7 +186,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           'claimedAtMs', (extract(epoch FROM l."claimedAt") * 1000)::double precision,
           'leaseUntilMs', (extract(epoch FROM l."leaseUntil") * 1000)::double precision,
           'outcome', l."outcome", 'prNumber', l."prNumber",
-          'mergedAtMs', (extract(epoch FROM l."mergedAt") * 1000)::double precision))
+          'mergedAtMs', (extract(epoch FROM l."mergedAt") * 1000)::double precision,
+          'prClosedAtMs', (extract(epoch FROM l."prClosedAt") * 1000)::double precision))
         FROM "AmuxIdeaLaneAttempt" l
         WHERE l."ideaId" = n."id") AS "laneAttempts"
     FROM newest n
@@ -217,7 +218,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
         (idea.state === "awaiting_owner" || (progress.waitingFor !== null &&
           WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor)) ||
-          lane?.state === "pr_open" || lane?.state === "queued" || lane?.state === "failed"),
+          lane?.state === "pr_open" || lane?.state === "pr_closed" || lane?.state === "queued" ||
+          lane?.state === "failed"),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,

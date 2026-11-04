@@ -4,8 +4,8 @@ import { after, before, test } from "node:test";
 
 import { AMUX_IDEA_LANE_MAX_ATTEMPTS, AMUX_IDEA_LANE_PUBLISH_FENCE_MS } from "@/lib/amux/ideaLaneCore";
 import { createInitialIdeaOnlySourcePlan } from "@/lib/amux/ideaInitialSourcePlanService";
-import { claimAmuxIdeaLane, fenceAmuxIdeaLanePublish, observeAmuxIdeaLaneMerges, recordAmuxIdeaLaneResult }
-  from "@/lib/amux/ideaLaneService";
+import { amuxIdeaLaneTook, claimAmuxIdeaLane, fenceAmuxIdeaLanePublish, observeAmuxIdeaLaneMerges,
+  recordAmuxIdeaLaneResult } from "@/lib/amux/ideaLaneService";
 import { EngineeringAgentGitHubReadError } from "@/lib/engineeringAgentGitHubRead";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { prisma } from "@/lib/prisma";
@@ -177,7 +177,7 @@ test("a run may publish only while its idea is open and its lease live, and the 
   await removeIdeas();
 });
 
-test("the PR observer records a lane PR's merge once, only for the run's own branch into develop", async () => {
+test("the PR observer records how a lane PR ended, once, only for the run's own branch into develop", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const now = new Date();
   const open = async (prNumber: number) => {
@@ -191,11 +191,14 @@ test("the PR observer records a lane PR's merge once, only for the run's own bra
   const waiting = await open(9_000_002);
   const foreign = await open(9_000_003);
   const unreadable = await open(9_000_004);
+  const closed = await open(9_000_005);
   const mergedAt = new Date("2026-11-03T23:52:28Z");
-  const pulls: Record<number, { merged: boolean; mergedAt: Date | null; baseRef: string; headRef: string }> = {
-    9_000_001: { merged: true, mergedAt, baseRef: "develop", headRef: `amux-idea/${merged.id}` },
-    9_000_002: { merged: false, mergedAt: null, baseRef: "develop", headRef: `amux-idea/${waiting.id}` },
-    9_000_003: { merged: true, mergedAt, baseRef: "develop", headRef: "someone/else" },
+  type Pull = { state: "open" | "closed"; merged: boolean; mergedAt: Date | null; baseRef: string; headRef: string };
+  const pulls: Record<number, Pull> = {
+    9_000_001: { state: "closed", merged: true, mergedAt, baseRef: "develop", headRef: `amux-idea/${merged.id}` },
+    9_000_002: { state: "open", merged: false, mergedAt: null, baseRef: "develop", headRef: `amux-idea/${waiting.id}` },
+    9_000_003: { state: "closed", merged: true, mergedAt, baseRef: "develop", headRef: "someone/else" },
+    9_000_005: { state: "closed", merged: false, mergedAt: null, baseRef: "develop", headRef: `amux-idea/${closed.id}` },
   };
   const read = async (prNumber: number) => {
     const pull = pulls[prNumber];
@@ -207,11 +210,15 @@ test("the PR observer records a lane PR's merge once, only for the run's own bra
   assert.equal(outcomes.get(waiting.id), "waiting");
   assert.equal(outcomes.get(foreign.id), "not_the_lane_pr", "a number that is not this run's branch decides nothing");
   assert.equal(outcomes.get(unreadable.id), "unreadable");
-  const stored = await prisma.amuxIdeaLaneAttempt.findMany({ where: { id: { in: [merged.id, waiting.id, foreign.id] } } });
+  assert.equal(outcomes.get(closed.id), "closed");
+  const stored = await prisma.amuxIdeaLaneAttempt.findMany({
+    where: { id: { in: [merged.id, waiting.id, foreign.id, closed.id] } } });
   assert.deepEqual(stored.filter((row) => row.mergedAt !== null).map((row) => [row.id, row.mergedAt?.toISOString()]),
     [[merged.id, mergedAt.toISOString()]]);
-  assert.equal((await observeAmuxIdeaLaneMerges(read)).some((row) => row.attemptId === merged.id), false,
-    "a recorded merge is not read again");
+  assert.deepEqual(stored.filter((row) => row.prClosedAt !== null).map((row) => row.id), [closed.id]);
+  const again = new Set((await observeAmuxIdeaLaneMerges(read)).map((row) => row.attemptId));
+  assert.ok(!again.has(merged.id) && !again.has(closed.id), "an ended PR is not read again");
+  assert.ok(again.has(waiting.id), "an open one still is");
 
   const rows = await readAmuxIdeaProgressForOwner(owner);
   const done = rows.find((row) => row.ideaId === merged.ideaId);
@@ -220,9 +227,15 @@ test("the PR observer records a lane PR's merge once, only for the run's own bra
   assert.equal(done?.closable, false, "a merged idea has nothing left to close");
   assert.deepEqual(done?.reviewPullRequests, []);
   assert.equal(rows.find((row) => row.ideaId === waiting.ideaId)?.stage, "review");
+  const shut = rows.find((row) => row.ideaId === closed.ideaId);
+  assert.deepEqual([shut?.stage, shut?.attention, shut?.closable, shut?.lane?.state], ["review", true, true, "pr_closed"]);
+  assert.equal(await amuxIdeaLaneTook(merged.ideaId), true);
+  assert.equal(await amuxIdeaLaneTook(await seedIdea(owner, new Date(OLD))), false);
 
   await assert.rejects(prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: merged.ideaId,
     claimedAt: now, leaseUntil: now, finishedAt: now, outcome: "no_change", mergedAt } }),
     "only an opened PR can merge");
+  await assert.rejects(prisma.amuxIdeaLaneAttempt.update({ where: { id: merged.id }, data: { prClosedAt: now } }),
+    "a PR ends one way");
   await removeIdeas();
 });
