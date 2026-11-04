@@ -18,7 +18,11 @@ import {
 import { IdeaSubmissionError, readIdeaSubmissionByDerivedRequestId, submitIdea } from "@/lib/amux/ideaSubmissionService";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { markRecommendationSentToAmux, readRecommendationForSend } from "@/lib/autoRouterRecommendations";
+import {
+  markRecommendationSentToAmux,
+  readRecommendationForSend,
+  reserveRecommendationForAmux,
+} from "@/lib/autoRouterRecommendations";
 import { recommendationIdeaText, recommendationSendRequestId } from "@/lib/autoRouterRecommendationSendCore";
 import { isRecommendationSendable, RECOMMENDATION_SENT_STATUS } from "@/lib/autoRouterRecommendationsCore";
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
@@ -86,6 +90,11 @@ export async function POST(request: Request) {
       })
     );
     if (!inspected.ok) return json({ error: inspected.code }, 400);
+
+    // Before anything reaches AMUX, under the lock the coding agent claims under.
+    if (!(await reserveRecommendationForAmux({ session, request }, body))) {
+      return json({ error: "not_sendable", code: "not_sendable" }, 409);
+    }
 
     const result = await sendScoutSuggestion({
       readBack: () => readIdeaSubmissionByDerivedRequestId(session, requestId),

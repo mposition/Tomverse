@@ -93,6 +93,7 @@ export function RecommendationControls({
         {item.status === "done" ||
         item.status === "dismissed" ||
         item.status === "failed" ||
+        item.status === "sending_to_amux" ||
         item.status === "needs_lookup" ? (
           <button
             type="button"

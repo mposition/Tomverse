@@ -52,11 +52,18 @@ test("the idea carries the recommendation, findings and cycle link, and passes A
   assert.equal(inspected.ok, true, JSON.stringify(inspected));
 });
 
-test("only an open recommendation or one the agent gave up on can be sent", () => {
-  for (const status of ["open", "failed"]) assert.equal(isRecommendationSendable(status), true, status);
+test("an open recommendation, one the agent gave up on, or an unfinished send can be sent", () => {
+  for (const status of ["open", "failed", "sending_to_amux"]) assert.equal(isRecommendationSendable(status), true, status);
   for (const status of ["done", "dismissed", "claimed", "pr_opened", "needs_lookup", "sent_to_amux"]) {
     assert.equal(isRecommendationSendable(status), false, status);
   }
+});
+
+test("a recommendation being sent stays on the open list, and the coding agent does not take it", () => {
+  const summary = withRecommendationStatus({ report }, 1, { status: "sending_to_amux", at, by: "owner" });
+  const cycles = [{ id: "cyc_1", createdAt: at, summary }];
+  assert.deepEqual(openRecommendations(cycles, NOW).map((entry) => entry.index), [1, 2]);
+  assert.equal(nextClaimableRecommendation(cycles, NOW), null);
 });
 
 test("a sent recommendation keeps its idea, leaves the open list, and the coding agent does not take it", () => {

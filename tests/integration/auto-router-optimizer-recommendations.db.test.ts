@@ -4,7 +4,12 @@ import { after, beforeEach, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
-import { markRecommendationSentToAmux, readRecommendationForSend, setRecommendationStatus } from "@/lib/autoRouterRecommendations";
+import {
+  markRecommendationSentToAmux,
+  readRecommendationForSend,
+  reserveRecommendationForAmux,
+  setRecommendationStatus,
+} from "@/lib/autoRouterRecommendations";
 import { actionableRecommendations } from "@/lib/autoRouterRecommendationsCore";
 
 // An operator's status for a cycle's code and setting recommendations, on a
@@ -270,6 +275,7 @@ test("a recommendation sent to AMUX records its idea with an audit entry, once, 
   assert.equal((await sentRows()).length, 1);
 
   // A second send, or one that finds another status, changes nothing.
+  assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index: 1 }), false);
   assert.equal(await markRecommendationSentToAmux(actor, { cycleId: cycle.id, index: 1, ideaId: "idea-2" }), false);
   await setRecommendationStatus(actor, { cycleId: cycle.id, index: 2, status: "dismissed" });
   assert.equal(await markRecommendationSentToAmux(actor, { cycleId: cycle.id, index: 2, ideaId: "idea-3" }), false);
@@ -280,4 +286,59 @@ test("a recommendation sent to AMUX records its idea with an audit entry, once, 
   assert.equal(await readRecommendationForSend({ cycleId: "missing", index: 1 }), null);
   const running = await seed({ status: "running" });
   assert.equal(await readRecommendationForSend({ cycleId: running.id, index: 1 }), null);
+});
+
+test("a send reserves the recommendation before AMUX: once, retryable, and a person can reopen it", async () => {
+  const cycle = await seed();
+  const startedRows = () =>
+    prisma.adminAuditLog.findMany({ where: { targetId: cycle.id, action: "auto.llm_router_recommendation.send_started" } });
+  const status = async () => actionableRecommendations(await summaryOf(cycle.id)).find((entry) => entry.index === 1)?.status;
+
+  assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index: 1 }), true);
+  assert.equal(await status(), "sending_to_amux");
+  // A retry of a send that stopped midway holds it too, with no second audit entry.
+  assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index: 1 }), true);
+  assert.equal((await startedRows()).length, 1);
+
+  await setRecommendationStatus(actor, { cycleId: cycle.id, index: 1, status: "open" });
+  assert.equal(await status(), "open");
+
+  assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index: 1 }), true);
+  assert.equal(await markRecommendationSentToAmux(actor, { cycleId: cycle.id, index: 1, ideaId: "idea-1" }), true);
+  assert.equal(await status(), "sent_to_amux");
+});
+
+test("a send and the coding agent's claim never both hold a recommendation", async () => {
+  const { claimNextRecommendation } = await import("@/lib/autoRouterRecAgent");
+  await prisma.appSetting.upsert({
+    where: { key: AGENT_SWITCH },
+    create: { key: AGENT_SWITCH, value: JSON.stringify({ enabled: true }) },
+    update: { value: JSON.stringify({ enabled: true }) },
+  });
+  try {
+    // Reserved first: the agent finds nothing to claim.
+    const reserved = await seed();
+    assert.equal(await reserveRecommendationForAmux(actor, { cycleId: reserved.id, index: 1 }), true);
+    assert.equal(await claimNextRecommendation({ origin: "https://tomverse.test" }), null);
+    await reset();
+
+    // Claimed first: the send is refused.
+    const claimed = await seed();
+    assert.ok(await claimNextRecommendation({ origin: "https://tomverse.test" }));
+    assert.equal(await reserveRecommendationForAmux(actor, { cycleId: claimed.id, index: 1 }), false);
+    await reset();
+
+    // At once, repeatedly: exactly one of the two gets it, whichever runs first.
+    for (let round = 0; round < 8; round += 1) {
+      const raced = await seed();
+      const [held, claim] = await Promise.all([
+        reserveRecommendationForAmux(actor, { cycleId: raced.id, index: 1 }),
+        claimNextRecommendation({ origin: "https://tomverse.test" }),
+      ]);
+      assert.equal(Number(held) + Number(Boolean(claim)), 1, `round ${round}`);
+      await reset();
+    }
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: AGENT_SWITCH } });
+  }
 });

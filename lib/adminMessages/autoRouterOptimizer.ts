@@ -57,6 +57,7 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
       failed: "agent did not open a PR",
       needs_lookup: "needs a look: the agent took it and did not report back",
       sent_to_amux: "sent to AMUX",
+      sending_to_amux: "sending to AMUX: if this stays, send it again",
     },
     recommendationFailureReasons: {
       out_of_scope: "it touched files the agent may not change",
@@ -217,6 +218,7 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
       failed: "에이전트가 PR을 열지 못함",
       needs_lookup: "확인 필요: 에이전트가 가져간 뒤 결과를 보고하지 않음",
       sent_to_amux: "AMUX로 보냄",
+      sending_to_amux: "AMUX로 보내는 중: 계속 이 상태면 다시 보내세요",
     },
     recommendationFailureReasons: {
       out_of_scope: "에이전트가 바꾸면 안 되는 파일을 건드림",

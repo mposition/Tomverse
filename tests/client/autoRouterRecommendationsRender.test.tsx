@@ -155,3 +155,17 @@ test("Send to AMUX replaces the copy button; only an owner can press it, and a s
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-done"'), 1);
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-reopen"'), 0);
 });
+
+test("a send that did not finish can be sent again or reopened", () => {
+  const summary = {
+    report,
+    recommendationStatus: { 1: { status: "sending_to_amux", at: "2026-10-21T00:00:00.000Z", by: "u1" } },
+  };
+  const item = actionableRecommendations(summary).find((entry) => entry.index === 1)!;
+  const html = renderToStaticMarkup(
+    createElement(RecommendationControls, { cycle: cycles[0], item, busy: false, canSend: true, onSetStatus: noop, onSend: noop })
+  );
+  assert.ok(text(html).includes(m.recommendationStatuses.sending_to_amux));
+  assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-send"'), 1);
+  assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-reopen"'), 1);
+});

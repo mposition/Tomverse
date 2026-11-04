@@ -35,10 +35,19 @@ export type AgentRecommendationStatus = (typeof AGENT_RECOMMENDATION_STATUSES)[n
  * work now, so it leaves the open list and the coding agent does not take it.
  */
 export const RECOMMENDATION_SENT_STATUS = "sent_to_amux" as const;
+
+/**
+ * Reserved before the idea is submitted, under the lock the agent claims under,
+ * so a recommendation is never both in AMUX and with the agent. It stays set if
+ * the send stops midway: the outcome may be unknown, so nothing releases it by
+ * itself. Sending again names the same AMUX request, or a person reopens it.
+ */
+export const RECOMMENDATION_SENDING_STATUS = "sending_to_amux" as const;
 export type StoredRecommendationStatus =
     | RecommendationStatus
     | AgentRecommendationStatus
-    | typeof RECOMMENDATION_SENT_STATUS;
+    | typeof RECOMMENDATION_SENT_STATUS
+    | typeof RECOMMENDATION_SENDING_STATUS;
 
 /**
  * As shown: a claim whose lease ran out with no result is needs_lookup. It is
@@ -52,6 +61,7 @@ const STORED_RECOMMENDATION_STATUSES: readonly string[] = [
     ...RECOMMENDATION_STATUSES,
     ...AGENT_RECOMMENDATION_STATUSES,
     RECOMMENDATION_SENT_STATUS,
+    RECOMMENDATION_SENDING_STATUS,
 ];
 
 /** How long the agent holds a claim before it shows as needs_lookup. */
@@ -284,12 +294,13 @@ export const recommendationResultDecision = (
 };
 
 /**
- * Whether an owner may send it to AMUX: waiting for someone, or the agent gave
- * up on it. Not while the agent holds it or after it opened a PR, and not an
- * expired claim -- the agent may have pushed, so a person looks and reopens it.
+ * Whether an owner may send it to AMUX: waiting for someone, the agent gave up
+ * on it, or a send that did not finish. Not while the agent holds it or after it
+ * opened a PR, and not an expired claim -- the agent may have pushed, so a person
+ * looks and reopens it.
  */
 export const isRecommendationSendable = (status: DisplayedRecommendationStatus) =>
-    status === "open" || status === "failed";
+    status === "open" || status === "failed" || status === RECOMMENDATION_SENDING_STATUS;
 
 /** Where in the repository a recommendation of each kind is usually carried out. */
 export const RECOMMENDATION_FILE_HINTS: Record<ActionableRecommendationKind, readonly string[]> = {

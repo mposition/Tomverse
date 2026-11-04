@@ -7,6 +7,7 @@ import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizer";
 import {
     actionableRecommendations,
     isRecommendationSendable,
+    RECOMMENDATION_SENDING_STATUS,
     RECOMMENDATION_SENT_STATUS,
     reportFindings,
     withRecommendationStatus,
@@ -93,6 +94,52 @@ export async function readRecommendationForSend(input: { cycleId: string; index:
     const recommendation = actionableRecommendations(cycle.summary).find((item) => item.index === input.index);
     if (!recommendation) return null;
     return { recommendation, findings: reportFindings(cycle.summary), createdAt: cycle.createdAt.toISOString() };
+}
+
+/**
+ * Reserves a recommendation for AMUX before the idea is submitted. It takes the
+ * locks the agent's claim takes, and the agent claims only an open one, so
+ * exactly one of the two gets it. True when this send holds it, including a
+ * retry of a send that did not finish; the audit entry is written once.
+ */
+export async function reserveRecommendationForAmux(
+    actor: { session: Session; request: Request },
+    input: { cycleId: string; index: number }
+): Promise<boolean> {
+    const by = actor.session.user?.id;
+    if (!by) return false;
+    return prisma.$transaction(async (tx) => {
+        await takeAuditChainLock(tx);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
+        const cycle = await tx.autoRouterOptimizerCycle.findUnique({
+            where: { id: input.cycleId },
+            select: { summary: true },
+        });
+        const recommendation =
+            cycle && actionableRecommendations(cycle.summary).find((item) => item.index === input.index);
+        if (!cycle || !recommendation || !isRecommendationSendable(recommendation.status)) return false;
+        if (recommendation.status === RECOMMENDATION_SENDING_STATUS) return true;
+        await tx.autoRouterOptimizerCycle.update({
+            where: { id: input.cycleId },
+            data: {
+                summary: withRecommendationStatus(cycle.summary, input.index, {
+                    status: RECOMMENDATION_SENDING_STATUS,
+                    at: new Date().toISOString(),
+                    by,
+                }) as Prisma.InputJsonObject,
+            },
+        });
+        await writeAdminAuditLog({
+            ...actor,
+            tx,
+            action: "auto.llm_router_recommendation.send_started",
+            targetType: "AutoRouterOptimizerCycle",
+            targetId: input.cycleId,
+            summary: "Started sending an Auto router optimizer recommendation to AMUX.",
+            metadata: { index: input.index, kind: recommendation.kind, before: recommendation.status },
+        });
+        return true;
+    });
 }
 
 /**
