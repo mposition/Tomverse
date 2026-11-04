@@ -173,3 +173,14 @@ test("a parsed snapshot is a frozen copy", () => {
     parsed.readiness.database = false;
   }, TypeError);
 });
+
+test("budget observations: a bad band as itself, a known band as ok, anything else as unknown", async () => {
+  const { budgetObservations } = await import("../scripts/ops-observer/envelope-schema-core.mjs");
+  const row = (provider, utilisationBand) => ({ provider, scope: "day", utilisationBand, resetAt: "2026-11-04T00:00:00.000Z" });
+  assert.deepEqual(
+    budgetObservations({ providerBudgets: [row("a", ">=95"), row("b", "exhausted"), row("c", "85-95"), row("d", null), row("Bad-Name", ">=95")] }),
+    { "P-B#a_day": ">=95", "P-B#b_day": "exhausted", "P-B#c_day": "ok", "P-B#d_day": "unknown" },
+  );
+  assert.deepEqual(budgetObservations({ providerBudgets: "unknown" }), {});
+  assert.deepEqual(budgetObservations(null), {});
+});
