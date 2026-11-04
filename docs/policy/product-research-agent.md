@@ -278,7 +278,7 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 
 목록은 운영자가 대화에서 바꾸면 코드와 이 표를 같이 고칩니다.
 
-**browser 규칙**(2026-10-13 측정, `scripts/agents/product-research-scout-s0-probe.mjs fixture`):
+**browser 규칙**(2026-10-13 측정):
 
 - browser 수준 CDP Fetch session이 모든 target의 모든 요청과 **redirect의 매 단계**를 보내기 전에 판정합니다: GET·HEAD만,
   허용 origin만. Playwright의 route 가로채기만으로는 redirect가 새고, host resolver 규칙만으로는 같은 host의 다른 port가

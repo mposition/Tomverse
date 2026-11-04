@@ -93,6 +93,7 @@ type Action =
 
 const OFF = "";
 const ENDPOINT = "/api/admin/auto-llm-router/optimizer";
+const SEND_ENDPOINT = `${ENDPOINT}/recommendations/send`;
 const usd = (micro: number) => `US$${(micro / 1_000_000).toFixed(micro < 10_000 ? 4 : 2)}`;
 
 /**
@@ -100,7 +101,7 @@ const usd = (micro: number) => `US$${(micro / 1_000_000).toFixed(micro < 10_000 
  * only: the decisions a cycle replayed are users' messages, and none of them
  * reach this screen.
  */
-export function AdminAutoRouterOptimizerPanel() {
+export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux: boolean }) {
   const m = useAdminMessages(adminAutoRouterOptimizerMessages);
   const { locale: apiLocale } = useAdminLocale();
   const [state, setState] = useState<OptimizerState | null>(null);
@@ -170,6 +171,33 @@ export function AdminAutoRouterOptimizerPanel() {
 
   const setRecommendation = (cycleId: string, index: number, status: RecommendationStatus) =>
     void send({ action: "set_recommendation", cycleId, index, status });
+
+  const sendToAmux = async (cycleId: string, index: number) => {
+    setBusy(true);
+    setRefusal(null);
+    setFailure(null);
+    try {
+      const response = await adminFetch(SEND_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cycleId, index }),
+      });
+      if (response.status === 409) {
+        const answer = (await response.json().catch(() => null)) as { code?: string } | null;
+        setRefusal(answer?.code ?? "unknown");
+        return;
+      }
+      if (!response.ok) {
+        setFailure(await readAdminApiFailure(response, { fallback: m.actionFailed, locale: apiLocale }));
+        return;
+      }
+      await load();
+    } catch {
+      setFailure(describeAdminApiFailure({ status: 0, fallback: m.actionFailed, locale: apiLocale }));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const reason = (code: string | null) =>
     code ? (m.reasons as Record<string, string>)[code] ?? code : null;
@@ -335,7 +363,13 @@ export function AdminAutoRouterOptimizerPanel() {
       ) : null}
 
       {state ? (
-        <OpenRecommendationsInbox cycles={state.cycles} busy={busy} onSetStatus={setRecommendation} />
+        <OpenRecommendationsInbox
+          cycles={state.cycles}
+          busy={busy}
+          canSend={canSendToAmux}
+          onSetStatus={setRecommendation}
+          onSend={(cycleId, index) => void sendToAmux(cycleId, index)}
+        />
       ) : null}
 
       <h3 className="mt-5 text-sm font-bold text-zinc-200">{m.cyclesTitle}</h3>
@@ -412,7 +446,9 @@ export function AdminAutoRouterOptimizerPanel() {
                                 cycle={cycle}
                                 item={actionable}
                                 busy={busy}
+                                canSend={canSendToAmux}
                                 onSetStatus={setRecommendation}
+                                onSend={(cycleId, sendIndex) => void sendToAmux(cycleId, sendIndex)}
                               />
                             ) : null}
                           </li>
