@@ -107,7 +107,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // covers these sections as well.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "8b1f6c3f4fc519e3b67d4dc63e2e168060bc84ff3560615082cd5fb0321505b4",
+    contentSha256: "bb4b04f7f9237679451504adc9e2f37f23b0a005afe25387b41bf7106e43e228",
   },
   "/terms": {
     date: "2026-11-16",
