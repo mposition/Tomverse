@@ -131,6 +131,25 @@ const ARM_ARMED_POLL_MS = 20 * 1000;
 // less a margin for the final disarm (seoAgentArmWindow): every request of the run, a disarm included, uses the one
 // token it started with. An arming is disarmed when the window ends; run the phase again with a fresh token to wait longer.
 
+/**
+ * The failed test cases of a policy test's junit report, for the run log: a policy test writes only to its
+ * report, so without this a failure names the file and not the assertion. The report holds test names and
+ * assertion text from code that ran with the allowlisted check environment, which has no secret in it.
+ */
+const junitFailures = (xml, limit = 5) => {
+  const unescape = (text) =>
+    text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, "&");
+  const failures = [];
+  for (const match of xml.matchAll(/<testcase\b[^>]*\bname="([^"]*)"[^>]*>([\s\S]*?)<\/testcase>/g)) {
+    const failure = /<failure\b[^>]*?(?:\bmessage="([^"]*)")?[^>]*>([\s\S]*?)<\/failure>/.exec(match[2]);
+    if (!failure) continue;
+    const detail = unescape(failure[1] || failure[2] || "").split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 6).join(" | ");
+    failures.push({ test: unescape(match[1]), detail: detail.slice(0, 600) });
+    if (failures.length >= limit) break;
+  }
+  return failures;
+};
+
 const option = (name) => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
@@ -387,7 +406,18 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
         console.log(JSON.stringify({ event: "marketing_seo_agent_check", check: command.label }));
         // Proposed code can loop forever or leave processes behind; a check that outlives its time has failed.
         const status = await runOne(command, { cwd: dir, env, stdio: "inherit", shell: process.platform === "win32", ...asUser });
-        if (status !== 0) return { ok: false, label: command.label };
+        if (status !== 0) {
+          if (command.policyTest) {
+            let xml = "";
+            try {
+              xml = readFileSync(reportPath, "utf8");
+            } catch {
+              // A test that crashed before reporting leaves no report; the exit status is all there is.
+            }
+            console.log(JSON.stringify({ event: "marketing_seo_agent_check_failed", check: command.label, status, failures: junitFailures(xml) }));
+          }
+          return { ok: false, label: command.label };
+        }
         if (command.policyTest) {
           // The exit code is not evidence that the tests ran: the report is.
           let xml = "";
