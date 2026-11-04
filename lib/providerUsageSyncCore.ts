@@ -153,17 +153,25 @@ const retryAfterHeaderMs = ({
   return Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : null;
 };
 
+// The Costs API limit is counted per minute, so the sub-second backoff below
+// only spends the remaining attempts: on 2026-11-04 all three attempts got a 429
+// within 2.8 seconds and that day stayed unsynced. Two of these span the window.
+export const OPENAI_COSTS_RATE_LIMIT_RETRY_DELAY_MS = 30_000;
+
 export const openAiCostsRetryDelayMs = ({
   attempt,
+  status = null,
   retryAfter = null,
   retryAfterMs = null,
   nowMs = Date.now(),
 }: {
   attempt: number;
+  status?: number | null;
   retryAfter?: string | null;
   retryAfterMs?: string | null;
   nowMs?: number;
 }) => {
+  if (status === 429) return OPENAI_COSTS_RATE_LIMIT_RETRY_DELAY_MS;
   const providerDelay = retryAfterHeaderMs({ retryAfter, retryAfterMs, nowMs });
   if (providerDelay !== null && Number.isFinite(providerDelay)) {
     return Math.min(Math.max(Math.round(providerDelay), 0), 10_000);
