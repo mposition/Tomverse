@@ -12,6 +12,8 @@ import { AMUX_V4_ANALYSIS_NAMESPACE } from "@/lib/amux/ideaAnalysisBudgetCore";
 import { readAnalysisMonthlyBudgetSetting } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { AmuxIdeaAnalysisPriceApprovalError,
   commitAmuxIdeaAnalysisPriceApproval } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
+import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID } from
+  "@/lib/amux/ideaAnalysisApprovedCostProfile";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
@@ -144,7 +146,7 @@ async function queueIdea(authority: AmuxOperatingScopeAuthority) {
 /** The claim service's own writes, by hand, so a wrong profile reaches the
  * database guard that the service would never let through. */
 async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
-  channel: Channel; ideaId: string; reservationId: string; maxAuthProfile: string;
+  channel: Channel; ideaId: string; reservationId: string; maxAuthProfile: string; priceless?: boolean; budgetMode?: string;
 }) {
   await takeAuditChainLock(tx);
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -170,8 +172,8 @@ async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
     targetId: claimId, summary: "Synthetic subscription channel claim.",
     metadata: { reservationId: input.reservationId, invocationOrdinal: 0, requestId,
       namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart: monthStart.toISOString(),
-      priceVersionId: price.id, modelId: input.channel.modelId,
-      reservedMicroUsd: reserved.toString(), budgetMode: "max_shadow", ideaId: input.ideaId,
+      ...(input.priceless ? {} : { priceVersionId: price.id }), modelId: input.channel.modelId,
+      reservedMicroUsd: reserved.toString(), budgetMode: input.budgetMode ?? "max_shadow", ideaId: input.ideaId,
       reasoningEffort: "high", maxAuthProfile: input.maxAuthProfile,
       maxAuthEvidenceDigest: randomBytes(32).toString("hex"),
       amountMeaning: "cli_shadow_headroom_not_ceiling", modelCallStarted: false } });
@@ -180,11 +182,11 @@ async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
   await tx.amuxIdeaSessionAnalysisBudgetClaim.create({ data: {
     id: claimId, requestId, reservationId: input.reservationId,
     namespace: AMUX_V4_ANALYSIS_NAMESPACE, invocationOrdinal: 0, monthStart,
-    priceVersionId: price.id, provider: input.channel.provider, modelId: input.channel.modelId,
+    priceVersionId: input.priceless ? null : price.id, provider: input.channel.provider, modelId: input.channel.modelId,
     inputTokensCap: price.inputTokensCap, outputTokensCap: price.outputTokensCap,
     inputMicroUsdPerMillion: price.inputMicroUsdPerMillion,
     outputMicroUsdPerMillion: price.outputMicroUsdPerMillion,
-    reservedMicroUsd: reserved, budgetMode: "max_shadow", status: "in_flight",
+    reservedMicroUsd: reserved, budgetMode: input.budgetMode ?? "max_shadow", status: "in_flight",
     claimAuditLogId: auditId } });
 }
 
@@ -273,14 +275,14 @@ for (const [index, [provider]] of CHANNELS.entries()) {
     const queued = await queueIdea(channel.authority);
     const selection = await prisma.$transaction((tx) =>
       readAmuxV19MaxPriceSelection(tx, queued));
-    assert.deepEqual(selection, { kind: "ready", priceVersionId: channel.priceVersionId,
+    assert.deepEqual(selection, { kind: "ready", priceVersionId: AMUX_V19_SUBSCRIPTION_NO_PRICE_ID,
       provider: channel.provider, modelId: channel.modelId, reasoningEffort: "high" });
     const identity = { ideaId: queued.ideaId, modelId: channel.modelId,
       reasoningEffort: "high", authEvidenceDigest: randomBytes(32).toString("hex") };
     const claim = (provider: string) => (tx: Prisma.TransactionClient) =>
       commitAmuxSessionBudgetClaim(tx, { claimId: randomUUID(), requestId: randomUUID(),
         reservationId: queued.reservationId, invocationOrdinal: 0,
-        priceVersionId: channel.priceVersionId,
+        priceVersionId: AMUX_V19_SUBSCRIPTION_NO_PRICE_ID,
         maxLauncherIdentity: { ...identity, provider },
         runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
           maxSubscriptionAuthenticated: true } });
@@ -294,8 +296,10 @@ for (const [index, [provider]] of CHANNELS.entries()) {
         where: { id: result.claimId } });
       assert.equal(row.provider, channel.provider);
       assert.equal(row.budgetMode, "max_shadow");
+      assert.equal(row.priceVersionId, null, "a subscription claim names no price row");
       const audit = await tx.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditId } });
       const metadata = audit.metadata as Record<string, unknown>;
+      assert.equal(Object.hasOwn(metadata, "priceVersionId"), false);
       assert.equal(metadata.maxAuthProfile, AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider]);
       assert.equal(metadata.budgetMode, "max_shadow");
       assert.equal(audit.summary, "Occupied monthly shadow headroom for one subscription CLI analysis.");
@@ -304,6 +308,12 @@ for (const [index, [provider]] of CHANNELS.entries()) {
     // channel's profile and is refused with any other channel's profile.
     await rolledBack((tx) => insertShadowClaimByHand(tx, { channel, ...queued,
       maxAuthProfile: AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider] }));
+    await rolledBack((tx) => insertShadowClaimByHand(tx, { channel, ...queued,
+      maxAuthProfile: AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider], priceless: true }));
+    // Only a subscription claim may omit the price.
+    await assert.rejects(prisma.$transaction((tx) => insertShadowClaimByHand(tx, { channel, ...queued,
+      maxAuthProfile: AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider], priceless: true,
+      budgetMode: "bounded" })), (error: unknown) => sqlState(error) === "23514");
     for (const wrong of Object.values(AMUX_SUBSCRIPTION_AUTH_PROFILES)
       .filter((profile) => profile !== AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider])
       .concat([""])) {
