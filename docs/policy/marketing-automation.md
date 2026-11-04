@@ -277,6 +277,8 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 | Threads | zh-Hant | 이미지·영상+텍스트 | 2/7 |
 | RedNote | zh-Hans | 이미지+텍스트 | 수동 |
 
+수동 계정(`provider = manual`; 운영 중인 X·RedNote 계정)의 게시물은 상한표의 채널과 무관하게 게시기가 집지 않고(`channel_posts_by_hand`) 예약도 거절한다. 사람이 손으로 올린 뒤 Admin에서 공개 URL(https)과 확인한 근거를 기록하면(`marketing_post.record_manual_publish`, `marketing:write` + step-up) 같은 트랜잭션에서 `verified`(`verificationMethod = operator_sample`)로 남고, 그날(UTC) 슬롯이 잡혀 일/주 집계에 들어간다. 상한을 넘어도 이미 공개된 사실의 기록이므로 거절하지 않고 경고만 한다(운영자 결정 2026-11-04). 정책 버전은 그대로다.
+
 모든 채널의 게시물은 이미지나 영상을 하나 이상 싣는다. 글만 있는 게시물은 없다(운영자 결정 2026-11-03).
 이미지가 최소선이고 영상이 가장 좋다. 생성기는 맞는 승인 자산이 없는 계정의 초안을 만들지 않고, 초안 접수는 자산이 없는
 초안을 받지 않으며, 게시기는 미디어가 없는 게시물을 보내기 전에 `media_required`로 실패시킨다(YouTube는 영상 하나가 아니면
