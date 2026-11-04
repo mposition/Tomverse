@@ -194,7 +194,10 @@ test("the nameable-replacement rule matches the chat route's MODEL_RETIRED branc
   assert.match(branch, /runtimeModelMap\.get\(candidateId\)/);
   // The route delegates to lib/models.ts; the bar lives in isPubliclySelectableModel.
   const models = readFileSync("lib/models.ts", "utf8");
-  const barStart = models.indexOf("model.publiclyListed !== false &&");
+  const barStart = models.indexOf(
+    "model.publiclyListed !== false &&",
+    models.indexOf("export const isPubliclySelectableModel"),
+  );
   assert.notEqual(barStart, -1, "isPubliclySelectableModel moved; re-read it before trusting this report");
   const bar = models.slice(barStart, models.indexOf(";", barStart));
   for (const clause of ["model.publiclyListed !== false", "!model.catalogDeleted", "model.enabled"]) {
