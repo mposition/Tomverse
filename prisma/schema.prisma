@@ -11976,3 +11976,21 @@ model TrustSafetyObserverRun {
   /// application cannot set it.
   recordedAt DateTime @db.Timestamptz(3)
 }
+
+/// The observer's activation row, written only by a person's Admin action
+/// (docs/policy/trust-safety-compliance-agent.md §5.1 item 1, §6).
+///
+/// Not the authority on its own: §6 derives the mode from the newest audit
+/// entry for `trust_safety.observer_activation_changed` and accepts this
+/// row's `mode` only when all seven checks pass, so a replayed historical
+/// tuple cannot turn observation on. Single row by CHECK; `version` is the
+/// counter the audit entry binds to, and a trigger refuses a version that
+/// does not move forward or a mode that does not change.
+model TrustSafetyObserverConfig {
+  /// Always "singleton"; a CHECK allows nothing else.
+  id      String @id
+  /// "off" or "on"; a CHECK allows nothing else.
+  mode    String
+  /// Monotonic, matched against the bound audit entry's metadata.version.
+  version Int
+}
