@@ -5,6 +5,7 @@ import {
   QA_RELEASE_DIGEST_STALE_MS,
   latestReadableDigest,
   qaReleaseAttentionItems,
+  qaReleaseFlow,
   qaReleaseStatusFigures,
 } from "../lib/qaReleaseAttentionCore.ts";
 
@@ -53,6 +54,33 @@ const quiet = () => ({
   main: main(),
   trains: [],
   nowMs: NOW,
+});
+
+const verdicts = (...statuses) => ({
+  rounds: [],
+  verdicts: { at: "2026-10-23T00:00:00.000Z", list: statuses.map((status, index) => ({ number: 100 + index, title: "", headRefName: "", status, reasons: [], files: [], failedChecks: [] })) },
+});
+
+test("the pull requests the lane leaves to a person are the operator's to do; the lane's own are not", () => {
+  assert.deepEqual(qaReleaseAttentionItems({ ...quiet(), laneRounds: verdicts("next", "queued", "fix", "waiting", "draft") }), []);
+  assert.deepEqual(qaReleaseAttentionItems({ ...quiet(), laneRounds: verdicts("human", "next", "human") }), [{ kind: "lane_human", numbers: [100, 102] }]);
+  // A lane that has reported nothing asks nothing.
+  assert.deepEqual(qaReleaseAttentionItems({ ...quiet(), laneRounds: { rounds: [], verdicts: null } }), []);
+});
+
+test("the flow reads from a develop pull request to production, and says what it does not know", () => {
+  const { main } = quiet();
+  const flow = qaReleaseFlow({ main, latched: false, trains: [{ slot: "20261104-1100", at: "2026-11-04T01:00:00.000Z", outcome: "opened", failure: null }], laneRounds: verdicts("next", "queued", "human", "fix", "waiting", "draft", "draft") });
+  assert.deepEqual(flow.pulls, { lane: 2, human: 1, fix: 1, waiting: 1, draft: 2 });
+  assert.deepEqual(flow.lastTrain, { slot: "20261104-1100", outcome: "opened" });
+  assert.equal(flow.mainPulls, main.pullRequests.length);
+  assert.equal(flow.servesMainHead, main.production.servesMainHead);
+  // Not judged yet, no train yet, GitHub unread: each is unknown, never zero.
+  const unknown = qaReleaseFlow({ main: { ...main, pullRequests: null }, latched: true, trains: [] });
+  assert.equal(unknown.pulls, null);
+  assert.equal(unknown.lastTrain, null);
+  assert.equal(unknown.mainPulls, null);
+  assert.equal(unknown.latched, true);
 });
 
 test("a quiet day asks nothing of the operator", () => {

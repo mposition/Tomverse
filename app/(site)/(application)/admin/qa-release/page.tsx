@@ -91,6 +91,7 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
             picks: report.picks,
           }))}
           ciAdvice={await readQaReleaseCiAdvice()}
+          laneRounds={laneRounds}
           nowMs={now.getTime()}
         />
       )}
