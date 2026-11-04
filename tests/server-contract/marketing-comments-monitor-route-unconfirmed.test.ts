@@ -4,15 +4,15 @@ import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
 /**
- * The comment monitor's route while the privacy notice's comments section is
- * unpublished (operator decision 2026-11-04; policy 12.1).
+ * The comment monitor's route if the privacy notice's comments section is ever
+ * unpublished again (operator decision 2026-11-04; policy 12.1).
  *
- * `COMMENTS_PRIVACY_NOTICE_CONFIRMED` is the real constant here, not replaced:
- * it is false, so with the monitor's variable on and the posting tool's key
- * present the answer is still `off`, and neither the database operations nor
- * the posting tool are reached. The sibling file
- * (marketing-comments-monitor-route.test.ts) replaces the constant with true
- * and holds the behaviour of a monitor that may run.
+ * The published constant is true since the operator confirmed the section, so
+ * this file replaces `COMMENTS_PRIVACY_NOTICE_CONFIRMED` with false: with the
+ * monitor's variable on and the posting tool's key present the answer is still
+ * `off`, and neither the database operations nor the posting tool are reached.
+ * The sibling file (marketing-comments-monitor-route.test.ts) replaces the
+ * constant with true and holds the behaviour of a monitor that may run.
  */
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -24,6 +24,7 @@ const touched: string[] = [];
 let routePromise: Promise<{ POST: (request: Request) => Promise<Response> }> | null = null;
 const loadRoute = () => {
   if (!routePromise) {
+    mock.module(mod("lib/privacyNoticeStatus.ts"), { namedExports: { COMMENTS_PRIVACY_NOTICE_CONFIRMED: false } });
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
     mock.module(mod("lib/marketingCommentsMonitorOperations.ts"), {
       namedExports: {
@@ -84,9 +85,8 @@ test("the variable on and the key present, the notice unconfirmed: both steps an
   process.env.MARKETING_GENERATOR_SUBMIT_SECRET = SECRET;
   process.env.MARKETING_COMMENTS_MONITOR_ENABLED = "true";
   delete process.env.MARKETING_AUTOMATION_KILL_SWITCH;
-  const { COMMENTS_PRIVACY_NOTICE_CONFIRMED } = await import(mod("lib/privacyNoticeStatus.ts"));
-  assert.equal(COMMENTS_PRIVACY_NOTICE_CONFIRMED, false, "this file is about the unconfirmed notice");
-
+  // The route's own answer proves the mocked constant is the one it reads: with the
+  // real constant (true) the monitor would run and reach the operations below.
   assert.deepEqual(await call({ action: "collect" }), { status: 200, body: { status: "off" } });
   assert.deepEqual(await call({ action: "judge", readAt: new Date().toISOString(), backlog: false, verdicts: [] }), {
     status: 200,
