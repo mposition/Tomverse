@@ -23,7 +23,7 @@ SEO Agent(GitHub Actions)와 Comments Monitor는 옮기지 않습니다. Comment
 ## 알려진 한계
 
 - CLI는 실제 응답 모델을 보고하지 않습니다. 원장의 `reportedModel`은 요청한 모델이고 tier는 pin의 값입니다.
-- `max_output_tokens`와 `max_tool_calls`를 CLI에 넘기지 못합니다. 검색 횟수는 프롬프트로 pin의 3회를 지시하고, 10회(`MARKETING_LLM_MAX_WEB_SEARCH_CALLS`)를 넘으면 프로세스를 끊습니다. 끊긴 호출은 unknown으로 닫히고 그 실행이 멈춥니다. 토큰이 예약을 넘으면 원장이
+- `max_output_tokens`와 `max_tool_calls`를 CLI에 넘기지 못합니다. 검색 횟수는 프롬프트로 pin의 3회를 지시하고, 예약이 계산한 4회를 넘으면 프로세스를 끊습니다. 실제 A3 6곳은 2~3회를 지켰습니다. 끊긴 호출은 unknown으로 닫히고 그 실행이 멈춥니다. 토큰이 예약을 넘으면 원장이
   `unknown_retained`로 닫고 그 실행이 멈춥니다. 호출 하나는 5분이면 끊습니다.
 - `generator.env`는 `tommy` 계정 파일입니다. 같은 계정으로 도는 shell 도구가 있는 작업은 이 비밀값을 읽을 수
   있습니다. 이 비밀값으로 할 수 있는 일은 초안 제출과 원장 기록이고, 게시는 여전히 사람 승인을 거칩니다.

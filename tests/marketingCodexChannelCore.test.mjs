@@ -10,6 +10,7 @@ import {
   marketingCodexChannel,
   marketingCodexFailure,
   marketingCodexLineStartsSearch,
+  marketingCodexSearchLimit,
   marketingCodexPrompt,
   marketingLlmChannelFromEnv,
   readMarketingCodexEvents,
@@ -163,6 +164,16 @@ test("a URL only the model's text names is not a retrieved page or a citation", 
   assert.deepEqual(withSearch.answerCitations, []);
 });
 
+test("the search limit is what the reservation priced, and none for a text call", () => {
+  assert.equal(marketingCodexSearchLimit(3), 4);
+  assert.equal(marketingCodexSearchLimit(undefined), 0);
+});
+
+test("a stray line of the CLI's does not lose the answer", () => {
+  const answer = readMarketingCodexEvents(`warning: something\n${STDOUT}`);
+  assert.equal(answer.content, ANSWER.item.text);
+});
+
 test("only a search's start counts toward the hard limit", () => {
   assert.equal(marketingCodexLineStartsSearch(JSON.stringify({ type: "item.started", item: { type: "web_search" } })), true);
   assert.equal(marketingCodexLineStartsSearch(JSON.stringify({ type: "item.completed", item: { type: "web_search" } })), false);
@@ -210,6 +221,7 @@ test("the child gets its login's variables and none of the worker's", async () =
     maxWebSearchCalls: 3,
   });
   assert.deepEqual(seen.env, { HOME: "/home/tommy", PATH: "/usr/bin" });
+  assert.equal(seen.searchLimit, 4);
   assert.equal(seen.bin, "/opt/codex");
   assert.deepEqual(seen.schemaOnDisk, { type: "object" });
   assert.match(seen.prompt, /Find it\./);
@@ -336,13 +348,25 @@ test("the process is killed at the search limit, and a stopped run is no answer"
   const fake = join(directory, "codex");
   const started = JSON.stringify({ type: "item.started", item: { type: "web_search" } });
   writeFileSync(fake, `#!/bin/sh\nwhile true; do echo '${started}'; sleep 0.01; done\n`, { mode: 0o755 });
-  const stdout = await runMarketingCodexProcess({ bin: fake, args: [], prompt: "", cwd: directory, env: {}, timeoutMs: 20_000 });
+  const env = { PATH: "/usr/bin:/bin" };
+  const stdout = await runMarketingCodexProcess({ bin: fake, args: [], prompt: "", cwd: directory, env, timeoutMs: 20_000, searchLimit: 4 });
   assert.equal(stdout, null);
   rmSync(directory, { recursive: true, force: true });
 });
 
+test("the process is killed at its timeout and at an abort", { skip: !posix }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "marketing-codex-test-"));
+  const fake = join(directory, "codex");
+  writeFileSync(fake, "#!/bin/sh\nsleep 30\n", { mode: 0o755 });
+  const env = { PATH: "/usr/bin:/bin" };
+  const common = { bin: fake, args: [], prompt: "", cwd: directory, env, searchLimit: 0 };
+  assert.equal(await runMarketingCodexProcess({ ...common, timeoutMs: 100 }), null);
+  assert.equal(await runMarketingCodexProcess({ ...common, timeoutMs: 20_000, signal: AbortSignal.timeout(100) }), null);
+  rmSync(directory, { recursive: true, force: true });
+});
+
 test("a binary that cannot start is no answer, not a crash", { skip: !posix }, async () => {
-  const stdout = await runMarketingCodexProcess({ bin: "/nonexistent/codex", args: [], prompt: "", cwd: tmpdir(), env: {}, timeoutMs: 1_000 });
+  const stdout = await runMarketingCodexProcess({ bin: "/nonexistent/codex", args: [], prompt: "", cwd: tmpdir(), env: {}, timeoutMs: 1_000, searchLimit: 0 });
   assert.equal(stdout, null);
 });
 

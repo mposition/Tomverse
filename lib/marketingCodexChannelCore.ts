@@ -20,7 +20,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { MARKETING_LLM_MAX_WEB_SEARCH_CALLS } from "./marketingLlmBudgetCore.ts";
+import { MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE } from "./marketingLlmBudgetCore.ts";
 import type {
   MarketingLlmAnswerSchema,
   MarketingLlmChannelAnswer,
@@ -46,11 +46,15 @@ const CODEX_CHILD_VARIABLES = ["HOME", "CODEX_HOME", "PATH", "LANG"] as const;
 export const MARKETING_CODEX_CALL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * Whether one line of the CLI's stream starts a search. The prompt asks for the
- * pin's count, which the model may pass by a little; this is what actually stops
- * a run of searches, at the most the ledger allows one call
- * (`MARKETING_LLM_MAX_WEB_SEARCH_CALLS`).
+ * The searches one call may start before its process is killed: what its
+ * reservation priced, the pin's count and the overshoot the API may bill. A text
+ * call reserved none. The prompt asks for the pin's count, and six real A3 calls
+ * kept to it (2 or 3 searches); this is what holds it if one does not.
  */
+export const marketingCodexSearchLimit = (maxWebSearchCalls: number | undefined): number =>
+  (maxWebSearchCalls ?? 0) + (maxWebSearchCalls === undefined ? 0 : MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE);
+
+/** Whether one line of the CLI's stream starts a search. */
 export function marketingCodexLineStartsSearch(line: string): boolean {
   try {
     const event = JSON.parse(line) as { type?: unknown; item?: { type?: unknown } };
@@ -212,7 +216,8 @@ export function readMarketingCodexEvents(stdout: string): MarketingLlmChannelAns
     try {
       event = JSON.parse(line);
     } catch {
-      return null;
+      // The stream is JSON lines, but one stray line of the CLI's is not a lost answer.
+      continue;
     }
     if (event.type === "turn.failed" || event.type === "error") return null;
     if (event.type === "turn.completed") {
@@ -251,11 +256,15 @@ export type MarketingCodexRunner = (input: {
   readonly env: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
   readonly timeoutMs: number;
+  /** The searches it may start; past this the process is killed. */
+  readonly searchLimit: number;
 }) => Promise<string | null>;
 
 /**
  * Run the CLI and return its stdout, or null for anything but a clean exit. The
  * child is its own process group, so a kill takes whatever it started with it.
+ * If the worker itself is killed, these timers die with it: on the box the unit's
+ * `KillMode=control-group` is what ends a child left behind.
  */
 export const runMarketingCodexProcess: MarketingCodexRunner = (input) =>
   new Promise((resolve) => {
@@ -312,7 +321,7 @@ export const runMarketingCodexProcess: MarketingCodexRunner = (input) =>
       const lines = `${partial}${chunk.toString("utf8")}`.split("\n");
       partial = lines.pop() ?? "";
       searches += lines.filter(marketingCodexLineStartsSearch).length;
-      if (searches > MARKETING_LLM_MAX_WEB_SEARCH_CALLS) stop("too_many_searches")();
+      if (searches > input.searchLimit) stop("too_many_searches")();
     });
     child.on("error", (error: NodeJS.ErrnoException) => {
       // A binary that cannot start has no exit code to report: name why here.
@@ -375,6 +384,7 @@ export function marketingCodexChannel(input: {
         env: childEnv,
         signal: call.signal,
         timeoutMs: input.timeoutMs ?? MARKETING_CODEX_CALL_TIMEOUT_MS,
+        searchLimit: marketingCodexSearchLimit(call.webSearch ? call.maxWebSearchCalls : undefined),
       });
       if (stdout === null) return null;
       const answer = readMarketingCodexEvents(stdout);
@@ -393,5 +403,7 @@ export function marketingLlmChannelFromEnv(
   env: Readonly<Record<string, string | undefined>>,
 ): MarketingLlmChannelPort | undefined {
   if (!marketingCodexChannelSelected(env)) return undefined;
-  return marketingCodexChannel({ bin: env[MARKETING_CODEX_BIN_ENV] as string, env });
+  const bin = env[MARKETING_CODEX_BIN_ENV];
+  if (!bin) throw new Error(`${MARKETING_CODEX_BIN_ENV} is not set`);
+  return marketingCodexChannel({ bin, env });
 }

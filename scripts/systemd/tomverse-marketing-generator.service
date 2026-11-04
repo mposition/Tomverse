@@ -17,6 +17,10 @@ ExecStart=/usr/bin/node %h/.local/lib/tomverse-marketing-generator/marketing-gen
 # The generator's forty minutes and the measurement's twenty-five, then the
 # supervisor's own kill has already happened.
 TimeoutStartSec=70min
+# The worker starts each Codex call as its own process group. If the supervisor
+# kills the worker, this ends the call it left behind when the service stops.
+KillMode=control-group
+TimeoutStopSec=10s
 Nice=10
 NoNewPrivileges=yes
 PrivateTmp=yes
