@@ -593,6 +593,14 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "read",
   },
+  // The idea lane's display cards on the Execution board
+  // (lib/amux/ideaLaneBoardRead.ts): setup + ONE statement + fence, pinned by
+  // tests/amuxIdeaLaneBoard.test.mjs, for the same idle-timeout reason.
+  ideaLaneBoardRead: {
+    operation: "idea_lane_board_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
   // Stage S2's one request for the person who judges it
   // (readDecisionMakerRequestDetailForAdmin): setup + its ledger row with the
   // database clock + its result detail + its judgment and deliveries + its

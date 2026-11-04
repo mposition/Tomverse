@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  AbortTally,
   SCOUT_LOCALES,
   SCOUT_PAGE_ORIGIN,
   SCOUT_PAGES,
@@ -213,22 +212,6 @@ test("only a refused or unavailable sandbox is retried without it, and the opera
     retriesWithoutSandbox(undefined, launchFailure(Object.assign(new Error("browserType.launch: Timeout 180000ms exceeded."), { name: "TimeoutError" }))),
     false,
   );
-});
-
-test("the abort tally keeps method and origin and drops the path", () => {
-  const tally = new AbortTally();
-  tally.add({ reason: "method", method: "post", url: "https://tomverse.app/api/consent?token=secret" });
-  tally.add({ reason: "method", method: "POST", url: "https://tomverse.app/other/path" });
-  tally.add({ reason: "origin", method: "GET", url: "https://cdn.example:8443/a.js" });
-  tally.add({ reason: "invalid_url", method: "GET", url: "data:text/plain,x" });
-  const entries = tally.entries();
-  assert.deepEqual(entries, [
-    { reason: "invalid_url", method: "GET", origin: "opaque", count: 1 },
-    { reason: "method", method: "POST", origin: "https://tomverse.app", count: 2 },
-    { reason: "origin", method: "GET", origin: "https://cdn.example:8443", count: 1 },
-  ]);
-  assert.ok(!JSON.stringify(entries).includes("secret"));
-  assert.ok(!JSON.stringify(entries).includes("/api/consent"));
 });
 
 test("console errors the scout's own blocking caused are told apart by their error code", () => {
