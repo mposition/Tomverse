@@ -66,3 +66,24 @@ export function localTime(
         : new Intl.DateTimeFormat(dateLocale(locale), { month: "numeric", day: "numeric" }).format(date);
   return `${day} ${time}`;
 }
+
+/**
+ * How many suggestions "select the next batch" picks: about what the AMUX idea
+ * lane takes in a day, since an idea it has not reached within seven days is
+ * dropped (lib/amux/ideaRetentionCore.ts).
+ */
+export const SCOUT_SEND_BATCH = 10;
+
+/** Sends are spaced so a long selection stays inside the send route's five a minute. */
+export const SCOUT_SEND_SPACING_MS = 13_000;
+
+/** The next batch to send: most severe first, and oldest first within a severity, so nothing waits for ever. */
+export function nextScoutSendBatch<T extends { readonly id: string; readonly severity: string; readonly createdAt: string }>(
+  rows: readonly T[],
+  count: number = SCOUT_SEND_BATCH,
+): string[] {
+  return [...rows]
+    .sort((a, b) => (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3) || a.createdAt.localeCompare(b.createdAt))
+    .slice(0, count)
+    .map((row) => row.id);
+}

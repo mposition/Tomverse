@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
 import { AdminScoutSuggestionsPanel } from "@/components/admin/AdminScoutSuggestionsPanel";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
+import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch } from "@/lib/adminScoutDisplay";
 import { SCOUT_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
 import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
@@ -150,4 +151,24 @@ test("every page, file and the catalogue the walker sends has a name in both lan
   }
   assert.deepEqual(scoutSubjectInfo("catalogue"), { kind: "catalogue" });
   assert.deepEqual(scoutSubjectInfo("something-else"), { kind: "other" });
+});
+
+test("the next batch is the most severe, oldest first, and bounded", () => {
+  const row = (id: string, severity: string, createdAt: string) => ({ id, severity, createdAt });
+  const rows = [
+    row("low-old", "low", "2026-10-20T00:00:00Z"),
+    row("high-new", "high", "2026-11-01T00:00:00Z"),
+    row("medium", "medium", "2026-10-25T00:00:00Z"),
+    row("high-old", "high", "2026-10-23T00:00:00Z"),
+  ];
+  assert.deepEqual(nextScoutSendBatch(rows), ["high-old", "high-new", "medium", "low-old"]);
+  assert.deepEqual(nextScoutSendBatch(rows, 2), ["high-old", "high-new"]);
+  assert.equal(SCOUT_SEND_BATCH, 10);
+  // Five sends a minute is the route's limit; the spacing keeps a long selection under it.
+  assert.ok(60_000 / SCOUT_SEND_SPACING_MS < 5);
+});
+
+test("only an owner is offered the next batch", () => {
+  assert.match(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} />), /admin-product-research-scout-select-batch/);
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ canSend: false })} />), /admin-product-research-scout-select-batch/);
 });
