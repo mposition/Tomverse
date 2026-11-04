@@ -21,6 +21,8 @@ export const QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS = 60_000;
 
 /** The release train's own tab, where a failed train's attention item sends the operator. */
 export const QA_RELEASE_TRAIN_TAB_HREF = "/admin/qa-release?tab=train";
+/** The merge lane's tab, where the pull requests that are the operator's are listed with their files. */
+export const QA_RELEASE_LANE_TAB_HREF = "/admin/qa-release?tab=lane";
 
 /** A train report as the overview's attention strip reads it. */
 export type QaReleaseTrainView = {
