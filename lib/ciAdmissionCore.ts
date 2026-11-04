@@ -238,6 +238,23 @@ const eventSchema = z
 const needSchema = z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY);
 const needsSchema = z.object({ develop: needSchema, main: needSchema, developPush: needSchema, mainPush: needSchema }).strict();
 
+/** How long the hour-by-hour runner record reaches back. */
+export const CI_ADMISSION_SATURATION_HOURS = 48;
+const saturationHourSchema = z
+  .object({
+    /** The hour, as an ISO timestamp cut to the hour (UTC). */
+    hour: z.string().max(13),
+    /** Rounds that read the runners in this hour. */
+    samples: z.number().int().nonnegative(),
+    /** Of those, rounds that found jobs waiting for a runner. */
+    queued: z.number().int().nonnegative(),
+    /** Of those, rounds that found the budget full. */
+    full: z.number().int().nonnegative(),
+    /** The most hosted jobs running or waiting at once. */
+    peak: z.number().int().nonnegative(),
+  })
+  .strict();
+
 const stateSchema = z
   .object({
     version: z.literal(3),
@@ -263,6 +280,8 @@ const stateSchema = z
       .max(MAX_QUEUE)
       .default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
+    /** How full the runners were, hour by hour, oldest first (ciAdmissionSaturationAfter). */
+    saturation: z.array(saturationHourSchema).max(CI_ADMISSION_SATURATION_HOURS).default([]),
     /** The latest round: when, how many runners were in use after it, and by whom. */
     lastRound: z
       .object({
@@ -309,8 +328,37 @@ export const emptyCiAdmissionState = (): CiAdmissionState => ({
   pendingStatus: [],
   updating: [],
   events: [],
+  saturation: [],
   lastRound: null,
 });
+
+/**
+ * The hour-by-hour runner record with one more reading (owner request
+ * 2026-10-20, "runner saturation"): whether CI is slow because the runners are
+ * full is a question of how often that happens, not of one moment. Unread
+ * runners add nothing, so a gap is a gap and not a quiet hour.
+ */
+export function ciAdmissionSaturationAfter(
+  saturation: CiAdmissionState["saturation"],
+  runners: readonly Pick<CiRunnerOwner, "running" | "queued">[] | null | undefined,
+  capacity: number,
+  nowMs: number,
+): CiAdmissionState["saturation"] {
+  if (!runners) return saturation;
+  const hour = new Date(nowMs).toISOString().slice(0, 13);
+  const live = runners.reduce((sum, owner) => sum + owner.running + owner.queued, 0);
+  const waiting = runners.some((owner) => owner.queued > 0);
+  const last = saturation[saturation.length - 1];
+  const bucket = last?.hour === hour ? last : { hour, samples: 0, queued: 0, full: 0, peak: 0 };
+  const next = {
+    hour,
+    samples: bucket.samples + 1,
+    queued: bucket.queued + (waiting ? 1 : 0),
+    full: bucket.full + (live >= capacity ? 1 : 0),
+    peak: Math.max(bucket.peak, live),
+  };
+  return [...(last?.hour === hour ? saturation.slice(0, -1) : saturation), next].slice(-CI_ADMISSION_SATURATION_HOURS);
+}
 
 /** The first stored shape (a line of held drafts built from events): its budget and order carry over. */
 const legacySchema = z
@@ -625,6 +673,7 @@ export function evaluateCiAdmission(input: {
       pendingStatus: pendingStatus.slice(-MAX_QUEUE),
       updating: updating.slice(-MAX_QUEUE),
       events: [...state.events, ...events].slice(-MAX_EVENTS),
+      saturation: ciAdmissionSaturationAfter(state.saturation, input.runners, state.capacity, nowMs),
       lastRound: {
         at,
         used,

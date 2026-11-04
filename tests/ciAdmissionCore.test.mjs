@@ -16,6 +16,7 @@ import {
   ciRunKey,
   ciRunnerCount,
   ciRunnerOwnerKey,
+  ciAdmissionSaturationAfter,
   emptyCiAdmissionState,
   evaluateCiAdmission,
   moveCiAdmissionEntry,
@@ -473,4 +474,32 @@ test("a pull request a person marked ready is never sent back, and still takes i
   // Who marked it could not be read: nothing is sent back this round.
   const unread = judge({ ...input, personReady: null });
   assert.equal(unread.actions.some((action) => action.kind === "hold"), false);
+});
+
+test("runner load is kept hour by hour, and an unread round is a gap, not a quiet hour", () => {
+  const at = (hour, minute = 0) => Date.parse(`2026-11-04T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00Z`);
+  let record = [];
+  record = ciAdmissionSaturationAfter(record, [{ running: 10, queued: 0 }], 40, at(1));
+  record = ciAdmissionSaturationAfter(record, [{ running: 30, queued: 15 }, { running: 2, queued: 0 }], 40, at(1, 30));
+  record = ciAdmissionSaturationAfter(record, null, 40, at(1, 40));
+  assert.deepEqual(record, [{ hour: "2026-11-04T01", samples: 2, queued: 1, full: 1, peak: 47 }]);
+  record = ciAdmissionSaturationAfter(record, [], 40, at(2));
+  assert.deepEqual(record[1], { hour: "2026-11-04T02", samples: 1, queued: 0, full: 0, peak: 0 });
+  // Two days, then the oldest hour falls off.
+  for (let day = 5; day < 8; day += 1) {
+    for (let hour = 0; hour < 24; hour += 1) record = ciAdmissionSaturationAfter(record, [], 40, Date.parse(`2026-11-0${day}T${String(hour).padStart(2, "0")}:00:00Z`));
+  }
+  assert.equal(record.length, 48);
+  assert.equal(record[47].hour, "2026-11-07T23");
+});
+
+test("a round records the runners it read, and a stored state without a record still parses", () => {
+  const open = [pull(1)];
+  const judged = judge({ state: state({ queue: lineOf(1) }), openPulls: open, checks: checksFor(open), runners: [{ key: "other:x", title: "x", number: null, base: null, sha: null, running: 3, queued: 1, startedAt: new Date(T0).toISOString() }] });
+  assert.equal(judged.state.saturation.length, 1);
+  assert.equal(judged.state.saturation[0].peak, 4);
+  assert.equal(judge({ state: state(), openPulls: [], nowMs: T0 }).state.saturation.length, 0);
+  const { saturation, ...stored } = emptyCiAdmissionState();
+  assert.deepEqual(saturation, []);
+  assert.deepEqual(parseCiAdmissionState(JSON.stringify(stored)).saturation, []);
 });
