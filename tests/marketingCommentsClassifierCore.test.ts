@@ -48,8 +48,7 @@ test("the service reads the switch exactly as the app does", () => {
     { [S]: "true", [K]: "  " },
     { [S]: "true", [K]: "" },
   ]) {
-    // The notice constant is false until the revision lands; the rule is held
-    // to the app's for both of its values.
+    // The rule is held to the app's for both values of the notice constant.
     for (const noticeConfirmed of [true, false]) {
       assert.equal(
         marketingCommentsMonitorGate(env, noticeConfirmed).on,
@@ -66,8 +65,9 @@ test("an unconfirmed privacy notice stops the service before a worker starts, an
   const on = { [MARKETING_COMMENTS_MONITOR_ENV]: "true" };
   assert.deepEqual(marketingCommentsMonitorGate(on, false), { on: false, reason: "privacy_notice_unconfirmed" });
   assert.deepEqual(marketingCommentsMonitorGate(on, true), { on: true });
-  // The default is the published constant, which is false.
-  assert.deepEqual(marketingCommentsMonitorGate(on), { on: false, reason: "privacy_notice_unconfirmed" });
+  // The default is the published constant, which is true since the operator
+  // confirmed the comments section (2026-11-04).
+  assert.deepEqual(marketingCommentsMonitorGate(on), { on: true });
   // The older reasons keep their place: the kill switch first, a missing variable next.
   assert.deepEqual(marketingCommentsMonitorGate({ ...on, [MARKETING_AUTOMATION_KILL_SWITCH_ENV]: "1" }, false), {
     on: false,
@@ -354,15 +354,13 @@ test("the worker loads under plain node with stripped types, and off it asks not
   const off = run({});
   assert.equal(off.status, 0);
   assert.deepEqual(JSON.parse(off.stdout), { event: "marketing_comments_monitor", status: "off", reason: "switch_off" });
-  // The variable on is not enough while the privacy notice's comments section
-  // is unpublished (operator decision 2026-11-04): the worker says so and asks
-  // nothing. Every module it imports has loaded by the time it answers, the
-  // notice constant's module included, under stripped types.
+  // The notice constant is true (operator decision 2026-11-04), so the variable
+  // on passes the gate. Started by hand, with no run id or deadline from the
+  // service, the worker then stops before any request: it prints no event, asks
+  // the app nothing and exits 1. Every module it imports has loaded by the time
+  // it gets that far, the notice constant's module included, under stripped types.
   const on = run({ [MARKETING_COMMENTS_MONITOR_ENV]: "true" });
-  assert.equal(on.status, 0);
-  assert.deepEqual(JSON.parse(on.stdout), {
-    event: "marketing_comments_monitor",
-    status: "off",
-    reason: "privacy_notice_unconfirmed",
-  });
+  assert.equal(on.status, 1);
+  assert.equal(on.stdout, "");
+  assert.match(on.stderr, /started by scripts\/marketing-comments-monitor-service\.mjs/);
 });
