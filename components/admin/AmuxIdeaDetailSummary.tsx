@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
+import { AmuxIdeaName } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
@@ -35,7 +36,7 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
       aria-labelledby="amux-idea-detail-heading" data-testid="amux-idea-detail" data-stage={row.stage}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="amux-idea-detail-heading" className="text-lg font-semibold text-zinc-100">
-          {row.displayKey ?? `${m.untitled} ${row.requestId.slice(0, 8)}`}
+          <AmuxIdeaName row={row} untitled={m.untitled} />
         </h2>
         <Link href="/admin/amux-backlog?tab=ideas" onClick={(event) => {
           // A new draft started from this idea is never stored; ask before leaving it.

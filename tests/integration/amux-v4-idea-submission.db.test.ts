@@ -84,6 +84,7 @@ test("synthetic idea submission is encrypted, audited, request-idempotent, and c
   assert.equal(stored.state, "submitted");
   assert.equal(stored.analysisDeadlineAt.getTime() - stored.submittedAt.getTime(), 7 * 86_400_000);
   assert.equal(stored.rawPurgeAfter?.getTime(), stored.analysisDeadlineAt.getTime());
+  assert.equal(stored.title, ideaText, "the first line is the plaintext list title");
   assert.equal(Buffer.from(stored.rawCiphertext ?? []).includes(Buffer.from(ideaText)), false);
   const opened = openAmuxContent({
     ciphertext: Buffer.from(stored.rawCiphertext ?? []),
@@ -152,6 +153,8 @@ test("a Scout suggestion's derived request id is read back by any owner; a brows
   await prisma.$transaction((tx) => commitIdeaSubmission(tx, {
     session, request, inspected: derivedInspection, ideaId: derivedIdeaId, keys,
   }));
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: derivedIdeaId } })).title,
+    "SYNTHETIC", "the Scout prefix is not part of the title");
   assert.deepEqual(await readIdeaSubmissionRequest(secondSession, derivedRequestId),
     { requestId: derivedRequestId, status: "absent" });
   assert.deepEqual(await readIdeaSubmissionByDerivedRequestId(secondSession, derivedRequestId),
