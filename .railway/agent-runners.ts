@@ -243,15 +243,6 @@ const AMUX_ORCHESTRATOR_VARIABLES = [
 ] as const;
 
 /**
- * The Support Triage services' one variable each (docs/policy/support-triage.md
- * §3): their own route secret, nothing else. The same lists
- * lib/supportTriageServiceCore.ts accepts at start; the IaC test holds them
- * equal.
- */
-const SUPPORT_TRIAGE_WORKER_VARIABLES = ["SUPPORT_TRIAGE_RUN_SECRET"] as const;
-const SUPPORT_TRIAGE_RETENTION_VARIABLES = ["SUPPORT_TRIAGE_RETENTION_SECRET"] as const;
-
-/**
  * The sre-ops page service's variables (docs/policy/sre-ops.md §7, §8): the
  * page service's list in scripts/ops-observer/runtime-variables-core.mjs, all
  * of it. OPS_OBSERVER_PAGE_WEBHOOK_URL is declared so an apply keeps it; only
