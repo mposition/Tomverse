@@ -49,6 +49,7 @@ import {
   inspectAmuxIdeaSessionSubmission,
   type AmuxIdeaSessionSubmissionInspection,
 } from "@/lib/amux/ideaSessionSubmissionCore";
+import { ideaSendPath, inspectIdeaSendForSession } from "@/lib/amux/ideaSendPath";
 import { prepareIdeaSubmissionStorage } from "@/lib/amux/ideaSubmissionService";
 import { AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
   amuxSessionAnalysisReservationAuditMetadata } from
@@ -1078,6 +1079,49 @@ test("reservation store refuses duplicate and superseded-scope attempts", async 
     where: { id: supersededIdeaId },
   }), 0);
   assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), scopeCount);
+});
+
+test("a send from another Admin screen enters as a session idea while session intake is on", async () => {
+  const switches = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
+    "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
+  const saved = switches.map((name) => process.env[name]);
+  const send = (requestId: string) => ideaSendPath({ session, request, requestId,
+    idea: "[Scout 제안] Synthetic suggestion", sessionDisplay: "Scout suggestion" });
+  try {
+    for (const name of switches) process.env[name] = "enabled";
+    const path = await send(committedRequestId);
+    assert.ok(path.ok);
+    // A stored session idea reads back committed, so a second click makes no second idea.
+    const seen = await path.readBack();
+    assert.equal(seen.status, "committed");
+    assert.equal(seen.status === "committed" && seen.ideaId, committedIdeaId);
+    assert.equal(path.isAlreadySeen(new AmuxIdeaSessionSubmissionError("request_already_seen")), true);
+    assert.equal(path.isAlreadySeen(new AmuxIdeaSessionSubmissionError("outcome_unknown")), false);
+
+    // It names this repository, without which analysis would have nothing to read.
+    const inspected = inspectIdeaSendForSession({ requestId: randomUUID(), idea: "Synthetic",
+      sessionDisplay: "Scout suggestion" });
+    assert.ok(inspected.ok);
+    assert.deepEqual(inspected.input.repositories, ["mposition/Tomverse"]);
+    assert.deepEqual(inspected.source, { toolName: "tomverse-admin", modelProvider: "operator",
+      sessionDisplay: "Scout suggestion" });
+
+    const refused = await ideaSendPath({ session, request, requestId: randomUUID(),
+      idea: "Contact person@example.test", sessionDisplay: "Scout suggestion" });
+    assert.deepEqual(refused, { ok: false, code: "content_refused", status: 400 });
+
+    // With session intake off the idea stays on the v4 path, and its read
+    // still finds the session idea rather than making another.
+    process.env.TOMVERSE_AMUX_SESSION_INTAKE = "disabled";
+    const off = await send(committedRequestId);
+    assert.ok(off.ok);
+    assert.equal((await off.readBack()).status, "committed");
+  } finally {
+    switches.forEach((name, index) => {
+      if (saved[index] === undefined) delete process.env[name];
+      else process.env[name] = saved[index];
+    });
+  }
 });
 
 test("request collision and references outside the saved scope are read-only refusals", async () => {
