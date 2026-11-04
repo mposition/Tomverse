@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { QaReleaseCiAdviceSection } from "@/components/admin/QaReleaseCiAdviceSection";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
 import type { AgentDigestConsole, AgentDigestConsoleRow } from "@/lib/agentDigestConsoleRead";
@@ -19,6 +20,7 @@ import {
   type QaReleaseAttentionItem,
   type QaReleaseStatusFigures,
 } from "@/lib/qaReleaseAttentionCore";
+import type { QaReleaseCiAdviceRecord } from "@/lib/qaReleaseCiAdviceCore";
 import type { QaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesCore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
 import { QA_RELEASE_SECTION_IDS, QA_RELEASE_TRAIN_TAB_HREF, card, openSection, type QaReleaseTrainView } from "@/components/admin/qaReleaseTabParts";
@@ -62,11 +64,13 @@ export function AdminAgentDigestsPanel({
   initial,
   main,
   trains,
+  ciAdvice,
   nowMs,
 }: {
   initial: AgentDigestConsole;
   main: QaReleaseMainCandidates;
   trains: QaReleaseTrainView[];
+  ciAdvice: QaReleaseCiAdviceRecord | null;
   /** The server's clock when the page was read, so both renders agree. */
   nowMs: number;
 }) {
@@ -100,6 +104,7 @@ export function AdminAgentDigestsPanel({
         <QaReleaseMainCandidatesSection data={main} id={QA_RELEASE_SECTION_IDS.main} />
         <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.lane} />
       </div>
+      <QaReleaseCiAdviceSection advice={ciAdvice} />
       <LatestDigest digests={initial.digests} limit={initial.limit} />
       <AgentSettings initial={initial} />
     </section>

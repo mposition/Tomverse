@@ -172,6 +172,7 @@ const QA_RELEASE_TRAIN_VARIABLES = [
   "QA_RELEASE_TRAIN_ANTHROPIC_API_KEY",
   // Unset: the verdict round's model runs on the key above; "false" stops it.
   "QA_RELEASE_TRAIN_MODEL_VERDICT",
+  "QA_RELEASE_CI_ADVICE_ENABLED",
   // "git": the deploy image has none, and the train clones and cherry-picks.
   "RAILPACK_DEPLOY_APT_PACKAGES",
 ] as const;
