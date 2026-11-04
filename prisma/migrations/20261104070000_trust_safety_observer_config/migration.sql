@@ -31,6 +31,12 @@ CREATE TABLE "TrustSafetyObserverConfig" (
     "id" TEXT NOT NULL,
     "mode" TEXT NOT NULL,
     "version" INTEGER NOT NULL,
+    -- The deadline this write must commit inside, written by the trigger below
+    -- from the database clock. It is a column rather than a re-read of the
+    -- setting because the same transaction could otherwise extend it: write
+    -- under a valid 24-second deadline, call set_config with a distant one,
+    -- and commit later. Stored, it cannot move.
+    "deadlineAt" TIMESTAMPTZ(3) NOT NULL,
 
     CONSTRAINT "TrustSafetyObserverConfig_pkey" PRIMARY KEY ("id")
 );
@@ -100,6 +106,10 @@ BEGIN
   IF claimed > clock_timestamp() + interval '24 seconds' THEN
     RAISE EXCEPTION 'trust_safety_activation_deadline_too_far' USING ERRCODE = 'TS004';
   END IF;
+  -- Fixed on the row, so the deferred check judges this instant's deadline and
+  -- not whatever the setting holds at COMMIT. A caller cannot write the column
+  -- itself: the assignment here overwrites whatever was supplied.
+  NEW."deadlineAt" := claimed;
   RETURN NEW;
 END $$;
 
@@ -109,20 +119,10 @@ CREATE TRIGGER trust_safety_observer_config_deadline_reach
 
 CREATE FUNCTION trust_safety_observer_config_deadline_check() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
-DECLARE
-  named   text;
-  claimed timestamptz;
 BEGIN
-  named := current_setting('trust_safety.activation_deadline', true);
-  IF named IS NULL OR named = '' THEN
-    RAISE EXCEPTION 'trust_safety_activation_deadline_missing' USING ERRCODE = 'TS001';
-  END IF;
-  -- Called with its schema named, as the other observer triggers do: this
-  -- function runs with search_path pinned to pg_catalog, so an unqualified
-  -- call cannot find a function in the table's own schema.
-  EXECUTE format('SELECT %I.trust_safety_parse_deadline($1)', TG_TABLE_SCHEMA)
-    INTO claimed USING named;
-  IF clock_timestamp() > claimed THEN
+  -- Reads the row, never the setting. Re-reading it here would let the same
+  -- transaction extend its own deadline after the reach check passed.
+  IF clock_timestamp() > NEW."deadlineAt" THEN
     RAISE EXCEPTION 'trust_safety_activation_late_commit' USING ERRCODE = 'TS002';
   END IF;
   RETURN NULL;

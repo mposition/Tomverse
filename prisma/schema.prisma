@@ -11975,4 +11975,8 @@ model TrustSafetyObserverConfig {
   mode String
   /// Monotonic, matched against the bound audit entry's metadata.version.
   version Int
+  /// The deadline this write must commit inside, written by a trigger from the database
+  /// clock; a caller's value is overwritten. Stored rather than re-read from the setting,
+  /// so the transaction cannot extend its own deadline after the reach check passed.
+  deadlineAt DateTime @db.Timestamptz(3)
 }

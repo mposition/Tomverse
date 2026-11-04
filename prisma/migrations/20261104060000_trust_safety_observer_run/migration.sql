@@ -54,8 +54,12 @@
 CREATE FUNCTION trust_safety_parse_deadline(named text) RETURNS timestamptz
 LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
-  IF named !~ '(Z|[+-][0-9]{2}(:?[0-9]{2})?)$' THEN
-    RAISE EXCEPTION 'trust_safety_deadline_offset_missing' USING ERRCODE = 'TS008';
+  -- The whole shape, not just the suffix. Checking only the tail accepted a
+  -- bare date: '2026-11-04' ends in '-04', which reads as an offset, and the
+  -- cast then resolves midnight in the session's TimeZone -- exactly the
+  -- dependency the check exists to remove.
+  IF named !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)$' THEN
+    RAISE EXCEPTION 'trust_safety_deadline_malformed' USING ERRCODE = 'TS008';
   END IF;
   RETURN named::timestamptz;
 END $$;
@@ -140,26 +144,23 @@ CREATE TRIGGER trust_safety_observer_run_append_only
 CREATE FUNCTION trust_safety_observer_run_deadline_check() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
-  named     text;
-  claimed   timestamptz;
-  now_utc   timestamptz;
+  now_utc timestamptz;
 BEGIN
-  named := current_setting('trust_safety.run_deadline', true);
-  IF named IS NULL OR named = '' THEN
-    RAISE EXCEPTION 'trust_safety_run_deadline_missing' USING ERRCODE = 'TS001';
-  END IF;
-  -- Called with its schema named, as the other observer triggers do: this
-  -- function runs with search_path pinned to pg_catalog, so an unqualified
-  -- call cannot find a function in the table's own schema.
-  EXECUTE format('SELECT %I.trust_safety_parse_deadline($1)', TG_TABLE_SCHEMA)
-    INTO claimed USING named;
   now_utc := clock_timestamp();
 
-  -- Only expiry is judged here. The deadline's reach was fixed at statement
-  -- time by the BEFORE INSERT trigger; re-checking "9 seconds ahead" at COMMIT
-  -- would measure the remaining time instead of the granted window, and a
-  -- distant deadline would pass simply by being committed late enough.
-  IF now_utc > claimed THEN
+  -- The deadline is taken from the row, not from the setting. Re-reading
+  -- `trust_safety.run_deadline` here would let the same transaction extend it:
+  -- insert under a valid 9-second deadline, call set_config with a distant
+  -- one, and commit ten seconds later -- the new value is not past, so the
+  -- round would be recorded as a success. `recordedAt` is written by the
+  -- BEFORE INSERT trigger from the database clock and the row is append-only,
+  -- so `recordedAt + 9s` is a deadline nothing in the transaction can move.
+  --
+  -- 9 seconds is the run row's approved deadline (§12 (1) table C). The
+  -- setting is still required at INSERT: §5.4 wants a write that named no
+  -- deadline to fail rather than go unchecked, and that is what makes a write
+  -- outside the wrapper a failed write.
+  IF now_utc > NEW."recordedAt" + interval '9 seconds' THEN
     RAISE EXCEPTION 'trust_safety_run_late_commit' USING ERRCODE = 'TS002';
   END IF;
 
