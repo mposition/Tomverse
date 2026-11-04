@@ -336,8 +336,6 @@ test("services that can only reach staging or production are not declared in dev
     "billing_finance_ops_deadline",
     "qa_release_merge_lane",
     "qa_release_train",
-    "support_triage_retention",
-    "support_triage_worker",
   ]) {
     const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
     assert.equal(runner.environments.dev, undefined, key);
@@ -427,20 +425,6 @@ test("the repository the run clones is the one the services deploy from", () => 
   // would answer for a backlog that is not this product's while looking
   // exactly like a correct run, and nothing downstream could tell.
   assert.equal(OBSERVED_REPOSITORY, AGENT_RAILWAY_REPOSITORY);
-});
-
-test("the Support Triage services declare exactly the variable their start check accepts, and start node directly", async () => {
-  const { supportTriageServiceVariables } = await import("../lib/supportTriageServiceCore.ts");
-  for (const [key, kind] of [["support_triage_worker", "worker"], ["support_triage_retention", "retention"]]) {
-    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
-    assert.ok(runner, key);
-    for (const environment of ["production", "staging"]) {
-      assert.deepEqual([...runner.environments[environment]].sort(), [...supportTriageServiceVariables(kind)].sort(), `${key} ${environment}`);
-    }
-    // docs/policy/support-triage.md §3: both every 30 minutes.
-    assert.equal(runner.cronSchedule, "*/30 * * * *", key);
-    assert.equal(runner.startCommand, `node --experimental-strip-types scripts/support-triage-${kind}-service.mjs`, key);
-  }
 });
 
 test("the sre-ops page service declares the supervisor's page list at S1b, production only", async () => {

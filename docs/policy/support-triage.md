@@ -98,17 +98,12 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
 
 | 능력 | 위치 |
 |---|---|
-| triage pass(후보 읽기·claim·신호·그룹 후보·템플릿 id·P1 표본·run 기록) | Railway cron 서비스 `Support Triage`(`*/30 * * * *`) → 본 앱 `POST /api/internal/support-triage/run`. 계산과 DB 쓰기는 본 앱 route |
-| 보존 회차 | Railway cron 서비스 `Support Triage Retention`(`*/30 * * * *`) → 본 앱 `POST /api/internal/support-triage/retention`. triage flag와 무관하게 돈다 |
+| triage pass와 보존 회차 | 15분 주기 기존 cron(`POST /api/internal/maintenance/credit-reservations`)이 응답 뒤에 함께 실행한다(`lib/supportTriageCycle.ts`, 2026-11-04). 각각 25분 이상 지났을 때만 돌아 실제 주기는 30분이다. worker는 triage가 켜졌을 때만, 보존은 켜졌거나 지울 행이 남아 있으면 스위치와 무관하게 돈다. 한 번도 쓰지 않은 배포에서는 아무것도 쓰지 않는다 |
 | 계정 삭제 시 triage 행 삭제 | 사용자의 계정 삭제 transaction 안 |
 | 사람 결정(수락·기각·확정·표본 판정) | 공통 Agent digest 영역의 본 앱 관리자 route(`support:write` + 최근 인증) |
-| heartbeat `{ stale }` | 본 앱 route. 부르는 쪽은 팀 3(sre-ops) 감시자 |
+| 상태 표시 | Admin › 지원 › Feedback 패널: 마지막 실행, 오늘 건수, 지연 경고(`readSupportTriageHealth`) |
 
-- 두 서비스는 각자 route secret(`SUPPORT_TRIAGE_RUN_SECRET`·`SUPPORT_TRIAGE_RETENTION_SECRET`, 32자 이상)과 URL
-  외의 변수를 갖지 않는다. 제품 DB 자격증명·GitHub 토큰·LLM/SaaS 키·`MAINTENANCE_SECRET`·heartbeat secret 모두 없다.
-  요청 본문이 없고 응답은 건수뿐이다.
-- 서비스 진입점은 supervisor + child다. worker는 supervisor 10분·child 요청 9분, retention은 supervisor 5분·child
-  요청 4분이며, supervisor가 상한에 child를 `SIGKILL`하고 exit 1로 끝난다. 재시도는 없다.
+- 별도 Railway 서비스·route secret·호출 스크립트는 없다(2026-11-04 삭제). 실행 코드는 본 앱 안에 있고, 재시도는 다음 회차다.
 - GitHub Actions는 쓰지 않는다. 상태·결정·digest는 본 앱 DB와 Admin Console에만 있다.
 
 ## 4. 시간 상한
@@ -223,14 +218,11 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
   시스템 actor 셋은 자기 action만 쓸 수 있다: worker는 run 시작·종료와 claim·reclaim·result, retention은 run
   시작·종료와 보존 배치(대상은 둘 다 `SupportTriageRun`), 계정 삭제는 `support_triage.account_data_deleted`
   (`SupportTriageAccountData`) 하나다(`systemAuditActionAllowed`, 2026-10-30).
-- digest는 팀 3의 공통 `AgentDigestItem` 하나에만 들어가고 단일 writer는 팀 3 공통 계약이 정한 digest store 하나다(아직 구현되지 않았고, 그 배포가 P1 착수 조건이다).
-  `kind = daily_digest`, 멱등 키 접두사 `support-triage:`, UTC 날짜당 한 항목. payload는 정수·enum·boolean과
-  `date` 문자열 하나뿐이고 팀 3 공통 계약의 bounded schema 규칙을 따른다. 시점값을 넣지 않는다.
-- **heartbeat retention 세 조건**: (1) liveness — 기대 주기 30분, 임계 80분, (2) progress 단발 — 최근 종료 행이
+- 별도 digest는 없다. Admin 패널의 상태 표시가 그 자리를 대신한다(2026-11-04).
+- **지연 판정의 retention 세 조건**: (1) liveness — 기대 주기 30분, 임계 80분, (2) progress 단발 — 최근 종료 행이
   `batchesCompleted = 0 AND overdueRemaining > 0`, (3) progress 기한 — `oldestOverdueAgeSeconds > 86,400`.
   worker에도 liveness 조건이 있다.
-- 실패한 구성요소가 자기 침묵을 보고하지 않도록, heartbeat를 부르는 것은 팀 3 감시자이고 이 Agent는 자체
-  checker·자체 경보를 만들지 않는다.
+- 회차가 실패하거나 보존이 진행하지 못하면 운영 경보(`SUPPORT_TRIAGE_CYCLE_FAILED`, `SUPPORT_TRIAGE_RETENTION_NOT_PROGRESSING`)가 오류 이름만 담아 나간다. cron 자체가 멈추면 기존 cron 감시가 잡고, 패널의 지연 경고는 triage가 켜졌거나 지울 제안이 남은 동안에만 판정한다.
 
 ## 8. 수치 상한과 감사량
 
@@ -255,8 +247,8 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
 > 꺼짐이다(#2727). 돈·신뢰안전 키워드의 사람 lane과 서버 검증 없는 `bug_verified` 금지는 코드가 지킨다. 모델은
 > 사람 lane을 내리지 못하고, `billing_human`을 더 앞선 `trust_safety_human`으로 올리는 것만 할 수 있다(2026-10-30). 초안은
 > 운영자에게만 보이고 자동 발송하지 않는다. 그룹 상향 이동·노출 승격·측정 단계는 중단했다. 켜는 데 필요한 것은
-> 운영자의 모델 선택(유료 호출)과 `SUPPORT_TRIAGE_ENABLED`뿐이며, 아래 P1의 Q15·Q16 같은 착수 조건은 더 이상
-> 켜기를 막지 않는다.
+> Admin 패널에서 운영자가 모델을 고르고(유료 호출) 스위치를 켜는 것뿐이고(2026-11-04, 15분 cron에 얹음), 아래 표의
+> 서비스 apply·독립 감시·P1의 Q15·Q16 같은 착수 조건은 더 이상 켜기를 막지 않는다.
 
 | 단계 | 내용 | 착수 조건 |
 |---|---|---|
@@ -269,5 +261,4 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
 
 - 발송 자동화 단계는 없다. LLM 단계는 위 2026-10-19 결정으로 생겼다(신고 본문을 선택한 모델 공급자에게 보낸다).
   각 단계는 flag 제거나 모델 선택 해제로 즉시 이전 단계로 돌아간다.
-- 7절의 독립 감시가 동작하지 않는 동안에는 `SUPPORT_TRIAGE_ENABLED`를 켜지 않는다.
 - 다음 단계 조건의 충족 판정과 flag 전환은 사람이 한다.
