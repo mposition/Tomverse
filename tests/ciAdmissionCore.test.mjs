@@ -463,8 +463,9 @@ test("a pull request a person marked ready is never sent back, and still takes i
   const open = [top, over, below];
   const input = { state: state({ capacity: 5, queue: lineOf(1, 2, 3) }), openPulls: open, running: runs(top, over), checks: checksFor(open), runners: [owner(top, 4), owner(over, 4)] };
   // Over the budget, no person: sent back as before.
-  assert.deepEqual(kinds(judge({ ...input, personReady: new Set() })), ["hold:2", "cancel:2"].slice(0, kinds(judge({ ...input, personReady: new Set() })).length));
-  assert.equal(statuses(judge({ ...input, personReady: new Set() }))[2], "held");
+  const sent = judge({ ...input, personReady: new Set() });
+  assert.equal(sent.actions.some((action) => action.kind === "hold" && action.pull.number === 2), true);
+  assert.equal(statuses(sent)[2], "held");
   // A person marked it ready: left alone, and the draft below waits for its runners.
   const kept = judge({ ...input, personReady: new Set([2]) });
   assert.equal(statuses(kept)[2], "running");
