@@ -24,7 +24,9 @@
  *   running keeps its slots while they fit; one further down whose CI runs
  *   past the budget goes back to draft and its runs are cancelled -- but
  *   never on a round that could not read GitHub's jobs, nor within
- *   CI_ADMISSION_HOLD_GRACE_MS of admission marking it ready. A draft
+ *   CI_ADMISSION_HOLD_GRACE_MS of admission marking it ready, nor when a
+ *   person marked it ready (owner, 2026-11-04: their decision stands; its
+ *   runners still count, so the drafts below wait for them). A draft
  *   that the slots reach is marked ready -- CI starts -- when it has no
  *   conflict with its base and is not behind it; otherwise it is passed over
  *   and says why. The first draft that does not
@@ -475,6 +477,8 @@ export function evaluateCiAdmission(input: {
   checks?: ReadonlyMap<number, CiAdmissionCheck>;
   /** Who holds GitHub-hosted runners right now; null when unread (every CI then counts at its need). */
   runners?: readonly CiRunnerOwner[] | null;
+  /** Running pull requests a person last marked ready, never sent back; null when unread, and then none is. */
+  personReady?: ReadonlySet<number> | null;
   nowMs: number;
   shadow: boolean;
   /** Whether a draft behind its base has its branch updated (CI_ADMISSION_UPDATE_BRANCH); on unless false. */
@@ -567,7 +571,7 @@ export function evaluateCiAdmission(input: {
       const runners = Math.min(pullRunners.get(pull.number) ?? 0, state.capacity);
       if (!occupying(pull)) {
         status.set(pull.number, "done");
-      } else if (allotted + runners <= budget || keepsRunning(pull.number)) {
+      } else if (allotted + runners <= budget || keepsRunning(pull.number) || input.personReady === null || input.personReady?.has(pull.number)) {
         allotted += runners;
         status.set(pull.number, "running");
       } else {

@@ -225,6 +225,12 @@ export const HISTORICAL_SOURCE_REFERENCES = {
             "layout did; the sentence names it in the past tense to say what the " +
             "spec is guarding against.",
     },
+    "tests/globalNotFoundRouting.test.mjs -> app/layout.tsx": {
+        reason:
+            "RECON-I18N-001. The comment says the global-not-found file is only " +
+            "load-bearing while there is no single root layout at app/layout.tsx, " +
+            "and the test asserts that file does not exist.",
+    },
 };
 
 /**
