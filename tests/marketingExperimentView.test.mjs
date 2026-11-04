@@ -59,6 +59,7 @@ test("with nothing stored the section has no row and offers every bundle", () =>
   assert.equal(experiments.spikePassed, true);
   assert.deepEqual(experiments.bundles, [
     { bundleId: "home-hero-v1", variantId: "b", locales: ["en", "ko"] },
+    { bundleId: "home-hero-v2", variantId: "b", locales: ["en", "ko"] },
   ]);
 });
 
