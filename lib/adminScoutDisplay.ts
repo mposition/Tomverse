@@ -68,9 +68,9 @@ export function localTime(
 }
 
 /**
- * How many suggestions "select the next batch" picks: about what the AMUX idea
- * lane takes in a day, since an idea it has not reached within seven days is
- * dropped (lib/amux/ideaRetentionCore.ts).
+ * How many suggestions "select the next batch" picks. AMUX gets through ideas
+ * slowly, each can start paid work, and one it has not reached within seven days
+ * is dropped (lib/amux/ideaRetentionCore.ts), so a larger batch would only lose ideas.
  */
 export const SCOUT_SEND_BATCH = 10;
 
