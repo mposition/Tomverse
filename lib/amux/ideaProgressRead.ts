@@ -20,8 +20,10 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   closable: boolean;
   requestId: string;
   submittedAt: string;
-  /** The first registered card's display key, the only plaintext label an idea has. */
+  /** The first registered card's display key, the idea's label when it has one. */
   displayKey: string | null;
+  /** The body's first line (lib/amux/ideaTitleCore.ts); null once the body is purged. */
+  title?: string | null;
   /** The idea lane's state, when the lane took the idea or will take it next (absent: neither). */
   lane?: AmuxIdeaLaneState | null;
   /** Task PRs waiting for GitHub review or merge. */
@@ -56,7 +58,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  * eight such gaps, and over the production round trip the Ideas list failed
  * to read; a single statement has the same two gaps as every other boundary.
  *
- * It reads no idea text, title or body (all encrypted or purged); a failed read
+ * It reads no idea body or digest, only the plaintext title kept with the body
+ * (lib/amux/ideaTitleCore.ts); a failed read
  * throws, and the page shows it as unavailable, never as an empty list. One
  * more attempt is made after a failure, which is safe because nothing was
  * written. Outside a route budget (the page has none) the boundary does not
@@ -94,7 +97,7 @@ type SqlCheckoutEvidence = {
 };
 type SqlIdea = {
   id: string; requestId: string; state: string; submissionOrigin: "owner" | "session";
-  submittedAtMs: number; cancelled: boolean;
+  title: string | null; submittedAtMs: number; cancelled: boolean;
   proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
   referencePins: unknown;
   referencePinAuditStatus: "declared" | "legacy" | null;
@@ -123,7 +126,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         -- The lane's claim (ideaLaneService.ts) needs the raw text kept. Its key
         -- is set exactly when the encrypted text is (raw_key_pair_check), so this read
         -- never names a text or digest column; intake writes the digest with them.
-        ("rawPurgedAt" IS NULL AND "rawKeyId" IS NOT NULL) AS "rawReadable"
+        -- The plaintext title is the one exception, cleared with the body.
+        ("rawPurgedAt" IS NULL AND "rawKeyId" IS NOT NULL) AS "rawReadable", "title"
       FROM "AmuxIdeaSubmission"
       -- A closed or cancelled idea leaves the list, so the bound is spent on
       -- ideas still in progress.
@@ -136,6 +140,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       n."requestId"::text AS "requestId",
       n."state" AS "state",
       n."submissionOrigin" AS "submissionOrigin",
+      n."title" AS "title",
       (extract(epoch FROM n."submittedAt") * 1000)::double precision AS "submittedAtMs",
       (n."cancelledAt" IS NOT NULL) AS "cancelled",
       (extract(epoch FROM n."analysisDeadlineAt") * 1000)::double precision AS "analysisDeadlineMs",
@@ -237,6 +242,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
+      title: idea.title,
       reviewPullRequests: own.filter((card) => card.cardType !== "story" && !card.terminal &&
         card.status === "review" && card.reviewPrNumber !== null)
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey }))
