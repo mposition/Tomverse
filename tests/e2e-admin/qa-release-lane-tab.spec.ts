@@ -80,7 +80,7 @@ test("the merge lane tab says what the lane is doing and which pull requests are
 
   // The operator's count rides on the tab, from any tab of the page.
   await page.goto("/admin/qa-release?tab=overview");
-  await expect(page.getByRole("link", { name: /^Merge lane/ })).toContainText("1");
+  await expect(page.getByRole("link", { name: /^Merge lane, / })).toContainText("1");
   // The overview raises them too and shows where work stands.
   await expect(page.getByTestId("qa-release-attention-lane_human")).toContainText("#2881");
   await expect(page.getByTestId("qa-release-flow")).toContainText("yours 1");
