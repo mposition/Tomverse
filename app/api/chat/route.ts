@@ -377,6 +377,11 @@ import {
     GUEST_MAX_ATTACHMENT_BYTES,
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
+import {
+    attachmentIdentity,
+    attachmentReferenceKey,
+    collapseRepeatedAttachments,
+} from "@/lib/chatRepeatedAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import {
     chatLeaseAcquired,
@@ -471,19 +476,6 @@ type IncomingAttachment = {
     uploadId?: unknown;
     data?: unknown;
     kind?: unknown;
-};
-
-/** How one attachment reference is keyed while a turn is being resolved. */
-const attachmentReferenceKey = (
-    attachment: IncomingAttachment
-): string | null => {
-    if (typeof attachment?.attachmentId === "string" && attachment.attachmentId) {
-        return `a:${attachment.attachmentId}`;
-    }
-    if (typeof attachment?.uploadId === "string" && attachment.uploadId) {
-        return `u:${attachment.uploadId}`;
-    }
-    return null;
 };
 
 const parseStoredModelIds = (value: unknown) => {
@@ -1385,7 +1377,7 @@ async function handleChatPost(
             (body as { currentLocation?: unknown } | null)?.currentLocation
         );
         const {
-            messages,
+            messages: requestMessages,
             modelId,
             conversationId,
             assistantMessageId,
@@ -1406,11 +1398,11 @@ async function handleChatPost(
         }
         persistenceSourceUserMessageId = sourceUserMessageId;
         {
-            const attachments = messages.flatMap((message) =>
+            const attachments = requestMessages.flatMap((message) =>
                 Array.isArray(message.attachments) ? message.attachments : []
             );
             requestShapeForLog = {
-                messageCount: messages.length,
+                messageCount: requestMessages.length,
                 attachmentCount: attachments.length,
                 imageAttachmentCount: attachments.filter((attachment) => {
                     const mediaType = (attachment as { mediaType?: unknown })
@@ -1421,6 +1413,20 @@ async function handleChatPost(
                     );
                 }).length,
             };
+        }
+        // Before anything reads the transcript, so the file a retry repeated is
+        // resolved, measured, priced and sent once. The log line above keeps the
+        // shape the client sent.
+        const { messages, removedReferenceCount } =
+            collapseRepeatedAttachments(requestMessages);
+        if (removedReferenceCount > 0) {
+            console.info(JSON.stringify({
+                event: "chat_repeated_attachments_collapsed",
+                traceId,
+                messageCount: messages.length,
+                removedReferenceCount,
+                timestamp: new Date().toISOString(),
+            }));
         }
         // The durable source remains authored. Only the server's atomic
         // consume may select a different current-turn execution view.
@@ -2521,10 +2527,12 @@ async function handleChatPost(
           reference -- and the guest path, whose keys are derived from the
           caller's own signed identity, keeps deduplicating on the key because
           that is the only name a guest object has.
+
+          A retry's repeat across messages was collapsed above, so what reaches
+          this refusal is a file named twice on one message.
         */
         const attachmentIdentities = new Set<string>();
         for (const attachment of requestAttachments) {
-            const hasObjectKey = typeof attachment?.objectKey === "string";
             const hasInlineData = typeof attachment?.data === "string";
             if (hasInlineData) {
                 throw new ChatAccessError(
@@ -2533,9 +2541,7 @@ async function handleChatPost(
                     "Attachments must be uploaded before sending."
                 );
             }
-            const identity =
-                attachmentReferenceKey(attachment) ??
-                (hasObjectKey ? `k:${attachment.objectKey as string}` : null);
+            const identity = attachmentIdentity(attachment);
             if (identity) {
                 if (attachmentIdentities.has(identity)) {
                     throw new ChatAccessError(
