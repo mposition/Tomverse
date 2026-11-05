@@ -68,6 +68,10 @@ test("the daily job keeps the stream outside git and through the reader", () => 
   assert.match(daily, /--output-format stream-json --verbose/);
   assert.match(daily, /job\/run-\$\(date -u \+%Y%m%d\)\.jsonl/);
   assert.match(daily, /node print-run-result\.mjs/);
+  // No MCP tool may ride in the prompt (2026-11-04 "Prompt is too long").
+  assert.match(daily, /ENABLE_CLAUDEAI_MCP_SERVERS=false "\$\{CLAUDE_BIN/);
+  assert.match(daily, /--strict-mcp-config/);
+  assert.match(daily, /--disallowedTools "mcp__\*"/);
   assert.match(readFileSync("tools/marketing-video/.gitignore", "utf8"), /^job\/$/m);
 });
 
