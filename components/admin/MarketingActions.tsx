@@ -335,7 +335,8 @@ export function MarketingActionRail({
     [open, send, sendBatch]
   );
 
-  if (actions.length === 0) return null;
+  // Kept while there is a result to read: a batch can leave a list with no actions.
+  if (actions.length === 0 && done === null && failure === null) return null;
   const opened = open ? byId.get(open) : null;
 
   const ICONS = { check: Check, pause: Pause, arrow: ArrowRight } as const;
