@@ -45,7 +45,7 @@ owner-only (rule 14).
 | Command Center | Work queue | `/admin/work-queue` | — |
 | Command Center | Analytics | `/admin/analytics` | `usage`, `product`, `imports`, `ai-review` |
 | Customers | Users | `/admin/users` | — |
-| Customers | Support | `/admin/support` | `feedback`, `fixes`, `privacy` |
+| Customers | Support | `/admin/support` | `feedback`, `privacy` (retired `fixes` falls to `feedback`) |
 | Revenue | Billing | `/admin/billing` | `plans`, `promotions` |
 | Revenue | Refunds | `/admin/refunds` | — |
 | Revenue | Credit ledger | `/admin/credit-ledger` | — |
@@ -196,8 +196,8 @@ rail shows it, greyed and dated when the report is old, and says so when a
 server too old to send it reports.
 The operator's to-do -- the tab, the dashboard's operator metric and both
 operator windows -- is the queues where an agent waits on a person: marketing
-posts pending approval, AMUX escalations, AMUX halts nobody has cleared and
-auto-fix cases waiting on an operator. They are read with the sidebar badges'
+posts pending approval, AMUX escalations and AMUX halts nobody has cleared.
+They are read with the sidebar badges'
 own count functions (`lib/adminNavigationCounts.ts`), each links to the
 screen where it is acted on, and a count that fails to read is drawn as
 unread and left out of the total, which then says "+?".

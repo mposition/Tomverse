@@ -30,7 +30,6 @@ import type {
   AgentOfficeRoutingState,
 } from "@/lib/agentOffice/live";
 import {
-  countAutoFixActionCases,
   countAwaitingAmuxEscalations,
   countPendingMarketingApprovals,
 } from "@/lib/adminNavigationCounts";
@@ -373,11 +372,10 @@ async function readDigest(now: Date): Promise<AgentOfficeDigestState> {
  * that count unknown, not the whole to-do zero (rule 8).
  */
 async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
-  const [marketing, amuxEscalations, amuxHalts, autoFix] = await Promise.allSettled([
+  const [marketing, amuxEscalations, amuxHalts] = await Promise.allSettled([
     countPendingMarketingApprovals(),
     countAwaitingAmuxEscalations(),
     countOpenAmuxOrchestratorHalts(),
-    countAutoFixActionCases(),
   ]);
   const value = (result: PromiseSettledResult<number>, read: string) => {
     if (result.status === "fulfilled") return result.value;
@@ -388,7 +386,6 @@ async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
     marketing: value(marketing, "operator_queue_marketing"),
     amuxEscalations: value(amuxEscalations, "operator_queue_amux_escalations"),
     amuxHalts: value(amuxHalts, "operator_queue_amux_halts"),
-    autoFix: value(autoFix, "operator_queue_autofix"),
   };
 }
 

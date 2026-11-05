@@ -1140,7 +1140,7 @@ export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy):
  * each links to the screen where it is acted on. Nothing here decides; the
  * office only counts and points.
  */
-export const OPERATOR_QUEUE_KEYS = ["marketing", "amuxEscalations", "amuxHalts", "autoFix"] as const;
+export const OPERATOR_QUEUE_KEYS = ["marketing", "amuxEscalations", "amuxHalts"] as const;
 export type OperatorQueueKey = (typeof OPERATOR_QUEUE_KEYS)[number];
 /** `null` is a count that could not be read: never shown as zero. */
 export type AgentOfficeOperatorQueue = Record<OperatorQueueKey, number | null>;
@@ -1149,7 +1149,6 @@ export const OPERATOR_QUEUE_HREFS: Record<OperatorQueueKey, string> = {
   marketing: "/admin/marketing",
   amuxEscalations: "/admin/amux-execution?tab=assignment",
   amuxHalts: "/admin/amux-settings?tab=safety",
-  autoFix: "/admin/support",
 };
 
 /** The to-do total over the counts that were read, and whether any could not be. */
