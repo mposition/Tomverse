@@ -84,7 +84,7 @@ const settled = (result, build) => (result && result.status === "fulfilled" ? bu
  * Promise.allSettled result: { status: "fulfilled", value } or a rejection.
  * Returns { ok: true, snapshot } or { ok: false, reason } from parseSnapshot.
  */
-export function buildSnapshot({ readiness, jobs, budgets, now, commitSha }) {
+export function buildSnapshot({ readiness, jobs, budgets, alertFailures, now, commitSha }) {
   const value = {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     generatedAt: floorIso(now, MINUTE),
@@ -94,6 +94,8 @@ export function buildSnapshot({ readiness, jobs, budgets, now, commitSha }) {
     readiness: settled(readiness, (v) => readinessSection(v?.checks)),
     scheduledJobs: settled(jobs, jobsSection),
     providerBudgets: settled(budgets, budgetsSection),
+    // Only for a runner that asked: an older one refuses a field it does not know.
+    ...(alertFailures ? { alertDeliveryFailuresBand: settled(alertFailures, (count) => failureBand(count) ?? "unknown") } : {}),
   };
   return parseSnapshot(value);
 }
