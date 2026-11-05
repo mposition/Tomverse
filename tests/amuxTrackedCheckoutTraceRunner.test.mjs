@@ -23,6 +23,11 @@ const sandboxUnavailable = (() => {
   } catch { return "strace cannot follow an unprivileged bwrap sandbox on this host"; }
 })();
 
+// The node-based cases bind only /usr, /bin and /lib into the sandbox, so they
+// need a system node there; a toolchain-managed node (setup-node) is not visible.
+const sandboxNodeUnavailable = sandboxUnavailable
+  || (existsSync("/usr/bin/node") ? false : "no system node at /usr/bin/node for the sandbox");
+
 test("isolated traced child streams opened checkout paths without a log", {
   skip: sandboxUnavailable,
 }, async () => {
@@ -64,7 +69,7 @@ test("isolated traced child streams opened checkout paths without a log", {
 });
 
 test("Node's io_uring is refused and its read is still observed as a complete manifest", {
-  skip: sandboxUnavailable,
+  skip: sandboxNodeUnavailable,
 }, async () => {
   // Measured 2026-10-19 on the v19 runner: without the seccomp filter Node 22's
   // libuv io_uring_setup succeeds and the manifest could not be certified.
@@ -100,7 +105,7 @@ test("Node's io_uring is refused and its read is still observed as a complete ma
 });
 
 test("concurrent reads that strace splits across threads still form a complete manifest", {
-  skip: sandboxUnavailable,
+  skip: sandboxNodeUnavailable,
 }, async () => {
   // The sixth Max S0 call ended `undecoded_open`: strace -f writes a call that
   // another thread interrupts as `<unfinished ...>` plus `<... resumed>`.
