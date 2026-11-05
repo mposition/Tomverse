@@ -7,7 +7,8 @@ import { AMUX_V4_ANALYSIS_PROMPT_VERSION, amuxAnalysisPromptWithNote, buildAmuxI
 import { AMUX_SESSION_PAGE_NOTE, amuxSessionAnswerUnitCount } from "../lib/amux/ideaSessionAnswerCore.ts";
 import { amuxV19SessionPromptForClaim } from "../lib/amux/ideaSessionAnalysisPromptCore.ts";
 import { classifyAmuxSessionReviewAnswer } from "../lib/amux/ideaSessionReviewCore.ts";
-import { amuxSessionReviewFirstPageDetail } from "../lib/amux/ideaSessionReviewDetailCore.ts";
+import { amuxSessionPageRefusalDetail, amuxSessionReviewFirstPageDetail } from
+  "../lib/amux/ideaSessionReviewDetailCore.ts";
 
 const source = "operator_idea";
 const feature = { ref: "feature_existing_01", kind: "node", level: "feature" };
@@ -190,6 +191,18 @@ test("an answer refused before the app derived the fields keeps its reason on th
   assert.deepEqual(amuxSessionReviewFirstPageDetail(raw, "claim-1"), { detail: "cursor_remaining_mismatch" });
   const passing = JSON.stringify(answer(0, { previewId: "claim-1", units }));
   assert.deepEqual(amuxSessionReviewFirstPageDetail(passing, "claim-1"), { detail: "draft_refused" });
+});
+
+test("a refusal recorded today names the check the derived answer failed", () => {
+  const page = { previewId: "preview-1", chunkIndex: 0, permittedTargetRefs: [feature], history: [] };
+  const nodesOnly = JSON.stringify(answer(0, { coverageStatus: "more", continuationKind: "input",
+    remainingScope: "Rest.", units: [node(0)] }));
+  assert.deepEqual(amuxSessionPageRefusalDetail(nodesOnly, page), { detail: "chunk_schema_rejected",
+    at: { rule: "outcome_combination", field: "outcome" } });
+  const mislabelled = JSON.stringify(answer(0, { coverageStatus: "more", continuationKind: "input",
+    remainingScope: "Rest." }));
+  assert.deepEqual(amuxSessionPageRefusalDetail(mislabelled, page), { detail: "draft_refused" },
+    "it passes inspection, so only storing it could have refused it");
 });
 
 test("the session note sits before the confirmed data, which stays the prompt's last block", () => {
