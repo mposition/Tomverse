@@ -188,16 +188,20 @@ test("a replacement cycle or an over-long chain ends without a successor", () =>
 // route is read to keep the two from drifting apart.
 test("the nameable-replacement rule matches the chat route's MODEL_RETIRED branch", () => {
   const route = readFileSync("app/api/chat/route.ts", "utf8");
-  const start = route.indexOf("const replacementCandidate = catalogModel.replacementModelId");
+  const start = route.indexOf("resolveReplacementModel(\n");
   assert.notEqual(start, -1, "the MODEL_RETIRED branch moved; re-read it before trusting this report");
   const branch = route.slice(start, route.indexOf('"MODEL_RETIRED"', start));
-  assert.match(branch, /runtimeModelMap\.get\(catalogModel\.replacementModelId\)/);
-  for (const clause of [
-    "replacementCandidate?.enabled",
-    "replacementCandidate.publiclyListed !== false",
-    "!replacementCandidate.catalogDeleted",
-  ]) {
-    assert.ok(branch.includes(clause), `the route no longer says ${clause}`);
+  assert.match(branch, /runtimeModelMap\.get\(candidateId\)/);
+  // The route delegates to lib/models.ts; the bar lives in isPubliclySelectableModel.
+  const models = readFileSync("lib/models.ts", "utf8");
+  const barStart = models.indexOf(
+    "model.publiclyListed !== false &&",
+    models.indexOf("export const isPubliclySelectableModel"),
+  );
+  assert.notEqual(barStart, -1, "isPubliclySelectableModel moved; re-read it before trusting this report");
+  const bar = models.slice(barStart, models.indexOf(";", barStart));
+  for (const clause of ["model.publiclyListed !== false", "!model.catalogDeleted", "model.enabled"]) {
+    assert.ok(bar.includes(clause), `the selectable bar no longer says ${clause}`);
   }
   assert.equal(isNameableReplacement(model("a", "openai")), true);
   assert.equal(isNameableReplacement(model("a", "openai", { enabled: false })), false);

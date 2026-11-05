@@ -1,7 +1,11 @@
 import "server-only";
 
-import type { AiModel } from "@/lib/models";
-import { getRuntimeModel } from "@/lib/modelRegistry";
+import {
+  isRetiredModel,
+  resolveReplacementModel,
+  type AiModel,
+} from "@/lib/models";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import {
   modelNotice,
   modelNoticeFallbackText,
@@ -40,7 +44,11 @@ export type ModelRuntimeVerdict = {
 export async function assertModelRuntimeAvailable(
   modelId: string
 ): Promise<ModelRuntimeVerdict> {
-  const model = await getRuntimeModel(modelId);
+  // The whole registry, so the replacement chain below is walked against one
+  // snapshot. `getRuntimeModel` reads the same cached list per call, so this
+  // is the same work done once rather than once per hop.
+  const models = await getRuntimeModels({ includeCatalogDeleted: true });
+  const model = models.find((entry) => entry.id === modelId);
   if (!model) {
     return { allowed: false, reason: "Unknown model.", notice: null };
   }
@@ -52,14 +60,22 @@ export async function assertModelRuntimeAvailable(
   // exactly what `replacementModelId` already says, in English, to everybody
   // (EM-15). The tenth said something no field holds, and a stored note still
   // wins -- see lib/modelRetirementNotice.ts.
-  const replacement = model.replacementModelId
-    ? await getRuntimeModel(model.replacementModelId)
-    : null;
+  //
+  // Resolved through the chain rather than by reading one hop. An
+  // administrator's `replacementModelId` is only as current as the day it was
+  // written: retire A onto B, retire B onto C, and A's link now names a model
+  // that is not in anybody's picker. This names the first model in that chain
+  // that is actually selectable, and nothing when there is none.
+  const modelsById = new Map(models.map((entry) => [entry.id, entry]));
+  const replacement = resolveReplacementModel(model, (candidateId) =>
+    modelsById.get(candidateId)
+  );
 
   const notice = modelNotice({
     userVisibleNote: model.userVisibleNote ?? null,
     replacementModelName: replacement?.name ?? null,
     unavailable,
+    retired: isRetiredModel(model) || model.catalogDeleted === true,
   });
 
   return {
