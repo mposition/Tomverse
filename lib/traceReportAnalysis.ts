@@ -6,6 +6,8 @@
  * Off by default. The Admin console holds one mode:
  *   off      nothing runs and nothing is spent;
  *   analyze  one call of the support-triage model per report;
+ *            Needs support triage on with a model, and FEEDBACK_AUTOFIX_SHADOW_ENABLED,
+ *            the kill switch that makes new reports into cases at all.
  *   fix      also hands what the model calls a code defect to the lane. The
  *            owner who chose it is saved with it: the ideas are theirs, and
  *            they stop when that account stops being an owner.
@@ -28,7 +30,7 @@ import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
-import { resolveSupportTriageLlmModel } from "@/lib/supportTriageLlmSetting";
+import { resolveSupportTriageEnabled, resolveSupportTriageLlmModel } from "@/lib/supportTriageLlmSetting";
 import {
   TRACE_ANALYSIS_CONFIDENCES,
   TRACE_ANALYSIS_KINDS,
@@ -303,7 +305,7 @@ const readUsage = async (tx: Prisma.TransactionClient, day: string): Promise<Usa
  * passes cannot call twice or read the same room under the limit. The case's
  * attempts go up here too: a reservation is spent even if the step then fails or
  * the process dies, as the call may have been billed. A handoff reserves once
- * per case: its retries reuse one idea, so they spend nothing.
+ * per case and day: its retries reuse one idea.
  */
 const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date): Promise<CaseRow | null> =>
   prisma.$transaction(async (tx) => {
@@ -319,9 +321,12 @@ const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date):
     } else if (!traceAnalysisWantsFix(row.classification, analysis)) {
       return null;
     }
-    const alreadyReserved = step === "handoff" && summary.llmHandoffReserved === true;
+    const day = now.toISOString().slice(0, 10);
+    // A retry today spends nothing; one from an earlier day counts again, so a
+    // backlog of failed submits cannot all land on the day submitting works.
+    const alreadyReserved = step === "handoff" && summary.llmHandoffReservedDay === day;
     if (!alreadyReserved) {
-      const usage = await readUsage(tx, now.toISOString().slice(0, 10));
+      const usage = await readUsage(tx, day);
       if (step === "analysis" ? usage.analyses >= TRACE_ANALYSIS_PER_DAY : usage.handoffs >= TRACE_FIX_HANDOFFS_PER_DAY) return null;
       const value = JSON.stringify(
         step === "analysis" ? { ...usage, analyses: usage.analyses + 1 } : { ...usage, handoffs: usage.handoffs + 1 }
@@ -340,7 +345,7 @@ const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date):
             llmAnalysisClaimUntil: new Date(now.getTime() + CLAIM_MS).toISOString(),
             llmAnalysisAttempts: attemptsOf(summary) + 1,
           }
-        : { ...summary, llmHandoffReserved: true };
+        : { ...summary, llmHandoffReservedDay: day };
     await tx.feedbackAutoFixCase.update({
       where: { id: caseId },
       data: { diagnosticSummary: claimed as Prisma.InputJsonObject },
@@ -381,6 +386,8 @@ export const runTraceReportAnalysisQuietly = async ({
     const { mode, ownerUserId } = await readTraceAnalysisMode();
     pass.mode = mode;
     if (mode === "off") return pass;
+    // Support triage's own switch stops this too: its Off means no paid calls here.
+    if (!(await resolveSupportTriageEnabled(process.env)).enabled) return pass;
     // The classifying pass otherwise waits for the daily cleanup.
     await runFeedbackAutoFixShadowWorker();
     const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;

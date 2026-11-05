@@ -116,7 +116,9 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     traceAnalysisModeLabel: "Verified trace analysis",
     traceAnalysisModes: { off: "Off", analyze: "Analyze", fix: "Analyze and open draft PRs" },
     traceAnalysisHelp:
-      "Each report with a verified trace is sent once to the model above, recorded facts only, never the reporter's words. Draft PRs are made by the AMUX idea lane, at most 3 a day, and you merge them.",
+      "Runs while AI triage is on. Each report with a verified trace is sent once to the model above, recorded facts only, never the reporter's words. Draft PRs are made by the AMUX idea lane, at most 3 a day, and you merge them.",
+    traceAnalysisNoCases:
+      "FEEDBACK_AUTOFIX_SHADOW_ENABLED is off in this environment, so new reports get no case and no analysis until it is set to true.",
     traceAnalysisTitle: "Error analysis",
     traceAnalysisCause: "Likely cause",
     traceAnalysisRecommendation: "First step",
@@ -311,7 +313,9 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     traceAnalysisModeLabel: "검증된 추적 ID 분석",
     traceAnalysisModes: { off: "끔", analyze: "분석", fix: "분석 + draft PR" },
     traceAnalysisHelp:
-      "검증된 추적 ID가 있는 신고마다 위 모델을 한 번 호출합니다. 서버 기록만 보내고 신고자의 글은 보내지 않습니다. draft PR은 AMUX idea lane이 하루 최대 3건 만들고, 병합은 직접 합니다.",
+      "AI 분류가 켜져 있을 때 돕니다. 검증된 추적 ID가 있는 신고마다 위 모델을 한 번 호출합니다. 서버 기록만 보내고 신고자의 글은 보내지 않습니다. draft PR은 AMUX idea lane이 하루 최대 3건 만들고, 병합은 직접 합니다.",
+    traceAnalysisNoCases:
+      "이 환경은 FEEDBACK_AUTOFIX_SHADOW_ENABLED가 꺼져 있어, true로 설정하기 전까지 새 신고에는 case도 분석도 생기지 않습니다.",
     traceAnalysisTitle: "오류 분석",
     traceAnalysisCause: "추정 원인",
     traceAnalysisRecommendation: "먼저 할 일",

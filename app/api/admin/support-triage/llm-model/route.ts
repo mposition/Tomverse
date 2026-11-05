@@ -8,6 +8,7 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
+import { isAutoFixShadowModeEnabled } from "@/lib/feedbackAutoFixCore";
 import { readSupportTriageHealth } from "@/lib/supportTriageCycle";
 import {
   listSupportTriageModelOptions,
@@ -61,6 +62,7 @@ export async function GET(request: Request) {
         enabledSource: switchState.source,
         health,
         traceAnalysis: traceAnalysis.mode,
+        traceCasesEnabled: isAutoFixShadowModeEnabled(),
       },
       { headers }
     );

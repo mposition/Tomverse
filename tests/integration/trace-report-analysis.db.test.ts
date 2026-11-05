@@ -3,6 +3,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { prisma } from "@/lib/prisma";
+import { SUPPORT_TRIAGE_ENABLED_SETTING_KEY } from "@/lib/supportTriageLlmSetting";
 import {
   TRACE_ANALYSIS_MODE_SETTING_KEY,
   TRACE_ANALYSIS_USAGE_SETTING_KEY,
@@ -32,12 +33,17 @@ const reset = async () => {
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-trace-" } } });
   await prisma.providerErrorEvent.deleteMany({ where: { traceId: { startsWith: "trace-analysis-" } } });
   await prisma.appSetting.deleteMany({
-    where: { key: { in: [TRACE_ANALYSIS_MODE_SETTING_KEY, TRACE_ANALYSIS_USAGE_SETTING_KEY] } },
+    where: { key: { in: [TRACE_ANALYSIS_MODE_SETTING_KEY, TRACE_ANALYSIS_USAGE_SETTING_KEY, SUPPORT_TRIAGE_ENABLED_SETTING_KEY] } },
   });
 };
 
 const setMode = (value: string) =>
-  prisma.appSetting.create({ data: { key: TRACE_ANALYSIS_MODE_SETTING_KEY, value } });
+  prisma.appSetting.createMany({
+    data: [
+      { key: TRACE_ANALYSIS_MODE_SETTING_KEY, value },
+      { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY, value: "true" },
+    ],
+  });
 
 const report = async (suffix: string, classification = "application_candidate") => {
   await prisma.feedback.create({
@@ -167,6 +173,38 @@ test("a pass whose claim was taken does not write over the one that holds it", a
   };
   assert.equal((await runTraceReportAnalysisQuietly({ llm: slow })).analyzed, 1);
   assert.equal(await stored(row.id), null);
+});
+
+test("support triage's Off stops the paid calls and the handoffs", async () => {
+  await setMode(`fix:${OWNER}`);
+  await report("triage-off");
+  await prisma.appSetting.update({ where: { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY }, data: { value: "false" } });
+  const { calls, llm } = recordingLlm();
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(calls.length, 0);
+  assert.equal(ideas.length, 0);
+});
+
+test("failed submits piled up over days do not all land on one day", async () => {
+  await setMode(`fix:${OWNER}`);
+  for (let i = 0; i < TRACE_FIX_HANDOFFS_PER_DAY + 2; i += 1) await report(`pile-${i}`);
+  const { llm } = recordingLlm();
+  const day = 24 * 60 * 60_000;
+  // Submitting is off for two days: each stops at its first refused case.
+  for (const ago of [2, 1]) {
+    await runTraceReportAnalysisQuietly({
+      llm,
+      now: new Date(Date.now() - ago * day),
+      submit: async () => {
+        throw new Error("submission_disabled");
+      },
+    });
+  }
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(ideas.length, TRACE_FIX_HANDOFFS_PER_DAY);
 });
 
 test("one pass takes a bounded number of reports", async () => {

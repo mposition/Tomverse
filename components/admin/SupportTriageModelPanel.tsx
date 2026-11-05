@@ -58,6 +58,7 @@ export function SupportTriageModelPanel() {
   const [modelSource, setModelSource] = useState<"admin" | "environment" | null>(null);
   const [health, setHealth] = useState<SupportTriageHealth | null>(null);
   const [traceAnalysis, setTraceAnalysis] = useState<TraceAnalysisMode | null>(null);
+  const [traceCasesEnabled, setTraceCasesEnabled] = useState(true);
 
   useEffect(() => {
     let live = true;
@@ -72,6 +73,7 @@ export function SupportTriageModelPanel() {
           enabledSource?: "admin" | "environment";
           health?: SupportTriageHealth;
           traceAnalysis?: TraceAnalysisMode;
+          traceCasesEnabled?: boolean;
         };
         if (!live) return;
         if (!response.ok || !Array.isArray(payload.options)) {
@@ -86,6 +88,7 @@ export function SupportTriageModelPanel() {
         setEnabledSource(payload.enabledSource ?? null);
         setHealth(payload.health ?? null);
         setTraceAnalysis(payload.traceAnalysis ?? null);
+        setTraceCasesEnabled(payload.traceCasesEnabled !== false);
       } catch {
         if (live) setNotice({ tone: "error", text: m.triageModelLoadFailed });
       }
@@ -214,6 +217,11 @@ export function SupportTriageModelPanel() {
           <option value="fix">{m.traceAnalysisModes.fix}</option>
         </select>
         <p className="w-full text-xs leading-5 text-zinc-400">{m.traceAnalysisHelp}</p>
+        {traceCasesEnabled ? null : (
+          <p role="alert" className="w-full text-xs leading-5 text-amber-300" data-testid="trace-analysis-no-cases">
+            {m.traceAnalysisNoCases}
+          </p>
+        )}
       </div>
       {health ? <SupportTriageHealthLine health={health} m={m} /> : null}
       {reauthenticationRequired ? (
