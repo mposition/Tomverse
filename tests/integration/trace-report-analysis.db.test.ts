@@ -1,0 +1,230 @@
+import assert from "node:assert/strict";
+import { after, beforeEach, test } from "node:test";
+
+import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
+import { prisma } from "@/lib/prisma";
+import {
+  TRACE_ANALYSIS_MODE_SETTING_KEY,
+  runTraceReportAnalysisQuietly,
+  submitTraceFix,
+  type TraceAnalysisLlm,
+} from "@/lib/traceReportAnalysis";
+import {
+  TRACE_ANALYSIS_MAX_ATTEMPTS,
+  TRACE_ANALYSIS_PER_PASS,
+  TRACE_FIX_HANDOFFS_PER_DAY,
+  readStoredTraceAnalysis,
+  traceFixRequestId,
+  type TraceAnalysisFacts,
+} from "@/lib/traceReportAnalysisCore";
+
+// Verified-trace analysis (docs/policy/trace-feedback-automation.md §8a).
+//
+// What needs a database: the mode row, the case rows the pass reads and writes
+// back, and the provider events it joins by trace.
+
+const SECRET_WORDS = "my-private-report-words";
+const OWNER = "owner-user-id";
+
+const reset = async () => {
+  await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-trace-" } } });
+  await prisma.providerErrorEvent.deleteMany({ where: { traceId: { startsWith: "trace-analysis-" } } });
+  await prisma.appSetting.deleteMany({ where: { key: TRACE_ANALYSIS_MODE_SETTING_KEY } });
+};
+
+const setMode = (value: string) =>
+  prisma.appSetting.create({ data: { key: TRACE_ANALYSIS_MODE_SETTING_KEY, value } });
+
+const report = async (suffix: string, classification = "application_candidate") => {
+  await prisma.feedback.create({
+    data: { id: `fb-trace-${suffix}`, type: "bug", message: SECRET_WORDS, path: `/${SECRET_WORDS}` },
+  });
+  return prisma.feedbackAutoFixCase.create({
+    data: {
+      id: `case-trace-${suffix}`,
+      feedbackId: `fb-trace-${suffix}`,
+      traceId: `trace-analysis-${suffix}`,
+      occurrenceId: `occurrence-${suffix}`,
+      fingerprint: "AI_REQUEST_FAILED|release-1",
+      sourceRelease: "release-1",
+      state: "ineligible",
+      classification,
+      diagnosticSummary: { traceId: `trace-analysis-${suffix}`, occurrenceId: `occurrence-${suffix}`, routeClass: "chat", httpStatus: 500 },
+    },
+  });
+};
+
+const stored = async (id: string) =>
+  readStoredTraceAnalysis((await prisma.feedbackAutoFixCase.findUniqueOrThrow({ where: { id } })).diagnosticSummary);
+
+const answer = (kind: "code_fix" | "needs_more_evidence" = "code_fix", confidence: "low" | "high" = "high") =>
+  ({ kind, confidence, cause: "A null model id.", recommendation: "Check the route.", modelId: "model-a" });
+
+const recordingLlm = (result = answer()) => {
+  const calls: TraceAnalysisFacts[] = [];
+  const llm: TraceAnalysisLlm = async (facts) => {
+    calls.push(facts);
+    return result;
+  };
+  return { calls, llm };
+};
+
+const recordingSubmit = () => {
+  const ideas: { ownerUserId: string; requestId: string; idea: string }[] = [];
+  return {
+    ideas,
+    submit: async (input: { ownerUserId: string; requestId: string; idea: string }) => {
+      ideas.push(input);
+      return { ideaId: `idea-${ideas.length}` };
+    },
+  };
+};
+
+beforeEach(reset);
+
+after(async () => {
+  await reset();
+  await prisma.$disconnect();
+});
+
+test("off by default: no setting means no call and nothing written", async () => {
+  await report("off");
+  const { calls, llm } = recordingLlm();
+  assert.equal((await runTraceReportAnalysisQuietly({ llm })).mode, "off");
+  assert.equal(calls.length, 0);
+  assert.equal(await stored("case-trace-off"), null);
+});
+
+test("analyze: the model gets recorded facts only, and its answer is stored once", async () => {
+  await setMode("analyze");
+  const row = await report("facts");
+  await prisma.providerErrorEvent.create({
+    data: { provider: "openai", phase: "stream", diagnosticCode: "X", traceId: row.traceId, message: SECRET_WORDS },
+  });
+  const { calls, llm } = recordingLlm();
+  const { ideas, submit } = recordingSubmit();
+  const pass = await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.deepEqual(pass, { mode: "analyze", analyzed: 1, failed: 0, handedOff: 0 });
+  const sent = JSON.stringify(calls[0]);
+  assert.ok(sent.includes("AI_REQUEST_FAILED"));
+  assert.ok(sent.includes('"diagnosticCode":"X"'));
+  for (const hidden of [SECRET_WORDS, row.traceId, "occurrence-facts"]) assert.ok(!sent.includes(hidden), hidden);
+  const analysis = await stored(row.id);
+  assert.equal(analysis?.status, "done");
+  // Analyze never reaches for the lane, and a second pass does not pay again.
+  assert.equal(ideas.length, 0);
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(calls.length, 1);
+});
+
+test("a failed call is counted and stops at the attempt limit", async () => {
+  await setMode("analyze");
+  const row = await report("fail");
+  let calls = 0;
+  const llm: TraceAnalysisLlm = async () => {
+    calls += 1;
+    return null;
+  };
+  for (let i = 0; i < TRACE_ANALYSIS_MAX_ATTEMPTS + 2; i += 1) await runTraceReportAnalysisQuietly({ llm });
+  assert.equal(calls, TRACE_ANALYSIS_MAX_ATTEMPTS);
+  const analysis = await stored(row.id);
+  assert.equal(analysis?.status === "failed" && analysis.attempts, TRACE_ANALYSIS_MAX_ATTEMPTS);
+});
+
+test("one pass takes a bounded number of reports", async () => {
+  await setMode("analyze");
+  for (let i = 0; i < TRACE_ANALYSIS_PER_PASS + 2; i += 1) await report(`bound-${i}`);
+  const { calls, llm } = recordingLlm();
+  await runTraceReportAnalysisQuietly({ llm });
+  assert.equal(calls.length, TRACE_ANALYSIS_PER_PASS);
+});
+
+test("fix: a code defect becomes one idea with no trace or report text, under the saved owner", async () => {
+  await setMode(`fix:${OWNER}`);
+  const row = await report("fix");
+  const { llm } = recordingLlm();
+  const { ideas, submit } = recordingSubmit();
+  assert.equal((await runTraceReportAnalysisQuietly({ llm, submit })).handedOff, 1);
+  assert.equal(ideas[0].ownerUserId, OWNER);
+  assert.equal(ideas[0].requestId, traceFixRequestId(row.id));
+  assert.ok(ideas[0].idea.startsWith("Fix a production error: AI_REQUEST_FAILED"));
+  for (const hidden of [SECRET_WORDS, row.traceId, "occurrence-fix"]) assert.ok(!ideas[0].idea.includes(hidden), hidden);
+  const analysis = await stored(row.id);
+  assert.equal(analysis?.status === "done" && analysis.handoff?.ideaId, "idea-1");
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(ideas.length, 1);
+});
+
+test("fix: what the server ruled out, a low-confidence answer or another kind opens nothing", async () => {
+  await setMode(`fix:${OWNER}`);
+  await report("limit", "operational_limit");
+  await report("provider", "provider_transient");
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm, submit });
+  assert.equal(ideas.length, 0);
+  await report("low");
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm(answer("code_fix", "low")).llm, submit });
+  await report("other");
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm(answer("needs_more_evidence")).llm, submit });
+  assert.equal(ideas.length, 0);
+});
+
+test("fix: a lost answer retries with the same request id; the daily limit holds across passes", async () => {
+  await setMode(`fix:${OWNER}`);
+  const first = await report("retry");
+  const { llm } = recordingLlm();
+  const requests: string[] = [];
+  await runTraceReportAnalysisQuietly({
+    llm,
+    submit: async ({ requestId }) => {
+      requests.push(requestId);
+      throw new Error("lost");
+    },
+  });
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(ideas[0].requestId, requests[0]);
+  assert.equal(ideas[0].requestId, traceFixRequestId(first.id));
+
+  for (let i = 0; i < TRACE_FIX_HANDOFFS_PER_DAY + 1; i += 1) await report(`cap-${i}`);
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(ideas.length, TRACE_FIX_HANDOFFS_PER_DAY);
+});
+
+test("a model turned off spends nothing but still hands over what was already analysed", async () => {
+  await setMode("analyze");
+  const row = await report("later");
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm });
+  await prisma.appSetting.update({ where: { key: TRACE_ANALYSIS_MODE_SETTING_KEY }, data: { value: `fix:${OWNER}` } });
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm: null, submit });
+  assert.equal(ideas[0].requestId, traceFixRequestId(row.id));
+});
+
+test("the idea is the saved owner's: an account that stopped being an owner submits nothing", async () => {
+  const email = "trace-analysis-owner@example.test";
+  await prisma.user.deleteMany({ where: { email } });
+  const user = await prisma.user.create({ data: { email } });
+  const saved = { ...process.env };
+  const code = async () =>
+    submitTraceFix({ ownerUserId: user.id, requestId: traceFixRequestId("case-a"), idea: "Fix a production error: X" }).then(
+      () => "submitted",
+      (error) => (error instanceof IdeaSubmissionError ? error.code : String(error))
+    );
+  try {
+    process.env.ADMIN_EMAILS = email;
+    process.env.ADMIN_OWNER_EMAILS = email;
+    process.env.ADMIN_USER_IDS = "";
+    // Past the owner check, as far as the submission switch this suite leaves off.
+    delete process.env.TOMVERSE_AMUX_V4_IDEA_SUBMIT;
+    assert.equal(await code(), "submission_disabled");
+    process.env.ADMIN_OWNER_EMAILS = "someone-else@example.test";
+    assert.equal(await code(), "forbidden");
+    await prisma.user.delete({ where: { id: user.id } });
+    assert.equal(await code(), "forbidden");
+  } finally {
+    process.env = saved;
+    await prisma.user.deleteMany({ where: { email } });
+  }
+});

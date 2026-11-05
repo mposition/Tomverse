@@ -8,6 +8,8 @@ import { adminFeedbackInboxMessages } from "@/lib/adminMessages/feedbackInbox";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import type { SupportTriageHealth } from "@/lib/supportTriageCycle";
 
+type TraceAnalysisMode = "off" | "analyze" | "fix";
+
 const PAGE_PATH = "/admin/support?tab=feedback";
 const ROUTE = "/api/admin/support-triage/llm-model";
 
@@ -55,6 +57,7 @@ export function SupportTriageModelPanel() {
   const [enabledSource, setEnabledSource] = useState<"admin" | "environment" | null>(null);
   const [modelSource, setModelSource] = useState<"admin" | "environment" | null>(null);
   const [health, setHealth] = useState<SupportTriageHealth | null>(null);
+  const [traceAnalysis, setTraceAnalysis] = useState<TraceAnalysisMode | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -68,6 +71,7 @@ export function SupportTriageModelPanel() {
           enabled?: boolean;
           enabledSource?: "admin" | "environment";
           health?: SupportTriageHealth;
+          traceAnalysis?: TraceAnalysisMode;
         };
         if (!live) return;
         if (!response.ok || !Array.isArray(payload.options)) {
@@ -81,6 +85,7 @@ export function SupportTriageModelPanel() {
         setEnabled(payload.enabled ?? null);
         setEnabledSource(payload.enabledSource ?? null);
         setHealth(payload.health ?? null);
+        setTraceAnalysis(payload.traceAnalysis ?? null);
       } catch {
         if (live) setNotice({ tone: "error", text: m.triageModelLoadFailed });
       }
@@ -90,7 +95,7 @@ export function SupportTriageModelPanel() {
     };
   }, [m.triageModelLoadFailed]);
 
-  const put = async (body: { modelId?: string | null; enabled?: boolean }) => {
+  const put = async (body: { modelId?: string | null; enabled?: boolean; traceAnalysis?: TraceAnalysisMode }) => {
     setBusy(true);
     setNotice(null);
     setReauthenticationRequired(false);
@@ -104,6 +109,7 @@ export function SupportTriageModelPanel() {
         code?: unknown;
         modelId?: string | null;
         enabled?: boolean;
+        traceAnalysis?: TraceAnalysisMode;
       };
       if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
         setReauthenticationRequired(true);
@@ -121,6 +127,7 @@ export function SupportTriageModelPanel() {
         setEnabled(payload.enabled);
         setEnabledSource("admin");
       }
+      if (payload.traceAnalysis) setTraceAnalysis(payload.traceAnalysis);
       setNotice({ tone: "ok", text: m.triageModelSaved });
     } catch {
       setNotice({ tone: "error", text: m.triageModelSaveFailed });
@@ -189,6 +196,24 @@ export function SupportTriageModelPanel() {
             {modelSource === "admin" ? m.triageSwitchFromAdmin : m.triageSwitchFromEnvironment}
           </span>
         ) : null}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
+        <label className="text-sm text-zinc-200" htmlFor="trace-analysis-mode">
+          {m.traceAnalysisModeLabel}
+        </label>
+        <select
+          id="trace-analysis-mode"
+          data-testid="trace-analysis-mode"
+          value={traceAnalysis ?? "off"}
+          onChange={(event) => void put({ traceAnalysis: event.target.value as TraceAnalysisMode })}
+          disabled={traceAnalysis === null || busy}
+          className="min-h-11 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100"
+        >
+          <option value="off">{m.traceAnalysisModes.off}</option>
+          <option value="analyze">{m.traceAnalysisModes.analyze}</option>
+          <option value="fix">{m.traceAnalysisModes.fix}</option>
+        </select>
+        <p className="w-full text-xs leading-5 text-zinc-400">{m.traceAnalysisHelp}</p>
       </div>
       {health ? <SupportTriageHealthLine health={health} m={m} /> : null}
       {reauthenticationRequired ? (
