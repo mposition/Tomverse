@@ -10,8 +10,8 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
 import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
-import { AMUX_V4_ANALYSIS_PROMPT_VERSION, buildAmuxIdeaAnalysisPrompt,
-  type AmuxIdeaAnalysisPromptInput,
+import { AMUX_V4_ANALYSIS_PROMPT_VERSION, amuxAnalysisPromptWithNote,
+  buildAmuxIdeaAnalysisPrompt, type AmuxIdeaAnalysisPromptInput,
   type AmuxIdeaAnalysisPromptResult } from "./ideaAnalysisPromptCore.ts";
 import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
@@ -20,6 +20,10 @@ import { persistAmuxAnalysisPageDraftInTx } from
 import { AMUX_V4_IDEA_SOURCE_SYSTEM } from "./ideaIdentityCore.ts";
 import type { AmuxContentKeyIdentity } from "./ideaKeyStore.ts";
 import type { AmuxAnalysisOutputPage } from "./ideaOutputCursorCore.ts";
+import { AMUX_SESSION_PAGE_NOTE } from "./ideaSessionAnswerCore.ts";
+import { parkAmuxSessionIdeaInTx, recordAmuxSessionPlanRefusalInTx } from
+  "./ideaSessionPlanRefusalService.ts";
+import { amuxSessionPageRefusalDetail } from "./ideaSessionReviewDetailCore.ts";
 import { inspectSealedAmuxIdeaSessionInput } from "./ideaSessionSubmissionCore.ts";
 import { buildAmuxSourcePlanManifest } from "./ideaSourcePlanManifestCore.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
@@ -139,7 +143,7 @@ export async function readAmuxSessionPageContextInTx(tx: Tx, input: {
  * reads its inherited references from. */
 export function buildAmuxSessionPagePrompt(input: { claimId: string;
   idea: string; context: AmuxSessionPageContext }): AmuxIdeaAnalysisPromptResult {
-  return buildAmuxIdeaAnalysisPrompt({
+  const built = buildAmuxIdeaAnalysisPrompt({
     previewId: amuxSessionAnalysisPreviewId(input.claimId),
     chunkIndex: input.context.chunkIndex,
     revisionChunkIndex: input.context.chunkIndex,
@@ -147,6 +151,9 @@ export function buildAmuxSessionPagePrompt(input: { claimId: string;
     sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
       text: input.idea }],
     permittedTargetRefs: input.context.permittedTargetRefs });
+  return built.status === "prompt_candidate"
+    ? { ...built, prompt: amuxAnalysisPromptWithNote(built.prompt, AMUX_SESSION_PAGE_NOTE) }
+    : built;
 }
 
 async function databaseNow(tx: Tx): Promise<Date> {
@@ -165,11 +172,12 @@ async function databaseNow(tx: Tx): Promise<Date> {
  * leaves, so the result reader and the system registration writer need no
  * session branch. A finished plan moves the idea to `awaiting_owner`; an
  * output continuation leaves it `analyzing` with the next page pending, which
- * the session queue claims as the next invocation (v19 item 4). An answer that
- * cannot become a page parks the idea for the operator, so no paid invocation
- * is ever bought for an answer that was refused. The caller holds the
- * audit-chain lock and has already committed the result and settlement in
- * this transaction. */
+ * the session queue claims as the next invocation (v19 item 4). An answer the
+ * plan check refuses holds the idea, with the check's reason, for the Decision
+ * Maker's confirmed proposal or the owner (owner decision 2026-11-05); nothing
+ * runs again until one of them decides. An answer that can continue no further
+ * parks the idea for the operator. The caller holds the audit-chain lock and
+ * has already committed the result and settlement in this transaction. */
 export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
   ideaId: string; claimId: string; resultAuditId: string; modelId: string;
   rawModelOutput: string; keys: AmuxContentKeys; unitIds?: readonly string[];
@@ -191,25 +199,11 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
   }
   const now = await databaseNow(tx);
   const park = async (reason: AmuxSessionPlanRefusal) => {
-    const parked = await tx.amuxIdeaSubmission.updateMany({
-      where: { id: idea.id, state: "analyzing", analysisCompletedAt: null,
-        cancelledAt: null, analysisDeadlineAt: { gt: now } },
-      // Completion ends the raw idea's clock, as on the v4 path (DB check).
-      data: { state: "awaiting_owner", analysisCompletedAt: now,
-        rawPurgeAfter: now },
-    });
-    if (parked.count !== 1) {
+    // An analysis that ends here ends every earlier page's body clock too,
+    // as a completed plan does (amux-intake v6 item 1).
+    if (!await parkAmuxSessionIdeaInTx(tx, idea.id, now)) {
       throw new AmuxSessionAnalysisPlanError("integrity_unavailable");
     }
-    // An analysis that ends here ends every earlier page's body clock too,
-    // as a completed plan does (amux-intake v6 item 1). Deadlines only move
-    // earlier; the database refuses moving them later.
-    await tx.amuxIdeaAnalysisChunk.updateMany({ where: { ideaId: idea.id,
-      freeformCiphertext: { not: null }, freeformPurgeAfter: { gt: now } },
-    data: { freeformPurgeAfter: now } });
-    await tx.amuxIdeaTransferPreview.updateMany({ where: { ideaId: idea.id,
-      payloadCiphertext: { not: null }, payloadPurgeAfter: { gt: now } },
-    data: { payloadPurgeAfter: now } });
     return { state: "plan_refused" as const, reason };
   };
   let context: AmuxSessionPageContext;
@@ -231,8 +225,17 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: context.permittedTargetRefs,
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
-    history: context.history, templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION });
-  if (prepared.decision === "hold") return park("invalid_result");
+    history: context.history, templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
+    sessionPage: true });
+  if (prepared.decision === "hold") {
+    await recordAmuxSessionPlanRefusalInTx(tx, { ideaId: idea.id,
+      claimId: input.claimId, chunkIndex: context.chunkIndex, now,
+      reason: amuxSessionPageRefusalDetail(input.rawModelOutput, { previewId,
+        chunkIndex: context.chunkIndex,
+        permittedTargetRefs: context.permittedTargetRefs,
+        history: context.history }) });
+    return { state: "plan_refused", reason: "invalid_result" };
+  }
   // No owner is present during a session analysis (v19 item 4).
   if (prepared.decision === "needs_owner_input") return park("needs_owner_input");
   if (!idea.rawCiphertext || !idea.rawKeyId || !idea.rawKeyVersion ||

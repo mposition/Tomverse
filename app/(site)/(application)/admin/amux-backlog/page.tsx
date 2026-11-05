@@ -187,6 +187,7 @@ export default async function AdminAmuxBacklogPage({
         {!openedIdea ? <p className="max-w-3xl text-sm text-zinc-300" data-testid="amux-ideas-lede">{ideaMessages.lede}</p> : null}
         {ideaProgress !== undefined && !openedIdea ? <AmuxIdeaInbox rows={ideaProgress} /> : null}
         <AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}
+          openedStage={openedIdea?.stage ?? null}
           progressRows={openedIdea ? undefined : ideaProgress}
           submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}

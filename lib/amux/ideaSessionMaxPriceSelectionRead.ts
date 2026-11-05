@@ -38,7 +38,8 @@ export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
       modelId: true, reasoningEffort: true,
       idea: { select: { submissionOrigin: true, state: true,
         cancelledAt: true, analysisCompletedAt: true,
-        analysisDeadlineAt: true } } },
+        analysisDeadlineAt: true,
+        planRefusals: { where: { state: "open" }, select: { id: true }, take: 1 } } } },
   });
   if (!reservation || reservation.ideaId !== input.ideaId ||
       reservation.status !== "queued" ||
@@ -47,6 +48,7 @@ export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
       !["submitted", "analyzing"].includes(reservation.idea.state) ||
       reservation.idea.cancelledAt !== null ||
       reservation.idea.analysisCompletedAt !== null ||
+      reservation.idea.planRefusals.length > 0 ||
       now >= reservation.idea.analysisDeadlineAt) return { kind: "hold" };
   // The channel tells the launcher which CLI and sign-in run this claim.
   return { kind: "ready", priceVersionId: AMUX_V19_SUBSCRIPTION_NO_PRICE_ID,

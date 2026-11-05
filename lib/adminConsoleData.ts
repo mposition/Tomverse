@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { readStoredTraceAnalysis } from "@/lib/traceReportAnalysisCore";
 import type { AdminAuditRow } from "@/components/admin/AdminAuditPanel";
 import type { AdminModelMetricRow } from "@/components/admin/AdminModelMetricsPanel";
 import type {
@@ -69,6 +70,7 @@ const feedbackInclude = {
       state: true,
       classification: true,
       ineligibilityReason: true,
+      diagnosticSummary: true,
       updatedAt: true,
     },
   },
@@ -151,6 +153,20 @@ export async function loadFeedbackRows(options?: {
   // Newest per report wins: a resend is what happened last.
   const replyDeliveryByFeedback = new Map<string, (typeof replyDeliveries)[number]>();
   for (const row of replyDeliveries) replyDeliveryByFeedback.set(row.referenceId, row);
+  const analysisOf = (feedback: (typeof rows)[number]) => readStoredTraceAnalysis(feedback.autoFixCase?.diagnosticSummary);
+  const handedOffIdeas = rows.flatMap((feedback) => {
+    const analysis = analysisOf(feedback);
+    return analysis?.status === "done" && analysis.handoff ? [analysis.handoff.ideaId] : [];
+  });
+  const lanePrs = handedOffIdeas.length
+    ? await prisma.amuxIdeaLaneAttempt.findMany({
+        where: { ideaId: { in: handedOffIdeas }, outcome: "pr_open", prNumber: { not: null } },
+        orderBy: { claimedAt: "asc" },
+        select: { ideaId: true, prNumber: true },
+      })
+    : [];
+  // Newest wins: a retried run's PR is the one still open.
+  const lanePrByIdea = new Map(lanePrs.map((row) => [row.ideaId, row.prNumber]));
   return rows.map((feedback) => ({
     id: feedback.id,
     userId: feedback.userId,
@@ -228,6 +244,20 @@ export async function loadFeedbackRows(options?: {
           classification: feedback.autoFixCase.classification,
           ineligibilityReason: feedback.autoFixCase.ineligibilityReason,
           updatedAt: feedback.autoFixCase.updatedAt.toISOString(),
+          analysis: (() => {
+            const analysis = analysisOf(feedback);
+            if (!analysis) return null;
+            if (analysis.status !== "done") return { status: "failed" as const };
+            return {
+              status: "done" as const,
+              kind: analysis.kind,
+              confidence: analysis.confidence,
+              cause: analysis.cause,
+              recommendation: analysis.recommendation,
+              handedOff: Boolean(analysis.handoff),
+              prNumber: analysis.handoff ? (lanePrByIdea.get(analysis.handoff.ideaId) ?? null) : null,
+            };
+          })(),
         }
       : null,
     createdAt: feedback.createdAt.toISOString(),
