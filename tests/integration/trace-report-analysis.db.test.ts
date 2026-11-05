@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import { randomUUID } from "node:crypto";
+
+import { claimAmuxIdeaLane } from "@/lib/amux/ideaLaneService";
+import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
+import { commitTraceReportIdea } from "@/lib/amux/ideaTraceReportSubmissionService";
 import { prisma } from "@/lib/prisma";
 import { SUPPORT_TRIAGE_ENABLED_SETTING_KEY } from "@/lib/supportTriageLlmSetting";
 import {
@@ -358,4 +363,44 @@ test("finished reports do not crowd out a new one", async () => {
   const row = await report("new");
   await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm });
   assert.equal((await stored(row.id))?.status, "done");
+});
+
+test("the idea is stored for the owner, audited as the system's, and the lane takes it", async () => {
+  const ownerUserId = `trace-analysis-idea-${randomUUID()}`;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY ??= "trace-analysis-test-audit-integrity-key-0000000000";
+  const keys = {
+    masterKeyId: "synthetic-master",
+    masterKeyVersion: 1,
+    masterKey: Buffer.alloc(32, 1),
+    digestKeyId: "synthetic-digest",
+    digestKey: Buffer.alloc(32, 2),
+  };
+  const requestId = traceFixRequestId(`case-${ownerUserId}`);
+  const inspected = inspectAmuxIdeaSubmission(
+    JSON.stringify({ version: 1, requestId, input: { version: 1, idea: "Fix a production error: X", repositories: [], pullRequests: [] } })
+  );
+  assert.ok(inspected.ok);
+  const ideaId = randomUUID();
+  try {
+    await prisma.$transaction((tx) =>
+      commitTraceReportIdea(tx, { ownerUserId, caseId: "case-a", inspected, ideaId, keys: keys as never })
+    );
+    const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } });
+    assert.equal(idea.actorUserId, ownerUserId);
+    assert.equal(idea.submissionOrigin, "owner");
+    const audit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "trace_report_analysis.idea_submitted", targetId: ideaId },
+    });
+    // The system's act, not the owner's: no person on the row, the owner in the metadata.
+    assert.equal(audit.actorUserId, null);
+    const metadata = audit.metadata as Record<string, unknown>;
+    assert.equal(metadata.systemActor, "trace-report-analysis");
+    assert.equal(metadata.authorizedByUserId, ownerUserId);
+    // No key store here, so the claim cannot open it: it still counts as this idea's run.
+    process.env.AMUX_IDEA_LANE_MAX_ATTEMPTS_PER_DAY = "100";
+    await claimAmuxIdeaLane({ actorUserId: ownerUserId });
+    assert.equal(await prisma.amuxIdeaLaneAttempt.count({ where: { ideaId } }), 1);
+  } finally {
+    await prisma.amuxIdeaSubmission.deleteMany({ where: { actorUserId: ownerUserId } });
+  }
 });

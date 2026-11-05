@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
@@ -21,6 +22,41 @@ import {
   prepareIdeaSubmissionStorage,
 } from "./ideaSubmissionService.ts";
 
+type TraceReportIdea = {
+  ownerUserId: string;
+  caseId: string;
+  inspected: Extract<IdeaSubmissionInspection, { ok: true }>;
+};
+
+/** Transaction body, for synthetic DB tests; the entry below owns the latch and the keys. */
+export async function commitTraceReportIdea(
+  tx: Prisma.TransactionClient,
+  input: TraceReportIdea & { ideaId: string; keys: AmuxContentKeys },
+): Promise<{ ideaId: string }> {
+  const { ideaId, keys } = input;
+  await tx.$executeRaw`SELECT set_config('statement_timeout', ${IDEA_SUBMISSION_STATEMENT_TIMEOUT}, true)`;
+  const submittedAt = await databaseNow(tx);
+  const { data, sealed } = prepareIdeaSubmissionStorage({ inspected: input.inspected, ideaId, keys, submittedAt });
+  await tx.amuxIdeaSubmission.create({ data: { ...data, actorUserId: input.ownerUserId } });
+  await writeSystemAuditLog({
+    tx,
+    systemActor: "trace-report-analysis",
+    action: "trace_report_analysis.idea_submitted",
+    targetType: "AmuxIdeaSubmission",
+    targetId: ideaId,
+    summary: "Handed one verified trace report's fix to the idea lane.",
+    metadata: {
+      requestId: input.inspected.requestId,
+      caseId: input.caseId,
+      authorizedByUserId: input.ownerUserId,
+      rawDigest: sealed.digest,
+      rawDigestKeyId: sealed.digestKeyId,
+      ideaBytes: input.inspected.counts.ideaBytes,
+    },
+  });
+  return { ideaId };
+}
+
 /**
  * A fix the trace report analysis hands to the idea lane
  * (docs/policy/trace-feedback-automation.md §8a). No session: the idea's data
@@ -28,11 +64,7 @@ import {
  * it, under that owner's standing choice. The caller checked they still are an
  * owner. An idea this request already made is returned, not made again.
  */
-export async function submitIdeaFromTraceReport(input: {
-  ownerUserId: string;
-  caseId: string;
-  inspected: Extract<IdeaSubmissionInspection, { ok: true }>;
-}): Promise<{ ideaId: string }> {
+export async function submitIdeaFromTraceReport(input: TraceReportIdea): Promise<{ ideaId: string }> {
   const { requestId } = input.inspected;
   const seen = () => prisma.amuxIdeaSubmission.findUnique({ where: { requestId }, select: { id: true } });
   const existing = await seen();
@@ -54,29 +86,9 @@ export async function submitIdeaFromTraceReport(input: {
     throw new IdeaSubmissionError("key_store_unavailable", 503);
   }
   try {
-    return await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('statement_timeout', ${IDEA_SUBMISSION_STATEMENT_TIMEOUT}, true)`;
-      const submittedAt = await databaseNow(tx);
-      const { data, sealed } = prepareIdeaSubmissionStorage({ inspected: input.inspected, ideaId, keys, submittedAt });
-      await tx.amuxIdeaSubmission.create({ data: { ...data, actorUserId: input.ownerUserId } });
-      await writeSystemAuditLog({
-        tx,
-        systemActor: "trace-report-analysis",
-        action: "trace_report_analysis.idea_submitted",
-        targetType: "AmuxIdeaSubmission",
-        targetId: ideaId,
-        summary: "Handed one verified trace report's fix to the idea lane.",
-        metadata: {
-          requestId,
-          caseId: input.caseId,
-          authorizedByUserId: input.ownerUserId,
-          rawDigest: sealed.digest,
-          rawDigestKeyId: sealed.digestKeyId,
-          ideaBytes: input.inspected.counts.ideaBytes,
-        },
-      });
-      return { ideaId };
-    }, { ...AMUX_IDEA_STANDARD_TRANSACTION });
+    return await prisma.$transaction((tx) => commitTraceReportIdea(tx, { ...input, ideaId, keys }), {
+      ...AMUX_IDEA_STANDARD_TRANSACTION,
+    });
   } catch (error) {
     // A lost answer or a racing pass: if the row is there, this was the same idea.
     const row = await seen().catch(() => null);
