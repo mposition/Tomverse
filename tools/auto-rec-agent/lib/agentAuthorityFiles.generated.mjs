@@ -50,6 +50,9 @@ const CONTROL_PLANE_PATTERNS = [
   // The marketing LLM cost ledger's price pins and cap ceiling (marketing
   // policy v4): a price is a person's decision here as in modelPricing.ts.
   "lib/marketingLlmBudgetCore.ts",
+  // The subscription channel starts the Codex binary the worker names and sets
+  // the child's environment: which program runs is a person's decision.
+  "lib/marketingCodexChannelCore.ts",
   // The official hosts a market fact may cite (S3f): which competitor and which
   // host is a person's decision about content.
   "lib/marketingIntelReportCore.ts",
