@@ -96,7 +96,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     activity: { running: "Running", waiting: "Waiting, nothing running", blocked: "Blocked, nothing running" },
     statusNowLabel: "Where this idea is now",
     notice: {
-      attention: { title: "", body: "" },
+      attention: { title: "Stopped: outcome unknown", body: "A step stopped with an unknown outcome. It is not retried on its own." },
       lane_running: { title: "Auto run in progress", body: "A run holds this idea. You have nothing to do until it opens a draft PR." },
       lane_waiting: { title: "Waiting for the auto run lane", body: "Nothing is running yet; the lane starts it on its own. You can close the idea below while it waits." },
       lane_failed: { title: "Auto run stopped", body: "Every attempt failed and it will not run again on its own. You can close the idea below, or submit it again." },
@@ -311,7 +311,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     activity: { running: "실행 중", waiting: "대기 중 · 도는 작업 없음", blocked: "차단됨 · 도는 작업 없음" },
     statusNowLabel: "이 아이디어의 지금 상태",
     notice: {
-      attention: { title: "", body: "" },
+      attention: { title: "멈춤 · 결과 불명", body: "한 단계가 결과 불명으로 멈췄습니다. 자동으로 다시 시도하지 않습니다." },
       lane_running: { title: "자동 실행 중", body: "실행이 이 아이디어를 잡고 있습니다. draft PR이 열릴 때까지 할 일은 없습니다." },
       lane_waiting: { title: "자동 실행 차례 대기", body: "아직 돌고 있는 것은 없고, 레인이 알아서 시작합니다. 기다리는 동안 아래에서 아이디어를 닫을 수 있습니다." },
       lane_failed: { title: "자동 실행 멈춤", body: "모든 시도가 실패했고 자동으로 다시 실행하지 않습니다. 아래에서 닫거나 다시 접수할 수 있습니다." },
