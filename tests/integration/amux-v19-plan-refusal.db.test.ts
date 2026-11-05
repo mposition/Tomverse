@@ -19,7 +19,8 @@ import { readDecisionMakerRequestState, recordDecisionMakerTransmitIntent } from
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
 import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID } from
   "@/lib/amux/ideaAnalysisApprovedCostProfile";
-import { commitAnalysisBudgetSetting } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
+import { commitAnalysisBudgetSetting, readAnalysisMonthlyBudgetSetting } from
+  "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
@@ -67,6 +68,7 @@ const keysFor = (ideaId: string) => ({
 const DM_KEY = Buffer.alloc(32, 9);
 let RING = new Map<number, Buffer>();
 let authority: AmuxOperatingScopeAuthority;
+let priorScope: AmuxOperatingScopeAuthority | null = null;
 
 before(async () => {
   const frontier = inspectFrontierCatalogWrite(JSON.stringify({ schemaVersion: 1,
@@ -76,13 +78,16 @@ before(async () => {
   if (!frontier.ok) throw new Error(frontier.code);
   await prisma.$transaction((tx) =>
     commitFrontierCatalogDecision(tx, { session, request, decision: frontier.request }));
+  priorScope = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
   await prisma.$transaction((tx) => commitAmuxOperatingScope(tx, { session, request,
-    id: randomUUID(), expectedPreviousVersion: 0, ownerConfirmed: true,
+    id: randomUUID(), expectedPreviousVersion: priorScope?.version ?? 0, ownerConfirmed: true,
     scope: { repositories: ["mposition/Tomverse"],
       model: { provider: "anthropic", modelId, reasoningEffort: "high" } } }));
   authority = (await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx)))!;
+  const budget = await prisma.$transaction((tx) => readAnalysisMonthlyBudgetSetting(tx));
   await prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, { session, request,
-    id: randomUUID(), expectedPreviousVersion: 0, monthlyUsd: "1000", ownerConfirmed: true }));
+    id: randomUUID(), expectedPreviousVersion: budget.version, monthlyUsd: "1000",
+    ownerConfirmed: true }));
   for (const scope of ["decision-maker-openai", "decision-maker-anthropic"] as const) {
     await prisma.$transaction((tx) => recordDecisionMakerSwitchByOperator(tx,
       { session, scope, value: "proposal" }));
@@ -95,7 +100,16 @@ before(async () => {
     { keyPeriod: period, keyRing: RING }));
 });
 
+// CI runs this suite late in the shared amux lane, after session-submission
+// needed a fresh scope; the append-only scope it adds is superseded by the
+// scope that was current, so the suites that follow see what they saw before.
 after(async () => {
+  if (priorScope) {
+    const current = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
+    await prisma.$transaction((tx) => commitAmuxOperatingScope(tx, { session, request,
+      id: randomUUID(), expectedPreviousVersion: current?.version ?? 0,
+      scope: priorScope!.scope, ownerConfirmed: true }));
+  }
   masterKey.fill(0);
   digestKey.fill(0);
   await prisma.$disconnect();

@@ -387,7 +387,6 @@ run(
     // to deliver, nothing under the kill switch, the decision once and its
     // outcome once, each through its route's own DB boundary.
     "tests/integration/amux-decision-maker-delivery.db.test.ts",
-    "tests/integration/amux-v19-plan-refusal.db.test.ts",
     // A v22 worker's owner question (docs/policy/development-agent-orchestration.md,
     // operator decision 2026-10-30): the answer resumes a parked Task once, a
     // Task that moved on is not resumed, and the table guards its lifecycle.
@@ -498,6 +497,9 @@ run(
     // nodes, cards, assessments and scores under exact system evidence, or
     // leaves the backlog untouched and records one durable refusal.
     "tests/integration/amux-v19-system-registration.db.test.ts",
+    // Runs after session-submission, which needs a fresh scope, and puts the
+    // scope that was current back when it ends.
+    "tests/integration/amux-v19-plan-refusal.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
