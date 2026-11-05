@@ -27,8 +27,11 @@ export async function readAmuxIdeaLaneBoardInTx(tx: Prisma.TransactionClient, ac
   const doneSince = new Date(now.getTime() - AMUX_IDEA_LANE_BOARD_DONE_MS);
   // timestamp(3) columns hold naive UTC, so instants are compared as naive UTC.
   // An idea the lane has run, or (lane on) a submitted owner idea it may take
-  // next; amuxIdeaLaneView decides the rest. A PR merged over a week ago is
-  // left out before the LIMIT, and a closed idea leaves as it does the Ideas list.
+  // next; amuxIdeaLaneView decides the rest. An idea whose final part merged over
+  // a week ago is left out before the LIMIT: only a merge after the newest merged
+  // PR that named more work settles it (as amuxIdeaLaneState), so an earlier
+  // part's merge never hides the parts still to come. A closed idea leaves as it
+  // does the Ideas list.
   const ideas = await tx.$queryRaw<AmuxIdeaLaneBoardIdea[]>`
     SELECT s."requestId"::text AS "requestId", s."title" AS "title",
       s."submissionOrigin" AS "submissionOrigin", s."state" AS "state", false AS "cancelled",
@@ -39,7 +42,7 @@ export async function readAmuxIdeaLaneBoardInTx(tx: Prisma.TransactionClient, ac
       COALESCE((SELECT json_agg(json_build_object(
           'claimedAtMs', (extract(epoch FROM l."claimedAt") * 1000)::double precision,
           'leaseUntilMs', (extract(epoch FROM l."leaseUntil") * 1000)::double precision,
-          'outcome', l."outcome", 'prNumber', l."prNumber",
+          'outcome', l."outcome", 'prNumber', l."prNumber", 'continues', l."continues",
           'mergedAtMs', (extract(epoch FROM l."mergedAt") * 1000)::double precision,
           'prClosedAtMs', (extract(epoch FROM l."prClosedAt") * 1000)::double precision))
         FROM "AmuxIdeaLaneAttempt" l WHERE l."ideaId" = s."id"), '[]'::json) AS "laneAttempts"
@@ -48,7 +51,11 @@ export async function readAmuxIdeaLaneBoardInTx(tx: Prisma.TransactionClient, ac
       AND (EXISTS (SELECT 1 FROM "AmuxIdeaLaneAttempt" l WHERE l."ideaId" = s."id")
         OR (${enabled}::boolean AND s."state" = 'submitted'))
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaLaneAttempt" l WHERE l."ideaId" = s."id"
-        AND l."mergedAt" <= (${doneSince.toISOString()}::timestamptz AT TIME ZONE 'UTC'))
+        AND l."outcome" = 'pr_open' AND NOT l."continues"
+        AND l."mergedAt" <= (${doneSince.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+        AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaLaneAttempt" b WHERE b."ideaId" = s."id"
+          AND b."outcome" = 'pr_open' AND b."continues" AND b."mergedAt" IS NOT NULL
+          AND b."claimedAt" >= l."claimedAt"))
     ORDER BY s."submittedAt" DESC, s."id" ASC
     LIMIT ${AMUX_IDEA_LANE_BOARD_LIMIT}
   `;
