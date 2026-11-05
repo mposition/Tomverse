@@ -33,8 +33,8 @@
 // reach the decision, not an impression that it looks unrelated.
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const MARKETING_ADMISSION_CODE_SCHEMA_VERSION =
   "marketing-admission-code-manifest-v1";
@@ -56,6 +56,20 @@ export const MARKETING_ADMISSION_CODE_ROOTS = Object.freeze([
 
 const LOCAL_SPECIFIER = /^(\.{1,2}\/|@\/)/u;
 
+/**
+ * A regular file of this repository, links followed. Asked before a byte is
+ * read, as the review server walks a branch's imports (a device or a file
+ * outside the checkout is named by nothing more than enough `../`).
+ */
+const isRepositoryFile = (candidate, repositoryRoot) => {
+  try {
+    const path = relative(realpathSync(repositoryRoot), realpathSync(candidate));
+    return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path) && statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+};
+
 /** Where a specifier written in `from` actually lives, or null if not local. */
 const resolveLocal = (specifier, from, repositoryRoot) => {
   if (!LOCAL_SPECIFIER.test(specifier)) return null;
@@ -75,12 +89,7 @@ const resolveLocal = (specifier, from, repositoryRoot) => {
     `${base}.mjs`,
     `${base}.js`,
   ]) {
-    try {
-      readFileSync(candidate);
-      return relative(repositoryRoot, candidate).split(sep).join("/");
-    } catch {
-      // Not this one.
-    }
+    if (isRepositoryFile(candidate, repositoryRoot)) return relative(repositoryRoot, candidate).split(sep).join("/");
   }
   // A local specifier that resolves to nothing is a fact about the tree, not
   // something to pass over: the caller decides what to do with it.
@@ -179,3 +188,17 @@ export const marketingAdmissionCodeDigest = (files) =>
 
 export const MARKETING_ADMISSION_CODE_MANIFEST_PATH =
   "config/marketing-admission-code-manifest.json";
+
+/** The manifest file's text for a closure's files: one form for every writer of it. */
+export const marketingAdmissionCodeManifestText = (files) =>
+  `${JSON.stringify(
+    {
+      schemaVersion: MARKETING_ADMISSION_CODE_SCHEMA_VERSION,
+      roots: [...MARKETING_ADMISSION_CODE_ROOTS],
+      digest: marketingAdmissionCodeDigest(files),
+      totalSizeBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0),
+      files,
+    },
+    null,
+    2
+  )}\n`;
