@@ -497,9 +497,6 @@ run(
     // nodes, cards, assessments and scores under exact system evidence, or
     // leaves the backlog untouched and records one durable refusal.
     "tests/integration/amux-v19-system-registration.db.test.ts",
-    // Runs after session-submission, which needs a fresh scope, and puts the
-    // scope that was current back when it ends.
-    "tests/integration/amux-v19-plan-refusal.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
@@ -967,6 +964,14 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// Node runs the files of one `--test` call in name order, so plan-refusal would
+// run before session-submission, which needs a fresh operating scope. Its own
+// call runs it after the whole list above and puts the current scope back.
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
+    "tests/integration/amux-v19-plan-refusal.db.test.ts"],
+  "Running the v19 plan-refusal scenarios after the fresh-scope suites"
 );
 // This suite creates and drops only its own synthetic schema. Give its Prisma
 // client that exact schema rather than letting it see the lane's public tables.
