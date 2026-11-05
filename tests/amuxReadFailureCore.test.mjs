@@ -103,6 +103,27 @@ test("a session the database ended for idling in its transaction (25P03) is tran
   }
 });
 
+test("the pg client's refusal on a connection that already failed is transient", () => {
+  // 2026-11-05, production: bridges kept halting on owned-queue 500s logged as a
+  // plain Error with no code. A session ended by the 100 ms idle limit while no
+  // query is running leaves the pg client refusing the next statement or the
+  // COMMIT with exactly this message.
+  const refusal = new Error("Client has encountered a connection error and is not queryable");
+  assert.equal(amuxTransientDatabaseCode(refusal), "ConnectionClosed");
+  assert.equal(
+    amuxTransientDatabaseCode({ code: "P2010", meta: { driverAdapterError: { cause: refusal } } }),
+    "ConnectionClosed",
+  );
+  // Compared whole: a message that merely contains it decides nothing.
+  for (const message of [
+    `${refusal.message}: SELECT 1`,
+    `relation "${refusal.message}" does not exist`,
+    "connection error",
+  ]) {
+    assert.equal(amuxTransientDatabaseCode(new Error(message)), null, message);
+  }
+});
+
 test("everything else keeps its old answer", () => {
   for (const error of [
     undefined,
