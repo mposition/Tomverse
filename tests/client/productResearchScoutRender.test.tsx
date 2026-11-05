@@ -6,7 +6,7 @@ import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
 import { AdminScoutSuggestionsPanel } from "@/components/admin/AdminScoutSuggestionsPanel";
 import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch } from "@/lib/adminScoutDisplay";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
-import { SCOUT_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
+import { SCOUT_GENERATIONS, SCOUT_PAGES, SCOUT_SIGNED_IN_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
 import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
 
@@ -31,9 +31,10 @@ const suggestion = (id: string, subject: string, severity: string, area: string,
 
 const view = (overrides: Partial<ScoutConsoleView> = {}): ScoutConsoleView => ({
   enabled: true,
-  settings: { modelId: "claude-sonnet-5", dailyCallCap: 50 },
+  testAccountConfigured: false,
+  settings: { modelId: "claude-sonnet-5", dailyCallCap: 50, generationDailyCap: 0 },
   modelOptions: [{ id: "claude-sonnet-5", name: "Claude Sonnet 5", provider: "Anthropic" }],
-  usageToday: { calls: 30, inputTokens: 412_330, outputTokens: 38_120 },
+  usageToday: { calls: 30, generations: 0, inputTokens: 412_330, outputTokens: 38_120 },
   lastRun: {
     startedAt: "2026-10-19T11:44:44.000Z",
     endedAt: "2026-10-19T11:50:50.000Z",
@@ -74,7 +75,7 @@ test("suggestions are grouped by place; a group with a high one opens and the re
   assert.equal(groups.length, 3);
   // Highest severity first: the Korean pricing page, then the catalogue, then the PDF.
   assert.match(groups[0], /Pricing · Korean/);
-  assert.match(groups[0], /href="https:\/\/tomverse.app\/pricing"/);
+  assert.match(groups[0], /href="\/pricing"/);
   assert.match(groups[0], /aria-expanded="true"/);
   assert.match(groups[0], /Pricing table is cut at 320px/);
   assert.match(groups[0], /Check icons have no name/);
@@ -95,7 +96,7 @@ test("a role that may not send sees the send buttons disabled and one line sayin
 });
 
 test("judging off and switched off are said above the list, with the way to the settings", () => {
-  const off = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ settings: { modelId: null, dailyCallCap: 50 } })} />);
+  const off = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ settings: { modelId: null, dailyCallCap: 50, generationDailyCap: 0 } })} />);
   assert.match(off, new RegExp(m.stateJudgingOff));
   assert.match(off, new RegExp(m.modelOff));
   assert.match(off, /href="\/admin\/product-research\?tab=runs"/);
@@ -136,14 +137,14 @@ test("runs and cost: the model, the cap, today's use and seven days, the form an
 test("every page, file and the catalogue the walker sends has a name in both languages", () => {
   for (const locale of ["en", "ko"] as const) {
     const copy = adminProductResearchScoutMessages[locale];
-    for (const page of SCOUT_PAGES as readonly { id: string }[]) {
+    for (const page of [...SCOUT_PAGES, ...SCOUT_SIGNED_IN_PAGES] as readonly { id: string }[]) {
       const info = scoutSubjectInfo(page.id);
       assert.equal(info.kind, "page", page.id);
       if (info.kind !== "page") continue;
       assert.ok(copy.pages[info.page as keyof typeof copy.pages], `${locale} ${page.id}`);
       assert.ok(copy.languages[info.lang as keyof typeof copy.languages], `${locale} ${page.id}`);
     }
-    for (const id of ["pdf.document", "docx.document", "xlsx.workbook", "pptx.presentation"]) {
+    for (const id of ["pdf.document", "docx.document", "xlsx.workbook", "pptx.presentation", ...(SCOUT_GENERATIONS as readonly { id: string }[]).map((generation) => generation.id)]) {
       const info = scoutSubjectInfo(id);
       assert.equal(info.kind, "file", id);
       if (info.kind === "file") assert.ok(copy.files[info.format as keyof typeof copy.files], `${locale} ${id}`);

@@ -10,13 +10,13 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { SCOUT_DAILY_CALL_CAP_MAX } from "@/lib/productResearchScoutCore";
+import { SCOUT_DAILY_CALL_CAP_MAX, SCOUT_GENERATION_DAILY_CAP_MAX } from "@/lib/productResearchScoutCore";
 import { scoutModelOptions } from "@/lib/productResearchScoutLlm";
 import { readScoutSettings, writeScoutSettings } from "@/lib/productResearchScoutSettings";
 
-// Admin › Engineering agent › Product research: which model the Scout uses
-// and how many model calls it may make per UTC day
-// (docs/policy/product-research-agent.md §13). Both decide spending, so only
+// Admin › Product research: which model the Scout uses, how many model calls
+// it may make per UTC day, and how many real generations it may ask for as the
+// test account (docs/policy/product-research-agent.md §13). All decide spending, so only
 // an owner with a recent sign-in may change them, and the change is audited
 // with its before and after. A null model turns the step off.
 
@@ -27,6 +27,7 @@ const updateSchema = z
   .object({
     modelId: z.string().trim().min(1).max(120).nullable(),
     dailyCallCap: z.number().int().min(0).max(SCOUT_DAILY_CALL_CAP_MAX),
+    generationDailyCap: z.number().int().min(0).max(SCOUT_GENERATION_DAILY_CAP_MAX),
   })
   .strict();
 
@@ -55,7 +56,7 @@ export async function PUT(request: Request) {
         action: "product_research.scout.settings_updated",
         targetType: "app_setting",
         targetId: "productResearch.scout",
-        summary: "Scout model and daily call cap updated",
+        summary: "Scout model and daily caps updated",
         metadata: { before, after: next },
         tx,
       }),

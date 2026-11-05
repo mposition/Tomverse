@@ -6,42 +6,46 @@
 // It gathers what a person would look at and leaves the judging to the model:
 // the twenty public pages at desktop and 320px, the first page of a generated
 // PDF, the text of generated Office files, and the catalogue mismatches the
-// 0-step report finds. Each subject goes to the app's scout route on its own;
-// the app calls the model and stores the suggestions.
+// 0-step report finds. When the app has a test account (§14) it also sees the
+// signed-in screens and makes real files and an image, within the cap an owner
+// set. Each subject goes to the app's scout route on its own; the app calls the
+// model and stores the suggestions.
 //
 // Variables: PRODUCT_RESEARCH_SCOUT_ENABLED (unset or empty: nothing runs),
 // PRODUCT_RESEARCH_SCOUT_INGEST_URL and PRODUCT_RESEARCH_SCOUT_INGEST_SECRET;
-// PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off stops the unsandboxed retry.
+// PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off stops the unsandboxed retry;
+// PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN points it at dev or Test, with
+// PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID and _SECRET to pass Cloudflare Access.
 // It holds no model key and no database credential. A send whose outcome is
 // unknown is not repeated; the next day's run covers the subject again.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { unzipSync, strFromU8 } from "fflate";
 import { installCdpRules, launch, resolverRules, ruledContext, sandboxHost } from "../../lib/productResearchScoutBrowser.mjs";
 import {
+  SCOUT_GENERATIONS,
   SCOUT_LOCALES,
-  SCOUT_PAGE_ORIGIN,
   SCOUT_PAGES,
   SCOUT_SANDBOX_FALLBACK_ENV,
+  SCOUT_SIGNED_IN_PAGES,
   errorCode,
   isScoutCausedConsoleError,
+  isSignedOutPath,
   launchFailure,
   originOf,
   retriesWithoutSandbox,
+  scoutWalkTarget,
+  signedInAccess,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
+import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
 import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
 const args = process.argv.slice(2);
 const outIndex = args.indexOf("--out");
 const outDir = outIndex >= 0 ? args[outIndex + 1] : null;
 
-const PAGE_TIMEOUT_MS = 45_000;
 const SETTLE_MS = 2_000;
 const SEND_TIMEOUT_MS = 150_000;
-/** Taller than this is cut: the model reads the top of a page best, and the body stays bounded. */
-const SCREENSHOT_MAX_HEIGHT = 2_400;
-const IMAGE_BASE64_LIMIT = 1_400_000;
 const VIEWPORTS = [
   { label: "desktop", width: 1280, height: 900 },
   { label: "phone-320", width: 320, height: 720 },
@@ -59,6 +63,16 @@ if (!outDir && (!/^https:\/\/[^/\s]+\/api\/internal\/product-research\/scout$/.t
   process.exit(1);
 }
 
+const walk = scoutWalkTarget({
+  origin: process.env.PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN,
+  accessClientId: process.env.PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID,
+  accessClientSecret: process.env.PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_SECRET,
+});
+if (walk.refused) {
+  console.error(JSON.stringify({ event: "product_research_scout_misconfigured", reason: walk.refused }));
+  process.exit(1);
+}
+
 /** The whole run stops here, whatever it is doing; tomorrow covers what was left. */
 const RUN_DEADLINE_MS = 45 * 60_000;
 setTimeout(() => {
@@ -66,7 +80,7 @@ setTimeout(() => {
   process.exit(1);
 }, RUN_DEADLINE_MS).unref();
 
-const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0 };
+const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0, signedInPages: 0, generated: 0 };
 /** Set by the route's first daily_cap_reached; nothing more is captured or sent today. */
 let capReached = false;
 
@@ -106,28 +120,16 @@ async function deliver(subject) {
 
 // ---------------------------------------------------------------- pages
 
-async function screenshot(page) {
-  const height = await page.evaluate(() => document.documentElement.scrollHeight).catch(() => 0);
-  const viewport = page.viewportSize();
-  const clip = { x: 0, y: 0, width: viewport.width, height: Math.max(viewport.height, Math.min(height, SCREENSHOT_MAX_HEIGHT)) };
-  for (const quality of [60, 40, 25]) {
-    const bytes = await page.screenshot({ type: "jpeg", quality, clip, fullPage: true });
-    const base64 = bytes.toString("base64");
-    if (base64.length <= IMAGE_BASE64_LIMIT) return base64;
-  }
-  return null;
-}
-
-async function capturePage(browser, rules, target) {
+async function capturePage(browser, rules, target, { cookies = [] } = {}) {
   const images = [];
   const consoleErrors = [];
   const sameOriginErrors = [];
   let documentLang = null;
   for (const viewport of VIEWPORTS) {
     rules.stops = [];
-    const context = await ruledContext(browser, { locale: SCOUT_LOCALES[target.lang] });
+    const context = await ruledContext(browser, { locale: SCOUT_LOCALES[target.lang], headers: walk.headers, cookies });
     try {
-      await context.setDefaultTimeout(PAGE_TIMEOUT_MS);
+      await context.setDefaultTimeout(SCOUT_PAGE_TIMEOUT_MS);
       const page = await context.newPage();
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       page.on("console", (message) => {
@@ -139,13 +141,14 @@ async function capturePage(browser, rules, target) {
         if (consoleErrors.length < 5) consoleErrors.push(`pageerror: ${String(error?.message ?? error).slice(0, 200)}`);
       });
       page.on("response", (response) => {
-        if (originOf(response.url()) === SCOUT_PAGE_ORIGIN && response.status() >= 400 && sameOriginErrors.length < 5) {
+        if (originOf(response.url()) === walk.origin && response.status() >= 400 && sameOriginErrors.length < 5) {
           sameOriginErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
         }
       });
-      await page.goto(`${SCOUT_PAGE_ORIGIN}${target.path}`, { waitUntil: "load", timeout: PAGE_TIMEOUT_MS });
+      await page.goto(`${walk.origin}${target.path}`, { waitUntil: "load", timeout: SCOUT_PAGE_TIMEOUT_MS });
       await page.waitForTimeout(SETTLE_MS);
       if (rules.stops.length > 0) return { stopped: rules.stops[0].stop };
+      if (cookies.length > 0 && isSignedOutPath(page.url())) return { error: "signed_out" };
       documentLang ??= await page.evaluate(() => document.documentElement.lang).catch(() => null);
       const base64 = await screenshot(page);
       if (base64) images.push({ label: viewport.label, mediaType: "image/jpeg", base64 });
@@ -158,6 +161,7 @@ async function capturePage(browser, rules, target) {
   }
   if (images.length === 0) return { error: "no_screenshot" };
   const signals = [
+    ...(cookies.length > 0 ? ["Seen signed in as a test account with no real user's data."] : []),
     `expected language: ${target.lang}; document lang attribute: ${documentLang ?? "none"}`,
     `console errors (not caused by the scout's own blocking): ${consoleErrors.length ? `\n- ${consoleErrors.join("\n- ")}` : "none"}`,
     `same-origin responses with status 400 or more: ${sameOriginErrors.length ? sameOriginErrors.join(", ") : "none"}`,
@@ -173,7 +177,7 @@ async function capturePage(browser, rules, target) {
 let sandbox = "none";
 
 async function walkPages() {
-  const args = [resolverRules([new URL(SCOUT_PAGE_ORIGIN).hostname])];
+  const args = [resolverRules([new URL(walk.origin).hostname])];
   let browser;
   try {
     browser = await launch(args);
@@ -195,7 +199,7 @@ async function walkPages() {
     console.warn(JSON.stringify({ event: "product_research_scout_browser_unsandboxed", cause: failure.cause, source: failure.source, switch: SCOUT_SANDBOX_FALLBACK_ENV }));
   }
   try {
-    const rules = await installCdpRules(browser, [SCOUT_PAGE_ORIGIN]);
+    const rules = await installCdpRules(browser, [walk.origin]);
     for (const target of SCOUT_PAGES) {
       if (capReached) {
         outcomes.capped += 1;
@@ -208,14 +212,83 @@ async function walkPages() {
         console.warn(JSON.stringify({ event: "product_research_scout_page_not_captured", page: target.id, ...captured }));
       }
     }
+    try {
+      await walkSignedIn(browser, rules);
+    } catch (error) {
+      outcomes.failed += 1;
+      console.warn(JSON.stringify({ event: "product_research_scout_step_failed", step: "signed_in", error: errorCode(error) }));
+    }
   } finally {
     await browser.close();
   }
 }
 
-// ---------------------------------------------------------------- generated files
+// ---------------------------------------------------------------- signed in
 
-const xmlText = (xml) => xml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+/**
+ * The app's answer to "may I come in as the test account?": a short-lived
+ * session and today's generation permits, or null when there is no test account
+ * (the route is 404) or the app refused.
+ */
+async function askSignedIn() {
+  const response = await fetch(`${ingestUrl}/signed-in`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${ingestSecret}`, "content-type": "application/json" },
+    body: JSON.stringify({ generations: SCOUT_GENERATIONS.map((generation) => generation.id) }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (response.status === 404) return null;
+  const answer = await response.json().catch(() => ({}));
+  const access = response.ok ? signedInAccess(answer, { ingestUrl, origin: walk.origin }) : { refused: String(answer.refused ?? response.status) };
+  if (access.refused) {
+    console.warn(JSON.stringify({ event: "product_research_scout_signed_in_refused", reason: access.refused }));
+    return null;
+  }
+  return access;
+}
+
+async function walkSignedIn(browser, rules) {
+  // Nothing signed in is worth paying for when the model will not judge it.
+  if (outDir || capReached || outcomes.modelOff > 0) return;
+  const access = await askSignedIn();
+  if (!access) return;
+  for (const target of SCOUT_SIGNED_IN_PAGES) {
+    if (capReached) {
+      outcomes.capped += 1;
+      continue;
+    }
+    const captured = await capturePage(browser, rules, target, { cookies: [access.cookie] });
+    if (captured.subject) {
+      outcomes.signedInPages += 1;
+      await deliver(captured.subject);
+    } else {
+      outcomes[captured.stopped ? "stopped" : "skipped"] += 1;
+      console.warn(JSON.stringify({ event: "product_research_scout_page_not_captured", page: target.id, ...captured }));
+      // A session the app no longer honours fails every page after it, and every real file too.
+      if (captured.error === "signed_out") return;
+    }
+  }
+  for (const id of access.permits) {
+    // The model went off or the cap ran out during this run: stop paying for what nothing will judge.
+    if (capReached || outcomes.modelOff > 0) {
+      outcomes.capped += 1;
+      continue;
+    }
+    const generation = SCOUT_GENERATIONS.find((entry) => entry.id === id);
+    const place = { walk, cookie: access.cookie };
+    const subject = id === "generated.image"
+      ? await generateImage(browser, generation, place)
+      : await generateFile(browser, rules, generation, place);
+    if (subject) {
+      outcomes.generated += 1;
+      await deliver(subject);
+    } else {
+      outcomes.skipped += 1;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- generated files
 
 async function walkFiles() {
   const { RENDERER_PROBES } = await import("../../lib/productResearchScoutRendererProbes.mjs");
@@ -250,37 +323,13 @@ async function walkFiles() {
         signals: `${bytes.byteLength} bytes.\n${specLine}`,
       });
     } else {
-      const parts = unzipSync(bytes);
-      const textParts = Object.keys(parts)
-        // A workbook's cell text is in its worksheets (the renderer writes inline strings) and in sharedStrings when present.
-        .filter((name) => /^(word\/document|xl\/sharedStrings|xl\/worksheets\/sheet\d+|ppt\/slides\/slide\d+)\.xml$/.test(name))
-        .sort();
-      const text = textParts.map((name) => xmlText(strFromU8(parts[name]))).join("\n").slice(0, 1_500);
+      const { parts, text } = officePackage(bytes);
       await deliver({
         kind: "file",
         subject: probe.id,
-        signals: `${bytes.byteLength} bytes, ${Object.keys(parts).length} package parts.\n${specLine}\nText the file contains:\n${text}`,
+        signals: `${bytes.byteLength} bytes, ${parts} package parts.\n${specLine}\nText the file contains:\n${text}`,
       });
     }
-  }
-}
-
-async function pdfFirstPage(bytes) {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const { createCanvas } = await import("@napi-rs/canvas");
-  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(bytes), disableWorker: true, isEvalSupported: false, useSystemFonts: false });
-  try {
-    const document = await loadingTask.promise;
-    const page = await document.getPage(1);
-    const viewport = page.getViewport({ scale: 1.25 });
-    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-    const context = canvas.getContext("2d");
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: context, canvas, viewport }).promise;
-    return canvas.toBuffer("image/png").toString("base64");
-  } finally {
-    await loadingTask.destroy();
   }
 }
 
@@ -289,7 +338,7 @@ async function pdfFirstPage(bytes) {
 async function walkCatalogue() {
   const { parseCatalogue, productConsistencyReport } = await import("../report-product-consistency-core.mjs");
   const { getWebSearchCapability, WEB_SEARCH_CAPABILITIES } = await import("../../lib/webSearchCapability.ts");
-  const response = await fetch(`${SCOUT_PAGE_ORIGIN}/api/models/catalog`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+  const response = await fetch(`${walk.origin}/api/models/catalog`, { headers: { accept: "application/json", ...walk.headers }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) {
     outcomes.skipped += 1;
     return;

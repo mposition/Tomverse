@@ -157,6 +157,7 @@ test("the system actor list is closed and changes only by review", () => {
     // agent has nothing to approve because it decides nothing.
     "product-research-observer",
     "product-research-retention",
+    "product-research-scout",
     // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
     "billing-finance-ops-intake",
     "support-triage-account-deletion",
