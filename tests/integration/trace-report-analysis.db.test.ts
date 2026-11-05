@@ -285,6 +285,21 @@ test("a saved model that is not enabled claims nothing and spends nothing", asyn
   }
 });
 
+test("a model switched off during its call opens no idea", async () => {
+  await setMode(`fix:${OWNER}`);
+  await report("model-off");
+  const { llm } = recordingLlm();
+  let reads = 0;
+  const { ideas, submit } = recordingSubmit();
+  const pass = await runTraceReportAnalysisQuietly({
+    // Usable when the call starts, gone when it has answered.
+    pickLlm: async () => ((reads += 1) === 1 ? llm : null),
+    submit,
+  });
+  assert.equal(pass.analyzed, 1);
+  assert.equal(ideas.length, 0);
+});
+
 test("one pass takes a bounded number of reports", async () => {
   await setMode("analyze");
   for (let i = 0; i < TRACE_ANALYSIS_PER_PASS + 2; i += 1) await report(`bound-${i}`);

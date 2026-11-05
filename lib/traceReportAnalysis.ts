@@ -375,11 +375,14 @@ const allowedNow = async (): Promise<{ mode: TraceAnalysisMode; ownerUserId: str
 
 export const runTraceReportAnalysisQuietly = async ({
   llm,
+  pickLlm = async () => (llm === undefined ? traceAnalysisLlmFromSettings() : llm),
   submit = submitTraceFix,
   now: start = new Date(),
 }: {
   /** Replaces the configured model (tests). */
   llm?: TraceAnalysisLlm | null;
+  /** Read before each step, so a model changed or switched off during the pass applies at once. */
+  pickLlm?: () => Promise<TraceAnalysisLlm | null>;
   submit?: TraceFixSubmit;
   now?: Date;
 } = {}): Promise<TraceAnalysisPass> => {
@@ -400,9 +403,8 @@ export const runTraceReportAnalysisQuietly = async ({
     let handoffsOpen = true;
     for (const { id } of work) {
       if ((await allowedNow()).mode === "off") break;
-      // Read each time: a model changed or disabled during the pass applies to the
-      // next call, and no usable model stops everything, handoffs included.
-      const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;
+      // No usable model stops everything, handoffs included.
+      const call = await pickLlm();
       if (!call) break;
       const current = await prisma.feedbackAutoFixCase.findUnique({ where: { id }, select: CASE_SELECT });
       if (!current) continue;
@@ -427,6 +429,7 @@ export const runTraceReportAnalysisQuietly = async ({
       // The call above can take a minute: read the switch again before an idea.
       const { mode: modeNow, ownerUserId } = await allowedNow();
       if (!handoffsOpen || modeNow !== "fix" || !ownerUserId || analysis?.status !== "done") continue;
+      if (!(await pickLlm())) break;
       if (!traceAnalysisWantsFix(row.classification, analysis)) continue;
       const reserved = await reserve(id, "handoff", now());
       if (!reserved) continue;
