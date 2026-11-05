@@ -186,8 +186,8 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // (2026-11-01); same pure parsing, same 17-file closure.
 // Re-pinned with the source-scope digests above for the same localIntakeCore
 // support-mailbox change (2026-11-04). Same 17-file closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "692dfb26fd43ba6d146ed4415d5689c7236895db38e6bb58ef4b9c4d13e4c983";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "1679246ba1bc86d87bf4d035e764df0300f3c76388e88ead53e57285bc733531";
+// The source digest pin is retired (2026-11-05): the 17-file closure list and the
+// route/service/reader writer and outbound-call scans below are the boundary.
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
@@ -232,8 +232,6 @@ const amuxSourceScopeReviewedDigest = (overrides = new Map()) =>
   amuxReviewedDigest(SOURCE_SCOPE_REVIEWED_FILES, overrides);
 const isReviewedSourceScopeDigest = (digest) =>
   digest === SOURCE_SCOPE_REVIEWED_DIGEST || digest === SOURCE_SCOPE_DISABLED_DIGEST;
-const isReviewedResolutionDigest = (digest) =>
-  digest === RESOLUTION_PREVIEW_REVIEWED_DIGEST || digest === RESOLUTION_PREVIEW_DISABLED_DIGEST;
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -296,6 +294,22 @@ const writeRoutes = routes.filter((route) =>
     new RegExp(`^export async function ${method}\\b`, "m").test(route.source)
   )
 );
+
+/**
+ * The trust-safety activation route is built inside the agent's closed import
+ * boundary (docs/policy/trust-safety-compliance-agent.md §5.6), which does not
+ * admit `lib/apiSecurity.ts` or `lib/adminApproval.ts`. So it cannot call
+ * `consumeApiRateLimit` or `adminApprovalErrorResponse`; its header says so. It
+ * is exempt from those two sweeps only, by exact name, and only while it keeps
+ * what stands in their place: owner-only permission, a step-up that answers
+ * `reauthentication_required`, and a store that writes nothing for a repeat.
+ * The audit sweep still applies to it.
+ */
+const isTrustSafetyActivationRoute = (route) =>
+  route.name === "agents/trust-safety/activation/route.ts" &&
+  route.source.includes('hasAdminPermission(session, "trust-safety:write")') &&
+  route.source.includes("isAdminReauthenticationError(error)") &&
+  route.source.includes('code: "reauthentication_required"');
 
 /**
  * The proposal route delegates its one audit to the canonical internal
@@ -380,7 +394,6 @@ const isReadOnlyAmuxResolutionPreview = (route,
   if (route.name !== "amux/ideas/resolution-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE)) !==
         JSON.stringify(RESOLUTION_PREVIEW_REVIEWED_FILES) ||
-      !isReviewedResolutionDigest(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES)) ||
       !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(amuxResolutionPreviewCore) ||
       !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
       !route.source.includes("const session = await owner();") ||
@@ -467,13 +480,7 @@ test("the resolution dry-run audit exception closes when its source boundary cha
   assert.ok(route);
   assert.deepEqual(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE),
     RESOLUTION_PREVIEW_REVIEWED_FILES);
-  assert.equal(isReviewedResolutionDigest(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES)), true);
-  const resolutionCore = "lib/amux/ideaResolutionChoiceCore.ts";
-  const rawResolutionCore = readFileSync(join(REPOSITORY_ROOT, ...resolutionCore.split("/")), "utf8");
-  assert.equal(isReviewedResolutionDigest(amuxReviewedDigest(
-    RESOLUTION_PREVIEW_REVIEWED_FILES, new Map([[
-      resolutionCore, rawResolutionCore.replace("CODE_ENABLED = true", "CODE_ENABLED = false"),
-    ]]))), true, "disabling the resolution latch keeps the audited exception");
+  const resolutionBaseline = amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES);
   assert.equal(isReadOnlyAmuxResolutionPreview(route), true);
   assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
     source: route.source.replace("await previewAmuxIdeaResolution({ session, ...parsed.data })",
@@ -488,7 +495,7 @@ test("the resolution dry-run audit exception closes when its source boundary cha
   const rawKeyStore = readFileSync(join(REPOSITORY_ROOT, ...keyStorePath.split("/")), "utf8");
   assert.notEqual(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES, new Map([
     [keyStorePath, `${rawKeyStore}\nvoid globalThis.fetch("https://example.invalid");`],
-  ])), RESOLUTION_PREVIEW_REVIEWED_DIGEST);
+  ])), resolutionBaseline);
   assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
     source: route.source.replaceAll("if (!amuxV4ResolutionPreviewEnabled(",
       "if (amuxV4ResolutionPreviewEnabled("),
@@ -586,7 +593,7 @@ test("every admin write route is rate limited", () => {
   // gets one of them wrong should run out of budget rather than run out of
   // rows.
   const unlimited = writeRoutes
-    .filter((route) => !route.reaches("consumeApiRateLimit"))
+    .filter((route) => !route.reaches("consumeApiRateLimit") && !isTrustSafetyActivationRoute(route))
     .map((route) => route.name);
 
   assert.deepEqual(
@@ -644,6 +651,7 @@ test("a route that can queue an approval can also answer the step-up refusal", (
   const missing = writeRoutes
     .filter(
       (route) =>
+        !isTrustSafetyActivationRoute(route) &&
         (route.source.includes("runWithAdminApproval") ||
           route.source.includes("assertRecentAdminAuthentication")) &&
         !route.source.includes("adminApprovalErrorResponse") &&

@@ -22,8 +22,7 @@ import {
  *    not a sighting (independent review, round 1 N6).
  *
  * Staging's `/api/ready` sits behind Cloudflare Access and cannot be read, so
- * staging observation uses the control plane and build-info only; the policy
- * records that gap (docs/policy/trace-feedback-automation.md §9.3).
+ * staging observation uses the control plane and build-info only.
  */
 
 type FetchLike = typeof fetch;

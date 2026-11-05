@@ -22,6 +22,11 @@ import { amuxIdeaCardCloseDecisionFromAnswer, type AmuxIdeaCardCloseDecision } f
 import { applyAmuxIdeaCardCloseDmAnswer, readOpenAmuxIdeaCardCloseQuestionOfCard,
   recordAmuxIdeaCardCloseHandoff, recordAmuxIdeaCardCloseLocalCard,
   recordAmuxIdeaCardCloseLocalCardClosed } from "./ideaCardCloseService.ts";
+import { amuxPlanRefusalDecisionOfAnswer, type AmuxPlanRefusalDecision } from
+  "./ideaSessionPlanRefusalCore.ts";
+import { applyAmuxPlanRefusalDmDecision, readAmuxPlanRefusalSyncRows,
+  readOpenAmuxPlanRefusalOfCard, recordAmuxPlanRefusalLocalCard,
+  recordAmuxPlanRefusalLocalCardClosed } from "./ideaSessionPlanRefusalService.ts";
 import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
 import { parseAmuxV22OwnerQuestion } from "./v22OwnerQuestionCore.ts";
 import { AMUX_V22_PROVIDERS, amuxV22Provider } from "./v22WorkerClaimCore.ts";
@@ -41,6 +46,10 @@ import { openAmuxV22TaskResultRow, type AmuxV22SealedRow } from
  * past it (decisionMakerDeliveryRead.ts). When the question has left "open"
  * the relay closes its local card. The Decision Maker's tables are read only
  * through their own stores.
+ *
+ * A session answer the plan check refused takes the same way (owner decision
+ * 2026-11-05, ideaSessionPlanRefusalService.ts): the relay sees one more
+ * pending card, and the confirmed option decides whether the page runs again.
  */
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -53,12 +62,15 @@ export const AMUX_V22_QUESTION_SYNC_LIMIT = 3;
 export const AMUX_V22_QUESTION_PENDING_SCAN = 24;
 
 /** Whether a Decision Maker request's card mirrors a question the app answers
- * itself: a v22 worker's, or an idea card close question. Its confirmed answer
- * never reaches a session. One statement. */
+ * itself: a v22 worker's, a refused session answer, or an idea card close
+ * question. Its confirmed answer never reaches a session. One statement. */
 export async function isAmuxV22QuestionCard(
   client: Pick<Prisma.TransactionClient, "$queryRaw">, cardId: string) {
   const rows = await client.$queryRaw<Array<{ found: number }>>`
     SELECT 1 AS "found" FROM "AmuxV22TaskQuestion"
+    WHERE "localCardId" = ${cardId}
+    UNION ALL
+    SELECT 1 AS "found" FROM "AmuxIdeaSessionPlanRefusal"
     WHERE "localCardId" = ${cardId}
     UNION ALL
     SELECT 1 AS "found" FROM "AmuxIdeaCardCloseQuestion"
@@ -73,7 +85,8 @@ type PendingRow = AmuxV22SealedRow & { questionId: string; taskId: string;
 
 /** Open questions with no local card yet, with their run's result rows, and
  * cards of questions no longer open that the relay has not closed. */
-export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient) {
+export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient,
+  now: Date) {
   const pending = await tx.$queryRaw<PendingRow[]>`
     SELECT q."id" AS "questionId", q."taskId", q."attemptId", q."worker",
       q."sequence", r."ideaId", r."ciphertext", r."keyId", r."keyVersion",
@@ -101,7 +114,11 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient) 
       AND q."localCardClosedAt" IS NULL
     ORDER BY q."updatedAt", q."id"
     LIMIT ${AMUX_V22_QUESTION_SYNC_LIMIT}`;
-  return { pending, closing };
+  const refusals = await readAmuxPlanRefusalSyncRows(tx, now);
+  // A refusal goes first: an open one holds a whole idea, and its card leaves
+  // the list as soon as it is filed, so it cannot crowd out the questions.
+  return { pending, closing: [...refusals.closing, ...closing]
+    .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT), refusalCards: refusals.cards };
 }
 
 /** The card the relay files for each pending question, opened outside the
@@ -140,7 +157,7 @@ export async function recordAmuxV22QuestionLocalCard(
   if (changed.count === 1) return { recorded: true as const };
   const row = await tx.amuxV22TaskQuestion.findUnique({
     where: { id: input.questionId }, select: { localCardId: true } });
-  if (!row) throw new BoardImportError("not_found", 404);
+  if (!row) return recordAmuxPlanRefusalLocalCard(tx, input);
   if (row.localCardId !== input.cardId)
     throw new BoardImportError("card_conflict", 409);
   return { recorded: true as const };
@@ -159,14 +176,15 @@ export async function recordAmuxV22QuestionLocalCardClosed(
   const row = await tx.amuxV22TaskQuestion.findUnique({
     where: { id: input.questionId },
     select: { localCardId: true, localCardClosedAt: true } });
-  if (!row) throw new BoardImportError("not_found", 404);
+  if (!row) return recordAmuxPlanRefusalLocalCardClosed(tx, input);
   if (row.localCardId !== input.cardId || !row.localCardClosedAt)
     throw new BoardImportError("not_closable", 409);
   return { recorded: true as const };
 }
 
-/** The local card of a question the relay filed, whichever table holds it.
- * The relay does not tell them apart. */
+/** The local card of a question the relay filed, whichever table holds it:
+ * an idea card close question, else a v22 question, else a refused session
+ * answer. The relay does not tell them apart. */
 export async function recordDmQuestionLocalCard(tx: Prisma.TransactionClient,
   input: { questionId: string; cardId: string }) {
   return await recordAmuxIdeaCardCloseLocalCard(tx, input) ??
@@ -193,6 +211,8 @@ export type AmuxV22ResolveStep =
   | { kind: "skip"; cursor: Advance }
   | { kind: "answer"; cursor: Advance; questionId: string; taskId: string;
       requestId: string; message: string }
+  | { kind: "plan_refusal"; cursor: Advance; refusalId: string; ideaId: string;
+      requestId: string; decision: AmuxPlanRefusalDecision }
   | { kind: "cancel"; cursor: Advance; questionId: string; taskId: string;
       requestId: string; reason: string }
   | { kind: "card_close"; cursor: Advance; questionId: string; requestId: string;
@@ -203,17 +223,18 @@ export type AmuxV22ResolveStep =
 /**
  * The read step of the walk over confirmed Decision Maker proposals, the walk
  * the delivery read takes (`readNextDecisionMakerDeliveryJudgment`), from the
- * relay's cursor: seven statements (switches, the confirmation, the request,
- * the open question of its card in each of the two tables, the result detail,
- * the bodies). Under the kill switch, or when the switches cannot be read,
- * nothing more is read and the walk keeps its place (docs/policy/amux-decision-maker.md §6). A confirmation of an open v22 question card
+ * relay's cursor: eight statements (switches, the confirmation, the request,
+ * the open question of its card, the open refusal of its card, the open card
+ * close question of its card, the result detail, the bodies). Under the kill
+ * switch, or when the switches cannot be read, nothing more is read and the
+ * walk keeps its place (docs/policy/amux-decision-maker.md §6). A confirmation of an open v22 question card
  * yields the text a worker would have been sent; one whose asking run has not
- * settled yet waits for it; one of an idea card close question yields what the
- * answer says, or that a person must decide; any other confirmation is stepped
- * past.
+ * settled yet waits for it; one of a refusal or an idea card close question
+ * yields what the answer says (for a card close question, or that a person
+ * must decide); any other confirmation is stepped past.
  */
 export async function readAmuxV22ResolveStep(
-  tx: Prisma.TransactionClient, after: DmDeliveryCursor | null):
+  tx: Prisma.TransactionClient, after: DmDeliveryCursor | null, now: Date):
   Promise<AmuxV22ResolveStep> {
   let killSwitch: boolean | null;
   try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
@@ -228,33 +249,40 @@ export async function readAmuxV22ResolveStep(
     where: { localCardId: state.binding.cardId, state: "open" },
     select: { id: true, taskId: true, attempt: { select: { endedAt: true } } },
   }) : null;
-  if (!question) {
-    const closeQuestion = state ? await readOpenAmuxIdeaCardCloseQuestionOfCard(tx,
-      state.binding.cardId) : null;
-    if (!closeQuestion) return { kind: "skip", cursor };
-    const detail = await readDecisionMakerResultDetail(tx, judgment.requestId);
-    const bodies: DmDeliveryBodies = {};
-    for (const body of await readDecisionMakerBodies(tx, judgment.requestId))
-      if (body.field === "dm_answer" || body.field === "operator_answer")
-        bodies[body.field] = body.text;
-    const base = { cursor, questionId: closeQuestion.id, requestId: judgment.requestId };
-    // The candidate is what proves this is a confirmation the stores wrote.
-    const decision = dmDeliveryCandidate({ judgment, state, detail, bodies })?.status === "ready" ?
-      amuxIdeaCardCloseDecisionFromAnswer({ judgmentKind: judgment.judgmentKind,
-        outputKind: detail?.outputKind ?? null, optionId: detail?.optionId ?? null,
-        dmAnswer: bodies.dm_answer, operatorAnswer: bodies.operator_answer }) : null;
-    return decision ? { kind: "card_close", ...base, decision } :
-      { kind: "card_close_handoff", ...base };
-  }
+  const refusal = state && !question ?
+    await readOpenAmuxPlanRefusalOfCard(tx, state.binding.cardId, now) : null;
+  const closeQuestion = state && !question && !refusal ?
+    await readOpenAmuxIdeaCardCloseQuestionOfCard(tx, state.binding.cardId) : null;
+  if (!question && !refusal && !closeQuestion) return { kind: "skip", cursor };
   // The asking run has not settled yet: the walk waits here and asks again,
   // rather than cancel a question that is about to be parked.
-  if (!question.attempt.endedAt) return { kind: "wait", cursor: { move: "keep" } };
+  if (question && !question.attempt.endedAt) return { kind: "wait", cursor: { move: "keep" } };
   const detail = await readDecisionMakerResultDetail(tx, judgment.requestId);
   const bodies: DmDeliveryBodies = {};
   for (const body of await readDecisionMakerBodies(tx, judgment.requestId))
     if (body.field === "dm_answer" || body.field === "operator_answer")
       bodies[body.field] = body.text;
   const candidate = dmDeliveryCandidate({ judgment, state, detail, bodies });
+  if (refusal) {
+    // No clear decision leaves the refusal open for the owner in Admin.
+    const decision = candidate?.status === "ready" ?
+      amuxPlanRefusalDecisionOfAnswer({ judgmentKind: judgment.judgmentKind,
+        optionId: detail?.optionId ?? null, outputKind: detail?.outputKind ?? null,
+        dmAnswer: bodies.dm_answer, operatorAnswer: bodies.operator_answer }) : null;
+    return decision ? { kind: "plan_refusal", cursor, refusalId: refusal.id,
+      ideaId: refusal.ideaId, requestId: judgment.requestId, decision } : { kind: "skip", cursor };
+  }
+  if (closeQuestion) {
+    const closeBase = { cursor, questionId: closeQuestion.id, requestId: judgment.requestId };
+    // The candidate is what proves this is a confirmation the stores wrote.
+    const decision = candidate?.status === "ready" ?
+      amuxIdeaCardCloseDecisionFromAnswer({ judgmentKind: judgment.judgmentKind,
+        outputKind: detail?.outputKind ?? null, optionId: detail?.optionId ?? null,
+        dmAnswer: bodies.dm_answer, operatorAnswer: bodies.operator_answer }) : null;
+    return decision ? { kind: "card_close", ...closeBase, decision } :
+      { kind: "card_close_handoff", ...closeBase };
+  }
+  if (!question) return { kind: "skip", cursor };
   const base = { cursor, questionId: question.id, taskId: question.taskId,
     requestId: judgment.requestId };
   return candidate?.status === "ready" ?
@@ -319,6 +347,22 @@ export async function cancelAmuxV22UnanswerableQuestion(
   return { cancelled: true as const };
 }
 
+/** A confirmed decision on a refused answer, under the audit chain lock and the
+ * kill switch; null when the switch holds it. */
+export const applyAmuxPlanRefusalDecisionStep = (step: { refusalId: string;
+  ideaId: string; requestId: string; decision: AmuxPlanRefusalDecision }) =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerPlanRefusalDecide,
+    async (tx, context) => {
+      await takeAuditChainLock(tx);
+      let killSwitch: boolean | null;
+      try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
+      catch { killSwitch = null; }
+      if (killSwitch !== false) return null;
+      return applyAmuxPlanRefusalDmDecision(tx, { refusalId: step.refusalId,
+        ideaId: step.ideaId, requestId: step.requestId, decision: step.decision,
+        now: context.dbNow });
+    });
+
 /**
  * One step of the walk, each part its own transaction within docs/policy/amux-decision-maker.md §9's 12
  * statements: the read; then the answer under the audit chain lock and the
@@ -329,7 +373,7 @@ export async function runAmuxV22ResolveStep(after: DmDeliveryCursor | null):
   Promise<{ resolved: null | "answered" | "cancelled" | "closed" | "kept"; cursor: AmuxV22ResolveCursor }> {
   const step = await withAmuxDbBoundary(
     AMUX_DB_BOUNDARIES.decisionMakerV22QuestionResolve,
-    (tx) => readAmuxV22ResolveStep(tx, after));
+    (tx, context) => readAmuxV22ResolveStep(tx, after, context.dbNow));
   if (step.kind === "card_close" || step.kind === "card_close_handoff") {
     // A fault here never holds back the v22 questions behind it: the walk goes
     // on and meets this confirmation again on its next pass, and a write that
@@ -358,6 +402,11 @@ export async function runAmuxV22ResolveStep(after: DmDeliveryCursor | null):
   let cursor: AmuxV22ResolveCursor = step.cursor;
   let outcome: null | "answered" | "cancelled" = null;
   let cancel = step.kind === "cancel" ? step.reason : null;
+  if (step.kind === "plan_refusal") {
+    const applied = await applyAmuxPlanRefusalDecisionStep(step);
+    if (applied === null) cursor = { move: "keep" };
+    else if (applied.applied) outcome = "answered";
+  }
   if (step.kind === "answer") {
     try {
       const applied = await withAmuxDbBoundary(

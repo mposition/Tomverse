@@ -535,11 +535,11 @@ export const AMUX_DB_BOUNDARIES = {
   // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
   // Each within docs/policy/amux-decision-maker.md §9's 12 statements.
   // Resolve read: setup + switches + the next confirmation + request state +
-  // the open question of its card (a v22 question, then an idea card close
-  // question) + result detail + bodies + fence.
+  // the open question of its card + the open refusal of its card + the open
+  // idea card close question of its card + result detail + bodies + fence.
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 10,
     isolation: "read",
   },
   // Answer: setup + audit chain lock + switches + the locked question, Task
@@ -561,17 +561,18 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 7,
     isolation: "mutation",
   },
-  // Sync read: setup + pending + closing + fence.
+  // Sync read: setup + pending + closing + refusal pending + refusal closing + fence.
   decisionMakerV22QuestionRead: {
     operation: "decision_maker_v22_question_read",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 6,
     isolation: "read",
   },
-  // Card or close record: setup + update + read-back, on the idea card close
-  // question and then the v22 question it may be instead + fence.
+  // Card or close record: setup + update + read-back on the idea card close
+  // question, then the same two on the v22 question, then on a refused session
+  // answer's card, whichever it is + fence.
   decisionMakerV22QuestionWrite: {
     operation: "decision_maker_v22_question_write",
-    prismaCallCeiling: 6,
+    prismaCallCeiling: 8,
     isolation: "mutation",
   },
   // An idea card close question (lib/amux/ideaCardCloseService.ts), each within
@@ -612,6 +613,26 @@ export const AMUX_DB_BOUNDARIES = {
   // The owner's read on the idea's detail: setup + ONE statement + fence.
   decisionMakerIdeaCardCloseOwnerRead: {
     operation: "decision_maker_idea_card_close_owner_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // A confirmed proposal on a refused session answer (ideaSessionPlanRefusalService.ts):
+  // setup + audit chain lock + switches + refusal + canonical audit 4 + the idea
+  // and two body clocks on a stop + fence, docs/policy/amux-decision-maker.md §9's 12.
+  decisionMakerPlanRefusalDecide: {
+    operation: "decision_maker_plan_refusal_decide",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // The owner's decision: the same, with the ownership read for the switches.
+  amuxPlanRefusalOwnerDecision: {
+    operation: "amux_plan_refusal_owner_decision",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // The idea detail's read: setup + the open refusal + fence.
+  amuxPlanRefusalOwnerRead: {
+    operation: "amux_plan_refusal_owner_read",
     prismaCallCeiling: 3,
     isolation: "read",
   },

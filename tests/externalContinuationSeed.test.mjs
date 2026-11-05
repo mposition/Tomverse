@@ -192,6 +192,88 @@ test("blank turns are dropped rather than seeded as empty lines", () => {
     );
 });
 
+test("a blank turn is counted as blank, never as something the budget left out", () => {
+    // The header turns `omittedByBudgetCount` into a sentence about the context
+    // budget, and the budget had no say about a turn with nothing in it.
+    const plan = planContinuationSeed({
+        messages: [
+            message({ ordinal: 0, role: "user", content: "   \n\t  " }),
+            // Blank only after the per-message cut, which is how the rule reads
+            // it: the visible word is past the 4,000th code point.
+            message({
+                ordinal: 1,
+                role: "assistant",
+                content: `${" ".repeat(
+                    CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT
+                )}visible`,
+            }),
+            message({ ordinal: 2, role: "system", content: "dropped" }),
+            message({ ordinal: 3, role: "user", content: "a question" }),
+        ],
+    });
+    assert.deepEqual(
+        plan.turns.map((turn) => turn.ordinal),
+        [3]
+    );
+    assert.equal(plan.omittedByBudgetCount, 0);
+    assert.equal(plan.blankSkippedCount, 2);
+    assert.equal(plan.excludedByRoleCount, 1);
+});
+
+test("blanks older than the turn the budget stopped at are still counted as blank", () => {
+    // The selection loop never reaches ordinal 0: it stops at 1, which does not
+    // fit. A reason the loop never evaluated still has to be reported.
+    const plan = planContinuationSeed({
+        messages: [
+            message({ ordinal: 0, role: "user", content: "  " }),
+            message({ ordinal: 1, role: "assistant", content: "an answer" }),
+            message({ ordinal: 2, role: "user", content: "a question" }),
+        ],
+        tokenBudget: estimateTextTokens("a question"),
+    });
+    assert.deepEqual(
+        plan.turns.map((turn) => turn.ordinal),
+        [2]
+    );
+    assert.equal(plan.omittedByBudgetCount, 1, "only the answer that did not fit");
+    assert.equal(plan.blankSkippedCount, 1);
+});
+
+test("an all-blank source yields an empty plan that blames no budget", () => {
+    const plan = planContinuationSeed({
+        messages: [
+            message({ ordinal: 0, role: "user", content: " " }),
+            message({ ordinal: 1, role: "assistant", content: "\n\t" }),
+        ],
+    });
+    assert.deepEqual(plan.turns, []);
+    assert.equal(plan.omittedByBudgetCount, 0);
+    assert.equal(plan.blankSkippedCount, 2);
+});
+
+test("the seed header's budget sentence counts only budget omissions", () => {
+    const plan = planContinuationSeed({
+        messages: [
+            message({ ordinal: 0, role: "user", content: "   " }),
+            message({ ordinal: 1, role: "assistant", content: "an answer" }),
+            message({ ordinal: 2, role: "user", content: "a question" }),
+        ],
+        sourceMessageCount: 3,
+        tokenBudget: estimateTextTokens("a question"),
+    });
+    const prompt = buildContinuationSeedPrompt({
+        provider: "chatgpt",
+        importedAt: null,
+        plan,
+    });
+    assert.ok(
+        prompt.transcriptText.includes(
+            "1 earlier message(s) were left out to stay within this turn's context budget."
+        ),
+        prompt.transcriptText
+    );
+});
+
 test("the total is the snapshot's, not the page the builder happened to read", () => {
     const plan = planContinuationSeed({
         messages: [message({ ordinal: 998 }), message({ ordinal: 999 })],

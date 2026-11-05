@@ -429,7 +429,7 @@ mock.module(mod("lib/apiSecurity.ts"), {
 });
 
 let contextConsumeSucceeds = true;
-let contextVerification: "ok" | "stale" = "ok";
+let contextVerification: "ok" | "stale" | "expired" | "invalid_signature" = "ok";
 mock.module(mod("lib/chatTurnContext.ts"), {
   namedExports: {
     buildChatTurnContext: async () => ({
@@ -448,8 +448,8 @@ mock.module(mod("lib/chatTurnContext.ts"), {
 });
 mock.module(mod("lib/chatContextBundleService.ts"), {
   namedExports: {
-    verifyChatContextBundle: () => contextVerification === "stale"
-      ? { ok: false, reason: "stale" as const }
+    verifyChatContextBundle: () => contextVerification !== "ok"
+      ? { ok: false, reason: contextVerification }
       : ({
           ok: true,
           payload: {
@@ -473,6 +473,8 @@ mock.module(mod("lib/chatContextBundleService.ts"), {
 type Attempt = {
   /** The model id `streamText` was asked for. */
   modelId: string | null;
+  /** The `onError` the route passed; absent means the SDK's own default. */
+  onError?: (event: { error: unknown }) => unknown;
   /** Whether its stream was cancelled, and with what. */
   cancelledWith: unknown;
   messages: Array<{ role: string; content: unknown }>;
@@ -525,6 +527,7 @@ mock.module("ai", {
       const attempt: Attempt = {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
+        onError: options.onError as Attempt["onError"],
         cancelledWith: null,
         messages: options.messages as Attempt["messages"],
         providerAbortedWith: null,
@@ -1726,6 +1729,47 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   assert.equal(attemptLifecycle[primaryAbort + 1], "0:reader_cancel");
 });
 
+test("both attempts log a stream error by its metadata, never the model's content", async () => {
+  await ask("answers");
+  assert.equal(attempts.length, 2);
+
+  const CONTENT = "SYNTHETIC-REASONING-MARKER";
+  const logged: unknown[][] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(args);
+  };
+  try {
+    for (const attempt of attempts) {
+      assert.equal(typeof attempt.onError, "function", "left to the SDK's default");
+      const result = attempt.onError?.({
+        error: Object.assign(new Error("Model response did not contain a tool call."), {
+          name: "AI_ToolChoiceViolationError",
+          finishReason: "stop",
+          content: [{ type: "reasoning", text: CONTENT }],
+        }),
+      });
+      // An `onError` result can ask the SDK to retry; this one must not.
+      assert.equal(result, undefined);
+    }
+  } finally {
+    console.error = realError;
+  }
+
+  assert.equal(logged.length, 2);
+  logged.forEach((args, index) => {
+    assert.equal(args.length, 1);
+    assert.equal(typeof args[0], "string");
+    assert.equal((args[0] as string).includes(CONTENT), false);
+    const record = JSON.parse(args[0] as string);
+    assert.equal(record.event, "chat_stream_error");
+    assert.equal(record.name, "AI_ToolChoiceViolationError");
+    assert.equal(record.finishReason, "stop");
+    assert.equal(record.modelId, attempts[index].modelId);
+    assert.equal(typeof record.traceId, "string");
+  });
+});
+
 test("a location-aware primary caches its stable prefix but fallback carries only the uncached current fix", async () => {
   forceAnthropicPrimary = true;
   turnLocation = { latitude: -27.4697701, longitude: 153.0251234, accuracy: 10, timestamp: Date.now() };
@@ -2145,9 +2189,53 @@ test("a post-claim context consumption collision is terminal and dispatch-free",
       refusalReason: "already_consumed",
     });
     assert.equal("bundleId" in payload, false);
+    const lines = warningEvents("chat_request_rejected");
+    assert.equal(lines.length, 1);
+    const line = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+    assert.equal(line.traceId, payload.traceId);
+    assert.equal(line.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(line.status, 409);
+    assert.equal(line.refusalReason, "already_consumed");
+    assert.equal(lines[0]?.includes("이 질문에 답해 줘"), false);
   } finally {
     contextConsumeSucceeds = true;
   }
+});
+
+for (const [verification, code, status, details, refusalReason] of [
+  ["stale", "CHAT_CONTEXT_BUNDLE_STALE", 409, { requiresPreflight: true }, "stale"],
+  ["expired", "CHAT_CONTEXT_BUNDLE_STALE", 409, { requiresPreflight: true }, "expired"],
+  ["invalid_signature", "INVALID_CONTEXT_BUNDLE", 400, undefined, undefined],
+] as const) {
+  test(`a ${verification} context bundle says why only in the log line`, async () => {
+    contextVerification = verification;
+    try {
+      const { body } = await ask("answers", "claimed", status, true);
+      const payload = JSON.parse(body) as Record<string, unknown>;
+      assert.equal(payload.code, code);
+      assert.deepEqual(payload.details, details);
+      const lines = warningEvents("chat_request_rejected");
+      assert.equal(lines.length, 1);
+      const line = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+      assert.equal(line.traceId, payload.traceId);
+      assert.equal(line.code, code);
+      assert.equal(line.status, status);
+      assert.equal(line.refusalReason, refusalReason);
+    } finally {
+      contextVerification = "ok";
+    }
+  });
+}
+
+test("a durable identity conflict from the common failure unwind leaves one rejection line", async () => {
+  const { body } = await ask("answers", "conflict", 409);
+  const payload = JSON.parse(body) as Record<string, unknown>;
+  const lines = warningEvents("chat_request_rejected");
+  assert.equal(lines.length, 1);
+  const line = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+  assert.equal(line.traceId, payload.traceId);
+  assert.equal(line.code, "CHAT_ATTEMPT_ID_REUSED");
+  assert.equal(line.status, 409);
 });
 
 test("a pre-durable browser request id derives and verifies one scoped durable source", async () => {
@@ -3260,6 +3348,11 @@ test("Guest Auto does not retry an ambiguous Router-refusal release with a new p
   assert.equal(
     (JSON.parse(body) as { code?: string }).code,
     "GUEST_AUTO_OUTCOME_UNKNOWN"
+  );
+  // The log names the refusal that left, not the one it replaced.
+  assert.deepEqual(
+    warningEvents("chat_request_rejected").map((line) => (JSON.parse(line) as { code?: string }).code),
+    ["GUEST_AUTO_OUTCOME_UNKNOWN"]
   );
   assert.equal(guestReleaseInputs.length, 1);
   assert.equal(

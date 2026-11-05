@@ -2304,6 +2304,27 @@ domains:
       evidence, account deletion and export remain unverified; restrictive
       claim, idea, evidence, manifest and audit references remain.
 
+  - domain: amuxIdeaSessionPlanRefusal
+    prismaModel: AmuxIdeaSessionPlanRefusal
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-decision-maker.md section 2 item 9, refused session answer account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      Why the plan check refused one session analysis answer, in the check's
+      closed words only, and the decision: run the page again or stop. It holds
+      no idea text and no model output. The deciding owner's user id is kept
+      when the owner decided in Admin. Account deletion and unified export are
+      not verified.
+
   - domain: amuxIdeaSessionResultOrphanKeyRetirement
     prismaModel: AmuxIdeaSessionResultOrphanKeyRetirement
     userLinkageRole: actor

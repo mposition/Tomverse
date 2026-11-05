@@ -116,10 +116,6 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     aliases: ["피드백", "수신함", "문의", "개인정보", "정보주체 권리", "불만"],
     tabs: {
       feedback: { label: "피드백", description: "제품에서 접수된 신고와 요청" },
-      fixes: {
-        label: "자동 수정 검토",
-        description: "Trace로 찾은 문제점과 해결책, 승인과 배포 진행",
-      },
       privacy: { label: "개인정보 요청", description: "내보내기와 삭제 요청" },
     },
   },
@@ -265,6 +261,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     aliases: ["digest", "가격 검증 기한"],
     tabs: {
       "billing-finance-ops": { label: "과금·재무", description: "가격 검증 기한 일일 digest, Agent 스위치와 monitor 확인" },
+      "trust-safety": { label: "신뢰·안전", description: "페이지를 열 때 센 DSR 기한과 관측 스위치" },
     },
   },
   office: {

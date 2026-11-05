@@ -282,6 +282,28 @@ const OPS_OBSERVER_DIGEST_VARIABLES = [
 ] as const;
 
 /**
+ * The trust-safety observer service's variables
+ * (docs/policy/trust-safety-compliance-agent.md §4): two, and the section says
+ * that is all of them -- the internal route's secret and the route's URL.
+ *
+ * No product database credential, no GitHub token, no model key, and **not**
+ * the dead-man ping URL, which stays in the main app so this service cannot
+ * reach the monitor. No enable switch either: the switch is the activation row
+ * (§6), and a third name would be an amendment of that section. The build
+ * setting is the `dockerfile` field below rather than
+ * `RAILWAY_DOCKERFILE_PATH`, for the same reason.
+ *
+ * The list equals `SERVICE_VARIABLES` in
+ * scripts/trust-safety/runtime-variables-core.mjs -- the supervisor refuses to
+ * start on any other name, and tests/trustSafetyServiceIac.test.mjs holds the
+ * two lists equal.
+ */
+const TRUST_SAFETY_OBSERVER_VARIABLES = [
+  "TRUST_SAFETY_OBSERVER_SECRET",
+  "TRUST_SAFETY_OBSERVER_URL",
+] as const;
+
+/**
  * The engineering agent's two services (docs/policy/engineering-agent.md §8,
  * §12): production only, each a cron that runs one cycle and stops. They are
  * not built by Railway: they run the image .github/workflows/engineering-
@@ -538,6 +560,35 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     cronSchedule: "0 21 * * *",
     environments: {
       production: OPS_OBSERVER_DIGEST_VARIABLES,
+    },
+  },
+  {
+    // docs/policy/trust-safety-compliance-agent.md §4 and §12 (1) table A:
+    // every thirty minutes, the declared period `P`, which the dead-man
+    // window `W` is four times. A schedule change is also a change to that
+    // monitor check, and §8 says the pull request that makes one carries the
+    // procedure for the other.
+    //
+    // Built from its own Dockerfile rather than through
+    // `RAILWAY_DOCKERFILE_PATH`, so the variable list stays at the two names
+    // §4 allows -- the build setting lives here instead of in the service's
+    // environment. No restart: the absent `restart` field is never-restart,
+    // and a run that failed is not retried (§5.5).
+    //
+    // Production only. Declaring it creates nothing by itself: the service
+    // calls the route every period and the route answers `failed` until a
+    // person writes the activation row (§6), so the deploy is dark until the
+    // owner turns the switch on in the Admin section.
+    key: "trust_safety_observer",
+    service: "Trust Safety Observer",
+    startCommand: "node scripts/trust-safety/supervise.mjs",
+    cronSchedule: "*/30 * * * *",
+    dockerfile: {
+      path: "docker/trust-safety-observer.Dockerfile",
+      watchPatterns: ["docker/trust-safety-observer.Dockerfile", "scripts/trust-safety/**"],
+    },
+    environments: {
+      production: TRUST_SAFETY_OBSERVER_VARIABLES,
     },
   },
   {

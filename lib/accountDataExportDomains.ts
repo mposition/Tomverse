@@ -821,6 +821,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaSessionPlanRefusal",
+    publicName: "amux_idea_session_plan_refusals",
+    prismaModel: "AmuxIdeaSessionPlanRefusal",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaSessionResultOrphanKeyRetirement",
     publicName: "amux_idea_session_result_orphan_key_retirements",
     prismaModel: "AmuxIdeaSessionResultOrphanKeyRetirement",

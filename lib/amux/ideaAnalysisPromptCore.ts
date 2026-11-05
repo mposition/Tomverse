@@ -264,6 +264,12 @@ function buildCheckedPrompt(
   };
 }
 
+/** A built prompt with one note just before its confirmed data, which stays
+ * the prompt's last block. The data comes after the instructions, so the first
+ * marker is always the data's own. */
+export const amuxAnalysisPromptWithNote = (prompt: string, note: string): string =>
+  prompt.replace(`\n\n${DATA_BEGIN}\n`, () => `\n\n${note}\n\n${DATA_BEGIN}\n`);
+
 /** Builds a candidate only; callers must never use this as send permission. */
 export function buildAmuxIdeaAnalysisPrompt(
   input: AmuxIdeaAnalysisPromptInput,

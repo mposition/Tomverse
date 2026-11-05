@@ -8082,6 +8082,38 @@ model AmuxV22TaskResult {
   @@index([ideaId, bodyPurgedAt])
 }
 
+/// A session answer the plan check refused, held for a decision (owner decision
+/// 2026-11-05): run the page again, or stop for the operator. The columns are
+/// the check's closed words only.
+model AmuxIdeaSessionPlanRefusal {
+  id                String    @id
+  ideaId            String
+  claimId           String    @unique @db.Uuid
+  chunkIndex        Int
+  detail            String
+  schemaRule        String?
+  schemaField       String?
+  schemaUnit        Int?
+  schemaUnitKind    String?
+  /// open | retry | stopped
+  state             String    @default("open")
+  /// operator | dm_confirmed
+  decisionSource    String?
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  /// The typed-ask card mirroring this refusal on the AMUX host, once.
+  localCardId       String?   @unique
+  localCardClosedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  idea  AmuxIdeaSubmission                 @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claim AmuxIdeaSessionAnalysisBudgetClaim @relation(fields: [claimId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, chunkIndex])
+  @@index([state, createdAt])
+}
+
 /// A v22 worker question to the owner (operator decision 2026-10-30). The
 /// question text stays in the attempt's encrypted result; this row keeps its
 /// digest, where it stands and the answer until the resumed delivery reads it.
@@ -10275,6 +10307,7 @@ model AmuxIdeaSubmission {
   trackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[]
   trackedCheckoutReadManifests AmuxIdeaTrackedCheckoutReadManifest[]
   sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
+  planRefusals           AmuxIdeaSessionPlanRefusal[]
   sessionResultOrphanKeyRetirements AmuxIdeaSessionResultOrphanKeyRetirement[]
   readManifestKeyIntents AmuxIdeaReadManifestKeyIntent[]
   sessionAnalysisReservation AmuxIdeaSessionAnalysisReservation?
@@ -10751,6 +10784,7 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   claimAudit     AdminAuditLog                      @relation("AmuxV19SessionBudgetClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_claim_audit_fkey")
   resolutionAudit AdminAuditLog?                    @relation("AmuxV19SessionBudgetResolutionAudit", fields: [resolutionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_resolution_audit_fkey")
   analysisResult AmuxIdeaSessionAnalysisResult?
+  planRefusal    AmuxIdeaSessionPlanRefusal?
   resultOrphanKeyRetirement AmuxIdeaSessionResultOrphanKeyRetirement?
 
   @@index([namespace, monthStart, status], map: "AmuxIdeaSessionAnalysisBudgetClaim_window_status_idx")
@@ -11887,4 +11921,42 @@ model CodeManagedCall {
   completedAt DateTime? @db.Timestamptz(6)
   @@index([reservationId,createdAt],map:"CodeManagedCall_task")
   @@index([status,createdAt],map:"CodeManagedCall_active")
+}
+
+/// One successful round of the trust-safety observer (docs/policy/trust-safety-compliance-agent.md §5.3).
+/// Five columns on purpose: no free text, reason, count, error message or user reference, and no
+/// idempotency key -- two overlapping rounds are two true sentences, so the row count is "successful
+/// rounds" and never a denominator. Append-only: triggers refuse UPDATE and DELETE. Nothing reads it,
+/// which is what makes the row a record rather than state.
+model TrustSafetyObserverRun {
+  id String @id
+  /// Always "succeeded"; a CHECK allows nothing else.
+  outcome String
+  /// Relayed by the app (docs/policy/trust-safety-compliance-agent.md §11-5); a CHECK refuses a value after recordedAt.
+  observedAt DateTime @db.Timestamptz(3)
+  /// Written by a BEFORE INSERT trigger from the database clock; the application cannot set it.
+  recordedAt DateTime @db.Timestamptz(3)
+  /// The deadline this round must commit inside, taken from the transaction-local setting at
+  /// INSERT and fixed by the same trigger; a caller's value is overwritten. The deferred trigger
+  /// reads this column and never the setting, so the transaction cannot extend its own deadline.
+  deadlineAt DateTime @db.Timestamptz(3)
+}
+
+/// The observer's activation row, written only by a person's Admin action
+/// (docs/policy/trust-safety-compliance-agent.md §5.1 item 1 and §6).
+/// Not the authority on its own: that §6 derives the mode from the newest audit entry for
+/// `trust_safety.observer_activation_changed` and accepts this row's mode only when all seven checks
+/// pass, so a replayed historical tuple cannot turn observation on. Single row by CHECK; triggers
+/// refuse a version that does not move forward, a mode that does not change, and DELETE.
+model TrustSafetyObserverConfig {
+  /// Always "singleton"; a CHECK allows nothing else.
+  id String @id
+  /// "off" or "on"; a CHECK allows nothing else.
+  mode String
+  /// Monotonic, matched against the bound audit entry's metadata.version.
+  version Int
+  /// The deadline this write must commit inside, written by a trigger from the database
+  /// clock; a caller's value is overwritten. Stored rather than re-read from the setting,
+  /// so the transaction cannot extend its own deadline after the reach check passed.
+  deadlineAt DateTime @db.Timestamptz(3)
 }

@@ -24,8 +24,9 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { parkAmuxSessionIdeaInTx } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
-import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import { readAmuxIdeaProgressForOwner, readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
 import { consumeAmuxV4UnitRejection, prepareAmuxV4UnitRejection } from
   "@/lib/amux/ideaUnitRejectionService";
 import { amuxV4UnitBrowserDigest } from "@/lib/amux/ideaUnitBrowserCore";
@@ -70,7 +71,8 @@ import { commitIdeaOnlyTransferPreview } from
 import { commitIdeaTransferConfirmation } from
   "@/lib/amux/ideaTransferConfirmationService";
 import { amuxSessionPageKeyIdentities,
-  commitAmuxSessionAnalysisPlanInTx, readAmuxSessionPageContextInTx } from
+  buildAmuxSessionPagePrompt, commitAmuxSessionAnalysisPlanInTx,
+  readAmuxSessionPageContextInTx } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
 import { commitAmuxV4UnitRejection, readAmuxV4UnitDecision } from "@/lib/amux/ideaUnitDecisionStore";
 import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
@@ -543,6 +545,61 @@ test("a registered plan's evidence unit leaves no plan approval waiting", async 
     "the inbox does not ask for a plan approval nobody can give");
 });
 
+test("the progress list reads a blocked Task's review and a live attempt in its one statement", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea();
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "committed");
+  const decision = await prisma.amuxIdeaUnitDecision.findFirstOrThrow({
+    where: { ideaId, action: "register_card" }, select: { registeredWorkItemId: true } });
+  const taskId = decision.registeredWorkItemId!;
+  const listed = async (tx: Prisma.TransactionClient) => {
+    const row = (await readAmuxIdeaProgressInTx(tx, session.user!.id!, new Date())).find((entry) => entry.ideaId === ideaId);
+    assert.ok(row);
+    return row;
+  };
+  // A real attempt needs a whole worker assignment and a real review a whole settlement, neither of
+  // which this read looks at, so each state is written as stored rows and rolled back.
+  const started = new Date(Date.now() - 60_000);
+  const ended = (number: number, reason: string) => ({ id: `idea-progress-attempt-${randomUUID()}`, taskId,
+    worker: "idea-progress-worker", workerInstanceId: "idea-progress-instance", workerGeneration: 1, taskRevision: 1,
+    attemptNumber: number, heartbeatAt: started, startedAt: new Date(started.getTime() + number),
+    endedAt: started, outcome: "failed", toStatus: "blocked", endedBy: "idea-progress-worker", reason });
+  const open = (leaseExpiresAt: Date) => ({ ...ended(3, ""), endedAt: null, outcome: null, toStatus: null,
+    endedBy: null, reason: null, leaseExpiresAt });
+  const escalation = (status: string) => ({ taskId, reason: "execution_lease_expired", openedBy: "worker", status });
+  const blocked = (tx: Prisma.TransactionClient) => tx.amuxWorkItem.update({ where: { id: taskId }, data: { status: "blocked" } });
+  const state = (mutate?: (tx: Prisma.TransactionClient) => Promise<unknown>) => inRolledBackTx(listed, mutate);
+
+  assert.equal((await state()).activity, "waiting", "a registered Task nobody took is not running");
+  const free = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: ended(1, "worker said: token sk-live-123") }); });
+  assert.equal(free.activity, "blocked");
+  assert.deepEqual([free.taskRows[0].id, free.taskRows[0].blockReason, free.taskRows[0].escalationId], [taskId, null, null],
+    "a worker's stored text never reaches the page");
+  const newest = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: ended(1, "worker said: token sk-live-123") });
+    await tx.amuxExecutionAttempt.create({ data: ended(2, "attempt_budget_exhausted") }); });
+  assert.equal(newest.taskRows[0].blockReason, "attempt_budget_exhausted", "the newest attempt speaks");
+  const reviewed = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: ended(1, "attempt_budget_exhausted") });
+    await tx.amuxHumanEscalation.create({ data: { ...escalation("open"), id: "cmideaprogressescalation1" } }); });
+  assert.deepEqual([reviewed.taskRows[0].blockReason, reviewed.taskRows[0].escalationId],
+    ["execution_lease_expired", "cmideaprogressescalation1"], "the open review comes first");
+  const resolved = await state(async (tx) => { await blocked(tx);
+    await tx.amuxHumanEscalation.create({ data: { ...escalation("resolved"), resolvedAt: new Date(),
+      resolvedById: "idea-progress-owner", resolvedByEmail: "owner@example.com", resolution: "fixture",
+      resolutionOutcome: "block" } }); });
+  assert.deepEqual([resolved.taskRows[0].blockReason, resolved.taskRows[0].escalationId], [null, null],
+    "a resolved review is no longer offered");
+  const expired = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: open(started) }); });
+  assert.equal(expired.activity, "blocked", "an attempt whose lease ran out is not live");
+  const live = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: open(new Date(Date.now() + 60_000)) }); });
+  assert.equal(live.activity, "running", "a live attempt runs whatever the card says");
+});
+
 test("a system-registered Task is ready, keeps its public PR consent and reads back", async () => {
   assert.ok(registeredSystemTaskId);
   const taskId = registeredSystemTaskId;
@@ -794,7 +851,45 @@ test("a session plan continues on its next page and registers once complete", as
   assert.equal(decisions.filter((entry) => entry.registeredWorkItemId).length, 9);
 });
 
-test("a refused later page ends every earlier page's body clock", async () => {
+test("a mislabelled remainder continues, and an empty last page closes and registers the plan", async () => {
+  await approveSyntheticTaskCatalog();
+  const title = `Synthetic mislabelled session ${randomUUID()}`;
+  const idea = await analysingSessionIdea();
+  const first = await sessionPageAnswer(idea, sessionPage(sessionPlanUnits(title), {
+    coverageStatus: "more", continuationKind: "input",
+    remainingScope: "A last check may remain." }));
+  assert.equal(first.planned.state, "plan_continues");
+  const stored = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId: idea.ideaId, chunkIndex: 0 } },
+    select: { continuationKind: true, outputPending: true } });
+  assert.deepEqual(stored, { continuationKind: "output", outputPending: true });
+  const keys = await createAmuxContentKeyRing([idea.rawIdentity,
+    ...await amuxSessionPageKeyIdentities(prisma, idea.ideaId)], []);
+  const context = await prisma.$transaction(async (tx) => {
+    const row = await tx.amuxIdeaSubmission.findUniqueOrThrow({
+      where: { id: idea.ideaId },
+      select: { actorUserId: true, currentSourcePlanRevisionId: true } });
+    return readAmuxSessionPageContextInTx(tx, { ideaId: idea.ideaId,
+      actorUserId: row.actorUserId, planId: row.currentSourcePlanRevisionId,
+      now: new Date(), keys });
+  });
+  assert.equal(context.continuation?.previousContinuationKind, "output");
+  assert.equal(context.continuation?.remainingScope, "A last check may remain.");
+  const prompt = buildAmuxSessionPagePrompt({ claimId: randomUUID(), idea: "One idea.", context });
+  assert.ok(prompt.status === "prompt_candidate" &&
+    prompt.prompt.includes("closes the plan with outcome propose"));
+  const second = await sessionPageAnswer(idea, (previewId) => ({ schemaVersion: 5,
+    previewId, chunkIndex: 1, outcome: "propose", coverageStatus: "complete",
+    continuationKind: null, ownerQuestion: null,
+    coveredScope: "The last check needs no further card.", remainingScope: null, units: [] }));
+  assert.equal(second.planned.state, "plan_ready");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: idea.ideaId }, select: { state: true } })).state, "awaiting_owner");
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(idea.ideaId);
+  assert.equal(result.state, "committed");
+});
+
+test("stopping on a later page ends every earlier page's body clock", async () => {
   const title = `Synthetic parked session ${randomUUID()}`;
   const signal = (metrics: Record<string, number>) => ({ metrics,
     uncertainty: "low", rationale: "Synthetic deterministic evidence.",
@@ -822,8 +917,11 @@ test("a refused later page ends every earlier page's body clock", async () => {
     select: { freeformPurgeAfter: true } });
   assert.ok(before.freeformPurgeAfter && before.freeformPurgeAfter > new Date(),
     "a continuing page keeps its body for the next page");
-  const second = await sessionPageAnswer(idea, () => ({ units: [] }));
-  assert.deepEqual(second.planned, { state: "plan_refused", reason: "invalid_result" });
+  await prisma.$transaction(async (tx) => {
+    const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
+    assert.equal(await parkAmuxSessionIdeaInTx(tx, idea.ideaId, clock[0]!.now), true);
+  });
   const [idea0, chunk0, preview0] = await Promise.all([
     prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: idea.ideaId },
       select: { state: true, analysisCompletedAt: true } }),
@@ -842,7 +940,7 @@ test("a refused later page ends every earlier page's body clock", async () => {
 test("a session answer that asks the owner leaves the queue without a plan", async () => {
   const { ideaId, planned } = await sessionPlannedIdea(sessionPage([], {
     outcome: "needs_information", coverageStatus: "needs_owner_input",
-    continuationKind: "input",
+    continuationKind: "input", remainingScope: "The owner's answer decides the rest.",
     ownerQuestion: "Which repository owns this change?" }));
   assert.equal(planned.state, "plan_refused");
   const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
@@ -1270,10 +1368,12 @@ test("the owner closes an idea waiting after analysis; none of its units can be 
 test("a batch close answers per idea and one refusal leaves the others closed", async () => {
   const noPlan = await sessionPlannedIdea(sessionPage([], {
     outcome: "needs_information", coverageStatus: "needs_owner_input",
-    continuationKind: "input", ownerQuestion: "Which repository owns this change?" }));
+    continuationKind: "input", remainingScope: "The owner's answer decides the rest.",
+    ownerQuestion: "Which repository owns this change?" }));
   const second = await sessionPlannedIdea(sessionPage([], {
     outcome: "needs_information", coverageStatus: "needs_owner_input",
-    continuationKind: "input", ownerQuestion: "Which team should review it?" }));
+    continuationKind: "input", remainingScope: "The owner's answer decides the rest.",
+    ownerQuestion: "Which team should review it?" }));
   const analysing = await analysingSessionIdea();
   const missing = `missing-${randomUUID()}`;
   const auditsBefore = await prisma.adminAuditLog.count({ where: {

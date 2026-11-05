@@ -24,6 +24,7 @@ import {
 import { dispatchAppToast } from "@/lib/appToast";
 import { submitFeedback } from "@/lib/feedbackClient";
 import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { buildSupportVerificationMailto } from "@/lib/supportVerificationMailto";
 import {
   feedbackFailureCopyKey,
   feedbackMessageState,
@@ -863,7 +864,13 @@ export function SupportPageContent() {
               // than only in the page's contact card further up.
               errorFallback={
                 <a
-                  href={`mailto:${page.emailValue}`}
+                  // Prefilled from the form, so following the link continues
+                  // this request rather than starting a blank one.
+                  href={buildSupportVerificationMailto({
+                    address: page.emailValue,
+                    subject: `${page.formTitle}: ${page.types[type]}`,
+                    message,
+                  })}
                   data-testid="support-verification-email"
                   className="font-bold text-blue-600 underline underline-offset-2 hover:text-blue-500 dark:text-blue-400"
                 >

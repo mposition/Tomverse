@@ -58,8 +58,10 @@ test("every runner's start command resolves: an npm script, or a node entry file
       continue;
     }
     // A Dockerfile-built runner: the start command replaces the image's
-    // ENTRYPOINT in exec form, so it is node, an entry file and one argument.
-    const image = /^node (scripts\/ops-observer\/supervise\.mjs) (page|digest)$/.exec(runner.startCommand);
+    // ENTRYPOINT in exec form, so it is node, an entry file and at most one
+    // argument. The ops observer passes one -- which child to run -- and the
+    // trust-safety observer has a single child and passes none.
+    const image = /^node (scripts\/[a-z0-9/-]+\.mjs)(?: ([a-z-]+))?$/.exec(runner.startCommand);
     if (image) {
       assert.ok(existsSync(join(process.cwd(), image[1])), `${runner.service}: ${image[1]} does not exist`);
       continue;

@@ -67,8 +67,8 @@ export async function POST(request: Request) {
       });
       const rows = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
-        (tx) => readAmuxV22QuestionSyncRows(tx));
-      const cards = await openAmuxV22QuestionCards(rows.pending);
+        (tx, context) => readAmuxV22QuestionSyncRows(tx, context.dbNow));
+      const cards = [...rows.refusalCards, ...await openAmuxV22QuestionCards(rows.pending)];
       const cardClose = await readAmuxIdeaCardCloseSyncForRelay();
       return amuxJsonNoStore({
         synced: true,

@@ -7,6 +7,8 @@ import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadAmuxContentKeyRing,
   type AmuxContentKeyIdentity } from "./ideaKeyStore.ts";
+import { amuxAnalysisPromptWithNote } from "./ideaAnalysisPromptCore.ts";
+import { readAmuxSessionPlanRetriesInTx } from "./ideaSessionPlanRefusalService.ts";
 import { amuxSessionPageKeyIdentities, buildAmuxSessionPagePrompt,
   readAmuxSessionPageContextInTx } from "./ideaSessionAnalysisPlanService.ts";
 import { readAmuxSessionReferencePin } from
@@ -107,9 +109,10 @@ export async function readAmuxV19MaxIdeaInTx(
 
 /** The v4 prompt for the page this exact claim analyses: page 0 opens the
  * plan, a later page continues the previous page's unfinished output. The
- * claim's invocation ordinal must be that page, so a claim can never be
- * pointed at another page's context. The app stores the same prompt as the
- * page's preview payload when the result arrives. */
+ * claim's invocation ordinal must be that page plus the runs decided again, so
+ * a claim can never be pointed at another page's context. A page being run
+ * again also carries the plan check's reason; the app stores the same prompt
+ * without that note as the page's preview payload when the result arrives. */
 export async function readAmuxV19MaxPagePrompt(input: {
   reservationId: string; ideaId: string; claimId: string;
 }): Promise<{ prompt: string } | null> {
@@ -150,8 +153,11 @@ export async function readAmuxV19MaxPagePromptInTx(
       actorUserId: idea.actorUserId, planId: idea.currentSourcePlanRevisionId,
       now, keys });
   } catch { return null; }
-  if (context.chunkIndex !== claim.invocationOrdinal) return null;
+  const retries = await readAmuxSessionPlanRetriesInTx(tx, input.ideaId);
+  if (context.chunkIndex + retries.count !== claim.invocationOrdinal) return null;
   const built = buildAmuxSessionPagePrompt({ claimId: input.claimId,
     idea: read.idea, context });
-  return built.status === "prompt_candidate" ? { prompt: built.prompt } : null;
+  if (built.status !== "prompt_candidate") return null;
+  const note = retries.noteFor(context.chunkIndex);
+  return { prompt: note ? amuxAnalysisPromptWithNote(built.prompt, note) : built.prompt };
 }

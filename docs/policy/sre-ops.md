@@ -230,12 +230,20 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
      무장돼 있음).
 
    물려받은 값 600 s에서도 셋째와 넷째 단언을 합니다. `current_setting`만 보는 단언은 합격 근거가 아닙니다.
-5. **어느 버전이든**, 마감을 넘긴 트랜잭션은 commit의 deferred constraint trigger 평가 시점에 DB 시계로 abort됩니다. 성공 응답·
-   전송 허가·heartbeat 전에는 별도의 짧은 트랜잭션으로 마감을 다시 확인합니다. 그 확인을 통과하지 못하면 성공을 내보내지 않습니다.
+5. **어느 버전이든**, 마감을 넘긴 트랜잭션은 commit의 deferred constraint trigger 평가 시점에 DB 시계로 abort됩니다 — **단,
+   그 검사를 앞당기지 않은 트랜잭션에 대해서입니다.** `SET CONSTRAINTS ... IMMEDIATE`로 대기 중인 검사를 먼저 발동시키면 그 시점에
+   통과하고 **다시 평가되지 않으므로**, 그 뒤 마감을 넘겨 commit해도 행이 남습니다(2026-11-05 임시 17.10 클러스터에서 재현). 이 한계는
+   `prisma/migrations/20261003070000_ops_observer_genesis_state` 5항이 이미 적고 있고, 이 항목이 그것을 요약하면서 단정형으로 적고
+   있었습니다. 그 문장을 어느 source도 쓰지 못하게 하는 것이 `tests/opsObserverNoSetConstraints`이고, **DB가 아니라 그 test가
+   "우리 코드는 앞당기지 않는다"를 받칩니다.** 임의 SQL을 보낼 수 있는 상대는 trigger를 끌 수도 있으므로 처음부터 그에 대한 방어가
+   아닙니다. 성공 응답·전송 허가·heartbeat 전에는 별도의 짧은 트랜잭션으로 마감을 다시 확인합니다(`assertNotLate`). 그 확인을
+   통과하지 못하면 성공을 내보내지 않으므로, **검사가 앞당겨진 경우에도 늦은 회차가 밖으로 성공을 내보내는 일은 그 재확인이 막습니다** —
+   남는 것은 행 하나입니다.
 6. 이 장치들이 덮지 못하는 구간이 있습니다.
    - `BEGIN`부터 무장 문장 끝까지
    - trigger 평가 뒤 commit 단계의 잔여
    - durable commit 자체
+   - 위 5항의 앞당겨진 검사 — 그 트랜잭션의 점유는 17의 `transaction_timeout`만 묶습니다
 
    이 구간들은 DB 상한이 없다고 적고, 상한이라고 부르지 않습니다.
 7. advance의 `C_guarded` 84초는 실행 서비스의 HTTP 요청 timeout 15초보다 깁니다. 호출자가 먼저 포기해도 트랜잭션은 더 돌 수 있지만,

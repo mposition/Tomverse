@@ -79,6 +79,7 @@ import {
 } from "@/lib/generatedArtifactStorage";
 import type { ArtifactToolMode } from "@/lib/generatedArtifactToolPolicy";
 import type { ArtifactToolRejectionCode } from "@/lib/generatedArtifactRejectionLog";
+import { contentFreeErrorMetadata } from "@/lib/providerErrorClassification";
 
 /**
  * The tool name for each kind.
@@ -954,12 +955,14 @@ export class GeneratedArtifactCollector {
       rendered = job.render();
     } catch (error) {
       this.recordFailure(filename, format, renderFailureCode(error), specHash);
+      // Not `error.message`: a parser or font error quotes the model's content.
+      // The model still gets the message below, so it can correct the file.
       console.error("Generated artifact rendering failed:", {
         traceId: this.options.traceId,
         conversationId: this.options.conversationId,
         kind,
         format,
-        error: error instanceof Error ? error.message : String(error),
+        ...contentFreeErrorMetadata(error),
       });
       return {
         status: "failed",
@@ -988,7 +991,7 @@ export class GeneratedArtifactCollector {
       console.error("Generated artifact storage failed:", {
         traceId: this.options.traceId,
         conversationId: this.options.conversationId,
-        error: error instanceof Error ? error.message : String(error),
+        ...contentFreeErrorMetadata(error),
       });
       return {
         status: "failed",

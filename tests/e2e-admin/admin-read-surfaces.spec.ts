@@ -22,6 +22,7 @@ import {
   test,
   FIXTURE_SUPPRESSION,
 } from "./support/console";
+import { adminFixtureDatabase } from "./support/database";
 
 /**
  * Contract coverage for every Admin Console read surface, including every tab
@@ -64,15 +65,10 @@ test.describe("admin read surfaces", () => {
     // that arrived in `reviewing` is work too, and read zero here until
     // 2026-09-28.
     await expect(page.getByText("3 feedback / 1 refund")).toBeVisible();
-    // The sidebar badges on real Postgres. Support: three unclosed reports --
-    // two with no auto-fix case at all, and one whose case is in
-    // `awaiting_human_review`, which is not an operator-action state
-    // (AUTOFIX_OPERATOR_ACTION_STATES), so autoFixActionCases is 0 and all
-    // three count as supportFeedback -- plus the open privacy request. The
-    // work queue: those three reports, the refund and the privacy request.
-    // Both read one short while the reviewing report went uncounted. The two
-    // case-less reports are what exercise `NOT: { autoFixCase: { is } }`
-    // keeping a report that has no case.
+    // The sidebar badges on real Postgres. Support: three unclosed reports
+    // plus the open privacy request. The work queue: those three reports, the
+    // refund and the privacy request. Both read one short while the reviewing
+    // report went uncounted.
     await expect(
       page.getByRole("link", { name: /^Support, 4 awaiting action/ }).first()
     ).toBeVisible();
@@ -414,6 +410,83 @@ test.describe("admin read surfaces", () => {
     await page.getByRole("button", { name: "resolved", exact: true }).first().click();
     await expect(page.getByText(FIXTURE_FEEDBACK.resolved.message)).toBeVisible();
     await expect(page.getByText(FIXTURE_FEEDBACK.open.message)).toHaveCount(0);
+  });
+
+  test("a finished report starts folded and opens from the keyboard with its actions", async ({
+    page,
+  }) => {
+    await page.goto("/admin/support?tab=feedback");
+
+    const entry = page
+      .getByTestId("feedback-entry")
+      .filter({ hasText: FIXTURE_FEEDBACK.resolved.message });
+    const toggle = entry.getByTestId("feedback-fold-toggle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toHaveCount(0);
+
+    // A working report has no fold at all.
+    const working = page
+      .getByTestId("feedback-entry")
+      .filter({ hasText: FIXTURE_FEEDBACK.open.message });
+    await expect(working.getByTestId("feedback-fold-toggle")).toHaveCount(0);
+    await expect(working.getByRole("button", { name: "reviewing", exact: true })).toBeVisible();
+
+    // Focus stays on the same control through both changes.
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(toggle).toBeFocused();
+    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toBeEnabled();
+    await expect(entry.getByText("Internal notes", { exact: true })).toBeVisible();
+
+    await page.keyboard.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
+    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toHaveCount(0);
+  });
+
+  test("a search opens the finished report it found", async ({ page }) => {
+    await page.goto(
+      `/admin/support?tab=feedback&q=${encodeURIComponent(FIXTURE_FEEDBACK.resolved.id)}`
+    );
+
+    const entry = page.getByTestId("feedback-entry");
+    await expect(entry).toHaveCount(1);
+    await expect(entry.getByTestId("feedback-fold-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toBeEnabled();
+  });
+
+  test("the feedback list does not scroll sideways at phone width, folded or open", async ({
+    page,
+  }) => {
+    // An unbroken line is the worst case: a pasted URL, with nowhere to wrap.
+    const unbroken = `https://example.com/${"x".repeat(400)}`;
+    await adminFixtureDatabase().feedback.update({
+      where: { id: FIXTURE_FEEDBACK.resolved.id },
+      data: { message: unbroken, userAgent: unbroken, path: `/${"p".repeat(300)}` },
+    });
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/admin/support?tab=feedback");
+
+    const overflow = () =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+    const toggle = page
+      .getByTestId("feedback-entry")
+      .filter({ hasText: "https://example.com/" })
+      .getByTestId("feedback-fold-toggle");
+
+    await expect(toggle).toBeVisible();
+    expect(await overflow()).toBe(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(await overflow()).toBe(0);
   });
 
   test("support's privacy tab renders the data-rights queue", async ({ page }) => {

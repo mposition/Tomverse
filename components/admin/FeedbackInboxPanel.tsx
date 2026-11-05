@@ -1,11 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   BellRing,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clipboard,
   Download,
   Mail,
@@ -31,7 +32,6 @@ import {
 } from "@/lib/feedbackLifecycleCore";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
-import { autoFixReplyDraft } from "@/lib/feedbackAutoFixReplyDraft";
 import {
   useServerSyncedRows,
   useSupportInboxRefresh,
@@ -77,13 +77,25 @@ export type FeedbackRow = {
     duplicateOf: string[];
     replyDraft: string | null;
   } | null;
-  /** Phase 2 diagnosis-only shadow case, when one was queued. Observational:
-   * no auto-fix pipeline exists, and the panel says so in words. */
+  /** The classifier's case, when one was queued, and the model's reading of it. */
   autoFixCase: {
     state: string;
     classification: string | null;
     ineligibilityReason: string | null;
     updatedAt: string;
+    /** The model's reading of the recorded facts (docs/policy/trace-feedback-automation.md §8a). */
+    analysis?:
+      | { status: "failed" }
+      | {
+          status: "done";
+          kind: string;
+          confidence: string;
+          cause: string;
+          recommendation: string;
+          handedOff: boolean;
+          prNumber: number | null;
+        }
+      | null;
   } | null;
   /**
    * The completion record the reply email renders from -- what a re-send
@@ -199,20 +211,6 @@ type UserNotificationResult =
 
 const statuses = ["open", "reviewing", "resolved", "closed"] as const;
 
-/** Case states that belong to diagnosis-only shadow mode; anything past them
- * is an auto-fix on its way through review and promotion. */
-const SHADOW_CASE_STATES = new Set([
-  "received",
-  "collecting_evidence",
-  "evidence_ready",
-  "evidence_delayed",
-  "classifying",
-  "diagnostic_ready",
-  "ineligible",
-  "awaiting_human_review",
-  "closed",
-]);
-
 /**
  * Whether the *answer* to this report can reach the reporter: an address is
  * all it needs (lib/feedbackLifecycleCore.ts,
@@ -227,6 +225,28 @@ const canEmailReply = (feedback: FeedbackRow) =>
     email: feedback.email,
     emailUpdatesConsent: feedback.emailUpdatesConsent,
   }).canSend;
+
+/** A written reply that never reached the reporter, and can still be sent. */
+const canResendReply = (feedback: FeedbackRow) =>
+  canEmailReply(feedback) &&
+  Boolean(feedback.completionSnapshot?.userReply) &&
+  (!feedback.replyDelivery || feedback.replyDelivery.status === "abandoned");
+
+/**
+ * Whether a report shows its full card. One still being worked always does. A
+ * finished one is folded until the operator opens it or a search finds it: a
+ * search can match a trace ID or any line of the body, which a folded row does
+ * not show, and the duplicate links land on `?q=<id>`.
+ */
+export const isFeedbackCardOpen = (
+  status: string,
+  operatorChoice: boolean | undefined,
+  searching: boolean
+) => !isTerminalFeedbackStatus(status) || (operatorChoice ?? searching);
+
+/** The first line with text in it, for a folded report's summary. */
+export const feedbackFirstLine = (message: string) =>
+  message.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
 
 /**
  * The sentence the toast adds about the submitter email. A failed send is
@@ -307,6 +327,8 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     initialStatus
   );
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** What the operator did to a finished report's fold, by report id. */
+  const [foldChoices, setFoldChoices] = useState<Record<string, boolean>>({});
   /**
    * Closing is never one click: resolved/closed go through a small dialog
    * that collects the outcome code and the user-facing reply, and previews
@@ -413,6 +435,11 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
             : item
         )
       );
+      // The card an operator just closed stays open: the reply's delivery line
+      // appears in it, and it should not vanish under their hand.
+      if (isTerminalFeedbackStatus(status)) {
+        setFoldChoices((current) => ({ ...current, [id]: true }));
+      }
       // Re-read the rows and the sidebar badge counts from the server: the
       // local merge above shows the change at once, the refresh makes every
       // count on the screen agree with it.
@@ -610,12 +637,41 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
         ) : (
           filteredItems.map((feedback) => {
             const busy = busyId === feedback.id;
+            const cardOpen = isFeedbackCardOpen(
+              feedback.status,
+              foldChoices[feedback.id],
+              Boolean(query.trim())
+            );
+            const foldToggle = isTerminalFeedbackStatus(feedback.status) ? (
+              <FeedbackFoldToggle
+                feedback={feedback}
+                open={cardOpen}
+                onToggle={() =>
+                  setFoldChoices((current) => ({ ...current, [feedback.id]: !cardOpen }))
+                }
+                m={m}
+              />
+            ) : null;
+            // Both returns put the toggle first in the same keyed article, so
+            // React keeps its DOM node and keyboard focus stays on it.
+            if (!cardOpen) {
+              return (
+                <article
+                  key={feedback.id}
+                  data-testid="feedback-entry"
+                  className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/70"
+                >
+                  {foldToggle}
+                </article>
+              );
+            }
             return (
               <article
                 key={feedback.id}
                 data-testid="feedback-entry"
-                className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
+                className="min-w-0 break-words rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
               >
+                {foldToggle}
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -654,6 +710,9 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
                       {feedback.message}
                     </p>
+                    {feedback.autoFixCase?.analysis ? (
+                      <TraceAnalysisBlock analysis={feedback.autoFixCase.analysis} m={m} />
+                    ) : null}
                     {feedback.triage ? (
                       <TriageProposal
                         triage={feedback.triage}
@@ -729,44 +788,6 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                   </div>
                 </div>
 
-                {(() => {
-                  // Only a fix observed live in production offers a draft;
-                  // the dialog still shows it for review before anything is sent.
-                  const draft = isTerminalFeedbackStatus(feedback.status)
-                    ? null
-                    : autoFixReplyDraft({
-                        caseState: feedback.autoFixCase?.state,
-                        language: feedback.language,
-                      });
-                  return draft ? (
-                    <div
-                      data-testid="feedback-autofix-reply-draft"
-                      className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs font-semibold leading-5 text-emerald-100 md:flex-row md:items-center md:justify-between"
-                    >
-                      <span>{m.autoFixDraft.ready}</span>
-                      <span className="flex flex-wrap gap-2">
-                        <Link
-                          href="/admin/support?tab=fixes"
-                          className="inline-flex min-h-11 items-center rounded-xl border border-emerald-400/40 px-3 py-2 font-bold text-emerald-50 transition hover:bg-emerald-500/20"
-                        >
-                          {m.autoFixDraft.review}
-                        </Link>
-                        <button
-                          type="button"
-                          data-testid="feedback-autofix-use-draft"
-                          disabled={busy}
-                          onClick={() =>
-                            setCloseTarget({ feedback, status: "resolved", draft })
-                          }
-                          className="inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-emerald-700 px-3 py-2 font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {m.autoFixDraft.use}
-                        </button>
-                      </span>
-                    </div>
-                  ) : null;
-                })()}
-
                 {isTerminalFeedbackStatus(feedback.status) ? (
                   <div
                     data-testid="feedback-reply-delivery"
@@ -776,10 +797,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                       <span className="text-zinc-500">{m.replyDelivery.label}: </span>
                       {replyDeliverySentence(feedback, m.replyDelivery)}
                     </span>
-                    {canEmailReply(feedback) &&
-                    feedback.completionSnapshot?.userReply &&
-                    (!feedback.replyDelivery ||
-                      feedback.replyDelivery.status === "abandoned") ? (
+                    {canResendReply(feedback) ? (
                       <span className="flex flex-col items-start gap-1 md:max-w-md md:items-end">
                         {/*
                           The text the mail will carry, read from the same
@@ -792,7 +810,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                           className="w-full whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/70 p-2 text-left text-zinc-200"
                         >
                           <span className="block text-zinc-500">{m.replyDelivery.previewLabel}</span>
-                          {feedback.completionSnapshot.userReply}
+                          {feedback.completionSnapshot?.userReply}
                         </span>
                         <button
                           type="button"
@@ -867,9 +885,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         data-testid="feedback-autofix-case"
                         className="truncate"
                       >
-                        {SHADOW_CASE_STATES.has(feedback.autoFixCase.state)
-                          ? m.shadowDiagnosis
-                          : m.autoFixStage}
+                        {m.shadowDiagnosis}
                         {feedback.autoFixCase.state}
                         {feedback.autoFixCase.classification
                           ? ` — ${feedback.autoFixCase.classification}`
@@ -1191,14 +1207,71 @@ function FeedbackCompletionDialog({
                 !alreadyCompleted &&
                 !withholdEmail &&
                 userReply.trim()
-                ? m.autoFixDraft.sendAndResolve
-                : m.autoFixDraft.resolveOnly
+                ? m.replyDraftAction.sendAndResolve
+                : m.replyDraftAction.resolveOnly
               : notifiable && !alreadyCompleted && !withholdEmail
                 ? m.dialog.confirm(m.statuses[status])
                 : m.dialog.confirmWithoutEmail}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** What the model read in a verified trace's recorded facts, and where the fix went. Read-only. */
+export function TraceAnalysisBlock({
+  analysis,
+  m,
+}: {
+  analysis: NonNullable<NonNullable<FeedbackRow["autoFixCase"]>["analysis"]>;
+  m: FeedbackInboxMessages;
+}) {
+  return (
+    <div
+      className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-sm leading-6 text-zinc-200"
+      data-testid="feedback-trace-analysis"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-bold text-amber-100">{m.traceAnalysisTitle}</span>
+        {analysis.status === "done" ? (
+          <>
+            <span className="rounded-full border border-amber-500/30 px-2 py-0.5 font-bold text-amber-100">
+              {(m.traceAnalysisKinds as Record<string, string>)[analysis.kind] ?? analysis.kind}
+            </span>
+            <span className="text-zinc-400">
+              {(m.traceAnalysisConfidence as Record<string, string>)[analysis.confidence] ?? analysis.confidence}
+            </span>
+          </>
+        ) : null}
+      </div>
+      {analysis.status === "done" ? (
+        <>
+          <p className="mt-2">
+            <span className="font-bold">{m.traceAnalysisCause}: </span>
+            {analysis.cause}
+          </p>
+          <p className="mt-1">
+            <span className="font-bold">{m.traceAnalysisRecommendation}: </span>
+            {analysis.recommendation}
+          </p>
+          {analysis.prNumber ? (
+            <a
+              className="mt-2 inline-block font-medium underline"
+              data-testid="feedback-trace-analysis-pr"
+              href={`https://github.com/mposition/Tomverse/pull/${analysis.prNumber}`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {m.traceAnalysisFixPr} #{analysis.prNumber}
+            </a>
+          ) : analysis.handedOff ? (
+            <p className="mt-2 text-xs text-zinc-400">{m.traceAnalysisFixRunning}</p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-2 text-xs text-zinc-400">{m.traceAnalysisFailed}</p>
+      )}
     </div>
   );
 }
@@ -1279,5 +1352,71 @@ export function TriageProposal({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The one control that folds and opens a finished report. Folded, it is the
+ * report's summary line, wrapping below the chips rather than scrolling on a
+ * narrow screen. A reply that never reached the reporter is named here because
+ * the resend offer sits inside the fold.
+ */
+export function FeedbackFoldToggle({
+  feedback,
+  open,
+  onToggle,
+  m,
+}: {
+  feedback: FeedbackRow;
+  open: boolean;
+  onToggle: () => void;
+  m: FeedbackInboxMessages;
+}) {
+  if (open) {
+    return (
+      <button
+        type="button"
+        data-testid="feedback-fold-toggle"
+        aria-expanded={true}
+        onClick={onToggle}
+        className="mb-3 inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+        {m.foldReport}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="feedback-fold-toggle"
+      aria-expanded={false}
+      onClick={onToggle}
+      className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-2xl p-3 text-left transition hover:bg-zinc-800"
+    >
+      <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
+      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
+          {feedback.type}
+        </span>
+        <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(feedback.status)}`}>
+          {isTerminalFeedbackStatus(feedback.status) ? m.statuses[feedback.status] : feedback.status}
+        </span>
+        <span className="whitespace-nowrap text-xs text-zinc-500">
+          {dateLabel(feedback.createdAt)} UTC
+        </span>
+        {canResendReply(feedback) ? (
+          <span
+            data-testid="feedback-fold-reply-undelivered"
+            className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-200"
+          >
+            {m.foldReplyUndelivered}
+          </span>
+        ) : null}
+        <span className="min-w-0 flex-1 basis-40 truncate text-sm text-zinc-200">
+          {feedbackFirstLine(feedback.message)}
+        </span>
+      </span>
+    </button>
   );
 }

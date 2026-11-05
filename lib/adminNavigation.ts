@@ -224,11 +224,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "Reports and requests submitted from the product",
       },
       {
-        id: "fixes",
-        label: "Auto-fix review",
-        description: "Problems and fixes found from traces, approval and rollout",
-      },
-      {
         id: "privacy",
         label: "Privacy requests",
         description: "Export and erasure requests",
@@ -714,6 +709,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "billing-finance-ops",
         label: "Billing and finance",
         description: "The daily pending-price deadline digest, the agent switch and the monitor check",
+      },
+      {
+        id: "trust-safety",
+        label: "Trust and safety",
+        description: "DSR deadlines counted when the page opens, and the observation switch",
       },
     ],
   },

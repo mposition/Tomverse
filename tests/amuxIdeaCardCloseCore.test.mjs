@@ -242,10 +242,10 @@ test("the boundaries stay within the policy's twelve statements, and the confirm
   for (const [name, ceiling] of [["decisionMakerIdeaCardCloseScan", 3], ["decisionMakerIdeaCardCloseOpen", 10],
     ["decisionMakerIdeaCardCloseRead", 4], ["decisionMakerIdeaCardCloseApply", 12],
     ["decisionMakerIdeaCardCloseHandoff", 7], ["decisionMakerIdeaCardCloseOwnerRead", 3],
-    ["decisionMakerV22QuestionResolve", 9], ["decisionMakerV22QuestionWrite", 6]]) {
+    ["decisionMakerV22QuestionResolve", 10], ["decisionMakerV22QuestionWrite", 8]]) {
     const match = new RegExp(`${name}: \\{[^}]*prismaCallCeiling: (\\d+)`).exec(boundaries);
     assert.equal(Number(match?.[1]), ceiling, name);
   }
   const dm = readFileSync(resolve(ROOT, "lib/amux/v22OwnerQuestionDmService.ts"), "utf8");
-  assert.match(dm, /FROM "AmuxV22TaskQuestion"\s+WHERE "localCardId" = \$\{cardId\}\s+UNION ALL\s+SELECT 1 AS "found" FROM "AmuxIdeaCardCloseQuestion"/);
+  assert.match(dm, /UNION ALL\s+SELECT 1 AS "found" FROM "AmuxIdeaCardCloseQuestion"\s+WHERE "localCardId" = \$\{cardId\}/);
 });
