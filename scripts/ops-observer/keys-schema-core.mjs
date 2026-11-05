@@ -9,7 +9,7 @@
 // signal's bands; a closed key has no band. Anything else -- an extra key, a
 // missing field, a band from another signal -- is not a state this agent wrote.
 
-import { BUDGET_KEY_LIMIT, RECOVERY_STREAK, S2_PAGE_KEYS, STREAK_MAX, signalForKey } from "./classify-core.mjs";
+import { S3_KEY_LIMIT, RECOVERY_STREAK, S2_PAGE_KEYS, STREAK_MAX, signalForKey } from "./classify-core.mjs";
 
 const FIELDS = Object.freeze(["status", "streak", "openedAt", "lastBand", "recoveredAt", "newOpenOwnerDate"]);
 
@@ -60,11 +60,11 @@ export function isKeyState(signal, state) {
   return false;
 }
 
-/** T2: `keys` is every S2 page key and any S3 budget keys, each a valid state for its signal. */
+/** T2: `keys` is every S2 page key and any S3 keys, each a valid state for its signal. */
 export function keysAreValid(keys) {
   if (!isPlainObject(keys)) return false;
   const names = Object.keys(keys);
-  if (names.length > S2_PAGE_KEYS.length + BUDGET_KEY_LIMIT) return false;
+  if (names.length > S2_PAGE_KEYS.length + S3_KEY_LIMIT) return false;
   if (!S2_PAGE_KEYS.every((name) => Object.hasOwn(keys, name))) return false;
   return names.every((name) => {
     const signal = signalForKey(name);
