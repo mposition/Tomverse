@@ -21,6 +21,7 @@ import { reportAmuxSessionIdeaNeedsOperator } from
   "@/lib/amux/ideaSessionAnalysisAlert";
 import { amuxSessionPageKeyIdentities } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
+import { amuxSessionAnswerUnitCount } from "@/lib/amux/ideaSessionAnswerCore";
 import { amuxV19SystemRegistrationEnabled } from
   "@/lib/amux/ideaSystemRegistrationCore";
 import { amuxV19RegistrationFailureLog } from
@@ -93,14 +94,8 @@ export async function POST(request: Request): Promise<Response> {
   }
   // One key per proposal unit the plan may store; an unusable answer still
   // commits its result and settlement, and its unit keys stay empty.
-  let unitCount = 0;
-  try {
-    const parsed: unknown = JSON.parse(body.rawModelOutput);
-    const units = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>).units : null;
-    if (Array.isArray(units) && units.length <= 40) unitCount = units.length;
-  } catch { /* A non-JSON answer is a refused plan, not a failed write. */ }
-  const unitIds = Array.from({ length: unitCount }, () => randomUUID());
+  const unitIds = Array.from({ length: amuxSessionAnswerUnitCount(body.rawModelOutput) },
+    () => randomUUID());
   // A continuation page opens the previous page; when that page cannot be
   // found the plan writer parks the idea, so a lookup failure is not fatal.
   const previousPage = await amuxSessionPageKeyIdentities(prisma, body.ideaId)

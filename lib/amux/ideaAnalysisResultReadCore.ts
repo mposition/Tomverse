@@ -122,8 +122,9 @@ export function parseAmuxIdeaAnalysisResultView(
         body.outcome !== "propose" && body.outcome !== "reject") ||
       (body.coveredScope !== null && !text(body.coveredScope)) ||
       !Array.isArray(body.units) || body.units.length > 40 ||
-      (body.outcome === "reject" ? body.units.length !== 0 :
-        body.outcome === "propose" && body.units.length === 0) ||
+      // A session plan's last page may close it with no further unit.
+      (body.outcome === "reject" && body.units.length !== 0) ||
+      (partial && body.units.length === 0) ||
       (body.registrationRefusal !== null &&
         !registrationRefusal(body.registrationRefusal))) {
     return null;

@@ -1,7 +1,7 @@
 # Trace 기반 오류 신고 자동화 정책
 
-사용자 오류 신고를 Trace 증거와 연결하고, 장기적으로 제한된 자동 수정까지
-확장하기 위한 3단계 rollout의 경계와 invariant를 정의한다. 이 문서는
+사용자 오류 신고를 Trace 증거와 연결하고, LLM 분석과 draft PR까지 잇는
+경로의 경계와 invariant를 정의한다. 이 문서는
 `AGENTS.md`의 요약 invariant가 가리키는 원본이다.
 
 ## 1. 3단계 rollout
@@ -10,11 +10,9 @@
 |---|---|---|
 | 1 | 메시지별 Trace 상관관계, 서버 발급 token, Trace evidence 모델, Admin 표시 | **구현됨** |
 | 2 | case 상태 머신, 증거 수집(collector), 적격성 판정, 진단 보고서 (diagnosis-only shadow mode) | **구현됨** (기본 비활성 — §8) |
-| 3 | 제한된 자동 수정, `develop` PR, 소유자 승인, 서버 관측 기반 승격(§9.3) | **인프라 구현됨** (완전 비활성 — §9.1) |
+| 2a | 검증된 추적 ID 신고의 LLM 분석과 AMUX idea lane draft PR(§8a) | **구현됨** (기본 꺼짐) |
 
-각 Phase는 별도 PR과 별도 사람 승인으로 진행한다. Admin Console은 Support의
-`자동 수정 검토` section(`/admin/support?tab=fixes`)에서 case의 문제점·해결책·
-승격 진행을 표시한다(2026-09-15, §9.3).
+Admin Console은 Support › Feedback의 신고 아래에 분석 결과와 수정 draft PR을 표시한다. §9는 삭제한 Phase 3의 기록이다.
 
 ## 2. Trace provenance 모델
 
@@ -240,198 +238,39 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
 - **retention**: terminal(closed·ineligible) case는 90일 후
   `cleanupExpiredData()`가 정리한다. 열린 case는 삭제하지 않는다.
 
-## 9. Phase 3 경계 (인프라 구현됨 — 운영 비활성)
+## 8a. 검증된 추적 ID 신고의 LLM 분석 (운영자 결정 2026-11-05)
 
-- **진입 조건**: Phase 2 shadow mode에서 최소 30일 관찰 + 검증된 traced
-  report 최소 30건 + 개인정보·금지 정보 유출 0건, 그리고 별도 사람 승인.
-  표본 조건 변경은 근거·owner·승인자와 함께 이 문서에 기록한다.
-  **코드는 이 조건을 스스로 검사하지 않는다** — `FEEDBACK_AUTOFIX_ENABLED`
-  플래그를 켜는 행위가 "사람이 조건 충족을 확인했다"는 약속이다.
+옛 Phase 3 파이프라인(§9)은 실행된 적이 없어, 분석과 수정을 LLM 호출과 기존 AMUX idea lane으로 옮겼다
+(`lib/traceReportAnalysis.ts`). §8의 판정은 그대로 두고 그 뒤에 붙는다. 15분 cron에 얹혀 돌고, 켜져 있는
+동안에는 §8의 판정도 같은 주기로 돈다.
 
-### 9.1 구현 상태와 활성화 절차
+- **모드**: Support › Feedback 패널의 끔·분석·분석 + draft PR 하나. 기본은 끔이고, 저장은 소유자 + 최근
+  인증 + 감사다. 분석 + draft PR은 고른 소유자를 함께 저장해, 그 소유자가 idea의 데이터 소유자가 되고 그 계정이 소유자가
+  아니게 되면 멈춘다. 제출 감사는 소유자 행위로 꾸미지 않고 시스템 행위자 `trace-report-analysis`로 남기며,
+  승인한 소유자를 metadata에 적는다. 모델은 지원 Triage가 쓰는 모델이고, Triage 스위치나 모델이 꺼져 있으면 분석도 돌지 않는다.
+  새 신고가 case가 되려면 §8의 `FEEDBACK_AUTOFIX_SHADOW_ENABLED`가 켜져 있어야 하며, 꺼진 환경은 패널이 그렇게 표시한다.
+- **입력은 서버 기록뿐이다**: §8의 진단 요약 중 허용 목록의 필드(요약의 `errorCode`는 증거가 없으면 client 값이라 제외), fingerprint의 서버 오류
+  코드와 release, 같은 Trace의 provider·limit event 코드 필드. 신고자의 글과 경로, provider 메시지는 넣지
+  않는다. 이 답이 branch에 쓰는 coding agent의 지시문이 되므로, 신고가 그 글을 쓸 수 없어야 한다.
+- **draft PR 조건**: 모델이 `code_fix`를 신뢰도 medium 이상으로 답하고, 서버 판정이 `operational_limit`·
+  `provider_transient`·`client_classified`·`untrusted_trace`가 아닐 것. UTC 하루 3건(같은 날의 재시도는 세지 않는다)이고 lane의 일일 한도가
+  따로 있다. idea와 PR은 공개되므로 Trace ID·신고 내용을 넣지 않는다. 병합은 사람이 한다.
+- **멱등**: request id를 case id에서 유도해, 응답을 잃은 제출을 다시 보내도 idea는 하나다.
+- **상한**: 분석은 회차당 5건, UTC 하루 20회(재시도 포함), 건당 3회까지. 대상은 최근 30일의 case다. 호출과 제출 전에 lock 안에서 그날 사용량(`traceReportAnalysis.usage`)을 올리고 case를 잡으므로, 실행이 겹쳐도 두 번 호출하거나 상한을 넘지 않는다. 건당 시도 횟수도 호출 전에 올리고, claim을 잃은 실행은 결과를 쓰지 않는다.
+- **저장**: `diagnosticSummary.llmAnalysis`. migration이 없고 case의 보존·삭제를 그대로 따른다.
+- **한계**: 분석 모델은 코드를 보지 못한다. 코드를 보는 원인 분석은 lane 실행이 PR에 적는다. 증거 행이 없는
+  신고는 오류 코드와 release만으로 판단한다.
 
-인프라는 배포돼 있지만 3중으로 잠겨 있다: (1) `FEEDBACK_AUTOFIX_ENABLED`
-미설정 시 모든 엔드포인트가 비활성 응답, (2)
-`FEEDBACK_AUTOFIX_SYNC_SECRET`(≥32자) 미설정 시 전 엔드포인트 401,
-(3) workflow는 `workflow_dispatch` 전용이고 schedule이 없다(§9.2).
+## 9. 삭제한 Phase 3 (2026-11-05)
 
-구성 요소:
+자동 수정 workflow, sync route, 소유자 승인·승격 관측, `자동 수정 검토` 탭은 한 번도 실행되지 않은 채
+§8a로 대체되어 삭제됐다. `/admin/support?tab=fixes`는 Feedback 탭으로 간다. `FeedbackAutoFixCase`의 Phase 3
+컬럼은 데이터 없이 남아 있으며 별도 migration으로 정리할 수 있다. Railway 배포 관측 모듈
+(`lib/feedbackAutoFixDeploymentProbe.ts`, `lib/feedbackAutoFixDeploymentObservation.ts`)은 AMUX가 쓰므로 남겼다.
 
-- **상태 확장**: `awaiting_human_review → fix_attempting →
-  red_green_proven → pr_open → merged → staging_verified → closed`,
-  실패는 `fix_failed`. 전이는 `lib/feedbackAutoFixCore.ts` 그래프만
-  허용하고, lease가 만료된 fix 시도는 review pool로 되돌아간다.
-- **sync 프로토콜**: `app/api/internal/feedback-autofix/{pending,claim,
-  result,heartbeat}` — 전부 POST, dedicated Bearer secret(digest 비교),
-  bounded body + 폐쇄형 Zod schema. claim은 CAS이고, result 콜백은
-  서버가 change manifest와 Red→Green proof를 **재검증**한 뒤에만 전이한다
-  (workflow의 자기 보고를 신뢰하지 않음). replay·순서 위반은
-  `{applied:false}` no-op이다.
-- **change policy** (`lib/feedbackAutoFixPolicy.ts`): 최대 5파일/300줄,
-  테스트 추가 필수, 테스트 삭제·skip/only·snapshot 금지, `.github/`·
-  `prisma/`·config·정책 문서·인증/결제/크레딧/concurrency 표면·**파이프라인
-  자기 자신** 금지. workflow가 git diff에서 manifest를 재계산해 검사하고
-  (`scripts/feedback-autofix-policy-check.mjs`) 서버가 다시 검사한다.
-- **Red→Green proof**: 신규 테스트만 clean base worktree에 적용해 assertion
-  으로 실패(문법·import 실패는 불인정), fixed head에서 동일 테스트 통과,
-  base≠head SHA. proof는 case에 저장된다.
-- **workflow** (`.github/workflows/feedback-autofix.yml`): checkout·
-  setup-node commit SHA 고정 + fix CLI version/integrity 고정, LLM step엔
-  LLM key만·PR step엔 GH PAT만·sync secret은 그 둘 어디에도 없음(전부
-  security regression이 고정). branch는 `feedback-autofix/<case-id>`,
-  PR은 `develop` 대상이며 **auto-merge를 켜지 않는다** — 초기 운영(최초
-  20개 PR과 30일 중 늦은 쪽)엔 사람 승인이 필수다.
+### 9.3 소유자 승인 기반 승격 (삭제)
 
-활성화 절차(순서 고정): ① §9 진입 조건 확인·기록 → ② GitHub secrets
-설정: `FEEDBACK_AUTOFIX_SYNC_SECRET`(서버 env와 동일 값),
-`FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY` → ③ 서버 env:
-`FEEDBACK_AUTOFIX_SYNC_SECRET`, `FEEDBACK_AUTOFIX_ENABLED=true`,
-필요 시 `FEEDBACK_AUTOFIX_MAX_CASES_PER_DAY`(기본 5) → ④ 수동
-`workflow_dispatch`로 첫 실행. kill switch는 ③의 플래그 제거 하나로
-충분하다(모든 엔드포인트가 즉시 비활성).
-
-### 9.2 미검증(N/V) 사항
-
-- workflow는 실제로 실행된 적이 없다(secrets 미설정, dispatch 전용).
-  첫 활성화 때 §9.1 ④를 staging 환경 대상(TOMVERSE_APP_URL 조정)으로
-  드라이런하는 것을 권장한다.
-- scheduled 실행은 default branch에서만 동작하며, schedule 추가 자체가
-  별도 go-live 결정이다.
-- 유일한 자동 적격 게이트는 **결정적 Red→Green 재현 증명**이다: clean
-  `develop`에서 assertion으로 실패(문법 오류·import 누락·fixture 부재 제외),
-  수정 후 동일 테스트 통과, 허용된 저위험 파일만 변경, 필수 CI 통과,
-  provider live 상태·production 데이터·개인정보·결제 없이 재현.
-- 자동 생성 수정(LLM)이 만드는 것은 `develop` PR뿐이다. 자동화는 어떤 PR도
-  병합하지 않는다 — `main` 승격은 §9.3의 소유자 승인 뒤 **사람이 GitHub에서**
-  병합한다. 자동 revert 금지. branch protection 우회(`--admin`) 금지.
-  auto-merge 금지. 병합 사실은 서버가 GitHub에서 직접 읽는다.
-- staging 반영은 production 사용자 오류가 해결됐다는 뜻이 아니다.
-  `Feedback.status`는 production 관측 뒤에도 자동으로 `resolved`가 되지 않고,
-  운영자의 해결됨 처리로만 바뀐다(§9.3).
-- 초기 운영(최초 20개 PR과 30일 중 더 늦은 시점까지)은 모든 auto-fix PR에
-  사람 승인을 요구한다. auto-merge 전환은 별도 정책 변경 PR로만 한다.
-- 자동 수정 제외 영역: 인증·결제·크레딧·guardrail·concurrency·identity·
-  Prisma schema/migration·관리자 권한·감사 무결성·개인정보·모델 가격/
-  lifecycle·`.github/**`·dependency·config·visual baseline·provider 장애·
-  일시 오류, 그리고 자동 수정 파이프라인 자체.
-- **workflow 경합** (2026-09-17 사실 정정, 규칙 변경 없음): 이 항목을 쓸 때는
-  `auto-pr-to-develop.yml`이 `autofix/**`를 제외하지 않아, `cron-auto-fix.yml`이
-  `GH_AUTOMATION_PAT`으로 push한 branch에 develop PR이 중복 생성될 수 있었다.
-  지금은 해소됐다 — `Auto PR to Develop`은 `to-develop` 경로 조각이 있는
-  branch에만 PR을 열고, 그보다 먼저 `autofix`·`feedback-autofix`·`dependabot`
-  namespace를 거절한다(`scripts/auto-pr-branch-policy.mjs`의
-  `AUTOMATION_NAMESPACES`, `tests/autoPrBranchPolicy.test.mjs`). Phase 3
-  workflow가 `cron-auto-fix.yml`을 재사용하지 않고 전용 namespace를 쓴다는
-  조건은 그대로다.
-- scheduled workflow는 default branch에 있어야 예약 실행된다. 구현이
-  `develop`에만 있는 동안 schedule이 활성화됐다고 보고하지 않는다(N/V).
-
-### 9.3 소유자 승인 기반 승격 (2026-09-15 개정)
-
-운영자 요청(2026-09-15)으로 추가했다. 설계와 독립 검토 기록:
-`.github/audits/support-trace-review-flow-design-2026-09-15.md`,
-`support-trace-review-flow-design-review-round0-2026-09-15.md`(reject),
-`support-trace-review-flow-design-review-round1-2026-09-15.md`(reject),
-`support-trace-review-flow-review-round2-2026-09-15.md`(구현 검토, reject). 세
-회차의 발견은 설계 문서 §2·§2a·§2b와 아래 계약에 반영했다.
-
-**신고 접수 (Phase와 무관, flag 없음)**
-
-- token `verified` + traceId가 있는 신고는 `reviewing`으로 저장된다
-  (`lib/feedbackTraceAutoReview.ts`). lifecycle `received`·`reviewing` 두 행을
-  같은 transaction에 쓰고, reviewing 행에는 actor가 없다. 사용자 입력 Trace·
-  미검증 token은 `open`에 남는다(§2).
-- 사용자에게 추가 메일을 보내지 않는다. 운영자 메일은 기존 `support_feedback`
-  한 통이며, 불변 필드 `errorReportVerification`으로 "자동으로 검토중" 변형을
-  렌더링한다.
-
-**상태 그래프** (`lib/feedbackAutoFixCore.ts`)
-
-`pr_open → approved → merged → staging_verified → production_merged →
-production_verified → closed`, 실패는 `promotion_failed → closed`.
-`pr_open → merged`, `staging_verified → closed`, workflow의 `merged`·
-`staging_verified` 보고는 **없다**. 승인 없이 병합된 PR은 승격되지 않는다.
-
-**검토 요청** — fix run이 보고한 PR 번호를 서버가 GitHub에서 읽어 이 저장소·
-base `develop`·`feedback-autofix/<caseId>`·open인지 확인하고, GitHub의 head와
-**change manifest**(경로별 merge-base blob과 head blob,
-`lib/feedbackAutoFixChangeManifest.ts`)를 저장한다. run의 원인·해결 보고
-(`fixReport`, 1,000/1,000/500자, 진단 요약만 입력)와 함께 저장되며
-`autofix_review_requested` 운영자 메일이 같은 transaction에 enqueue된다.
-
-**승인** — `POST /api/admin/feedback-autofix/[caseId]/approve`. owner 역할 +
-최근 인증(step-up) + audit log. 화면이 본 head가 저장된 head이고, GitHub의
-현재 head이며, 그 head의 manifest가 저장된 manifest일 때만 CAS로
-`approved`가 되고 head와 manifest digest에 묶인다. 병합하지 않는다.
-
-**관측** (`lib/feedbackAutoFixPromotion.ts`, maintenance cadence, 읽기 전용)
-
-- develop PR이 **승인 head로** 병합됨 → `merged`. head 변경·다른 head 병합·
-  미병합 close → `promotion_failed` + `autofix_promotion_failed` 메일.
-- 배포 판정(`lib/feedbackAutoFixDeploymentObservation.ts`): Railway control
-  plane에서 서비스·환경의 **트래픽을 받을 수 있는** deployment(SUCCESS·
-  DEPLOYING·REMOVING·SLEEPING)가 **정확히 하나**이고 SUCCESS이며, 그 commit이
-  기대 commit을 **포함**할 것(같거나 기대 commit이 ancestor — GitHub compare로
-  판정, 판정 불가는 미관측), 한 pass의 build-info 표본 5개가 모두 그
-  deployment·그 commit·success일 것, production은 `/api/ready` 표본 5개가 모두
-  **캐시되지 않은** 200일 것(`Age`가 없거나 0).
-  "포함"인 이유: staging은 2026-09-15 두 시간 반 동안 develop 병합 6건을 받았고,
-  정확한 병합 commit이 10분간 live이기를 기다리면 바쁜 날에는 영원히 관측되지
-  않는다. serving 상태 집합은 같은 날 실제 control plane에서 읽었다 — 교체된
-  deployment는 REMOVED가 되고 SUCCESS는 하나만 남으며, CI를 기다리는 WAITING과
-  SKIPPED는 트래픽을 받지 않는다(`tests/fixtures/railwayDeploymentsStaging.json`).
-  한 pass는 창을 열 뿐이고, ≥10분 뒤 같은 deployment로 다시 충족해야 한다.
-  timeout은 실패 상태가 아니라 화면의 "관측 지연"이다.
-  **staging `/api/ready`는 Cloudflare Access 뒤라 관측하지 않는다(N/V)**.
-- main 승격 PR은 서버가 브랜치 `feedback-autofix-main/<caseId>`로 찾는다.
-  이 저장소의 open/merged PR이 정확히 하나이고, 그 manifest가 승인 manifest와
-  **완전히 같을 때**(같은 경로, 같은 before blob = main이 승인 base를 그대로
-  가짐, 같은 after blob)만 기록한다. 다르면 `promotion_failed`. 병합되면
-  `production_merged`, production 판정 통과 시 `production_verified` +
-  `autofix_production_verified` 메일.
-
-**승격 PR workflow** (`.github/workflows/feedback-autofix-promotion-pr.yml`) —
-`pull_request: closed`(privileged trigger 아님), head가 이 저장소일 때만.
-read-only `promotion/prepare`로 적격성을 묻고(서버 상태 변경 없음), back-merge
-완료(`origin/main`이 `origin/develop`의 ancestor)와 main의 승인 base를 확인한 뒤
-cherry-pick 브랜치가 승인 manifest와 같을 때만 PR을 연다. 재실행은 기존
-브랜치·PR을 재사용한다. **병합·`--admin`·`--auto`는 쓰지 않는다**
-(`npm run security:regression`이 고정).
-
-**해결됨** — `production_verified` case의 신고에만 결정적 답변 초안
-(`lib/feedbackAutoFixReplyDraft.ts`, 기술 식별자·사용자 본문 없음)이 표시된다.
-운영자가 해결됨으로 처리하면 같은 transaction에서 case가 CAS로 `closed`가 된다.
-그 전 상태의 case는 해결됨 처리로 닫히지 않는다.
-
-**자격증명과 kill switch** — 서버에는 GitHub **읽기 전용** 토큰만 둔다.
-
-| 환경변수 | 위치 | 용도 |
-|---|---|---|
-| `FEEDBACK_AUTOFIX_ENABLED` | 서버 | Phase 3 전체 master switch (기존) |
-| `FEEDBACK_AUTOFIX_GITHUB_READ_TOKEN` | 서버 | 이 저장소 한정 fine-grained PAT: Contents·Pull requests·Metadata **read**만, 만료 ≤90일 |
-| `FEEDBACK_AUTOFIX_GITHUB_REPOSITORY` | 서버(선택) | 기본 `mposition/Tomverse` |
-| `RAILWAY_API_TOKEN`, `RAILWAY_PROJECT_ID` | 서버 | control plane 읽기 (기존 build-info와 공유) |
-| `FEEDBACK_AUTOFIX_RAILWAY_SERVICE_ID` | 서버(선택) | 기본 `RAILWAY_SERVICE_ID` |
-| `FEEDBACK_AUTOFIX_STAGING_RAILWAY_ENVIRONMENT_ID`, `FEEDBACK_AUTOFIX_PRODUCTION_RAILWAY_ENVIRONMENT_ID` | 서버 | 관측 대상 환경 |
-| `FEEDBACK_AUTOFIX_SYNC_SECRET`, `GH_AUTOMATION_PAT` | GitHub secrets | 기존 |
-
-하나라도 없으면 승인 버튼은 사유와 함께 비활성이고 observer는 아무것도 읽지
-않는다. 읽기 토큰이 유출되면 private 소스가 노출되므로 GitHub에서 즉시
-revoke하고 새 토큰으로 교체한다(서버 env 교체 → 재배포). kill switch는
-`FEEDBACK_AUTOFIX_ENABLED` 제거 하나로 충분하다.
-
-**fix run fencing** — claim이 서버 생성 `fixAttemptId`를 발급하고, heartbeat와
-모든 result는 그 id가 일치할 때만 적용된다. lease 회수와 종료 결과가 id를
-지우므로, lease가 만료된 실행의 늦은 callback은 다음 실행의 case를 바꾸지
-못한다.
-
-**N/V** — 실제 GitHub·Railway에 대한 end-to-end 실행은 아직 없다. Railway
-deployments 목록의 상태 의미는 실측했으나(위), GraphQL 응답의 `meta.commitHash`
-필드 이름은 MCP 도구 출력으로만 확인했다 — 없으면 `deployment_commit_unknown`으로
-fail-closed다. GitHub가 대용량·binary 파일의 contents를 돌려주지 않는 경우도
-fail-closed(승격 안 됨)로 처리되지만 실측 전이다.
-back-merge 충돌 자체는 여전히 사람이 해결하며, 해결 전에는 승격 PR이 만들어지지
-않는다.
+`prisma/schema.prisma`의 Phase 3 컬럼 주석이 가리키는 절이다. 컬럼을 정리할 때 함께 지운다.
 
 ## 10. 운영자 절차
 

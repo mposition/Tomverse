@@ -41,6 +41,7 @@ import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentS
 import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
 import { runSupportTriageCycleQuietly } from "@/lib/supportTriageCycle";
+import { runTraceReportAnalysisQuietly } from "@/lib/traceReportAnalysis";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 
 const isAuthorized = (request: Request) => {
@@ -242,6 +243,7 @@ export async function POST(request: Request) {
     // a cycle cut short by a deploy only leaves claims that lapse. Writes nothing
     // while triage is off with nothing to delete, and never throws.
     after(() => runSupportTriageCycleQuietly());
+    after(() => runTraceReportAnalysisQuietly());
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,

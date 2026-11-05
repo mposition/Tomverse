@@ -3758,7 +3758,7 @@ const checks = [
   },
   {
     // One branch must never grow two PRs. The automation namespaces open
-    // their own PRs (cron-auto-fix -> main, feedback-autofix -> develop), so
+    // their own PRs (cron-auto-fix -> main), so
     // the generic auto-PR workflow has to stay out of them -- a PAT push
     // does trigger workflows, which is exactly how the duplicate happened.
     // Was: "excludes the automation branch namespaces", asserting two entries
@@ -3816,118 +3816,13 @@ const checks = [
         !/gh pr merge/.test(source) &&
         !/--auto\b/.test(source) &&
         // The namespaces that open their own PRs are still refused, and still
-        // refused ahead of the marker -- `feedback-autofix` records the number
-        // of the PR its own workflow created, so a second one is not a
-        // duplicate but a wrong answer.
+        // refused ahead of the marker.
         policy.includes('"dependabot"') &&
         policy.includes('"autofix"') &&
-        policy.includes('"feedback-autofix"') &&
         policy.indexOf("AUTOMATION_NAMESPACES") < policy.indexOf("TARGET_MARKER") &&
         policy.includes('PRODUCTION_NAMESPACES = ["to-main", "release", "hotfix"]')
       );
     },
-  },
-  {
-    // Phase 3 fix workflow supply chain and trigger surface: dispatch-only
-    // (a schedule is a §9 go-live decision), never pull_request_target, and
-    // every third-party executable pinned by SHA or integrity hash.
-    name: "Feedback auto-fix workflow is dispatch-only with pinned supply chain",
-    file: ".github/workflows/feedback-autofix.yml",
-    test: (source) =>
-      source.includes("workflow_dispatch:") &&
-      !source.includes("pull_request_target") &&
-      !source.includes("schedule:") &&
-      source.includes(
-        "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
-      ) &&
-      source.includes(
-        "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38"
-      ) &&
-      source.includes("CLAUDE_CODE_INTEGRITY"),
-  },
-  {
-    // Token separation: the LLM step must not see the GitHub PAT or the sync
-    // secret, and the PR step must not see the LLM key. Checked per step
-    // block so a refactor cannot silently co-locate them.
-    name: "Feedback auto-fix workflow separates its credentials by step",
-    file: ".github/workflows/feedback-autofix.yml",
-    test: (source) => {
-      const steps = source.split(/\n {6}- name: /);
-      const fixStep = steps.find((step) => step.startsWith("Attempt the fix"));
-      const prStep = steps.find((step) =>
-        step.startsWith("Push the branch and open the develop PR")
-      );
-      return (
-        Boolean(fixStep) &&
-        Boolean(prStep) &&
-        fixStep.includes("FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY") &&
-        !fixStep.includes("GH_AUTOMATION_PAT") &&
-        !fixStep.includes("FEEDBACK_AUTOFIX_SYNC_SECRET") &&
-        prStep.includes("GH_AUTOMATION_PAT") &&
-        !prStep.includes("ANTHROPIC") &&
-        !prStep.includes("FEEDBACK_AUTOFIX_SYNC_SECRET") &&
-        !prStep.includes("--auto")
-      );
-    },
-  },
-  {
-    // Owner-approved promotion (docs/policy/trace-feedback-automation.md §9.3).
-    // The promotion-PR workflow opens a main PR and must never merge one:
-    // merging is a person's act in GitHub under branch protection. It runs on
-    // the plain pull_request trigger (never the privileged one), refuses a
-    // head outside this repository in the job condition -- before any secret
-    // is read -- and keeps the sync secret and the GitHub PAT in separate
-    // steps. Third-party actions stay pinned by SHA.
-    name: "Feedback auto-fix promotion workflow opens a main PR and never merges",
-    file: ".github/workflows/feedback-autofix-promotion-pr.yml",
-    test: (raw) => {
-      const source = raw.replace(/\r\n/g, "\n");
-      const code = source
-        .split("\n")
-        .filter((line) => !/^\s*#/.test(line))
-        .join("\n");
-      const steps = code.split(/\n {6}- name: /);
-      const prepare = steps.find((step) => step.startsWith("Ask the server"));
-      const push = steps.find((step) => step.startsWith("Push and open the main promotion PR"));
-      const fetchExisting = steps.find((step) => step.startsWith("Fetch an existing promotion branch"));
-      const secretSteps = steps.filter((step) => step.includes("FEEDBACK_AUTOFIX_SYNC_SECRET"));
-      const patSteps = steps.filter((step) => step.includes("GH_AUTOMATION_PAT"));
-      return (
-        /\n  pull_request:\n    types: \[closed\]\n    branches: \[develop\]/.test(code) &&
-        !code.includes("pull_request_target") &&
-        !code.includes("schedule:") &&
-        code.includes("github.event.pull_request.head.repo.full_name == github.repository") &&
-        code.includes("github.event.pull_request.merged == true") &&
-        !/gh pr merge|--admin|--auto\b|git push[^\n]*\bmain\b/.test(code) &&
-        code.includes("actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803") &&
-        code.includes("actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38") &&
-        code.includes("merge-base --is-ancestor origin/main origin/develop") &&
-        code.includes("check-main") &&
-        code.includes("check-branch") &&
-        Boolean(prepare) &&
-        Boolean(push) &&
-        Boolean(fetchExisting) &&
-        secretSteps.length === 1 &&
-        secretSteps[0] === prepare &&
-        patSteps.length === 2 &&
-        patSteps.includes(push) &&
-        patSteps.includes(fetchExisting) &&
-        !prepare.includes("GH_AUTOMATION_PAT") &&
-        !push.includes("FEEDBACK_AUTOFIX_SYNC_SECRET")
-      );
-    },
-  },
-  {
-    // The server's side of promotion reads GitHub and never writes to it: no
-    // non-GET request, no merge endpoint, no dispatch. A write credential on
-    // the production server was the round-0 review's blocker F8.
-    name: "Feedback auto-fix GitHub access on the server is read-only",
-    file: "lib/feedbackAutoFixGitHub.ts",
-    test: (source) =>
-      source.includes('method: "GET"') &&
-      !/method:\s*"(POST|PUT|PATCH|DELETE)"/.test(source) &&
-      !/\/merge\b|\/dispatches\b|\/reviews\b/.test(source) &&
-      source.includes('redirect: "error"'),
   },
   {
     // The auto-PR guard decides whether a branch gets a pull request at all,

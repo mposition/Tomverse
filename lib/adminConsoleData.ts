@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { readStoredTraceAnalysis } from "@/lib/traceReportAnalysisCore";
 import type { AdminAuditRow } from "@/components/admin/AdminAuditPanel";
 import type { AdminModelMetricRow } from "@/components/admin/AdminModelMetricsPanel";
 import type {
@@ -6,8 +7,6 @@ import type {
   ProviderHealthCheckRow,
 } from "@/components/admin/AdminProviderOpsPanel";
 import type { FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
-import type { AutoFixReviewRow } from "@/components/admin/AutoFixReviewPanel";
-import { AUTOFIX_CASE_STATE } from "@/lib/feedbackAutoFixCore";
 import { isFeedbackAwaitingOperator } from "@/lib/feedbackLifecycleCore";
 import { NOTIFICATION_KIND } from "@/lib/notificationDeliveries";
 import type { RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
@@ -35,7 +34,6 @@ export const ADMIN_READ_LIMITS = {
   auditLog: 50,
   creditLedger: 100,
   feedback: 20,
-  autoFixCases: 20,
   refunds: 20,
   providerIncidents: 50,
   providerChecks: 50,
@@ -62,13 +60,14 @@ const feedbackInclude = {
       occurredAt: true,
     },
   },
-  // Phase 2 shadow diagnosis state -- observational only; the panel labels it
-  // explicitly as "no auto-fix exists".
+  // The classifier's case and the model's reading of it
+  // (docs/policy/trace-feedback-automation.md §8, §8a).
   autoFixCase: {
     select: {
       state: true,
       classification: true,
       ineligibilityReason: true,
+      diagnosticSummary: true,
       updatedAt: true,
     },
   },
@@ -151,6 +150,20 @@ export async function loadFeedbackRows(options?: {
   // Newest per report wins: a resend is what happened last.
   const replyDeliveryByFeedback = new Map<string, (typeof replyDeliveries)[number]>();
   for (const row of replyDeliveries) replyDeliveryByFeedback.set(row.referenceId, row);
+  const analysisOf = (feedback: (typeof rows)[number]) => readStoredTraceAnalysis(feedback.autoFixCase?.diagnosticSummary);
+  const handedOffIdeas = rows.flatMap((feedback) => {
+    const analysis = analysisOf(feedback);
+    return analysis?.status === "done" && analysis.handoff ? [analysis.handoff.ideaId] : [];
+  });
+  const lanePrs = handedOffIdeas.length
+    ? await prisma.amuxIdeaLaneAttempt.findMany({
+        where: { ideaId: { in: handedOffIdeas }, outcome: "pr_open", prNumber: { not: null } },
+        orderBy: { claimedAt: "asc" },
+        select: { ideaId: true, prNumber: true },
+      })
+    : [];
+  // Newest wins: a retried run's PR is the one still open.
+  const lanePrByIdea = new Map(lanePrs.map((row) => [row.ideaId, row.prNumber]));
   return rows.map((feedback) => ({
     id: feedback.id,
     userId: feedback.userId,
@@ -228,93 +241,24 @@ export async function loadFeedbackRows(options?: {
           classification: feedback.autoFixCase.classification,
           ineligibilityReason: feedback.autoFixCase.ineligibilityReason,
           updatedAt: feedback.autoFixCase.updatedAt.toISOString(),
+          analysis: (() => {
+            const analysis = analysisOf(feedback);
+            if (!analysis) return null;
+            if (analysis.status !== "done") return { status: "failed" as const };
+            return {
+              status: "done" as const,
+              kind: analysis.kind,
+              confidence: analysis.confidence,
+              cause: analysis.cause,
+              recommendation: analysis.recommendation,
+              handedOff: Boolean(analysis.handoff),
+              prNumber: analysis.handoff ? (lanePrByIdea.get(analysis.handoff.ideaId) ?? null) : null,
+            };
+          })(),
         }
       : null,
     createdAt: feedback.createdAt.toISOString(),
   }));
-}
-
-/** Cases the auto-fix review section shows: from review to a stop or to
- * production, newest activity first. Closed cases are finished work. */
-const AUTOFIX_REVIEW_STATES = [
-  AUTOFIX_CASE_STATE.prOpen,
-  AUTOFIX_CASE_STATE.approved,
-  AUTOFIX_CASE_STATE.merged,
-  AUTOFIX_CASE_STATE.stagingVerified,
-  AUTOFIX_CASE_STATE.productionMerged,
-  AUTOFIX_CASE_STATE.productionVerified,
-  AUTOFIX_CASE_STATE.promotionFailed,
-];
-
-export async function loadAutoFixReviewRows(): Promise<AutoFixReviewRow[]> {
-  const rows = await prisma.feedbackAutoFixCase.findMany({
-    where: { state: { in: AUTOFIX_REVIEW_STATES } },
-    orderBy: { updatedAt: "desc" },
-    take: ADMIN_READ_LIMITS.autoFixCases,
-    select: {
-      id: true,
-      feedbackId: true,
-      state: true,
-      diagnosticSummary: true,
-      fixReport: true,
-      fixManifest: true,
-      redGreenProof: true,
-      fixPrUrl: true,
-      fixHeadSha: true,
-      approvedAt: true,
-      stagingVerifiedAt: true,
-      productionPrUrl: true,
-      productionVerifiedAt: true,
-      promotionObservedAt: true,
-      promotionObservation: true,
-      terminalReason: true,
-      updatedAt: true,
-    },
-  });
-  const text = (value: unknown) => (typeof value === "string" ? value : null);
-  const object = (value: unknown) =>
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  const iso = (value: Date | null) => (value ? value.toISOString() : null);
-  return rows.map((row) => {
-    // Stored JSON is read defensively: the diagnostic summary and the fix
-    // report are bounded technical facts, but their shape is not a schema.
-    const summary = object(row.diagnosticSummary);
-    const report = object(row.fixReport);
-    const sentry = object(summary.sentry);
-    return {
-      id: row.id,
-      feedbackId: row.feedbackId,
-      state: row.state,
-      errorCode: text(summary.errorCode),
-      routeClass: text(summary.routeClass),
-      release: text(summary.release),
-      provider: text(summary.provider),
-      modelId: text(summary.modelId),
-      occurredAt: text(summary.occurredAt),
-      sentryTitle: text(sentry.title),
-      rootCause: text(report.rootCause),
-      fixSummary: text(report.fixSummary),
-      testSummary: text(report.testSummary),
-      changedPaths: Array.isArray(row.fixManifest)
-        ? row.fixManifest
-            .map((entry) => text(object(entry).path))
-            .filter((path): path is string => Boolean(path))
-        : [],
-      proofTestPath: text(object(row.redGreenProof).testPath),
-      fixPrUrl: row.fixPrUrl,
-      fixHeadSha: row.fixHeadSha,
-      approvedAt: iso(row.approvedAt),
-      stagingVerifiedAt: iso(row.stagingVerifiedAt),
-      productionPrUrl: row.productionPrUrl,
-      productionVerifiedAt: iso(row.productionVerifiedAt),
-      promotionObservedAt: iso(row.promotionObservedAt),
-      promotionObservation: row.promotionObservation,
-      terminalReason: row.terminalReason,
-      updatedAt: row.updatedAt.toISOString(),
-    };
-  });
 }
 
 /** Unclosed reports older than a day, oldest first, for the work queue. A
