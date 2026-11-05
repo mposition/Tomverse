@@ -153,8 +153,9 @@ export const amuxIdeaCardCloseAskedFrom = (targets: readonly AmuxIdeaCardCloseCa
  */
 export const AMUX_IDEA_CARD_CLOSE_DM_WORKER = "amux-card-close";
 /**
- * The provider class the Decision Maker routes by (policy §7): `claude` goes
- * to `decision-maker-openai`. No worker asked, so this only picks the instance.
+ * The provider class the Decision Maker routes by
+ * (docs/policy/amux-decision-maker.md §7): `claude` goes to
+ * `decision-maker-openai`. No worker asked, so this only picks the instance.
  */
 export const AMUX_IDEA_CARD_CLOSE_DM_PROVIDER = "claude";
 
