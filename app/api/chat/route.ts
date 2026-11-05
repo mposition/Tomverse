@@ -429,6 +429,7 @@ import { scopedMessageId } from "@/lib/messageRequestIdentity";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
+    logStreamErrorWithoutContent,
     providerDiagnosticCode,
     safeErrorMessage,
     safeErrorMetadata,
@@ -4986,6 +4987,10 @@ async function handleChatPost(
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
                         prepareStep: mcpConnector.prepareStep,
                     } : {}),
+                    onError: logStreamErrorWithoutContent({
+                        traceId,
+                        modelId: modelConfig.id,
+                    }),
                 })
         );
         // The fallback drill's deliberate failure, if this request asked for
@@ -6120,6 +6125,10 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
+                    onError: logStreamErrorWithoutContent({
+                        traceId,
+                        modelId: plan.modelId,
+                    }),
                 });
             } catch (dispatchError) {
                 nextAttemptAbortController.abort(dispatchError);

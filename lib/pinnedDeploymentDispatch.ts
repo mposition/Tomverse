@@ -26,7 +26,9 @@ export const streamPinnedInference = (input: {
             };
         };
     }) => void | Promise<void>;
-    onError?: (event: { error: unknown }) => void | Promise<void>;
+    // Required: leaving it unset hands the error to the SDK's default
+    // `console.error(error)`, which prints the model's content.
+    onError: (event: { error: unknown }) => void | Promise<void>;
 }) => streamText({
     model: input.model,
     messages: input.messages.map((message) => ({
