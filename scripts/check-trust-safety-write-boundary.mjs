@@ -822,20 +822,48 @@ export const analysePackageFile = ({ specifier, file, source }) => {
     return isLoaderValue(node.expression) && (MODULE_RECEIVER_LOADERS.has(key) || PROCESS_RECEIVER_LOADERS.has(key));
   };
 
-  /** The specifier a loader call loads, folded as §5.6 says, or undefined. */
-  const loaderSpecifier = (call) => {
+  /**
+   * Every specifier a loader call could be loading, folded as §5.6 says.
+   *
+   * **All of them, not the first.** Picking the first reducible string was
+   * wrong in the way independent review showed:
+   * `Function.prototype.call.call(require, "node:crypto", "node:net")` loads
+   * `node:net` -- the second argument is the forwarded call's `thisArg` -- and
+   * taking the first string judged `node:crypto`, which is allowed, and passed.
+   * Rebuilding JavaScript's own `call`/`apply`/`bind` folding here would be a
+   * second place to get it wrong, so every reducible string argument is
+   * judged: the real target is always among them, and an allowed one beside it
+   * passes on its own merits. A call where none reduces is a failure.
+   *
+   * `bind` is folded as the section says -- the bound arguments then the later
+   * call's -- by reading the enclosing call when the bound value is invoked
+   * there.
+   */
+  const loaderSpecifiers = (call) => {
     const callee = call.expression;
     const key = propertyName(callee) ?? (ts.isIdentifier(callee) ? callee.text : null);
     const args = [...call.arguments];
-    // `call` drops the receiver argument; `apply` takes an array this check
-    // cannot read; `bind` concatenates bound arguments with the later call's,
-    // so the first module argument is the first reducible string either way.
-    if (key === "call" || key === "apply") args.shift();
+    if (key === "bind" && ts.isCallExpression(call.parent) && call.parent.expression === call) {
+      args.push(...call.parent.arguments);
+    }
+    const found = [];
     for (const argument of args) {
       const text = asString(argument);
-      if (text !== null) return text;
+      if (text !== null) found.push(text);
     }
-    return undefined;
+    return found;
+  };
+
+  /**
+   * Judge every specifier a loader call could be loading, and refuse the call
+   * when none of its arguments reduces to one.
+   */
+  const judgeEveryTarget = (targets, rule) => {
+    if (targets.length === 0) {
+      judgeTarget(undefined, rule);
+      return;
+    }
+    for (const target of targets) judgeTarget(target, rule);
   };
 
   /** Judge one resolved specifier: an allowed builtin, an edge, or a failure. */
@@ -905,11 +933,11 @@ export const analysePackageFile = ({ specifier, file, source }) => {
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         judgeTarget(asString(node.arguments[0]) ?? undefined, "package-dynamic-import");
       } else if (isLoaderValue(node.expression)) {
-        judgeTarget(loaderSpecifier(node), "package-loader-unreducible");
+        judgeEveryTarget(loaderSpecifiers(node), "package-loader-unreducible");
       } else if (node.arguments.some((argument) => isLoaderValue(argument))) {
         // The argument group: the loader is handed to something else, and the
         // specifier is still visible.
-        judgeTarget(loaderSpecifier(node), "package-loader-forwarded");
+        judgeEveryTarget(loaderSpecifiers(node), "package-loader-forwarded");
       }
     }
 

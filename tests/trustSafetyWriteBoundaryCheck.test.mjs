@@ -587,6 +587,40 @@ test("(ㄷ): a loader access inside a package has to reduce, or the package fail
   }
 });
 
+test("(ㄷ): an allowed module cannot be used to hide the real target", () => {
+  // `Function.prototype.call.call(require, "node:crypto", "node:net")` loads
+  // node:net -- the second argument is the forwarded call's thisArg -- and
+  // judging only the first reducible string passed it as node:crypto.
+  // Independent review found that; every reducible argument is judged now.
+  const refused = {
+    "an allowed module as the forwarded thisArg":
+      'module.exports = Function.prototype.call.call(require, "node:crypto", "node:net");',
+    "require.call with an allowed thisArg":
+      'module.exports = require.call("node:crypto", "node:net");',
+    "a bound loader invoked later":
+      'const load = require.bind(module); module.exports = load("node:net");',
+    "bind with the specifier bound in":
+      'module.exports = require.bind(module, "node:net")();',
+  };
+  for (const [label, source] of Object.entries(refused)) {
+    const { failures } = analysePackageFile({
+      specifier: "probe",
+      file: "node_modules/probe/index.js",
+      source,
+    });
+    assert.ok(failures.length > 0, `${label} must be refused`);
+  }
+
+  // And the allowed module on its own still passes, or the rule would refuse
+  // every package that hashes anything.
+  const { failures } = analysePackageFile({
+    specifier: "probe",
+    file: "node_modules/probe/index.js",
+    source: 'const { createHash } = require("node:crypto"); module.exports = createHash;',
+  });
+  assert.deepEqual(failures, []);
+});
+
 test("(ㄷ): an ordinary edge and an allowed builtin are not refused", () => {
   // The rule has to leave a real package usable: `zod` is walked on every run
   // of this check and must stay clean, and `node:crypto` is allowed whole.

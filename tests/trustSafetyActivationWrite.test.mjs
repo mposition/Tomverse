@@ -260,6 +260,24 @@ test("the refusal code the section shows is one the route can answer with", () =
   );
 });
 
+test("every code the route can redirect with is one the section accepts", () => {
+  // The route redirects a form submit back with its refusal code, and a code
+  // outside the closed set is dropped -- which left the wrong-role refusal
+  // showing nothing at all. Independent review found that one; this reads the
+  // codes out of the route rather than listing them again here.
+  const whole = readFileSync(ROUTE, "utf8");
+  const emitted = new Set(
+    [...whole.matchAll(/code: "([A-Za-z_]+)"/g)].map((match) => match[1]),
+  );
+  assert.ok(emitted.size >= 6, `found ${emitted.size} codes in the route`);
+  for (const code of emitted) {
+    assert.equal(isTrustSafetyRefusalCode(code), true, `${code} must be in the closed set`);
+  }
+  // And the fallback the redirect uses when a path supplies none.
+  assert.match(whole, /body\.code \?\? "internal"/);
+  assert.equal(isTrustSafetyRefusalCode("internal"), true);
+});
+
 test("the route builds its own responses and caps its own body", () => {
   // (ㄴ') closes the outside specifiers at eight and `next/server` is not one,
   // and `lib/apiSecurity.ts` is not a boundary module -- so `NextResponse`,

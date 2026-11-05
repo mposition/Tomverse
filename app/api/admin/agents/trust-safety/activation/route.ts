@@ -109,10 +109,13 @@ const answer = (
   // exists, which is what the 404 is for. Independent review found the form
   // path turning it into `?refused=refused`.
   if (status === 404 || !isFormSubmission(request)) return json(body, status);
+  // Every refusal supplies its code; `internal` rather than a word of its own
+  // if one ever does not, so the value stays inside the closed set the section
+  // accepts -- a code outside it is dropped and shows the operator nothing.
   const target =
     status >= 200 && status < 300
       ? SECTION_PATH
-      : `${SECTION_PATH}&refused=${encodeURIComponent(body.code ?? "refused")}`;
+      : `${SECTION_PATH}&refused=${encodeURIComponent(body.code ?? "internal")}`;
   return new Response(null, {
     status: 303,
     headers: { Location: target, "Cache-Control": "no-store" },

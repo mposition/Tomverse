@@ -219,6 +219,11 @@ export const TRUST_SAFETY_REFUSAL_CODES = [
   ...ACTIVATION_REFUSALS,
   "integrity_key_missing",
   "reauthentication_required",
+  // The wrong role. It is in this list because the route redirects a form
+  // submit back to the section with its code, and a code the section does not
+  // accept is dropped -- which left that refusal showing nothing at all.
+  // Independent review found it.
+  "TRUST_SAFETY_WRITE_REQUIRED",
   "stale",
   "late",
   "body_too_large",
