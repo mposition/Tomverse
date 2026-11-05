@@ -113,6 +113,25 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     triageModelOwnerOnly: "Only the owner can change the model.",
     triageModelReauthenticate: "Sign in again to change the model.",
     triageModelSignInAgain: "Sign in again",
+    traceAnalysisModeLabel: "Verified trace analysis",
+    traceAnalysisModes: { off: "Off", analyze: "Analyze", fix: "Analyze and open draft PRs" },
+    traceAnalysisHelp:
+      "Runs while AI triage is on. Each report with a verified trace is sent once to the model above, recorded facts only, never the reporter's words. Draft PRs are made by the AMUX idea lane, at most 3 a day, and you merge them.",
+    traceAnalysisNoCases:
+      "FEEDBACK_AUTOFIX_SHADOW_ENABLED is off in this environment, so new reports get no case and no analysis until it is set to true.",
+    traceAnalysisTitle: "Error analysis",
+    traceAnalysisCause: "Likely cause",
+    traceAnalysisRecommendation: "First step",
+    traceAnalysisKinds: {
+      code_fix: "Code defect",
+      provider_or_transient: "Provider or transient",
+      operational_limit: "Limit working as designed",
+      needs_more_evidence: "Needs more evidence",
+    },
+    traceAnalysisConfidence: { low: "low confidence", medium: "medium confidence", high: "high confidence" },
+    traceAnalysisFailed: "The analysis could not be made.",
+    traceAnalysisFixRunning: "Fix handed to the idea lane; the draft PR is not open yet.",
+    traceAnalysisFixPr: "Draft fix",
     triageTitle: "AI triage",
     triageByModel: "by model",
     triageByKeyword: "by keyword rule",
@@ -144,12 +163,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     traceSourceClaim: (provenance: string) => `${provenance} (client claim)`,
     clientCode: (code: string) => `Client-classified code: ${code}`,
     shadowDiagnosis: "Shadow diagnosis (observation only, no auto-fix): ",
-    autoFixStage: "Auto-fix: ",
-    autoFixDraft: {
-      ready:
-        "The fix for this report was observed live in production. A reply draft is ready; nothing has been sent to the reporter.",
-      use: "Reply with the draft and resolve",
-      review: "Review the fix",
+    replyDraftAction: {
       sendAndResolve: "Send reply and mark resolved",
       resolveOnly: "Mark resolved",
     },
@@ -291,6 +305,25 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     triageSwitchFromEnvironment: "(환경변수 값)",
     triageSwitchTurnOn: "켜기",
     triageSwitchTurnOff: "끄기",
+    traceAnalysisModeLabel: "검증된 추적 ID 분석",
+    traceAnalysisModes: { off: "끔", analyze: "분석", fix: "분석 + draft PR" },
+    traceAnalysisHelp:
+      "AI 분류가 켜져 있을 때 돕니다. 검증된 추적 ID가 있는 신고마다 위 모델을 한 번 호출합니다. 서버 기록만 보내고 신고자의 글은 보내지 않습니다. draft PR은 AMUX idea lane이 하루 최대 3건 만들고, 병합은 직접 합니다.",
+    traceAnalysisNoCases:
+      "이 환경은 FEEDBACK_AUTOFIX_SHADOW_ENABLED가 꺼져 있어, true로 설정하기 전까지 새 신고에는 case도 분석도 생기지 않습니다.",
+    traceAnalysisTitle: "오류 분석",
+    traceAnalysisCause: "추정 원인",
+    traceAnalysisRecommendation: "먼저 할 일",
+    traceAnalysisKinds: {
+      code_fix: "코드 결함",
+      provider_or_transient: "모델 제공사 또는 일시 오류",
+      operational_limit: "한도가 설계대로 동작",
+      needs_more_evidence: "증거 부족",
+    },
+    traceAnalysisConfidence: { low: "신뢰도 낮음", medium: "신뢰도 중간", high: "신뢰도 높음" },
+    traceAnalysisFailed: "분석을 만들지 못했습니다.",
+    traceAnalysisFixRunning: "수정을 idea lane에 넘겼습니다. draft PR은 아직 열리지 않았습니다.",
+    traceAnalysisFixPr: "수정 draft",
     triageModelTitle: "AI 분류 모델",
     triageModelHelp: "새 신고마다 이 모델을 한 번 호출해 lane, 중복 후보, 답변 초안을 만듭니다. 끄면 키워드 규칙만 쓰고 비용이 들지 않습니다.",
     triageModelOff: "끔 (키워드 규칙만)",
@@ -332,12 +365,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     traceSourceClaim: (provenance: string) => `${provenance} (클라이언트 주장)`,
     clientCode: (code: string) => `클라이언트 분류 코드: ${code}`,
     shadowDiagnosis: "Shadow 진단 (관찰 전용, 자동 수정 없음): ",
-    autoFixStage: "자동 수정: ",
-    autoFixDraft: {
-      ready:
-        "이 신고의 수정이 production에 반영된 것을 확인했습니다. 답변 초안이 준비되었고, 신고자에게는 아직 아무것도 보내지 않았습니다.",
-      use: "초안으로 답변하고 해결됨 처리",
-      review: "수정 내용 보기",
+    replyDraftAction: {
       sendAndResolve: "답변 보내고 해결됨으로 표시",
       resolveOnly: "해결됨으로 표시",
     },

@@ -10,8 +10,8 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
 import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
-import { AMUX_V4_ANALYSIS_PROMPT_VERSION, buildAmuxIdeaAnalysisPrompt,
-  type AmuxIdeaAnalysisPromptInput,
+import { AMUX_V4_ANALYSIS_PROMPT_VERSION, amuxAnalysisPromptWithNote,
+  buildAmuxIdeaAnalysisPrompt, type AmuxIdeaAnalysisPromptInput,
   type AmuxIdeaAnalysisPromptResult } from "./ideaAnalysisPromptCore.ts";
 import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
@@ -20,6 +20,7 @@ import { persistAmuxAnalysisPageDraftInTx } from
 import { AMUX_V4_IDEA_SOURCE_SYSTEM } from "./ideaIdentityCore.ts";
 import type { AmuxContentKeyIdentity } from "./ideaKeyStore.ts";
 import type { AmuxAnalysisOutputPage } from "./ideaOutputCursorCore.ts";
+import { AMUX_SESSION_PAGE_NOTE } from "./ideaSessionAnswerCore.ts";
 import { parkAmuxSessionIdeaInTx, recordAmuxSessionPlanRefusalInTx } from
   "./ideaSessionPlanRefusalService.ts";
 import { amuxSessionPageRefusalDetail } from "./ideaSessionReviewDetailCore.ts";
@@ -142,7 +143,7 @@ export async function readAmuxSessionPageContextInTx(tx: Tx, input: {
  * reads its inherited references from. */
 export function buildAmuxSessionPagePrompt(input: { claimId: string;
   idea: string; context: AmuxSessionPageContext }): AmuxIdeaAnalysisPromptResult {
-  return buildAmuxIdeaAnalysisPrompt({
+  const built = buildAmuxIdeaAnalysisPrompt({
     previewId: amuxSessionAnalysisPreviewId(input.claimId),
     chunkIndex: input.context.chunkIndex,
     revisionChunkIndex: input.context.chunkIndex,
@@ -150,6 +151,9 @@ export function buildAmuxSessionPagePrompt(input: { claimId: string;
     sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
       text: input.idea }],
     permittedTargetRefs: input.context.permittedTargetRefs });
+  return built.status === "prompt_candidate"
+    ? { ...built, prompt: amuxAnalysisPromptWithNote(built.prompt, AMUX_SESSION_PAGE_NOTE) }
+    : built;
 }
 
 async function databaseNow(tx: Tx): Promise<Date> {
@@ -221,7 +225,8 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: context.permittedTargetRefs,
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
-    history: context.history, templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION });
+    history: context.history, templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
+    sessionPage: true });
   if (prepared.decision === "hold") {
     await recordAmuxSessionPlanRefusalInTx(tx, { ideaId: idea.id,
       claimId: input.claimId, chunkIndex: context.chunkIndex, now,

@@ -23,7 +23,6 @@ test("the three lanes pass", () => {
 
 test("automation that carries its own gates passes", () => {
     assert.ok(allowed("dependabot/npm_and_yarn/next-16.3.9", 2000));
-    assert.ok(allowed("feedback-autofix-main/case-123", 2000));
     assert.ok(allowed("autofix/maintenance-123", 2000));
 });
 
