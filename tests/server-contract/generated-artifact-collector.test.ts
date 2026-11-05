@@ -19,6 +19,8 @@ const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relativePath: string) =>
   pathToFileURL(resolve(ROOT, relativePath)).href;
 
+const MESSAGE_MARKER = "SYNTHETIC_ERROR_MESSAGE_MARKER";
+
 type StoredCall = {
   userId: string;
   conversationId: string;
@@ -62,7 +64,10 @@ const loadTool = () => {
         }) => {
           if (world.failNextPut) {
             world.failNextPut = false;
-            throw new Error("storage is unavailable");
+            throw Object.assign(new Error(`storage is unavailable ${MESSAGE_MARKER}`), {
+              name: "NoSuchBucket",
+              $metadata: { httpStatusCode: 404 },
+            });
           }
           world.nextId += 1;
           const id = `art_${world.nextId}`;
@@ -242,6 +247,51 @@ test("a storage failure is reported and leaves nothing stored", async () => {
   assert.equal(report.reason, "storage_failed");
   assert.equal(subject.stored.length, 0);
   assert.equal(subject.failed[0].failureCode, "storage_failed");
+});
+
+const capturedConsoleError = (t: { mock: typeof mock }) => {
+  const errors = t.mock.method(console, "error", () => {});
+  return () =>
+    errors.mock.calls.map((call) => JSON.stringify(call.arguments)).join("\n");
+};
+
+test("a render failure logs metadata, while the model still reads the parser's message", async (t) => {
+  resetWorld();
+  const logged = capturedConsoleError(t);
+  const subject = await collector();
+  // JSON.parse quotes the text it could not read, so this is the model's own
+  // content arriving in `error.message`. It shortens a long input, hence a
+  // marker this short.
+  const content = "QZXV7 no";
+  const report = await subject.run("text", {
+    filename: "report.json",
+    format: "json",
+    content,
+  });
+
+  assert.equal(report.status, "failed");
+  assert.match(String(report.reason), new RegExp(content));
+  assert.equal(subject.failed[0].failureCode, "spec_rejected");
+
+  const line = logged();
+  assert.match(line, /Generated artifact rendering failed/);
+  assert.match(line, /"name":"TextContentError"/);
+  assert.match(line, /"code":"CONTENT_MALFORMED"/);
+  assert.doesNotMatch(line, new RegExp(content));
+});
+
+test("a storage failure logs metadata, never the error's message", async (t) => {
+  resetWorld();
+  const logged = capturedConsoleError(t);
+  world.failNextPut = true;
+  const subject = await collector();
+  await subject.run("spreadsheet", QUARTERLY);
+
+  const line = logged();
+  assert.match(line, /Generated artifact storage failed/);
+  assert.match(line, /"name":"NoSuchBucket"/);
+  assert.match(line, /"statusCode":404/);
+  assert.doesNotMatch(line, new RegExp(MESSAGE_MARKER));
 });
 
 test("the per-message ceiling refuses a fourth file", async () => {
