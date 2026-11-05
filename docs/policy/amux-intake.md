@@ -50,6 +50,8 @@ Codex CLI(ChatGPT 구독, `codex-chatgpt`), GitHub Copilot CLI(`copilot-github`)
 CLI(`cursor-login`). DB와 코드의 `provider` 값은 모델 공급사가 아니라 이 실행 채널을 뜻하고,
 Copilot·Cursor의 모델 ID는 그 CLI가 받는 모델 이름이다. 구독 CLI 호출은 호출당
 가격이 없으므로 가격 승인을 요구하지 않는다(운영자 결정 2026-11-04). Opus 5.5 프로필의 단가는 관측 토큰을 API 환산 추정치로 바꾸는 데만 쓴다.
+분석 답이 계획 검사에서 거부되면 아이디어를 끝내지 않고 분석 대기열에서 뺀 채 Decision Maker의 제안과 운영자 확정을 기다린다.
+`retry`면 거부 사유를 프롬프트에 붙여 그 페이지를 다시 실행하고, `stop`이면 운영자에게 넘긴다(운영자 결정 2026-11-05, docs/policy/amux-decision-maker.md §2).
 API 키 호출, v4 분석, 다른 Agent, 사용자 크레딧과 실제 추가 청구 승인은 포함하지 않는다.
 구독의 실제 추가 청구 여부는 확인된 사실로 간주하지 않는다. 병합·배포·인증 발급·운영
 스위치 변경은 이 승인에 포함되지 않는다.
