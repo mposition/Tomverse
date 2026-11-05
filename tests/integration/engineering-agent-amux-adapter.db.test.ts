@@ -556,15 +556,31 @@ test("the adapter's settlement runs against delivery acknowledgement and expired
 
     // Whatever won, the run and the attempt tell the same story, or the run is
     // still active for the person who reconciles a mismatch (§11).
+    const settle = results[0];
+    const settledByAdapter =
+      settle.status === "fulfilled" && settle.value.settled === true;
+    // Recovery takes the oldest 200 expired attempts first, and the database
+    // is shared with every other suite in the run. When the adapter did not
+    // settle, drain until recovery has reached this attempt.
+    if (!settledByAdapter) {
+      for (let drain = 0; drain < 50; drain += 1) {
+        const current = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+          where: { id: started.attemptId },
+          select: { endedAt: true },
+        });
+        if (current.endedAt) break;
+        await reclaimExpiredAmuxExecutions({
+          now: new Date(Date.now() + 10 * 60_000),
+          limit: 200,
+        });
+      }
+    }
     const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
       where: { id: started.attemptId },
     });
     const run = await prisma.engineeringAgentRun.findUniqueOrThrow({
       where: { id: runId },
     });
-    const settle = results[0];
-    const settledByAdapter =
-      settle.status === "fulfilled" && settle.value.settled === true;
     if (settledByAdapter) {
       assert.equal(attempt.endedBy, fixture.worker);
       assert.equal(run.status, "finished");
