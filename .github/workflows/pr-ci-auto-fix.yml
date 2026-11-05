@@ -19,7 +19,9 @@
 # markers, and the resolution -- the lines that replace each conflict (a
 # lockfile does not fit whole), or a file's contents -- comes here with the
 # base commit it was made against. Off unless PR_AUTO_FIX_CONFLICTS_ENABLED is
-# exactly "true" as well.
+# exactly "true" as well. A conflict GitHub shows and git's merge does not have
+# (two merge bases, #3314) comes with an empty resolution: the commit is then
+# the merge this workflow made, and nothing of the dispatch's goes into it.
 #
 # Every input is untrusted: whoever can dispatch can send any patch. So:
 # - target: a trusted checkout of the default branch re-decides everything
@@ -240,8 +242,15 @@ jobs:
           # The merge is made here, from base_sha, never taken from the dispatch.
           git -C pr -c user.name=pr-auto-fix -c user.email=pr-auto-fix@users.noreply.github.com merge --no-commit --no-ff "$BASE_SHA" > /dev/null 2>&1 || true
           if [ -z "$(git -C pr diff --name-only --diff-filter=U)" ]; then
-            echo "Merging ${BASE_SHA} leaves no conflict to resolve."
-            echo "push=false" >> "$GITHUB_OUTPUT"
+            # The target job saw GitHub show a conflict; git's merge has none. Only
+            # an empty resolution is published, and only a merge git actually began.
+            if git -C pr rev-parse -q --verify MERGE_HEAD > /dev/null && jq -e '.files == {}' patch/resolution.json > /dev/null 2>&1; then
+              echo "Merging ${BASE_SHA} has no conflict in git; publishing that merge."
+              { echo "push=true"; echo "clean=true"; } >> "$GITHUB_OUTPUT"
+            else
+              echo "Merging ${BASE_SHA} leaves no conflict to resolve."
+              echo "push=false" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
           if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs conflict pr "$GITHUB_WORKSPACE/patch/resolution.json"; then
@@ -259,6 +268,7 @@ jobs:
           HEAD_BRANCH: ${{ needs.target.outputs.head_branch }}
           BASE_BRANCH: ${{ needs.target.outputs.base_branch }}
           WORKFLOWS: ${{ needs.target.outputs.workflows }}
+          CLEAN_MERGE: ${{ steps.resolve.outputs.clean }}
         run: |
           # The target job judged these names; the push checks them again itself.
           plain='^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$'
@@ -268,7 +278,9 @@ jobs:
           git config user.email "pr-auto-fix@users.noreply.github.com"
           if [ "$KIND" = conflict ]; then
             [ -z "$(git diff --name-only --diff-filter=U)" ] || { echo "Conflicts are left."; exit 1; }
-            git commit -q -m "auto-fix(conflict): merge ${BASE_BRANCH} into #${PR_NUMBER}" -m "${BASE_BRANCH} at ${BASE_SHA}. Resolved by Claude Code on the AMUX server; judged and published by .github/workflows/pr-ci-auto-fix.yml."
+            how="Resolved by Claude Code on the AMUX server"
+            [ "$CLEAN_MERGE" != true ] || how="Git merged it without a conflict, no model involved"
+            git commit -q -m "auto-fix(conflict): merge ${BASE_BRANCH} into #${PR_NUMBER}" -m "${BASE_BRANCH} at ${BASE_SHA}. ${how}; judged and published by .github/workflows/pr-ci-auto-fix.yml."
           else
             git add --all
             git commit -q -m "auto-fix(ci): ${WORKFLOWS} failure on #${PR_NUMBER}" -m "Runs ${RUN_IDS}. Proposed by Claude Code on the AMUX server; published by .github/workflows/pr-ci-auto-fix.yml."

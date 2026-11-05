@@ -10,10 +10,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   MARKETING_ADMISSION_CODE_MANIFEST_PATH,
-  MARKETING_ADMISSION_CODE_ROOTS,
-  MARKETING_ADMISSION_CODE_SCHEMA_VERSION,
   marketingAdmissionCodeClosure,
-  marketingAdmissionCodeDigest,
+  marketingAdmissionCodeManifestText,
 } from "./marketing-admission-code-core.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -36,21 +34,7 @@ if (unresolved.length > 0) {
     new URL(`../${MARKETING_ADMISSION_CODE_MANIFEST_PATH}`, import.meta.url)
   );
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(
-    target,
-    `${JSON.stringify(
-      {
-        schemaVersion: MARKETING_ADMISSION_CODE_SCHEMA_VERSION,
-        roots: [...MARKETING_ADMISSION_CODE_ROOTS],
-        digest: marketingAdmissionCodeDigest(files),
-        totalSizeBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0),
-        files,
-      },
-      null,
-      2
-    )}\n`,
-    "utf8"
-  );
+  writeFileSync(target, marketingAdmissionCodeManifestText(files), "utf8");
   console.log(
     `generate:marketing-admission-code — wrote ${files.length} file(s) to ` +
       MARKETING_ADMISSION_CODE_MANIFEST_PATH
