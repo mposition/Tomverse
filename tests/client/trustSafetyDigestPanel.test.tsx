@@ -128,6 +128,27 @@ test("the switch posts a form to the activation route, with the other mode", () 
   assert.match(off, /Turn on/);
 });
 
+test("with the mode unbelieved the owner can still turn the observation off", () => {
+  // Offering only the opposite of `mode` meant a chain fault always offered
+  // `on`, which the store refuses as `not_a_transition` when the stored row is
+  // already on -- so the owner could not turn observation off from the screen
+  // while the fault stood. Independent review found it.
+  const html = render({
+    reauthenticationHref: REAUTH,
+    view: view({
+      activation: { mode: null, fault: "chain_broken", countPermitted: false, pingPermitted: false },
+      counts: null,
+    }),
+    messages,
+    canWrite: true,
+    refusedCode: null,
+  });
+  assert.match(html, /name="mode" value="off"/);
+  assert.match(html, /name="mode" value="on"/);
+  assert.match(html, /Turn off/);
+  assert.match(html, /Turn on/);
+});
+
 test("without the permission there is no form at all", () => {
   const html = render({ reauthenticationHref: REAUTH, view: view(), messages, canWrite: false, refusedCode: null });
   assert.doesNotMatch(html, /<form/);

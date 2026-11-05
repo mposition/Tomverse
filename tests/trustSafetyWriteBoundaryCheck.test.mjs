@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   ALLOWED_SPECIFIERS,
+  analysePackageFile,
   BOUNDARY_MODULES,
   ENTRY_POINTS,
   checkTrustSafetyWriteBoundary,
@@ -554,6 +555,55 @@ export const purge = async (client: { privacyRequest: { deleteMany: (x: unknown)
   ({ createHash: () => client.privacyRequest }).createHash("x").deleteMany({});`,
   });
   assert.ok(rules(result).includes("delegateWrites-not-allowed"), JSON.stringify(result.failures.slice(0, 3)));
+});
+
+test("(ㄷ): a loader access inside a package has to reduce, or the package fails", () => {
+  // Independent review ran the first two of these through the earlier,
+  // regex-based scan and both passed with nothing reported. They are judged
+  // by the five loader groups §5.6 names, parsed rather than matched.
+  const refused = {
+    "dynamic import of a module (ㄱ-1) does not allow":
+      'export const go = (url) => import("node:https").then((m) => m.get(url));',
+    "a loader reached through process.mainModule with a string key":
+      'const net = process.mainModule["require"]("node:net"); export const go = () => net.connect(443, "h");',
+    "require.call":
+      'const net = require.call(module, "node:net"); module.exports = net;',
+    "the loader handed to something else as an argument":
+      'const net = Function.prototype.call.call(require, null, "node:net"); module.exports = net;',
+    "module.constructor._load":
+      'const net = module.constructor._load("node:net"); module.exports = net;',
+    "a specifier that does not reduce to a string":
+      'const name = String.fromCharCode(110) + "ode:net"; module.exports = require(name);',
+    "a call forwarder taken by a computed destructuring key":
+      'const { ["call"]: c } = require; module.exports = c.call(require, module, "node:net");',
+  };
+  for (const [label, source] of Object.entries(refused)) {
+    const { failures } = analysePackageFile({
+      specifier: "probe",
+      file: "node_modules/probe/index.js",
+      source,
+    });
+    assert.ok(failures.length > 0, `${label} must be refused`);
+  }
+});
+
+test("(ㄷ): an ordinary edge and an allowed builtin are not refused", () => {
+  // The rule has to leave a real package usable: `zod` is walked on every run
+  // of this check and must stay clean, and `node:crypto` is allowed whole.
+  const fine = {
+    "a relative require": 'module.exports = require("./util.js");',
+    "a static import": 'import { z } from "./schema.js"; export const s = z;',
+    "node:crypto, allowed entirely": 'const { createHash } = require("node:crypto"); module.exports = createHash;',
+    "an ordinary computed read, which react does": "module.exports = (config, key) => config[key];",
+  };
+  for (const [label, source] of Object.entries(fine)) {
+    const { failures } = analysePackageFile({
+      specifier: "probe",
+      file: "node_modules/probe/index.js",
+      source,
+    });
+    assert.deepEqual(failures, [], `${label}: ${JSON.stringify(failures)}`);
+  }
 });
 
 test("the entry points and the specifier list are the ones the section names", () => {

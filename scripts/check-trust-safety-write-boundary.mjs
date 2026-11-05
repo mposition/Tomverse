@@ -24,7 +24,7 @@
 // one line per failure, with the file and the rule, and exits non-zero.
 
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import { dirname, join, relative, resolve as resolvePath } from "node:path";
 
 const require = createRequire(import.meta.url);
@@ -709,8 +709,236 @@ const checkEntryPoint = (entry, { load, exists }) => {
  */
 const PACKAGE_FILE_BUDGET = 1_500;
 
+/**
+ * Node's own module names, so a bare `require("net")` is judged as the
+ * builtin it is rather than resolved as a dependency.
+ */
+const BUILTIN_MODULE_NAMES = new Set(builtinModules);
+
+/**
+ * (ㄱ-2)'s transmission names, judged over a walked package's text: these are
+ * built files, and over-matching costs a review while under-matching costs
+ * the rule.
+ *
+ * There is no list of forbidden modules beside this one any more. Which
+ * built-in a package may reach is `ALLOWED_BUILTINS` -- the (ㄱ-1) allowlist,
+ * applied in `judgeTarget` -- so a ban list would be a second answer to the
+ * same question and the shorter of the two would quietly win.
+ */
 const EGRESS_NAMES = ["XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "getBuiltinModule"];
-const EGRESS_MODULES = ["node:net", "node:tls", "node:dgram", "node:dns", "node:http", "node:https", "node:http2", "node:child_process", "node:worker_threads", "node:cluster", "node:module", "node:vm"];
+
+/**
+ * One walked package file, judged (§5.6 (ㄷ)).
+ *
+ * (ㄷ) applies the egress rules to a package the closure loads, and it is
+ * explicit about how: a **loader access** has to reduce statically to what it
+ * loads. It reduces, that target is an edge; it does not, the package fails.
+ * The five groups it names are implemented here by name and receiver, which
+ * is the part a regular expression could not do -- independent review ran
+ * `import("node:https").then((m) => m.get(url))` and
+ * `process.mainModule["require"]("node:net").connect(...)` through the old
+ * scan and both passed with nothing reported.
+ *
+ * The groups, as §5.6 names them (never by number: it says its own numbering
+ * drifted from the list):
+ *
+ *   - receiver-independent names: `require`, `require.resolve`,
+ *     `createRequire`, `getBuiltinModule`, `_load`;
+ *   - names that are a loader access only on a `module` receiver: `require`,
+ *     `constructor`, `parent`, `children`, `load`;
+ *   - names that are a loader access only on a `process` receiver:
+ *     `mainModule`, `binding`, `dlopen`;
+ *   - any call one of whose **arguments** reduces to a loader value, whatever
+ *     the receiver -- which is what catches
+ *     `Function.prototype.call.call(require, null, "node:net")`;
+ *   - `call`, `apply` and `bind` on a receiver that reduces to a loader value,
+ *     in dot form or as a reducible string key, which §5.6 calls one place.
+ *
+ * A property name is read whether it is written as an identifier or as a
+ * reducible string key. An unreducible key fails only under the receiver
+ * condition the section gives -- `module`, `process`, `global`, `globalThis`
+ * or a loader value -- because the wider rule would refuse `react`'s own
+ * `config[propName]` and with it the panel E2 needs.
+ */
+const RECEIVER_FREE_LOADERS = new Set(["require", "createRequire", "getBuiltinModule", "_load"]);
+const MODULE_RECEIVER_LOADERS = new Set(["require", "constructor", "parent", "children", "load"]);
+const PROCESS_RECEIVER_LOADERS = new Set(["mainModule", "binding", "dlopen"]);
+const LOADER_FORWARDERS = new Set(["call", "apply", "bind"]);
+const UNREDUCIBLE_KEY_RECEIVERS = new Set(["module", "process", "global", "globalThis"]);
+
+export const analysePackageFile = ({ specifier, file, source }) => {
+  const failures = [];
+  const edges = [];
+  const where = `${specifier} -> ${relative(ROOT, file)}`;
+  const fail = (rule, detail) => failures.push({ entry: "package", file: where, rule, detail });
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
+
+  /** Local names that hold a loader value. */
+  const loaderNames = new Set(["require"]);
+
+  /** A string a key or specifier reduces to, or null. */
+  const asString = (node) => {
+    if (node === undefined) return null;
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isTemplateExpression(node) && node.templateSpans.length === 0) return node.head.text;
+    return null;
+  };
+
+  /** The property name a member read or binding key reduces to, or null. */
+  const propertyName = (node) => {
+    if (ts.isPropertyAccessExpression(node)) return node.name.text;
+    if (ts.isElementAccessExpression(node)) return asString(node.argumentExpression);
+    return null;
+  };
+
+  /** Whether this expression reduces to the named global or local. */
+  const reducesTo = (node, name) => {
+    if (node === undefined) return false;
+    if (ts.isParenthesizedExpression(node)) return reducesTo(node.expression, name);
+    if (ts.isIdentifier(node)) return node.text === name;
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      // `globalThis.process` and `global.module` reduce to the same names.
+      const key = propertyName(node);
+      return key === name && (reducesTo(node.expression, "globalThis") || reducesTo(node.expression, "global"));
+    }
+    return false;
+  };
+
+  /** Whether this expression reduces to a loader value. */
+  const isLoaderValue = (node) => {
+    if (node === undefined) return false;
+    if (ts.isParenthesizedExpression(node)) return isLoaderValue(node.expression);
+    if (ts.isIdentifier(node)) return loaderNames.has(node.text);
+    const key = propertyName(node);
+    if (key === null) return false;
+    if (key === "resolve" && isLoaderValue(node.expression)) return true;
+    if (RECEIVER_FREE_LOADERS.has(key)) return true;
+    if (MODULE_RECEIVER_LOADERS.has(key) && reducesTo(node.expression, "module")) return true;
+    if (PROCESS_RECEIVER_LOADERS.has(key) && reducesTo(node.expression, "process")) return true;
+    if (LOADER_FORWARDERS.has(key) && isLoaderValue(node.expression)) return true;
+    // A loader value reached through one of the module-receiver names, e.g.
+    // `module.constructor._load` or `process.mainModule.require`.
+    if (RECEIVER_FREE_LOADERS.has(key) && isLoaderValue(node.expression)) return true;
+    return isLoaderValue(node.expression) && (MODULE_RECEIVER_LOADERS.has(key) || PROCESS_RECEIVER_LOADERS.has(key));
+  };
+
+  /** The specifier a loader call loads, folded as §5.6 says, or undefined. */
+  const loaderSpecifier = (call) => {
+    const callee = call.expression;
+    const key = propertyName(callee) ?? (ts.isIdentifier(callee) ? callee.text : null);
+    const args = [...call.arguments];
+    // `call` drops the receiver argument; `apply` takes an array this check
+    // cannot read; `bind` concatenates bound arguments with the later call's,
+    // so the first module argument is the first reducible string either way.
+    if (key === "call" || key === "apply") args.shift();
+    for (const argument of args) {
+      const text = asString(argument);
+      if (text !== null) return text;
+    }
+    return undefined;
+  };
+
+  /** Judge one resolved specifier: an allowed builtin, an edge, or a failure. */
+  const judgeTarget = (target, rule) => {
+    if (target === undefined) {
+      fail(rule, "the specifier does not reduce to a string");
+      return;
+    }
+    const normalised = target.startsWith("node:") ? target.split("/")[0] : `node:${target.split("/")[0]}`;
+    if (ALLOWED_BUILTINS.has(normalised)) {
+      // Allowed whole, or not: a loader call hides which export it takes, so
+      // only a module that is allowed entirely can pass here.
+      if (ALLOWED_BUILTINS.get(normalised) !== null) fail("package-builtin", normalised);
+      return;
+    }
+    if (target.startsWith("node:") || BUILTIN_MODULE_NAMES.has(target.split("/")[0])) {
+      fail("package-builtin", target);
+      return;
+    }
+    const base = target.startsWith(".") ? resolvePath(dirname(file), target) : null;
+    if (base === null) {
+      try {
+        edges.push(createRequire(file).resolve(target));
+      } catch {
+        // A dependency that does not resolve from here cannot be loaded here.
+      }
+      return;
+    }
+    for (const candidate of [base, `${base}.js`, `${base}.cjs`, `${base}.mjs`, join(base, "index.js")]) {
+      try {
+        readFileSync(candidate, "utf8");
+        edges.push(candidate);
+        return;
+      } catch {
+        // Not that spelling; try the next.
+      }
+    }
+  };
+
+  // Local names that hold a loader value, collected before the walk so an
+  // alias assigned above its use is still known.
+  const collectLoaderNames = (node) => {
+    if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
+      if (isLoaderValue(node.initializer)) loaderNames.add(node.name.text);
+    }
+    if (ts.isBindingElement(node) && ts.isIdentifier(node.name)) {
+      const key = node.propertyName
+        ? asString(node.propertyName) ?? (ts.isIdentifier(node.propertyName) ? node.propertyName.text : null)
+        : node.name.text;
+      if (key !== null && (RECEIVER_FREE_LOADERS.has(key) || LOADER_FORWARDERS.has(key))) {
+        loaderNames.add(node.name.text);
+      }
+    }
+    ts.forEachChild(node, collectLoaderNames);
+  };
+  ts.forEachChild(parsed, collectLoaderNames);
+
+  const visit = (node) => {
+    // A static import or re-export: an ordinary edge.
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+      const target = asString(node.moduleSpecifier);
+      if (target !== null) judgeTarget(target, "package-loader-unreducible");
+    }
+
+    if (ts.isCallExpression(node)) {
+      // A dynamic import, which the old scan did not see at all.
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        judgeTarget(asString(node.arguments[0]) ?? undefined, "package-dynamic-import");
+      } else if (isLoaderValue(node.expression)) {
+        judgeTarget(loaderSpecifier(node), "package-loader-unreducible");
+      } else if (node.arguments.some((argument) => isLoaderValue(argument))) {
+        // The argument group: the loader is handed to something else, and the
+        // specifier is still visible.
+        judgeTarget(loaderSpecifier(node), "package-loader-forwarded");
+      }
+    }
+
+    // An unreducible key, under the receiver condition §5.6 gives.
+    if (ts.isElementAccessExpression(node) && asString(node.argumentExpression) === null) {
+      const receiver = node.expression;
+      const guarded =
+        [...UNREDUCIBLE_KEY_RECEIVERS].some((name) => reducesTo(receiver, name)) || isLoaderValue(receiver);
+      if (guarded) fail("package-loader-unreducible-key", node.argumentExpression.getText(parsed).slice(0, 40));
+    }
+    if (ts.isBindingElement(node) && node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
+      let receiver;
+      for (let up = node.parent; up; up = up.parent) {
+        if (ts.isVariableDeclaration(up) && up.initializer) {
+          receiver = up.initializer;
+          break;
+        }
+      }
+      const guarded =
+        [...UNREDUCIBLE_KEY_RECEIVERS].some((name) => reducesTo(receiver, name)) || isLoaderValue(receiver);
+      if (guarded) fail("package-loader-unreducible-key", node.propertyName.getText(parsed).slice(0, 40));
+    }
+
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(parsed, visit);
+
+  return { failures, edges };
+};
 
 const checkPackages = (specifiers) => {
   const failures = [];
@@ -744,88 +972,21 @@ const checkPackages = (specifiers) => {
       } catch {
         continue;
       }
+      // The egress names, over text: these are built files, and over-matching
+      // costs a review while under-matching costs the rule (§5.6 (A)).
       for (const name of EGRESS_NAMES) {
-        if (new RegExp(`\\b${name}\\b`).test(source)) {
+        if (new RegExp(String.raw`\b${name}\b`).test(source)) {
           failures.push({ entry: "package", file: `${specifier} -> ${relative(ROOT, file)}`, rule: "package-egress-name", detail: name });
         }
       }
       if (/\bfetch\s*\(/.test(source)) {
         failures.push({ entry: "package", file: `${specifier} -> ${relative(ROOT, file)}`, rule: "package-egress-name", detail: "fetch" });
       }
-      for (const builtin of EGRESS_MODULES) {
-        const bare = builtin.slice("node:".length);
-        if (new RegExp(`require\\(["'](?:node:)?${bare}["']\\)|from\\s+["'](?:node:)?${bare}["']`).test(source)) {
-          failures.push({ entry: "package", file: `${specifier} -> ${relative(ROOT, file)}`, rule: "package-builtin", detail: builtin });
-        }
-      }
-      // A loader call whose argument does not reduce to a string literal is a
-      // failure, not an edge to skip. §5.6 is fail-closed about this, and
-      // independent review named the forms that get past a path-based walk:
-      // `require.call(module, "node:net")`, `const load = require; load(...)`.
-      // Neither is an edge this walk can follow, so the package is refused
-      // rather than cleared.
-      for (const loader of source.matchAll(/\brequire(?:\.(\w+))?\s*\(([^)]{0,80})/g)) {
-        const [, member, argument] = loader;
-        // The captured window stops at the closing paren, so the literal may
-        // end the window as well as be followed by one.
-        const literalFirst = /^\s*["'][^"']+["']\s*(?:[),]|$)/.test(argument);
-        if (member && member !== "resolve") {
-          failures.push({
-            entry: "package",
-            file: `${specifier} -> ${relative(ROOT, file)}`,
-            rule: "package-loader-indirect",
-            detail: `require.${member}`,
-          });
-        } else if (!literalFirst) {
-          failures.push({
-            entry: "package",
-            file: `${specifier} -> ${relative(ROOT, file)}`,
-            rule: "package-loader-unreducible",
-            detail: argument.trim().slice(0, 40),
-          });
-        }
-      }
-      if (/(?:^|[^.\w])require\s*[;,)=]/.test(source)) {
-        failures.push({
-          entry: "package",
-          file: `${specifier} -> ${relative(ROOT, file)}`,
-          rule: "package-loader-aliased",
-          detail: "require used as a value",
-        });
-      }
 
-      // Edges: relative paths, and the packages this one depends on -- a
-      // dependency is how an allowed package reaches code the walk would
-      // otherwise never see.
-      for (const match of source.matchAll(/(?:require\(|from\s*)["']([^"']+)["']/g)) {
-        const target = match[1];
-        if (target.startsWith("node:")) continue;
-        const candidates = target.startsWith(".")
-          ? [resolvePath(dirname(file), target)]
-          : [];
-        if (candidates.length === 0) {
-          // A bare specifier: resolve it from this file's directory, so the
-          // walk crosses into the dependency rather than stopping at it.
-          try {
-            queue.push(createRequire(file).resolve(target));
-          } catch {
-            // A dependency that does not resolve from here cannot be loaded
-            // from here either.
-          }
-          continue;
-        }
-        for (const base of candidates) {
-          for (const candidate of [base, `${base}.js`, `${base}.cjs`, `${base}.mjs`, join(base, "index.js")]) {
-            try {
-              readFileSync(candidate, "utf8");
-              queue.push(candidate);
-              break;
-            } catch {
-              // Not that spelling; try the next.
-            }
-          }
-        }
-      }
+      // The loader rules and the edges, parsed rather than matched.
+      const judged = analysePackageFile({ specifier, file, source });
+      failures.push(...judged.failures);
+      for (const edge of judged.edges) queue.push(edge);
     }
   }
   return failures;

@@ -101,7 +101,12 @@ export const verifyTrustSafetyAuditEntry = ({
     summary: row.summary,
     // The writer passes `entry.metadata || null`, so a row stored without
     // metadata must be offered as null here or the digest will not reproduce.
-    metadata: row.metadata ?? null,
+    // `||` rather than `??`, matching it exactly: a falsy JSON scalar -- 0,
+    // false, "" -- would otherwise be offered as itself here and as null
+    // there, and the entry would read as `signature_unverified`. Activation
+    // entries are always objects, so this is symmetry rather than a fix, which
+    // is how independent review put it.
+    metadata: row.metadata || null,
     ipAddress: row.ipAddress,
     userAgent: row.userAgent,
     createdAt: row.createdAt.toISOString(),

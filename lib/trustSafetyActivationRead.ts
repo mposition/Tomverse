@@ -10,9 +10,8 @@
  * cannot disagree with the round about whether the chain verifies.
  *
  * It reads and judges; it writes nothing. The caller supplies the transaction,
- * so the statements are charged against that kind's ceiling (§5.5) and the
- * four here are what `activation_read`'s `A` = 5 leaves after the arming
- * statement.
+ * so the statements are charged against that kind's ceiling (§5.5): at most
+ * three here, inside `activation_read`'s `A` = 5 with the arming statement.
  */
 
 import "server-only";
@@ -104,11 +103,13 @@ export type TrustSafetyActivationRead = {
 /**
  * Reads and derives the activation state inside the caller's transaction.
  *
- * Four statements: the config row, the entries, and -- only when the newest
- * entry carries a hash to chain from -- the successor. The whole entry set is
- * read because §6 asks for the largest version across it and whether any
- * entry lacks a hash, neither of which one row answers; the set grows only
- * when a person uses the switch.
+ * At most three statements: the config row, the entries, and -- only when the
+ * newest entry carries a hash to chain from -- the successor. So
+ * `activation_read`'s `A` = 5 leaves one statement unspent after the arming
+ * statement, which the caller may use and the digest read does not. The whole
+ * entry set is read because §6 asks for the largest version across it and
+ * whether any entry lacks a hash, neither of which one row answers; the set
+ * grows only when a person uses the switch.
  */
 export const readTrustSafetyActivation = async ({
   tx,

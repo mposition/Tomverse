@@ -198,16 +198,33 @@ export function AdminTrustSafetyDigestPanel({
             {canWrite ? (
               // A form, not a click handler: §5.6 does not allow these files to
               // name `fetch`, and the route answers a redirect back to here.
-              <form method="post" action="/api/admin/agents/trust-safety/activation">
-                <input type="hidden" name="mode" value={nextMode} />
-                <button
-                  type="submit"
-                  className="w-fit rounded bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-700"
-                  data-testid="trust-safety-switch"
-                >
-                  {nextMode === "on" ? m.turnOn : m.turnOff}
-                </button>
-              </form>
+              //
+              // **Both directions when the mode is not believed.** Offering
+              // only the opposite of `mode` meant a chain fault -- where the
+              // mode is null -- always offered `on`, which the store refuses
+              // as `not_a_transition` if the stored row is already on: the
+              // owner could not turn the observation off from the screen while
+              // a fault stood. Independent review found it. With no believed
+              // mode both are offered and the store judges each against the
+              // stored row.
+              <div className="flex gap-2">
+                {(mode === null ? ["off", "on"] : [nextMode]).map((requested) => (
+                  <form
+                    key={requested}
+                    method="post"
+                    action="/api/admin/agents/trust-safety/activation"
+                  >
+                    <input type="hidden" name="mode" value={requested} />
+                    <button
+                      type="submit"
+                      className="w-fit rounded bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-700"
+                      data-testid={`trust-safety-switch-${requested}`}
+                    >
+                      {requested === "on" ? m.turnOn : m.turnOff}
+                    </button>
+                  </form>
+                ))}
+              </div>
             ) : (
               <p className="text-sm text-zinc-400">{m.switchOwnerOnly}</p>
             )}
