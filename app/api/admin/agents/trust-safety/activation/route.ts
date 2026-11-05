@@ -42,7 +42,11 @@ import {
 import { authOptions } from "@/lib/auth";
 import { TRUST_SAFETY_MODES } from "@/lib/trustSafetyActivationCore";
 import { setTrustSafetyActivation } from "@/lib/trustSafetyActivationStore";
-import { TrustSafetyRoundRefused, isBudgetInsufficient } from "@/lib/trustSafetyTransaction";
+import {
+  TrustSafetyRoundRefused,
+  isActivationConflict,
+  isBudgetInsufficient,
+} from "@/lib/trustSafetyTransaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,6 +159,13 @@ export async function POST(request: Request) {
         { error: "Recent sign-in required.", code: "reauthentication_required" },
         403,
       );
+    }
+    if (isActivationConflict(error)) {
+      // Two writes read the same version and the row's trigger settled it;
+      // nothing was written. The operator can look again and retry, so this
+      // is a refusal rather than a failure -- independent review found it
+      // surfacing as a 500.
+      return answer(request, { error: "Refused.", code: "stale" }, 409);
     }
     if (isBudgetInsufficient(error) || error instanceof TrustSafetyRoundRefused) {
       // The transaction refused to start, or refused a statement past the

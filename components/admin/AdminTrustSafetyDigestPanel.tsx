@@ -44,6 +44,7 @@ export function AdminTrustSafetyDigestPanel({
   messages: m,
   canWrite,
   refusedCode,
+  reauthenticationHref,
 }: {
   /** Null when the read failed: the section degrades and the page stays usable. */
   readonly view: TrustSafetyDigestView | null;
@@ -51,10 +52,17 @@ export function AdminTrustSafetyDigestPanel({
   readonly canWrite: boolean;
   /** The refusal code the activation route redirected back with, if any. */
   readonly refusedCode: string | null;
+  /**
+   * Where a stale step-up sends the operator, back to this tab afterwards.
+   * The page builds it: these files may not import the helper that makes it
+   * (§5.6 closes their imports), and §6 calls a refusal with no link a defect.
+   */
+  readonly reauthenticationHref: string;
 }) {
-  const counts = view?.counts ?? null;
-  const fault = view?.activation.fault ?? null;
-  const mode = view?.activation.mode ?? null;
+  const values = view !== null && view.permitted ? view : null;
+  const counts = values?.counts ?? null;
+  const fault = values?.activation.fault ?? null;
+  const mode = values?.activation.mode ?? null;
   const nextMode = mode === "on" ? "off" : "on";
   // A table, read through a `Map`: §6's six faults by name, because a
   // computed lookup into the messages is one of the forms §5.6 refuses here.
@@ -74,7 +82,11 @@ export function AdminTrustSafetyDigestPanel({
         <p className="text-sm text-zinc-400">{m.note}</p>
       </div>
 
-      {view === null ? (
+      {view !== null && !view.permitted ? (
+        <p className="text-sm text-zinc-400" data-testid="trust-safety-not-permitted">
+          {m.notPermitted}
+        </p>
+      ) : values === null ? (
         <p className="text-sm text-zinc-400" data-testid="trust-safety-unavailable">
           {m.unavailable}
         </p>
@@ -88,8 +100,8 @@ export function AdminTrustSafetyDigestPanel({
                   {mode === null ? m.modeUnknown : mode === "on" ? m.mode_on : m.mode_off}
                 </span>
               </Row>
-              <Row label={m.version}>{view.version ?? "-"}</Row>
-              <Row label={m.observedAt}>{view.observedAt}</Row>
+              <Row label={m.version}>{values.version ?? "-"}</Row>
+              <Row label={m.observedAt}>{values.observedAt}</Row>
             </dl>
             {fault !== null ? (
               <div className="flex flex-col gap-1 rounded border border-amber-700/50 bg-amber-950/20 p-3 text-sm">
@@ -165,9 +177,22 @@ export function AdminTrustSafetyDigestPanel({
             <h3 className="text-sm font-semibold text-zinc-200">{m.switchTitle}</h3>
             {refusedCode === null ? null : (
               <p className="text-sm text-amber-200" data-testid="trust-safety-switch-refused">
-                {refusedCode === "reauthentication_required"
-                  ? m.switchReauth
-                  : fillCode(m.switchRefused, refusedCode)}
+                {refusedCode === "reauthentication_required" ? (
+                  <>
+                    {m.switchReauth}{" "}
+                    {/* §6: the refusal is drawn with the way back, not just a
+                        sentence. Independent review found the sentence alone. */}
+                    <a
+                      className="underline"
+                      href={reauthenticationHref}
+                      data-testid="trust-safety-reauthenticate"
+                    >
+                      {m.switchReauthLink}
+                    </a>
+                  </>
+                ) : (
+                  fillCode(m.switchRefused, refusedCode)
+                )}
               </p>
             )}
             {canWrite ? (

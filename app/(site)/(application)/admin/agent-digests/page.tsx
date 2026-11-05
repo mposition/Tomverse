@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import type { Session } from "next-auth";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
@@ -7,6 +8,11 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminTrustSafetyDigestPanel } from "@/components/admin/AdminTrustSafetyDigestPanel";
 import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import {
+  ADMIN_REAUTHENTICATION_MODE_PARAM,
+  ADMIN_RECENT_AUTH_MODE,
+  adminReauthenticationHref,
+} from "@/lib/adminReauthenticationCore";
 import { adminTrustSafetyMessages } from "@/lib/adminMessages/trustSafety";
 import { readTrustSafetyDigest, type TrustSafetyDigestView } from "@/lib/trustSafetyDigestRead";
 import { hasAdminPermission } from "@/lib/adminAuth";
@@ -68,7 +74,7 @@ async function TrustSafetySection({
   session,
   refused,
 }: {
-  session: Awaited<ReturnType<typeof getServerSession>>;
+  session: Session | null;
   refused: string | string[] | undefined;
 }) {
   const [messages, read] = await Promise.all([
@@ -89,12 +95,19 @@ async function TrustSafetySection({
     })(),
   ]);
 
+  // The step-up window, not console access: §6's refusal has to send the
+  // operator to the clock that actually ran out, and back to this tab after.
+  const reauthenticationHref = `${adminReauthenticationHref(
+    "/admin/agent-digests?tab=trust-safety",
+  )}&${ADMIN_REAUTHENTICATION_MODE_PARAM}=${ADMIN_RECENT_AUTH_MODE}`;
+
   return (
     <AdminTrustSafetyDigestPanel
       view={read as TrustSafetyDigestView | null}
       messages={messages as unknown as Record<string, string>}
       canWrite={hasAdminPermission(session, "trust-safety:write")}
       refusedCode={typeof refused === "string" ? refused : null}
+      reauthenticationHref={reauthenticationHref}
     />
   );
 }

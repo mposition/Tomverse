@@ -74,12 +74,17 @@ export const successorAfterEntry = ({
 }: {
   readonly createdAt: Date;
   readonly id: string;
-}) => ({
+}): {
+  where: { OR: ({ createdAt: { gt: Date } } | { createdAt: Date; id: { gt: string } })[] };
+  // Not `as const`: a readonly tuple is not what the query builder takes, and
+  // the error only appeared once the generated client was back in place.
+  orderBy: ({ createdAt: "asc" } | { id: "asc" })[];
+} => ({
   where: {
     OR: [{ createdAt: { gt: createdAt } }, { createdAt, id: { gt: id } }],
   },
   orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-}) as const;
+});
 
 export const activationVerdict = (state: ActivationState): ActivationVerdict => {
   // A null mode is exactly §6's refusal: every fault that stops counting

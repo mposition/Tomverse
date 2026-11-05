@@ -16,6 +16,8 @@ export const adminTrustSafetyMessages = defineAdminMessages({
     note:
       "Counts every privacy request against its deadline, records one row per successful round and pings an external monitor. It changes no request and notifies no one.",
     unavailable: "The values could not be read. Nothing was written; reopen the page to try again.",
+    notPermitted:
+      "This section is the owner's. Reading the counts takes trust-safety:read, which no other role holds.",
 
     activationTitle: "Observation",
     mode: "Switch",
@@ -59,7 +61,8 @@ export const adminTrustSafetyMessages = defineAdminMessages({
     turnOn: "Turn on",
     turnOff: "Turn off",
     switchRefused: "Refused: {code}. Nothing was written.",
-    switchReauth: "Your sign-in is too old. Sign in again, then change the switch.",
+    switchReauth: "Your sign-in is too old to change the switch.",
+    switchReauthLink: "Sign in again",
 
     excludedTitle: "What this panel does not show",
     excluded_policy: "Policy citations and AI transparency check results.",
@@ -75,6 +78,8 @@ export const adminTrustSafetyMessages = defineAdminMessages({
     note:
       "개인정보 요청을 기한에 비추어 세고, 성공한 회차마다 한 행을 남기고, 외부 monitor에 ping을 보냅니다. 요청을 바꾸지 않고 누구에게도 알리지 않습니다.",
     unavailable: "값을 읽지 못했습니다. 아무것도 쓰이지 않았으니 페이지를 다시 열어 주세요.",
+    notPermitted:
+      "이 절은 소유자 전용입니다. count를 읽는 데 trust-safety:read가 필요하고, 다른 role은 갖지 않습니다.",
 
     activationTitle: "관측",
     mode: "스위치",
@@ -114,7 +119,8 @@ export const adminTrustSafetyMessages = defineAdminMessages({
     turnOn: "켜기",
     turnOff: "끄기",
     switchRefused: "거절: {code}. 아무것도 쓰이지 않았습니다.",
-    switchReauth: "로그인이 오래되었습니다. 다시 로그인한 뒤 스위치를 바꿔 주세요.",
+    switchReauth: "스위치를 바꾸기에는 로그인이 오래되었습니다.",
+    switchReauthLink: "다시 로그인",
 
     excludedTitle: "이 패널이 표시하지 않는 것",
     excluded_policy: "정책 인용과 AI 투명성 검사 결과.",

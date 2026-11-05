@@ -18,7 +18,8 @@ const messages = adminTrustSafetyMessages.en as unknown as Record<string, string
 
 const bucket = (total: number, legalHold = 0) => ({ total, legalHold });
 
-const view = (over: Partial<TrustSafetyDigestView> = {}): TrustSafetyDigestView => ({
+const view = (over: Record<string, unknown> = {}): TrustSafetyDigestView => ({
+  permitted: true,
   activation: { mode: "on", fault: null, countPermitted: true, pingPermitted: true },
   version: 2,
   observedAt: "2026-11-05T04:50:38.694Z",
@@ -33,11 +34,13 @@ const view = (over: Partial<TrustSafetyDigestView> = {}): TrustSafetyDigestView 
   ...over,
 });
 
+const REAUTH = "/auth/admin-reauthenticate?callbackUrl=%2Fadmin%2Fagent-digests%3Ftab%3Dtrust-safety&mode=recent";
+
 const render = (over: Parameters<typeof AdminTrustSafetyDigestPanel>[0]) =>
   renderToStaticMarkup(<AdminTrustSafetyDigestPanel {...over} />);
 
 test("the two lines §14 asks the operator to judge by are both shown", () => {
-  const html = render({ view: view(), messages, canWrite: true, refusedCode: null });
+  const html = render({ reauthenticationHref: REAUTH, view: view(), messages, canWrite: true, refusedCode: null });
   // The count comparison line.
   assert.match(html, /Requests counted/);
   assert.match(html, />12</);
@@ -53,12 +56,13 @@ test("the two lines §14 asks the operator to judge by are both shown", () => {
 
 test("an unapproved imminence window says so instead of showing a zero", () => {
   // §12 approves no threshold, so the panel must not present 0 as a count.
-  const html = render({ view: view(), messages, canWrite: true, refusedCode: null });
+  const html = render({ reauthenticationHref: REAUTH, view: view(), messages, canWrite: true, refusedCode: null });
   assert.match(html, /No window has been approved/);
 });
 
 test("an approved window shows the count and the window", () => {
   const html = render({
+    reauthenticationHref: REAUTH,
     view: view({
       counts: {
         observed: bucket(5),
@@ -79,6 +83,7 @@ test("an approved window shows the count and the window", () => {
 
 test("a fault is named, and a counting fault replaces the counts", () => {
   const html = render({
+    reauthenticationHref: REAUTH,
     view: view({
       activation: {
         mode: null,
@@ -101,7 +106,7 @@ test("a fault is named, and a counting fault replaces the counts", () => {
 test("the switch posts a form to the activation route, with the other mode", () => {
   // §5.6 does not allow these files to name `fetch`, so the control is a plain
   // submit. The value is the mode being moved to, never the current one.
-  const on = render({ view: view(), messages, canWrite: true, refusedCode: null });
+  const on = render({ reauthenticationHref: REAUTH, view: view(), messages, canWrite: true, refusedCode: null });
   // React orders the attributes itself, so both are asserted rather than the
   // literal tag.
   assert.match(on, /<form[^>]*action="\/api\/admin\/agents\/trust-safety\/activation"/);
@@ -110,6 +115,7 @@ test("the switch posts a form to the activation route, with the other mode", () 
   assert.match(on, /Turn off/);
 
   const off = render({
+    reauthenticationHref: REAUTH,
     view: view({
       activation: { mode: "off", fault: null, countPermitted: false, pingPermitted: false },
       counts: null,
@@ -123,13 +129,14 @@ test("the switch posts a form to the activation route, with the other mode", () 
 });
 
 test("without the permission there is no form at all", () => {
-  const html = render({ view: view(), messages, canWrite: false, refusedCode: null });
+  const html = render({ reauthenticationHref: REAUTH, view: view(), messages, canWrite: false, refusedCode: null });
   assert.doesNotMatch(html, /<form/);
   assert.match(html, /Only the owner can change this/);
 });
 
 test("a refusal the route redirected back with is shown, including the step-up remedy", () => {
   const refused = render({
+    reauthenticationHref: REAUTH,
     view: view(),
     messages,
     canWrite: true,
@@ -139,6 +146,7 @@ test("a refusal the route redirected back with is shown, including the step-up r
   assert.match(refused, /Nothing was written/);
 
   const stale = render({
+    reauthenticationHref: REAUTH,
     view: view(),
     messages,
     canWrite: true,
@@ -149,7 +157,7 @@ test("a refusal the route redirected back with is shown, including the step-up r
 
 test("the fixed list of what the panel does not show is rendered in full", () => {
   // §9 requires it as code constants, and §5.3 is why the last line is there.
-  const html = render({ view: view(), messages, canWrite: true, refusedCode: null });
+  const html = render({ reauthenticationHref: REAUTH, view: view(), messages, canWrite: true, refusedCode: null });
   for (const line of [
     /Policy citations/,
     /MODERATION-01/,
@@ -162,7 +170,7 @@ test("the fixed list of what the panel does not show is rendered in full", () =>
 });
 
 test("a failed read degrades the section rather than the workspace", () => {
-  const html = render({ view: null, messages, canWrite: true, refusedCode: null });
+  const html = render({ reauthenticationHref: REAUTH, view: null, messages, canWrite: true, refusedCode: null });
   assert.match(html, /could not be read/);
   assert.doesNotMatch(html, /<form/, "and offers no switch over values it does not have");
 });
@@ -170,6 +178,42 @@ test("a failed read degrades the section rather than the workspace", () => {
 test("nothing in the panel reports when the observer last ran", () => {
   // §5.3: the run table stays unread. A "last round" line here would be its
   // first reader and would make the record into state.
-  const html = render({ view: view(), messages, canWrite: true, refusedCode: null });
+  const html = render({ reauthenticationHref: REAUTH, view: view(), messages, canWrite: true, refusedCode: null });
   assert.doesNotMatch(html, /last round|Last run|lastRound/i);
+});
+
+test("a reader without the permission is told so, and no values are shown", () => {
+  // §6: reading is the owner's too, and the check is not hiding the section --
+  // the read answers  and the panel says why. Independent
+  // review found the section rendering for any administrator.
+  const html = render({
+    reauthenticationHref: REAUTH,
+    view: { permitted: false },
+    messages,
+    canWrite: false,
+    refusedCode: null,
+  });
+  assert.match(html, /This section is the owner/);
+  assert.doesNotMatch(html, /Requests counted/);
+  assert.doesNotMatch(html, /<form/);
+  // And it is not reported as a failed read, which is a different thing.
+  assert.doesNotMatch(html, /could not be read/);
+});
+
+test("a stale step-up is drawn with the way back, not just a sentence", () => {
+  const html = render({
+    reauthenticationHref: REAUTH,
+    view: view(),
+    messages,
+    canWrite: true,
+    refusedCode: "reauthentication_required",
+  });
+  assert.match(html, /Sign in again/);
+  // React escapes `&` in an attribute, so the href is compared in the form it
+  // is actually written as.
+  assert.ok(
+    html.includes(`href="${REAUTH.replaceAll("&", "&amp;")}"`),
+    "the link is the href, not just copy",
+  );
+  assert.match(html, /mode=recent/, "the step-up window, not console access");
 });

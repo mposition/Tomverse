@@ -236,6 +236,32 @@ export const clock = (tx: { $queryRaw: (s: unknown) => Promise<unknown> }) =>
   assert.ok(rules(result).includes("taggedQueryRaw-not-allowed"));
 });
 
+test("an allowed statement that changes shape is refused, count unchanged", () => {
+  // §5.6 fixes the shape as well as the number. Counting alone let the run
+  // row's INSERT become a DELETE on another table -- the same one tagged
+  // statement, in the file allowed to have one -- which independent review
+  // found.
+  const source = load("lib/trustSafetyObserverRun.ts");
+  const deletes = source.replace(
+    /INSERT INTO "TrustSafetyObserverRun"[\s\S]*?RETURNING "id"/,
+    'DELETE FROM "PrivacyRequest" WHERE "id" = ${id} RETURNING "id"',
+  );
+  assert.notEqual(deletes, source, "the statement is where the test thinks it is");
+  const result = withOverlay({ "lib/trustSafetyObserverRun.ts": deletes });
+  const found = rules(result);
+  assert.ok(found.includes("raw-shape"), JSON.stringify(result.failures));
+  assert.ok(found.includes("raw-destructive"));
+  assert.ok(!found.includes("taggedQueryRaw-not-allowed"), "the count did not change");
+});
+
+test("the wrapper's deadline statement cannot become something else", () => {
+  const source = load("lib/trustSafetyTransaction.ts");
+  const swapped = source.replace(/SELECT set_config\([\s\S]*?true\) AS armed/, "SELECT 1 AS armed");
+  assert.notEqual(swapped, source);
+  const result = withOverlay({ "lib/trustSafetyTransaction.ts": swapped });
+  assert.ok(rules(result).includes("raw-shape"));
+});
+
 test("a change to the shared audit writer's statements fails here first", () => {
   // §5.6 item 1 pins the count because this agent is charged for it: a
   // statement added there changes what the activation write spends, and the

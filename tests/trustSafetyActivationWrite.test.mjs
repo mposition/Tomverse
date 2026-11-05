@@ -208,6 +208,19 @@ test("a stale step-up answers with the remedy, not a bare refusal", () => {
   assert.ok(remedy < internal, "the remedy is answered before the generic failure");
 });
 
+test("a concurrent activation write is a refusal, not a failure", () => {
+  // Two writes that read the same version are settled by the row's own
+  // trigger (TS005) and nothing is written. Independent review found that
+  // surfacing as a 500, which sends the operator looking for a fault that is
+  // not there; it answers 409 `stale` now.
+  const code = codeOf(ROUTE);
+  assert.match(code, /isActivationConflict\(error\)/);
+  assert.match(code, /code: "stale" \}, 409\)/);
+  const conflict = code.indexOf("isActivationConflict");
+  const internal = code.indexOf('error: "Internal error."');
+  assert.ok(conflict < internal, "answered before the generic failure");
+});
+
 test("the route builds its own responses and caps its own body", () => {
   // (ㄴ') closes the outside specifiers at eight and `next/server` is not one,
   // and `lib/apiSecurity.ts` is not a boundary module -- so `NextResponse`,

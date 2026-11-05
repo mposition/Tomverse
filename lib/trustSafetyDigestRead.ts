@@ -21,6 +21,10 @@
 
 import "server-only";
 
+import { getServerSession } from "next-auth/next";
+
+import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { authOptions } from "@/lib/auth";
 import { readTrustSafetyActivation } from "@/lib/trustSafetyActivationRead";
 import type { ActivationState } from "@/lib/trustSafetyActivationCore";
 import { trustSafetyIntegrityKeyEnv } from "@/lib/trustSafetyAuditEntryVerify";
@@ -37,15 +41,19 @@ import { withTrustSafetyTransaction } from "@/lib/trustSafetyTransaction";
 const IMMINENT_WITHIN_DAYS_UNSET = 0;
 
 /** What the section renders. Values only: no copy, no markup, no links. */
-export type TrustSafetyDigestView = {
-  readonly activation: ActivationState;
-  /** The version the config row holds, for the operator to see what moved. */
-  readonly version: number | null;
-  /** Null when §6's derivation does not permit counting this view. */
-  readonly counts: DsrDeadlineCounts | null;
-  /** The instant the values were computed, by the database clock. */
-  readonly observedAt: string;
-};
+export type TrustSafetyDigestView =
+  | {
+      readonly permitted: true;
+      readonly activation: ActivationState;
+      /** The version the config row holds, for the operator to see what moved. */
+      readonly version: number | null;
+      /** Null when §6's derivation does not permit counting this view. */
+      readonly counts: DsrDeadlineCounts | null;
+      /** The instant the values were computed, by the database clock. */
+      readonly observedAt: string;
+    }
+  /** The caller does not hold `trust-safety:read`. Nothing was read. */
+  | { readonly permitted: false };
 
 /**
  * Reads the section's values.
@@ -57,6 +65,17 @@ export type TrustSafetyDigestView = {
  * observation that happened.
  */
 export const readTrustSafetyDigest = async (): Promise<TrustSafetyDigestView> => {
+  // §6: reading is `trust-safety:read` and both permissions are the owner's
+  // alone, and the check is **not** hiding the section in the UI -- it is made
+  // in the server component, in this read and in the activation route, each
+  // fail-closed. Independent review found this missing: the console layout
+  // admits any administrator, so without it a support or billing
+  // administrator could open the tab and read the counts.
+  const session = await getServerSession(authOptions);
+  if (!session || !isAdminSession(session) || !hasAdminPermission(session, "trust-safety:read")) {
+    return { permitted: false };
+  }
+
   const env = trustSafetyIntegrityKeyEnv();
   const runDeadline = new Date(Date.now() + ROUTE_BUDGET_MS);
 
@@ -74,7 +93,7 @@ export const readTrustSafetyDigest = async (): Promise<TrustSafetyDigestView> =>
   });
 
   if (!state.activation.countPermitted) {
-    return { ...state, counts: null };
+    return { permitted: true, ...state, counts: null };
   }
 
   const counts = await withTrustSafetyTransaction({
@@ -90,5 +109,5 @@ export const readTrustSafetyDigest = async (): Promise<TrustSafetyDigestView> =>
       ),
   });
 
-  return { ...state, counts };
+  return { permitted: true, ...state, counts };
 };

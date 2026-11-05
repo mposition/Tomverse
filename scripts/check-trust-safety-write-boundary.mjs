@@ -140,6 +140,25 @@ export const ENTRY_POINTS = [
 ];
 
 /**
+ * The shape each allowed tagged statement must have, by file.
+ *
+ * §5.6 item 2 says the run row's exception is "the fixed statement shape", and
+ * item 3 says the wrapper's setting statements are pinned by shape and number.
+ * A count alone satisfies neither: these are the shapes.
+ */
+export const STATEMENT_SHAPES = {
+  "lib/trustSafetyObserverRun.ts": [
+    /INSERT INTO "TrustSafetyObserverRun" \("id", "outcome", "observedAt", "recordedAt", "deadlineAt"\)[\s\S]*RETURNING "id"/,
+  ],
+  "lib/trustSafetyTransaction.ts": [
+    // The arming statement: the ops-observer function, read as a row.
+    /SELECT "serverVersion", "priorTxTimeoutMs", "txStart", "ttArmedMs", "ttArmed" FROM ops_observer_arm_timeouts\(/,
+    // The deadline: transaction-local, from the database clock, pinned format.
+    /SELECT set_config\( \$\{\}, to_char\( clock_timestamp\(\) \+ make_interval\(secs => \$\{\}::double precision\), 'YYYY-MM-DD"T"HH24:MI:SS\.MSOF'\), true\) AS armed/,
+  ],
+};
+
+/**
  * `lib/adminAudit.ts` is a boundary module, and §5.6 item 1 reads its own body
  * for one purpose: counting the statements the shared append sends, so a
  * change there fails this check before it changes what this agent is charged.
@@ -313,6 +332,26 @@ export const analyseFile = ({ file, source, exists }) => {
         fail("raw-execute", text.slice(-30));
       } else if (text.includes("$queryRaw") || name === "$queryRaw") {
         counts.taggedQueryRaw += 1;
+        // §5.6 fixes the **shape** as well as the number, and counting alone
+        // does not: swapping the run row's INSERT for a DELETE on another
+        // table, or the wrapper's `set_config` for a write, leaves the count
+        // unchanged. Independent review found exactly that, so each allowed
+        // statement has to match one of the shapes named for its file, and a
+        // statement that matches none fails however few there are.
+        // Substitutions are normalised to `${}`: the shape is the SQL and
+        // where the parameters sit, not what the variables holding them are
+        // called.
+        const statement = node.template
+          .getText(sourceFile)
+          .replace(/\$\{[^}]*\}/g, "${}")
+          .replace(/\s+/g, " ");
+        const shapes = STATEMENT_SHAPES[file] ?? [];
+        if (!shapes.some((shape) => shape.test(statement))) {
+          fail("raw-shape", statement.slice(0, 60));
+        }
+        if (/\b(DELETE|DROP|TRUNCATE|ALTER|GRANT|CREATE|UPDATE)\b/i.test(statement)) {
+          fail("raw-destructive", statement.slice(0, 60));
+        }
       }
     }
     if (ts.isCallExpression(node)) {
@@ -455,15 +494,71 @@ const checkPackages = (specifiers) => {
           failures.push({ entry: "package", file: `${specifier} -> ${relative(ROOT, file)}`, rule: "package-builtin", detail: builtin });
         }
       }
-      for (const match of source.matchAll(/(?:require\(|from\s*)["'](\.[^"']+)["']/g)) {
-        const target = resolvePath(dirname(file), match[1]);
-        for (const candidate of [target, `${target}.js`, `${target}.cjs`, `${target}.mjs`, join(target, "index.js")]) {
+      // A loader call whose argument does not reduce to a string literal is a
+      // failure, not an edge to skip. §5.6 is fail-closed about this, and
+      // independent review named the forms that get past a path-based walk:
+      // `require.call(module, "node:net")`, `const load = require; load(...)`.
+      // Neither is an edge this walk can follow, so the package is refused
+      // rather than cleared.
+      for (const loader of source.matchAll(/\brequire(?:\.(\w+))?\s*\(([^)]{0,80})/g)) {
+        const [, member, argument] = loader;
+        // The captured window stops at the closing paren, so the literal may
+        // end the window as well as be followed by one.
+        const literalFirst = /^\s*["'][^"']+["']\s*(?:[),]|$)/.test(argument);
+        if (member && member !== "resolve") {
+          failures.push({
+            entry: "package",
+            file: `${specifier} -> ${relative(ROOT, file)}`,
+            rule: "package-loader-indirect",
+            detail: `require.${member}`,
+          });
+        } else if (!literalFirst) {
+          failures.push({
+            entry: "package",
+            file: `${specifier} -> ${relative(ROOT, file)}`,
+            rule: "package-loader-unreducible",
+            detail: argument.trim().slice(0, 40),
+          });
+        }
+      }
+      if (/(?:^|[^.\w])require\s*[;,)=]/.test(source)) {
+        failures.push({
+          entry: "package",
+          file: `${specifier} -> ${relative(ROOT, file)}`,
+          rule: "package-loader-aliased",
+          detail: "require used as a value",
+        });
+      }
+
+      // Edges: relative paths, and the packages this one depends on -- a
+      // dependency is how an allowed package reaches code the walk would
+      // otherwise never see.
+      for (const match of source.matchAll(/(?:require\(|from\s*)["']([^"']+)["']/g)) {
+        const target = match[1];
+        if (target.startsWith("node:")) continue;
+        const candidates = target.startsWith(".")
+          ? [resolvePath(dirname(file), target)]
+          : [];
+        if (candidates.length === 0) {
+          // A bare specifier: resolve it from this file's directory, so the
+          // walk crosses into the dependency rather than stopping at it.
           try {
-            readFileSync(candidate, "utf8");
-            queue.push(candidate);
-            break;
+            queue.push(createRequire(file).resolve(target));
           } catch {
-            // Not that spelling; try the next.
+            // A dependency that does not resolve from here cannot be loaded
+            // from here either.
+          }
+          continue;
+        }
+        for (const base of candidates) {
+          for (const candidate of [base, `${base}.js`, `${base}.cjs`, `${base}.mjs`, join(base, "index.js")]) {
+            try {
+              readFileSync(candidate, "utf8");
+              queue.push(candidate);
+              break;
+            } catch {
+              // Not that spelling; try the next.
+            }
           }
         }
       }

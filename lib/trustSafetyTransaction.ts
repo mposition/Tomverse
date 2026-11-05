@@ -47,6 +47,17 @@ import {
 /** The arming function's refusal for a budget too short to start in. */
 export const BUDGET_INSUFFICIENT_SQLSTATE = "OB001";
 
+/**
+ * The activation row's own refusals: a version that does not move forward
+ * (TS005) and a mode that does not change (TS006).
+ *
+ * Two activation writes that read the same version before either commits are
+ * a real race, and the trigger is what settles it -- the second one is refused
+ * and rolls back. The caller needs to tell that apart from a broken app,
+ * because it is a refusal the operator can act on by looking again.
+ */
+export const ACTIVATION_CONFLICT_SQLSTATES = ["TS005", "TS006"];
+
 /** The round ended before doing anything. Never retried (§5.5). */
 export class TrustSafetyRoundRefused extends Error {
   readonly code: string;
@@ -67,19 +78,29 @@ export class TrustSafetyRoundRefused extends Error {
  * carries it as `code`. Message text is never consulted -- matching on prose
  * would hide a change in where the code travels.
  */
-export const isBudgetInsufficient = (error: unknown): boolean => {
+const hasSqlState = (error: unknown, states: readonly string[]): boolean => {
   if (error === null || typeof error !== "object") return false;
   const e = error as {
     code?: unknown;
     meta?: { driverAdapterError?: { cause?: { code?: unknown; originalCode?: unknown } } };
   };
-  if (e.code === BUDGET_INSUFFICIENT_SQLSTATE) return true;
+  if (typeof e.code === "string" && states.includes(e.code)) return true;
   const cause = e.meta?.driverAdapterError?.cause;
   return (
-    cause?.code === BUDGET_INSUFFICIENT_SQLSTATE ||
-    cause?.originalCode === BUDGET_INSUFFICIENT_SQLSTATE
+    (typeof cause?.code === "string" && states.includes(cause.code)) ||
+    (typeof cause?.originalCode === "string" && states.includes(cause.originalCode))
   );
 };
+
+export const isBudgetInsufficient = (error: unknown): boolean =>
+  hasSqlState(error, [BUDGET_INSUFFICIENT_SQLSTATE]);
+
+/**
+ * Whether the activation row's own trigger refused this write: another write
+ * moved the version first, or the mode did not change.
+ */
+export const isActivationConflict = (error: unknown): boolean =>
+  hasSqlState(error, ACTIVATION_CONFLICT_SQLSTATES);
 
 /** What the arming statement reported. */
 export type TrustSafetyArmed = {

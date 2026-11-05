@@ -4,6 +4,7 @@ import test from "node:test";
 import { TRUST_SAFETY_BOUNDS } from "../lib/trustSafetyBoundsCore.ts";
 import {
   TrustSafetyRoundRefused,
+  isActivationConflict,
   isBudgetInsufficient,
   withTrustSafetyTransaction,
 } from "../lib/trustSafetyTransaction.ts";
@@ -241,6 +242,21 @@ test("the transaction options are the kind's, with the ordering §5.5 requires",
     // The database must end a run before the client library gives up on it.
     assert.ok(options.timeout > TRUST_SAFETY_BOUNDS.get(kind).transactionTimeoutMs, kind);
   }
+});
+
+test("the activation row's own refusals are recognised by SQLSTATE", () => {
+  // TS005 is a version that did not move forward, TS006 a mode that did not
+  // change. Both mean another write settled it and nothing of ours landed.
+  for (const code of ["TS005", "TS006"]) {
+    assert.equal(isActivationConflict({ code }), true, code);
+    assert.equal(
+      isActivationConflict({ code: "P2010", meta: { driverAdapterError: { cause: { code } } } }),
+      true,
+      `${code} through the adapter`,
+    );
+  }
+  assert.equal(isActivationConflict({ code: "TS002" }), false, "a late commit is a different answer");
+  assert.equal(isActivationConflict({ message: "TS005" }), false, "never on prose");
 });
 
 test("the budget refusal is recognised by SQLSTATE, through either error shape", () => {

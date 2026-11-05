@@ -32,6 +32,33 @@ test("the section is a tab of the common digest area, not a page of its own", ()
   assert.match(codeOf(PAGE), /tab\.id === "trust-safety"/);
 });
 
+test("the read refuses a caller without trust-safety:read, before reading", () => {
+  // §6: reading is the owner's too, and the check is not hiding the section in
+  // the UI -- it is made in the server component, in this read and in the
+  // activation route, each fail-closed. Independent review found it missing
+  // here: the console layout admits any administrator, so a support or
+  // billing administrator could open the tab and read the counts.
+  const code = codeOf(READ);
+  assert.match(code, /hasAdminPermission\(session, "trust-safety:read"\)/);
+  assert.match(code, /return \{ permitted: false \};/);
+  // From the function, not the file: the import block names the transaction
+  // wrapper first, and reading the file would compare against that.
+  const body = code.slice(code.indexOf("export const readTrustSafetyDigest"));
+  const check = body.indexOf("trust-safety:read");
+  const transaction = body.indexOf("withTrustSafetyTransaction");
+  assert.ok(check > 0 && check < transaction, "the permission is checked before anything is read");
+  // Fail-closed: no session, not an admin session, or the wrong role.
+  assert.match(code, /!session \|\| !isAdminSession\(session\)/);
+});
+
+test("the page checks the same permission before it renders the section", () => {
+  // §6 asks for the check in each place rather than once: the page may not
+  // draw values a reader is not allowed to see even if the read would refuse.
+  assert.match(codeOf(PAGE), /hasAdminPermission\(session, "trust-safety:write"\)/);
+  assert.match(codeOf(PAGE), /adminReauthenticationHref\(/);
+  assert.match(codeOf(PAGE), /ADMIN_RECENT_AUTH_MODE/);
+});
+
 test("the read writes nothing at all", () => {
   // §5.6 gives E2 an empty write allowance: not a row, not an audit entry,
   // not an outgoing request.
