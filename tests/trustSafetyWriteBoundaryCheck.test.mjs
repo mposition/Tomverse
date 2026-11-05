@@ -351,6 +351,31 @@ export const purge = async (requests: { deleteMany: (args: unknown) => Promise<u
   assert.ok(rules(result).includes("delegateWrites-not-allowed"), JSON.stringify(result.failures));
 });
 
+test("a write reached through a literal key or an alias still counts", () => {
+  // The two forms the call-shaped rule missed, both from review: the method
+  // named in brackets, and the method pulled out into a variable first.
+  for (const line of [
+    'export const purge = async (client: Record<string, Record<string, (a: unknown) => Promise<unknown>>>) => client.privacyRequest["deleteMany"]({});',
+    "export const purge2 = async (client: { privacyRequest: { deleteMany: (a: unknown) => Promise<unknown> } }) => { const remove = client.privacyRequest.deleteMany; return remove({}); };",
+  ]) {
+    const result = withOverlay({
+      "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}\n${line}`,
+    });
+    assert.ok(rules(result).includes("delegateWrites-not-allowed"), line);
+  }
+});
+
+test("an audit writer pulled into a variable counts too", () => {
+  const result = withOverlay({
+    "lib/trustSafetyActivationRead.ts": `${load("lib/trustSafetyActivationRead.ts")}
+export const sneak = (writeAdminAuditLog: (input: unknown) => Promise<string>) => {
+  const append = writeAdminAuditLog;
+  return append({});
+};`,
+  });
+  assert.ok(rules(result).includes("auditAppends-not-allowed"), JSON.stringify(result.failures));
+});
+
 test("a digest's own update is still not a write", () => {
   // Which is why the receiver was looked at in the first place: the routes
   // compare bearer digests with `createHash("sha256").update(...)`.

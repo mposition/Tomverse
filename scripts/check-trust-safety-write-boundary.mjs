@@ -428,28 +428,37 @@ export const analyseFile = ({ file, source, exists }) => {
         }
       }
     }
-    if (ts.isCallExpression(node)) {
-      const callee = node.expression;
-      if (ts.isPropertyAccessExpression(callee)) {
-        const method = callee.name.text;
-        if (method === "$queryRawUnsafe" || method === "$executeRawUnsafe") fail("raw-unsafe", method);
-        if (method === "$executeRaw") fail("raw-execute", method);
-        // Any receiver, not just a delegate chain. Requiring the chain let a
-        // delegate held in a variable write unseen -- `const requests =
-        // prisma.privacyRequest; requests.deleteMany({})` -- which
-        // independent review found, and a read-only entry point deleting rows
-        // is the case §5.6's zero allowance exists for.
-        //
-        // The one shape excluded is a digest's own `update`, which is not a
-        // write and is why the first version of this rule looked at the
-        // receiver at all. Anything else counts, so a false positive forces a
-        // file into the allowlist rather than slipping past it.
-        if (WRITE_METHODS.has(method)) {
-          const receiver = callee.expression.getText(sourceFile);
-          if (!/\b(createHash|createHmac)\s*\(/.test(receiver)) counts.delegateWrites += 1;
-        }
-      }
-      if (ts.isIdentifier(callee) && AUDIT_WRITERS.has(callee.text)) counts.auditAppends += 1;
+    // A writing method is counted where its **name appears as a property**,
+    // not where it is called. Three forms reached the call-shaped rule and
+    // one did not, each found by a round of review: the delegate chain, a
+    // delegate held in a variable, `client.privacyRequest["deleteMany"]({})`,
+    // and `const remove = client.privacyRequest.deleteMany; remove({})`.
+    // Naming is the thing they have in common, so naming is what is counted --
+    // extracting a write method is a write as far as this check is concerned,
+    // which is the fail-closed direction.
+    //
+    // The one exclusion is a digest's own `update`: the routes compare bearer
+    // digests, and that is not a write.
+    const countIfWriteMethod = (method, receiverText) => {
+      if (!WRITE_METHODS.has(method)) return;
+      if (/\b(createHash|createHmac)\s*\(/.test(receiverText)) return;
+      counts.delegateWrites += 1;
+    };
+    if (ts.isPropertyAccessExpression(node)) {
+      const method = node.name.text;
+      if (method === "$queryRawUnsafe" || method === "$executeRawUnsafe") fail("raw-unsafe", method);
+      if (method === "$executeRaw") fail("raw-execute", method);
+      countIfWriteMethod(method, node.expression.getText(sourceFile));
+    }
+    if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)) {
+      countIfWriteMethod(node.argumentExpression.text, node.expression.getText(sourceFile));
+    }
+    // The audit writers, counted the same way and for the same reason: by the
+    // name appearing, with the import binding that brings it in excluded.
+    if (ts.isIdentifier(node) && AUDIT_WRITERS.has(node.text)) {
+      const parent = node.parent;
+      const isImportBinding = ts.isImportSpecifier(parent) || ts.isImportClause(parent);
+      if (!isImportBinding) counts.auditAppends += 1;
     }
 
     ts.forEachChild(node, visit);
