@@ -270,6 +270,7 @@ export const zhHant = {
         guestVerificationTitle: "請確認後繼續",
         guestVerificationDescription: "這是為了減少自動化請求的快速確認，通常會自動完成。",
         guestVerificationClose: "取消確認",
+        guestVerificationRetry: "重新確認",
         guestVerificationLongWait: "本次確認耗時比平常更久。您可以繼續等待，也可以取消後重試。",
         guestVerificationFailed: "未能完成確認，請重試。",
         guestVerificationUnavailable: "確認服務目前無法使用，請稍後再試。",
