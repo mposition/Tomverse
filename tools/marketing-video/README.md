@@ -61,9 +61,11 @@ Guard codes; the job records it and goes on. Nothing here publishes: a person ap
 asset in Admin, and the app's generator, whose calls go through the LLM cost
 ledger, writes the post that carries it for a second approval. The job does
 not submit posts: the draft intake takes only drafts backed by ledger calls.
+Each run's whole CLI stream stays in `job/run-<yyyymmdd>.jsonl` (not in git); the
+log gets the final answer and one `marketing_media_job_run` line on how it ended.
 
-Cron on the box (07:30 Brisbane, after the generator's run), against production:
+Cron on the box (05:00 Brisbane, before the generator's run, so its assets can be approved first), against production:
 
 ```
-30 21 * * * set -a; . $HOME/.config/tomverse/marketing-video.prod.env; set +a; PATH=$HOME/.local/bin:$PATH $HOME/marketing-video-job/tools/marketing-video/run-daily.sh
+0 19 * * * set -a; . $HOME/.config/tomverse/marketing-video.prod.env; set +a; PATH=$HOME/.local/bin:$PATH $HOME/marketing-video-job/tools/marketing-video/run-daily.sh
 ```
