@@ -9,8 +9,9 @@
  *            Needs support triage on with a model, and FEEDBACK_AUTOFIX_SHADOW_ENABLED,
  *            the kill switch that makes new reports into cases at all.
  *   fix      also hands what the model calls a code defect to the lane. The
- *            owner who chose it is saved with it: the ideas are theirs, and
- *            they stop when that account stops being an owner.
+ *            owner who chose it is saved with it: the ideas' data owner, under
+ *            a system audit entry, and they stop when that account stops being
+ *            an owner.
  *
  * Never throws, so it cannot disturb the cron it rides on.
  */
@@ -24,8 +25,10 @@ import type { Session } from "next-auth";
 
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { isAdminOwnerAccount } from "@/lib/adminAuth";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
-import { IdeaSubmissionError, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
+import { submitIdeaFromTraceReport } from "@/lib/amux/ideaTraceReportSubmissionService";
 import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
@@ -238,37 +241,16 @@ const store = (row: CaseRow, analysis: StoredTraceAnalysis) => {
   });
 };
 
-/** The saved owner's session for the idea they allowed, or null once that account is no longer one. */
-const ownerSession = async (ownerUserId: string): Promise<Session | null> => {
+export type TraceFixSubmit = (input: { ownerUserId: string; caseId: string; requestId: string; idea: string }) => Promise<{ ideaId: string }>;
+
+export const submitTraceFix: TraceFixSubmit = async ({ ownerUserId, caseId, requestId, idea }) => {
   const user = await prisma.user.findUnique({ where: { id: ownerUserId }, select: { id: true, email: true } });
-  if (!user?.email) return null;
-  const session: Session = {
-    user: { id: user.id, email: user.email, authenticatedAt: new Date().toISOString() },
-    expires: new Date(Date.now() + 60_000).toISOString(),
-  };
-  return session;
-};
-
-export type TraceFixSubmit = (input: { ownerUserId: string; requestId: string; idea: string }) => Promise<{ ideaId: string }>;
-
-export const submitTraceFix: TraceFixSubmit = async ({ ownerUserId, requestId, idea }) => {
-  const session = await ownerSession(ownerUserId);
-  if (!session) throw new IdeaSubmissionError("forbidden", 403);
+  if (!user || !isAdminOwnerAccount(user)) throw new IdeaSubmissionError("forbidden", 403);
   const inspected = inspectAmuxIdeaSubmission(
     JSON.stringify({ version: 1, requestId, input: { version: 1, idea, repositories: [], pullRequests: [] } })
   );
   if (!inspected.ok) throw new Error(`trace_fix_idea_refused_${inspected.code}`);
-  const request = new Request("https://tomverse.app/internal/trace-report-analysis", { method: "POST" });
-  try {
-    return await submitIdea({ session, request, inspected });
-  } catch (error) {
-    // An earlier submit of this case got through, whatever it heard back.
-    if (error instanceof IdeaSubmissionError && error.code === "request_already_seen") {
-      const seen = await prisma.amuxIdeaSubmission.findUnique({ where: { requestId }, select: { id: true } });
-      if (seen) return { ideaId: seen.id };
-    }
-    throw error;
-  }
+  return submitIdeaFromTraceReport({ ownerUserId, caseId, inspected });
 };
 
 const incident = (code: string, title: string, error: unknown) =>
@@ -391,6 +373,8 @@ export const runTraceReportAnalysisQuietly = async ({
     // The classifying pass otherwise waits for the daily cleanup.
     await runFeedbackAutoFixShadowWorker();
     const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;
+    // Off in the console stops everything this pass would start, handoffs included.
+    if (!call) return pass;
     const work = await readWork(mode, new Date(now().getTime() - TRACE_ANALYSIS_WINDOW_DAYS * DAY_MS));
     let called = 0;
     let handoffsOpen = mode === "fix" && Boolean(ownerUserId);
@@ -399,7 +383,7 @@ export const runTraceReportAnalysisQuietly = async ({
       if (!current) continue;
       let analysis = readStoredTraceAnalysis(current.diagnosticSummary);
       let row: CaseRow = current;
-      if (analysis?.status !== "done" && call && called < TRACE_ANALYSIS_PER_PASS) {
+      if (analysis?.status !== "done" && called < TRACE_ANALYSIS_PER_PASS) {
         const reserved = await reserve(id, "analysis", now());
         if (reserved) {
           called += 1;
@@ -422,6 +406,7 @@ export const runTraceReportAnalysisQuietly = async ({
       try {
         const { ideaId } = await submit({
           ownerUserId,
+          caseId: id,
           requestId: traceFixRequestId(id),
           idea: traceFixIdea({
             caseId: id,

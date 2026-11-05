@@ -81,10 +81,10 @@ const recordingLlm = (result = answer()) => {
 };
 
 const recordingSubmit = () => {
-  const ideas: { ownerUserId: string; requestId: string; idea: string }[] = [];
+  const ideas: { ownerUserId: string; caseId: string; requestId: string; idea: string }[] = [];
   return {
     ideas,
-    submit: async (input: { ownerUserId: string; requestId: string; idea: string }) => {
+    submit: async (input: { ownerUserId: string; caseId: string; requestId: string; idea: string }) => {
       ideas.push(input);
       return { ideaId: `idea-${ideas.length}` };
     },
@@ -268,13 +268,15 @@ test("fix: a lost answer retries with the same request id; the daily limit holds
   assert.equal(ideas.length, TRACE_FIX_HANDOFFS_PER_DAY);
 });
 
-test("a model turned off spends nothing but still hands over what was already analysed", async () => {
+test("a model turned off starts nothing, not even a fix for what was already analysed", async () => {
   await setMode("analyze");
   const row = await report("later");
   await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm });
   await prisma.appSetting.update({ where: { key: TRACE_ANALYSIS_MODE_SETTING_KEY }, data: { value: `fix:${OWNER}` } });
   const { ideas, submit } = recordingSubmit();
   await runTraceReportAnalysisQuietly({ llm: null, submit });
+  assert.equal(ideas.length, 0);
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm, submit });
   assert.equal(ideas[0].requestId, traceFixRequestId(row.id));
 });
 
@@ -284,7 +286,7 @@ test("the idea is the saved owner's: an account that stopped being an owner subm
   const user = await prisma.user.create({ data: { email } });
   const saved = { ...process.env };
   const code = async () =>
-    submitTraceFix({ ownerUserId: user.id, requestId: traceFixRequestId("case-a"), idea: "Fix a production error: X" }).then(
+    submitTraceFix({ ownerUserId: user.id, caseId: "case-a", requestId: traceFixRequestId("case-a"), idea: "Fix a production error: X" }).then(
       () => "submitted",
       (error) => (error instanceof IdeaSubmissionError ? error.code : String(error))
     );

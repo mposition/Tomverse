@@ -248,8 +248,9 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
 동안에는 §8의 판정도 같은 주기로 돈다.
 
 - **모드**: Support › Feedback 패널의 끔·분석·분석 + draft PR 하나. 기본은 끔이고, 저장은 소유자 + 최근
-  인증 + 감사다. 분석 + draft PR은 고른 소유자를 함께 저장해, idea는 그 소유자의 것이 되고 그 계정이 소유자가
-  아니게 되면 멈춘다. 모델은 지원 Triage가 쓰는 모델이고, Triage 스위치나 모델이 꺼져 있으면 분석도 돌지 않는다.
+  인증 + 감사다. 분석 + draft PR은 고른 소유자를 함께 저장해, 그 소유자가 idea의 데이터 소유자가 되고 그 계정이 소유자가
+  아니게 되면 멈춘다. 제출 감사는 소유자 행위로 꾸미지 않고 시스템 행위자 `trace-report-analysis`로 남기며,
+  승인한 소유자를 metadata에 적는다. 모델은 지원 Triage가 쓰는 모델이고, Triage 스위치나 모델이 꺼져 있으면 분석도 돌지 않는다.
   새 신고가 case가 되려면 §8의 `FEEDBACK_AUTOFIX_SHADOW_ENABLED`가 켜져 있어야 하며, 꺼진 환경은 패널이 그렇게 표시한다.
 - **입력은 서버 기록뿐이다**: §8의 진단 요약 중 허용 목록의 필드(요약의 `errorCode`는 증거가 없으면 client 값이라 제외), fingerprint의 서버 오류
   코드와 release, 같은 Trace의 provider·limit event 코드 필드. 신고자의 글과 경로, provider 메시지는 넣지
