@@ -834,69 +834,45 @@ export const analysePackageFile = ({ specifier, file, source }) => {
   };
 
   /**
-   * The arguments that hold the specifier of a loader call, by position, as
-   * §5.6's folding rule gives them.
+   * Judge a call that a loader value takes part in -- as its callee or as any
+   * argument.
    *
-   * Two rounds of review shaped this. Taking the first reducible string judged
-   * `Function.prototype.call.call(require, "node:crypto", "node:net")` as the
-   * allowed `node:crypto` while it loads `node:net`. Judging every reducible
-   * string instead then let an **unreducible** specifier hide behind an
-   * irrelevant one -- `require(target, "node:crypto")` loads whatever `target`
-   * is and reported nothing. So the positions are folded:
+   * **The positional fold is gone, and three rounds of review are why.** It
+   * tried to say which argument is the specifier after `call`, `apply` and
+   * `bind` had been folded, and each round found one more shape where the
+   * answer moved: the first reducible string read `Function.prototype.call
+   * .call(require, "node:crypto", "node:net")` as the allowed module; judging
+   * every reducible string let `require(target, "node:crypto")` hide an
+   * unreducible specifier behind an irrelevant one; then
+   * `Function.prototype.call.bind(require)("node:crypto", "node:net")` and a
+   * loader-valued `thisArg` emptied the candidate list. Re-deriving
+   * JavaScript's own folding here is the mistake, not any one of its versions.
    *
-   *   - `require`, `require.resolve`, `_load`, `getBuiltinModule`: argument 0;
-   *   - `.call(thisArg, specifier)`: argument 1;
-   *   - `.apply(thisArg, array)`: the array, which does not reduce, so such a
-   *     call always fails -- the specifier is unreadable there;
-   *   - `.bind(thisArg, ...bound)` invoked later: the bound arguments then the
-   *     later call's, first one;
-   *   - a loader handed to a call as an argument: two past it, the forwarded
-   *     call's own `thisArg` being the one between.
+   * So the rule stops guessing which argument matters and judges the call:
    *
-   * `createRequire` takes a base URL rather than a specifier, so it has no
-   * position here: refusing its argument would refuse `createRequire(
-   * import.meta.url)`, which is how most packages reach CommonJS at all. The
-   * loader it returns is tracked by name and judged where it is called.
+   *   - every argument that reduces to a string is judged as a specifier, so
+   *     the real target is judged wherever in the call it sits;
+   *   - if **any** argument does not reduce to a string, the call fails --
+   *     §5.6's own answer for a loader whose target cannot be read.
+   *
+   * It refuses more than the fold did, and deliberately: a package that hands
+   * a loader something this check cannot read is a package it cannot clear.
+   * The one exemption is `createRequire`, whose argument is a base URL rather
+   * than a specifier -- refusing it would refuse `createRequire(
+   * import.meta.url)` and with it most packages' CommonJS interop. The loader
+   * it returns is tracked by name and judged where it is called.
    */
-  const specifierCandidates = (call) => {
+  const judgeLoaderCall = (call, rule) => {
     const callee = call.expression;
     const key = propertyName(callee) ?? (ts.isIdentifier(callee) ? callee.text : null);
-    const args = [...call.arguments];
-
-    // The argument group comes first, because the loader being **handed in**
-    // decides the fold: `Function.prototype.call.call(require, thisArg, spec)`
-    // and `require.call(thisArg, spec)` both have `call` as their property
-    // name and the specifier in different places. Taking the receiver's case
-    // first read the forwarded `thisArg` as the specifier and passed the
-    // reviewer's form again.
-    const at = args.findIndex((argument) => isLoaderValue(argument));
-    if (at !== -1) return args.slice(at + 2, at + 3);
-
-    if (key === "createRequire") return [];
-    if (key === "call" || key === "apply") return args.slice(1, 2);
-    if (key === "bind") {
-      const bound = args.slice(1);
-      const later =
-        ts.isCallExpression(call.parent) && call.parent.expression === call
-          ? [...call.parent.arguments]
-          : [];
-      return [...bound, ...later].slice(0, 1);
-    }
-    if (isLoaderValue(callee)) return args.slice(0, 1);
-    return [];
-  };
-
-  /**
-   * Judge the specifier positions of a loader call: each one that reduces, and
-   * a failure for each one that does not.
-   *
-   * An empty list is not a failure -- `createRequire(...)` and a `bind` with
-   * nothing bound load nothing at that site, and the loader they produce is
-   * judged where it is called.
-   */
-  const judgeCandidates = (candidates, rule) => {
-    for (const candidate of candidates) {
-      judgeTarget(asString(candidate) ?? undefined, rule);
+    if (key === "createRequire") return;
+    for (const argument of call.arguments) {
+      const text = asString(argument);
+      if (text === null) {
+        fail(rule, `${argument.getText(parsed).slice(0, 30)} does not reduce to a string`);
+      } else {
+        judgeTarget(text, rule);
+      }
     }
   };
 
@@ -967,11 +943,11 @@ export const analysePackageFile = ({ specifier, file, source }) => {
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         judgeTarget(asString(node.arguments[0]) ?? undefined, "package-dynamic-import");
       } else if (isLoaderValue(node.expression)) {
-        judgeCandidates(specifierCandidates(node), "package-loader-unreducible");
+        judgeLoaderCall(node, "package-loader-unreducible");
       } else if (node.arguments.some((argument) => isLoaderValue(argument))) {
         // The argument group: the loader is handed to something else, and the
         // specifier is still visible.
-        judgeCandidates(specifierCandidates(node), "package-loader-forwarded");
+        judgeLoaderCall(node, "package-loader-forwarded");
       }
     }
 

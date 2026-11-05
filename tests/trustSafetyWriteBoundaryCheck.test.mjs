@@ -557,18 +557,24 @@ export const purge = async (client: { privacyRequest: { deleteMany: (x: unknown)
   assert.ok(rules(result).includes("delegateWrites-not-allowed"), JSON.stringify(result.failures.slice(0, 3)));
 });
 
-test("(ㄷ): the loader fold, as a table of what is refused and what is not", () => {
-  // Three rounds of review each moved this fold. The first reducible string
-  // judged `Function.prototype.call.call(require, "node:crypto", "node:net")`
-  // as the allowed module; judging every reducible string then let
-  // `require(target, "node:crypto")` hide an unreducible specifier behind an
-  // irrelevant one. The positions are folded now, and the whole table is
-  // asserted together so moving one case cannot quietly move another.
+test("(ㄷ): the loader rule, as a table of what is refused and what is not", () => {
+  // Four rounds of review each moved a positional fold, so the fold is gone:
+  // a call a loader takes part in has every reducible argument judged as a
+  // specifier, and any argument that does not reduce fails the package. The
+  // whole table is asserted together, so moving one case cannot quietly move
+  // another, and the five allowed rows are what keep the rule usable.
   const refused = {
     "an unreducible specifier beside an allowed string":
       'const target = "node:" + "net"; module.exports = require(target, "node:crypto");',
     "an allowed module as the forwarded thisArg":
       'module.exports = Function.prototype.call.call(require, "node:crypto", "node:net");',
+    "the loader bound into Function.prototype.call":
+      'module.exports = Function.prototype.call.bind(require)("node:crypto", "node:net");',
+    "a loader-valued thisArg on .call": 'module.exports = require.call(require, "node:net");',
+    "a loader-valued thisArg on .apply":
+      'module.exports = require.apply(require, ["node:net"]);',
+    "a loader-valued thisArg on .bind":
+      'module.exports = require.bind(require, "node:net")();',
     "require.call with an allowed thisArg":
       'module.exports = require.call("node:crypto", "node:net");',
     "bind with the specifier bound in": 'module.exports = require.bind(module, "node:net")();',
@@ -582,9 +588,9 @@ test("(ㄷ): the loader fold, as a table of what is refused and what is not", ()
       'module.exports = process.mainModule["require"]("node:net");',
     "module.constructor._load": 'module.exports = module.constructor._load("node:net");',
     // (ㄱ-1) allows no export of `node:module`, so a package that imports it
-    // fails -- `createRequire` included. That is the section's own answer and
-    // the cost of using such a package, not a gap: the walked packages today
-    // are `zod` and `server-only`, which do not.
+    // fails, `createRequire` included. That is the section's own answer and
+    // the cost of using such a package, not a gap: the two walked today,
+    // `zod` and `server-only`, do not.
     "a package importing node:module":
       'import { createRequire } from "node:module"; const r = createRequire(import.meta.url); module.exports = r("./util.js");',
   };
@@ -594,6 +600,7 @@ test("(ㄷ): the loader fold, as a table of what is refused and what is not", ()
     "a relative require": 'module.exports = require("./util.js");',
     "a static import": 'import { z } from "./schema.js"; export const s = z;',
     "an ordinary computed read, which react does": "module.exports = (config, key) => config[key];",
+    "a call that no loader takes part in": "module.exports = (f, x) => f(x);",
   };
 
   const judge = (source) =>
