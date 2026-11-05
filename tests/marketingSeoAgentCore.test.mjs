@@ -456,11 +456,34 @@ test("any edit that cannot be applied exactly refuses the whole proposal", () =>
 });
 
 test("an unreadable or over-wide answer is refused", () => {
-    for (const text of ["", "not json", "[]", "{}", JSON.stringify({ summary: "", edits: [] }), proposal([], "x"),
+    for (const text of ["", "not json", "[]", "{}", JSON.stringify({ summary: "", edits: [] }),
+        proposal([], "x".repeat(4001)),
         JSON.stringify({ summary: "x", edits: [{ path: "lib/seo.ts", find: "A = 1", replace: "A = 2", extra: 1 }] }),
         JSON.stringify({ summary: "x", edits: [{ path: "lib/seo.ts", find: "A = 1", replace: "A = 2" }], note: "extra" })]) {
         assert.equal(applySeoProposal(text, files).refusal, "unreadable", text);
     }
+});
+
+test("no edits is an answer with its reason, not an unreadable one", () => {
+    assert.deepEqual(applySeoProposal(proposal([], "These files hold no FAQ metadata."), files), {
+        ok: false,
+        refusal: "nothing_to_do",
+        reason: "These files hold no FAQ metadata.",
+    });
+});
+
+test("a long summary is cut, and neither loses the edits nor the no-edit reason", () => {
+    const long = "y".repeat(201);
+    const applied = applySeoProposal(proposal([{ path: "lib/seo.ts", find: "A = 1", replace: "A = 2" }], long), files);
+    assert.equal(applied.ok, true);
+    assert.equal(applied.summary, "y".repeat(200));
+    assert.equal(applySeoProposal(proposal([], long), files).reason, "y".repeat(200));
+});
+
+test("the prompt allows an empty edit list and bounds the summary", () => {
+    const [system] = seoAgentMessages("Improve hreflang", files);
+    assert.match(system.content, /empty `edits` array/);
+    assert.match(system.content, /at most 200 characters/);
 });
 
 test("the prompt carries the four files as data and a fixed instruction", () => {
@@ -733,6 +756,13 @@ test("a refused proposal writes nothing", async () => {
     const { ports, calls } = validatePorts({ propose: { status: "answered", callId: "c", requestKey: "k", citations: [], ledgerState: "settled", content: proposal([{ path: "package.json", find: "a", replace: "b" }]) } });
     assert.deepEqual(await validate(ports), { status: "proposal_refused", refusal: "path_outside_allowlist" });
     assert.ok(!calls.includes("writeFiles"));
+});
+
+test("a proposal with no edits ends the run with its reason, writes nothing and commits nothing", async () => {
+    const secretShaped = "A".repeat(40);
+    const { ports, calls } = validatePorts({ propose: { status: "answered", callId: "c", requestKey: "k", citations: [], ledgerState: "settled", content: proposal([], `No FAQ metadata here ${secretShaped}`) } });
+    assert.deepEqual(await validate(ports), { status: "nothing_to_do", reason: "No FAQ metadata here [redacted]" });
+    for (const port of ["writeFiles", "runChecks", "commit", "exportCommit"]) assert.ok(!calls.includes(port), port);
 });
 
 test("git's diff decides: a change outside the list is refused even when the proposal looked clean", async () => {
