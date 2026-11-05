@@ -558,7 +558,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 `config/marketing-admission-code-manifest.json`의 digest를 만들 수 없습니다. 목록의 파일을 고친 PR은 그래서 `not_found`로 멈췄습니다(#3328).
 `read.env`에 `PR_CI_AUTO_FIX_REGENERATE=on`을 두면 모델이 끝난 뒤 이 서버의 코드가 작업 checkout의 파일을 읽어 manifest를 다시 씁니다. 브랜치의 코드는 실행하지 않습니다.
 - 파일 내용만 바뀐 경우에만 씁니다. 목록에 파일이 들어오거나 빠지면(`paths_changed`) 스스로 나가는 게시를 결정하는 코드가 바뀐 것이므로 그대로 두어 사람이 읽게 합니다.
-- checkout 밖을 가리키는 경로(`outside_checkout`), 스키마나 root가 다른 manifest(`other_schema`), 찾지 못한 import(`unresolved`)도 쓰지 않습니다.
+- 스키마나 root가 다른 manifest(`other_schema`), 찾지 못한 import(`unresolved`)도 쓰지 않습니다. checkout 밖이나 일반 파일이 아닌 곳을 가리키는 import는 읽기 전에 `unresolved`가 됩니다.
 - 결과는 ledger의 `manifest`와 서버 로그에 남습니다. 병합은 여전히 운영자가 하고, 그 diff에 manifest 변경이 보입니다.
 
 **Dependabot PR(운영자 결정 2026-10-26).**

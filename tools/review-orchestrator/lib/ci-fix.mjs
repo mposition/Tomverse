@@ -1134,8 +1134,6 @@ export function regenerateAdmissionManifest(worktree, headSha) {
     || !Array.isArray(stored.files) || !stored.files.every((file) => typeof file?.path === "string")) return "other_schema";
   const { files, unresolved } = marketingAdmissionCodeClosure(worktree);
   if (unresolved.length > 0) return "unresolved";
-  // A branch's import can name any path: the size and hash of a file outside the checkout do not leave.
-  if (files.some((file) => isAbsolute(file.path) || file.path === ".." || file.path.startsWith("../"))) return "outside_checkout";
   const paths = (list) => JSON.stringify(list.map((file) => file.path).sort());
   if (paths(files) !== paths(stored.files)) return "paths_changed";
   const text = marketingAdmissionCodeManifestText(files);

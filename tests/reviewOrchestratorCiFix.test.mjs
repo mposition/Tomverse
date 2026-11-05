@@ -1121,10 +1121,11 @@ test("the admission manifest is left for a person when what decides a post chang
     }],
     ["paths_changed", "a file leaves the list", (r) => writeFileSync(join(r.root, "lib", "marketingGuardCore.ts"), "export {};\n")],
     ["unresolved", "an import resolves to nothing", (r) => writeFileSync(join(r.root, "lib", "helper.ts"), 'export * from "./gone";\n')],
-    ["outside_checkout", "an import leaves the checkout", (r) => {
+    ["unresolved", "an import leaves the checkout", (r) => {
       writeFileSync(join(r.parent, "secret.ts"), "credential\n");
       writeFileSync(join(r.root, "lib", "helper.ts"), 'export * from "../../secret";\n');
     }],
+    ["unresolved", "an import names a directory", (r) => writeFileSync(join(r.root, "lib", "helper.ts"), 'export * from "../lib";\n')],
   ];
   for (const [outcome, what, change] of cases) {
     const r = admissionRepo(admissionTree());
@@ -1137,17 +1138,16 @@ test("the admission manifest is left for a person when what decides a post chang
       rmSync(r.parent, { recursive: true, force: true });
     }
   }
-  // A committed list naming that outside path does not make it reportable either.
+  // A committed list naming an outside path does not bring it into the closure.
   const named = admissionRepo(admissionTree());
   try {
     const manifest = JSON.parse(readFileSync(named.path, "utf8"));
     manifest.files.push({ path: "../secret.ts", sizeBytes: 11, sha256: "0".repeat(64) });
     writeFileSync(named.path, `${JSON.stringify(manifest, null, 2)}\n`);
     writeFileSync(join(named.parent, "secret.ts"), "credential\n");
-    writeFileSync(join(named.root, "lib", "helper.ts"), 'export * from "../../secret";\n');
     sh(named.root, "add", "-A");
     sh(named.root, "commit", "-q", "-m", "names it");
-    assert.equal(regenerateAdmissionManifest(named.root, sh(named.root, "rev-parse", "HEAD")), "outside_checkout");
+    assert.equal(regenerateAdmissionManifest(named.root, sh(named.root, "rev-parse", "HEAD")), "paths_changed");
   } finally {
     rmSync(named.parent, { recursive: true, force: true });
   }
@@ -1165,6 +1165,39 @@ test("the admission manifest is left for a person when what decides a post chang
     } finally {
       rmSync(r.parent, { recursive: true, force: true });
     }
+  }
+});
+
+test("the admission closure reads nothing outside the repository, through a path or a link", () => {
+  const r = admissionRepo(admissionTree());
+  try {
+    writeFileSync(join(r.parent, "outside.ts"), 'export * from "./further";\n');
+    writeFileSync(join(r.parent, "further.ts"), "export {};\n");
+    writeFileSync(join(r.root, "lib", "helper.ts"), 'export * from "../../outside";\n');
+    const { files, unresolved } = marketingAdmissionCodeClosure(r.root);
+    assert.deepEqual(unresolved, [{ from: "lib/helper.ts", specifier: "../../outside" }]);
+    assert.ok(files.every((file) => !file.path.startsWith("..")), "nor what it would have led to");
+  } finally {
+    rmSync(r.parent, { recursive: true, force: true });
+  }
+});
+
+test("the admission closure follows no link out of the repository, nor reads a device", { skip: process.platform === "win32" }, () => {
+  const r = admissionRepo(admissionTree());
+  try {
+    writeFileSync(join(r.parent, "outside.ts"), "credential\n");
+    symlinkSync(join(r.parent, "outside.ts"), join(r.root, "lib", "filelink.ts"));
+    symlinkSync(r.parent, join(r.root, "lib", "dirlink"));
+    symlinkSync("/dev/zero", join(r.root, "lib", "zero.ts"));
+    const relativeUp = "../".repeat(r.root.split("/").length + 1);
+    writeFileSync(join(r.root, "lib", "helper.ts"), [
+      'export * from "./filelink";', 'export * from "./dirlink/outside";', 'export * from "./zero";', `export * from "${relativeUp}dev/zero";`, "",
+    ].join("\n"));
+    const { files, unresolved } = marketingAdmissionCodeClosure(r.root);
+    assert.deepEqual(unresolved.map((entry) => entry.specifier).sort(), ["./dirlink/outside", "./filelink", "./zero", `${relativeUp}dev/zero`].sort());
+    assert.ok(!files.some((file) => /link|zero/.test(file.path)));
+  } finally {
+    rmSync(r.parent, { recursive: true, force: true });
   }
 });
 
