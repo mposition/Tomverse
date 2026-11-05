@@ -21,6 +21,7 @@ export const TRACE_ANALYSIS_TEXT_MAX = 1_000;
 /** Attempts on one report before it stays without an analysis. */
 export const TRACE_ANALYSIS_MAX_ATTEMPTS = 3;
 export const TRACE_ANALYSIS_PER_PASS = 5;
+/** Model calls in a UTC day, retries included. */
 export const TRACE_ANALYSIS_PER_DAY = 20;
 /** Draft PR runs one day may start from reports, on top of the idea lane's own daily limit. */
 export const TRACE_FIX_HANDOFFS_PER_DAY = 3;
@@ -87,7 +88,7 @@ export const readStoredTraceAnalysis = (summary: unknown): StoredTraceAnalysis |
 };
 
 /** What the server already judged there is nothing in the code to fix. */
-const NEVER_FIXED: readonly (string | null)[] = [
+export const TRACE_FIX_NEVER_CLASSIFICATIONS: readonly string[] = [
   AUTOFIX_CLASSIFICATION.operationalLimit,
   AUTOFIX_CLASSIFICATION.providerTransient,
   AUTOFIX_CLASSIFICATION.clientClassified,
@@ -104,7 +105,7 @@ export const traceAnalysisWantsFix = (classification: string | null, analysis: S
   !analysis.handoff &&
   analysis.kind === "code_fix" &&
   analysis.confidence !== "low" &&
-  !NEVER_FIXED.includes(classification);
+  !(classification !== null && TRACE_FIX_NEVER_CLASSIFICATIONS.includes(classification));
 
 /** One idea per case, so a repeated submit after an unknown outcome finds the first. */
 export const traceFixRequestId = (caseId: string) => {

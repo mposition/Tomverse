@@ -37,6 +37,7 @@ import {
   TRACE_ANALYSIS_SYSTEM,
   TRACE_ANALYSIS_WINDOW_DAYS,
   TRACE_FIX_HANDOFFS_PER_DAY,
+  TRACE_FIX_NEVER_CLASSIFICATIONS,
   parseTraceAnalysisAnswer,
   readStoredTraceAnalysis,
   traceAnalysisPrompt,
@@ -49,12 +50,17 @@ import {
 } from "@/lib/traceReportAnalysisCore";
 
 const DAY_MS = 24 * 60 * 60_000;
-const SCAN = 200;
+/** Cases one pass reads; each has work left, and one pass does at most TRACE_ANALYSIS_PER_PASS calls. */
+const WORK_SCAN = 50;
+/** A model call's timeout and the writes around it; a pass cut short by a deploy lapses here. */
+const CLAIM_MS = 2 * 60_000;
 const MAX_OUTPUT_TOKENS = 800;
 const TIMEOUT_MS = 60_000;
 const INCIDENT_COOLDOWN_MS = 6 * 60 * 60_000;
 
 export const TRACE_ANALYSIS_MODE_SETTING_KEY = "traceReportAnalysis.mode";
+/** {day, analyses, handoffs} for the UTC day, moved only by `reserve`. */
+export const TRACE_ANALYSIS_USAGE_SETTING_KEY = "traceReportAnalysis.usage";
 export const TRACE_ANALYSIS_MODES = ["off", "analyze", "fix"] as const;
 export type TraceAnalysisMode = (typeof TRACE_ANALYSIS_MODES)[number];
 
@@ -163,8 +169,18 @@ type CaseRow = {
   diagnosticSummary: Prisma.JsonValue;
 };
 
-/** Identifiers of this occurrence, and the analysis itself. */
-const NOT_SENT = ["traceId", "occurrenceId", "sentry", "llmAnalysis"];
+const CASE_SELECT = {
+  id: true,
+  traceId: true,
+  classification: true,
+  ineligibilityReason: true,
+  fingerprint: true,
+  sourceRelease: true,
+  diagnosticSummary: true,
+} as const;
+
+/** Identifiers of this occurrence, and this module's own bookkeeping. */
+const NOT_SENT = ["traceId", "occurrenceId", "sentry", "llmAnalysis", "llmAnalysisClaimUntil", "llmHandoffReserved"];
 
 const summaryOf = (row: CaseRow) => (row.diagnosticSummary ?? {}) as Record<string, unknown>;
 const serverErrorCodeOf = (row: CaseRow) => {
@@ -251,6 +267,82 @@ const incident = (code: string, title: string, error: unknown) =>
 
 export type TraceAnalysisPass = { mode: TraceAnalysisMode; analyzed: number; failed: number; handedOff: number };
 
+type Usage = { day: string; analyses: number; handoffs: number };
+
+const readUsage = async (tx: Prisma.TransactionClient, day: string): Promise<Usage> => {
+  const row = await tx.appSetting.findUnique({ where: { key: TRACE_ANALYSIS_USAGE_SETTING_KEY }, select: { value: true } });
+  try {
+    const usage = JSON.parse(row?.value ?? "") as Usage;
+    if (usage.day === day) return usage;
+  } catch {
+    // No row, or one nothing here wrote: today starts empty.
+  }
+  return { day, analyses: 0, handoffs: 0 };
+};
+
+/**
+ * Reserves one paid step before it runs, under a lock every pass takes: the
+ * day's count goes up and the case is claimed for CLAIM_MS, so overlapping
+ * passes cannot call twice or read the same room under the limit. A reservation
+ * is spent even if the step then fails, as the call may have been billed. A
+ * handoff reserves once per case: its retries reuse one idea, so they spend nothing.
+ */
+const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date): Promise<CaseRow | null> =>
+  prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('trace_report_analysis'))`;
+    const row = await tx.feedbackAutoFixCase.findUnique({ where: { id: caseId }, select: CASE_SELECT });
+    if (!row) return null;
+    const summary = summaryOf(row);
+    const analysis = readStoredTraceAnalysis(summary);
+    if (step === "analysis") {
+      const claimedUntil = summary.llmAnalysisClaimUntil;
+      if (typeof claimedUntil === "string" && Date.parse(claimedUntil) > now.getTime()) return null;
+      if (analysis?.status === "done" || (analysis?.status === "failed" && analysis.attempts >= TRACE_ANALYSIS_MAX_ATTEMPTS)) {
+        return null;
+      }
+    } else if (!traceAnalysisWantsFix(row.classification, analysis)) {
+      return null;
+    }
+    const alreadyReserved = step === "handoff" && summary.llmHandoffReserved === true;
+    if (!alreadyReserved) {
+      const usage = await readUsage(tx, now.toISOString().slice(0, 10));
+      if (step === "analysis" ? usage.analyses >= TRACE_ANALYSIS_PER_DAY : usage.handoffs >= TRACE_FIX_HANDOFFS_PER_DAY) return null;
+      const value = JSON.stringify(
+        step === "analysis" ? { ...usage, analyses: usage.analyses + 1 } : { ...usage, handoffs: usage.handoffs + 1 }
+      );
+      await tx.appSetting.upsert({
+        where: { key: TRACE_ANALYSIS_USAGE_SETTING_KEY },
+        create: { key: TRACE_ANALYSIS_USAGE_SETTING_KEY, value },
+        update: { value },
+      });
+    }
+    const claimed =
+      step === "analysis"
+        ? { ...summary, llmAnalysisClaimUntil: new Date(now.getTime() + CLAIM_MS).toISOString() }
+        : { ...summary, llmHandoffReserved: true };
+    await tx.feedbackAutoFixCase.update({
+      where: { id: caseId },
+      data: { diagnosticSummary: claimed as Prisma.InputJsonObject },
+    });
+    return { ...row, diagnosticSummary: claimed as Prisma.JsonObject };
+  });
+
+/** Only cases with work left, so finished ones can never crowd out a new report. */
+const readWork = (mode: TraceAnalysisMode, since: Date) =>
+  prisma.$queryRaw<{ id: string }[]>`
+    SELECT c."id" FROM "FeedbackAutoFixCase" c
+    WHERE c."classification" IS NOT NULL AND c."createdAt" > ${since}
+      AND (c."diagnosticSummary"->'llmAnalysis' IS NULL
+        OR (c."diagnosticSummary"->'llmAnalysis'->>'status' = 'failed'
+          AND (c."diagnosticSummary"->'llmAnalysis'->>'attempts')::int < ${TRACE_ANALYSIS_MAX_ATTEMPTS})
+        OR (${mode === "fix"} AND c."diagnosticSummary"->'llmAnalysis'->>'status' = 'done'
+          AND c."diagnosticSummary"->'llmAnalysis'->>'kind' = 'code_fix'
+          AND c."diagnosticSummary"->'llmAnalysis'->>'confidence' <> 'low'
+          AND c."diagnosticSummary"->'llmAnalysis'->'handoff' IS NULL
+          AND c."classification" <> ALL(${[...TRACE_FIX_NEVER_CLASSIFICATIONS]}::text[])))
+    ORDER BY c."createdAt" ASC, c."id" ASC
+    LIMIT ${WORK_SCAN}`;
+
 export const runTraceReportAnalysisQuietly = async ({
   llm,
   submit = submitTraceFix,
@@ -269,76 +361,54 @@ export const runTraceReportAnalysisQuietly = async ({
     // The classifying pass otherwise waits for the daily cleanup.
     await runFeedbackAutoFixShadowWorker();
     const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;
-    const rows = await prisma.feedbackAutoFixCase.findMany({
-      where: {
-        classification: { not: null },
-        createdAt: { gt: new Date(now.getTime() - TRACE_ANALYSIS_WINDOW_DAYS * DAY_MS) },
-      },
-      orderBy: { createdAt: "asc" },
-      take: SCAN,
-      select: {
-        id: true,
-        traceId: true,
-        classification: true,
-        ineligibilityReason: true,
-        fingerprint: true,
-        sourceRelease: true,
-        diagnosticSummary: true,
-      },
-    });
-    const since = now.getTime() - DAY_MS;
-    const stored = rows.map((row) => ({ row, analysis: readStoredTraceAnalysis(row.diagnosticSummary) }));
-    let analysesLeft = Math.max(
-      0,
-      TRACE_ANALYSIS_PER_DAY -
-        stored.filter(({ analysis }) => analysis && Date.parse(analysis.at) > since).length
-    );
-    let handoffsLeft = Math.max(
-      0,
-      TRACE_FIX_HANDOFFS_PER_DAY -
-        stored.filter(
-          ({ analysis }) => analysis?.status === "done" && analysis.handoff && Date.parse(analysis.handoff.at) > since
-        ).length
-    );
-    let examined = 0;
-    for (const { row, analysis: found } of stored) {
-      let analysis = found;
-      const wanted =
-        !analysis || (analysis.status === "failed" && analysis.attempts < TRACE_ANALYSIS_MAX_ATTEMPTS);
-      if (wanted && call && analysesLeft > 0 && examined < TRACE_ANALYSIS_PER_PASS) {
-        examined += 1;
-        analysesLeft -= 1;
-        const answer = await call(await factsOf(row));
-        const at = now.toISOString();
-        analysis = answer
-          ? { status: "done", at, ...answer }
-          : { status: "failed", at, attempts: (found?.status === "failed" ? found.attempts : 0) + 1 };
-        await store(row, analysis);
-        if (answer) pass.analyzed += 1;
-        else pass.failed += 1;
+    const work = await readWork(mode, new Date(now.getTime() - TRACE_ANALYSIS_WINDOW_DAYS * DAY_MS));
+    let called = 0;
+    let handoffsOpen = mode === "fix" && Boolean(ownerUserId);
+    for (const { id } of work) {
+      const current = await prisma.feedbackAutoFixCase.findUnique({ where: { id }, select: CASE_SELECT });
+      if (!current) continue;
+      let analysis = readStoredTraceAnalysis(current.diagnosticSummary);
+      let row: CaseRow = current;
+      if (analysis?.status !== "done" && call && called < TRACE_ANALYSIS_PER_PASS) {
+        const reserved = await reserve(id, "analysis", now);
+        if (reserved) {
+          called += 1;
+          row = reserved;
+          const answer = await call(await factsOf(row));
+          const at = now.toISOString();
+          analysis = answer
+            ? { status: "done", at, ...answer }
+            : { status: "failed", at, attempts: (analysis?.status === "failed" ? analysis.attempts : 0) + 1 };
+          await store(row, analysis);
+          row = { ...row, diagnosticSummary: { ...summaryOf(row), llmAnalysis: analysis } as Prisma.JsonObject };
+          if (answer) pass.analyzed += 1;
+          else pass.failed += 1;
+        }
       }
-      if (mode !== "fix" || !ownerUserId || handoffsLeft <= 0) continue;
-      if (analysis?.status !== "done" || !traceAnalysisWantsFix(row.classification, analysis)) continue;
+      if (!handoffsOpen || !ownerUserId || analysis?.status !== "done") continue;
+      if (!traceAnalysisWantsFix(row.classification, analysis)) continue;
+      const reserved = await reserve(id, "handoff", now);
+      if (!reserved) continue;
       try {
         const { ideaId } = await submit({
           ownerUserId,
-          requestId: traceFixRequestId(row.id),
+          requestId: traceFixRequestId(id),
           idea: traceFixIdea({
-            caseId: row.id,
-            serverErrorCode: serverErrorCodeOf(row),
-            sourceRelease: row.sourceRelease,
-            summary: summaryOf(row),
+            caseId: id,
+            serverErrorCode: serverErrorCodeOf(reserved),
+            sourceRelease: reserved.sourceRelease,
+            summary: summaryOf(reserved),
             analysis,
           }),
         });
-        handoffsLeft -= 1;
         pass.handedOff += 1;
-        await store(row, { ...analysis, handoff: { ideaId, at: now.toISOString() } });
+        await store(reserved, { ...analysis, handoff: { ideaId, at: now.toISOString() } });
       } catch (error) {
         // Tried again next tick with the same request id, which finds a first
-        // submit whose answer was lost. Later cases would fail the same way.
+        // submit whose answer was lost. Later cases would fail the same way, so
+        // this pass stops handing over but still analyses them.
+        handoffsOpen = false;
         await incident("TRACE_REPORT_FIX_HANDOFF_FAILED", "A traced report could not be handed to the idea lane", error);
-        break;
       }
     }
   } catch (error) {

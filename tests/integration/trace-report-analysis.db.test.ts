@@ -5,12 +5,14 @@ import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { prisma } from "@/lib/prisma";
 import {
   TRACE_ANALYSIS_MODE_SETTING_KEY,
+  TRACE_ANALYSIS_USAGE_SETTING_KEY,
   runTraceReportAnalysisQuietly,
   submitTraceFix,
   type TraceAnalysisLlm,
 } from "@/lib/traceReportAnalysis";
 import {
   TRACE_ANALYSIS_MAX_ATTEMPTS,
+  TRACE_ANALYSIS_PER_DAY,
   TRACE_ANALYSIS_PER_PASS,
   TRACE_FIX_HANDOFFS_PER_DAY,
   readStoredTraceAnalysis,
@@ -29,7 +31,9 @@ const OWNER = "owner-user-id";
 const reset = async () => {
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-trace-" } } });
   await prisma.providerErrorEvent.deleteMany({ where: { traceId: { startsWith: "trace-analysis-" } } });
-  await prisma.appSetting.deleteMany({ where: { key: TRACE_ANALYSIS_MODE_SETTING_KEY } });
+  await prisma.appSetting.deleteMany({
+    where: { key: { in: [TRACE_ANALYSIS_MODE_SETTING_KEY, TRACE_ANALYSIS_USAGE_SETTING_KEY] } },
+  });
 };
 
 const setMode = (value: string) =>
@@ -125,7 +129,10 @@ test("a failed call is counted and stops at the attempt limit", async () => {
     calls += 1;
     return null;
   };
-  for (let i = 0; i < TRACE_ANALYSIS_MAX_ATTEMPTS + 2; i += 1) await runTraceReportAnalysisQuietly({ llm });
+  // Each tick is past the claim the one before took.
+  for (let i = 0; i < TRACE_ANALYSIS_MAX_ATTEMPTS + 2; i += 1) {
+    await runTraceReportAnalysisQuietly({ llm, now: new Date(Date.now() + i * 3 * 60_000) });
+  }
   assert.equal(calls, TRACE_ANALYSIS_MAX_ATTEMPTS);
   const analysis = await stored(row.id);
   assert.equal(analysis?.status === "failed" && analysis.attempts, TRACE_ANALYSIS_MAX_ATTEMPTS);
@@ -227,4 +234,57 @@ test("the idea is the saved owner's: an account that stopped being an owner subm
     process.env = saved;
     await prisma.user.deleteMany({ where: { email } });
   }
+});
+
+test("the daily limit counts every call, retries included, and holds on the next pass", async () => {
+  await setMode("analyze");
+  await report("spent");
+  const day = new Date().toISOString().slice(0, 10);
+  await prisma.appSetting.create({
+    data: {
+      key: TRACE_ANALYSIS_USAGE_SETTING_KEY,
+      value: JSON.stringify({ day, analyses: TRACE_ANALYSIS_PER_DAY - 1, handoffs: 0 }),
+    },
+  });
+  let calls = 0;
+  const llm: TraceAnalysisLlm = async () => {
+    calls += 1;
+    return null;
+  };
+  await runTraceReportAnalysisQuietly({ llm });
+  await runTraceReportAnalysisQuietly({ llm, now: new Date(Date.now() + 3 * 60_000) });
+  assert.equal(calls, 1);
+});
+
+test("overlapping passes call the model once for a report", async () => {
+  await setMode("analyze");
+  await report("overlap");
+  let calls = 0;
+  const llm: TraceAnalysisLlm = async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return answer();
+  };
+  await Promise.all([runTraceReportAnalysisQuietly({ llm }), runTraceReportAnalysisQuietly({ llm })]);
+  assert.equal(calls, 1);
+});
+
+test("finished reports do not crowd out a new one", async () => {
+  await setMode("analyze");
+  const done = { status: "done", at: new Date().toISOString(), modelId: "m", ...answer("needs_more_evidence") };
+  await prisma.feedback.createMany({
+    data: Array.from({ length: 60 }, (_, i) => ({ id: `fb-trace-done-${i}`, type: "bug", message: "x" })),
+  });
+  await prisma.feedbackAutoFixCase.createMany({
+    data: Array.from({ length: 60 }, (_, i) => ({
+      feedbackId: `fb-trace-done-${i}`,
+      traceId: `trace-analysis-done-${i}`,
+      state: "ineligible",
+      classification: "evidence_incomplete",
+      diagnosticSummary: { llmAnalysis: done },
+    })),
+  });
+  const row = await report("new");
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm });
+  assert.equal((await stored(row.id))?.status, "done");
 });
