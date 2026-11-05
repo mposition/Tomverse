@@ -59,6 +59,20 @@ test("the page checks the same permission before it renders the section", () => 
   assert.match(codeOf(PAGE), /ADMIN_RECENT_AUTH_MODE/);
 });
 
+test("the two entry points test the ping URL the same way", () => {
+  // A set-but-empty variable read as present in the section and absent in the
+  // round, so the screen showed no fault while every round reported
+  // `ping_url_missing` and withheld the ping. Independent review found the
+  // pair disagreeing; §6's sixth fault has to mean one thing.
+  const readCode = codeOf(READ);
+  const roundCode = codeOf("lib/trustSafetyObserverRound.ts");
+  assert.doesNotMatch(readCode, /typeof process\.env\.TRUST_SAFETY_OBSERVER_PING_URL === "string"/);
+  assert.match(readCode, /pingUrlPresent: \(process\.env\.TRUST_SAFETY_OBSERVER_PING_URL \?\? ""\)\.length > 0/);
+  // The round's own test is the same shape: a non-empty string.
+  assert.match(roundCode, /isPresent\(process\.env\.TRUST_SAFETY_OBSERVER_PING_URL\)/);
+  assert.match(roundCode, /typeof value === "string" && value\.length > 0/);
+});
+
 test("the read writes nothing at all", () => {
   // §5.6 gives E2 an empty write allowance: not a row, not an audit entry,
   // not an outgoing request.

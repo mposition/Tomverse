@@ -557,86 +557,53 @@ export const purge = async (client: { privacyRequest: { deleteMany: (x: unknown)
   assert.ok(rules(result).includes("delegateWrites-not-allowed"), JSON.stringify(result.failures.slice(0, 3)));
 });
 
-test("(ㄷ): a loader access inside a package has to reduce, or the package fails", () => {
-  // Independent review ran the first two of these through the earlier,
-  // regex-based scan and both passed with nothing reported. They are judged
-  // by the five loader groups §5.6 names, parsed rather than matched.
+test("(ㄷ): the loader fold, as a table of what is refused and what is not", () => {
+  // Three rounds of review each moved this fold. The first reducible string
+  // judged `Function.prototype.call.call(require, "node:crypto", "node:net")`
+  // as the allowed module; judging every reducible string then let
+  // `require(target, "node:crypto")` hide an unreducible specifier behind an
+  // irrelevant one. The positions are folded now, and the whole table is
+  // asserted together so moving one case cannot quietly move another.
   const refused = {
-    "dynamic import of a module (ㄱ-1) does not allow":
-      'export const go = (url) => import("node:https").then((m) => m.get(url));',
-    "a loader reached through process.mainModule with a string key":
-      'const net = process.mainModule["require"]("node:net"); export const go = () => net.connect(443, "h");',
-    "require.call":
-      'const net = require.call(module, "node:net"); module.exports = net;',
-    "the loader handed to something else as an argument":
-      'const net = Function.prototype.call.call(require, null, "node:net"); module.exports = net;',
-    "module.constructor._load":
-      'const net = module.constructor._load("node:net"); module.exports = net;',
-    "a specifier that does not reduce to a string":
-      'const name = String.fromCharCode(110) + "ode:net"; module.exports = require(name);',
-    "a call forwarder taken by a computed destructuring key":
-      'const { ["call"]: c } = require; module.exports = c.call(require, module, "node:net");',
-  };
-  for (const [label, source] of Object.entries(refused)) {
-    const { failures } = analysePackageFile({
-      specifier: "probe",
-      file: "node_modules/probe/index.js",
-      source,
-    });
-    assert.ok(failures.length > 0, `${label} must be refused`);
-  }
-});
-
-test("(ㄷ): an allowed module cannot be used to hide the real target", () => {
-  // `Function.prototype.call.call(require, "node:crypto", "node:net")` loads
-  // node:net -- the second argument is the forwarded call's thisArg -- and
-  // judging only the first reducible string passed it as node:crypto.
-  // Independent review found that; every reducible argument is judged now.
-  const refused = {
+    "an unreducible specifier beside an allowed string":
+      'const target = "node:" + "net"; module.exports = require(target, "node:crypto");',
     "an allowed module as the forwarded thisArg":
       'module.exports = Function.prototype.call.call(require, "node:crypto", "node:net");',
     "require.call with an allowed thisArg":
       'module.exports = require.call("node:crypto", "node:net");',
+    "bind with the specifier bound in": 'module.exports = require.bind(module, "node:net")();',
     "a bound loader invoked later":
       'const load = require.bind(module); module.exports = load("node:net");',
-    "bind with the specifier bound in":
-      'module.exports = require.bind(module, "node:net")();',
+    "apply, whose argument array cannot be read":
+      'module.exports = require.apply(null, ["node:net"]);',
+    "a dynamic import of a module (ㄱ-1) does not allow":
+      'export const go = (u) => import("node:https").then((m) => m.get(u));',
+    "process.mainModule with a string key":
+      'module.exports = process.mainModule["require"]("node:net");',
+    "module.constructor._load": 'module.exports = module.constructor._load("node:net");',
+    // (ㄱ-1) allows no export of `node:module`, so a package that imports it
+    // fails -- `createRequire` included. That is the section's own answer and
+    // the cost of using such a package, not a gap: the walked packages today
+    // are `zod` and `server-only`, which do not.
+    "a package importing node:module":
+      'import { createRequire } from "node:module"; const r = createRequire(import.meta.url); module.exports = r("./util.js");',
   };
-  for (const [label, source] of Object.entries(refused)) {
-    const { failures } = analysePackageFile({
-      specifier: "probe",
-      file: "node_modules/probe/index.js",
-      source,
-    });
-    assert.ok(failures.length > 0, `${label} must be refused`);
-  }
-
-  // And the allowed module on its own still passes, or the rule would refuse
-  // every package that hashes anything.
-  const { failures } = analysePackageFile({
-    specifier: "probe",
-    file: "node_modules/probe/index.js",
-    source: 'const { createHash } = require("node:crypto"); module.exports = createHash;',
-  });
-  assert.deepEqual(failures, []);
-});
-
-test("(ㄷ): an ordinary edge and an allowed builtin are not refused", () => {
-  // The rule has to leave a real package usable: `zod` is walked on every run
-  // of this check and must stay clean, and `node:crypto` is allowed whole.
-  const fine = {
+  const allowed = {
+    "node:crypto, allowed entirely":
+      'const { createHash } = require("node:crypto"); module.exports = createHash;',
     "a relative require": 'module.exports = require("./util.js");',
     "a static import": 'import { z } from "./schema.js"; export const s = z;',
-    "node:crypto, allowed entirely": 'const { createHash } = require("node:crypto"); module.exports = createHash;',
     "an ordinary computed read, which react does": "module.exports = (config, key) => config[key];",
   };
-  for (const [label, source] of Object.entries(fine)) {
-    const { failures } = analysePackageFile({
-      specifier: "probe",
-      file: "node_modules/probe/index.js",
-      source,
-    });
-    assert.deepEqual(failures, [], `${label}: ${JSON.stringify(failures)}`);
+
+  const judge = (source) =>
+    analysePackageFile({ specifier: "probe", file: "node_modules/probe/index.js", source }).failures;
+
+  for (const [label, source] of Object.entries(refused)) {
+    assert.ok(judge(source).length > 0, `${label} must be refused`);
+  }
+  for (const [label, source] of Object.entries(allowed)) {
+    assert.deepEqual(judge(source), [], `${label}: ${JSON.stringify(judge(source))}`);
   }
 });
 

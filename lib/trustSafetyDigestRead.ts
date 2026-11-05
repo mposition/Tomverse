@@ -86,7 +86,11 @@ export const readTrustSafetyDigest = async (): Promise<TrustSafetyDigestView> =>
       ...(await readTrustSafetyActivation({
         tx,
         env,
-        pingUrlPresent: typeof process.env.TRUST_SAFETY_OBSERVER_PING_URL === "string",
+        // Non-empty, the same test the round makes. A set-but-empty variable
+        // read as present here and absent there, so the screen showed no
+        // fault while every round reported `ping_url_missing` and withheld
+        // the ping -- independent review found the pair disagreeing.
+        pingUrlPresent: (process.env.TRUST_SAFETY_OBSERVER_PING_URL ?? "").length > 0,
       })),
       observedAt: armed.txStart.toISOString(),
     }),
