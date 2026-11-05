@@ -69,8 +69,9 @@ COMMIT이 됐든 안 됐든 DB 상태는 같다. 결과 불명 규칙(정책 Pha
 
 **지금의 동작.**
 
-- 읽기 경계가 `P2024`, `P2028`, `57014`, `25P03`(2026-10-13 추가), 연결 오류(목록은
-  `lib/amux/readFailureCore.ts`)로 실패하고, 그 route가 그때까지 쓰기 트랜잭션을 시작하지
+- 읽기 경계가 `P2024`, `P2028`, `57014`, `25P03`(2026-10-13 추가), 연결 오류, 이미 끊긴
+  연결에 대한 pg client의 거절(코드가 없고 로그의 `error_code`는 `ConnectionClosed`,
+  2026-11-05 추가. 목록은 `lib/amux/readFailureCore.ts`)로 실패하고, 그 route가 그때까지 쓰기 트랜잭션을 시작하지
   않았으면 503 `amux_database_busy`와 `Retry-After: 5`로 답한다. incident를 열지 않고
   WARN `internal_route_database_busy` 한 줄을 남긴다.
 - 판정은 `amuxDbBoundaryFailure`(`lib/amux/dbBoundary.ts`) 한 곳에서 경계의
@@ -149,7 +150,8 @@ setup·콜백·fence SQL이 하나도 나가지 않았음을 확인한다. 같�
   sweep이 시작하지 못했을 때뿐이다. sweep이 시작된 뒤의 실패는 전처럼 결과 불명이다.
 - WARN `internal_route_database_busy`에 `path`(`read` 또는 `not_started`),
   `connection_wait_ms`, 그 순간 pool의 `pool_total`·`pool_idle`·`pool_waiting`이 남는다.
-  연결 문자열이나 호스트는 남기지 않는다. pool 포화 여부는 이 값으로 판단한다.
+  연결 문자열이나 호스트는 남기지 않는다. pool 포화 여부는 `pool_waiting`으로 판단한다.
+  `connection_wait_ms`는 잰 대기 시간이 아니라 그 트랜잭션에 허용한 `maxWait` 상한이다.
 - orchestrator: claim busy는 WARN(`claim_skipped`) 후 tick을 건너뛰고, recover busy는
   WARN(`recovery_skipped`) 후 다음 30초 주기에 다시 부른다. 그 밖은 전처럼 끝난다.
 - WSL bridge의 lifecycle 호출은 `wsl-execution-bridge.md`의 해당 절을 본다.
