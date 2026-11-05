@@ -67,7 +67,7 @@ export type AmuxBuildPreviewHooks = {
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
   analysisBudgetAvailable, analysisStopAvailable, ideaId, planReady,
   declaredExternalSources, operatorId, chunkIndex = 0, build = null, buildRequestId = null,
-  ideaText = "", onExecutionApproved }: {
+  ideaText = "", onExecutionApproved, approvalClosed = false }: {
   available: boolean;
   previewAvailable: boolean; confirmAvailable: boolean;
   analysisBudgetAvailable: boolean; analysisStopAvailable: boolean;
@@ -81,6 +81,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   ideaText?: string;
   /** Called once the execution approval is recorded, so the analysis result can be watched on its own. */
   onExecutionApproved?: () => void;
+  /** The idea is past this step; the card stays only to recover what this browser has in flight. */
+  approvalClosed?: boolean;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const budgetMessages = useAdminMessages(adminAmuxAnalysisBudgetMessages);
@@ -697,6 +699,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     );
   }
 
+  if (approvalClosed && preview.kind === "idle" && confirmation.kind === "idle" && !executionRefusal) return null;
+
   return (
     <section className="space-y-2 rounded-xl border p-4 text-sm border-zinc-800"
       aria-labelledby="amux-v4-frontier-models-heading">
@@ -725,6 +729,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         className={`min-h-11 rounded-lg border border-blue-400 px-4 text-blue-200 disabled:opacity-50 ${preview.kind === "idle" ? "" : "hidden"}`}>
         {reviewing ? m.buildPreviewPending : m.continueReviewAction}
       </button> : null}
+      {ideaId && preview.kind === "idle" && !loading && available && (!selected || !selectedEffort) ?
+        <p className="text-zinc-400" data-testid="amux-idea-continue-needs-model">{m.continueReviewNeedsModel}</p> : null}
       {ideaId && !previewAvailable ? <p>{m.transferPreviewUnavailable}</p> : null}
       {ideaId && previewAvailable && declaredExternalSources ?
         <p>{m.transferPreviewIdeaOnly}</p> : null}
