@@ -7,15 +7,17 @@ import { z } from "zod";
 import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
+import { ideaSendPath } from "@/lib/amux/ideaSendPath";
+import { amuxIdeaSessionPrewriteStatus } from "@/lib/amux/ideaSessionSubmissionCore";
+import { AmuxIdeaSessionSubmissionError } from "@/lib/amux/ideaSessionSubmissionService";
 import {
   AMUX_V4_IDEA_READBACK_ENV,
   AMUX_V4_IDEA_SUBMISSION_ENV,
   ideaSubmissionReadBackPermitted,
   ideaSubmissionWritePermitted,
-  inspectAmuxIdeaSubmission,
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
-import { IdeaSubmissionError, readIdeaSubmissionByDerivedRequestId, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
@@ -26,13 +28,15 @@ import {
 import { recommendationIdeaText, recommendationSendRequestId } from "@/lib/autoRouterRecommendationSendCore";
 import { isRecommendationSendable, RECOMMENDATION_SENT_STATUS } from "@/lib/autoRouterRecommendationsCore";
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
+import { getPublicAppOrigin } from "@/lib/publicUrl";
 
 // Admin › Routing: an owner sends a code or setting recommendation to AMUX as an
 // idea, the same way the Scout console sends a suggestion
-// (app/api/admin/product-research/suggestions/[suggestionId]/route.ts): the v4
-// path the idea form uses, its gates, its content scan and its audit. The text
-// and the request id are derived here from the stored report, so a lost answer,
-// a second tab or a second owner name the same request and AMUX takes it once.
+// (app/api/admin/product-research/suggestions/[suggestionId]/route.ts): through
+// the door the idea form uses (lib/amux/ideaSendPath.ts), its gates, its content
+// scan and its audit. The text and the request id are derived here from the
+// stored report, so a lost answer, a second tab or a second owner name the same
+// request and AMUX takes it once.
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: noStore });
@@ -72,24 +76,22 @@ export async function POST(request: Request) {
     }
     await consumeApiRateLimit(request, session.user.id, "admin-auto-router-recommendation-send", { minute: 5, day: 50 });
 
-    const inspected = inspectAmuxIdeaSubmission(
-      JSON.stringify({
-        version: 1,
-        requestId,
-        input: {
-          version: 1,
-          idea: recommendationIdeaText({
-            recommendation: { kind: recommendation.kind, text: recommendation.text },
-            findings: found.findings,
-            cycle: { id: body.cycleId, createdAt: found.createdAt },
-            origin: new URL(request.url).origin,
-          }),
-          repositories: [],
-          pullRequests: [],
-        },
-      })
-    );
-    if (!inspected.ok) return json({ error: inspected.code }, 400);
+    const path = await ideaSendPath({
+      session,
+      request,
+      requestId,
+      idea: recommendationIdeaText({
+        recommendation: { kind: recommendation.kind, text: recommendation.text },
+        findings: found.findings,
+        cycle: { id: body.cycleId, createdAt: found.createdAt },
+        origin: getPublicAppOrigin(request),
+      }),
+      sessionDisplay: "Auto router recommendation",
+    });
+    if (!path.ok) {
+      console.warn(JSON.stringify({ event: "auto_router_recommendation_send_refused", code: path.code }));
+      return json({ error: path.code }, path.status);
+    }
 
     // Before anything reaches AMUX, under the lock the coding agent claims under.
     if (!(await reserveRecommendationForAmux({ session, request }, body))) {
@@ -97,17 +99,24 @@ export async function POST(request: Request) {
     }
 
     const result = await sendScoutSuggestion({
-      readBack: () => readIdeaSubmissionByDerivedRequestId(session, requestId),
-      submit: () => submitIdea({ session, request, inspected }),
-      isAlreadySeen: (error) => error instanceof IdeaSubmissionError && error.code === "request_already_seen",
+      readBack: path.readBack,
+      submit: path.submit,
+      isAlreadySeen: path.isAlreadySeen,
       close: (ideaId) => markRecommendationSentToAmux({ session, request }, { ...body, ideaId }),
     });
     if (result.kind === "partial") return json({ error: "idea_partial", code: "idea_partial", ideaId: result.ideaId }, 409);
     if (result.kind === "in_progress") return json({ error: "idea_in_progress", code: "idea_in_progress" }, 409);
     return json({ status: result.closed ? "sent" : "unchanged", amuxIdeaId: result.ideaId });
   } catch (error) {
+    if (error instanceof AmuxIdeaSessionSubmissionError) {
+      // Anything but a refusal before the write is finished by sending again,
+      // which reads the idea back by its request id.
+      const status = amuxIdeaSessionPrewriteStatus(error.code);
+      const code = status ? error.code : "outcome_unknown";
+      return json({ error: code, code }, status ?? 503);
+    }
     if (error instanceof IdeaSubmissionError) {
-      return json({ error: error.code, ...(error.ideaId ? { ideaId: error.ideaId } : {}) }, error.status);
+      return json({ error: error.code, code: error.code, ...(error.ideaId ? { ideaId: error.ideaId } : {}) }, error.status);
     }
     const approval = adminApprovalErrorResponse(error);
     if (approval) return approval;

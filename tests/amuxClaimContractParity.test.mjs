@@ -429,7 +429,7 @@ test("the claim HTTP deadline outlives one anchored DB-clock route budget", () =
   const maxWait = dbNumber("AMUX_DB_MAX_WAIT_MS");
   const perCallPlanningFactor =
     dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
-    dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS");
+    dbNumber("AMUX_DB_IDLE_GAP_PLANNING_MS");
   const reserve = dbNumber("AMUX_DB_COMMIT_RESERVE_MS");
   const budget = (profile) =>
     profileCallCeiling(profile) * perCallPlanningFactor + reserve;
@@ -580,7 +580,7 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
       const plannedBudget =
         ceiling *
           (value("AMUX_DB_STATEMENT_TIMEOUT_MS") +
-            value("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
+            value("AMUX_DB_IDLE_GAP_PLANNING_MS")) +
         value("AMUX_DB_COMMIT_RESERVE_MS") +
         value("AMUX_DB_MAX_WAIT_MS");
       assert.ok(
@@ -638,7 +638,7 @@ test("v22 execution routes cover their expanded DB ceilings and client transport
   const connectMs = number(dbBoundarySource, "AMUX_DB_MAX_WAIT_MS");
   assert.ok(clientSeconds * 1_000 >= routeMs + 3_000);
   const callMs = number(dbBoundarySource, "AMUX_DB_STATEMENT_TIMEOUT_MS") +
-    number(dbBoundarySource, "AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS");
+    number(dbBoundarySource, "AMUX_DB_IDLE_GAP_PLANNING_MS");
   const reserveMs = number(dbBoundarySource, "AMUX_DB_COMMIT_RESERVE_MS");
   const admittedCall = number(dbBoundarySource,
     "AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS");
@@ -700,7 +700,7 @@ test("selection reads reserve connect and response time beyond both route budget
     const transactionBudget =
       ceiling *
         (dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
-          dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
+          dbNumber("AMUX_DB_IDLE_GAP_PLANNING_MS")) +
       dbNumber("AMUX_DB_COMMIT_RESERVE_MS");
     assert.ok(Number.isInteger(ceiling), boundary);
     assert.ok(Number.isInteger(routeMs), route);
