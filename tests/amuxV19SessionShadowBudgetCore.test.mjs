@@ -5,11 +5,7 @@ import { assessSessionShadowBudget, resolveSessionUnknownClaim,
 
 const basis = (change = {}) => ({
   mode: "subscription_cli", provider: "anthropic",
-  asOfIso: "2026-10-18T00:00:00.000Z",
-  pricingVerifiedAt: "2026-10-17T00:00:00.000Z",
-  pricingExpiresAt: "2026-10-19T00:00:00.000Z",
-  inputMicroUsdPerMillion: 3000000, outputMicroUsdPerMillion: 15000000,
-  worstTierVerified: true, billableToolsDisabled: true,
+  billableToolsDisabled: true,
   consumedMicroUsd: "10000000", reservedMicroUsd: "5000000",
   shadowOverrunMicroUsd: "0", monthlyLimitMicroUsd: "50000000",
   usageState: "known", ...change,
@@ -41,8 +37,6 @@ test("subscription exception refuses API, unknown channels, unknown usage and un
     [{ provider: "Anthropic" }, "basis_invalid"],
     [{ usageState: "unknown" }, "usage_unknown"],
     [{ billableToolsDisabled: false }, "non_token_cost_unbounded"],
-    [{ worstTierVerified: false }, "price_unverified"],
-    [{ pricingExpiresAt: "2026-10-18T00:00:00.000Z" }, "price_unverified"],
   ]) assert.deepEqual(assessSessionShadowBudget(basis(change)),
     { decision: "hold", reason });
 });

@@ -17,6 +17,7 @@ import { QA_RELEASE_SECTION_IDS } from "@/components/admin/qaReleaseTabParts";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { readAmuxIdeaLaneDailyReport } from "@/lib/amux/ideaLaneDailyReportRead";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
+import { readQaReleaseCiAdvice } from "@/lib/qaReleaseCiAdviceStore";
 import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
 import { type QaReleaseLaneRounds, readQaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 import { readQaReleaseTrainBoard } from "@/lib/qaReleaseTrainBoardRead";
@@ -89,6 +90,7 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
             failure: report.failure,
             picks: report.picks,
           }))}
+          ciAdvice={await readQaReleaseCiAdvice()}
           laneRounds={laneRounds}
           nowMs={now.getTime()}
         />

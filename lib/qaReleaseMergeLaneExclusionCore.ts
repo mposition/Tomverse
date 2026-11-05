@@ -15,13 +15,20 @@ import { compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFil
  * and actions hold the secrets CI runs with; the instructions and the lane's
  * own policy say what agents may do; admin auth, the system audit actors and
  * the authority manifest are the security and audit boundary. Everything else
- * -- scripts, root config, package manifests, audit records, other policies --
+ * -- scripts, root config other than the three below, workspace manifests and
+ * configs, audit records, other policies --
  * is reversible code the lane merges like any feature; CI has already run it
  * on the pull request.
  */
 export const QA_RELEASE_MERGE_LANE_GATE_PATTERNS: readonly string[] = [
   ".github/workflows/**",
   ".github/actions/**",
+  // The root manifest names the scripts the operator and CI run (npm run merge-train ...);
+  // the TypeScript and Next configuration decide which file an import resolves to, so a
+  // path alias could swap a kept module for an unkept one (independent review, 2026-10-23).
+  "package.json",
+  "tsconfig*.json",
+  "next.config.*",
   "AGENTS.md",
   "CLAUDE.md",
   "docs/policy/qa-release-agent.md",

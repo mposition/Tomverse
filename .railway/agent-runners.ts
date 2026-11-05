@@ -172,6 +172,7 @@ const QA_RELEASE_TRAIN_VARIABLES = [
   "QA_RELEASE_TRAIN_ANTHROPIC_API_KEY",
   // Unset: the verdict round's model runs on the key above; "false" stops it.
   "QA_RELEASE_TRAIN_MODEL_VERDICT",
+  "QA_RELEASE_CI_ADVICE_ENABLED",
   // "git": the deploy image has none, and the train clones and cherry-picks.
   "RAILPACK_DEPLOY_APT_PACKAGES",
 ] as const;
@@ -241,15 +242,6 @@ const AMUX_ORCHESTRATOR_VARIABLES = [
   "TOMVERSE_INTERNAL_URL",
   "TOMVERSE_AMUX_CLAIM",
 ] as const;
-
-/**
- * The Support Triage services' one variable each (docs/policy/support-triage.md
- * §3): their own route secret, nothing else. The same lists
- * lib/supportTriageServiceCore.ts accepts at start; the IaC test holds them
- * equal.
- */
-const SUPPORT_TRIAGE_WORKER_VARIABLES = ["SUPPORT_TRIAGE_RUN_SECRET"] as const;
-const SUPPORT_TRIAGE_RETENTION_VARIABLES = ["SUPPORT_TRIAGE_RETENTION_SECRET"] as const;
 
 /**
  * The sre-ops page service's variables (docs/policy/sre-ops.md §7, §8): the
@@ -509,31 +501,6 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
       production: MARKETING_COMMENTS_MONITOR_VARIABLES,
       staging: MARKETING_COMMENTS_MONITOR_VARIABLES,
       // Not on dev, like the publisher: it reads outside accounts.
-    },
-  },
-  {
-    // docs/policy/support-triage.md §3: every 30 minutes. The run route
-    // answers without writing anything while SUPPORT_TRIAGE_ENABLED is off.
-    // Applied by the operator at stage P0c.
-    key: "support_triage_worker",
-    service: "Support Triage",
-    startCommand: "node --experimental-strip-types scripts/support-triage-worker-service.mjs",
-    cronSchedule: "*/30 * * * *",
-    environments: {
-      production: SUPPORT_TRIAGE_WORKER_VARIABLES,
-      staging: SUPPORT_TRIAGE_WORKER_VARIABLES,
-    },
-  },
-  {
-    // docs/policy/support-triage.md §3, §5: every 30 minutes, whatever the
-    // triage flag says. Applied by the operator at stage P0c.
-    key: "support_triage_retention",
-    service: "Support Triage Retention",
-    startCommand: "node --experimental-strip-types scripts/support-triage-retention-service.mjs",
-    cronSchedule: "*/30 * * * *",
-    environments: {
-      production: SUPPORT_TRIAGE_RETENTION_VARIABLES,
-      staging: SUPPORT_TRIAGE_RETENTION_VARIABLES,
     },
   },
   {

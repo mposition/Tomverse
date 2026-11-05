@@ -67,22 +67,62 @@ export default function GlobalError({
             "Contact support if it keeps happening."
           )}
         </p>
-        <button
-          type="button"
-          onClick={() => retry()}
+        {/*
+          Retry, and somewhere to go when retrying keeps failing. "Contact
+          support if it keeps happening" above named no destination, and this
+          page replaces the layout that carries the site's navigation, so the
+          reader had the instruction and no link to act on it. A plain <a> and
+          not next/link: the router is part of what has failed here.
+        */}
+        <div
           style={{
             marginTop: "0.5rem",
-            padding: "0.55rem 1.1rem",
-            borderRadius: "0.75rem",
-            border: "1px solid currentColor",
-            background: "transparent",
-            font: "inherit",
-            fontWeight: 800,
-            cursor: "pointer",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.75rem",
           }}
         >
-          Try again
-        </button>
+          <button
+            type="button"
+            onClick={() => retry()}
+            style={{
+              padding: "0.55rem 1.1rem",
+              borderRadius: "0.75rem",
+              border: "1px solid currentColor",
+              background: "transparent",
+              font: "inherit",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Try again
+          </button>
+          {/*
+            eslint-disable-next-line @next/next/no-html-link-for-pages --
+            a client navigation is what has just failed; this has to be a
+            document load, and next/link would also mount a prefetch in the
+            boundary that has nothing beneath it to catch another throw.
+          */}
+          <a
+            href="/support"
+            style={{
+              padding: "0.55rem 1.1rem",
+              borderRadius: "0.75rem",
+              border: "1px solid currentColor",
+              font: "inherit",
+              fontWeight: 800,
+              // The UA link colour is a fixed blue that this page cannot check
+              // against either scheme; the neutral text colour is chosen to be
+              // legible in both.
+              color: "inherit",
+              textDecoration: "none",
+            }}
+          >
+            Contact support
+          </a>
+        </div>
       </body>
     </html>
   );
