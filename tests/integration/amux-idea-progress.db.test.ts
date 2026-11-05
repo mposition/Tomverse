@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import {
+  AMUX_DB_BOUNDARIES,
+  AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
+  AmuxDbBoundaryError,
+  withAmuxDbBoundary,
+  withAmuxRouteBudget,
+} from "@/lib/amux/dbBoundary";
 import { AMUX_IDEA_PROGRESS_LIMIT, readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { amuxIdeaProgressFailureLog } from "@/lib/amux/ideaProgressCore";
 import { prisma } from "@/lib/prisma";
@@ -84,10 +90,24 @@ test("the progress list reads the owner's newest ideas in one statement inside i
   assert.deepEqual(await readAmuxIdeaProgressForOwner(`nobody-${randomUUID()}`), [], "no ideas is an empty list");
 });
 
+test("a gap over the 100 ms a boundary used to allow no longer ends its session", async () => {
+  // 2026-11-05, production: gaps over 100 ms ended about 13 sessions an hour. Both isolations.
+  const observed: unknown[] = [];
+  for (const isolation of ["read", "mutation"] as const) {
+    await withAmuxDbBoundary({ operation: "idle_limit_probe", prismaCallCeiling: 5, isolation }, async (tx) => {
+      observed.push(await tx.$queryRaw`SHOW idle_in_transaction_session_timeout`);
+      await sleep(200);
+      await tx.$queryRaw`SELECT 1`;
+    });
+  }
+  const expected = [{ idle_in_transaction_session_timeout: `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms` }];
+  assert.deepEqual(observed, [expected, expected]);
+});
+
 test("a gap over the boundary's idle-in-transaction timeout ends a read with no code at all", async () => {
   // Why the list is one statement: every gap between two statements of a boundary must stay under
-  // 100 ms (the session is ended with 25P03), and seven sequential reads made eight of them. The pg
-  // client reports it as a plain Error, which is why the page used to log only the bare event.
+  // the timeout (the session is ended with 25P03), and seven sequential reads made eight of them. The
+  // pg client reports it as a plain Error, which is why the page used to log only the bare event.
   const probe = (gapMs: number) => withAmuxDbBoundary(
     { operation: "idea_progress_gap_probe", prismaCallCeiling: 5, isolation: "read" }, async (tx) => {
       await tx.$queryRaw`SELECT 1`;

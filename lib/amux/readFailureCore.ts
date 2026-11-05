@@ -59,7 +59,7 @@ const TRANSIENT_DRIVER_KINDS = new Set([
 const TRANSIENT_SQLSTATES = new Set([
   // query_canceled: the statement timeout.
   "57014",
-  // idle_in_transaction_session_timeout: a boundary sets it to 100 ms
+  // idle_in_transaction_session_timeout: a boundary sets it to 300 ms
   // (lib/amux/dbBoundary.ts), so a gap longer than that between two of its
   // statements -- a slow round trip, a stalled event loop on a just-started
   // instance -- ends the session, and the next statement or the COMMIT is
