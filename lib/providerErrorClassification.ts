@@ -61,6 +61,21 @@ export const safeErrorMetadata = (error: unknown): SafeErrorMetadata => {
 };
 
 /**
+ * `safeErrorMetadata` for a log line: `name` is also held to a shape that cannot
+ * hold prose. Log this in place of an error's `message`, which can quote what
+ * was being processed.
+ */
+export const contentFreeErrorMetadata = (error: unknown): SafeErrorMetadata => {
+    const metadata = safeErrorMetadata(error);
+    return {
+        ...metadata,
+        name: /^[A-Za-z0-9_.$-]{1,80}$/.test(metadata.name)
+            ? metadata.name
+            : "Error",
+    };
+};
+
+/**
  * The `onError` every `streamText` call has to pass.
  *
  * Without one the AI SDK falls back to `console.error(error)`, which prints the
@@ -75,15 +90,13 @@ export const safeErrorMetadata = (error: unknown): SafeErrorMetadata => {
 export const logStreamErrorWithoutContent =
     (context: { traceId: string; modelId: string }) =>
     ({ error }: { error: unknown }): void => {
-        const { name, ...metadata } = safeErrorMetadata(error);
         const finishReason = (error as { finishReason?: unknown } | null | undefined)
             ?.finishReason;
         console.error(
             JSON.stringify({
                 event: "chat_stream_error",
                 ...context,
-                name: /^[A-Za-z0-9_.$-]{1,80}$/.test(name) ? name : "Error",
-                ...metadata,
+                ...contentFreeErrorMetadata(error),
                 finishReason:
                     typeof finishReason === "string" &&
                     /^[a-z-]{1,32}$/.test(finishReason)
