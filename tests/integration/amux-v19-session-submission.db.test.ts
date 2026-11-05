@@ -135,6 +135,7 @@ import { encodeAmuxSessionAnalysisQueueCursor,
   "@/lib/amux/ideaSessionAnalysisQueueCursorCore";
 import { buildAmuxSessionAnalysisQueueWhere } from
   "@/lib/amux/ideaSessionAnalysisQueueWhereCore";
+import { parkAmuxSessionIdeaInTx } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { prisma } from "@/lib/prisma";
 
 const commitAmuxIdeaSessionSubmission = (
@@ -2130,16 +2131,22 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   assert.ok(storedResult.ciphertext && storedResult.ciphertext.length > 0);
   assert.equal(storedResult.inputTokens, 200000);
   assert.equal(storedResult.outputTokens, 1);
-  // An answer that is not a schema-valid plan page still settles, but it
-  // leaves the queue for the operator instead of buying another invocation.
+  // An answer that is not a schema-valid plan page still settles, and waits
+  // for a decision (tests/integration/amux-v19-plan-refusal.db.test.ts).
   assert.deepEqual(savedResult.plan,
     { state: "plan_refused", reason: "invalid_result" });
-  const parked = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+  const held = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: ideaId }, select: { state: true,
       currentSourcePlanRevisionId: true, analysisCompletedAt: true } });
-  assert.equal(parked.state, "awaiting_owner");
-  assert.equal(parked.currentSourcePlanRevisionId, null);
-  assert.ok(parked.analysisCompletedAt);
+  assert.equal(held.state, "analyzing");
+  assert.equal(held.currentSourcePlanRevisionId, null);
+  assert.equal(held.analysisCompletedAt, null);
+  // The rest of this test follows the idea once the decision stopped it.
+  assert.equal(await prisma.$transaction(async (tx) => {
+    const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
+    return parkAmuxSessionIdeaInTx(tx, ideaId, clock[0]!.now);
+  }), true);
   const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
