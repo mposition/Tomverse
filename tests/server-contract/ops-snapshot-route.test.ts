@@ -72,10 +72,11 @@ beforeEach(() => {
   process.env.OPS_OBSERVER_DIGEST_SECRET = DIGEST;
 });
 
-const call = (bearer: string | null) =>
+const call = (bearer: string | null, body?: unknown) =>
   POST(new Request("https://tomverse.app/api/internal/ops-snapshot", {
     method: "POST",
     headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }));
 
 test("with no usable secret it is 404 and no source is read", async () => {
@@ -112,17 +113,24 @@ test("both services read the closed snapshot, no-store, readiness first, and the
   assert.deepEqual(events.map((e) => [e.service, e.result]), [["page", "ok"], ["digest", "ok"]]);
 });
 
+test("a runner that does not ask gets the snapshot it has always read, and nothing is counted", async () => {
+  world.failedAlerts = 7;
+  const body = await (await call(PAGE)).json();
+  assert.equal(Object.hasOwn(body, "alertDeliveryFailuresBand"), false);
+  assert.equal(world.alertWhere, null);
+});
+
 test("failed operational alerts of the last hour cross as a band, and a failed count only as unknown", async () => {
   world.failedAlerts = 7;
   const started = Date.now();
-  const body = await (await call(PAGE)).json();
+  const body = await (await call(PAGE, { alertDelivery: true })).json();
   assert.equal(body.alertDeliveryFailuresBand, "3+");
   const where = world.alertWhere as { status: string; createdAt: { gte: Date } };
   assert.equal(where.status, "failed");
   assert.ok(Math.abs(started - where.createdAt.gte.getTime() - 3_600_000) < 5_000);
 
   world.failedAlerts = new Error("db down: password=hunter2");
-  const failed = await call(PAGE);
+  const failed = await call(PAGE, { alertDelivery: true });
   assert.equal(failed.status, 200);
   const failedBody = await failed.json();
   assert.equal(failedBody.alertDeliveryFailuresBand, "unknown");

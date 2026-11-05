@@ -47,7 +47,8 @@ export const S2_PAGE_KEYS = Object.freeze(
  * Scopes come from the budget report, so a new provider needs no change here.
  */
 export const BUDGET_SIGNAL = signal("P-B", [], 1, [">=95", "exhausted"]);
-export const BUDGET_KEY_LIMIT = 64;
+// Bounds every S3 key. The sorted first run on the switch takes the alert delivery key first.
+export const S3_KEY_LIMIT = 64;
 
 /**
  * The S3 alert delivery signal: the app's existing operational alerts failing to

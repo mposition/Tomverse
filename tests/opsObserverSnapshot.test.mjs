@@ -66,6 +66,7 @@ test("the alert failure count crosses only as a band", () => {
   );
   assert.equal(build({ alertFailures: failed() }).snapshot.alertDeliveryFailuresBand, "unknown");
   assert.equal(build({ alertFailures: ok(-1) }).snapshot.alertDeliveryFailuresBand, "unknown");
+  assert.equal(Object.hasOwn(build().snapshot, "alertDeliveryFailuresBand"), false);
 });
 
 test("a failed section is unknown on its own", () => {

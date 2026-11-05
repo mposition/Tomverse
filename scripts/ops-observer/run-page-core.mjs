@@ -33,7 +33,7 @@
 // URL, no secret, no key state, no response body.
 
 import { incidentOrigin, owedMessages } from "./advance-request-core.mjs";
-import { BUDGET_KEY_LIMIT, S2_PAGE_SIGNALS, evaluateKey, initialKeyState, isS3Key, signalForKey } from "./classify-core.mjs";
+import { S3_KEY_LIMIT, S2_PAGE_SIGNALS, evaluateKey, initialKeyState, isS3Key, signalForKey } from "./classify-core.mjs";
 import { checkNotification, isCanonicalItemId, renderChannelCheckMessage, renderPageMessage } from "./content-guard-core.mjs";
 import { alertDeliveryObservations, budgetObservations, observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
 import { admitOwedItems, planRunMessage } from "./notification-budget-core.mjs";
@@ -110,7 +110,7 @@ export function planAdvance({ state, observations, nowMs, ownerDate, channelChec
     const fresh = Object.keys(observations)
       .filter((name) => isS3Key(name) && !held.includes(name))
       .sort()
-      .slice(0, Math.max(0, BUDGET_KEY_LIMIT - held.length));
+      .slice(0, Math.max(0, S3_KEY_LIMIT - held.length));
     for (const key of [...held, ...fresh]) {
       keys[key] = evaluateKey(signalForKey(key), state.keys[key] ?? initialKeyState(), observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
     }
@@ -216,16 +216,16 @@ export async function runPage({
   // 2. Health and the snapshot. Health itself is unauthenticated.
   const health = await read("/api/health", { method: "GET", bearer: false });
   const healthOk = health.status === 200;
+  // S3's pages stay off until the owner sets this switch (policy §8).
+  const s3Pages = env.OPS_OBSERVER_S3_PAGES === "true";
   let snapshot = null;
   if (healthOk) {
-    const answer = await read("/api/internal/ops-snapshot");
+    const answer = await read("/api/internal/ops-snapshot", s3Pages ? { body: { alertDelivery: true } } : undefined);
     if (answer.status === 200) {
       const parsed = parseSnapshot(answer.json);
       snapshot = parsed.ok ? parsed.snapshot : null;
     }
   }
-  // S3's pages stay off until the owner sets this switch (policy §8).
-  const s3Pages = env.OPS_OBSERVER_S3_PAGES === "true";
   const observations = {
     ...observationsFromSnapshot({ healthOk, snapshot }),
     ...(s3Pages && healthOk ? { ...budgetObservations(snapshot), ...alertDeliveryObservations(snapshot) } : {}),

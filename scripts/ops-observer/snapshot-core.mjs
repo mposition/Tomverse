@@ -94,7 +94,8 @@ export function buildSnapshot({ readiness, jobs, budgets, alertFailures, now, co
     readiness: settled(readiness, (v) => readinessSection(v?.checks)),
     scheduledJobs: settled(jobs, jobsSection),
     providerBudgets: settled(budgets, budgetsSection),
-    alertDeliveryFailuresBand: settled(alertFailures, (count) => failureBand(count) ?? "unknown"),
+    // Only for a runner that asked: an older one refuses a field it does not know.
+    ...(alertFailures ? { alertDeliveryFailuresBand: settled(alertFailures, (count) => failureBand(count) ?? "unknown") } : {}),
   };
   return parseSnapshot(value);
 }

@@ -24,7 +24,7 @@ export const UTILISATION_BANDS = ["<70", "70-85", "85-95", ">=95", "exhausted"];
 export const BUDGET_SCOPES = ["day", "month"];
 
 const TOP_LEVEL_FIELDS = ["schemaVersion", "generatedAt", "commitSha", "readiness", "scheduledJobs", "providerBudgets"];
-// Optional so a runner and an app from different releases still read each other.
+// Sent only to a runner that asks; absent from an app that predates it.
 const ALERT_DELIVERY_FIELD = "alertDeliveryFailuresBand";
 const JOB_FIELDS = ["key", "delayed", "stuck", "lastRunAt", "lastSuccessAt", "consecutiveFailuresBand"];
 const BUDGET_FIELDS = ["provider", "scope", "utilisationBand", "resetAt"];

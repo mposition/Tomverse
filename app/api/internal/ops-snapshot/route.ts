@@ -40,6 +40,7 @@ export async function POST(request: Request) {
   }
 
   const now = new Date();
+  const wantsAlertDelivery = (await request.json().catch(() => null))?.alertDelivery === true;
   // Readiness before the database aggregates: it is the one a broken
   // database must not starve. Every section has its own time limit, so a
   // source that never answers costs only its own section.
@@ -47,11 +48,13 @@ export async function POST(request: Request) {
   const [jobs, budgets, alertFailures] = await Promise.all([
     settleWithin(getScheduledJobsDashboard(now)),
     settleWithin(getProviderBudgetStatuses({ now })),
-    settleWithin(
-      prisma.adminNotificationLog.count({
-        where: { status: "failed", createdAt: { gte: new Date(now.getTime() - ALERT_FAILURE_WINDOW_MS) } },
-      }),
-    ),
+    wantsAlertDelivery
+      ? settleWithin(
+          prisma.adminNotificationLog.count({
+            where: { status: "failed", createdAt: { gte: new Date(now.getTime() - ALERT_FAILURE_WINDOW_MS) } },
+          }),
+        )
+      : undefined,
   ]);
   const built = buildSnapshot({
     readiness,

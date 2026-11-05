@@ -305,6 +305,7 @@ test("the alert delivery key is off without the switch, opens at 3+ with it, and
   }));
   await run(off);
   assert.equal(Object.hasOwn(off.calls.find((call) => call.path.endsWith("/advance")).body.keys, ALERT_KEY), false);
+  assert.equal(off.calls.find((call) => call.path.endsWith("/ops-snapshot")).body, null);
 
   const on = fakeFetch(liveRoutes({
     "/api/internal/ops-snapshot": [200, withBand("3+")],
@@ -312,6 +313,7 @@ test("the alert delivery key is off without the switch, opens at 3+ with it, and
     "/api/internal/ops-observer/confirm": [200, { result: "shadowed" }],
   }));
   await run(on, { env: { ...ENV, OPS_OBSERVER_S3_PAGES: "true" } });
+  assert.deepEqual(on.calls.find((call) => call.path.endsWith("/ops-snapshot")).body, { alertDelivery: true });
   const body = on.calls.find((call) => call.path.endsWith("/advance")).body;
   assert.equal(body.keys[ALERT_KEY].status, "open");
   assert.equal(parseAdvanceRequest(JSON.stringify(body), START).ok, true);
