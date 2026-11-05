@@ -210,11 +210,11 @@ test("the raw statements are where §5.6 puts them", () => {
     for (const banned of ["$executeRaw", "$executeRawUnsafe", "$queryRawUnsafe"]) {
       assert.ok(!code.includes(banned), `${file}: ${banned}`);
     }
-    // §5.4's device rests on this absence. `SET CONSTRAINTS <name> IMMEDIATE`
-    // fires a pending deferred check at that point, and it is not queued
-    // again -- so a transaction that sends it can then run past its deadline
-    // and commit with the row intact, which was measured on 17.10. No
-    // statement in these files may contain it.
-    assert.doesNotMatch(code, /SET\s+CONSTRAINTS/i, `${file}: SET CONSTRAINTS`);
+    // §5.4's device also rests on no file moving a deferred check earlier,
+    // and that rule is not asserted here: `tests/opsObserverNoSetConstraints`
+    // already sweeps every source file in the repository for it, these files
+    // included, with a reviewed list of the comments allowed to name it. A
+    // second check scoped to this agent would be a second owner of one rule
+    // and would drift from it.
   }
 });

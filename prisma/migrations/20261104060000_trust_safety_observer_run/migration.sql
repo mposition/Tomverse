@@ -38,22 +38,24 @@
 -- computes the same window at statement time for `pingPermitted`, but the
 -- binding judgement is this one.
 --
--- **What the deferred trigger does not bind, measured.** A transaction may
--- send `SET CONSTRAINTS trust_safety_observer_run_deadline_check IMMEDIATE`
--- (or `ALL IMMEDIATE`), which fires the pending check at that point; it passes
--- while the deadline still holds, is not queued again, and the transaction can
--- then run past the deadline and commit with the row intact. Verified on a
--- throwaway 17.10 cluster: the row lands, and the same transaction without
--- that statement is refused with TS002.
+-- **What the deferred trigger does not bind.** A transaction can move a
+-- deferrable check earlier, and then the pending check is not evaluated again
+-- at COMMIT, so the transaction can run past the deadline and commit with the
+-- row intact. The ops-observer migrations state this limit first
+-- (20261003070000_ops_observer_genesis_state item 5), and it was measured for
+-- this table too on a throwaway 17.10 cluster: the row lands, and the same
+-- transaction without that statement is refused with TS002.
 --
--- So the device holds against a transaction that does not send that statement,
--- and what keeps this agent's transactions in that class is the application
--- side: the statement set of E1 and E3 is fixed and counted (§5.5's ceiling),
--- the raw-SQL allowlist pins its shape and number (§5.6 item 3), and a test
--- holds `SET CONSTRAINTS` out of every one of this agent's own files. It is
--- not a defence against arbitrary SQL in the product database -- a party who
--- can send that can also disable the trigger or drop it, and §5.4 never
--- claimed otherwise.
+-- So the device holds against a transaction that does not move the check, and
+-- what keeps this agent's transactions in that class is the application side:
+-- the statement set of E1 and E3 is fixed and counted (§5.5's ceiling), the
+-- raw-SQL allowlist pins its shape and number (§5.6 item 3), and the
+-- repository already refuses the statement in source -- the sweep in
+-- tests/opsObserverNoSetConstraints covers every file here, including this
+-- one, which is why this comment is counted in its reviewed mentions. It is
+-- not a defence against arbitrary SQL in the product database: a party who can
+-- send that can also disable the trigger or drop it, and §5.4 never claimed
+-- otherwise.
 --
 -- The same cluster showed what would close it on 17: a `transaction_timeout`
 -- armed at the deadline terminates such a transaction before COMMIT, leaving
