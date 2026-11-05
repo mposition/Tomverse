@@ -261,6 +261,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     aliases: ["digest", "가격 검증 기한"],
     tabs: {
       "billing-finance-ops": { label: "과금·재무", description: "가격 검증 기한 일일 digest, Agent 스위치와 monitor 확인" },
+      "trust-safety": { label: "신뢰·안전", description: "페이지를 열 때 센 DSR 기한과 관측 스위치" },
     },
   },
   office: {

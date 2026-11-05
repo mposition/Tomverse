@@ -2216,6 +2216,13 @@ const REGISTRY = {
     reason:
       "One value, risk_accepted. obligation_waiver is deliberately absent: a waiver changes what a country rule requires and is consumed while obligations are resolved, so it can never be the reason a recipient was allowed. A second value here would be a way for a send to be permitted that the admin screen has no wording for.",
   },
+  TrustSafetyObserverConfig_mode_check: {
+    owner: "list",
+    module: "lib/trustSafetyActivationCore.ts",
+    list: "TRUST_SAFETY_MODES",
+    reason:
+      "off and on, the only two modes docs/policy/trust-safety-compliance-agent.md section 6 allows. A third value would be an activation state the seven checks have no verdict for, and section 6 never believes this row on its own -- it derives the mode and reads a mode it does not know as a fault, so the application answers 400 on the way in rather than letting a row exist that every round refuses.",
+  },
 };
 
 const migrations = readdirSync(migrationsDirectory)

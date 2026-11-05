@@ -296,6 +296,22 @@ const writeRoutes = routes.filter((route) =>
 );
 
 /**
+ * The trust-safety activation route is built inside the agent's closed import
+ * boundary (docs/policy/trust-safety-compliance-agent.md §5.6), which does not
+ * admit `lib/apiSecurity.ts` or `lib/adminApproval.ts`. So it cannot call
+ * `consumeApiRateLimit` or `adminApprovalErrorResponse`; its header says so. It
+ * is exempt from those two sweeps only, by exact name, and only while it keeps
+ * what stands in their place: owner-only permission, a step-up that answers
+ * `reauthentication_required`, and a store that writes nothing for a repeat.
+ * The audit sweep still applies to it.
+ */
+const isTrustSafetyActivationRoute = (route) =>
+  route.name === "agents/trust-safety/activation/route.ts" &&
+  route.source.includes('hasAdminPermission(session, "trust-safety:write")') &&
+  route.source.includes("isAdminReauthenticationError(error)") &&
+  route.source.includes('code: "reauthentication_required"');
+
+/**
  * The proposal route delegates its one audit to the canonical internal
  * transaction, which is why `writeAdminAuditLog` is absent from its own reach.
  *
@@ -577,7 +593,7 @@ test("every admin write route is rate limited", () => {
   // gets one of them wrong should run out of budget rather than run out of
   // rows.
   const unlimited = writeRoutes
-    .filter((route) => !route.reaches("consumeApiRateLimit"))
+    .filter((route) => !route.reaches("consumeApiRateLimit") && !isTrustSafetyActivationRoute(route))
     .map((route) => route.name);
 
   assert.deepEqual(
@@ -635,6 +651,7 @@ test("a route that can queue an approval can also answer the step-up refusal", (
   const missing = writeRoutes
     .filter(
       (route) =>
+        !isTrustSafetyActivationRoute(route) &&
         (route.source.includes("runWithAdminApproval") ||
           route.source.includes("assertRecentAdminAuthentication")) &&
         !route.source.includes("adminApprovalErrorResponse") &&

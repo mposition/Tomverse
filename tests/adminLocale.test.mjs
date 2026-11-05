@@ -155,6 +155,11 @@ const COMPONENTS_WITHOUT_COPY = new Set([
   "MarketingActions.tsx",
   // Renders nothing: it reads the release train tab again after a save on it.
   "QaReleaseTrainRefresher.tsx",
+  // Renders only the strings the page passes in `messages`, which the page read
+  // from `adminTrustSafetyMessages`. The trust-safety section's files may not
+  // import the locale helpers (docs/policy/trust-safety-compliance-agent.md
+  // §5.6 closes their imports), so the page does the choosing.
+  "AdminTrustSafetyDigestPanel.tsx",
 ]);
 
 test("every admin component reads its copy from a message catalog", () => {

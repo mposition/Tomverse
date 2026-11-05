@@ -3541,6 +3541,24 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261104070000_trust_safety_observer_config/migration.sql",
+    count: 1,
+    reason:
+      "One read in the config deadline guard: the trust_safety_parse_deadline call, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA quoted with %I and the value bound with USING. The function pins search_path to pg_catalog, pg_temp. It reads and never writes. The other EXECUTE words are CREATE TRIGGER ... EXECUTE FUNCTION clauses, which this check does not count.",
+  },
+  {
+    path: "prisma/migrations/20261104060000_trust_safety_observer_run/migration.sql",
+    count: 1,
+    reason:
+      "One read in the run row's deadline guard: the trust_safety_parse_deadline call, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA quoted with %I and the value bound with USING. The function pins search_path to pg_catalog, pg_temp. It reads and never writes. The other EXECUTE words are CREATE TRIGGER ... EXECUTE FUNCTION clauses, which this check does not count.",
+  },
+  {
+    path: "scripts/check-trust-safety-write-boundary.mjs",
+    count: 10,
+    reason:
+      "This check names the raw-SQL methods it refuses ($executeRaw, $executeRawUnsafe, $queryRawUnsafe, the tagged $queryRaw) in its own refusal sets and in the code that classifies a call by those names. It opens no database connection and runs no SQL.",
+  },
+  {
     path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
     count: 1,
     reason:
