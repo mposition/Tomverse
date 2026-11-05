@@ -107,6 +107,16 @@ test("streaks and closed-state triples evaluateKey() never writes are refused", 
   }
 });
 
+test("S3 budget keys are accepted beside the S2 keys, and nothing else is", () => {
+  const keys = initialKeys();
+  assert.equal(keysAreValid({ ...keys, "P-B#openai_day": initialKeyState() }), true);
+  assert.equal(keysAreValid({ ...keys, "P-B#openai_week": initialKeyState() }), false);
+  assert.equal(keysAreValid({ ...keys, "P-B#Open-AI_day": initialKeyState() }), false);
+  assert.equal(keysAreValid({ "P-B#openai_day": initialKeyState() }), false);
+  const tooMany = Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`P-B#p${i}_day`, initialKeyState()]));
+  assert.equal(keysAreValid({ ...keys, ...tooMany }), false);
+});
+
 test("the key set is exactly the S2 page keys", () => {
   const keys = initialKeys();
   assert.equal(keysAreValid({ ...keys, "P9#x": initialKeyState() }), false);
