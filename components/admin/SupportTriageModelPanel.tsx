@@ -6,11 +6,35 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminFeedbackInboxMessages } from "@/lib/adminMessages/feedbackInbox";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import type { SupportTriageHealth } from "@/lib/supportTriageCycle";
 
 const PAGE_PATH = "/admin/support?tab=feedback";
 const ROUTE = "/api/admin/support-triage/llm-model";
 
 type Option = { id: string; name: string; provider: string };
+type Messages = (typeof adminFeedbackInboxMessages)["en"];
+
+const runLine = (run: SupportTriageHealth["worker"], m: Messages) =>
+  run ? `${new Date(run.at).toLocaleString()} (${run.outcome})` : m.triageHealthNever;
+
+/** The last runs, today's counts and the overdue warning. Hook-free, so a render test can walk it. */
+export function SupportTriageHealthLine({ health, m }: { health: SupportTriageHealth; m: Messages }) {
+  return (
+    <div className="mt-3 text-xs leading-5 text-zinc-400" data-testid="support-triage-health">
+      <p>
+        {m.triageHealthWorker}: {runLine(health.worker, m)} · {m.triageHealthRetention}: {runLine(health.retention, m)}
+      </p>
+      <p>
+        {m.triageHealthReportsToday}: {health.reportsToday} · {m.triageHealthFailedToday}: {health.failedRunsToday}
+      </p>
+      {health.stale ? (
+        <p role="alert" className="text-amber-300" data-testid="support-triage-health-stale">
+          {m.triageHealthStale}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Which model the support-triage LLM step uses. Saving needs the owner and a
@@ -30,6 +54,7 @@ export function SupportTriageModelPanel() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [enabledSource, setEnabledSource] = useState<"admin" | "environment" | null>(null);
   const [modelSource, setModelSource] = useState<"admin" | "environment" | null>(null);
+  const [health, setHealth] = useState<SupportTriageHealth | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -42,6 +67,7 @@ export function SupportTriageModelPanel() {
           options?: Option[];
           enabled?: boolean;
           enabledSource?: "admin" | "environment";
+          health?: SupportTriageHealth;
         };
         if (!live) return;
         if (!response.ok || !Array.isArray(payload.options)) {
@@ -54,6 +80,7 @@ export function SupportTriageModelPanel() {
         setModelSource(payload.modelSource ?? null);
         setEnabled(payload.enabled ?? null);
         setEnabledSource(payload.enabledSource ?? null);
+        setHealth(payload.health ?? null);
       } catch {
         if (live) setNotice({ tone: "error", text: m.triageModelLoadFailed });
       }
@@ -163,6 +190,7 @@ export function SupportTriageModelPanel() {
           </span>
         ) : null}
       </div>
+      {health ? <SupportTriageHealthLine health={health} m={m} /> : null}
       {reauthenticationRequired ? (
         <p role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-sm text-amber-300">
           {m.triageModelReauthenticate}

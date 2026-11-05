@@ -17,11 +17,10 @@
  *
  * One batch deletes every class in `RETENTION_CLASSES`, one window read and
  * one delete per class, each class with its own cursor: run rows 30 days
- * after creation, terminal suggestions and terminal groups 30 days after they
- * became terminal (both are immutable once terminal, so updatedAt and
- * keyRetiredAt are those moments), and decision records at their own
- * retentionUntil. A cancellation is charged to the class whose statement was
- * running, and only that class's window is skipped.
+ * after creation, and terminal suggestions 30 days after they became terminal
+ * (immutable once terminal, so updatedAt is that moment). A cancellation is
+ * charged to the class whose statement was running, and only that class's
+ * window is skipped.
  *
  * A suggestion is kept 30 days after it became terminal or after its report
  * closed, whichever is earlier. The report keeps no closure timestamp (a
@@ -67,7 +66,6 @@ import {
   SUGGESTION_STATES,
   SUGGESTION_TERMINAL_STATES,
   SUPPORT_TRIAGE_RUN_RETENTION_DAYS,
-  TERMINAL_GROUP_RETENTION_DAYS,
   TERMINAL_SUGGESTION_RETENTION_DAYS,
   mayStartRetentionBatch,
   type RetentionClass,
@@ -103,7 +101,6 @@ type Cursor = { readonly at: Date; readonly id: string } | null;
 type WindowRow = { id: string; at: Date };
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-const GROUP_TERMINAL_STATES = ["dismissed", "expired", "invalidated"];
 const CLOSED_REPORT_STATUSES = FEEDBACK_STATUSES.filter(isTerminalFeedbackStatus);
 const OPEN_SUGGESTION_STATES = SUGGESTION_STATES.filter((state) => !SUGGESTION_TERMINAL_STATES.includes(state));
 const CLOSABLE_SUGGESTION_STATES = [...SUGGESTION_CLOSABLE_OPEN_STATES];
@@ -180,23 +177,6 @@ const readWindow = (tx: Tx, cls: RetentionClass, after: Cursor, size: number) =>
            AND (${afterAt}::timestamp(3) IS NULL OR (s."updatedAt", s."id") > (${afterAt}::timestamp(3), ${afterId}::text))
          ORDER BY s."updatedAt", s."id"
          LIMIT ${size}::integer`;
-    case "groups":
-      return tx.$queryRaw<WindowRow[]>`
-        SELECT g."id", g."keyRetiredAt" AS "at"
-          FROM "SupportTriageGroup" g
-         WHERE g."state" = ANY(${GROUP_TERMINAL_STATES}::text[])
-           AND g."keyRetiredAt" <= (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${TERMINAL_GROUP_RETENTION_DAYS}::integer)
-           AND (${afterAt}::timestamp(3) IS NULL OR (g."keyRetiredAt", g."id") > (${afterAt}::timestamp(3), ${afterId}::text))
-         ORDER BY g."keyRetiredAt", g."id"
-         LIMIT ${size}::integer`;
-    case "decisionRecords":
-      return tx.$queryRaw<WindowRow[]>`
-        SELECT d."id", d."retentionUntil" AS "at"
-          FROM "SupportTriageDecisionRecord" d
-         WHERE d."retentionUntil" <= (clock_timestamp() AT TIME ZONE 'UTC')
-           AND (${afterAt}::timestamp(3) IS NULL OR (d."retentionUntil", d."id") > (${afterAt}::timestamp(3), ${afterId}::text))
-         ORDER BY d."retentionUntil", d."id"
-         LIMIT ${size}::integer`;
   }
 };
 
@@ -208,16 +188,11 @@ const deleteWindow = async (tx: Tx, cls: RetentionClass, ids: string[]) => {
       return (await tx.supportTriageRun.deleteMany({ where })).count;
     case "suggestions":
       return (await tx.supportTriageSuggestion.deleteMany({ where })).count;
-    case "groups":
-      return (await tx.supportTriageGroup.deleteMany({ where })).count;
-    case "decisionRecords":
-      // Its links go with it (cascade).
-      return (await tx.supportTriageDecisionRecord.deleteMany({ where })).count;
   }
 };
 
 type ClassCounts = Record<RetentionClass, number>;
-const zeroCounts = (): ClassCounts => ({ runs: 0, suggestions: 0, groups: 0, decisionRecords: 0 });
+const zeroCounts = (): ClassCounts => ({ runs: 0, suggestions: 0 });
 
 const databaseNow = async (): Promise<Date> => {
   const [row] = await prisma.$queryRaw<{ now: Date }[]>`
@@ -320,7 +295,7 @@ export type RetentionRunResult = {
 };
 
 /** Rows past their boundary (or a suggestion past its expiry) in every class, and how long the oldest has waited. */
-const overdueState = async () => {
+export const overdueState = async () => {
   const [row] = await prisma.$queryRaw<{ remaining: bigint | null; oldestAgeSeconds: number | null }[]>`
     WITH now_utc AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS t),
     due AS (
@@ -343,11 +318,6 @@ const overdueState = async () => {
        WHERE s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[])
           OR f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
           OR (s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[]) AND s."ownerQueueState" = 'not_queued')
-      UNION ALL
-      SELECT g."keyRetiredAt" + make_interval(days => ${TERMINAL_GROUP_RETENTION_DAYS}::integer)
-        FROM "SupportTriageGroup" g WHERE g."state" = ANY(${GROUP_TERMINAL_STATES}::text[])
-      UNION ALL
-      SELECT d."retentionUntil" FROM "SupportTriageDecisionRecord" d
     )
     SELECT count(*) AS remaining,
            floor(extract(epoch FROM (SELECT t FROM now_utc) - min(due."dueAt")))::integer AS "oldestAgeSeconds"

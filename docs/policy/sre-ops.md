@@ -71,7 +71,7 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
    `emailFooterDisclosures`, `amuxReviewApproval`, `emailBiennialConsentNotice`(ready 판정에 들어가지 않음)의 12개이며, 뒤에
    더해지는 검사도 같은 규칙을 따릅니다. 상태 집계는 검사 이름 목록을 코드가 아니라 readiness 계산에서 얻고, 모르는 검사가
    있으면 digest에 그 이름을 적습니다.
-4. **주간 page 채널 점검.** S2부터 주 1회 낮 시간 창에 고정 점검 문장을 page 채널로 보냅니다. 소유자가 휴대폰 푸시로
+4. **주간 page 채널 점검.** S2부터 주 1회 낮 시간 창(화요일 10:00–12:00, Brisbane)에 고정 점검 문장을 page 채널로 보냅니다. 소유자가 휴대폰 푸시로
    받았을 때만 별도 check-in URL을 엽니다(5절).
 
 **LLM을 쓰지 않습니다.** 모든 판정은 결정적 코드입니다. 로그·오류 문자열·사용자 텍스트는 판정의 입력도 알림 내용도
@@ -124,7 +124,9 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
    - 자식은 자기 서비스 변수 중 필요한 것만 받습니다.
 6. **빌드 단계에는 runtime 비밀값이 없습니다.** 전용 Dockerfile은 `ARG`를 선언하지 않는 단일 stage이고, 첫 실행 명령이 빌드 환경
    검사입니다.
-7. **결과를 모르면 멈춥니다.** 본 앱 요청은 재시도하지 않고, 상태를 신뢰할 수 없으면 아무것도 보내지 않고 heartbeat도
+7. **결과를 모르면 멈춥니다.** 쓰는 요청(advance, confirm, digest 제출)과 page·digest 전송은 재시도하지 않습니다. 읽기(health,
+   상태 집계, state)와 heartbeat ping은 연결이 실패했을 때만 한 번 다시 시도합니다(2026-11-03에 Railway와 Cloudflare 사이 연결이
+   요청 단위로 멈춘 것을 관측). 응답을 받은 요청은 다시 시도하지 않습니다. 상태를 신뢰할 수 없으면 아무것도 보내지 않고 heartbeat도
    보내지 않습니다. 그 침묵은 P8이 알립니다.
 8. **늦은 실행은 성공으로 기록되지 않습니다.** 6절의 규칙이 이것을 DB로 강제합니다.
 9. **재시작과 겹침이 두 번째 전송을 만들지 않습니다.** 두 서비스는 `restartPolicyType: NEVER`이고, Railway cron은 이전 회차가
@@ -171,7 +173,8 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
   직전 genesis 뒤 7일 안의 genesis는 전송 대신 침묵을 만들므로, 한 달력일에 전송이 가능한 genesis는 최대 하나입니다(결정 D5b).
   S2 시작일은 activation genesis 날이므로 그날 최대 31입니다.
 - 본 앱 store가 예약 트랜잭션 안에서 사건·종류 unique와 날짜별 개수를 다시 세고, 넘으면 advance 전체를 거절합니다.
-  S3에서 키가 늘면 최대값을 다시 계산해 정책 버전을 올립니다.
+  S3에서 키가 늘면 최대값을 다시 계산해 정책 버전을 올립니다. 예산 키는 provider마다 일·월 2개이고 모두 악화 구간을 가지므로,
+  provider가 n개이면 하루 최대는 `15 + 4n`입니다(2026-11-04 기준 12개면 63). 실제로는 95%를 넘은 window만 메시지를 만듭니다.
 - 채널 점검은 소유자 날짜당 1회. check-in monitor는 주기 7일 + 유예 2일이며, 채널이 죽은 뒤 최대 9일 안에 탐지합니다.
 - dead-man monitor 셋(page heartbeat, digest heartbeat, 점검 check-in)의 알림 대상은 **page 채널이 아닌 경로**여야 합니다.
 
@@ -242,7 +245,7 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 
 | 서비스 | 가진 것 |
 |---|---|
-| `Ops Observer`(page) | `OPS_OBSERVER_SECRET`(32자 이상, 본 앱 route Bearer), `OPS_OBSERVER_HEARTBEAT_URL`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`(**S2부터만**), `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
+| `Ops Observer`(page) | `OPS_OBSERVER_SECRET`(32자 이상, 본 앱 route Bearer), `OPS_OBSERVER_HEARTBEAT_URL`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`(**S2부터만**), `OPS_OBSERVER_S3_BUDGET_PAGES`(**S3부터만**, `true`일 때 예산 키를 page), `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
 | `Ops Observer Digest` | `OPS_OBSERVER_DIGEST_SECRET`(32자 이상, advance·confirm은 거절), `OPS_OBSERVER_DIGEST_WEBHOOK_URL`, `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`, `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
 
 - 두 서비스 모두 제품 DB 자격증명·GitHub 토큰·admin session·LLM 키·Railway 쓰기 토큰·maintenance secret·감사 무결성 키를
@@ -279,7 +282,7 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 | D5c | Railway가 주 프로세스 종료를 실행 종료로 인식하는지 관측해 통과해야 S2 |
 | N-2 | 6절의 종류별 상수 아홉 줄을 수락. advance의 `C_guarded`가 호출자 timeout 15초보다 길다는 사실 포함 |
 | N-3a | 감사 재검증 buffer 예산 40 |
-| N-3b | **보류.** S1a 측정 뒤 결정 |
+| N-3b | (2026-10-23 대화) S1a 측정(상태 집계 p95 595 ms, state p95 340 ms)을 근거로 page 실행의 앱 부하를 수락 |
 | N-4 | digest 항목 크기 상한 16 KiB, 메타 행 보존 365일을 Agent 공통 불변값으로 확정 |
 | N-5 | PostgreSQL 16에서는 트랜잭션 점유에 DB 상한이 없다는 것을 수락 |
 | N-6 | genesis 은퇴는 90일 전체 재검증에 묶음 |

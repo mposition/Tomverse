@@ -177,16 +177,18 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    허용한 head)과 production 상태를 Admin에 표시만 합니다. **이 목록은 병합 준비 판정이 아닙니다** — hotfix의 7.9.2 항목이나
    각 자동화의 자기 게이트는 사람이 봅니다. 이 Agent는 auto-merge를 켜지 않습니다.
 2. **후보.** base가 develop, draft 아님, check가 모두 끝났고 실패 없음, PR Fast Gate 성공 run이 하나 이상, mergeable인 PR 중
-   가장 오래된 것. 판정 코드는 `scripts/merge-train-core.mjs`(`refusalReason`·`pickNextPullRequest`·`inFlightDeployments`·
+   운영자가 CI 입장에서 정한 우선순위가 가장 높은 것(목록에 없으면 뒤로, 우선순위를 못 읽으면 가장 오래된 것부터, 운영자 요청 2026-10-22). 판정 코드는 `scripts/merge-train-core.mjs`(`refusalReason`·`pickNextPullRequest`·`inFlightDeployments`·
    `deploymentOutcome`)를 재사용하고, **3항의 제외 판정을 후보 선정 안에 넣습니다** — 제외 대상은 실패 PR과 똑같이 이유와 함께
    건너뛰고 다음으로 오래된 PR을 봅니다. 그래서 제외 대상이든 실패 PR이든 **뒤의 PR을 막지 않습니다.**
 3. **제외.** 아래 PR은 레인이 **병합하지 않고** Admin에 "사람 처리 대상"으로 표시만 합니다. 사람이 GitHub에서 각자의 계약대로
    처리합니다.
-   - 변경 경로에 게이트 파일: `.github/workflows/**`, `.github/actions/**`(CI가 비밀값을 들고 도는 곳), 정책 테스트(PR base의
+   - 변경 경로에 게이트 파일: `.github/workflows/**`, `.github/actions/**`(CI가 비밀값을 들고 도는 곳), 저장소 루트의 `package.json`(운영자와
+     CI가 실행하는 script 이름을 정함)·`tsconfig*.json`·`next.config.*`(셋 다 루트에 있는 것만; 뒤의 둘은 import가 어느 파일로
+     풀리는지 정함), 정책 테스트(PR base의
      `AGENTS.md`·`CLAUDE.md`·`docs/policy/qa-release-agent.md`가 경로로 이름 댄 `tests/**` 파일), `AGENTS.md`, `CLAUDE.md`,
      `docs/policy/qa-release-agent.md`, `lib/adminAuth*`, `lib/adminAuditSystemActors.ts`, `lib/agentAuthorityFiles.ts`.
      **이것이 전부입니다**(운영자 결정 2026-10-23 "최소한의 장치만": revert로 되돌릴 수 없는 것과 Agent가 자기 게이트를 넓힐 수
-     있는 것만 남김). 나머지 `.github/**`(감사 기록 등), `scripts/**`, 저장소 루트 설정, `package.json`·lock 파일, 다른 기능의
+     있는 것만 남김). 나머지 `.github/**`(감사 기록 등), 부록 A 밖의 `scripts/**`, 그 밖의 저장소 루트 설정, 하위 패키지의 `package.json`과 lock 파일, 다른 기능의
      정책·UI 계약 문서는 되돌릴 수 있는 코드로 보고 레인이 병합합니다 — PR의 CI가 이미 그 내용으로 돌았습니다. CI 자동 수정은
      예외 없이 모든 열린 PR의 CI를 고칩니다(운영자 결정 2026-11-03, workflow·action 파일 포함, `lib/prCiAutoFixGuardCore.ts`). 자동 수정이 게이트 파일을 고친 PR도 이 목록에 따라 레인이 병합하지 않고 사람에게 남깁니다.
      같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
@@ -272,7 +274,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    업데이트(update-branch)하기 위해서입니다. 2026-10-30 운영자 결정으로 엔지니어링 에이전트 게시 App(`tomverse-engineering-publisher`,
    integration 5224114)을 같은 bypass에 `always`로 더했습니다 — `creation` 규칙이 이 App의 `agent/engineering/*` 브랜치 생성을 거절해
    게시가 한 번도 되지 않았기 때문입니다. 병합 레인 App은 여전히 넣지 않습니다.
-8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
+8. **병합 주체의 전환(2026-11-04 완료).** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
 9. **develop의 직접 push도 막습니다.** 필수 check는 이미 check를 통과한 commit의 직접 push를 막지 못합니다. 그래서 develop에
@@ -360,7 +362,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       그 회차는 출발할 정기 열차를 이어서 출발시킵니다.
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
-      — 운영자가 `npm run merge-train`으로 합니다. label·comment·status는 쓰지 않습니다.
+      — 운영자가 GitHub나 `npm run merge-train -- --include-main`으로 합니다. label·comment·status는 쓰지 않습니다.
     - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 30분마다, `.railway/agent-runners.ts`)에서 `QA_RELEASE_TRAIN_ENABLED`가 정확히
       `true`일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
       레인을 함께 멈추지 않게 하기 위해서입니다. 레인의 App과 앱 secret을 같이 쓰므로 앱 쪽에 새로 둘 것은 없습니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
@@ -406,32 +408,32 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 **main 병합**, 제외된 develop PR의 처리, 병합된 commit의 revert, dev 복구, 판정과 서명. 그 밖에 이 Agent가 사람에게 일을
 만들지 않습니다.
 
+## 부록 B. CI 개선안 (LLM 제안)
+
+열차 서비스가 하루 한 번, develop 커밋의 check별 소요 시간과 CI 입장의 러너 부하 기록(이름과 숫자뿐, 로그와 diff는 보내지 않음)을
+모델에 보내 대기 시간을 줄일 방안을 받아 Admin 개요에 보여 줍니다(`lib/qaReleaseCiAdvice.ts`). 표시 전용이고 아무것도 자동으로
+바꾸지 않으며 감사 이벤트가 아닙니다. 유료 호출이라 `QA_RELEASE_CI_ADVICE_ENABLED`가 정확히 `true`일 때만 돌고(기본 꺼짐), 열차의
+Anthropic 키로 24시간에 최대 1회입니다. 호출 전에 시각을 먼저 기록하고 기록에 성공한 회차만 호출하므로, 어떤 실패도 호출을 되풀이하지 않습니다.
+
 ## 부록 A. 이 Agent의 파일 (병합 레인의 제외 판정에 쓰는 경로 목록)
 
 병합 레인은 아래 경로를 바꾸는 PR을 무인 병합하지 않습니다(8절 3항). 판정은 그 PR의 base에 있던 이 목록으로 합니다.
 패턴에서 `**`는 디렉터리를 넘고, `*`는 한 경로 조각 안에서 맞추되 **패턴 끝의 `*`는 그 이름으로 시작하는 더 깊은 경로까지**
 맞춥니다(`lib/qaRelease*`는 `lib/qaRelease` 디렉터리 아래 파일도 맞춤). 8절 3항의 `lib/adminAuth*`도 같습니다.
 목록을 바꾸는 것은 이 정책 문서를 바꾸는 것이고, 정책 문서는 게이트 파일입니다. 2026-10-23 운영자 결정("최소한의 장치만")으로
-레인이 **스스로를 바꾸거나 자기를 통제하는 장치를 바꾸는 파일**만 남깁니다: 병합을 판단하고 실행하는 코드와 그 API 진입점,
-운영자 제어(레인 스위치·래치 해제·열차 선택)의 권한 검사와 쓰기 API, 감사 기록을 쓰는 store, push 자격증명을 쓰는 열차,
-서비스의 변수 허용 목록과 시작 검사, 정책 승인 판정, Agent 서비스의 IaC(독립 검토 반영, 2026-10-23). QA 화면·digest 표시·
-테스트 같은 나머지 이 Agent의 파일은 레인이 병합합니다.
+이 Agent의 **서버 쪽 코드 전체**만 남깁니다: 병합과 열차, 운영자 제어와 그 Admin API, 서비스 진입점과 그 runner, 비밀값을 실어
+보내는 목적지 허용 목록, 감사 기록 store와 그 비밀값 검사·정규화, GitHub ruleset 생성, 운영자 merge train script, IaC. 이 파일들은
+비밀값이나 감사 기록, GitHub 설정처럼 revert로 되돌릴 수 없는 것에 닿거나 레인 자신을 통제합니다(독립 검토 두 차례 반영).
+**QA 화면 컴포넌트, Admin 문구, 테스트는 레인이 병합합니다.**
 
 ```
-lib/qaReleaseMergeLane*
-lib/qaReleaseTrain*
-lib/qaReleaseOperatorControl*
-lib/qaRelease*Store.ts
-lib/qaReleaseMonitor.ts
-lib/qaReleaseDigestIntake.ts
-lib/qaReleaseServiceEnvCore.ts
-lib/qaReleaseRouteAuthCore.ts
-lib/agentDigestStore.ts
+lib/qaRelease*
+lib/agentDigest*
 lib/agentPolicyApproval*
 lib/prCiAutoFixGuardCore.ts
 app/api/internal/agents/qa-release/**
 app/api/admin/agent-digests/qa-release/**
-scripts/merge-train-core.mjs
+scripts/merge-train*
 scripts/qa-release-*
 .railway/**
 ```

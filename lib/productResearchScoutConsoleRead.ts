@@ -28,6 +28,7 @@ import {
   type ScoutSettings,
   type ScoutUsageToday,
 } from "@/lib/productResearchScoutSettings";
+import { scoutTestAccountEmail } from "@/lib/productResearchScoutSignedIn";
 import {
   listSuggestions,
   suggestionCounts,
@@ -52,6 +53,8 @@ export const SCOUT_CONSOLE_DAYS = 7;
 
 export type ScoutConsoleView = {
   readonly enabled: boolean;
+  /** Whether a test account is named. The address itself stays on the server. */
+  readonly testAccountConfigured: boolean;
   readonly settings: ScoutSettings;
   readonly modelOptions: readonly ScoutModelOption[];
   readonly usageToday: ScoutUsageToday;
@@ -81,6 +84,7 @@ export async function readScoutConsole(session: Session | null, section: ScoutCo
   ]);
   return {
     enabled: isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),
+    testAccountConfigured: scoutTestAccountEmail() !== null,
     settings,
     modelOptions,
     usageToday,

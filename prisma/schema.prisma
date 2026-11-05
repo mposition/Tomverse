@@ -2285,8 +2285,6 @@ model Feedback {
   lifecycleEvents          FeedbackLifecycleEvent[]
   autoFixCase              FeedbackAutoFixCase?
   supportTriageSuggestions SupportTriageSuggestion[]
-  supportTriageMemberships SupportTriageGroupMember[]
-  supportTriageDecisionLinks SupportTriageDecisionRecordLink[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
@@ -9909,6 +9907,9 @@ model AmuxIdeaLaneAttempt {
   mergedAt     DateTime?
   prClosedAt   DateTime?
   prObservedAt DateTime?
+  /// The run did one part of a larger idea and its PR names the remaining
+  /// work: once this PR merges, the lane takes the idea again for the next part.
+  continues    Boolean   @default(false)
   idea       AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Cascade)
 
   @@index([ideaId, claimedAt])
@@ -10271,7 +10272,7 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   requestId                String   @unique @db.Uuid
   namespace                String
   monthStart               DateTime
-  priceVersionId           String
+  priceVersionId           String?
   provider                 String
   modelId                  String
   inputTokensCap           Int
@@ -10292,7 +10293,7 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
 
   reservation    AmuxIdeaSessionAnalysisReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_reservation_fkey")
   window         AmuxIdeaAnalysisBudgetWindow       @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_window_fkey")
-  priceVersion   AmuxIdeaAnalysisPriceVersion       @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_price_fkey")
+  priceVersion   AmuxIdeaAnalysisPriceVersion?      @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_price_fkey")
   claimAudit     AdminAuditLog                      @relation("AmuxV19SessionBudgetClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_claim_audit_fkey")
   resolutionAudit AdminAuditLog?                    @relation("AmuxV19SessionBudgetResolutionAudit", fields: [resolutionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_resolution_audit_fkey")
   analysisResult AmuxIdeaSessionAnalysisResult?
@@ -11691,100 +11692,4 @@ model SupportTriageSuggestion {
   @@index([state, ownerQueueState, createdAt])
   @@index([leaseExpiresAt])
   @@index([contextFeedbackIds], type: Gin)
-}
-
-/// Support-triage group (docs/policy/support-triage.md §5, §6): one
-/// equivalence class of one kind over server facts, for display only. Its
-/// members carry its primary digest through a composite key, so a terminal
-/// group (digest NULL) can hold none. Migration
-/// 20261004020000_support_triage_group holds the state machine and the
-/// tombstone rules.
-model SupportTriageGroup {
-  id                            String    @id
-  state                         String    @default("candidate")
-  primaryKind                   String
-  primarySnapshotDigest         String?
-  groupCandidateKey             String?   @unique
-  groupInputDigest              String?
-  keyRetiredAt                  DateTime?
-  retiredMemberIds              String[]  @default([])
-  decision                      String?
-  decidedAt                     DateTime?
-  ownerQueueState               String    @default("not_queued")
-  displayedAt                   DateTime?
-  keyRecheckDeferredCount       Int       @default(0)
-  keyRecheckDeferredRunId       String?
-  keyRecheckLastEvaluatedRunSeq BigInt?
-  keyRecheckDeferredRunSeq      BigInt?
-  createdAt                     DateTime  @default(now())
-  updatedAt                     DateTime  @default(now())
-
-  members SupportTriageGroupMember[]
-  signals SupportTriageGroupSignal[]
-
-  @@unique([id, primarySnapshotDigest])
-  @@index([state, ownerQueueState, createdAt])
-  @@index([keyRetiredAt])
-  @@index([retiredMemberIds], type: Gin)
-}
-
-/// A report in an open support-triage group. Inserted and deleted, never updated.
-model SupportTriageGroupMember {
-  groupId               String
-  feedbackId            String   @unique
-  primarySnapshotDigest String
-  createdAt             DateTime @default(now())
-
-  group    SupportTriageGroup @relation(fields: [groupId, primarySnapshotDigest], references: [id, primarySnapshotDigest], onDelete: Cascade, onUpdate: Restrict, map: "SupportTriageGroupMember_group_digest_fkey")
-  feedback Feedback           @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-
-  @@id([groupId, feedbackId])
-}
-
-/// One signal per (group, kind): the SHA-256 of a server value its members
-/// share, never the value. Inserted and deleted, never updated.
-model SupportTriageGroupSignal {
-  groupId           String
-  kind              String
-  snapshotDigest    String
-  provenanceClass   String
-  snapshotExpiresAt DateTime
-  observedAt        DateTime @default(now())
-
-  group SupportTriageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-
-  @@id([groupId, kind])
-  @@index([snapshotExpiresAt])
-}
-
-/// A person's support-triage decision (docs/policy/support-triage.md §5, §6):
-/// its kind, when, and a keyed digest of what it was bound to. Kept twelve
-/// months, and deleted whole the moment any linked report's account is.
-/// Migration 20261005010000_support_triage_decision_record holds the rules.
-model SupportTriageDecisionRecord {
-  id                     String   @id
-  decisionKind           String
-  decidedAt              DateTime @default(now())
-  decisionEnvelopeDigest String
-  digestVersion          Int
-  retentionUntil         DateTime @default(now())
-
-  links SupportTriageDecisionRecordLink[]
-
-  @@index([retentionUntil])
-  @@index([digestVersion])
-}
-
-/// One report a decision was bound to. Inserted and deleted, never updated;
-/// deleting any link deletes its record and every other link.
-model SupportTriageDecisionRecordLink {
-  id         String @id
-  recordId   String
-  feedbackId String
-
-  record   SupportTriageDecisionRecord @relation(fields: [recordId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-  feedback Feedback                    @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-
-  @@unique([recordId, feedbackId])
-  @@index([feedbackId])
 }

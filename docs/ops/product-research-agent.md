@@ -294,15 +294,30 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
 - **GitHub에 아무것도 쓰지 않습니다.** 이슈·label·comment·PR·check 전부. 토큰은
   읽기 전용이고, 쓰기 권한이 붙은 토큰을 넣으면 그 자체가 정책 위반입니다.
 
-## 개선 탐색 S0 probe (정책 §12)
+## 개선 탐색 Chromium sandbox (정책 §12)
 
-`npm run agent:product-research-scout-s0-probe -- fixture|pages|renderers`는 browser 규칙과 렌더러를 **로컬에서** 재는
-도구입니다(2026-10-13 측정의 근거). fixture는 로컬 서버 두 개로 금지된 요청이 실제로 도달하는지 세고, pages는 production
-공개 page 20개를 GET·HEAD로만 열며, renderers는 고정 명세 파일을 만들고 검사합니다. 출력에 page 원문·경로·비밀값이 없어
-그대로 붙여도 안전합니다. Railway 서비스는 따로 두지 않습니다. Railway 호스트 일부는 Chromium sandbox를 거부합니다
+Railway 호스트 일부는 Chromium sandbox를 거부합니다
 (`product_research_scout_browser_launch_failed`의 `source`·`fatal`). 그때 walker는 sandbox 없이 한 번 더 띄우고
 `product_research_scout_browser_unsandboxed`와 실행 줄의 `sandbox: off`를 남깁니다(정책 §12). 재시도를 끄려면 walker에
 `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off`를 넣습니다.
+
+## Scout 테스트 계정 켜기 (정책 §14)
+
+owner가 합니다. dev에서 먼저 확인합니다.
+
+1. **[브라우저 — 쓰기]** 그 환경의 사이트에서 관리자가 아닌 새 계정을 일반 가입 절차로 만들고, 필요한 만큼 크레딧을 넣습니다. 이미지까지 보려면 Pro 또는 Max여야 합니다.
+2. **[Railway 대시보드 — Tomverse 프로젝트, 그 환경의 앱]** `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL`에 그 주소를 넣습니다. 이 단계부터 로그인 화면을 봅니다.
+3. **[Admin › 제품 리서치 › 실행과 비용]** 실제 생성 하루 횟수를 정합니다(0이면 생성 없음, 한 번 실행에 5). 모델 호출 상한은 약 39회로 올립니다.
+4. **[Railway 대시보드 — Agents 프로젝트, Scout 서비스]** Run now 후 실행 줄의 `signedInPages`와 `generated`를 읽습니다.
+
+끄기: 2의 변수를 지우면 다음 실행부터 로그인하지 않습니다. 이미 받은 session은 발급 후 1시간에 끝납니다.
+
+## Scout로 dev·Test 화면 보기 (정책 §12)
+
+**[Railway 대시보드 — Agents 프로젝트, 그 환경의 Scout 서비스]** `PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN`에 `https://dev.tomverse.app`이나
+`https://staging.tomverse.app`을 넣고, Cloudflare Zero Trust에서 만든 서비스 토큰을 `PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID`와
+`PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_SECRET`에 넣습니다. Access 앱에 그 토큰을 허용하는 Service Auth 정책이 있어야 합니다. 토큰이 없으면 walker는
+`product_research_scout_misconfigured`(`access_token`)로 시작하지 않습니다. 비밀값은 대화에 붙이지 않습니다.
 
 ## Scout walker (정책 §10, §13)
 

@@ -163,6 +163,7 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
       "return { content, citations: [], model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };",
       "return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };",
       "reportedServiceTier: answer.serviceTier,",
+      "answer = served && { ...served, model: input.pin.model, serviceTier: MARKETING_LLM_SERVICE_TIER };",
     ],
   },
   {

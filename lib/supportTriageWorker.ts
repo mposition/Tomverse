@@ -413,9 +413,7 @@ export const runTriageLlm = async (
 
 /**
  * Step 4: ready only the rows still claimed with this token, for reports still
- * eligible. Reports are no longer grouped here: the model's duplicateOf answer
- * replaced the keyword-era group formation (owner direction 2026-10-19, LLM
- * first), so the worker writes no SupportTriageGroup rows.
+ * eligible. Duplicates are the model's duplicateOf answer, stored on the row.
  */
 export const writeSupportTriageResults = (
   run: { id: string; deadlineAt: Date },

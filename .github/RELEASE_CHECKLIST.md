@@ -997,8 +997,8 @@ order, leaves out any that conflict (named in the body; pick them again later),
 and opens one
 `release/train-YYYYMMDD-HHMM` pull request with the block above pre-filled
 (RC SHA and Rollback SHA; Verified and Back-merge are yours). Every item
-above still applies to that pull request, and a person merges it with
-`npm run merge-train`. One train is open at a time
+above still applies to that pull request, and a person merges it on GitHub or with
+`npm run merge-train -- --include-main`. One train is open at a time
 (`docs/policy/qa-release-agent.md` section 8 item 12). A declared incident
 or advisory still takes `hotfix/**`.
 

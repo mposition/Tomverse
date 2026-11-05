@@ -676,6 +676,52 @@ export const isPubliclySelectableModel = (
     model.status !== "disabled" &&
     model.status !== "coming-soon";
 
+/**
+ * The replacement a retired model can actually send somebody to, or undefined.
+ *
+ * The static catalogue is checked at import time (below), so its links are
+ * live by construction. The *runtime* registry is not: an administrator
+ * retires a model onto a successor, the successor is itself retired months
+ * later, and the first model's link is left pointing at something nobody can
+ * select. The chain is therefore walked -- not read one hop -- and only a
+ * publicly selectable model is returned, so a caller that finds nothing says
+ * "no longer available, pick another" instead of naming a dead end.
+ *
+ * Bounded and cycle-safe for the same reason `resolveSelectableModelId` is:
+ * the links are operator data, so A -> B -> A has to terminate. Two things
+ * differ from that function, which is why this is not a call to it. The model
+ * itself is never the answer -- this answers "where do I send them instead",
+ * asked only once the model cannot serve. And the bar is
+ * `isPubliclySelectableModel`, so a "limited" successor is still named: it is
+ * degraded, not unreachable, and a user told to pick it can.
+ */
+export const resolveReplacementModel = <
+    T extends Pick<
+        AiModel,
+        | "id"
+        | "enabled"
+        | "publiclyListed"
+        | "status"
+        | "catalogDeleted"
+        | "replacementModelId"
+    >,
+>(
+    model: Pick<AiModel, "id" | "replacementModelId">,
+    lookup: (candidateId: string) => T | undefined
+): T | undefined => {
+    const visited = new Set<string>([model.id]);
+    let candidateId = model.replacementModelId;
+    for (let hop = 0; candidateId && hop < 8; hop += 1) {
+        if (visited.has(candidateId)) return undefined;
+        visited.add(candidateId);
+        const candidate = lookup(candidateId);
+        if (!candidate) return undefined;
+        if (isPubliclySelectableModel(candidate)) return candidate;
+        candidateId = candidate.replacementModelId;
+    }
+    return undefined;
+};
+
 if (!isEnabledModelId(DEFAULT_MODEL_ID)) {
     throw new Error(`Default model "${DEFAULT_MODEL_ID}" must be enabled.`);
 }

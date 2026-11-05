@@ -13,7 +13,6 @@ import { runSupportTriageWorker } from "@/lib/supportTriageWorker";
 const PREFIX = "fb-llm-";
 
 const reset = async () => {
-  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageGroup"`);
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageSuggestion"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: PREFIX } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageRun" DISABLE TRIGGER "SupportTriageRun_before_delete"`);
@@ -321,15 +320,9 @@ test("the model chosen in the Admin console is saved, audited and preferred over
   }
 });
 
-test("the Admin switch decides whether the run route works, over the environment variable", async () => {
+test("the Admin switch decides whether the cycle works, over the environment variable", async () => {
   const setting = await import("@/lib/supportTriageLlmSetting");
-  const { handleSupportTriageRun } = await import("@/lib/supportTriageRoutes");
-  const SECRET = "s".repeat(40);
-  const post = () =>
-    new Request("https://example.invalid/api/internal/support-triage/run", {
-      method: "POST",
-      headers: { authorization: `Bearer ${SECRET}` },
-    });
+  const { runSupportTriageCycleQuietly } = await import("@/lib/supportTriageCycle");
   const session = { user: { id: "admin-switch-test", email: "owner@example.invalid" }, expires: "2099-01-01T00:00:00.000Z" };
   const request = new Request("https://example.invalid/api/admin/support-triage/llm-model", { method: "PUT" });
   await report("a");
@@ -341,17 +334,14 @@ test("the Admin switch decides whether the run route works, over the environment
     });
     // Off in the Admin console beats the environment's true.
     await setting.writeSupportTriageEnabledSetting({ session: session as never, request, enabled: false });
-    const off = await handleSupportTriageRun(post(), {
-      env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET, SUPPORT_TRIAGE_ENABLED: "true" },
-    });
-    assert.deepEqual(off.body, { result: "ok", enabled: false });
+    const off = await runSupportTriageCycleQuietly({ env: { SUPPORT_TRIAGE_ENABLED: "true" } });
+    assert.equal(off.worker.outcome, "off");
     assert.equal(await prisma.supportTriageSuggestion.count({ where: { feedbackId: { startsWith: PREFIX } } }), 0);
     // On in the Admin console works with no environment variable at all.
     await setting.writeSupportTriageEnabledSetting({ session: session as never, request, enabled: true });
-    const on = await handleSupportTriageRun(post(), { env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET } });
-    assert.equal(on.status, 200);
-    assert.equal(on.body.enabled, true);
-    assert.equal(on.body.ready, 1);
+    const on = await runSupportTriageCycleQuietly({ env: {} });
+    assert.equal(on.worker.outcome, "ran");
+    assert.equal(on.worker.pass?.ready, 1);
     const audits = await prisma.adminAuditLog.findMany({
       where: { action: "support_triage.enabled_updated" },
       orderBy: { createdAt: "asc" },

@@ -46,6 +46,9 @@ export const QA_RELEASE_SERVICE_VARIABLES = Object.freeze({
     // Optional (owner, 2026-10-29): `false` stops the verdict round's model
     // calls (lib/qaReleaseTrainVerdict.ts); unset, they run on the key above.
     "QA_RELEASE_TRAIN_MODEL_VERDICT",
+    // Optional, off unless "true": one paid CI suggestion call a day on the key
+    // above (lib/qaReleaseCiAdvice.ts).
+    "QA_RELEASE_CI_ADVICE_ENABLED",
     // The train clones and cherry-picks; Railpack's deploy image has no git
     // unless this names it (2026-10-23: the first admitted departure failed
     // assemble for want of it). Read by the build, not by the service.

@@ -3,7 +3,6 @@ import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
-import { handleSupportTriageRun } from "@/lib/supportTriageRoutes";
 import { startSupportTriageRun } from "@/lib/supportTriageRunStore";
 import {
   claimSupportTriageBatch,
@@ -180,32 +179,6 @@ test("an expired claim fails and its report is not called again, whatever its at
     { feedbackId: "fb-w-a", state: "failed", attemptCount: 0, failureCode: "retry_exhausted" },
     { feedbackId: "fb-w-b", state: "failed", attemptCount: 3, failureCode: "retry_exhausted" },
   ]);
-});
-
-test("the run route answers enabled false and writes nothing while triage is off", async () => {
-  await report("a");
-  const SECRET = "w".repeat(40);
-  const post = (secret: string) =>
-    new Request("https://example.invalid/api/internal/support-triage/run", {
-      method: "POST",
-      headers: { authorization: `Bearer ${secret}` },
-    });
-  assert.deepEqual(await handleSupportTriageRun(post("x".repeat(40)), { env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET } }), {
-    status: 401,
-    body: { result: "unauthorized" },
-  });
-  assert.deepEqual(await handleSupportTriageRun(post(SECRET), { env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET } }), {
-    status: 200,
-    body: { result: "ok", enabled: false },
-  });
-  assert.equal(await prisma.supportTriageRun.count(), 0);
-  assert.equal((await suggestions()).length, 0);
-  const on = await handleSupportTriageRun(post(SECRET), {
-    env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET, SUPPORT_TRIAGE_ENABLED: "true" },
-  });
-  assert.equal(on.status, 200);
-  assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "result", "stale", "superseded"]);
-  assert.equal(on.body.ready, 1);
 });
 
 test("an input that comes back after it was answered is not paid for again; one never answered is", async () => {

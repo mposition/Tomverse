@@ -24,7 +24,6 @@ test("source chat messages are not report-derived, while incoming report links r
   assert.equal(reaching.has("Message"), false);
   assert.equal(reaching.has("Conversation"), false);
   assert.equal(reaching.has("SupportTriageSuggestion"), true);
-  assert.equal(reaching.has("SupportTriageGroup"), true);
 });
 
 test("a second report relation on Message cannot hide behind source-message attribution", () => {
@@ -204,12 +203,6 @@ test("negative control: a typed link must be the foreign key of a relation to it
   const selfId = [{ ...SUPPORT_TRIAGE_DELETION_MANIFEST[0], link: { kind: "feedback_id", column: "id" }, onAccountDeletion: "delete" }];
   assert.ok(
     auditDeletionManifest(schema, selfId).some((f) => /link column id is not the foreign key of a relation to Feedback/.test(f))
-  );
-  const viaWrong = [
-    { ...SUPPORT_TRIAGE_DELETION_MANIFEST[0], link: { kind: "via_model", model: "SupportTriageRun", column: "id" }, onAccountDeletion: "cascade_from_group" },
-  ];
-  assert.ok(
-    auditDeletionManifest(schema, viaWrong).some((f) => /link column id is not the foreign key of a relation to SupportTriageRun/.test(f))
   );
 });
 

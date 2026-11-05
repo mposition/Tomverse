@@ -1660,6 +1660,18 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The v46 migration re-creates the recovery request guard so a legacy safe stop binds the profile's live runtime. It performs no row DML and never writes AdminAuditLog; the scanner's one write verb is the guard's existing FOR UPDATE lock.",
   })),
+  ...[
+    ["AmuxIdeaSessionAnalysisBudgetClaim", 5],
+    ["AmuxIdeaSessionAnalysisReservation", 1],
+    ["AdminAuditLog", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261104150000_amux_v19_subscription_claim_no_price/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 5,
+    reason:
+      "The additive v19 migration drops one NOT NULL and re-creates the session budget claim guard so a max_shadow subscription claim needs no price row. It performs no row DML and never writes AdminAuditLog; the scanner's write verbs are the ALTER TABLE clauses and the guard's existing FOR KEY SHARE and FOR SHARE locks.",
+  })),
   {
     path: "lib/amux/cliUsageLedgerStore.ts",
     table: "AmuxCliUsageEvent",
@@ -2428,9 +2440,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageDeletionManifest.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 5,
+    writeVerbs: 2,
     reason:
-      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears only as account-deletion action names (delete, delete_parent_record) and in comments about them. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
+      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears only as the account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
   },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",

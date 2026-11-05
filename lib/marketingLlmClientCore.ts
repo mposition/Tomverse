@@ -314,6 +314,26 @@ export function readMarketingLlmWebSearchAnswer(body: unknown): ProviderAnswer |
   return { ...served(), answerCitations: [...new Set(cited)] } as ProviderAnswer;
 }
 
+/** One call as a channel other than the API key is given it (lib/marketingCodexChannelCore.ts). */
+export type MarketingLlmChannelCall = {
+  readonly model: string;
+  readonly messages: readonly MarketingLlmMessage[];
+  readonly webSearch?: { readonly allowedDomains: readonly string[]; readonly answerSchema?: MarketingLlmAnswerSchema };
+  readonly answerSchema?: MarketingLlmAnswerSchema;
+  /** The searches the pin allows a web-search call. */
+  readonly maxWebSearchCalls?: number;
+  readonly signal?: AbortSignal;
+};
+
+/** What a channel reports back. It cannot name a model or tier the ledger did not ask for. */
+export type MarketingLlmChannelAnswer = Pick<
+  ProviderAnswer,
+  "content" | "citations" | "answerCitations" | "inputTokens" | "outputTokens"
+>;
+
+/** A channel's answer, or null when nothing usable came back, which is an unknown outcome. */
+export type MarketingLlmChannelPort = (call: MarketingLlmChannelCall) => Promise<MarketingLlmChannelAnswer | null>;
+
 const ok = (answer: MarketingLlmBudgetAnswer) => answer.httpStatus === 200 && answer.body.status === "ok";
 const refused = (answer: MarketingLlmBudgetAnswer) =>
   answer.httpStatus === 200 && answer.body.status === "refused" ? String(answer.body.code ?? "refused") : null;
@@ -336,6 +356,12 @@ export async function runMarketingLlmCall(
     /** The provider transport. Called at most once per call. */
     readonly transport: typeof fetch;
     readonly apiKey: string;
+    /**
+     * Replaces the API request when given. A subscription CLI states only the
+     * model it was asked for, so the call settles as the pin's model and tier;
+     * its tokens are the ones it reported.
+     */
+    readonly channel?: MarketingLlmChannelPort;
     /** Asked once, between the reservation and the dispatch: false gives the call up. */
     readonly proceed?: () => boolean;
     /** Aborts the provider request; the service's supervisor is the hard bound. */
@@ -411,24 +437,36 @@ export async function runMarketingLlmCall(
   // 4. The provider, exactly once.
   let answer: ProviderAnswer | null = null;
   try {
-    const response = await deps.transport(input.webSearch ? MARKETING_LLM_RESPONSES_URL : MARKETING_LLM_CHAT_COMPLETIONS_URL, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${deps.apiKey}`,
-        "content-type": "application/json",
-        // A project key already names its project; the header is only for a named one.
-        ...(input.pin.projectId === MARKETING_LLM_KEY_SCOPED_PROJECT ? {} : { "openai-project": input.pin.projectId }),
-      },
-      body: JSON.stringify(
-        input.webSearch
-          ? marketingLlmWebSearchRequestBody(input.pin, input.messages, input.webSearch.allowedDomains, input.webSearch.answerSchema)
-          : marketingLlmRequestBody(input.pin, input.messages, input.answerSchema),
-      ),
-      signal: deps.signal,
-    });
-    if (response.ok) {
-      const body = await response.json().catch(() => null);
-      answer = input.webSearch ? readMarketingLlmWebSearchAnswer(body) : readMarketingLlmProviderAnswer(body);
+    if (deps.channel) {
+      const served = await deps.channel({
+        model: input.pin.model,
+        messages: input.messages,
+        webSearch: input.webSearch,
+        answerSchema: input.answerSchema,
+        maxWebSearchCalls: input.pin.maxWebSearchCalls,
+        signal: deps.signal,
+      });
+      answer = served && { ...served, model: input.pin.model, serviceTier: MARKETING_LLM_SERVICE_TIER };
+    } else {
+      const response = await deps.transport(input.webSearch ? MARKETING_LLM_RESPONSES_URL : MARKETING_LLM_CHAT_COMPLETIONS_URL, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${deps.apiKey}`,
+          "content-type": "application/json",
+          // A project key already names its project; the header is only for a named one.
+          ...(input.pin.projectId === MARKETING_LLM_KEY_SCOPED_PROJECT ? {} : { "openai-project": input.pin.projectId }),
+        },
+        body: JSON.stringify(
+          input.webSearch
+            ? marketingLlmWebSearchRequestBody(input.pin, input.messages, input.webSearch.allowedDomains, input.webSearch.answerSchema)
+            : marketingLlmRequestBody(input.pin, input.messages, input.answerSchema),
+        ),
+        signal: deps.signal,
+      });
+      if (response.ok) {
+        const body = await response.json().catch(() => null);
+        answer = input.webSearch ? readMarketingLlmWebSearchAnswer(body) : readMarketingLlmProviderAnswer(body);
+      }
     }
   } catch {
     answer = null;

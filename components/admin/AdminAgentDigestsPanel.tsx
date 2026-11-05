@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { QaReleaseCiAdviceSection } from "@/components/admin/QaReleaseCiAdviceSection";
+import { QaReleaseFlowSection } from "@/components/admin/QaReleaseFlowSection";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
 import type { AgentDigestConsole, AgentDigestConsoleRow } from "@/lib/agentDigestConsoleRead";
@@ -15,13 +17,16 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
   latestReadableDigest,
   qaReleaseAttentionItems,
+  qaReleaseFlow,
   qaReleaseStatusFigures,
   type QaReleaseAttentionItem,
   type QaReleaseStatusFigures,
 } from "@/lib/qaReleaseAttentionCore";
+import type { QaReleaseCiAdviceRecord } from "@/lib/qaReleaseCiAdviceCore";
 import type { QaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesCore";
+import type { QaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
-import { QA_RELEASE_SECTION_IDS, QA_RELEASE_TRAIN_TAB_HREF, card, openSection, type QaReleaseTrainView } from "@/components/admin/qaReleaseTabParts";
+import { QA_RELEASE_LANE_TAB_HREF, QA_RELEASE_SECTION_IDS, QA_RELEASE_TRAIN_TAB_HREF, card, openSection, type QaReleaseTrainView } from "@/components/admin/qaReleaseTabParts";
 
 const PAGE_PATH = "/admin/qa-release";
 const CONTROL_ROUTE = "/api/admin/agent-digests/qa-release/control";
@@ -62,17 +67,22 @@ export function AdminAgentDigestsPanel({
   initial,
   main,
   trains,
+  ciAdvice,
+  laneRounds,
   nowMs,
 }: {
   initial: AgentDigestConsole;
   main: QaReleaseMainCandidates;
   trains: QaReleaseTrainView[];
+  ciAdvice: QaReleaseCiAdviceRecord | null;
+  laneRounds: QaReleaseLaneRounds;
   /** The server's clock when the page was read, so both renders agree. */
   nowMs: number;
 }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
   const router = useRouter();
-  const items = qaReleaseAttentionItems({ console: initial, main, trains, nowMs });
+  const items = qaReleaseAttentionItems({ console: initial, main, trains, laneRounds, nowMs });
+  const flow = qaReleaseFlow({ main, latched: initial.mergeLane.latched, trains, laneRounds });
   const figures = qaReleaseStatusFigures({ digests: initial.digests, main });
   // Refresh: the page is read again on the server (main's pull requests and
   // production straight from GitHub). The next train lives on its own tab.
@@ -95,11 +105,13 @@ export function AdminAgentDigestsPanel({
         </button>
       </div>
       <AttentionStrip items={items} />
+      <QaReleaseFlowSection flow={flow} />
       <StatusCards figures={figures} />
       <div className="grid min-w-0 gap-5 lg:grid-cols-2">
         <QaReleaseMainCandidatesSection data={main} id={QA_RELEASE_SECTION_IDS.main} />
         <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.lane} />
       </div>
+      <QaReleaseCiAdviceSection advice={ciAdvice} />
       <LatestDigest digests={initial.digests} limit={initial.limit} />
       <AgentSettings initial={initial} />
     </section>
@@ -170,6 +182,13 @@ function AttentionStrip({ items }: { items: QaReleaseAttentionItem[] }) {
           title: m.attentionDigestStale,
           detail: item.lastAt ? fill(m.attentionDigestStaleDetail, { at: aestStamp(item.lastAt) }) : m.attentionDigestNever,
           action: [m.attentionOpenSettings, QA_RELEASE_SECTION_IDS.settings],
+          urgent: false,
+        };
+      case "lane_human":
+        return {
+          title: fill(m.attentionLaneHuman, { count: item.numbers.length }),
+          detail: item.numbers.map((number) => `#${number}`).join(", "),
+          action: [m.attentionSeeLane, QA_RELEASE_LANE_TAB_HREF],
           urgent: false,
         };
       case "train_failed":

@@ -7,7 +7,7 @@
 // the same process is advice, a SIGKILL from the parent is not
 // (agent foundation section 6.2a).
 //
-// The worker gets its four variables and what Node itself needs -- not the
+// The worker gets its variables and what Node itself needs -- not the
 // rest of this process's environment, which Railway fills with its own.
 //
 // Not yet wired into .railway/agent-runners.ts: the service needs the
@@ -46,6 +46,12 @@ const WORKER_VARIABLES = [
   "MARKETING_APP_URL",
   "MARKETING_GENERATOR_SUBMIT_SECRET",
   "MARKETING_LLM_API_KEY",
+  // The subscription channel on the AMUX box: which CLI, and the home its login lives in.
+  "MARKETING_LLM_CHANNEL",
+  "MARKETING_CODEX_BIN",
+  "HOME",
+  "CODEX_HOME",
+  "LANG",
   "PATH",
   "SystemRoot",
   "SYSTEMROOT",
@@ -72,7 +78,9 @@ export const superviseMarketingGeneratorRun = ({
     const runId = randomUUID();
     const deadline = new Date(Date.now() + deadlineMs);
 
-    const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", worker], {
+    // Railway runs the .ts sources and so starts this service with the flag. The box runs a bundle, which needs none.
+    const typeStripping = process.execArgv.filter((flag) => flag === "--experimental-strip-types");
+    const child = spawn(process.execPath, [...typeStripping, "--no-warnings", worker], {
       env: {
         ...workerEnvironment(env, variables),
         MARKETING_GENERATOR_RUN_ID: runId,
