@@ -55,6 +55,20 @@ test("Done keeps a merged idea for seven days, counted from its first merge", ()
     ended("pr_open", { prNumber: 2, mergedAtMs: NOW - MIN, claimedAtMs: NOW - 10 * MIN })])), null);
 });
 
+test("a merged part that names more work is not Done: the idea waits for, or runs, its next part", () => {
+  const partOne = ended("pr_open", { prNumber: 1, continues: true, claimedAtMs: NOW - 9 * 86_400_000,
+    mergedAtMs: NOW - 8 * 86_400_000 });
+  assert.equal(column(idea([partOne])), "amux_backlog", "the next part waits for its claim, however old the merge");
+  assert.equal(column(idea([partOne, attempt()])), "in_progress", "the next part's run shows, not the old merge");
+  const partTwo = amuxIdeaLaneBoardCard(idea([partOne, ended("pr_open", { prNumber: 2 })]), NOW, true);
+  assert.deepEqual([partTwo.column, partTwo.prNumber], ["in_review", 2]);
+  // The final part keeps the idea in Done for its own seven days.
+  const final = (agoMs) => idea([partOne, ended("pr_open", { prNumber: 2, mergedAtMs: NOW - agoMs })]);
+  const done = amuxIdeaLaneBoardCard(final(MIN), NOW, true);
+  assert.deepEqual([done.column, done.prNumber], ["done", 2], "counted from the final part, not the first merge");
+  assert.equal(column(final(AMUX_IDEA_LANE_BOARD_DONE_MS)), null);
+});
+
 test("a card names the idea by title, else its id, and links to the idea's detail", () => {
   const card = amuxIdeaLaneBoardCard(idea([], { title: null }), NOW, true);
   assert.equal(card.title, null);
@@ -84,6 +98,7 @@ test("the board read is one bounded owner-scoped statement that never reads idea
     assert.ok(values.includes("owner-1") && values.includes(AMUX_IDEA_LANE_BOARD_LIMIT) && values.includes(true));
     assert.ok(values.includes(new Date(NOW - AMUX_IDEA_LANE_BOARD_DONE_MS).toISOString()));
     assert.ok(sql.includes(`s."cancelledAt" IS NULL`), "a closed idea leaves the board");
+    assert.ok(sql.includes(`'continues', l."continues"`), "the core needs it to tell a merged part from the idea done");
     assert.equal(/AmuxWorkItem|INSERT|UPDATE|DELETE/.test(sql), false, "it reads no card and writes nothing");
     assert.deepEqual(cards.map((card) => card.column), ["in_progress"], "the core drops an idea analysis took");
   } finally {

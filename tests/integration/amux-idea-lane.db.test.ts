@@ -7,6 +7,7 @@ import { createInitialIdeaOnlySourcePlan } from "@/lib/amux/ideaInitialSourcePla
 import { amuxIdeaLaneTook, claimAmuxIdeaLane, fenceAmuxIdeaLanePublish, observeAmuxIdeaLaneMerges,
   recordAmuxIdeaLaneResult } from "@/lib/amux/ideaLaneService";
 import { EngineeringAgentGitHubReadError } from "@/lib/engineeringAgentGitHubRead";
+import { readAmuxIdeaLaneBoardForOwner } from "@/lib/amux/ideaLaneBoardRead";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { prisma } from "@/lib/prisma";
 
@@ -329,6 +330,39 @@ test("a part that names more work holds the idea until its PR merges, and the ne
   assert.equal(after.length, 3 + AMUX_IDEA_LANE_MAX_ATTEMPTS);
   const [spent] = await readAmuxIdeaProgressForOwner(owner);
   assert.deepEqual([spent.lane?.state, spent.lane?.part], ["failed", 2]);
+  await removeIdeas();
+});
+
+test("the Execution board keeps a larger idea until its final part has been merged for a week", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const idea = await seedIdea(owner, new Date(OLD));
+  const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS);
+  const run = (prNumber: number, claimedDaysAgo: number, mergedDaysAgo: number | null, continues: boolean) => {
+    const claimedAt = daysAgo(claimedDaysAgo);
+    return prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea, claimedAt, leaseUntil: claimedAt,
+      finishedAt: claimedAt, outcome: "pr_open", prNumber, continues,
+      mergedAt: mergedDaysAgo === null ? null : daysAgo(mergedDaysAgo) } });
+  };
+  const board = async () => (await readAmuxIdeaLaneBoardForOwner(owner)).map((card) => [card.column, card.prNumber]);
+
+  // Part 1 merged long past the Done window and named more: the idea is not done.
+  await run(61, 12, 10, true);
+  assert.deepEqual(await board(), [["amux_backlog", null]]);
+  const running = await prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea, claimedAt: daysAgo(0.01),
+    leaseUntil: new Date(Date.now() + 3_600_000) } });
+  assert.deepEqual(await board(), [["in_progress", null]], "the next part's run shows, not the old merge");
+  await prisma.amuxIdeaLaneAttempt.delete({ where: { id: running.id } });
+
+  // A merge before a later part's boundary is settled history, even without continues.
+  await run(62, 11, 9, false);
+  await run(63, 9, 9, true);
+  assert.deepEqual(await board(), [["amux_backlog", null]]);
+
+  // The final part is counted from its own merge, and leaves once that is a week old.
+  const final = await run(64, 2, 1, false);
+  assert.deepEqual(await board(), [["done", 64]]);
+  await prisma.amuxIdeaLaneAttempt.update({ where: { id: final.id }, data: { mergedAt: daysAgo(8) } });
+  assert.deepEqual(await board(), []);
   await removeIdeas();
 });
 
