@@ -48,6 +48,13 @@ export const S2_PAGE_KEYS = Object.freeze(
  */
 export const BUDGET_SIGNAL = signal("P-B", [], 1, [">=95", "exhausted"]);
 export const BUDGET_KEY_LIMIT = 64;
+
+/**
+ * The S3 alert delivery signal: the app's existing operational alerts failing to
+ * go out. Its one key opens at 3 or more failed rows in the trailing hour.
+ */
+export const ALERT_DELIVERY_SIGNAL = signal("P-A", ["admin_notifications"], 1, ["failures_3_plus"]);
+export const ALERT_DELIVERY_KEY = `${ALERT_DELIVERY_SIGNAL.id}#${ALERT_DELIVERY_SIGNAL.scopes[0]}`;
 const BUDGET_SCOPE = /^[a-z][a-z0-9]{0,47}_(day|month)$/;
 
 const S2_SIGNAL_BY_KEY = new Map(S2_PAGE_SIGNALS.flatMap((s) => s.scopes.map((scope) => [`${s.id}#${scope}`, s])));
@@ -55,8 +62,14 @@ const S2_SIGNAL_BY_KEY = new Map(S2_PAGE_SIGNALS.flatMap((s) => s.scopes.map((sc
 /** The signal a key belongs to, or null for a name that is not a page key. */
 export function signalForKey(key) {
   if (S2_SIGNAL_BY_KEY.has(key)) return S2_SIGNAL_BY_KEY.get(key);
+  if (key === ALERT_DELIVERY_KEY) return ALERT_DELIVERY_SIGNAL;
   if (typeof key !== "string" || !key.startsWith(`${BUDGET_SIGNAL.id}#`)) return null;
   return BUDGET_SCOPE.test(key.slice(BUDGET_SIGNAL.id.length + 1)) ? BUDGET_SIGNAL : null;
+}
+
+/** Whether a key is one the S3 switch governs, rather than a required S2 key. */
+export function isS3Key(key) {
+  return key === ALERT_DELIVERY_KEY || signalForKey(key) === BUDGET_SIGNAL;
 }
 
 /** The state a key starts from after a genesis. */

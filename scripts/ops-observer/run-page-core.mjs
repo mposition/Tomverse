@@ -33,9 +33,9 @@
 // URL, no secret, no key state, no response body.
 
 import { incidentOrigin, owedMessages } from "./advance-request-core.mjs";
-import { BUDGET_KEY_LIMIT, BUDGET_SIGNAL, S2_PAGE_SIGNALS, evaluateKey, initialKeyState, signalForKey } from "./classify-core.mjs";
+import { BUDGET_KEY_LIMIT, S2_PAGE_SIGNALS, evaluateKey, initialKeyState, isS3Key, signalForKey } from "./classify-core.mjs";
 import { checkNotification, isCanonicalItemId, renderChannelCheckMessage, renderPageMessage } from "./content-guard-core.mjs";
-import { budgetObservations, observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
+import { alertDeliveryObservations, budgetObservations, observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
 import { admitOwedItems, planRunMessage } from "./notification-budget-core.mjs";
 import { RUN_DEADLINE_MS } from "./transaction-bounds-core.mjs";
 import { OWNER_TIME_ZONE, ownerDateOf } from "./owner-date-core.mjs";
@@ -93,7 +93,7 @@ export function runIdOf(ms, random) {
  * observations. Pure. Returns { keys, reservation, deferred } where
  * `reservation` is null or the advance request's reservation.
  */
-export function planAdvance({ state, observations, nowMs, ownerDate, channelCheckDue = false, budgetPages = false }) {
+export function planAdvance({ state, observations, nowMs, ownerDate, channelCheckDue = false, s3Pages = false }) {
   const keys = {};
   for (const signal of S2_PAGE_SIGNALS) {
     for (const scope of signal.scopes) {
@@ -101,19 +101,18 @@ export function planAdvance({ state, observations, nowMs, ownerDate, channelChec
       keys[key] = evaluateKey(signal, state.keys[key], observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
     }
   }
-  // Budget keys the chain holds are never dropped: with the switch off they stay
+  // S3 keys the chain holds are never dropped: with the switch off they stay
   // exactly as they are, so switching back on cannot re-announce an open incident.
   // A window that has gone from the report holds too, rather than recovering.
-  const prefix = `${BUDGET_SIGNAL.id}#`;
-  const held = Object.keys(state.keys).filter((name) => name.startsWith(prefix) && signalForKey(name) !== null).sort();
+  const held = Object.keys(state.keys).filter(isS3Key).sort();
   for (const key of held) keys[key] = state.keys[key];
-  if (budgetPages) {
+  if (s3Pages) {
     const fresh = Object.keys(observations)
-      .filter((name) => name.startsWith(prefix) && signalForKey(name) !== null && !held.includes(name))
+      .filter((name) => isS3Key(name) && !held.includes(name))
       .sort()
       .slice(0, Math.max(0, BUDGET_KEY_LIMIT - held.length));
     for (const key of [...held, ...fresh]) {
-      keys[key] = evaluateKey(BUDGET_SIGNAL, state.keys[key] ?? initialKeyState(), observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
+      keys[key] = evaluateKey(signalForKey(key), state.keys[key] ?? initialKeyState(), observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
     }
   }
   const owed = owedMessages(state.keys, keys, ownerDate);
@@ -225,11 +224,11 @@ export async function runPage({
       snapshot = parsed.ok ? parsed.snapshot : null;
     }
   }
-  // S3's budget pages stay off until the owner sets this switch (policy §8).
-  const budgetPages = env.OPS_OBSERVER_S3_BUDGET_PAGES === "true";
+  // S3's pages stay off until the owner sets this switch (policy §8).
+  const s3Pages = env.OPS_OBSERVER_S3_PAGES === "true";
   const observations = {
     ...observationsFromSnapshot({ healthOk, snapshot }),
-    ...(budgetPages && healthOk ? budgetObservations(snapshot) : {}),
+    ...(s3Pages && healthOk ? { ...budgetObservations(snapshot), ...alertDeliveryObservations(snapshot) } : {}),
   };
 
   // 3. The state. Only trusted goes on.
@@ -257,7 +256,7 @@ export async function runPage({
     nowMs: startedAt,
     ownerDate,
     channelCheckDue: live && inChannelCheckWindow(startedAt),
-    budgetPages,
+    s3Pages,
   });
   record.deferred = plan.deferred;
   record.reservedItems = plan.reservation ? plan.reservation.items.length : 0;

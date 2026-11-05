@@ -60,7 +60,7 @@ export function isKeyState(signal, state) {
   return false;
 }
 
-/** T2: `keys` is every S2 page key and any S3 budget keys, each a valid state for its signal. */
+/** T2: `keys` is every S2 page key and any S3 keys, each a valid state for its signal. */
 export function keysAreValid(keys) {
   if (!isPlainObject(keys)) return false;
   const names = Object.keys(keys);

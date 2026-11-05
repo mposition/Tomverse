@@ -13,7 +13,7 @@ const mod = (relative: string) => pathToFileURL(resolve(ROOT, relative)).href;
 const PAGE = "p".repeat(40);
 const DIGEST = "d".repeat(40);
 
-const world = { calls: [] as string[], failJobs: false, hangBudgets: false };
+const world = { calls: [] as string[], failJobs: false, hangBudgets: false, failedAlerts: 0 as number | Error, alertWhere: null as unknown };
 let POST: (request: Request) => Promise<Response>;
 
 before(async () => {
@@ -46,6 +46,19 @@ before(async () => {
       },
     },
   });
+  mock.module(mod("lib/prisma.ts"), {
+    namedExports: {
+      prisma: {
+        adminNotificationLog: {
+          count: async ({ where }: { where: unknown }) => {
+            world.alertWhere = where;
+            if (world.failedAlerts instanceof Error) throw world.failedAlerts;
+            return world.failedAlerts;
+          },
+        },
+      },
+    },
+  });
   ({ POST } = await import(mod("app/api/internal/ops-snapshot/route.ts")));
 });
 
@@ -53,6 +66,8 @@ beforeEach(() => {
   world.calls = [];
   world.failJobs = false;
   world.hangBudgets = false;
+  world.failedAlerts = 0;
+  world.alertWhere = null;
   process.env.OPS_OBSERVER_SECRET = PAGE;
   process.env.OPS_OBSERVER_DIGEST_SECRET = DIGEST;
 });
@@ -95,6 +110,24 @@ test("both services read the closed snapshot, no-store, readiness first, and the
   }
   const events = logged.map((line) => JSON.parse(line)).filter((e) => e.event === "ops_snapshot_read");
   assert.deepEqual(events.map((e) => [e.service, e.result]), [["page", "ok"], ["digest", "ok"]]);
+});
+
+test("failed operational alerts of the last hour cross as a band, and a failed count only as unknown", async () => {
+  world.failedAlerts = 7;
+  const started = Date.now();
+  const body = await (await call(PAGE)).json();
+  assert.equal(body.alertDeliveryFailuresBand, "3+");
+  const where = world.alertWhere as { status: string; createdAt: { gte: Date } };
+  assert.equal(where.status, "failed");
+  assert.ok(Math.abs(started - where.createdAt.gte.getTime() - 3_600_000) < 5_000);
+
+  world.failedAlerts = new Error("db down: password=hunter2");
+  const failed = await call(PAGE);
+  assert.equal(failed.status, 200);
+  const failedBody = await failed.json();
+  assert.equal(failedBody.alertDeliveryFailuresBand, "unknown");
+  assert.notEqual(failedBody.readiness, "unknown");
+  assert.ok(!JSON.stringify(failedBody).includes("hunter2"));
 });
 
 test("a failing source makes only its section unknown, and its error never leaves", async () => {

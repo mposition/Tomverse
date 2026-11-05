@@ -59,6 +59,15 @@ test("a full snapshot is built in the closed shape and parsed by the runner's pa
   assert.equal(observations["P3#credit_reservation_reconciliation"], "stuck");
 });
 
+test("the alert failure count crosses only as a band", () => {
+  assert.deepEqual(
+    [0, 2, 3, 40].map((count) => build({ alertFailures: ok(count) }).snapshot.alertDeliveryFailuresBand),
+    ["0", "2", "3+", "3+"],
+  );
+  assert.equal(build({ alertFailures: failed() }).snapshot.alertDeliveryFailuresBand, "unknown");
+  assert.equal(build({ alertFailures: ok(-1) }).snapshot.alertDeliveryFailuresBand, "unknown");
+});
+
 test("a failed section is unknown on its own", () => {
   for (const [section, key] of [["readiness", "readiness"], ["jobs", "scheduledJobs"], ["budgets", "providerBudgets"]]) {
     const result = build({ [section]: failed() });
