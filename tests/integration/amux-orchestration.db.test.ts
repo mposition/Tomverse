@@ -175,7 +175,7 @@ test("AMUX idle-in-transaction timeout rolls back a preceding write", async () =
             where: { id: taskId },
             data: { priority: "p0" },
           });
-          await delay(250);
+          await delay(AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS + 150);
           await tx.$queryRaw`SELECT 1`;
         },
       ),
@@ -375,7 +375,7 @@ test("AMUX LOCAL timeout settings do not leak to another connection use", async 
           current_setting('idle_in_transaction_session_timeout') AS idle
       `;
       assert.equal(values[0]?.statement, "200ms");
-      assert.equal(values[0]?.idle, "100ms");
+      assert.equal(values[0]?.idle, `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms`);
     },
   );
   const values = await prisma.$queryRaw<
@@ -385,7 +385,7 @@ test("AMUX LOCAL timeout settings do not leak to another connection use", async 
       current_setting('idle_in_transaction_session_timeout') AS idle
   `;
   assert.notEqual(values[0]?.statement, "200ms");
-  assert.notEqual(values[0]?.idle, "100ms");
+  assert.notEqual(values[0]?.idle, `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms`);
 });
 
 const signals = (
