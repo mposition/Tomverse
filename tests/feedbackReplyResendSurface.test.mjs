@@ -26,9 +26,18 @@ const LOADER = fileURLToPath(new URL("../lib/adminConsoleData.ts", import.meta.u
 const panel = readFileSync(PANEL, "utf8");
 const loader = readFileSync(LOADER, "utf8");
 
+/** The rule that decides whether a re-send is offered. */
+const resendGate = (() => {
+  const start = panel.indexOf("const canResendReply =");
+  assert.ok(start > 0, "the re-send rule moved; this test cannot see it");
+  const end = panel.indexOf(";\n", start);
+  assert.ok(end > 0, "the re-send rule has no end");
+  return panel.slice(start, end);
+})();
+
 /** The block that renders the re-send affordance, from its own testid. */
 const resendBlock = (() => {
-  const start = panel.indexOf("canEmailReply(feedback) &&");
+  const start = panel.indexOf("{canResendReply(feedback) ? (");
   assert.ok(start > 0, "the re-send affordance moved; this test cannot see it");
   const end = panel.indexOf("feedback-reply-resend-preview", start);
   const closing = panel.indexOf("</span>\n                    ) : null}", start);
@@ -38,20 +47,22 @@ const resendBlock = (() => {
 
 test("the re-send control is gated and previewed by the completion record", () => {
   assert.match(
-    resendBlock,
+    resendGate,
     /feedback\.completionSnapshot\?\.userReply/,
     "the button must appear only when the completion record has a reply"
   );
   assert.match(
     resendBlock,
-    /feedback-reply-resend-preview[\s\S]*feedback\.completionSnapshot\.userReply/,
+    /feedback-reply-resend-preview[\s\S]*feedback\.completionSnapshot\?\.userReply/,
     "the preview must show the completion record's reply"
   );
-  assert.doesNotMatch(
-    resendBlock,
-    /feedback\.userReply/,
-    "the row's latest reply is not what a re-send sends"
-  );
+  for (const source of [resendGate, resendBlock]) {
+    assert.doesNotMatch(
+      source,
+      /feedback\.userReply/,
+      "the row's latest reply is not what a re-send sends"
+    );
+  }
 });
 
 test("the completion record reaches the console from the lifecycle event", () => {
