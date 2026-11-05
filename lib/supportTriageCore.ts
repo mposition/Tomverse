@@ -1,7 +1,7 @@
 /**
  * The support-triage agent's deterministic core: the timeout layers and the
  * guarded budget derived from them, the retention batch gate, the retention
- * heartbeat conditions, the per-pass promotion budget and the decision about an
+ * heartbeat conditions, the suggestion state machine and the decision about an
  * inherited `transaction_timeout`.
  *
  * Every value here is fixed by docs/policy/support-triage.md (version 1). This
@@ -218,70 +218,6 @@ export const retentionHeartbeat = (input: {
   };
 };
 
-/** Group kinds in priority order, highest first. */
-export const GROUP_KIND_PRIORITY = Object.freeze([
-  "server_evidence_match",
-  "same_account",
-  "autofix_fingerprint",
-] as const);
-export type GroupKind = (typeof GROUP_KIND_PRIORITY)[number];
-
-export const GROUP_MEMBER_CAP = 50;
-export const PROMOTION_MOVES_PER_PASS_MAX = 50;
-
-export type PromotionCandidate = {
-  readonly kind: GroupKind;
-  readonly groupCandidateKey: string;
-  /** Memberships the move would create; at most `GROUP_MEMBER_CAP`. */
-  readonly moves: number;
-};
-
-/**
- * Policy section 6. Candidates are ordered by kind priority (highest first),
- * then by `groupCandidateKey` ascending, and only the prefix whose cumulative
- * move count stays within the remaining pass budget is admitted. Comparing each
- * candidate alone against the budget let two 30-move candidates through a
- * 50-move budget together.
- */
-export const allocatePromotionBudget = (
-  candidates: readonly PromotionCandidate[],
-  remainingBudget: number
-) => {
-  if (!Number.isSafeInteger(remainingBudget) || remainingBudget < 0) {
-    throw new RangeError("remainingBudget must be a non-negative integer");
-  }
-  for (const candidate of candidates) {
-    if (!GROUP_KIND_PRIORITY.includes(candidate.kind)) {
-      throw new RangeError("unknown group kind");
-    }
-    if (!Number.isSafeInteger(candidate.moves) || candidate.moves < 1 || candidate.moves > GROUP_MEMBER_CAP) {
-      throw new RangeError("a candidate moves between 1 and 50 members");
-    }
-  }
-  const ordered = [...candidates].sort((a, b) => {
-    const byKind = GROUP_KIND_PRIORITY.indexOf(a.kind) - GROUP_KIND_PRIORITY.indexOf(b.kind);
-    if (byKind !== 0) return byKind;
-    return a.groupCandidateKey < b.groupCandidateKey
-      ? -1
-      : a.groupCandidateKey > b.groupCandidateKey
-        ? 1
-        : 0;
-  });
-  const admitted: PromotionCandidate[] = [];
-  const deferred: PromotionCandidate[] = [];
-  let used = 0;
-  for (const candidate of ordered) {
-    // A prefix only: once one candidate is deferred, every later one is too.
-    if (deferred.length === 0 && used + candidate.moves <= remainingBudget) {
-      admitted.push(candidate);
-      used += candidate.moves;
-    } else {
-      deferred.push(candidate);
-    }
-  }
-  return { admitted, deferred, movesUsed: used, remainingAfter: remainingBudget - used };
-};
-
 /**
  * `SupportTriageRun` (policy sections 4 and 8): one row per run. The kinds and
  * outcomes below are the CHECK lists of migration
@@ -423,93 +359,8 @@ export const OWNER_QUEUE_STATES = Object.freeze(["not_queued", "displayed"] as c
 /** A claim's lease, set by the database when a suggestion is claimed. */
 export const SUGGESTION_LEASE_SECONDS = 5 * 60;
 
-/**
- * `SupportTriageGroup` (policy section 6, design section 5.4). The lists and
- * the transition table below are the CHECK lists and the `-- transitions:`
- * block of migration 20261004020000_support_triage_group; tests compare them.
- * A group is one equivalence class of one kind (`GROUP_KIND_PRIORITY`).
- */
-export const GROUP_STATES = Object.freeze([
-  "candidate",
-  "confirmed",
-  "dismissed",
-  "expired",
-  "invalidated",
-] as const);
-export type GroupState = (typeof GROUP_STATES)[number];
-
-/** Open groups hold members, signals and a primary snapshot digest; terminal ones hold none. */
-export const GROUP_OPEN_STATES: readonly GroupState[] = Object.freeze(["candidate", "confirmed"]);
-export const GROUP_TERMINAL_STATES: readonly GroupState[] = Object.freeze([
-  "dismissed",
-  "expired",
-  "invalidated",
-]);
-
-export const GROUP_TRANSITIONS: readonly (readonly [GroupState, GroupState])[] = Object.freeze([
-  // A person's decision.
-  ["candidate", "confirmed"],
-  ["candidate", "dismissed"],
-  // Seven days not_queued, or the primary signal's snapshot expired.
-  ["candidate", "expired"],
-  // Fewer than two members, a key collision lost, or three deferred evaluations in a row.
-  ["candidate", "invalidated"],
-  ["confirmed", "invalidated"],
-]);
-
-export const isGroupTransitionAllowed = (from: GroupState, to: GroupState) =>
-  GROUP_TRANSITIONS.some(([a, b]) => a === from && b === to);
-
-/** A person's decision, kept apart from the state so an invalidated group keeps it. */
-export const GROUP_DECISIONS = Object.freeze(["confirmed", "dismissed"] as const);
-
-/** Where a signal's server value comes from; determined by its kind. */
-export const SIGNAL_PROVENANCE: Readonly<Record<GroupKind, string>> = Object.freeze({
-  server_evidence_match: "server_evidence",
-  same_account: "account_derived",
-  autofix_fingerprint: "autofix_derived",
-});
-
-/** Member ids a terminal group keeps as its key tombstone, at most one group's worth. */
-export const GROUP_RETIRED_MEMBER_IDS_MAX = GROUP_MEMBER_CAP;
-
-/** Consecutive deferred key evaluations that invalidate a group (policy section 6). */
-export const GROUP_KEY_RECHECK_DEFERRAL_LIMIT = 3;
-export const GROUP_KEY_TOMBSTONE_DAYS = 7;
-
-/** The provenance classes a signal can carry; `SIGNAL_PROVENANCE` maps each kind to one. */
-export const SIGNAL_PROVENANCE_CLASSES = Object.freeze([
-  "server_evidence",
-  "account_derived",
-  "autofix_derived",
-] as const);
-
-/**
- * `SupportTriageDecisionRecord` (policy sections 5 and 6). The kinds are the
- * CHECK list of migration 20261005010000_support_triage_decision_record.
- */
-export const DECISION_KINDS = Object.freeze([
-  "suggestion_accepted",
-  "suggestion_rejected",
-  "group_confirmed",
-  "group_dismissed",
-  "sample_judged",
-] as const);
-export type DecisionKind = (typeof DECISION_KINDS)[number];
-
-/** How long a decision record is kept (operator decision X2); a CHECK holds it. */
-export const DECISION_RECORD_RETENTION_MONTHS = 12;
-
-/** Reports one decision can be bound to: a group's members at most. */
-export const DECISION_RECORD_LINKS_MAX = GROUP_MEMBER_CAP;
-
-/**
- * Retention of the other deletable classes (policy section 5). A terminal
- * suggestion and a terminal group are kept 30 days after they became
- * terminal; a decision record carries its own `retentionUntil`.
- */
+/** A terminal suggestion is kept 30 days after it became terminal (policy section 5). */
 export const TERMINAL_SUGGESTION_RETENTION_DAYS = 30;
-export const TERMINAL_GROUP_RETENTION_DAYS = 30;
 /**
  * The worker triages only reports created within this many days. Retention
  * deletes a terminal suggestion no earlier than this long after it was
@@ -526,7 +377,7 @@ export const TRIAGE_REPORT_WINDOW_DAYS = TERMINAL_SUGGESTION_RETENTION_DAYS;
 export const NOT_QUEUED_SUGGESTION_EXPIRY_DAYS = 7;
 
 /** The classes one retention batch deletes, one statement pair each, in this order. */
-export const RETENTION_CLASSES = Object.freeze(["runs", "suggestions", "groups", "decisionRecords"] as const);
+export const RETENTION_CLASSES = Object.freeze(["runs", "suggestions"] as const);
 export type RetentionClass = (typeof RETENTION_CLASSES)[number];
 
 /** Worker liveness (policy section 7): twice the 30-minute cadence plus 20 minutes. */

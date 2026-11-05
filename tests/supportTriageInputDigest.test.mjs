@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { suggestionInputDigest } = await import("../lib/supportTriageInputDigest.ts");
+const { canonicalJson, suggestionInputDigest } = await import("../lib/supportTriageInputDigest.ts");
 
 // The suggestion input digest (design section 5.3).
+
+test("canonical JSON sorts keys at every depth, so field order never changes the digest", () => {
+  assert.equal(canonicalJson({ b: 1, a: { d: [2, 1], c: null } }), '{"a":{"c":null,"d":[2,1]},"b":1}');
+  assert.equal(canonicalJson({ a: undefined, b: 1 }), '{"b":1}');
+  assert.throws(() => canonicalJson(Number.NaN), RangeError);
+  assert.throws(() => canonicalJson(() => 1), TypeError);
+});
 
 const BASE = {
   report: {
