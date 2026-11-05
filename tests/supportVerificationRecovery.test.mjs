@@ -11,6 +11,10 @@ import { ko } from "../locales/ko.ts";
 import { pt } from "../locales/pt.ts";
 import { zh } from "../locales/zh.ts";
 import { zhHant } from "../locales/zhHant.ts";
+import {
+  buildSupportVerificationMailto,
+  SUPPORT_MAILTO_BODY_MAX_LENGTH,
+} from "../lib/supportVerificationMailto.ts";
 
 /**
  * A failed security check used to be a dead end on the support form: the only
@@ -165,6 +169,19 @@ test("retry and the fallback route render only alongside a failure", () => {
   assert.match(slotSource, /errorFallback\?: ReactNode/);
 });
 
+test("cancel steps aside once a failure has a way forward", () => {
+  assert.match(
+    slotSource,
+    /const hasRecovery = Boolean\(failure\) && Boolean\(onRetry \|\| errorFallback\)/
+  );
+  // Cancelling a settled failure only makes the hook forget it, which takes
+  // the error, the retry and the address away in one go.
+  assert.match(slotSource, /isChallengeVisible && onCancel && !hasRecovery \?/);
+  // A surface that offers neither control is unchanged: cancel is still the
+  // one thing it can show next to an error.
+  assert.equal(slotSource.match(/data-testid=\{`\$\{testId\}-cancel`\}/g)?.length, 1);
+});
+
 test("retry copy exists in every locale and is not left in English", () => {
   const dictionaries = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };
   for (const [name, dictionary] of Object.entries(dictionaries)) {
@@ -216,7 +233,8 @@ test("a verification failure keeps everything that was typed", () => {
 
 test("the support address is offered next to the verification error", () => {
   assert.match(supportSource, /errorFallback=\{/);
-  assert.match(supportSource, /href=\{`mailto:\$\{page\.emailValue\}`\}/);
+  assert.match(supportSource, /buildSupportVerificationMailto\(\{/);
+  assert.match(supportSource, /address: page\.emailValue,/);
   assert.match(supportSource, /data-testid="support-verification-email"/);
   // Every locale's contact card already carries the real address, so the
   // fallback link needs no new copy and cannot drift from it.
@@ -224,4 +242,56 @@ test("the support address is offered next to the verification error", () => {
     supportSource.match(/"emailValue": "support@tomverse\.app"/g)?.length,
     8
   );
+});
+
+test("the fallback link carries the request instead of a blank address", () => {
+  // Subject and body come from the form's own state, so following the link
+  // continues this request rather than asking for it to be written again.
+  assert.match(
+    supportSource,
+    /subject: `\$\{page\.formTitle\}: \$\{page\.types\[type\]\}`,\s*\n\s*message,/
+  );
+
+  const href = buildSupportVerificationMailto({
+    address: "support@tomverse.app",
+    subject: "Contact support: Billing",
+    message: "  No answer after I attached a PDF.  ",
+  });
+  assert.equal(
+    href,
+    "mailto:support@tomverse.app?subject=Contact%20support%3A%20Billing" +
+      "&body=No%20answer%20after%20I%20attached%20a%20PDF."
+  );
+
+  // Nothing typed yet, nothing to prefill -- the address alone still works.
+  assert.equal(
+    buildSupportVerificationMailto({
+      address: "support@tomverse.app",
+      subject: "   ",
+      message: "   ",
+    }),
+    "mailto:support@tomverse.app"
+  );
+
+  // Newlines survive as newlines, not as a run-together paragraph.
+  assert.match(
+    buildSupportVerificationMailto({
+      address: "support@tomverse.app",
+      message: "first\nsecond",
+    }),
+    /body=first%0Asecond$/
+  );
+});
+
+test("a message too long for a mail handler is cut where it can be marked", () => {
+  const long = "x".repeat(SUPPORT_MAILTO_BODY_MAX_LENGTH + 40);
+  const href = buildSupportVerificationMailto({
+    address: "support@tomverse.app",
+    message: long,
+  });
+  const body = decodeURIComponent(href.split("body=")[1]);
+  assert.equal(body, `${"x".repeat(SUPPORT_MAILTO_BODY_MAX_LENGTH)}\n[truncated]`);
+  // The cut belongs to the link only; the form still holds every character,
+  // so a retry submits the whole message.
+  assert.ok(SUPPORT_MAILTO_BODY_MAX_LENGTH < 2_000);
 });

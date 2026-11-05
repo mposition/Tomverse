@@ -89,7 +89,8 @@ test("Node's io_uring is refused and its read is still observed as a complete ma
       "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
       "--ro-bind", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
       "--ro-bind", directory, directory, "--chdir", directory,
-      "--setenv", "PATH", "/usr/bin:/bin", "--", "/usr/bin/node", "-e",
+      "--ro-bind", process.execPath, "/tmp/node",
+      "--setenv", "PATH", "/usr/bin:/bin", "--", "/tmp/node", "-e",
       "require('fs').readFile('TRACE.txt', (e, d) => process.stdout.write(e ? 'ERR' : d))",
     ] });
     const child = launched.child;
@@ -126,7 +127,8 @@ test("concurrent reads that strace splits across threads still form a complete m
       "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
       "--ro-bind", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
       "--ro-bind", directory, directory, "--chdir", directory,
-      "--setenv", "PATH", "/usr/bin:/bin", "--", "/usr/bin/node", "-e",
+      "--ro-bind", process.execPath, "/tmp/node",
+      "--setenv", "PATH", "/usr/bin:/bin", "--", "/tmp/node", "-e",
       `Promise.all(${JSON.stringify(files)}.map((f) => require('fs').promises.readFile(f)))` +
         ".then((all) => process.stdout.write(String(all.length)))",
     ] });
