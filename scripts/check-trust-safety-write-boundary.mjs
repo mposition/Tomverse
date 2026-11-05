@@ -915,11 +915,24 @@ export const analysePackageFile = ({ specifier, file, source }) => {
       try {
         edges.push(createRequire(file).resolve(target));
       } catch {
-        // A dependency that does not resolve from here cannot be loaded here.
+        // **A failure, not a dropped edge.** Code this check could not resolve
+        // is code it did not judge, and passing on it means the boundary check
+        // succeeded over a file it never read. §5.6 is the other way round --
+        // a branch it cannot resolve or read is a failure -- and independent
+        // review found all three places that swallowed one.
+        fail("package-unresolved", target);
       }
       return;
     }
-    for (const candidate of [base, `${base}.js`, `${base}.cjs`, `${base}.mjs`, join(base, "index.js")]) {
+    for (const candidate of [
+      base,
+      `${base}.js`,
+      `${base}.cjs`,
+      `${base}.mjs`,
+      join(base, "index.js"),
+      join(base, "index.cjs"),
+      join(base, "index.mjs"),
+    ]) {
       try {
         readFileSync(candidate, "utf8");
         edges.push(candidate);
@@ -928,6 +941,9 @@ export const analysePackageFile = ({ specifier, file, source }) => {
         // Not that spelling; try the next.
       }
     }
+    // None of them: a relative target this check cannot find is a file it did
+    // not judge.
+    fail("package-unresolved", target);
   };
 
   // Local names that hold a loader value, collected before the walk so an
@@ -1020,19 +1036,122 @@ export const analysePackageFile = ({ specifier, file, source }) => {
   return { failures, edges };
 };
 
+/**
+ * Every file a package can be entered through, not the one `require.resolve`
+ * picks.
+ *
+ * A package's `exports` map has a branch per condition -- `require`, `import`,
+ * `react-server`, `browser`, `default` -- and resolving once judges one of
+ * them. Independent review named the consequence: a package whose `require`
+ * branch is clean and whose `import` or `react-server` branch calls `fetch`
+ * passed. (ㄷ) is about what the closure loads, and which branch that is
+ * depends on how the file importing it was itself loaded, so all of them are
+ * walked.
+ *
+ * `main`, `module` and `browser` are read for the same reason, and so are the
+ * subpath entries: every string in the map is an entry somebody can reach.
+ * A package.json that cannot be read or parsed is a failure -- the alternative
+ * is clearing a package whose entry points are unknown.
+ */
+export const packageEntryFiles = (specifier) => {
+  const failures = [];
+  const files = [];
+  let resolved;
+  try {
+    resolved = require.resolve(specifier);
+  } catch {
+    failures.push({ entry: "package", file: specifier, rule: "package-unresolved", detail: "" });
+    return { failures, files };
+  }
+  files.push(resolved);
+
+  // The package root: the nearest directory above the resolved entry that has
+  // a package.json with a name.
+  let root = dirname(resolved);
+  let manifest;
+  for (let up = 0; up < 8; up += 1) {
+    try {
+      const read = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+      if (typeof read.name === "string") {
+        manifest = read;
+        break;
+      }
+    } catch {
+      // Not here; look one directory up.
+    }
+    const parent = dirname(root);
+    if (parent === root) break;
+    root = parent;
+  }
+  if (manifest === undefined) {
+    failures.push({
+      entry: "package",
+      file: specifier,
+      rule: "package-manifest-unreadable",
+      detail: "no package.json above the resolved entry",
+    });
+    return { failures, files };
+  }
+
+  const strings = [];
+  const collect = (value) => {
+    if (typeof value === "string") {
+      strings.push(value);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    for (const inner of Object.values(value)) collect(inner);
+  };
+  collect(manifest.exports);
+  collect(manifest.main);
+  collect(manifest.module);
+  collect(manifest.browser);
+
+  for (const entry of strings) {
+    if (!entry.startsWith(".")) continue;
+    // §5.6's walk is over what a runtime loads, and §11-7 records the targets
+    // it leaves out as a residual: declaration files, TypeScript sources and
+    // JSON. `zod` points some entries at `src/*.ts`, which a bundler compiles
+    // and Node never loads, so reading them would judge files the closure does
+    // not run -- and their TypeScript-style `./x.js` specifiers do not resolve
+    // as written either.
+    if (/\.(d\.[cm]?ts|[cm]?tsx?|json)$/.test(entry)) continue;
+    const base = resolvePath(root, entry);
+    let found = false;
+    for (const candidate of [base, `${base}.js`, `${base}.cjs`, `${base}.mjs`, join(base, "index.js")]) {
+      try {
+        readFileSync(candidate, "utf8");
+        files.push(candidate);
+        found = true;
+        break;
+      } catch {
+        // Not that spelling.
+      }
+    }
+    // A wildcard entry (`./*.js`) names a pattern rather than a file, and
+    // the files it covers are reached by the edges inside the package.
+    if (!found && !entry.includes("*")) {
+      failures.push({
+        entry: "package",
+        file: `${specifier} -> ${entry}`,
+        rule: "package-unresolved",
+        detail: "an entry point in package.json that does not resolve",
+      });
+    }
+  }
+
+  return { failures, files: [...new Set(files)] };
+};
+
 const checkPackages = (specifiers) => {
   const failures = [];
   for (const specifier of specifiers) {
     if (specifier === "server-only") continue;
-    let entryFile;
-    try {
-      entryFile = require.resolve(specifier);
-    } catch {
-      failures.push({ entry: "package", file: specifier, rule: "package-unresolved", detail: "" });
-      continue;
-    }
+    const entries = packageEntryFiles(specifier);
+    failures.push(...entries.failures);
+    if (entries.files.length === 0) continue;
     const seen = new Set();
-    const queue = [entryFile];
+    const queue = [...entries.files];
     while (queue.length > 0) {
       // `>=`, so the budget is the number of files read rather than one more
       // than it: the check fired after reading 1,501.
@@ -1052,6 +1171,14 @@ const checkPackages = (specifiers) => {
       try {
         source = readFileSync(file, "utf8");
       } catch {
+        // A file the walk reached and could not read is a file it did not
+        // judge, so it is a failure rather than a skip.
+        failures.push({
+          entry: "package",
+          file: `${specifier} -> ${relative(ROOT, file)}`,
+          rule: "package-unreadable",
+          detail: "",
+        });
         continue;
       }
       // The egress names, over text: these are built files, and over-matching

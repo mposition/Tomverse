@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
 import test from "node:test";
 
 import {
   ALLOWED_SPECIFIERS,
   analysePackageFile,
+  packageEntryFiles,
   BOUNDARY_MODULES,
   ENTRY_POINTS,
   checkTrustSafetyWriteBoundary,
@@ -622,8 +625,14 @@ test("(ㄷ): the loader rule, as a table of what is refused and what is not", ()
     "an ordinary conditional": "module.exports = (c, a, b) => (c ? a : b);",
   };
 
+  // A real directory with the two files the allowed rows reference: an
+  // unresolvable relative edge is a failure now, so a fictional path would
+  // fail every row that requires a sibling.
+  const dir = mkdtempSync(join(tmpdir(), "ts-package-table-"));
+  writeFileSync(join(dir, "util.js"), "module.exports = 1;");
+  writeFileSync(join(dir, "schema.js"), "export const z = 1;");
   const judge = (source) =>
-    analysePackageFile({ specifier: "probe", file: "node_modules/probe/index.js", source }).failures;
+    analysePackageFile({ specifier: "probe", file: join(dir, "index.js"), source }).failures;
 
   for (const [label, source] of Object.entries(refused)) {
     assert.ok(judge(source).length > 0, `${label} must be refused`);
@@ -631,6 +640,44 @@ test("(ㄷ): the loader rule, as a table of what is refused and what is not", ()
   for (const [label, source] of Object.entries(allowed)) {
     assert.deepEqual(judge(source), [], `${label}: ${JSON.stringify(judge(source))}`);
   }
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("(ㄷ): every condition branch of a package is walked, not the resolved one", () => {
+  // `require.resolve` picks one branch -- for `zod` it is `./index.cjs`, the
+  // `require` condition -- so a package whose `require` branch is clean and
+  // whose `import` or `react-server` branch calls `fetch` passed. Independent
+  // review named it as structural, and it was. Every string entry in the
+  // manifest is an entry somebody can reach, so all of them are walked.
+  const { failures, files } = packageEntryFiles("zod");
+  assert.deepEqual(failures, [], JSON.stringify(failures));
+  const names = files.map((file) => file.split("node_modules").pop().split(sep).join("/"));
+  assert.ok(names.some((name) => name.endsWith("/zod/index.cjs")), "the require branch");
+  assert.ok(names.some((name) => name.endsWith("/zod/index.js")), "the import branch");
+  assert.ok(names.some((name) => name.includes("/zod/v4/")), "and the subpath entries");
+  assert.ok(files.length > 2, `only ${files.length} entry points`);
+  // TypeScript sources are not entry points here: `zod` points `@zod/source`
+  // at `src/*.ts`, which a bundler compiles and Node never loads. §11-7
+  // records that exclusion as a residual.
+  assert.ok(!names.some((name) => name.endsWith(".ts")), "no TypeScript sources");
+});
+
+test("(ㄷ): a package that cannot be resolved or read is a failure", () => {
+  // Dropping an unresolvable edge let the boundary check succeed over code it
+  // never read. All three places that swallowed one now report it.
+  const { failures } = packageEntryFiles("a-package-that-is-not-installed");
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].rule, "package-unresolved");
+
+  const judged = analysePackageFile({
+    specifier: "probe",
+    file: "node_modules/probe/index.js",
+    source: 'module.exports = require("./a-file-that-is-not-there.js");',
+  });
+  assert.ok(
+    judged.failures.some((failure) => failure.rule === "package-unresolved"),
+    JSON.stringify(judged.failures),
+  );
 });
 
 test("the entry points and the specifier list are the ones the section names", () => {
