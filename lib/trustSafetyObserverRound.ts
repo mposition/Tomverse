@@ -173,8 +173,9 @@ export const runTrustSafetyObservation = async ({
   }
 
   // T0: the activation read. Every §6 input comes from this one transaction,
-  // so the checks judge one consistent view rather than a config row read
-  // before an audit entry that was written in between.
+  // and that transaction runs at REPEATABLE READ (see the wrapper), so the
+  // checks judge one snapshot -- not a config row read before an audit entry
+  // that was written in between, which would read as `binding_mismatch`.
   const activation = await withTrustSafetyTransaction({
     kind: "activation_read",
     runDeadline: roundDeadline,

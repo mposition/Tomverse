@@ -9,6 +9,7 @@ export const maxDuration = 120;
 import { createHash, timingSafeEqual } from "node:crypto";
 
 import { runTrustSafetyObservation } from "@/lib/trustSafetyObserverRound";
+import { TrustSafetyRoundRefused, isBudgetInsufficient } from "@/lib/trustSafetyTransaction";
 
 // E1, the trust-safety observer's only entry point into product state
 // (docs/policy/trust-safety-compliance-agent.md §4, §5.6).
@@ -90,13 +91,20 @@ export async function POST(request: Request) {
     // query: a refusal from the arming function or a late COMMIT arrives here
     // with the row already absent, and there is nothing to clean up (§5.5).
     const code = (error as { code?: unknown })?.code;
+    // A refusal the design expects -- too little budget to start a transaction
+    // in (the arming function's OB001, recognised by SQLSTATE through either
+    // error shape) or one of the wrapper's own refusals -- is a round that did
+    // not run, not a broken app. It answers `failed` either way, and the
+    // status says which it was so an operator is not sent looking for a fault.
+    const expected = isBudgetInsufficient(error) || error instanceof TrustSafetyRoundRefused;
     console.error(
       JSON.stringify({
         event: "trust_safety_observation_failed",
+        expected,
         errorName: error instanceof Error ? error.name : "unknown",
         errorCode: typeof code === "string" && /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : null,
       }),
     );
-    return json({ outcome: "failed" }, 500);
+    return json({ outcome: "failed" }, expected ? 200 : 500);
   }
 }

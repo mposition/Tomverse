@@ -75,8 +75,8 @@ test("the response carries the closed enum and nothing else", () => {
 
 test("the ping URL is neither read nor logged here", () => {
   // §4: the URL lives in the main app variable and appears in no log, no
-  // manifest and no response. The round passes `process.env` through; this
-  // file never names the variable.
+  // manifest and no response. The round reads that literal itself; this file
+  // never names the variable.
   assert.doesNotMatch(source, /TRUST_SAFETY_OBSERVER_PING_URL/);
   // The log line is the outcome, the mode, the fault and the ping's result.
   const logged = code.match(/event: "trust_safety_observation"[\s\S]*?\}\)/);
@@ -90,7 +90,11 @@ test("a thrown round logs a code-shaped code and no message", () => {
   assert.match(code, /errorName: error instanceof Error \? error\.name : "unknown"/);
   assert.match(code, /\^\[A-Za-z0-9_\]\{1,64\}\$/);
   assert.doesNotMatch(code, /error\.message|String\(error\)|errorMessage/);
-  assert.match(code, /json\(\{ outcome: "failed" \}, 500\)/);
+  // A refusal the design expects answers `failed` at 200; an unexpected error
+  // answers `failed` at 500. The body is the same enum either way (§4).
+  assert.match(code, /json\(\{ outcome: "failed" \}, expected \? 200 : 500\)/);
+  assert.match(code, /isBudgetInsufficient\(error\)/);
+  assert.match(code, /error instanceof TrustSafetyRoundRefused/);
 });
 
 test("the route holds no judgement of its own", () => {

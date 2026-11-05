@@ -210,5 +210,11 @@ test("the raw statements are where §5.6 puts them", () => {
     for (const banned of ["$executeRaw", "$executeRawUnsafe", "$queryRawUnsafe"]) {
       assert.ok(!code.includes(banned), `${file}: ${banned}`);
     }
+    // §5.4's device rests on this absence. `SET CONSTRAINTS <name> IMMEDIATE`
+    // fires a pending deferred check at that point, and it is not queued
+    // again -- so a transaction that sends it can then run past its deadline
+    // and commit with the row intact, which was measured on 17.10. No
+    // statement in these files may contain it.
+    assert.doesNotMatch(code, /SET\s+CONSTRAINTS/i, `${file}: SET CONSTRAINTS`);
   }
 });

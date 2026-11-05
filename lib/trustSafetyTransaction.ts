@@ -130,6 +130,29 @@ const DEADLINE_SETTING = new Map<TrustSafetyTransactionKind, string>([
 ]);
 
 /**
+ * The isolation each kind runs at.
+ *
+ * `activation_read` is the one that needs more than READ COMMITTED, and
+ * independent review found why: §6 judges the config row against the audit
+ * entries bound to it, and under READ COMMITTED each statement takes a fresh
+ * snapshot -- so a legitimate activation write committing between the two
+ * reads is seen as an old config with a new entry, which the derivation
+ * reports as `binding_mismatch`. A fault, fail-closed, but a false one, and it
+ * would stop counting for a round because someone used the switch correctly.
+ * One snapshot for that transaction removes the case.
+ *
+ * The others stay READ COMMITTED: the count is a single statement, and a
+ * writing transaction at REPEATABLE READ would add serialization failures to
+ * a path that must not retry (§5.5).
+ */
+const ISOLATION = new Map<TrustSafetyTransactionKind, "ReadCommitted" | "RepeatableRead">([
+  ["activation_read", "RepeatableRead"],
+  ["dsr_read", "ReadCommitted"],
+  ["run_write", "ReadCommitted"],
+  ["activation_write", "ReadCommitted"],
+]);
+
+/**
  * Runs `fn` inside one bounded transaction of `kind`.
  *
  * In order, and the order is §5.4's: the two database timers first, then --
@@ -239,7 +262,7 @@ export const withTrustSafetyTransaction = async <T>({
       return fn(tx, armed);
     },
     {
-      isolationLevel: "ReadCommitted",
+      isolationLevel: ISOLATION.get(kind) ?? "ReadCommitted",
       timeout: bound.prismaTimeoutMs,
       maxWait: 2_000,
     },

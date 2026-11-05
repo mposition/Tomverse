@@ -36,6 +36,29 @@
 -- computes the same window at statement time for `pingPermitted`, but the
 -- binding judgement is this one.
 --
+-- **What the deferred trigger does not bind, measured.** A transaction may
+-- send `SET CONSTRAINTS trust_safety_observer_run_deadline_check IMMEDIATE`
+-- (or `ALL IMMEDIATE`), which fires the pending check at that point; it passes
+-- while the deadline still holds, is not queued again, and the transaction can
+-- then run past the deadline and commit with the row intact. Verified on a
+-- throwaway 17.10 cluster: the row lands, and the same transaction without
+-- that statement is refused with TS002.
+--
+-- So the device holds against a transaction that does not send that statement,
+-- and what keeps this agent's transactions in that class is the application
+-- side: the statement set of E1 and E3 is fixed and counted (§5.5's ceiling),
+-- the raw-SQL allowlist pins its shape and number (§5.6 item 3), and a test
+-- holds `SET CONSTRAINTS` out of every one of this agent's own files. It is
+-- not a defence against arbitrary SQL in the product database -- a party who
+-- can send that can also disable the trigger or drop it, and §5.4 never
+-- claimed otherwise.
+--
+-- The same cluster showed what would close it on 17: a `transaction_timeout`
+-- armed at the deadline terminates such a transaction before COMMIT, leaving
+-- no row. Arming it there instead of at `C_guarded + 3s` changes §12 (1) table
+-- B's approved gap, which only the operator signs, so it is recorded for that
+-- signature rather than done here.
+--
 -- What this does not guarantee (§5.4 states it, so this comment does not
 -- overclaim): that COMMIT finishes before the deadline. The pre-commit and
 -- durability phases are not bounded on any PostgreSQL version. The success

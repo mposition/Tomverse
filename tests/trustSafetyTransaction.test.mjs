@@ -229,7 +229,13 @@ test("the transaction options are the kind's, with the ordering §5.5 requires",
       fn: async () => null,
     });
     const options = fake.optionsSeen();
-    assert.equal(options.isolationLevel, "ReadCommitted", kind);
+    // REPEATABLE READ for the activation read only: §6 judges the config row
+    // against the entries bound to it, and under READ COMMITTED a legitimate
+    // activation write committing between those two reads reads as
+    // `binding_mismatch`. The writing kinds stay READ COMMITTED -- a
+    // serialization failure on a path that must not retry is worse.
+    const expectedIsolation = kind === "activation_read" ? "RepeatableRead" : "ReadCommitted";
+    assert.equal(options.isolationLevel, expectedIsolation, kind);
     assert.equal(options.timeout, TRUST_SAFETY_BOUNDS.get(kind).prismaTimeoutMs, kind);
     assert.equal(options.maxWait, 2_000, kind);
     // The database must end a run before the client library gives up on it.

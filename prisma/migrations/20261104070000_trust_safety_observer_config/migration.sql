@@ -106,6 +106,14 @@ BEGIN
   IF claimed > clock_timestamp() + interval '24 seconds' THEN
     RAISE EXCEPTION 'trust_safety_activation_deadline_too_far' USING ERRCODE = 'TS004';
   END IF;
+  -- An already-expired deadline is refused here, as the run row's trigger
+  -- does. The reach check above only bounds how far ahead it may be, so
+  -- without this the write proceeds on a deadline with no time left and holds
+  -- the transaction open until COMMIT before failing. Independent review found
+  -- the two writing paths had drifted apart on this.
+  IF claimed <= clock_timestamp() THEN
+    RAISE EXCEPTION 'trust_safety_activation_deadline_expired' USING ERRCODE = 'TS002';
+  END IF;
   -- Fixed on the row, so the deferred check judges this instant's deadline and
   -- not whatever the setting holds at COMMIT. A caller cannot write the column
   -- itself: the assignment here overwrites whatever was supplied.
