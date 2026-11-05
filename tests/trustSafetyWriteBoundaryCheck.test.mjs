@@ -564,6 +564,14 @@ test("(ㄷ): the loader rule, as a table of what is refused and what is not", ()
   // whole table is asserted together, so moving one case cannot quietly move
   // another, and the five allowed rows are what keep the rule usable.
   const refused = {
+    // `createRequire` was exempt by name, so an alias of `require` called
+    // that skipped the specifier check. There is no exemption now.
+    "createRequire as an alias of require":
+      'const createRequire = require; module.exports = createRequire("node:net");',
+    // Evaluating a `new` loads the module too, and only calls were judged.
+    "new require(...)": 'module.exports = new require("node:https");',
+    // An alias assigned rather than declared went untracked.
+    "an alias assigned, not declared": 'let r; r = require; module.exports = r("node:net");',
     "an unreducible specifier beside an allowed string":
       'const target = "node:" + "net"; module.exports = require(target, "node:crypto");',
     "an allowed module as the forwarded thisArg":
@@ -601,6 +609,7 @@ test("(ㄷ): the loader rule, as a table of what is refused and what is not", ()
     "a static import": 'import { z } from "./schema.js"; export const s = z;',
     "an ordinary computed read, which react does": "module.exports = (config, key) => config[key];",
     "a call that no loader takes part in": "module.exports = (f, x) => f(x);",
+    "an ordinary new": "module.exports = class A { constructor() { this.x = new Map(); } };",
   };
 
   const judge = (source) =>

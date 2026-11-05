@@ -857,16 +857,22 @@ export const analysePackageFile = ({ specifier, file, source }) => {
    *
    * It refuses more than the fold did, and deliberately: a package that hands
    * a loader something this check cannot read is a package it cannot clear.
-   * The one exemption is `createRequire`, whose argument is a base URL rather
-   * than a specifier -- refusing it would refuse `createRequire(
-   * import.meta.url)` and with it most packages' CommonJS interop. The loader
-   * it returns is tracked by name and judged where it is called.
+   *
+   * **There is no exemption, and the one there was is why.** `createRequire`
+   * was exempt because its argument is a base URL rather than a specifier --
+   * true of the real function, not of the name. Independent review pointed
+   * out that `const createRequire = require; createRequire("node:net")` then
+   * skipped the specifier check entirely. Resolving the name to a real import
+   * would close that, but it is unnecessary: a package that imports
+   * `node:module` to get `createRequire` already fails, because (ㄱ-1) allows
+   * no export of it. The exemption bought nothing a legitimate package needed
+   * and cost a hole.
    */
   const judgeLoaderCall = (call, rule) => {
-    const callee = call.expression;
-    const key = propertyName(callee) ?? (ts.isIdentifier(callee) ? callee.text : null);
-    if (key === "createRequire") return;
-    for (const argument of call.arguments) {
+    // `new X()` carries no argument list at all when it is written without
+    // parentheses, so the default keeps a `new require` from reading as a
+    // call with no arguments and passing.
+    for (const argument of call.arguments ?? []) {
       const text = asString(argument);
       if (text === null) {
         fail(rule, `${argument.getText(parsed).slice(0, 30)} does not reduce to a string`);
@@ -919,6 +925,17 @@ export const analysePackageFile = ({ specifier, file, source }) => {
     if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
       if (isLoaderValue(node.initializer)) loaderNames.add(node.name.text);
     }
+    // An assignment, not only a declaration: `let r; r = require; r("node:net")`
+    // left the alias untracked, so the call after it was judged as an ordinary
+    // one. Independent review found it.
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left) &&
+      isLoaderValue(node.right)
+    ) {
+      loaderNames.add(node.left.text);
+    }
     if (ts.isBindingElement(node) && ts.isIdentifier(node.name)) {
       const key = node.propertyName
         ? asString(node.propertyName) ?? (ts.isIdentifier(node.propertyName) ? node.propertyName.text : null)
@@ -938,13 +955,17 @@ export const analysePackageFile = ({ specifier, file, source }) => {
       if (target !== null) judgeTarget(target, "package-loader-unreducible");
     }
 
-    if (ts.isCallExpression(node)) {
+    // A call or a `new`: evaluating `new require("node:https")` loads the
+    // module just as a call does, and judging only calls let it past every
+    // rule -- independent review found it.
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      const args = node.arguments ?? [];
       // A dynamic import, which the old scan did not see at all.
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-        judgeTarget(asString(node.arguments[0]) ?? undefined, "package-dynamic-import");
+        judgeTarget(asString(args[0]) ?? undefined, "package-dynamic-import");
       } else if (isLoaderValue(node.expression)) {
         judgeLoaderCall(node, "package-loader-unreducible");
-      } else if (node.arguments.some((argument) => isLoaderValue(argument))) {
+      } else if ([...args].some((argument) => isLoaderValue(argument))) {
         // The argument group: the loader is handed to something else, and the
         // specifier is still visible.
         judgeLoaderCall(node, "package-loader-forwarded");
