@@ -665,6 +665,7 @@ export const en = {
         guestVerificationTitle: "Please confirm to continue",
         guestVerificationDescription: "A quick check that reduces automated requests. It usually finishes on its own.",
         guestVerificationClose: "Cancel the check",
+        guestVerificationRetry: "Try the check again",
         guestVerificationLongWait: "This check is taking longer than usual. You can keep waiting, or cancel it and try again.",
         guestVerificationFailed: "The check could not be completed. Please try again.",
         guestVerificationUnavailable: "The verification service is unavailable right now. Please try again shortly.",
