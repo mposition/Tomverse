@@ -21,7 +21,7 @@
 // current keys to these keys owes with owedMessages() -- the rules
 // evaluateKey() applies -- and reserves only items in that set.
 
-import { BUDGET_SIGNAL, REOPEN_WINDOW_MS, S2_PAGE_SIGNALS, initialKeyState, signalForKey } from "./classify-core.mjs";
+import { REOPEN_WINDOW_MS, S2_PAGE_SIGNALS, initialKeyState, isS3Key, signalForKey } from "./classify-core.mjs";
 import { ITEM_ORIGINS, MESSAGE_KINDS } from "./delivery-core.mjs";
 import { keysAreValid } from "./keys-schema-core.mjs";
 import { admissibleReservationDates } from "./owner-date-core.mjs";
@@ -122,11 +122,11 @@ export function owedMessages(previousKeys, nextKeys, ownerDate) {
       if (kind) owed.push({ signal: signal.id, scope, kind, openedAt: nextKeys[key].openedAt });
     }
   }
-  // S3 budget keys, in a fixed order: a key the chain does not hold yet starts closed.
-  const budgetPrefix = `${BUDGET_SIGNAL.id}#`;
-  for (const key of Object.keys(nextKeys).filter((name) => name.startsWith(budgetPrefix)).sort()) {
-    const kind = owedMessage(BUDGET_SIGNAL, previousKeys[key] ?? initialKeyState(), nextKeys[key], ownerDate);
-    if (kind) owed.push({ signal: BUDGET_SIGNAL.id, scope: key.slice(budgetPrefix.length), kind, openedAt: nextKeys[key].openedAt });
+  // S3 keys, in a fixed order: a key the chain does not hold yet starts closed.
+  for (const key of Object.keys(nextKeys).filter(isS3Key).sort()) {
+    const signal = signalForKey(key);
+    const kind = owedMessage(signal, previousKeys[key] ?? initialKeyState(), nextKeys[key], ownerDate);
+    if (kind) owed.push({ signal: signal.id, scope: key.slice(signal.id.length + 1), kind, openedAt: nextKeys[key].openedAt });
   }
   return owed;
 }

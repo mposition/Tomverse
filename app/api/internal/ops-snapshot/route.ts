@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+import { prisma } from "@/lib/prisma";
 import { getProviderBudgetStatuses } from "@/lib/providerBudgetStatus";
 import { computeReadinessChecks } from "@/lib/readinessChecks";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
@@ -17,6 +18,8 @@ import { buildSnapshot, settleWithin } from "@/scripts/ops-observer/snapshot-cor
 // "unknown" on its own. The snapshot is validated by the runner's own parser
 // before it leaves. Each read is logged without a body: when, which service,
 // and whether the snapshot was valid.
+
+const ALERT_FAILURE_WINDOW_MS = 60 * 60 * 1000;
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -37,18 +40,27 @@ export async function POST(request: Request) {
   }
 
   const now = new Date();
+  const wantsAlertDelivery = (await request.json().catch(() => null))?.alertDelivery === true;
   // Readiness before the database aggregates: it is the one a broken
   // database must not starve. Every section has its own time limit, so a
   // source that never answers costs only its own section.
   const readiness = await settleWithin(computeReadinessChecks());
-  const [jobs, budgets] = await Promise.all([
+  const [jobs, budgets, alertFailures] = await Promise.all([
     settleWithin(getScheduledJobsDashboard(now)),
     settleWithin(getProviderBudgetStatuses({ now })),
+    wantsAlertDelivery
+      ? settleWithin(
+          prisma.adminNotificationLog.count({
+            where: { status: "failed", createdAt: { gte: new Date(now.getTime() - ALERT_FAILURE_WINDOW_MS) } },
+          }),
+        )
+      : undefined,
   ]);
   const built = buildSnapshot({
     readiness,
     jobs,
     budgets,
+    alertFailures,
     now,
     commitSha: process.env.RAILWAY_GIT_COMMIT_SHA,
   }) as { ok: true; snapshot: unknown } | { ok: false; reason: string };

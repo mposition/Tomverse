@@ -176,7 +176,7 @@ test("a sent page whose confirm fails beats nothing and posts nothing more", asy
   const result = await run(fake, { env: LIVE_ENV });
   assert.deepEqual([result.exitCode, result.outcome], [1, "confirm_refused"]);
   assert.equal(fake.paths().filter((path) => path === WEBHOOK).length, 1);
-  assert.equal(fake.paths().includes(HEARTBEAT), false);
+  assert.equal(fake.paths().filter((path) => path === HEARTBEAT).length, 0);
 });
 
 test("a live chain without a Slack webhook reserves nothing and beats nothing", async () => {
@@ -195,7 +195,7 @@ test("a shadow chain never touches the webhook, even when one is configured", as
   }));
   const result = await run(fake, { env: LIVE_ENV });
   assert.deepEqual([result.exitCode, result.outcome], [0, "advanced"]);
-  assert.equal(fake.paths().includes(WEBHOOK), false);
+  assert.equal(fake.paths().filter((path) => path === WEBHOOK).length, 0);
 });
 
 test("the channel check window is Tuesday 10:00-12:00 in Brisbane", () => {
@@ -249,6 +249,7 @@ const budgetSnapshot = (band) => {
   }).snapshot;
 };
 const BUDGET_KEY = "P-B#openai_day";
+const ALERT_KEY = "P-A#admin_notifications";
 
 test("budget pages are off without the switch, and a bad window opens one with it", async () => {
   const routes = liveRoutes({
@@ -263,7 +264,7 @@ test("budget pages are off without the switch, and a bad window opens one with i
   assert.equal(offBody.reservation, null);
 
   const on = fakeFetch(routes);
-  await run(on, { env: { ...ENV, OPS_OBSERVER_S3_BUDGET_PAGES: "true" } });
+  await run(on, { env: { ...ENV, OPS_OBSERVER_S3_PAGES: "true" } });
   const onBody = on.calls.find((call) => call.path.endsWith("/advance")).body;
   assert.equal(onBody.keys[BUDGET_KEY].status, "open");
   assert.deepEqual(onBody.reservation.items.map((item) => [item.signal, item.scope, item.kind]), [["P-B", "openai_day", "new_open"]]);
@@ -277,7 +278,7 @@ test("a budget key worsens at exhausted, recovers after two good runs, and holds
     observations: band === null ? {} : { [BUDGET_KEY]: band === "<70" ? "ok" : band },
     nowMs: START,
     ownerDate: "2026-10-08",
-    budgetPages: true,
+    s3Pages: true,
   });
   const opened = plan(initial(), ">=95");
   assert.equal(opened.keys[BUDGET_KEY].status, "open");
@@ -292,13 +293,53 @@ test("a budget key worsens at exhausted, recovers after two good runs, and holds
   assert.deepEqual(second.reservation.items.map((item) => item.kind), ["recovery"]);
 });
 
+test("the alert delivery key is off without the switch, opens at 3+ with it, and recovers after two quiet runs", async () => {
+  const withBand = (band) => {
+    const value = budgetSnapshot("<70");
+    return { ...value, alertDeliveryFailuresBand: band };
+  };
+  const off = fakeFetch(liveRoutes({
+    "/api/internal/ops-snapshot": [200, withBand("3+")],
+    "/api/internal/ops-observer/state": [200, trusted()],
+    "/api/internal/ops-observer/confirm": [200, { result: "shadowed" }],
+  }));
+  await run(off);
+  assert.equal(Object.hasOwn(off.calls.find((call) => call.path.endsWith("/advance")).body.keys, ALERT_KEY), false);
+  assert.equal(off.calls.find((call) => call.path.endsWith("/ops-snapshot")).body, null);
+
+  const on = fakeFetch(liveRoutes({
+    "/api/internal/ops-snapshot": [200, withBand("3+")],
+    "/api/internal/ops-observer/state": [200, trusted()],
+    "/api/internal/ops-observer/confirm": [200, { result: "shadowed" }],
+  }));
+  await run(on, { env: { ...ENV, OPS_OBSERVER_S3_PAGES: "true" } });
+  assert.deepEqual(on.calls.find((call) => call.path.endsWith("/ops-snapshot")).body, { alertDelivery: true });
+  const body = on.calls.find((call) => call.path.endsWith("/advance")).body;
+  assert.equal(body.keys[ALERT_KEY].status, "open");
+  assert.equal(parseAdvanceRequest(JSON.stringify(body), START).ok, true);
+
+  const plan = (keys, observations) => planAdvance({ state: trusted({ keys }), observations, nowMs: START, ownerDate: "2026-10-08", s3Pages: true });
+  const first = plan(body.keys, { [ALERT_KEY]: "ok" });
+  assert.equal(first.reservation, null);
+  const second = plan(first.keys, { [ALERT_KEY]: "ok" });
+  assert.equal(second.keys[ALERT_KEY].status, "closed");
+  assert.deepEqual(second.reservation.items.map((item) => [item.signal, item.scope, item.kind]), [["P-A", "admin_notifications", "recovery"]]);
+});
+
+test("an app that does not send the alert band yet leaves the key as it is", () => {
+  const opened = planAdvance({ state: trusted(), observations: { [ALERT_KEY]: "failures_3_plus" }, nowMs: START, ownerDate: "2026-10-08", s3Pages: true });
+  const held = planAdvance({ state: trusted({ keys: opened.keys }), observations: { [ALERT_KEY]: "unknown" }, nowMs: START, ownerDate: "2026-10-08", s3Pages: true });
+  assert.equal(held.keys[ALERT_KEY].status, "open");
+  assert.equal(held.reservation, null);
+});
+
 test("switching budget pages off keeps an open key, and switching back on does not announce it again", () => {
-  const plan = (keys, budgetPages, band) => planAdvance({
+  const plan = (keys, s3Pages, band) => planAdvance({
     state: trusted({ keys }),
     observations: band ? { [BUDGET_KEY]: band } : {},
     nowMs: START,
     ownerDate: "2026-10-08",
-    budgetPages,
+    s3Pages,
   });
   const opened = plan(initial(), true, ">=95");
   assert.deepEqual(opened.reservation.items.map((item) => item.kind), ["new_open"]);
@@ -317,7 +358,7 @@ test("a held budget key survives past the limit; only new windows are left out",
     observations: { "P-B#aaa_day": ">=95" },
     nowMs: START,
     ownerDate: "2026-10-08",
-    budgetPages: true,
+    s3Pages: true,
   });
   assert.equal(Object.keys(planned.keys).filter((key) => key.startsWith("P-B#")).length, 64);
   assert.equal(Object.hasOwn(planned.keys, "P-B#aaa_day"), false);
@@ -329,7 +370,7 @@ test("a reservation for a budget key the body does not hold is refused, not a cr
     "/api/internal/ops-observer/state": [200, trusted()],
     "/api/internal/ops-observer/confirm": [200, { result: "shadowed" }],
   }));
-  await run(fake, { env: { ...ENV, OPS_OBSERVER_S3_BUDGET_PAGES: "true" } });
+  await run(fake, { env: { ...ENV, OPS_OBSERVER_S3_PAGES: "true" } });
   const body = fake.calls.find((call) => call.path.endsWith("/advance")).body;
   delete body.keys[BUDGET_KEY];
   const parsed = parseAdvanceRequest(JSON.stringify(body), START);
