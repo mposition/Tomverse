@@ -12,6 +12,12 @@ cd "$(dirname "$0")"
 : "${MARKETING_MEDIA_SUBMIT_SECRET:?MARKETING_MEDIA_SUBMIT_SECRET is not set}"
 
 git -C ../.. pull --ff-only --quiet
+[ "${MARKETING_MEDIA_JOB_PULLED:-}" = 1 ] || MARKETING_MEDIA_JOB_PULLED=1 exec bash "$PWD/run-daily.sh" "$@"
+# The pull can replace this file while bash is still reading it: on 2026-11-05
+# the CLI call was read from the middle of the new file and lost its flags. So
+# the pulled copy runs again from the top. Everything above the line before
+# this comment stays byte for byte as it is, because a running older copy
+# reads on from exactly there.
 npm ci --no-audit --no-fund --silent
 npx --yes remotion browser ensure >/dev/null
 npx --yes playwright install chromium >/dev/null
