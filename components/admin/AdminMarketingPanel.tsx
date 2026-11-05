@@ -10,6 +10,7 @@ import {
   instantFromLocalInput,
   localDateTimeValue,
   type MarketingAction,
+  type MarketingBatchResult,
 } from "@/components/admin/MarketingActions";
 import { MarketingAnalysisSwitch, MarketingBriefReport } from "@/components/admin/MarketingAnalysis";
 import { MarketingMorningCard } from "@/components/admin/MarketingMorning";
@@ -323,6 +324,15 @@ export function AdminMarketingPanel({
                   <p className="w-full text-xs font-semibold text-amber-300">{m.truncatedAtLimit}</p>
                 ) : null}
               </div>
+              {view.section === "published" && view.canWrite ? (
+                <MarketingActionRail
+                  actions={scheduleAllApprovedActions(rows, m)}
+                  section={view.section}
+                  onDone={done}
+                  m={m}
+                  appearance="block"
+                />
+              ) : null}
               {rows.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-400">
                   {m.empty}
@@ -1669,6 +1679,46 @@ const MARKETING_LOCALE_CHANGE_ACCOUNT_STATUSES = new Set([
   "connect_pending",
   "approval_mode",
 ]);
+
+/** Far enough ahead that the time is still in the future at the database's clock. */
+const SCHEDULE_ALL_LEAD_MS = 2 * 60 * 1000;
+
+/**
+ * One press for the approved posts on this page: each is scheduled through the
+ * same route, with the same checks and its own audit entry, as its own button. A
+ * person still approved every post and presses this; a hand-posted account's
+ * post is not the publisher's, so it is left out.
+ */
+export function scheduleAllApprovedActions(rows: Row[], m: Record<string, string>): MarketingAction[] {
+  const approved = rows.filter(
+    (row) => str(row.status) === "approved" && str(row.provider) !== "manual"
+  );
+  if (approved.length === 0) return [];
+  const count = String(approved.length);
+  return [
+    {
+      id: "schedule-all-approved",
+      primary: true,
+      label: m.actScheduleAllApproved.replace("{n}", count),
+      path: "",
+      confirm: m.confirmScheduleAllApproved.replace("{n}", count),
+      body: () => null,
+      batch: () => {
+        const scheduledAt = new Date(Date.now() + SCHEDULE_ALL_LEAD_MS).toISOString();
+        return approved.map((row) => ({
+          path: POST(row.id, "schedule"),
+          body: { ...postCas(row), scheduledAt },
+        }));
+      },
+      describe: (result) => {
+        const { sent, failed } = result as MarketingBatchResult;
+        return (failed > 0 ? m.scheduleAllPartial : m.scheduleAllDone)
+          .replace("{sent}", String(sent))
+          .replace("{failed}", String(failed));
+      },
+    },
+  ];
+}
 
 function publishedActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];

@@ -99,6 +99,52 @@ export type MarketingAction = {
   checked?: boolean;
   fields?: MarketingActionField[];
   body: (values: Record<string, string>) => unknown;
+  /**
+   * Sent instead of `path` and `body`: one request per row, so each row keeps
+   * its own check and its own audit entry. `describe` receives the batch's result.
+   */
+  batch?: () => readonly MarketingBatchRequest[];
+};
+
+export type MarketingBatchRequest = { readonly path: string; readonly body: unknown };
+
+export type MarketingBatchResult = {
+  readonly sent: number;
+  readonly failed: number;
+  readonly requiresReauthentication: boolean;
+};
+
+const REAUTHENTICATION_REQUIRED = "ADMIN_REAUTHENTICATION_REQUIRED";
+
+/**
+ * The requests in order. A row the server refuses does not stop the others, and
+ * it is never sent twice; only a lapsed step-up stops, because every later
+ * request would be refused the same way.
+ */
+export const sendMarketingBatch = async (
+  requests: readonly MarketingBatchRequest[],
+  post: (request: MarketingBatchRequest) => Promise<Response>
+): Promise<MarketingBatchResult> => {
+  let sent = 0;
+  let failed = 0;
+  for (const request of requests) {
+    try {
+      const response = await post(request);
+      if (response.ok) {
+        await discardResponseBody(response);
+        sent += 1;
+        continue;
+      }
+      const problem = (await response.json().catch(() => null)) as { code?: unknown } | null;
+      if (problem?.code === REAUTHENTICATION_REQUIRED) {
+        return { sent, failed, requiresReauthentication: true };
+      }
+    } catch {
+      // Counted below; the refreshed list shows what that row's state is now.
+    }
+    failed += 1;
+  }
+  return { sent, failed, requiresReauthentication: false };
 };
 
 type Failure = {
@@ -197,7 +243,7 @@ export function MarketingActionRail({
           }
           setFailure({
             message: message ?? m.actionFailed,
-            requiresReauthentication: code === "ADMIN_REAUTHENTICATION_REQUIRED",
+            requiresReauthentication: code === REAUTHENTICATION_REQUIRED,
           });
           return;
         }
@@ -224,9 +270,42 @@ export function MarketingActionRail({
     [m.actionDone, m.actionFailed, onDone]
   );
 
+  const sendBatch = useCallback(
+    async (action: MarketingAction, requests: readonly MarketingBatchRequest[]) => {
+      setBusy(action.id);
+      setFailure(null);
+      setDone(null);
+      const result = await sendMarketingBatch(requests, (request) =>
+        adminFetch(request.path, {
+          method: action.method ?? "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request.body),
+          cache: "no-store",
+        })
+      );
+      const described = action.describe ? action.describe(result) : null;
+      if (result.failed > 0 || result.requiresReauthentication) {
+        setFailure({
+          message: described ?? m.actionFailed,
+          requiresReauthentication: result.requiresReauthentication,
+        });
+      } else {
+        setDone(described ?? m.actionDone);
+      }
+      setBusy(null);
+      onDone();
+    },
+    [m.actionDone, m.actionFailed, onDone]
+  );
+
   const start = useCallback(
     (action: MarketingAction) => {
       if (action.unavailable) return;
+      if (action.batch) {
+        if (action.confirm && !window.confirm(confirmText(action, {}))) return;
+        void sendBatch(action, action.batch());
+        return;
+      }
       if (action.fields && action.fields.length > 0) {
         if (open === action.id) {
           setOpen(null);
@@ -245,7 +324,7 @@ export function MarketingActionRail({
       if (action.confirm && !window.confirm(confirmText(action, {}))) return;
       void send(action, action.body({}));
     },
-    [open, send]
+    [open, send, sendBatch]
   );
 
   if (actions.length === 0) return null;
