@@ -38,7 +38,11 @@ import {
   type ActivationState,
   deriveTrustSafetyActivation,
 } from "@/lib/trustSafetyActivationCore";
-import { verifyTrustSafetyAuditEntry } from "@/lib/trustSafetyAuditEntryVerify";
+import {
+  type TrustSafetyIntegrityKeyEnv,
+  trustSafetyIntegrityKeyEnv,
+  verifyTrustSafetyAuditEntry,
+} from "@/lib/trustSafetyAuditEntryVerify";
 import { observeDsrDeadlines } from "@/lib/trustSafetyDsrObservation";
 import { insertTrustSafetyObserverRun } from "@/lib/trustSafetyObserverRun";
 import {
@@ -125,24 +129,10 @@ const readVersion = (metadata: Prisma.JsonValue | null): number | null => {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 };
 
-/**
- * The integrity keys, read one literal at a time.
- *
- * §5.6 allows `process.env.<literal>` in these files and nothing else -- not
- * the object in a variable, not passed as an argument, not destructured. An
- * earlier revision of this file took `process.env` as a parameter from the
- * route, which is the banned form; independent review named it. Three reads
- * into a fresh object is the allowed one.
- */
-const integrityKeyEnv = () => ({
-  ADMIN_AUDIT_INTEGRITY_KEY: process.env.ADMIN_AUDIT_INTEGRITY_KEY,
-  ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS: process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS,
-  NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
-});
-
-type IntegrityKeyEnv = ReturnType<typeof integrityKeyEnv>;
-
-const toActivationEntry = (row: AuditRow, env: IntegrityKeyEnv): ActivationAuditEntry => ({
+const toActivationEntry = (
+  row: AuditRow,
+  env: TrustSafetyIntegrityKeyEnv,
+): ActivationAuditEntry => ({
   id: row.id,
   toMode: readToMode(row.metadata),
   version: readVersion(row.metadata),
@@ -156,7 +146,7 @@ export const runTrustSafetyObservation = async ({
 }: {
   readonly nowMonotonicMs?: () => number;
 } = {}): Promise<TrustSafetyRoundResult> => {
-  const env = integrityKeyEnv();
+  const env = trustSafetyIntegrityKeyEnv();
   const startedAt = nowMonotonicMs();
   // The round's deadline is the caller's claim, on the application's wall
   // clock, while the arming function measures the remaining budget against it

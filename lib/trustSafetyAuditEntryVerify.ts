@@ -30,6 +30,23 @@ import {
   type AdminAuditHashInput,
 } from "@/lib/adminAudit";
 
+/**
+ * The integrity keys, read one literal at a time.
+ *
+ * §5.6 allows `process.env.<literal>` in these files and nothing else -- not
+ * the object in a variable, not passed as an argument, not destructured. So
+ * the callers that need the keys (the observation round, and the activation
+ * write's refusal when none is configured) take them from here rather than
+ * each handing `process.env` to something.
+ */
+export const trustSafetyIntegrityKeyEnv = () => ({
+  ADMIN_AUDIT_INTEGRITY_KEY: process.env.ADMIN_AUDIT_INTEGRITY_KEY,
+  ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS: process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS,
+  NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
+});
+
+export type TrustSafetyIntegrityKeyEnv = ReturnType<typeof trustSafetyIntegrityKeyEnv>;
+
 /** The entry fields the digest is computed over, plus the stored hashes. */
 export type TrustSafetyAuditEntryRow = {
   readonly actorUserId: string | null;

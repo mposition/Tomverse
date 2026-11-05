@@ -5,7 +5,15 @@ export type AdminPermission =
   | "ops:write"
   | "marketing:write"
   | "engineering-agent:write"
-  | "sre-agent:write" | "user:delete";
+  | "sre-agent:write"
+  // The trust-safety observer: its activation switch, and the digest section
+  // that shows what it counted. Both are the owner's alone
+  // (docs/policy/trust-safety-compliance-agent.md §6), which is what the
+  // default in `roleHasPermission` gives them -- adding another role to that
+  // branch is an amendment of that policy, in its own words.
+  | "trust-safety:write"
+  | "trust-safety:read"
+  | "user:delete";
 export type AdminSessionAccessState =
   | "authorized"
   | "reauthentication-required"

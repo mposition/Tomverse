@@ -105,7 +105,16 @@ export type TrustSafetyArmed = {
  * kind's ceiling `A` before sending it.
  */
 export type TrustSafetyTx = {
-  statement<T>(run: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  /**
+   * Charges `cost` statements -- one unless the call sends more -- and runs it.
+   *
+   * A helper that sends several statements of its own passes its own count, so
+   * the ceiling counts round trips rather than calls. The audit append is the
+   * one such caller: §5.6 pins it at four (two advisory-lock statements, the
+   * database clock, the insert), and charging it as one would let this agent
+   * send eleven statements under a budget approved for eight.
+   */
+  statement<T>(run: (client: Prisma.TransactionClient) => Promise<T>, cost?: number): Promise<T>;
   /** Statements still available to the callback. */
   readonly remaining: () => number;
 };
@@ -185,8 +194,14 @@ export const withTrustSafetyTransaction = async <T>({
   return client.$transaction(
     async (raw) => {
       let sent = 0;
-      const charge = <R>(run: (c: Prisma.TransactionClient) => Promise<R>): Promise<R> => {
-        sent += 1;
+      const charge = <R>(
+        run: (c: Prisma.TransactionClient) => Promise<R>,
+        cost = 1,
+      ): Promise<R> => {
+        if (!Number.isInteger(cost) || cost < 1) {
+          throw new TrustSafetyRoundRefused("trust_safety_statement_cost_invalid");
+        }
+        sent += cost;
         if (sent > bound.statementCeiling) {
           throw new TrustSafetyRoundRefused("trust_safety_statement_ceiling");
         }

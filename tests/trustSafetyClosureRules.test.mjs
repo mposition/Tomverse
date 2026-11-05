@@ -27,11 +27,46 @@ const SELF_FILES = [
   "lib/trustSafetyObserverPing.ts",
   "lib/trustSafetyObserverRound.ts",
   "lib/trustSafetyActivationCore.ts",
+  "lib/trustSafetyActivationStore.ts",
   "lib/trustSafetyAuditEntryVerify.ts",
   "lib/trustSafetyDsrCountsCore.ts",
   "lib/trustSafetyDsrObservation.ts",
   "app/api/internal/trust-safety/observe/route.ts",
+  "app/api/admin/agents/trust-safety/activation/route.ts",
 ];
+
+/**
+ * The six boundary modules (ㄴ) names. An import of one of these stops the
+ * walk; a seventh is a failure, and adding one is an amendment of the policy.
+ */
+const BOUNDARY_MODULES = [
+  "@/lib/prisma",
+  "@/lib/adminAudit",
+  "@/lib/auth",
+  "next-auth/next",
+  "@/lib/adminAuth",
+  "@/lib/adminReauthentication",
+];
+
+/**
+ * (ㄴ') closes the outside-repo specifiers at eight, with the shape each is
+ * allowed in. `null` means any import form.
+ */
+const ALLOWED_SPECIFIERS = new Map([
+  ["server-only", null],
+  // Type-only, as `lib/adminAudit.ts` imports it.
+  ["@prisma/client", "type"],
+  // A boundary module and an outside specifier at once, so it is in both lists.
+  ["next-auth/next", "getServerSession"],
+  // The activation body's `.strict()` schema is how this repository does it.
+  ["zod", null],
+  // The `Session` type, named by the files that take a session.
+  ["next-auth", "type"],
+  // E2's panel.
+  ["react", null],
+  ["next/link", null],
+  ["next/navigation", null],
+]);
 
 /** The file with its comments removed: the rules are about code, not prose. */
 const codeOf = (file) =>
@@ -142,23 +177,66 @@ test("built-in modules are imported by name, and only the allowed pairs", () => 
   }
 });
 
-test("a package is imported for its types only", () => {
-  // A type edge is erased at build, so the package never enters these files.
-  // A value import of `@prisma/client` -- for its isolation-level enum, which
-  // review found -- does, and brings the whole package with it.
+test("only (ㄴ')'s eight outside specifiers are imported, in their allowed shape", () => {
+  // The list is closed: an outside specifier that is not one of the eight
+  // fails, which is how `next/server` and the shared admin-route helpers stay
+  // out of these files. A type edge is erased at build, so `@prisma/client`
+  // and `next-auth` are allowed only in that form -- a value import of
+  // `@prisma/client` for its isolation-level enum, which review found, brings
+  // the whole package in.
+  assert.equal(ALLOWED_SPECIFIERS.size, 8, "eight, as the section counts them");
   for (const file of SELF_FILES) {
     const code = codeOf(file);
-    const imports = importsOf(code);
-    for (const statement of imports) {
+    for (const statement of importsOf(code)) {
       const specifier = statement.match(/from\s+"([^"]+)"/)[1];
-      if (specifier.startsWith("@/") || specifier.startsWith(".") || specifier.startsWith("node:")) {
+      if (specifier.startsWith("@/") || specifier.startsWith(".")) {
+        // A repository file. Boundary modules stop the walk; the rest are
+        // self files and are listed above.
         continue;
       }
-      if (specifier === "server-only") continue;
-      assert.match(
-        statement,
-        /^import\s+type\s|^import\s*\{\s*type\s/,
-        `${file}: ${specifier} must be a type-only import`,
+      if (specifier.startsWith("node:")) continue;
+      assert.ok(
+        ALLOWED_SPECIFIERS.has(specifier),
+        `${file}: ${specifier} is not one of the eight allowed specifiers`,
+      );
+      const shape = ALLOWED_SPECIFIERS.get(specifier);
+      if (shape === "type") {
+        assert.match(
+          statement,
+          /^import\s+type\s|^import\s*\{\s*type\s/,
+          `${file}: ${specifier} must be a type-only import`,
+        );
+      } else if (shape !== null) {
+        const names = (statement.match(/\{([^}]*)\}/)?.[1] ?? "")
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean);
+        assert.deepEqual(names, [shape], `${file}: ${specifier} allows only ${shape}`);
+      }
+    }
+  }
+  // A side-effect import carries no names, and `server-only` is the one these
+  // files make.
+  for (const file of SELF_FILES) {
+    for (const bare of codeOf(file).match(/^import\s+"([^"]+)";$/gm) ?? []) {
+      assert.match(bare, /^import "server-only";$/, `${file}: ${bare}`);
+    }
+  }
+});
+
+test("no seventh boundary module is called", () => {
+  // (ㄴ'): widening the boundary is the only way to weaken this check, so the
+  // repository modules these files may import are the six, plus this agent's
+  // own files. `lib/apiSecurity.ts` and `lib/adminApproval.ts` are the two
+  // that an admin route reaches for by habit, and they are not on the list.
+  for (const file of SELF_FILES) {
+    for (const statement of importsOf(codeOf(file))) {
+      const specifier = statement.match(/from\s+"([^"]+)"/)[1];
+      if (!specifier.startsWith("@/")) continue;
+      const own = SELF_FILES.some((self) => `@/${self.replace(/\.tsx?$/, "")}` === specifier);
+      assert.ok(
+        own || BOUNDARY_MODULES.includes(specifier),
+        `${file}: ${specifier} is neither a self file nor one of the six boundary modules`,
       );
     }
   }
@@ -171,7 +249,10 @@ test("a property is never reached through a key the file cannot reduce", () => {
   // the policy suggests and what the bounds table now is.
   for (const file of SELF_FILES) {
     const code = codeOf(file);
-    const accesses = code.match(/[A-Za-z_$][\w$]*\s*\[[^\]]+\]/g) ?? [];
+    // No space before the bracket: a computed access is written attached, and
+    // allowing a gap made this read `as [string, ...string[]]` -- a type
+    // annotation -- as an access on an identifier called `as`.
+    const accesses = code.match(/[A-Za-z_$][\w$]*\[[^\]]+\]/g) ?? [];
     for (const access of accesses) {
       const key = access.slice(access.indexOf("[") + 1, access.lastIndexOf("]")).trim();
       const reducible = /^\d+$/.test(key) || /^["'][^"']*["']$/.test(key);

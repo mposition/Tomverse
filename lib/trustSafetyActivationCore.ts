@@ -193,3 +193,66 @@ export const activationTransitionAllowed = ({
   readonly toMode: string;
 }): boolean =>
   isMode(fromMode) && isMode(toMode) && fromMode !== toMode;
+
+/** Why an activation request writes nothing. A closed set; §6 answers 409. */
+export const ACTIVATION_REFUSALS = [
+  /** The requested mode is not one of the two. */
+  "mode_unknown",
+  /** The stored row holds a mode outside the two; a person has to look at it. */
+  "stored_mode_unknown",
+  /** The same mode again, which §6 names explicitly. */
+  "not_a_transition",
+] as const;
+
+export type ActivationRefusal = (typeof ACTIVATION_REFUSALS)[number];
+
+/** What the activation write will record, or why there is nothing to record. */
+export type ActivationWrite =
+  | { readonly refusal: ActivationRefusal }
+  | {
+      readonly refusal: null;
+      /** null the first time, when no row exists yet (§14's single `on` step). */
+      readonly fromMode: TrustSafetyMode | null;
+      readonly toMode: TrustSafetyMode;
+      readonly version: number;
+    };
+
+/**
+ * Decides one activation write from the stored row and the requested mode.
+ *
+ * §6 allows `off → on` and `on → off` and nothing else, and refuses the same
+ * mode again without writing anything. The row does not exist before the first
+ * write -- no migration seeds it, and §14's order has the operator go straight
+ * to `on` -- so a first write is allowed and records `fromMode: null` rather
+ * than inventing a previous mode it never had.
+ *
+ * `version` is monotonic because §6's check 5 reads the largest
+ * `metadata.version` across this action's entries and requires the newest
+ * entry to hold it. The row's trigger refuses a version that does not move
+ * forward; this is the application half of that pair.
+ */
+export const nextActivationWrite = ({
+  current,
+  requested,
+}: {
+  readonly current: { readonly mode: string; readonly version: number } | null;
+  readonly requested: string;
+}): ActivationWrite => {
+  if (!isMode(requested)) return { refusal: "mode_unknown" };
+  if (current === null) {
+    return { refusal: null, fromMode: null, toMode: requested, version: 1 };
+  }
+  // A stored mode outside the two is not a transition to judge: that row was
+  // written around the database CHECK, and §6 reports it as its own fault
+  // rather than letting the next write paper over it.
+  if (!isMode(current.mode)) return { refusal: "stored_mode_unknown" };
+  if (!activationTransitionAllowed({ fromMode: current.mode, toMode: requested })) {
+    return { refusal: "not_a_transition" };
+  }
+  return {
+    refusal: null,
+    fromMode: current.mode,
+    toMode: requested,
+    version: current.version + 1,
+  };
+};
