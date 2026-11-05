@@ -9,13 +9,9 @@
 // signal's bands; a closed key has no band. Anything else -- an extra key, a
 // missing field, a band from another signal -- is not a state this agent wrote.
 
-import { RECOVERY_STREAK, S2_PAGE_SIGNALS, STREAK_MAX } from "./classify-core.mjs";
+import { BUDGET_KEY_LIMIT, RECOVERY_STREAK, S2_PAGE_KEYS, STREAK_MAX, signalForKey } from "./classify-core.mjs";
 
 const FIELDS = Object.freeze(["status", "streak", "openedAt", "lastBand", "recoveredAt", "newOpenOwnerDate"]);
-
-const SIGNAL_BY_KEY = new Map(
-  S2_PAGE_SIGNALS.flatMap((signal) => signal.scopes.map((scope) => [`${signal.id}#${scope}`, signal])),
-);
 
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -64,10 +60,14 @@ export function isKeyState(signal, state) {
   return false;
 }
 
-/** T2: `keys` is exactly the S2 page keys, each a valid state for its signal. */
+/** T2: `keys` is every S2 page key and any S3 budget keys, each a valid state for its signal. */
 export function keysAreValid(keys) {
   if (!isPlainObject(keys)) return false;
   const names = Object.keys(keys);
-  if (names.length !== SIGNAL_BY_KEY.size) return false;
-  return names.every((name) => SIGNAL_BY_KEY.has(name) && isKeyState(SIGNAL_BY_KEY.get(name), keys[name]));
+  if (names.length > S2_PAGE_KEYS.length + BUDGET_KEY_LIMIT) return false;
+  if (!S2_PAGE_KEYS.every((name) => Object.hasOwn(keys, name))) return false;
+  return names.every((name) => {
+    const signal = signalForKey(name);
+    return signal !== null && isKeyState(signal, keys[name]);
+  });
 }
