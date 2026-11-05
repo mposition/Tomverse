@@ -65,13 +65,17 @@ export async function observeOnce({ env, fetchImpl = fetch, log = console.log })
     return EXIT.requestFailed;
   }
 
-  // The body is read only for the enum, and only to log it. `outcome` is one
-  // of `ran`, `disabled` and `failed`; anything else is reported as unknown
-  // rather than parsed further.
+  // The body is read only for the enum, and only to log it. §4 closes that
+  // enum at three values, so anything else -- including a string the route
+  // never sends -- is logged as `unknown` rather than passed through. Accepted
+  // review asked for the closed set to be enforced here and not only
+  // described: a log line is the one place free text from a response could
+  // reach an operator's screen.
+  const ANSWERS = ["ran", "disabled", "failed"];
   let outcome = "unknown";
   try {
     const body = await response.json();
-    if (body && typeof body.outcome === "string") outcome = body.outcome;
+    if (body && ANSWERS.includes(body.outcome)) outcome = body.outcome;
   } catch {
     outcome = "unreadable";
   }

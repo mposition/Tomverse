@@ -99,8 +99,17 @@ export const isBudgetInsufficient = (error: unknown): boolean =>
  * Whether the activation row's own trigger refused this write: another write
  * moved the version first, or the mode did not change.
  */
-export const isActivationConflict = (error: unknown): boolean =>
-  hasSqlState(error, ACTIVATION_CONFLICT_SQLSTATES);
+export const isActivationConflict = (error: unknown): boolean => {
+  if (hasSqlState(error, ACTIVATION_CONFLICT_SQLSTATES)) return true;
+  // The first activation has no row to transition from, so two requests can
+  // both read `null` and both try to create it; the second loses on the
+  // primary key. That is the same race the triggers settle for an update, and
+  // it was answering 500 -- accepted review asked for it, and it is the one
+  // conflict the database reports as Prisma's own code rather than a SQLSTATE
+  // of ours.
+  const code = (error as { code?: unknown })?.code;
+  return code === "P2002";
+};
 
 /** What the arming statement reported. */
 export type TrustSafetyArmed = {

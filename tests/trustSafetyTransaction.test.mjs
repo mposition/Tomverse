@@ -255,6 +255,10 @@ test("the activation row's own refusals are recognised by SQLSTATE", () => {
       `${code} through the adapter`,
     );
   }
+  // The first activation has no row to transition from, so two requests can
+  // both read null and both create; the second loses on the primary key, which
+  // the database reports as Prisma's own code. Accepted review asked for it.
+  assert.equal(isActivationConflict({ code: "P2002" }), true);
   assert.equal(isActivationConflict({ code: "TS002" }), false, "a late commit is a different answer");
   assert.equal(isActivationConflict({ message: "TS005" }), false, "never on prose");
 });

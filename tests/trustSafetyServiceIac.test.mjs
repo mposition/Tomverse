@@ -241,6 +241,31 @@ test("the child reports a refusal and a failure as different exit codes", async 
   assert.equal(threw, CHILD_EXIT.requestFailed);
 });
 
+test("the child logs only the enum §4 closes, never a string from the body", async () => {
+  // A log line is the one place free text from a response could reach an
+  // operator's screen, so the closed set is enforced rather than described.
+  const lines = [];
+  await observeOnce({
+    env: startableEnv(),
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ outcome: "unexpected free text" }), { status: 200 }),
+    log: (line) => lines.push(line),
+  });
+  const logged = lines.join("\n");
+  assert.match(logged, /"outcome":"unknown"/);
+  assert.doesNotMatch(logged, /unexpected free text/);
+
+  for (const outcome of ["ran", "disabled", "failed"]) {
+    const kept = [];
+    await observeOnce({
+      env: startableEnv(),
+      fetchImpl: async () => new Response(JSON.stringify({ outcome }), { status: 200 }),
+      log: (line) => kept.push(line),
+    });
+    assert.match(kept.join("\n"), new RegExp(`"outcome":"${outcome}"`), outcome);
+  }
+});
+
 test("the child refuses to run with a variable missing, naming it only", async () => {
   const lines = [];
   const code = await observeOnce({
