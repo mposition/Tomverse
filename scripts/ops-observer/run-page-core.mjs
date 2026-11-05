@@ -17,26 +17,32 @@
 //   5. One advance: the next keys and, at most, one reservation of the
 //      admitted items. Only an `advanced` answer with sendPermitted carries a
 //      reservation to act on.
-//   6. In shadow mode the message is rendered and held to the content guard,
-//      never sent, and the reservation is closed with confirm (shadowed). Live
-//      sending is the S2 page channel and is not built: a live chain stops
-//      before anything is sent, and the next run abandons the reservation.
+//   6. The message is rendered and held to the content guard. In shadow mode it
+//      is never sent and the reservation is closed with confirm (shadowed). In
+//      live mode it is posted to the page webhook exactly once and, on a 200,
+//      closed with confirm (confirmed). Any other answer ends the run with no
+//      confirm: the next run abandons the reservation and does not send again.
 //   7. The heartbeat, unless the advance withheld it (§3 rule 9) or anything
 //      above did not finish.
 //
-// No request is retried. Logs are one JSON line per run with enums and counts
-// only: no URL, no secret, no key state, no response body.
+// Only reads are retried, once, and only when the connection failed (health,
+// snapshot, state and the heartbeat ping): Railway-to-Cloudflare connections
+// have stalled for single requests in production (2026-11-03), and a stalled
+// read is not an unknown outcome. Advance, confirm and the webhook post are
+// never retried. Logs are one JSON line per run with enums and counts only: no
+// URL, no secret, no key state, no response body.
 
 import { incidentOrigin, owedMessages } from "./advance-request-core.mjs";
-import { S2_PAGE_SIGNALS, evaluateKey } from "./classify-core.mjs";
+import { BUDGET_KEY_LIMIT, BUDGET_SIGNAL, S2_PAGE_SIGNALS, evaluateKey, initialKeyState, signalForKey } from "./classify-core.mjs";
 import { checkNotification, isCanonicalItemId, renderChannelCheckMessage, renderPageMessage } from "./content-guard-core.mjs";
-import { observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
+import { budgetObservations, observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
 import { admitOwedItems, planRunMessage } from "./notification-budget-core.mjs";
 import { RUN_DEADLINE_MS } from "./transaction-bounds-core.mjs";
 import { OWNER_TIME_ZONE, ownerDateOf } from "./owner-date-core.mjs";
 
 // Re-exported for the run's callers and tests; the rule lives in owner-date-core.
 export { OWNER_TIME_ZONE, ownerDateOf };
+import { SLACK_WEBHOOK_PREFIX, slackNoticeBody } from "./run-digest-core.mjs";
 import { TRUST_REASONS } from "./trust-check-core.mjs";
 
 /** The store's advance and confirm answers; anything else is logged as unknown. */
@@ -56,6 +62,27 @@ export const REQUEST_TIMEOUT_MS = 15_000;
 const DEADLINE_MARGIN_MS = 5_000;
 
 
+/** The pause before a read's one retry. */
+export const READ_RETRY_DELAY_MS = 2_000;
+
+/**
+ * The weekly channel check window, in the owner's time zone (policy §1 item 4,
+ * §8 S2): Tuesday 10:00 to 12:00 in Brisbane, daytime on a working day. The
+ * store allows one check per owner date, so one of the window's twelve runs
+ * takes it. UTC+10 has no daylight saving (decision T-1).
+ */
+export const CHANNEL_CHECK_WINDOW = Object.freeze({ weekday: 2, startHour: 10, endHour: 12 });
+
+/** True when `ms` falls inside the weekly channel check window. */
+export function inChannelCheckWindow(ms) {
+  const local = new Date(ms + 10 * 60 * 60 * 1000);
+  return (
+    local.getUTCDay() === CHANNEL_CHECK_WINDOW.weekday &&
+    local.getUTCHours() >= CHANNEL_CHECK_WINDOW.startHour &&
+    local.getUTCHours() < CHANNEL_CHECK_WINDOW.endHour
+  );
+}
+
 /** A run id in the shape OpsObserverDelivery_runId_check accepts. */
 export function runIdOf(ms, random) {
   return `page-${ms.toString(36)}-${random.replace(/[^0-9a-f]/g, "").slice(0, 12)}`;
@@ -66,12 +93,27 @@ export function runIdOf(ms, random) {
  * observations. Pure. Returns { keys, reservation, deferred } where
  * `reservation` is null or the advance request's reservation.
  */
-export function planAdvance({ state, observations, nowMs, ownerDate, channelCheckDue = false }) {
+export function planAdvance({ state, observations, nowMs, ownerDate, channelCheckDue = false, budgetPages = false }) {
   const keys = {};
   for (const signal of S2_PAGE_SIGNALS) {
     for (const scope of signal.scopes) {
       const key = `${signal.id}#${scope}`;
       keys[key] = evaluateKey(signal, state.keys[key], observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
+    }
+  }
+  // Budget keys the chain holds are never dropped: with the switch off they stay
+  // exactly as they are, so switching back on cannot re-announce an open incident.
+  // A window that has gone from the report holds too, rather than recovering.
+  const prefix = `${BUDGET_SIGNAL.id}#`;
+  const held = Object.keys(state.keys).filter((name) => name.startsWith(prefix) && signalForKey(name) !== null).sort();
+  for (const key of held) keys[key] = state.keys[key];
+  if (budgetPages) {
+    const fresh = Object.keys(observations)
+      .filter((name) => name.startsWith(prefix) && signalForKey(name) !== null && !held.includes(name))
+      .sort()
+      .slice(0, Math.max(0, BUDGET_KEY_LIMIT - held.length));
+    for (const key of [...held, ...fresh]) {
+      keys[key] = evaluateKey(BUDGET_SIGNAL, state.keys[key] ?? initialKeyState(), observations[key] ?? "unknown", { now: nowMs, ownerDate }).state;
     }
   }
   const owed = owedMessages(state.keys, keys, ownerDate);
@@ -117,7 +159,14 @@ const isTrustedState = (body) =>
  * `random` are injected so tests drive every branch. Resolves to
  * { exitCode, outcome } and logs one line.
  */
-export async function runPage({ env, fetchImpl = globalThis.fetch, now = Date.now, random = () => crypto.randomUUID(), log = console.log }) {
+export async function runPage({
+  env,
+  fetchImpl = globalThis.fetch,
+  now = Date.now,
+  random = () => crypto.randomUUID(),
+  log = console.log,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}) {
   const startedAt = now();
   const deadline = startedAt + RUN_DEADLINE_MS;
   const runDeadline = new Date(deadline).toISOString();
@@ -156,31 +205,60 @@ export async function runPage({ env, fetchImpl = globalThis.fetch, now = Date.no
     }
   };
 
+  /** A read: one retry when the connection failed, none on any answer. */
+  const read = async (path, options) => {
+    const first = await request(path, options);
+    if (!first.failed) return first;
+    record.readRetries = (record.readRetries ?? 0) + 1;
+    await sleep(READ_RETRY_DELAY_MS);
+    return request(path, options);
+  };
+
   // 2. Health and the snapshot. Health itself is unauthenticated.
-  const health = await request("/api/health", { method: "GET", bearer: false });
+  const health = await read("/api/health", { method: "GET", bearer: false });
   const healthOk = health.status === 200;
   let snapshot = null;
   if (healthOk) {
-    const answer = await request("/api/internal/ops-snapshot");
+    const answer = await read("/api/internal/ops-snapshot");
     if (answer.status === 200) {
       const parsed = parseSnapshot(answer.json);
       snapshot = parsed.ok ? parsed.snapshot : null;
     }
   }
-  const observations = observationsFromSnapshot({ healthOk, snapshot });
+  // S3's budget pages stay off until the owner sets this switch (policy §8).
+  const budgetPages = env.OPS_OBSERVER_S3_BUDGET_PAGES === "true";
+  const observations = {
+    ...observationsFromSnapshot({ healthOk, snapshot }),
+    ...(budgetPages && healthOk ? budgetObservations(snapshot) : {}),
+  };
 
   // 3. The state. Only trusted goes on.
-  const state = await request("/api/internal/ops-observer/state", { body: { runDeadline, ownerDate } });
+  const state = await read("/api/internal/ops-observer/state", { body: { runDeadline, ownerDate } });
   if (state.late) return finish(1, "late");
   if (state.status === 409) return finish(1, "late");
   if (state.status !== 200 || !isTrustedState(state.json)) {
     const reason = TRUST_REASONS.includes(state.json?.trust) ? state.json.trust : "state_unavailable";
-    return finish(1, "untrusted", { reason });
+    return finish(1, "untrusted", { reason, httpStatus: state.status ?? null });
   }
   record.mode = state.json.mode;
+  const live = state.json.mode === "live";
+
+  // A live chain with no usable channel reserves nothing: there is no silent
+  // page, only the missing heartbeat P8 reports.
+  const webhook = env.OPS_OBSERVER_PAGE_WEBHOOK_URL;
+  if (live && (typeof webhook !== "string" || !webhook.startsWith(SLACK_WEBHOOK_PREFIX))) {
+    return finish(1, "webhook_not_slack");
+  }
 
   // 4. The next keys and the reservation the budget admits.
-  const plan = planAdvance({ state: state.json, observations, nowMs: startedAt, ownerDate });
+  const plan = planAdvance({
+    state: state.json,
+    observations,
+    nowMs: startedAt,
+    ownerDate,
+    channelCheckDue: live && inChannelCheckWindow(startedAt),
+    budgetPages,
+  });
   record.deferred = plan.deferred;
   record.reservedItems = plan.reservation ? plan.reservation.items.length : 0;
 
@@ -216,24 +294,27 @@ export async function runPage({ env, fetchImpl = globalThis.fetch, now = Date.no
     const kind = plan.reservation.items.length > 0 ? "page" : "channel_check";
     const guard = checkNotification(kind, message);
     if (!guard.ok) return finish(1, "content_refused", { reason: guard.reason });
-    if (state.json.mode !== "shadow") {
-      // S2's page channel is not built; nothing is sent and the next run
-      // closes this reservation as abandoned.
-      return finish(1, "live_send_not_built");
+    if (live) {
+      // One post, never retried. Anything but a 200 leaves the reservation open
+      // for the next run to abandon, so no outcome can send a second time.
+      const posted = await request("", { bearer: false, url: webhook, body: slackNoticeBody(message) });
+      if (posted.late) return finish(1, "late");
+      if (posted.status !== 200) return finish(1, "send_failed", { httpStatus: posted.status ?? null });
+      record.sent = true;
     }
     const confirm = await request("/api/internal/ops-observer/confirm", { body: { runDeadline, deliveryId, runId } });
     if (confirm.late) return finish(1, "late");
     if (confirm.status === 409) return finish(1, "late");
-    if (confirm.status !== 200 || confirm.json?.result !== "shadowed") {
+    if (confirm.status !== 200 || confirm.json?.result !== (live ? "confirmed" : "shadowed")) {
       return finish(1, "confirm_refused", { result: asEnum(confirm, "result", CONFIRM_RESULTS) });
     }
-    record.shadowed = true;
+    if (!live) record.shadowed = true;
   }
 
   // 7. The heartbeat.
   if (advance.json.heartbeatWithheld === true) return finish(0, "heartbeat_withheld");
-  const beat = await request("", { method: "GET", bearer: false, url: env.OPS_OBSERVER_HEARTBEAT_URL });
+  const beat = await read("", { method: "GET", bearer: false, url: env.OPS_OBSERVER_HEARTBEAT_URL });
   if (beat.late) return finish(1, "late");
-  if (!(beat.status >= 200 && beat.status < 300)) return finish(1, "heartbeat_failed");
+  if (!(beat.status >= 200 && beat.status < 300)) return finish(1, "heartbeat_failed", { httpStatus: beat.status ?? null });
   return finish(0, result === "noop" ? "noop" : "advanced");
 }

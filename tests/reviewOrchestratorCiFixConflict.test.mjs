@@ -472,6 +472,119 @@ test("a resolution that leaves a marker is recorded and not sent", async () => {
   }
 });
 
+/**
+ * A stacked branch after its parent merged (#3314): S3 sits on S2 and took
+ * develop in, and develop then took S2 in, so the two share two merge bases.
+ * `baseInBranch` has the branch take that develop in as well.
+ */
+function crissCrossFixture({ baseInBranch = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "ci-fix-crisscross-"));
+  const source = join(root, "source");
+  mkdirSync(join(source, "lib"), { recursive: true });
+  sh(source, "init", "-q", "-b", "develop");
+  sh(source, "config", "core.autocrlf", "false");
+  writeFileSync(join(source, "lib", "app.js"), "one\ntwo\n");
+  writeFileSync(join(source, "lib", "other.js"), "export {};\n");
+  sh(source, "add", "-A");
+  sh(source, "commit", "-q", "-m", "base");
+  sh(source, "checkout", "-q", "-b", "stack/s2");
+  writeFileSync(join(source, "lib", "app.js"), "one\ntwo\ns2\n");
+  sh(source, "commit", "-q", "-am", "s2");
+  const s2 = sh(source, "rev-parse", "HEAD");
+  sh(source, "checkout", "-q", "develop");
+  writeFileSync(join(source, "lib", "other.js"), "export const d = 1;\n");
+  sh(source, "commit", "-q", "-am", "develop moves");
+  const developBefore = sh(source, "rev-parse", "HEAD");
+  sh(source, "checkout", "-q", "-b", "stack/s3", s2);
+  sh(source, "merge", "-q", "--no-edit", developBefore);
+  writeFileSync(join(source, "lib", "app.js"), "one\ntwo\ns2\ns3\n");
+  sh(source, "commit", "-q", "-am", "s3");
+  sh(source, "checkout", "-q", "develop");
+  sh(source, "merge", "-q", "--no-ff", "--no-edit", s2);
+  const develop = sh(source, "rev-parse", "HEAD");
+  if (baseInBranch) {
+    sh(source, "checkout", "-q", "stack/s3");
+    sh(source, "merge", "-q", "--no-edit", develop);
+    sh(source, "checkout", "-q", "develop");
+  }
+  const head = sh(source, "rev-parse", "stack/s3");
+  const config = validateConfig({
+    stateDir: join(root, "state"),
+    repos: { tomverse: { url: source, mirror: join(root, "state", "mirrors", "tomverse.git") } },
+    providers: [{ id: "claude", vendor: "anthropic", enabled: true, command: "claude", args: [], timeoutSeconds: 60 }],
+  });
+  const github = {
+    async json(path) {
+      if (path.startsWith("/pulls?")) return [pull(61, "stack/s3", head)];
+      if (path === "/pulls/61") return { number: 61, mergeable: false };
+      if (path.startsWith("/pulls/61/commits")) return [{ sha: head, commit: { message: "s3" } }];
+      if (path.startsWith("/actions/runs?head_sha=")) return { workflow_runs: [] };
+      throw new Error(`unexpected ${path}`);
+    },
+  };
+  return { root, source, config, outbox: join(root, "outbox"), workDir: join(root, "work"), head, s2, developBefore, develop, github };
+}
+
+const mergeTreeStatus = (cwd, ...args) => spawnSync("git", ["merge-tree", "--write-tree", "--name-only", "--no-messages", ...args], { cwd, encoding: "utf8" }).status;
+
+test("a conflict only GitHub sees is published as git's own merge, with no model", async () => {
+  const f = crissCrossFixture();
+  try {
+    // Why GitHub and git disagree: each merge base alone conflicts, git's merge of them does not.
+    assert.equal(mergeTreeStatus(f.source, `--merge-base=${f.developBefore}`, f.develop, f.head), 1);
+    assert.equal(mergeTreeStatus(f.source, f.develop, f.head), 0);
+
+    const result = await pass(f, () => assert.fail("nothing here for the model"));
+    assert.deepEqual(result, { outcome: "queued", pr: 61 });
+    const entry = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`];
+    assert.deepEqual({ kind: entry.kind, outcome: entry.outcome, detail: entry.detail }, { kind: "conflict", outcome: "queued", detail: "clean_merge" });
+    const request = normaliseDispatchRequest(JSON.parse(readFileSync(join(f.outbox, `${f.head}.json`), "utf8")), `${f.head}.json`);
+    assert.equal(request.kind, "conflict", "the sender carries it as any other resolution");
+    assert.equal(request.baseSha, f.develop);
+    assert.deepEqual(JSON.parse(gunzipSync(Buffer.from(request.patchGzB64, "base64")).toString("utf8")), { files: {} });
+
+    // What the workflow does with it: its own merge, committed as git left it.
+    const checkout = join(f.root, "pr");
+    sh(f.root, "clone", "-q", "-c", "core.autocrlf=false", f.source, checkout);
+    sh(checkout, "checkout", "-q", "--detach", f.head);
+    sh(checkout, "merge", "--no-commit", "--no-ff", request.baseSha);
+    assert.equal(sh(checkout, "diff", "--name-only", "--diff-filter=U"), "");
+    assert.ok(sh(checkout, "rev-parse", "-q", "--verify", "MERGE_HEAD"), "a merge git began");
+    sh(checkout, "commit", "-q", "-m", "merge");
+    assert.equal(readFileSync(join(checkout, "lib", "app.js"), "utf8"), "one\ntwo\ns2\ns3\n", "the branch's line is kept");
+    assert.equal(readFileSync(join(checkout, "lib", "other.js"), "utf8"), "export const d = 1;\n");
+    // The commit ends it: one merge base, so GitHub's single base no longer conflicts.
+    assert.equal(sh(checkout, "merge-base", "--all", request.baseSha, "HEAD"), f.develop);
+    assert.equal(mergeTreeStatus(checkout, `--merge-base=${f.develop}`, f.develop, "HEAD"), 0);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("the workflow publishes a clean merge only for an empty resolution of a merge git began", () => {
+  const workflow = read("../.github/workflows/pr-ci-auto-fix.yml");
+  const step = workflow.slice(workflow.indexOf("Merge the base and judge the resolution"), workflow.indexOf("Commit and push to the pull request branch"));
+  const clean = step.slice(step.indexOf('diff --name-only --diff-filter=U)" ]'), step.indexOf("pr-ci-auto-fix-guard.mjs conflict"));
+  assert.match(clean, /if git -C pr rev-parse -q --verify MERGE_HEAD > \/dev\/null && jq -e '\.files == \{\}' patch\/resolution\.json/);
+  assert.match(clean, /else\s+echo "Merging \$\{BASE_SHA\} leaves no conflict to resolve\."\s+echo "push=false"/, "anything else is still refused");
+  // Whatever the dispatch says, conflicts in the merge still go to the guard.
+  assert.equal(judgePrCiAutoFixConflict({ files: [{ path: "lib/x.ts", regular: true, merged: "<<<<<<< a\nx\n=======\ny\n>>>>>>> b\n", resolved: null }], proposed: [] }).push, false);
+  assert.equal(judgePrCiAutoFixConflict({ files: [], proposed: [] }).push, false, "the guard itself still commits no resolution of nothing");
+});
+
+test("a branch that already has its base has nothing to merge, whatever GitHub shows", async () => {
+  const f = crissCrossFixture({ baseInBranch: true });
+  try {
+    const result = await pass(f, () => assert.fail("nothing here for the model"));
+    assert.equal(result.outcome, "no_change");
+    const entry = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`];
+    assert.deepEqual({ outcome: entry.outcome, reason: entry.reason }, { outcome: "no_change", reason: "transient" });
+    assert.equal(existsSync(join(f.outbox, `${f.head}.json`)), false, "nothing is sent");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test("the guard writes through no link: a conflicted path that is one is refused", { skip: process.platform === "win32" }, () => {
   const f = conflictFixture();
   try {

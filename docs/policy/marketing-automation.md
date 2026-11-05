@@ -59,7 +59,7 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 | O10 | AI는 새 문구를 자유롭게 쓰고, 자동 사실 검증 후 승인 큐로 보낸다 |
 | O11 | Tomverse는 호주 법인이다. 호주를 1순위 영어 시장으로, 호주 광고·소비자법을 적용한다 |
 | O12 | 이메일 마케팅은 범위 밖 |
-| O13 | LLM은 구독이 아닌 API 키. 개발은 Claude 작성 ↔ Codex 검토(또는 반대)로 분리 |
+| O13 | LLM은 API 키가 기본이다. **Marketing Generator는 운영자 결정(2026-11-04)으로 AMUX 박스의 구독 Codex CLI로 옮길 수 있다**(`docs/ops/marketing-generator-box.md`). 제3자 댓글을 읽는 Comments Monitor는 API 키로 둔다. 개발은 Claude 작성 ↔ Codex 검토(또는 반대)로 분리 |
 | O14 | LLM 호출은 어댑터 뒤에 두고, 공급 경로는 Tomverse Code의 어댑터 계층을 추출한 공용 LLM 게이트웨이(별도 저장소)로 한다. 게이트웨이 준비 전에는 같은 어댑터 뒤에서 전용 키를 임시로 쓰며, 그 공급사는 OpenAI다(2026-10-16, 정책 버전 4) |
 | O15 | **Instagram·TikTok 계정은 졸업하지 않고 항상 승인 모드**다. 두 채널은 게시된 글을 API로 내릴 수 없어(S0 C10 관측, 앱에서 수동 삭제만 가능) 잘못 나간 공개 게시물을 자동으로 회수할 수 없기 때문이다. (2026-09-17, 정책 버전 2) |
 
@@ -277,6 +277,8 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 | Threads | zh-Hant | 이미지·영상+텍스트 | 2/7 |
 | RedNote | zh-Hans | 이미지+텍스트 | 수동 |
 
+수동 계정(`provider = manual`; 운영 중인 X·RedNote 계정)의 게시물은 상한표의 채널과 무관하게 게시기가 집지 않고(`channel_posts_by_hand`) 예약도 거절한다. 사람이 손으로 올린 뒤 Admin에서 공개 URL(https)과 확인한 근거를 기록하면(`marketing_post.record_manual_publish`, `marketing:write` + step-up) 같은 트랜잭션에서 `verified`(`verificationMethod = operator_sample`)로 남고, 그날(UTC) 슬롯이 잡혀 일/주 집계에 들어간다. 상한을 넘어도 이미 공개된 사실의 기록이므로 거절하지 않고 경고만 한다(운영자 결정 2026-11-04). 정책 버전은 그대로다.
+
 모든 채널의 게시물은 이미지나 영상을 하나 이상 싣는다. 글만 있는 게시물은 없다(운영자 결정 2026-11-03).
 이미지가 최소선이고 영상이 가장 좋다. 생성기는 맞는 승인 자산이 없는 계정의 초안을 만들지 않고, 초안 접수는 자산이 없는
 초안을 받지 않으며, 게시기는 미디어가 없는 게시물을 보내기 전에 `media_required`로 실패시킨다(YouTube는 영상 하나가 아니면
@@ -292,8 +294,14 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 빠진다. 생성기 맥락의 계정별 `usedAssetIds`를 `marketingA5AssetsFor`가 결정적으로 거르고(모델 판단이 아님), 남은 자산이 없는
 계정은 호출하지 않는다(`accountsWithoutMedia`). 초안 접수도 그 계정이 이미 쓴 자산이 붙은 초안을
 `intake_asset_already_used`로 거절한다(아무것도 쓰지 않고, 호출도 소비하지 않는다). 이 사유는 S2B1 refusal 목록 밖의 접수 전용 문자열이다.
-자산이 브리프 주제와 맞지 않아도 계정에 주어진 자산이 하나라도 있으면 초안을 만든다. 프롬프트(`a5-social-v6`)는 그 경우 자산 설명이
+자산이 브리프 주제와 맞지 않아도 계정에 주어진 자산이 하나라도 있으면 초안을 만든다. 프롬프트(`a5-social-v7`)는 그 경우 자산 설명이
 보여 주는 내용으로만 쓰게 한다.
+
+해시태그(운영자 결정 2026-11-04): 도움이 될 때만, Instagram·TikTok·RedNote 3~5, YouTube 설명에 2~3(`#Shorts` 포함), LinkedIn
+2~3, X 1~2, Facebook 0~2, Threads 최대 1. `#Tomverse` 하나를 권장하고 개수에 넣는다. 그 계정 locale의 언어와 문자로 쓰고, 다른
+회사·제품 이름 태그와 과장·가격 암시 태그(`#best`, `#free`, `#최고`, `#무료` 등)는 쓰지 않는다. 판단은 프롬프트가 모델에 맡기고
+(`a5-social-v7`, 범위는 `task.hashtags`), 생성기의 초안 읽기가 금지 태그와 상한을 넘는 태그를 결정적으로 지운다(`lib/marketingHashtags.ts`,
+초안은 버리지 않고 `hashtagsRemoved`로 센다). Guard는 태그를 포함한 전체 글을 그대로 읽는다.
 
 상한은 코드 상수이고 운영 설정으로는 **내리기만** 한다. 게시 시간창은 대상 시장 현지 09:00~20:00,
 같은 claim은 계정당 14일 안에 다시 쓰지 않는다(생성기 입력과 프롬프트로 지킨다. 4.2 참조).

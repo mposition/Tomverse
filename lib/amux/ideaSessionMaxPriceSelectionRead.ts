@@ -2,15 +2,17 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { isAmuxIdeaAnalysisProvider } from "./ideaAnalysisChannelCore.ts";
-import { readApprovedAmuxIdeaAnalysisPriceVersion } from
-  "./ideaAnalysisPriceVersionRead.ts";
+import { AMUX_V19_SUBSCRIPTION_NO_PRICE_ID } from
+  "./ideaAnalysisApprovedCostProfile.ts";
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Content-free price selection for one queued subscription reservation, on
- * the reservation's own CLI channel (owner decision 2026-10-20). The claim
- * transaction rechecks this version and every admission guard. */
+/** Content-free readiness of one queued subscription reservation, on the
+ * reservation's own CLI channel. A subscription CLI call has no per-call price,
+ * so no price approval is needed (owner decision 2026-11-04); the runner still
+ * carries the fixed id in this reply and its signed claim. The claim
+ * transaction rechecks every admission guard. */
 export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
   reservationId: string; ideaId: string;
 }): Promise<{ kind: "ready"; priceVersionId: string; provider: string;
@@ -46,20 +48,8 @@ export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
       reservation.idea.cancelledAt !== null ||
       reservation.idea.analysisCompletedAt !== null ||
       now >= reservation.idea.analysisDeadlineAt) return { kind: "hold" };
-  const row = await tx.amuxIdeaAnalysisPriceVersion.findFirst({
-    where: { provider: reservation.modelProvider, modelId: reservation.modelId,
-      mode: "subscription_cli", status: "approved", revokedAt: null },
-    orderBy: { version: "desc" }, select: { id: true },
-  });
-  if (!row) return { kind: "hold" };
-  const approved = await readApprovedAmuxIdeaAnalysisPriceVersion(tx, {
-    priceVersionId: row.id, provider: reservation.modelProvider,
-    modelId: reservation.modelId, now,
-  });
-  if (approved.decision !== "ready" ||
-      approved.price.mode !== "subscription_cli") return { kind: "hold" };
   // The channel tells the launcher which CLI and sign-in run this claim.
-  return { kind: "ready", priceVersionId: row.id,
+  return { kind: "ready", priceVersionId: AMUX_V19_SUBSCRIPTION_NO_PRICE_ID,
     provider: reservation.modelProvider, modelId: reservation.modelId,
     reasoningEffort: reservation.reasoningEffort };
 }

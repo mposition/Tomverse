@@ -2,6 +2,10 @@ import "server-only";
 
 import { z } from "zod";
 
+import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
+import { QA_RELEASE_CI_ADVICE_MAX_SUGGESTIONS } from "@/lib/qaReleaseCiAdviceCore";
+import { readQaReleaseCiAdvice, recordQaReleaseCiAdvice } from "@/lib/qaReleaseCiAdviceStore";
+
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
 import { QA_RELEASE_TRAIN_RESOLVE_WHY_CHARS } from "@/lib/qaReleaseTrainResolve";
 import { qaReleaseTrainVerdictWanted } from "@/lib/qaReleaseTrainCargoCore";
@@ -68,6 +72,26 @@ const VERDICT = z
 
 const body = z.union([
   z.object({ phase: z.literal("verdict_queue") }).strict(),
+  z.object({ phase: z.literal("ci_advice_state") }).strict(),
+  z
+    .object({
+      phase: z.literal("ci_advice"),
+      at: AT,
+      suggestions: z
+        .array(
+          z
+            .object({
+              title: z.string().min(1).max(160),
+              why: z.string().max(700),
+              change: z.string().max(700),
+              savesMinutes: z.number().min(0).max(1000).nullable(),
+            })
+            .strict(),
+        )
+        .max(QA_RELEASE_CI_ADVICE_MAX_SUGGESTIONS)
+        .nullable(),
+    })
+    .strict(),
   z.object({ phase: z.literal("verdicts"), mainSha: SHA, at: AT, verdicts: z.array(VERDICT).max(QA_RELEASE_TRAIN_VERDICTS_MAX) }).strict(),
   z
     .object({
@@ -140,6 +164,16 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
     if (input.phase === "schedule") {
       // Display only (Admin's next train): no revision check, no audit row.
       await recordQaReleaseTrainSchedule(input.hours);
+      return { status: 200, body: { recorded: true } };
+    }
+    if (input.phase === "ci_advice_state") {
+      // Read only: when suggestions were last asked for, and how full the runners were.
+      const [advice, admission] = await Promise.all([readQaReleaseCiAdvice(), readCiAdmissionAdminView()]);
+      return { status: 200, body: { askedAt: advice?.askedAt ?? null, saturation: admission.state.saturation, budget: admission.state.capacity } };
+    }
+    if (input.phase === "ci_advice") {
+      // Display only: no revision check, no audit row.
+      await recordQaReleaseCiAdvice(input.at, input.suggestions);
       return { status: 200, body: { recorded: true } };
     }
     if (input.phase === "verdict_queue") {

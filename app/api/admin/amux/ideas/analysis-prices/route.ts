@@ -12,11 +12,9 @@ import { apiSecurityResponse, consumeApiRateLimit,
 import { authOptions } from "@/lib/auth";
 import { AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE,
   AMUX_V4_CLAUDE_OPUS_55_PRICE_EVIDENCE,
-  amuxSubscriptionCliCostProfileMatches,
   amuxV4ApprovedCliCostProfileMatches,
   amuxV4ApprovedCliPriceEvidenceDigest } from
   "@/lib/amux/ideaAnalysisApprovedCostProfile";
-import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "@/lib/amux/ideaAnalysisChannelCore";
 import { AmuxIdeaAnalysisPriceApprovalError,
   commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
@@ -29,21 +27,11 @@ const WRITE_CODE_LATCH = true;
 const READ_CODE_LATCH = true;
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const uuid = z.string().uuid();
-const provider = z.enum(AMUX_IDEA_ANALYSIS_PROVIDERS);
-const modelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/);
 const bodySchema = z.object({
   id: uuid,
   expectedPreviousVersion: z.number().int().nonnegative().max(2_147_483_646),
   ownerConfirmedWorstTier: z.literal(true),
-  // amux-intake v19: the session runner needs the same rates approved as a
-  // subscription_cli conversion estimate. Absent keeps the v4 API price.
-  mode: z.enum(["api", "subscription_cli"]).optional(),
-  // Owner decision 2026-10-20: a subscription_cli price names one approved
-  // Frontier model on any of the four CLI channels; the API price stays Opus.
-  provider: provider.optional(),
-  modelId: modelId.optional(),
 }).strict();
-const subscriptionModel = z.object({ provider, modelId }).strict();
 const revokeSchema = z.object({
   priceVersionId: uuid,
   expectedVersion: z.number().int().positive().max(2_147_483_647),
@@ -97,21 +85,13 @@ export async function POST(request: Request): Promise<Response> {
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v4-analysis-price-write", { minute: 3, day: 20 });
     const body = await readLimitedJson(request, 2_048, bodySchema);
-    const subscription = body.mode === "subscription_cli";
-    if (subscription !== (body.provider !== undefined) ||
-        subscription !== (body.modelId !== undefined)) {
-      return NextResponse.json({ error: "Invalid request." },
-        { status: 400, headers: noStore });
-    }
-    // Every subscription price uses the reviewed Opus 5.5 rates, caps and
-    // evidence as a conservative estimate (owner decision 2026-10-20).
     const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
     const approval = { id: body.id,
       expectedPreviousVersion: body.expectedPreviousVersion,
       ownerConfirmedWorstTier: body.ownerConfirmedWorstTier,
-      provider: subscription ? body.provider! : profile.provider,
-      modelId: subscription ? body.modelId! : profile.modelId,
-      mode: body.mode ?? profile.mode,
+      provider: profile.provider,
+      modelId: profile.modelId,
+      mode: profile.mode,
       inputTokensCap: profile.inputTokensCap,
       outputTokensCap: profile.outputTokensCap,
       inputMicroUsdPerMillion: profile.inputMicroUsdPerMillion,
@@ -120,8 +100,7 @@ export async function POST(request: Request): Promise<Response> {
       verifiedAt: new Date(AMUX_V4_CLAUDE_OPUS_55_PRICE_EVIDENCE.verifiedAt),
       expiresAt: new Date(AMUX_V4_CLAUDE_OPUS_55_PRICE_EVIDENCE.expiresAt) };
     const result = await prisma.$transaction((tx) =>
-      commitAmuxIdeaAnalysisPriceApproval(tx, { session, request, approval,
-        ...(subscription ? { requireCurrentFrontierModel: true as const } : {}) }),
+      commitAmuxIdeaAnalysisPriceApproval(tx, { session, request, approval }),
     { maxWait: 5_000, timeout: 15_000 });
     return NextResponse.json(result, { status: 201, headers: noStore });
   } catch (error) { return failure(error); }
@@ -158,7 +137,7 @@ export async function DELETE(request: Request): Promise<Response> {
 
 /** The reviewed Opus 5.5 numbers under the requested model and mode. */
 function profileReply(model: { provider: string; modelId: string;
-  mode: "api" | "subscription_cli" },
+  mode: "api" },
 latest: { id: string; version: number; status: string; expiresAt: Date } | null,
 profileMatches: boolean): Response {
   return NextResponse.json({ state: "profile", profile: {
@@ -185,7 +164,6 @@ export async function GET(request: Request): Promise<Response> {
         { status: 409, headers: noStore });
     }
     await consumeApiRateLimit(request, session.user!.id!,
-      // One read per approved Frontier model row of the subscription panel.
       "admin-amux-v4-analysis-price-read", { minute: 30, day: 300 });
     const params = new URL(request.url).searchParams;
     const profileName = params.get("profile");
@@ -200,19 +178,6 @@ export async function GET(request: Request): Promise<Response> {
       return profileReply({ provider: profile.provider, modelId: profile.modelId,
         mode: profile.mode }, latest,
       latest !== null && amuxV4ApprovedCliCostProfileMatches(latest));
-    }
-    if (keyCount === 3 && profileName === "max-subscription" &&
-        ["profile", "provider", "modelId"].every((key) => params.getAll(key).length === 1)) {
-      const selected = subscriptionModel.safeParse({ provider: params.get("provider"),
-        modelId: params.get("modelId") });
-      if (!selected.success) return NextResponse.json({ error: "Invalid request." },
-        { status: 400, headers: noStore });
-      const latest = await prisma.amuxIdeaAnalysisPriceVersion.findFirst({
-        where: { ...selected.data, mode: "subscription_cli" },
-        orderBy: { version: "desc" },
-      });
-      return profileReply({ ...selected.data, mode: "subscription_cli" }, latest,
-        latest !== null && amuxSubscriptionCliCostProfileMatches(latest, selected.data));
     }
     if ([...params.keys()].length !== 1 || params.getAll("id").length !== 1) {
       return NextResponse.json({ error: "Invalid request." },

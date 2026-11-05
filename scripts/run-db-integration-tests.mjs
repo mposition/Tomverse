@@ -419,15 +419,9 @@ run(
     // Support-triage suggestions: the state machine, the lease and the
     // display stamp are the guard trigger's, and a report's deletion takes them.
     "tests/integration/support-triage-suggestion.db.test.ts",
-    // Support-triage groups: one kind per group, members tied to its digest,
-    // members then signals then the group when it ends, and the tombstone.
-    "tests/integration/support-triage-group.db.test.ts",
-    // Support-triage decision records: twelve months by CHECK, never updated,
-    // at least one link at commit, and no record outlives any of its links.
-    "tests/integration/support-triage-decision-record.db.test.ts",
     // Support-triage retention and heartbeat routes: own secrets, counts only,
     // non-2xx when retention makes no progress, a fail-closed heartbeat.
-    "tests/integration/support-triage-routes.db.test.ts",
+    "tests/integration/support-triage-cycle.db.test.ts",
     // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
     // supersede on a changed input, nothing for a closed or deleted report.
     "tests/integration/support-triage-worker.db.test.ts",

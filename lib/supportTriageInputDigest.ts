@@ -15,14 +15,29 @@
  */
 import { createHash } from "node:crypto";
 
-import { canonicalJson } from "./supportTriageDecisionDigest";
-
 /** Bump when the lane rule or anything else in the core that reads a report changes. */
 export const SUPPORT_TRIAGE_CORE_VERSION = "1";
 /** Bump when lib/supportTriageKeywords.ts changes a list. */
 export const SUPPORT_TRIAGE_KEYWORD_LIST_VERSION = "1";
 /** No reply templates exist yet (stage P1.5); "none" until they do. */
 export const SUPPORT_TRIAGE_TEMPLATE_VERSION = "none";
+
+/** JSON with object keys sorted at every depth; arrays keep their order. */
+export const canonicalJson = (value: unknown): string => {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new RangeError("canonical JSON has no non-finite numbers");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  throw new TypeError(`canonical JSON cannot hold ${typeof value}`);
+};
 
 export type SuggestionInput = {
   readonly report: {

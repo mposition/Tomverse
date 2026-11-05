@@ -285,6 +285,7 @@ export const authOptions: NextAuthOptions = {
             const revocation = sessionRevocationReason({
                 issuedAt: token.sessionIssuedAt ?? token.authenticatedAt,
                 snapshot,
+                absoluteExpiresAt: token.absoluteExpiresAt,
             });
             if (revocation) {
                 logAuthAuditEvent("auth.session_rejected", {

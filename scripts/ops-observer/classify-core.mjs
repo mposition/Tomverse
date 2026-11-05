@@ -41,6 +41,24 @@ export const S2_PAGE_KEYS = Object.freeze(
   S2_PAGE_SIGNALS.flatMap((s) => s.scopes.map((scope) => `${s.id}#${scope}`)),
 );
 
+/**
+ * The S3 provider budget signal (policy §8): one key per provider and window,
+ * `P-B#<provider>_<day|month>`, opening at ">=95" and worsening at "exhausted".
+ * Scopes come from the budget report, so a new provider needs no change here.
+ */
+export const BUDGET_SIGNAL = signal("P-B", [], 1, [">=95", "exhausted"]);
+export const BUDGET_KEY_LIMIT = 64;
+const BUDGET_SCOPE = /^[a-z][a-z0-9]{0,47}_(day|month)$/;
+
+const S2_SIGNAL_BY_KEY = new Map(S2_PAGE_SIGNALS.flatMap((s) => s.scopes.map((scope) => [`${s.id}#${scope}`, s])));
+
+/** The signal a key belongs to, or null for a name that is not a page key. */
+export function signalForKey(key) {
+  if (S2_SIGNAL_BY_KEY.has(key)) return S2_SIGNAL_BY_KEY.get(key);
+  if (typeof key !== "string" || !key.startsWith(`${BUDGET_SIGNAL.id}#`)) return null;
+  return BUDGET_SCOPE.test(key.slice(BUDGET_SIGNAL.id.length + 1)) ? BUDGET_SIGNAL : null;
+}
+
 /** The state a key starts from after a genesis. */
 export function initialKeyState() {
   return { status: "closed", streak: 0, openedAt: null, lastBand: null, recoveredAt: null, newOpenOwnerDate: null };

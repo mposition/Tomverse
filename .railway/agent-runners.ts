@@ -132,6 +132,10 @@ const PRODUCT_RESEARCH_SCOUT_VARIABLES = [
   "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
   // Optional: `off` stops the unsandboxed retry (docs/policy/product-research-agent.md §12).
   "PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK",
+  // Optional: dev or Test walks its own screens behind Cloudflare Access (docs/policy/product-research-agent.md §12, §13).
+  "PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN",
+  "PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID",
+  "PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_SECRET",
 ] as const;
 
 /**
@@ -172,6 +176,7 @@ const QA_RELEASE_TRAIN_VARIABLES = [
   "QA_RELEASE_TRAIN_ANTHROPIC_API_KEY",
   // Unset: the verdict round's model runs on the key above; "false" stops it.
   "QA_RELEASE_TRAIN_MODEL_VERDICT",
+  "QA_RELEASE_CI_ADVICE_ENABLED",
   // "git": the deploy image has none, and the train clones and cherry-picks.
   "RAILPACK_DEPLOY_APT_PACKAGES",
 ] as const;
@@ -243,25 +248,19 @@ const AMUX_ORCHESTRATOR_VARIABLES = [
 ] as const;
 
 /**
- * The Support Triage services' one variable each (docs/policy/support-triage.md
- * §3): their own route secret, nothing else. The same lists
- * lib/supportTriageServiceCore.ts accepts at start; the IaC test holds them
- * equal.
- */
-const SUPPORT_TRIAGE_WORKER_VARIABLES = ["SUPPORT_TRIAGE_RUN_SECRET"] as const;
-const SUPPORT_TRIAGE_RETENTION_VARIABLES = ["SUPPORT_TRIAGE_RETENTION_SECRET"] as const;
-
-/**
- * The sre-ops page service's variables at S1b (docs/policy/sre-ops.md §7, §8):
- * the page service's list in scripts/ops-observer/runtime-variables-core.mjs
- * without OPS_OBSERVER_PAGE_WEBHOOK_URL, which exists from S2 only. The
- * supervisor refuses to start on any other name; the IaC test holds the two
- * lists to that difference. RAILWAY_DOCKERFILE_PATH points the build at
+ * The sre-ops page service's variables (docs/policy/sre-ops.md §7, §8): the
+ * page service's list in scripts/ops-observer/runtime-variables-core.mjs, all
+ * of it. OPS_OBSERVER_PAGE_WEBHOOK_URL is declared so an apply keeps it; only
+ * the owner sets it, at S2, and a preserved name creates nothing until then.
+ * The supervisor refuses to start on any other name; the IaC test holds the two
+ * lists equal. RAILWAY_DOCKERFILE_PATH points the build at
  * docker/ops-observer.Dockerfile, which the operator sets.
  */
-const OPS_OBSERVER_PAGE_S1B_VARIABLES = [
+const OPS_OBSERVER_PAGE_VARIABLES = [
   "OPS_OBSERVER_SECRET",
   "OPS_OBSERVER_HEARTBEAT_URL",
+  "OPS_OBSERVER_PAGE_WEBHOOK_URL",
+  "OPS_OBSERVER_S3_BUDGET_PAGES",
   "OPS_OBSERVER_ENABLED",
   "OPS_OBSERVER_APP_URL",
   "RAILWAY_DOCKERFILE_PATH",
@@ -509,31 +508,6 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     },
   },
   {
-    // docs/policy/support-triage.md §3: every 30 minutes. The run route
-    // answers without writing anything while SUPPORT_TRIAGE_ENABLED is off.
-    // Applied by the operator at stage P0c.
-    key: "support_triage_worker",
-    service: "Support Triage",
-    startCommand: "node --experimental-strip-types scripts/support-triage-worker-service.mjs",
-    cronSchedule: "*/30 * * * *",
-    environments: {
-      production: SUPPORT_TRIAGE_WORKER_VARIABLES,
-      staging: SUPPORT_TRIAGE_WORKER_VARIABLES,
-    },
-  },
-  {
-    // docs/policy/support-triage.md §3, §5: every 30 minutes, whatever the
-    // triage flag says. Applied by the operator at stage P0c.
-    key: "support_triage_retention",
-    service: "Support Triage Retention",
-    startCommand: "node --experimental-strip-types scripts/support-triage-retention-service.mjs",
-    cronSchedule: "*/30 * * * *",
-    environments: {
-      production: SUPPORT_TRIAGE_RETENTION_VARIABLES,
-      staging: SUPPORT_TRIAGE_RETENTION_VARIABLES,
-    },
-  },
-  {
     // docs/policy/sre-ops.md §1 item 1, §8 S1b: every ten minutes, built from
     // docker/ops-observer.Dockerfile. The start command replaces the image's
     // ENTRYPOINT in exec form, so it names the supervisor and its service
@@ -546,7 +520,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     startCommand: "node scripts/ops-observer/supervise.mjs page",
     cronSchedule: "*/10 * * * *",
     environments: {
-      production: OPS_OBSERVER_PAGE_S1B_VARIABLES,
+      production: OPS_OBSERVER_PAGE_VARIABLES,
     },
   },
   {

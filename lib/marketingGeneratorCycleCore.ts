@@ -31,6 +31,7 @@ import {
   type MarketingA5Refusal,
 } from "./marketingGeneratorDraftingCore.ts";
 import type { MarketingDraftSubmission } from "./marketingDraftIntakeCore.ts";
+import type { MarketingHashtagRemoval } from "./marketingHashtags.ts";
 import type { MarketingGeneratorReport } from "./marketingIntelReportCore.ts";
 import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
@@ -66,6 +67,8 @@ export type MarketingGeneratorCycleSummary = {
   readonly draftsProposed: number;
   readonly draftsSubmitted: number;
   readonly dropped: Partial<Record<MarketingA5Refusal, number>>;
+  /** Hashtags taken out of drafts that were kept: forbidden, or past the platform's maximum. */
+  readonly hashtagsRemoved: Partial<Record<MarketingHashtagRemoval, number>>;
   /** Per submitted draft, the intake's answer: queued, rejected, refused or conflict. */
   readonly intake: Partial<Record<string, number>>;
   /** Where the run ended early, or null when every account was asked. */
@@ -87,6 +90,7 @@ export async function runMarketingGeneratorCycle(
   let draftsProposed = 0;
   let draftsSubmitted = 0;
   const dropped: Partial<Record<MarketingA5Refusal, number>> = {};
+  const hashtagsRemoved: Partial<Record<MarketingHashtagRemoval, number>> = {};
   const intake: Partial<Record<string, number>> = {};
   const summary = (stoppedAt: MarketingGeneratorCycleSummary["stoppedAt"]): MarketingGeneratorCycleSummary => ({
     calls,
@@ -94,6 +98,7 @@ export async function runMarketingGeneratorCycle(
     draftsProposed,
     draftsSubmitted,
     dropped,
+    hashtagsRemoved,
     intake,
     stoppedAt,
   });
@@ -143,6 +148,10 @@ export async function runMarketingGeneratorCycle(
     const read = readMarketingA5Answer(outcome.content, context, scope);
     for (const [reason, count] of Object.entries(read.dropped)) {
       dropped[reason as MarketingA5Refusal] = (dropped[reason as MarketingA5Refusal] ?? 0) + (count ?? 0);
+    }
+    for (const [reason, count] of Object.entries(read.hashtagsRemoved)) {
+      const key = reason as MarketingHashtagRemoval;
+      hashtagsRemoved[key] = (hashtagsRemoved[key] ?? 0) + (count ?? 0);
     }
     draftsProposed += read.drafts.length;
     if (read.drafts.length === 0) continue;
@@ -208,8 +217,16 @@ export type MarketingGeneratorWorkerConfig = {
 export function marketingGeneratorWorkerConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): { readonly ok: true; readonly config: MarketingGeneratorWorkerConfig } | { readonly ok: false; readonly reason: string } {
-  const missing = MARKETING_GENERATOR_WORKER_VARIABLES.filter((name) => !env[name]);
+  const subscription = env.MARKETING_LLM_CHANNEL === "codex-subscription";
+  // The subscription channel holds no API key and names the CLI instead.
+  const needed: readonly string[] = subscription
+    ? ["MARKETING_APP_URL", "MARKETING_GENERATOR_SUBMIT_SECRET", "MARKETING_CODEX_BIN"]
+    : MARKETING_GENERATOR_WORKER_VARIABLES;
+  const missing = needed.filter((name) => !env[name]);
   if (missing.length > 0) return { ok: false, reason: `missing: ${missing.join(", ")}` };
+  if (subscription && !(env.MARKETING_CODEX_BIN as string).startsWith("/")) {
+    return { ok: false, reason: "MARKETING_CODEX_BIN is not an absolute path" };
+  }
   const secret = env.MARKETING_GENERATOR_SUBMIT_SECRET as string;
   if (secret.length < 32) return { ok: false, reason: "MARKETING_GENERATOR_SUBMIT_SECRET is shorter than 32 characters" };
   let appUrl: URL;
@@ -220,7 +237,7 @@ export function marketingGeneratorWorkerConfig(
   }
   const local = appUrl.hostname === "localhost" || appUrl.hostname === "127.0.0.1";
   if (appUrl.protocol !== "https:" && !local) return { ok: false, reason: "MARKETING_APP_URL must use HTTPS" };
-  return { ok: true, config: { appUrl, secret, apiKey: env.MARKETING_LLM_API_KEY as string } };
+  return { ok: true, config: { appUrl, secret, apiKey: subscription ? "" : (env.MARKETING_LLM_API_KEY as string) } };
 }
 
 /**

@@ -270,10 +270,10 @@ back-merge가 아홉 번 자동으로, 한 번(#1794, 충돌 34개 파일)은 �
 병합하므로, Railway가 무엇을 하고 있든 상관없이 몇 분 간격으로 병합된 PR들이
 staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
 
-병합은 운영자가 로컬에서 실행하는 merge train(`npm run merge-train`,
-`scripts/merge-train.mjs`)이 맡습니다. 가장 오래된 non-draft·CI 통과 PR을 하나씩
-병합하고, 그 환경에 진행 중인 Railway 배포가 하나라도 있으면 hold합니다. 자기가
-병합한 배포가 실패하면 멈추고 재시도하지 않습니다.
+develop 병합은 QA·릴리스 병합 레인(`docs/policy/qa-release-agent.md` 8절)이 맡습니다.
+가장 오래된 non-draft·CI 통과 PR을 하나씩 병합하고, CI를 기다리는 dev 배포가 있으면 hold합니다.
+최신 dev 배포가 실패해 있으면 멈추고 재시도하지 않습니다. main 병합은 운영자가 GitHub나 로컬
+merge train(`npm run merge-train -- --include-main`, `scripts/merge-train.mjs`)으로 합니다.
 
 이전 규칙의 교훈은 그대로입니다. 2026-09-05에 PR #1256은 사람이 auto-merge를
 끈 뒤 push 한 번에 workflow가 다시 켜서, 병합을 보류하라는 지시가 있던 상태로

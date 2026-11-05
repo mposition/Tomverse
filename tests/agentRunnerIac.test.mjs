@@ -336,8 +336,6 @@ test("services that can only reach staging or production are not declared in dev
     "billing_finance_ops_deadline",
     "qa_release_merge_lane",
     "qa_release_train",
-    "support_triage_retention",
-    "support_triage_worker",
   ]) {
     const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
     assert.equal(runner.environments.dev, undefined, key);
@@ -429,20 +427,6 @@ test("the repository the run clones is the one the services deploy from", () => 
   assert.equal(OBSERVED_REPOSITORY, AGENT_RAILWAY_REPOSITORY);
 });
 
-test("the Support Triage services declare exactly the variable their start check accepts, and start node directly", async () => {
-  const { supportTriageServiceVariables } = await import("../lib/supportTriageServiceCore.ts");
-  for (const [key, kind] of [["support_triage_worker", "worker"], ["support_triage_retention", "retention"]]) {
-    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
-    assert.ok(runner, key);
-    for (const environment of ["production", "staging"]) {
-      assert.deepEqual([...runner.environments[environment]].sort(), [...supportTriageServiceVariables(kind)].sort(), `${key} ${environment}`);
-    }
-    // docs/policy/support-triage.md §3: both every 30 minutes.
-    assert.equal(runner.cronSchedule, "*/30 * * * *", key);
-    assert.equal(runner.startCommand, `node --experimental-strip-types scripts/support-triage-${kind}-service.mjs`, key);
-  }
-});
-
 test("the sre-ops page service declares the supervisor's page list at S1b, production only", async () => {
   // docs/policy/sre-ops.md §7, §8: the supervisor refuses a name outside its
   // page list, and the page webhook exists from S2 only. Declaring it here
@@ -458,9 +442,8 @@ test("the sre-ops page service declares the supervisor's page list at S1b, produ
   assert.equal(PRODUCTION_ORIGIN, "https://tomverse.app");
   assert.deepEqual(
     [...page.environments.production].sort(),
-    SERVICE_VARIABLES.page.filter((name) => name !== "OPS_OBSERVER_PAGE_WEBHOOK_URL").sort(),
+    [...SERVICE_VARIABLES.page].sort(),
   );
-  assert.equal(page.environments.production.includes("OPS_OBSERVER_PAGE_WEBHOOK_URL"), false);
 });
 
 test("the sre-ops digest service declares the supervisor's digest list, daily at 07:00 Brisbane, production only", async () => {

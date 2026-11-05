@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefCallback } from "react";
+import type { ReactNode, RefCallback } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   guestVerificationFailureKey,
@@ -22,6 +22,11 @@ import type { GuestVerificationFailure } from "@/components/chat/guestVerificati
  *
  * The failure sentence comes from the shared mapping, so a cancelled check
  * reads the same here as it does in chat.
+ *
+ * A failed check must leave a way forward, not just a way out: `onRetry` runs
+ * the caller's submission again (the check is re-run as part of it) and
+ * `errorFallback` is where a form puts the route that does not depend on
+ * verification at all, next to the sentence explaining why it is offered.
  */
 export function TurnstileFormSlot({
   containerRef,
@@ -29,6 +34,8 @@ export function TurnstileFormSlot({
   failure,
   surface = "chat",
   onCancel,
+  onRetry,
+  errorFallback,
   testId = "turnstile-form-slot",
 }: {
   containerRef: RefCallback<HTMLDivElement>;
@@ -36,6 +43,8 @@ export function TurnstileFormSlot({
   failure: GuestVerificationFailure | null;
   surface?: GuestVerificationSurface;
   onCancel?: () => void;
+  onRetry?: () => void;
+  errorFallback?: ReactNode;
   testId?: string;
 }) {
   const { t } = useLanguage();
@@ -72,6 +81,24 @@ export function TurnstileFormSlot({
         >
           {t(guestVerificationFailureKey(failure, surface))}
         </p>
+      ) : null}
+      {isChallengeVisible && failure && errorFallback ? (
+        <div
+          data-testid={`${testId}-fallback`}
+          className="w-full text-xs font-semibold leading-5 text-zinc-600 break-keep dark:text-zinc-300"
+        >
+          {errorFallback}
+        </div>
+      ) : null}
+      {isChallengeVisible && failure && onRetry ? (
+        <button
+          type="button"
+          data-testid={`${testId}-retry`}
+          onClick={onRetry}
+          className="min-h-11 w-full rounded-xl bg-blue-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          {t("chat.guestVerificationRetry")}
+        </button>
       ) : null}
       {isChallengeVisible && onCancel ? (
         <button

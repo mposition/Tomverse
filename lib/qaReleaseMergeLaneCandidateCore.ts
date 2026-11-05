@@ -44,10 +44,19 @@ export type QaReleaseLaneSelection = {
   skipped: QaReleaseLaneSkip[];
 };
 
-const createdAtMs = (pr: QaReleaseLanePullRequest): number => {
-  const ms = Date.parse(pr.createdAt);
-  return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY;
-};
+/**
+ * The order the lane takes pull requests in: the operator's priority from CI
+ * admission first (owner: one order for the whole pipeline), then anything it
+ * does not list, oldest first. Without a priority that is simply oldest first.
+ */
+export function qaReleaseLaneOrder<T extends Pick<QaReleaseLanePullRequest, "number" | "createdAt">>(pulls: readonly T[], priority: readonly number[] = []): T[] {
+  const rank = new Map(priority.map((number, index) => [number, index]));
+  const at = (pull: T) => {
+    const ms = Date.parse(pull.createdAt);
+    return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY;
+  };
+  return [...pulls].sort((a, b) => (rank.get(a.number) ?? Infinity) - (rank.get(b.number) ?? Infinity) || at(a) - at(b) || a.number - b.number);
+}
 
 /**
  * Chooses the lane's next pull request. `exclusions` holds the item 3
@@ -58,11 +67,12 @@ const createdAtMs = (pr: QaReleaseLanePullRequest): number => {
 export function pickQaReleaseLaneCandidate(
   pullRequests: readonly QaReleaseLanePullRequest[],
   exclusions: ReadonlyMap<number, QaReleaseExclusion>,
+  priority: readonly number[] = [],
 ): QaReleaseLaneSelection {
-  const ordered = pullRequests
-    .filter((pr) => pr.baseRefName === QA_RELEASE_MERGE_LANE_BRANCH)
-    .slice()
-    .sort((a, b) => createdAtMs(a) - createdAtMs(b) || a.number - b.number);
+  const ordered = qaReleaseLaneOrder(
+    pullRequests.filter((pr) => pr.baseRefName === QA_RELEASE_MERGE_LANE_BRANCH),
+    priority,
+  );
 
   const skipped: QaReleaseLaneSkip[] = [];
   for (const pr of ordered) {

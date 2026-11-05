@@ -23,7 +23,8 @@ import {
   createQaReleaseTrainVerdictModel,
   runQaReleaseTrainVerdictRound,
 } from "../lib/qaReleaseTrainVerdict.ts";
-import { createQaReleaseTrainVerdictAppPorts } from "../lib/qaReleaseTrainPorts.ts";
+import { createQaReleaseCiAdviceAppPorts, createQaReleaseTrainVerdictAppPorts } from "../lib/qaReleaseTrainPorts.ts";
+import { createQaReleaseCiAdviceChecks, createQaReleaseCiAdviceModel, runQaReleaseCiAdviceRound } from "../lib/qaReleaseCiAdvice.ts";
 
 const STARTED_MS = Date.now();
 // The verdict round starts no model call within its last five minutes of this.
@@ -101,6 +102,26 @@ if (train.train !== "disabled" && train.train !== "refused_to_start" && Date.now
   ).finally(() => verdictGit.cleanup().catch(() => {}));
 }
 
+// The CI suggestion round: off unless switched on, at most one paid call a day,
+// and its failure never changes the round's exit code.
+let ciAdvice = "off";
+if (
+  (env.QA_RELEASE_CI_ADVICE_ENABLED ?? "").trim() === "true" &&
+  apiKey !== "" &&
+  train.train !== "disabled" &&
+  train.train !== "refused_to_start" &&
+  Date.now() - STARTED_MS < VERDICT_START_BY_MS
+) {
+  ciAdvice = await runQaReleaseCiAdviceRound(
+    {
+      app: createQaReleaseCiAdviceAppPorts({ http: httpWith(APP_TIMEOUT_MS), env }),
+      checks: createQaReleaseCiAdviceChecks({ http: readHttp, token }),
+      ask: createQaReleaseCiAdviceModel({ http: httpWith(MODEL_TIMEOUT_MS), apiKey }),
+    },
+    Date.now(),
+  );
+}
+
 clearTimeout(supervisor);
-console.log(JSON.stringify({ ...train, verdict }));
+console.log(JSON.stringify({ ...train, verdict, ciAdvice }));
 process.exitCode = train.exitCode;
