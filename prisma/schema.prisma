@@ -7946,6 +7946,38 @@ model AmuxV22TaskResult {
   @@index([ideaId, bodyPurgedAt])
 }
 
+/// A session answer the plan check refused, held for a decision (owner decision
+/// 2026-11-05): run the page again, or stop for the operator. The columns are
+/// the check's closed words only.
+model AmuxIdeaSessionPlanRefusal {
+  id                String    @id
+  ideaId            String
+  claimId           String    @unique @db.Uuid
+  chunkIndex        Int
+  detail            String
+  schemaRule        String?
+  schemaField       String?
+  schemaUnit        Int?
+  schemaUnitKind    String?
+  /// open | retry | stopped
+  state             String    @default("open")
+  /// operator | dm_confirmed
+  decisionSource    String?
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  /// The typed-ask card mirroring this refusal on the AMUX host, once.
+  localCardId       String?   @unique
+  localCardClosedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  idea  AmuxIdeaSubmission                 @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claim AmuxIdeaSessionAnalysisBudgetClaim @relation(fields: [claimId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, chunkIndex])
+  @@index([state, createdAt])
+}
+
 /// A v22 worker question to the owner (operator decision 2026-10-30). The
 /// question text stays in the attempt's encrypted result; this row keeps its
 /// digest, where it stands and the answer until the resumed delivery reads it.
@@ -9870,6 +9902,7 @@ model AmuxIdeaSubmission {
   trackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[]
   trackedCheckoutReadManifests AmuxIdeaTrackedCheckoutReadManifest[]
   sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
+  planRefusals           AmuxIdeaSessionPlanRefusal[]
   sessionResultOrphanKeyRetirements AmuxIdeaSessionResultOrphanKeyRetirement[]
   readManifestKeyIntents AmuxIdeaReadManifestKeyIntent[]
   sessionAnalysisReservation AmuxIdeaSessionAnalysisReservation?
@@ -10297,6 +10330,7 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   claimAudit     AdminAuditLog                      @relation("AmuxV19SessionBudgetClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_claim_audit_fkey")
   resolutionAudit AdminAuditLog?                    @relation("AmuxV19SessionBudgetResolutionAudit", fields: [resolutionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_resolution_audit_fkey")
   analysisResult AmuxIdeaSessionAnalysisResult?
+  planRefusal    AmuxIdeaSessionPlanRefusal?
   resultOrphanKeyRetirement AmuxIdeaSessionResultOrphanKeyRetirement?
 
   @@index([namespace, monthStart, status], map: "AmuxIdeaSessionAnalysisBudgetClaim_window_status_idx")

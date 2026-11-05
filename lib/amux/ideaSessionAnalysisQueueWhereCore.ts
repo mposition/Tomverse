@@ -18,7 +18,9 @@ export function buildAmuxSessionAnalysisQueueWhere(now: Date,
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,
-      sourceProvenanceCiphertext: { not: null } },
+      sourceProvenanceCiphertext: { not: null },
+      // A refused answer waits for its decision (owner decision 2026-11-05).
+      planRefusals: { none: { state: "open" } } },
     ...(cursor ? { OR: [
       { createdAt: { gt: cursor.createdAt } },
       { createdAt: cursor.createdAt, id: { gt: cursor.reservationId } },
