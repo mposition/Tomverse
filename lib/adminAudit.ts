@@ -8,6 +8,27 @@ import {
   adminAuditIntegrityKeys,
   computeAdminAuditEntryHash,
 } from "@/lib/adminAuditIntegrityCore";
+
+/**
+ * Re-exported so a caller that must verify a single entry does it with the
+ * chain's own functions, reached through this module.
+ *
+ * Nothing about the chain changes here. The one caller today is the
+ * trust-safety observer, whose activation derivation asks whether one entry
+ * and its successor verify (docs/policy/trust-safety-compliance-agent.md §6);
+ * `verifyAdminAuditIntegrity` answers a different question and walks the whole
+ * table to do it. That agent's write-boundary check stops at this module
+ * (§5.6), so reaching the hash helpers through here keeps the boundary where
+ * the policy puts it rather than pulling the integrity core into the
+ * observer's own files. These are the hash helpers only: appending is still
+ * refused in that agent's read-only entry points.
+ */
+export {
+  adminAuditEntryHashVariants,
+  adminAuditIntegrityKeys as adminAuditIntegrityKeysForVerification,
+} from "@/lib/adminAuditIntegrityCore";
+export type { AdminAuditHashInput } from "@/lib/adminAuditIntegrityCore";
+
 import {
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   AMUX_V4_IDEA_SYSTEM_ACTOR,

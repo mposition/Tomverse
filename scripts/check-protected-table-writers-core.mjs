@@ -3464,6 +3464,24 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Triggers on SupportTriageDecisionRecord and its links, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: at commit, whether a record that still exists has a link; a link's report message FOR SHARE (no link to a deleted account's report); the record FOR UPDATE and then, as a separate statement, its link count (the fifty cap); and, after a link is deleted, a DELETE of its own record by id, so no record outlives any of its links. The functions pin search_path to pg_catalog, pg_temp. The one write deletes the record the deleted link pointed at and nothing else. The other three uses are support_triage_group_member_guard() replaced unchanged except that it now requires READ COMMITTED: the report FOR SHARE, the group FOR UPDATE, then its member count.",
   },
   {
+    path: "prisma/migrations/20261104070000_trust_safety_observer_config/migration.sql",
+    count: 1,
+    reason:
+      "One read in the config deadline guard: the trust_safety_parse_deadline call, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA quoted with %I and the value bound with USING. The function pins search_path to pg_catalog, pg_temp. It reads and never writes. The other EXECUTE words are CREATE TRIGGER ... EXECUTE FUNCTION clauses, which this check does not count.",
+  },
+  {
+    path: "prisma/migrations/20261104060000_trust_safety_observer_run/migration.sql",
+    count: 1,
+    reason:
+      "One read in the run row's deadline guard: the trust_safety_parse_deadline call, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA quoted with %I and the value bound with USING. The function pins search_path to pg_catalog, pg_temp. It reads and never writes. The other EXECUTE words are CREATE TRIGGER ... EXECUTE FUNCTION clauses, which this check does not count.",
+  },
+  {
+    path: "scripts/check-trust-safety-write-boundary.mjs",
+    count: 10,
+    reason:
+      "This check names the raw-SQL methods it refuses ($executeRaw, $executeRawUnsafe, $queryRawUnsafe, the tagged $queryRaw) in its own refusal sets and in the code that classifies a call by those names. It opens no database connection and runs no SQL.",
+  },
+  {
     path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
     count: 1,
     reason:
