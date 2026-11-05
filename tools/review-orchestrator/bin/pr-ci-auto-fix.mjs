@@ -23,6 +23,8 @@
  *   PR_CI_AUTO_FIX_INSTALL                 optional: "on" installs the head's packages
  *                                          (npm ci --ignore-scripts) so the model can read their
  *                                          API; off, the model sees the source tree only
+ *   PR_CI_AUTO_FIX_REGENERATE              optional: "on" regenerates the marketing admission manifest
+ *                                          when only its files' bytes changed; off, a stale one stays failing
  *
  * Exit 0 after a pass whatever it found, 64 when the settings cannot run, 65 on error.
  */
@@ -72,7 +74,8 @@ export function ciFixSettings(env, config) {
   if (leaky) return { error: `providers.${leaky.id}: passEnv must not carry a GitHub token` };
   const conflicts = env.PR_CI_AUTO_FIX_CONFLICTS === "on";
   const install = env.PR_CI_AUTO_FIX_INSTALL === "on";
-  return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox, workDir, home, model, minRemainingPercent, conflicts, install };
+  const regenerate = env.PR_CI_AUTO_FIX_REGENERATE === "on";
+  return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox, workDir, home, model, minRemainingPercent, conflicts, install, regenerate };
 }
 
 const isAbsolute = (path) => typeof path === "string" && path.startsWith("/") && !path.split("/").includes("..");
@@ -130,6 +133,7 @@ async function main() {
       minRemainingPercent: settings.minRemainingPercent,
       conflicts: settings.conflicts,
       install: settings.install,
+      regenerate: settings.regenerate,
       // The daemon's last reading: a pass never probes the account itself.
       quota: async (provider) => readQuotaStatus(config, Date.now())[provider.id],
       secrets: knownSecrets(process.env, config),
