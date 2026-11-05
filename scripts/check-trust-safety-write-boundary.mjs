@@ -155,7 +155,14 @@ export const ENTRY_POINTS = [
     allowed: {
       taggedQueryRaw: { "lib/trustSafetyTransaction.ts": 2 },
       // The config row: one create, one update, one of which runs.
-      delegateWrites: { "lib/trustSafetyActivationStore.ts": 2 },
+      // The single config row, and the two operations that write it (§6: the
+      // first write creates it, a transition updates it).
+      delegateWrites: {
+        "lib/trustSafetyActivationStore.ts": [
+          "trustSafetyObserverConfig.create",
+          "trustSafetyObserverConfig.update",
+        ],
+      },
       // And the audit append in the same transaction (§6).
       auditAppends: { "lib/trustSafetyActivationStore.ts": 1 },
       fetchCalls: {},
@@ -172,13 +179,13 @@ export const ENTRY_POINTS = [
  */
 export const STATEMENT_SHAPES = {
   "lib/trustSafetyObserverRun.ts": [
-    /INSERT INTO "TrustSafetyObserverRun" \("id", "outcome", "observedAt", "recordedAt", "deadlineAt"\)[\s\S]*RETURNING "id"/,
+    /^INSERT INTO "TrustSafetyObserverRun" \("id", "outcome", "observedAt", "recordedAt", "deadlineAt"\) VALUES \( \$\{\}, 'succeeded', \$\{\}::timestamptz, clock_timestamp\(\), clock_timestamp\(\)\) RETURNING "id"$/,
   ],
   "lib/trustSafetyTransaction.ts": [
     // The arming statement: the ops-observer function, read as a row.
-    /SELECT "serverVersion", "priorTxTimeoutMs", "txStart", "ttArmedMs", "ttArmed" FROM ops_observer_arm_timeouts\(/,
+    /^SELECT "serverVersion", "priorTxTimeoutMs", "txStart", "ttArmedMs", "ttArmed" FROM ops_observer_arm_timeouts\( \$\{\}::int, \$\{\}::int, \$\{\}::int, \$\{\}::int, \$\{\}::int, \$\{\}::timestamptz\)$/,
     // The deadline: transaction-local, from the database clock, pinned format.
-    /SELECT set_config\( \$\{\}, to_char\( clock_timestamp\(\) \+ make_interval\(secs => \$\{\}::double precision\), 'YYYY-MM-DD"T"HH24:MI:SS\.MSOF'\), true\) AS armed/,
+    /^SELECT set_config\( \$\{\}, to_char\( clock_timestamp\(\) \+ make_interval\(secs => \$\{\}::double precision\), 'YYYY-MM-DD"T"HH24:MI:SS\.MSOF'\), true\) AS armed$/,
   ],
 };
 
@@ -226,7 +233,7 @@ const namedImportNames = (node) => {
 export const analyseFile = ({ file, source, exists }) => {
   const failures = [];
   const edges = [];
-  const counts = { taggedQueryRaw: 0, delegateWrites: 0, auditAppends: 0, fetchCalls: 0 };
+  const counts = { taggedQueryRaw: 0, delegateWrites: [], auditAppends: 0, fetchCalls: 0 };
   const valuePackages = new Set();
   const fail = (rule, detail) => failures.push({ file, rule, detail });
   const sourceFile = parse(file, source);
@@ -236,17 +243,51 @@ export const analyseFile = ({ file, source, exists }) => {
    * local name an aliased import gave them.
    */
   const auditWriterNames = new Set(AUDIT_WRITERS);
+  /**
+   * The local names this file imported from `node:crypto` for a digest, which
+   * is the only thing the write exclusion accepts.
+   */
+  const cryptoDigestNames = new Set();
   const collectAliases = (node) => {
-    if (
-      ts.isImportSpecifier(node) &&
-      node.propertyName &&
-      AUDIT_WRITERS.has(node.propertyName.text)
-    ) {
-      auditWriterNames.add(node.name.text);
+    if (ts.isImportSpecifier(node)) {
+      const imported = node.propertyName?.text ?? node.name.text;
+      if (node.propertyName && AUDIT_WRITERS.has(node.propertyName.text)) {
+        auditWriterNames.add(node.name.text);
+      }
+      const declaration = node.parent?.parent?.parent;
+      const from =
+        declaration && ts.isImportDeclaration(declaration) && ts.isStringLiteral(declaration.moduleSpecifier)
+          ? declaration.moduleSpecifier.text
+          : null;
+      if ((from === "node:crypto" || from === "crypto") && (imported === "createHash" || imported === "createHmac")) {
+        cryptoDigestNames.add(node.name.text);
+      }
     }
     ts.forEachChild(node, collectAliases);
   };
   ts.forEachChild(sourceFile, collectAliases);
+
+  /**
+   * The model a write is aimed at: the last property of the receiver, when the
+   * receiver reduces to one.
+   *
+   * `client.trustSafetyObserverConfig.create(...)` gives
+   * `trustSafetyObserverConfig`. Anything the check cannot reduce -- a
+   * variable, a bracket, a destructured delegate -- gives `<unresolved>`,
+   * which no allowlist entry names, so it fails.
+   */
+  const modelOf = (receiver) => {
+    if (receiver === undefined) return "<unresolved>";
+    if (ts.isPropertyAccessExpression(receiver)) return receiver.name.text;
+    if (
+      ts.isElementAccessExpression(receiver) &&
+      (ts.isStringLiteral(receiver.argumentExpression) ||
+        ts.isNoSubstitutionTemplateLiteral(receiver.argumentExpression))
+    ) {
+      return receiver.argumentExpression.text;
+    }
+    return "<unresolved>";
+  };
 
   /**
    * Whether this receiver really is a digest, by walking it rather than
@@ -266,12 +307,13 @@ export const analyseFile = ({ file, source, exists }) => {
       }
       if (ts.isCallExpression(at)) {
         const callee = at.expression;
-        const name = ts.isIdentifier(callee)
-          ? callee.text
-          : ts.isPropertyAccessExpression(callee)
-            ? callee.name.text
-            : null;
-        if (name === "createHash" || name === "createHmac") return true;
+        // The name has to be the one this file imported from `node:crypto`.
+        // Any call named `createHash` counted before, so
+        // `({ createHash: () => client.privacyRequest }).createHash("x")
+        // .deleteMany({})` suppressed a real write -- independent review
+        // found it. A plain identifier that the file imported is the only
+        // form that excludes; a method call named `createHash` does not.
+        if (ts.isIdentifier(callee) && cryptoDigestNames.has(callee.text)) return true;
         at = callee;
         continue;
       }
@@ -345,7 +387,13 @@ export const analyseFile = ({ file, source, exists }) => {
             valuePackages.add(specifier);
           }
         } else if (BOUNDARY_MODULES.has(specifier)) {
-          // The walk stops here, which is what "boundary" means.
+          // The walk stops here, which is what "boundary" means -- but a
+          // namespace or default import of one is refused for the same reason
+          // (ㄱ-1) refuses one of a built-in: which export is used cannot be
+          // seen, and `import * as audit` followed by
+          // `audit["writeAdminAuditLog"](...)` was an audit write nothing
+          // counted. Independent review found it.
+          if (namespace || defaultImport) fail("boundary-namespace-import", specifier);
         } else if (!typeOnly) {
           edges.push(repoPath);
         }
@@ -471,7 +519,14 @@ export const analyseFile = ({ file, source, exists }) => {
         if (!isTag) fail("raw-extracted", name);
       }
       if (WRITE_METHODS.has(name) && !isDigestReceiver(receiver)) {
-        counts.delegateWrites += 1;
+        // **What** is written, not just how many times. Counting alone let
+        // E3's two allowed config writes become `client.user.deleteMany(...)`
+        // at the same count, which independent review found, and §5.6 allows
+        // this closure one thing: the single config row. So the model is
+        // resolved from the receiver and the pair is recorded; a receiver that
+        // does not reduce to a model name records `<unresolved>`, which no
+        // allowlist entry matches.
+        counts.delegateWrites.push(`${modelOf(receiver)}.${name}`);
       }
     };
 
@@ -530,10 +585,17 @@ export const analyseFile = ({ file, source, exists }) => {
         // Substitutions are normalised to `${}`: the shape is the SQL and
         // where the parameters sit, not what the variables holding them are
         // called.
+        // The template's own text carries its backticks; the shapes are
+        // anchored to the whole statement, so they come off. Anchoring is the
+        // point: a partial match let `WITH extra AS (INSERT INTO … RETURNING
+        // …) SELECT …` keep the allowed shape as its tail and write a second
+        // table in one valid statement, which independent review found.
         const statement = node.template
           .getText(sourceFile)
+          .replace(/^`|`$/g, "")
           .replace(/\$\{[^}]*\}/g, "${}")
-          .replace(/\s+/g, " ");
+          .replace(/\s+/g, " ")
+          .trim();
         const shapes = STATEMENT_SHAPES[file] ?? [];
         if (!shapes.some((shape) => shape.test(statement))) {
           fail("raw-shape", statement.slice(0, 60));
@@ -585,24 +647,43 @@ const checkEntryPoint = (entry, { load, exists }) => {
     const result = analyseFile({ file, source, exists });
     for (const failure of result.failures) failures.push({ entry: entry.id, ...failure });
     for (const kind of Object.keys(totals)) {
-      if (result.counts[kind] > 0) totals[kind][file] = result.counts[kind];
+      const value = result.counts[kind];
+      if (Array.isArray(value) ? value.length > 0 : value > 0) totals[kind][file] = value;
     }
     for (const edge of result.edges) queue.push(edge);
     for (const specifier of result.valuePackages) packages.add(specifier);
   }
 
   // The allowlist, compared as a whole: a file that writes and is not named
-  // fails, and a named file that writes more than its number fails too.
+  // fails, a named file that writes more than its number fails, and a named
+  // file that writes something other than what it is named for fails too --
+  // the delegate writes are compared as `model.operation` pairs, because a
+  // count alone let the allowed pair be swapped for another table's delete.
   for (const kind of Object.keys(totals)) {
     const allowed = entry.allowed[kind] ?? {};
-    for (const [file, count] of Object.entries(totals[kind])) {
-      const permitted = allowed[file] ?? 0;
-      if (count > permitted) {
+    for (const [file, observed] of Object.entries(totals[kind])) {
+      const permitted = allowed[file] ?? (Array.isArray(observed) ? [] : 0);
+      if (Array.isArray(observed)) {
+        const remaining = [...(Array.isArray(permitted) ? permitted : [])];
+        for (const pair of observed) {
+          const at = remaining.indexOf(pair);
+          if (at === -1) {
+            failures.push({
+              entry: entry.id,
+              file,
+              rule: `${kind}-not-allowed`,
+              detail: `${pair} is not one of [${(Array.isArray(permitted) ? permitted : []).join(", ")}]`,
+            });
+          } else {
+            remaining.splice(at, 1);
+          }
+        }
+      } else if (observed > permitted) {
         failures.push({
           entry: entry.id,
           file,
           rule: `${kind}-not-allowed`,
-          detail: `${count} where ${permitted} are allowed`,
+          detail: `${observed} where ${permitted} are allowed`,
         });
       }
     }

@@ -497,6 +497,65 @@ export const write = async (client: Record<string, Record<string, (x: unknown) =
   }
 });
 
+test("a write to another model is refused at the same count", () => {
+  // The allowlist names the pair, not the number: E3's two config writes were
+  // swappable for `client.user.deleteMany(...)` while the count held.
+  const result = withOverlay({
+    "lib/trustSafetyActivationStore.ts": load("lib/trustSafetyActivationStore.ts").replace(
+      "client.trustSafetyObserverConfig.update({",
+      "client.user.deleteMany({",
+    ),
+  });
+  const entries = result.failures.filter((failure) => failure.rule === "delegateWrites-not-allowed");
+  assert.ok(entries.length > 0, JSON.stringify(result.failures.slice(0, 3)));
+  assert.match(entries[0].detail, /user\.deleteMany is not one of/);
+});
+
+test("a receiver the check cannot reduce to a model is refused", () => {
+  const result = withOverlay({
+    "lib/trustSafetyActivationStore.ts": load("lib/trustSafetyActivationStore.ts").replace(
+      "client.trustSafetyObserverConfig.update({",
+      "delegate.update({",
+    ),
+  });
+  const entries = result.failures.filter((failure) => failure.rule === "delegateWrites-not-allowed");
+  assert.ok(entries.some((failure) => failure.detail.includes("<unresolved>")), JSON.stringify(entries));
+});
+
+test("a CTE smuggling a second write past the allowed shape is refused", () => {
+  // One valid PostgreSQL statement, the allowed shape as its tail: the shapes
+  // are anchored to the whole statement now.
+  const result = withOverlay({
+    "lib/trustSafetyTransaction.ts": load("lib/trustSafetyTransaction.ts").replace(
+      "          SELECT \"serverVersion\"",
+      "          WITH extra AS (INSERT INTO \"PrivacyRequest\" DEFAULT VALUES RETURNING \"id\")\n          SELECT \"serverVersion\"",
+    ),
+  });
+  assert.ok(rules(result).includes("raw-shape"), JSON.stringify(result.failures.slice(0, 3)));
+});
+
+test("a namespace import of a boundary module is refused", () => {
+  // `import * as audit from "@/lib/adminAudit"` then
+  // `audit["writeAdminAuditLog"](...)` was an audit write nothing counted.
+  const result = withOverlay({
+    "lib/trustSafetyActivationStore.ts": `import * as audit from "@/lib/adminAudit";\n${load(
+      "lib/trustSafetyActivationStore.ts",
+    )}`,
+  });
+  assert.ok(rules(result).includes("boundary-namespace-import"), JSON.stringify(result.failures.slice(0, 3)));
+});
+
+test("only a digest imported from node:crypto excludes a write", () => {
+  // Any call named createHash counted before, so an object literal with that
+  // key suppressed a real delete.
+  const result = withOverlay({
+    "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}
+export const purge = async (client: { privacyRequest: { deleteMany: (x: unknown) => Promise<unknown> } }) =>
+  ({ createHash: () => client.privacyRequest }).createHash("x").deleteMany({});`,
+  });
+  assert.ok(rules(result).includes("delegateWrites-not-allowed"), JSON.stringify(result.failures.slice(0, 3)));
+});
+
 test("the entry points and the specifier list are the ones the section names", () => {
   assert.deepEqual(
     ENTRY_POINTS.map((entry) => entry.id),
