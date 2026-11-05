@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   ACTIVATION_REFUSALS,
   TRUST_SAFETY_ACTIVATION_ACTION,
+  isTrustSafetyRefusalCode,
   nextActivationWrite,
 } from "../lib/trustSafetyActivationCore.ts";
 import { TRUST_SAFETY_BOUNDS } from "../lib/trustSafetyBoundsCore.ts";
@@ -166,7 +167,7 @@ test("the route checks who, then step-up, then the body", () => {
     "isAdminSession",
     'hasAdminPermission(session, "trust-safety:write")',
     "assertRecentAdminAuthentication",
-    "request.text()",
+    "readCappedBody(request)",
     "bodySchema.safeParse",
     "setTrustSafetyActivation",
   ];
@@ -221,6 +222,44 @@ test("a concurrent activation write is a refusal, not a failure", () => {
   assert.ok(conflict < internal, "answered before the generic failure");
 });
 
+test("a non-administrator's form submit is still a 404, not a redirect", () => {
+  // Redirecting it to the section would say the section exists, which is the
+  // one thing the 404 is for. Independent review found the form path turning
+  // it into `?refused=refused`.
+  const whole = codeOf(ROUTE);
+  assert.match(whole, /if \(status === 404 \|\| !isFormSubmission\(request\)\) return json\(body, status\);/);
+});
+
+test("the body is capped in bytes, before it is all in memory", () => {
+  // `await request.text()` buffers the whole body first, and String.length
+  // counts UTF-16 units rather than bytes, so the old guard bounded neither.
+  const whole = codeOf(ROUTE);
+  assert.match(whole, /content-length/);
+  assert.match(whole, /byteLength/);
+  assert.match(whole, /reader\.cancel\(\)/);
+  assert.doesNotMatch(whole, /await request\.text\(\)/);
+  assert.doesNotMatch(whole, /raw\.length > BODY_MAX_BYTES/);
+});
+
+test("the refusal code the section shows is one the route can answer with", () => {
+  // The route's own rule is closed sets rather than free text, and the query
+  // parameter has to be held to the same thing.
+  assert.equal(isTrustSafetyRefusalCode("not_a_transition"), true);
+  assert.equal(isTrustSafetyRefusalCode("reauthentication_required"), true);
+  assert.equal(isTrustSafetyRefusalCode("stale"), true);
+  assert.equal(isTrustSafetyRefusalCode("<script>"), false);
+  assert.equal(isTrustSafetyRefusalCode(""), false);
+  assert.equal(isTrustSafetyRefusalCode(undefined), false);
+  // Every refusal the core can return is in the list the section accepts.
+  for (const refusal of ACTIVATION_REFUSALS) {
+    assert.equal(isTrustSafetyRefusalCode(refusal), true, refusal);
+  }
+  assert.match(
+    readFileSync("app/(site)/(application)/admin/agent-digests/page.tsx", "utf8"),
+    /isTrustSafetyRefusalCode\(refused\)/,
+  );
+});
+
 test("the route builds its own responses and caps its own body", () => {
   // (ㄴ') closes the outside specifiers at eight and `next/server` is not one,
   // and `lib/apiSecurity.ts` is not a boundary module -- so `NextResponse`,
@@ -232,6 +271,6 @@ test("the route builds its own responses and caps its own body", () => {
   assert.doesNotMatch(code, /readLimitedJson|consumeApiRateLimit|apiSecurityResponse/);
   assert.match(code, /new Response\(JSON\.stringify\(body\)/);
   assert.match(code, /"Cache-Control": "no-store"/);
-  assert.match(code, /raw\.length > BODY_MAX_BYTES/);
+  assert.match(code, /readCappedBody\(request\)/);
   assert.match(code, /status: 413|, 413\)/);
 });

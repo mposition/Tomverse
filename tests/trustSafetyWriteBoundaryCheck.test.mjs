@@ -110,6 +110,53 @@ test("reflection is refused in every use, including a destructured one", () => {
   }
 });
 
+test("a name written as a string in brackets is judged as that name", () => {
+  // The hole independent review executed: a literal key was allowed without
+  // being judged, so `(() => {})["constructor"]` reached `Function` without
+  // naming it anywhere this check looked.
+  const result = withOverlay({
+    "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}
+const make = (() => {})["constructor"] as (body: string) => () => unknown;
+export const run = () => make("return 1")();`,
+  });
+  assert.ok(rules(result).includes("bracket-name"), JSON.stringify(result.failures));
+});
+
+test("the same name in a destructuring key is judged too", () => {
+  const result = withOverlay({
+    "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}
+export const { "constructor": make } = (() => {}) as unknown as Record<string, unknown>;`,
+  });
+  assert.ok(rules(result).includes("binding-name"), JSON.stringify(result.failures));
+});
+
+test("a numeric index is still allowed", () => {
+  const result = withOverlay({
+    "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}
+export const head = (rows: readonly string[]) => rows[0];`,
+  });
+  assert.deepEqual(result.failures, []);
+});
+
+test("a value re-export is walked like an import", () => {
+  // The second hole review found: `export { x } from "./y"` loads that file
+  // at runtime without importing it, so its requests and writes were outside
+  // the check entirely.
+  const result = withOverlay({
+    "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}
+export { NextResponse } from "next/server";`,
+  });
+  assert.ok(rules(result).includes("specifier-not-allowed"), JSON.stringify(result.failures));
+});
+
+test("a type-only re-export is not walked", () => {
+  const result = withOverlay({
+    "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}
+export type { ActivationState } from "@/lib/trustSafetyActivationCore";`,
+  });
+  assert.deepEqual(result.failures, []);
+});
+
 test("a package import outside (ㄴ')'s eight is refused", () => {
   const result = withOverlay({
     "app/api/admin/agents/trust-safety/activation/route.ts": load(

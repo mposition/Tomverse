@@ -207,15 +207,27 @@ export const analyseFile = ({ file, source, exists }) => {
   const fail = (rule, detail) => failures.push({ file, rule, detail });
   const sourceFile = parse(file, source);
 
-  const visit = (node) => {
-    // --- imports -------------------------------------------------------
-    if (ts.isImportDeclaration(node)) {
-      const specifier = node.moduleSpecifier.text;
-      const typeOnly = isTypeOnlyImport(node);
-      const namespace =
-        node.importClause?.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings);
-      const defaultImport = Boolean(node.importClause?.name);
+  /**
+   * Judge one name that was written as a string rather than an identifier.
+   *
+   * The banned-name rules are about names, not about the syntax that spells
+   * them: a key in brackets or in a destructuring pattern is the same name as
+   * a property access, and §5.6 says to judge it as one once it reduces.
+   */
+  const judgeName = (name, rule) => {
+    if (BANNED_NAMES.includes(name) || BANNED_REFLECTION.includes(name) || BANNED_GLOBALS.includes(name)) {
+      fail(rule, name);
+    }
+  };
 
+  /**
+   * Judge one module edge and record it.
+   *
+   * Imports and value re-exports are the same edge -- both load the file at
+   * runtime -- so both come through here, which is how the rules stay one set
+   * rather than two that drift.
+   */
+  const judgeSpecifier = ({ specifier, typeOnly, namespace, defaultImport, names }) => {
       if (specifier.startsWith("node:") || ALLOWED_BUILTINS.has(`node:${specifier}`)) {
         const normalised = specifier.startsWith("node:") ? specifier.split("/")[0] : `node:${specifier}`;
         if (!ALLOWED_BUILTINS.has(normalised)) {
@@ -224,7 +236,7 @@ export const analyseFile = ({ file, source, exists }) => {
           if (namespace || defaultImport) fail("builtin-namespace-import", specifier);
           const allowedExports = ALLOWED_BUILTINS.get(normalised);
           if (allowedExports) {
-            for (const name of namedImportNames(node)) {
+            for (const name of names) {
               if (!allowedExports.has(name)) fail("builtin-export-not-allowed", `${specifier}:${name}`);
             }
           }
@@ -238,7 +250,7 @@ export const analyseFile = ({ file, source, exists }) => {
           } else if (allowed.shape === "type-only" && !typeOnly) {
             fail("specifier-must-be-type-only", specifier);
           } else if (allowed.shape === "named") {
-            for (const name of namedImportNames(node)) {
+            for (const name of names) {
               if (!allowed.names.includes(name)) fail("specifier-export-not-allowed", `${specifier}:${name}`);
             }
             if (namespace || defaultImport) fail("specifier-namespace-import", specifier);
@@ -261,6 +273,36 @@ export const analyseFile = ({ file, source, exists }) => {
           edges.push(repoPath);
         }
       }
+  };
+
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) {
+      judgeSpecifier({
+        specifier: node.moduleSpecifier.text,
+        typeOnly: isTypeOnlyImport(node),
+        namespace: Boolean(
+          node.importClause?.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings),
+        ),
+        defaultImport: Boolean(node.importClause?.name),
+        names: namedImportNames(node),
+      });
+    }
+
+    // A value re-export is an edge too, and missing it was the second hole
+    // independent review found: `export { send } from "./egress"` runs that
+    // file without ever importing it, so its requests and writes were
+    // outside this check. `export type { ... } from` is erased, like a type
+    // import, and is not followed.
+    if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      const specifier = node.moduleSpecifier.text;
+      const typeOnly = Boolean(node.isTypeOnly) ||
+        (Boolean(node.exportClause) && ts.isNamedExports(node.exportClause) &&
+          node.exportClause.elements.length > 0 &&
+          node.exportClause.elements.every((element) => element.isTypeOnly));
+      const names = node.exportClause && ts.isNamedExports(node.exportClause)
+        ? node.exportClause.elements.map((element) => element.propertyName?.text ?? element.name.text)
+        : [];
+      judgeSpecifier({ specifier, typeOnly, namespace: false, defaultImport: false, names });
     }
 
     // A dynamic import or a `require` is an edge this check cannot follow.
@@ -311,10 +353,25 @@ export const analyseFile = ({ file, source, exists }) => {
       const argument = node.argumentExpression;
       const literal =
         ts.isStringLiteral(argument) || ts.isNumericLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument);
-      if (!literal) fail("computed-access", argument.getText(sourceFile).slice(0, 40));
+      if (!literal) {
+        fail("computed-access", argument.getText(sourceFile).slice(0, 40));
+      } else if (ts.isNumericLiteral(argument)) {
+        // An index, not a name.
+      } else {
+        // §5.6: a key that reduces to a literal is judged **by that name**,
+        // and allowing it without judging was the hole independent review
+        // found -- `(() => {})["constructor"]("return globalThis.fetch")()`
+        // reaches `Function` without naming it anywhere this check looked.
+        judgeName(argument.text, "bracket-name");
+      }
     }
-    if (ts.isBindingElement(node) && node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
-      fail("computed-binding", node.propertyName.getText(sourceFile).slice(0, 40));
+    if (ts.isBindingElement(node) && node.propertyName) {
+      if (ts.isComputedPropertyName(node.propertyName)) {
+        fail("computed-binding", node.propertyName.getText(sourceFile).slice(0, 40));
+      } else if (ts.isStringLiteral(node.propertyName)) {
+        // The same rule for the destructuring form: `const { "constructor": f }`.
+        judgeName(node.propertyName.text, "binding-name");
+      }
     }
 
     // --- writes and raw SQL -------------------------------------------

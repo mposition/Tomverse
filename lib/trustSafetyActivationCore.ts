@@ -206,6 +206,30 @@ export const ACTIVATION_REFUSALS = [
 
 export type ActivationRefusal = (typeof ACTIVATION_REFUSALS)[number];
 
+/**
+ * Every code the activation route can answer with, and the closed set the
+ * section will show.
+ *
+ * The route says its codes are closed sets rather than free text; the query
+ * parameter it redirects back with has to be held to the same thing, or a
+ * hand-written `?refused=<anything>` renders a stranger's text in the panel.
+ * Independent review named that.
+ */
+export const TRUST_SAFETY_REFUSAL_CODES = [
+  ...ACTIVATION_REFUSALS,
+  "integrity_key_missing",
+  "reauthentication_required",
+  "stale",
+  "late",
+  "body_too_large",
+  "invalid_request",
+  "internal",
+] as const;
+
+/** Whether a value is one of the codes the route emits. */
+export const isTrustSafetyRefusalCode = (value: unknown): boolean =>
+  typeof value === "string" && (TRUST_SAFETY_REFUSAL_CODES as readonly string[]).includes(value);
+
 /** What the activation write will record, or why there is nothing to record. */
 export type ActivationWrite =
   | { readonly refusal: ActivationRefusal }

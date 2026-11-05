@@ -14,6 +14,7 @@ import {
   adminReauthenticationHref,
 } from "@/lib/adminReauthenticationCore";
 import { adminTrustSafetyMessages } from "@/lib/adminMessages/trustSafety";
+import { isTrustSafetyRefusalCode } from "@/lib/trustSafetyActivationCore";
 import { readTrustSafetyDigest, type TrustSafetyDigestView } from "@/lib/trustSafetyDigestRead";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import {
@@ -106,7 +107,10 @@ async function TrustSafetySection({
       view={read as TrustSafetyDigestView | null}
       messages={messages as unknown as Record<string, string>}
       canWrite={hasAdminPermission(session, "trust-safety:write")}
-      refusedCode={typeof refused === "string" ? refused : null}
+      // Only a code the route can actually answer with: the panel interpolates
+      // it into its copy, and the route's own rule is closed sets rather than
+      // free text.
+      refusedCode={isTrustSafetyRefusalCode(refused) ? (refused as string) : null}
       reauthenticationHref={reauthenticationHref}
     />
   );

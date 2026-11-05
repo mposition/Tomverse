@@ -94,7 +94,11 @@ const answer = (
   body: { error?: string; code?: string; ok?: true; result?: unknown },
   status: number,
 ): Response => {
-  if (!isFormSubmission(request)) return json(body, status);
+  // A 404 is answered as a 404 even to a form, and that is the point of it:
+  // redirecting a non-administrator to the section would tell them the section
+  // exists, which is what the 404 is for. Independent review found the form
+  // path turning it into `?refused=refused`.
+  if (status === 404 || !isFormSubmission(request)) return json(body, status);
   const target =
     status >= 200 && status < 300
       ? SECTION_PATH
@@ -103,6 +107,44 @@ const answer = (
     status: 303,
     headers: { Location: target, "Cache-Control": "no-store" },
   });
+};
+
+/**
+ * Read the body with a byte cap, without buffering past it.
+ *
+ * `await request.text()` materialises the whole body before anything is
+ * checked, and `String.length` counts UTF-16 units rather than bytes -- so the
+ * old guard bounded neither memory nor bytes, which independent review named.
+ * The declared length is refused first when it is present, and the stream is
+ * then read in chunks with a byte count that stops at the cap.
+ */
+const readCappedBody = async (request: Request): Promise<string | null> => {
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > BODY_MAX_BYTES) return null;
+  const body = request.body;
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      bytes += value.byteLength;
+      if (bytes > BODY_MAX_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  }
+  const joined = new Uint8Array(bytes);
+  let at = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return new TextDecoder().decode(joined);
 };
 
 export async function POST(request: Request) {
@@ -120,8 +162,8 @@ export async function POST(request: Request) {
     }
     await assertRecentAdminAuthentication(session);
 
-    const raw = await request.text();
-    if (raw.length > BODY_MAX_BYTES) {
+    const raw = await readCappedBody(request);
+    if (raw === null) {
       return answer(request, { error: "Refused.", code: "body_too_large" }, 413);
     }
     // Two shapes: the section's form, and JSON for anything calling this
