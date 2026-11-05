@@ -8082,9 +8082,6 @@ model AmuxV22TaskResult {
   @@index([ideaId, bodyPurgedAt])
 }
 
-/// A v22 worker question to the owner (operator decision 2026-10-30). The
-/// question text stays in the attempt's encrypted result; this row keeps its
-/// digest, where it stands and the answer until the resumed delivery reads it.
 /// A session answer the plan check refused, held for a decision (owner decision
 /// 2026-11-05): run the page again, or stop for the operator. The columns are
 /// the check's closed words only.
@@ -8117,6 +8114,9 @@ model AmuxIdeaSessionPlanRefusal {
   @@index([state, createdAt])
 }
 
+/// A v22 worker question to the owner (operator decision 2026-10-30). The
+/// question text stays in the attempt's encrypted result; this row keeps its
+/// digest, where it stands and the answer until the resumed delivery reads it.
 model AmuxV22TaskQuestion {
   id               String    @id
   taskId           String

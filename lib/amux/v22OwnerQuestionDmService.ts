@@ -192,8 +192,9 @@ export type AmuxV22ResolveStep =
 /**
  * The read step of the walk over confirmed Decision Maker proposals, the walk
  * the delivery read takes (`readNextDecisionMakerDeliveryJudgment`), from the
- * relay's cursor: six statements (switches, the confirmation, the request,
- * the open question of its card, the result detail, the bodies). Under the
+ * relay's cursor: seven statements (switches, the confirmation, the request,
+ * the open question of its card, the open refusal of its card, the result
+ * detail, the bodies). Under the
  * kill switch, or when the switches cannot be read, nothing more is read and
  * the walk keeps its place (docs/policy/amux-decision-maker.md §6). A confirmation of an open v22 question card
  * yields the text a worker would have been sent; one whose asking run has not
