@@ -1,0 +1,544 @@
+#!/usr/bin/env node
+// The §5.6 static check (docs/policy/trust-safety-compliance-agent.md).
+//
+// §5.6 says the write boundary is checked from the route inward, over the
+// agent's own files -- everything an entry point reaches without passing one
+// of the six approved shared modules -- and it names what each entry point may
+// do. This is that check.
+//
+// **It parses rather than greps.** The rules are about syntax: a type-only
+// import edge is not followed, a computed property access fails whatever it
+// spells, and a class body's own `constructor` is the one exemption in a ban
+// on that name. A regular expression over the text gets each of those wrong in
+// a different direction, and the section's own history is five review rounds
+// of exactly that. So the files are parsed with the TypeScript compiler's
+// parser and the rules are asked of the tree.
+//
+// **The three entry points are files, and the second one needs saying.** E1
+// and E3 are routes. E2 is "the section" -- its server component and the read
+// behind it -- not the page that hosts it: the common Agent digest area is not
+// this team's to own (§9), and walking from the page would pull every other
+// agent's panel into this agent's files and refuse a correct implementation.
+//
+// Run it with `node scripts/check-trust-safety-write-boundary.mjs`. It prints
+// one line per failure, with the file and the rule, and exits non-zero.
+
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, relative, resolve as resolvePath } from "node:path";
+
+const require = createRequire(import.meta.url);
+const ts = require("typescript");
+
+const ROOT = resolvePath(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
+
+/** The six boundary modules (ㄴ). The walk stops at these. */
+export const BOUNDARY_MODULES = new Set([
+  "@/lib/prisma",
+  "@/lib/adminAudit",
+  "@/lib/auth",
+  "next-auth/next",
+  "@/lib/adminAuth",
+  "@/lib/adminReauthentication",
+]);
+
+/** (ㄴ'): the eight outside specifiers, and the shape each is allowed in. */
+export const ALLOWED_SPECIFIERS = new Map([
+  ["server-only", { shape: "side-effect" }],
+  ["@prisma/client", { shape: "type-only" }],
+  ["next-auth/next", { shape: "named", names: ["getServerSession"] }],
+  ["zod", { shape: "any" }],
+  ["next-auth", { shape: "type-only" }],
+  ["react", { shape: "any" }],
+  ["next/link", { shape: "any" }],
+  ["next/navigation", { shape: "any" }],
+]);
+
+/** (ㄱ-1): the built-in modules and the exports allowed from each. */
+export const ALLOWED_BUILTINS = new Map([
+  ["node:crypto", null],
+  ["node:net", new Set(["isIP", "isIPv4", "isIPv6"])],
+]);
+
+/** (ㄱ-2): names that may not appear, with any receiver or none. */
+export const BANNED_NAMES = [
+  "fetch",
+  "XMLHttpRequest",
+  "WebSocket",
+  "EventSource",
+  "sendBeacon",
+  "getBuiltinModule",
+  "Function",
+  "eval",
+  "constructor",
+];
+
+/** (ㄱ-2): reflection, banned in every use. */
+export const BANNED_REFLECTION = ["Object", "Reflect", "Proxy", "WebAssembly", "__proto__"];
+
+/** Global objects, allowed only as `process.env.<literal>`. */
+export const BANNED_GLOBALS = ["globalThis", "global", "self", "window", "process"];
+
+/** Prisma delegate methods that write. */
+const WRITE_METHODS = new Set([
+  "create",
+  "createMany",
+  "createManyAndReturn",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany",
+  "executeRaw",
+]);
+
+/** The audit writers; calling one is a write wherever it happens. */
+const AUDIT_WRITERS = new Set(["writeAdminAuditLog", "writeSystemAuditLog", "writeSystemAuditLogEntry"]);
+
+/**
+ * The three entry points and what each closure may do.
+ *
+ * `writes` is an allowlist keyed by file: anything not named here fails, which
+ * is §5.6's reason for writing it this way round -- a ban list only ever holds
+ * the shapes somebody has already been caught by.
+ */
+export const ENTRY_POINTS = [
+  {
+    id: "E1",
+    files: ["app/api/internal/trust-safety/observe/route.ts"],
+    allowed: {
+      // The run row, as the one tagged `$queryRaw` §5.6 item 2 permits.
+      taggedQueryRaw: { "lib/trustSafetyObserverRun.ts": 1, "lib/trustSafetyTransaction.ts": 2 },
+      delegateWrites: {},
+      auditAppends: {},
+      // The dead-man ping, the one outgoing request (§5.6 item 4).
+      fetchCalls: { "lib/trustSafetyObserverPing.ts": 1 },
+    },
+  },
+  {
+    id: "E2",
+    files: ["components/admin/AdminTrustSafetyDigestPanel.tsx", "lib/trustSafetyDigestRead.ts"],
+    // Zero writes: not a row, not an audit entry, not a request. The wrapper's
+    // two setting statements are not a widening -- §5.6 item 3 counts the
+    // statements that arm the timers and make the deadline separately from
+    // writes, and allows them in the wrapper module, which the section's read
+    // opens its bounded transactions through.
+    allowed: { taggedQueryRaw: { "lib/trustSafetyTransaction.ts": 2 }, delegateWrites: {}, auditAppends: {}, fetchCalls: {} },
+  },
+  {
+    id: "E3",
+    files: ["app/api/admin/agents/trust-safety/activation/route.ts"],
+    allowed: {
+      taggedQueryRaw: { "lib/trustSafetyTransaction.ts": 2 },
+      // The config row: one create, one update, one of which runs.
+      delegateWrites: { "lib/trustSafetyActivationStore.ts": 2 },
+      // And the audit append in the same transaction (§6).
+      auditAppends: { "lib/trustSafetyActivationStore.ts": 1 },
+      fetchCalls: {},
+    },
+  },
+];
+
+/**
+ * `lib/adminAudit.ts` is a boundary module, and §5.6 item 1 reads its own body
+ * for one purpose: counting the statements the shared append sends, so a
+ * change there fails this check before it changes what this agent is charged.
+ */
+export const AUDIT_WRITER_STATEMENTS = { executeRaw: 2, taggedQueryRaw: 1 };
+
+const read = (file) => readFileSync(join(ROOT, file), "utf8");
+
+const parse = (file, source) =>
+  ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true, file.endsWith("tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+
+/** `@/lib/x` and `./x` to a repository path, or null when it is outside. */
+const toRepoPath = (specifier, fromFile, exists) => {
+  let base = null;
+  if (specifier.startsWith("@/")) base = specifier.slice(2);
+  else if (specifier.startsWith(".")) base = relative(ROOT, resolvePath(dirname(join(ROOT, fromFile)), specifier)).split("\\").join("/");
+  if (base === null) return null;
+  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`]) {
+    if (exists(candidate)) return candidate;
+  }
+  return base;
+};
+
+const isTypeOnlyImport = (node) =>
+  Boolean(node.importClause?.isTypeOnly) ||
+  (Boolean(node.importClause?.namedBindings) &&
+    ts.isNamedImports(node.importClause.namedBindings) &&
+    node.importClause.namedBindings.elements.length > 0 &&
+    node.importClause.namedBindings.elements.every((element) => element.isTypeOnly));
+
+const namedImportNames = (node) => {
+  const bindings = node.importClause?.namedBindings;
+  if (!bindings || !ts.isNamedImports(bindings)) return [];
+  return bindings.elements.map((element) => element.propertyName?.text ?? element.name.text);
+};
+
+/**
+ * Analyse one file: the rules that are about its own text, and the edges to
+ * follow. Returns `{ failures, edges, counts }`.
+ */
+export const analyseFile = ({ file, source, exists }) => {
+  const failures = [];
+  const edges = [];
+  const counts = { taggedQueryRaw: 0, delegateWrites: 0, auditAppends: 0, fetchCalls: 0 };
+  const valuePackages = new Set();
+  const fail = (rule, detail) => failures.push({ file, rule, detail });
+  const sourceFile = parse(file, source);
+
+  const visit = (node) => {
+    // --- imports -------------------------------------------------------
+    if (ts.isImportDeclaration(node)) {
+      const specifier = node.moduleSpecifier.text;
+      const typeOnly = isTypeOnlyImport(node);
+      const namespace =
+        node.importClause?.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings);
+      const defaultImport = Boolean(node.importClause?.name);
+
+      if (specifier.startsWith("node:") || ALLOWED_BUILTINS.has(`node:${specifier}`)) {
+        const normalised = specifier.startsWith("node:") ? specifier.split("/")[0] : `node:${specifier}`;
+        if (!ALLOWED_BUILTINS.has(normalised)) {
+          fail("builtin-not-allowed", specifier);
+        } else {
+          if (namespace || defaultImport) fail("builtin-namespace-import", specifier);
+          const allowedExports = ALLOWED_BUILTINS.get(normalised);
+          if (allowedExports) {
+            for (const name of namedImportNames(node)) {
+              if (!allowedExports.has(name)) fail("builtin-export-not-allowed", `${specifier}:${name}`);
+            }
+          }
+        }
+      } else {
+        const repoPath = toRepoPath(specifier, file, exists);
+        if (repoPath === null) {
+          const allowed = ALLOWED_SPECIFIERS.get(specifier);
+          if (!allowed) {
+            fail("specifier-not-allowed", specifier);
+          } else if (allowed.shape === "type-only" && !typeOnly) {
+            fail("specifier-must-be-type-only", specifier);
+          } else if (allowed.shape === "named") {
+            for (const name of namedImportNames(node)) {
+              if (!allowed.names.includes(name)) fail("specifier-export-not-allowed", `${specifier}:${name}`);
+            }
+            if (namespace || defaultImport) fail("specifier-namespace-import", specifier);
+          }
+          // (ㄷ) walks into a package the closure loads at runtime. A type-only
+          // import is erased, so its package is never loaded and never walked.
+          //
+          // A boundary module is not walked even when it is also an outside
+          // specifier, and `next-auth/next` is exactly that -- it is in both
+          // lists so the specifier check passes while the walk still stops.
+          // §5.6: what a boundary module uses is not judged here, and the
+          // first run of this check reported `fetch` and `sendBeacon` in
+          // next-auth's own logger, which is the case that sentence is about.
+          if (allowed && !typeOnly && !BOUNDARY_MODULES.has(specifier)) {
+            valuePackages.add(specifier);
+          }
+        } else if (BOUNDARY_MODULES.has(specifier)) {
+          // The walk stops here, which is what "boundary" means.
+        } else if (!typeOnly) {
+          edges.push(repoPath);
+        }
+      }
+    }
+
+    // A dynamic import or a `require` is an edge this check cannot follow.
+    if (ts.isCallExpression(node)) {
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) fail("dynamic-import", "");
+      if (ts.isIdentifier(node.expression) && node.expression.text === "require") fail("require", "");
+    }
+
+    // --- (ㄱ-2) names --------------------------------------------------
+    if (ts.isIdentifier(node)) {
+      const name = node.text;
+      const parent = node.parent;
+      const isPropertyName = ts.isPropertyAccessExpression(parent) && parent.name === node;
+      const isDeclarationName =
+        (ts.isPropertyAssignment(parent) || ts.isPropertySignature(parent) || ts.isMethodSignature(parent)) &&
+        parent.name === node;
+      const isImportBinding = ts.isImportSpecifier(parent) || ts.isImportClause(parent);
+
+      if (BANNED_REFLECTION.includes(name) && !isDeclarationName) {
+        fail("reflection-name", name);
+      }
+      if (BANNED_NAMES.includes(name) && !isDeclarationName && !isImportBinding) {
+        // A class body's own constructor declaration is the one exemption.
+        const isClassConstructor =
+          name === "constructor" && ts.isConstructorDeclaration(parent);
+        if (!isClassConstructor) {
+          if (name === "fetch" && ts.isCallExpression(parent) && parent.expression === node) {
+            counts.fetchCalls += 1;
+          } else {
+            fail("banned-name", name);
+          }
+        }
+      }
+      if (BANNED_GLOBALS.includes(name) && !isPropertyName && !isDeclarationName) {
+        // `process.env.<literal>` and nothing else.
+        const envAccess =
+          name === "process" &&
+          ts.isPropertyAccessExpression(parent) &&
+          parent.name.text === "env" &&
+          ts.isPropertyAccessExpression(parent.parent) &&
+          ts.isIdentifier(parent.parent.name);
+        if (!envAccess) fail("global-object", name);
+      }
+    }
+
+    // --- computed access ----------------------------------------------
+    if (ts.isElementAccessExpression(node)) {
+      const argument = node.argumentExpression;
+      const literal =
+        ts.isStringLiteral(argument) || ts.isNumericLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument);
+      if (!literal) fail("computed-access", argument.getText(sourceFile).slice(0, 40));
+    }
+    if (ts.isBindingElement(node) && node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
+      fail("computed-binding", node.propertyName.getText(sourceFile).slice(0, 40));
+    }
+
+    // --- writes and raw SQL -------------------------------------------
+    if (ts.isTaggedTemplateExpression(node)) {
+      const tag = node.tag;
+      const name = ts.isPropertyAccessExpression(tag)
+        ? tag.name.text
+        : ts.isExpressionWithTypeArguments(tag) || tag.kind === ts.SyntaxKind.PropertyAccessExpression
+          ? null
+          : null;
+      const text = tag.getText(sourceFile);
+      if (text.includes("$queryRawUnsafe") || text.includes("$executeRawUnsafe")) {
+        fail("raw-unsafe", text.slice(-30));
+      } else if (text.includes("$executeRaw")) {
+        fail("raw-execute", text.slice(-30));
+      } else if (text.includes("$queryRaw") || name === "$queryRaw") {
+        counts.taggedQueryRaw += 1;
+      }
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      if (ts.isPropertyAccessExpression(callee)) {
+        const method = callee.name.text;
+        if (method === "$queryRawUnsafe" || method === "$executeRawUnsafe") fail("raw-unsafe", method);
+        if (method === "$executeRaw") fail("raw-execute", method);
+        // The Prisma delegate shape: `<client>.<model>.<method>(...)`. The
+        // receiver has to be a property-access chain, or `createHash(...)
+        // .update(...)` counts as a write -- which it did on the first run of
+        // this check. A delegate held in a variable would be missed, and the
+        // allowlist is by file for that reason: a file that writes at all has
+        // to be named here.
+        if (WRITE_METHODS.has(method) && ts.isPropertyAccessExpression(callee.expression)) {
+          counts.delegateWrites += 1;
+        }
+      }
+      if (ts.isIdentifier(callee) && AUDIT_WRITERS.has(callee.text)) counts.auditAppends += 1;
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(sourceFile, visit);
+  return { failures, edges, counts, valuePackages: [...valuePackages] };
+};
+
+/** Walk one entry point's closure and judge it. */
+const checkEntryPoint = (entry, { load, exists }) => {
+  const failures = [];
+  const seen = new Set();
+  const totals = { taggedQueryRaw: {}, delegateWrites: {}, auditAppends: {}, fetchCalls: {} };
+  const packages = new Set();
+  const queue = [...entry.files];
+
+  while (queue.length > 0) {
+    const file = queue.shift();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    let source;
+    try {
+      source = load(file);
+    } catch {
+      failures.push({ entry: entry.id, file, rule: "unreadable", detail: "" });
+      continue;
+    }
+    const result = analyseFile({ file, source, exists });
+    for (const failure of result.failures) failures.push({ entry: entry.id, ...failure });
+    for (const kind of Object.keys(totals)) {
+      if (result.counts[kind] > 0) totals[kind][file] = result.counts[kind];
+    }
+    for (const edge of result.edges) queue.push(edge);
+    for (const specifier of result.valuePackages) packages.add(specifier);
+  }
+
+  // The allowlist, compared as a whole: a file that writes and is not named
+  // fails, and a named file that writes more than its number fails too.
+  for (const kind of Object.keys(totals)) {
+    const allowed = entry.allowed[kind] ?? {};
+    for (const [file, count] of Object.entries(totals[kind])) {
+      const permitted = allowed[file] ?? 0;
+      if (count > permitted) {
+        failures.push({
+          entry: entry.id,
+          file,
+          rule: `${kind}-not-allowed`,
+          detail: `${count} where ${permitted} are allowed`,
+        });
+      }
+    }
+  }
+
+  return { failures, files: [...seen].sort(), packages: [...packages].sort() };
+};
+
+/**
+ * (ㄷ): walk into the packages the closure imports as values, for egress only.
+ *
+ * (ㄴ') alone leaves a path where an allowed package reaches the network with
+ * an API (ㄱ) does not name, so the section walks in -- but applies only the
+ * egress rules, not the whole of (ㄱ). The walk follows relative edges from
+ * the package's entry rather than reading the whole package: a package ships
+ * code for runtimes nobody here loads, and judging files that are never
+ * reached would refuse a package for something that cannot run.
+ *
+ * Text, not a parse. These are built files, and over-matching costs a review
+ * while under-matching costs the rule. A budget bounds the walk and
+ * **exhausting it fails**: a package too large to judge is not a package this
+ * check can clear.
+ */
+const PACKAGE_FILE_BUDGET = 1_500;
+
+const EGRESS_NAMES = ["XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "getBuiltinModule"];
+const EGRESS_MODULES = ["node:net", "node:tls", "node:dgram", "node:dns", "node:http", "node:https", "node:http2", "node:child_process", "node:worker_threads", "node:cluster", "node:module", "node:vm"];
+
+const checkPackages = (specifiers) => {
+  const failures = [];
+  for (const specifier of specifiers) {
+    if (specifier === "server-only") continue;
+    let entryFile;
+    try {
+      entryFile = require.resolve(specifier);
+    } catch {
+      failures.push({ entry: "package", file: specifier, rule: "package-unresolved", detail: "" });
+      continue;
+    }
+    const seen = new Set();
+    const queue = [entryFile];
+    while (queue.length > 0) {
+      if (seen.size > PACKAGE_FILE_BUDGET) {
+        failures.push({
+          entry: "package",
+          file: specifier,
+          rule: "package-scan-budget",
+          detail: `more than ${PACKAGE_FILE_BUDGET} files reachable from its entry`,
+        });
+        break;
+      }
+      const file = queue.shift();
+      if (seen.has(file)) continue;
+      seen.add(file);
+      let source;
+      try {
+        source = readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      for (const name of EGRESS_NAMES) {
+        if (new RegExp(`\\b${name}\\b`).test(source)) {
+          failures.push({ entry: "package", file: `${specifier} -> ${relative(ROOT, file)}`, rule: "package-egress-name", detail: name });
+        }
+      }
+      if (/\bfetch\s*\(/.test(source)) {
+        failures.push({ entry: "package", file: `${specifier} -> ${relative(ROOT, file)}`, rule: "package-egress-name", detail: "fetch" });
+      }
+      for (const builtin of EGRESS_MODULES) {
+        const bare = builtin.slice("node:".length);
+        if (new RegExp(`require\\(["'](?:node:)?${bare}["']\\)|from\\s+["'](?:node:)?${bare}["']`).test(source)) {
+          failures.push({ entry: "package", file: `${specifier} -> ${relative(ROOT, file)}`, rule: "package-builtin", detail: builtin });
+        }
+      }
+      for (const match of source.matchAll(/(?:require\(|from\s*)["'](\.[^"']+)["']/g)) {
+        const target = resolvePath(dirname(file), match[1]);
+        for (const candidate of [target, `${target}.js`, `${target}.cjs`, `${target}.mjs`, join(target, "index.js")]) {
+          try {
+            readFileSync(candidate, "utf8");
+            queue.push(candidate);
+            break;
+          } catch {
+            // Not that spelling; try the next.
+          }
+        }
+      }
+    }
+  }
+  return failures;
+};
+
+/** The shared audit writer's own statement count (§5.6 item 1). */
+const checkAuditWriter = ({ load }) => {
+  const failures = [];
+  const source = load("lib/adminAudit.ts");
+  const executeRaw = (source.match(/\$executeRaw/g) ?? []).length;
+  const queryRaw = (source.match(/\$queryRaw/g) ?? []).length;
+  if (executeRaw !== AUDIT_WRITER_STATEMENTS.executeRaw) {
+    failures.push({
+      entry: "boundary",
+      file: "lib/adminAudit.ts",
+      rule: "audit-writer-statements",
+      detail: `${executeRaw} advisory-lock statements where ${AUDIT_WRITER_STATEMENTS.executeRaw} are pinned`,
+    });
+  }
+  if (queryRaw !== AUDIT_WRITER_STATEMENTS.taggedQueryRaw) {
+    failures.push({
+      entry: "boundary",
+      file: "lib/adminAudit.ts",
+      rule: "audit-writer-statements",
+      detail: `${queryRaw} tagged statements where ${AUDIT_WRITER_STATEMENTS.taggedQueryRaw} is pinned`,
+    });
+  }
+  return failures;
+};
+
+/**
+ * Run the whole check.
+ *
+ * `load` and `exists` are injectable so a test can overlay one changed file
+ * and prove a rule fires; by default they read the repository.
+ */
+export const checkTrustSafetyWriteBoundary = ({
+  load = read,
+  exists = (file) => {
+    try {
+      read(file);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+} = {}) => {
+  const failures = [];
+  const closure = {};
+  const valuePackages = new Set();
+  for (const entry of ENTRY_POINTS) {
+    const result = checkEntryPoint(entry, { load, exists });
+    failures.push(...result.failures);
+    closure[entry.id] = result.files;
+    for (const specifier of result.packages) valuePackages.add(specifier);
+  }
+  failures.push(...checkAuditWriter({ load }));
+  failures.push(...checkPackages([...valuePackages].sort()));
+  return { failures, closure, packages: [...valuePackages].sort() };
+};
+
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("check-trust-safety-write-boundary.mjs")) {
+  const { failures, closure } = checkTrustSafetyWriteBoundary();
+  for (const [entry, files] of Object.entries(closure)) {
+    console.log(`${entry}: ${files.length} own files`);
+  }
+  if (failures.length > 0) {
+    console.error("\nTrust-safety write boundary check failed (docs/policy/trust-safety-compliance-agent.md §5.6):\n");
+    for (const failure of failures) {
+      console.error(`  ${failure.entry} ${failure.file}  ${failure.rule}${failure.detail ? ` ${failure.detail}` : ""}`);
+    }
+    process.exit(1);
+  }
+  console.log("trust_safety_write_boundary=pass");
+}
