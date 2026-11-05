@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pickQaReleaseLaneCandidate } from "../lib/qaReleaseMergeLaneCandidateCore.ts";
+import { pickQaReleaseLaneCandidate, qaReleaseLaneOrder } from "../lib/qaReleaseMergeLaneCandidateCore.ts";
 
 const GREEN = [
   { __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS", workflowName: "PR Fast Gate" },
@@ -79,4 +79,14 @@ test("ties on creation time fall back to the pull request number, and the input 
   const result = pickQaReleaseLaneCandidate(input, judged([[9, CLEAR], [4, CLEAR]]));
   assert.equal(result.pick?.number, 4);
   assert.deepEqual(input.map((p) => p.number), [9, 4]);
+});
+
+test("the operator's priority comes first, then the oldest; without one, the oldest", () => {
+  const at = (number, createdAt) => ({ number, createdAt });
+  const pulls = [at(3, "2026-10-03T00:00:00Z"), at(1, "2026-10-01T00:00:00Z"), at(2, "2026-10-02T00:00:00Z"), at(4, "2026-10-04T00:00:00Z")];
+  const order = (priority) => qaReleaseLaneOrder(pulls, priority).map((pull) => pull.number);
+  assert.deepEqual(order(), [1, 2, 3, 4]);
+  assert.deepEqual(order([4, 2]), [4, 2, 1, 3]);
+  // A number no longer open changes nothing.
+  assert.deepEqual(order([99, 3]), [3, 1, 2, 4]);
 });

@@ -177,7 +177,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    허용한 head)과 production 상태를 Admin에 표시만 합니다. **이 목록은 병합 준비 판정이 아닙니다** — hotfix의 7.9.2 항목이나
    각 자동화의 자기 게이트는 사람이 봅니다. 이 Agent는 auto-merge를 켜지 않습니다.
 2. **후보.** base가 develop, draft 아님, check가 모두 끝났고 실패 없음, PR Fast Gate 성공 run이 하나 이상, mergeable인 PR 중
-   가장 오래된 것. 판정 코드는 `scripts/merge-train-core.mjs`(`refusalReason`·`pickNextPullRequest`·`inFlightDeployments`·
+   운영자가 CI 입장에서 정한 우선순위가 가장 높은 것(목록에 없으면 뒤로, 우선순위를 못 읽으면 가장 오래된 것부터, 운영자 요청 2026-10-22). 판정 코드는 `scripts/merge-train-core.mjs`(`refusalReason`·`pickNextPullRequest`·`inFlightDeployments`·
    `deploymentOutcome`)를 재사용하고, **3항의 제외 판정을 후보 선정 안에 넣습니다** — 제외 대상은 실패 PR과 똑같이 이유와 함께
    건너뛰고 다음으로 오래된 PR을 봅니다. 그래서 제외 대상이든 실패 PR이든 **뒤의 PR을 막지 않습니다.**
 3. **제외.** 아래 PR은 레인이 **병합하지 않고** Admin에 "사람 처리 대상"으로 표시만 합니다. 사람이 GitHub에서 각자의 계약대로
