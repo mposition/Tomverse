@@ -59,7 +59,7 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 | O10 | AI는 새 문구를 자유롭게 쓰고, 자동 사실 검증 후 승인 큐로 보낸다 |
 | O11 | Tomverse는 호주 법인이다. 호주를 1순위 영어 시장으로, 호주 광고·소비자법을 적용한다 |
 | O12 | 이메일 마케팅은 범위 밖 |
-| O13 | LLM은 구독이 아닌 API 키. 개발은 Claude 작성 ↔ Codex 검토(또는 반대)로 분리 |
+| O13 | LLM은 API 키가 기본이다. **Marketing Generator는 운영자 결정(2026-11-04)으로 AMUX 박스의 구독 Codex CLI로 옮길 수 있다**(`docs/ops/marketing-generator-box.md`). 제3자 댓글을 읽는 Comments Monitor는 API 키로 둔다. 개발은 Claude 작성 ↔ Codex 검토(또는 반대)로 분리 |
 | O14 | LLM 호출은 어댑터 뒤에 두고, 공급 경로는 Tomverse Code의 어댑터 계층을 추출한 공용 LLM 게이트웨이(별도 저장소)로 한다. 게이트웨이 준비 전에는 같은 어댑터 뒤에서 전용 키를 임시로 쓰며, 그 공급사는 OpenAI다(2026-10-16, 정책 버전 4) |
 | O15 | **Instagram·TikTok 계정은 졸업하지 않고 항상 승인 모드**다. 두 채널은 게시된 글을 API로 내릴 수 없어(S0 C10 관측, 앱에서 수동 삭제만 가능) 잘못 나간 공개 게시물을 자동으로 회수할 수 없기 때문이다. (2026-09-17, 정책 버전 2) |
 
@@ -276,6 +276,8 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 | Instagram ×3 | en / ko / zh-Hant | 이미지·영상 | 1/4 |
 | Threads | zh-Hant | 이미지·영상+텍스트 | 2/7 |
 | RedNote | zh-Hans | 이미지+텍스트 | 수동 |
+
+수동 계정(`provider = manual`; 운영 중인 X·RedNote 계정)의 게시물은 상한표의 채널과 무관하게 게시기가 집지 않고(`channel_posts_by_hand`) 예약도 거절한다. 사람이 손으로 올린 뒤 Admin에서 공개 URL(https)과 확인한 근거를 기록하면(`marketing_post.record_manual_publish`, `marketing:write` + step-up) 같은 트랜잭션에서 `verified`(`verificationMethod = operator_sample`)로 남고, 그날(UTC) 슬롯이 잡혀 일/주 집계에 들어간다. 상한을 넘어도 이미 공개된 사실의 기록이므로 거절하지 않고 경고만 한다(운영자 결정 2026-11-04). 정책 버전은 그대로다.
 
 모든 채널의 게시물은 이미지나 영상을 하나 이상 싣는다. 글만 있는 게시물은 없다(운영자 결정 2026-11-03).
 이미지가 최소선이고 영상이 가장 좋다. 생성기는 맞는 승인 자산이 없는 계정의 초안을 만들지 않고, 초안 접수는 자산이 없는

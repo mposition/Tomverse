@@ -32,7 +32,7 @@ import {
   qaReleaseMergeLaneExcludingFiles,
 } from "./qaReleaseMergeLaneExclusionCore.ts";
 import { type QaReleaseLaneVerdict, qaReleaseLaneVerdicts } from "./qaReleaseMergeLaneVerdictCore.ts";
-import { type QaReleaseLanePullRequest, pickQaReleaseLaneCandidate } from "./qaReleaseMergeLaneCandidateCore.ts";
+import { type QaReleaseLanePullRequest, pickQaReleaseLaneCandidate, qaReleaseLaneOrder } from "./qaReleaseMergeLaneCandidateCore.ts";
 import { type QaReleaseDeployObservation, type QaReleaseMergeReport, qaReleaseDeployObservation } from "./qaReleaseMergeLaneReportCore.ts";
 import { judgeQaReleaseMergeLanding, qaReleaseHoldingDeployments } from "./qaReleaseMergeLaneRoundCore.ts";
 import { decideQaReleaseServiceStart } from "./qaReleaseServiceEnvCore.ts";
@@ -56,6 +56,8 @@ export type QaReleaseDeployment = {
 export type QaReleaseLaneState = {
   dbNowMs: number;
   latched: boolean;
+  /** The operator's priority from CI admission; absent, the lane takes the oldest first. */
+  priority?: readonly number[];
   openAttempt: {
     id: string;
     state: "issued" | "consumed" | "awaiting_deploy";
@@ -74,7 +76,8 @@ export type QaReleasePullRead = QaReleaseLanePullRequest & {
   mergeCommitSha: string | null;
 };
 
-export type QaReleaseMergeCall = { result: "merged"; sha: string } | { result: "refused" } | { result: "unknown" };
+/** `httpStatus` says why an unknown merge is unknown, for the log; absent when GitHub gave no answer. */
+export type QaReleaseMergeCall = { result: "merged"; sha: string } | { result: "refused" } | { result: "unknown"; httpStatus?: number };
 
 export type QaReleaseMergeLanePorts = {
   app: {
@@ -293,6 +296,7 @@ async function observeVerdicts(
   exclusions: ReadonlyMap<number, QaReleaseExclusion>,
   excludingFiles: Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>,
   pickNumber: number | null,
+  priority?: readonly number[],
 ): Promise<void> {
   const shown = new Map(exclusions);
   for (const pull of ordered) {
@@ -304,7 +308,7 @@ async function observeVerdicts(
     shown.set(pull.number, judged);
     if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
   }
-  observer.verdicts(qaReleaseLaneVerdicts({ pulls: ordered, exclusions: shown, excludingFiles, pickNumber }));
+  observer.verdicts(qaReleaseLaneVerdicts({ pulls: ordered, exclusions: shown, excludingFiles, pickNumber, priority }));
 }
 
 /** Rounds that end without listing pull requests and still show them; the rest list them, or cannot. */
@@ -392,9 +396,9 @@ async function laneRound(
   const excludingFiles = new Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>();
   try {
     pulls = await ports.github.listOpenDevelopPulls();
-    ordered = [...pulls].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.number - b.number);
+    ordered = qaReleaseLaneOrder(pulls, state.priority);
     // Exclusion is judged only for pull requests the readiness rule passes,
-    // oldest first, and the first clear one is the pick: no list is read for
+    // in the lane's order, and the first clear one is the pick: no list is read for
     // a pull request that cannot be merged anyway.
     for (const pull of ordered) {
       if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
@@ -407,8 +411,8 @@ async function laneRound(
   } catch {
     return { exitCode: 1, outcome: "candidates_unknown" };
   }
-  const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions);
-  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null);
+  const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions, state.priority);
+  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority);
   if (pick === null) return { exitCode: 0, outcome: "idle" };
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);
@@ -467,7 +471,11 @@ async function laneRound(
     if (refusedPull.merged) return rereadAttempt(ports, { id: attemptId, pullRequestNumber: pick.number });
     return sendReport(ports, attemptId, { kind: "merge", result: "refused" }, "merge_refused");
   }
-  if (call.result === "unknown") return sendReport(ports, attemptId, { kind: "merge", result: "unknown" }, "merge_unknown");
+  if (call.result === "unknown") {
+    // 2026-11-04: two merges of #3304 latched the lane and the status that said why was thrown away.
+    const detail = call.httpStatus === undefined ? "merge_unknown" : `merge_unknown_${call.httpStatus}`;
+    return sendReport(ports, attemptId, { kind: "merge", result: "unknown" }, detail);
+  }
 
   // Where did it land (section 3 step 4)? Anything but a clear yes latches.
   const after = await ports.github.readPull(pick.number).catch(() => null);

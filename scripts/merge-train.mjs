@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// Operator-run merge train: merges the oldest green pull request into develop
-// (and, with --include-main, into main), one at a time per environment, and
-// holds while Railway has any deployment in flight for that environment.
+// Operator-run merge train: merges the oldest green pull request into main, one
+// at a time, and holds while Railway has any deployment in flight for
+// production. develop is the QA-release merge lane's (docs/policy/qa-release-agent.md
+// section 8 item 8); a pull request the lane leaves to a person is merged on GitHub.
 //
-//   npm run merge-train -- --dry-run --once      # read-only: say what would merge
-//   npm run merge-train                           # develop -> dev only
-//   npm run merge-train -- --include-main         # also main -> production
-//   npm run merge-train -- --pr=1916 --once       # consider only this PR
+//   npm run merge-train -- --include-main --dry-run --once  # read-only: say what would merge
+//   npm run merge-train -- --include-main         # main -> production
+//   npm run merge-train -- --include-main --pr=1916 --once  # consider only this PR
 //   npm run merge-train -- --clear-latch=develop  # a person clears a stop
 //   npm run merge-train -- --forget-merge=develop # ...and stops following its merge
 //   npm run merge-train -- --break-lock           # a person removes a dead train's lock
 //
 // Run it from a local PowerShell in the repository clone. It uses the
 // operator's own `gh` login and `railway` CLI login; it holds no token of its
-// own. It is a stopgap until the QA/Release agent exists, not that agent.
+// own.
 //
 // Per lane, each poll:
 //   1. A merge the train started but never confirmed is resolved first, from
@@ -103,7 +103,12 @@ if (onlyPr !== null && !(Number.isInteger(onlyPr) && onlyPr > 0)) usage("--pr mu
 if (!UUID_PATTERN.test(RAILWAY_PROJECT_ID)) usage("MERGE_TRAIN_RAILWAY_PROJECT_ID must be a UUID");
 if (!REPOSITORY_PATTERN.test(REPOSITORY)) usage("MERGE_TRAIN_REPOSITORY must look like owner/name");
 
-const lanes = LANES.filter((lane) => lane.branch !== "main" || includeMain);
+// The develop lane was deleted when the merge lane took develop over. A stale
+// develop lane in the state file can still be cleared by name below.
+const lanes = LANES.filter((lane) => lane.branch === "main" && includeMain);
+if (lanes.length === 0 && !breakLock && clearLatch === undefined && forgetMerge === undefined) {
+  usage("develop is merged by the QA-release merge lane. To merge into main, pass --include-main.");
+}
 
 // `railway` is an npm shim on Windows, which execFile cannot start without a
 // shell, and cmd.exe joins the arguments unquoted. Every argument is therefore

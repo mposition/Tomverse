@@ -8,6 +8,7 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
+import { readSupportTriageHealth } from "@/lib/supportTriageCycle";
 import {
   listSupportTriageModelOptions,
   resolveSupportTriageLlmModel,
@@ -39,10 +40,11 @@ export async function GET(request: Request) {
       minute: 30,
       day: 600,
     });
-    const [model, options, switchState] = await Promise.all([
+    const [model, options, switchState, health] = await Promise.all([
       resolveSupportTriageLlmModel(process.env),
       listSupportTriageModelOptions(),
       resolveSupportTriageEnabled(process.env),
+      readSupportTriageHealth(),
     ]);
     return Response.json(
       {
@@ -51,6 +53,7 @@ export async function GET(request: Request) {
         options,
         enabled: switchState.enabled,
         enabledSource: switchState.source,
+        health,
       },
       { headers }
     );

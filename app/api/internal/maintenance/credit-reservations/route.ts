@@ -40,6 +40,7 @@ import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactS
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
 import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
+import { runSupportTriageCycleQuietly } from "@/lib/supportTriageCycle";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 
 const isAuthorized = (request: Request) => {
@@ -237,6 +238,10 @@ export async function POST(request: Request) {
         chunksProcessed: 0,
         skippedForTime: 0,
       }));
+    // Rides along after the answer: it waits on a model while triage is on, and
+    // a cycle cut short by a deploy only leaves claims that lapse. Writes nothing
+    // while triage is off with nothing to delete, and never throws.
+    after(() => runSupportTriageCycleQuietly());
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,

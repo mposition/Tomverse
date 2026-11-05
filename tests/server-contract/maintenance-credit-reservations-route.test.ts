@@ -31,6 +31,7 @@ const mod = (relativePath: string) =>
   pathToFileURL(resolve(ROOT, relativePath)).href;
 
 const MAINTENANCE_SECRET = "maintenance-secret-value-32-characters-long";
+let triageCycles = 0;
 
 type Incident = {
   code: string;
@@ -213,6 +214,13 @@ const loadRoute = () => {
         }),
       },
     });
+    mock.module(mod("lib/supportTriageCycle.ts"), {
+      namedExports: {
+        runSupportTriageCycleQuietly: async () => {
+          triageCycles += 1;
+        },
+      },
+    });
     mock.module(mod("lib/marketingLlmExpiry.ts"), {
       namedExports: {
         runMarketingLlmExpiryQuietly: quiet({
@@ -282,8 +290,12 @@ const post = async () => {
 test("a dropped connection is retried, and the retry is an ordinary run", async () => {
   resetWorld();
   world.reconcileErrors = [connectionDropped()];
+  triageCycles = 0;
 
   const response = await post();
+
+  // Support triage rides along on a run that succeeded.
+  assert.equal(triageCycles, 1);
 
   assert.equal(response.status, 200);
   assert.equal(world.reconcileCalls, 2);
@@ -297,8 +309,11 @@ test("a dropped connection is retried, and the retry is an ordinary run", async 
 test("a drop that survives the retry defers instead of crashing the caller", async () => {
   resetWorld();
   world.reconcileErrors = [connectionDropped(), connectionDropped()];
+  triageCycles = 0;
 
   const response = await post();
+
+  assert.equal(triageCycles, 0);
 
   assert.equal(world.reconcileCalls, 2);
   assert.equal(response.status, 503);

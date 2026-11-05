@@ -13,7 +13,10 @@ import type { Session } from "next-auth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { getEnabledRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
-import { isSupportTriageEnabled } from "@/lib/supportTriageRouteAuth";
+
+/** With nothing saved in the Admin console: only the exact string "true" enables triage. */
+const isSupportTriageEnabled = (env: Readonly<Record<string, string | undefined>>) =>
+  env.SUPPORT_TRIAGE_ENABLED === "true";
 
 export const SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY = "supportTriage.llmModelId";
 /** Saved in place of a model id when the Admin console switched the step off. */
