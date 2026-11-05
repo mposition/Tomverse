@@ -93,11 +93,28 @@ const WRITE_METHODS = new Set([
   "createManyAndReturn",
   "update",
   "updateMany",
+  // Prisma 7's returning variants.  was missing and
+  // independent review named it: a real write that nothing counted.
+  "updateManyAndReturn",
   "upsert",
   "delete",
   "deleteMany",
   "executeRaw",
 ]);
+
+/**
+ * The raw-SQL methods. The tagged `$queryRaw` is allowed only as the tag of a
+ * tagged template, in a file the allowlist names; the other three are never
+ * allowed anywhere.
+ *
+ * Naming `$queryRaw` in any other position is refused rather than counted,
+ * because a tag taken out of its call site is not a statement this check can
+ * read the shape of: `const query = client.$queryRaw.bind(client)` followed
+ * by a tagged `query` was past the count, the shape and the destructive-SQL
+ * rules at once, which independent review found.
+ */
+const RAW_ALWAYS_REFUSED = new Set(["$executeRaw", "$executeRawUnsafe", "$queryRawUnsafe"]);
+const RAW_TAG_ONLY = "$queryRaw";
 
 /** The audit writers; calling one is a write wherever it happens. */
 const AUDIT_WRITERS = new Set(["writeAdminAuditLog", "writeSystemAuditLog", "writeSystemAuditLogEntry"]);
@@ -213,6 +230,59 @@ export const analyseFile = ({ file, source, exists }) => {
   const valuePackages = new Set();
   const fail = (rule, detail) => failures.push({ file, rule, detail });
   const sourceFile = parse(file, source);
+
+  /**
+   * The audit writers' names in this file: the exported ones, plus whatever
+   * local name an aliased import gave them.
+   */
+  const auditWriterNames = new Set(AUDIT_WRITERS);
+  const collectAliases = (node) => {
+    if (
+      ts.isImportSpecifier(node) &&
+      node.propertyName &&
+      AUDIT_WRITERS.has(node.propertyName.text)
+    ) {
+      auditWriterNames.add(node.name.text);
+    }
+    ts.forEachChild(node, collectAliases);
+  };
+  ts.forEachChild(sourceFile, collectAliases);
+
+  /**
+   * Whether this receiver really is a digest, by walking it rather than
+   * reading its text.
+   *
+   * The exclusion exists for `createHash("sha256").update(...)`, and a text
+   * match on the receiver's span let `(client /* createHash( *\/).deleteMany()`
+   * suppress the write count -- a parenthesised receiver's text includes its
+   * comments, which independent review used. So the chain is walked and the
+   * answer is whether a `createHash`/`createHmac` call is actually in it.
+   */
+  const isDigestReceiver = (receiver) => {
+    for (let at = receiver; at !== undefined; ) {
+      if (ts.isParenthesizedExpression(at)) {
+        at = at.expression;
+        continue;
+      }
+      if (ts.isCallExpression(at)) {
+        const callee = at.expression;
+        const name = ts.isIdentifier(callee)
+          ? callee.text
+          : ts.isPropertyAccessExpression(callee)
+            ? callee.name.text
+            : null;
+        if (name === "createHash" || name === "createHmac") return true;
+        at = callee;
+        continue;
+      }
+      if (ts.isPropertyAccessExpression(at) || ts.isElementAccessExpression(at)) {
+        at = at.expression;
+        continue;
+      }
+      return false;
+    }
+    return false;
+  };
 
   /**
    * Judge one name that was written as a string rather than an identifier.
@@ -383,11 +453,24 @@ export const analyseFile = ({ file, source, exists }) => {
     //
     // The one exclusion is a digest's own `update`: the routes compare bearer
     // digests with `createHash("sha256").update(...)`, and that is not a write.
-    const judgeProperty = (name, receiverText, rule) => {
+    const judgeProperty = (name, receiver, rule, accessNode) => {
       judgeName(name, rule);
-      if (name === "$queryRawUnsafe" || name === "$executeRawUnsafe") fail("raw-unsafe", name);
-      else if (name === "$executeRaw") fail("raw-execute", name);
-      if (WRITE_METHODS.has(name) && !/\b(createHash|createHmac)\s*\(/.test(receiverText)) {
+      if (RAW_ALWAYS_REFUSED.has(name)) {
+        fail(name === "$executeRaw" ? "raw-execute" : "raw-unsafe", name);
+      }
+      if (name === RAW_TAG_ONLY) {
+        // Allowed only where it is the tag of a tagged template; the tagged
+        // visitor then reads the statement's shape. Anywhere else -- bound,
+        // destructured, passed on -- the shape is unreadable, so it is
+        // refused rather than counted.
+        const isTag =
+          accessNode !== undefined &&
+          accessNode.parent !== undefined &&
+          ts.isTaggedTemplateExpression(accessNode.parent) &&
+          accessNode.parent.tag === accessNode;
+        if (!isTag) fail("raw-extracted", name);
+      }
+      if (WRITE_METHODS.has(name) && !isDigestReceiver(receiver)) {
         counts.delegateWrites += 1;
       }
     };
@@ -395,7 +478,7 @@ export const analyseFile = ({ file, source, exists }) => {
     if (ts.isPropertyAccessExpression(node)) {
       // The banned-name rules already judge a dot access through the
       // identifier visitor, so this one passes a rule it will not use.
-      judgeProperty(node.name.text, node.expression.getText(sourceFile), "property-name");
+      judgeProperty(node.name.text, node.expression, "property-name", node);
     }
     if (ts.isElementAccessExpression(node)) {
       const argument = node.argumentExpression;
@@ -404,7 +487,7 @@ export const analyseFile = ({ file, source, exists }) => {
           ? argument.text
           : null;
       if (literalName !== null) {
-        judgeProperty(literalName, node.expression.getText(sourceFile), "bracket-name");
+        judgeProperty(literalName, node.expression, "bracket-name", node);
       } else if (!ts.isNumericLiteral(argument)) {
         // Not reducible to a name: fail-closed, whatever it spells.
         fail("computed-access", argument.getText(sourceFile).slice(0, 40));
@@ -412,10 +495,10 @@ export const analyseFile = ({ file, source, exists }) => {
     }
     if (ts.isBindingElement(node)) {
       // The object being destructured, for the digest exclusion.
-      let receiverText = "";
+      let receiver;
       for (let up = node.parent; up; up = up.parent) {
         if (ts.isVariableDeclaration(up) && up.initializer) {
-          receiverText = up.initializer.getText(sourceFile);
+          receiver = up.initializer;
           break;
         }
       }
@@ -423,7 +506,7 @@ export const analyseFile = ({ file, source, exists }) => {
       if (node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
         fail("computed-binding", node.propertyName.getText(sourceFile).slice(0, 40));
       } else if (ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) {
-        judgeProperty(key.text, receiverText, "binding-name");
+        judgeProperty(key.text, receiver, "binding-name", node);
       }
     }
 
@@ -461,8 +544,13 @@ export const analyseFile = ({ file, source, exists }) => {
       }
     }
     // The audit writers, counted the same way and for the same reason: by the
-    // name appearing, with the import binding that brings it in excluded.
-    if (ts.isIdentifier(node) && AUDIT_WRITERS.has(node.text)) {
+    // name appearing, with the import binding that brings it in excluded --
+    // and under whatever local name it was imported as. `import {
+    // writeAdminAuditLog as wal }` followed by `wal(...)` was an audit write
+    // with a count of zero, which independent review called a blocker; it is
+    // the same one-more-spelling class the property rules were unified to
+    // close, so the local name is resolved to the imported one here.
+    if (ts.isIdentifier(node) && auditWriterNames.has(node.text)) {
       const parent = node.parent;
       const isImportBinding = ts.isImportSpecifier(parent) || ts.isImportClause(parent);
       if (!isImportBinding) counts.auditAppends += 1;

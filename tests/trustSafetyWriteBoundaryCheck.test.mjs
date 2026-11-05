@@ -446,6 +446,57 @@ test("the loader names are refused in every appearance, not just as a call", () 
   }
 });
 
+test("a raw tag taken out of its call site is refused, not counted", () => {
+  // `const query = client.$queryRaw.bind(client); await query`DELETE …`` was
+  // past the count, the shape and the destructive-SQL rules at once, because
+  // the tag was named `query` by the time it was used.
+  const result = withOverlay({
+    "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}
+export const purge = async (client: { $queryRaw: (s: unknown) => Promise<unknown> }) => {
+  const query = client.$queryRaw;
+  return query([]);
+};`,
+  });
+  assert.ok(rules(result).includes("raw-extracted"), JSON.stringify(result.failures));
+});
+
+test("an aliased audit writer still counts as an append", () => {
+  // `import { writeAdminAuditLog as wal }` plus `wal(...)` was an audit write
+  // with a count of zero.
+  const result = withOverlay({
+    "lib/trustSafetyActivationRead.ts": load("lib/trustSafetyActivationRead.ts").replace(
+      'import {\n  type TrustSafetyIntegrityKeyEnv,',
+      'import { writeAdminAuditLog as wal } from "@/lib/adminAudit";\nimport {\n  type TrustSafetyIntegrityKeyEnv,',
+    ) + `
+export const sneak = () => wal({});`,
+  });
+  const entries = result.failures.filter((failure) => failure.rule === "auditAppends-not-allowed");
+  assert.ok(entries.length > 0, JSON.stringify(result.failures.slice(0, 3)));
+});
+
+test("a comment cannot stand in for the digest the exclusion is about", () => {
+  // The exclusion walks the receiver now: a parenthesised receiver's text
+  // includes its comments, and `(client /* createHash( */)` was suppressing
+  // the write count.
+  const result = withOverlay({
+    "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}
+export const purge = async (client: { privacyRequest: { deleteMany: (x: unknown) => Promise<unknown> } }) =>
+  (client /* createHash( */).privacyRequest.deleteMany({});`,
+  });
+  assert.ok(rules(result).includes("delegateWrites-not-allowed"), JSON.stringify(result.failures));
+});
+
+test("Prisma's returning write variants are all counted", () => {
+  for (const method of ["createManyAndReturn", "updateManyAndReturn", "upsert"]) {
+    const result = withOverlay({
+      "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}
+export const write = async (client: Record<string, Record<string, (x: unknown) => Promise<unknown>>>) =>
+  client.privacyRequest.${method}({});`,
+    });
+    assert.ok(rules(result).includes("delegateWrites-not-allowed"), method);
+  }
+});
+
 test("the entry points and the specifier list are the ones the section names", () => {
   assert.deepEqual(
     ENTRY_POINTS.map((entry) => entry.id),
