@@ -473,6 +473,8 @@ mock.module(mod("lib/chatContextBundleService.ts"), {
 type Attempt = {
   /** The model id `streamText` was asked for. */
   modelId: string | null;
+  /** The `onError` the route passed; absent means the SDK's own default. */
+  onError?: (event: { error: unknown }) => unknown;
   /** Whether its stream was cancelled, and with what. */
   cancelledWith: unknown;
   messages: Array<{ role: string; content: unknown }>;
@@ -524,6 +526,7 @@ mock.module("ai", {
       const attempt: Attempt = {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
+        onError: options.onError as Attempt["onError"],
         cancelledWith: null,
         messages: options.messages as Attempt["messages"],
         providerAbortedWith: null,
@@ -1710,6 +1713,47 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   const primaryAbort = attemptLifecycle.indexOf("0:provider_abort");
   assert.ok(primaryAbort >= 0);
   assert.equal(attemptLifecycle[primaryAbort + 1], "0:reader_cancel");
+});
+
+test("both attempts log a stream error by its metadata, never the model's content", async () => {
+  await ask("answers");
+  assert.equal(attempts.length, 2);
+
+  const CONTENT = "SYNTHETIC-REASONING-MARKER";
+  const logged: unknown[][] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(args);
+  };
+  try {
+    for (const attempt of attempts) {
+      assert.equal(typeof attempt.onError, "function", "left to the SDK's default");
+      const result = attempt.onError?.({
+        error: Object.assign(new Error("Model response did not contain a tool call."), {
+          name: "AI_ToolChoiceViolationError",
+          finishReason: "stop",
+          content: [{ type: "reasoning", text: CONTENT }],
+        }),
+      });
+      // An `onError` result can ask the SDK to retry; this one must not.
+      assert.equal(result, undefined);
+    }
+  } finally {
+    console.error = realError;
+  }
+
+  assert.equal(logged.length, 2);
+  logged.forEach((args, index) => {
+    assert.equal(args.length, 1);
+    assert.equal(typeof args[0], "string");
+    assert.equal((args[0] as string).includes(CONTENT), false);
+    const record = JSON.parse(args[0] as string);
+    assert.equal(record.event, "chat_stream_error");
+    assert.equal(record.name, "AI_ToolChoiceViolationError");
+    assert.equal(record.finishReason, "stop");
+    assert.equal(record.modelId, attempts[index].modelId);
+    assert.equal(typeof record.traceId, "string");
+  });
 });
 
 test("a location-aware primary caches its stable prefix but fallback carries only the uncached current fix", async () => {

@@ -61,6 +61,39 @@ export const safeErrorMetadata = (error: unknown): SafeErrorMetadata => {
 };
 
 /**
+ * The `onError` every `streamText` call has to pass.
+ *
+ * Without one the AI SDK falls back to `console.error(error)`, which prints the
+ * whole object: `AI_ToolChoiceViolationError` carries the model's `content`,
+ * reasoning included, and `AI_APICallError` carries the request and response
+ * bodies. Only the fields below are written, and each is either ours or checked
+ * against a shape that cannot hold prose.
+ *
+ * Returns nothing on purpose: an `onError` result of `{ retry: true }` asks the
+ * SDK to retry the stream, and this only observes.
+ */
+export const logStreamErrorWithoutContent =
+    (context: { traceId: string; modelId: string }) =>
+    ({ error }: { error: unknown }): void => {
+        const { name, ...metadata } = safeErrorMetadata(error);
+        const finishReason = (error as { finishReason?: unknown } | null | undefined)
+            ?.finishReason;
+        console.error(
+            JSON.stringify({
+                event: "chat_stream_error",
+                ...context,
+                name: /^[A-Za-z0-9_.$-]{1,80}$/.test(name) ? name : "Error",
+                ...metadata,
+                finishReason:
+                    typeof finishReason === "string" &&
+                    /^[a-z-]{1,32}$/.test(finishReason)
+                        ? finishReason
+                        : undefined,
+            })
+        );
+    };
+
+/**
  * Strips credentials out of provider-originated text before it is persisted or
  * shown to an operator. Provider errors routinely echo the request back, which
  * is how an Authorization header ends up in an error message.
