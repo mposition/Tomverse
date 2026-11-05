@@ -58,7 +58,7 @@ const session = { user: { id: ownerId, email: ownerEmail,
   authenticatedAt: new Date().toISOString() },
 expires: new Date(Date.now() + 60 * 60_000).toISOString() } as Session;
 const request = new Request("https://tomverse.test/internal/amux/plan-refusal", { method: "POST" });
-const modelId = "claude-opus-5-5";
+const modelId = "synthetic-plan-refusal-model-" + randomUUID();
 const masterKey = randomBytes(32);
 const digestKey = randomBytes(32);
 const keysFor = (ideaId: string) => ({
