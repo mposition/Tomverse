@@ -289,7 +289,8 @@ DB timeout은 실제 PostgreSQL 버전과 세션에서 읽은 설정값으로만
 true)`로 다음만 설정한다.
 
 - `statement_timeout`: 200 milliseconds
-- `idle_in_transaction_session_timeout`: 100 milliseconds
+- `idle_in_transaction_session_timeout`: 300 milliseconds (운영자 결정 2026-11-05. 100 ms는 운영에서 시간당
+  약 13건의 세션을 끊어 bridge를 멈췄다. 예산 계산의 호출당 간격은 100 ms 그대로다)
 - session-local deadline marker: `tomverse.amux_deadline`
 
 같은 코드는 `transaction_timeout`을 설정하지 않는다. 마지막 SQL은

@@ -54,7 +54,7 @@ import { prisma } from "@/lib/prisma";
  * transaction so the domain write rolls back with it.
  *
  * This transaction does not use the AMUX worker boundary (200ms statement
- * timeout, 100ms idle). It sets its own 15s statement timeout and leaves the
+ * timeout, 300ms idle). It sets its own 15s statement timeout and leaves the
  * idle timeout alone. There is no measured evidence that the worker boundary
  * can cover the audit-chain lock.
  *

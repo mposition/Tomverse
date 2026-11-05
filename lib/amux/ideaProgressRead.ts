@@ -53,7 +53,7 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  * boundary: setup + ONE statement + fence, pinned by tests/amuxIdeaProgress.test.mjs.
  *
  * Why one statement: a boundary sets idle_in_transaction_session_timeout to
- * 100 ms (lib/amux/dbBoundary.ts), and a gap longer than that between two of
+ * 300 ms (lib/amux/dbBoundary.ts), and a gap longer than that between two of
  * its statements ends the session with 25P03. Seven sequential reads made
  * eight such gaps, and over the production round trip the Ideas list failed
  * to read; a single statement has the same two gaps as every other boundary.
