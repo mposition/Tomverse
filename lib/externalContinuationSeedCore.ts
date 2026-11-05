@@ -117,20 +117,37 @@ export type ContinuationSeedPlan = {
     /** Selected turns whose text is not complete. */
     truncatedCount: number;
     /**
-     * Stored user/assistant messages the cap left out.
+     * Stored user/assistant messages **the cap** left out: eligible, carrying
+     * text, and still not selected.
      *
      * Counted rather than inferred from the difference between two totals,
-     * because a third number — messages dropped for their role — is also part
-     * of that difference and means something else entirely.
+     * because the other reasons a stored message is absent — its role, and
+     * having no text to carry — are also part of that difference and each mean
+     * something else entirely. The seed header turns this number into a
+     * sentence about the context budget (`lib/externalContinuationSeedPrompt.ts`),
+     * so a message the budget never had a say about must not be in it.
      */
     omittedByBudgetCount: number;
     /** Stored messages whose role the seed does not carry. */
     excludedByRoleCount: number;
+    /**
+     * Eligible messages whose text is blank once the per-message cap is
+     * applied. Dropped by the rule, never by the budget: a turn with nothing
+     * in it would cost a line and a role label and say nothing.
+     */
+    blankSkippedCount: number;
     /** The estimate the caller prices, from the shared estimator. */
     estimatedTokens: number;
 };
 
 const shorten = (text: string) => {
+    // A string can never hold more code points than UTF-16 units, so anything
+    // this short is already whole and needs no scan. Worth the line because
+    // every eligible message in the scan window is cut before selection, and
+    // the seed is rebuilt on every turn of a continued conversation.
+    if (text.length <= CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT) {
+        return { text, shortened: false };
+    }
     const points = [...text];
     return points.length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT
         ? {
@@ -162,6 +179,7 @@ export const emptyContinuationSeedPlan = (
     truncatedCount: 0,
     omittedByBudgetCount: 0,
     excludedByRoleCount: 0,
+    blankSkippedCount: 0,
     estimatedTokens: 0,
 });
 
@@ -196,23 +214,35 @@ export function planContinuationSeed(
     );
     const excludedByRoleCount = ordered.length - eligible.length;
 
-    if (budget <= 0 || eligible.length === 0) {
+    /*
+      Every eligible message is cut and judged before any of them is selected,
+      rather than inside the loop below.
+
+      The loop stops at the first turn that does not fit, so a message older
+      than that one is never reached — and a reason it was absent that the loop
+      never evaluated cannot be reported. Blank turns are the reason this
+      matters: they are dropped by the rule whatever the budget is, and
+      counting them as budget omissions made the seed header's sentence about
+      the context budget overstate what the cap left out.
+    */
+    const candidates = eligible
+        .map((message) => ({ message, ...shorten(message.content) }))
+        .filter((candidate) => candidate.text.trim().length > 0);
+    const blankSkippedCount = eligible.length - candidates.length;
+
+    if (budget <= 0 || candidates.length === 0) {
         return {
             ...emptyContinuationSeedPlan(sourceMessageCount),
-            omittedByBudgetCount: eligible.length,
+            omittedByBudgetCount: candidates.length,
             excludedByRoleCount,
+            blankSkippedCount,
         };
     }
 
     const selected: ContinuationSeedTurn[] = [];
     let spent = 0;
-    for (let index = eligible.length - 1; index >= 0; index -= 1) {
-        const message = eligible[index]!;
-        const { text, shortened } = shorten(message.content);
-        // A blank turn is dropped rather than seeded: it costs a line and a
-        // role label and says nothing, and it would still be counted in the
-        // "N messages used" disclosure.
-        if (text.trim().length === 0) continue;
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+        const { message, text, shortened } = candidates[index]!;
         const cost = estimateTextTokens(text);
         if (spent + cost > budget) break;
         spent += cost;
@@ -228,8 +258,9 @@ export function planContinuationSeed(
     if (selected.length === 0) {
         return {
             ...emptyContinuationSeedPlan(sourceMessageCount),
-            omittedByBudgetCount: eligible.length,
+            omittedByBudgetCount: candidates.length,
             excludedByRoleCount,
+            blankSkippedCount,
         };
     }
 
@@ -240,8 +271,9 @@ export function planContinuationSeed(
         toOrdinal: selected[selected.length - 1]!.ordinal,
         sourceMessageCount,
         truncatedCount: selected.filter((turn) => turn.shortened).length,
-        omittedByBudgetCount: eligible.length - selected.length,
+        omittedByBudgetCount: candidates.length - selected.length,
         excludedByRoleCount,
+        blankSkippedCount,
         estimatedTokens: spent,
     };
 }
