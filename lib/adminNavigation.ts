@@ -715,6 +715,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Billing and finance",
         description: "The daily pending-price deadline digest, the agent switch and the monitor check",
       },
+      {
+        id: "trust-safety",
+        label: "Trust and safety",
+        description: "DSR deadlines counted when the page opens, and the observation switch",
+      },
     ],
   },
   {

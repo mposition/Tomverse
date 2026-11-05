@@ -4,7 +4,11 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminTrustSafetyDigestPanel } from "@/components/admin/AdminTrustSafetyDigestPanel";
 import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminTrustSafetyMessages } from "@/lib/adminMessages/trustSafety";
+import { readTrustSafetyDigest, type TrustSafetyDigestView } from "@/lib/trustSafetyDigestRead";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import {
   ADMIN_AGENT_DIGESTS_LEGACY_TABS,
@@ -40,7 +44,57 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
         label="Agent digest sections"
         query={query}
       />
-      <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={await readBillingFinanceOpsConsole(canWrite)} />
+      {tab.id === "trust-safety" ? (
+        <TrustSafetySection session={session} refused={query.refused} />
+      ) : (
+        <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={await readBillingFinanceOpsConsole(canWrite)} />
+      )}
     </div>
+  );
+}
+
+/**
+ * The trust-safety section.
+ *
+ * The page resolves the copy and the permission and hands them in, because the
+ * section's own files may not import the locale helpers
+ * (docs/policy/trust-safety-compliance-agent.md §5.6 closes their imports at
+ * the six boundary modules and eight outside specifiers). The read is settled
+ * on its own so a failure degrades this section instead of the workspace
+ * (docs/ui-contracts/admin-console-ia.md rule 5), and the loss is reported
+ * rather than absorbed.
+ */
+async function TrustSafetySection({
+  session,
+  refused,
+}: {
+  session: Awaited<ReturnType<typeof getServerSession>>;
+  refused: string | string[] | undefined;
+}) {
+  const [messages, read] = await Promise.all([
+    getAdminMessages(adminTrustSafetyMessages),
+    (async () => {
+      try {
+        return await readTrustSafetyDigest();
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "admin_agent_digests_read_failed",
+            read: "trust-safety",
+            errorName: error instanceof Error ? error.name : "unknown",
+          }),
+        );
+        return null;
+      }
+    })(),
+  ]);
+
+  return (
+    <AdminTrustSafetyDigestPanel
+      view={read as TrustSafetyDigestView | null}
+      messages={messages as unknown as Record<string, string>}
+      canWrite={hasAdminPermission(session, "trust-safety:write")}
+      refusedCode={typeof refused === "string" ? refused : null}
+    />
   );
 }

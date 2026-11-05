@@ -31,6 +31,9 @@ const SELF_FILES = [
   "lib/trustSafetyAuditEntryVerify.ts",
   "lib/trustSafetyDsrCountsCore.ts",
   "lib/trustSafetyDsrObservation.ts",
+  "lib/trustSafetyActivationRead.ts",
+  "lib/trustSafetyDigestRead.ts",
+  "components/admin/AdminTrustSafetyDigestPanel.tsx",
   "app/api/internal/trust-safety/observe/route.ts",
   "app/api/admin/agents/trust-safety/activation/route.ts",
 ];

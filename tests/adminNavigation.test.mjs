@@ -732,7 +732,13 @@ test("QA and release left Agent digests; its old tab links land on the same sect
   );
   // The release train has its own tab (owner, 2026-10-25).
   assert.deepEqual(adminNavItemTabs("qa-release").map((tab) => tab.id), ["overview", "train", "lane", "ci-admission"]);
-  assert.deepEqual(adminNavItemTabs("agent-digests").map((tab) => tab.id), ["billing-finance-ops"]);
+  // The trust-safety observer's section joined the area:
+  // docs/policy/trust-safety-compliance-agent.md §9 puts one section per agent
+  // inside the common area and refuses a team screen.
+  assert.deepEqual(adminNavItemTabs("agent-digests").map((tab) => tab.id), [
+    "billing-finance-ops",
+    "trust-safety",
+  ]);
   const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/agent-digests/page.tsx"), "utf8");
   assert.ok(page.includes("ADMIN_AGENT_DIGESTS_LEGACY_TABS[query.tab]"));
   assert.ok(page.includes("redirect(adminRedirectTarget(legacy, query))"));

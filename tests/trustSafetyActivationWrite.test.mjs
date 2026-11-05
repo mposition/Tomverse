@@ -177,10 +177,16 @@ test("the route checks who, then step-up, then the body", () => {
     last = at;
   }
   // A non-administrator learns nothing about what is here.
-  assert.match(code, /json\(\{ error: "Not found\." \}, 404\)/);
+  assert.match(code, /answer\(request, \{ error: "Not found\." \}, 404\)/);
   assert.match(code, /TRUST_SAFETY_WRITE_REQUIRED[\s\S]*?403/);
   // §6: a refusal is 409 and writes nothing.
-  assert.match(code, /outcome\.result \}, 409\)/);
+  assert.match(code, /answer\(request, \{ error: "Refused\.", code: outcome\.result \}, 409\)/);
+  // A form submit is answered with a redirect back to the section carrying the
+  // refusal code, because the panel cannot read a JSON body (§5.6: these files
+  // may not name `fetch`, so the control is a plain submit).
+  assert.match(whole, /status: 303/);
+  assert.match(whole, /refused=\$\{encodeURIComponent/);
+  assert.match(whole, /application\/x-www-form-urlencoded/);
   // The body is the mode and nothing else. The schema sits above the handler,
   // so it is read from the whole file.
   assert.match(whole, /\.strict\(\)/);

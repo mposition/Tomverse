@@ -63,14 +63,53 @@ const NO_STORE_HEADERS = {
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), { status, headers: NO_STORE_HEADERS });
 
+/** Where the section lives, for a form submit to land back on. */
+const SECTION_PATH = "/admin/agent-digests?tab=trust-safety";
+
+const isFormSubmission = (request: Request) =>
+  (request.headers.get("content-type") ?? "").startsWith("application/x-www-form-urlencoded");
+
+const parseJson = (raw: string): unknown => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Answers a form submit with a redirect back to the section, and anything else
+ * with the JSON.
+ *
+ * A refusal travels as `?refused=<code>` so the panel can say what happened --
+ * §6 wants the operator to see the reason, not a blank page -- and the code is
+ * one of the closed sets, never free text.
+ */
+const answer = (
+  request: Request,
+  body: { error?: string; code?: string; ok?: true; result?: unknown },
+  status: number,
+): Response => {
+  if (!isFormSubmission(request)) return json(body, status);
+  const target =
+    status >= 200 && status < 300
+      ? SECTION_PATH
+      : `${SECTION_PATH}&refused=${encodeURIComponent(body.code ?? "refused")}`;
+  return new Response(null, {
+    status: 303,
+    headers: { Location: target, "Cache-Control": "no-store" },
+  });
+};
+
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) {
-      return json({ error: "Not found." }, 404);
+      return answer(request, { error: "Not found." }, 404);
     }
     if (!hasAdminPermission(session, "trust-safety:write")) {
-      return json(
+      return answer(
+        request,
         { error: "Trust-safety write access is required.", code: "TRUST_SAFETY_WRITE_REQUIRED" },
         403,
       );
@@ -79,17 +118,17 @@ export async function POST(request: Request) {
 
     const raw = await request.text();
     if (raw.length > BODY_MAX_BYTES) {
-      return json({ error: "Refused.", code: "body_too_large" }, 413);
+      return answer(request, { error: "Refused.", code: "body_too_large" }, 413);
     }
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(raw);
-    } catch {
-      return json({ error: "Refused.", code: "invalid_request" }, 400);
-    }
-    const parsed = bodySchema.safeParse(parsedJson);
+    // Two shapes: the section's form, and JSON for anything calling this
+    // directly. The form exists because §5.6 does not allow the panel's files
+    // to name `fetch`, so the control is a plain submit.
+    const submitted = isFormSubmission(request)
+      ? { mode: new URLSearchParams(raw).get("mode") }
+      : parseJson(raw);
+    const parsed = bodySchema.safeParse(submitted);
     if (!parsed.success) {
-      return json({ error: "Refused.", code: "invalid_request" }, 400);
+      return answer(request, { error: "Refused.", code: "invalid_request" }, 400);
     }
 
     const outcome = await setTrustSafetyActivation({
@@ -104,14 +143,15 @@ export async function POST(request: Request) {
     // because an entry this build cannot sign is one the observer's own
     // checks will not verify.
     if (outcome.result !== "changed") {
-      return json({ error: "Refused.", code: outcome.result }, 409);
+      return answer(request, { error: "Refused.", code: outcome.result }, 409);
     }
-    return json({ ok: true, result: outcome }, 200);
+    return answer(request, { ok: true, result: outcome }, 200);
   } catch (error) {
     if (isAdminReauthenticationError(error)) {
       // The remedy, not a bare refusal: the panel needs a code it can turn
       // into the reauthentication link (§6).
-      return json(
+      return answer(
+        request,
         { error: "Recent sign-in required.", code: "reauthentication_required" },
         403,
       );
@@ -120,7 +160,7 @@ export async function POST(request: Request) {
       // The transaction refused to start, or refused a statement past the
       // budget §12 approved. Nothing was written (§5.5) and the switch is
       // where it was.
-      return json({ error: "Refused.", code: "late" }, 409);
+      return answer(request, { error: "Refused.", code: "late" }, 409);
     }
     console.error(
       JSON.stringify({
@@ -128,6 +168,6 @@ export async function POST(request: Request) {
         errorName: error instanceof Error ? error.name : "unknown",
       }),
     );
-    return json({ error: "Internal error." }, 500);
+    return answer(request, { error: "Internal error.", code: "internal" }, 500);
   }
 }
