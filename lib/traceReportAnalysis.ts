@@ -365,12 +365,9 @@ const readWork = async (mode: TraceAnalysisMode, since: Date) => {
 };
 
 /** What the Admin console allows right now: a pass can run for minutes, and Off means no new call or idea. */
-const allowedNow = async (needsConfiguredModel: boolean): Promise<{ mode: TraceAnalysisMode; ownerUserId: string | null }> => {
+const allowedNow = async (): Promise<{ mode: TraceAnalysisMode; ownerUserId: string | null }> => {
   const saved = await readTraceAnalysisMode();
   if (saved.mode === "off" || !(await resolveSupportTriageEnabled(process.env)).enabled) {
-    return { mode: "off", ownerUserId: null };
-  }
-  if (needsConfiguredModel && !(await resolveSupportTriageLlmModel(process.env)).modelId) {
     return { mode: "off", ownerUserId: null };
   }
   return saved;
@@ -394,19 +391,19 @@ export const runTraceReportAnalysisQuietly = async ({
     const { mode } = await readTraceAnalysisMode();
     pass.mode = mode;
     if (mode === "off") return pass;
-    // Support triage's own switch and model stop this too: their Off means no paid calls here.
-    if ((await allowedNow(llm === undefined)).mode === "off") return pass;
+    // Support triage's own switch stops this too: its Off means no paid calls here.
+    if ((await allowedNow()).mode === "off") return pass;
     // The classifying pass otherwise waits for the daily cleanup.
     await runFeedbackAutoFixShadowWorker();
-    const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;
-    // Off in the console stops everything this pass would start, handoffs included.
-    if (!call) return pass;
     const work = await readWork(mode, new Date(now().getTime() - TRACE_ANALYSIS_WINDOW_DAYS * DAY_MS));
     let called = 0;
     let handoffsOpen = true;
     for (const { id } of work) {
-      const allowed = await allowedNow(llm === undefined);
-      if (allowed.mode === "off") break;
+      if ((await allowedNow()).mode === "off") break;
+      // Read each time: a model changed or disabled during the pass applies to the
+      // next call, and no usable model stops everything, handoffs included.
+      const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;
+      if (!call) break;
       const current = await prisma.feedbackAutoFixCase.findUnique({ where: { id }, select: CASE_SELECT });
       if (!current) continue;
       let analysis = readStoredTraceAnalysis(current.diagnosticSummary);
@@ -428,7 +425,7 @@ export const runTraceReportAnalysisQuietly = async ({
         }
       }
       // The call above can take a minute: read the switch again before an idea.
-      const { mode: modeNow, ownerUserId } = await allowedNow(llm === undefined);
+      const { mode: modeNow, ownerUserId } = await allowedNow();
       if (!handoffsOpen || modeNow !== "fix" || !ownerUserId || analysis?.status !== "done") continue;
       if (!traceAnalysisWantsFix(row.classification, analysis)) continue;
       const reserved = await reserve(id, "handoff", now());

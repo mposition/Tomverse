@@ -8,7 +8,7 @@ import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { commitTraceReportIdea } from "@/lib/amux/ideaTraceReportSubmissionService";
 import { prisma } from "@/lib/prisma";
-import { SUPPORT_TRIAGE_ENABLED_SETTING_KEY } from "@/lib/supportTriageLlmSetting";
+import { SUPPORT_TRIAGE_ENABLED_SETTING_KEY, SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY } from "@/lib/supportTriageLlmSetting";
 import {
   TRACE_ANALYSIS_MODE_SETTING_KEY,
   TRACE_ANALYSIS_USAGE_SETTING_KEY,
@@ -264,6 +264,25 @@ test("fixes waiting out the daily limit do not crowd out a new report", async ()
   await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm, submit });
   assert.equal(ideas.length, TRACE_FIX_HANDOFFS_PER_DAY);
   assert.equal((await stored(row.id))?.status, "done");
+});
+
+test("a saved model that is not enabled claims nothing and spends nothing", async () => {
+  await setMode(`fix:${OWNER}`);
+  const row = await report("disabled-model");
+  await prisma.appSetting.upsert({
+    where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY },
+    create: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY, value: "no-such-model" },
+    update: { value: "no-such-model" },
+  });
+  try {
+    const { ideas, submit } = recordingSubmit();
+    assert.deepEqual(await runTraceReportAnalysisQuietly({ submit }), { mode: "fix", analyzed: 0, failed: 0, handedOff: 0 });
+    assert.equal(ideas.length, 0);
+    const summary = (await prisma.feedbackAutoFixCase.findUniqueOrThrow({ where: { id: row.id } })).diagnosticSummary as Record<string, unknown>;
+    assert.equal(summary.llmAnalysisAttempts, undefined);
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY } });
+  }
 });
 
 test("one pass takes a bounded number of reports", async () => {
