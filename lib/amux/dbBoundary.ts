@@ -24,7 +24,16 @@ import {
 } from "@/lib/amux/orchestratorHaltStore";
 
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
-export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 100;
+/**
+ * What PostgreSQL enforces between two statements of a boundary. 100 ms (until
+ * 2026-11-05) ended sessions about 13 times an hour in production, which halted
+ * bridges and lost worker leases. A longer gap does not lengthen a transaction:
+ * it spends the transaction's budget, and Prisma still closes the transaction at
+ * that budget plus the slack below.
+ */
+export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 300;
+/** The per-call gap a transaction's budget plans for. Not a database setting. */
+export const AMUX_DB_IDLE_GAP_PLANNING_MS = 100;
 export const AMUX_DB_COMMIT_RESERVE_MS = 200;
 /**
  * The longest a transaction waits for a pool connection and its BEGIN
@@ -628,7 +637,7 @@ export const AMUX_DB_BOUNDARIES = {
   // statement that returns the owner's newest ideas with their chunks, current
   // previews, budget holds, proposed unit counts and registered cards + fence,
   // pinned by tests/amuxIdeaProgress.test.mjs. Seven separate reads made eight
-  // gaps under the 100 ms idle-in-transaction timeout and failed in production
+  // gaps under the idle-in-transaction timeout (then 100 ms) and failed in production
   // (up to 9 calls before 2026-10-16); one statement has the two gaps every
   // other read boundary has. One REPEATABLE READ snapshot.
   ideaProgressListRead: {
@@ -940,7 +949,7 @@ const amuxRouteWriteState = (
 
 export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_STATEMENT_TIMEOUT_MS +
-  boundary.prismaCallCeiling * AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS +
+  boundary.prismaCallCeiling * AMUX_DB_IDLE_GAP_PLANNING_MS +
   AMUX_DB_COMMIT_RESERVE_MS;
 
 /**

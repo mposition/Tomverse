@@ -231,9 +231,10 @@ export type OpenRecommendation = ActionableRecommendation & { cycleId: string; c
 
 /**
  * The recommendations that still need a person or the agent -- everything not
- * marked done or dismissed or sent to AMUX -- newest cycle first and in report order within
- * one. The caller says how many cycles it read: the list is only as wide as
- * that (docs/ui-contracts/admin-console-ia.md rule 6).
+ * marked done or dismissed -- newest cycle first and in report order within
+ * one. One sent to AMUX stays until it is marked, so the owner can see that it
+ * went and under which idea. The caller says how many cycles it read: the list
+ * is only as wide as that (docs/ui-contracts/admin-console-ia.md rule 6).
  */
 export const openRecommendations = (
     cycles: readonly { id: string; createdAt: string; summary: unknown }[],
@@ -243,7 +244,7 @@ export const openRecommendations = (
         .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
         .flatMap((cycle) =>
             actionableRecommendations(cycle.summary, now)
-                .filter((item) => item.status !== "done" && item.status !== "dismissed" && item.status !== RECOMMENDATION_SENT_STATUS)
+                .filter((item) => item.status !== "done" && item.status !== "dismissed")
                 .map((item) => ({ ...item, cycleId: cycle.id, createdAt: cycle.createdAt }))
         );
 

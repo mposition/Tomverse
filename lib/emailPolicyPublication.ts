@@ -70,7 +70,13 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
   // decision in chat: free automatic extraction, notice in the privacy
   // policy). Only privacyPolicy.memory changed; the approved email clause and
   // the effective date are byte-for-byte the 2026-10-03 version (5052379184eb).
-  "/privacy": ["eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8"],
+  //
+  // The owner approved the changed page in chat on 2026-11-05: the location,
+  // memory, comment-monitoring and GA4 User-ID notices, same effective date.
+  "/privacy": [
+    "eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8",
+    "0a598b218b4cc0db14a71bfa49c2b067a46fb2756519cd5879fe3d3311270817",
+  ],
   "/terms": ["5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709"],
 };
 
@@ -85,11 +91,9 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
  * verifier that recomputes it. This table is read first; a sitemap entry would
  * answer only for a document not listed here.
  *
- * Both documents are effective 2026-11-16. The current-location disclosure
- * changed /privacy after the S10 approval: its observed digest is recorded
- * here, while the approved digest above retains main's approved memory rewrite.
- * Release notes therefore remain closed pending a separate approval of the
- * changed page. `/privacy` is here, not in the sitemap table, while that
+ * Both documents are effective 2026-11-16. A recorded digest here is evidence
+ * of current content, never an approval: any later edit to the page moves it off
+ * the approved list above until that version is approved too. `/privacy` is here, not in the sitemap table, while that
  * date is in the future: a sitemap lastmod may not be a day that has not come
  * (lib/sitemapContentDates.ts).
  */
@@ -102,10 +106,8 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // and the comment-monitoring and GA4 User-ID notices (2026-11-03). On
   // 2026-11-04 the operator confirmed the comment section's facts and
   // lib/privacyNoticeStatus.ts says so, so the page now renders that section
-  // (docs/policy/marketing-privacy-dpia-checklist.md). This is evidence of
-  // current content, not approval to publish the amendment: the approved list
-  // above is unchanged, and the owner's pending approval of the changed page
-  // covers these sections as well.
+  // (docs/policy/marketing-privacy-dpia-checklist.md). The owner approved this
+  // version on 2026-11-05; see the approved list above.
   "/privacy": {
     date: "2026-11-16",
     contentSha256: "0a598b218b4cc0db14a71bfa49c2b067a46fb2756519cd5879fe3d3311270817",

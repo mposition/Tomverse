@@ -408,7 +408,8 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   다시 받으면 기존 행을 돌려주고, 같은 요청 키의 다른 digest는 거절한다. 응답을 잃으면 다시 제출하지 않고 그
   쌍으로 조회해서만 확정한다. 조회로도 확정하지 못하면 `result_unknown`으로 두고 그 요청은 운영자에게 간다.
 - **timeout 층:** route 트랜잭션은 기존 AMUX DB 경계(`lib/amux/dbBoundary.ts`)를 그대로 쓴다.
-  `statement_timeout` 200 ms, `idle_in_transaction_session_timeout` 100 ms, commit 예비시간 200 ms다. **문장 수는 코드
+  `statement_timeout` 200 ms, 예산 계산의 호출당 유휴 간격 100 ms(설치되는
+  `idle_in_transaction_session_timeout`은 2026-11-05부터 300 ms), commit 예비시간 200 ms다. **문장 수는 코드
   구조로 정한다.** DM store의 각 연산은 반복 없는 문장열이고, 설정문·fence·`writeSystemAuditLog()`의 문장을
   **가장 많은 경우(무결성 키가 있어 잠금·시계·이전 hash·삽입을 모두 실행하는 경우)로 세어 12개 이하**다. 연산마다
   키가 있는 경우와 없는 경우의 실제 SQL 문장 수를 테스트가 고정하고, 숫자가 바뀌면 테스트가 실패한다. 런타임

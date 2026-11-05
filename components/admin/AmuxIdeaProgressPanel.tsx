@@ -240,7 +240,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
 }
 
 /** One line for an idea the lane took or will take next (lib/amux/ideaLaneCore.ts). */
-function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
+export function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   running: (attempt: number, max: number) => string;
   waiting: string;
   queued: (attempts: number, max: number, outcome: string) => string;
