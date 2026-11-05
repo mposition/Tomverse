@@ -28,7 +28,7 @@
 // under the shared 16 KiB limit, and the shared store's canonical form and
 // secret scan still run on it.
 
-import { S2_PAGE_KEYS } from "./classify-core.mjs";
+import { signalForKey } from "./classify-core.mjs";
 import { MESSAGE_KINDS } from "./notification-budget-core.mjs";
 import { REQUEST_BODY_MAX_BYTES, isOwnerDate, parseRunDeadline } from "./request-schema-core.mjs";
 import { ownerDateIsFinal } from "./owner-date-core.mjs";
@@ -124,7 +124,7 @@ export function parseDigestPayload(value) {
   if (!Array.isArray(items) || items.length > DIGEST_MAX_ENTRIES) return refuse("payload_shape");
   for (const item of items) {
     if (!hasExactly(item, ITEM_KEYS)) return refuse("payload_shape");
-    if (!S2_PAGE_KEYS.includes(item.key) || !MESSAGE_KINDS.includes(item.kind) || typeof item.capped !== "boolean") {
+    if (signalForKey(item.key) === null || !MESSAGE_KINDS.includes(item.kind) || typeof item.capped !== "boolean") {
       return refuse("payload_shape");
     }
     if (!MODES.includes(item.mode) || !DIGEST_ITEM_STATUSES.includes(item.status)) return refuse("payload_shape");

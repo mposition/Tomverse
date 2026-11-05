@@ -15,7 +15,7 @@
 // or budget list is valid and simply leaves those keys unknown. A parsed
 // snapshot is a frozen copy, so a caller cannot change it after validation.
 
-import { S2_PAGE_SIGNALS } from "./classify-core.mjs";
+import { BUDGET_SIGNAL, S2_PAGE_SIGNALS, signalForKey } from "./classify-core.mjs";
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
@@ -128,6 +128,23 @@ export function observationsFromSnapshot({ healthOk, snapshot }) {
       "standard_email_drain",
       !drain ? "unknown" : drain.consecutiveFailuresBand === "3+" ? "failures_3_plus" : "ok",
     );
+  }
+  return out;
+}
+
+/**
+ * The S3 budget observations, one per provider window the snapshot reported:
+ * a bad band as itself, a known lower band as ok, anything else as unknown. A
+ * provider whose name cannot be a key is left out rather than guessed at.
+ */
+export function budgetObservations(snapshot) {
+  const out = {};
+  if (!snapshot || snapshot.providerBudgets === "unknown") return out;
+  for (const budget of snapshot.providerBudgets) {
+    const key = `${BUDGET_SIGNAL.id}#${budget.provider}_${budget.scope}`;
+    if (signalForKey(key) === null) continue;
+    const band = budget.utilisationBand;
+    out[key] = BUDGET_SIGNAL.bands.includes(band) ? band : UTILISATION_BANDS.includes(band) ? "ok" : "unknown";
   }
   return out;
 }
