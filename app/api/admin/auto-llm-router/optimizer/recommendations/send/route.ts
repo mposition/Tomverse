@@ -88,7 +88,10 @@ export async function POST(request: Request) {
       }),
       sessionDisplay: "Auto router recommendation",
     });
-    if (!path.ok) return json({ error: path.code }, path.status);
+    if (!path.ok) {
+      console.warn(JSON.stringify({ event: "auto_router_recommendation_send_refused", code: path.code }));
+      return json({ error: path.code }, path.status);
+    }
 
     // Before anything reaches AMUX, under the lock the coding agent claims under.
     if (!(await reserveRecommendationForAmux({ session, request }, body))) {

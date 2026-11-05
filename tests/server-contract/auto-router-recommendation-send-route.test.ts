@@ -124,6 +124,24 @@ test("with session intake on, a recommendation enters as a session idea naming t
   assert.deepEqual(world.closes, ["session-idea"]);
 });
 
+test("behind the proxy the request names a private address; the idea links the public origin and is not refused", async () => {
+  const before = process.env.PUBLIC_APP_URL;
+  process.env.PUBLIC_APP_URL = "https://tomverse.app";
+  try {
+    const response = await POST(new Request("http://localhost:8080/api/admin/auto-llm-router/optimizer/recommendations/send", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cycleId: "cycle-1", index: 1 }),
+    }));
+    assert.equal(response.status, 200);
+    const { idea } = world.sessionCalls[0].inspected.input;
+    assert.ok(idea.includes("https://tomverse.app/admin/routing#optimizer-cycle-cycle-1"));
+    assert.ok(!idea.includes("localhost"));
+  } finally {
+    if (before === undefined) delete process.env.PUBLIC_APP_URL;
+    else process.env.PUBLIC_APP_URL = before;
+  }
+});
+
 test("with session intake off, a recommendation stays a v4 idea", async () => {
   setSwitches("disabled");
   const response = await send();
