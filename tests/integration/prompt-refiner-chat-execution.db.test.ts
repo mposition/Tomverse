@@ -419,7 +419,7 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       // Synthetic aged row in an isolated schema; product DDL remains unchanged.
       await client.query(`ALTER TABLE "PromptRefinerChatSuggestion" DISABLE TRIGGER "PromptRefinerChatSuggestion_guard"`);
       await client.query(`UPDATE "PromptRefinerChatSuggestion" SET "createdAt"=(clock_timestamp() AT TIME ZONE 'UTC')-INTERVAL '6 minutes',
-        "expiresAt"=(clock_timestamp() AT TIME ZONE 'UTC')-INTERVAL '1 minute' WHERE "id"=$1`, [f.held.suggestionId]);
+        "expiresAt"=(clock_timestamp() AT TIME ZONE 'UTC')-INTERVAL '2 minutes' WHERE "id"=$1`, [f.held.suggestionId]);
       await client.query(`ALTER TABLE "PromptRefinerChatSuggestion" ENABLE TRIGGER "PromptRefinerChatSuggestion_guard"`);
       await assert.rejects(
         store.consumePreviewedPromptRefinerChatExecution(f.input, preview),
