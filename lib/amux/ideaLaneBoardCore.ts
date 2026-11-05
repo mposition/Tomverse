@@ -45,7 +45,7 @@ export type AmuxIdeaLaneBoardIdea = AmuxIdeaLaneCandidateFacts & {
 
 /**
  * One idea's board card, or null when the lane has not taken it and will not
- * take it next, or its PR merged more than a week ago. The lane state is the
+ * take it next, or its final part merged more than a week ago. The lane state is the
  * Ideas list's (amuxIdeaLaneView): attempts already made show with the lane
  * off; an idea waiting for its first run shows only while the lane is on.
  */
@@ -54,8 +54,9 @@ export function amuxIdeaLaneBoardCard(idea: AmuxIdeaLaneBoardIdea, nowMs: number
   const lane = amuxIdeaLaneView(idea.laneAttempts, nowMs, idea, enabled);
   if (!lane) return null;
   if (lane.state === "merged") {
+    // lane.prNumber is the PR that settled the final part; an earlier part's merge does not count.
     const mergedAtMs = Math.min(...idea.laneAttempts.flatMap((item) =>
-      item.outcome === "pr_open" && item.mergedAtMs ? [item.mergedAtMs] : []));
+      item.outcome === "pr_open" && item.prNumber === lane.prNumber && item.mergedAtMs ? [item.mergedAtMs] : []));
     if (mergedAtMs <= nowMs - AMUX_IDEA_LANE_BOARD_DONE_MS) return null;
   }
   return { requestId: idea.requestId, title: idea.title, column: COLUMN[lane.state], state: lane.state,

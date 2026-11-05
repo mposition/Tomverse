@@ -15,7 +15,7 @@
 // or budget list is valid and simply leaves those keys unknown. A parsed
 // snapshot is a frozen copy, so a caller cannot change it after validation.
 
-import { BUDGET_SIGNAL, S2_PAGE_SIGNALS, signalForKey } from "./classify-core.mjs";
+import { ALERT_DELIVERY_KEY, ALERT_DELIVERY_SIGNAL, BUDGET_SIGNAL, S2_PAGE_SIGNALS, signalForKey } from "./classify-core.mjs";
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
@@ -24,6 +24,8 @@ export const UTILISATION_BANDS = ["<70", "70-85", "85-95", ">=95", "exhausted"];
 export const BUDGET_SCOPES = ["day", "month"];
 
 const TOP_LEVEL_FIELDS = ["schemaVersion", "generatedAt", "commitSha", "readiness", "scheduledJobs", "providerBudgets"];
+// Sent only to a runner that asks; absent from an app that predates it.
+const ALERT_DELIVERY_FIELD = "alertDeliveryFailuresBand";
 const JOB_FIELDS = ["key", "delayed", "stuck", "lastRunAt", "lastSuccessAt", "consecutiveFailuresBand"];
 const BUDGET_FIELDS = ["provider", "scope", "utilisationBand", "resetAt"];
 
@@ -36,7 +38,7 @@ const MAX_ENTRIES = 64;
 /** Returns `{ ok: true, snapshot }` or `{ ok: false, reason }` (an enum). */
 export function parseSnapshot(value) {
   if (!isPlainObject(value)) return invalid("not_object");
-  if (!sameKeys(value, TOP_LEVEL_FIELDS)) return invalid("fields");
+  if (!sameKeys(value, Object.hasOwn(value, ALERT_DELIVERY_FIELD) ? [...TOP_LEVEL_FIELDS, ALERT_DELIVERY_FIELD] : TOP_LEVEL_FIELDS)) return invalid("fields");
   if (value.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) return invalid("schema_version");
   if (!isInstant(value.generatedAt, MINUTE_INSTANT)) return invalid("generated_at");
   if (typeof value.commitSha !== "string" || !COMMIT_SHA.test(value.commitSha)) return invalid("commit_sha");
@@ -75,6 +77,10 @@ export function parseSnapshot(value) {
       if (!UTILISATION_BANDS.includes(budget.utilisationBand)) return invalid("provider_budgets");
       if (!isInstant(budget.resetAt, HOUR_INSTANT)) return invalid("provider_budgets");
     }
+  }
+
+  if (Object.hasOwn(value, ALERT_DELIVERY_FIELD) && value[ALERT_DELIVERY_FIELD] !== "unknown" && !FAILURE_BANDS.includes(value[ALERT_DELIVERY_FIELD])) {
+    return invalid("alert_delivery");
   }
 
   return { ok: true, snapshot: deepFreeze(structuredClone(value)) };
@@ -147,6 +153,13 @@ export function budgetObservations(snapshot) {
     out[key] = BUDGET_SIGNAL.bands.includes(band) ? band : UTILISATION_BANDS.includes(band) ? "ok" : "unknown";
   }
   return out;
+}
+
+/** The S3 alert delivery observation; nothing when no snapshot answered, so the key holds. */
+export function alertDeliveryObservations(snapshot) {
+  if (!snapshot) return {};
+  const band = snapshot[ALERT_DELIVERY_FIELD];
+  return { [ALERT_DELIVERY_KEY]: band === "3+" ? ALERT_DELIVERY_SIGNAL.bands[0] : FAILURE_BANDS.includes(band) ? "ok" : "unknown" };
 }
 
 /** Readiness check names the snapshot reported that are not page keys (policy §1 item 3). */
