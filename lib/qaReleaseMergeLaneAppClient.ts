@@ -31,7 +31,10 @@ const finite = (value: unknown): number => {
 function stateOf(body: Json): QaReleaseLaneState {
   if (typeof body.latched !== "boolean") throw new Error("app_shape");
   const open = body.openAttempt;
-  if (open === null) return { dbNowMs: finite(body.dbNowMs), latched: body.latched, openAttempt: null };
+  // The operator's priority is a preference: a body without a usable one means oldest first.
+  const priority = Array.isArray(body.priority) ? body.priority.filter((n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0) : [];
+  const ordering = priority.length > 0 ? { priority } : {};
+  if (open === null) return { dbNowMs: finite(body.dbNowMs), latched: body.latched, openAttempt: null, ...ordering };
   const attempt = record(open);
   const state = attempt.state;
   const number = attempt.pullRequestNumber;
@@ -45,6 +48,7 @@ function stateOf(body: Json): QaReleaseLaneState {
   return {
     dbNowMs: finite(body.dbNowMs),
     latched: body.latched,
+    ...ordering,
     openAttempt: {
       id: attempt.id,
       state: state as "issued" | "consumed" | "awaiting_deploy",

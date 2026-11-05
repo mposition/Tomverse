@@ -456,6 +456,26 @@ test("a ci:hold pull request out of the line still counts the runners its CI hol
   assert.equal(judged.state.lastRound.running.find((r) => r.number === 1).title, "Pull 1");
 });
 
+test("a pull request a person marked ready is never sent back, and still takes its runners", () => {
+  const top = pull(1, { draft: false });
+  const over = pull(2, { draft: false });
+  const below = pull(3);
+  const open = [top, over, below];
+  const input = { state: state({ capacity: 5, queue: lineOf(1, 2, 3) }), openPulls: open, running: runs(top, over), checks: checksFor(open), runners: [owner(ciRunnerOwnerKey.pull(1), 4), owner(ciRunnerOwnerKey.pull(2), 4)] };
+  // Over the budget, no person: sent back as before.
+  const sent = judge({ ...input, personReady: new Set() });
+  assert.equal(sent.actions.some((action) => action.kind === "hold" && action.pull.number === 2), true);
+  assert.equal(statuses(sent)[2], "held");
+  // A person marked it ready: left alone, and the draft below waits for its runners.
+  const kept = judge({ ...input, personReady: new Set([2]) });
+  assert.equal(statuses(kept)[2], "running");
+  assert.equal(statuses(kept)[3], "waiting");
+  assert.equal(kept.actions.some((action) => action.kind === "hold"), false);
+  // Who marked it could not be read: nothing is sent back this round.
+  const unread = judge({ ...input, personReady: null });
+  assert.equal(unread.actions.some((action) => action.kind === "hold"), false);
+});
+
 test("runner load is kept hour by hour, and an unread round is a gap, not a quiet hour", () => {
   const at = (hour, minute = 0) => Date.parse(`2026-11-04T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00Z`);
   let record = [];

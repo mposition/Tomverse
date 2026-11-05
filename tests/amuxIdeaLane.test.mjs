@@ -22,23 +22,24 @@ const run = (overrides = {}) => ({ claimedAtMs: NOW - 60_000, leaseUntilMs: NOW 
 const failed = (minutesAgo, outcome = "cli_failed") =>
   run({ claimedAtMs: NOW - minutesAgo * 60_000, leaseUntilMs: NOW - 1, outcome });
 const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const PART1 = { part: 1, continues: false, previousPrNumber: null };
 
 test("an idea's runs decide whether the lane runs it again", () => {
   assert.equal(amuxIdeaLaneState([], NOW), null, "an idea the lane never took has no state");
   assert.equal(amuxIdeaLaneClaimable(null), true);
   assert.deepEqual(amuxIdeaLaneState([run()], NOW),
-    { state: "running", attempts: 1, prNumber: null, lastOutcome: null });
+    { ...PART1, state: "running", attempts: 1, prNumber: null, lastOutcome: null });
   const vanished = amuxIdeaLaneState([run({ leaseUntilMs: NOW - 1 })], NOW);
-  assert.deepEqual(vanished, { state: "queued", attempts: 1, prNumber: null, lastOutcome: "lease_expired" },
+  assert.deepEqual(vanished, { ...PART1, state: "queued", attempts: 1, prNumber: null, lastOutcome: "lease_expired" },
     "a run that never reported is retried, not held for a proof");
   assert.equal(amuxIdeaLaneClaimable(vanished), true);
   assert.deepEqual(amuxIdeaLaneState([failed(30), failed(10, "no_change")], NOW),
-    { state: "queued", attempts: 2, prNumber: null, lastOutcome: "no_change" });
+    { ...PART1, state: "queued", attempts: 2, prNumber: null, lastOutcome: "no_change" });
   const spent = amuxIdeaLaneState(Array.from({ length: AMUX_IDEA_LANE_MAX_ATTEMPTS }, (_, i) => failed(i + 1)), NOW);
   assert.equal(spent.state, "failed", "the attempt limit stops it");
   assert.equal(amuxIdeaLaneClaimable(spent), false);
   const opened = amuxIdeaLaneState([failed(30), run({ outcome: "pr_open", prNumber: 42, leaseUntilMs: NOW - 1 })], NOW);
-  assert.deepEqual(opened, { state: "pr_open", attempts: 2, prNumber: 42, lastOutcome: "pr_open" });
+  assert.deepEqual(opened, { ...PART1, state: "pr_open", attempts: 2, prNumber: 42, lastOutcome: "pr_open" });
   assert.equal(amuxIdeaLaneClaimable(opened), false, "an opened PR ends the lane's work");
   assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([run()], NOW)), false, "never two runs at once");
 });
@@ -47,7 +48,7 @@ test("an observed merge of the lane's PR settles the idea as done", () => {
   const opened = (prNumber, mergedAtMs = null, minutesAgo = 30) => run({ claimedAtMs: NOW - minutesAgo * 60_000,
     leaseUntilMs: NOW - 1, outcome: "pr_open", prNumber, mergedAtMs });
   assert.deepEqual(amuxIdeaLaneState([opened(42, NOW - 1)], NOW),
-    { state: "merged", attempts: 1, prNumber: 42, lastOutcome: "pr_open" });
+    { ...PART1, state: "merged", attempts: 1, prNumber: 42, lastOutcome: "pr_open" });
   assert.equal(amuxIdeaLaneState([opened(42, null)], NOW).state, "pr_open", "an unmerged PR is still in review");
   assert.deepEqual(amuxIdeaLaneState([opened(42, NOW - 1, 60), opened(43, null, 10)], NOW).prNumber, 42,
     "a retry's PR left open does not hide the one that merged");
@@ -59,6 +60,40 @@ test("an observed merge of the lane's PR settles the idea as done", () => {
   assert.equal(closed.state, "pr_closed");
   assert.deepEqual(view(closed), ["review", null, true], "a PR closed without a merge is flagged for the owner");
   assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([opened(42, NOW - 1)], NOW)), false);
+});
+
+test("a larger idea runs in parts, each only after the part before merged", () => {
+  const part = (prNumber, minutesAgo, { continues = true, mergedAtMs = null } = {}) => run({
+    claimedAtMs: NOW - minutesAgo * 60_000, leaseUntilMs: NOW - 1, outcome: "pr_open", prNumber, continues, mergedAtMs });
+  const view = (lane) => { const result = amuxIdeaProgress({ state: "submitted", submissionOrigin: "owner",
+    cancelled: false, chunks: [], proposedUnits: 0, cards: [], lane }); return [result.stage, result.waitingFor, result.attention]; };
+  // Part 1 opened its PR and named more: in review, and the lane waits for the merge.
+  const open = amuxIdeaLaneState([part(41, 90)], NOW);
+  assert.deepEqual(open, { state: "pr_open", attempts: 1, prNumber: 41, lastOutcome: "pr_open",
+    part: 1, continues: true, previousPrNumber: null });
+  assert.equal(amuxIdeaLaneClaimable(open), false, "part 2 never starts before part 1 merged");
+  assert.deepEqual(view(open), ["review", null, false]);
+  // Merged: the idea is queued for part 2, which knows the PR that named its work.
+  const next = amuxIdeaLaneState([part(41, 90, { mergedAtMs: NOW - 5 })], NOW);
+  assert.deepEqual(next, { state: "queued", attempts: 0, prNumber: null, lastOutcome: null,
+    part: 2, continues: false, previousPrNumber: 41 });
+  assert.equal(amuxIdeaLaneClaimable(next), true);
+  assert.deepEqual(view(next), ["execution", null, false], "a merged part is not the idea done");
+  // Part 2 has its own attempt limit: part 1's failed tries do not count against it.
+  const early = [failed(200), failed(150), part(41, 90, { mergedAtMs: NOW - 5 })];
+  const retry = amuxIdeaLaneState([...early, failed(2)], NOW);
+  assert.equal(retry.state, "queued");
+  assert.equal(retry.attempts, 1);
+  assert.equal(retry.part, 2);
+  // The last part names nothing more: its merge makes the idea done.
+  const done = amuxIdeaLaneState([...early, part(42, 1, { continues: false, mergedAtMs: NOW - 1 })], NOW);
+  assert.deepEqual([done.state, done.part, done.prNumber, done.previousPrNumber], ["merged", 2, 42, 41]);
+  assert.deepEqual(view(done), ["done", null, false]);
+  // A part's PR closed without a merge stops the chain for the owner to look at.
+  const closed = amuxIdeaLaneState([run({ claimedAtMs: NOW - 60_000, leaseUntilMs: NOW - 1, outcome: "pr_open",
+    prNumber: 43, continues: true, prClosedAtMs: NOW - 1 })], NOW);
+  assert.equal(closed.state, "pr_closed");
+  assert.equal(amuxIdeaLaneClaimable(closed), false);
 });
 
 test("the switch is off unless set, and the daily limit stays bounded", () => {
@@ -75,11 +110,14 @@ test("the switch is off unless set, and the daily limit stays bounded", () => {
 
 test("a run reports an opened PR or one fixed failure word, nothing else", () => {
   assert.deepEqual(inspectAmuxIdeaLaneResult({ attemptId: ID, outcome: "pr_open", prNumber: 3300 }),
-    { attemptId: ID, outcome: "pr_open", prNumber: 3300 });
+    { attemptId: ID, outcome: "pr_open", prNumber: 3300, continues: false });
   for (const outcome of AMUX_IDEA_LANE_FAILURES) {
     assert.deepEqual(inspectAmuxIdeaLaneResult({ attemptId: ID, outcome }), { attemptId: ID, outcome, prNumber: null });
   }
+  assert.deepEqual(inspectAmuxIdeaLaneResult({ attemptId: ID, outcome: "pr_open", prNumber: 3300, continues: true }),
+    { attemptId: ID, outcome: "pr_open", prNumber: 3300, continues: true }, "a part that names more work");
   for (const body of [null, [], { attemptId: "x", outcome: "no_change" }, { attemptId: ID, outcome: "pr_open" },
+    { attemptId: ID, outcome: "no_change", continues: true }, { attemptId: ID, outcome: "pr_open", prNumber: 3, continues: "yes" },
     { attemptId: ID, outcome: "pr_open", prNumber: 0 }, { attemptId: ID, outcome: "no_change", prNumber: 5 },
     { attemptId: ID, outcome: "merged" }, { attemptId: ID, outcome: "no_change", note: "hi" }]) {
     assert.equal(inspectAmuxIdeaLaneResult(body), null, JSON.stringify(body));

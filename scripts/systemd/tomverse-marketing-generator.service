@@ -1,0 +1,29 @@
+# The marketing generator on the AMUX box, over the signed-in Codex CLI.
+# A systemd --user unit of the account that holds the login. Runbook:
+# docs/ops/marketing-generator-box.md
+[Unit]
+Description=Tomverse marketing generator (Codex subscription channel)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+# MARKETING_APP_URL, MARKETING_GENERATOR_SUBMIT_SECRET, MARKETING_LLM_CHANNEL,
+# MARKETING_CODEX_BIN, MARKETING_AI_VISIBILITY_ENABLED. Mode 600.
+EnvironmentFile=%h/.config/tomverse-marketing-generator/generator.env
+# The bundle of `npm run build:marketing-generator-box`: the box's Node has no
+# TypeScript support, so the repository's .ts modules cannot run there directly.
+ExecStart=/usr/bin/node %h/.local/lib/tomverse-marketing-generator/marketing-generator-service.mjs
+# The generator's forty minutes and the measurement's twenty-five, then the
+# supervisor's own kill has already happened.
+TimeoutStartSec=70min
+# The worker starts each Codex call as its own process group. If the supervisor
+# kills the worker, this ends the call it left behind when the service stops.
+KillMode=control-group
+TimeoutStopSec=10s
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

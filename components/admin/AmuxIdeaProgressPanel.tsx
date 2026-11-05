@@ -248,13 +248,27 @@ function laneLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: { lane: {
   merged: (pr: number) => string;
   prClosed: (pr: number) => string;
   failed: (max: number, outcome: string) => string;
+  part: (part: number) => string;
+  continuesAfterMerge: string;
+  nextPartWaiting: (pr: number) => string;
 } }): string {
+  const line = laneStateLine(lane, m);
+  // A larger idea runs in parts, each after the one before merged. A part's
+  // PR closed without a merge stops the chain, so only an open one promises more.
+  const parted = lane.part > 1 || lane.continues ? `${m.lane.part(lane.part)} · ${line}` : line;
+  return lane.continues && lane.state === "pr_open" ? `${parted} · ${m.lane.continuesAfterMerge}` : parted;
+}
+
+function laneStateLine(lane: NonNullable<AmuxIdeaProgressRow["lane"]>, m: Parameters<typeof laneLine>[1]): string {
   const max = AMUX_IDEA_LANE_MAX_ATTEMPTS;
   const last = lane.lastOutcome ?? "-";
   if (lane.state === "merged" && lane.prNumber !== null) return m.lane.merged(lane.prNumber);
   if (lane.state === "pr_closed" && lane.prNumber !== null) return m.lane.prClosed(lane.prNumber);
   if (lane.state === "pr_open" && lane.prNumber !== null) return m.lane.prOpen(lane.prNumber);
   if (lane.state === "running") return m.lane.running(lane.attempts, max);
+  if (lane.state === "queued" && lane.attempts === 0 && lane.previousPrNumber !== null) {
+    return m.lane.nextPartWaiting(lane.previousPrNumber);
+  }
   if (lane.state === "queued" && lane.attempts === 0) return m.lane.waiting;
   if (lane.state === "queued") return m.lane.queued(lane.attempts, max, last);
   return m.lane.failed(max, last);

@@ -10311,6 +10311,9 @@ model AmuxIdeaLaneAttempt {
   mergedAt     DateTime?
   prClosedAt   DateTime?
   prObservedAt DateTime?
+  /// The run did one part of a larger idea and its PR names the remaining
+  /// work: once this PR merges, the lane takes the idea again for the next part.
+  continues    Boolean   @default(false)
   idea       AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Cascade)
 
   @@index([ideaId, claimedAt])
@@ -10687,7 +10690,7 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   requestId                String   @unique @db.Uuid
   namespace                String
   monthStart               DateTime
-  priceVersionId           String
+  priceVersionId           String?
   provider                 String
   modelId                  String
   inputTokensCap           Int
@@ -10708,7 +10711,7 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
 
   reservation    AmuxIdeaSessionAnalysisReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_reservation_fkey")
   window         AmuxIdeaAnalysisBudgetWindow       @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_window_fkey")
-  priceVersion   AmuxIdeaAnalysisPriceVersion       @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_price_fkey")
+  priceVersion   AmuxIdeaAnalysisPriceVersion?      @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_price_fkey")
   claimAudit     AdminAuditLog                      @relation("AmuxV19SessionBudgetClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_claim_audit_fkey")
   resolutionAudit AdminAuditLog?                    @relation("AmuxV19SessionBudgetResolutionAudit", fields: [resolutionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_resolution_audit_fkey")
   analysisResult AmuxIdeaSessionAnalysisResult?

@@ -11,7 +11,6 @@ import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorH
 import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
 import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
 import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePanel";
-import { AmuxMaxSubscriptionPricePanel } from "@/components/admin/AmuxMaxSubscriptionPricePanel";
 import { AmuxSessionBudgetResolutionPanel } from "@/components/admin/AmuxSessionBudgetResolutionPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import { AmuxWorkersOverviewPanel } from "@/components/admin/AmuxWorkersOverview";
@@ -118,7 +117,6 @@ export default async function AdminAmuxSettingsPage({
     // unattended intake, so it comes first on this owner-only tab.
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxOperatingScopePanel operatorId={session.user.id} />
-      <AmuxMaxSubscriptionPricePanel />
       <AmuxAnalysisMonthlyBudgetPanel available={budgetAvailable} operatorId={session.user.id} />
       <AmuxSessionBudgetResolutionPanel />
       <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} /></div>;

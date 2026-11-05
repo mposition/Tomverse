@@ -12,6 +12,8 @@ import { amuxSubscriptionAuthProfile } from "./ideaAnalysisChannelCore.ts";
 import { assessSessionShadowBudget } from "./ideaSessionShadowBudgetCore.ts";
 import { readAnalysisMonthlyBudgetSetting } from
   "./ideaAnalysisBudgetSettingStore.ts";
+import { AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE } from
+  "./ideaAnalysisApprovedCostProfile.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
 import { readAmuxIdeaAnalysisFailureStreak } from
@@ -165,15 +167,24 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   if (latestScope?.id !== reservation.operatingScopeSettingId) {
     throw new AmuxSessionBudgetClaimError("not_ready");
   }
-  const price = await readApprovedAmuxIdeaAnalysisPriceVersion(tx, {
+  // Every channel is a subscription account (owner decision 2026-10-20) and a
+  // subscription CLI call has no per-call price, so it needs no price approval
+  // (owner decision 2026-11-04). The stored rates only convert observed tokens
+  // into the shadow estimate.
+  const maxShadow = input.runner.maxSubscriptionAuthenticated === true &&
+    input.runner.tokenCapsEnforceable === false;
+  const price = maxShadow ? null : await readApprovedAmuxIdeaAnalysisPriceVersion(tx, {
     priceVersionId: input.priceVersionId,
     provider: reservation.modelProvider,
     modelId: reservation.modelId, now,
   });
-  if (price.decision !== "ready" || price.price.mode !== "subscription_cli") {
+  if (price !== null &&
+      (price.decision !== "ready" || price.price.mode !== "subscription_cli")) {
     throw new AmuxSessionBudgetClaimError("budget_hold",
       price.decision === "hold" ? price.reason : "price_unverified");
   }
+  const bounded = price?.decision === "ready" ? price.price : null;
+  const rates = bounded ?? AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
   const setting = await readAnalysisMonthlyBudgetSetting(tx);
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   await tx.amuxIdeaAnalysisBudgetWindow.createMany({
@@ -217,28 +228,16 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     throw new AmuxSessionBudgetClaimError(failureStreak === "stopped"
       ? "not_ready" : "integrity_unavailable");
   }
-  // Keep the narrow subscription mode predicate adjacent to the exception even
-  // though price admission above already rejects non-subscription versions.
-  // Every channel is a subscription account (owner decision 2026-10-20).
-  const maxShadow = price.price.mode === "subscription_cli" &&
-    input.runner.maxSubscriptionAuthenticated === true &&
-    input.runner.tokenCapsEnforceable === false;
   const usageState = v4Unknown || sessionUnknown ? "unknown" as const : "known" as const;
-  const decision = maxShadow ? assessSessionShadowBudget({
-    mode: "subscription_cli", provider: price.price.provider,
-    asOfIso: now.toISOString(),
-    pricingVerifiedAt: price.price.pricingVerifiedAt,
-    pricingExpiresAt: price.price.pricingExpiresAt,
-    inputMicroUsdPerMillion: price.price.inputMicroUsdPerMillion,
-    outputMicroUsdPerMillion: price.price.outputMicroUsdPerMillion,
-    worstTierVerified: price.price.worstTierVerified,
+  const decision = bounded === null ? assessSessionShadowBudget({
+    mode: "subscription_cli", provider: reservation.modelProvider,
     billableToolsDisabled: input.runner.billableToolsDisabled,
     consumedMicroUsd: window.spentMicroUsd.toString(),
     reservedMicroUsd: window.reservedMicroUsd.toString(),
     shadowOverrunMicroUsd: window.shadowOverrunMicroUsd.toString(),
     monthlyLimitMicroUsd: window.limitMicroUsd.toString(), usageState,
   }) : assessAmuxIdeaAnalysisBudget({
-    ...price.price, tokenCapsEnforceable: input.runner.tokenCapsEnforceable,
+    ...bounded, tokenCapsEnforceable: input.runner.tokenCapsEnforceable,
     billableToolsDisabled: input.runner.billableToolsDisabled,
     namespace: AMUX_V4_ANALYSIS_NAMESPACE,
     asOfIso: now.toISOString(),
@@ -263,7 +262,8 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     metadata: { reservationId: input.reservationId,
       invocationOrdinal: input.invocationOrdinal,
       requestId: input.requestId, namespace: AMUX_V4_ANALYSIS_NAMESPACE,
-      monthStart: monthStart.toISOString(), priceVersionId: input.priceVersionId,
+      monthStart: monthStart.toISOString(),
+      ...(maxShadow ? {} : { priceVersionId: input.priceVersionId }),
       modelId: reservation.modelId,
       reservedMicroUsd, budgetMode,
       ...(maxShadow ? { ideaId: reservation.ideaId,
@@ -286,12 +286,12 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     id: input.claimId, requestId: input.requestId,
     reservationId: input.reservationId, namespace: AMUX_V4_ANALYSIS_NAMESPACE,
     invocationOrdinal: input.invocationOrdinal,
-    monthStart, priceVersionId: input.priceVersionId,
+    monthStart, priceVersionId: maxShadow ? null : input.priceVersionId,
     provider: reservation.modelProvider, modelId: reservation.modelId,
-    inputTokensCap: price.price.inputTokensCap,
-    outputTokensCap: price.price.outputTokensCap,
-    inputMicroUsdPerMillion: price.price.inputMicroUsdPerMillion,
-    outputMicroUsdPerMillion: price.price.outputMicroUsdPerMillion,
+    inputTokensCap: rates.inputTokensCap,
+    outputTokensCap: rates.outputTokensCap,
+    inputMicroUsdPerMillion: rates.inputMicroUsdPerMillion,
+    outputMicroUsdPerMillion: rates.outputMicroUsdPerMillion,
     reservedMicroUsd: BigInt(reservedMicroUsd), budgetMode,
     status: "in_flight", claimAuditLogId: auditId,
   } });

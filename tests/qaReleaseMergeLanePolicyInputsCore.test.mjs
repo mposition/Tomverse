@@ -14,25 +14,42 @@ const POLICY = readFileSync(new URL("../docs/policy/qa-release-agent.md", import
 test("the appendix A patterns are read from the policy as it stands", () => {
   const patterns = qaReleaseAgentOwnPatterns(POLICY);
   assert.ok(patterns, "appendix A is found");
-  // Only what changes the lane itself (owner, 2026-10-23): its merge code, its start check and the IaC.
-  assert.ok(patterns.includes("lib/qaReleaseMergeLane*"));
-  assert.ok(patterns.includes("scripts/merge-train-core.mjs"));
-  assert.ok(patterns.includes(".railway/**"));
-  assert.ok(!patterns.includes("lib/qaRelease*"));
+  // The agent's whole server side stays with a person; its screens, copy and tests are the
+  // lane's (owner, 2026-10-23, after two independent reviews).
   assert.ok(!patterns.some((pattern) => pattern.startsWith("components/") || pattern.startsWith("tests/")));
-  // What controls the lane stays too (independent review, 2026-10-23): its API entry points, the
-  // operator control and its Admin routes, the stores that write the audit chain, the train.
   const own = (path) => patterns.some((pattern) => compileManifestPattern(pattern).test(path));
   for (const path of [
+    // merge, its API entry points, operator control and its Admin routes
+    "lib/qaReleaseMergeLaneServiceCore.ts",
     "app/api/internal/agents/qa-release/merge-lane/consume/route.ts",
     "app/api/admin/agent-digests/qa-release/control/route.ts",
     "lib/qaReleaseOperatorControlAdmin.ts",
-    "lib/qaReleaseTrainStore.ts",
-    "lib/qaReleaseTrainPorts.ts",
+    // where secrets are sent, and the runners that send them
+    "lib/qaReleaseDigestEndpointCore.ts",
+    "lib/qaReleaseDigestServiceCore.ts",
+    "lib/qaReleaseMonitorServiceCore.ts",
+    // the audit-chain stores and the secret scan and canonical bytes they trust
     "lib/agentDigestStore.ts",
+    "lib/agentDigestStoreCore.ts",
+    "lib/agentDigestCanonicalJson.ts",
+    // GitHub rulesets, which a revert does not restore
+    "lib/qaReleaseLaneRulesetsCore.ts",
+    "lib/qaReleaseBranchProtectionCore.ts",
+    // the train and the operator's merge train
+    "lib/qaReleaseTrainPorts.ts",
+    "scripts/merge-train.mjs",
+    "scripts/merge-train-core.mjs",
     "scripts/qa-release-train-service.mjs",
+    ".railway/agent-runners.ts",
   ]) assert.ok(own(path), path);
-  for (const path of ["components/admin/QaReleaseLaneVerdictsSection.tsx", "lib/qaReleaseAttentionCore.ts", "lib/qaReleaseDigestBuildCore.ts", "tests/qaReleaseTrainService.test.mjs"]) {
+  for (const path of [
+    "components/admin/QaReleaseLaneVerdictsSection.tsx",
+    "components/admin/QaReleaseTrainCargoSection.tsx",
+    "lib/adminMessages/agentDigests.ts",
+    "lib/adminMessages/qaReleaseLane.ts",
+    "app/(site)/(application)/admin/qa-release/page.tsx",
+    "tests/qaReleaseTrainService.test.mjs",
+  ]) {
     assert.ok(!own(path), path);
   }
   assert.ok(patterns.every((pattern) => !pattern.includes(" ")));
