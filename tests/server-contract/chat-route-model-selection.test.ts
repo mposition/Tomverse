@@ -92,7 +92,7 @@ async function loadRouteWithSpies(): Promise<{
   mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
     previewPromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
       refinerAdmissionEvents.push("preview");
-      if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
+      if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError("consumed");
       return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
         ? { ...message, content: "Synthetic held execution prompt" } : message),
         mode: "explicit" as const, provenance: { decision: "accepted" as const } };
@@ -309,7 +309,9 @@ test("a Refiner decision on the default-off deployment refuses before model, cre
     }),
   }));
   assert.equal(response.status, 409);
-  assert.equal((await response.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+  const body = await response.json();
+  assert.equal(body.code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+  assert.equal(JSON.stringify(body).includes("mode_disabled"), false);
   assert.equal(spies.creditReservations, 0);
   assert.equal(spies.streamTextCalls, 0);
   assert.equal(spies.conversationReads, 0);
@@ -361,9 +363,18 @@ test("an admitted valid Refiner decision consumes once and a stale replay remain
     assert.equal(consumedRefinerDecisions, 1);
     assert.equal(spies.creditReservations, 1);
     assert.deepEqual(refinerAdmissionEvents, ["scope", "admission", "preview", "consume"]);
+    const warnings: string[] = [];
+    const warn = mock.method(console, "warn", (line: unknown) => { warnings.push(String(line)); });
     const repeated = await POST(refinerRequest());
+    warn.mock.restore();
     assert.equal(repeated.status, 409);
-    assert.equal((await repeated.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    const repeatedBody = await repeated.json();
+    assert.equal(repeatedBody.code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    assert.equal(JSON.stringify(repeatedBody).includes("consumed"), false);
+    // The operator's line says why, and nothing the user wrote.
+    const rejected = warnings.find((line) => line.includes("chat_request_rejected"));
+    assert.equal(rejected ? JSON.parse(rejected).reason : null, "consumed");
+    assert.equal(rejected?.includes("authored source"), false);
     assert.equal(consumedRefinerDecisions, 1);
     assert.equal(spies.creditReservations, 1);
     assert.equal(spies.streamTextCalls, 0);

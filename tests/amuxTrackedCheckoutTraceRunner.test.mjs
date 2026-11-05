@@ -23,11 +23,17 @@ const sandboxUnavailable = (() => {
   } catch { return "strace cannot follow an unprivileged bwrap sandbox on this host"; }
 })();
 
-// The Node-based cases exec /usr/bin/node inside the sandbox, which only binds
-// /usr, /bin and /lib*. A host whose node lives elsewhere (setup-node installs
-// under /opt/hostedtoolcache) makes bwrap fail to exec it and exit 1.
-const nodeUnavailable = sandboxUnavailable ||
-  (existsSync("/usr/bin/node") ? false : "/usr/bin/node is not installed on this host");
+// The two Node-based cases need a system Node under /usr/bin, which the sandbox
+// binds. A runner whose Node comes from setup-node lives outside those binds.
+const nodeUnavailable = sandboxUnavailable || (() => {
+  try {
+    execFileSync("/usr/bin/strace", ["-f", "-qq", "-o", "/dev/null", "/usr/bin/bwrap",
+      "--unshare-all", "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin",
+      "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64", "--",
+      "/usr/bin/node", "-e", "0"], { stdio: "ignore", timeout: 15_000 });
+    return false;
+  } catch { return "no system Node runnable inside the sandbox on this host"; }
+})();
 
 test("isolated traced child streams opened checkout paths without a log", {
   skip: sandboxUnavailable,
