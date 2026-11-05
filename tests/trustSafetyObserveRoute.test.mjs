@@ -90,9 +90,12 @@ test("a thrown round logs a code-shaped code and no message", () => {
   assert.match(code, /errorName: error instanceof Error \? error\.name : "unknown"/);
   assert.match(code, /\^\[A-Za-z0-9_\]\{1,64\}\$/);
   assert.doesNotMatch(code, /error\.message|String\(error\)|errorMessage/);
-  // A refusal the design expects answers `failed` at 200; an unexpected error
-  // answers `failed` at 500. The body is the same enum either way (§4).
-  assert.match(code, /json\(\{ outcome: "failed" \}, expected \? 200 : 500\)/);
+  // A refusal the design expects answers `failed` at 409; an unexpected error
+  // answers `failed` at 500. The body is the same enum either way (§4). 409
+  // rather than 200 because the child turns a non-2xx into a non-zero exit, so
+  // a run where no round happened does not read as a service-level success --
+  // independent review found that it did.
+  assert.match(code, /json\(\{ outcome: "failed" \}, expected \? 409 : 500\)/);
   assert.match(code, /isBudgetInsufficient\(error\)/);
   assert.match(code, /error instanceof TrustSafetyRoundRefused/);
 });

@@ -741,6 +741,51 @@ test("(ㄷ): a package whose own manifest cannot be read is a failure", () => {
   }
 });
 
+test("(ㄷ): an entry written without `./` is still an entry point", () => {
+  // `exports` targets must start with `./`, but `main`, `module` and `browser`
+  // need not: a package with `main: "./cjs.js"` and `module: "esm.js"` had only
+  // the first walked, so the branch a bundler picks went unread. Independent
+  // review reproduced it. A `browser` **map** is different -- its keys and
+  // values are specifiers rather than paths -- and must not be read as entries.
+  const root = mkdtempSync(join(tmpdir(), "ts-bare-entry-"));
+  const dep = join(root, "node_modules", "bare");
+  mkdirSync(dep, { recursive: true });
+  const importer = join(root, "index.js");
+  writeFileSync(importer, 'module.exports = require("bare");');
+  writeFileSync(join(dep, "cjs.js"), "module.exports = 1;");
+  writeFileSync(join(dep, "esm.js"), "export const go = (u) => fetch(u);");
+  writeFileSync(join(dep, "browser.js"), "export const go2 = (u) => fetch(u);");
+
+  try {
+    writeFileSync(
+      join(dep, "package.json"),
+      JSON.stringify({ name: "bare", main: "./cjs.js", module: "esm.js", browser: "browser.js" }),
+    );
+    const bare = packageEntryFiles("bare", importer);
+    assert.deepEqual(bare.failures, [], JSON.stringify(bare.failures));
+    const names = bare.files.map((file) => file.split(sep).pop()).sort();
+    assert.deepEqual(names, ["browser.js", "cjs.js", "esm.js"]);
+
+    // The map form: `fs` and `path` are module names, not files here.
+    writeFileSync(
+      join(dep, "package.json"),
+      JSON.stringify({
+        name: "bare",
+        main: "./cjs.js",
+        browser: { fs: false, path: "path-browserify" },
+      }),
+    );
+    const mapped = packageEntryFiles("bare", importer);
+    assert.deepEqual(mapped.failures, [], JSON.stringify(mapped.failures));
+    assert.deepEqual(
+      mapped.files.map((file) => file.split(sep).pop()),
+      ["cjs.js"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the entry points and the specifier list are the ones the section names", () => {
   assert.deepEqual(
     ENTRY_POINTS.map((entry) => entry.id),

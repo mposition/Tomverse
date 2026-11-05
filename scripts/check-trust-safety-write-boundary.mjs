@@ -1129,7 +1129,15 @@ export const packageEntryFiles = (specifier, fromFile = import.meta.filename) =>
   collect(manifest.browser);
 
   for (const entry of strings) {
-    if (!entry.startsWith(".")) continue;
+    // **Not only `./` paths.** `exports` targets must start with `./`, but
+    // `main`, `module` and `browser` need not: a package with
+    // `main: "./cjs.js"` and `module: "esm.js"` had only the first walked, so
+    // the branch a bundler picks went unread. Independent review reproduced
+    // it. A string that resolves to a file under the package root is an entry
+    // point however it is spelled; one that does not and is not a relative
+    // path is a specifier rather than a path -- `browser` maps module names
+    // to replacements -- and is left alone.
+    const relative = entry.startsWith(".") ? entry : `./${entry}`;
     // §5.6's walk is over what a runtime loads, and §11-7 records the targets
     // it leaves out as a residual: declaration files, TypeScript sources and
     // JSON. `zod` points some entries at `src/*.ts`, which a bundler compiles
@@ -1137,7 +1145,7 @@ export const packageEntryFiles = (specifier, fromFile = import.meta.filename) =>
     // not run -- and their TypeScript-style `./x.js` specifiers do not resolve
     // as written either.
     if (/\.(d\.[cm]?ts|[cm]?tsx?|json)$/.test(entry)) continue;
-    const base = resolvePath(root, entry);
+    const base = resolvePath(root, relative);
     let found = false;
     for (const candidate of [base, `${base}.js`, `${base}.cjs`, `${base}.mjs`, join(base, "index.js")]) {
       try {
@@ -1150,8 +1158,9 @@ export const packageEntryFiles = (specifier, fromFile = import.meta.filename) =>
       }
     }
     // A wildcard entry (`./*.js`) names a pattern rather than a file, and
-    // the files it covers are reached by the edges inside the package.
-    if (!found && !entry.includes("*")) {
+    // the files it covers are reached by the edges inside the package. A bare
+    // string that resolved to nothing is a specifier, not a path.
+    if (!found && !entry.includes("*") && entry.startsWith(".")) {
       failures.push({
         entry: "package",
         file: `${specifier} -> ${entry}`,

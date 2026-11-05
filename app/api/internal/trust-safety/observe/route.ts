@@ -96,6 +96,10 @@ export async function POST(request: Request) {
     // error shape) or one of the wrapper's own refusals -- is a round that did
     // not run, not a broken app. It answers `failed` either way, and the
     // status says which it was so an operator is not sent looking for a fault.
+    //
+    // 409 rather than 200: the child turns a non-2xx into a non-zero exit, so
+    // a run where no round happened does not read as a service-level success.
+    // Independent review found that it did.
     const expected = isBudgetInsufficient(error) || error instanceof TrustSafetyRoundRefused;
     console.error(
       JSON.stringify({
@@ -105,6 +109,6 @@ export async function POST(request: Request) {
         errorCode: typeof code === "string" && /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : null,
       }),
     );
-    return json({ outcome: "failed" }, expected ? 200 : 500);
+    return json({ outcome: "failed" }, expected ? 409 : 500);
   }
 }
