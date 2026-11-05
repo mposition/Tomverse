@@ -50,6 +50,7 @@ import {
     canUseModelWithPlan,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
+    resolveReplacementModel,
     type AiModel,
 } from "@/lib/models";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
@@ -1512,18 +1513,18 @@ async function handleChatPost(
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const catalogModel = runtimeModelMap.get(requestedModelId);
         if (catalogModel && !catalogModel.enabled) {
-            const replacementCandidate = catalogModel.replacementModelId
-                ? runtimeModelMap.get(catalogModel.replacementModelId)
-                : undefined;
             // Only name a replacement the user could actually go and pick.
             // A retirement that points at a delisted or disabled model is a
             // dead end, so in that case the message stays generic.
-            const replacement =
-                replacementCandidate?.enabled &&
-                replacementCandidate.publiclyListed !== false &&
-                !replacementCandidate.catalogDeleted
-                    ? replacementCandidate
-                    : undefined;
+            //
+            // Walked, not read one hop: a successor that was itself retired
+            // later leaves the first model's link naming something nobody can
+            // select, and the next live model in the chain is the answer when
+            // there is one (lib/models.ts resolveReplacementModel).
+            const replacement = resolveReplacementModel(
+                catalogModel,
+                (candidateId) => runtimeModelMap.get(candidateId)
+            );
             return tracedJsonError(
                 replacement
                     ? `${catalogModel.name} is no longer available. Please select ${replacement.name}.`

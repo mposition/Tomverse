@@ -106,11 +106,17 @@ export const nativeSearchProviders = (register) =>
 
 /**
  * Whether the chat route would name this model as a replacement. Mirrors the
- * condition in app/api/chat/route.ts's MODEL_RETIRED branch; a change there is a
- * change here.
+ * condition of lib/models.ts isPubliclySelectableModel, which the chat route's
+ * MODEL_RETIRED branch reaches through resolveReplacementModel; a change there
+ * is a change here.
  */
 export const isNameableReplacement = (model) =>
-  Boolean(model) && model.enabled === true && model.publiclyListed !== false && model.catalogDeleted !== true;
+  Boolean(model) &&
+  model.enabled === true &&
+  model.publiclyListed !== false &&
+  model.catalogDeleted !== true &&
+  model.status !== "disabled" &&
+  model.status !== "coming-soon";
 
 export const webSearchRouteFindings = ({ models, register, capabilityOf }) => {
   const natives = nativeSearchProviders(register);

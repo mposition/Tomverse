@@ -45,6 +45,44 @@ test("an unavailable model with no replacement is not called retired", () => {
     });
 });
 
+test("a retired model with no reachable replacement is told support ended", () => {
+    // The state the runtime registry drifts into: the model is withdrawn for
+    // good, and its `replacementModelId` either names nobody or names models
+    // that are themselves retired. Saying "temporarily unavailable" to
+    // somebody whose model is never coming back leaves them waiting for it;
+    // this sends them to the picker instead.
+    assert.deepEqual(modelNotice({ unavailable: true, retired: true }), {
+        source: "localised",
+        kind: "retired",
+        copyKey: "chat.modelRetired",
+    });
+    assert.equal(
+        modelNoticeFallbackText(modelNotice({ unavailable: true, retired: true })),
+        "This model is no longer available. Please select another current model."
+    );
+});
+
+test("a retirement with a reachable replacement still names it", () => {
+    // `retired` only decides the wording when there is nowhere to send them.
+    assert.equal(
+        modelNotice({
+            unavailable: true,
+            retired: true,
+            replacementModelName: "Grok 4.5",
+        }).kind,
+        "retired_replaced"
+    );
+});
+
+test("an outage on a live model is still called temporary", () => {
+    // A provider incident or an admin switch is not a retirement, and the
+    // caller says so by leaving `retired` unset.
+    assert.equal(
+        modelNotice({ unavailable: true, retired: false }).kind,
+        "unavailable"
+    );
+});
+
 test("a working model with nothing to say says nothing", () => {
     // The availability check used to return userVisibleNote on the allowed path
     // too, so a note left on a model that was later re-enabled kept appearing

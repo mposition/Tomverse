@@ -70,10 +70,28 @@ export type ModelNotice =
 export type ModelNoticeInput = {
     /** The stored note, if an operator wrote one. */
     userVisibleNote?: string | null;
-    /** The replacement's display name, resolved by the caller. */
+    /**
+     * The replacement's display name, resolved by the caller.
+     *
+     * Only a model the reader could go and select. A caller that reads
+     * `replacementModelId` without checking its target's own lifecycle sends
+     * this field the name of a retired model, and the notice then tells
+     * somebody to pick something that is not in the picker.
+     */
     replacementModelName?: string | null;
     /** Whether the model can answer at all right now. */
     unavailable: boolean;
+    /**
+     * Whether it is gone for good rather than failing right now.
+     *
+     * Withdrawn from the offer (`isRetiredModel`) or deleted from the
+     * catalogue, as opposed to an outage, a provider incident or an admin
+     * switch. It only changes the no-replacement wording: "no longer
+     * available, pick another current model" instead of "temporarily
+     * unavailable", which is what somebody whose model is never coming back
+     * was being told while they waited for it.
+     */
+    retired?: boolean;
 };
 
 /**
@@ -97,6 +115,17 @@ export const modelNotice = (input: ModelNoticeInput): ModelNotice | null => {
             kind: "retired_replaced",
             copyKey: MODEL_NOTICE_COPY_KEYS.retired_replaced,
             replacementModelName: replacement,
+        };
+    }
+    // End of support, stated as such. No replacement is reachable -- either
+    // none was named or the chain runs into models nobody can select -- so the
+    // sentence says the model is gone and leaves the choice to the picker,
+    // which is the only place that knows what is currently selectable.
+    if (input.retired) {
+        return {
+            source: "localised",
+            kind: "retired",
+            copyKey: MODEL_NOTICE_COPY_KEYS.retired,
         };
     }
     // Deliberately not "retired": a model can be unavailable for an outage, a
