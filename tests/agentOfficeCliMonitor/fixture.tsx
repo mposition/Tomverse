@@ -7,7 +7,7 @@ const unread = { kind: "unread" } as const;
 const live: AgentOfficeLiveRooms = {
   readAt: new Date().toISOString(), research: unread, qa: unread, finance: unread,
   routing: unread, sre: unread, support: unread, marketing: unread, engineering: unread, digest: unread, decision: unread, review: unread,
-  queue: { marketing: 0, amuxEscalations: 0, amuxHalts: 0, autoFix: 0 },
+  queue: { marketing: 0, amuxEscalations: 0, amuxHalts: 0 },
   amux: { kind: "observed", catalogConfigured: true, workers: AGENT_OFFICE_AMUX_ROSTER.map(worker =>
     ({ ...worker, state: "idle" as const, heartbeatAt: new Date().toISOString() })) },
 };

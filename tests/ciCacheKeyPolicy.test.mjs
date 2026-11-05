@@ -909,8 +909,9 @@ test("every widely readable workflow in this repository holds a read-only cache 
   // 2026-10-20, when the PR CI auto-fix (workflow_run, cache-mode: read) arrived;
   // 27 from 2026-11-02, when the AMUX idea lane (schedule, cache-mode: read) arrived;
   // 28 from 2026-11-03, when the marketing SEO agent runner (workflow_dispatch,
-  // cache-mode: read) arrived.
-  assert.equal(checked, 28);
+  // cache-mode: read) arrived; 26 from 2026-11-05, when the two feedback auto-fix
+  // workflows were deleted.
+  assert.equal(checked, 26);
 });
 
 test("an explicit write stops being allowed the moment a wider trigger is added", () => {
