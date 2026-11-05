@@ -27,6 +27,16 @@
  * that does not move forward -- so a repeated request writes nothing. A limit
  * would still be better, and it is unavailable rather than unwanted.
  *
+ * **What stands in for a CSRF token, written down because it is an
+ * assumption.** The form carries none: this route has no shared middleware to
+ * mint one, and these files may not reach for the helpers that would. What
+ * holds instead is that the session cookie is `SameSite=Lax`, so a cross-site
+ * form POST arrives without it and is a 404; that the permission is the
+ * owner's alone; and that the write needs a sign-in recent enough to pass
+ * step-up. A same-site page that could forge this submit could also call the
+ * route directly. If the cookie's `SameSite` ever changes, this paragraph is
+ * the thing that stops being true.
+ *
  * The write itself is `lib/trustSafetyActivationStore.ts`: one transaction
  * holding the config row and its audit entry, the only pair §5.6 allows here.
  */

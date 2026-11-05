@@ -339,6 +339,50 @@ test("importing a seventh shared module brings it into the agent's own files", (
   );
 });
 
+test("a delegate held in a variable still counts as a write", () => {
+  // Requiring the delegate chain let a read-only entry point delete rows:
+  // `const requests = prisma.privacyRequest; requests.deleteMany({})`.
+  // Independent review found it in E2's closure, where the allowance is zero.
+  const result = withOverlay({
+    "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}
+export const purge = async (requests: { deleteMany: (args: unknown) => Promise<unknown> }) =>
+  requests.deleteMany({});`,
+  });
+  assert.ok(rules(result).includes("delegateWrites-not-allowed"), JSON.stringify(result.failures));
+});
+
+test("a digest's own update is still not a write", () => {
+  // Which is why the receiver was looked at in the first place: the routes
+  // compare bearer digests with `createHash("sha256").update(...)`.
+  const { failures } = checkTrustSafetyWriteBoundary();
+  assert.deepEqual(failures, []);
+});
+
+test("a star re-export of a built-in module is refused", () => {
+  for (const line of [
+    'export * from "node:net";',
+    'export * as net from "node:net";',
+  ]) {
+    const result = withOverlay({
+      "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}\n${line}`,
+    });
+    assert.ok(rules(result).includes("builtin-namespace-import"), line);
+  }
+});
+
+test("the loader names are refused in every appearance, not just as a call", () => {
+  for (const line of [
+    "export const load = require;",
+    'export const net = module.require("node:net");',
+    "export const own = exports;",
+  ]) {
+    const result = withOverlay({
+      "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}\n${line}`,
+    });
+    assert.ok(rules(result).includes("loader-name"), line);
+  }
+});
+
 test("the entry points and the specifier list are the ones the section names", () => {
   assert.deepEqual(
     ENTRY_POINTS.map((entry) => entry.id),

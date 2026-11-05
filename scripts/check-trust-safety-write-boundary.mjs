@@ -79,6 +79,13 @@ export const BANNED_REFLECTION = ["Object", "Reflect", "Proxy", "WebAssembly", "
 /** Global objects, allowed only as `process.env.<literal>`. */
 export const BANNED_GLOBALS = ["globalThis", "global", "self", "window", "process"];
 
+/**
+ * The CommonJS loader names. §5.6 bans every appearance of these in these
+ * files, in any form: the files are ESM, and a loader is how a built-in module
+ * is reached without an import the check can see.
+ */
+export const BANNED_LOADER_NAMES = ["require", "module", "exports"];
+
 /** Prisma delegate methods that write. */
 const WRITE_METHODS = new Set([
   "create",
@@ -302,7 +309,13 @@ export const analyseFile = ({ file, source, exists }) => {
       const names = node.exportClause && ts.isNamedExports(node.exportClause)
         ? node.exportClause.elements.map((element) => element.propertyName?.text ?? element.name.text)
         : [];
-      judgeSpecifier({ specifier, typeOnly, namespace: false, defaultImport: false, names });
+      // `export *` and `export * as x` carry no names, and passing them as a
+      // named re-export let `export * from "node:net"` through with an empty
+      // list -- a module whose allowlist is three string tests. Independent
+      // review found it. They are namespace forms, and the rules already
+      // refuse those: which export is used cannot be seen.
+      const starExport = !node.exportClause || ts.isNamespaceExport(node.exportClause);
+      judgeSpecifier({ specifier, typeOnly, namespace: starExport, defaultImport: false, names });
     }
 
     // A dynamic import or a `require` is an edge this check cannot follow.
@@ -346,6 +359,14 @@ export const analyseFile = ({ file, source, exists }) => {
           ts.isIdentifier(parent.parent.name);
         if (!envAccess) fail("global-object", name);
       }
+      // §5.6 bans `require`, `require.resolve`, `module` and `exports` in
+      // these files in **every** appearance, and the check only refused a
+      // direct `require(...)` call: `const load = require; load("node:net")`
+      // and `module.require("node:net")` were neither an import edge nor a
+      // banned call. Independent review found both.
+      if (BANNED_LOADER_NAMES.includes(name) && !isDeclarationName) {
+        fail("loader-name", name);
+      }
     }
 
     // --- computed access ----------------------------------------------
@@ -377,11 +398,7 @@ export const analyseFile = ({ file, source, exists }) => {
     // --- writes and raw SQL -------------------------------------------
     if (ts.isTaggedTemplateExpression(node)) {
       const tag = node.tag;
-      const name = ts.isPropertyAccessExpression(tag)
-        ? tag.name.text
-        : ts.isExpressionWithTypeArguments(tag) || tag.kind === ts.SyntaxKind.PropertyAccessExpression
-          ? null
-          : null;
+      const name = ts.isPropertyAccessExpression(tag) ? tag.name.text : null;
       const text = tag.getText(sourceFile);
       if (text.includes("$queryRawUnsafe") || text.includes("$executeRawUnsafe")) {
         fail("raw-unsafe", text.slice(-30));
@@ -417,14 +434,19 @@ export const analyseFile = ({ file, source, exists }) => {
         const method = callee.name.text;
         if (method === "$queryRawUnsafe" || method === "$executeRawUnsafe") fail("raw-unsafe", method);
         if (method === "$executeRaw") fail("raw-execute", method);
-        // The Prisma delegate shape: `<client>.<model>.<method>(...)`. The
-        // receiver has to be a property-access chain, or `createHash(...)
-        // .update(...)` counts as a write -- which it did on the first run of
-        // this check. A delegate held in a variable would be missed, and the
-        // allowlist is by file for that reason: a file that writes at all has
-        // to be named here.
-        if (WRITE_METHODS.has(method) && ts.isPropertyAccessExpression(callee.expression)) {
-          counts.delegateWrites += 1;
+        // Any receiver, not just a delegate chain. Requiring the chain let a
+        // delegate held in a variable write unseen -- `const requests =
+        // prisma.privacyRequest; requests.deleteMany({})` -- which
+        // independent review found, and a read-only entry point deleting rows
+        // is the case §5.6's zero allowance exists for.
+        //
+        // The one shape excluded is a digest's own `update`, which is not a
+        // write and is why the first version of this rule looked at the
+        // receiver at all. Anything else counts, so a false positive forces a
+        // file into the allowlist rather than slipping past it.
+        if (WRITE_METHODS.has(method)) {
+          const receiver = callee.expression.getText(sourceFile);
+          if (!/\b(createHash|createHmac)\s*\(/.test(receiver)) counts.delegateWrites += 1;
         }
       }
       if (ts.isIdentifier(callee) && AUDIT_WRITERS.has(callee.text)) counts.auditAppends += 1;
