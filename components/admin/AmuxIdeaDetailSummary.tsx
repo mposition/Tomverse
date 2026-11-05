@@ -97,7 +97,18 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
             <h3 className="font-medium text-zinc-100">{m.notice[notice].title}</h3>
             <p className="text-zinc-300">{m.notice[notice].body}</p>
           </>}
-          {row.lane ? <p className="text-xs text-zinc-300" data-testid="amux-idea-detail-lane">{laneLine(row.lane, m)}</p> : null}
+          {/* A lane idea has no Task rows; its one PR is what the review step is about. */}
+          {row.lane ? (
+            <p className="flex flex-wrap items-center gap-x-3 text-xs text-zinc-300" data-testid="amux-idea-detail-lane">
+              <span>{laneLine(row.lane, m)}</span>
+              {row.lane.prNumber !== null ? (
+                <a href={`${REPOSITORY_URL}/pull/${row.lane.prNumber}`} target="_blank" rel="noreferrer"
+                  className="inline-flex min-h-11 items-center font-medium underline text-blue-200">
+                  PR #{row.lane.prNumber} ↗
+                </a>
+              ) : null}
+            </p>
+          ) : null}
           {NOTICE_ACTIONS[notice] ? <p className="flex flex-wrap gap-x-4">
             {NOTICE_ACTIONS[notice].map((action) => <Link key={action} href={SCREENS[action]} className={LINK}>
               {m.actions[action]}</Link>)}
