@@ -61,18 +61,16 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       sre: {
         name: "Ops & SRE",
         task: "Status roll-up every 10 minutes, page or digest",
-        blockReason:
-          "Ops & SRE has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
+        blockReason: "Ops & SRE is waiting on its record screen.",
       },
       support: {
         name: "Support triage",
-        task: "A lane for each report, related reports grouped",
-        blockReason:
-          "Support triage has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
+        task: "A lane, duplicate pointers and a reply draft for each report",
+        blockReason: "Support triage is waiting on its record screen.",
       },
       marketing: {
         name: "Marketing",
-        task: "Approved posts published, the Guard's check",
+        task: "Drafts to approve, approved posts published, the Guard's check",
         blockReason: "Marketing is waiting on its record screen.",
       },
       finance: {
@@ -400,25 +398,26 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           switch: "OPS_OBSERVER_ENABLED on its services, and the owner's stage approval on its record screen.",
         },
         support: {
-          summary: "Suggests a lane for each incoming user report, and which reports belong together, by fixed rules, so a person knows what to look at first.",
+          summary: "With one model call per incoming user report, it suggests a lane, which open reports the report duplicates and a reply draft, so a person knows what to look at first.",
           does: [
-            "Every 30 min it reads up to 50 open or reviewing reports, skipping deleted accounts.",
-            "It suggests one of six lanes: verified bug, unverified bug, billing (a person), trust and safety (a person), feature request or other. Money goes to billing; privacy, security, legal and self-harm go to trust and safety.",
-            "It groups related reports, and stores its suggestions, groups and runs with an audit entry for each.",
-            "A retention job every 30 min deletes expired triage data.",
+            "Every 30 min, riding the app's 15-minute maintenance cron, it reads up to 50 open or reviewing reports, skipping deleted accounts.",
+            "With a model chosen in Admin, one call per report suggests one of six lanes (verified bug, unverified bug, billing (a person), trust and safety (a person), feature request or other), the duplicates and a reply draft. Fixed keyword rules hold the floor: money goes to billing; privacy, security, legal and self-harm go to trust and safety, and the model can only raise billing to trust and safety. With no model chosen, the keyword rules alone pick the lane.",
+            "It stores its suggestions and runs with an audit entry for each; the reply draft shows only to the operator.",
+            "A retention job on the same cron deletes expired triage data.",
           ],
           never: [
-            "No LLM, and report text never leaves the app.",
+            "Report text goes to the model provider chosen in Admin only while both triage and a model are on; with either off, no text leaves the app.",
             "Never sends mail, changes a report's status or reply, creates an auto-fix case, or promises credits or refunds.",
           ],
           human: [
-            "Accepts or dismisses each suggestion, confirms groups and sends any reply.",
+            "Accepts or dismisses each suggestion and sends any reply; a draft is never sent for you.",
           ],
-          switch: "Turned on in Support → Feedback (AI triage); with nothing saved there, SUPPORT_TRIAGE_ENABLED=\"true\". Off, a run writes nothing.",
+          switch: "Two choices in Support → Feedback (AI triage): the triage switch, and the model, which is a paid call and off until chosen. With no triage switch saved there, SUPPORT_TRIAGE_ENABLED=\"true\". Off, a run writes nothing.",
         },
         marketing: {
-          summary: "Publishes approved social posts to the brand's accounts through a deterministic Guard, with a person in charge of what goes public.",
+          summary: "Its generator drafts social posts and market reports with model calls under a monthly cap; approved posts are published to the brand's accounts through a deterministic Guard, with a person in charge of what goes public.",
           does: [
+            "The generator tracks the competitors a person approved and writes post drafts; each model call is booked in a ledger under a monthly cap, and every draft waits in the approval queue.",
             "The publisher (every 5 min) checks each publishing account's health, claims the next approved post that is due, makes exactly one publish call and records published, failed or outcome unknown.",
             "The Guard checks input hygiene, facts (prices only from stored values) and approved links and assets; questionable wording is flagged for a person.",
             "A published post is polled until it is confirmed live.",
@@ -705,6 +704,60 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         lastPromotion: (time: string) => `last promotion ${time}`,
         noPromotion: "no promotion yet",
       },
+      sre: {
+        badges: { trusted: "Trusted", untrusted: "Not trusted", noGenesis: "Not started", unread: "Unread" },
+        unread: "Could not read its record",
+        noGenesis: "No genesis approved yet: the agent has not started",
+        modes: { shadow: "shadow (recorded, not sent)", live: "live" },
+        generationMissing: "not recorded",
+        trusted: (mode: string, generation: string) => `State chain trusted · ${mode} · generation ${generation}`,
+        untrusted: (reason: string, mode: string, generation: string) =>
+          `State chain not trusted · ${reason} · ${mode} · generation ${generation}`,
+        lastDigest: (time: string) => `last digest ${time}`,
+        noDigest: "no digest received yet",
+      },
+      support: {
+        badges: { on: "On", off: "Off", stale: "Stale", failed: "Runs failed", unread: "Unread" },
+        unread: "Could not read its record",
+        on: "Triage is on",
+        off: "Triage is off: the worker takes no reports",
+        outcomes: {
+          running: "running",
+          success: "success",
+          partial: "partial",
+          failed: "failed",
+          deadline_exceeded: "deadline exceeded",
+        },
+        lastRun: (time: string, outcome: string) => `latest worker run ${time} · ${outcome}`,
+        noRun: "no worker run has finished yet",
+        reportsToday: (count: number) => `${count} ${count === 1 ? "report" : "reports"} taken up today (UTC day)`,
+        failedRunsToday: (count: number) => `${count} failed ${count === 1 ? "run" : "runs"} today (UTC day)`,
+        stale: "a run is overdue or retention is stuck",
+      },
+      marketing: {
+        badges: {
+          awaiting: "To approve",
+          unreadableSwitch: "Switch unreadable",
+          unreadableQueue: "Queue unreadable",
+          draftsOff: "Drafts off",
+          clear: "Nothing waiting",
+          unread: "Unread",
+        },
+        unread: "Could not read its record",
+        switchWords: { on: "on", off: "off", unreadable: "unreadable" },
+        switchUnreadable: "A switch could not be read: it is not shown as off",
+        queueUnread: "The approval queue could not be read",
+        queueEmpty: "No post waits for approval",
+        queue: (count: number, oldest: string | null) =>
+          `${count} ${count === 1 ? "post waits" : "posts wait"} for approval${oldest ? ` · oldest since ${oldest}` : ""}`,
+        draftsOff: "Drafts are off: the generator's drafts are not taken into the approval queue",
+        switches: (drafts: string, publish: string) => `drafts ${drafts} · publishing ${publish}`,
+        lastRun: (time: string) => `generator last ran ${time}`,
+        noRun: "the generator has not run yet",
+        lastRunUnread: "the generator's last run could not be read",
+        calls: (count: number) => `${count} generator ${count === 1 ? "call" : "calls"} this month (UTC)`,
+        callsUnread: "this month's generator calls could not be read",
+      },
       qa: {
         badges: {
           fresh: "Received",
@@ -942,18 +995,16 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       sre: {
         name: "운영·SRE팀",
         task: "10분마다 상태 집계, page 또는 digest",
-        blockReason:
-          "운영·SRE팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
+        blockReason: "운영·SRE팀은 기록 화면 연결을 기다리고 있어요.",
       },
       support: {
         name: "고객지원 분류팀",
-        task: "신고별 lane 제안, 관련 신고 묶기",
-        blockReason:
-          "고객지원 분류팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
+        task: "신고별 lane 제안, 중복 신고 가리키기, 답변 초안",
+        blockReason: "고객지원 분류팀은 기록 화면 연결을 기다리고 있어요.",
       },
       marketing: {
         name: "마케팅팀",
-        task: "승인된 게시물 게시, Guard 검사",
+        task: "승인할 초안, 승인된 게시물 게시, Guard 검사",
         blockReason: "마케팅팀은 기록 화면 연결을 기다리고 있어요.",
       },
       finance: {
@@ -1281,25 +1332,26 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           switch: "서비스의 OPS_OBSERVER_ENABLED와, 기록 화면에서 owner가 승인한 단계.",
         },
         support: {
-          summary: "들어온 사용자 신고마다 lane과 함께 볼 신고 묶음을 고정 규칙으로 제안해, 무엇부터 볼지 알려 줍니다.",
+          summary: "들어온 사용자 신고마다 모델을 한 번 호출해 lane, 같은 문제의 열린 신고, 답변 초안을 제안해서 무엇부터 볼지 알려 줍니다.",
           does: [
-            "30분마다 open·reviewing 상태 신고를 최대 50건 읽습니다(삭제된 계정 제외).",
-            "lane 여섯 개 중 하나를 제안합니다: 확인된 버그, 미확인 버그, 결제(사람), 신뢰·안전(사람), 기능 요청, 기타. 돈 문제는 결제로, 개인정보·보안·법률·자해는 신뢰·안전으로 갑니다.",
-            "관련된 신고를 묶고, 제안·묶음·실행 기록을 각각 감사 기록과 함께 저장합니다.",
-            "보존 작업이 30분마다 기한이 지난 분류 데이터를 지웁니다.",
+            "앱의 15분 유지보수 cron에 얹혀 30분마다 open·reviewing 상태 신고를 최대 50건 읽습니다(삭제된 계정 제외).",
+            "Admin에서 모델을 고르면 신고마다 한 번 호출해 lane 여섯 개 중 하나(확인된 버그, 미확인 버그, 결제(사람), 신뢰·안전(사람), 기능 요청, 기타)와 중복 신고, 답변 초안을 제안합니다. 고정 키워드 규칙이 바닥을 지킵니다: 돈 문제는 결제로, 개인정보·보안·법률·자해는 신뢰·안전으로 가며, 모델은 결제를 신뢰·안전으로 올리는 것만 할 수 있습니다. 모델을 고르지 않으면 키워드 규칙만으로 lane을 정합니다.",
+            "제안과 실행 기록을 각각 감사 기록과 함께 저장하고, 답변 초안은 운영자에게만 보입니다.",
+            "같은 cron의 보존 작업이 기한이 지난 분류 데이터를 지웁니다.",
           ],
           never: [
-            "LLM을 쓰지 않고, 신고 내용은 앱 밖으로 나가지 않습니다.",
+            "신고 내용은 triage와 모델이 모두 켜져 있을 때만 Admin에서 고른 모델 공급자에게 가고, 둘 중 하나라도 꺼져 있으면 앱 밖으로 나가지 않습니다.",
             "메일을 보내거나, 신고 상태·답변을 바꾸거나, 자동 수정 사례를 만들거나, 크레딧·환불을 약속하지 않습니다.",
           ],
           human: [
-            "제안을 받아들이거나 버리고, 묶음을 확인하고, 답변은 사람이 보냅니다.",
+            "제안을 받아들이거나 버리고 답변을 보냅니다. 초안은 대신 보내지 않습니다.",
           ],
-          switch: "지원 → 피드백 탭의 AI 분류에서 켭니다. 거기 저장된 값이 없으면 SUPPORT_TRIAGE_ENABLED=\"true\"를 봅니다. 꺼져 있으면 실행해도 아무것도 쓰지 않습니다.",
+          switch: "지원 → 피드백 탭의 AI 분류에서 고르는 두 가지: 분류 스위치와, 유료 호출이라 고르기 전까지 꺼져 있는 모델. 거기 저장된 분류 스위치가 없으면 SUPPORT_TRIAGE_ENABLED=\"true\"를 봅니다. 꺼져 있으면 실행해도 아무것도 쓰지 않습니다.",
         },
         marketing: {
-          summary: "승인된 소셜 게시물을 결정적 Guard를 거쳐 브랜드 계정에 게시합니다. 무엇이 공개될지는 사람이 정합니다.",
+          summary: "생성기가 모델 호출로 소셜 게시물 초안과 시장 보고서를 월 상한 안에서 쓰고, 승인된 게시물은 결정적 Guard를 거쳐 브랜드 계정에 게시합니다. 무엇이 공개될지는 사람이 정합니다.",
           does: [
+            "생성기가 사람이 승인한 경쟁사를 추적해 게시물 초안을 씁니다. 모델 호출은 호출마다 월 상한이 있는 원장에 기록되고, 모든 초안은 승인 대기열에서 기다립니다.",
             "게시기(5분마다)가 게시 모드 계정마다 상태를 확인하고, 시간이 된 승인 게시물 하나를 잡아 게시 호출을 정확히 한 번 한 뒤 게시됨·실패·결과 불명을 기록합니다.",
             "Guard는 입력 위생, 사실(가격은 저장된 값만), 승인된 링크·자산을 검사하고, 애매한 표현은 사람에게 표시합니다.",
             "게시된 글은 실제로 올라갔는지 확인될 때까지 조회합니다.",
@@ -1583,6 +1635,60 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           `${period === "day" ? "오늘" : "이번 달"} ${spent} / ${cap}`,
         lastPromotion: (time: string) => `마지막 승격 ${time}`,
         noPromotion: "아직 승격 없음",
+      },
+      sre: {
+        badges: { trusted: "신뢰됨", untrusted: "신뢰 안 됨", noGenesis: "시작 전", unread: "읽지 못함" },
+        unread: "기록을 읽지 못함",
+        noGenesis: "승인된 genesis 없음: 에이전트가 아직 시작되지 않았어요",
+        modes: { shadow: "shadow(기록만, 발송 안 함)", live: "live" },
+        generationMissing: "기록 없음",
+        trusted: (mode: string, generation: string) => `상태 체인 신뢰됨 · ${mode} · 세대 ${generation}`,
+        untrusted: (reason: string, mode: string, generation: string) =>
+          `상태 체인 신뢰 안 됨 · ${reason} · ${mode} · 세대 ${generation}`,
+        lastDigest: (time: string) => `마지막 digest ${time}`,
+        noDigest: "아직 받은 digest 없음",
+      },
+      support: {
+        badges: { on: "켜짐", off: "꺼짐", stale: "지연", failed: "실행 실패", unread: "읽지 못함" },
+        unread: "기록을 읽지 못함",
+        on: "분류가 켜져 있음",
+        off: "분류가 꺼져 있음: worker가 신고를 가져가지 않아요",
+        outcomes: {
+          running: "실행 중",
+          success: "성공",
+          partial: "일부만 처리",
+          failed: "실패",
+          deadline_exceeded: "제한 시간 초과",
+        },
+        lastRun: (time: string, outcome: string) => `직전 worker 실행 ${time} · ${outcome}`,
+        noRun: "끝난 worker 실행 아직 없음",
+        reportsToday: (count: number) => `오늘(UTC 기준 하루) 가져간 신고 ${count}건`,
+        failedRunsToday: (count: number) => `오늘(UTC 기준 하루) 실패한 실행 ${count}회`,
+        stale: "실행이 늦었거나 보존 작업이 멈춰 있음",
+      },
+      marketing: {
+        badges: {
+          awaiting: "승인 대기",
+          unreadableSwitch: "스위치 읽지 못함",
+          unreadableQueue: "대기열 읽지 못함",
+          draftsOff: "초안 꺼짐",
+          clear: "대기 없음",
+          unread: "읽지 못함",
+        },
+        unread: "기록을 읽지 못함",
+        switchWords: { on: "켜짐", off: "꺼짐", unreadable: "읽지 못함" },
+        switchUnreadable: "스위치를 읽지 못함: 꺼짐으로 표시하지 않아요",
+        queueUnread: "승인 대기열을 읽지 못함",
+        queueEmpty: "승인을 기다리는 게시물 없음",
+        queue: (count: number, oldest: string | null) =>
+          `승인을 기다리는 게시물 ${count}건${oldest ? ` · 가장 오래된 것 ${oldest}부터` : ""}`,
+        draftsOff: "초안이 꺼져 있음: 생성기의 초안이 승인 대기열로 들어오지 않아요",
+        switches: (drafts: string, publish: string) => `초안 ${drafts} · 게시 ${publish}`,
+        lastRun: (time: string) => `생성기 마지막 실행 ${time}`,
+        noRun: "생성기가 아직 실행된 적 없음",
+        lastRunUnread: "생성기의 마지막 실행을 읽지 못함",
+        calls: (count: number) => `이번 달(UTC) 생성기 호출 ${count}회`,
+        callsUnread: "이번 달 생성기 호출 수를 읽지 못함",
       },
       qa: {
         badges: {
