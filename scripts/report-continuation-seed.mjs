@@ -19,7 +19,12 @@
 // query per page of 50 -- and evaluates every candidate in memory. It prints
 // shares and quantiles per script class, weighted both per snapshot and per
 // assistant turn of the continued conversations (a proxy for seeded requests
-// whose biases the output states). Figures are coarsened so that combining
+// whose biases the output states). The reasons a stored message is not in the
+// seed stay separate, because a budget decision only follows from the first:
+// the budget stopped there (stoppedByBudget, emptySeed), the turn had no text
+// (blankSkipped), or the source is longer than the 200-message scan and part of
+// it is beyond every candidate's reach (sourceLongerThanScan). The inclusion
+// amount reached is includedShareP50. Figures are coarsened so that combining
 // them usually narrows a group's size to a range rather than a number: counts
 // and shares are bands, token figures are rounded to 100, groups under 20
 // snapshots are suppressed, and a share resting on fewer than five snapshots on
@@ -205,7 +210,10 @@ if (json) {
         console.log(`    ${script}: suppressed (${group.reason})`);
         continue;
       }
-      console.log(`    ${script}: ${group.snapshotsBand} snapshot(s), ${group.assistantTurnsBand} assistant turn(s)`);
+      console.log(
+        `    ${script}: ${group.snapshotsBand} snapshot(s), ${group.assistantTurnsBand} assistant turn(s), ` +
+          `longer than the ${SEED_SOURCE_MESSAGE_SCAN_LIMIT}-message scan: ${JSON.stringify(group.sourceLongerThanScan)}`
+      );
       for (const [id, figures] of Object.entries(group.byCandidate)) {
         console.log(`      ${id.padEnd(8)} ${JSON.stringify(figures)}`);
       }
