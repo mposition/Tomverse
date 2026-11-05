@@ -59,10 +59,18 @@ for (const locale of ["en", "ko"] as const) {
 
   test(`${locale}: the sentence says how many went and how many did not`, () => {
     const [action] = scheduleAllApprovedActions([row("a")], m);
-    const done = action.describe?.({ sent: 3, failed: 0, requiresReauthentication: false });
+    const done = action.describe?.({ sent: 3, failed: 0, unsent: 0, requiresReauthentication: false });
     assert.ok(done?.includes("3") && !done.includes("{"));
-    const partial = action.describe?.({ sent: 3, failed: 1, requiresReauthentication: false });
+    const partial = action.describe?.({ sent: 3, failed: 1, unsent: 0, requiresReauthentication: false });
     assert.ok(partial?.includes("3") && partial.includes("1") && !partial.includes("{"));
+  });
+
+  test(`${locale}: a batch that stopped never reads as done`, () => {
+    const [action] = scheduleAllApprovedActions([row("a")], m);
+    const stopped = action.describe?.({ sent: 0, failed: 0, unsent: 5, requiresReauthentication: true });
+    assert.equal(stopped, m.scheduleAllStopped.replace("{sent}", "0").replace("{failed}", "0").replace("{unsent}", "5"));
+    assert.notEqual(stopped, m.scheduleAllDone.replace("{sent}", "0"));
+    assert.ok(stopped?.includes("5") && !stopped.includes("{"));
   });
 }
 
@@ -75,7 +83,17 @@ test("a refused row does not stop the others, and none is sent twice", async () 
     return request.path === "/b" ? json(409, { code: "schedule_conflict" }) : json(200);
   });
   assert.deepEqual(seen, ["/a", "/b", "/c"]);
-  assert.deepEqual(result, { sent: 2, failed: 1, requiresReauthentication: false });
+  assert.deepEqual(result, { sent: 2, failed: 1, unsent: 0, requiresReauthentication: false });
+});
+
+test("the route's rate limit stops the batch and says how many were left unsent", async () => {
+  const seen: string[] = [];
+  const result = await sendMarketingBatch(requests, async (request) => {
+    seen.push(request.path);
+    return request.path === "/a" ? json(200) : json(429, { error: "Too many requests" });
+  });
+  assert.deepEqual(seen, ["/a", "/b"]);
+  assert.deepEqual(result, { sent: 1, failed: 0, unsent: 2, requiresReauthentication: false });
 });
 
 test("a lapsed step-up stops the batch: every later request would be refused too", async () => {
@@ -85,7 +103,7 @@ test("a lapsed step-up stops the batch: every later request would be refused too
     return request.path === "/a" ? json(200) : json(403, { code: "ADMIN_REAUTHENTICATION_REQUIRED" });
   });
   assert.deepEqual(seen, ["/a", "/b"]);
-  assert.deepEqual(result, { sent: 1, failed: 0, requiresReauthentication: true });
+  assert.deepEqual(result, { sent: 1, failed: 0, unsent: 2, requiresReauthentication: true });
 });
 
 test("a request that never answers counts as failed, and a body that is not JSON does too", async () => {
@@ -93,5 +111,5 @@ test("a request that never answers counts as failed, and a body that is not JSON
     if (request.path === "/a") throw new Error("offline");
     return request.path === "/b" ? new Response("nope", { status: 500 }) : json(200);
   });
-  assert.deepEqual(result, { sent: 1, failed: 2, requiresReauthentication: false });
+  assert.deepEqual(result, { sent: 1, failed: 2, unsent: 0, requiresReauthentication: false });
 });

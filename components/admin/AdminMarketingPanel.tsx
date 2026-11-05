@@ -1711,10 +1711,13 @@ export function scheduleAllApprovedActions(rows: Row[], m: Record<string, string
         }));
       },
       describe: (result) => {
-        const { sent, failed } = result as MarketingBatchResult;
-        return (failed > 0 ? m.scheduleAllPartial : m.scheduleAllDone)
+        const { sent, failed, unsent } = result as MarketingBatchResult;
+        const sentence =
+          unsent > 0 ? m.scheduleAllStopped : failed > 0 ? m.scheduleAllPartial : m.scheduleAllDone;
+        return sentence
           .replace("{sent}", String(sent))
-          .replace("{failed}", String(failed));
+          .replace("{failed}", String(failed))
+          .replace("{unsent}", String(unsent));
       },
     },
   ];

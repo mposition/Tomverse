@@ -111,6 +111,8 @@ export type MarketingBatchRequest = { readonly path: string; readonly body: unkn
 export type MarketingBatchResult = {
   readonly sent: number;
   readonly failed: number;
+  /** Requests never sent, because the batch stopped first. */
+  readonly unsent: number;
   readonly requiresReauthentication: boolean;
 };
 
@@ -118,8 +120,9 @@ const REAUTHENTICATION_REQUIRED = "ADMIN_REAUTHENTICATION_REQUIRED";
 
 /**
  * The requests in order. A row the server refuses does not stop the others, and
- * it is never sent twice; only a lapsed step-up stops, because every later
- * request would be refused the same way.
+ * it is never sent twice. A lapsed step-up or the route's rate limit stops the
+ * batch, because every later request would be refused the same way: those rows
+ * stay approved, and pressing the button again takes them up with a fresh time.
  */
 export const sendMarketingBatch = async (
   requests: readonly MarketingBatchRequest[],
@@ -127,6 +130,12 @@ export const sendMarketingBatch = async (
 ): Promise<MarketingBatchResult> => {
   let sent = 0;
   let failed = 0;
+  const stopped = (requiresReauthentication: boolean): MarketingBatchResult => ({
+    sent,
+    failed,
+    unsent: requests.length - sent - failed,
+    requiresReauthentication,
+  });
   for (const request of requests) {
     try {
       const response = await post(request);
@@ -136,15 +145,14 @@ export const sendMarketingBatch = async (
         continue;
       }
       const problem = (await response.json().catch(() => null)) as { code?: unknown } | null;
-      if (problem?.code === REAUTHENTICATION_REQUIRED) {
-        return { sent, failed, requiresReauthentication: true };
-      }
+      if (problem?.code === REAUTHENTICATION_REQUIRED) return stopped(true);
+      if (response.status === 429) return stopped(false);
     } catch {
       // Counted below; the refreshed list shows what that row's state is now.
     }
     failed += 1;
   }
-  return { sent, failed, requiresReauthentication: false };
+  return stopped(false);
 };
 
 type Failure = {
@@ -284,7 +292,7 @@ export function MarketingActionRail({
         })
       );
       const described = action.describe ? action.describe(result) : null;
-      if (result.failed > 0 || result.requiresReauthentication) {
+      if (result.failed > 0 || result.unsent > 0) {
         setFailure({
           message: described ?? m.actionFailed,
           requiresReauthentication: result.requiresReauthentication,
