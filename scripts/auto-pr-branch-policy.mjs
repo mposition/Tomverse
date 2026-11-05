@@ -42,12 +42,9 @@
 
 const AUTOMATION_NAMESPACES = [
     // Each of these opens its own pull request, so an automatic second one is
-    // two PRs for one branch. They are refused ahead of the marker on purpose:
-    // a branch named `feedback-autofix/to-develop/...` is still a branch whose
-    // workflow records the PR number it created, and it must be that one.
+    // two PRs for one branch. They are refused ahead of the marker on purpose.
     "dependabot",
     "autofix",
-    "feedback-autofix",
 ];
 
 // Named so the refusal reads as a decision rather than as "not matched". These
