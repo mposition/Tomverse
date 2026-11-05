@@ -84,6 +84,19 @@ export type FeedbackRow = {
     classification: string | null;
     ineligibilityReason: string | null;
     updatedAt: string;
+    /** The model's reading of the recorded facts (docs/policy/trace-feedback-automation.md §8a). */
+    analysis?:
+      | { status: "failed" }
+      | {
+          status: "done";
+          kind: string;
+          confidence: string;
+          cause: string;
+          recommendation: string;
+          handedOff: boolean;
+          prNumber: number | null;
+        }
+      | null;
   } | null;
   /**
    * The completion record the reply email renders from -- what a re-send
@@ -654,6 +667,9 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
                       {feedback.message}
                     </p>
+                    {feedback.autoFixCase?.analysis ? (
+                      <TraceAnalysisBlock analysis={feedback.autoFixCase.analysis} m={m} />
+                    ) : null}
                     {feedback.triage ? (
                       <TriageProposal
                         triage={feedback.triage}
@@ -1199,6 +1215,63 @@ function FeedbackCompletionDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** What the model read in a verified trace's recorded facts, and where the fix went. Read-only. */
+export function TraceAnalysisBlock({
+  analysis,
+  m,
+}: {
+  analysis: NonNullable<NonNullable<FeedbackRow["autoFixCase"]>["analysis"]>;
+  m: FeedbackInboxMessages;
+}) {
+  return (
+    <div
+      className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-sm leading-6 text-zinc-200"
+      data-testid="feedback-trace-analysis"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-bold text-amber-100">{m.traceAnalysisTitle}</span>
+        {analysis.status === "done" ? (
+          <>
+            <span className="rounded-full border border-amber-500/30 px-2 py-0.5 font-bold text-amber-100">
+              {(m.traceAnalysisKinds as Record<string, string>)[analysis.kind] ?? analysis.kind}
+            </span>
+            <span className="text-zinc-400">
+              {(m.traceAnalysisConfidence as Record<string, string>)[analysis.confidence] ?? analysis.confidence}
+            </span>
+          </>
+        ) : null}
+      </div>
+      {analysis.status === "done" ? (
+        <>
+          <p className="mt-2">
+            <span className="font-bold">{m.traceAnalysisCause}: </span>
+            {analysis.cause}
+          </p>
+          <p className="mt-1">
+            <span className="font-bold">{m.traceAnalysisRecommendation}: </span>
+            {analysis.recommendation}
+          </p>
+          {analysis.prNumber ? (
+            <a
+              className="mt-2 inline-block font-medium underline"
+              data-testid="feedback-trace-analysis-pr"
+              href={`https://github.com/mposition/Tomverse/pull/${analysis.prNumber}`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {m.traceAnalysisFixPr} #{analysis.prNumber}
+            </a>
+          ) : analysis.handedOff ? (
+            <p className="mt-2 text-xs text-zinc-400">{m.traceAnalysisFixRunning}</p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-2 text-xs text-zinc-400">{m.traceAnalysisFailed}</p>
+      )}
     </div>
   );
 }
