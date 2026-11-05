@@ -391,6 +391,11 @@ run(
     // operator decision 2026-10-30): the answer resumes a parked Task once, a
     // Task that moved on is not resumed, and the table guards its lifecycle.
     "tests/integration/amux-v22-owner-question.db.test.ts",
+    // Closing a stalled idea's cards (docs/policy/amux-decision-maker.md §2-9):
+    // the switch and the day's limit, a confirmed answer applied within its
+    // statement ceiling and never delivered, nothing closed once work started,
+    // and the owner's direct answer.
+    "tests/integration/amux-idea-card-close.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.

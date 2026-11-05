@@ -526,10 +526,11 @@ export const AMUX_DB_BOUNDARIES = {
   // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
   // Each within docs/policy/amux-decision-maker.md §9's 12 statements.
   // Resolve read: setup + switches + the next confirmation + request state +
-  // the open question of its card + result detail + bodies + fence.
+  // the open question of its card (a v22 question, then an idea card close
+  // question) + result detail + bodies + fence.
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 8,
+    prismaCallCeiling: 9,
     isolation: "read",
   },
   // Answer: setup + audit chain lock + switches + the locked question, Task
@@ -557,11 +558,53 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 4,
     isolation: "read",
   },
-  // Card or close record: setup + update + read-back + fence.
+  // Card or close record: setup + update + read-back, on the idea card close
+  // question and then the v22 question it may be instead + fence.
   decisionMakerV22QuestionWrite: {
     operation: "decision_maker_v22_question_write",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 6,
     isolation: "mutation",
+  },
+  // An idea card close question (lib/amux/ideaCardCloseService.ts), each within
+  // the same 12 statements. Scan: setup + ONE statement + fence, on every relay
+  // tick while its switch is on.
+  decisionMakerIdeaCardCloseScan: {
+    operation: "decision_maker_idea_card_close_scan",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // Open: setup + audit chain lock + switches + the idea's read + the row +
+  // canonical audit 4 + fence.
+  decisionMakerIdeaCardCloseOpen: {
+    operation: "decision_maker_idea_card_close_open",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // Sync read: setup + pending + closing + fence.
+  decisionMakerIdeaCardCloseRead: {
+    operation: "decision_maker_idea_card_close_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  // Apply a confirmed answer: setup + audit chain lock + switches + the locked
+  // question and cards + cards + escalations + question + canonical audit 4 +
+  // fence.
+  decisionMakerIdeaCardCloseApply: {
+    operation: "decision_maker_idea_card_close_apply",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // Hand off: setup + question + canonical audit 4 + fence.
+  decisionMakerIdeaCardCloseHandoff: {
+    operation: "decision_maker_idea_card_close_handoff",
+    prismaCallCeiling: 7,
+    isolation: "mutation",
+  },
+  // The owner's read on the idea's detail: setup + ONE statement + fence.
+  decisionMakerIdeaCardCloseOwnerRead: {
+    operation: "decision_maker_idea_card_close_owner_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
   },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
   // tallies + the proposal timeline with the database clock + fence, pinned

@@ -2148,6 +2148,28 @@ domains:
       transcript or change; the row goes with its idea by cascade, so it
       follows the parent's unresolved account-deletion and export decision.
 
+  - domain: amuxIdeaCardCloseQuestion
+    prismaModel: AmuxIdeaCardCloseQuestion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-decision-maker.md section 2 item 9, AMUX account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      One question to the owner about a stalled idea (lib/amux/ideaCardCloseService.ts):
+      whether to close its remaining cards. It holds card ids, card numbers, types and
+      statuses, a fixed reason code, the answer's source, who gave it and when. It
+      stores no idea text; the owner's free-text reason is kept in the audit only as a
+      keyed digest. The row is never deleted on its own and follows the parent's
+      unresolved account-deletion and export decision.
+
   - domain: amuxIdeaTrackedCheckoutEvidence
     prismaModel: AmuxIdeaTrackedCheckoutEvidence
     userLinkageRole: actor

@@ -159,7 +159,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         WHERE c."ideaId" = n."id") AS "chunks",
       (SELECT json_agg(json_build_object(
           'id', w."id", 'cardType', w."cardType", 'status', w."status",
-          'reviewPrNumber', w."reviewPrNumber", 'terminal', (w."v4TerminalAt" IS NOT NULL),
+          -- A closed card is terminal too (ideaCardCloseService.ts); only a done one merged.
+          'reviewPrNumber', w."reviewPrNumber", 'terminal', (w."v4TerminalAt" IS NOT NULL AND w."status" = 'done'),
           'displayKey', w."displayKey") ORDER BY w."createdAt" ASC, w."id" ASC)
         FROM "AmuxIdeaUnitDecision" d
         JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
