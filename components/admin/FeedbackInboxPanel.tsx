@@ -5,6 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   BellRing,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clipboard,
   Download,
   Mail,
@@ -224,6 +226,28 @@ const canEmailReply = (feedback: FeedbackRow) =>
     emailUpdatesConsent: feedback.emailUpdatesConsent,
   }).canSend;
 
+/** A written reply that never reached the reporter, and can still be sent. */
+const canResendReply = (feedback: FeedbackRow) =>
+  canEmailReply(feedback) &&
+  Boolean(feedback.completionSnapshot?.userReply) &&
+  (!feedback.replyDelivery || feedback.replyDelivery.status === "abandoned");
+
+/**
+ * Whether a report shows its full card. One still being worked always does. A
+ * finished one is folded until the operator opens it or a search finds it: a
+ * search can match a trace ID or any line of the body, which a folded row does
+ * not show, and the duplicate links land on `?q=<id>`.
+ */
+export const isFeedbackCardOpen = (
+  status: string,
+  operatorChoice: boolean | undefined,
+  searching: boolean
+) => !isTerminalFeedbackStatus(status) || (operatorChoice ?? searching);
+
+/** The first line with text in it, for a folded report's summary. */
+export const feedbackFirstLine = (message: string) =>
+  message.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+
 /**
  * The sentence the toast adds about the submitter email. A failed send is
  * "queued for retry" -- never a failed status change, which by this point has
@@ -303,6 +327,8 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     initialStatus
   );
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** What the operator did to a finished report's fold, by report id. */
+  const [foldChoices, setFoldChoices] = useState<Record<string, boolean>>({});
   /**
    * Closing is never one click: resolved/closed go through a small dialog
    * that collects the outcome code and the user-facing reply, and previews
@@ -409,6 +435,11 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
             : item
         )
       );
+      // The card an operator just closed stays open: the reply's delivery line
+      // appears in it, and it should not vanish under their hand.
+      if (isTerminalFeedbackStatus(status)) {
+        setFoldChoices((current) => ({ ...current, [id]: true }));
+      }
       // Re-read the rows and the sidebar badge counts from the server: the
       // local merge above shows the change at once, the refresh makes every
       // count on the screen agree with it.
@@ -606,12 +637,41 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
         ) : (
           filteredItems.map((feedback) => {
             const busy = busyId === feedback.id;
+            const cardOpen = isFeedbackCardOpen(
+              feedback.status,
+              foldChoices[feedback.id],
+              Boolean(query.trim())
+            );
+            const foldToggle = isTerminalFeedbackStatus(feedback.status) ? (
+              <FeedbackFoldToggle
+                feedback={feedback}
+                open={cardOpen}
+                onToggle={() =>
+                  setFoldChoices((current) => ({ ...current, [feedback.id]: !cardOpen }))
+                }
+                m={m}
+              />
+            ) : null;
+            // Both returns put the toggle first in the same keyed article, so
+            // React keeps its DOM node and keyboard focus stays on it.
+            if (!cardOpen) {
+              return (
+                <article
+                  key={feedback.id}
+                  data-testid="feedback-entry"
+                  className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/70"
+                >
+                  {foldToggle}
+                </article>
+              );
+            }
             return (
               <article
                 key={feedback.id}
                 data-testid="feedback-entry"
-                className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
+                className="min-w-0 break-words rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
               >
+                {foldToggle}
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -737,10 +797,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                       <span className="text-zinc-500">{m.replyDelivery.label}: </span>
                       {replyDeliverySentence(feedback, m.replyDelivery)}
                     </span>
-                    {canEmailReply(feedback) &&
-                    feedback.completionSnapshot?.userReply &&
-                    (!feedback.replyDelivery ||
-                      feedback.replyDelivery.status === "abandoned") ? (
+                    {canResendReply(feedback) ? (
                       <span className="flex flex-col items-start gap-1 md:max-w-md md:items-end">
                         {/*
                           The text the mail will carry, read from the same
@@ -753,7 +810,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                           className="w-full whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/70 p-2 text-left text-zinc-200"
                         >
                           <span className="block text-zinc-500">{m.replyDelivery.previewLabel}</span>
-                          {feedback.completionSnapshot.userReply}
+                          {feedback.completionSnapshot?.userReply}
                         </span>
                         <button
                           type="button"
@@ -1295,5 +1352,71 @@ export function TriageProposal({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The one control that folds and opens a finished report. Folded, it is the
+ * report's summary line, wrapping below the chips rather than scrolling on a
+ * narrow screen. A reply that never reached the reporter is named here because
+ * the resend offer sits inside the fold.
+ */
+export function FeedbackFoldToggle({
+  feedback,
+  open,
+  onToggle,
+  m,
+}: {
+  feedback: FeedbackRow;
+  open: boolean;
+  onToggle: () => void;
+  m: FeedbackInboxMessages;
+}) {
+  if (open) {
+    return (
+      <button
+        type="button"
+        data-testid="feedback-fold-toggle"
+        aria-expanded={true}
+        onClick={onToggle}
+        className="mb-3 inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+        {m.foldReport}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="feedback-fold-toggle"
+      aria-expanded={false}
+      onClick={onToggle}
+      className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-2xl p-3 text-left transition hover:bg-zinc-800"
+    >
+      <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
+      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
+          {feedback.type}
+        </span>
+        <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(feedback.status)}`}>
+          {isTerminalFeedbackStatus(feedback.status) ? m.statuses[feedback.status] : feedback.status}
+        </span>
+        <span className="whitespace-nowrap text-xs text-zinc-500">
+          {dateLabel(feedback.createdAt)} UTC
+        </span>
+        {canResendReply(feedback) ? (
+          <span
+            data-testid="feedback-fold-reply-undelivered"
+            className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-200"
+          >
+            {m.foldReplyUndelivered}
+          </span>
+        ) : null}
+        <span className="min-w-0 flex-1 basis-40 truncate text-sm text-zinc-200">
+          {feedbackFirstLine(feedback.message)}
+        </span>
+      </span>
+    </button>
   );
 }
