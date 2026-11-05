@@ -79,7 +79,19 @@ SEO Agent(GitHub Actions)와 Comments Monitor는 옮기지 않습니다. Comment
 
 두 곳이 함께 돌면 초안과 호출이 두 배가 되므로 순서를 지킵니다.
 
-1. Railway `Marketing Generator`의 cron을 끕니다.
+1. Railway `Marketing Generator`의 production 실행 명령을 아무 일도 하지 않는 명령으로 바꾸고, 소스에서 새로
+   배포합니다. 예: `node -e "console.log('Marketing generator moved to the AMUX box; see docs/ops/marketing-generator-box.md')"`
+
+   ```bash
+   railway redeploy -p <Tomverse Agents 프로젝트 ID> --from-source -s "Marketing Generator" -e production -y
+   ```
+
+   - cron을 지우지 않습니다. Railway는 `cronSchedule`이 없는 서비스를 main 배포 때마다 실행하므로, 지우면 API 키
+     호출이 오히려 늘어납니다.
+   - 일반 redeploy를 쓰지 않습니다. 이전 배포의 실행 명령을 그대로 복사하므로 다음 cron이 옛 명령으로 돕니다.
+   - `railway deployment list --json`에서 활성 배포의 `meta.serviceManifest.deploy.startCommand`를 확인합니다.
+   - `.railway/agent-runners.ts`의 값은 dev와 staging이 쓰므로 그대로 둡니다. production은 의도적으로 다르며, production에
+     `railway:agents:apply`를 하면 옛 명령으로 돌아갑니다. plan에 이 차이가 보이면 apply 후 이 1번을 다시 합니다.
 2. 박스에서 한 번 돌립니다.
 
    ```bash
@@ -88,7 +100,9 @@ SEO Agent(GitHub Actions)와 Comments Monitor는 옮기지 않습니다. Comment
    ```
 
 3. 로그의 `marketing_generator_a3`, `marketing_generator_analysis`, `marketing_generator_run`을 API 때와
-   비교합니다. API 때 A3는 경쟁사 11곳에 `factsKept` 200, `stoppedAt` null이었습니다.
+   비교합니다. 2026-11-05 비교에서 API는 경쟁사 11곳에 `factsKept` 200, 박스는 182였고 둘 다 `stoppedAt` null,
+   약 10분이었습니다. 같은 날 두 번째 실행은 초안이 적습니다. 안 쓴 미디어가 없는 계정은 모델 호출 전에 건너뛰기
+   때문입니다(`accountsWithoutMedia`).
 4. 괜찮으면 timer를 켭니다.
 
    ```bash
@@ -103,7 +117,9 @@ SEO Agent(GitHub Actions)와 Comments Monitor는 옮기지 않습니다. Comment
 systemctl --user disable --now tomverse-marketing-generator.timer
 ```
 
-그다음 Railway cron을 다시 켭니다. 코드 변경은 필요 없습니다.
+그다음 Railway production의 실행 명령을
+`node --experimental-strip-types scripts/marketing-generator-service.mjs`로 되돌리고 전환 1번처럼 소스에서 새로
+배포합니다. Railway 설정만 바꾸면 되고 코드 변경은 필요 없습니다.
 
 ## 코드 갱신
 
