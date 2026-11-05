@@ -365,6 +365,44 @@ test("a write reached through a literal key or an alias still counts", () => {
   }
 });
 
+test("every spelling of a write method's name counts, including the three found last", () => {
+  // The class, not its instances: a destructuring key, a shorthand
+  // destructuring binding, and a template-literal key. Each was a separate
+  // review finding.
+  const forms = [
+    "export const a = async (client: { privacyRequest: { deleteMany: (x: unknown) => Promise<unknown> } }) => { const { deleteMany: remove } = client.privacyRequest; return remove({}); };",
+    "export const b = async (client: { privacyRequest: { deleteMany: (x: unknown) => Promise<unknown> } }) => { const { deleteMany } = client.privacyRequest; return deleteMany({}); };",
+    "export const c = async (client: Record<string, Record<string, (x: unknown) => Promise<unknown>>>) => client.privacyRequest[`deleteMany`]({});",
+  ];
+  for (const line of forms) {
+    const result = withOverlay({
+      "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}\n${line}`,
+    });
+    assert.ok(rules(result).includes("delegateWrites-not-allowed"), line.slice(0, 60));
+  }
+});
+
+test("a raw method reached through a literal key is refused like a dot access", () => {
+  for (const [rule, line] of [
+    ["raw-unsafe", 'export const any = (client: Record<string, (s: string) => Promise<unknown>>) => client["$executeRawUnsafe"]("DELETE FROM \\"PrivacyRequest\\"");'],
+    ["raw-execute", 'export const lock = (client: Record<string, (s: string) => Promise<unknown>>) => client["$executeRaw"]("SELECT 1");'],
+  ]) {
+    const result = withOverlay({
+      "lib/trustSafetyDigestRead.ts": `${load("lib/trustSafetyDigestRead.ts")}\n${line}`,
+    });
+    assert.ok(rules(result).includes(rule), line.slice(0, 60));
+  }
+});
+
+test("a template-literal key naming a banned name is judged too", () => {
+  const result = withOverlay({
+    "lib/trustSafetyRoundCore.ts": `${load("lib/trustSafetyRoundCore.ts")}
+const make = (() => {})[\`constructor\`] as (body: string) => () => unknown;
+export const run = () => make("return 1")();`,
+  });
+  assert.ok(rules(result).includes("bracket-name"), JSON.stringify(result.failures));
+});
+
 test("an audit writer pulled into a variable counts too", () => {
   const result = withOverlay({
     "lib/trustSafetyActivationRead.ts": `${load("lib/trustSafetyActivationRead.ts")}

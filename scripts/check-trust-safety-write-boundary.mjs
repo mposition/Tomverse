@@ -369,29 +369,61 @@ export const analyseFile = ({ file, source, exists }) => {
       }
     }
 
-    // --- computed access ----------------------------------------------
+    // --- property names, however they are spelled ---------------------
+    //
+    // One judgement, reached from every syntax that names a property: a dot
+    // access, a literal key in brackets, a destructuring key and a shorthand
+    // destructuring binding. Five rounds of review each found one more
+    // spelling of the same move -- `client.privacyRequest["deleteMany"]()`,
+    // `const remove = …deleteMany`, `const { deleteMany } = …`,
+    // `client["$executeRawUnsafe"](sql)`, a template-literal key -- so the
+    // rule stopped being about calls and became about the name appearing.
+    // Extracting a writing method counts as a write here, which is the
+    // fail-closed direction and removes the class instead of its instances.
+    //
+    // The one exclusion is a digest's own `update`: the routes compare bearer
+    // digests with `createHash("sha256").update(...)`, and that is not a write.
+    const judgeProperty = (name, receiverText, rule) => {
+      judgeName(name, rule);
+      if (name === "$queryRawUnsafe" || name === "$executeRawUnsafe") fail("raw-unsafe", name);
+      else if (name === "$executeRaw") fail("raw-execute", name);
+      if (WRITE_METHODS.has(name) && !/\b(createHash|createHmac)\s*\(/.test(receiverText)) {
+        counts.delegateWrites += 1;
+      }
+    };
+
+    if (ts.isPropertyAccessExpression(node)) {
+      // The banned-name rules already judge a dot access through the
+      // identifier visitor, so this one passes a rule it will not use.
+      judgeProperty(node.name.text, node.expression.getText(sourceFile), "property-name");
+    }
     if (ts.isElementAccessExpression(node)) {
       const argument = node.argumentExpression;
-      const literal =
-        ts.isStringLiteral(argument) || ts.isNumericLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument);
-      if (!literal) {
+      const literalName =
+        ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)
+          ? argument.text
+          : null;
+      if (literalName !== null) {
+        judgeProperty(literalName, node.expression.getText(sourceFile), "bracket-name");
+      } else if (!ts.isNumericLiteral(argument)) {
+        // Not reducible to a name: fail-closed, whatever it spells.
         fail("computed-access", argument.getText(sourceFile).slice(0, 40));
-      } else if (ts.isNumericLiteral(argument)) {
-        // An index, not a name.
-      } else {
-        // §5.6: a key that reduces to a literal is judged **by that name**,
-        // and allowing it without judging was the hole independent review
-        // found -- `(() => {})["constructor"]("return globalThis.fetch")()`
-        // reaches `Function` without naming it anywhere this check looked.
-        judgeName(argument.text, "bracket-name");
       }
     }
-    if (ts.isBindingElement(node) && node.propertyName) {
-      if (ts.isComputedPropertyName(node.propertyName)) {
+    if (ts.isBindingElement(node)) {
+      // The object being destructured, for the digest exclusion.
+      let receiverText = "";
+      for (let up = node.parent; up; up = up.parent) {
+        if (ts.isVariableDeclaration(up) && up.initializer) {
+          receiverText = up.initializer.getText(sourceFile);
+          break;
+        }
+      }
+      const key = node.propertyName ?? node.name;
+      if (node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
         fail("computed-binding", node.propertyName.getText(sourceFile).slice(0, 40));
-      } else if (ts.isStringLiteral(node.propertyName)) {
-        // The same rule for the destructuring form: `const { "constructor": f }`.
-        judgeName(node.propertyName.text, "binding-name");
+      } else if (ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) {
+        judgeProperty(key.text, receiverText, "binding-name");
       }
     }
 
@@ -427,31 +459,6 @@ export const analyseFile = ({ file, source, exists }) => {
           fail("raw-destructive", statement.slice(0, 60));
         }
       }
-    }
-    // A writing method is counted where its **name appears as a property**,
-    // not where it is called. Three forms reached the call-shaped rule and
-    // one did not, each found by a round of review: the delegate chain, a
-    // delegate held in a variable, `client.privacyRequest["deleteMany"]({})`,
-    // and `const remove = client.privacyRequest.deleteMany; remove({})`.
-    // Naming is the thing they have in common, so naming is what is counted --
-    // extracting a write method is a write as far as this check is concerned,
-    // which is the fail-closed direction.
-    //
-    // The one exclusion is a digest's own `update`: the routes compare bearer
-    // digests, and that is not a write.
-    const countIfWriteMethod = (method, receiverText) => {
-      if (!WRITE_METHODS.has(method)) return;
-      if (/\b(createHash|createHmac)\s*\(/.test(receiverText)) return;
-      counts.delegateWrites += 1;
-    };
-    if (ts.isPropertyAccessExpression(node)) {
-      const method = node.name.text;
-      if (method === "$queryRawUnsafe" || method === "$executeRawUnsafe") fail("raw-unsafe", method);
-      if (method === "$executeRaw") fail("raw-execute", method);
-      countIfWriteMethod(method, node.expression.getText(sourceFile));
-    }
-    if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)) {
-      countIfWriteMethod(node.argumentExpression.text, node.expression.getText(sourceFile));
     }
     // The audit writers, counted the same way and for the same reason: by the
     // name appearing, with the import binding that brings it in excluded.
