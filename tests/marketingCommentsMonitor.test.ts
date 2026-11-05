@@ -195,7 +195,9 @@ test("the health reader does not query the database with the variable off, and r
     appSetting: {
       findUnique: async () => {
         queried += 1;
-        return { value: new Date().toISOString() };
+        // Slightly in the past: the reader fixes `now` before it queries, so a
+        // timestamp taken here would be newer than `now` and read as unhealthy.
+        return { value: new Date(Date.now() - 60_000).toISOString() };
       },
     },
   };
