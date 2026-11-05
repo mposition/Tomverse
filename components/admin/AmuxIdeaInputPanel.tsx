@@ -42,6 +42,7 @@ import {
   type ScopeRepositoryRead,
 } from "@/lib/amux/ideaScopeRepositoryPickCore";
 import { setAmuxIdeaUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
+import type { AmuxIdeaProgressStage } from "@/lib/amux/ideaProgressCore";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
 const receiptStore = (): Storage | null => {
@@ -90,7 +91,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
   analysisStopAvailable, sessionIntake = false, analysisTranslationAvailable = false,
-  openRequestId = null, progressRows, laneAvailable = false }: {
+  openRequestId = null, openedStage = null, progressRows, laneAvailable = false }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
@@ -103,6 +104,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   sessionIntake?: boolean;
   /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
   openRequestId?: string | null;
+  /** Where that idea really is, from the progress read; null when it could not be read. */
+  openedStage?: AmuxIdeaProgressStage | null;
   /** The Ideas main shows the list of ideas beside the input; omitted, the list is not drawn here. */
   progressRows?: AmuxIdeaProgressRows;
   /** The idea lane is on (AMUX_IDEA_LANE_ENABLED): a test button saves an owner idea for it. */
@@ -152,6 +155,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const laneQueued = submission.kind === "submitted" && submission.requestId === laneRequestId;
   // An idea read back as one the lane took (a list row, a receipt, a typed id) has no v4 steps either.
   const laneTaken = laneQueued || (submission.kind === "submitted" && submission.lane === true);
+  // The idea on screen is past its execution approval: the v4 steps no longer apply, whatever this browser last did.
+  const approvalClosed = submission.kind === "submitted" && submission.requestId === openRequestId &&
+    openedStage !== null && openedStage !== "execution_approval";
   const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
   const [continuationChunkIndex, setContinuationChunkIndex] = useState(0);
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
@@ -502,7 +508,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         ? { kind: "checking", requestId: submission.requestId }
         : { kind: "unknown", requestId: submission.requestId }) :
         submission.kind === "submitted"
-          ? { kind: "saved", requestId: submission.requestId, ideaId: submission.ideaId, lane: laneTaken } :
+          ? { kind: "saved", requestId: submission.requestId, ideaId: submission.ideaId, lane: laneTaken,
+            session: submission.origin === "session", progressAbove: approvalClosed } :
           submission.kind === "recovery_unavailable" ? { kind: "locked" } : null;
   const setAsideControls = submission.kind === "outcome_unknown" || submission.kind === "recovery_unavailable" ? (
     <div className="w-full space-y-2 border-t pt-3 border-zinc-700" data-testid="amux-idea-set-aside">
@@ -540,6 +547,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       chunkIndex={continuationChunkIndex}
       build={submission.kind === "submitted" ? null : buildHooks}
       buildRequestId={submission.kind === "submitted" ? submission.requestId : null}
+      approvalClosed={approvalClosed}
       onExecutionApproved={() => setAnalysisWatch((current) => submission.kind === "submitted"
         ? { ideaId: submission.ideaId, token: (current?.token ?? 0) + 1 } : current)}
     />
@@ -810,30 +818,29 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         ) : null}
       </div>
 
-      {submission.kind === "submitted" && submission.origin === "session" ? (
-        <p role="status" className="rounded-xl border p-4 text-sm border-blue-500/30 text-zinc-200"
-          data-testid="amux-idea-session-queued">{messages.sessionQueued}</p>
-      ) : null}
       {laneQueued ? (
         <p role="status" className="rounded-xl border p-4 text-sm border-emerald-500/30 text-zinc-200"
           data-testid="amux-idea-lane-queued">{messages.laneQueued}</p>
       ) : null}
-      {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? <AmuxInitialPlanPanel
-        key={submission.ideaId}
-        ideaId={submission.ideaId}
-        operatorId={operatorId} available={initialPlanAvailable}
-        declaredExternalSources={submission.hasExternalSources}
-        onCommitted={onInitialPlanCommitted}
-      /> : null}
+      {/* Past the approval the plan panel is hidden, not removed: a plan read back as committed still
+          lets the card below recover a preview this browser had in flight. Each flow panel needs its own
+          key: a key shared by two siblings leaves a stale copy on the page at every render of this panel. */}
+      {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? <div
+        key={`plan-wrapper:${submission.ideaId}`} className={approvalClosed ? "hidden" : "contents"}>
+        <AmuxInitialPlanPanel key={`plan:${submission.ideaId}`} ideaId={submission.ideaId}
+          operatorId={operatorId} available={initialPlanAvailable}
+          declaredExternalSources={submission.hasExternalSources}
+          onCommitted={onInitialPlanCommitted} />
+      </div> : null}
       {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? composePanel : null}
       {analysisResultAvailable && submission.kind === "submitted" && !laneTaken ?
-        <AmuxIdeaAnalysisResultPanel key={submission.ideaId}
+        <AmuxIdeaAnalysisResultPanel key={`result:${submission.ideaId}`}
           ideaId={submission.ideaId}
           watchToken={analysisWatch?.ideaId === submission.ideaId ? analysisWatch.token : 0}
           watchChunk={continuationChunkIndex}
           onContinuationReady={setContinuationChunkIndex}
           translationAvailable={analysisTranslationAvailable} /> : null}
-      {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? (
+      {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken && !approvalClosed ? (
         <section className="space-y-3 rounded-xl border p-4 border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-100">{messages.sourceScopeTitle}</h3>
           <p className="text-sm text-zinc-300">{messages.sourceScopeHint}</p>
