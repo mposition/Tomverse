@@ -15,6 +15,31 @@ import {
 
 const migration = (name, sql) => ({ name, sql });
 
+test("a dropped table takes its constraints, and only its own", () => {
+  const constraints = readEnumConstraints([
+    migration("create", `
+      ALTER TABLE "Group" ADD CONSTRAINT "Group_state_check" CHECK ("state" IN ('a', 'b'));
+      ALTER TABLE "Group"
+          ADD CONSTRAINT "Group_kind_check" CHECK ("kind" IN ('c')),
+          ADD CONSTRAINT "Group_mode_check" CHECK ("mode" IN ('d'));
+      ALTER TABLE "GroupSignal" ADD CONSTRAINT "GroupSignal_kind_check" CHECK ("kind" IN ('e'));
+    `),
+    migration("drop", `DROP TABLE "Group";`),
+  ]);
+  assert.deepEqual(constraints.map((constraint) => constraint.constraint), ["GroupSignal_kind_check"]);
+});
+
+test("a constraint added after its table was recreated survives the drop", () => {
+  const constraints = readEnumConstraints([
+    migration("create", `ALTER TABLE "Group" ADD CONSTRAINT "Group_state_check" CHECK ("state" IN ('a'));`),
+    migration("recreate", `
+      DROP TABLE IF EXISTS "Group";
+      ALTER TABLE "Group" ADD CONSTRAINT "Group_state_check" CHECK ("state" IN ('b'));
+    `),
+  ]);
+  assert.deepEqual(constraints.map((constraint) => constraint.values), [["b"]]);
+});
+
 test("composite checks do not masquerade as a closed enum", () => {
   const constraints = readEnumConstraints([migration("composite", `
     CREATE TABLE "Example" (

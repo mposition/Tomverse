@@ -29,7 +29,9 @@
  *
  * `DROP CONSTRAINT` removes an entry, so a constraint that was dropped and not
  * re-added does not appear; a constraint that was recreated appears with its
- * newest values.
+ * newest values. `DROP TABLE` removes the table's entries. The form that reads
+ * no table is matched by the `<Table>_` name prefix every constraint here uses;
+ * one named otherwise stays and is reported, which is the safe side.
  */
 export const readEnumConstraints = (migrations) => {
   const constraints = new Map();
@@ -39,6 +41,16 @@ export const readEnumConstraints = (migrations) => {
       /DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?"([^"]+)"/gi
     )) {
       constraints.delete(match[1]);
+    }
+
+    for (const match of sql.matchAll(
+      /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?"([^"]+)"/gi
+    )) {
+      for (const [name, constraint] of constraints) {
+        if (constraint.table === match[1] || name.startsWith(`${match[1]}_`)) {
+          constraints.delete(name);
+        }
+      }
     }
 
     // `[^;]*?` rather than `[\s\S]{0,300}?`: without the statement terminator

@@ -28,8 +28,6 @@ const reset = async () => {
     await enableTrigger("SupportTriageRun_before_delete");
   }
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageSuggestion"`);
-  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageGroup"`);
-  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageDecisionRecord"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-ret-" } } });
   await resetTestFixture(prisma, `TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
 };
@@ -296,10 +294,9 @@ test("statement cancellation is read from the SQLSTATE wherever the client puts 
   assert.equal(isStatementCancelled(loop), false);
 });
 
-// The other classes (docs/policy/support-triage.md §5): terminal suggestions
-// and terminal groups 30 days after they became terminal, decision records at
-// their own retentionUntil. Each fixture moves a timestamp the guard trigger
-// owns, so it disables that trigger for one statement.
+// The other class (docs/policy/support-triage.md §5): terminal suggestions 30
+// days after they became terminal. Each fixture moves a timestamp the guard
+// trigger owns, so it disables that trigger for one statement.
 
 const withDisabled = async (table: string, trigger: string, sql: string) => {
   await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" DISABLE TRIGGER "${trigger}"`);
@@ -310,7 +307,7 @@ const withDisabled = async (table: string, trigger: string, sql: string) => {
   }
 };
 
-const seedOtherClasses = async (age: string) => {
+const seedSuggestions = async (age: string) => {
   await prisma.feedback.create({ data: { id: "fb-ret-1", type: "bug", message: "retention fixture" } });
   // Two terminal suggestions with the given age, and one open one created a
   // day ago, inside its 7-day expiry, so it stays open whatever the age.
@@ -325,89 +322,54 @@ const seedOtherClasses = async (age: string) => {
             ('s-open', 'fb-ret-1', '${"c".repeat(64)}', 'pending', NULL,
              (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 day', (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 day')`
   );
-  // One terminal group and one open group.
-  await withDisabled(
-    "SupportTriageGroup",
-    "SupportTriageGroup_guard",
-    `INSERT INTO "SupportTriageGroup" ("id", "state", "primaryKind", "primarySnapshotDigest", "groupCandidateKey", "keyRetiredAt", "createdAt", "updatedAt")
-     VALUES ('g-ended', 'expired', 'same_account', NULL, '${"d".repeat(64)}',
-             (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}',
-             (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}', (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}'),
-            ('g-open', 'candidate', 'same_account', '${"e".repeat(64)}', '${"f".repeat(64)}', NULL,
-             (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}', (clock_timestamp() AT TIME ZONE 'UTC') - interval '${age}')`
-  );
-  // One decision record whose retentionUntil is as far past (or short of) now
-  // as the other classes' 30-day boundary: age minus 30 days.
-  // The guard stamps decidedAt; it is disabled outside the transaction, which
-  // ends with the deferred has-link check pending and so cannot ALTER the table.
-  await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageDecisionRecord" DISABLE TRIGGER "SupportTriageDecisionRecord_guard"`);
-  try {
-    await prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
-        `INSERT INTO "SupportTriageDecisionRecord" ("id", "decisionKind", "decidedAt", "decisionEnvelopeDigest", "digestVersion", "retentionUntil")
-         SELECT 'dr-old', 'group_confirmed', t.d, '${"9".repeat(64)}', 1, t.d + interval '12 months'
-           FROM (SELECT (clock_timestamp() AT TIME ZONE 'UTC') - interval '12 months' - (interval '${age}' - interval '30 days') AS d) t`
-      );
-      await tx.supportTriageDecisionRecordLink.create({ data: { id: "dr-old-l0", recordId: "dr-old", feedbackId: "fb-ret-1" } });
-    });
-  } finally {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageDecisionRecord" ENABLE TRIGGER "SupportTriageDecisionRecord_guard"`);
-  }
 };
 
-test("terminal suggestions, terminal groups and expired decision records are deleted in the same batch", async () => {
-  await seedOtherClasses("31 days");
+test("terminal suggestions and run rows are deleted in the same batch", async () => {
+  await seedSuggestions("31 days");
   await seedExpired(3);
   const result = await runSupportTriageRetention();
-  assert.equal(result.deleted, 3 + 2 + 1 + 1);
+  assert.equal(result.deleted, 3 + 2);
   assert.equal(result.batchesCompleted, 1);
   assert.equal(result.overdueRemaining, 0);
   assert.equal(result.outcome, "success");
   assert.deepEqual((await prisma.supportTriageSuggestion.findMany({ select: { id: true } })).map((r) => r.id), ["s-open"]);
-  assert.deepEqual((await prisma.supportTriageGroup.findMany({ select: { id: true } })).map((r) => r.id), ["g-open"]);
-  assert.equal(await prisma.supportTriageDecisionRecord.count(), 0);
-  assert.equal(await prisma.supportTriageDecisionRecordLink.count(), 0);
   const [batch] = await prisma.adminAuditLog.findMany({ where: { action: "support_triage.retention_batch" } });
   assert.deepEqual(batch.metadata, {
-    deleted: 7,
+    deleted: 5,
     batchSize: 500,
     runs: 3,
     suggestions: 2,
-    groups: 1,
-    decisionRecords: 1,
     invalidated: 0,
     expired: 0,
     systemActor: "support-triage-retention",
   });
 });
 
-test("rows of the other classes inside their period are left alone and are not overdue", async () => {
-  await seedOtherClasses("29 days");
+test("suggestions inside their period are left alone and are not overdue", async () => {
+  await seedSuggestions("29 days");
   const result = await runSupportTriageRetention();
   assert.equal(result.deleted, 0);
   assert.equal(result.overdueRemaining, 0);
   assert.equal(await prisma.supportTriageSuggestion.count(), 3);
-  assert.equal(await prisma.supportTriageGroup.count(), 2);
-  assert.equal(await prisma.supportTriageDecisionRecord.count(), 1);
 });
 
-test("an overdue row of another class counts toward overdueRemaining and its age", async () => {
-  await seedOtherClasses("33 days");
-  // Make every delete of SupportTriageGroup sleep past statement_timeout.
-  await prisma.$executeRawUnsafe(`CREATE FUNCTION test_slow_group_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+test("an overdue suggestion counts toward overdueRemaining and its age", async () => {
+  await seedSuggestions("33 days");
+  // Make every delete of SupportTriageSuggestion sleep past statement_timeout.
+  await prisma.$executeRawUnsafe(`CREATE FUNCTION test_slow_suggestion_delete() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN PERFORM pg_sleep(1); RETURN OLD; END $$`);
-  await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_slow_group_delete" BEFORE DELETE ON "SupportTriageGroup"
-    FOR EACH ROW EXECUTE FUNCTION test_slow_group_delete()`);
+  await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_slow_suggestion_delete" BEFORE DELETE ON "SupportTriageSuggestion"
+    FOR EACH ROW EXECUTE FUNCTION test_slow_suggestion_delete()`);
   try {
     const result = await runSupportTriageRetention();
-    // The group never deletes; the cancelled class alone is skipped and blocked.
-    assert.equal(result.blocked, 1);
-    assert.ok(await prisma.supportTriageGroup.findUnique({ where: { id: "g-ended" } }));
-    assert.equal(result.overdueRemaining, 1);
+    // Neither row deletes; the cancelled class alone is skipped and blocked.
+    assert.equal(result.blocked, 2);
+    assert.ok(await prisma.supportTriageSuggestion.findUnique({ where: { id: "s-acc" } }));
+    assert.equal(result.overdueRemaining, 2);
     assert.ok(result.oldestOverdueAgeSeconds >= 2 * 86_400, String(result.oldestOverdueAgeSeconds));
   } finally {
-    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_slow_group_delete" ON "SupportTriageGroup"`);
-    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_slow_group_delete()`);
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_slow_suggestion_delete" ON "SupportTriageSuggestion"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_slow_suggestion_delete()`);
   }
 });
 
@@ -517,33 +479,44 @@ test("a suggestion past its 7-day expiry is overdue until a run expires it", asy
   assert.equal((await prisma.supportTriageSuggestion.findUniqueOrThrow({ where: { id: "s-unexpired" } })).state, "ready");
 });
 
-test("toxic rows in three classes cannot keep the fourth from committing", async () => {
-  await seedOtherClasses("31 days");
-  await seedExpired(1);
-  // One row in each of runs, suggestions and groups sleeps past statement_timeout on delete.
-  for (const [table, id] of [
-    ["SupportTriageRun", "old-00001"],
-    ["SupportTriageSuggestion", "s-acc"],
-    ["SupportTriageGroup", "g-ended"],
-  ]) {
-    await prisma.$executeRawUnsafe(`CREATE FUNCTION "test_toxic_${table}"() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN IF OLD."id" = '${id}' THEN PERFORM pg_sleep(1); END IF; RETURN OLD; END $$`);
-    await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_toxic" BEFORE DELETE ON "${table}"
-      FOR EACH ROW EXECUTE FUNCTION "test_toxic_${table}"()`);
-  }
+// One row of the named class sleeps past statement_timeout on delete, while the
+// test runs. Each class goes first in one direction: runs are deleted first in a
+// batch, suggestions second, and either way the other class's deletes commit.
+const withToxicRow = async (table: string, id: string, body: () => Promise<void>) => {
+  await prisma.$executeRawUnsafe(`CREATE FUNCTION test_toxic() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF OLD."id" = '${id}' THEN PERFORM pg_sleep(1); END IF; RETURN OLD; END $$`);
+  await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_toxic" BEFORE DELETE ON "${table}"
+    FOR EACH ROW EXECUTE FUNCTION test_toxic()`);
   try {
-    const result = await runSupportTriageRetention();
-    // The decision record committed although every other class cancelled first.
-    assert.equal(await prisma.supportTriageDecisionRecord.count(), 0);
-    assert.ok(result.batchesCompleted >= 1);
-    assert.ok(await prisma.supportTriageRun.findUnique({ where: { id: "old-00001" } }));
-    assert.ok(await prisma.supportTriageGroup.findUnique({ where: { id: "g-ended" } }));
+    await body();
   } finally {
-    for (const table of ["SupportTriageRun", "SupportTriageSuggestion", "SupportTriageGroup"]) {
-      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_toxic" ON "${table}"`);
-      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "test_toxic_${table}"()`);
-    }
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_toxic" ON "${table}"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_toxic()`);
   }
+};
+
+test("a toxic suggestion cannot keep run rows from committing", async () => {
+  await seedSuggestions("31 days");
+  await seedExpired(1);
+  await withToxicRow("SupportTriageSuggestion", "s-acc", async () => {
+    const result = await runSupportTriageRetention();
+    assert.ok(result.batchesCompleted >= 1);
+    assert.equal(await prisma.supportTriageRun.findUnique({ where: { id: "old-00001" } }), null);
+    assert.ok(await prisma.supportTriageSuggestion.findUnique({ where: { id: "s-acc" } }));
+    assert.equal(result.blocked, 2);
+  });
+});
+
+test("a toxic run row cannot keep suggestions from committing", async () => {
+  await seedSuggestions("31 days");
+  await seedExpired(1);
+  await withToxicRow("SupportTriageRun", "old-00001", async () => {
+    const result = await runSupportTriageRetention();
+    assert.ok(result.batchesCompleted >= 1);
+    assert.deepEqual((await prisma.supportTriageSuggestion.findMany({ select: { id: true } })).map((r) => r.id), ["s-open"]);
+    assert.ok(await prisma.supportTriageRun.findUnique({ where: { id: "old-00001" } }));
+    assert.equal(result.blocked, 1);
+  });
 });
 
 test("a suggestion of a report closed 40 days ago is deleted now, not 30 days after its invalidation", async () => {

@@ -13,7 +13,6 @@ import { runSupportTriageWorker } from "@/lib/supportTriageWorker";
 const PREFIX = "fb-llm-";
 
 const reset = async () => {
-  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageGroup"`);
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageSuggestion"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: PREFIX } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageRun" DISABLE TRIGGER "SupportTriageRun_before_delete"`);
