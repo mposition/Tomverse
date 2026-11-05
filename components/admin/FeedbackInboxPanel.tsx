@@ -1209,7 +1209,7 @@ function FeedbackCompletionDialog({
  * reply draft with a copy button. Read-only: nothing here sends or changes
  * the report.
  */
-function TriageProposal({
+export function TriageProposal({
   triage,
   m,
   onUseDraft,

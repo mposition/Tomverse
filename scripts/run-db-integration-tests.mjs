@@ -426,7 +426,7 @@ run(
     "tests/integration/support-triage-decision-record.db.test.ts",
     // Support-triage retention and heartbeat routes: own secrets, counts only,
     // non-2xx when retention makes no progress, a fail-closed heartbeat.
-    "tests/integration/support-triage-routes.db.test.ts",
+    "tests/integration/support-triage-cycle.db.test.ts",
     // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
     // supersede on a changed input, nothing for a closed or deleted report.
     "tests/integration/support-triage-worker.db.test.ts",

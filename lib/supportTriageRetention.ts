@@ -320,7 +320,7 @@ export type RetentionRunResult = {
 };
 
 /** Rows past their boundary (or a suggestion past its expiry) in every class, and how long the oldest has waited. */
-const overdueState = async () => {
+export const overdueState = async () => {
   const [row] = await prisma.$queryRaw<{ remaining: bigint | null; oldestAgeSeconds: number | null }[]>`
     WITH now_utc AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS t),
     due AS (
