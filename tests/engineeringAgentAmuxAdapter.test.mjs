@@ -7,7 +7,7 @@ import {
   AMUX_ATTACHMENT_MAX_PRISMA_CALLS,
   AMUX_DB_BOUNDARIES,
   AMUX_DB_COMMIT_RESERVE_MS,
-  AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
+  AMUX_DB_IDLE_GAP_PLANNING_MS,
   AMUX_DB_MAX_WAIT_MS,
   AMUX_DB_STATEMENT_TIMEOUT_MS,
 } from "../lib/amux/dbBoundary.ts";
@@ -151,7 +151,7 @@ test("no engineering route takes a worker from its body, and only runner routes 
 });
 
 test("each attached writer fits the adapter routes' budget, as the AMUX routes' writers fit theirs", () => {
-  const perCall = AMUX_DB_STATEMENT_TIMEOUT_MS + AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS;
+  const perCall = AMUX_DB_STATEMENT_TIMEOUT_MS + AMUX_DB_IDLE_GAP_PLANNING_MS;
   const fits = (boundary, attachment) =>
     (AMUX_DB_BOUNDARIES[boundary].prismaCallCeiling + attachment.prismaCalls) * perCall +
       AMUX_DB_COMMIT_RESERVE_MS +

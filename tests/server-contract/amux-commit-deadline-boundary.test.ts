@@ -735,6 +735,41 @@ test("an idle-in-transaction termination (25P03) is a busy read and leaves a mut
   });
 });
 
+// 2026-11-05: the same termination usually reaches a boundary with no code at
+// all, as the pg client's refusal of the next statement or the COMMIT. It was
+// answered 500, which halts a WSL bridge on the owned queue.
+test("the pg client's not-queryable refusal is a busy read and leaves a mutation's answer alone", async () => {
+  const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  const refusal = () => new Error("Client has encountered a connection error and is not queryable");
+
+  for (const overrides of [{ callbackError: refusal() }, { commitError: refusal() }]) {
+    reset(overrides);
+    await quietly(async ({ warnings, errors }) => {
+      const error = await caught(withAmuxRouteBudget(() => run(READ)));
+      const where = Object.keys(overrides)[0];
+      assert.ok(error instanceof AmuxDbBoundaryError, where);
+      assert.equal(error.code, "AMUX_DB_READ_BUSY", where);
+      const response = amuxInternalErrorResponse("owned_queue", error);
+      assert.equal(response.status, 503, where);
+      assert.equal(await response.text(), busyBody, where);
+      assert.equal(errors.mock.callCount(), 0, `${where}: a busy answer opens no incident`);
+      assert.equal(lastWarning(warnings).error_code, "ConnectionClosed", where);
+    });
+  }
+
+  await quietly(async () => {
+    reset({ commitError: refusal() });
+    const atCommit = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+    assert.equal(atCommit.code, "AMUX_DB_OUTCOME_UNKNOWN");
+
+    reset({ callbackError: refusal() });
+    const running = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+    assert.equal(running instanceof AmuxDbBoundaryError, false);
+    const response = amuxInternalErrorResponse("worker_heartbeat", running);
+    assert.equal(response.status, 500);
+  });
+});
+
 test("once its route has started a mutation, a transaction that cannot start keeps the unknown outcome", async () => {
   const { AmuxDbBoundaryError, amuxInternalErrorResponse, anchorAmuxRouteDeadline, withAmuxRouteBudget } =
     await modules();
