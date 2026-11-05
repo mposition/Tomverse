@@ -25,7 +25,7 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
 import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
-import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import { readAmuxIdeaProgressForOwner, readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
 import { consumeAmuxV4UnitRejection, prepareAmuxV4UnitRejection } from
   "@/lib/amux/ideaUnitRejectionService";
 import { amuxV4UnitBrowserDigest } from "@/lib/amux/ideaUnitBrowserCore";
@@ -542,6 +542,61 @@ test("a registered plan's evidence unit leaves no plan approval waiting", async 
   assert.ok(row, "the registered idea is still listed");
   assert.deepEqual([row.stage, row.waitingFor, row.taskRows.length], ["execution", null, 1],
     "the inbox does not ask for a plan approval nobody can give");
+});
+
+test("the progress list reads a blocked Task's review and a live attempt in its one statement", async () => {
+  await approveSyntheticTaskCatalog();
+  const { ideaId } = await completedSessionIdea();
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "committed");
+  const decision = await prisma.amuxIdeaUnitDecision.findFirstOrThrow({
+    where: { ideaId, action: "register_card" }, select: { registeredWorkItemId: true } });
+  const taskId = decision.registeredWorkItemId!;
+  const listed = async (tx: Prisma.TransactionClient) => {
+    const row = (await readAmuxIdeaProgressInTx(tx, session.user!.id!, new Date())).find((entry) => entry.ideaId === ideaId);
+    assert.ok(row);
+    return row;
+  };
+  // A real attempt needs a whole worker assignment and a real review a whole settlement, neither of
+  // which this read looks at, so each state is written as stored rows and rolled back.
+  const started = new Date(Date.now() - 60_000);
+  const ended = (number: number, reason: string) => ({ id: `idea-progress-attempt-${randomUUID()}`, taskId,
+    worker: "idea-progress-worker", workerInstanceId: "idea-progress-instance", workerGeneration: 1, taskRevision: 1,
+    attemptNumber: number, heartbeatAt: started, startedAt: new Date(started.getTime() + number),
+    endedAt: started, outcome: "failed", toStatus: "blocked", endedBy: "idea-progress-worker", reason });
+  const open = (leaseExpiresAt: Date) => ({ ...ended(3, ""), endedAt: null, outcome: null, toStatus: null,
+    endedBy: null, reason: null, leaseExpiresAt });
+  const escalation = (status: string) => ({ taskId, reason: "execution_lease_expired", openedBy: "worker", status });
+  const blocked = (tx: Prisma.TransactionClient) => tx.amuxWorkItem.update({ where: { id: taskId }, data: { status: "blocked" } });
+  const state = (mutate?: (tx: Prisma.TransactionClient) => Promise<unknown>) => inRolledBackTx(listed, mutate);
+
+  assert.equal((await state()).activity, "waiting", "a registered Task nobody took is not running");
+  const free = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: ended(1, "worker said: token sk-live-123") }); });
+  assert.equal(free.activity, "blocked");
+  assert.deepEqual([free.taskRows[0].id, free.taskRows[0].blockReason, free.taskRows[0].escalationId], [taskId, null, null],
+    "a worker's stored text never reaches the page");
+  const newest = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: ended(1, "worker said: token sk-live-123") });
+    await tx.amuxExecutionAttempt.create({ data: ended(2, "attempt_budget_exhausted") }); });
+  assert.equal(newest.taskRows[0].blockReason, "attempt_budget_exhausted", "the newest attempt speaks");
+  const reviewed = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: ended(1, "attempt_budget_exhausted") });
+    await tx.amuxHumanEscalation.create({ data: { ...escalation("open"), id: "cmideaprogressescalation1" } }); });
+  assert.deepEqual([reviewed.taskRows[0].blockReason, reviewed.taskRows[0].escalationId],
+    ["execution_lease_expired", "cmideaprogressescalation1"], "the open review comes first");
+  const resolved = await state(async (tx) => { await blocked(tx);
+    await tx.amuxHumanEscalation.create({ data: { ...escalation("resolved"), resolvedAt: new Date(),
+      resolvedById: "idea-progress-owner", resolvedByEmail: "owner@example.com", resolution: "fixture",
+      resolutionOutcome: "block" } }); });
+  assert.deepEqual([resolved.taskRows[0].blockReason, resolved.taskRows[0].escalationId], [null, null],
+    "a resolved review is no longer offered");
+  const expired = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: open(started) }); });
+  assert.equal(expired.activity, "blocked", "an attempt whose lease ran out is not live");
+  const live = await state(async (tx) => { await blocked(tx);
+    await tx.amuxExecutionAttempt.create({ data: open(new Date(Date.now() + 60_000)) }); });
+  assert.equal(live.activity, "running", "a live attempt runs whatever the card says");
 });
 
 test("a system-registered Task is ready, keeps its public PR consent and reads back", async () => {

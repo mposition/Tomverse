@@ -152,6 +152,10 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
         </button>
       ) : null}
       {!available ? <p className="text-zinc-400">{m.initialPlanUnavailable}</p> : null}
+      {/* The button above stays disabled until this idea's plan has read back as absent. */}
+      {ideaId && available && !declaredExternalSources && state.kind === "idle" &&
+        (!recoveryChecked || checkedIdeaId !== ideaId) ?
+        <p role="status" className="text-zinc-400">{m.initialPlanChecking}</p> : null}
       {state.kind === "pending" ? <p role="status">{m.initialPlanPreparing}</p> : null}
       {state.kind === "committed" ? <p role="status">{m.initialPlanCommitted(state.ideaId)}</p> : null}
       {state.kind === "refused" && !failure ? <p role="alert">{m.initialPlanRefused(state.code)}</p> : null}
