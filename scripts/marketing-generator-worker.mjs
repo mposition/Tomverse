@@ -8,8 +8,8 @@
 // behind it (2026-11-01). A5 then reads the app's context -- which now holds those
 // facts and the brief -- asks the model once per approval-mode account through the LLM cost
 // ledger, and submits what survives the reading to the draft intake, where
-// the Guard judges it again. It holds the LLM key and the generator's secret
-// and nothing else: no database, publishing, bucket or GitHub credential.
+// the Guard judges it again. It holds the LLM key (or, on the box, runs the
+// signed-in Codex CLI) and the generator's secret and nothing else: no database, publishing, bucket or GitHub credential.
 //
 // It does not retry. A call whose outcome is unknown stops the run; the ledger
 // closes the row and a person looks.
@@ -20,6 +20,7 @@
 import { randomUUID } from "node:crypto";
 
 import { marketingLlmPinProblems } from "../lib/marketingLlmBudgetCore.ts";
+import { marketingLlmChannelFromEnv } from "../lib/marketingCodexChannelCore.ts";
 import { marketingLlmBudgetHttpPort, runMarketingLlmCall } from "../lib/marketingLlmClientCore.ts";
 import { runMarketingA3Cycle } from "../lib/marketingA3CycleCore.ts";
 import { runMarketingAnalysisCycle } from "../lib/marketingAnalysisCycleCore.ts";
@@ -63,6 +64,8 @@ if (!configured.ok) {
   process.exit(1);
 }
 const { appUrl, secret, apiKey } = configured.config;
+// The API key unless the box selected the subscription channel.
+const channel = marketingLlmChannelFromEnv(process.env);
 
 // Aborted a little before the deadline, so the run can say it ran out of time
 // rather than vanish when the supervisor's SIGKILL lands.
@@ -130,6 +133,7 @@ try {
             budget: a3Budget,
             transport: fetch,
             apiKey,
+            channel,
             signal: a3Signal,
             // A minute before the share ends, a reserved call is released, not sent.
             proceed: () => Date.parse(a3DeadlineAt) - Date.now() > 60_000,
@@ -184,6 +188,7 @@ try {
             budget: analysisBudget,
             transport: fetch,
             apiKey,
+            channel,
             signal: analysisSignal,
             proceed: () => Date.parse(analysisDeadlineAt) - Date.now() > 60_000,
           },
@@ -214,7 +219,7 @@ try {
       callLlm: (messages, requestKey) =>
         runMarketingLlmCall(
           { pin, generatorRunId: runId, purpose: "draft", messages, requestKey },
-          { budget, transport: fetch, apiKey, signal: controller.signal },
+          { budget, transport: fetch, apiKey, channel, signal: controller.signal },
         ),
       secret,
       newId: randomUUID,

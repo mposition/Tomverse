@@ -50,7 +50,7 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 | O10 | AI는 새 문구를 자유롭게 쓰고, 자동 사실 검증 후 승인 큐로 보낸다 |
 | O11 | Tomverse는 호주 법인이다. 호주를 1순위 영어 시장으로, 호주 광고·소비자법을 적용한다 |
 | O12 | 이메일 마케팅은 범위 밖 |
-| O13 | LLM은 구독이 아닌 API 키. 개발은 Claude 작성 ↔ Codex 검토(또는 반대)로 분리 |
+| O13 | LLM은 API 키가 기본이다. **Marketing Generator는 운영자 결정(2026-11-04)으로 AMUX 박스의 구독 Codex CLI로 옮길 수 있다**(`docs/ops/marketing-generator-box.md`). 제3자 댓글을 읽는 Comments Monitor는 API 키로 둔다. 개발은 Claude 작성 ↔ Codex 검토(또는 반대)로 분리 |
 | O14 | LLM 호출은 어댑터 뒤에 두고, 공급 경로는 Tomverse Code의 어댑터 계층을 추출한 공용 LLM 게이트웨이(별도 저장소)로 한다. 게이트웨이 준비 전에는 같은 어댑터 뒤에서 전용 키를 임시로 쓰며, 그 공급사는 OpenAI다(2026-10-16, 정책 버전 4) |
 | O15 | **Instagram·TikTok 계정은 졸업하지 않고 항상 승인 모드**다. 두 채널은 게시된 글을 API로 내릴 수 없어(S0 C10 관측, 앱에서 수동 삭제만 가능) 잘못 나간 공개 게시물을 자동으로 회수할 수 없기 때문이다. (2026-09-17, 정책 버전 2) |
 
