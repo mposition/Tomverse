@@ -67,6 +67,11 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   const partial = { ...result, state: "partial", remainingScope: "One more Task",
     nextChunkIndex: 1 };
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, partial, ideaId), partial);
+  const closingPage = { ...result, units: [] };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, closingPage, ideaId), closingPage,
+    "a session plan's last page may add nothing");
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...partial, units: [] }, ideaId), null,
+    "a page that continues has proposed something");
   assert.equal(parseAmuxIdeaAnalysisResultView(200, {
     ...partial, remainingScope: "",
   }, ideaId), null);

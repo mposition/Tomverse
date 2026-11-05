@@ -9,17 +9,21 @@ import type { AmuxSessionReviewDetail } from "./ideaSessionReviewCore.ts";
  * is fixed (one operator idea, no history, no inherited target references, the
  * claim as preview id), so this reaches the same verdict the writer reached.
  * Only the closed code, and for a schema refusal the schema's own rule, field
- * name and unit position, leave; nothing of the answer does.
+ * name and unit position, leave; nothing of the answer does. An answer that
+ * passes today but not without the session bookkeeping was refused before the
+ * app derived it, so it keeps the reason it was refused for.
  */
 export function amuxSessionReviewFirstPageDetail(raw: string,
   claimId: string): { detail: AmuxSessionReviewDetail; at?: AmuxAnalysisSchemaRejectAt } {
-  const inspected = inspectAmuxAnalysisContinuation({
+  const context = {
     raw, expectedPreviewId: claimId, expectedChunkIndex: 0,
     expectedRevisionChunkIndex: 0, permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: [], sourceUnitCount: 1, coveredStartOrdinal: 0,
     coveredEndOrdinal: 0, history: [],
     templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
-  });
+  };
+  const current = inspectAmuxAnalysisContinuation({ ...context, sessionPage: true });
+  const inspected = current.ok ? inspectAmuxAnalysisContinuation(context) : current;
   if (inspected.ok) return { detail: "draft_refused" };
   switch (inspected.stage) {
     case "chunk":

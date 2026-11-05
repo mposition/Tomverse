@@ -9,6 +9,7 @@ import {
   type AmuxAnalysisOutputPage,
   type AmuxOutputCursorDecision,
 } from "./ideaOutputCursorCore.ts";
+import { normalizeAmuxSessionAnswer } from "./ideaSessionAnswerCore.ts";
 
 /**
  * Dark, pure boundary joining one parsed model response to app-derived source
@@ -34,6 +35,8 @@ export type AmuxAnalysisContinuationInput = {
   history: unknown;
   /** The confirmed preview's prompt version; it fixes the admitted chunk schema. */
   templateVersion: string;
+  /** A session page: the app derives its bookkeeping (ideaSessionAnswerCore). */
+  sessionPage?: true;
 };
 
 export type AmuxAnalysisContinuationInspection =
@@ -106,7 +109,7 @@ export function inspectAmuxAnalysisContinuation(
     const keys = ["raw", "expectedPreviewId", "expectedChunkIndex", "expectedRevisionChunkIndex",
       "permittedSourceRefIds",
       "permittedTargetRefs", "sourceUnitCount", "coveredStartOrdinal", "coveredEndOrdinal", "history",
-      "templateVersion"];
+      "templateVersion", ...("sessionPage" in descriptors ? ["sessionPage"] : [])];
     if (Reflect.ownKeys(descriptors).length !== keys.length ||
         !keys.every((key) => "value" in (descriptors[key] ?? {}))) {
       return { ok: false, stage: "history", reason: "history_invalid" };
@@ -138,8 +141,13 @@ export function inspectAmuxAnalysisContinuation(
 
   const requiredSchemaVersion = amuxAnalysisSchemaForTemplate(fields.templateVersion);
   if (requiredSchemaVersion === null) return { ok: false, stage: "chunk", code: "schema_rejected" };
+  const sessionPage = fields.sessionPage === true;
   const parsed = inspectAmuxAnalysisChunk({
-    raw: fields.raw,
+    raw: sessionPage ? normalizeAmuxSessionAnswer(fields.raw, {
+      schemaVersion: requiredSchemaVersion, previewId: fields.expectedPreviewId,
+      chunkIndex: fields.expectedChunkIndex, continuing: previousKind === "output",
+    }) : fields.raw,
+    allowEmptyClosingPage: sessionPage,
     expectedPreviewId: fields.expectedPreviewId,
     expectedChunkIndex: fields.expectedChunkIndex,
     expectedRevisionChunkIndex: fields.expectedRevisionChunkIndex,

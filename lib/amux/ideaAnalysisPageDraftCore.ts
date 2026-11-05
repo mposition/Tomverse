@@ -24,6 +24,7 @@ export function prepareAmuxAnalysisPageDraft(input: {
   coveredEndOrdinal: number;
   history: readonly AmuxAnalysisOutputPage[];
   templateVersion: string;
+  sessionPage?: true;
 }):
   | { decision: "ready"; draft: SealedAmuxAnalysisDraft;
       page: AmuxAnalysisOutputPage;
@@ -43,6 +44,7 @@ export function prepareAmuxAnalysisPageDraft(input: {
     coveredEndOrdinal: input.coveredEndOrdinal,
     history: input.history,
     templateVersion: input.templateVersion,
+    ...(input.sessionPage ? { sessionPage: true as const } : {}),
   });
   if (!inspected.ok && inspected.stage !== "owner_input") {
     return { decision: "hold", reason: "invalid_result" };
