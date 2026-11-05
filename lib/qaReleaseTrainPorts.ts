@@ -5,6 +5,8 @@
  * lane's secret. No token, key or command output is ever logged or returned:
  * every failure is a fixed error code.
  */
+import type { QaReleaseCiAdvicePorts } from "./qaReleaseCiAdvice.ts";
+import type { QaReleaseCiAdviceHour } from "./qaReleaseCiAdviceCore.ts";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -443,6 +445,22 @@ export function createQaReleaseTrainAppPorts(input: AppInput): QaReleaseTrainPor
         );
       }
       if (answer.status !== 200) throw new Error("app_report_refused");
+    },
+  };
+}
+
+/** The CI suggestion round's calls to the app (lib/qaReleaseCiAdvice.ts). */
+export function createQaReleaseCiAdviceAppPorts(input: AppInput): QaReleaseCiAdvicePorts["app"] {
+  return {
+    async read() {
+      const answer = await trainAppCall(input, { phase: "ci_advice_state" });
+      const { askedAt, saturation, budget } = answer.body;
+      if (answer.status !== 200 || !Array.isArray(saturation) || typeof budget !== "number") throw new Error("app_advice_shape");
+      return { askedAt: typeof askedAt === "string" ? askedAt : null, saturation: saturation as QaReleaseCiAdviceHour[], budget };
+    },
+    async save(at, suggestions) {
+      const answer = await trainAppCall(input, { phase: "ci_advice", at, suggestions });
+      if (answer.status !== 200) throw new Error(`app_${answer.status}`);
     },
   };
 }
