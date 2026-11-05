@@ -387,6 +387,7 @@ run(
     // to deliver, nothing under the kill switch, the decision once and its
     // outcome once, each through its route's own DB boundary.
     "tests/integration/amux-decision-maker-delivery.db.test.ts",
+    "tests/integration/amux-v19-plan-refusal.db.test.ts",
     // A v22 worker's owner question (docs/policy/development-agent-orchestration.md,
     // operator decision 2026-10-30): the answer resumes a parked Task once, a
     // Task that moved on is not resumed, and the table guards its lifecycle.

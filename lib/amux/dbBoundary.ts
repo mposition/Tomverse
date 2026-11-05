@@ -526,10 +526,11 @@ export const AMUX_DB_BOUNDARIES = {
   // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
   // Each within docs/policy/amux-decision-maker.md §9's 12 statements.
   // Resolve read: setup + switches + the next confirmation + request state +
-  // the open question of its card + result detail + bodies + fence.
+  // the open question of its card + the open refusal of its card + result
+  // detail + bodies + fence.
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 8,
+    prismaCallCeiling: 9,
     isolation: "read",
   },
   // Answer: setup + audit chain lock + switches + the locked question, Task
@@ -551,17 +552,38 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 7,
     isolation: "mutation",
   },
-  // Sync read: setup + pending + closing + fence.
+  // Sync read: setup + pending + closing + refusal pending + refusal closing + fence.
   decisionMakerV22QuestionRead: {
     operation: "decision_maker_v22_question_read",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 6,
     isolation: "read",
   },
-  // Card or close record: setup + update + read-back + fence.
+  // Card or close record: setup + update + read-back, then the same two on a
+  // refused session answer's card + fence.
   decisionMakerV22QuestionWrite: {
     operation: "decision_maker_v22_question_write",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 6,
     isolation: "mutation",
+  },
+  // A confirmed proposal on a refused session answer (ideaSessionPlanRefusalService.ts):
+  // setup + audit chain lock + switches + the open refusal + canonical audit 4
+  // + refusal + the idea and two body clocks on a stop + fence.
+  decisionMakerPlanRefusalDecide: {
+    operation: "decision_maker_plan_refusal_decide",
+    prismaCallCeiling: 13,
+    isolation: "mutation",
+  },
+  // The owner's decision: the same, with the ownership read.
+  amuxPlanRefusalOwnerDecision: {
+    operation: "amux_plan_refusal_owner_decision",
+    prismaCallCeiling: 14,
+    isolation: "mutation",
+  },
+  // The idea detail's read: setup + the open refusal + fence.
+  amuxPlanRefusalOwnerRead: {
+    operation: "amux_plan_refusal_owner_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
   },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
   // tallies + the proposal timeline with the database clock + fence, pinned

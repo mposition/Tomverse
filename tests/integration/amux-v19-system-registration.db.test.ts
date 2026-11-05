@@ -24,6 +24,7 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { parkAmuxSessionIdeaInTx } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { consumeAmuxV4UnitRejection, prepareAmuxV4UnitRejection } from
@@ -794,7 +795,7 @@ test("a session plan continues on its next page and registers once complete", as
   assert.equal(decisions.filter((entry) => entry.registeredWorkItemId).length, 9);
 });
 
-test("a refused later page ends every earlier page's body clock", async () => {
+test("stopping on a later page ends every earlier page's body clock", async () => {
   const title = `Synthetic parked session ${randomUUID()}`;
   const signal = (metrics: Record<string, number>) => ({ metrics,
     uncertainty: "low", rationale: "Synthetic deterministic evidence.",
@@ -822,8 +823,11 @@ test("a refused later page ends every earlier page's body clock", async () => {
     select: { freeformPurgeAfter: true } });
   assert.ok(before.freeformPurgeAfter && before.freeformPurgeAfter > new Date(),
     "a continuing page keeps its body for the next page");
-  const second = await sessionPageAnswer(idea, () => ({ units: [] }));
-  assert.deepEqual(second.planned, { state: "plan_refused", reason: "invalid_result" });
+  await prisma.$transaction(async (tx) => {
+    const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
+    assert.equal(await parkAmuxSessionIdeaInTx(tx, idea.ideaId, clock[0]!.now), true);
+  });
   const [idea0, chunk0, preview0] = await Promise.all([
     prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: idea.ideaId },
       select: { state: true, analysisCompletedAt: true } }),
@@ -842,7 +846,7 @@ test("a refused later page ends every earlier page's body clock", async () => {
 test("a session answer that asks the owner leaves the queue without a plan", async () => {
   const { ideaId, planned } = await sessionPlannedIdea(sessionPage([], {
     outcome: "needs_information", coverageStatus: "needs_owner_input",
-    continuationKind: "input",
+    continuationKind: "input", remainingScope: "The owner's answer decides the rest.",
     ownerQuestion: "Which repository owns this change?" }));
   assert.equal(planned.state, "plan_refused");
   const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
@@ -1270,10 +1274,12 @@ test("the owner closes an idea waiting after analysis; none of its units can be 
 test("a batch close answers per idea and one refusal leaves the others closed", async () => {
   const noPlan = await sessionPlannedIdea(sessionPage([], {
     outcome: "needs_information", coverageStatus: "needs_owner_input",
-    continuationKind: "input", ownerQuestion: "Which repository owns this change?" }));
+    continuationKind: "input", remainingScope: "The owner's answer decides the rest.",
+    ownerQuestion: "Which repository owns this change?" }));
   const second = await sessionPlannedIdea(sessionPage([], {
     outcome: "needs_information", coverageStatus: "needs_owner_input",
-    continuationKind: "input", ownerQuestion: "Which team should review it?" }));
+    continuationKind: "input", remainingScope: "The owner's answer decides the rest.",
+    ownerQuestion: "Which team should review it?" }));
   const analysing = await analysingSessionIdea();
   const missing = `missing-${randomUUID()}`;
   const auditsBefore = await prisma.adminAuditLog.count({ where: {

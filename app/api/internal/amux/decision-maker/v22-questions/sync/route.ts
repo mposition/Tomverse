@@ -18,6 +18,7 @@ import {
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import {
+  AMUX_V22_QUESTION_SYNC_LIMIT,
   openAmuxV22QuestionCards,
   readAmuxV22QuestionSyncRows,
   runAmuxV22ResolveStep,
@@ -53,8 +54,9 @@ export async function POST(request: Request) {
       const { resolved: outcome, cursor } = await runAmuxV22ResolveStep(after);
       const rows = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
-        (tx) => readAmuxV22QuestionSyncRows(tx));
-      const cards = await openAmuxV22QuestionCards(rows.pending);
+        (tx, context) => readAmuxV22QuestionSyncRows(tx, context.dbNow));
+      const cards = [...await openAmuxV22QuestionCards(rows.pending),
+        ...rows.refusalCards].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT);
       return amuxJsonNoStore({
         synced: true,
         resolved: outcome,

@@ -8,6 +8,7 @@ import { AmuxIdeaName } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
+import { AmuxSessionPlanRefusalPanel } from "@/components/admin/AmuxSessionPlanRefusalPanel";
 import { AmuxSessionReviewPanel } from "@/components/admin/AmuxSessionReviewPanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
@@ -68,6 +69,8 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
       {row.waitingFor === "session_review" ? (
         <p className="text-amber-200" data-testid="amux-session-review">{m.sessionReviewDetail}</p>
       ) : null}
+      {row.stage === "analysis" && row.submissionOrigin === "session" ?
+        <AmuxSessionPlanRefusalPanel key={`refusal-${row.ideaId}`} ideaId={row.ideaId} /> : null}
       {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
         // Keyed by idea: another idea's question never shows while the next one loads.
         <AmuxSessionReviewPanel key={row.ideaId} ideaId={row.ideaId} /> : null}
