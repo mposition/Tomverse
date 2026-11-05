@@ -278,7 +278,13 @@ export async function seoAgentIsGraduated(lookup: () => Promise<boolean>): Promi
 
 const proposalSchema = z
   .object({
-    summary: z.string().min(1).max(200),
+    // A long summary is no reason to throw away a paid answer: it is cut to what the record holds.
+    summary: z
+      .string()
+      .min(1)
+      .max(4000)
+      .transform((text) => text.slice(0, 200)),
+    // Empty is an answer: the model found nothing to change in these files (`nothing_to_do`).
     edits: z
       .array(
         z
@@ -289,7 +295,6 @@ const proposalSchema = z
           })
           .strict(),
       )
-      .min(1)
       .max(40),
   })
   .strict();
@@ -314,6 +319,7 @@ const SYSTEM_PROMPT = [
   "Keep the whole change under 400 changed lines.",
   'Answer with one JSON object and nothing else: {"summary":string,"edits":[{"path":string,"find":string,"replace":string}]}.',
   "Each `find` must occur exactly once in that file's current text. Use enough surrounding lines to make it unique.",
+  "If these four files hold nothing to change for the topic, answer with an empty `edits` array and say why in `summary`. Keep `summary` to one sentence of at most 200 characters.",
 ].join("\n");
 
 /** The messages for the one call: a fixed system prompt, then the topic and the four files as JSON. */
@@ -356,6 +362,7 @@ export function applySeoProposal(
   files: Readonly<Record<string, string | null>>,
 ):
   | { readonly ok: true; readonly summary: string; readonly files: Record<string, string> }
+  | { readonly ok: false; readonly refusal: "nothing_to_do"; readonly reason: string }
   | { readonly ok: false; readonly refusal: SeoProposalRefusal } {
   let parsed: SeoProposal;
   try {
@@ -365,6 +372,7 @@ export function applySeoProposal(
   } catch {
     return { ok: false, refusal: "unreadable" };
   }
+  if (parsed.edits.length === 0) return { ok: false, refusal: "nothing_to_do", reason: parsed.summary };
   const allowed = new Set<string>(SEO_AGENT_ALLOWED_FILES);
   const next: Record<string, string> = {};
   for (const edit of parsed.edits) {
@@ -981,6 +989,8 @@ export type SeoValidateResult =
   | { readonly status: "input_too_large" }
   | { readonly status: "llm_stopped"; readonly detail: string }
   | { readonly status: "proposal_refused"; readonly refusal: SeoProposalRefusal }
+  /** The model read the files and proposed no edit. A finished run with nothing to publish, and its reason, redacted. */
+  | { readonly status: "nothing_to_do"; readonly reason: string }
   | { readonly status: "validation_failed"; readonly problems: readonly SeoValidationProblem[] }
   | { readonly status: "no_policy_tests" }
   | { readonly status: "checks_failed"; readonly label: string }
@@ -1066,7 +1076,11 @@ export async function runSeoAgentValidate(
       return { status: "llm_stopped", detail: outcome.status === "refused" ? `${outcome.stage}:${outcome.code}` : outcome.status };
     }
     const applied = applySeoProposal(outcome.content, original);
-    if (!applied.ok) return { status: "proposal_refused", refusal: applied.refusal };
+    if (!applied.ok) {
+      return applied.refusal === "nothing_to_do"
+        ? { status: "nothing_to_do", reason: redactSeoLogText(applied.reason) }
+        : { status: "proposal_refused", refusal: applied.refusal };
+    }
 
     await ports.writeFiles(dir, applied.files);
     const diff = await ports.stagedDiff(dir, input.baseCommit);
