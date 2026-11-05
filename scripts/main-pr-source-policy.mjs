@@ -27,7 +27,6 @@
 //   release/**                    a selective release cut from main (checklist 7.9.1)
 //   any `hotfix` path segment     hotfix/login, claude/hotfix/stripe-timeout
 //   dependabot/**                 security updates ignore target-branch (checklist 7.9.2)
-//   feedback-autofix-main/**      owner-approved promotion (checklist 6.1)
 //   autofix/**                    cron-auto-fix, its own gates (off today)
 //
 // A segment, not a substring: `feature/hotfixes-list` is a feature about a
@@ -49,7 +48,7 @@ export const GRANDFATHERED_MAIN_PULL_REQUESTS = Object.freeze([
     1882, // codex/to-main/amux-v4-integration
 ]);
 
-const AUTOMATION_PREFIXES = ["dependabot", "feedback-autofix-main", "autofix"];
+const AUTOMATION_PREFIXES = ["dependabot", "autofix"];
 
 export const mainPullRequestDecision = (headBranch, pullRequestNumber) => {
     const name = String(headBranch ?? "").trim();

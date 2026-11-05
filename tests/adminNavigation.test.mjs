@@ -759,3 +759,9 @@ test("legacy execution controls retain their exact settings section and query", 
   const settingsPage = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/amux-settings/page.tsx"), "utf8");
   assert.ok(settingsPage.includes('tab.id === "workers"'));
 });
+
+test("the retired Support tab still lands on the inbox", () => {
+  const tabs = adminNavItemTabs("support");
+  assert.deepEqual(tabs.map((tab) => tab.id), ["feedback", "privacy"]);
+  assert.equal(resolveAdminTab(tabs, "fixes").id, "feedback");
+});

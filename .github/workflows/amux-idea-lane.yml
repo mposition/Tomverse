@@ -194,7 +194,7 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          # This job holds a credential and caches nothing (see feedback-autofix.yml).
+          # This job holds a credential and caches nothing.
           package-manager-cache: false
 
       - name: Install dependencies

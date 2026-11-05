@@ -2056,9 +2056,9 @@ test("the dashboard's three windows read the live rooms, not a demo day", () => 
 });
 
 test("the operator's to-do counts the real queues an agent waits on, the same sets the sidebar badges count", () => {
-  assert.deepEqual(operatorQueueTotal({ marketing: 2, amuxEscalations: 1, amuxHalts: 0, autoFix: 0 }), { total: 3, unknown: false });
-  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: 1, amuxHalts: 0, autoFix: 4 }), { total: 5, unknown: true });
-  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: null, amuxHalts: null, autoFix: null }), { total: 0, unknown: true });
+  assert.deepEqual(operatorQueueTotal({ marketing: 2, amuxEscalations: 1, amuxHalts: 0 }), { total: 3, unknown: false });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: 1, amuxHalts: 4 }), { total: 5, unknown: true });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: null, amuxHalts: null }), { total: 0, unknown: true });
 
   // Every queue links to a console screen that exists, and to its tab when it names one.
   for (const key of OPERATOR_QUEUE_KEYS) {
@@ -2070,13 +2070,13 @@ test("the operator's to-do counts the real queues an agent waits on, the same se
   }
   // Read with the badges' own count functions, each on its own.
   const queue = readFunction("readOperatorQueue");
-  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()", "countAutoFixActionCases()"]) {
+  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
     assert.ok(queue.includes(count), count);
   }
   assert.match(queue, /Promise\.allSettled/);
   assert.match(queue, /return null;/);
   const badges = readFileSync("lib/adminNavigationCounts.ts", "utf8");
-  for (const count of ["countPendingMarketingApprovals()", "countAutoFixActionCases()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
+  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
     assert.ok(badges.includes(count), `the sidebar counts ${count} too`);
   }
 

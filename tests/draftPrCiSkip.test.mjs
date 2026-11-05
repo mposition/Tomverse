@@ -26,7 +26,6 @@ const GUARDED = [
 ];
 const EXEMPT = new Map([
     ["e2e.yml", "skips every draft into main, a superset of this condition"],
-    ["feedback-autofix-promotion-pr.yml", "runs only on a closed pull request"],
 ]);
 
 const workflowsDir = new URL("../.github/workflows/", import.meta.url);

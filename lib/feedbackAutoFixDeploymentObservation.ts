@@ -38,7 +38,8 @@
  * shown as "observation delayed" with its age, and nothing is marked failed
  * on the strength of not having seen something yet.
  *
- * docs/policy/trace-feedback-automation.md §9.3.
+ * Named for the fix pipeline it was written for; AMUX's deployment readback
+ * (lib/amux/v22DeploymentReadback.ts) is what uses it now.
  */
 
 export const DEPLOYMENT_STABILISATION_WINDOW_MS = 10 * 60 * 1000;

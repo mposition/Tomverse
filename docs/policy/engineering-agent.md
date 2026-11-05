@@ -156,8 +156,8 @@ staging 자동 배포도 이 예외에 포함하지 않는다. 새 경로의 코
 
 - cron-auto-fix incident: 읽는 순간 claim되고 내용이 production 서버의 비공개
   데이터이므로 LLM provider에 보낼 수 없다.
-- feedback-autofix case: `docs/policy/trace-feedback-automation.md`가 지배하고 자기
-  workflow가 있다. 이 에이전트는 dispatch도 하지 않는다.
+- 추적 ID 신고의 case: `docs/policy/trace-feedback-automation.md`가 지배한다. 이 에이전트의
+  입력이 아니다.
 
 ## 3. 권한 등급
 
