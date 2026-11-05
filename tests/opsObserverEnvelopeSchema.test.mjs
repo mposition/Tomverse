@@ -174,6 +174,20 @@ test("a parsed snapshot is a frozen copy", () => {
   }, TypeError);
 });
 
+test("the alert delivery band is optional, closed, and only 3+ is bad", async () => {
+  const { alertDeliveryObservations } = await import("../scripts/ops-observer/envelope-schema-core.mjs");
+  const key = "P-A#admin_notifications";
+  for (const band of ["0", "1", "2", "3+", "unknown"]) assert.equal(parseSnapshot(snapshot({ alertDeliveryFailuresBand: band })).ok, true, band);
+  assert.deepEqual(parseSnapshot(snapshot({ alertDeliveryFailuresBand: "4" })), { ok: false, reason: "alert_delivery" });
+  assert.deepEqual(parseSnapshot(snapshot({ alertDeliveryFailuresBand: null })), { ok: false, reason: "alert_delivery" });
+  assert.equal(parseSnapshot(snapshot()).ok, true);
+  assert.deepEqual(alertDeliveryObservations(snapshot({ alertDeliveryFailuresBand: "3+" })), { [key]: "failures_3_plus" });
+  assert.deepEqual(alertDeliveryObservations(snapshot({ alertDeliveryFailuresBand: "2" })), { [key]: "ok" });
+  assert.deepEqual(alertDeliveryObservations(snapshot({ alertDeliveryFailuresBand: "unknown" })), { [key]: "unknown" });
+  assert.deepEqual(alertDeliveryObservations(snapshot()), { [key]: "unknown" });
+  assert.deepEqual(alertDeliveryObservations(null), {});
+});
+
 test("budget observations: a bad band as itself, a known band as ok, anything else as unknown", async () => {
   const { budgetObservations } = await import("../scripts/ops-observer/envelope-schema-core.mjs");
   const row = (provider, utilisationBand) => ({ provider, scope: "day", utilisationBand, resetAt: "2026-11-04T00:00:00.000Z" });
