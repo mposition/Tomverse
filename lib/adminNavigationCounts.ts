@@ -4,7 +4,6 @@ import { abandonedLegalEmailCount } from "@/lib/adminEmailDeliveries";
 import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
 import { overdueCampaignWaveCount } from "@/lib/adminEmailCampaigns";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
-import { AUTOFIX_OPERATOR_ACTION_STATES } from "@/lib/feedbackAutoFixCore";
 import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
 import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
@@ -44,15 +43,6 @@ export const countAwaitingAmuxEscalations = () =>
     where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
   });
 
-/**
- * Auto-fix cases waiting on an operator. Exported, like the two AMUX counts,
- * because the Agent office's operator to-do counts the same set.
- */
-export const countAutoFixActionCases = () =>
-  prisma.feedbackAutoFixCase.count({
-    where: { state: { in: [...AUTOFIX_OPERATOR_ACTION_STATES] } },
-  });
-
 /** Marketing drafts waiting on a person's approval (docs/policy/marketing-automation.md §6). */
 export const countPendingMarketingApprovals = () =>
   prisma.marketingPost.count({ where: { status: "pending_approval" } });
@@ -65,8 +55,6 @@ export async function getAdminNavigationCounts(): Promise<{
   const now = new Date();
   const [
     openFeedback,
-    supportFeedback,
-    autoFixActionCases,
     openPrivacyRequests,
     pendingRefunds,
     pendingApprovals,
@@ -86,18 +74,6 @@ export async function getAdminNavigationCounts(): Promise<{
     prisma.feedback.count({
       where: { status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] } },
     }),
-    // The same reports, less those whose case is counted in the next read: for
-    // Support the case stands in for the report (lib/adminNavigationBadges.ts).
-    // `NOT is` keeps a report with no case at all.
-    prisma.feedback.count({
-      where: {
-        status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] },
-        NOT: {
-          autoFixCase: { is: { state: { in: [...AUTOFIX_OPERATOR_ACTION_STATES] } } },
-        },
-      },
-    }),
-    countAutoFixActionCases(),
     prisma.privacyRequest.count({ where: { status: "open" } }),
     prisma.refundRequest.count({ where: { status: "pending" } }),
     prisma.adminActionApproval.count({
@@ -123,8 +99,6 @@ export async function getAdminNavigationCounts(): Promise<{
   const jobsValue = settled(jobs);
   const counts: AdminNavigationCounts = {
     openFeedback: settled(openFeedback),
-    supportFeedback: settled(supportFeedback),
-    autoFixActionCases: settled(autoFixActionCases),
     openPrivacyRequests: settled(openPrivacyRequests),
     pendingRefunds: settled(pendingRefunds),
     pendingApprovals: settled(pendingApprovals),

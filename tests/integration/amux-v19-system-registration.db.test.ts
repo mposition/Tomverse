@@ -71,7 +71,8 @@ import { commitIdeaOnlyTransferPreview } from
 import { commitIdeaTransferConfirmation } from
   "@/lib/amux/ideaTransferConfirmationService";
 import { amuxSessionPageKeyIdentities,
-  commitAmuxSessionAnalysisPlanInTx, readAmuxSessionPageContextInTx } from
+  buildAmuxSessionPagePrompt, commitAmuxSessionAnalysisPlanInTx,
+  readAmuxSessionPageContextInTx } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
 import { commitAmuxV4UnitRejection, readAmuxV4UnitDecision } from "@/lib/amux/ideaUnitDecisionStore";
 import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
@@ -848,6 +849,44 @@ test("a session plan continues on its next page and registers once complete", as
   assert.deepEqual(new Set(decisions.map((entry) => entry.sourcePreviewId)),
     new Set([first.claimId, second.claimId]));
   assert.equal(decisions.filter((entry) => entry.registeredWorkItemId).length, 9);
+});
+
+test("a mislabelled remainder continues, and an empty last page closes and registers the plan", async () => {
+  await approveSyntheticTaskCatalog();
+  const title = `Synthetic mislabelled session ${randomUUID()}`;
+  const idea = await analysingSessionIdea();
+  const first = await sessionPageAnswer(idea, sessionPage(sessionPlanUnits(title), {
+    coverageStatus: "more", continuationKind: "input",
+    remainingScope: "A last check may remain." }));
+  assert.equal(first.planned.state, "plan_continues");
+  const stored = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId: idea.ideaId, chunkIndex: 0 } },
+    select: { continuationKind: true, outputPending: true } });
+  assert.deepEqual(stored, { continuationKind: "output", outputPending: true });
+  const keys = await createAmuxContentKeyRing([idea.rawIdentity,
+    ...await amuxSessionPageKeyIdentities(prisma, idea.ideaId)], []);
+  const context = await prisma.$transaction(async (tx) => {
+    const row = await tx.amuxIdeaSubmission.findUniqueOrThrow({
+      where: { id: idea.ideaId },
+      select: { actorUserId: true, currentSourcePlanRevisionId: true } });
+    return readAmuxSessionPageContextInTx(tx, { ideaId: idea.ideaId,
+      actorUserId: row.actorUserId, planId: row.currentSourcePlanRevisionId,
+      now: new Date(), keys });
+  });
+  assert.equal(context.continuation?.previousContinuationKind, "output");
+  assert.equal(context.continuation?.remainingScope, "A last check may remain.");
+  const prompt = buildAmuxSessionPagePrompt({ claimId: randomUUID(), idea: "One idea.", context });
+  assert.ok(prompt.status === "prompt_candidate" &&
+    prompt.prompt.includes("closes the plan with outcome propose"));
+  const second = await sessionPageAnswer(idea, (previewId) => ({ schemaVersion: 5,
+    previewId, chunkIndex: 1, outcome: "propose", coverageStatus: "complete",
+    continuationKind: null, ownerQuestion: null,
+    coveredScope: "The last check needs no further card.", remainingScope: null, units: [] }));
+  assert.equal(second.planned.state, "plan_ready");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: idea.ideaId }, select: { state: true } })).state, "awaiting_owner");
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(idea.ideaId);
+  assert.equal(result.state, "committed");
 });
 
 test("stopping on a later page ends every earlier page's body clock", async () => {

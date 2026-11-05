@@ -29,10 +29,6 @@ import { sendWithAddressLock } from "@/lib/emailSendLock";
 import { sendOperatorNotification } from "@/lib/operatorNotificationSend";
 import { STANDARD_SEND_PROVIDER_TIMEOUT_MS } from "@/lib/emailSendLockCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
-import {
-  buildAutoFixOperatorEmail,
-  type AutoFixOperatorEmailKind,
-} from "@/lib/autoFixOperatorEmail";
 import type { SenderRole } from "@/lib/emailSendingIdentityCore";
 import {
   NOTIFICATION_DELIVERY_STATUS,
@@ -89,9 +85,6 @@ export const NOTIFICATION_KIND = {
   // Operator notices about an auto-fix case (docs/policy/trace-feedback-automation.md
   // §9.3). The referenceId is the case id; each stage is reached at most once,
   // so the (kind, referenceId) unique constraint makes each mail at most once.
-  autoFixReviewRequested: "autofix_review_requested",
-  autoFixProductionVerified: "autofix_production_verified",
-  autoFixPromotionFailed: "autofix_promotion_failed",
   // The QA-release Monitor's silence alert (docs/policy/qa-release-agent.md
   // section 7). The referenceId is `stale:<UTC date>`, so the (kind,
   // referenceId) unique constraint makes it at most one per day.
@@ -139,9 +132,6 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.feedbackUserReviewing]: "support",
   [NOTIFICATION_KIND.feedbackUserCompleted]: "support",
   [NOTIFICATION_KIND.feedbackUserCompletedResend]: "support",
-  [NOTIFICATION_KIND.autoFixReviewRequested]: "operations",
-  [NOTIFICATION_KIND.autoFixProductionVerified]: "operations",
-  [NOTIFICATION_KIND.autoFixPromotionFailed]: "operations",
   [NOTIFICATION_KIND.qaReleaseDigestStale]: "operations",
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operations",
   [NOTIFICATION_KIND.qaReleaseAttention]: "operations",
@@ -172,9 +162,6 @@ export const NOTIFICATION_AUDIENCE: Record<NotificationKind, "customer" | "opera
   [NOTIFICATION_KIND.feedbackUserReviewing]: "customer",
   [NOTIFICATION_KIND.feedbackUserCompleted]: "customer",
   [NOTIFICATION_KIND.feedbackUserCompletedResend]: "customer",
-  [NOTIFICATION_KIND.autoFixReviewRequested]: "operator",
-  [NOTIFICATION_KIND.autoFixProductionVerified]: "operator",
-  [NOTIFICATION_KIND.autoFixPromotionFailed]: "operator",
   [NOTIFICATION_KIND.qaReleaseDigestStale]: "operator",
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operator",
   [NOTIFICATION_KIND.qaReleaseAttention]: "operator",
@@ -384,58 +371,6 @@ async function renderNotification(
           verification: feedback.errorReportVerification,
           traceId: feedback.traceId,
         }),
-      }),
-    };
-  }
-
-  const autoFixKind: Record<string, AutoFixOperatorEmailKind> = {
-    [NOTIFICATION_KIND.autoFixReviewRequested]: "review_requested",
-    [NOTIFICATION_KIND.autoFixProductionVerified]: "production_verified",
-    [NOTIFICATION_KIND.autoFixPromotionFailed]: "promotion_failed",
-  };
-  if (autoFixKind[kind]) {
-    const recipient = supportNotificationRecipient();
-    if (!recipient) return null;
-    const autoFixCase = await prisma.feedbackAutoFixCase.findUnique({
-      where: { id: referenceId },
-      select: {
-        id: true,
-        feedbackId: true,
-        fixPrUrl: true,
-        fixReport: true,
-        fixManifest: true,
-        diagnosticSummary: true,
-        productionPrUrl: true,
-        productionMergeSha: true,
-        terminalReason: true,
-      },
-    });
-    if (!autoFixCase) return null;
-    const report = (autoFixCase.fixReport ?? {}) as Record<string, unknown>;
-    const summary = (autoFixCase.diagnosticSummary ?? {}) as Record<string, unknown>;
-    const text = (value: unknown) => (typeof value === "string" ? value : null);
-    const changedPaths = Array.isArray(autoFixCase.fixManifest)
-      ? autoFixCase.fixManifest
-          .map((entry) => text((entry as Record<string, unknown> | null)?.path))
-          .filter((path): path is string => Boolean(path))
-      : [];
-    const consoleBase =
-      process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://tomverse.app";
-    return {
-      to: recipient,
-      ...buildAutoFixOperatorEmail(autoFixKind[kind], {
-        caseId: autoFixCase.id,
-        feedbackId: autoFixCase.feedbackId,
-        errorCode: text(summary.errorCode),
-        fixPrUrl: autoFixCase.fixPrUrl,
-        rootCause: text(report.rootCause),
-        fixSummary: text(report.fixSummary),
-        testSummary: text(report.testSummary),
-        changedPaths,
-        productionPrUrl: autoFixCase.productionPrUrl,
-        productionMergeSha: autoFixCase.productionMergeSha,
-        terminalReason: autoFixCase.terminalReason,
-        consoleUrl: `${consoleBase}/admin/support?tab=fixes`,
       }),
     };
   }

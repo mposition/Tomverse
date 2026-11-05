@@ -23,7 +23,7 @@ import {
 
 const AUDIT_ACTION = "AMUX_V4_IDEA_SUBMITTED";
 const TARGET_TYPE = "AmuxIdeaSubmission";
-const STATEMENT_TIMEOUT = "5000";
+export const IDEA_SUBMISSION_STATEMENT_TIMEOUT = "5000";
 
 export class IdeaSubmissionError extends Error {
   constructor(
@@ -46,7 +46,7 @@ const actorId = (session: Session): string => {
   return id;
 };
 
-const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
+export const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
   const rows = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
@@ -245,7 +245,7 @@ export async function submitIdea(input: {
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;
+      await tx.$executeRaw`SELECT set_config('statement_timeout', ${IDEA_SUBMISSION_STATEMENT_TIMEOUT}, true)`;
       const committed = await commitIdeaSubmission(tx, { ...input, ideaId, keys });
       callbackReturned = true;
       return committed;

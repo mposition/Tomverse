@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -31,7 +30,6 @@ import {
 } from "@/lib/feedbackLifecycleCore";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
-import { autoFixReplyDraft } from "@/lib/feedbackAutoFixReplyDraft";
 import {
   useServerSyncedRows,
   useSupportInboxRefresh,
@@ -77,13 +75,25 @@ export type FeedbackRow = {
     duplicateOf: string[];
     replyDraft: string | null;
   } | null;
-  /** Phase 2 diagnosis-only shadow case, when one was queued. Observational:
-   * no auto-fix pipeline exists, and the panel says so in words. */
+  /** The classifier's case, when one was queued, and the model's reading of it. */
   autoFixCase: {
     state: string;
     classification: string | null;
     ineligibilityReason: string | null;
     updatedAt: string;
+    /** The model's reading of the recorded facts (docs/policy/trace-feedback-automation.md §8a). */
+    analysis?:
+      | { status: "failed" }
+      | {
+          status: "done";
+          kind: string;
+          confidence: string;
+          cause: string;
+          recommendation: string;
+          handedOff: boolean;
+          prNumber: number | null;
+        }
+      | null;
   } | null;
   /**
    * The completion record the reply email renders from -- what a re-send
@@ -198,20 +208,6 @@ type UserNotificationResult =
     };
 
 const statuses = ["open", "reviewing", "resolved", "closed"] as const;
-
-/** Case states that belong to diagnosis-only shadow mode; anything past them
- * is an auto-fix on its way through review and promotion. */
-const SHADOW_CASE_STATES = new Set([
-  "received",
-  "collecting_evidence",
-  "evidence_ready",
-  "evidence_delayed",
-  "classifying",
-  "diagnostic_ready",
-  "ineligible",
-  "awaiting_human_review",
-  "closed",
-]);
 
 /**
  * Whether the *answer* to this report can reach the reporter: an address is
@@ -654,6 +650,9 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
                       {feedback.message}
                     </p>
+                    {feedback.autoFixCase?.analysis ? (
+                      <TraceAnalysisBlock analysis={feedback.autoFixCase.analysis} m={m} />
+                    ) : null}
                     {feedback.triage ? (
                       <TriageProposal
                         triage={feedback.triage}
@@ -728,44 +727,6 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                     })}
                   </div>
                 </div>
-
-                {(() => {
-                  // Only a fix observed live in production offers a draft;
-                  // the dialog still shows it for review before anything is sent.
-                  const draft = isTerminalFeedbackStatus(feedback.status)
-                    ? null
-                    : autoFixReplyDraft({
-                        caseState: feedback.autoFixCase?.state,
-                        language: feedback.language,
-                      });
-                  return draft ? (
-                    <div
-                      data-testid="feedback-autofix-reply-draft"
-                      className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs font-semibold leading-5 text-emerald-100 md:flex-row md:items-center md:justify-between"
-                    >
-                      <span>{m.autoFixDraft.ready}</span>
-                      <span className="flex flex-wrap gap-2">
-                        <Link
-                          href="/admin/support?tab=fixes"
-                          className="inline-flex min-h-11 items-center rounded-xl border border-emerald-400/40 px-3 py-2 font-bold text-emerald-50 transition hover:bg-emerald-500/20"
-                        >
-                          {m.autoFixDraft.review}
-                        </Link>
-                        <button
-                          type="button"
-                          data-testid="feedback-autofix-use-draft"
-                          disabled={busy}
-                          onClick={() =>
-                            setCloseTarget({ feedback, status: "resolved", draft })
-                          }
-                          className="inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-emerald-700 px-3 py-2 font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {m.autoFixDraft.use}
-                        </button>
-                      </span>
-                    </div>
-                  ) : null;
-                })()}
 
                 {isTerminalFeedbackStatus(feedback.status) ? (
                   <div
@@ -867,9 +828,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         data-testid="feedback-autofix-case"
                         className="truncate"
                       >
-                        {SHADOW_CASE_STATES.has(feedback.autoFixCase.state)
-                          ? m.shadowDiagnosis
-                          : m.autoFixStage}
+                        {m.shadowDiagnosis}
                         {feedback.autoFixCase.state}
                         {feedback.autoFixCase.classification
                           ? ` — ${feedback.autoFixCase.classification}`
@@ -1191,14 +1150,71 @@ function FeedbackCompletionDialog({
                 !alreadyCompleted &&
                 !withholdEmail &&
                 userReply.trim()
-                ? m.autoFixDraft.sendAndResolve
-                : m.autoFixDraft.resolveOnly
+                ? m.replyDraftAction.sendAndResolve
+                : m.replyDraftAction.resolveOnly
               : notifiable && !alreadyCompleted && !withholdEmail
                 ? m.dialog.confirm(m.statuses[status])
                 : m.dialog.confirmWithoutEmail}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** What the model read in a verified trace's recorded facts, and where the fix went. Read-only. */
+export function TraceAnalysisBlock({
+  analysis,
+  m,
+}: {
+  analysis: NonNullable<NonNullable<FeedbackRow["autoFixCase"]>["analysis"]>;
+  m: FeedbackInboxMessages;
+}) {
+  return (
+    <div
+      className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-sm leading-6 text-zinc-200"
+      data-testid="feedback-trace-analysis"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-bold text-amber-100">{m.traceAnalysisTitle}</span>
+        {analysis.status === "done" ? (
+          <>
+            <span className="rounded-full border border-amber-500/30 px-2 py-0.5 font-bold text-amber-100">
+              {(m.traceAnalysisKinds as Record<string, string>)[analysis.kind] ?? analysis.kind}
+            </span>
+            <span className="text-zinc-400">
+              {(m.traceAnalysisConfidence as Record<string, string>)[analysis.confidence] ?? analysis.confidence}
+            </span>
+          </>
+        ) : null}
+      </div>
+      {analysis.status === "done" ? (
+        <>
+          <p className="mt-2">
+            <span className="font-bold">{m.traceAnalysisCause}: </span>
+            {analysis.cause}
+          </p>
+          <p className="mt-1">
+            <span className="font-bold">{m.traceAnalysisRecommendation}: </span>
+            {analysis.recommendation}
+          </p>
+          {analysis.prNumber ? (
+            <a
+              className="mt-2 inline-block font-medium underline"
+              data-testid="feedback-trace-analysis-pr"
+              href={`https://github.com/mposition/Tomverse/pull/${analysis.prNumber}`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {m.traceAnalysisFixPr} #{analysis.prNumber}
+            </a>
+          ) : analysis.handedOff ? (
+            <p className="mt-2 text-xs text-zinc-400">{m.traceAnalysisFixRunning}</p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-2 text-xs text-zinc-400">{m.traceAnalysisFailed}</p>
+      )}
     </div>
   );
 }

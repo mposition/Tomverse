@@ -8,6 +8,7 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
+import { isAutoFixShadowModeEnabled } from "@/lib/feedbackAutoFixCore";
 import { readSupportTriageHealth } from "@/lib/supportTriageCycle";
 import {
   listSupportTriageModelOptions,
@@ -17,6 +18,7 @@ import {
   writeSupportTriageEnabledSetting,
   writeSupportTriageLlmModelSetting,
 } from "@/lib/supportTriageLlmSetting";
+import { readTraceAnalysisMode, TRACE_ANALYSIS_MODES, writeTraceAnalysisMode } from "@/lib/traceReportAnalysis";
 
 /**
  * The support-triage switch and LLM model, set in the Admin console. GET for
@@ -26,9 +28,13 @@ import {
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 // Either field or both; an absent field is left as it is.
 const schema = z
-  .object({ modelId: z.string().trim().min(1).max(200).nullable().optional(), enabled: z.boolean().optional() })
+  .object({
+    modelId: z.string().trim().min(1).max(200).nullable().optional(),
+    enabled: z.boolean().optional(),
+    traceAnalysis: z.enum(TRACE_ANALYSIS_MODES).optional(),
+  })
   .strict()
-  .refine((body) => body.modelId !== undefined || body.enabled !== undefined);
+  .refine((body) => body.modelId !== undefined || body.enabled !== undefined || body.traceAnalysis !== undefined);
 
 export async function GET(request: Request) {
   try {
@@ -40,11 +46,12 @@ export async function GET(request: Request) {
       minute: 30,
       day: 600,
     });
-    const [model, options, switchState, health] = await Promise.all([
+    const [model, options, switchState, health, traceAnalysis] = await Promise.all([
       resolveSupportTriageLlmModel(process.env),
       listSupportTriageModelOptions(),
       resolveSupportTriageEnabled(process.env),
       readSupportTriageHealth(),
+      readTraceAnalysisMode(),
     ]);
     return Response.json(
       {
@@ -54,6 +61,8 @@ export async function GET(request: Request) {
         enabled: switchState.enabled,
         enabledSource: switchState.source,
         health,
+        traceAnalysis: traceAnalysis.mode,
+        traceCasesEnabled: isAutoFixShadowModeEnabled(),
       },
       { headers }
     );
@@ -92,7 +101,11 @@ export async function PUT(request: Request) {
       body.enabled === undefined
         ? undefined
         : (await writeSupportTriageEnabledSetting({ session, request, enabled: body.enabled })).enabled;
-    return Response.json({ modelId: model, enabled }, { headers });
+    const traceAnalysis =
+      body.traceAnalysis === undefined
+        ? undefined
+        : (await writeTraceAnalysisMode({ session, request, mode: body.traceAnalysis })).mode;
+    return Response.json({ modelId: model, enabled, traceAnalysis }, { headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
     if (security) return security;

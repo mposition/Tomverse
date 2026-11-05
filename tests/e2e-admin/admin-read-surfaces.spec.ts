@@ -64,15 +64,10 @@ test.describe("admin read surfaces", () => {
     // that arrived in `reviewing` is work too, and read zero here until
     // 2026-09-28.
     await expect(page.getByText("3 feedback / 1 refund")).toBeVisible();
-    // The sidebar badges on real Postgres. Support: three unclosed reports --
-    // two with no auto-fix case at all, and one whose case is in
-    // `awaiting_human_review`, which is not an operator-action state
-    // (AUTOFIX_OPERATOR_ACTION_STATES), so autoFixActionCases is 0 and all
-    // three count as supportFeedback -- plus the open privacy request. The
-    // work queue: those three reports, the refund and the privacy request.
-    // Both read one short while the reviewing report went uncounted. The two
-    // case-less reports are what exercise `NOT: { autoFixCase: { is } }`
-    // keeping a report that has no case.
+    // The sidebar badges on real Postgres. Support: three unclosed reports
+    // plus the open privacy request. The work queue: those three reports, the
+    // refund and the privacy request. Both read one short while the reviewing
+    // report went uncounted.
     await expect(
       page.getByRole("link", { name: /^Support, 4 awaiting action/ }).first()
     ).toBeVisible();
