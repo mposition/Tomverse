@@ -53,7 +53,7 @@ const ownerEmail = "amux-plan-refusal-owner@example.test";
 process.env.ADMIN_USER_IDS = ownerId;
 process.env.ADMIN_EMAILS = ownerEmail;
 process.env.ADMIN_OWNER_EMAILS = ownerEmail;
-process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-plan-refusal-audit-key-2026";
+process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-intake-operating-scope-audit-key-2026";
 const session = { user: { id: ownerId, email: ownerEmail,
   authenticatedAt: new Date().toISOString() },
 expires: new Date(Date.now() + 60 * 60_000).toISOString() } as Session;
