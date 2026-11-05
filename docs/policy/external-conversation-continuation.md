@@ -154,9 +154,13 @@ Chat 대화의 `productKey`를 바꾸지 않습니다. bridge 없음·남의 대
   하나이며, 두 번째 상한을 만들지 않습니다. 토큰 추정은 기존
   `lib/chatTokenEstimate.ts`의 `estimateTextTokens`를 씁니다 — 별도 계산기를
   만들지 않습니다.
-- **잘림·누락 개수를 세어 metadata로 전달**합니다: cap 때문에 빠진 수, 잘린 수,
-  role 때문에 빠진 수를 각각 따로 셉니다. 총합의 차이로 유도하면 세 사실이 하나로
-  뭉개집니다.
+- **잘림·누락 개수를 세어 metadata로 전달**합니다: cap 때문에 빠진 수
+  (`omittedByBudgetCount`), 잘린 수, role 때문에 빠진 수, 본문이 비어서 규칙이
+  버린 수(`blankSkippedCount`)를 각각 따로 셉니다. 총합의 차이로 유도하면 네 사실이
+  하나로 뭉개집니다. **cap 때문에 빠진 수에는 cap이 판단한 적 없는 message를 넣지
+  않습니다** — seed header가 그 수를 "context budget 때문에 빠졌다"는 문장으로
+  바꾸므로, 빈 turn을 거기 더하면 고지가 과장됩니다. 이 네 수는 선택 규칙이 아니므로
+  `contextSeedVersion`을 올리지 않습니다.
 - 첨부·이미지·오디오는 애초에 import되지 않았으므로 복제할 것이 없습니다. 화면이
   말하는 것은 그것이 **없다는 사실**입니다.
 - `contextSeedVersion`을 bridge에 기록합니다. 선택 규칙이 바뀌면 올립니다.

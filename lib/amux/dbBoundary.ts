@@ -24,7 +24,16 @@ import {
 } from "@/lib/amux/orchestratorHaltStore";
 
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
-export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 100;
+/**
+ * What PostgreSQL enforces between two statements of a boundary. 100 ms (until
+ * 2026-11-05) ended sessions about 13 times an hour in production, which halted
+ * bridges and lost worker leases. A longer gap does not lengthen a transaction:
+ * it spends the transaction's budget, and Prisma still closes the transaction at
+ * that budget plus the slack below.
+ */
+export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 300;
+/** The per-call gap a transaction's budget plans for. Not a database setting. */
+export const AMUX_DB_IDLE_GAP_PLANNING_MS = 100;
 export const AMUX_DB_COMMIT_RESERVE_MS = 200;
 /**
  * The longest a transaction waits for a pool connection and its BEGIN
@@ -526,10 +535,11 @@ export const AMUX_DB_BOUNDARIES = {
   // A v22 worker question's local card (lib/amux/v22OwnerQuestionDmService.ts).
   // Each within docs/policy/amux-decision-maker.md §9's 12 statements.
   // Resolve read: setup + switches + the next confirmation + request state +
-  // the open question of its card + result detail + bodies + fence.
+  // the open question of its card + the open refusal of its card + result
+  // detail + bodies + fence.
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 8,
+    prismaCallCeiling: 9,
     isolation: "read",
   },
   // Answer: setup + audit chain lock + switches + the locked question, Task
@@ -551,17 +561,38 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 7,
     isolation: "mutation",
   },
-  // Sync read: setup + pending + closing + fence.
+  // Sync read: setup + pending + closing + refusal pending + refusal closing + fence.
   decisionMakerV22QuestionRead: {
     operation: "decision_maker_v22_question_read",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 6,
     isolation: "read",
   },
-  // Card or close record: setup + update + read-back + fence.
+  // Card or close record: setup + update + read-back, then the same two on a
+  // refused session answer's card + fence.
   decisionMakerV22QuestionWrite: {
     operation: "decision_maker_v22_question_write",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 6,
     isolation: "mutation",
+  },
+  // A confirmed proposal on a refused session answer (ideaSessionPlanRefusalService.ts):
+  // setup + audit chain lock + switches + refusal + canonical audit 4 + the idea
+  // and two body clocks on a stop + fence, docs/policy/amux-decision-maker.md §9's 12.
+  decisionMakerPlanRefusalDecide: {
+    operation: "decision_maker_plan_refusal_decide",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // The owner's decision: the same, with the ownership read for the switches.
+  amuxPlanRefusalOwnerDecision: {
+    operation: "amux_plan_refusal_owner_decision",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // The idea detail's read: setup + the open refusal + fence.
+  amuxPlanRefusalOwnerRead: {
+    operation: "amux_plan_refusal_owner_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
   },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
   // tallies + the proposal timeline with the database clock + fence, pinned
@@ -585,7 +616,7 @@ export const AMUX_DB_BOUNDARIES = {
   // statement that returns the owner's newest ideas with their chunks, current
   // previews, budget holds, proposed unit counts and registered cards + fence,
   // pinned by tests/amuxIdeaProgress.test.mjs. Seven separate reads made eight
-  // gaps under the 100 ms idle-in-transaction timeout and failed in production
+  // gaps under the idle-in-transaction timeout (then 100 ms) and failed in production
   // (up to 9 calls before 2026-10-16); one statement has the two gaps every
   // other read boundary has. One REPEATABLE READ snapshot.
   ideaProgressListRead: {
@@ -897,7 +928,7 @@ const amuxRouteWriteState = (
 
 export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_STATEMENT_TIMEOUT_MS +
-  boundary.prismaCallCeiling * AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS +
+  boundary.prismaCallCeiling * AMUX_DB_IDLE_GAP_PLANNING_MS +
   AMUX_DB_COMMIT_RESERVE_MS;
 
 /**

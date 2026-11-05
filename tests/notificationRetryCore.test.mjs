@@ -507,9 +507,6 @@ test("every customer-facing notification kind goes through the address lock", ()
   // mailboxes; a customer's suppression must not silence them.
   for (const kind of [
     "supportFeedback",
-    "autoFixReviewRequested",
-    "autoFixProductionVerified",
-    "autoFixPromotionFailed",
     "qaReleaseDigestStale",
   ]) {
     assert.match(table, new RegExp(`NOTIFICATION_KIND\\.${kind}\\]: "operator"`));

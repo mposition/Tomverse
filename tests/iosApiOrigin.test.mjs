@@ -9,7 +9,7 @@ test("iOS preparation defaults to the existing production origin", () => {
   assert.equal(iosApiOrigin(), "https://tomverse.app");
 });
 
-for (const origin of ["http://tomverse.app", "https://tomverse.app/", "https://tomverse.app@other.invalid", "https://other.invalid", "https://staging.tomverse.app:443", ""]) {
+for (const origin of ["http://tomverse.app", "https://tomverse.app/", "https://tomverse.app@other.invalid", "https://tomverse.app.other.invalid", "https://other.invalid/https://tomverse.app", "https://staging.tomverse.app.other.invalid", "https://other.invalid", "https://staging.tomverse.app:443", ""]) {
   test(`iOS preparation refuses an unapproved origin: ${origin}`, () => assert.throws(() => iosApiOrigin(origin)));
 }
 

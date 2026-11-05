@@ -27,6 +27,7 @@ import type { GuestVerificationFailure } from "@/components/chat/guestVerificati
  * the caller's submission again (the check is re-run as part of it) and
  * `errorFallback` is where a form puts the route that does not depend on
  * verification at all, next to the sentence explaining why it is offered.
+ * Once either of those is on screen, cancel steps aside -- see `hasRecovery`.
  */
 export function TurnstileFormSlot({
   containerRef,
@@ -48,6 +49,15 @@ export function TurnstileFormSlot({
   testId?: string;
 }) {
   const { t } = useLanguage();
+
+  /**
+   * A settled failure has nothing left to cancel: the hook simply forgets it,
+   * which takes the sentence, the retry button and the address off screen
+   * together and leaves the form looking as though nothing had happened. Where
+   * a surface offers a way forward, that way forward is the only thing offered
+   * next to the error. A surface that offers none keeps cancel as before.
+   */
+  const hasRecovery = Boolean(failure) && Boolean(onRetry || errorFallback);
 
   return (
     <div
@@ -100,7 +110,7 @@ export function TurnstileFormSlot({
           {t("chat.guestVerificationRetry")}
         </button>
       ) : null}
-      {isChallengeVisible && onCancel ? (
+      {isChallengeVisible && onCancel && !hasRecovery ? (
         <button
           type="button"
           data-testid={`${testId}-cancel`}

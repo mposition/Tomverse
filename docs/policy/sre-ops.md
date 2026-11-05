@@ -174,7 +174,7 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
   S2 시작일은 activation genesis 날이므로 그날 최대 31입니다.
 - 본 앱 store가 예약 트랜잭션 안에서 사건·종류 unique와 날짜별 개수를 다시 세고, 넘으면 advance 전체를 거절합니다.
   S3에서 키가 늘면 최대값을 다시 계산해 정책 버전을 올립니다. 예산 키는 provider마다 일·월 2개이고 모두 악화 구간을 가지므로,
-  provider가 n개이면 하루 최대는 `15 + 4n`입니다(2026-11-04 기준 12개면 63). 실제로는 95%를 넘은 window만 메시지를 만듭니다.
+  알림 전달 실패 키는 신규 열림 1을 더하므로 provider가 n개이면 하루 최대는 `16 + 4n`입니다(2026-11-04 기준 12개면 64). 실제로는 95%를 넘은 window만 메시지를 만듭니다.
 - 채널 점검은 소유자 날짜당 1회. check-in monitor는 주기 7일 + 유예 2일이며, 채널이 죽은 뒤 최대 9일 안에 탐지합니다.
 - dead-man monitor 셋(page heartbeat, digest heartbeat, 점검 check-in)의 알림 대상은 **page 채널이 아닌 경로**여야 합니다.
 
@@ -253,13 +253,12 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 
 | 서비스 | 가진 것 |
 |---|---|
-| `Ops Observer`(page) | `OPS_OBSERVER_SECRET`(32자 이상, 본 앱 route Bearer), `OPS_OBSERVER_HEARTBEAT_URL`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`(**S2부터만**), `OPS_OBSERVER_S3_BUDGET_PAGES`(**S3부터만**, `true`일 때 예산 키를 page), `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
+| `Ops Observer`(page) | `OPS_OBSERVER_SECRET`(32자 이상, 본 앱 route Bearer), `OPS_OBSERVER_HEARTBEAT_URL`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`(**S2부터만**), `OPS_OBSERVER_S3_PAGES`(**S3부터만**, `true`일 때 예산 키와 알림 전달 실패 키를 page), `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
 | `Ops Observer Digest` | `OPS_OBSERVER_DIGEST_SECRET`(32자 이상, advance·confirm은 거절), `OPS_OBSERVER_DIGEST_WEBHOOK_URL`, `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`, `OPS_OBSERVER_ENABLED`, `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH` |
 
 - 두 서비스 모두 제품 DB 자격증명·GitHub 토큰·admin session·LLM 키·Railway 쓰기 토큰·maintenance secret·감사 무결성 키를
   갖지 않습니다. check-in URL은 어떤 서비스에도 넣지 않습니다.
-- Railway 읽기 토큰(S3)은 읽기 전용 scope가 확인되지 않으면 발급하지 않습니다. 그 변수 이름, page 서비스 금지 목록에서의 예외,
-  scope 확인 방법은 S3의 정책 버전에서 정하며 그 전에는 어떤 Railway 토큰도 두 서비스에 없습니다.
+- 어떤 Railway 토큰도 두 서비스에 두지 않습니다. S3는 토큰이 필요한 키를 쓰지 않습니다(소유자 결정 2026-11-05).
 - 소유자가 로컬에서 돌리는 전체 감사 재검증 보고는 서비스 작업이 아니며, 그 실행에 필요한 읽기 자격증명은 소유자만 다룹니다.
 
 ## 8. 단계와 착수·전환 조건
@@ -274,7 +273,7 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 | S1a | 본 앱에 dark 배포: 상태 집계 route, 감시 테이블과 route(genesis 행 없음), Admin genesis 동작과 digest 영역. 배포 뒤 소유자가 최초 genesis(`shadow`)를 승인 | S0b 병합. production이 전용 감사 무결성 키를 쓰고 있음을 확인. 소유자가 production의 `server_version_num`을 한 번 읽어 기록하고, 170000 이상일 때만 `SHOW transaction_timeout`도 읽어 기록(16이면 "해당 없음") | 7일 동안 응답 p95와 DB 부하가 소유자가 대화에서 정한 범위 안(앱은 Railway 서비스 지표, Railway 밖에 있는 DB는 소유자가 대화에서 정한 지표). 상태 집계·감사 조회 비용 측정을 기록하고 N-3b를 결정 |
 | S1b shadow | 두 Railway 서비스 가동, page webhook 없음, 예약은 `shadowed`로 종결. digest에 would-have-paged 목록과 종류별 예상 메시지 수 | 소유자가 실행 비용 상한과 소유자 시간대를 정하고 정책 버전 증가. 두 서비스의 IaC 선언 병합과 운영자 apply. 첫 빌드 로그에 빌드 환경 검사 통과 줄. 두 heartbeat monitor를 "사건당 1회"로 등록하고 알림 대상 기록 | **14일 연속**(S1b 시작 시각부터): P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록), 최초 genesis 뒤 추가 genesis 0건(genesis 행과 그 사람 감사 행), `shadowed`에 이르지 않은 예약 0건(전송 기록 테이블) |
 | S2 page | 1절의 8개 키를 실제로 page | S1b 전환 조건 충족. page 키가 아닌 readiness 검사 **전부**(1절 3항의 이름, 그때 추가된 것 포함)의 영향표에 대한 소유자 결정 기록. page 채널이 소유자 전용이고 휴대폰 푸시로 도달함을 확인. 점검 요일·시간 창을 소유자가 대화에서 정하고 PR에 한 줄로 기록. check-in monitor 생성, monitor 셋의 알림 대상이 page 채널이 아님. Railway의 주 프로세스 종료 인식 관측 통과(결정 D5c). activation genesis(`live`) | **14일**: 오탐 page 주 1회 이하(전송 기록 테이블의 키·종류·열림 시각을 소유자가 보고 판정하고, 기록으로 조치 필요 여부를 판정할 수 없는 page는 오탐으로 셈), P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블) |
-| S3 page 확대 | provider 예산 키(provider × 일·월, `>=95`로 열림, `exhausted`로 악화). 그리고 Railway 읽기 전용 토큰이 확인된 뒤에만 HTTP 5xx 급증과 기존 운영 알림 전달 실패 | S2 전환 조건 충족. 키 수와 5절 최대값을 다시 계산해 정책 버전 증가 | **30일**: 커밋된 소유자 날짜별 예약 수가 재계산한 최대값 이하(전송 기록 테이블. 거절된 advance는 롤백되어 행을 남기지 않으므로 이 조건은 거절 횟수를 주장하지 않음), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블), P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록) |
+| S3 page 확대 | provider 예산 키(provider × 일·월, `>=95`로 열림, `exhausted`로 악화). 기존 운영 알림 전달 실패 키 하나(`AdminNotificationLog`의 `failed` 행이 직전 1시간에 3건 이상이면 열림, 악화 구간 없음. 상태 집계는 runner가 스위치를 켜고 요청할 때만 이 값을 계산해 보냅니다). HTTP 5xx 급증은 Railway 토큰이 필요해 S3에서 뺐습니다(소유자 결정 2026-11-05) | S2 전환 조건 충족. 키 수와 5절 최대값을 다시 계산해 정책 버전 증가 | **30일**: 커밋된 소유자 날짜별 예약 수가 재계산한 최대값 이하(전송 기록 테이블. 거절된 advance는 롤백되어 행을 남기지 않으므로 이 조건은 거절 횟수를 주장하지 않음), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블), P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록) |
 
 되돌림: 어느 단계든 실행 서비스의 `OPS_OBSERVER_ENABLED`를 지우면 다음 회차부터 멈추고, route secret을 지우면 본 앱 route가
 404를 돌려줍니다. 해제(정지)는 아무 조건도 요구하지 않습니다. 다시 켜는 것은 소유자만 합니다.

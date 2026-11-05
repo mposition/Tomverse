@@ -845,24 +845,22 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // publish: the GitHub App private key and the attestation key). It runs on
 // workflow_dispatch only, so no reason and no path rule changes; only the
 // credentialed-job portion of this digest moves.
-const POSTURE_DIGEST = "0b0e3ed91146";
+// 2026-11-05 owner decision: the feedback auto-fix workflows were deleted, which
+// removes their credentialed jobs and the one reason that forbade every path.
+const POSTURE_DIGEST = "d370f9cecedc";
 
-test("owner-reviewed workflow exclusion is exact-blob-only", () => {
-  const workflows = committedWorkflows();
-  const matched = analyseCredentialReachability({ workflows,
+test("no owner-reviewed exclusion is left, and the committed workflows need none", () => {
+  // The last one was the feedback auto-fix promotion workflow, deleted 2026-11-05.
+  // Exact-blob matching stays covered by the synthetic pins above.
+  assert.deepEqual(AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, []);
+  const result = analyseCredentialReachability({
+    workflows: committedWorkflows(),
     exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS,
-    cacheIsolationRecorded: true });
-  assert.equal(matched.status, "analysed");
-  assert.equal(matched.voidExclusions.length, 0);
-  assert.equal(matched.forbidsAll, false);
-  const stale = analyseCredentialReachability({ workflows: workflows.map((workflow) =>
-    workflow.path === AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS[0].workflowPath
-      ? { ...workflow, blobSha: "b".repeat(40) } : workflow),
-    exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS,
-    cacheIsolationRecorded: true });
-  assert.equal(stale.status, "analysed");
-  assert.equal(stale.voidExclusions.length, 1);
-  assert.equal(stale.forbidsAll, true);
+    cacheIsolationRecorded: true,
+  });
+  assert.equal(result.status, "analysed");
+  assert.equal(result.voidExclusions.length, 0);
+  assert.equal(result.forbidsAll, false);
 });
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
@@ -872,13 +870,14 @@ test("on this repository's committed workflows the credential posture is the rev
     cacheIsolationRecorded: false,
   });
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
-  assert.equal(result.forbidsAll, true);
+  // True until 2026-11-05: the deleted promotion workflow was the only reason.
+  assert.equal(result.forbidsAll, false);
   const reasons = new Set(result.reasons.map((r) => r.reason));
   // No longer present, and asserted as absent rather than dropped: the ten
   // credentialed jobs that asked for an npm cache gave it up (10 below), so a
   // reason of this kind reappearing means a credentialed job took a cache back.
   assert.ok(!reasons.has("credential_job_restores_cache"));
-  assert.ok(reasons.size > 0, "the digest must not be computed over no reasons at all");
+  assert.ok(result.credentialedJobs.length > 0, "the digest must not be computed over no jobs at all");
   assert.ok(result.pathRules.length > 0);
 
   const summary = [

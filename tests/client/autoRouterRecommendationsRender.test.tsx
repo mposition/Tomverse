@@ -3,7 +3,12 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { OpenRecommendationsInbox, RecommendationControls } from "@/components/admin/AdminAutoRouterRecommendations";
+import {
+  OpenRecommendationsInbox,
+  RecommendationControls,
+  recommendationKey,
+  type RecommendationSendState,
+} from "@/components/admin/AdminAutoRouterRecommendations";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import { actionableRecommendations } from "@/lib/autoRouterRecommendationsCore";
 
@@ -154,6 +159,49 @@ test("Send to AMUX replaces the copy button; only an owner can press it, and a s
   // AMUX has it: it can still be closed, and is not reopened into the agent's queue from here.
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-done"'), 1);
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-reopen"'), 0);
+});
+
+test("the inbox keeps a sent recommendation with its status and idea, and offers no send for it", () => {
+  const sentCycle = {
+    id: "cyc_sent",
+    createdAt: "2026-10-21T00:00:00.000Z",
+    summary: {
+      report,
+      recommendationStatus: { 1: { status: "sent_to_amux", at: "2026-10-21T00:00:00.000Z", by: "u1", amuxIdeaId: "idea-77" } },
+    },
+  };
+  const html = renderToStaticMarkup(
+    createElement(OpenRecommendationsInbox, { cycles: [sentCycle], busy: false, canSend: true, onSetStatus: noop, onSend: noop })
+  );
+  assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-open"'), 2);
+  assert.equal(count(html, 'data-status="sent_to_amux"'), 1);
+  assert.ok(text(html).includes("idea-77"));
+  // Only the other recommendation can still be sent.
+  assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-send"'), 1);
+});
+
+test("a send in progress shows on its own button, and a refusal shows beside the button that was pressed", () => {
+  const items = actionableRecommendations(cycles[0].summary);
+  const code = items.find((entry) => entry.index === 1)!;
+  const setting = items.find((entry) => entry.index === 2)!;
+  const render = (item: typeof code, sendState: RecommendationSendState) =>
+    renderToStaticMarkup(
+      createElement(RecommendationControls, { cycle: cycles[0], item, busy: true, canSend: true, sendState, onSetStatus: noop, onSend: noop })
+    );
+  const key = recommendationKey("cyc_new", 1);
+
+  const sending = { sendingKey: key, failure: null };
+  assert.ok(text(render(code, sending)).includes(m.sendingToAmux));
+  assert.ok(!text(render(setting, sending)).includes(m.sendingToAmux));
+
+  const refused = {
+    sendingKey: null,
+    failure: { key, failure: { message: m.reasons.content_refused, tone: "error" as const, requiresReauthentication: false, approvalId: null } },
+  };
+  const failureId = 'data-testid="admin-auto-router-recommendation-send-failure"';
+  assert.equal(count(render(code, refused), failureId), 1);
+  assert.ok(text(render(code, refused)).includes(m.reasons.content_refused));
+  assert.equal(count(render(setting, refused), failureId), 0);
 });
 
 test("a send that did not finish can be sent again or reopened", () => {

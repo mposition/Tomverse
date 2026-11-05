@@ -481,7 +481,7 @@ if (process.argv[1] && self === resolve(process.argv[1]) && phase === "validate"
     // The signature stays in the artifact; the log carries the outcome and the tree.
     const loggable = { ...result };
     delete loggable.attestation;
-    printAndExit("marketing_seo_agent_validate", loggable, ["validated", "validated_dry_run", "off"]);
+    printAndExit("marketing_seo_agent_validate", loggable, ["validated", "validated_dry_run", "off", "nothing_to_do"]);
   } catch (error) {
     fail(error);
   }

@@ -107,6 +107,5 @@ train은 이 변경 이전의 script로 돌리면 staging을 기다립니다.
   보이면 apply하지 않습니다.
 - **Test에는 Railway Wait for CI가 없습니다**(§2). `test`로 옮기는 길은 `promote:test`뿐이라는 관례가 CI 게이트까지
   겸합니다 — `git push`로 `test`를 직접 옮기면 suite가 실패했거나 아직 도는 commit도 그대로 배포됩니다.
-- **정책 개정을 기다리는 둘:** QA Release Merge Lane의 대상(docs/policy/qa-release-agent.md §8)과 feedback
-  auto-fix의 승격 관측(docs/policy/trace-feedback-automation.md §9.3)은 아직 staging을 봅니다. 둘 다 2026-10-07
-  현재 운영되지 않습니다.
+- **정책 개정을 기다리는 것:** QA Release Merge Lane의 대상(docs/policy/qa-release-agent.md §8)은 아직 staging을
+  봅니다. 2026-10-07 현재 운영되지 않습니다.

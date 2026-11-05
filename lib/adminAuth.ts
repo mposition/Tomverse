@@ -67,6 +67,13 @@ export const getAdminRole = (
   });
 };
 
+/**
+ * Whether an account is an owner now, for a standing choice made in an earlier
+ * session. A check only: this session must never reach a writer as an actor.
+ */
+export const isAdminOwnerAccount = (user: { id: string; email: string | null }) =>
+  getAdminRole({ user: { ...user, authenticatedAt: new Date().toISOString() }, expires: "" }) === "owner";
+
 export const hasAdminPermission = (
   session: Session | null | undefined,
   permission: AdminPermission

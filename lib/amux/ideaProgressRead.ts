@@ -7,7 +7,8 @@ import {
   amuxIdeaLaneEnabled, amuxIdeaLaneView, type AmuxIdeaLaneAttemptFact, type AmuxIdeaLaneState,
 } from "@/lib/amux/ideaLaneCore";
 import { amuxIdeaOwnerClosableState } from "@/lib/amux/ideaOwnerCloseCore";
-import { amuxIdeaProgress, type AmuxIdeaProgress, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
+import { amuxIdeaBlockReason, amuxIdeaProgress, type AmuxIdeaBlockReason, type AmuxIdeaProgress,
+  type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 
 /** How many of the owner's newest open ideas the Ideas tab lists. */
 export const AMUX_IDEA_PROGRESS_LIMIT = 20;
@@ -29,7 +30,11 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   /** Task PRs waiting for GitHub review or merge. */
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
   /** The idea's Task cards in registration order, for its detail view. */
-  taskRows: Array<{ displayKey: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
+  taskRows: Array<{ id: string; displayKey: string | null; status: string; reviewPrNumber: number | null; merged: boolean;
+    /** A blocked Task's reason from the closed vocabulary; null when it has none, or when it is not blocked. */
+    blockReason: AmuxIdeaBlockReason | null;
+    /** A blocked Task's unresolved owner review, the place a decision on it is made. */
+    escalationId: string | null }>;
   /** Session reference SHAs fixed at intake, before a checkout exists. */
   referencePins: Array<{ referenceOrdinal: number; pinnedCommitSha: string }> | null;
   /** Valid pre-pinning audit, distinct from a damaged or unavailable pin. */
@@ -53,7 +58,7 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  * boundary: setup + ONE statement + fence, pinned by tests/amuxIdeaProgress.test.mjs.
  *
  * Why one statement: a boundary sets idle_in_transaction_session_timeout to
- * 100 ms (lib/amux/dbBoundary.ts), and a gap longer than that between two of
+ * 300 ms (lib/amux/dbBoundary.ts), and a gap longer than that between two of
  * its statements ends the session with 25P03. Seven sequential reads made
  * eight such gaps, and over the production round trip the Ideas list failed
  * to read; a single statement has the same two gaps as every other boundary.
@@ -86,7 +91,8 @@ type SqlChunk = {
 };
 type SqlCard = {
   id: string; cardType: string | null; status: string; reviewPrNumber: number | null;
-  terminal: boolean; displayKey: string | null;
+  terminal: boolean; displayKey: string | null; liveAttempt?: boolean;
+  escalationId?: string | null; escalationReason?: string | null; lastAttemptReason?: string | null;
 };
 type SqlCheckoutEvidence = {
   referenceOrdinal: number; pinnedCommitSha: string; excludedCount: number;
@@ -118,7 +124,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   // timestamp leaves as epoch milliseconds (a double, never a session-zone
   // string). An expired proposal can no longer be approved, so it waits for
   // nobody; neither does an evidence unit, which no approval ever decides.
-  // Chunks keep their index order and cards their registration order.
+  // Chunks keep their index order and cards their registration order. A card's
+  // attempt and review facts stay inside this statement (see the head of this file).
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
       SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
@@ -160,7 +167,19 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       (SELECT json_agg(json_build_object(
           'id', w."id", 'cardType', w."cardType", 'status', w."status",
           'reviewPrNumber', w."reviewPrNumber", 'terminal', (w."v4TerminalAt" IS NOT NULL),
-          'displayKey', w."displayKey") ORDER BY w."createdAt" ASC, w."id" ASC)
+          'displayKey', w."displayKey",
+          'liveAttempt', EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a
+            WHERE a."taskId" = w."id" AND a."endedAt" IS NULL
+              AND a."leaseExpiresAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')),
+          'escalationId', (SELECT e."id" FROM "AmuxHumanEscalation" e
+            WHERE e."taskId" = w."id" AND e."status" IN ('open', 'acknowledged')
+            ORDER BY e."createdAt" DESC, e."id" DESC LIMIT 1),
+          'escalationReason', (SELECT e."reason" FROM "AmuxHumanEscalation" e
+            WHERE e."taskId" = w."id" AND e."status" IN ('open', 'acknowledged')
+            ORDER BY e."createdAt" DESC, e."id" DESC LIMIT 1),
+          'lastAttemptReason', (SELECT a."reason" FROM "AmuxExecutionAttempt" a
+            WHERE a."taskId" = w."id" ORDER BY a."startedAt" DESC, a."id" DESC LIMIT 1))
+          ORDER BY w."createdAt" ASC, w."id" ASC)
         FROM "AmuxIdeaUnitDecision" d
         JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
         WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards",
@@ -224,7 +243,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       chunks: (idea.chunks ?? []).map((chunk) => ({ ...chunk })),
       proposedUnits: idea.proposedUnits,
       cards: own.map((card) => ({ cardType: card.cardType, status: card.status,
-        reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
+        reviewPrNumber: card.reviewPrNumber, merged: card.terminal, liveAttempt: card.liveAttempt })),
       lane,
     });
     return {
@@ -248,8 +267,13 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey }))
         .concat(lane?.state === "pr_open" && lane.prNumber !== null ? [{ number: lane.prNumber, displayKey: null }] : []),
       lane,
-      taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
-        status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
+      taskRows: own.filter((card) => card.cardType !== "story").map((card) => {
+        const blocked = card.status === "blocked" && !card.terminal;
+        return { id: card.id, displayKey: card.displayKey, status: card.status,
+          reviewPrNumber: card.reviewPrNumber, merged: card.terminal,
+          blockReason: blocked ? amuxIdeaBlockReason(card.escalationReason, card.lastAttemptReason) : null,
+          escalationId: blocked ? card.escalationId ?? null : null };
+      }),
       referencePins: Array.isArray(pins) && pins.every((sha) =>
         typeof sha === "string" && PIN_SHA.test(sha))
         ? pins.map((sha, referenceOrdinal) => ({ referenceOrdinal,

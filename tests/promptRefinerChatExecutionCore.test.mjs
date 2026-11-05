@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { validatePromptRefinerChatExecution, promptRefinerChatDecisionSchema } from "../lib/promptRefinerChatExecutionCore.ts";
+import { PROMPT_REFINER_REFUSAL_REASONS, validatePromptRefinerChatExecution, promptRefinerChatDecisionSchema } from "../lib/promptRefinerChatExecutionCore.ts";
 import { promptRefinerChatExecutionRelease } from "../lib/promptRefinerChatExecutionRelease.ts";
 import { scopedMessageId } from "../lib/messageRequestIdentity.ts";
 import { profileTextFor, preflightInputEstimate } from "../lib/autoDispatchPreflight.ts";
@@ -77,6 +77,30 @@ for (const [name, modify] of [
   ["suggestion id mismatch", x => { x.decision.suggestionId = uuid(7); }],
   ["revision decision mismatch", x => { x.decision.epoch = 3; }],
 ]) test(`${name} refuses without execution or disclosure`, () => { const input = fixture(); modify(input); refuse(input); });
+for (const [reason, modify] of [
+  ["consumed", x => { x.held.state = "consumed"; }],
+  ["stale", x => { x.held.state = "stale"; }],
+  ["kill_switch", x => { x.facts.killSwitch = true; }],
+  ["expired", x => { x.facts.dbNow = x.held.expiresAt; }],
+  ["owner_mismatch", x => { x.facts.userId = "another-owner"; }],
+  ["scope_mismatch", x => { x.facts.scope.surface = "workspace"; }],
+  ["epoch_mismatch", x => { x.facts.recoveryEpoch = 2; }],
+  ["decision_mismatch", x => { x.decision.suggestionId = uuid(7); }],
+  ["source_mismatch", x => { x.facts.persistedSourcePrompt += " "; }],
+  ["mode_disabled", x => { x.held.mode = "anything"; }],
+  ["malformed_decision", x => { x.decision = { accepted: true }; }],
+]) test(`a refusal names ${reason}, answers the same and carries no prompt`, () => {
+  const input = fixture(); modify(input);
+  assert.throws(() => validatePromptRefinerChatExecution(input), error => {
+    assert.equal(error.reason, reason);
+    assert.ok(PROMPT_REFINER_REFUSAL_REASONS.includes(error.reason));
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    assert.equal(error.message, "The Prompt Refiner decision is no longer available.");
+    assert.ok(!JSON.stringify({ ...error, message: error.message }).includes("Cafe"));
+    return true;
+  });
+});
 test("empty, duplicate-id, edited and trailing assistant transcripts refuse", () => {
   for (const messages of [[], [fixture().messages.at(-1), fixture().messages.at(-1)],
     [...fixture().messages.slice(0, 2), { ...fixture().messages.at(-1), content: original + "edit" }],

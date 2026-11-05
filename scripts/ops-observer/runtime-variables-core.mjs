@@ -22,7 +22,7 @@ export const SERVICE_VARIABLES = Object.freeze({
     "OPS_OBSERVER_SECRET",
     "OPS_OBSERVER_HEARTBEAT_URL",
     "OPS_OBSERVER_PAGE_WEBHOOK_URL",
-    "OPS_OBSERVER_S3_BUDGET_PAGES",
+    "OPS_OBSERVER_S3_PAGES",
     "OPS_OBSERVER_ENABLED",
     "OPS_OBSERVER_APP_URL",
     "RAILWAY_DOCKERFILE_PATH",
@@ -42,7 +42,7 @@ export const CHILD_VARIABLES = Object.freeze({
   page: Object.freeze([
     "OPS_OBSERVER_SECRET",
     "OPS_OBSERVER_PAGE_WEBHOOK_URL",
-    "OPS_OBSERVER_S3_BUDGET_PAGES",
+    "OPS_OBSERVER_S3_PAGES",
     "OPS_OBSERVER_HEARTBEAT_URL",
     "OPS_OBSERVER_APP_URL",
   ]),
@@ -173,7 +173,7 @@ export function buildEnvironmentViolations(names) {
   if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
     throw new Error("ops_observer_env_names_invalid");
   }
-  const notSecret = new Set(["OPS_OBSERVER_ENABLED", "OPS_OBSERVER_S3_BUDGET_PAGES", "OPS_OBSERVER_APP_URL", "RAILWAY_DOCKERFILE_PATH"]);
+  const notSecret = new Set(["OPS_OBSERVER_ENABLED", "OPS_OBSERVER_S3_PAGES", "OPS_OBSERVER_APP_URL", "RAILWAY_DOCKERFILE_PATH"]);
   const runtimeSecrets = new Set(
     [...SERVICE_VARIABLES.page, ...SERVICE_VARIABLES.digest].filter((name) => !notSecret.has(name)),
   );

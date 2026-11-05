@@ -17,10 +17,13 @@ test("an owner question in the kept answer is shown as the model wrote it", () =
     question: "Should the badge live in the idea list or the detail page?" });
   assert.deepEqual(classifyAmuxSessionReviewAnswer(answer({ ownerQuestion: "  Which page?\n" })),
     { reason: "owner_question", question: "Which page?" }, "trimmed");
+  assert.deepEqual(classifyAmuxSessionReviewAnswer(answer({ coverageStatus: "complete", ownerQuestion: "Which page?" })),
+    { reason: "owner_question", question: "Which page?" }, "the plan writer treats it as a question too");
 });
 
 test("anything else is the closed not-a-plan word, never model text", () => {
-  for (const raw of ["not json", "[]", "null", answer({ coverageStatus: "complete" }),
+  for (const raw of ["not json", "[]", "null",
+    answer({ outcome: "propose", coverageStatus: "complete", units: [{ kind: "card" }] }),
     answer({ ownerQuestion: null }), answer({ ownerQuestion: "   " }),
     answer({ ownerQuestion: "x".repeat(2_001) }), answer({ ownerQuestion: "ask ‮ me" })]) {
     assert.deepEqual(classifyAmuxSessionReviewAnswer(raw), { reason: "not_a_plan" }, raw.slice(0, 40));

@@ -80,7 +80,12 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
     recordHref: "/admin/qa-release",
   },
   { id: "sre", icon: "📟", policy: "docs/policy/sre-ops.md", recordHref: "/admin/sre-ops" },
-  { id: "support", icon: "🎧", policy: "docs/policy/support-triage.md", recordHref: null },
+  {
+    id: "support",
+    icon: "🎧",
+    policy: "docs/policy/support-triage.md",
+    recordHref: "/admin/support?tab=feedback",
+  },
   {
     id: "marketing",
     icon: "📣",
