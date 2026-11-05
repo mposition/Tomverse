@@ -50,6 +50,13 @@ import {
   type AmuxIdeaSessionSubmissionInspection,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 import { ideaSendPath, inspectIdeaSendForSession } from "@/lib/amux/ideaSendPath";
+import {
+  markRecommendationSentToAmux,
+  readRecommendationForSend,
+  reserveRecommendationForAmux,
+} from "@/lib/autoRouterRecommendations";
+import { recommendationSendRequestId } from "@/lib/autoRouterRecommendationSendCore";
+import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
 import { prepareIdeaSubmissionStorage } from "@/lib/amux/ideaSubmissionService";
 import { AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
   amuxSessionAnalysisReservationAuditMetadata } from
@@ -128,6 +135,7 @@ import { encodeAmuxSessionAnalysisQueueCursor,
   "@/lib/amux/ideaSessionAnalysisQueueCursorCore";
 import { buildAmuxSessionAnalysisQueueWhere } from
   "@/lib/amux/ideaSessionAnalysisQueueWhereCore";
+import { parkAmuxSessionIdeaInTx } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { prisma } from "@/lib/prisma";
 
 const commitAmuxIdeaSessionSubmission = (
@@ -1124,6 +1132,74 @@ test("a send from another Admin screen enters as a session idea while session in
   }
 });
 
+test("an auto-router recommendation sent again finds its session idea and makes no second one", async () => {
+  const switches = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
+    "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
+  const saved = switches.map((name) => process.env[name]);
+  const cycle = await prisma.autoRouterOptimizerCycle.create({ data: {
+    optimizerModelId: "optimizer-model", routerModelId: "router-model", incumbentGuidance: "guidance",
+    reservedMicroUsd: 0, status: "passed",
+    summary: { report: { findings: ["answer calls failed"], recommendations: [
+      { kind: "guidance", text: "Guidance" }, { kind: "code", text: "Synthetic code change" },
+      { kind: "setting", text: "Synthetic setting change" }] } },
+  } });
+  const actor = { session, request };
+  const statusOf = async (index: number) =>
+    (await readRecommendationForSend({ cycleId: cycle.id, index }))?.recommendation.status;
+  // What the route does for one click, with the stored idea standing in for a
+  // first send whose answer was lost before the recommendation closed.
+  const send = async (index: number) => {
+    const requestId = recommendationSendRequestId(cycle.id, index);
+    const path = await ideaSendPath({ session, request, requestId, idea: "Synthetic recommendation",
+      sessionDisplay: "Auto router recommendation" });
+    assert.ok(path.ok);
+    assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index }), true);
+    return sendScoutSuggestion({
+      readBack: path.readBack,
+      submit: () => assert.fail("a stored idea must not be submitted again"),
+      isAlreadySeen: path.isAlreadySeen,
+      close: (ideaId) => markRecommendationSentToAmux(actor, { cycleId: cycle.id, index, ideaId }),
+    });
+  };
+  const storeIdea = async (index: number) => {
+    const ideaId = recommendationSendRequestId(cycle.id, index);
+    const inspected = inspect(ideaId, undefined, { idea: "Synthetic recommendation",
+      sessionDisplay: "Auto router recommendation" });
+    await prisma.$transaction(async (tx) => {
+      const submission = await commitAmuxIdeaSessionSubmission(tx, {
+        inspected, expectedAuthority: authority, ideaId, keys: keysFor(ideaId) });
+      await commitAmuxSessionAnalysisReservation(tx, { ideaId: submission.ideaId,
+        requestId: submission.requestId, submissionAuditId: submission.auditId, authority });
+    });
+    return ideaId;
+  };
+  try {
+    for (const name of switches) process.env[name] = "enabled";
+    const ideaId = await storeIdea(1);
+    assert.deepEqual(await send(1), { kind: "sent", ideaId, closed: true });
+    assert.equal(await statusOf(1), "sent_to_amux");
+    assert.equal(await prisma.amuxIdeaSubmission.count({ where: { requestId: ideaId } }), 1);
+    const row = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } });
+    assert.equal(row.submissionOrigin, "session");
+
+    // Once sent, the recommendation is held: another send changes nothing.
+    assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index: 1 }), false);
+
+    // Session intake turned off between the idea and the retry: the v4 door
+    // still reads the session idea rather than making another.
+    process.env.TOMVERSE_AMUX_SESSION_INTAKE = "disabled";
+    const otherId = await storeIdea(2);
+    assert.deepEqual(await send(2), { kind: "sent", ideaId: otherId, closed: true });
+    assert.equal(await prisma.amuxIdeaSubmission.count({ where: { requestId: otherId } }), 1);
+  } finally {
+    switches.forEach((name, index) => {
+      if (saved[index] === undefined) delete process.env[name];
+      else process.env[name] = saved[index];
+    });
+    await prisma.autoRouterOptimizerCycle.delete({ where: { id: cycle.id } });
+  }
+});
+
 test("request collision and references outside the saved scope are read-only refusals", async () => {
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaSessionSubmission(tx, {
@@ -2055,16 +2131,22 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   assert.ok(storedResult.ciphertext && storedResult.ciphertext.length > 0);
   assert.equal(storedResult.inputTokens, 200000);
   assert.equal(storedResult.outputTokens, 1);
-  // An answer that is not a schema-valid plan page still settles, but it
-  // leaves the queue for the operator instead of buying another invocation.
+  // An answer that is not a schema-valid plan page still settles, and waits
+  // for a decision (tests/integration/amux-v19-plan-refusal.db.test.ts).
   assert.deepEqual(savedResult.plan,
     { state: "plan_refused", reason: "invalid_result" });
-  const parked = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+  const held = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: ideaId }, select: { state: true,
       currentSourcePlanRevisionId: true, analysisCompletedAt: true } });
-  assert.equal(parked.state, "awaiting_owner");
-  assert.equal(parked.currentSourcePlanRevisionId, null);
-  assert.ok(parked.analysisCompletedAt);
+  assert.equal(held.state, "analyzing");
+  assert.equal(held.currentSourcePlanRevisionId, null);
+  assert.equal(held.analysisCompletedAt, null);
+  // The rest of this test follows the idea once the decision stopped it.
+  assert.equal(await prisma.$transaction(async (tx) => {
+    const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
+    return parkAmuxSessionIdeaInTx(tx, ideaId, clock[0]!.now);
+  }), true);
   const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",

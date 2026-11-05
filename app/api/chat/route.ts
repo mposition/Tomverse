@@ -71,7 +71,11 @@ import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
 } from "@/lib/promptRefinerChatExecutionStore";
-import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
+import {
+  PromptRefinerChatExecutionError,
+  promptRefinerRefusalReasonOf,
+  type PromptRefinerRefusalReason,
+} from "@/lib/promptRefinerChatExecutionCore";
 import { promptRefinerChatExecutionRelease } from "@/lib/promptRefinerChatExecutionRelease";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
 import {
@@ -316,6 +320,7 @@ import {
     consumeApiRateLimit,
     readLimitedJson,
     reserveDailyUploadBytes,
+    type ApiSecurityError,
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
 import {
@@ -372,6 +377,11 @@ import {
     GUEST_MAX_ATTACHMENT_BYTES,
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
+import {
+    attachmentIdentity,
+    attachmentReferenceKey,
+    collapseRepeatedAttachments,
+} from "@/lib/chatRepeatedAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import {
     chatLeaseAcquired,
@@ -425,6 +435,7 @@ import { scopedMessageId } from "@/lib/messageRequestIdentity";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
+    logStreamErrorWithoutContent,
     providerDiagnosticCode,
     safeErrorMessage,
     safeErrorMetadata,
@@ -465,19 +476,6 @@ type IncomingAttachment = {
     uploadId?: unknown;
     data?: unknown;
     kind?: unknown;
-};
-
-/** How one attachment reference is keyed while a turn is being resolved. */
-const attachmentReferenceKey = (
-    attachment: IncomingAttachment
-): string | null => {
-    if (typeof attachment?.attachmentId === "string" && attachment.attachmentId) {
-        return `a:${attachment.attachmentId}`;
-    }
-    if (typeof attachment?.uploadId === "string" && attachment.uploadId) {
-        return `u:${attachment.uploadId}`;
-    }
-    return null;
 };
 
 const parseStoredModelIds = (value: unknown) => {
@@ -522,6 +520,32 @@ const logRequestError = (
     );
 };
 
+/**
+ * Refusals owed a `chat_request_rejected` line, keyed by the response carrying
+ * them. `POST` writes the line for the response that actually leaves, so a
+ * refusal replaced on its way out is not reported under a code nobody received.
+ */
+const rejectionsToLog = new WeakMap<
+    Response,
+    { code: string; status: number; details?: Readonly<Record<string, unknown>> }
+>();
+
+/** For a path that already wrote its own line for this trace. */
+const withoutRejectionLine = (response: Response) => {
+    rejectionsToLog.delete(response);
+    return response;
+};
+
+/** For a refusal built elsewhere, whose code is only in its body. */
+const withRejectionLine = async (response: Response) => {
+    const body = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
+    rejectionsToLog.set(response, {
+        code: typeof body?.code === "string" ? body.code : "UNKNOWN",
+        status: response.status,
+    });
+    return response;
+};
+
 const tracedJsonError = (
     error: string,
     code: string,
@@ -551,7 +575,7 @@ const tracedJsonError = (
         httpStatus: status,
         ...(grantContext || {}),
     });
-    return new Response(JSON.stringify({ error, code, traceId, ...(details ? { details } : {}) }), {
+    const response = new Response(JSON.stringify({ error, code, traceId, ...(details ? { details } : {}) }), {
         status,
         headers: {
             "Content-Type": "application/json",
@@ -562,6 +586,8 @@ const tracedJsonError = (
                 : {}),
         },
     });
+    rejectionsToLog.set(response, { code, status, details });
+    return response;
 };
 /**
  * Everything this route used to answer from four hand-kept literals now comes
@@ -1071,7 +1097,29 @@ export async function POST(req: Request) {
     // this (ensureGuestVerified throws before assigning), so a rejected token
     // still earns nothing.
     const verificationGrant: { setCookie?: string } = {};
-    const response = await handleChatPost(req, traceId, verificationGrant);
+    const rejectionLogFields: { read?: () => Record<string, unknown> } = {};
+    const response = await handleChatPost(req, traceId, verificationGrant, rejectionLogFields);
+    const rejection = rejectionsToLog.get(response);
+    if (rejection) {
+        // Every refusal, so a reported trace always has a line to find. Validation
+        // refusals -- an over-long context, a malformed transcript -- used to
+        // leave nothing at all: they are neither cost-safety codes nor limit
+        // decisions, and the trace a person reported pointed at an empty log.
+        console.warn(
+            JSON.stringify({
+                event: "chat_request_rejected",
+                phase: "chat_request",
+                traceId,
+                code: rejection.code,
+                status: rejection.status,
+                ...rejectionLogFields.read?.(),
+                // Numbers and flags only. Some refusals name the files they are
+                // about, and a file name is the user's content.
+                ...countableChatErrorDetails(rejection.details),
+                timestamp: new Date().toISOString(),
+            })
+        );
+    }
     if (verificationGrant.setCookie) {
         try {
             // append, not set: the response may already carry the guest
@@ -1097,7 +1145,8 @@ export async function POST(req: Request) {
 async function handleChatPost(
     req: Request,
     traceId: string,
-    verificationGrant: { setCookie?: string }
+    verificationGrant: { setCookie?: string },
+    rejectionLogFields: { read?: () => Record<string, unknown> }
 ): Promise<Response> {
     // CHAT-LATENCY-01. The start of every server-side duration this turn
     // reports (lib/chatTurnTiming.ts).
@@ -1302,11 +1351,22 @@ async function handleChatPost(
      * Counts only -- never text, file names or ids -- so the line says how
      * big the turn was without saying what was in it.
      */
+    let refinerRefusalReasonForLog: PromptRefinerRefusalReason | null = null;
     let requestShapeForLog: {
         messageCount: number;
         attachmentCount: number;
         imageAttachmentCount: number;
     } | null = null;
+    // Log-only: the response cannot say which of stale and expired this was.
+    let contextRefusalReasonForLog: "stale" | "expired" | "already_consumed" | null = null;
+    rejectionLogFields.read = () => ({
+        modelId: dispatchModelIdForLog ?? null,
+        plan: refusalSubjectForLog?.plan ?? null,
+        ...(requestShapeForLog ?? {}),
+        // A closed list, so a refused Refiner decision says why.
+        ...(refinerRefusalReasonForLog ? { reason: refinerRefusalReasonForLog } : {}),
+        ...(contextRefusalReasonForLog ? { refusalReason: contextRefusalReasonForLog } : {}),
+    });
     try {
         assertChatRequestSize(req);
         const routeAuth = await resolveChatRouteSession(req);
@@ -1317,7 +1377,7 @@ async function handleChatPost(
             (body as { currentLocation?: unknown } | null)?.currentLocation
         );
         const {
-            messages,
+            messages: requestMessages,
             modelId,
             conversationId,
             assistantMessageId,
@@ -1338,11 +1398,11 @@ async function handleChatPost(
         }
         persistenceSourceUserMessageId = sourceUserMessageId;
         {
-            const attachments = messages.flatMap((message) =>
+            const attachments = requestMessages.flatMap((message) =>
                 Array.isArray(message.attachments) ? message.attachments : []
             );
             requestShapeForLog = {
-                messageCount: messages.length,
+                messageCount: requestMessages.length,
                 attachmentCount: attachments.length,
                 imageAttachmentCount: attachments.filter((attachment) => {
                     const mediaType = (attachment as { mediaType?: unknown })
@@ -1354,16 +1414,34 @@ async function handleChatPost(
                 }).length,
             };
         }
+        // Before anything reads the transcript, so the file a retry repeated is
+        // resolved, measured, priced and sent once. The log line above keeps the
+        // shape the client sent.
+        const { messages, removedReferenceCount } =
+            collapseRepeatedAttachments(requestMessages);
+        if (removedReferenceCount > 0) {
+            console.info(JSON.stringify({
+                event: "chat_repeated_attachments_collapsed",
+                traceId,
+                messageCount: messages.length,
+                removedReferenceCount,
+                timestamp: new Date().toISOString(),
+            }));
+        }
         // The durable source remains authored. Only the server's atomic
         // consume may select a different current-turn execution view.
         let executionMessages = messages;
         type RefinerExecution = { mode: "explicit" | "auto"; applied: boolean };
         let refinerExecution: RefinerExecution | null = null;
         let refinerPreview: Awaited<ReturnType<typeof previewPromptRefinerChatExecution>> | null = null;
+        const refuseRefinerDecision = (reason: PromptRefinerRefusalReason, status = 409): never => {
+            refinerRefusalReasonForLog = reason;
+            throw new ChatAccessError(status, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+        };
         const consumeRefinerPreview = async (): Promise<RefinerExecution | null> => {
             if (!refinerPreview || refinerExecution) return refinerExecution;
             if (!session?.user?.id || !conversationId || !sourceUserMessageId) {
-                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision("request_incomplete");
             }
             try {
                 const view = await consumePreviewedPromptRefinerChatExecution({
@@ -1375,21 +1453,21 @@ async function handleChatPost(
                 refinerExecution = consumed;
                 return consumed;
             } catch (error) {
-                throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
-                    "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision(promptRefinerRefusalReasonOf(error),
+                    error instanceof PromptRefinerChatExecutionError ? 409 : 503);
             }
         };
         if (promptRefinerDecision !== undefined) {
             if (!session?.user?.id || !conversationId || !sourceUserMessageId || !assistantMessageId) {
-                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision("request_incomplete");
             }
             const release = await promptRefinerChatExecutionRelease();
             if (!release.explicitEnabled && !release.autoEnabled) {
-                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision("mode_disabled");
             }
             const scopeAccess = await authorizeChatRecoveryScope({ request: req,
                 userId: session.user.id, scopeKey: conversationId });
-            if (!scopeAccess.ok) return scopeAccess.response;
+            if (!scopeAccess.ok) return withRejectionLine(scopeAccess.response);
             // Cross-scope probes must not spend this account's admission, but
             // authenticated stale/replay probes remain rate-protected. Keep
             // admission before the one-time consume so a 429 cannot burn a
@@ -1403,8 +1481,8 @@ async function handleChatPost(
                 });
                 executionMessages = [...refinerPreview.executionMessages];
             } catch (error) {
-                throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
-                    "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision(promptRefinerRefusalReasonOf(error),
+                    error instanceof PromptRefinerChatExecutionError ? 409 : 503);
             }
         }
         const pinnedDeploymentEntered = classifyPinnedDeployment(
@@ -1422,8 +1500,7 @@ async function handleChatPost(
         // deterministic pinned refusal. Keep the held suggestion intact and
         // require an ordinary Chat dispatch instead.
         if (pinnedDeploymentEntered && refinerPreview) {
-            throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE",
-                "The Prompt Refiner decision is no longer available.");
+            return refuseRefinerDecision("pinned_deployment");
         }
         // A pinned internal account either finishes on this path or, when the
         // flag is off or the account is not the configured one, falls through
@@ -2447,10 +2524,12 @@ async function handleChatPost(
           reference -- and the guest path, whose keys are derived from the
           caller's own signed identity, keeps deduplicating on the key because
           that is the only name a guest object has.
+
+          A retry's repeat across messages was collapsed above, so what reaches
+          this refusal is a file named twice on one message.
         */
         const attachmentIdentities = new Set<string>();
         for (const attachment of requestAttachments) {
-            const hasObjectKey = typeof attachment?.objectKey === "string";
             const hasInlineData = typeof attachment?.data === "string";
             if (hasInlineData) {
                 throw new ChatAccessError(
@@ -2459,9 +2538,7 @@ async function handleChatPost(
                     "Attachments must be uploaded before sending."
                 );
             }
-            const identity =
-                attachmentReferenceKey(attachment) ??
-                (hasObjectKey ? `k:${attachment.objectKey as string}` : null);
+            const identity = attachmentIdentity(attachment);
             if (identity) {
                 if (attachmentIdentities.has(identity)) {
                     throw new ChatAccessError(
@@ -2646,12 +2723,12 @@ async function handleChatPost(
                     selectedModelIds: selectedConversationModels,
                     timestamp: new Date().toISOString(),
                 }));
-                return tracedJsonError(
+                return withoutRejectionLine(tracedJsonError(
                     "The requested model is not selected for this conversation.",
                     "MODEL_NOT_SELECTED",
                     403,
                     traceId
-                );
+                ));
             }
         }
         const userObjectPrefix = ownAttachmentPrefix;
@@ -2878,9 +2955,11 @@ async function handleChatPost(
                 // is a client defect or tampering, and answering it with
                 // "re-preflight" would invite a retry loop against a token that
                 // can never pass.
+                const refusalReason = verification.reason;
                 const drifted =
-                    verification.reason === "stale" ||
-                    verification.reason === "expired";
+                    refusalReason === "stale" ||
+                    refusalReason === "expired";
+                contextRefusalReasonForLog = drifted ? refusalReason : null;
                 // Awaited rather than fired and forgotten: the response is
                 // about to be returned, and a refusal that is never counted
                 // is exactly the observation §22 wants. One upsert, on a path
@@ -3099,6 +3178,7 @@ async function handleChatPost(
                     durableAttempt = null;
                     durableCheckpointWriter = null;
                 }
+                contextRefusalReasonForLog = consumption.reason;
                 return tracedJsonError(
                     "This prepared conversation context has already been used.",
                     "CHAT_CONTEXT_BUNDLE_STALE",
@@ -4492,7 +4572,7 @@ async function handleChatPost(
                             : {}),
                     }
                 );
-                return isMessageContractError
+                return withoutRejectionLine(isMessageContractError
                     ? tracedJsonError(
                           "This deep research request had no question to research. Reserved credits were refunded.",
                           "DEEP_RESEARCH_INVALID_MESSAGES",
@@ -4504,7 +4584,7 @@ async function handleChatPost(
                           "DEEP_RESEARCH_SUBMIT_FAILED",
                           502,
                           traceId
-                      );
+                      ));
             }
         }
 
@@ -4975,6 +5055,10 @@ async function handleChatPost(
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
                         prepareStep: mcpConnector.prepareStep,
                     } : {}),
+                    onError: logStreamErrorWithoutContent({
+                        traceId,
+                        modelId: modelConfig.id,
+                    }),
                 })
         );
         // The fallback drill's deliberate failure, if this request asked for
@@ -6109,6 +6193,10 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
+                    onError: logStreamErrorWithoutContent({
+                        traceId,
+                        modelId: plan.modelId,
+                    }),
                 });
                 await recordDispatched(nextRecord);
             } catch (dispatchError) {
@@ -7535,6 +7623,10 @@ async function handleChatPost(
         if (securityResponse) {
             securityResponse.headers.set("X-Request-ID", traceId);
             securityResponse.headers.set("Cache-Control", "private, no-store");
+            rejectionsToLog.set(securityResponse, {
+                code: (error as ApiSecurityError).code,
+                status: securityResponse.status,
+            });
             return securityResponse;
         }
         const accessError = chatErrorResponse(error);
@@ -7577,28 +7669,11 @@ async function handleChatPost(
                     })
                 );
             } else if (error instanceof ChatAccessError) {
-                // Every other refusal, so a reported trace always has a line
-                // to find. Validation refusals -- an over-long context, a
-                // malformed transcript -- used to leave nothing at all: they
-                // are neither cost-safety codes nor limit decisions, and the
-                // trace a person reported pointed at an empty log.
-                console.warn(
-                    JSON.stringify({
-                        event: "chat_request_rejected",
-                        phase: "chat_request",
-                        traceId,
-                        code: error.code,
-                        status: error.status,
-                        modelId: dispatchModelIdForLog ?? null,
-                        plan: refusalSubjectForLog?.plan ?? null,
-                        ...(requestShapeForLog ?? {}),
-                        // Numbers and flags only. Some refusals name the
-                        // files they are about, and a file name is the
-                        // user's content.
-                        ...countableChatErrorDetails(error.details),
-                        timestamp: new Date().toISOString(),
-                    })
-                );
+                rejectionsToLog.set(accessError, {
+                    code: error.code,
+                    status: error.status,
+                    details: error.details,
+                });
             }
             accessError.headers.set("X-Request-ID", traceId);
             // Chat errors can contain account-scoped quota and recovery
@@ -7664,7 +7739,7 @@ async function handleChatPost(
                     storageStatus: localFailure.storageStatus,
                 }
             );
-            return tracedJsonError(
+            return withoutRejectionLine(tracedJsonError(
                 localFailure.layer === "storage"
                     ? "첨부파일 저장소를 읽지 못했습니다. 잠시 후 다시 시도해 주세요."
                     : "요청을 처리하지 못했습니다.",
@@ -7686,7 +7761,7 @@ async function handleChatPost(
                     error: localFailure.cause ?? localFailure,
                     retryable: localFailure.layer === "storage" ? null : false,
                 }
-            );
+            ));
         }
 
         const providerError = isProviderRequestFailure(error) ? error.reason : error;
@@ -7746,7 +7821,7 @@ async function handleChatPost(
                 dispatchModelIdForLog,
                 { failureLayer: "application", phase: "request" }
             );
-            return tracedJsonError(
+            return withoutRejectionLine(tracedJsonError(
                 "요청을 처리하지 못했습니다.",
                 "CHAT_APPLICATION_ERROR",
                 500,
@@ -7760,10 +7835,10 @@ async function handleChatPost(
                     error: providerError,
                     retryable: false,
                 }
-            );
+            ));
         }
 
-        return tracedJsonError(
+        return withoutRejectionLine(tracedJsonError(
             "AI 응답 생성에 실패했습니다.",
             "AI_PROVIDER_ERROR",
             500,
@@ -7776,6 +7851,6 @@ async function handleChatPost(
                 modelId: dispatchModelIdForLog,
                 error: providerError,
             }
-        );
+        ));
     }
 }

@@ -1673,6 +1673,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The additive v19 migration drops one NOT NULL and re-creates the session budget claim guard so a max_shadow subscription claim needs no price row. It performs no row DML and never writes AdminAuditLog; the scanner's write verbs are the ALTER TABLE clauses and the guard's existing FOR KEY SHARE and FOR SHARE locks.",
   })),
   {
+    path: "prisma/migrations/20261105100000_amux_idea_session_plan_refusal/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The additive migration creates AmuxIdeaSessionPlanRefusal. It names the claim table only as a foreign key target and writes no claim row.",
+  },
+  {
     path: "lib/amux/cliUsageLedgerStore.ts",
     table: "AmuxCliUsageEvent",
     tableMentions: 2,

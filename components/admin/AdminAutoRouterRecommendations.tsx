@@ -1,11 +1,14 @@
 "use client";
 
-import { Check, RotateCcw, Send, X } from "lucide-react";
+import { Check, Loader2, RotateCcw, Send, X } from "lucide-react";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import {
   isRecommendationSendable,
   openRecommendations,
+  RECOMMENDATION_SENT_STATUS,
   type ActionableRecommendation,
   type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
@@ -15,19 +18,31 @@ export type RecommendationCycle = { id: string; createdAt: string; summary: unkn
 
 export const optimizerCycleAnchor = (cycleId: string) => `optimizer-cycle-${cycleId}`;
 
+/** Names one recommendation, for the send in progress and the send that was refused. */
+export const recommendationKey = (cycleId: string, index: number) => `${cycleId}:${index}`;
+
+/** What the last press of a send button came to while its answer matters. */
+export type RecommendationSendState = {
+  sendingKey: string | null;
+  failure: { key: string; failure: AdminApiFailure } | null;
+};
+
 type SetStatus = (cycleId: string, index: number, status: RecommendationStatus) => void;
 type SendToAmux = (cycleId: string, index: number) => void;
 
 /**
  * One code or setting recommendation's status and its buttons. An owner can send
  * it to AMUX as an idea; the server builds the idea from the stored report
- * (app/api/admin/auto-llm-router/optimizer/recommendations/send/route.ts).
+ * (app/api/admin/auto-llm-router/optimizer/recommendations/send/route.ts). A
+ * refused send says why here, beside the button that was pressed: the panel's
+ * own notice is too far above this list to be seen from it.
  */
 export function RecommendationControls({
   cycle,
   item,
   busy,
   canSend,
+  sendState,
   onSetStatus,
   onSend,
 }: {
@@ -35,12 +50,16 @@ export function RecommendationControls({
   item: ActionableRecommendation;
   busy: boolean;
   canSend: boolean;
+  sendState?: RecommendationSendState;
   onSetStatus: SetStatus;
   onSend: SendToAmux;
 }) {
   const m = useAdminMessages(adminAutoRouterOptimizerMessages);
   const buttonClass =
     "inline-flex min-h-11 items-center gap-1 rounded-xl border border-zinc-600 px-3 text-xs font-bold text-zinc-200 disabled:opacity-50";
+  const key = recommendationKey(cycle.id, item.index);
+  const sending = sendState?.sendingKey === key;
+  const refused = sendState?.failure?.key === key ? sendState.failure.failure : null;
 
   return (
     <div className="mt-1" data-testid="admin-auto-router-recommendation-controls">
@@ -48,7 +67,11 @@ export function RecommendationControls({
         <span
           data-testid="admin-auto-router-recommendation-status"
           data-status={item.status}
-          className="rounded border border-zinc-600 px-1 text-[11px] text-zinc-400"
+          className={`rounded border px-1 text-[11px] ${
+            item.status === RECOMMENDATION_SENT_STATUS
+              ? "border-status-success-900 bg-status-success-950/50 font-bold text-status-success-300"
+              : "border-zinc-600 text-zinc-400"
+          }`}
         >
           {m.recommendationStatuses[item.status]}
           {item.at ? ` · ${new Date(item.at).toLocaleString()}` : ""}
@@ -115,11 +138,12 @@ export function RecommendationControls({
             data-testid="admin-auto-router-recommendation-send"
             className={buttonClass}
           >
-            <Send className="h-3.5 w-3.5" aria-hidden />
-            {m.sendToAmux}
+            {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Send className="h-3.5 w-3.5" aria-hidden />}
+            {sending ? m.sendingToAmux : m.sendToAmux}
           </button>
         ) : null}
       </div>
+      {refused ? <AdminApiFailureNotice failure={refused} testId="admin-auto-router-recommendation-send-failure" /> : null}
     </div>
   );
 }
@@ -133,12 +157,14 @@ export function OpenRecommendationsInbox({
   cycles,
   busy,
   canSend,
+  sendState,
   onSetStatus,
   onSend,
 }: {
   cycles: readonly RecommendationCycle[];
   busy: boolean;
   canSend: boolean;
+  sendState?: RecommendationSendState;
   onSetStatus: SetStatus;
   onSend: SendToAmux;
 }) {
@@ -178,7 +204,7 @@ export function OpenRecommendationsInbox({
                   {m.cycleLink}
                 </a>
               </p>
-              <RecommendationControls cycle={cycle} item={item} busy={busy} canSend={canSend} onSetStatus={onSetStatus} onSend={onSend} />
+              <RecommendationControls cycle={cycle} item={item} busy={busy} canSend={canSend} sendState={sendState} onSetStatus={onSetStatus} onSend={onSend} />
             </li>
           );
         })}

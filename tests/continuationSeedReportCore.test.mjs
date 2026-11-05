@@ -15,6 +15,7 @@ import {
   evaluateSeedCandidates,
   excerptToTokens,
   factsRetained,
+  fractionBand,
   measureStoredConversations,
   planWithBoundaryExcerpt,
   representativeSeedFixtures,
@@ -124,6 +125,44 @@ test("blank turns are reported apart from budget stops, judged on the pre-cut te
   assert.equal(judged.newest, "none_eligible");
   assert.equal(judged.omittedByBudget, 0);
   assert.equal(judged.blankSkipped, 1);
+  assert.equal(judged.includedShare, null, "no denominator, so no inclusion share");
+});
+
+test("every candidate separates a blank turn from a budget stop the same way", () => {
+  // A blank turn older than the one the budget stopped at: C reaches the same
+  // boundary turn as the shipped rule, so both must attribute it identically.
+  const messages = [
+    message("user", 0, "   \n  "),
+    message("assistant", 1, "가".repeat(1_900)),
+    message("user", 2, "가".repeat(1_900)),
+  ];
+  for (const candidate of SEED_CANDIDATES) {
+    const plan = candidate.plan(messages, messages.length);
+    const result = evaluatePlan(plan, messages);
+    assert.equal(plan.blankSkippedCount, 1, candidate.id);
+    assert.equal(result.blankSkipped, 1, candidate.id);
+    assert.equal(result.eligibleNonBlank, 2, candidate.id);
+    // The blank turn is in neither term: every message that carries text was
+    // either carried or left out by this candidate's budget.
+    assert.equal(result.includedMessages + result.omittedByBudget, 2, candidate.id);
+    assert.equal(result.includedShare, result.includedMessages / 2, candidate.id);
+  }
+  // The shipped budget fits one of the two; the larger budgets fit both.
+  assert.equal(evaluatePlan(planContinuationSeed({ messages }), messages).omittedByBudget, 1);
+  const wider = SEED_CANDIDATES.find((candidate) => candidate.id === "B6000");
+  assert.equal(evaluatePlan(wider.plan(messages, 3), messages).includedShare, 1);
+});
+
+test("the inclusion amount is a share of the eligible non-blank messages only", () => {
+  const messages = [
+    message("tool", 0, "{}"),
+    message("user", 1, "  "),
+    message("user", 2, "질문입니다 오늘 회의 정리 부탁드립니다"),
+    message("assistant", 3, "짧은 답변입니다 정리했습니다"),
+  ];
+  const result = evaluatePlan(planContinuationSeed({ messages }), messages);
+  assert.equal(result.includedMessages, 2);
+  assert.equal(result.includedShare, 1, "a role-excluded and a blank message are not a loss");
 });
 
 test("rendered tokens price the seed with the snapshot's own provider and import time", () => {
@@ -205,6 +244,39 @@ test("combined figures do not pin a group's size: neighbouring groups publish th
   assert.equal(published.hangul.byCandidate.current.stoppedByBudget.snapshotShare, "30-39%", "the stops are counted");
   assert.equal(published.hangul.byCandidate.current.emptySeed.snapshotShare, "10-19%");
   assert.equal(published.hangul.byCandidate.current.includedMessagesP10, undefined, "no low quantile");
+});
+
+test("a source longer than the scan is published apart from every candidate's figures", () => {
+  // Half the group is longer than the newest-200 scan. No candidate can reach
+  // those messages, so the figure belongs to the group, not to a budget.
+  const beyond = (count) =>
+    Array.from({ length: count }, () => ({
+      ...evaluateSeedCandidates(fineTurns, 400),
+      assistantTurns: 1,
+    }));
+  const report = aggregateSeedSamples([...beyond(10), ...repeated(10, fineTurns, 1)]);
+  assert.equal(report.hangul.sourceLongerThanScan.snapshotShare, "50-59%");
+  assert.equal(report.hangul.sourceLongerThanScan.assistantTurnShare, "50-59%");
+  for (const figures of Object.values(report.hangul.byCandidate)) {
+    assert.equal(figures.stoppedByBudget.snapshotShare, "0%", "the scan is not a budget stop");
+  }
+  // All within the scan: the share is 0%, not a missing key.
+  assert.equal(
+    aggregateSeedSamples(repeated(MIN_GROUP_SIZE, fineTurns, 1)).hangul.sourceLongerThanScan.snapshotShare,
+    "0%"
+  );
+});
+
+test("the median inclusion amount is published as a band, per candidate", () => {
+  const report = aggregateSeedSamples([...repeated(5, emptyTurns, 1), ...repeated(15, fineTurns, 1)]);
+  // The median source carries both of its two eligible non-blank messages.
+  assert.equal(report.hangul.byCandidate.current.includedShareP50, "100%");
+  // The empty-seed sources carry none; weighted to the median they do.
+  const mostlyEmpty = aggregateSeedSamples([...repeated(15, emptyTurns, 1), ...repeated(5, fineTurns, 1)]);
+  assert.equal(mostlyEmpty.hangul.byCandidate.current.includedShareP50, "0%");
+  assert.equal(mostlyEmpty.hangul.byCandidate["C-tail"].includedShareP50, "50-59%");
+  assert.equal(fractionBand(0.996), "90-99%", "99.6% is not all of it");
+  assert.deepEqual([null, -1, 0, 0.05, 1, 2].map(fractionBand), [null, "0%", "0%", "1-9%", "100%", "100%"]);
 });
 
 test("shares and counts are bands", () => {

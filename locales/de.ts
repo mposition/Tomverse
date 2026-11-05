@@ -247,6 +247,7 @@ export const de = {
         guestVerificationTitle: "Bitte bestätigen Sie, um fortzufahren",
         guestVerificationDescription: "Eine kurze Prüfung, die automatisierte Anfragen reduziert. Meist läuft sie von selbst durch.",
         guestVerificationClose: "Prüfung abbrechen",
+        guestVerificationRetry: "Prüfung erneut versuchen",
         guestVerificationLongWait: "Diese Prüfung dauert länger als üblich. Sie können weiter warten oder sie abbrechen und es erneut versuchen.",
         guestVerificationFailed: "Die Prüfung konnte nicht abgeschlossen werden. Bitte erneut versuchen.",
         guestVerificationUnavailable: "Der Prüfdienst ist derzeit nicht verfügbar. Bitte versuchen Sie es in Kürze erneut.",

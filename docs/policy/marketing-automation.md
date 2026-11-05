@@ -428,7 +428,7 @@ O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에�
 - 검증 단계: 허용 파일 정확히 4개(`lib/seo.ts`, `components/seo/StructuredData.tsx`, `app/sitemap.ts`, `app/llms.txt/route.ts` — 마지막은 환경변수 `LLMS_TXT_ENABLED=true`일 때만 응답하는 기본 꺼진 실험 route이고, 문구·링크는 `tests/llmsTxtRoute.test.mjs`가 판정한다)
   밖의 변경·rename·삭제·바이너리·symlink·mode 변경 거부, 500줄 이하, lint·typecheck·테스트, **base 커밋의 정책 테스트로** 판정.
   판정 테스트는 사람 소유 파일이며 허용 목록에 없다.
-  제안 호출은 엄격한 구조화 출력(JSON schema)으로 `{summary, edits[]}`를 받고, 읽을 수 없는 답은 `unreadable`로 거절하면서 종류·길이·첫 issue·앞 300자(자격증명처럼 보이는 문자열은 지움)를 실행 로그에 남긴다(2026-11-04 운영자 결정, 정책 버전 변경 없음).
+  제안 호출은 엄격한 구조화 출력(JSON schema)으로 `{summary, edits[]}`를 받고, 읽을 수 없는 답은 `unreadable`로 거절하면서 종류·길이·첫 issue·앞 300자(자격증명처럼 보이는 문자열은 지움)를 실행 로그에 남긴다(2026-11-04 운영자 결정, 정책 버전 변경 없음). 빈 `edits`는 실패가 아니라 `nothing_to_do`로 끝나 이유만 로그에 남기고 게시할 것이 없으며, 200자를 넘는 `summary`는 잘라서 읽는다(2026-11-05 운영자 지시).
 - PR 생성: 이 저장소 전용 GitHub App 토큰, 검증 산출 tree hash와 push 내용 일치 시에만.
 - 브랜치: 졸업 전 `marketing-agent/<topic>`(자동화 권한 없음, 사람 병합). 졸업 후
   `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다

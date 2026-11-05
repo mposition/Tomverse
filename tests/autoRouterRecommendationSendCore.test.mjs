@@ -66,13 +66,16 @@ test("a recommendation being sent stays on the open list, and the coding agent d
   assert.equal(nextClaimableRecommendation(cycles, NOW), null);
 });
 
-test("a sent recommendation keeps its idea, leaves the open list, and the coding agent does not take it", () => {
+test("a sent recommendation keeps its idea, stays on the open list until marked, and the coding agent does not take it", () => {
   assert.equal(recommendationStatusEntries(sent).get(1)?.amuxIdeaId, "idea-1");
   const item = actionableRecommendations(sent, NOW).find((entry) => entry.index === 1);
   assert.equal(item.status, "sent_to_amux");
   assert.equal(item.amuxIdeaId, "idea-1");
 
   const cycles = [{ id: "cyc_1", createdAt: at, summary: sent }];
-  assert.deepEqual(openRecommendations(cycles, NOW).map((entry) => entry.index), [2]);
+  assert.deepEqual(openRecommendations(cycles, NOW).map((entry) => entry.index), [1, 2]);
   assert.equal(nextClaimableRecommendation(cycles, NOW), null);
+
+  const marked = withRecommendationStatus(sent, 1, { status: "done", at, by: "owner" });
+  assert.deepEqual(openRecommendations([{ id: "cyc_1", createdAt: at, summary: marked }], NOW).map((entry) => entry.index), [2]);
 });

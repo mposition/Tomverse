@@ -32,6 +32,13 @@
  * guidance it was for, the spend against the optimizer's day and month caps
  * and when a cycle was last promoted -- never the guidance, cases or summary,
  * which stay on the routing screen.
+ *
+ * Ops and SRE shows whether its state chain is trusted, the stage the chain
+ * was approved in, its generation and when its newest digest arrived. Support
+ * triage shows its switch, its newest worker run and the day's counts, and
+ * Marketing shows what waits for approval, its two switches and its generator's
+ * latest run. None of them reads a body, title, URL or a user's words, and no
+ * amount of money is shown.
  */
 
 import type { DeptStatus } from "@/lib/agentOffice/sim";
@@ -202,6 +209,56 @@ export type AgentOfficeRoutingState =
       lastPromotedAt: string | null;
     };
 
+export type AgentOfficeSreState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      /** The chain's head, or null when no genesis was ever approved. */
+      head: {
+        /** Null when the head has no state row. */
+        generation: number | null;
+        /** The stage the genesis was approved in, as stored ("shadow" or "live"). */
+        mode: string;
+      } | null;
+      /** "trusted", or the chain check's own reason code. */
+      trustReason: string;
+      /** When the agent's newest digest was stored (UTC ISO), or null if none ever was. */
+      latestDigestAt: string | null;
+    };
+
+export type AgentOfficeSupportState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      /** The effective switch: the Admin console's, or the environment's when none is saved. */
+      enabled: boolean;
+      /** The newest finished worker run, or null when none ever finished. */
+      worker: { at: string; outcome: string } | null;
+      /** Reports the worker took up since the start of this UTC day. */
+      reportsToday: number;
+      /** Runs of either kind since the start of this UTC day that did not succeed. */
+      failedRunsToday: number;
+      /** A run is overdue or retention is stuck (the agent's own judgement). */
+      stale: boolean;
+    };
+
+/** A Marketing switch as the console reads it. */
+export type AgentOfficeMarketingSwitch = "on" | "off" | "unreadable";
+
+export type AgentOfficeMarketingState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      drafts: AgentOfficeMarketingSwitch;
+      publish: AgentOfficeMarketingSwitch;
+      /** Posts waiting for a person; null when the count could not be read (never zero). */
+      pending: { count: number; oldestAt: string | null } | null;
+      /** The generator's newest run; null when that could not be read, `at: null` when none ran. */
+      lastRun: { at: string | null } | null;
+      /** The generator's calls this UTC month; null when they could not be read. */
+      calls: number | null;
+    };
+
 /** One reviewer of the independent review server, as its latest report shows it. */
 export type AgentOfficeReviewerState = "reviewing" | "idle" | "off" | "lost";
 
@@ -288,6 +345,9 @@ export type AgentOfficeLiveRooms = {
   qa: AgentOfficeQaState;
   finance: AgentOfficeFinanceState;
   routing: AgentOfficeRoutingState;
+  sre: AgentOfficeSreState;
+  support: AgentOfficeSupportState;
+  marketing: AgentOfficeMarketingState;
   engineering: AgentOfficeEngineeringState;
   amux: AgentOfficeAmuxState;
 };
@@ -865,6 +925,168 @@ export function routingLiveDept(state: AgentOfficeRoutingState, copy: RoutingCop
   };
 }
 
+/** A label from a copy table, or the stored code itself when the table has none: a code is never invented. */
+const labelOrCode = (table: Readonly<Record<string, string>>, code: string) =>
+  Object.hasOwn(table, code) ? table[code] : code;
+
+/**
+ * The Ops and SRE room's colour. A chain that is not trusted and a read that
+ * failed need a look; no genesis approved yet is waiting; a trusted chain is
+ * done. How old the newest digest is is not judged here: the digest desk and
+ * the agent's own dead-man monitor judge that, so the room shows the time.
+ */
+export function sreTone(state: AgentOfficeSreState): DeptStatus {
+  if (state.kind === "unread") return "attention";
+  if (!state.head) return "waiting";
+  return state.trustReason === "trusted" ? "done" : "attention";
+}
+
+type SreCopy = {
+  badges: { trusted: string; untrusted: string; noGenesis: string; unread: string };
+  unread: string;
+  noGenesis: string;
+  /** The stage words by their stored value; a value with no word is shown as stored. */
+  modes: Record<string, string>;
+  generationMissing: string;
+  trusted: (mode: string, generation: string) => string;
+  untrusted: (reason: string, mode: string, generation: string) => string;
+  lastDigest: (time: string) => string;
+  noDigest: string;
+};
+
+/** The Ops and SRE room's line and detail, from its state and the console's copy. */
+export function sreLiveDept(state: AgentOfficeSreState, copy: SreCopy): AgentOfficeLiveDept {
+  const status = sreTone(state);
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
+
+  const digest = state.latestDigestAt ? copy.lastDigest(aestStamp(state.latestDigestAt)) : copy.noDigest;
+  if (!state.head) {
+    return { status, badge: copy.badges.noGenesis, line: copy.noGenesis, detail: digest };
+  }
+  const mode = labelOrCode(copy.modes, state.head.mode);
+  const generation = state.head.generation === null ? copy.generationMissing : String(state.head.generation);
+  const trusted = state.trustReason === "trusted";
+  return {
+    status,
+    badge: trusted ? copy.badges.trusted : copy.badges.untrusted,
+    line: trusted ? copy.trusted(mode, generation) : copy.untrusted(state.trustReason, mode, generation),
+    detail: digest,
+  };
+}
+
+/**
+ * The Support triage room's colour. A read that failed, a run overdue and a
+ * run that did not succeed today need a look, whatever the switch says; a
+ * switch that is off is waiting; otherwise the room is done.
+ */
+export function supportTone(state: AgentOfficeSupportState): DeptStatus {
+  if (state.kind === "unread") return "attention";
+  if (state.stale || state.failedRunsToday > 0) return "attention";
+  return state.enabled ? "done" : "waiting";
+}
+
+type SupportCopy = {
+  badges: { on: string; off: string; stale: string; failed: string; unread: string };
+  unread: string;
+  on: string;
+  off: string;
+  /** The run outcome words by their stored value; a value with no word is shown as stored. */
+  outcomes: Record<string, string>;
+  lastRun: (time: string, outcome: string) => string;
+  noRun: string;
+  reportsToday: (count: number) => string;
+  failedRunsToday: (count: number) => string;
+  stale: string;
+};
+
+/** The Support triage room's line and detail, from its state and the console's copy. */
+export function supportLiveDept(state: AgentOfficeSupportState, copy: SupportCopy): AgentOfficeLiveDept {
+  const status = supportTone(state);
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
+
+  const last = state.worker
+    ? copy.lastRun(aestStamp(state.worker.at), labelOrCode(copy.outcomes, state.worker.outcome))
+    : copy.noRun;
+  const facts: string[] = [];
+  // Off, the line is the switch; the newest run is still a fact worth keeping.
+  if (!state.enabled) facts.push(last);
+  facts.push(copy.reportsToday(state.reportsToday), copy.failedRunsToday(state.failedRunsToday));
+  if (state.stale) facts.push(copy.stale);
+  return {
+    status,
+    badge: state.stale ? copy.badges.stale : state.failedRunsToday > 0 ? copy.badges.failed : state.enabled ? copy.badges.on : copy.badges.off,
+    line: state.enabled ? `${copy.on} · ${last}` : copy.off,
+    detail: facts.join(" · "),
+  };
+}
+
+/**
+ * The Marketing room's colour. A read that failed, a switch that cannot be
+ * read and an approval queue that cannot be counted need a look; so does a
+ * post waiting for a person, because that is the operator's work; drafts
+ * switched off is waiting; otherwise the room is done.
+ */
+export function marketingTone(state: AgentOfficeMarketingState): DeptStatus {
+  if (state.kind === "unread") return "attention";
+  if (state.drafts === "unreadable" || state.publish === "unreadable") return "attention";
+  if (state.pending === null || state.pending.count > 0) return "attention";
+  return state.drafts === "off" ? "waiting" : "done";
+}
+
+type MarketingCopy = {
+  badges: { awaiting: string; unreadableSwitch: string; unreadableQueue: string; draftsOff: string; clear: string; unread: string };
+  unread: string;
+  switchWords: Record<AgentOfficeMarketingSwitch, string>;
+  switchUnreadable: string;
+  queueUnread: string;
+  queueEmpty: string;
+  /** How many posts wait, and since when the oldest has. */
+  queue: (count: number, oldest: string | null) => string;
+  draftsOff: string;
+  switches: (drafts: string, publish: string) => string;
+  lastRun: (time: string) => string;
+  noRun: string;
+  lastRunUnread: string;
+  calls: (count: number) => string;
+  callsUnread: string;
+};
+
+/** The Marketing room's line and detail, from its state and the console's copy. */
+export function marketingLiveDept(state: AgentOfficeMarketingState, copy: MarketingCopy): AgentOfficeLiveDept {
+  const status = marketingTone(state);
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
+
+  const queue =
+    state.pending === null
+      ? copy.queueUnread
+      : state.pending.count === 0
+        ? copy.queueEmpty
+        : copy.queue(state.pending.count, state.pending.oldestAt ? aestStamp(state.pending.oldestAt) : null);
+  const switchUnreadable = state.drafts === "unreadable" || state.publish === "unreadable";
+  const line = switchUnreadable
+    ? copy.switchUnreadable
+    : state.pending === null || state.pending.count > 0 || state.drafts !== "off"
+      ? queue
+      : copy.draftsOff;
+  const badge = switchUnreadable
+    ? copy.badges.unreadableSwitch
+    : state.pending === null
+      ? copy.badges.unreadableQueue
+      : state.pending.count > 0
+        ? copy.badges.awaiting
+        : state.drafts === "off"
+          ? copy.badges.draftsOff
+          : copy.badges.clear;
+
+  const facts: string[] = [];
+  // The queue is a fact beside a line that is about something else.
+  if (line !== queue) facts.push(queue);
+  facts.push(copy.switches(copy.switchWords[state.drafts], copy.switchWords[state.publish]));
+  facts.push(state.lastRun === null ? copy.lastRunUnread : state.lastRun.at ? copy.lastRun(aestStamp(state.lastRun.at)) : copy.noRun);
+  facts.push(state.calls === null ? copy.callsUnread : copy.calls(state.calls));
+  return { status, badge, line, detail: facts.join(" · ") };
+}
+
 /** A reviewer's colour: reviewing is working, idle is ready, off waits, lost needs a look. */
 export function reviewerTone(state: AgentOfficeReviewerState): DeptStatus {
   if (state === "reviewing") return "working";
@@ -1140,7 +1362,7 @@ export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy):
  * each links to the screen where it is acted on. Nothing here decides; the
  * office only counts and points.
  */
-export const OPERATOR_QUEUE_KEYS = ["marketing", "amuxEscalations", "amuxHalts", "autoFix"] as const;
+export const OPERATOR_QUEUE_KEYS = ["marketing", "amuxEscalations", "amuxHalts"] as const;
 export type OperatorQueueKey = (typeof OPERATOR_QUEUE_KEYS)[number];
 /** `null` is a count that could not be read: never shown as zero. */
 export type AgentOfficeOperatorQueue = Record<OperatorQueueKey, number | null>;
@@ -1149,7 +1371,6 @@ export const OPERATOR_QUEUE_HREFS: Record<OperatorQueueKey, string> = {
   marketing: "/admin/marketing",
   amuxEscalations: "/admin/amux-execution?tab=assignment",
   amuxHalts: "/admin/amux-settings?tab=safety",
-  autoFix: "/admin/support",
 };
 
 /** The to-do total over the counts that were read, and whether any could not be. */

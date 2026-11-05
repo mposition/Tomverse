@@ -2,6 +2,7 @@ import {
   AMUX_ANALYSIS_SCHEMA_FIELDS, AMUX_ANALYSIS_SCHEMA_RULES, amuxAnalysisAnswerJson, amuxAnalysisTextSafe,
   type AmuxAnalysisSchemaRejectAt,
 } from "./ideaAnalysisChunkCore.ts";
+import { amuxSessionAnswerQuestion } from "./ideaSessionAnswerCore.ts";
 
 /**
  * Why a session analysis answer became no plan, read back for the owner from
@@ -38,10 +39,8 @@ export function classifyAmuxSessionReviewAnswer(raw: string): AmuxSessionReview 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { reason: "not_a_plan" };
   }
-  const answer = parsed as Record<string, unknown>;
-  const question = typeof answer.ownerQuestion === "string" ? answer.ownerQuestion.trim() : "";
-  if (answer.coverageStatus !== "needs_owner_input" || question.length === 0 ||
-      question.length > QUESTION_MAX || !amuxAnalysisTextSafe(question)) {
+  const question = amuxSessionAnswerQuestion(parsed as Record<string, unknown>);
+  if (question === null || question.length > QUESTION_MAX || !amuxAnalysisTextSafe(question)) {
     return { reason: "not_a_plan" };
   }
   return { reason: "owner_question", question };

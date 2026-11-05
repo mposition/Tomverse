@@ -24,6 +24,7 @@ import {
 import { dispatchAppToast } from "@/lib/appToast";
 import { submitFeedback } from "@/lib/feedbackClient";
 import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { buildSupportVerificationMailto } from "@/lib/supportVerificationMailto";
 import {
   feedbackFailureCopyKey,
   feedbackMessageState,
@@ -608,8 +609,13 @@ export function SupportPageContent() {
   const messageState = feedbackMessageState(message);
   const canSubmit = messageState.isValid && Boolean(email.trim()) && !busy;
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  /**
+   * One submission path for the form's submit button and for the retry button
+   * a failed security check offers. Nothing typed is cleared unless the request
+   * was actually stored, so a retry re-runs the check with the same request
+   * rather than asking for it again.
+   */
+  const send = async () => {
     if (submittingRef.current) return;
     if (!messageState.isValid || !email.trim()) return;
     submittingRef.current = true;
@@ -677,6 +683,11 @@ export function SupportPageContent() {
       submittingRef.current = false;
       setBusy(false);
     }
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void send();
   };
 
   return (
@@ -842,6 +853,30 @@ export function SupportPageContent() {
               failure={verificationFailure}
               surface="feedback"
               onCancel={cancelVerification}
+              // `send` is re-entrant-safe through `submittingRef`, and the slot
+              // is hidden while a check is running, so the retry button cannot
+              // start a second submission.
+              onRetry={() => void send()}
+              // The check cannot always be made to work -- a blocked script or
+              // an unreachable Cloudflare leaves this form with no way to
+              // submit at all. The support address is a channel that never
+              // needed verification, so it is offered with the error rather
+              // than only in the page's contact card further up.
+              errorFallback={
+                <a
+                  // Prefilled from the form, so following the link continues
+                  // this request rather than starting a blank one.
+                  href={buildSupportVerificationMailto({
+                    address: page.emailValue,
+                    subject: `${page.formTitle}: ${page.types[type]}`,
+                    message,
+                  })}
+                  data-testid="support-verification-email"
+                  className="font-bold text-blue-600 underline underline-offset-2 hover:text-blue-500 dark:text-blue-400"
+                >
+                  {page.emailLabel}: {page.emailValue}
+                </a>
+              }
               testId="support-verification"
             />
             <button

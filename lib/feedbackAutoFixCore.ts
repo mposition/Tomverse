@@ -5,15 +5,14 @@ import {
 } from "@/lib/errorReportContract";
 
 /**
- * Phase 2 shadow-mode case vocabulary and rules -- dependency-free so the
+ * Shadow-mode case vocabulary and rules -- dependency-free so the
  * server worker, the admin console and the tests share one definition.
  *
  * Shadow mode means exactly this (docs/policy/trace-feedback-automation.md
  * §8): a case only collects evidence, classifies eligibility with the
  * deterministic rules below, and leaves a bounded diagnostic summary for a
- * human. No code is modified, no branch is pushed, no PR is created, and no
- * LLM verdict gates anything -- `llmConfidence` exists as an observational
- * field for a future diagnosis pass and stays null here.
+ * human. No code is modified, no branch is pushed and no PR is created here.
+ * The model's reading of a classified case is lib/traceReportAnalysis.ts (§8a).
  */
 
 export const AUTOFIX_CASE_STATE = {
@@ -26,36 +25,6 @@ export const AUTOFIX_CASE_STATE = {
   ineligible: "ineligible",
   awaitingHumanReview: "awaiting_human_review",
   closed: "closed",
-  // --- Phase 3 (docs/policy §9; dark until FEEDBACK_AUTOFIX_ENABLED) ------
-  /** A fix workflow run holds the case under a lease. */
-  fixAttempting: "fix_attempting",
-  /** The deterministic Red→Green proof was validated server-side. */
-  redGreenProven: "red_green_proven",
-  /** A develop PR exists; a human must approve it (never auto-merge in the
-   * initial operating period). */
-  prOpen: "pr_open",
-  /** The attempt could not produce a proof or a PR; a human decides next. */
-  fixFailed: "fix_failed",
-  // --- Owner-approved promotion (docs/policy/trace-feedback-automation.md §9.3)
-  // Every state below is entered only on a fact the server read itself: an
-  // approval made in the console, or GitHub / a deployment observed through a
-  // read-only credential. No automation merges anything -- a person merges
-  // both PRs in GitHub, under branch protection.
-  /** An owner approved the PR at one head SHA and one patch digest. */
-  approved: "approved",
-  /** The develop PR was observed merged at exactly the approved head. */
-  merged: "merged",
-  /** The merge commit was observed on staging across a stabilisation window. */
-  stagingVerified: "staging_verified",
-  /** The main promotion PR was observed merged with the approved digest. */
-  productionMerged: "production_merged",
-  /** The production merge commit was observed live and ready across a
-   * stabilisation window. The report is still not resolved: only the
-   * operator's reply does that. */
-  productionVerified: "production_verified",
-  /** Promotion stopped on an observed fact that breaks the approval (a head
-   * pushed after approval, a PR closed unmerged, a digest mismatch). */
-  promotionFailed: "promotion_failed",
 } as const;
 export type AutoFixCaseState =
   (typeof AUTOFIX_CASE_STATE)[keyof typeof AUTOFIX_CASE_STATE];
@@ -87,66 +56,10 @@ const TRANSITIONS: Record<AutoFixCaseState, readonly AutoFixCaseState[]> = {
     AUTOFIX_CASE_STATE.collectingEvidence,
   ],
   diagnostic_ready: [AUTOFIX_CASE_STATE.awaitingHumanReview],
-  awaiting_human_review: [
-    AUTOFIX_CASE_STATE.closed,
-    // Phase 3 entry: a candidate may be claimed by the fix workflow. The
-    // claim endpoint additionally requires FEEDBACK_AUTOFIX_ENABLED -- the
-    // graph edge alone never activates anything.
-    AUTOFIX_CASE_STATE.fixAttempting,
-  ],
+  awaiting_human_review: [AUTOFIX_CASE_STATE.closed],
   ineligible: [AUTOFIX_CASE_STATE.closed],
-  // --- Phase 3 -------------------------------------------------------------
-  fix_attempting: [
-    AUTOFIX_CASE_STATE.redGreenProven,
-    AUTOFIX_CASE_STATE.fixFailed,
-    // Lease recovery: an expired claim returns to the review pool.
-    AUTOFIX_CASE_STATE.awaitingHumanReview,
-  ],
-  red_green_proven: [AUTOFIX_CASE_STATE.prOpen, AUTOFIX_CASE_STATE.fixFailed],
-  // The only way forward from an open PR is an owner's approval. There is no
-  // pr_open -> merged edge: a PR someone merged without approving it is not
-  // promoted, it stays here and the console says so.
-  pr_open: [AUTOFIX_CASE_STATE.approved, AUTOFIX_CASE_STATE.fixFailed],
-  fix_failed: [AUTOFIX_CASE_STATE.closed, AUTOFIX_CASE_STATE.awaitingHumanReview],
-  // --- Owner-approved promotion ---------------------------------------------
-  approved: [AUTOFIX_CASE_STATE.merged, AUTOFIX_CASE_STATE.promotionFailed],
-  merged: [
-    AUTOFIX_CASE_STATE.stagingVerified,
-    AUTOFIX_CASE_STATE.promotionFailed,
-  ],
-  // No staging_verified -> closed: staging is not production, and a case must
-  // not be finished before the fix reached the people who reported it.
-  staging_verified: [
-    AUTOFIX_CASE_STATE.productionMerged,
-    AUTOFIX_CASE_STATE.promotionFailed,
-  ],
-  production_merged: [
-    AUTOFIX_CASE_STATE.productionVerified,
-    AUTOFIX_CASE_STATE.promotionFailed,
-  ],
-  production_verified: [AUTOFIX_CASE_STATE.closed],
-  promotion_failed: [AUTOFIX_CASE_STATE.closed],
   closed: [],
 };
-
-/**
- * States an operator has to act on -- the support badge counts these, so a
- * PR waiting for approval, a verified fix waiting for its reply and a stopped
- * promotion are visible from anywhere in the console.
- */
-export const AUTOFIX_OPERATOR_ACTION_STATES: readonly AutoFixCaseState[] = [
-  AUTOFIX_CASE_STATE.prOpen,
-  AUTOFIX_CASE_STATE.productionVerified,
-  AUTOFIX_CASE_STATE.promotionFailed,
-];
-
-/** States the promotion observer re-reads on every pass. */
-export const AUTOFIX_PROMOTION_OBSERVED_STATES: readonly AutoFixCaseState[] = [
-  AUTOFIX_CASE_STATE.approved,
-  AUTOFIX_CASE_STATE.merged,
-  AUTOFIX_CASE_STATE.stagingVerified,
-  AUTOFIX_CASE_STATE.productionMerged,
-];
 
 export const canTransitionAutoFixCase = (
   from: string,
@@ -282,13 +195,3 @@ export const AUTOFIX_LEASE_MS = 5 * 60 * 1000;
  * the literal string "true". Fail-closed by default. */
 export const isAutoFixShadowModeEnabled = () =>
   process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED === "true";
-
-/**
- * Phase 3 master switch. Entirely separate from shadow mode and default OFF:
- * turning it on is an operational decision gated by policy §9 (30 days of
- * shadow observation, ≥30 verified traced reports, zero leaks, and explicit
- * human approval) -- the code never checks those conditions itself, so the
- * flag is the commitment that a human verified them.
- */
-export const isAutoFixFixingEnabled = () =>
-  process.env.FEEDBACK_AUTOFIX_ENABLED === "true";

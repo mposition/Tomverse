@@ -92,7 +92,7 @@ async function loadRouteWithSpies(): Promise<{
   mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
     previewPromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
       refinerAdmissionEvents.push("preview");
-      if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
+      if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError("consumed");
       return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
         ? { ...message, content: "Synthetic held execution prompt" } : message),
         mode: "explicit" as const, provenance: { decision: "accepted" as const } };
@@ -309,7 +309,9 @@ test("a Refiner decision on the default-off deployment refuses before model, cre
     }),
   }));
   assert.equal(response.status, 409);
-  assert.equal((await response.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+  const body = await response.json();
+  assert.equal(body.code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+  assert.equal(JSON.stringify(body).includes("mode_disabled"), false);
   assert.equal(spies.creditReservations, 0);
   assert.equal(spies.streamTextCalls, 0);
   assert.equal(spies.conversationReads, 0);
@@ -361,9 +363,20 @@ test("an admitted valid Refiner decision consumes once and a stale replay remain
     assert.equal(consumedRefinerDecisions, 1);
     assert.equal(spies.creditReservations, 1);
     assert.deepEqual(refinerAdmissionEvents, ["scope", "admission", "preview", "consume"]);
+    const warnings: string[] = [];
+    const warn = mock.method(console, "warn", (line: unknown) => { warnings.push(String(line)); });
     const repeated = await POST(refinerRequest());
+    warn.mock.restore();
     assert.equal(repeated.status, 409);
-    assert.equal((await repeated.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    const repeatedBody = await repeated.json();
+    assert.equal(repeatedBody.code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    assert.equal(JSON.stringify(repeatedBody).includes("consumed"), false);
+    // The operator's line says why, and nothing the user wrote.
+    const rejectedLines = warnings.filter((line) => line.includes("chat_request_rejected"));
+    assert.equal(rejectedLines.length, 1);
+    const rejected = rejectedLines[0];
+    assert.equal(rejected ? JSON.parse(rejected).reason : null, "consumed");
+    assert.equal(rejected?.includes("authored source"), false);
     assert.equal(consumedRefinerDecisions, 1);
     assert.equal(spies.creditReservations, 1);
     assert.equal(spies.streamTextCalls, 0);
@@ -387,6 +400,94 @@ test("an answer id a Chat image turn already used is refused before credit or pr
     assert.equal(spies.streamTextCalls, 0);
   } finally {
     imageAnswerStored = false;
+  }
+});
+
+const withWarnings = async (run: () => Promise<Response>) => {
+  const warnings: string[] = [];
+  const warn = mock.method(console, "warn", (line: unknown) => { warnings.push(String(line)); });
+  try {
+    const response = await run();
+    return { response, warnings, rejected: warnings.filter((line) => line.includes('"chat_request_rejected"')) };
+  } finally {
+    warn.mock.restore();
+  }
+};
+
+test("a refusal built by tracedJsonError leaves one content-free line naming its code and status", async () => {
+  const { POST } = await loadRouteWithSpies();
+  imageAnswerStored = true;
+  try {
+    const { response, rejected } = await withWarnings(() => POST(chatRequest(STORED_SELECTED_MODELS[0])));
+    const payload = (await response.json()) as { traceId?: string };
+    assert.deepEqual(Object.keys(payload).sort(), ["code", "error", "traceId"]);
+    assert.equal(rejected.length, 1);
+    const line = JSON.parse(rejected[0] ?? "{}") as Record<string, unknown>;
+    assert.equal(line.phase, "chat_request");
+    assert.equal(line.traceId, payload.traceId);
+    assert.equal(line.traceId, response.headers.get("X-Request-ID"));
+    assert.equal(line.code, "ASSISTANT_MESSAGE_CONFLICT");
+    assert.equal(line.status, 409);
+    for (const secret of ["hello", "qa@tomverse.app", CONVERSATION_ID]) {
+      assert.equal(rejected[0]?.includes(secret), false, secret);
+    }
+  } finally {
+    imageAnswerStored = false;
+  }
+});
+
+test("a security refusal leaves the same line", async () => {
+  const { POST } = await loadRouteWithSpies();
+  explicitRefinerAuthority = true; refinerAdmissionRefused = true;
+  try {
+    const { response, rejected } = await withWarnings(() => POST(refinerRequest()));
+    assert.equal(response.status, 429);
+    assert.equal(rejected.length, 1);
+    const line = JSON.parse(rejected[0] ?? "{}") as Record<string, unknown>;
+    assert.equal(line.traceId, response.headers.get("X-Request-ID"));
+    assert.equal(line.code, "API_RATE_LIMITED");
+    assert.equal(line.status, 429);
+    assert.equal(rejected[0]?.includes("authored source"), false);
+  } finally {
+    explicitRefinerAuthority = false; refinerAdmissionRefused = false;
+  }
+});
+
+test("a refused Refiner scope leaves the same line and an untouched response", async () => {
+  const { POST } = await loadRouteWithSpies();
+  explicitRefinerAuthority = true; refinerScopeAuthorized = false;
+  try {
+    const { response, rejected } = await withWarnings(() => POST(refinerRequest()));
+    assert.equal(response.status, 404);
+    assert.equal(((await response.json()) as { code?: string }).code, "CONVERSATION_NOT_FOUND");
+    assert.equal(rejected.length, 1);
+    const line = JSON.parse(rejected[0] ?? "{}") as Record<string, unknown>;
+    assert.equal(line.code, "CONVERSATION_NOT_FOUND");
+    assert.equal(line.status, 404);
+  } finally {
+    explicitRefinerAuthority = false; refinerScopeAuthorized = true;
+  }
+});
+
+test("a refusal with its own line is not logged a second time", async () => {
+  const { POST } = await loadRouteWithSpies();
+  const { response, warnings, rejected } = await withWarnings(() => POST(chatRequest(UNSELECTED_MODEL_ID)));
+  assert.equal(response.status, 403);
+  assert.equal(rejected.length, 0);
+  assert.equal(warnings.filter((line) => line.includes('"chat_model_selection_denied"')).length, 1);
+});
+
+test("a failure that wrote its own error line does not also claim to be a refusal", async () => {
+  const { POST } = await loadRouteWithSpies();
+  const error = mock.method(console, "error", () => {});
+  try {
+    // The access spy throws a plain Error after the selection gate.
+    const { response, rejected } = await withWarnings(() => POST(chatRequest(STORED_SELECTED_MODELS[0])));
+    assert.equal(response.status, 500);
+    assert.equal(rejected.length, 0);
+    assert.equal(error.mock.calls.length > 0, true);
+  } finally {
+    error.mock.restore();
   }
 });
 

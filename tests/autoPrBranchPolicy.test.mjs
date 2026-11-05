@@ -48,13 +48,10 @@ const REFUSE = [
     ["hotfix/credit-lot", /hotfix reaches production/],
 
     // Automation namespaces open their own PRs. Refused ahead of the marker,
-    // so even an explicitly-marked branch there does not get a second one --
-    // the feedback-autofix workflow records the number of the PR it created,
-    // and it has to be that PR.
+    // so even an explicitly-marked branch there does not get a second one.
     ["dependabot/npm_and_yarn/development-dependencies-3f86c07b8b", /opens its own pull request/],
     ["autofix/2026-08-15", /opens its own pull request/],
-    ["feedback-autofix/case-114", /opens its own pull request/],
-    ["feedback-autofix/to-develop/case-114", /opens its own pull request/],
+    ["autofix/to-develop/case-114", /opens its own pull request/],
 
     // A marker that is not a segment. Both of these contain the string and
     // neither states a target: one is a branch about development notes, the

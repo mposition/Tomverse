@@ -138,13 +138,14 @@ export function planWithBoundaryExcerpt({
 }) {
   const ordered = [...messages].sort((a, b) => a.ordinal - b.ordinal);
   const eligible = ordered.filter((message) => isContinuationSeedRole(message.role));
+  const candidates = eligible
+    .map((message) => ({ message, ...preCut(message.content) }))
+    .filter((candidate) => candidate.text.trim().length > 0);
   const selected = [];
   let spent = 0;
   let excerpted = false;
-  for (let index = eligible.length - 1; index >= 0; index -= 1) {
-    const message = eligible[index];
-    const { text, cut: wasPreCut } = preCut(message.content);
-    if (text.trim().length === 0) continue;
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const { message, text, cut: wasPreCut } = candidates[index];
     const cost = estimateTextTokens(text);
     if (spent + cost <= tokenBudget) {
       spent += cost;
@@ -175,8 +176,9 @@ export function planWithBoundaryExcerpt({
     toOrdinal: selected.at(-1)?.ordinal ?? 0,
     sourceMessageCount: sourceMessageCount ?? ordered.length,
     truncatedCount: selected.filter((turn) => turn.shortened).length,
-    omittedByBudgetCount: eligible.length - selected.length,
+    omittedByBudgetCount: candidates.length - selected.length,
     excludedByRoleCount: ordered.length - eligible.length,
+    blankSkippedCount: eligible.length - candidates.length,
     estimatedTokens: spent,
     excerpted,
   };
@@ -221,15 +223,23 @@ export const SEED_CANDIDATES = [
  * import time, as the loader renders it, because that and not the body budget
  * is what each turn costs.
  *
+ * `includedShare` is the inclusion amount this candidate reaches: the fraction
+ * of the eligible non-blank messages the scan loaded that the seed carries. Its
+ * denominator is deliberately the same set the defect question is about --
+ * messages with text, in a role the seed admits -- so a source made mostly of
+ * tool calls or blank turns does not read as a loss.
+ *
  * "Blank" is judged on the pre-cut text, as the planner judges it: a message
- * whose first 4,000 code points are whitespace is skipped by the rule, not
- * left out by the budget.
+ * whose first 4,000 code points are whitespace is skipped by the rule, not left
+ * out by the budget. Both the shipped plan and the C candidates separate it
+ * from a budget stop themselves, so the two counts are read off the plan rather
+ * than re-derived here -- a second derivation is a second rule, and it would
+ * keep agreeing with the first right up to the edit that made them differ.
  */
 export function evaluatePlan(plan, messages, { provider = "chatgpt", importedAt = null } = {}) {
-  const isBlank = (message) => preCut(message.content).text.trim().length === 0;
   const eligible = messages.filter((message) => isContinuationSeedRole(message.role));
   const eligibleNonBlank = eligible
-    .filter((message) => !isBlank(message))
+    .filter((message) => preCut(message.content).text.trim().length > 0)
     .sort((a, b) => a.ordinal - b.ordinal);
   const newest = eligibleNonBlank.at(-1);
   const newestTurn = newest ? plan.turns.find((turn) => turn.ordinal === newest.ordinal) : undefined;
@@ -237,19 +247,18 @@ export function evaluatePlan(plan, messages, { provider = "chatgpt", importedAt 
   const renderedTokens =
     (prompt.rulesText ? estimateTextTokens(prompt.rulesText) : 0) +
     (prompt.transcriptText ? estimateTextTokens(prompt.transcriptText) : 0);
-  const blankEligible = eligible.filter(isBlank).length;
   return {
     empty: plan.turns.length === 0,
     eligibleNonBlank: eligibleNonBlank.length,
     includedMessages: plan.turns.length,
+    includedShare:
+      eligibleNonBlank.length === 0 ? null : plan.turns.length / eligibleNonBlank.length,
     shortenedMessages: plan.truncatedCount,
     bodyTokens: plan.estimatedTokens,
     renderedTokens,
     newest: !newest ? "none_eligible" : !newestTurn ? "missing" : newestTurn.shortened ? "shortened" : "whole",
-    // Budget stops only: blanks are skipped by the rule, not by the budget, so
-    // the shipped `omittedByBudgetCount` (which counts them) is split here.
-    omittedByBudget: Math.max(0, plan.omittedByBudgetCount - blankEligible),
-    blankSkipped: blankEligible,
+    omittedByBudget: plan.omittedByBudgetCount,
+    blankSkipped: plan.blankSkippedCount,
   };
 }
 
@@ -266,6 +275,12 @@ export function factsRetained(plan, facts) {
  * The script class is decided on the same newest-200 scan the seed is built
  * from, which is what the seed can carry; an older part of a long conversation
  * in another language does not change what reaches the model.
+ *
+ * `notScannedCount` is the rest of the snapshot: stored messages older than the
+ * scan window, which no candidate here can carry and no budget decided about.
+ * It is kept apart from every candidate's figures because the two are different
+ * questions -- raising the budget cannot reach these messages, and a seed that
+ * carries all of a long source's newest 200 messages is still an excerpt of it.
  */
 export function evaluateSeedCandidates(messages, sourceMessageCount, context = {}) {
   const eligibleText = messages
@@ -280,7 +295,11 @@ export function evaluateSeedCandidates(messages, sourceMessageCount, context = {
       context
     );
   }
-  return { script: scriptClass(eligibleText), results };
+  return {
+    script: scriptClass(eligibleText),
+    notScannedCount: Math.max(0, (sourceMessageCount ?? messages.length) - messages.length),
+    results,
+  };
 }
 
 // ---------------------------------------------------------------- aggregation
@@ -302,15 +321,20 @@ export function countBand(value) {
 }
 
 /**
- * A share as a ten-point band ("0%", "1-9%", "10-19%", ... "90-99%", "100%"),
- * judged on the exact fraction so 99.6% is not reported as all.
+ * A fraction as a ten-point band ("0%", "1-9%", "10-19%", ... "90-99%",
+ * "100%"), judged on the exact value so 0.996 is not reported as all.
  */
-export function shareBand(part, whole) {
-  if (whole <= 0) return null;
-  if (part <= 0) return "0%";
-  if (part >= whole) return "100%";
-  const lower = Math.floor((part * 100) / whole / 10) * 10;
+export function fractionBand(fraction) {
+  if (fraction === null || !Number.isFinite(fraction)) return null;
+  if (fraction <= 0) return "0%";
+  if (fraction >= 1) return "100%";
+  const lower = Math.floor((fraction * 100) / 10) * 10;
   return lower === 0 ? "1-9%" : `${lower}-${lower + 9}%`;
+}
+
+/** A share as a ten-point band. Null when there is nothing to be a share of. */
+export function shareBand(part, whole) {
+  return whole <= 0 ? null : fractionBand(part / whole);
 }
 
 /** Rounded to the nearest 100: the cost decision needs hundreds, not units. */
@@ -332,7 +356,8 @@ const hundreds = (value) => (value === null ? null : Math.round(value / 100) * 1
  * nothing published here is exact enough to form those equations:
  *
  *   - groups under MIN_GROUP_SIZE snapshots are suppressed with no figures;
- *   - counts are bands (`countBand`), shares are ten-point bands (`shareBand`);
+ *   - counts are bands (`countBand`), shares and the median inclusion amount
+ *     are ten-point bands (`shareBand`, `fractionBand`);
  *   - a share resting on fewer than MIN_PUBLISHED_CELL snapshots on either side
  *     says only that, with no band;
  *   - rendered-token figures are rounded to the nearest 100, and no low
@@ -361,36 +386,54 @@ export function aggregateSeedSamples(samples, { minGroupSize = MIN_GROUP_SIZE } 
     }
     const weightOf = (sample) => Math.max(0, sample.assistantTurns ?? 0);
     const totalTurns = list.reduce((total, sample) => total + weightOf(sample), 0);
+    /**
+     * The share of `rows` matching `predicate`, in both units, with the
+     * small-cell rule. Takes its rows rather than closing over one set, so the
+     * same coarsening covers a figure about the sources themselves (the scan
+     * boundary) and a figure about one candidate's result.
+     */
+    const shareIn = (rows, predicate) => {
+      const matching = rows.filter(({ row }) => predicate(row));
+      const rest = rows.length - matching.length;
+      if ((matching.length > 0 && matching.length < MIN_PUBLISHED_CELL) || (rest > 0 && rest < MIN_PUBLISHED_CELL)) {
+        return {
+          snapshotShare: null,
+          assistantTurnShare: null,
+          smallCell:
+            matching.length < MIN_PUBLISHED_CELL
+              ? `fewer than ${MIN_PUBLISHED_CELL} snapshots`
+              : `all but fewer than ${MIN_PUBLISHED_CELL} snapshots`,
+        };
+      }
+      return {
+        snapshotShare: shareBand(matching.length, rows.length),
+        assistantTurnShare: shareBand(
+          matching.reduce((total, { weight }) => total + weight, 0),
+          totalTurns
+        ),
+      };
+    };
+    const sampleRows = list.map((sample) => ({ row: sample, weight: weightOf(sample) }));
     const byCandidate = {};
     for (const candidate of SEED_CANDIDATES) {
       const rows = list.map((sample) => ({ row: sample.results[candidate.id], weight: weightOf(sample) }));
-      const shares = (predicate) => {
-        const matching = rows.filter(({ row }) => predicate(row));
-        const rest = rows.length - matching.length;
-        if ((matching.length > 0 && matching.length < MIN_PUBLISHED_CELL) || (rest > 0 && rest < MIN_PUBLISHED_CELL)) {
-          return {
-            snapshotShare: null,
-            assistantTurnShare: null,
-            smallCell:
-              matching.length < MIN_PUBLISHED_CELL
-                ? `fewer than ${MIN_PUBLISHED_CELL} snapshots`
-                : `all but fewer than ${MIN_PUBLISHED_CELL} snapshots`,
-          };
-        }
-        return {
-          snapshotShare: shareBand(matching.length, rows.length),
-          assistantTurnShare: shareBand(
-            matching.reduce((total, { weight }) => total + weight, 0),
-            totalTurns
-          ),
-        };
-      };
+      const shares = (predicate) => shareIn(rows, predicate);
       byCandidate[candidate.id] = {
         emptySeed: shares((row) => row.empty && row.eligibleNonBlank > 0),
         newestMissing: shares((row) => row.newest === "missing"),
         newestShortened: shares((row) => row.newest === "shortened"),
         stoppedByBudget: shares((row) => row.omittedByBudget > 0),
         includedMessagesP50: quantile(rows.map(({ row }) => row.includedMessages), 0.5),
+        // The inclusion amount, banded: of the eligible non-blank messages the
+        // scan loaded, what fraction a median source has carried. Published as
+        // a band for the same reason a count is -- an exact order statistic of
+        // a ratio names its own denominator.
+        includedShareP50: fractionBand(
+          quantile(
+            rows.map(({ row }) => row.includedShare).filter((share) => share !== null),
+            0.5
+          )
+        ),
         renderedTokensP50: hundreds(quantile(rows.map(({ row }) => row.renderedTokens), 0.5)),
         renderedTokensP90: hundreds(quantile(rows.map(({ row }) => row.renderedTokens), 0.9)),
         // Assistant-turn-weighted mean of what this candidate would add per
@@ -407,6 +450,10 @@ export function aggregateSeedSamples(samples, { minGroupSize = MIN_GROUP_SIZE } 
     report[script] = {
       snapshotsBand: countBand(list.length),
       assistantTurnsBand: countBand(totalTurns),
+      // Not a candidate's figure: these snapshots are longer than the loader's
+      // scan, so part of them is out of every candidate's reach and must not be
+      // read as something a budget left out.
+      sourceLongerThanScan: shareIn(sampleRows, (sample) => (sample.notScannedCount ?? 0) > 0),
       byCandidate,
     };
   }
@@ -463,6 +510,7 @@ export async function measureStoredConversations(
       samples.push({
         script: evaluated.script,
         results: evaluated.results,
+        notScannedCount: evaluated.notScannedCount,
         assistantTurns: turnsById.get(snapshot.id) ?? 0,
       });
     }

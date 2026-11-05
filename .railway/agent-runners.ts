@@ -244,7 +244,7 @@ const OPS_OBSERVER_PAGE_VARIABLES = [
   "OPS_OBSERVER_SECRET",
   "OPS_OBSERVER_HEARTBEAT_URL",
   "OPS_OBSERVER_PAGE_WEBHOOK_URL",
-  "OPS_OBSERVER_S3_BUDGET_PAGES",
+  "OPS_OBSERVER_S3_PAGES",
   "OPS_OBSERVER_ENABLED",
   "OPS_OBSERVER_APP_URL",
   "RAILWAY_DOCKERFILE_PATH",
@@ -423,6 +423,10 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     // No database, publishing, bucket or GitHub credential. The worker does
     // nothing until a model is pinned and the operator has selected it with a
     // monthly cap in the Admin Console; the ledger refuses every other call.
+    //
+    // Production differs on purpose: the generator runs on the AMUX box there and
+    // the live start command does nothing, so an apply restores this one
+    // (docs/ops/marketing-generator-box.md).
     key: "marketing_generator",
     service: "Marketing Generator",
     startCommand: "node --experimental-strip-types scripts/marketing-generator-service.mjs",

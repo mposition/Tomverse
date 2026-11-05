@@ -421,6 +421,9 @@ run(
     // Support-triage retention and heartbeat routes: own secrets, counts only,
     // non-2xx when retention makes no progress, a fail-closed heartbeat.
     "tests/integration/support-triage-cycle.db.test.ts",
+    // Verified-trace analysis: off by default, facts only, one idea per case and
+    // the daily limits, nothing past a report the server already ruled out.
+    "tests/integration/trace-report-analysis.db.test.ts",
     // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
     // supersede on a changed input, nothing for a closed or deleted report.
     "tests/integration/support-triage-worker.db.test.ts",
@@ -962,6 +965,14 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// Node runs the files of one `--test` call in name order, so plan-refusal would
+// run before session-submission, which needs a fresh operating scope. Its own
+// call runs it after the whole list above and puts the current scope back.
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
+    "tests/integration/amux-v19-plan-refusal.db.test.ts"],
+  "Running the v19 plan-refusal scenarios after the fresh-scope suites"
 );
 // Native pass redemption uses real promotion/entitlement rows with mocked
 // authentication and email/provider seams. Keep those mocks in their own process.

@@ -71,6 +71,12 @@ export function useTurnstile(
     reject: (error: GuestVerificationError) => void;
   } | null>(null);
   const silentTimerRef = useRef<number | null>(null);
+  // Bumped when a verification starts with no usable widget, so the render
+  // effect runs again. Without it a blocked script or a widget Cloudflare threw
+  // away stayed broken for the life of the page: every later attempt waited out
+  // WIDGET_READY_TIMEOUT_MS and reported "unavailable", and the form had no way
+  // back other than a reload.
+  const [renderAttempt, setRenderAttempt] = useState(0);
   const [phase, setPhase] = useState<TurnstileFormPhase>("idle");
   const [failure, setFailure] = useState<GuestVerificationFailure | null>(null);
 
@@ -159,7 +165,15 @@ export function useTurnstile(
       }
       widgetIdRef.current = null;
     };
-  }, [action, clearSilentTimer, container, enabled, settle, siteKey]);
+  }, [
+    action,
+    clearSilentTimer,
+    container,
+    enabled,
+    renderAttempt,
+    settle,
+    siteKey,
+  ]);
 
   /** Ends the challenge on screen at the user's request. */
   const cancel = useCallback(() => {
@@ -183,6 +197,9 @@ export function useTurnstile(
 
     setFailure(null);
     setPhase("verifying");
+    // Nothing to execute: ask for a fresh render (which reloads a script tag
+    // whose load failed) and let the readiness poll below wait for it.
+    if (!widgetIdRef.current) setRenderAttempt((current) => current + 1);
 
     const deadline = Date.now() + WIDGET_READY_TIMEOUT_MS;
     while (!widgetIdRef.current || !window.turnstile) {

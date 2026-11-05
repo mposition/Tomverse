@@ -24,13 +24,15 @@ import type {
   AgentOfficeEngineeringState,
   AgentOfficeFinanceState,
   AgentOfficeLiveRooms,
+  AgentOfficeMarketingState,
   AgentOfficeOperatorQueue,
   AgentOfficeQaState,
   AgentOfficeResearchState,
   AgentOfficeRoutingState,
+  AgentOfficeSreState,
+  AgentOfficeSupportState,
 } from "@/lib/agentOffice/live";
 import {
-  countAutoFixActionCases,
   countAwaitingAmuxEscalations,
   countPendingMarketingApprovals,
 } from "@/lib/adminNavigationCounts";
@@ -43,10 +45,13 @@ import {
   AGENT_OFFICE_ENGINEERING_SETTING_KEYS,
   agentOfficeEngineeringState,
 } from "@/lib/agentOfficeEngineeringState";
+import { agentOfficeMarketingState } from "@/lib/agentOfficeMarketingState";
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
 import { agentOfficeRoutingMonthStart, agentOfficeRoutingState } from "@/lib/agentOfficeRoutingState";
 import { agentOfficeReviewState } from "@/lib/agentOfficeReviewState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
+import { agentOfficeSreState } from "@/lib/agentOfficeSreState";
+import { agentOfficeSupportState } from "@/lib/agentOfficeSupportState";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import {
@@ -65,6 +70,9 @@ import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { REVIEW_ORCHESTRATOR_STATUS_KEY } from "@/lib/reviewOrchestratorStatusCore";
 import { ENGINEERING_AGENT_KILL_SWITCH_ENV, OWNER_ITEM_KINDS } from "@/lib/engineeringAgentCore";
 import { currentEngineeringAgentHalt, readEngineeringAgentHaltState } from "@/lib/engineeringAgentStore";
+import { readMarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
+import { readSwitches as readMarketingSwitches } from "@/lib/marketingConsoleRead";
+import { readOpsObserverAdminView } from "@/lib/opsObserverStore";
 import { prisma } from "@/lib/prisma";
 import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
 import {
@@ -73,6 +81,8 @@ import {
 } from "@/lib/productResearchObservationStore";
 import { slotForInstant } from "@/lib/productResearchObservationRunnerCore.mjs";
 import { QA_RELEASE_ROUTE_SECRET_ENV } from "@/lib/qaReleaseRouteAuthCore";
+import { readSupportTriageHealth } from "@/lib/supportTriageCycle";
+import { resolveSupportTriageEnabled } from "@/lib/supportTriageLlmSetting";
 
 const parseInstant = (value: string | null | undefined) => {
   if (!value) return null;
@@ -232,6 +242,67 @@ async function readRouting(now: Date): Promise<AgentOfficeRoutingState> {
 }
 
 /**
+ * Ops and SRE: the chain verdict through the agent's own admin reader (one
+ * bounded `state_read` transaction that writes nothing), and when its newest
+ * digest was stored. The agent's tables are not read here, and no digest body
+ * is selected.
+ */
+async function readSre(): Promise<AgentOfficeSreState> {
+  try {
+    const [view, latest] = await Promise.all([
+      readOpsObserverAdminView(),
+      prisma.agentDigestItem.findFirst({
+        where: { agentKey: "sre-ops" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+    ]);
+    return agentOfficeSreState({ view, latestDigestAt: latest?.createdAt ?? null });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "ops_observer" });
+    return { kind: "unread" };
+  }
+}
+
+/**
+ * Support triage: the agent's own health reading and its own switch. A switch
+ * or health read that fails is an unread room, never an "off" one. No report,
+ * draft or suggestion is selected.
+ */
+async function readSupport(): Promise<AgentOfficeSupportState> {
+  try {
+    const [resolved, health] = await Promise.all([
+      resolveSupportTriageEnabled(process.env),
+      readSupportTriageHealth(),
+    ]);
+    return agentOfficeSupportState({ enabled: resolved.enabled, health });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "support_triage" });
+    return { kind: "unread" };
+  }
+}
+
+/**
+ * Marketing: the console's own overview counts and its switch strip. The
+ * overview fails part by part (a part it could not read is null); the switch
+ * strip says "unreadable" rather than "off". No draft, fact, URL or amount is
+ * used, and the cost figures the overview carries are not passed on.
+ */
+async function readMarketing(): Promise<AgentOfficeMarketingState> {
+  try {
+    const [overview, read] = await Promise.all([readMarketingConsoleOverview(), readMarketingSwitches()]);
+    return agentOfficeMarketingState({
+      overview,
+      drafts: read.switches.drafts,
+      publish: read.switches.publish,
+    });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "marketing" });
+    return { kind: "unread" };
+  }
+}
+
+/**
  * Engineering: the switch settings, the agent's own halt reading, open owner
  * items counted by kind, how many runs are in progress and since when, and the
  * newest ended run's status, outcome and times. No patch body, reason, cause key or card is selected: the office says
@@ -380,11 +451,10 @@ async function readDigest(now: Date): Promise<AgentOfficeDigestState> {
  * that count unknown, not the whole to-do zero (rule 8).
  */
 async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
-  const [marketing, amuxEscalations, amuxHalts, autoFix] = await Promise.allSettled([
+  const [marketing, amuxEscalations, amuxHalts] = await Promise.allSettled([
     countPendingMarketingApprovals(),
     countAwaitingAmuxEscalations(),
     countOpenAmuxOrchestratorHalts(),
-    countAutoFixActionCases(),
   ]);
   const value = (result: PromiseSettledResult<number>, read: string) => {
     if (result.status === "fulfilled") return result.value;
@@ -395,22 +465,40 @@ async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
     marketing: value(marketing, "operator_queue_marketing"),
     amuxEscalations: value(amuxEscalations, "operator_queue_amux_escalations"),
     amuxHalts: value(amuxHalts, "operator_queue_amux_halts"),
-    autoFix: value(autoFix, "operator_queue_autofix"),
   };
 }
 
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, routing, engineering, amux, review, decision, digest, queue] = await Promise.all([
-    readResearch(now),
-    readQa(),
-    readFinance(),
-    readRouting(now),
-    readEngineering(),
-    readAmuxWorkers(),
-    readReview(),
-    readDecision(),
-    readDigest(now),
-    readOperatorQueue(),
-  ]);
-  return { readAt: now.toISOString(), research, qa, finance, routing, engineering, amux, review, decision, digest, queue };
+  const [research, qa, finance, routing, sre, support, marketing, engineering, amux, review, decision, digest, queue] =
+    await Promise.all([
+      readResearch(now),
+      readQa(),
+      readFinance(),
+      readRouting(now),
+      readSre(),
+      readSupport(),
+      readMarketing(),
+      readEngineering(),
+      readAmuxWorkers(),
+      readReview(),
+      readDecision(),
+      readDigest(now),
+      readOperatorQueue(),
+    ]);
+  return {
+    readAt: now.toISOString(),
+    research,
+    qa,
+    finance,
+    routing,
+    sre,
+    support,
+    marketing,
+    engineering,
+    amux,
+    review,
+    decision,
+    digest,
+    queue,
+  };
 }

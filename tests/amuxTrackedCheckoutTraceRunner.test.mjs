@@ -23,6 +23,18 @@ const sandboxUnavailable = (() => {
   } catch { return "strace cannot follow an unprivileged bwrap sandbox on this host"; }
 })();
 
+// The two Node-based cases need a system Node under /usr/bin, which the sandbox
+// binds. A runner whose Node comes from setup-node lives outside those binds.
+const nodeUnavailable = sandboxUnavailable || (() => {
+  try {
+    execFileSync("/usr/bin/strace", ["-f", "-qq", "-o", "/dev/null", "/usr/bin/bwrap",
+      "--unshare-all", "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin",
+      "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64", "--",
+      "/usr/bin/node", "-e", "0"], { stdio: "ignore", timeout: 15_000 });
+    return false;
+  } catch { return "no system Node runnable inside the sandbox on this host"; }
+})();
+
 test("isolated traced child streams opened checkout paths without a log", {
   skip: sandboxUnavailable,
 }, async () => {
@@ -64,7 +76,7 @@ test("isolated traced child streams opened checkout paths without a log", {
 });
 
 test("Node's io_uring is refused and its read is still observed as a complete manifest", {
-  skip: sandboxUnavailable,
+  skip: nodeUnavailable,
 }, async () => {
   // Measured 2026-10-19 on the v19 runner: without the seccomp filter Node 22's
   // libuv io_uring_setup succeeds and the manifest could not be certified.
@@ -77,7 +89,8 @@ test("Node's io_uring is refused and its read is still observed as a complete ma
       "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
       "--ro-bind", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
       "--ro-bind", directory, directory, "--chdir", directory,
-      "--setenv", "PATH", "/usr/bin:/bin", "--", "/usr/bin/node", "-e",
+      "--ro-bind", process.execPath, "/tmp/node",
+      "--setenv", "PATH", "/usr/bin:/bin", "--", "/tmp/node", "-e",
       "require('fs').readFile('TRACE.txt', (e, d) => process.stdout.write(e ? 'ERR' : d))",
     ] });
     const child = launched.child;
@@ -100,7 +113,7 @@ test("Node's io_uring is refused and its read is still observed as a complete ma
 });
 
 test("concurrent reads that strace splits across threads still form a complete manifest", {
-  skip: sandboxUnavailable,
+  skip: nodeUnavailable,
 }, async () => {
   // The sixth Max S0 call ended `undecoded_open`: strace -f writes a call that
   // another thread interrupts as `<unfinished ...>` plus `<... resumed>`.
@@ -114,7 +127,8 @@ test("concurrent reads that strace splits across threads still form a complete m
       "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
       "--ro-bind", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
       "--ro-bind", directory, directory, "--chdir", directory,
-      "--setenv", "PATH", "/usr/bin:/bin", "--", "/usr/bin/node", "-e",
+      "--ro-bind", process.execPath, "/tmp/node",
+      "--setenv", "PATH", "/usr/bin:/bin", "--", "/tmp/node", "-e",
       `Promise.all(${JSON.stringify(files)}.map((f) => require('fs').promises.readFile(f)))` +
         ".then((all) => process.stdout.write(String(all.length)))",
     ] });

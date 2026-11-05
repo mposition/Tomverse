@@ -44,6 +44,12 @@ import {
   researchTone,
   routingLiveDept,
   routingTone,
+  marketingLiveDept,
+  marketingTone,
+  sreLiveDept,
+  sreTone,
+  supportLiveDept,
+  supportTone,
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "../lib/agentOfficeAmuxState.ts";
 import { AMUX_WORKER_REGISTRY_V31_SEED } from "../lib/amux/workerRegistryCore.ts";
@@ -63,6 +69,9 @@ import {
 } from "../lib/reviewOrchestratorStatusCore.ts";
 import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import { agentOfficeRoutingState } from "../lib/agentOfficeRoutingState.ts";
+import { agentOfficeMarketingState } from "../lib/agentOfficeMarketingState.ts";
+import { agentOfficeSreState } from "../lib/agentOfficeSreState.ts";
+import { agentOfficeSupportState } from "../lib/agentOfficeSupportState.ts";
 import {
   AMUX_ROOM,
   DECISION_ROOM,
@@ -141,7 +150,7 @@ test("a record link is kept only while the console has its page and tab", () => 
   assert.equal(consoleHasRecord("/admin/no-such-page"), false);
   // The teams whose screens every branch carries stay linked; a team whose
   // screen a branch lacks is drawn as waiting on a link, never as a dead link.
-  for (const id of ["engineering", "qa", "marketing", "research", "digest"]) {
+  for (const id of ["engineering", "qa", "sre", "support", "marketing", "research", "routing", "digest"]) {
     assert.ok(AGENT_OFFICE_DEPTS.find((dept) => dept.id === id)?.recordHref, `${id} lost its link`);
   }
   // Every link on screen is the declared one filtered by that predicate, and
@@ -205,8 +214,8 @@ test("the console answers in the office's language and finds the team it names",
   assert.match(ko.chat.at(-1).name, /백서진/);
 
   // A team with no record screen says so.
-  ko.deptStatus.sre = "blocked";
-  ko.command("SRE팀 왜 늦어?");
+  ko.deptStatus.trust = "blocked";
+  ko.command("신뢰안전팀 왜 늦어?");
   assert.match(ko.chat.at(-1).text, /기록 화면이 없어서/);
 
   en.command("banana split");
@@ -1250,6 +1259,354 @@ test("the office reads the optimizer's cycle status and spend, never its guidanc
   assert.match(panel, /routing: routingLiveDept\(live\.routing, m\.real\.routing\)/);
 });
 
+// ── Ops and SRE, Support triage and Marketing ──────────────────────────────
+
+const roomAt = (iso) => new Date(iso);
+
+test("the Ops and SRE state keeps the chain verdict, the stage, the generation and the digest time", () => {
+  const view = { head: { generation: 7, mode: "live" }, trustReason: "trusted" };
+  assert.deepEqual(agentOfficeSreState({ view, latestDigestAt: roomAt("2026-11-04T21:00:05Z") }), {
+    kind: "observed",
+    head: { generation: 7, mode: "live" },
+    trustReason: "trusted",
+    latestDigestAt: "2026-11-04T21:00:05.000Z",
+  });
+  const none = agentOfficeSreState({ view: { head: null, trustReason: "state_missing" }, latestDigestAt: null });
+  assert.deepEqual(none, { kind: "observed", head: null, trustReason: "state_missing", latestDigestAt: null });
+  // A head with no state row has no generation, and says so rather than guessing one.
+  const noState = agentOfficeSreState({
+    view: { head: { generation: null, mode: "shadow" }, trustReason: "state_missing" },
+    latestDigestAt: null,
+  });
+  assert.equal(noState.head.generation, null);
+  // A verdict that is not a code is unread, not a guess.
+  assert.deepEqual(agentOfficeSreState({ view: { head: null, trustReason: "" }, latestDigestAt: null }), { kind: "unread" });
+});
+
+test("the Ops and SRE room is done on a trusted chain, waiting before a genesis, and needs a look otherwise", () => {
+  const en = adminAgentOfficeMessages.en.real.sre;
+  const ko = adminAgentOfficeMessages.ko.real.sre;
+  const state = (overrides = {}) =>
+    agentOfficeSreState({
+      view: { head: { generation: 7, mode: "shadow" }, trustReason: "trusted", ...overrides },
+      latestDigestAt: roomAt("2026-11-04T21:00:05Z"),
+    });
+
+  const unread = sreLiveDept({ kind: "unread" }, en);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "Unread");
+  assert.equal(unread.line, en.unread);
+  assert.equal(sreTone({ kind: "unread" }), "attention");
+
+  const trusted = sreLiveDept(state(), en);
+  assert.equal(trusted.status, "done");
+  assert.equal(trusted.badge, "Trusted");
+  assert.equal(trusted.line, "State chain trusted · shadow (recorded, not sent) · generation 7");
+  // The newest digest's time is drawn in Brisbane time and judged by nobody here.
+  assert.equal(trusted.detail, "last digest 11-05 07:00 AEST");
+  assert.equal(sreLiveDept(state({ head: { generation: 7, mode: "live" } }), en).line, "State chain trusted · live · generation 7");
+  // A stage the room has no word for is shown as stored.
+  assert.equal(
+    sreLiveDept(state({ head: { generation: 7, mode: "canary" } }), en).line,
+    "State chain trusted · canary · generation 7"
+  );
+
+  // A chain that is not trusted shows the check's own code, untranslated.
+  const untrusted = sreLiveDept(state({ trustReason: "transition_ledger_gap" }), en);
+  assert.equal(untrusted.status, "attention");
+  assert.equal(untrusted.badge, "Not trusted");
+  assert.equal(untrusted.line, "State chain not trusted · transition_ledger_gap · shadow (recorded, not sent) · generation 7");
+
+  // No genesis yet is waiting, not a failure; a digest time is still a fact.
+  const noGenesis = sreLiveDept(agentOfficeSreState({ view: { head: null, trustReason: "state_missing" }, latestDigestAt: null }), en);
+  assert.equal(noGenesis.status, "waiting");
+  assert.equal(noGenesis.badge, "Not started");
+  assert.equal(noGenesis.line, en.noGenesis);
+  assert.equal(noGenesis.detail, "no digest received yet");
+  assert.equal(
+    sreLiveDept(state({ head: { generation: null, mode: "shadow" }, trustReason: "state_missing" }), en).line,
+    "State chain not trusted · state_missing · shadow (recorded, not sent) · generation not recorded"
+  );
+
+  const koTrusted = sreLiveDept(state(), ko);
+  assert.equal(koTrusted.badge, "신뢰됨");
+  assert.equal(koTrusted.line, "상태 체인 신뢰됨 · shadow(기록만, 발송 안 함) · 세대 7");
+  assert.equal(koTrusted.detail, "마지막 digest 11-05 07:00 AEST");
+  assert.equal(
+    sreLiveDept(state({ trustReason: "transition_ledger_gap" }), ko).line,
+    "상태 체인 신뢰 안 됨 · transition_ledger_gap · shadow(기록만, 발송 안 함) · 세대 7"
+  );
+});
+
+const supportHealth = (overrides = {}) => ({
+  worker: { at: "2026-11-05T04:10:00.000Z", outcome: "success" },
+  reportsToday: 3,
+  failedRunsToday: 0,
+  stale: false,
+  ...overrides,
+});
+const supportRoom = (input, copy = adminAgentOfficeMessages.en.real.support) =>
+  supportLiveDept(agentOfficeSupportState({ enabled: true, ...input, health: supportHealth(input.health) }), copy);
+
+test("the Support triage room says whether the worker is on, its newest run and the day's counts", () => {
+  const en = adminAgentOfficeMessages.en.real.support;
+  const ko = adminAgentOfficeMessages.ko.real.support;
+
+  const unread = supportLiveDept({ kind: "unread" }, en);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "Unread");
+  assert.equal(unread.line, en.unread);
+
+  // On, no failures, not stale: done.
+  const on = supportRoom({});
+  assert.equal(on.status, "done");
+  assert.equal(on.badge, "On");
+  assert.equal(on.line, "Triage is on · latest worker run 11-05 14:10 AEST · success");
+  assert.equal(on.detail, "3 reports taken up today (UTC day) · 0 failed runs today (UTC day)");
+  assert.equal(supportRoom({ health: { reportsToday: 1 } }).detail.split(" · ")[0], "1 report taken up today (UTC day)");
+  assert.equal(supportRoom({ health: { worker: null } }).line, "Triage is on · no worker run has finished yet");
+
+  // A run outcome the room has no word for is shown as stored.
+  assert.equal(supportRoom({ health: { worker: { at: "2026-11-05T04:10:00.000Z", outcome: "deadline_exceeded" } } }).line,
+    "Triage is on · latest worker run 11-05 14:10 AEST · deadline exceeded");
+  assert.equal(supportRoom({ health: { worker: { at: "2026-11-05T04:10:00.000Z", outcome: "odd_code" } } }).line,
+    "Triage is on · latest worker run 11-05 14:10 AEST · odd_code");
+
+  // Failed runs today and a stale heartbeat need a look; stale wins the badge.
+  const failed = supportRoom({ health: { failedRunsToday: 2 } });
+  assert.equal(failed.status, "attention");
+  assert.equal(failed.badge, "Runs failed");
+  assert.match(failed.detail, /2 failed runs today \(UTC day\)$/);
+  const stale = supportRoom({ health: { stale: true, failedRunsToday: 2 } });
+  assert.equal(stale.status, "attention");
+  assert.equal(stale.badge, "Stale");
+  assert.match(stale.detail, /a run is overdue or retention is stuck$/);
+
+  // Off is waiting, and its newest run is still a fact. A failed run today still needs a look.
+  const off = supportRoom({ enabled: false });
+  assert.equal(off.status, "waiting");
+  assert.equal(off.badge, "Off");
+  assert.equal(off.line, "Triage is off: the worker takes no reports");
+  assert.match(off.detail, /^latest worker run 11-05 14:10 AEST · success · 3 reports taken up today/);
+  assert.equal(supportRoom({ enabled: false, health: { failedRunsToday: 1 } }).status, "attention");
+  assert.equal(supportTone({ kind: "unread" }), "attention");
+
+  const koOn = supportRoom({}, ko);
+  assert.equal(koOn.badge, "켜짐");
+  assert.equal(koOn.line, "분류가 켜져 있음 · 직전 worker 실행 11-05 14:10 AEST · 성공");
+  assert.equal(koOn.detail, "오늘(UTC 기준 하루) 가져간 신고 3건 · 오늘(UTC 기준 하루) 실패한 실행 0회");
+});
+
+test("a failed read of the Support triage room is unread, never off", () => {
+  // The state has no third form: a read that fails is the unread state, which needs a look; off is a stored switch.
+  assert.equal(supportTone({ kind: "unread" }), "attention");
+  assert.equal(supportTone(agentOfficeSupportState({ enabled: false, health: supportHealth({ worker: null }) })), "waiting");
+  const read = readFunction("readSupport");
+  assert.match(read, /resolveSupportTriageEnabled\(process\.env\)/);
+  assert.match(read, /readSupportTriageHealth\(\)/);
+  // Both reads sit in one try: either failing is the unread room.
+  assert.match(read, /try \{[\s\S]*Promise\.all\(\[[\s\S]*\]\);[\s\S]*\} catch \{[\s\S]*return \{ kind: "unread" \}/);
+  assert.match(read, /event: "admin_agent_office_read_failed", read: "support_triage"/);
+});
+
+const marketingOverview = (overrides = {}) => ({
+  pending: { count: 0, oldestAt: null },
+  llm: { calls: 12 },
+  lastRun: { at: "2026-11-05T02:00:00.000Z" },
+  ...overrides,
+});
+const marketingRoom = (input = {}, copy = adminAgentOfficeMessages.en.real.marketing) =>
+  marketingLiveDept(
+    agentOfficeMarketingState({
+      overview: marketingOverview(input.overview),
+      drafts: input.drafts ?? "on",
+      publish: input.publish ?? "on",
+    }),
+    copy
+  );
+
+test("the Marketing state never turns a part it could not read into zero", () => {
+  assert.deepEqual(
+    agentOfficeMarketingState({ overview: marketingOverview(), drafts: "on", publish: "off" }),
+    {
+      kind: "observed",
+      drafts: "on",
+      publish: "off",
+      pending: { count: 0, oldestAt: null },
+      lastRun: { at: "2026-11-05T02:00:00.000Z" },
+      calls: 12,
+    }
+  );
+  const partial = agentOfficeMarketingState({
+    overview: marketingOverview({ pending: null, llm: null }),
+    drafts: "on",
+    publish: "on",
+  });
+  assert.equal(partial.pending, null);
+  assert.equal(partial.calls, null);
+  assert.deepEqual(partial.lastRun, { at: "2026-11-05T02:00:00.000Z" });
+  // The overview as a whole unreadable is the unread room.
+  assert.deepEqual(
+    agentOfficeMarketingState({ overview: { pending: null, llm: null, lastRun: null }, drafts: "on", publish: "on" }),
+    { kind: "unread" }
+  );
+  // A switch state that is neither on nor off is unreadable, never off.
+  assert.equal(agentOfficeMarketingState({ overview: marketingOverview(), drafts: "unreadable", publish: "on" }).drafts, "unreadable");
+  assert.equal(agentOfficeMarketingState({ overview: marketingOverview(), drafts: "scope-valid", publish: "on" }).drafts, "unreadable");
+  // No money travels with the state.
+  assert.deepEqual(Object.keys(partial).sort(), ["calls", "drafts", "kind", "lastRun", "pending", "publish"]);
+});
+
+test("the Marketing room needs a look for work waiting on a person, and waits when drafts are off", () => {
+  const en = adminAgentOfficeMessages.en.real.marketing;
+  const ko = adminAgentOfficeMessages.ko.real.marketing;
+
+  const unread = marketingLiveDept({ kind: "unread" }, en);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "Unread");
+  assert.equal(unread.line, en.unread);
+
+  const clear = marketingRoom();
+  assert.equal(clear.status, "done");
+  assert.equal(clear.badge, "Nothing waiting");
+  assert.equal(clear.line, "No post waits for approval");
+  assert.equal(clear.detail, "drafts on · publishing on · generator last ran 11-05 12:00 AEST · 12 generator calls this month (UTC)");
+
+  // A post waiting is the operator's work: it needs a look, and the line names the oldest wait.
+  const waiting = marketingRoom({ overview: { pending: { count: 2, oldestAt: "2026-11-04T23:30:00.000Z" } } });
+  assert.equal(waiting.status, "attention");
+  assert.equal(waiting.badge, "To approve");
+  assert.equal(waiting.line, "2 posts wait for approval · oldest since 11-05 09:30 AEST");
+  assert.equal(marketingRoom({ overview: { pending: { count: 1, oldestAt: "2026-11-04T23:30:00.000Z" } } }).line,
+    "1 post waits for approval · oldest since 11-05 09:30 AEST");
+
+  // Drafts off waits; with a post waiting it still needs a look, and drafts being off stays a fact.
+  const off = marketingRoom({ drafts: "off" });
+  assert.equal(off.status, "waiting");
+  assert.equal(off.badge, "Drafts off");
+  assert.equal(off.line, en.draftsOff);
+  assert.match(off.detail, /^No post waits for approval · drafts off · publishing on/);
+  const offWaiting = marketingRoom({ drafts: "off", overview: { pending: { count: 1, oldestAt: "2026-11-04T23:30:00.000Z" } } });
+  assert.equal(offWaiting.status, "attention");
+  assert.match(offWaiting.detail, /^drafts off · publishing on/);
+  // Publishing off alone does not wait: the drafts switch is the room's.
+  assert.equal(marketingRoom({ publish: "off" }).status, "done");
+
+  // An unreadable switch or queue needs a look and is never shown as off or empty.
+  const switchUnreadable = marketingRoom({ drafts: "unreadable" });
+  assert.equal(switchUnreadable.status, "attention");
+  assert.equal(switchUnreadable.badge, "Switch unreadable");
+  assert.equal(switchUnreadable.line, en.switchUnreadable);
+  assert.match(switchUnreadable.detail, /drafts unreadable · publishing on/);
+  const queueUnread = marketingRoom({ overview: { pending: null, llm: null } });
+  assert.equal(queueUnread.status, "attention");
+  assert.equal(queueUnread.badge, "Queue unreadable");
+  assert.equal(queueUnread.line, "The approval queue could not be read");
+  assert.match(queueUnread.detail, /this month's generator calls could not be read$/);
+  assert.equal(marketingRoom({ overview: { lastRun: { at: null } } }).detail.includes("the generator has not run yet"), true);
+  assert.equal(marketingTone({ kind: "unread" }), "attention");
+
+  const koWaiting = marketingRoom({ overview: { pending: { count: 2, oldestAt: "2026-11-04T23:30:00.000Z" } } }, ko);
+  assert.equal(koWaiting.badge, "승인 대기");
+  assert.equal(koWaiting.line, "승인을 기다리는 게시물 2건 · 가장 오래된 것 11-05 09:30 AEST부터");
+  assert.equal(
+    marketingRoom({}, ko).detail,
+    "초안 켜짐 · 게시 켜짐 · 생성기 마지막 실행 11-05 12:00 AEST · 이번 달(UTC) 생성기 호출 12회"
+  );
+  // Nothing in the room shows an amount of money.
+  for (const room of [clear, waiting, off, koWaiting]) assert.doesNotMatch(`${room.line} ${room.detail}`, /\$|USD|원\b/);
+});
+
+test("the three rooms carry every badge and word in both languages, and the record links are the console's", () => {
+  for (const locale of ["en", "ko"]) {
+    const real = adminAgentOfficeMessages[locale].real;
+    for (const key of ["trusted", "untrusted", "noGenesis", "unread"]) assert.ok(real.sre.badges[key], `${locale} sre ${key}`);
+    for (const key of ["shadow", "live"]) assert.ok(real.sre.modes[key], `${locale} sre mode ${key}`);
+    for (const key of ["on", "off", "stale", "failed", "unread"]) assert.ok(real.support.badges[key], `${locale} support ${key}`);
+    for (const key of ["running", "success", "partial", "failed", "deadline_exceeded"]) {
+      assert.ok(real.support.outcomes[key], `${locale} support outcome ${key}`);
+    }
+    for (const key of ["awaiting", "unreadableSwitch", "unreadableQueue", "draftsOff", "clear", "unread"]) {
+      assert.ok(real.marketing.badges[key], `${locale} marketing ${key}`);
+    }
+    for (const key of ["on", "off", "unreadable"]) assert.ok(real.marketing.switchWords[key], `${locale} marketing switch ${key}`);
+  }
+  // The same words in both languages, key for key.
+  for (const room of ["sre", "support", "marketing"]) {
+    const keys = (value) =>
+      Object.entries(value).flatMap(([key, inner]) =>
+        inner && typeof inner === "object" ? keys(inner).map((name) => `${key}.${name}`) : [key]
+      );
+    assert.deepEqual(keys(adminAgentOfficeMessages.en.real[room]).sort(), keys(adminAgentOfficeMessages.ko.real[room]).sort(), room);
+  }
+  // Support's record is the Feedback section of the support screen; none of the three waits on a link.
+  const dept = (id) => AGENT_OFFICE_DEPTS.find((entry) => entry.id === id);
+  assert.equal(AGENT_OFFICE_DECLARED_RECORD_HREFS.support, "/admin/support?tab=feedback");
+  assert.equal(dept("support").recordHref, "/admin/support?tab=feedback");
+  assert.equal(dept("sre").recordHref, "/admin/sre-ops");
+  assert.equal(dept("marketing").recordHref, "/admin/marketing");
+  for (const id of ["sre", "support", "marketing"]) assert.equal(AGENT_OFFICE_BLOCKED_DEPTS.has(id), false, id);
+  // Trust has no code and its activation is blocked: it stays waiting on a link.
+  assert.equal(dept("trust").recordHref, null);
+  assert.equal(AGENT_OFFICE_BLOCKED_DEPTS.has("trust"), true);
+  // The team lines no longer say a live room has nothing to read, or that it waits on a link.
+  for (const locale of ["en", "ko"]) {
+    for (const id of ["sre", "support", "marketing"]) {
+      assert.doesNotMatch(adminAgentOfficeMessages[locale].depts[id].blockReason, /아직 콘솔에 기록 화면이 없어서|no record screen in the console yet/);
+    }
+  }
+  // The panel gives each room its own copy.
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /sre: sreLiveDept\(live\.sre, m\.real\.sre\)/);
+  assert.match(panel, /support: supportLiveDept\(live\.support, m\.real\.support\)/);
+  assert.match(panel, /marketing: marketingLiveDept\(live\.marketing, m\.real\.marketing\)/);
+});
+
+test("the office reads the three rooms through their own readers, never their content, and writes nothing", () => {
+  const sre = readFunction("readSre");
+  assert.match(sre, /readOpsObserverAdminView\(\)/);
+  assert.match(sre, /prisma\.agentDigestItem\.findFirst\(\{\s*where: \{ agentKey: "sre-ops" \},\s*orderBy: \{ createdAt: "desc" \},\s*select: \{ createdAt: true \},/);
+  // The agent's own tables belong to its store; nothing here reads them directly.
+  assert.doesNotMatch(sre, /opsObserver(Genesis|State|Delivery|Transition)|\$queryRaw|\$executeRaw|\$transaction/i);
+  assert.doesNotMatch(sre, /\.(create|update|upsert|delete)(Many)?\(/);
+  assert.match(sre, /event: "admin_agent_office_read_failed", read: "ops_observer"/);
+  assert.match(sre, /return \{ kind: "unread" \}/);
+
+  const support = readFunction("readSupport");
+  assert.match(support, /resolveSupportTriageEnabled\(process\.env\)/);
+  assert.match(support, /readSupportTriageHealth\(\)/);
+  // The judgement is the agent's: no table of its is read here, and no report, draft or suggestion.
+  assert.doesNotMatch(support, /prisma\.|\$queryRaw|feedback|reply|draft|suggestion/i);
+  assert.doesNotMatch(support, /\.(create|update|upsert|delete)(Many)?\(/);
+  assert.match(support, /return \{ kind: "unread" \}/);
+
+  const marketing = readFunction("readMarketing");
+  assert.match(marketing, /readMarketingConsoleOverview\(\)/);
+  assert.match(marketing, /readMarketingSwitches\(\)/);
+  assert.match(marketing, /drafts: read\.switches\.drafts,\s*publish: read\.switches\.publish,/);
+  assert.doesNotMatch(marketing, /prisma\.|\$queryRaw|renderedText|payload|trackedPages|url|countedMicroUsd|tokenMicroUsd/i);
+  assert.doesNotMatch(marketing, /\.(create|update|upsert|delete)(Many)?\(/);
+  assert.match(marketing, /event: "admin_agent_office_read_failed", read: "marketing"/);
+  assert.match(marketing, /return \{ kind: "unread" \}/);
+
+  // Each read has its own try/catch, so one room failing never blocks another.
+  for (const name of ["readSre", "readSupport", "readMarketing"]) assert.match(readFunction(name), /\} catch \{/, name);
+  const all = readFileSync("lib/agentOfficeLiveRead.ts", "utf8");
+  assert.match(all, /readSre\(\),\s*readSupport\(\),\s*readMarketing\(\),/);
+  assert.match(all, /sre,\s*support,\s*marketing,/);
+  // The marketing switch reader is the console's own, exported rather than copied.
+  assert.match(readFileSync("lib/marketingConsoleRead.ts", "utf8"), /export async function readSwitches\(\)/);
+  assert.match(all, /import \{ readSwitches as readMarketingSwitches \} from "@\/lib\/marketingConsoleRead";/);
+  // The pure state modules are client-safe: no server-only module is imported at runtime.
+  for (const file of ["lib/agentOfficeSreState.ts", "lib/agentOfficeSupportState.ts", "lib/agentOfficeMarketingState.ts"]) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /server-only|from "@\/lib\/prisma"/, file);
+    for (const match of source.matchAll(/^import (?!type)[^\n]*from "([^"]+)"/gm)) {
+      assert.fail(`${file} has a runtime import: ${match[1]}`);
+    }
+  }
+});
+
 // ── The real view is the default; the demo plays on request ───────────────
 
 const liveLine = (text, status = "done") => ({ status, badge: "", line: text, detail: "" });
@@ -1699,9 +2056,9 @@ test("the dashboard's three windows read the live rooms, not a demo day", () => 
 });
 
 test("the operator's to-do counts the real queues an agent waits on, the same sets the sidebar badges count", () => {
-  assert.deepEqual(operatorQueueTotal({ marketing: 2, amuxEscalations: 1, amuxHalts: 0, autoFix: 0 }), { total: 3, unknown: false });
-  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: 1, amuxHalts: 0, autoFix: 4 }), { total: 5, unknown: true });
-  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: null, amuxHalts: null, autoFix: null }), { total: 0, unknown: true });
+  assert.deepEqual(operatorQueueTotal({ marketing: 2, amuxEscalations: 1, amuxHalts: 0 }), { total: 3, unknown: false });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: 1, amuxHalts: 4 }), { total: 5, unknown: true });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: null, amuxHalts: null }), { total: 0, unknown: true });
 
   // Every queue links to a console screen that exists, and to its tab when it names one.
   for (const key of OPERATOR_QUEUE_KEYS) {
@@ -1713,13 +2070,13 @@ test("the operator's to-do counts the real queues an agent waits on, the same se
   }
   // Read with the badges' own count functions, each on its own.
   const queue = readFunction("readOperatorQueue");
-  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()", "countAutoFixActionCases()"]) {
+  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
     assert.ok(queue.includes(count), count);
   }
   assert.match(queue, /Promise\.allSettled/);
   assert.match(queue, /return null;/);
   const badges = readFileSync("lib/adminNavigationCounts.ts", "utf8");
-  for (const count of ["countPendingMarketingApprovals()", "countAutoFixActionCases()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
+  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
     assert.ok(badges.includes(count), `the sidebar counts ${count} too`);
   }
 
@@ -2315,7 +2672,9 @@ test("a room's name opens what its team does, written from its code and policy",
   }
   for (const path of Object.values(AGENT_OFFICE_ROOM_POLICIES)) assert.ok(existsSync(path), path);
   // The team lines no longer promise what the code does not do.
-  assert.doesNotMatch(en.depts.support.task, /reply draft/);
+  assert.match(en.depts.support.task, /reply draft/);
+  assert.doesNotMatch(en.depts.support.task, /grouped/);
+  assert.doesNotMatch(adminAgentOfficeMessages.ko.depts.support.task, /묶기/);
   assert.doesNotMatch(en.depts.marketing.task, /KPI/);
 
   // The floor: every room but the operator's names itself with a button.

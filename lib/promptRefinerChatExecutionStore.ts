@@ -16,6 +16,7 @@ import {
   promptRefinerChatDecisionSchema,
   validatePromptRefinerChatExecution,
   type PromptRefinerHeldChatSuggestion,
+  type PromptRefinerRefusalReason,
 } from "@/lib/promptRefinerChatExecutionCore";
 import { bindPromptRefinerSuggestion, PROMPT_REFINER_INPUT_SCOPE,
   promptRefinerResponseSchema } from "@/lib/promptRefinerSuggestion";
@@ -35,7 +36,9 @@ import { prisma } from "@/lib/prisma";
 
 type Tx = Prisma.TransactionClient;
 type Scope = { id: string; userId: string; conversationId: string; surface: "chat" | "workspace"; epoch: number };
-const unavailable = (): never => { throw new PromptRefinerChatExecutionError(); };
+const unavailable = (reason?: PromptRefinerRefusalReason): never => {
+  throw new PromptRefinerChatExecutionError(reason);
+};
 const options = { maxWait: 2_000, timeout: 5_000 };
 // A serialized browser object cannot become a server-captured snapshot.
 const capturedSnapshots = new WeakSet<object>();
@@ -351,7 +354,7 @@ async function readExecutionView(
     ? await readScope(tx, choice.scopeId, input.userId)
     : (await tx.$queryRaw<Scope[]>`SELECT "id", "userId", "conversationId", "surface", "epoch"
         FROM "PromptRefinerChatScope" WHERE "id" = ${choice.scopeId} AND "userId" = ${input.userId}`)[0] ?? null;
-  if (!scope) return unavailable();
+  if (!scope) return unavailable("not_found");
   const rows = lockForConsume
     ? await tx.$queryRaw<PromptRefinerHeldChatSuggestion[]>`SELECT *
         FROM "PromptRefinerChatSuggestion" WHERE "id" = ${choice.suggestionId} AND "userId" = ${input.userId} FOR UPDATE`
@@ -376,7 +379,8 @@ async function readExecutionView(
         FROM "Message" m JOIN "Conversation" c ON c."id" = m."conversationId"
         WHERE m."id" = ${input.sourceMessageId} AND m."role" = 'user' AND c."id" = ${input.conversationId}
           AND c."userId" = ${input.userId} AND c."kind" = 'chat' AND c."productKey" = 'chat'`;
-  if (rows.length !== 1 || source.length !== 1) return unavailable();
+  if (rows.length !== 1) return unavailable("not_found");
+  if (source.length !== 1) return unavailable("source_mismatch");
   if (rows[0].mode === "auto") {
     if (lockForConsume) {
       // Chat draft/scope writers already order Conversation -> audit. Preserve
@@ -385,7 +389,7 @@ async function readExecutionView(
       await takeAuditChainLock(tx);
     }
     if (!(await readPromptRefinerProductAutoGuard(tx)).active) {
-      return unavailable();
+      return unavailable("guard_paused");
     }
   }
   return {
@@ -401,10 +405,10 @@ async function readExecutionView(
 
 async function admitExecution(input: PromptRefinerChatExecutionInput) {
   const choice = promptRefinerChatDecisionSchema.safeParse(input.decision);
-  if (!choice.success) return unavailable();
+  if (!choice.success) return unavailable("malformed_decision");
   const release = await promptRefinerChatExecutionAdmission();
-  if ((!release.explicitEnabled && !release.autoEnabled) ||
-    promptRefinerKillSwitchEngaged(process.env)) return unavailable();
+  if (!release.explicitEnabled && !release.autoEnabled) return unavailable("mode_disabled");
+  if (promptRefinerKillSwitchEngaged(process.env)) return unavailable("kill_switch");
   await verifyDurableChatSourceMessage({ ...input, sourceUserMessageId: input.sourceMessageId });
   return { choice: choice.data, release };
 }
@@ -440,7 +444,7 @@ export async function consumePreviewedPromptRefinerChatExecution(
 ) {
   const expected = previewSnapshots.get(preview);
   if (!expected || !isDeepStrictEqual(snapshotExecutionView(preview), expected)) {
-    return unavailable();
+    return unavailable("preview_changed");
   }
   previewSnapshots.delete(preview);
   const { choice, release } = await admitExecution(input);
@@ -457,13 +461,13 @@ async function consumeWithRelease(
     const { view, held, receiptNow } =
       await readExecutionView(tx, input, choice, release, true);
     if (expectedPreview &&
-      !isDeepStrictEqual(snapshotExecutionView(view), expectedPreview)) return unavailable();
+      !isDeepStrictEqual(snapshotExecutionView(view), expectedPreview)) return unavailable("preview_changed");
     const changed = await tx.$executeRaw`UPDATE "PromptRefinerChatSuggestion"
       SET "state" = 'consumed', "consumedAt" = clock_timestamp() AT TIME ZONE 'UTC',
         "decision" = ${choice.decision}, "sourcePrompt" = NULL, "refinedPrompt" = NULL
       WHERE "id" = ${choice.suggestionId} AND "state" = 'ready'
         AND "expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')`;
-    if (changed !== 1) return unavailable();
+    if (changed !== 1) return unavailable("consume_lost");
     await writeSystemAuditLog({ tx, systemActor: "prompt-refiner-chat-execution",
       action: "prompt_refiner.chat_decision_consumed", targetType: "PromptRefinerChatSuggestion",
       targetId: choice.suggestionId, summary: "Consumed one verified Prompt Refiner Chat decision.",
@@ -472,7 +476,7 @@ async function consumeWithRelease(
       SELECT "id", "requestId" FROM "PromptRefinerProductExecutionReceipt"
       WHERE "suggestionId" = ${choice.suggestionId} FOR SHARE
     `;
-    if (product.length > 1) return unavailable();
+    if (product.length > 1) return unavailable("receipt_mismatch");
     if (product.length === 1) {
       const attempts = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "PromptRefinerProductAttempt"
@@ -486,7 +490,7 @@ async function consumeWithRelease(
           AND "state" = 'held'
         FOR SHARE
       `;
-      if (attempts.length !== 1) return unavailable();
+      if (attempts.length !== 1) return unavailable("receipt_mismatch");
       await writePromptRefinerProductDispositionReceipt(tx, {
         receiptVersion: PROMPT_REFINER_DISPOSITION_RECEIPT_VERSION,
         dispositionId: randomUUID(),

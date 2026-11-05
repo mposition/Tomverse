@@ -262,7 +262,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  "qa-release-intake", "support-triage-worker", "support-triage-retention",
+  "qa-release-intake", "support-triage-worker", "support-triage-retention", "trace-report-analysis",
   "qa-release-merge-lane",
   "agent-digest-retention",
   ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "support-triage-account-deletion", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal",
@@ -427,6 +427,8 @@ export const systemAuditActionAllowed = (
   (actor !== "product-research-scout" ||
     (action === "product_research.scout.test_session_issued" && targetType === "User")) &&
   marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) &&
+  (actor !== "trace-report-analysis" ||
+    (action === "trace_report_analysis.idea_submitted" && targetType === "AmuxIdeaSubmission")) &&
   (actor !== AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.inspected" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&

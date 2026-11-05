@@ -77,7 +77,7 @@ test("email login keeps one Turnstile host mounted across email and code steps",
   );
   assert.match(
     hookSource,
-    /\[action, clearSilentTimer, container, enabled, settle, siteKey\]/
+    /\[\s*action,\s*clearSilentTimer,\s*container,\s*enabled,\s*renderAttempt,\s*settle,\s*siteKey,?\s*\]/
   );
 });
 

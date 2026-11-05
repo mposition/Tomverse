@@ -79,39 +79,10 @@ test("both statuses a new report can arrive in are counted", () => {
   );
 });
 
-test("Support counts a report and its waiting auto-fix case once, the work queue counts every report", () => {
-  // Three unclosed reports; one of them has a case waiting on an operator, so
-  // Support counts the case in its place. The work queue lists reports only.
-  const counts = {
-    ...EMPTY_ADMIN_NAVIGATION_COUNTS,
-    openFeedback: 3,
-    supportFeedback: 2,
-    autoFixActionCases: 1,
-    openPrivacyRequests: 1,
-  };
+test("Support counts every unclosed report, as the work queue does", () => {
+  const counts = { ...EMPTY_ADMIN_NAVIGATION_COUNTS, openFeedback: 3, openPrivacyRequests: 1 };
   assert.equal(adminNavigationBadge("support", counts), 4);
   assert.equal(adminNavigationBadge("workQueue", counts), 4);
-
-  // A reviewing report with no case -- the 2026-09-28 report -- lights Support.
-  assert.equal(
-    adminNavigationBadge("support", {
-      ...EMPTY_ADMIN_NAVIGATION_COUNTS,
-      openFeedback: 1,
-      supportFeedback: 1,
-      autoFixActionCases: 0,
-      openPrivacyRequests: 0,
-    }),
-    1
-  );
-});
-
-test("the Support count leaves out exactly the reports whose case is counted beside it", () => {
-  const source = read("lib/adminNavigationCounts.ts");
-  assert.match(
-    source,
-    /NOT:\s*\{\s*autoFixCase:\s*\{\s*is:\s*\{\s*state:\s*\{\s*in:\s*\[\.\.\.AUTOFIX_OPERATOR_ACTION_STATES\]/,
-    "supportFeedback must exclude the same states autoFixActionCases counts"
-  );
 });
 
 const sourceFiles = (directory: string): string[] => {
