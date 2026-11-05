@@ -45,7 +45,11 @@ import {
   type TrustSafetyPingOutcome,
   sendTrustSafetyPing,
 } from "@/lib/trustSafetyObserverPing";
-import { activationVerdict, budgetAllowsBatch } from "@/lib/trustSafetyRoundCore";
+import {
+  activationVerdict,
+  budgetAllowsBatch,
+  successorAfterEntry,
+} from "@/lib/trustSafetyRoundCore";
 import { withTrustSafetyTransaction } from "@/lib/trustSafetyTransaction";
 
 /** The config row the activation checks are about (§5.1, §6). */
@@ -121,10 +125,24 @@ const readVersion = (metadata: Prisma.JsonValue | null): number | null => {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 };
 
-const toActivationEntry = (
-  row: AuditRow,
-  env: NodeJS.ProcessEnv,
-): ActivationAuditEntry => ({
+/**
+ * The integrity keys, read one literal at a time.
+ *
+ * §5.6 allows `process.env.<literal>` in these files and nothing else -- not
+ * the object in a variable, not passed as an argument, not destructured. An
+ * earlier revision of this file took `process.env` as a parameter from the
+ * route, which is the banned form; independent review named it. Three reads
+ * into a fresh object is the allowed one.
+ */
+const integrityKeyEnv = () => ({
+  ADMIN_AUDIT_INTEGRITY_KEY: process.env.ADMIN_AUDIT_INTEGRITY_KEY,
+  ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS: process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS,
+  NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
+});
+
+type IntegrityKeyEnv = ReturnType<typeof integrityKeyEnv>;
+
+const toActivationEntry = (row: AuditRow, env: IntegrityKeyEnv): ActivationAuditEntry => ({
   id: row.id,
   toMode: readToMode(row.metadata),
   version: readVersion(row.metadata),
@@ -132,20 +150,13 @@ const toActivationEntry = (
   hmacValid: verifyTrustSafetyAuditEntry({ row, env }),
 });
 
-/**
- * Runs one round.
- *
- * `env` is passed in rather than read here so the integrity keys and the ping
- * URL arrive from one place: §5.6 allows `process.env.<literal>` in these
- * files and nothing else, and the route is where those literals live.
- */
+/** Runs one round. */
 export const runTrustSafetyObservation = async ({
-  env,
   nowMonotonicMs = () => performance.now(),
 }: {
-  readonly env: NodeJS.ProcessEnv;
   readonly nowMonotonicMs?: () => number;
-}): Promise<TrustSafetyRoundResult> => {
+} = {}): Promise<TrustSafetyRoundResult> => {
+  const env = integrityKeyEnv();
   const startedAt = nowMonotonicMs();
   const roundDeadline = new Date(Date.now() + ROUTE_BUDGET_MS);
 
@@ -204,14 +215,15 @@ export const runTrustSafetyObservation = async ({
         }
       }
 
-      // Check 7's successor is the next entry in the chain, whatever action
-      // wrote it: the chain is the repository's, not this agent's, so a
-      // successor filtered by action would miss a cut made by the next entry.
+      // Check 7's successor is the next entry in the chain by position,
+      // whatever action wrote it: the chain is the repository's, not this
+      // agent's, so a successor filtered by action -- or by the very link
+      // being checked -- would miss a cut made by that next entry.
       let successor: ActivationInput["successor"] = null;
       if (newest !== null && newest.entryHash !== null && newest.entryHash !== "") {
         const row = (await tx.statement((client) =>
           client.adminAuditLog.findFirst({
-            where: { previousHash: newest.entryHash },
+            ...successorAfterEntry({ createdAt: newest.createdAt, id: newest.id }),
             select: AUDIT_SELECT,
           }),
         )) as AuditRow | null;
@@ -229,7 +241,7 @@ export const runTrustSafetyObservation = async ({
         unhashedEntryExists,
         maxEntryVersion,
         successor,
-        pingUrlPresent: isPresent(env.TRUST_SAFETY_OBSERVER_PING_URL),
+        pingUrlPresent: isPresent(process.env.TRUST_SAFETY_OBSERVER_PING_URL),
       });
     },
   });
@@ -282,7 +294,7 @@ export const runTrustSafetyObservation = async ({
 
   // §6's sixth fault withholds the ping and nothing else: the round ran and is
   // recorded, and the monitor will notice the silence after `W`.
-  const pingUrl = env.TRUST_SAFETY_OBSERVER_PING_URL;
+  const pingUrl = process.env.TRUST_SAFETY_OBSERVER_PING_URL;
   if (!activation.pingPermitted || !isPresent(pingUrl)) {
     return { outcome: "ran", activation, ping: "withheld" };
   }

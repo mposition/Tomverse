@@ -12,7 +12,7 @@
  *     three values and §6 keeps distinct from each other.
  */
 
-import { TRUST_SAFETY_BOUNDS, type TrustSafetyTransactionKind } from "@/lib/trustSafetyBoundsCore";
+import { trustSafetyBound, type TrustSafetyTransactionKind } from "@/lib/trustSafetyBoundsCore";
 import type { ActivationState } from "@/lib/trustSafetyActivationCore";
 
 /**
@@ -34,7 +34,7 @@ export const budgetAllowsBatch = ({
   readonly budgetMs: number;
 }): boolean => {
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return false;
-  return budgetMs - elapsedMs >= TRUST_SAFETY_BOUNDS[kind].cGuardedMs;
+  return budgetMs - elapsedMs >= trustSafetyBound(kind).cGuardedMs;
 };
 
 /** What the round does next, once activation is derived. */
@@ -50,6 +50,37 @@ export type ActivationVerdict = "observe" | "disabled" | "failed";
  * failure: it withholds the ping and the round still observes and records, so
  * the monitor reports the silence instead.
  */
+/**
+ * Where to look for check 7's successor: the next entry by position, never by
+ * the link being checked.
+ *
+ * Independent review found the mistake this replaces. Selecting the successor
+ * with `previousHash = <the bound entry's hash>` asks the chain whether it is
+ * intact and believes the answer: cut the next entry's `previousHash` and the
+ * query returns nothing, the derivation reads that as "no successor exists",
+ * and the round observes and pings with the chain broken behind it. The
+ * successor is whichever entry comes next, and whether it points back at the
+ * bound one is then a question the derivation can actually answer.
+ *
+ * The order is `createdAt` then `id`, matching the order the newest entry is
+ * chosen with, so a pair written inside the same millisecond resolves the same
+ * way in both directions. The tiebreak is why the condition is a disjunction
+ * rather than `createdAt > x`: entries sharing a timestamp would otherwise be
+ * skipped, and the one that cut the chain could be among them.
+ */
+export const successorAfterEntry = ({
+  createdAt,
+  id,
+}: {
+  readonly createdAt: Date;
+  readonly id: string;
+}) => ({
+  where: {
+    OR: [{ createdAt: { gt: createdAt } }, { createdAt, id: { gt: id } }],
+  },
+  orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+}) as const;
+
 export const activationVerdict = (state: ActivationState): ActivationVerdict => {
   // A null mode is exactly §6's refusal: every fault that stops counting
   // leaves the mode unbelieved. `countPermitted` is not the test here -- an

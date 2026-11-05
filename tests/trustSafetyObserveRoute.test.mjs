@@ -99,5 +99,9 @@ test("the route holds no judgement of its own", () => {
   assert.doesNotMatch(code, /\bprisma\b/);
   assert.doesNotMatch(code, /\$queryRaw|\$executeRaw/);
   assert.doesNotMatch(code, /\bfetch\s*\(/);
-  assert.match(code, /runTrustSafetyObservation\(\{ env: process\.env \}\)/);
+  assert.match(code, /runTrustSafetyObservation\(\)/);
+  // §5.6 allows `process.env.<literal>` in these files and nothing else.
+  // Handing the object to the round was the banned form; independent review
+  // named it, and the round reads the literals it needs itself.
+  assert.doesNotMatch(code, /process\.env\s*[,)}]/, "process.env is not passed as a value");
 });

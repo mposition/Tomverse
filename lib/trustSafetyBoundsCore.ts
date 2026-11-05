@@ -50,25 +50,44 @@ const bound = (statementCeiling: number, prismaTimeoutMs: number) => {
   };
 };
 
+/** One kind's figures. */
+export type TrustSafetyBound = ReturnType<typeof bound>;
+
+export type TrustSafetyTransactionKind =
+  | "activation_read"
+  | "dsr_read"
+  | "run_write"
+  | "activation_write";
+
 /**
  * The four transaction kinds (§12 table B).
  *
  * `dsr_read` and `run_write` hold the same three figures because `A` is 3 for
  * both. The policy asks for two entries rather than one shared constant: a
  * statement added to the run write must not quietly move the read's budget.
+ *
+ * A `Map`, not an object, and §5.6 is the reason: looking a kind up by a
+ * variable would be a computed property access, which these files may not use
+ * -- the policy says objects by literal and spread, tables through a `Map`.
  */
-export const TRUST_SAFETY_BOUNDS = {
-  /** T0 -- activation read. */
-  activation_read: bound(5, 25_000),
-  /** Ta -- DSR count read. */
-  dsr_read: bound(3, 20_000),
-  /** Tr -- run row write. */
-  run_write: bound(3, 20_000),
-  /** The person's activation write (E3). */
-  activation_write: bound(8, 40_000),
-} as const;
+export const TRUST_SAFETY_BOUNDS: ReadonlyMap<TrustSafetyTransactionKind, TrustSafetyBound> =
+  new Map<TrustSafetyTransactionKind, TrustSafetyBound>([
+    /** T0 -- activation read. */
+    ["activation_read", bound(5, 25_000)],
+    /** Ta -- DSR count read. */
+    ["dsr_read", bound(3, 20_000)],
+    /** Tr -- run row write. */
+    ["run_write", bound(3, 20_000)],
+    /** The person's activation write (E3). */
+    ["activation_write", bound(8, 40_000)],
+  ]);
 
-export type TrustSafetyTransactionKind = keyof typeof TRUST_SAFETY_BOUNDS;
+/** The kind's figures. An unknown kind is a programming error, not a late round. */
+export const trustSafetyBound = (kind: TrustSafetyTransactionKind): TrustSafetyBound => {
+  const found = TRUST_SAFETY_BOUNDS.get(kind);
+  if (found === undefined) throw new TypeError(`Unknown transaction kind ${kind}.`);
+  return found;
+};
 
 /** The monotonic pre-check between the commit's response and the ping (§8). */
 export const MONOTONIC_PRECHECK_MS = 1_000;
@@ -88,16 +107,16 @@ export const ROUND_WINDOW_MS = 47_000;
  * minted through the run write's commit, covered conservatively (§12 table C).
  */
 export const ROUND_WINDOW_FLOOR_MS =
-  TRUST_SAFETY_BOUNDS.activation_read.cGuardedMs +
-  TRUST_SAFETY_BOUNDS.dsr_read.cGuardedMs +
-  TRUST_SAFETY_BOUNDS.run_write.cGuardedMs +
+  trustSafetyBound("activation_read").cGuardedMs +
+  trustSafetyBound("dsr_read").cGuardedMs +
+  trustSafetyBound("run_write").cGuardedMs +
   MONOTONIC_PRECHECK_MS;
 
 /** The three transactions plus the ping (§12 table C). */
 export const GUARDED_TOTAL_MS =
-  TRUST_SAFETY_BOUNDS.activation_read.cGuardedMs +
-  TRUST_SAFETY_BOUNDS.dsr_read.cGuardedMs +
-  TRUST_SAFETY_BOUNDS.run_write.cGuardedMs +
+  trustSafetyBound("activation_read").cGuardedMs +
+  trustSafetyBound("dsr_read").cGuardedMs +
+  trustSafetyBound("run_write").cGuardedMs +
   PING_ABORT_MS;
 
 /**
@@ -106,7 +125,7 @@ export const GUARDED_TOTAL_MS =
  * from the policy because no table cell gave its figure.
  */
 export const ROUTE_BUDGET_MS =
-  ROUND_WINDOW_MS + TRUST_SAFETY_BOUNDS.run_write.cGuardedMs + PING_ABORT_MS;
+  ROUND_WINDOW_MS + trustSafetyBound("run_write").cGuardedMs + PING_ABORT_MS;
 
 /** A budget, not a guarantee: the ping claims no arrival inside the window (§8). */
 export const PING_FRESHNESS_MS = ROUND_WINDOW_MS + MONOTONIC_PRECHECK_MS + PING_ABORT_MS;
@@ -120,8 +139,6 @@ export const DECLARED_PERIOD_MS = 30 * 60_000;
 export const DEAD_MAN_WINDOW_MULTIPLE = 4;
 export const DEAD_MAN_WINDOW_MS = DEAD_MAN_WINDOW_MULTIPLE * DECLARED_PERIOD_MS;
 
-type Bound = (typeof TRUST_SAFETY_BOUNDS)[TrustSafetyTransactionKind];
-
 /**
  * The per-kind ordering §5.5 calls a contract, returned as the names of the
  * links that fail.
@@ -131,7 +148,7 @@ type Bound = (typeof TRUST_SAFETY_BOUNDS)[TrustSafetyTransactionKind];
  * statement timer turns the per-statement limit off silently, and the guarded
  * budget then rests on nothing.
  */
-export const boundViolations = (b: Bound): readonly string[] => {
+export const boundViolations = (b: TrustSafetyBound): readonly string[] => {
   const violations: string[] = [];
   if (!(b.prismaTimeoutMs > b.transactionTimeoutMs)) violations.push("prisma_gt_transaction");
   if (!(b.transactionTimeoutMs > b.cGuardedMs)) violations.push("transaction_gt_guarded");

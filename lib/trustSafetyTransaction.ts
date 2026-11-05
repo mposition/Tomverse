@@ -31,12 +31,16 @@
 
 import "server-only";
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+// Type-only, and §5.6 turns on that: a type edge is erased at build, so the
+// package does not enter this agent's own files. A value import of `Prisma`
+// for its isolation-level enum would, which is why the level below is the
+// literal the enum holds.
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import {
   ARM_MARGIN_MS,
-  TRUST_SAFETY_BOUNDS,
+  trustSafetyBound,
   type TrustSafetyTransactionKind,
 } from "@/lib/trustSafetyBoundsCore";
 
@@ -114,11 +118,16 @@ type ArmRow = {
   ttArmed: boolean;
 };
 
-/** The GUC each writing kind's deadline goes into; the reading kinds have none. */
-const DEADLINE_SETTING: Partial<Record<TrustSafetyTransactionKind, string>> = {
-  run_write: "trust_safety.run_deadline",
-  activation_write: "trust_safety.activation_deadline",
-};
+/**
+ * The GUC each writing kind's deadline goes into; the reading kinds have none.
+ *
+ * A `Map` for the same reason the bounds table is one: §5.6 refuses a computed
+ * property access in these files, and the kind arrives as a variable.
+ */
+const DEADLINE_SETTING = new Map<TrustSafetyTransactionKind, string>([
+  ["run_write", "trust_safety.run_deadline"],
+  ["activation_write", "trust_safety.activation_deadline"],
+]);
 
 /**
  * Runs `fn` inside one bounded transaction of `kind`.
@@ -144,8 +153,8 @@ export const withTrustSafetyTransaction = async <T>({
   readonly fn: (tx: TrustSafetyTx, armed: TrustSafetyArmed) => Promise<T>;
   readonly client?: PrismaClient;
 }): Promise<T> => {
-  const bound = TRUST_SAFETY_BOUNDS[kind];
-  const deadlineSetting = DEADLINE_SETTING[kind];
+  const bound = trustSafetyBound(kind);
+  const deadlineSetting = DEADLINE_SETTING.get(kind);
   // The arming statement, and for a writing kind the deadline statement, are
   // spent before the callback sees the ceiling.
   const spentByWrapper = deadlineSetting === undefined ? 1 : 2;
@@ -230,7 +239,7 @@ export const withTrustSafetyTransaction = async <T>({
       return fn(tx, armed);
     },
     {
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      isolationLevel: "ReadCommitted",
       timeout: bound.prismaTimeoutMs,
       maxWait: 2_000,
     },

@@ -9,20 +9,26 @@
  * table, and the observer's transactions are bounded in statements (§5.5).
  *
  * **No second hash implementation.** The digest, the key-order history and the
- * key list all come from `lib/adminAuditIntegrityCore.ts` — the same functions
- * the writer signs with. A local HMAC here would be a second answer to "is
- * this entry authentic", and the two would drift at the next key rotation.
+ * key list are the chain's own, reached through `lib/adminAudit.ts` — the same
+ * functions the writer signs with. A local HMAC here would be a second answer
+ * to "is this entry authentic", and the two would drift at the next key
+ * rotation.
+ *
+ * They come through `lib/adminAudit.ts` rather than from the integrity core
+ * directly because §5.6's boundary stops at that module: importing the core
+ * here would pull it into the observer's own files, where the section's
+ * reflection rules apply and that file's `Object` use would fail them. Only
+ * the hash helpers come through; this module appends nothing.
  *
  * This module reads the integrity keys from the environment, so it is not a
  * pure core: `lib/trustSafetyActivationCore.ts` takes the verdict as an input
  * and stays testable without secrets.
  */
 import {
-  ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
   adminAuditEntryHashVariants,
-  adminAuditIntegrityKeys,
+  adminAuditIntegrityKeysForVerification,
   type AdminAuditHashInput,
-} from "@/lib/adminAuditIntegrityCore";
+} from "@/lib/adminAudit";
 
 /** The entry fields the digest is computed over, plus the stored hashes. */
 export type TrustSafetyAuditEntryRow = {
@@ -65,7 +71,7 @@ export const verifyTrustSafetyAuditEntry = ({
   };
 }): boolean | null => {
   if (row.entryHash === null || row.entryHash === "") return null;
-  const keys = adminAuditIntegrityKeys(env);
+  const keys = adminAuditIntegrityKeysForVerification(env);
   if (keys.length === 0) return null;
 
   const input: AdminAuditHashInput = {
@@ -86,9 +92,13 @@ export const verifyTrustSafetyAuditEntry = ({
 
   for (const key of keys) {
     const variants = adminAuditEntryHashVariants(input, key);
-    for (const order of ADMIN_AUDIT_VERIFICATION_KEY_ORDERS) {
-      if (variants[order] === row.entryHash) return true;
-    }
+    // Both orders by name. §5.6 refuses a computed property access in these
+    // files -- `variants[order]` over the exported order list is one, because
+    // the key does not reduce to a literal here -- so the two are named, and
+    // a test fails if the repository ever verifies under a third order that
+    // this line does not mention.
+    if (variants.locale === row.entryHash) return true;
+    if (variants.codepoint === row.entryHash) return true;
   }
   return false;
 };

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ROUTE_BUDGET_MS, TRUST_SAFETY_BOUNDS } from "../lib/trustSafetyBoundsCore.ts";
-import { activationVerdict, budgetAllowsBatch } from "../lib/trustSafetyRoundCore.ts";
+import {
+  activationVerdict,
+  budgetAllowsBatch,
+  successorAfterEntry,
+} from "../lib/trustSafetyRoundCore.ts";
 
 /**
  * The round's two judgements (docs/policy/trust-safety-compliance-agent.md
@@ -15,7 +19,7 @@ test("a batch starts only with its whole guarded budget left", () => {
   // §5.5: not starting is the point -- no row, no ping. The boundary is
   // inclusive, so a batch with exactly its budget left still runs.
   for (const kind of KINDS) {
-    const guarded = TRUST_SAFETY_BOUNDS[kind].cGuardedMs;
+    const guarded = TRUST_SAFETY_BOUNDS.get(kind).cGuardedMs;
     const exactly = ROUTE_BUDGET_MS - guarded;
     assert.equal(
       budgetAllowsBatch({ kind, elapsedMs: exactly, budgetMs: ROUTE_BUDGET_MS }),
@@ -40,7 +44,7 @@ test("the three batches fit the route budget together", () => {
       true,
       `${kind} fits after ${elapsed}ms`,
     );
-    elapsed += TRUST_SAFETY_BOUNDS[kind].cGuardedMs;
+    elapsed += TRUST_SAFETY_BOUNDS.get(kind).cGuardedMs;
   }
   assert.ok(elapsed < ROUTE_BUDGET_MS, "and the ping's share is still left over");
 });
@@ -53,6 +57,39 @@ test("an unreadable or backwards elapsed time refuses the batch", () => {
       `elapsed ${String(elapsedMs)}`,
     );
   }
+});
+
+test("the successor is selected by position, never by the link being checked", () => {
+  // The mistake independent review found: selecting it with `previousHash =
+  // <the bound entry's hash>` asks the chain whether it is intact and believes
+  // the answer. Cut the next entry's previousHash and that query returns
+  // nothing, check 7 reads "no successor", and the round observes with a
+  // broken chain behind it.
+  const createdAt = new Date("2026-11-05T01:02:03.456Z");
+  const query = successorAfterEntry({ createdAt, id: "entry-2" });
+  assert.deepEqual(query, {
+    where: {
+      OR: [{ createdAt: { gt: createdAt } }, { createdAt, id: { gt: "entry-2" } }],
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  const text = JSON.stringify(query);
+  assert.ok(!text.includes("previousHash"), "the link is not a filter");
+  assert.ok(!text.includes("entryHash"), "nor is the hash");
+  assert.ok(!text.includes("action"), "and not the action either: the chain is the repository's");
+});
+
+test("the successor query covers an entry written in the same millisecond", () => {
+  // createdAt has millisecond resolution, so a tiebreak is reachable. Without
+  // the second disjunct an entry sharing the timestamp is skipped -- and the
+  // one that cut the chain could be exactly that entry.
+  const createdAt = new Date("2026-11-05T01:02:03.456Z");
+  const { where, orderBy } = successorAfterEntry({ createdAt, id: "b" });
+  assert.equal(where.OR.length, 2);
+  assert.deepEqual(where.OR[1], { createdAt, id: { gt: "b" } });
+  // The same order the newest entry is chosen with, read the other way, so one
+  // pair cannot be both the newest and its own successor.
+  assert.deepEqual(orderBy, [{ createdAt: "asc" }, { id: "asc" }]);
 });
 
 const state = (over) => ({

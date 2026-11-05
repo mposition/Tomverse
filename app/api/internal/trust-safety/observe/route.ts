@@ -1,8 +1,9 @@
 export const dynamic = "force-dynamic";
-// Longer than the round's own budget `B`, because the hard limit belongs to the
-// cron service: its supervisor SIGKILLs the child at the deadline (§4). This
-// route claims no hard timeout -- a Next handler cannot end itself, and it
-// cannot take back a COMMIT it already sent.
+// Above the round's own budget `B` and above the supervisor's kill, so the
+// limit that ends a run is the service's and not the platform's (§4). The
+// platform will cut the handler here, but §4's point stands: *this route*
+// claims no hard timeout of its own -- a Next handler cannot end itself, and
+// neither it nor the platform can take back a COMMIT already sent.
 export const maxDuration = 120;
 
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -29,8 +30,12 @@ import { runTrustSafetyObservation } from "@/lib/trustSafetyObserverRound";
 // answers `ran` -- including when §6's sixth fault withheld the ping, because
 // the round did run and the monitor's silence after `W` is the consequence.
 //
-// Nothing is turned on by this file. Until an operator writes the config row
-// through E3, every round answers `disabled` and writes nothing.
+// Nothing is turned on by this file, and before activation the answer is
+// `failed`, not `disabled`: with no config row §6's first check is a fault
+// that stops counting, and the section keeps a fault apart from a switch
+// someone deliberately turned off. `disabled` begins once a person has written
+// the row through E3 and set it to `off`. Either way nothing is written and no
+// ping goes out.
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -66,7 +71,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runTrustSafetyObservation({ env: process.env });
+    const result = await runTrustSafetyObservation();
     // Structured and value-free: the outcome, the fault §6 named and what
     // happened to the ping. Never the ping URL, never a count, never a request
     // id of a person's.

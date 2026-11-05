@@ -39,9 +39,9 @@ test("table B gives each kind its four figures", () => {
     ["run_write", [3, 9_000, 12_000, 20_000]],
     ["activation_write", [8, 24_000, 27_000, 40_000]],
   ]);
-  assert.equal(Object.keys(TRUST_SAFETY_BOUNDS).length, table.size, "four kinds, no more");
+  assert.equal(TRUST_SAFETY_BOUNDS.size, table.size, "four kinds, no more");
   for (const [kind, [a, guarded, tt, prismaTimeout]] of table) {
-    const bound = TRUST_SAFETY_BOUNDS[kind];
+    const bound = TRUST_SAFETY_BOUNDS.get(kind);
     assert.ok(bound, `${kind} exists`);
     assert.equal(bound.statementCeiling, a, `${kind} A`);
     assert.equal(bound.cGuardedMs, guarded, `${kind} C_guarded`);
@@ -58,20 +58,20 @@ test("a kind's deadline is its guarded budget, by the same expression", () => {
   // §12 corrected this: one revision's table said A x 3s and its test
   // requirement said (A - 1) x 3s, so no implementation without a literal
   // satisfied both. The deadline and the guarded budget are now one figure.
-  for (const bound of Object.values(TRUST_SAFETY_BOUNDS)) {
+  for (const bound of TRUST_SAFETY_BOUNDS.values()) {
     assert.equal(bound.deadlineMs, bound.cGuardedMs);
     assert.equal(bound.deadlineMs, bound.statementCeiling * 3_000);
   }
-  assert.equal(TRUST_SAFETY_BOUNDS.run_write.deadlineMs, 9_000, "the run row: 9s");
-  assert.equal(TRUST_SAFETY_BOUNDS.activation_write.deadlineMs, 24_000, "activation: 24s");
+  assert.equal(TRUST_SAFETY_BOUNDS.get("run_write").deadlineMs, 9_000, "the run row: 9s");
+  assert.equal(TRUST_SAFETY_BOUNDS.get("activation_write").deadlineMs, 24_000, "activation: 24s");
 });
 
 test("dsr_read and run_write are separate entries, not one shared constant", () => {
   // §12: the two hold the same figures only because A is 3 for both. A
   // statement added to the run write must not move the read's budget.
   const source = readFileSync("lib/trustSafetyBoundsCore.ts", "utf8");
-  assert.match(source, /dsr_read:\s*bound\(/);
-  assert.match(source, /run_write:\s*bound\(/);
+  assert.match(source, /\["dsr_read",\s*bound\(/);
+  assert.match(source, /\["run_write",\s*bound\(/);
 });
 
 test("table C's derived figures come out of table B", () => {
@@ -96,7 +96,7 @@ test("table A's period and window", () => {
 });
 
 test("every kind satisfies the ordering §5.5 calls a contract", () => {
-  for (const [kind, bound] of Object.entries(TRUST_SAFETY_BOUNDS)) {
+  for (const [kind, bound] of TRUST_SAFETY_BOUNDS.entries()) {
     assert.deepEqual(boundViolations(bound), [], kind);
   }
 });
@@ -138,7 +138,7 @@ test("the migration's own intervals are the module's figures", () => {
   assert.ok(window, "the window interval is in the migration");
   assert.equal(Number(window[1]) * 1_000, ROUND_WINDOW_MS);
   assert.ok(
-    run.includes(`interval '${TRUST_SAFETY_BOUNDS.run_write.deadlineMs / 1_000} seconds'`),
+    run.includes(`interval '${TRUST_SAFETY_BOUNDS.get("run_write").deadlineMs / 1_000} seconds'`),
     "the run row's reach check uses the kind's deadline",
   );
 
@@ -147,7 +147,7 @@ test("the migration's own intervals are the module's figures", () => {
     "utf8",
   );
   assert.ok(
-    config.includes(`interval '${TRUST_SAFETY_BOUNDS.activation_write.deadlineMs / 1_000} seconds'`),
+    config.includes(`interval '${TRUST_SAFETY_BOUNDS.get("activation_write").deadlineMs / 1_000} seconds'`),
     "the activation write's reach check uses its own deadline",
   );
 });

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   ADMIN_AUDIT_SIGNING_KEY_ORDER,
+  ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
   adminAuditEntryHashVariants,
   computeAdminAuditEntryHash,
 } from "../lib/adminAuditIntegrityCore.ts";
@@ -113,6 +114,23 @@ test("an entry signed with a previous key still verifies after rotation", () => 
   );
 });
 
+test("every order the repository verifies under is named in the module", () => {
+  // §5.6 refuses a computed property access in these files, so the module
+  // cannot loop over the exported order list -- it names the orders. That is
+  // only safe while the list holds no order the module left out, which is what
+  // this asserts. A third order added upstream fails here first.
+  const source = readFileSync(MODULE, "utf8");
+  for (const order of ADMIN_AUDIT_VERIFICATION_KEY_ORDERS) {
+    assert.match(source, new RegExp(`variants\\.${order}\\b`), `order ${order} is not compared`);
+  }
+  const compared = source.match(/variants\.[A-Za-z]+/g) ?? [];
+  assert.equal(
+    new Set(compared).size,
+    ADMIN_AUDIT_VERIFICATION_KEY_ORDERS.length,
+    "and no order is compared that the repository does not verify under",
+  );
+});
+
 test("an entry signed under another key order still verifies", () => {
   // The repository moved its signing order once; verification tries each, so
   // entries from before that move are not lost.
@@ -141,7 +159,11 @@ test("the module computes no digest of its own", () => {
   // the two would drift at the next rotation. Anchored to the import and to
   // the absence of a crypto call.
   const source = readFileSync(MODULE, "utf8");
-  assert.match(source, /from "@\/lib\/adminAuditIntegrityCore"/);
+  // Through the boundary module, not from the integrity core: §5.6's check
+  // stops at `lib/adminAudit.ts`, and importing the core here would put its
+  // body in this agent's own files.
+  assert.match(source, /from "@\/lib\/adminAudit"/);
+  assert.doesNotMatch(source, /from "@\/lib\/adminAuditIntegrityCore"/);
   // Anchored to the imports, not to the characters: the comment explaining why
   // there is no local HMAC names the function, and a substring guard failed on
   // its own explanation.

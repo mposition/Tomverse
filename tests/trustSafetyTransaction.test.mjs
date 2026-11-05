@@ -116,7 +116,7 @@ test("a reading kind has no deadline statement", async () => {
     assert.equal(fake.statements.length, 1, kind);
     assert.equal(
       remaining,
-      TRUST_SAFETY_BOUNDS[kind].statementCeiling - 1,
+      TRUST_SAFETY_BOUNDS.get(kind).statementCeiling - 1,
       `${kind} leaves the callback A - 1`,
     );
   }
@@ -230,10 +230,10 @@ test("the transaction options are the kind's, with the ordering §5.5 requires",
     });
     const options = fake.optionsSeen();
     assert.equal(options.isolationLevel, "ReadCommitted", kind);
-    assert.equal(options.timeout, TRUST_SAFETY_BOUNDS[kind].prismaTimeoutMs, kind);
+    assert.equal(options.timeout, TRUST_SAFETY_BOUNDS.get(kind).prismaTimeoutMs, kind);
     assert.equal(options.maxWait, 2_000, kind);
     // The database must end a run before the client library gives up on it.
-    assert.ok(options.timeout > TRUST_SAFETY_BOUNDS[kind].transactionTimeoutMs, kind);
+    assert.ok(options.timeout > TRUST_SAFETY_BOUNDS.get(kind).transactionTimeoutMs, kind);
   }
 });
 
