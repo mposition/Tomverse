@@ -11854,7 +11854,7 @@ model CodeManagedCall {
 }
 
 /// One successful round of the trust-safety observer (docs/policy/trust-safety-compliance-agent.md §5.3).
-/// Four columns on purpose: no free text, reason, count, error message or user reference, and no
+/// Five columns on purpose: no free text, reason, count, error message or user reference, and no
 /// idempotency key -- two overlapping rounds are two true sentences, so the row count is "successful
 /// rounds" and never a denominator. Append-only: triggers refuse UPDATE and DELETE. Nothing reads it,
 /// which is what makes the row a record rather than state.

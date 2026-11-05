@@ -3,9 +3,11 @@
 --
 -- baseline-check: present-if-relation "TrustSafetyObserverRun"
 --
--- Four columns and nothing else. §5.3 fixes them: id, outcome, observedAt,
--- recordedAt, with no free text, reason, count, error message or user
--- reference column. `outcome` has one allowed value so the schema itself says
+-- Five columns and nothing else. §5.3 fixes them: id, outcome, observedAt,
+-- recordedAt, deadlineAt, with no free text, reason, count, error message or
+-- user reference column. The fifth is the deadline this round must commit
+-- inside, and §5.3 records why it had to exist: no implementation satisfies
+-- §5.4 without it. `outcome` has one allowed value so the schema itself says
 -- "this table holds successes only", and there is no idempotency key -- two
 -- overlapping runs are two true sentences, so the row count is "successful
 -- runs" and never a denominator.

@@ -158,6 +158,12 @@ export const runTrustSafetyObservation = async ({
 } = {}): Promise<TrustSafetyRoundResult> => {
   const env = integrityKeyEnv();
   const startedAt = nowMonotonicMs();
+  // The round's deadline is the caller's claim, on the application's wall
+  // clock, while the arming function measures the remaining budget against it
+  // on the database's. The mixed clocks can only refuse a round that had time
+  // left, or grant one a little more of the route budget than it should have
+  // had -- never record a late round as a success, because the deadline the
+  // trigger judges is computed by the database and stored on the row.
   const roundDeadline = new Date(Date.now() + ROUTE_BUDGET_MS);
 
   /** §5.5: a batch that cannot fit in what is left does not start. */
