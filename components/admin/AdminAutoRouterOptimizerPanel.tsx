@@ -16,6 +16,8 @@ import {
   OpenRecommendationsInbox,
   RecommendationControls,
   optimizerCycleAnchor,
+  recommendationKey,
+  type RecommendationSendState,
 } from "@/components/admin/AdminAutoRouterRecommendations";
 import {
   actionableRecommendations,
@@ -110,6 +112,7 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
+  const [sendState, setSendState] = useState<RecommendationSendState>({ sendingKey: null, failure: null });
 
   const apply = useCallback((next: OptimizerState) => {
     setState(next);
@@ -172,35 +175,37 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
   const setRecommendation = (cycleId: string, index: number, status: RecommendationStatus) =>
     void send({ action: "set_recommendation", cycleId, index, status });
 
+  const reason = (code: string | null) =>
+    code ? (m.reasons as Record<string, string>)[code] ?? code : null;
+
   const sendToAmux = async (cycleId: string, index: number) => {
+    const key = recommendationKey(cycleId, index);
+    let refused: AdminApiFailure | null = null;
     setBusy(true);
     setRefusal(null);
     setFailure(null);
+    setSendState({ sendingKey: key, failure: null });
     try {
       const response = await adminFetch(SEND_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cycleId, index }),
       });
-      if (response.status === 409) {
-        const answer = (await response.json().catch(() => null)) as { code?: string } | null;
-        setRefusal(answer?.code ?? "unknown");
-        return;
-      }
       if (!response.ok) {
-        setFailure(await readAdminApiFailure(response, { fallback: m.actionFailed, locale: apiLocale }));
-        return;
+        // The send route answers its refusals with a code.
+        const failed = await readAdminApiFailure(response, { fallback: m.actionFailed, locale: apiLocale });
+        refused = { ...failed, message: reason(failed.message) ?? failed.message };
       }
-      await load();
     } catch {
-      setFailure(describeAdminApiFailure({ status: 0, fallback: m.actionFailed, locale: apiLocale }));
+      refused = describeAdminApiFailure({ status: 0, fallback: m.actionFailed, locale: apiLocale });
     } finally {
+      // Refused or not, show what is stored now: a send that stopped part-way has its own status.
+      await load();
+      setSendState({ sendingKey: null, failure: refused ? { key, failure: refused } : null });
       setBusy(false);
     }
   };
 
-  const reason = (code: string | null) =>
-    code ? (m.reasons as Record<string, string>)[code] ?? code : null;
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
   const verdict = (value: string) => (m.verdicts as Record<string, string>)[value] ?? value;
   const comparisonVerdict = (value: string) =>
@@ -367,6 +372,7 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
           cycles={state.cycles}
           busy={busy}
           canSend={canSendToAmux}
+          sendState={sendState}
           onSetStatus={setRecommendation}
           onSend={(cycleId, index) => void sendToAmux(cycleId, index)}
         />
@@ -447,6 +453,7 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
                                 item={actionable}
                                 busy={busy}
                                 canSend={canSendToAmux}
+                                sendState={sendState}
                                 onSetStatus={setRecommendation}
                                 onSend={(cycleId, sendIndex) => void sendToAmux(cycleId, sendIndex)}
                               />
