@@ -23,10 +23,17 @@ const sandboxUnavailable = (() => {
   } catch { return "strace cannot follow an unprivileged bwrap sandbox on this host"; }
 })();
 
-// The Node tests run /usr/bin/node inside the sandbox; a runner whose Node comes
-// from a toolcache (setup-node) has none there, so bwrap exits 1 before any trace.
-const nodeSandboxUnavailable = sandboxUnavailable
-  || (existsSync("/usr/bin/node") ? false : "/usr/bin/node is not installed");
+// The two Node-based cases need a system Node under /usr/bin, which the sandbox
+// binds. A runner whose Node comes from setup-node lives outside those binds.
+const nodeUnavailable = sandboxUnavailable || (() => {
+  try {
+    execFileSync("/usr/bin/strace", ["-f", "-qq", "-o", "/dev/null", "/usr/bin/bwrap",
+      "--unshare-all", "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin",
+      "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64", "--",
+      "/usr/bin/node", "-e", "0"], { stdio: "ignore", timeout: 15_000 });
+    return false;
+  } catch { return "no system Node runnable inside the sandbox on this host"; }
+})();
 
 test("isolated traced child streams opened checkout paths without a log", {
   skip: sandboxUnavailable,
@@ -69,7 +76,7 @@ test("isolated traced child streams opened checkout paths without a log", {
 });
 
 test("Node's io_uring is refused and its read is still observed as a complete manifest", {
-  skip: nodeSandboxUnavailable,
+  skip: nodeUnavailable,
 }, async () => {
   // Measured 2026-10-19 on the v19 runner: without the seccomp filter Node 22's
   // libuv io_uring_setup succeeds and the manifest could not be certified.
@@ -105,7 +112,7 @@ test("Node's io_uring is refused and its read is still observed as a complete ma
 });
 
 test("concurrent reads that strace splits across threads still form a complete manifest", {
-  skip: nodeSandboxUnavailable,
+  skip: nodeUnavailable,
 }, async () => {
   // The sixth Max S0 call ended `undecoded_open`: strace -f writes a call that
   // another thread interrupts as `<unfinished ...>` plus `<... resumed>`.

@@ -71,7 +71,11 @@ import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
 } from "@/lib/promptRefinerChatExecutionStore";
-import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
+import {
+  PromptRefinerChatExecutionError,
+  promptRefinerRefusalReasonOf,
+  type PromptRefinerRefusalReason,
+} from "@/lib/promptRefinerChatExecutionCore";
 import { promptRefinerChatExecutionRelease } from "@/lib/promptRefinerChatExecutionRelease";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
 import {
@@ -1302,6 +1306,7 @@ async function handleChatPost(
      * Counts only -- never text, file names or ids -- so the line says how
      * big the turn was without saying what was in it.
      */
+    let refinerRefusalReasonForLog: PromptRefinerRefusalReason | null = null;
     let requestShapeForLog: {
         messageCount: number;
         attachmentCount: number;
@@ -1360,10 +1365,14 @@ async function handleChatPost(
         type RefinerExecution = { mode: "explicit" | "auto"; applied: boolean };
         let refinerExecution: RefinerExecution | null = null;
         let refinerPreview: Awaited<ReturnType<typeof previewPromptRefinerChatExecution>> | null = null;
+        const refuseRefinerDecision = (reason: PromptRefinerRefusalReason, status = 409): never => {
+            refinerRefusalReasonForLog = reason;
+            throw new ChatAccessError(status, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+        };
         const consumeRefinerPreview = async (): Promise<RefinerExecution | null> => {
             if (!refinerPreview || refinerExecution) return refinerExecution;
             if (!session?.user?.id || !conversationId || !sourceUserMessageId) {
-                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision("request_incomplete");
             }
             try {
                 const view = await consumePreviewedPromptRefinerChatExecution({
@@ -1375,17 +1384,17 @@ async function handleChatPost(
                 refinerExecution = consumed;
                 return consumed;
             } catch (error) {
-                throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
-                    "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision(promptRefinerRefusalReasonOf(error),
+                    error instanceof PromptRefinerChatExecutionError ? 409 : 503);
             }
         };
         if (promptRefinerDecision !== undefined) {
             if (!session?.user?.id || !conversationId || !sourceUserMessageId || !assistantMessageId) {
-                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision("request_incomplete");
             }
             const release = await promptRefinerChatExecutionRelease();
             if (!release.explicitEnabled && !release.autoEnabled) {
-                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision("mode_disabled");
             }
             const scopeAccess = await authorizeChatRecoveryScope({ request: req,
                 userId: session.user.id, scopeKey: conversationId });
@@ -1403,8 +1412,8 @@ async function handleChatPost(
                 });
                 executionMessages = [...refinerPreview.executionMessages];
             } catch (error) {
-                throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
-                    "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+                return refuseRefinerDecision(promptRefinerRefusalReasonOf(error),
+                    error instanceof PromptRefinerChatExecutionError ? 409 : 503);
             }
         }
         const pinnedDeploymentEntered = classifyPinnedDeployment(
@@ -1422,8 +1431,7 @@ async function handleChatPost(
         // deterministic pinned refusal. Keep the held suggestion intact and
         // require an ordinary Chat dispatch instead.
         if (pinnedDeploymentEntered && refinerPreview) {
-            throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE",
-                "The Prompt Refiner decision is no longer available.");
+            return refuseRefinerDecision("pinned_deployment");
         }
         // A pinned internal account either finishes on this path or, when the
         // flag is off or the account is not the configured one, falls through
@@ -7592,6 +7600,8 @@ async function handleChatPost(
                         modelId: dispatchModelIdForLog ?? null,
                         plan: refusalSubjectForLog?.plan ?? null,
                         ...(requestShapeForLog ?? {}),
+                        // A closed list, so a refused Refiner decision says why.
+                        ...(refinerRefusalReasonForLog ? { reason: refinerRefusalReasonForLog } : {}),
                         // Numbers and flags only. Some refusals name the
                         // files they are about, and a file name is the
                         // user's content.
