@@ -34,6 +34,10 @@ test.describe("marketing console", () => {
 
     await expect(consoleHeading(page)).toHaveText("Marketing");
     await expect(page.getByText(FIXTURE_MARKETING.pending.renderedText)).toBeVisible();
+    // The whole post, not a shortened excerpt: a person approves these words.
+    await expect(page.getByTestId("marketing-queue-text").first()).toHaveText(
+      FIXTURE_MARKETING.pending.renderedText
+    );
     await expect(
       page.getByText(FIXTURE_MARKETING.channel.accountSlug, { exact: false }).first()
     ).toBeVisible();

@@ -617,7 +617,7 @@ test.describe("fixture experiment, forced variant", () => {
     expect(policy, "a CSP header is on the rewritten response").toBeTruthy();
 
     const inlineScripts = [
-      ...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi),
+      ...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi),
     ]
       .filter(([, attributes, content]) => !/\bsrc\s*=/.test(attributes) && content)
       .map(([, , content]) => content);

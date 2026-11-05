@@ -176,7 +176,7 @@ test("a sent page whose confirm fails beats nothing and posts nothing more", asy
   const result = await run(fake, { env: LIVE_ENV });
   assert.deepEqual([result.exitCode, result.outcome], [1, "confirm_refused"]);
   assert.equal(fake.paths().filter((path) => path === WEBHOOK).length, 1);
-  assert.equal(fake.paths().includes(HEARTBEAT), false);
+  assert.equal(fake.paths().filter((path) => path === HEARTBEAT).length, 0);
 });
 
 test("a live chain without a Slack webhook reserves nothing and beats nothing", async () => {
@@ -195,7 +195,7 @@ test("a shadow chain never touches the webhook, even when one is configured", as
   }));
   const result = await run(fake, { env: LIVE_ENV });
   assert.deepEqual([result.exitCode, result.outcome], [0, "advanced"]);
-  assert.equal(fake.paths().includes(WEBHOOK), false);
+  assert.equal(fake.paths().filter((path) => path === WEBHOOK).length, 0);
 });
 
 test("the channel check window is Tuesday 10:00-12:00 in Brisbane", () => {
