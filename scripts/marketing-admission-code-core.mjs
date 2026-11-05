@@ -179,3 +179,17 @@ export const marketingAdmissionCodeDigest = (files) =>
 
 export const MARKETING_ADMISSION_CODE_MANIFEST_PATH =
   "config/marketing-admission-code-manifest.json";
+
+/** The manifest file's text for a closure's files: one form for every writer of it. */
+export const marketingAdmissionCodeManifestText = (files) =>
+  `${JSON.stringify(
+    {
+      schemaVersion: MARKETING_ADMISSION_CODE_SCHEMA_VERSION,
+      roots: [...MARKETING_ADMISSION_CODE_ROOTS],
+      digest: marketingAdmissionCodeDigest(files),
+      totalSizeBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0),
+      files,
+    },
+    null,
+    2
+  )}\n`;

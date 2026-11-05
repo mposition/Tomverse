@@ -539,6 +539,10 @@ workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(c
 - 양쪽 모두 일반 파일이어야 하고, 링크를 따라가지 않고 씁니다.
 - 한쪽이 지운 파일, symlink, 지시 파일이 걸린 충돌은 풀지 않습니다(`no_change`, `outside_rules`).
 - head 하나에는 요청 하나만 보냅니다. 같은 head의 CI 수정이 진행 중이거나 보내졌으면 충돌 해결은 기다립니다(반대도 같습니다).
+- GitHub은 충돌로 보는데 git merge는 깨끗한 경우가 있습니다. 병합 베이스가 둘이면(쌓은 PR의 부모가 먼저 병합됐을 때, #3314)
+  베이스 하나로는 충돌하고 git이 합친 베이스로는 충돌하지 않습니다. 이때는 모델을 부르지 않고 빈 해결안을 보내며,
+  workflow가 자기가 만든 merge를 그대로 커밋합니다. 그 뒤로는 베이스가 하나가 되어 GitHub도 충돌로 보지 않습니다.
+  head에 base가 이미 들어 있어 merge할 것이 없으면 전처럼 `no_change`입니다.
 켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,
 그리고 GitHub 저장소 변수 `PR_AUTO_FIX_CONFLICTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이
 main에 들어간 뒤에 켭니다. base 쪽에서 workflow 파일이 바뀐 merge는 `GH_AUTOMATION_PAT`에
@@ -549,6 +553,13 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 "push됨"은 `pushed`이고 그 자동 수정 커밋이 지금도 head일 때만 나옵니다(보고의 `settled`). 보낸 지 2시간이
 지나도 head가 그대로면 workflow가 거절했거나 push가 실패한 것으로 보고 `not_published`로 끝냅니다. 이 상태는
 다시 분석할 수 있고, 같은 head의 다른 종류 수정을 더 막지 않습니다.
+
+**marketing admission manifest 재생성(기본 꺼짐, 켜려면 운영자 승인).** 모델은 명령을 실행할 수 없어
+`config/marketing-admission-code-manifest.json`의 digest를 만들 수 없습니다. 목록의 파일을 고친 PR은 그래서 `not_found`로 멈췄습니다(#3328).
+`read.env`에 `PR_CI_AUTO_FIX_REGENERATE=on`을 두면 모델이 끝난 뒤 이 서버의 코드가 작업 checkout의 파일을 읽어 manifest를 다시 씁니다. 브랜치의 코드는 실행하지 않습니다.
+- 파일 내용만 바뀐 경우에만 씁니다. 목록에 파일이 들어오거나 빠지면(`paths_changed`) 스스로 나가는 게시를 결정하는 코드가 바뀐 것이므로 그대로 두어 사람이 읽게 합니다.
+- checkout 밖을 가리키는 경로(`outside_checkout`), 스키마나 root가 다른 manifest(`other_schema`), 찾지 못한 import(`unresolved`)도 쓰지 않습니다.
+- 결과는 ledger의 `manifest`와 서버 로그에 남습니다. 병합은 여전히 운영자가 하고, 그 diff에 manifest 변경이 보입니다.
 
 **Dependabot PR(운영자 결정 2026-10-26).**
 - 수정은 업데이트된 패키지에 맞춰 코드를 고치는 것입니다. 업데이트를 되돌리지 말라고 프롬프트에 적습니다.
@@ -615,7 +626,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
   Admin › QA·릴리스 › CI 입장 화면에 PR별로 보입니다(2026-10-27). 모델의 문장 자체는 앱으로 가지 않습니다.
 - **기능이 바뀌면 저절로 다시 시도.** ledger는 시도마다 그때의 능력(`ability`)을 남깁니다. 이 모듈
-  (`lib/ci-fix.mjs`, 프롬프트와 설치 경로)의 내용과, CI 수정이면 설치 스위치(`PR_CI_AUTO_FIX_INSTALL`)의 digest입니다.
+  (`lib/ci-fix.mjs`, 프롬프트와 설치 경로)의 내용과, CI 수정이면 설치·manifest 스위치(`PR_CI_AUTO_FIX_INSTALL`, `PR_CI_AUTO_FIX_REGENERATE`)의 digest입니다.
   고치지 못했거나 검사에 거부된 head도, 그 뒤 능력이 바뀌면 라벨 없이 **한 번 더** 시도합니다. 스위치를
   켜거나 서버 checkout을 갱신한 경우입니다. 같은 능력으로는 다시 시도하지 않습니다. 보낸 수정은 대상이
   아니고, 한 pass에 하나·시간당 상한·quota는 그대로입니다. 이 기록이 없던 예전 항목은 첫
