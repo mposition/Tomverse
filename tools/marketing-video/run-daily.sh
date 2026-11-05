@@ -27,11 +27,16 @@ mkdir -p job
 # no prompts, no session kept, and only these tools. The whole stream stays in job/
 # (not in git): plain text keeps only the last line, and a run that dies early
 # ("Prompt is too long", 2026-11-04) then says nothing about what it had read.
-"${CLAUDE_BIN:-claude}" --print "$(cat JOB.md)" \
+# No MCP: the job uses none, and with ToolSearch left out of --tools every MCP
+# tool of the account's claude.ai connectors is loaded into the prompt up front
+# (code.claude.com/docs/en/mcp.md), the likely cause of that 2026-11-04 failure.
+ENABLE_CLAUDEAI_MCP_SERVERS=false "${CLAUDE_BIN:-claude}" --print "$(cat JOB.md)" \
   --no-session-persistence \
   --permission-mode dontAsk --permission-prompts none \
+  --strict-mcp-config \
   --tools "Bash,Read,Write,Edit" \
   --allowedTools "Bash(node *),Bash(npx *),Read,Write,Edit" \
+  --disallowedTools "mcp__*" \
   --max-turns 120 \
   --output-format stream-json --verbose \
   | tee -a "job/run-$(date -u +%Y%m%d).jsonl" \
