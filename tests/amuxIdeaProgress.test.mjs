@@ -4,7 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
-import { amuxIdeaProgress, amuxIdeaProgressFailureLog, amuxIdeaProgressStep } from "../lib/amux/ideaProgressCore.ts";
+import { amuxIdeaBlockReason, amuxIdeaProgress, amuxIdeaProgressFailureLog, amuxIdeaProgressStep,
+  amuxIdeaStatusNotice } from "../lib/amux/ideaProgressCore.ts";
 import { AMUX_IDEA_PROGRESS_LIMIT, readAmuxIdeaProgressInTx } from "../lib/amux/ideaProgressRead.ts";
 
 const root = process.cwd();
@@ -88,6 +89,72 @@ test("an unknown outcome is flagged, never a decision to retry", () => {
   assert.deepEqual(["execution_approval", "done", "cancelled"].map(amuxIdeaProgressStep), [1, 6, null]);
 });
 
+test("analysis and execution say what is actually happening, not only which stage the idea reached", () => {
+  const activity = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.activity]; };
+  // AMUX-CONTSEED-001: one Task blocked, the rest in backlog, no PR, nothing running.
+  assert.deepEqual(activity({ cards: [task({ status: "blocked" }), task({ status: "backlog" }), task({ status: "backlog" })] }),
+    ["execution", "blocked"]);
+  assert.deepEqual(activity({ cards: [task({ status: "backlog" }), task()] }), ["execution", "waiting"],
+    "every Task waits, so nothing is running");
+  assert.deepEqual(activity({ cards: [task({ cardType: "story", status: "backlog" })] }), ["execution", "waiting"]);
+  assert.deepEqual(activity({ cards: [task({ status: "doing" }), task({ status: "backlog" })] }), ["execution", "running"]);
+  assert.deepEqual(activity({ cards: [task({ status: "todo", liveAttempt: true })] }), ["execution", "running"],
+    "a live attempt is running whatever the card says");
+  assert.deepEqual(activity({ cards: [task({ status: "blocked" }), task({ status: "doing" })] }), ["execution", "running"],
+    "blocked means nothing else runs");
+  assert.deepEqual(activity({ cards: [task({ status: "blocked", merged: true }), task({ status: "backlog" })] }),
+    ["execution", "waiting"], "a closed Task blocks nothing");
+  assert.deepEqual(activity({ cards: [task({ status: "review", reviewPrNumber: 3 }), task({ status: "blocked" })] }),
+    ["review", null], "the review is a person's step");
+  // Case 2: the execution approval is recorded and no worker holds the page yet.
+  assert.deepEqual(activity({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null,
+    previewState: "confirmed", holdStatus: "reserved" })] }), ["analysis", "waiting"]);
+  assert.deepEqual(activity({ state: "analyzing", chunks: [chunk({ state: "in_flight", coverageStatus: null,
+    previewState: "in_flight", holdStatus: "in_flight" })] }), ["analysis", "running"]);
+  assert.deepEqual(activity({ state: "analyzing" }), ["analysis", "waiting"]);
+  assert.deepEqual(activity({ submissionOrigin: "session" }), ["analysis", "waiting"], "queued for the analysis");
+  assert.deepEqual(activity({}), ["execution_approval", null]);
+  assert.deepEqual(activity({ submissionOrigin: "session", state: "awaiting_owner" }), ["analysis", null],
+    "the operator's review is not a wait for the system");
+  assert.deepEqual(activity({ state: "analyzing", chunks: [chunk({ previewState: "outcome_unknown" })] }), ["analysis", null],
+    "an unknown outcome claims neither");
+  const lane = (state) => amuxIdeaProgress(facts({ lane: { state, attempts: 1, prNumber: null, lastOutcome: null,
+    part: 1, continues: false, previousPrNumber: null } })).activity;
+  assert.deepEqual(["running", "queued", "failed", "pr_open", "merged"].map(lane),
+    ["running", "waiting", "blocked", null, null]);
+});
+
+test("each stopped state names the one notice that says what the owner can do", () => {
+  const notice = (value, extra = {}) => amuxIdeaStatusNotice({ ...amuxIdeaProgress(facts(value)), ...extra });
+  const blocked = { cards: [task({ status: "blocked" })] };
+  assert.equal(notice(blocked), "execution_blocked");
+  assert.equal(notice({ cards: [task({ status: "backlog" })] }), "execution_waiting");
+  assert.equal(notice({ cards: [task({ status: "doing" })] }), "execution_running");
+  const approved = { chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "confirmed", holdStatus: "reserved" })] };
+  assert.equal(notice(approved), "analysis_waiting");
+  assert.equal(notice({ state: "analyzing", chunks: [chunk({ state: "in_flight" })] }), "analysis_running");
+  assert.equal(notice({ submissionOrigin: "session" }, { submissionOrigin: "session" }), "analysis_queued");
+  assert.equal(notice({}), "execution_approval");
+  assert.equal(notice({ state: "awaiting_owner", chunks: [chunk({ state: "decided" })] }), "plan_finished");
+  assert.equal(notice({ chunks: [chunk()], cards: [task({ status: "review", reviewPrNumber: 3 })] }), "review");
+  assert.equal(notice({ state: "analyzing", chunks: [chunk({ previewState: "outcome_unknown" })] }), "attention");
+  assert.equal(notice({ cards: [task({ status: "done", merged: true })] }), null, "done asks nothing");
+  assert.equal(notice({ cancelled: true }), null);
+  assert.equal(notice({ submissionOrigin: "session", state: "awaiting_owner" }), null, "its own notice and panel say it");
+  const lane = (state) => { const value = { state, attempts: 1, prNumber: 7, lastOutcome: null, part: 1,
+    continues: false, previousPrNumber: null }; return notice({ lane: value }, { lane: value }); };
+  assert.deepEqual(["running", "queued", "failed", "pr_closed", "pr_open", "merged"].map(lane),
+    ["lane_running", "lane_waiting", "lane_failed", "lane_pr_closed", "review", null]);
+});
+
+test("only a reason from the closed vocabulary reaches the page, never stored free text", () => {
+  assert.equal(amuxIdeaBlockReason("execution_lease_expired", "attempts"), "execution_lease_expired", "the open review comes first");
+  assert.equal(amuxIdeaBlockReason(null, "attempts"), "attempts");
+  assert.equal(amuxIdeaBlockReason("worker said: token sk-live-123", "also free text"), null);
+  assert.equal(amuxIdeaBlockReason("__proto__", "constructor"), null);
+  assert.equal(amuxIdeaBlockReason(null, null), null);
+});
+
 test("the list is one statement in one bounded snapshot that never reads idea text", async () => {
   // Seven reads made eight gaps under the boundary's 100 ms idle-in-transaction
   // timeout and the production read failed; one statement has the two gaps of
@@ -102,7 +169,12 @@ test("the list is one statement in one bounded snapshot that never reads idea te
     chunks: [{ chunkIndex: 0, state: "decided", coverageStatus: "complete", previewState: "completed", holdStatus: "succeeded" }],
     cards: [
       { id: "c1", cardType: "story", status: "backlog", reviewPrNumber: null, terminal: false, displayKey: "AMUX-ADM-001" },
-      { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, terminal: false, displayKey: "AMUX-ADM-002" }],
+      { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, terminal: false, displayKey: "AMUX-ADM-002" },
+      { id: "c3", cardType: "task", status: "blocked", reviewPrNumber: null, terminal: false, displayKey: "AMUX-ADM-003",
+        liveAttempt: false, escalationId: "cm-escalation-1", escalationReason: "attempt_budget_exhausted",
+        lastAttemptReason: "worker said: token sk-live-123" },
+      { id: "c4", cardType: "task", status: "blocked", reviewPrNumber: null, terminal: false, displayKey: "AMUX-ADM-004",
+        liveAttempt: false, escalationId: null, escalationReason: null, lastAttemptReason: "worker said: token sk-live-123" }],
     checkoutEvidence: [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 2,
       secretPath: 1, secretContent: 1, nonRegular: 0, unscannableContent: 0,
       readManifests: [{ manifestId: "m1", fileCount: 2, digest: "b".repeat(64),
@@ -151,8 +223,15 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.ok(sql.includes(`ORDER BY e."referenceOrdinal"`));
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests, row.submittedAt],
     ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }], "2026-10-15T00:00:00.123Z"]);
-  assert.deepEqual(row.taskRows, [{ displayKey: "AMUX-ADM-002", status: "review", reviewPrNumber: 2540, merged: false }],
-    "the detail lists Tasks only, never stories");
+  assert.deepEqual(row.taskRows, [
+    { id: "c2", displayKey: "AMUX-ADM-002", status: "review", reviewPrNumber: 2540, merged: false, blockReason: null, escalationId: null },
+    { id: "c3", displayKey: "AMUX-ADM-003", status: "blocked", reviewPrNumber: null, merged: false,
+      blockReason: "attempt_budget_exhausted", escalationId: "cm-escalation-1" },
+    { id: "c4", displayKey: "AMUX-ADM-004", status: "blocked", reviewPrNumber: null, merged: false, blockReason: null, escalationId: null },
+  ], "the detail lists Tasks only, never stories, and no stored free text reaches it");
+  assert.ok(sql.includes(`FROM "AmuxExecutionAttempt" a`), "a live attempt is read inside the one statement");
+  assert.ok(sql.includes(`a."leaseExpiresAt" > (?::timestamptz AT TIME ZONE 'UTC')`), "an expired lease is not live");
+  assert.ok(sql.includes(`e."status" IN ('open', 'acknowledged')`), "only an unresolved review is linked");
   assert.deepEqual(row.checkoutEvidence, [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
     excludedCount: 2, excludedReasons: { secretPath: 1, secretContent: 1,
       nonRegular: 0, unscannableContent: 0 },
@@ -267,7 +346,7 @@ test("the exact transfer payload is readable: an explicit text colour on a dark 
 
 test("the list asks before it leaves an unsaved draft", () => {
   const panel = read("components/admin/AmuxIdeaProgressPanel.tsx");
-  assert.equal(panel.split("onClick={keepDraft}").length - 1, 2, "both links to an idea ask first");
+  assert.equal(panel.split("onClick={keepDraft}").length - 1, 3, "every link to an idea asks first");
   const input = read("components/admin/AmuxIdeaInputPanel.tsx");
   assert.ok(input.includes('const draftAtRisk = hasUnsavedInput && (submission.kind === "idle" || submission.kind === "refused");'));
   assert.ok(input.includes("setAmuxIdeaUnsavedDraft(draftAtRisk)"));

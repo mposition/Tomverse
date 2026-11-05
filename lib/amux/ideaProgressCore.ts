@@ -23,6 +23,9 @@ import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
  * A human step still open always wins over card progress: an idea with some
  * cards registered and proposals still undecided is waiting for its plan
  * approval, not done.
+ *
+ * Analysis and execution can sit still for a long time, so the stage alone does
+ * not say whether anything is happening: `activity` does.
  */
 
 export const AMUX_IDEA_PROGRESS_STAGES = [
@@ -32,6 +35,8 @@ export type AmuxIdeaProgressStage = typeof AMUX_IDEA_PROGRESS_STAGES[number] | "
 /** What a person must do next, when anything. */
 export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_input" | "plan_approval" |
   "session_review";
+/** Inside a stage no person holds: something runs, it waits its turn, or it is stuck until someone acts. */
+export type AmuxIdeaProgressActivity = "running" | "waiting" | "blocked";
 
 export type AmuxIdeaProgressFacts = {
   state: string;
@@ -44,7 +49,9 @@ export type AmuxIdeaProgressFacts = {
   proposedUnits: number;
   /** The idea's own registered cards (stories and tasks). */
   /** `merged`: v4TerminalAt is set (the merge was observed); a cancelled card is closed but not merged. */
-  cards: Array<{ cardType: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
+  cards: Array<{ cardType: string | null; status: string; reviewPrNumber: number | null; merged: boolean;
+    /** An attempt that has not ended holds an unexpired lease. */
+    liveAttempt?: boolean }>;
   /** The idea lane's runs (ideaLaneCore.ts), null when the lane never took the idea. */
   lane?: AmuxIdeaLaneState | null;
 };
@@ -53,6 +60,8 @@ export type AmuxIdeaProgress = {
   stage: AmuxIdeaProgressStage;
   /** The human step waiting, or null; never set while an outcome is unknown. */
   waitingFor: AmuxIdeaWaitingFor | null;
+  /** Null when a person holds the step, the outcome is unknown, or the stage has no work of its own. */
+  activity: AmuxIdeaProgressActivity | null;
   /** Something stopped with an unknown outcome; it is never retried automatically. */
   attention: boolean;
   tasks: { total: number; done: number; inReview: number };
@@ -78,8 +87,19 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     (last, chunk) => !last || chunk.chunkIndex > last.chunkIndex ? chunk : last, null);
   const attention = latest !== null && (latest.state === UNKNOWN ||
     latest.previewState === UNKNOWN || latest.holdStatus === UNKNOWN);
+  const open = tasks.filter((task) => !closed(task));
+  const activityAt = (stage: AmuxIdeaProgressStage, waitingFor: AmuxIdeaWaitingFor | null): AmuxIdeaProgressActivity | null => {
+    if (attention || waitingFor !== null) return null;
+    if (stage === "analysis") {
+      return latest !== null && (latest.state === "in_flight" || latest.previewState === "in_flight" ||
+        latest.holdStatus === "in_flight") ? "running" : "waiting";
+    }
+    if (stage !== "execution") return null;
+    if (open.some((task) => task.status === "doing" || task.liveAttempt === true)) return "running";
+    return open.some((task) => task.status === "blocked") ? "blocked" : "waiting";
+  };
   const at = (stage: AmuxIdeaProgressStage, waitingFor: AmuxIdeaWaitingFor | null = null): AmuxIdeaProgress =>
-    ({ stage, waitingFor: attention ? null : waitingFor, attention, tasks: counts });
+    ({ stage, waitingFor: attention ? null : waitingFor, activity: activityAt(stage, waitingFor), attention, tasks: counts });
 
   if (facts.cancelled || facts.state === "cancelled") return at("cancelled");
   // The lane skips analysis and approvals: its run is the execution, its
@@ -88,7 +108,8 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   if (facts.lane) {
     const { state } = facts.lane;
     return { stage: state === "merged" ? "done" : state === "pr_open" || state === "pr_closed" ? "review" : "execution",
-      waitingFor: null, attention: state === "failed" || state === "pr_closed", tasks: counts };
+      waitingFor: null, activity: state === "running" ? "running" : state === "queued" ? "waiting" : state === "failed" ? "blocked" : null,
+      attention: state === "failed" || state === "pr_closed", tasks: counts };
   }
   if (latest && (latest.state === "in_flight" ||
     (latest.previewState !== null && ACTIVE_PREVIEW.has(latest.previewState)) ||
@@ -134,6 +155,60 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     return at("analysis");
   }
   return at("execution_approval", "execution_approval");
+}
+
+/**
+ * What the detail page says about the idea right now, so a stopped idea always
+ * names what the owner can do, or that there is nothing to do. Null: another part
+ * of the page already says it (a finished or cancelled idea, a session review).
+ */
+export type AmuxIdeaStatusNoticeKind = "attention" | "lane_running" | "lane_waiting" | "lane_failed" | "lane_pr_closed" |
+  "analysis_running" | "analysis_waiting" | "analysis_queued" | "execution_running" | "execution_waiting" |
+  "execution_blocked" | "execution_approval" | "continuation" | "owner_input" | "plan_approval" | "plan_finished" | "review";
+
+export function amuxIdeaStatusNotice(progress: Pick<AmuxIdeaProgress, "stage" | "waitingFor" | "activity" | "attention"> & {
+  submissionOrigin?: "owner" | "session"; lane?: AmuxIdeaLaneState | null;
+}): AmuxIdeaStatusNoticeKind | null {
+  if (progress.stage === "cancelled") return null;
+  if (progress.lane) {
+    return ({ running: "lane_running", queued: "lane_waiting", failed: "lane_failed", pr_closed: "lane_pr_closed",
+      pr_open: "review", merged: null } as const)[progress.lane.state];
+  }
+  if (progress.attention) return "attention";
+  if (progress.waitingFor === "session_review") return null;
+  if (progress.waitingFor) return progress.waitingFor;
+  if (progress.stage === "analysis") {
+    if (progress.activity === "running") return "analysis_running";
+    return progress.submissionOrigin === "session" ? "analysis_queued" : "analysis_waiting";
+  }
+  if (progress.stage === "execution") {
+    return progress.activity === "running" ? "execution_running"
+      : progress.activity === "blocked" ? "execution_blocked" : "execution_waiting";
+  }
+  if (progress.stage === "plan_approval") return "plan_finished";
+  return progress.stage === "review" ? "review" : null;
+}
+
+/**
+ * The reasons a blocked Task may show: the codes escalations store
+ * (lib/amux/escalation.ts) and the ones the execution settlement writes on an attempt
+ * (lib/amux/execution.ts). An attempt's reason column has held free text, so
+ * anything outside this list is dropped and the page says the reason is not known.
+ */
+export const AMUX_IDEA_BLOCK_REASONS = [
+  "human_review_required", "execution_blocked", "attempt_budget_exhausted", "attempts", "execution_lease_expired",
+  "usage_outcome_unknown", "outcome_unknown", "operational_cost_blocked", "cost_reconfirmation_required",
+  "canonical_deadline_review_required", "local_card_closed", "local_card_unlinked", "local_card_ambiguous",
+  "assignment_mismatch", "contract_path_touched", "incident_frozen", "orchestrator_halted",
+] as const;
+export type AmuxIdeaBlockReason = typeof AMUX_IDEA_BLOCK_REASONS[number];
+const isBlockReason = (value: string | null | undefined): value is AmuxIdeaBlockReason =>
+  (AMUX_IDEA_BLOCK_REASONS as readonly unknown[]).includes(value);
+
+/** The open review's reason first, then the last attempt's. */
+export function amuxIdeaBlockReason(escalationReason: string | null | undefined,
+  lastAttemptReason: string | null | undefined): AmuxIdeaBlockReason | null {
+  return isBlockReason(escalationReason) ? escalationReason : isBlockReason(lastAttemptReason) ? lastAttemptReason : null;
 }
 
 /** Position of a stage on the six-step bar; cancelled has none. */
