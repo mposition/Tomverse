@@ -607,6 +607,9 @@ type AmuxAnalysisChunkInspectionInput = {
    * skip the newer contract (amux-intake v20). Null only when re-reading a
    * stored, digest-verified chunk, whose schema was fixed when it was admitted. */
   requiredSchemaVersion: AmuxAnalysisChunk["schemaVersion"] | null;
+  /** Session pages only: an output continuation may end with no further card
+   * once the model finds nothing left (ideaSessionAnswerCore). */
+  allowEmptyClosingPage?: boolean;
 };
 
 const SCHEMA_VERSIONS: readonly unknown[] = [2, 3, 4, AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION];
@@ -620,6 +623,7 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
   sourceRefs: string[];
   targetRefs: AmuxPermittedTargetRef[];
   requiredSchemaVersion: AmuxAnalysisChunk["schemaVersion"] | null;
+  allowEmptyClosingPage: boolean;
 } | null => {
   try {
     if (!input || typeof input !== "object") return null;
@@ -644,7 +648,8 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
     if (verifiedTargets.some((target) => !amuxPermittedTargetRefSafe(target, expectedChunkIndex))) return null;
     return { raw, expectedPreviewId, expectedChunkIndex, expectedRevisionChunkIndex,
       previousContinuationKind,
-      sourceRefs, targetRefs: verifiedTargets, requiredSchemaVersion };
+      sourceRefs, targetRefs: verifiedTargets, requiredSchemaVersion,
+      allowEmptyClosingPage: input.allowEmptyClosingPage === true };
   } catch {
     return null;
   }
@@ -656,7 +661,7 @@ export function inspectAmuxAnalysisChunk(
   const snapshot = snapshotInspectionInput(input);
   if (snapshot === null) return { ok: false, code: "metadata_incomplete" };
   const { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
-    sourceRefs, targetRefs, requiredSchemaVersion } = snapshot;
+    sourceRefs, targetRefs, requiredSchemaVersion, allowEmptyClosingPage } = snapshot;
   if (byteLength(raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES) return { ok: false, code: "too_large" };
   let parsed: unknown;
   try {
@@ -725,6 +730,8 @@ export function inspectAmuxAnalysisChunk(
       oneOf(data.continuationKind, ["input", "output"] as const, "continuationKind");
     const ownerQuestion = nullableText(data.ownerQuestion, 2_000, "ownerQuestion");
     const remainingScope = nullableText(data.remainingScope, 2_000, "remainingScope");
+    const emptyClose = allowEmptyClosingPage && previousContinuationKind === "output" &&
+      outcome === "propose" && coverageStatus === "complete";
     if ((remainingScope === null) !== (continuationKind === null) ||
         (coverageStatus === "complete" && continuationKind !== null) ||
         (coverageStatus === "more" && continuationKind === null) ||
@@ -733,11 +740,11 @@ export function inspectAmuxAnalysisChunk(
         (continuationKind === "output" && outcome !== "propose") ||
         (continuationKind === "output" && counts.cards === 0) ||
         (previousContinuationKind === "output" &&
-          (outcome === "reject" || (outcome === "propose" && counts.cards === 0) ||
+          (outcome === "reject" || (outcome === "propose" && counts.cards === 0 && !emptyClose) ||
            (outcome === "needs_information" && continuationKind !== "input"))) ||
         (outcome === "needs_information") !== (coverageStatus === "needs_owner_input") ||
         (outcome === "reject" && coverageStatus !== "complete") ||
-        (outcome === "propose" && units.length === 0) ||
+        (outcome === "propose" && units.length === 0 && !emptyClose) ||
         (outcome === "reject" && units.length !== 0)) refuse("outcome_combination", "outcome");
     const chunk: AmuxAnalysisChunk = {
       schemaVersion: data.schemaVersion as AmuxAnalysisChunk["schemaVersion"],
