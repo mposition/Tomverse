@@ -18,11 +18,16 @@ npx --yes playwright install chromium >/dev/null
 mkdir -p job
 
 # The flags the box's other unattended CLI runs use (lib/amux/ideaTrackedCheckoutCli.ts):
-# no prompts, no session kept, and only these tools.
+# no prompts, no session kept, and only these tools. The whole stream stays in job/
+# (not in git): plain text keeps only the last line, and a run that dies early
+# ("Prompt is too long", 2026-11-04) then says nothing about what it had read.
 "${CLAUDE_BIN:-claude}" --print "$(cat JOB.md)" \
   --no-session-persistence \
   --permission-mode dontAsk --permission-prompts none \
   --tools "Bash,Read,Write,Edit" \
   --allowedTools "Bash(node *),Bash(npx *),Read,Write,Edit" \
   --max-turns 120 \
+  --output-format stream-json --verbose \
+  | tee -a "job/run-$(date -u +%Y%m%d).jsonl" \
+  | node print-run-result.mjs \
   | tee -a "job/run-$(date -u +%Y%m%d).log"

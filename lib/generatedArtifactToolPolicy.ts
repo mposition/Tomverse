@@ -46,6 +46,7 @@ export const ARTIFACT_TOOL_CAPABILITIES: Readonly<
   Record<string, ArtifactToolSupport>
 > = {
   // OpenAI -- function calling on the Responses API, used by @ai-sdk/openai.
+  "gpt-6-luna": "verified",
   "gpt-5-6-sol": "verified",
   "gpt-5-6-terra": "verified",
   "gpt-5-6-luna": "verified",

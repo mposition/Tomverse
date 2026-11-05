@@ -161,6 +161,17 @@ a patch, a reason or a card, which
 `docs/policy/engineering-agent.md §11` keeps to its own record. Its
 decisions are real and are made on its own screen, so the office's approval
 window says so and links there; it never offers an approve button.
+Ops and SRE, Support triage and Marketing are LIVE the same way, each through
+its own reader. Ops and SRE shows whether the state chain is trusted (the
+check's own reason code when it is not), the stage the genesis was approved
+in, the generation and when the newest digest was stored. Support triage shows
+its effective switch, the newest finished worker run and the day's report and
+failed-run counts with the agent's own staleness verdict; a failed read is
+unread, never off. Marketing shows the posts waiting for approval and the
+oldest wait, the drafts and publish switches, the generator's latest run and
+its call count; a count or switch that cannot be read is never drawn as zero
+or off. None of them shows a body, title, URL, user text or an amount of
+money, and Trust and safety stays waiting on a link until its code exists.
 Under the teams, the AMUX execution room separates the display-only Ubuntu
 resident roster approved in orchestration policy v27 (thirteen desks, no Devin
 or virtual engineering runner) from the app's dispatch admission catalog.

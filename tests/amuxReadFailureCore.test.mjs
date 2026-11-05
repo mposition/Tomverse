@@ -78,7 +78,7 @@ test("a session the database ended for idling in its transaction (25P03) is tran
   // owned-queue read failed with P2010, P2039 and a bare DriverAdapterError
   // and was answered 500, and four WSL bridges halted on it. The recovery
   // sweep logged the nested code of the same failures: 25P03. A boundary sets
-  // idle_in_transaction_session_timeout to 100 ms (lib/amux/dbBoundary.ts), so
+  // idle_in_transaction_session_timeout (then 100 ms, lib/amux/dbBoundary.ts), so
   // a gap longer than that between two statements ends the session, and the
   // next statement or the COMMIT is refused with this code.
   const fatal = new DriverAdapterError({
@@ -100,6 +100,27 @@ test("a session the database ended for idling in its transaction (25P03) is tran
   ];
   for (const error of cases) {
     assert.equal(amuxTransientDatabaseCode(error), "25P03", JSON.stringify(error));
+  }
+});
+
+test("the pg client's refusal on a connection that already failed is transient", () => {
+  // 2026-11-05, production: bridges kept halting on owned-queue 500s logged as a
+  // plain Error with no code. A session ended by the 100 ms idle limit while no
+  // query is running leaves the pg client refusing the next statement or the
+  // COMMIT with exactly this message.
+  const refusal = new Error("Client has encountered a connection error and is not queryable");
+  assert.equal(amuxTransientDatabaseCode(refusal), "ConnectionClosed");
+  assert.equal(
+    amuxTransientDatabaseCode({ code: "P2010", meta: { driverAdapterError: { cause: refusal } } }),
+    "ConnectionClosed",
+  );
+  // Compared whole: a message that merely contains it decides nothing.
+  for (const message of [
+    `${refusal.message}: SELECT 1`,
+    `relation "${refusal.message}" does not exist`,
+    "connection error",
+  ]) {
+    assert.equal(amuxTransientDatabaseCode(new Error(message)), null, message);
   }
 });
 
