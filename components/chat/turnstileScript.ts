@@ -29,6 +29,12 @@ declare global {
 const SCRIPT_ID = "cloudflare-turnstile-script";
 const SCRIPT_URL =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+/**
+ * Marks a script tag whose load already failed. Such a tag never fires `load`
+ * again, so waiting on it would make every later attempt hang until the
+ * caller's own deadline -- a retry has to replace it instead.
+ */
+const FAILED_ATTRIBUTE = "data-turnstile-load-failed";
 
 export const isLocalTurnstileBypassHost = () => {
   if (process.env.NODE_ENV === "production") return false;
@@ -45,7 +51,9 @@ export const loadTurnstile = () =>
     const existing = document.getElementById(
       SCRIPT_ID
     ) as HTMLScriptElement | null;
-    if (existing) {
+    if (existing?.hasAttribute(FAILED_ATTRIBUTE)) {
+      existing.remove();
+    } else if (existing) {
       existing.addEventListener("load", () => resolve(), { once: true });
       existing.addEventListener(
         "error",
@@ -63,7 +71,10 @@ export const loadTurnstile = () =>
     script.addEventListener("load", () => resolve(), { once: true });
     script.addEventListener(
       "error",
-      () => reject(new Error("Turnstile failed to load.")),
+      () => {
+        script.setAttribute(FAILED_ATTRIBUTE, "true");
+        reject(new Error("Turnstile failed to load."));
+      },
       { once: true }
     );
     document.head.appendChild(script);
