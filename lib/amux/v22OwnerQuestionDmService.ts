@@ -104,7 +104,9 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient,
     ORDER BY q."updatedAt", q."id"
     LIMIT ${AMUX_V22_QUESTION_SYNC_LIMIT}`;
   const refusals = await readAmuxPlanRefusalSyncRows(tx, now);
-  return { pending, closing: [...closing, ...refusals.closing]
+  // A refusal goes first: an open one holds a whole idea, and its card leaves
+  // the list as soon as it is filed, so it cannot crowd out the questions.
+  return { pending, closing: [...refusals.closing, ...closing]
     .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT), refusalCards: refusals.cards };
 }
 
@@ -182,7 +184,7 @@ export type AmuxV22ResolveStep =
   | { kind: "skip"; cursor: Advance }
   | { kind: "answer"; cursor: Advance; questionId: string; taskId: string;
       requestId: string; message: string }
-  | { kind: "plan_refusal"; cursor: Advance; refusalId: string;
+  | { kind: "plan_refusal"; cursor: Advance; refusalId: string; ideaId: string;
       requestId: string; decision: AmuxPlanRefusalDecision }
   | { kind: "cancel"; cursor: Advance; questionId: string; taskId: string;
       requestId: string; reason: string };
@@ -232,7 +234,7 @@ export async function readAmuxV22ResolveStep(
         optionId: detail?.optionId ?? null, outputKind: detail?.outputKind ?? null,
         dmAnswer: bodies.dm_answer, operatorAnswer: bodies.operator_answer }) : null;
     return decision ? { kind: "plan_refusal", cursor, refusalId: refusal.id,
-      requestId: judgment.requestId, decision } : { kind: "skip", cursor };
+      ideaId: refusal.ideaId, requestId: judgment.requestId, decision } : { kind: "skip", cursor };
   }
   if (!question) return { kind: "skip", cursor };
   const base = { cursor, questionId: question.id, taskId: question.taskId,
@@ -299,6 +301,22 @@ export async function cancelAmuxV22UnanswerableQuestion(
   return { cancelled: true as const };
 }
 
+/** A confirmed decision on a refused answer, under the audit chain lock and the
+ * kill switch; null when the switch holds it. */
+export const applyAmuxPlanRefusalDecisionStep = (step: { refusalId: string;
+  ideaId: string; requestId: string; decision: AmuxPlanRefusalDecision }) =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerPlanRefusalDecide,
+    async (tx, context) => {
+      await takeAuditChainLock(tx);
+      let killSwitch: boolean | null;
+      try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
+      catch { killSwitch = null; }
+      if (killSwitch !== false) return null;
+      return applyAmuxPlanRefusalDmDecision(tx, { refusalId: step.refusalId,
+        ideaId: step.ideaId, requestId: step.requestId, decision: step.decision,
+        now: context.dbNow });
+    });
+
 /**
  * One step of the walk, each part its own transaction within docs/policy/amux-decision-maker.md §9's 12
  * statements: the read; then the answer under the audit chain lock and the
@@ -314,16 +332,7 @@ export async function runAmuxV22ResolveStep(after: DmDeliveryCursor | null):
   let outcome: null | "answered" | "cancelled" = null;
   let cancel = step.kind === "cancel" ? step.reason : null;
   if (step.kind === "plan_refusal") {
-    const applied = await withAmuxDbBoundary(
-      AMUX_DB_BOUNDARIES.decisionMakerPlanRefusalDecide, async (tx, context) => {
-        await takeAuditChainLock(tx);
-        let killSwitch: boolean | null;
-        try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
-        catch { killSwitch = null; }
-        if (killSwitch !== false) return null;
-        return applyAmuxPlanRefusalDmDecision(tx, { refusalId: step.refusalId,
-          requestId: step.requestId, decision: step.decision, now: context.dbNow });
-      });
+    const applied = await applyAmuxPlanRefusalDecisionStep(step);
     if (applied === null) cursor = { move: "keep" };
     else if (applied.applied) outcome = "answered";
   }

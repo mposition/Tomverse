@@ -566,17 +566,17 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // A confirmed proposal on a refused session answer (ideaSessionPlanRefusalService.ts):
-  // setup + audit chain lock + switches + the open refusal + canonical audit 4
-  // + refusal + the idea and two body clocks on a stop + fence.
+  // setup + audit chain lock + switches + refusal + canonical audit 4 + the idea
+  // and two body clocks on a stop + fence, docs/policy/amux-decision-maker.md §9's 12.
   decisionMakerPlanRefusalDecide: {
     operation: "decision_maker_plan_refusal_decide",
-    prismaCallCeiling: 13,
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
-  // The owner's decision: the same, with the ownership read.
+  // The owner's decision: the same, with the ownership read for the switches.
   amuxPlanRefusalOwnerDecision: {
     operation: "amux_plan_refusal_owner_decision",
-    prismaCallCeiling: 14,
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   // The idea detail's read: setup + the open refusal + fence.

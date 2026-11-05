@@ -39,12 +39,11 @@ import { readAmuxV19MaxPagePromptInTx } from "@/lib/amux/ideaSessionMaxIdeaRead"
 import { readAmuxV19MaxPriceSelection } from "@/lib/amux/ideaSessionMaxPriceSelectionRead";
 import { decideAmuxPlanRefusalAsOwner } from
   "@/lib/amux/ideaSessionPlanRefusalOwnerService";
-import { applyAmuxPlanRefusalDmDecision, readOpenAmuxPlanRefusal } from
-  "@/lib/amux/ideaSessionPlanRefusalService";
+import { readOpenAmuxPlanRefusal } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { commitAmuxIdeaSessionSubmission as commitPinned } from
   "@/lib/amux/ideaSessionSubmissionService";
 import { inspectAmuxIdeaSessionSubmission } from "@/lib/amux/ideaSessionSubmissionCore";
-import { isAmuxV22QuestionCard, readAmuxV22QuestionSyncRows,
+import { applyAmuxPlanRefusalDecisionStep, isAmuxV22QuestionCard, readAmuxV22QuestionSyncRows,
   recordAmuxV22QuestionLocalCard, recordAmuxV22QuestionLocalCardClosed,
   runAmuxV22ResolveStep } from "@/lib/amux/v22OwnerQuestionDmService";
 import { prisma } from "@/lib/prisma";
@@ -282,13 +281,15 @@ test("a refused answer waits for a confirmed proposal, then runs again with its 
 
 test("a stop parks the idea for the operator and no further claim is possible", async () => {
   const idea = await refusedIdea();
-  const applied = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerPlanRefusalDecide,
-    async (tx, context) => {
-      await takeAuditChainLock(tx);
-      return applyAmuxPlanRefusalDmDecision(tx, { refusalId: idea.refusal.id,
-        requestId: randomUUID(), decision: "stop", now: context.dbNow });
-    });
-  assert.equal(applied.applied, true);
+  // The longest path runs through its own boundary: docs/policy/amux-decision-maker.md
+  // §9's 12 statements, which the boundary's ceiling enforces call by call.
+  assert.equal(AMUX_DB_BOUNDARIES.decisionMakerPlanRefusalDecide.prismaCallCeiling, 12);
+  const applied = await applyAmuxPlanRefusalDecisionStep({ refusalId: idea.refusal.id,
+    ideaId: idea.ideaId, requestId: randomUUID(), decision: "stop" });
+  assert.equal(applied?.applied, true);
+  assert.equal((await applyAmuxPlanRefusalDecisionStep({ refusalId: idea.refusal.id,
+    ideaId: idea.ideaId, requestId: randomUUID(), decision: "retry" }))?.applied, false,
+  "a decided refusal is decided once");
   const parked = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: idea.ideaId },
     select: { state: true, analysisCompletedAt: true, rawPurgeAfter: true } });
   assert.equal(parked.state, "awaiting_owner");

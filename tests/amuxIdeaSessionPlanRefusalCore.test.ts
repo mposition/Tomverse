@@ -10,13 +10,13 @@ const reason = { detail: "chunk_schema_rejected" as const,
 
 test("the card carries the reason and both options, on the claim's own provider class", () => {
   const card = amuxPlanRefusalCard({ refusalId: "r", ideaId: "i", claimProvider: "github-copilot",
-    chunkIndex: 1, priorRetries: 2, reason })!;
+    chunkIndex: 1, runs: 3, reason })!;
   assert.equal(card.provider, "copilot");
   assert.match(card.question, /on page 1: chunk_schema_rejected, rule task_fields, field taskRole, unit 3 \(card\)/);
-  assert.match(card.question, /run again 2 time/);
+  assert.match(card.question, /has made 3 run\(s\)/);
   assert.deepEqual(card.options.map((option) => option.id), ["retry", "stop"]);
   assert.equal(amuxPlanRefusalCard({ refusalId: "r", ideaId: "i", claimProvider: "unknown",
-    chunkIndex: 0, priorRetries: 0, reason }), null);
+    chunkIndex: 0, runs: 1, reason }), null);
 });
 
 test("only a chosen option or an answer that is exactly one option decides", () => {

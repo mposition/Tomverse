@@ -9,6 +9,23 @@ import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgr
 type Refusal = { refusalId: string; chunkIndex: number; detail: string;
   at?: { rule: string; field?: string; unit?: number; kind?: string } };
 
+/** Reads now and every `everyMs`, so a refusal that arrives while the detail
+ * stays open still shows, also after a run decided again is refused again. A
+ * failed read keeps what is shown. Returns the stop. */
+export function watchAmuxPlanRefusal(read: () => Promise<Refusal | null>,
+  apply: (refusal: Refusal | null) => void, everyMs = 30_000) {
+  let active = true;
+  const tick = async () => {
+    try {
+      const refusal = await read();
+      if (active) apply(refusal);
+    } catch { /* The panel is an extra way to decide; the card still waits. */ }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), everyMs);
+  return () => { active = false; clearInterval(timer); };
+}
+
 /** A refused analysis answer holds the idea for a decision (owner decision
  * 2026-11-05). Renders nothing unless this idea is waiting on one. */
 export function AmuxSessionPlanRefusalPanel({ ideaId }: { ideaId: string }) {
@@ -17,19 +34,13 @@ export function AmuxSessionPlanRefusalPanel({ ideaId }: { ideaId: string }) {
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const response = await adminFetch(
-          `/api/admin/amux/ideas/session-plan-refusal?${new URLSearchParams({ ideaId })}`,
-          { cache: "no-store" });
-        const body = response.ok ? await response.json() as { refusal: Refusal | null } : null;
-        if (active) setRefusal(body?.refusal ?? null);
-      } catch { /* The panel is an extra way to decide; the card still waits. */ }
-    })();
-    return () => { active = false; };
-  }, [ideaId]);
+  useEffect(() => watchAmuxPlanRefusal(async () => {
+    const response = await adminFetch(
+      `/api/admin/amux/ideas/session-plan-refusal?${new URLSearchParams({ ideaId })}`,
+      { cache: "no-store" });
+    if (!response.ok) throw new Error("plan_refusal_unavailable");
+    return (await response.json() as { refusal: Refusal | null }).refusal;
+  }, setRefusal), [ideaId]);
 
   if (!refusal) return null;
   const decide = async (decision: "retry" | "stop") => {

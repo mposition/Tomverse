@@ -29,13 +29,14 @@ export async function decideAmuxPlanRefusalAsOwner(input: { session: Session;
         where: { id: input.refusalId }, select: { ideaId: true } });
       if (owned?.ideaId !== input.ideaId) throw new BoardImportError("not_found", 404);
       const result = await decideAmuxPlanRefusalInTx(tx, { refusalId: input.refusalId,
-        decision: input.decision, source: "operator",
+        ideaId: input.ideaId, decision: input.decision, source: "operator",
         decidedByUserId: actorUserId, now: context.dbNow,
-        audit: (ideaId) => writeAdminAuditLog({ tx, session: input.session,
+        audit: () => writeAdminAuditLog({ tx, session: input.session,
           request: input.request, action: AMUX_PLAN_REFUSAL_DECIDED_ACTION,
           targetType: AMUX_PLAN_REFUSAL_AUDIT_TARGET, targetId: input.refusalId,
           summary: "Decided one refused session analysis answer.",
-          metadata: { ideaId, decision: input.decision, source: "operator" } }) });
+          metadata: { ideaId: input.ideaId, decision: input.decision,
+            source: "operator" } }) });
       if (!result.applied) throw new BoardImportError("not_open", 409);
       return result;
     });

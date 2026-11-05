@@ -55,8 +55,8 @@ export async function POST(request: Request) {
       const rows = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
         (tx, context) => readAmuxV22QuestionSyncRows(tx, context.dbNow));
-      const cards = [...await openAmuxV22QuestionCards(rows.pending),
-        ...rows.refusalCards].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT);
+      const cards = [...rows.refusalCards,
+        ...await openAmuxV22QuestionCards(rows.pending)].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT);
       return amuxJsonNoStore({
         synced: true,
         resolved: outcome,

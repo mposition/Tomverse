@@ -92,8 +92,7 @@ export async function readAmuxPlanRefusalSyncRows(tx: Tx, now: Date) {
     cards: pending.flatMap((row) => {
       const card = amuxPlanRefusalCard({ refusalId: row.id, ideaId: row.ideaId,
         claimProvider: row.claim.provider ?? "", chunkIndex: row.chunkIndex,
-        // Every run before this one past the page's own index was a decided retry.
-        priorRetries: row.claim.invocationOrdinal - row.chunkIndex,
+        runs: row.claim.invocationOrdinal + 1,
         reason: reasonOf(row) });
       return card ? [card] : [];
     }),
@@ -134,7 +133,7 @@ export async function recordAmuxPlanRefusalLocalCardClosed(tx: Tx,
 /** The open refusal a card mirrors, on an idea still in analysis. */
 export const readOpenAmuxPlanRefusalOfCard = (tx: Tx, cardId: string, now: Date) =>
   tx.amuxIdeaSessionPlanRefusal.findFirst({ where: { localCardId: cardId, ...open,
-    idea: ideaLive(now) }, select: { id: true } });
+    idea: ideaLive(now) }, select: { id: true, ideaId: true } });
 
 /** Ends the idea's analysis for the operator: the idea and every earlier
  * page's body clock. The refused answer's kept copy stays for its retention. */
@@ -156,23 +155,23 @@ export async function parkAmuxSessionIdeaInTx(tx: Tx, ideaId: string, now: Date)
   return true;
 }
 
-/** Applies one decision; the caller holds the audit chain lock and has written
- * nothing else. A decision that lost a race changes nothing. */
+/** Applies one decision; the caller holds the audit chain lock. A decision that
+ * lost a race changes nothing. One conditional update, the audit, and on a stop
+ * the three updates of the idea, which keeps a Decision Maker transaction within
+ * docs/policy/amux-decision-maker.md §9's 12 statements. */
 export async function decideAmuxPlanRefusalInTx(tx: Tx, input: { refusalId: string;
-  decision: AmuxPlanRefusalDecision; source: "operator" | "dm_confirmed";
-  decidedByUserId: string | null; now: Date;
-  audit: (ideaId: string) => Promise<unknown> }) {
-  const refusal = await tx.amuxIdeaSessionPlanRefusal.findFirst({
-    where: { id: input.refusalId, ...open, idea: ideaLive(input.now) },
-    select: { ideaId: true } });
-  if (!refusal) return { applied: false as const };
-  await input.audit(refusal.ideaId);
-  await tx.amuxIdeaSessionPlanRefusal.update({ where: { id: input.refusalId },
+  ideaId: string; decision: AmuxPlanRefusalDecision;
+  source: "operator" | "dm_confirmed"; decidedByUserId: string | null; now: Date;
+  audit: () => Promise<unknown> }) {
+  const decided = await tx.amuxIdeaSessionPlanRefusal.updateMany({
+    where: { id: input.refusalId, ideaId: input.ideaId, ...open, idea: ideaLive(input.now) },
     data: { state: input.decision === "retry" ? "retry" : "stopped",
       decisionSource: input.source, decidedByUserId: input.decidedByUserId,
       decidedAt: input.now, updatedAt: input.now } });
+  if (decided.count !== 1) return { applied: false as const };
+  await input.audit();
   if (input.decision === "stop" &&
-      !await parkAmuxSessionIdeaInTx(tx, refusal.ideaId, input.now)) {
+      !await parkAmuxSessionIdeaInTx(tx, input.ideaId, input.now)) {
     throw new BoardImportError("not_ready", 409);
   }
   return { applied: true as const };
@@ -182,16 +181,16 @@ export async function decideAmuxPlanRefusalInTx(tx: Tx, input: { refusalId: stri
  * switch under the audit chain lock. The person's judgment audit names who
  * confirmed it. */
 export const applyAmuxPlanRefusalDmDecision = (tx: Tx, input: { refusalId: string;
-  requestId: string; decision: AmuxPlanRefusalDecision; now: Date }) =>
-  decideAmuxPlanRefusalInTx(tx, { refusalId: input.refusalId, decision: input.decision,
-    source: "dm_confirmed", decidedByUserId: null, now: input.now,
-    audit: (ideaId) => writeSystemAuditLog({ tx,
+  ideaId: string; requestId: string; decision: AmuxPlanRefusalDecision; now: Date }) =>
+  decideAmuxPlanRefusalInTx(tx, { refusalId: input.refusalId, ideaId: input.ideaId,
+    decision: input.decision, source: "dm_confirmed", decidedByUserId: null, now: input.now,
+    audit: () => writeSystemAuditLog({ tx,
       systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
       action: AMUX_PLAN_REFUSAL_DECIDED_ACTION,
       targetType: AMUX_PLAN_REFUSAL_AUDIT_TARGET,
       targetId: input.refusalId,
       summary: "Applied a confirmed Decision Maker proposal to one refused session analysis answer.",
-      metadata: { ideaId, decision: input.decision, source: "dm_confirmed",
+      metadata: { ideaId: input.ideaId, decision: input.decision, source: "dm_confirmed",
         requestId: input.requestId } }) });
 
 /** The open refusal of an idea, for its Admin detail. */

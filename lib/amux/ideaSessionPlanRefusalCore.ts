@@ -30,7 +30,7 @@ const place = (at: AmuxAnalysisSchemaRejectAt | undefined): string => !at ? "" :
 /** The card the relay files. Its text avoids the routing term list on purpose:
  * only closed words of the check and fixed sentences. */
 export function amuxPlanRefusalCard(input: { refusalId: string; ideaId: string;
-  claimProvider: string; chunkIndex: number; priorRetries: number;
+  claimProvider: string; chunkIndex: number; runs: number;
   reason: AmuxPlanRefusalReason }) {
   const provider = amuxV22Provider(input.claimProvider);
   if (!provider) return null;
@@ -40,8 +40,8 @@ export function amuxPlanRefusalCard(input: { refusalId: string; ideaId: string;
     provider: AMUX_V22_PROVIDERS[provider].providerClass,
     title: `Session analysis answer refused, idea ${input.ideaId}`,
     question: `The plan check refused a session analysis answer on page ${
-      input.chunkIndex}: ${input.reason.detail}${place(input.reason.at)}. This page has been run again ${
-      input.priorRetries} time(s) so far. Another run uses the subscription and takes minutes, and its prompt carries this reason. Should the analysis run again, or stop here and leave the idea for the operator?`,
+      input.chunkIndex}: ${input.reason.detail}${place(input.reason.at)}. The analysis of this idea has made ${
+      input.runs} run(s) so far. Another run uses the subscription and takes minutes, and its prompt carries this reason. Should the analysis run again, or stop here and leave the idea for the operator?`,
     unblocks: "The idea stays out of the analysis queue until this is decided.",
     options: [
       { id: "retry", label: "Run the analysis again with this reason in its prompt" },
