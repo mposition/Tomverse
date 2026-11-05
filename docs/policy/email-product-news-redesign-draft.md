@@ -1810,12 +1810,12 @@ EEA·영국을 여는 선행 게이트입니다.
 - 고지의 production `contentHash` 7개를 `CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적었습니다.
 - `tests/emailPolicyPublication.test.mjs`가 그 승인된 상태를 고정합니다.
 
-**남은 운영 조건 (2026-10-25 갱신).** 위치 기능 안내가 추가되면서 `/privacy`의 현재
-관측 digest가 바뀌었습니다. `AMENDED_DOCUMENT_EVIDENCE`는 현재 문안을 기록하고,
-`APPROVED_AMENDED_DIGESTS`는 2026-10-03 승인값을 유지합니다. 따라서 현재는
-`document_not_amended`로 닫혀 있으며, 시행일과 고지 조건만으로는 열리지 않습니다.
+**남은 운영 조건 (2026-11-05 갱신).** 위치 기능 안내가 추가되면서 `/privacy`의 현재
+관측 digest가 바뀌었고, 2026-11-05에 소유자가 변경된 페이지를 대화에서 승인해 그 digest를
+`APPROVED_AMENDED_DIGESTS`에 적었습니다. 따라서 `document_not_amended`는 풀렸고, 시행일과 고지
+조건이 아직 발송을 막습니다. 페이지가 다시 바뀌면 `document_not_amended`로 다시 닫힙니다.
 
-1. 변경된 `/privacy` 문안을 소유자가 별도로 승인해야 합니다. 관측값 갱신은 새 승인이
+1. (완료) 변경된 `/privacy` 문안의 소유자 승인. 이 승인이 발송을 승인하지는 않습니다. 관측값 갱신은 새 승인이
    아니며, 이 현황 갱신도 발송을 승인하지 않습니다. (2026-11-03: 마케팅 댓글 모니터링과
    GA4 User-ID 고지 초안이 같은 페이지에 더해져 관측 digest가 다시 바뀌었습니다. 소유자의
    이 승인 한 번이 위치·기억 문안과 이 두 고지를 함께 덮도록 하며, 이메일 개정과 시행일

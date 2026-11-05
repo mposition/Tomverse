@@ -474,9 +474,16 @@
       "brace-expansion": "^1.1.17"
     },
     "eslint-config-next": {
-      "brace-expansion": "^1.1.17"
+      "brace-expansion": "^1.1.17",
+      "typescript-eslint": {
+        "minimatch": "^11.0.1",
+        "brace-expansion": "^5.0.12"
+      }
     },
     "fast-uri": "^3.1.6",
+    "glob": {
+      "minimatch": "^11.0.1"
+    },
     "pdfjs-dist": "^6.2.108",
     "postcss": {
       ".": "8.5.25",

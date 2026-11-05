@@ -59,7 +59,7 @@ const TRANSIENT_DRIVER_KINDS = new Set([
 const TRANSIENT_SQLSTATES = new Set([
   // query_canceled: the statement timeout.
   "57014",
-  // idle_in_transaction_session_timeout: a boundary sets it to 100 ms
+  // idle_in_transaction_session_timeout: a boundary sets it to 300 ms
   // (lib/amux/dbBoundary.ts), so a gap longer than that between two of its
   // statements -- a slow round trip, a stalled event loop on a just-started
   // instance -- ends the session, and the next statement or the COMMIT is
@@ -90,6 +90,15 @@ const TRANSIENT_SOCKET_CODES = new Set([
   "ETIMEDOUT",
   "ENOTFOUND",
 ]);
+
+/**
+ * What the pg client throws for a statement on a connection that has already
+ * failed. It has no code, and it is the usual form of a 25P03: the FATAL reaches
+ * the client while no query is running, so the next statement or the COMMIT is
+ * refused locally and never sent.
+ */
+const PG_CLIENT_NOT_QUERYABLE_MESSAGE =
+  "Client has encountered a connection error and is not queryable";
 
 /** Enough for every wrapper Prisma and the pg adapter put around one error. */
 const MAX_ERROR_NODES = 16;
@@ -126,8 +135,10 @@ const isTransientCode = (value: unknown): value is string =>
  * own code at the top (`P2028`), the pg adapter's `DriverAdapterError` whose
  * `cause` carries `kind` and `code`/`originalCode` (rethrown bare by the
  * transaction manager, or at `meta.driverAdapterError` of a `P2010`/`P2039`),
- * an older Prisma shape at `meta.code`, and the pg driver's own `code`. Only
- * codes and kinds decide; no message is read.
+ * an older Prisma shape at `meta.code`, and the pg driver's own `code`. Codes
+ * and kinds decide. The one message read is the pg client's fixed refusal above,
+ * compared whole, because that error carries nothing else; it is reported under
+ * the adapter's name for a closed connection.
  */
 export const amuxTransientDatabaseCode = (error: unknown): string | null => {
   const seen = new Set<unknown>();
@@ -142,6 +153,7 @@ export const amuxTransientDatabaseCode = (error: unknown): string | null => {
     if (typeof record.kind === "string" && TRANSIENT_DRIVER_KINDS.has(record.kind)) {
       return record.kind;
     }
+    if (record.message === PG_CLIENT_NOT_QUERYABLE_MESSAGE) return "ConnectionClosed";
     queue.push(record.cause, record.meta, record.driverAdapterError);
   }
   return null;
