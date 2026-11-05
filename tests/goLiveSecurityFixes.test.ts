@@ -1039,3 +1039,13 @@ test("secondary sheets use the shared modal focus and scroll-lock contract", () 
     );
   }
 });
+
+test("a session past its absolute end is rejected, whatever else is true of it", () => {
+  const snapshot = { accountStatus: "active", sessionsRevokedAt: null };
+  const now = 1_000_000;
+  assert.equal(sessionRevocationReason({ issuedAt: now, snapshot, now }), null, "ordinary sessions have no such end");
+  assert.equal(sessionRevocationReason({ issuedAt: now, snapshot, absoluteExpiresAt: now + 1, now }), null);
+  assert.equal(sessionRevocationReason({ issuedAt: now, snapshot, absoluteExpiresAt: now, now }), "absolute-expiry");
+  assert.equal(sessionRevocationReason({ issuedAt: now, snapshot, absoluteExpiresAt: Number.NaN, now }), "absolute-expiry", "an unreadable end fails closed");
+  assert.equal(sessionRevocationReason({ issuedAt: now, snapshot: null, absoluteExpiresAt: now - 1, now }), "absolute-expiry", "the time needs no database");
+});

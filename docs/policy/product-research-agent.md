@@ -10,6 +10,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | v2 | mposition, 병합 2026-10-12(UTC, #2411) | 개선 탐색 기능 추가(§10~§21). 관측 기능의 변경 넷: 각 외부 호출 직전의 상태 확인(§3), Agent 전체 kill switch와 쓰기 직렬화(§6), kill switch 중 보존 삭제 지연(§4), kill switch 중 침묵 검사 정지(§5). 비공개 설계서(revision 20)의 공개 가능한 계약 |
 | v3 | mposition 2026-10-13 | 승인 기록 정정만. v2는 UTC 2026-10-12 22:16에 병합되어 `approvedAt` 2026-10-13과 승인 판정 5가 맞지 않았습니다. 본문은 v2와 같습니다 |
 | 2026-10-19 | 운영자 결정(대화) | 개선 탐색을 LLM-first로 전환(§10~§14). v2·v3의 개선 탐색 장치(slot·latch·kill switch·page token·손으로 짠 규칙)와 관측 기능의 v2 변경 넷은 만들지 않았고 이 문서에서 뺐습니다 |
+| 2026-11-04 | 운영자 결정(대화) | 테스트 계정의 로그인 화면·실제 생성과 dev·Test 탐색을 구현하고 기본 꺼짐으로 둠(§12~§14). 켜기는 owner가 정함 |
 
 위 승인 기록은 v3까지의 이력입니다. 2026-10-19부터 이 문서는 AGENTS.md의 "먼저 만들고, 되돌릴 수 없는 것에만 게이트를
 둡니다" 절을 따릅니다: 운영자 승인이 필요한 것은 되돌릴 수 없는 일(유료 호출 활성화와 상한, 외부 게시·발송, 사용자 데이터
@@ -228,6 +229,7 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 
 1. **walker**가 대상마다 화면을 모읍니다: production 공개 page의 desktop·320px screenshot과 콘솔 오류·실패한 같은 origin
    요청, 고정 명세로 만든 PDF·DOCX·XLSX·PPTX의 이미지, 카탈로그 불일치(0단계 보고서 `report:product-consistency`).
+   테스트 계정이 있으면 로그인 화면과 실제 생성 결과도 모읍니다(§14).
 2. walker가 대상 하나씩 앱의 `POST /api/internal/product-research/scout`로 보냅니다.
 3. **앱이 LLM을 한 번 부릅니다**(`lib/productResearchScoutLlm.ts`, support-triage와 같은 방식). 입력은 그 대상의 이미지와
    신호, 그리고 같은 대상에 이미 낸 제안 제목들(반복을 막기 위해서)이고, 출력은 제안 최대 5개(제목·영역·심각도·근거·제안)의
@@ -245,7 +247,7 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
    감사 기록에 남습니다. 호출은 대상당 한 번이고, 호출 전에 원장(`ProductResearchScoutLlmCall`)에 한 줄을 써서 상한을 차감하며,
    `maxRetries: 0`과 출력 상한이 있고, 로그와 원장에는 토큰 수만 남깁니다.
 3. **walker는 제출 secret 하나만 갖습니다.** LLM 키·제품 DB 자격증명은 앱에만 있습니다.
-4. **production 공개 page를 게스트로, GET·HEAD로만 봅니다.** 클릭·입력·form 제출이 없습니다.
+4. **page는 GET·HEAD로만 봅니다.** 클릭·입력·form 제출이 없습니다. 예외는 §14의 실제 생성 한 턴뿐입니다.
 5. **봇 차단·CAPTCHA를 우회하지 않습니다.** 챌린지나 오류 상태의 문서는 renderer에 닿기 전에 그 자리에서 멈춥니다(§12).
 6. **이미지와 파일은 모델 호출에만 쓰고 저장하지 않습니다.** 저장하는 것은 제안 문장과 대상 id입니다.
 7. 화면과 신호는 Tomverse 자신의 것이지만 모델에게는 **데이터**로 넘깁니다(프롬프트의 태그 안).
@@ -278,6 +280,13 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 | `support.ko` | `/support` | ko |
 | `chat-guest.ko` | `/chat`(게스트) | ko |
 
+테스트 계정이 있으면(§14) 로그인 화면 9개도 같은 방식으로 봅니다: `signed-in-chat.ko`·`signed-in-chat.en`(`/chat`), `review.ko`,
+`plugins.ko`, `settings-assistants.ko`, `settings-data.ko`, `settings-memory.ko`, `settings-notifications.ko`, `settings-imports.ko`.
+
+walker는 기본으로 production을 봅니다. 변수로 `https://dev.tomverse.app`이나 `https://staging.tomverse.app`을 고르면 그 환경의
+walker가 자기 화면을 보며, 이 둘은 Cloudflare Access 뒤에 있으므로 서비스 토큰이 있어야 시작합니다. 토큰은 그 origin으로만 나갑니다
+(다른 origin 요청은 보내기 전에 막힙니다). 이 셋 밖의 origin은 시작을 거부합니다.
+
 목록은 운영자가 대화에서 바꾸면 코드와 이 표를 같이 고칩니다.
 
 **browser 규칙**(2026-10-13 측정):
@@ -302,15 +311,34 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 | `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET` | 앱과 walker | 32자 이상. Bearer로 비교 |
 | `PRODUCT_RESEARCH_SCOUT_INGEST_URL` | walker | 그 환경 앱의 `https://…/api/internal/product-research/scout` |
 | `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK` | walker, 선택 | `off`면 sandbox가 거부된 날 sandbox 없이 다시 띄우지 않음(§12). 없으면 재시도 |
+| `PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN` | walker, 선택 | dev나 Test의 origin(§12). 없으면 production |
+| `PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID`, `PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_SECRET` | walker, 선택 | dev·Test의 Cloudflare Access 서비스 토큰 |
+| `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL` | 앱, 선택 | 테스트 계정 주소(§14). 없으면 로그인 화면과 실제 생성을 건너뛰고 route는 404 |
+| 실제 생성 하루 횟수 | Admin › 제품 리서치 › 실행과 비용 (`AppSetting`) | owner가 정함. 기본 0이면 실제 생성 없음 |
 | 모델·하루 호출 상한 | Admin › 제품 리서치 › 실행과 비용 (`AppSetting` 두 행) | owner가 정함. 모델이 없으면 route는 `model_off`, 상한을 다 쓰면 `daily_cap_reached`로 답함 |
 
 켜는 순서: 앱 변수 → walker 서비스와 스위치 → Admin에서 모델과 하루 상한 지정(owner). 실행마다 로그의 `sandbox`가 그날
 Chromium sandbox가 떴는지(`on`), 재시도로 sandbox 없이 떴는지(`off`) 말합니다. walker는 Railway cron `Product Research Scout`로 매일 18:00 UTC(04:00 AEST)에 돕니다.
 
-## 14. 보류 — 자격증명이나 유료 생성 승인이 필요한 것
+## 14. 테스트 계정: 로그인 화면과 실제 생성
 
-같은 구조에 입력만 더하는 일이지만, 아래는 되돌릴 수 없는 경계에 닿으므로 운영자가 정할 때 엽니다.
+코드는 있고 기본으로 꺼져 있습니다. 켜는 일은 자격증명과 비용을 정하므로 owner가 합니다.
 
-- 테스트 계정으로 실제 PDF·Office·이미지 **생성**을 호출하고 그 결과를 LLM이 평가하기(테스트 계정 자격증명, 생성 비용).
-- 로그인 화면(채팅·설정 등) 탐색(같은 테스트 계정).
-- dev·Test 화면 탐색(Cloudflare Access 서비스 토큰).
+- **들어가는 방법**: walker가 앱의 `POST /api/internal/product-research/scout/signed-in`에 제출 secret으로 요청하면, 앱이
+  `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL` 계정의 1시간짜리 session을 만들어 줍니다(`lib/productResearchScoutSignedIn.ts`). 1시간은 token 안의
+  절대 만료(`absoluteExpiresAt`)가 지킵니다. NextAuth가 session을 읽으며 token을 일반 7일로 다시 만들어도 session callback이 이 시각에 끝냅니다. walker에는
+  비밀번호도 오래가는 토큰도 없어 교체할 것이 없고, 변수를 지우면 늦어도 1시간 안에 끝납니다. 발급은 감사 체인에 남습니다.
+- **경계**: 관리자 계정은 거부합니다(`test_account_is_admin`). 활성 계정이 아니면 거부합니다. session cookie는 답을 준 앱과 같은 origin에만
+  넣습니다. 테스트 계정에는 실제 사용자의 데이터를 넣지 않습니다.
+- **로그인 화면**(§12 표): 공개 page와 같이 GET·HEAD로만 보고, 모델 호출 상한을 함께 씁니다.
+- **실제 생성**: 파일 4종은 채팅 입력창에 고정 문장을 넣어 보내고 카드의 다운로드 버튼으로 받으며, 이미지는 이미지 route로 만듭니다
+  (`SCOUT_GENERATIONS`). 쓰기(POST·PUT·DELETE)는 전송 버튼을 누를 때부터 답이 끝날 때까지만, 채팅 턴이 쓰는 경로(`scoutTurnWrites`: `/api/chat` 최대 3회와 대화 생성·초안·preflight·메시지 저장 같은 주변 호출)에만
+  허용합니다. 음성·Review·이미지 턴 같은 다른 유료 경로로는 나가지 못하고, 막힌 쓰기는 모델에게 알립니다. walker가 하는 것과 같은 새 대화의 전송 경로에 호출이 새로 생기면
+  `tests/e2e/scout-chat-turn-writes.spec.ts`가 실패합니다. 모델은 요청한 내용, 걸린 시간, 채팅 화면, PDF 첫 쪽 또는 Office 본문,
+  이미지를 보고 결과가 요청을 충족하는지 판정합니다. 파일이 오지 않은 것도 제안 대상입니다.
+- **비용**: owner가 Admin에서 정한 하루 횟수(UTC 하루, 기본 0, 최대 20)만큼 walker가 허가를 받습니다. 허가는 쓰기 전에 원장에 한 줄씩 남고
+  (`permit.` 접두어, 모델 호출 상한과 따로 셉니다), 쓰지 못한 허가도 돌려주지 않습니다. 이 경로는 제품 경로 그대로이므로 **테스트 계정의 크레딧을
+  쓰고 Chat 비용에 잡힙니다.** 크레딧이 떨어지면 생성이 멈추므로, 계정에 넣은 크레딧이 실제 상한입니다. 판정할 모델이 없거나 호출 상한이 0이면 허가를 내주지
+  않고, 실행 중에 모델이 꺼지거나 호출 상한을 다 쓰면 남은 생성을 하지 않습니다.
+
+켜는 순서는 `docs/ops/product-research-agent.md`의 "Scout 테스트 계정 켜기"를 따릅니다.

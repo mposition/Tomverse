@@ -170,6 +170,7 @@ test("the system actor list is closed and changes only by review", () => {
     // agent has nothing to approve because it decides nothing.
     "product-research-observer",
     "product-research-retention",
+    "product-research-scout",
     // docs/policy/qa-release-agent.md section 5: the digest intake route.
     "qa-release-intake",
     "support-triage-worker",

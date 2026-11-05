@@ -27,13 +27,19 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
   const [settings, setSettings] = useState(initial.settings);
   const [draftModel, setDraftModel] = useState(initial.settings.modelId ?? "");
   const [draftCap, setDraftCap] = useState(String(initial.settings.dailyCallCap));
+  const [draftGenerationCap, setDraftGenerationCap] = useState(String(initial.settings.generationDailyCap));
   const [saveState, setSaveState] = useState<
     { readonly kind: "idle" | "saving" | "saved" } | { readonly kind: "failed"; readonly failure: AdminApiFailure }
   >({ kind: "idle" });
 
   const save = async () => {
     const cap = Number.parseInt(draftCap, 10);
-    const next = { modelId: draftModel || null, dailyCallCap: Number.isInteger(cap) && cap >= 0 ? cap : 0 };
+    const generationCap = Number.parseInt(draftGenerationCap, 10);
+    const next = {
+      modelId: draftModel || null,
+      dailyCallCap: Number.isInteger(cap) && cap >= 0 ? cap : 0,
+      generationDailyCap: Number.isInteger(generationCap) && generationCap >= 0 ? generationCap : 0,
+    };
     setSaveState({ kind: "saving" });
     let response: Response;
     try {
@@ -136,6 +142,23 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
             />
           </label>
           <p className="mt-2 text-xs text-zinc-400">{m.capHint}</p>
+          <label className="mt-3 flex flex-col gap-1.5 text-xs font-medium text-zinc-300">
+            {m.generationCapLabel}
+            <input
+              type="number"
+              min={0}
+              max={20}
+              inputMode="numeric"
+              className={`${INPUT} font-mono`}
+              value={draftGenerationCap}
+              disabled={!initial.canConfigure || saveState.kind === "saving"}
+              onChange={(event) => setDraftGenerationCap(event.target.value)}
+            />
+          </label>
+          <p className="mt-2 text-xs text-zinc-400">{m.generationCapHint}</p>
+          <p className="mt-1 text-xs text-zinc-400" data-testid="admin-product-research-scout-test-account">
+            {initial.testAccountConfigured ? m.testAccountOn : m.testAccountOff}
+          </p>
           {initial.modelOptions.length === 0 ? <p className="mt-1 text-xs text-amber-300">{m.noImageModels}</p> : null}
           {!initial.canConfigure ? <p className="mt-1 text-xs text-zinc-400">{m.configureNotAllowed}</p> : null}
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -175,6 +198,9 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
             {fill(m.usageTokens, { input: number(initial.usageToday.inputTokens), output: number(initial.usageToday.outputTokens) })}
           </p>
           <p className="mt-1 text-xs text-zinc-400">{m.usageCapNote}</p>
+          <p className="mt-1 text-xs text-zinc-400">
+            {fill(m.usageGenerations, { used: initial.usageToday.generations, cap: settings.generationDailyCap })}
+          </p>
         </section>
       </div>
 

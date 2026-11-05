@@ -25,6 +25,7 @@ export type SessionSecuritySnapshotResult =
   | null;
 
 export type SessionRevocationReason =
+  | "absolute-expiry"
   | "missing-issued-at"
   | "revoked"
   | "account-not-active"
@@ -42,14 +43,24 @@ const toMillis = (value: Date | string | null | undefined) => {
  *
  * Fails closed: a token with no usable issue time cannot be proven to postdate a
  * revocation, so it is rejected rather than trusted.
+ *
+ * `absoluteExpiresAt` is the end of a session that must not outlive it. NextAuth
+ * re-encodes a JWT with the seven-day session.maxAge whenever the session is read,
+ * so a token's own `exp` does not hold a short session to its length; this does.
  */
 export const sessionRevocationReason = ({
   issuedAt,
   snapshot,
+  absoluteExpiresAt,
+  now = Date.now(),
 }: {
   issuedAt: string | number | null | undefined;
   snapshot: SessionSecuritySnapshotResult;
+  absoluteExpiresAt?: number;
+  now?: number;
 }): SessionRevocationReason | null => {
+  if (absoluteExpiresAt !== undefined && !(now < absoluteExpiresAt)) return "absolute-expiry";
+
   // Null is reserved for the isolated E2E database bypass. Real lookup
   // failures and missing users are explicit states and fail closed below.
   if (!snapshot) return null;
