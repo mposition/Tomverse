@@ -260,7 +260,7 @@ const PUBLISH_STATE_STATUSES = [
   "deleted",
 ] as const;
 
-async function readSwitches(): Promise<{
+export async function readSwitches(): Promise<{
   switches: MarketingSwitchStates;
   configGeneration: number | null;
 }> {
