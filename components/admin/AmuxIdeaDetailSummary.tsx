@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
-import { AmuxIdeaName } from "@/components/admin/AmuxIdeaProgressPanel";
+import { AmuxIdeaName, laneLine } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
@@ -65,6 +65,18 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         })}
       </ol>
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
+      {/* A lane idea has no Task rows; its one PR is what the review step is about. */}
+      {row.lane ? (
+        <p className="flex flex-wrap items-center gap-x-3 text-zinc-300" data-testid="amux-idea-detail-lane">
+          <span>{laneLine(row.lane, m)}</span>
+          {row.lane.prNumber !== null ? (
+            <a href={`${REPOSITORY_URL}/pull/${row.lane.prNumber}`} target="_blank" rel="noreferrer"
+              className="inline-flex min-h-11 items-center font-medium underline text-blue-200">
+              PR #{row.lane.prNumber} ↗
+            </a>
+          ) : null}
+        </p>
+      ) : null}
       {row.waitingFor === "session_review" ? (
         <p className="text-amber-200" data-testid="amux-session-review">{m.sessionReviewDetail}</p>
       ) : null}

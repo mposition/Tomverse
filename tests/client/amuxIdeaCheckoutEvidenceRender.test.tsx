@@ -27,6 +27,21 @@ test("Admin shows the intake SHA before checkout evidence exists", () => {
   assert.doesNotMatch(markup, /data-testid="amux-checkout-evidence"/);
 });
 
+test("Admin idea detail links a lane idea's PR, and no PR before the run opens one", () => {
+  const lane = { state: "pr_open" as const, attempts: 1, prNumber: 3332, lastOutcome: "pr_open",
+    part: 1, previousPrNumber: null, continues: false };
+  const open = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), stage: "review", lane } }));
+  assert.match(open, /data-testid="amux-idea-detail-lane"/);
+  assert.ok(open.includes('href="https://github.com/mposition/Tomverse/pull/3332"'));
+  const running = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), stage: "execution", lane: { ...lane, state: "running" as const, prNumber: null } } }));
+  assert.match(running, /data-testid="amux-idea-detail-lane"/);
+  assert.doesNotMatch(running, /\/pull\//);
+  assert.doesNotMatch(renderToStaticMarkup(createElement(AmuxIdeaDetailSummary, { row: row([]) })),
+    /amux-idea-detail-lane/);
+});
+
 test("Admin distinguishes an older unpinned idea from a damaged pin", () => {
   const legacy = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
     { row: { ...row([]), submissionOrigin: "session",
