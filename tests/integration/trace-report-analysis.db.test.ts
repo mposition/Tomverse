@@ -176,8 +176,30 @@ test("a pass whose claim was taken does not write over the one that holds it", a
     });
     return answer();
   };
-  assert.equal((await runTraceReportAnalysisQuietly({ llm: slow })).analyzed, 1);
+  assert.equal((await runTraceReportAnalysisQuietly({ llm: slow })).analyzed, 0);
   assert.equal(await stored(row.id), null);
+});
+
+test("a pass that lost its claim hands over the stored answer, not its own", async () => {
+  await setMode(`fix:${OWNER}`);
+  const row = await report("stale");
+  const winner = { status: "done", at: new Date().toISOString(), modelId: "m", kind: "code_fix", confidence: "high", cause: "The later answer.", recommendation: "r" };
+  const slow: TraceAnalysisLlm = async () => {
+    await prisma.feedbackAutoFixCase.update({
+      where: { id: row.id },
+      data: { diagnosticSummary: { llmAnalysisClaim: "someone-else", llmAnalysis: winner } },
+    });
+    return { ...answer(), cause: "The stale answer." };
+  };
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm: slow, submit });
+  assert.equal(ideas.length, 0);
+  const analysis = await stored(row.id);
+  assert.equal(analysis?.status === "done" && analysis.cause, "The later answer.");
+  // The next tick hands over what is stored.
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm, submit });
+  assert.ok(ideas[0].idea.includes("The later answer."));
+  assert.ok(!ideas[0].idea.includes("The stale answer."));
 });
 
 test("support triage's Off stops the paid calls and the handoffs", async () => {

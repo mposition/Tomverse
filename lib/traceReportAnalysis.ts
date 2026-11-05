@@ -420,7 +420,8 @@ export const runTraceReportAnalysisQuietly = async ({
           analysis = answer
             ? { status: "done", at, ...answer }
             : { status: "failed", at, attempts: attemptsOf(summaryOf(row)) };
-          await store(row, analysis);
+          // Lost the claim to a later pass: its result stands, and this one is done here.
+          if ((await store(row, analysis)).count === 0) continue;
           row = { ...row, diagnosticSummary: { ...summaryOf(row), llmAnalysis: analysis } as Prisma.JsonObject };
           if (answer) pass.analyzed += 1;
           else pass.failed += 1;
@@ -433,6 +434,9 @@ export const runTraceReportAnalysisQuietly = async ({
       if (!traceAnalysisWantsFix(row.classification, analysis)) continue;
       const reserved = await reserve(id, "handoff", now());
       if (!reserved) continue;
+      // What the reservation saw, never an answer this pass still holds.
+      const reservedAnalysis = readStoredTraceAnalysis(reserved.diagnosticSummary);
+      if (reservedAnalysis?.status !== "done") continue;
       try {
         const { ideaId } = await submit({
           ownerUserId,
@@ -443,11 +447,11 @@ export const runTraceReportAnalysisQuietly = async ({
             serverErrorCode: serverErrorCodeOf(reserved),
             sourceRelease: reserved.sourceRelease,
             summary: recordedSummary(reserved),
-            analysis,
+            analysis: reservedAnalysis,
           }),
         });
         pass.handedOff += 1;
-        await store(reserved, { ...analysis, handoff: { ideaId, at: now().toISOString() } });
+        await store(reserved, { ...reservedAnalysis, handoff: { ideaId, at: now().toISOString() } });
       } catch (error) {
         // Tried again next tick with the same request id, which finds a first
         // submit whose answer was lost. Later cases would fail the same way, so
