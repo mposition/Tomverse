@@ -429,7 +429,7 @@ mock.module(mod("lib/apiSecurity.ts"), {
 });
 
 let contextConsumeSucceeds = true;
-let contextVerification: "ok" | "stale" = "ok";
+let contextVerification: "ok" | "stale" | "expired" | "invalid_signature" = "ok";
 mock.module(mod("lib/chatTurnContext.ts"), {
   namedExports: {
     buildChatTurnContext: async () => ({
@@ -448,8 +448,8 @@ mock.module(mod("lib/chatTurnContext.ts"), {
 });
 mock.module(mod("lib/chatContextBundleService.ts"), {
   namedExports: {
-    verifyChatContextBundle: () => contextVerification === "stale"
-      ? { ok: false, reason: "stale" as const }
+    verifyChatContextBundle: () => contextVerification !== "ok"
+      ? { ok: false, reason: contextVerification }
       : ({
           ok: true,
           payload: {
@@ -2175,9 +2175,53 @@ test("a post-claim context consumption collision is terminal and dispatch-free",
       refusalReason: "already_consumed",
     });
     assert.equal("bundleId" in payload, false);
+    const lines = warningEvents("chat_request_rejected");
+    assert.equal(lines.length, 1);
+    const line = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+    assert.equal(line.traceId, payload.traceId);
+    assert.equal(line.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(line.status, 409);
+    assert.equal(line.refusalReason, "already_consumed");
+    assert.equal(lines[0]?.includes("이 질문에 답해 줘"), false);
   } finally {
     contextConsumeSucceeds = true;
   }
+});
+
+for (const [verification, code, status, details, refusalReason] of [
+  ["stale", "CHAT_CONTEXT_BUNDLE_STALE", 409, { requiresPreflight: true }, "stale"],
+  ["expired", "CHAT_CONTEXT_BUNDLE_STALE", 409, { requiresPreflight: true }, "expired"],
+  ["invalid_signature", "INVALID_CONTEXT_BUNDLE", 400, undefined, undefined],
+] as const) {
+  test(`a ${verification} context bundle says why only in the log line`, async () => {
+    contextVerification = verification;
+    try {
+      const { body } = await ask("answers", "claimed", status, true);
+      const payload = JSON.parse(body) as Record<string, unknown>;
+      assert.equal(payload.code, code);
+      assert.deepEqual(payload.details, details);
+      const lines = warningEvents("chat_request_rejected");
+      assert.equal(lines.length, 1);
+      const line = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+      assert.equal(line.traceId, payload.traceId);
+      assert.equal(line.code, code);
+      assert.equal(line.status, status);
+      assert.equal(line.refusalReason, refusalReason);
+    } finally {
+      contextVerification = "ok";
+    }
+  });
+}
+
+test("a durable identity conflict from the common failure unwind leaves one rejection line", async () => {
+  const { body } = await ask("answers", "conflict", 409);
+  const payload = JSON.parse(body) as Record<string, unknown>;
+  const lines = warningEvents("chat_request_rejected");
+  assert.equal(lines.length, 1);
+  const line = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+  assert.equal(line.traceId, payload.traceId);
+  assert.equal(line.code, "CHAT_ATTEMPT_ID_REUSED");
+  assert.equal(line.status, 409);
 });
 
 test("a pre-durable browser request id derives and verifies one scoped durable source", async () => {
@@ -3249,6 +3293,11 @@ test("Guest Auto does not retry an ambiguous Router-refusal release with a new p
   assert.equal(
     (JSON.parse(body) as { code?: string }).code,
     "GUEST_AUTO_OUTCOME_UNKNOWN"
+  );
+  // The log names the refusal that left, not the one it replaced.
+  assert.deepEqual(
+    warningEvents("chat_request_rejected").map((line) => (JSON.parse(line) as { code?: string }).code),
+    ["GUEST_AUTO_OUTCOME_UNKNOWN"]
   );
   assert.equal(guestReleaseInputs.length, 1);
   assert.equal(
