@@ -20,6 +20,7 @@ import { recordDecisionMakerJudgment } from "@/lib/amux/decisionMakerJudgmentSto
 import { readDecisionMakerRequestState, recordDecisionMakerTransmitIntent } from "@/lib/amux/decisionMakerRequestStore";
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
 import { takeAuditChainLock } from "@/lib/adminAudit";
+import { AMUX_IDEA_CARD_CLOSE_SCAN } from "@/lib/amux/ideaCardCloseCore";
 import {
   amuxIdeaCardCloseRelayCards,
   answerAmuxIdeaCardCloseForOwner,
@@ -428,6 +429,46 @@ test("an idea with anything moving, finished, or waiting elsewhere is not asked 
     assert.equal(await questionOf(seeded.ideaId), null, name);
   }
   assert.equal((await questionOf(planDone.ideaId))?.state, "open", "a completed idea leaves its proposals behind");
+});
+
+test("ideas that can never be asked about do not hide a later one from the scan's bound", async () => {
+  const seedDependedOn = async () => {
+    const seeded = await seedIdea([{ status: "blocked" }]);
+    const other = await seedIdea([{ status: "backlog", ageDays: 1 }]);
+    await asReplica((tx) => tx.$executeRaw`
+      INSERT INTO "AmuxWorkDependency" ("taskId", "dependencyId") VALUES (${other.cardIds[0]}, ${seeded.cardIds[0]})`);
+  };
+  const seedLiveAttempt = async () => {
+    const seeded = await seedIdea([{ status: "blocked" }]);
+    await asReplica((tx) => tx.$executeRaw`
+      INSERT INTO "AmuxExecutionAttempt" ("id", "taskId", "worker", "workerInstanceId", "workerGeneration",
+        "taskRevision", "attemptNumber", "heartbeatAt", "leaseExpiresAt", "startedAt", "updatedAt")
+      VALUES (${randomUUID()}, ${seeded.cardIds[0]}, 'claude-impl', 'fixture-instance', 1, 3, 1,
+        ${new Date()}, ${new Date(Date.now() + 60_000)}, ${new Date()}, ${new Date()})`);
+  };
+  const seedWorkerQuestion = async () => {
+    const seeded = await seedIdea([{ status: "blocked" }]);
+    await asReplica(async (tx) => {
+      const attemptId = randomUUID();
+      const now = new Date();
+      await tx.$executeRaw`
+        INSERT INTO "AmuxExecutionAttempt" ("id", "taskId", "worker", "workerInstanceId", "workerGeneration",
+          "taskRevision", "attemptNumber", "heartbeatAt", "startedAt", "endedAt", "outcome", "toStatus", "endedBy",
+          "reason", "updatedAt")
+        VALUES (${attemptId}, ${seeded.cardIds[0]}, 'claude-impl', 'fixture-instance', 1, 3, 1, ${now}, ${now}, ${now},
+          'succeeded', 'blocked', 'claude-impl', 'owner_question', ${now})`;
+      await tx.$executeRaw`
+        INSERT INTO "AmuxV22TaskQuestion" ("id", "taskId", "attemptId", "worker", "sequence", "questionSha256", "updatedAt")
+        VALUES (${randomUUID()}, ${seeded.cardIds[0]}, ${attemptId}, 'claude-impl', 1, ${digest}, ${now})`;
+    });
+  };
+  const seedAssigned = () => seedIdea([{ status: "blocked" }, { status: "todo", assigned: true }]);
+  // Each kind passes the blocked-Task test, is refused only for what else it holds, and stays old.
+  const kinds = [seedAssigned, seedLiveAttempt, seedWorkerQuestion, seedDependedOn];
+  for (let index = 0; index <= AMUX_IDEA_CARD_CLOSE_SCAN; index += 1) await kinds[index % kinds.length]();
+  const later = await seedIdea([{ status: "blocked" }]);
+  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue(ON),
+    { opened: true, questionId: (await questionOf(later.ideaId))?.id, ideaId: later.ideaId });
 });
 
 test("one question per call, up to the day's limit", async () => {

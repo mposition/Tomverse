@@ -21,7 +21,7 @@ export const AMUX_IDEA_CARD_CLOSE_KEEP_DAYS = 30;
 export const AMUX_IDEA_CARD_CLOSE_CANCEL_COOLDOWN_DAYS = 1;
 /** At most this many questions or cards per relay tick, as the v22 list. */
 export const AMUX_IDEA_CARD_CLOSE_SYNC_LIMIT = 3;
-/** Ideas read per scan, so a few that cannot be asked about never hide the rest. */
+/** Ideas read per scan. The scan's filter makes the core's exclusions before this bound. */
 export const AMUX_IDEA_CARD_CLOSE_SCAN = 24;
 
 export type AmuxIdeaCardCloseEnv = Record<string, string | undefined>;

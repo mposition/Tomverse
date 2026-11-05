@@ -17,12 +17,12 @@ import {
 } from "@/lib/amux/decisionMakerInternalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
-import { AMUX_IDEA_CARD_CLOSE_SYNC_LIMIT } from "@/lib/amux/ideaCardCloseCore";
 import {
   openAmuxIdeaCardCloseQuestionIfDue,
   readAmuxIdeaCardCloseSyncForRelay,
 } from "@/lib/amux/ideaCardCloseService";
 import {
+  AMUX_V22_QUESTION_SYNC_LIMIT,
   openAmuxV22QuestionCards,
   readAmuxV22QuestionSyncRows,
   runAmuxV22ResolveStep,
@@ -76,8 +76,8 @@ export async function POST(request: Request) {
         cursor: cursor.move === "advance" ? { move: "advance",
           judged_at_ms: cursor.judgedAtMs, request_id: cursor.requestId } :
           { move: cursor.move },
-        pending: [...cards, ...cardClose.pending].slice(0, AMUX_IDEA_CARD_CLOSE_SYNC_LIMIT),
-        closing: [...rows.closing, ...cardClose.closing].slice(0, AMUX_IDEA_CARD_CLOSE_SYNC_LIMIT)
+        pending: [...cards, ...cardClose.pending].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT),
+        closing: [...rows.closing, ...cardClose.closing].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT)
           .map((row) => ({ question_id: row.questionId, card_id: row.cardId })),
       });
     } catch (error) {

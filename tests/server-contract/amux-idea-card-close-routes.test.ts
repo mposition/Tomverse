@@ -87,6 +87,7 @@ mock.module(mod("lib/amux/decisionMakerDeliveryCore.ts"), { namedExports: {
   parseDmDeliveryCursor: (value: unknown) => value === "bad" ? undefined : value ?? null,
 } });
 mock.module(mod("lib/amux/v22OwnerQuestionDmService.ts"), { namedExports: {
+  AMUX_V22_QUESTION_SYNC_LIMIT: 3,
   openAmuxV22QuestionCards: async (pending: unknown[]) => pending,
   readAmuxV22QuestionSyncRows: async () => ({ pending: world.v22Pending, closing: world.v22Closing }),
   runAmuxV22ResolveStep: async () => { world.calls.push("walk"); return { resolved: world.resolved, cursor: { move: "keep" } }; },

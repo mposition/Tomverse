@@ -49,10 +49,12 @@ type SqlCandidate = { ideaId: string; askedLastDay: number; cards: SqlCard[] | n
 
 /**
  * The ideas a question could be about, oldest first: one statement. Each idea's
- * cards come with what could still be moving them, and the core judges them;
- * the filters here only keep the scan's bound for ideas that can pass. An idea
- * still waiting for plan approval waits for a person already, unless it is
- * completed, which leaves its proposals behind (see lib/amux/ideaProgressCore.ts).
+ * cards come with what could still be moving them, and the core judges them.
+ * Every exclusion the core makes is also here, before the LIMIT: an idea the
+ * core refuses stays old, so one that passed this filter would hold its place in
+ * the bound on every tick and hide the ideas behind it. An idea still waiting
+ * for plan approval waits for a person already, unless it is completed, which
+ * leaves its proposals behind (see lib/amux/ideaProgressCore.ts).
  */
 async function readCandidateRows(tx: Prisma.TransactionClient,
   input: { now: Date; staleDays: number; ideaId: string | null }): Promise<SqlCandidate[]> {
@@ -98,7 +100,20 @@ async function readCandidateRows(tx: Prisma.TransactionClient,
           AND u."expiresAt" > clock."now"))
       AND EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id" AND c."cardType" = 'task'
         AND c."status" NOT IN ('done', 'cancelled'))
-      AND NOT EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id" AND c."status" IN ('doing', 'review'))
+      AND NOT EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id"
+        AND c."status" NOT IN ('done', 'cancelled', 'backlog', 'blocked', 'todo'))
+      AND NOT EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id" AND c."status" NOT IN ('done', 'cancelled')
+        AND (c."owner" IS NOT NULL OR c."claimedAt" IS NOT NULL OR c."v22AssignmentId" IS NOT NULL))
+      AND NOT EXISTS (SELECT 1 FROM own c JOIN "AmuxExecutionAttempt" a ON a."taskId" = c."id"
+        WHERE c."ideaId" = i."id" AND a."endedAt" IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM own c JOIN "AmuxV22TaskQuestion" t ON t."taskId" = c."id"
+        WHERE c."ideaId" = i."id" AND t."state" IN ('open', 'answered'))
+      AND NOT EXISTS (SELECT 1 FROM own c
+        JOIN "AmuxWorkDependency" e ON e."dependencyId" = c."id"
+        JOIN "AmuxWorkItem" o ON o."id" = e."taskId"
+        WHERE c."ideaId" = i."id" AND c."status" IN ('backlog', 'blocked', 'todo')
+          AND o."status" NOT IN ('done', 'cancelled')
+          AND NOT EXISTS (SELECT 1 FROM own same WHERE same."ideaId" = i."id" AND same."id" = o."id"))
       AND (EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id" AND c."cardType" = 'task' AND c."status" = 'blocked')
         OR NOT EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id" AND c."status" NOT IN ('done', 'cancelled')
           AND c."updatedAt" >= clock."now" - (${input.staleDays}::int * INTERVAL '1 day')))
