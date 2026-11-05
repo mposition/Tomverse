@@ -2,15 +2,9 @@ export const dynamic = "force-dynamic";
 
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminPrivacyRequestsPanel } from "@/components/admin/AdminPrivacyRequestsPanel";
-import { AutoFixReviewPanel } from "@/components/admin/AutoFixReviewPanel";
 import { FeedbackInboxPanel } from "@/components/admin/FeedbackInboxPanel";
 import { SupportTriageModelPanel } from "@/components/admin/SupportTriageModelPanel";
-import {
-  ADMIN_READ_LIMITS,
-  loadAutoFixReviewRows,
-  loadFeedbackRows,
-} from "@/lib/adminConsoleData";
-import { promotionConfigurationProblems } from "@/lib/feedbackAutoFixPromotion";
+import { ADMIN_READ_LIMITS, loadFeedbackRows } from "@/lib/adminConsoleData";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 
 const TABS = adminNavItemTabs("support");
@@ -21,7 +15,7 @@ const TABS = adminNavItemTabs("support");
  * The two rendered the same `FeedbackInboxPanel` from the same rows; the only
  * difference was that Support also showed privacy requests. `/admin/feedback`
  * now redirects here with `?tab=feedback`, so every existing link still lands on
- * the inbox.
+ * the inbox. The retired `?tab=fixes` falls to the first tab, the same inbox.
  */
 export default async function AdminSupportPage({
   searchParams,
@@ -40,12 +34,6 @@ export default async function AdminSupportPage({
       />
       {tab.id === "privacy" ? (
         <AdminPrivacyRequestsPanel />
-      ) : tab.id === "fixes" ? (
-        <AutoFixReviewPanel
-          rows={await loadAutoFixReviewRows()}
-          rowLimit={ADMIN_READ_LIMITS.autoFixCases}
-          configurationProblems={promotionConfigurationProblems()}
-        />
       ) : (
         <>
         <SupportTriageModelPanel />

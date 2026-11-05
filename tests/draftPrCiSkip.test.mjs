@@ -24,9 +24,7 @@ const GUARDED = [
     "review-parity-shadow.yml",
     "secret-history-scan.yml",
 ];
-const EXEMPT = new Map([
-    ["feedback-autofix-promotion-pr.yml", "runs only on a closed pull request"],
-]);
+const EXEMPT = new Map([]);
 
 const workflowsDir = new URL("../.github/workflows/", import.meta.url);
 const load = (name) => parse(readFileSync(new URL(name, workflowsDir), "utf8"));

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -31,7 +30,6 @@ import {
 } from "@/lib/feedbackLifecycleCore";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
-import { autoFixReplyDraft } from "@/lib/feedbackAutoFixReplyDraft";
 import {
   useServerSyncedRows,
   useSupportInboxRefresh,
@@ -77,8 +75,7 @@ export type FeedbackRow = {
     duplicateOf: string[];
     replyDraft: string | null;
   } | null;
-  /** Phase 2 diagnosis-only shadow case, when one was queued. Observational:
-   * no auto-fix pipeline exists, and the panel says so in words. */
+  /** The classifier's case, when one was queued, and the model's reading of it. */
   autoFixCase: {
     state: string;
     classification: string | null;
@@ -211,20 +208,6 @@ type UserNotificationResult =
     };
 
 const statuses = ["open", "reviewing", "resolved", "closed"] as const;
-
-/** Case states that belong to diagnosis-only shadow mode; anything past them
- * is an auto-fix on its way through review and promotion. */
-const SHADOW_CASE_STATES = new Set([
-  "received",
-  "collecting_evidence",
-  "evidence_ready",
-  "evidence_delayed",
-  "classifying",
-  "diagnostic_ready",
-  "ineligible",
-  "awaiting_human_review",
-  "closed",
-]);
 
 /**
  * Whether the *answer* to this report can reach the reporter: an address is
@@ -745,44 +728,6 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                   </div>
                 </div>
 
-                {(() => {
-                  // Only a fix observed live in production offers a draft;
-                  // the dialog still shows it for review before anything is sent.
-                  const draft = isTerminalFeedbackStatus(feedback.status)
-                    ? null
-                    : autoFixReplyDraft({
-                        caseState: feedback.autoFixCase?.state,
-                        language: feedback.language,
-                      });
-                  return draft ? (
-                    <div
-                      data-testid="feedback-autofix-reply-draft"
-                      className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs font-semibold leading-5 text-emerald-100 md:flex-row md:items-center md:justify-between"
-                    >
-                      <span>{m.autoFixDraft.ready}</span>
-                      <span className="flex flex-wrap gap-2">
-                        <Link
-                          href="/admin/support?tab=fixes"
-                          className="inline-flex min-h-11 items-center rounded-xl border border-emerald-400/40 px-3 py-2 font-bold text-emerald-50 transition hover:bg-emerald-500/20"
-                        >
-                          {m.autoFixDraft.review}
-                        </Link>
-                        <button
-                          type="button"
-                          data-testid="feedback-autofix-use-draft"
-                          disabled={busy}
-                          onClick={() =>
-                            setCloseTarget({ feedback, status: "resolved", draft })
-                          }
-                          className="inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-emerald-700 px-3 py-2 font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {m.autoFixDraft.use}
-                        </button>
-                      </span>
-                    </div>
-                  ) : null;
-                })()}
-
                 {isTerminalFeedbackStatus(feedback.status) ? (
                   <div
                     data-testid="feedback-reply-delivery"
@@ -883,9 +828,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         data-testid="feedback-autofix-case"
                         className="truncate"
                       >
-                        {SHADOW_CASE_STATES.has(feedback.autoFixCase.state)
-                          ? m.shadowDiagnosis
-                          : m.autoFixStage}
+                        {m.shadowDiagnosis}
                         {feedback.autoFixCase.state}
                         {feedback.autoFixCase.classification
                           ? ` — ${feedback.autoFixCase.classification}`
@@ -1207,8 +1150,8 @@ function FeedbackCompletionDialog({
                 !alreadyCompleted &&
                 !withholdEmail &&
                 userReply.trim()
-                ? m.autoFixDraft.sendAndResolve
-                : m.autoFixDraft.resolveOnly
+                ? m.replyDraftAction.sendAndResolve
+                : m.replyDraftAction.resolveOnly
               : notifiable && !alreadyCompleted && !withholdEmail
                 ? m.dialog.confirm(m.statuses[status])
                 : m.dialog.confirmWithoutEmail}
