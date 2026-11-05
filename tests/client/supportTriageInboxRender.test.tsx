@@ -81,7 +81,7 @@ test("the error analysis shows the cause and first step, then where the fix went
   const running = html(<TraceAnalysisBlock analysis={{ ...analysis, handedOff: true }} m={m} />);
   assert.ok(running.includes(m.traceAnalysisFixRunning));
   const opened = html(<TraceAnalysisBlock analysis={{ ...analysis, handedOff: true, prNumber: 12 }} m={m} />);
-  assert.ok(opened.includes("https://github.com/mposition/Tomverse/pull/12"));
+  assert.match(opened, /href="https:\/\/github\.com\/mposition\/Tomverse\/pull\/12"/);
   assert.ok(!opened.includes(m.traceAnalysisFixRunning));
   assert.ok(html(<TraceAnalysisBlock analysis={{ status: "failed" }} m={m} />).includes(m.traceAnalysisFailed));
 });
