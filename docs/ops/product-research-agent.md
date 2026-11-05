@@ -305,6 +305,8 @@ Railway 호스트 일부는 Chromium sandbox를 거부합니다
 
 owner가 합니다. dev에서 먼저 확인합니다.
 
+walker는 page origin과 `PRODUCT_RESEARCH_SCOUT_INGEST_URL`의 origin이 같을 때만 앱이 발급한 session을 씁니다. 기본 page origin은 production이므로, **dev나 Test에서는 아래 "Scout로 dev·Test 화면 보기"를 먼저 끝냅니다.** 순서가 바뀌면 `origin_mismatch`로 로그인을 건너뛰고 그날의 허가만 소모됩니다. production에서는 이 단계가 필요 없습니다. Railway 변수는 그 뒤의 배포부터 적용되므로, 변수를 바꾼 서비스는 Deploy한 다음 진행합니다.
+
 1. **[브라우저 — 쓰기]** 그 환경의 사이트에서 관리자가 아닌 새 계정을 일반 가입 절차로 만들고, 필요한 만큼 크레딧을 넣습니다. 이미지까지 보려면 Pro 또는 Max여야 합니다.
 2. **[Railway 대시보드 — Tomverse 프로젝트, 그 환경의 앱]** `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL`에 그 주소를 넣습니다. 이 단계부터 로그인 화면을 봅니다.
 3. **[Admin › 제품 리서치 › 실행과 비용]** 실제 생성 하루 횟수를 정합니다(0이면 생성 없음, 한 번 실행에 5). 모델 호출 상한은 약 39회로 올립니다.
