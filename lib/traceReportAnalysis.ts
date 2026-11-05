@@ -16,6 +16,7 @@ import "server-only";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
@@ -179,14 +180,22 @@ const CASE_SELECT = {
   diagnosticSummary: true,
 } as const;
 
-/** Identifiers of this occurrence, and this module's own bookkeeping. */
-const NOT_SENT = ["traceId", "occurrenceId", "sentry", "llmAnalysis", "llmAnalysisClaimUntil", "llmHandoffReserved"];
+/**
+ * What the model and the idea may read of the summary. An allowlist: with no
+ * evidence row, summary.errorCode holds the client's own error code, which is
+ * free text the reporter controls. The error code they get is the fingerprint's,
+ * from the signed token.
+ */
+const SENT = ["classificationSource", "routeClass", "phase", "httpStatus", "provider", "modelId", "retryable", "release", "environment", "occurredAt", "providerEventCount", "limitEventCount"];
 
 const summaryOf = (row: CaseRow) => (row.diagnosticSummary ?? {}) as Record<string, unknown>;
 const serverErrorCodeOf = (row: CaseRow) => {
   const code = row.fingerprint?.split("|")[0];
   return code && code !== "unclassified" ? code : null;
 };
+
+const recordedSummary = (row: CaseRow) =>
+  Object.fromEntries(Object.entries(summaryOf(row)).filter(([key]) => SENT.includes(key)));
 
 const factsOf = async (row: CaseRow): Promise<TraceAnalysisFacts> => {
   // Coded fields only: a provider's message can quote what the user sent.
@@ -204,23 +213,28 @@ const factsOf = async (row: CaseRow): Promise<TraceAnalysisFacts> => {
       select: { phase: true, decision: true, errorCode: true, limitLayer: true, limitScope: true },
     }),
   ]);
-  const summary = Object.fromEntries(Object.entries(summaryOf(row)).filter(([key]) => !NOT_SENT.includes(key)));
   return {
     classification: row.classification,
     reason: row.ineligibilityReason,
     serverErrorCode: serverErrorCodeOf(row),
     sourceRelease: row.sourceRelease,
-    summary,
+    summary: recordedSummary(row),
     providerEvents,
     limitEvents,
   };
 };
 
-const store = (row: CaseRow, analysis: StoredTraceAnalysis) =>
-  prisma.feedbackAutoFixCase.update({
-    where: { id: row.id },
+/** Only the pass still holding the claim writes: one whose claim lapsed and was taken writes nothing. */
+const store = (row: CaseRow, analysis: StoredTraceAnalysis) => {
+  const claim = summaryOf(row).llmAnalysisClaim;
+  return prisma.feedbackAutoFixCase.updateMany({
+    where: {
+      id: row.id,
+      ...(typeof claim === "string" ? { diagnosticSummary: { path: ["llmAnalysisClaim"], equals: claim } } : {}),
+    },
     data: { diagnosticSummary: { ...summaryOf(row), llmAnalysis: analysis } as Prisma.InputJsonObject },
   });
+};
 
 /** The saved owner's session for the idea they allowed, or null once that account is no longer one. */
 const ownerSession = async (ownerUserId: string): Promise<Session | null> => {
@@ -267,6 +281,9 @@ const incident = (code: string, title: string, error: unknown) =>
 
 export type TraceAnalysisPass = { mode: TraceAnalysisMode; analyzed: number; failed: number; handedOff: number };
 
+const attemptsOf = (summary: Record<string, unknown>) =>
+  typeof summary.llmAnalysisAttempts === "number" ? summary.llmAnalysisAttempts : 0;
+
 type Usage = { day: string; analyses: number; handoffs: number };
 
 const readUsage = async (tx: Prisma.TransactionClient, day: string): Promise<Usage> => {
@@ -283,9 +300,10 @@ const readUsage = async (tx: Prisma.TransactionClient, day: string): Promise<Usa
 /**
  * Reserves one paid step before it runs, under a lock every pass takes: the
  * day's count goes up and the case is claimed for CLAIM_MS, so overlapping
- * passes cannot call twice or read the same room under the limit. A reservation
- * is spent even if the step then fails, as the call may have been billed. A
- * handoff reserves once per case: its retries reuse one idea, so they spend nothing.
+ * passes cannot call twice or read the same room under the limit. The case's
+ * attempts go up here too: a reservation is spent even if the step then fails or
+ * the process dies, as the call may have been billed. A handoff reserves once
+ * per case: its retries reuse one idea, so they spend nothing.
  */
 const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date): Promise<CaseRow | null> =>
   prisma.$transaction(async (tx) => {
@@ -297,9 +315,7 @@ const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date):
     if (step === "analysis") {
       const claimedUntil = summary.llmAnalysisClaimUntil;
       if (typeof claimedUntil === "string" && Date.parse(claimedUntil) > now.getTime()) return null;
-      if (analysis?.status === "done" || (analysis?.status === "failed" && analysis.attempts >= TRACE_ANALYSIS_MAX_ATTEMPTS)) {
-        return null;
-      }
+      if (analysis?.status === "done" || attemptsOf(summary) >= TRACE_ANALYSIS_MAX_ATTEMPTS) return null;
     } else if (!traceAnalysisWantsFix(row.classification, analysis)) {
       return null;
     }
@@ -318,7 +334,12 @@ const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date):
     }
     const claimed =
       step === "analysis"
-        ? { ...summary, llmAnalysisClaimUntil: new Date(now.getTime() + CLAIM_MS).toISOString() }
+        ? {
+            ...summary,
+            llmAnalysisClaim: randomUUID(),
+            llmAnalysisClaimUntil: new Date(now.getTime() + CLAIM_MS).toISOString(),
+            llmAnalysisAttempts: attemptsOf(summary) + 1,
+          }
         : { ...summary, llmHandoffReserved: true };
     await tx.feedbackAutoFixCase.update({
       where: { id: caseId },
@@ -332,9 +353,8 @@ const readWork = (mode: TraceAnalysisMode, since: Date) =>
   prisma.$queryRaw<{ id: string }[]>`
     SELECT c."id" FROM "FeedbackAutoFixCase" c
     WHERE c."classification" IS NOT NULL AND c."createdAt" > ${since}
-      AND (c."diagnosticSummary"->'llmAnalysis' IS NULL
-        OR (c."diagnosticSummary"->'llmAnalysis'->>'status' = 'failed'
-          AND (c."diagnosticSummary"->'llmAnalysis'->>'attempts')::int < ${TRACE_ANALYSIS_MAX_ATTEMPTS})
+      AND ((COALESCE(c."diagnosticSummary"->'llmAnalysis'->>'status', '') <> 'done'
+          AND COALESCE((c."diagnosticSummary"->>'llmAnalysisAttempts')::int, 0) < ${TRACE_ANALYSIS_MAX_ATTEMPTS})
         OR (${mode === "fix"} AND c."diagnosticSummary"->'llmAnalysis'->>'status' = 'done'
           AND c."diagnosticSummary"->'llmAnalysis'->>'kind' = 'code_fix'
           AND c."diagnosticSummary"->'llmAnalysis'->>'confidence' <> 'low'
@@ -346,7 +366,7 @@ const readWork = (mode: TraceAnalysisMode, since: Date) =>
 export const runTraceReportAnalysisQuietly = async ({
   llm,
   submit = submitTraceFix,
-  now = new Date(),
+  now: start = new Date(),
 }: {
   /** Replaces the configured model (tests). */
   llm?: TraceAnalysisLlm | null;
@@ -354,6 +374,9 @@ export const runTraceReportAnalysisQuietly = async ({
   now?: Date;
 } = {}): Promise<TraceAnalysisPass> => {
   const pass: TraceAnalysisPass = { mode: "off", analyzed: 0, failed: 0, handedOff: 0 };
+  // Calls take up to a minute each: every claim and stamp reads the time it happens.
+  const startedAt = Date.now();
+  const now = () => new Date(start.getTime() + Date.now() - startedAt);
   try {
     const { mode, ownerUserId } = await readTraceAnalysisMode();
     pass.mode = mode;
@@ -361,7 +384,7 @@ export const runTraceReportAnalysisQuietly = async ({
     // The classifying pass otherwise waits for the daily cleanup.
     await runFeedbackAutoFixShadowWorker();
     const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;
-    const work = await readWork(mode, new Date(now.getTime() - TRACE_ANALYSIS_WINDOW_DAYS * DAY_MS));
+    const work = await readWork(mode, new Date(now().getTime() - TRACE_ANALYSIS_WINDOW_DAYS * DAY_MS));
     let called = 0;
     let handoffsOpen = mode === "fix" && Boolean(ownerUserId);
     for (const { id } of work) {
@@ -370,15 +393,15 @@ export const runTraceReportAnalysisQuietly = async ({
       let analysis = readStoredTraceAnalysis(current.diagnosticSummary);
       let row: CaseRow = current;
       if (analysis?.status !== "done" && call && called < TRACE_ANALYSIS_PER_PASS) {
-        const reserved = await reserve(id, "analysis", now);
+        const reserved = await reserve(id, "analysis", now());
         if (reserved) {
           called += 1;
           row = reserved;
           const answer = await call(await factsOf(row));
-          const at = now.toISOString();
+          const at = now().toISOString();
           analysis = answer
             ? { status: "done", at, ...answer }
-            : { status: "failed", at, attempts: (analysis?.status === "failed" ? analysis.attempts : 0) + 1 };
+            : { status: "failed", at, attempts: attemptsOf(summaryOf(row)) };
           await store(row, analysis);
           row = { ...row, diagnosticSummary: { ...summaryOf(row), llmAnalysis: analysis } as Prisma.JsonObject };
           if (answer) pass.analyzed += 1;
@@ -387,7 +410,7 @@ export const runTraceReportAnalysisQuietly = async ({
       }
       if (!handoffsOpen || !ownerUserId || analysis?.status !== "done") continue;
       if (!traceAnalysisWantsFix(row.classification, analysis)) continue;
-      const reserved = await reserve(id, "handoff", now);
+      const reserved = await reserve(id, "handoff", now());
       if (!reserved) continue;
       try {
         const { ideaId } = await submit({
@@ -397,12 +420,12 @@ export const runTraceReportAnalysisQuietly = async ({
             caseId: id,
             serverErrorCode: serverErrorCodeOf(reserved),
             sourceRelease: reserved.sourceRelease,
-            summary: summaryOf(reserved),
+            summary: recordedSummary(reserved),
             analysis,
           }),
         });
         pass.handedOff += 1;
-        await store(reserved, { ...analysis, handoff: { ideaId, at: now.toISOString() } });
+        await store(reserved, { ...analysis, handoff: { ideaId, at: now().toISOString() } });
       } catch (error) {
         // Tried again next tick with the same request id, which finds a first
         // submit whose answer was lost. Later cases would fail the same way, so

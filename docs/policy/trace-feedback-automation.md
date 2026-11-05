@@ -250,14 +250,14 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
 - **모드**: Support › Feedback 패널의 끔·분석·분석 + draft PR 하나. 기본은 끔이고, 저장은 소유자 + 최근
   인증 + 감사다. 분석 + draft PR은 고른 소유자를 함께 저장해, idea는 그 소유자의 것이 되고 그 계정이 소유자가
   아니게 되면 멈춘다. 모델은 지원 Triage가 쓰는 모델이고, 그쪽이 꺼져 있으면 분석도 돌지 않는다.
-- **입력은 서버 기록뿐이다**: §8의 진단 요약에서 Trace·occurrence·Sentry 값을 뺀 것, fingerprint의 서버 오류
+- **입력은 서버 기록뿐이다**: §8의 진단 요약 중 허용 목록의 필드(요약의 `errorCode`는 증거가 없으면 client 값이라 제외), fingerprint의 서버 오류
   코드와 release, 같은 Trace의 provider·limit event 코드 필드. 신고자의 글과 경로, provider 메시지는 넣지
   않는다. 이 답이 branch에 쓰는 coding agent의 지시문이 되므로, 신고가 그 글을 쓸 수 없어야 한다.
 - **draft PR 조건**: 모델이 `code_fix`를 신뢰도 medium 이상으로 답하고, 서버 판정이 `operational_limit`·
   `provider_transient`·`client_classified`·`untrusted_trace`가 아닐 것. UTC 하루 3건이고 lane의 일일 한도가
   따로 있다. idea와 PR은 공개되므로 Trace ID·신고 내용을 넣지 않는다. 병합은 사람이 한다.
 - **멱등**: request id를 case id에서 유도해, 응답을 잃은 제출을 다시 보내도 idea는 하나다.
-- **상한**: 분석은 회차당 5건, UTC 하루 20회(재시도 포함), 건당 3회까지. 대상은 최근 30일의 case다. 호출과 제출 전에 lock 안에서 그날 사용량(`traceReportAnalysis.usage`)을 올리고 case를 잡으므로, 실행이 겹쳐도 두 번 호출하거나 상한을 넘지 않는다.
+- **상한**: 분석은 회차당 5건, UTC 하루 20회(재시도 포함), 건당 3회까지. 대상은 최근 30일의 case다. 호출과 제출 전에 lock 안에서 그날 사용량(`traceReportAnalysis.usage`)을 올리고 case를 잡으므로, 실행이 겹쳐도 두 번 호출하거나 상한을 넘지 않는다. 건당 시도 횟수도 호출 전에 올리고, claim을 잃은 실행은 결과를 쓰지 않는다.
 - **저장**: `diagnosticSummary.llmAnalysis`. migration이 없고 case의 보존·삭제를 그대로 따른다.
 - **한계**: 분석 모델은 코드를 보지 못한다. 코드를 보는 원인 분석은 lane 실행이 PR에 적는다. 증거 행이 없는
   신고는 오류 코드와 release만으로 판단한다.

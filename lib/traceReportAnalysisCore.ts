@@ -134,7 +134,7 @@ export const traceFixIdea = (input: {
     `Fix a production error: ${input.serverErrorCode ?? "unclassified"}`,
     "",
     "A user reported this error and the server verified that it happened. These are the recorded facts:",
-    ...fact("error code", input.serverErrorCode ?? summary.errorCode),
+    ...fact("error code", input.serverErrorCode),
     ...fact("route class", summary.routeClass),
     ...fact("phase", summary.phase),
     ...fact("HTTP status", summary.httpStatus),

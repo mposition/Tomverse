@@ -53,7 +53,8 @@ const report = async (suffix: string, classification = "application_candidate") 
       sourceRelease: "release-1",
       state: "ineligible",
       classification,
-      diagnosticSummary: { traceId: `trace-analysis-${suffix}`, occurrenceId: `occurrence-${suffix}`, routeClass: "chat", httpStatus: 500 },
+      // With no evidence row, errorCode is the client's own text.
+      diagnosticSummary: { traceId: `trace-analysis-${suffix}`, occurrenceId: `occurrence-${suffix}`, routeClass: "chat", httpStatus: 500, errorCode: SECRET_WORDS },
     },
   });
 };
@@ -136,6 +137,36 @@ test("a failed call is counted and stops at the attempt limit", async () => {
   assert.equal(calls, TRACE_ANALYSIS_MAX_ATTEMPTS);
   const analysis = await stored(row.id);
   assert.equal(analysis?.status === "failed" && analysis.attempts, TRACE_ANALYSIS_MAX_ATTEMPTS);
+});
+
+test("a process that dies after the call still used its attempt", async () => {
+  await setMode("analyze");
+  const row = await report("died");
+  let calls = 0;
+  const llm: TraceAnalysisLlm = async () => {
+    calls += 1;
+    throw new Error("process died");
+  };
+  for (let i = 0; i < TRACE_ANALYSIS_MAX_ATTEMPTS + 2; i += 1) {
+    await runTraceReportAnalysisQuietly({ llm, now: new Date(Date.now() + i * 3 * 60_000) });
+  }
+  assert.equal(calls, TRACE_ANALYSIS_MAX_ATTEMPTS);
+  assert.equal(await stored(row.id), null);
+});
+
+test("a pass whose claim was taken does not write over the one that holds it", async () => {
+  await setMode("analyze");
+  const row = await report("fence");
+  const slow: TraceAnalysisLlm = async () => {
+    // Another pass takes the case after this claim lapsed.
+    await prisma.feedbackAutoFixCase.update({
+      where: { id: row.id },
+      data: { diagnosticSummary: { llmAnalysisClaim: "someone-else" } },
+    });
+    return answer();
+  };
+  assert.equal((await runTraceReportAnalysisQuietly({ llm: slow })).analyzed, 1);
+  assert.equal(await stored(row.id), null);
 });
 
 test("one pass takes a bounded number of reports", async () => {
@@ -271,7 +302,7 @@ test("overlapping passes call the model once for a report", async () => {
 
 test("finished reports do not crowd out a new one", async () => {
   await setMode("analyze");
-  const done = { status: "done", at: new Date().toISOString(), modelId: "m", ...answer("needs_more_evidence") };
+  const done = { status: "done", at: new Date().toISOString(), ...answer("needs_more_evidence") };
   await prisma.feedback.createMany({
     data: Array.from({ length: 60 }, (_, i) => ({ id: `fb-trace-done-${i}`, type: "bug", message: "x" })),
   });
