@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { APP_DEFAULTS } from "../lib/appDefaults.ts";
 import { ENABLED_MODELS } from "../lib/models.ts";
 import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 import {
@@ -274,6 +275,14 @@ test("an off prompt tells the user what would actually help", () => {
 
 test("an unknown model is unverified rather than assumed to work", () => {
   assert.equal(getArtifactToolSupport("a-model-nobody-added"), "unverified");
+});
+
+test("the default models can create files", () => {
+  // Off the registry, a new account's file request is told to pick another
+  // model. That went unnoticed from the default's change on 2026-10-12 until the
+  // Scout asked for a real PDF on 2026-11-05.
+  assert.equal(getArtifactToolSupport(APP_DEFAULTS.defaultModelId), "verified");
+  assert.equal(getArtifactToolSupport(APP_DEFAULTS.guestDefaultModelId), "verified");
 });
 
 test("every registered model is a real catalogue id", () => {
