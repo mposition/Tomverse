@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
@@ -678,6 +678,67 @@ test("(ㄷ): a package that cannot be resolved or read is a failure", () => {
     judged.failures.some((failure) => failure.rule === "package-unresolved"),
     JSON.stringify(judged.failures),
   );
+});
+
+test("(ㄷ): a dependency's other branches are walked too, not just `require`", () => {
+  // The same gap one level down, which independent review found after the top
+  // level was fixed: a package file importing another package judged that
+  // dependency's `require` branch even when the importing file had itself been
+  // reached through an `import` branch, so an `import`-only `fetch` was never
+  // read. Built here as a real package tree, because that is the only way to
+  // see which branch was taken.
+  const root = mkdtempSync(join(tmpdir(), "ts-transitive-"));
+  const dep = join(root, "node_modules", "dep");
+  mkdirSync(dep, { recursive: true });
+  writeFileSync(
+    join(dep, "package.json"),
+    JSON.stringify({
+      name: "dep",
+      exports: { ".": { require: "./clean.cjs", import: "./leaky.js" } },
+    }),
+  );
+  writeFileSync(join(dep, "clean.cjs"), "module.exports = 1;");
+  writeFileSync(join(dep, "leaky.js"), 'export const go = (u) => fetch(u);');
+  const importer = join(root, "index.js");
+  writeFileSync(importer, 'import { go } from "dep"; export const run = go;');
+
+  try {
+    const { files } = packageEntryFiles("dep", importer);
+    const names = files.map((file) => file.split(sep).pop());
+    assert.ok(names.includes("clean.cjs"), "the require branch");
+    assert.ok(names.includes("leaky.js"), `the import branch, from ${names.join(", ")}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("(ㄷ): a package whose own manifest cannot be read is a failure", () => {
+  // Accepting the first readable manifest above the entry meant an unparseable
+  // one fell through to an ancestor's -- the repository's own, in the worst
+  // case -- and its entries were walked as the package's.
+  const root = mkdtempSync(join(tmpdir(), "ts-manifest-"));
+  const dep = join(root, "node_modules", "broken");
+  mkdirSync(dep, { recursive: true });
+  writeFileSync(join(dep, "package.json"), '{"name": "broken", "main": "./index.js"');
+  writeFileSync(join(dep, "index.js"), "module.exports = 1;");
+  const importer = join(root, "index.js");
+  writeFileSync(importer, 'module.exports = require("broken");');
+
+  try {
+    const { failures, files } = packageEntryFiles("broken", importer);
+    // Either code is the right answer -- Node refuses to resolve a package
+    // whose manifest will not parse, so that failure may come first. What
+    // matters is that it is a failure naming the package and that no entry
+    // points are returned, rather than an ancestor manifest's being walked.
+    assert.ok(failures.length > 0, "a broken manifest is a failure");
+    assert.ok(
+      failures.every((failure) => failure.file.includes("broken")),
+      JSON.stringify(failures),
+    );
+    assert.deepEqual(files, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the entry points and the specifier list are the ones the section names", () => {

@@ -912,8 +912,19 @@ export const analysePackageFile = ({ specifier, file, source }) => {
     }
     const base = target.startsWith(".") ? resolvePath(dirname(file), target) : null;
     if (base === null) {
+      // Every branch of the dependency, not the one `require` picks. This was
+      // the same gap one level down: a package file importing another package
+      // judged its `require` branch even when the importing file had been
+      // reached through its own `import` branch, so an `import`-only
+      // `fetch` was never read. Independent review found it twice -- at the
+      // top level first, then here.
       try {
-        edges.push(createRequire(file).resolve(target));
+        const dependency = packageEntryFiles(target, file);
+        for (const failure of dependency.failures) failures.push(failure);
+        for (const entry of dependency.files) edges.push(entry);
+        if (dependency.files.length === 0 && dependency.failures.length === 0) {
+          throw new Error("no entry point");
+        }
       } catch {
         // **A failure, not a dropped edge.** Code this check could not resolve
         // is code it did not judge, and passing on it means the boundary check
@@ -1053,12 +1064,12 @@ export const analysePackageFile = ({ specifier, file, source }) => {
  * A package.json that cannot be read or parsed is a failure -- the alternative
  * is clearing a package whose entry points are unknown.
  */
-export const packageEntryFiles = (specifier) => {
+export const packageEntryFiles = (specifier, fromFile = import.meta.filename) => {
   const failures = [];
   const files = [];
   let resolved;
   try {
-    resolved = require.resolve(specifier);
+    resolved = createRequire(fromFile).resolve(specifier);
   } catch {
     failures.push({ entry: "package", file: specifier, rule: "package-unresolved", detail: "" });
     return { failures, files };
@@ -1067,21 +1078,31 @@ export const packageEntryFiles = (specifier) => {
 
   // The package root: the nearest directory above the resolved entry that has
   // a package.json with a name.
+  // The nearest package.json, and **only** that one: accepting the first
+  // readable manifest above the entry meant an unparseable package manifest
+  // fell through to an ancestor's -- the repository's own, in the worst case --
+  // and its entries were walked as this package's. Independent review named
+  // it. A manifest that is there and cannot be read is a failure; a directory
+  // without one is looked past.
   let root = dirname(resolved);
   let manifest;
   for (let up = 0; up < 8; up += 1) {
+    let text;
     try {
-      const read = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-      if (typeof read.name === "string") {
-        manifest = read;
-        break;
-      }
+      text = readFileSync(join(root, "package.json"), "utf8");
     } catch {
-      // Not here; look one directory up.
+      const parent = dirname(root);
+      if (parent === root) break;
+      root = parent;
+      continue;
     }
-    const parent = dirname(root);
-    if (parent === root) break;
-    root = parent;
+    try {
+      const read = JSON.parse(text);
+      if (typeof read.name === "string") manifest = read;
+    } catch {
+      // Left undefined: the failure below reports it.
+    }
+    break;
   }
   if (manifest === undefined) {
     failures.push({
