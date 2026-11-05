@@ -212,6 +212,60 @@ test("failed submits piled up over days do not all land on one day", async () =>
   assert.equal(ideas.length, TRACE_FIX_HANDOFFS_PER_DAY);
 });
 
+test("switching off during a pass stops the next call and any idea", async () => {
+  await setMode(`fix:${OWNER}`);
+  await report("stop-a");
+  await report("stop-b");
+  let calls = 0;
+  const llm: TraceAnalysisLlm = async () => {
+    calls += 1;
+    await prisma.appSetting.update({ where: { key: TRACE_ANALYSIS_MODE_SETTING_KEY }, data: { value: "off" } });
+    return answer();
+  };
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(calls, 1);
+  assert.equal(ideas.length, 0);
+});
+
+test("lowering fix to analyze during a pass keeps analysing but opens no idea", async () => {
+  await setMode(`fix:${OWNER}`);
+  await report("lower-a");
+  await report("lower-b");
+  let calls = 0;
+  const llm: TraceAnalysisLlm = async () => {
+    calls += 1;
+    await prisma.appSetting.update({ where: { key: TRACE_ANALYSIS_MODE_SETTING_KEY }, data: { value: "analyze" } });
+    return answer();
+  };
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm, submit });
+  assert.equal(calls, 2);
+  assert.equal(ideas.length, 0);
+});
+
+test("fixes waiting out the daily limit do not crowd out a new report", async () => {
+  await setMode(`fix:${OWNER}`);
+  const waiting = { status: "done", at: new Date().toISOString(), modelId: "m", kind: "code_fix", confidence: "high", cause: "c", recommendation: "r" };
+  await prisma.feedback.createMany({
+    data: Array.from({ length: 60 }, (_, i) => ({ id: `fb-trace-wait-${i}`, type: "bug", message: "x" })),
+  });
+  await prisma.feedbackAutoFixCase.createMany({
+    data: Array.from({ length: 60 }, (_, i) => ({
+      feedbackId: `fb-trace-wait-${i}`,
+      traceId: `trace-analysis-wait-${i}`,
+      state: "ineligible",
+      classification: "application_candidate",
+      diagnosticSummary: { llmAnalysis: waiting },
+    })),
+  });
+  const row = await report("after-the-queue");
+  const { ideas, submit } = recordingSubmit();
+  await runTraceReportAnalysisQuietly({ llm: recordingLlm().llm, submit });
+  assert.equal(ideas.length, TRACE_FIX_HANDOFFS_PER_DAY);
+  assert.equal((await stored(row.id))?.status, "done");
+});
+
 test("one pass takes a bounded number of reports", async () => {
   await setMode("analyze");
   for (let i = 0; i < TRACE_ANALYSIS_PER_PASS + 2; i += 1) await report(`bound-${i}`);

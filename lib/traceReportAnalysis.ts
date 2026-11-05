@@ -335,20 +335,46 @@ const reserve = async (caseId: string, step: "analysis" | "handoff", now: Date):
     return { ...row, diagnosticSummary: claimed as Prisma.JsonObject };
   });
 
-/** Only cases with work left, so finished ones can never crowd out a new report. */
-const readWork = (mode: TraceAnalysisMode, since: Date) =>
-  prisma.$queryRaw<{ id: string }[]>`
-    SELECT c."id" FROM "FeedbackAutoFixCase" c
-    WHERE c."classification" IS NOT NULL AND c."createdAt" > ${since}
-      AND ((COALESCE(c."diagnosticSummary"->'llmAnalysis'->>'status', '') <> 'done'
-          AND COALESCE((c."diagnosticSummary"->>'llmAnalysisAttempts')::int, 0) < ${TRACE_ANALYSIS_MAX_ATTEMPTS})
-        OR (${mode === "fix"} AND c."diagnosticSummary"->'llmAnalysis'->>'status' = 'done'
-          AND c."diagnosticSummary"->'llmAnalysis'->>'kind' = 'code_fix'
-          AND c."diagnosticSummary"->'llmAnalysis'->>'confidence' <> 'low'
-          AND c."diagnosticSummary"->'llmAnalysis'->'handoff' IS NULL
-          AND c."classification" <> ALL(${[...TRACE_FIX_NEVER_CLASSIFICATIONS]}::text[])))
-    ORDER BY c."createdAt" ASC, c."id" ASC
-    LIMIT ${WORK_SCAN}`;
+/**
+ * Only cases with work left, and each kind read on its own: finished cases can
+ * never crowd out a new report, nor can fixes waiting out the daily limit.
+ */
+const readWork = async (mode: TraceAnalysisMode, since: Date) => {
+  const [analyses, fixes] = await Promise.all([
+    prisma.$queryRaw<{ id: string }[]>`
+      SELECT c."id" FROM "FeedbackAutoFixCase" c
+      WHERE c."classification" IS NOT NULL AND c."createdAt" > ${since}
+        AND COALESCE(c."diagnosticSummary"->'llmAnalysis'->>'status', '') <> 'done'
+        AND COALESCE((c."diagnosticSummary"->>'llmAnalysisAttempts')::int, 0) < ${TRACE_ANALYSIS_MAX_ATTEMPTS}
+      ORDER BY c."createdAt" ASC, c."id" ASC
+      LIMIT ${WORK_SCAN}`,
+    mode !== "fix"
+      ? []
+      : prisma.$queryRaw<{ id: string }[]>`
+          SELECT c."id" FROM "FeedbackAutoFixCase" c
+          WHERE c."classification" IS NOT NULL AND c."createdAt" > ${since}
+            AND c."diagnosticSummary"->'llmAnalysis'->>'status' = 'done'
+            AND c."diagnosticSummary"->'llmAnalysis'->>'kind' = 'code_fix'
+            AND c."diagnosticSummary"->'llmAnalysis'->>'confidence' <> 'low'
+            AND c."diagnosticSummary"->'llmAnalysis'->'handoff' IS NULL
+            AND c."classification" <> ALL(${[...TRACE_FIX_NEVER_CLASSIFICATIONS]}::text[])
+          ORDER BY c."createdAt" ASC, c."id" ASC
+          LIMIT ${WORK_SCAN}`,
+  ]);
+  return [...analyses, ...fixes];
+};
+
+/** What the Admin console allows right now: a pass can run for minutes, and Off means no new call or idea. */
+const allowedNow = async (needsConfiguredModel: boolean): Promise<{ mode: TraceAnalysisMode; ownerUserId: string | null }> => {
+  const saved = await readTraceAnalysisMode();
+  if (saved.mode === "off" || !(await resolveSupportTriageEnabled(process.env)).enabled) {
+    return { mode: "off", ownerUserId: null };
+  }
+  if (needsConfiguredModel && !(await resolveSupportTriageLlmModel(process.env)).modelId) {
+    return { mode: "off", ownerUserId: null };
+  }
+  return saved;
+};
 
 export const runTraceReportAnalysisQuietly = async ({
   llm,
@@ -365,11 +391,11 @@ export const runTraceReportAnalysisQuietly = async ({
   const startedAt = Date.now();
   const now = () => new Date(start.getTime() + Date.now() - startedAt);
   try {
-    const { mode, ownerUserId } = await readTraceAnalysisMode();
+    const { mode } = await readTraceAnalysisMode();
     pass.mode = mode;
     if (mode === "off") return pass;
-    // Support triage's own switch stops this too: its Off means no paid calls here.
-    if (!(await resolveSupportTriageEnabled(process.env)).enabled) return pass;
+    // Support triage's own switch and model stop this too: their Off means no paid calls here.
+    if ((await allowedNow(llm === undefined)).mode === "off") return pass;
     // The classifying pass otherwise waits for the daily cleanup.
     await runFeedbackAutoFixShadowWorker();
     const call = llm === undefined ? await traceAnalysisLlmFromSettings() : llm;
@@ -377,8 +403,10 @@ export const runTraceReportAnalysisQuietly = async ({
     if (!call) return pass;
     const work = await readWork(mode, new Date(now().getTime() - TRACE_ANALYSIS_WINDOW_DAYS * DAY_MS));
     let called = 0;
-    let handoffsOpen = mode === "fix" && Boolean(ownerUserId);
+    let handoffsOpen = true;
     for (const { id } of work) {
+      const allowed = await allowedNow(llm === undefined);
+      if (allowed.mode === "off") break;
       const current = await prisma.feedbackAutoFixCase.findUnique({ where: { id }, select: CASE_SELECT });
       if (!current) continue;
       let analysis = readStoredTraceAnalysis(current.diagnosticSummary);
@@ -399,7 +427,9 @@ export const runTraceReportAnalysisQuietly = async ({
           else pass.failed += 1;
         }
       }
-      if (!handoffsOpen || !ownerUserId || analysis?.status !== "done") continue;
+      // The call above can take a minute: read the switch again before an idea.
+      const { mode: modeNow, ownerUserId } = await allowedNow(llm === undefined);
+      if (!handoffsOpen || modeNow !== "fix" || !ownerUserId || analysis?.status !== "done") continue;
       if (!traceAnalysisWantsFix(row.classification, analysis)) continue;
       const reserved = await reserve(id, "handoff", now());
       if (!reserved) continue;
