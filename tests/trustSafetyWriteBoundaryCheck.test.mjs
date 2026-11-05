@@ -564,6 +564,14 @@ test("(ㄷ): the loader rule, as a table of what is refused and what is not", ()
   // whole table is asserted together, so moving one case cannot quietly move
   // another, and the five allowed rows are what keep the rule usable.
   const refused = {
+    // An alias of an alias assigned later in the file: the collector ran
+    // once in source order, so this was invisible. It runs to a fixed point.
+    "an alias of an alias assigned later":
+      'let r; function run() { const load = r; return load("node:net"); } r = require; module.exports = run;',
+    // A comma expression and a conditional reduce to a loader too.
+    "a comma expression": 'module.exports = (0, require)("node:net");',
+    "a conditional alias":
+      'const r = globalThis.x ? require : null; module.exports = r("node:net");',
     // `createRequire` was exempt by name, so an alias of `require` called
     // that skipped the specifier check. There is no exemption now.
     "createRequire as an alias of require":
@@ -610,6 +618,8 @@ test("(ㄷ): the loader rule, as a table of what is refused and what is not", ()
     "an ordinary computed read, which react does": "module.exports = (config, key) => config[key];",
     "a call that no loader takes part in": "module.exports = (f, x) => f(x);",
     "an ordinary new": "module.exports = class A { constructor() { this.x = new Map(); } };",
+    "an ordinary comma expression": "module.exports = (a, b) => (a, b);",
+    "an ordinary conditional": "module.exports = (c, a, b) => (c ? a : b);",
   };
 
   const judge = (source) =>

@@ -808,6 +808,17 @@ export const analysePackageFile = ({ specifier, file, source }) => {
   const isLoaderValue = (node) => {
     if (node === undefined) return false;
     if (ts.isParenthesizedExpression(node)) return isLoaderValue(node.expression);
+    // `(0, require)("node:net")` and `c ? require : other` reduce to a loader
+    // as surely as the name does, and neither was followed -- so the call was
+    // judged as an ordinary one and its specifier never read. Independent
+    // review found both. A conditional counts when **either** branch is a
+    // loader: it may be one at runtime, which is the fail-closed reading.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      return isLoaderValue(node.right);
+    }
+    if (ts.isConditionalExpression(node)) {
+      return isLoaderValue(node.whenTrue) || isLoaderValue(node.whenFalse);
+    }
     if (ts.isIdentifier(node)) return loaderNames.has(node.text);
     // What a loader call hands back is a loader too: `createRequire(...)`
     // returns one, and `require.bind(module)` returns one. Not following that
@@ -946,7 +957,17 @@ export const analysePackageFile = ({ specifier, file, source }) => {
     }
     ts.forEachChild(node, collectLoaderNames);
   };
-  ts.forEachChild(parsed, collectLoaderNames);
+  // To a fixed point, not once in source order. An alias of an alias that is
+  // assigned **later** in the file -- `let r; function run() { const load = r;
+  // load("node:net"); } r = require;` -- was invisible, because `load` was
+  // visited before `r` was known. Independent review found it. The set only
+  // grows, so repeating until it stops terminates; the bound is there so a
+  // pathological file cannot spin.
+  for (let pass = 0; pass < 10; pass += 1) {
+    const before = loaderNames.size;
+    ts.forEachChild(parsed, collectLoaderNames);
+    if (loaderNames.size === before) break;
+  }
 
   const visit = (node) => {
     // A static import or re-export: an ordinary edge.
@@ -1013,7 +1034,9 @@ const checkPackages = (specifiers) => {
     const seen = new Set();
     const queue = [entryFile];
     while (queue.length > 0) {
-      if (seen.size > PACKAGE_FILE_BUDGET) {
+      // `>=`, so the budget is the number of files read rather than one more
+      // than it: the check fired after reading 1,501.
+      if (seen.size >= PACKAGE_FILE_BUDGET) {
         failures.push({
           entry: "package",
           file: specifier,
