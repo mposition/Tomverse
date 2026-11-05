@@ -34,7 +34,8 @@ test("v19 session queue filters expired, cancelled, purged and owner ideas", () 
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,
-      sourceProvenanceCiphertext: { not: null } },
+      sourceProvenanceCiphertext: { not: null },
+      planRefusals: { none: { state: "open" } } },
     OR: [
       { createdAt: { gt: cursor.createdAt } },
       { createdAt: cursor.createdAt, id: { gt: cursor.reservationId } },

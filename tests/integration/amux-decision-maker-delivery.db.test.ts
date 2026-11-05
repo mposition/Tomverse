@@ -682,7 +682,7 @@ test("a v22 question card's confirmed answer resumes its Task and is never offer
   let listed = false;
   for (let round = 0; round < 20 && !listed; round += 1) {
     const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
-      (tx) => readAmuxV22QuestionSyncRows(tx));
+      (tx, context) => readAmuxV22QuestionSyncRows(tx, context.dbNow));
     listed = rows.closing.some((row) => row.questionId === question.id && row.cardId === cardId);
     if (listed) break;
     for (const row of rows.closing)
@@ -694,7 +694,7 @@ test("a v22 question card's confirmed answer resumes its Task and is never offer
   await writeQuestion((tx, now) => recordAmuxV22QuestionLocalCardClosed(tx,
     { questionId: question.id, cardId, now }));
   const after = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
-    (tx) => readAmuxV22QuestionSyncRows(tx));
+    (tx, context) => readAmuxV22QuestionSyncRows(tx, context.dbNow));
   assert.ok(!after.closing.some((row) => row.questionId === question.id));
 });
 
