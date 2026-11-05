@@ -594,7 +594,7 @@ export const AMUX_DB_BOUNDARIES = {
   // statement that returns the owner's newest ideas with their chunks, current
   // previews, budget holds, proposed unit counts and registered cards + fence,
   // pinned by tests/amuxIdeaProgress.test.mjs. Seven separate reads made eight
-  // gaps under the 100 ms idle-in-transaction timeout and failed in production
+  // gaps under the idle-in-transaction timeout (then 100 ms) and failed in production
   // (up to 9 calls before 2026-10-16); one statement has the two gaps every
   // other read boundary has. One REPEATABLE READ snapshot.
   ideaProgressListRead: {

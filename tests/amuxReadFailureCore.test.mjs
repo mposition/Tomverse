@@ -78,7 +78,7 @@ test("a session the database ended for idling in its transaction (25P03) is tran
   // owned-queue read failed with P2010, P2039 and a bare DriverAdapterError
   // and was answered 500, and four WSL bridges halted on it. The recovery
   // sweep logged the nested code of the same failures: 25P03. A boundary sets
-  // idle_in_transaction_session_timeout to 100 ms (lib/amux/dbBoundary.ts), so
+  // idle_in_transaction_session_timeout (then 100 ms, lib/amux/dbBoundary.ts), so
   // a gap longer than that between two statements ends the session, and the
   // next statement or the COMMIT is refused with this code.
   const fatal = new DriverAdapterError({
