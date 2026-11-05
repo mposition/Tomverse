@@ -82,7 +82,9 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
     session_review: [m.sessionReview, m.sessionReviewHint],
   };
   const reviews = rows.flatMap((row) => row.reviewPullRequests.map((pr) => ({ row, pr })));
-  const waiting = decisions.length + reviews.length;
+  // Nothing moves a blocked idea on until someone looks at it (its detail says where).
+  const blocked = rows.filter((row) => !row.lane && row.stage === "execution" && row.activity === "blocked");
+  const waiting = decisions.length + reviews.length + blocked.length;
 
   return (
     <section aria-labelledby="amux-idea-inbox-heading" data-testid="amux-idea-inbox"
@@ -105,6 +107,20 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
                 <p className="text-xs text-zinc-400">
                   {decision[row.waitingFor as AmuxIdeaWaitingFor][1]}
                 </p>
+              </div>
+              <Link href={amuxIdeaHref(row.requestId)} onClick={keepDraft} className={BUTTON_PRIMARY}>
+                {m.open}
+              </Link>
+            </li>
+          ))}
+          {blocked.map((row) => (
+            <li key={`${row.ideaId}:blocked`} className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/30 bg-zinc-900/60 p-3"
+              data-testid="amux-idea-inbox-blocked">
+              <span aria-hidden="true" className="w-1 self-stretch rounded-full bg-red-500" />
+              <div className="min-w-0 flex-1 space-y-1 text-sm">
+                <p className="font-semibold text-zinc-100">{m.executionBlocked}</p>
+                <p className="text-zinc-200"><AmuxIdeaName row={row} untitled={m.untitled} /> · {m.savedAt(when(row.submittedAt))}</p>
+                <p className="text-xs text-zinc-400">{m.executionBlockedHint}</p>
               </div>
               <Link href={amuxIdeaHref(row.requestId)} onClick={keepDraft} className={BUTTON_PRIMARY}>
                 {m.open}
@@ -196,7 +212,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                     data-testid="amux-idea-progress-row" data-stage={row.stage}>
                     <span className="block font-semibold text-zinc-100"><AmuxIdeaName row={row} untitled={m.untitled} /></span>
                     <span className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className={`rounded-full border px-2 py-0.5 ${row.attention
+                      <span className={`rounded-full border px-2 py-0.5 ${row.attention || row.activity === "blocked"
                         ? "border-red-500/40 bg-red-500/10 text-red-200"
                         : human ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
                           : "border-blue-500/40 bg-blue-500/10 text-blue-200"}`}>
@@ -204,7 +220,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                           : m.attention) : m.stages[row.stage]}
                       </span>
                       <span className="text-zinc-400">
-                        {step ? m.stepOf(step) : null}{step ? " · " : ""}{human ? m.human : m.automatic}
+                        {step ? m.stepOf(step) : null}{step ? " · " : ""}{human ? m.human : row.activity ? m.activity[row.activity] : m.automatic}
                         {row.tasks.total > 0 ? ` · ${m.tasks(row.tasks.done, row.tasks.total)}` : ""}
                         {row.tasks.inReview > 0 ? ` · ${m.inReview(row.tasks.inReview)}` : ""}
                       </span>
@@ -214,7 +230,8 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                         {Array.from({ length: 6 }, (_, index) => (
                           <span key={index} className={`h-1 rounded-full ${index < step - 1
                             ? "bg-blue-500" : index === step - 1
-                              ? (row.attention ? "bg-red-500" : human ? "bg-amber-500" : "bg-blue-300")
+                              ? (row.attention || row.activity === "blocked" ? "bg-red-500" : human ? "bg-amber-500"
+                                : row.activity === "waiting" ? "bg-zinc-500" : "bg-blue-300")
                               : "bg-zinc-800"}`} />
                         ))}
                       </span>

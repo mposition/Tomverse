@@ -139,7 +139,9 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   const rawAvailable = reservation ?
     await tx.amuxIdeaSubmission.findFirst({
       where: { id: reservation.ideaId, rawCiphertext: { not: null },
-        rawPurgedAt: null, sourceProvenanceCiphertext: { not: null } },
+        rawPurgedAt: null, sourceProvenanceCiphertext: { not: null },
+        // A refused answer waits for its decision (owner decision 2026-11-05).
+        planRefusals: { none: { state: "open" } } },
       select: { id: true },
     }) : null;
   const latestClaim = await tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({

@@ -19,7 +19,7 @@ const tx = (change: Record<string, unknown> = {}, idea: Record<string, unknown> 
     ideaId, status: "queued", modelProvider: "anthropic",
     modelId: "claude-opus-5-5", reasoningEffort: "high", ...change,
     idea: { submissionOrigin: "session", state: "submitted", cancelledAt: null,
-      analysisCompletedAt: null,
+      analysisCompletedAt: null, planRefusals: [],
       analysisDeadlineAt: new Date("2026-11-05T00:00:00.000Z"), ...idea },
   }) },
 });
@@ -43,6 +43,11 @@ test("the claim guard's fixed rates are the code's fixed rates", () => {
   const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
   assert.ok(guard.includes(`ROW(${profile.inputTokensCap}, ${profile.outputTokensCap}, ${
     profile.inputMicroUsdPerMillion}, ${profile.outputMicroUsdPerMillion})`));
+});
+
+test("an open plan refusal holds the claim until it is decided", async () => {
+  assert.deepEqual(await readAmuxV19MaxPriceSelection(
+    tx({}, { planRefusals: [{ id: "r" }] }) as never, { reservationId, ideaId }), { kind: "hold" });
 });
 
 test("reservation state still holds the claim", async () => {
