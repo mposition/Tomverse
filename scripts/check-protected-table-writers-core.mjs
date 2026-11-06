@@ -1703,14 +1703,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The existing reviewed retention writer aggregates eligible expired rows before deleting them under the database-enforced 13-month retention contract.",
   },
   {
-    path: "lib/amux/v22WorkerClaimService.ts",
-    table: "AmuxCliUsageEvent",
-    tableMentions: 2,
-    writeVerbs: 2,
-    reason:
-      "Claim eligibility only reads whether prior attempts have usage evidence; unrelated assignment writes in the same module trigger the conservative raw-SQL text inventory.",
-  },
-  {
     path: "lib/amux/v22TaskRecoveryService.ts",
     table: "AmuxV22TaskRecoveryInspectionRequest",
     tableMentions: 7,
