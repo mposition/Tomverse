@@ -17,6 +17,8 @@ DEST=/usr/local/lib/autorec-agent
 UNIT_DIR=/etc/systemd/system
 ACCOUNT=autorec
 HOME_DIR=/home/autorec
+# The gateway's account: a system user with no login and no home, never autorec.
+GATEWAY_ACCOUNT=autorec-gw
 
 FILES=(
   tools/auto-rec-agent/bin/autorec-runner.mjs
@@ -40,6 +42,20 @@ fail() { echo "install: $*" >&2; exit "${2:-1}"; }
 [ "$(id -u)" -eq 0 ] || fail "run as root (sudo)" 77
 [[ "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "ref must be a branch or tag name" 64
 id "$ACCOUNT" >/dev/null 2>&1 || fail "account $ACCOUNT does not exist" 64
+# Only /etc/passwd counts: while an older DynamicUser gateway instance runs,
+# nss-systemd resolves the same name, and that account vanishes when it stops.
+# Stopping the instances first also frees the name for useradd.
+if ! getent -s files passwd "$GATEWAY_ACCOUNT" >/dev/null; then
+  systemctl stop 'autorec-gateway@*.service' 2>/dev/null || true
+  id "$GATEWAY_ACCOUNT" >/dev/null 2>&1 && fail "$GATEWAY_ACCOUNT still resolves to a dynamic account; stop autorec-gateway and run again" 75
+  if getent -s files group "$GATEWAY_ACCOUNT" >/dev/null; then
+    useradd --system --gid "$GATEWAY_ACCOUNT" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$GATEWAY_ACCOUNT"
+  else
+    useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$GATEWAY_ACCOUNT"
+  fi
+fi
+[ "$(id -u "$GATEWAY_ACCOUNT")" != "$(id -u "$ACCOUNT")" ] || fail "$GATEWAY_ACCOUNT and $ACCOUNT must be different accounts" 64
+id -nG "$ACCOUNT" | tr ' ' '\n' | grep -qx "$GATEWAY_ACCOUNT" && fail "$ACCOUNT must not be in the $GATEWAY_ACCOUNT group" 64
 command -v git >/dev/null || fail "git is not installed" 64
 [ -x /usr/bin/node ] || fail "/usr/bin/node not found (the units use that path)" 64
 # Ask node itself for the flags the units use, instead of comparing versions

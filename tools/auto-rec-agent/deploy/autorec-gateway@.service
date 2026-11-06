@@ -3,10 +3,19 @@ Description=Auto-rec credential gateway (one request)
 Documentation=https://github.com/mposition/Tomverse/blob/develop/tools/auto-rec-agent/README.md
 
 [Service]
-# Its own transient account, never autorec: autorec runs agent-written code,
-# and this process holds the app secret and the GitHub token.
-DynamicUser=yes
+# Its own system account (install.sh creates it), never autorec: autorec runs
+# agent-written code, and this process holds the app secret and the GitHub
+# token. Not DynamicUser=: the system bus drops a dynamic user's connection, so
+# `systemctl show` failed ("Transport endpoint is not connected") and every
+# request was refused as peer_not_runner.
 User=autorec-gw
+Group=autorec-gw
+# What DynamicUser= used to imply.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+RemoveIPC=yes
+RestrictSUIDSGID=yes
 # The gateway's own develop mirror and its publish log.
 StateDirectory=autorec-gw
 StateDirectoryMode=0700
