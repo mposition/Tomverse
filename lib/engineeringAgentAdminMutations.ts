@@ -35,6 +35,8 @@ export async function runEngineeringAgentAdminMutation<TBody, TResult>(spec: {
   run: (tx: EngineeringAgentTransaction, context: { body: TBody; session: Session }) => Promise<TResult>;
   /** AMUX row locks taken before the audit chain, in AMUX's order (§11). */
   beforeAuditLock?: (tx: Prisma.TransactionClient, body: TBody) => Promise<void>;
+  /** A read outside the transaction (a GitHub observation), after authentication and the body. */
+  beforeTransaction?: (body: TBody) => Promise<void>;
 }): Promise<Response> {
   try {
     const session = await getServerSession(authOptions);
@@ -51,6 +53,7 @@ export async function runEngineeringAgentAdminMutation<TBody, TResult>(spec: {
     await assertRecentAdminAuthentication(session);
     await consumeApiRateLimit(spec.request, session.user.id, spec.bucket, { minute: 20, day: 200 });
     const body = await readLimitedJson(spec.request, 4 * 1024, spec.schema);
+    await spec.beforeTransaction?.(body);
     const result = await runEngineeringAgentTransaction(
       prisma,
       (tx) => spec.run(tx, { body, session }),

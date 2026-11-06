@@ -26,12 +26,15 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     mismatchNote:
       "A state mismatch halts the agent until a person acts. Both sides are locked and read again before any action; neither is corrected to match the other.",
     mismatchClose: "Close the run (nothing was written)",
+    mismatchCloseMerged: "Close: the pull request merged",
     mismatchLeaveOpen: "Leave open",
     mismatchModeOff: "Turn the agent off",
     mismatchEscalate: "Escalate as an incident",
     confirmMismatchClose:
       "End this run as abandoned? This is allowed only when no publish of the run was ever allowed to write to GitHub.",
     confirmMismatchEscalate: "Escalate this mismatch as an incident? The agent's mode is set to off.",
+    confirmMismatchCloseMerged:
+      "Close this mismatch because its pull request merged? GitHub is read now; the merge is recorded on the binding and the agent stays on. Refused unless GitHub reports this item's own pull request merged.",
     status: "Status",
     outcome: "Outcome",
     halt: "Halt",
@@ -100,12 +103,15 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     mismatchNote:
       "상태 불일치는 사람이 조치할 때까지 에이전트를 정지시킵니다. 어떤 조치든 양쪽을 잠그고 다시 읽은 뒤에만 실행되며, 한쪽을 다른 쪽에 맞춰 고치지 않습니다.",
     mismatchClose: "run 종료(쓰기 없음 확인됨)",
+    mismatchCloseMerged: "닫기: PR 병합됨",
     mismatchLeaveOpen: "열어 두기",
     mismatchModeOff: "에이전트 끄기",
     mismatchEscalate: "사고로 격상",
     confirmMismatchClose:
       "이 run을 중단(abandoned)으로 종료할까요? 이 run의 게시가 GitHub에 쓰도록 허용된 적이 한 번도 없을 때만 가능합니다.",
     confirmMismatchEscalate: "이 불일치를 사고로 격상할까요? 에이전트 모드가 off로 바뀝니다.",
+    confirmMismatchCloseMerged:
+      "PR이 병합되었으므로 이 불일치를 닫을까요? 지금 GitHub를 읽어 병합을 바인딩에 기록하고, 에이전트는 켜진 채로 둡니다. GitHub가 이 항목의 PR을 병합으로 보고하지 않으면 거절됩니다.",
     status: "상태",
     outcome: "결과",
     halt: "정지",

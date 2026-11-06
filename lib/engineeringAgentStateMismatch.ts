@@ -119,6 +119,7 @@ export const classifyState = (input: {
 export const MISMATCH_ACTIONS = [
   "retry_lookup",
   "close_domain_after_verified_no_write",
+  "close_after_observed_merge",
   "leave_open",
   "mode_off",
   "escalate_incident",
@@ -128,7 +129,9 @@ export type MismatchAction = (typeof MISMATCH_ACTIONS)[number];
 const ALLOWED_ACTIONS: Readonly<Record<MismatchKind, readonly MismatchAction[]>> = {
   A: ["retry_lookup", "close_domain_after_verified_no_write", "leave_open", "mode_off", "escalate_incident"],
   B: ["leave_open", "escalate_incident"],
-  C: ["leave_open", "escalate_incident"],
+  // Owner decision 2026-11-06: a C item whose pull request a person sees
+  // merged on GitHub may close without turning the agent off.
+  C: ["leave_open", "close_after_observed_merge", "escalate_incident"],
   D: ["retry_lookup", "close_domain_after_verified_no_write", "escalate_incident"],
 };
 
@@ -152,6 +155,8 @@ export type ActionInput = {
   workItemTerminal: boolean;
   /** A lookup confirmed that nothing was written to GitHub. */
   lookupVerifiedNoWrite: boolean;
+  /** GitHub reports the item's own bound pull request merged, read just now. */
+  mergeObserved: boolean;
   recurrences: number;
 };
 
@@ -194,20 +199,25 @@ export const decideMismatchAction = (input: ActionInput): ActionVerdict => {
   if (input.action === "close_domain_after_verified_no_write" && !input.lookupVerifiedNoWrite) {
     return deny("no_write_not_verified");
   }
+  if (input.action === "close_after_observed_merge" && !input.mergeObserved) {
+    return deny("merge_not_observed");
+  }
   // Closing the domain side is a normal transition, which resolves A and D; so
-  // does escalation. A lookup resolves only through the transition its result
-  // leads to, never by itself.
+  // does escalation, and for C a merge GitHub reports. A lookup resolves only
+  // through the transition its result leads to, never by itself.
   return {
     allowed: true,
     resolves:
       input.action === "escalate_incident" ||
-      input.action === "close_domain_after_verified_no_write",
+      input.action === "close_domain_after_verified_no_write" ||
+      input.action === "close_after_observed_merge",
   };
 };
 
 /**
  * How a B item ends once AMUX reaches a terminal state: equal conclusions close
- * it, different ones turn it into C. Nothing closes C except escalation.
+ * it, different ones turn it into C. C closes only by escalation, or by a
+ * person once GitHub reports its pull request merged.
  */
 export const resolveBOnAmuxTerminal = (input: {
   amuxSettlement: Settlement;

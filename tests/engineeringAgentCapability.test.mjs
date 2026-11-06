@@ -229,6 +229,7 @@ const action = (overrides) =>
     workItemState: "claimed",
     workItemTerminal: false,
     lookupVerifiedNoWrite: false,
+    mergeObserved: false,
     recurrences: 0,
     ...overrides,
   });
@@ -272,6 +273,28 @@ test("closing the domain side requires a lookup that verified no write", () => {
     allowed: true,
     resolves: true,
   });
+});
+
+test("C closes on a merge GitHub reports, and only C, without turning the agent off", () => {
+  assert.deepEqual(action({ kind: "C", action: "close_after_observed_merge", ...terminalBoth }), {
+    allowed: false,
+    reason: "merge_not_observed",
+  });
+  assert.deepEqual(action({ kind: "C", action: "close_after_observed_merge", ...terminalBoth, mergeObserved: true }), {
+    allowed: true,
+    resolves: true,
+  });
+  assert.equal(
+    action({ kind: "C", action: "close_after_observed_merge", ...terminalBoth, mergeObserved: true, workItemTerminal: false }).allowed,
+    false,
+    "a C item still needs its run and work item terminal",
+  );
+  for (const kind of ["A", "B", "D"]) {
+    assert.deepEqual(action({ kind, action: "close_after_observed_merge", ...terminalBoth, mergeObserved: true }), {
+      allowed: false,
+      reason: "action_not_allowed_for_kind",
+    });
+  }
 });
 
 test("leave_open, mode_off and a lookup never resolve anything", () => {
