@@ -123,11 +123,17 @@ beforeEach(async () => {
 });
 
 // A test's ideas leave the scan with it, so the next test asks only about its own.
+// Their cards are archived too: an open synthetic card has no key in another suite's
+// key store, so that suite's duplicate scan and worker catalog would fail on it.
 const seededIdeas: string[] = [];
 afterEach(async () => {
   if (seededIdeas.length === 0) return;
-  await asReplica((tx) => tx.$executeRaw`UPDATE "AmuxIdeaSubmission"
-    SET "state" = 'cancelled', "cancelledAt" = "updatedAt" WHERE "id" = ANY(${seededIdeas})`);
+  await asReplica(async (tx) => {
+    await tx.$executeRaw`UPDATE "AmuxIdeaSubmission"
+      SET "state" = 'cancelled', "cancelledAt" = "updatedAt" WHERE "id" = ANY(${seededIdeas})`;
+    await tx.$executeRaw`UPDATE "AmuxWorkItem" SET "archivedAt" = COALESCE("archivedAt", CURRENT_TIMESTAMP)
+      WHERE "sourceSystem" = 'admin-idea-v4' AND "sourceSnapshot"->>'ideaId' = ANY(${seededIdeas})`;
+  });
   seededIdeas.length = 0;
 });
 

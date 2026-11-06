@@ -462,6 +462,10 @@ test("no administrator audit call site names the reserved key", () => {
     // system writer and leaves owner registrations on the administrator writer.
     // Both writers independently reject a reserved-key mismatch.
     "lib/amux/ideaRegistrationAuditAuthority.ts",
+    // Card close answers: the Decision Maker path calls the system writer with
+    // `systemActor`, the owner path calls the administrator writer without it
+    // (the metadata it passes never carries the reserved key).
+    "lib/amux/ideaCardCloseService.ts",
   ]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))
