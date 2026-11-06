@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
 import { AmuxIdeaDetailSummary } from "@/components/admin/AmuxIdeaDetailSummary";
+import { openResubmittedIdea } from "@/components/admin/AmuxIdeaResubmitPanel";
 import { AmuxIdeaList } from "@/components/admin/AmuxIdeaProgressPanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { amuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
@@ -88,4 +89,10 @@ test("both Admin locales carry every resubmit message, and the no-plan notice na
   assert.ok(en.sessionReviewDetail.includes(en.resubmit.action));
   assert.ok(ko.sessionReviewDetail.includes(ko.resubmit.action));
   assert.equal(ko.resubmit.purged, "원문이 지워져 다시 접수할 수 없습니다. 새로 입력하세요.");
+});
+
+test("a resubmitted idea opens with a full page load, so no line of the closed idea stays on screen", () => {
+  const opened: string[] = [];
+  openResubmittedIdea("/admin/amux-backlog?tab=ideas&idea=abc", { assign: (href) => { opened.push(String(href)); } });
+  assert.deepEqual(opened, ["/admin/amux-backlog?tab=ideas&idea=abc"]);
 });
