@@ -69,6 +69,12 @@ test("a closed adapter is a normal round; a lost runtime lease is not", async ()
   });
 });
 
+test("a failed pull request round decides nothing and does not stop the cycle", async () => {
+  const { app, calls } = fakeApp({ "observe/pull-requests": { status: 503, json: { error: "unavailable" } } });
+  assert.deepEqual(await runRunnerCycle(ports(app)), { finishedNormally: true, halt: "none", reason: "observed" });
+  assert.equal(calls.at(-1).path, "worker/heartbeat", "the runner still reports itself stopped");
+});
+
 test("the runner imports node builtins and the dependency-free core, and holds no model key", () => {
   const allowedLib = new Set(["lib/engineeringAgentCore.ts"]);
   const seen = new Set();
