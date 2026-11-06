@@ -431,5 +431,8 @@ test("the gateway runs as a static account the system bus answers, created by th
   for (const line of ["User=autorec-gw", "Group=autorec-gw", "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=yes", "RemoveIPC=yes", "RestrictSUIDSGID=yes"]) {
     assert.ok(settings.includes(line), line);
   }
-  assert.match(read("install.sh"), /useradd --system [^\n]*"\$GATEWAY_ACCOUNT"/);
+  const install = read("install.sh");
+  assert.match(install, /useradd --system [^\n]*"\$GATEWAY_ACCOUNT"/);
+  // A running DynamicUser instance resolves the same name through nss-systemd; only /etc/passwd counts.
+  assert.match(install, /getent -s files passwd "\$GATEWAY_ACCOUNT"/);
 });
