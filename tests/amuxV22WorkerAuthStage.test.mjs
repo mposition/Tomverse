@@ -73,6 +73,16 @@ test("staging replaces the worker's copy with a private file and leaves no tempo
   assert.deepEqual(await readdir(cli), [".credentials.json"]);
 });
 
+test("a failed rename leaves no temporary copy of the token behind", async () => {
+  const { home, stateRoot, cli } = await box();
+  await writeFile(join(home, ".claude", ".credentials.json"), login());
+  // The target name is a directory, so the rename after the write fails.
+  await mkdir(join(cli, ".credentials.json", "occupied"), { recursive: true });
+  await assert.rejects(stageAmuxV22WorkerAuth({ provider: "anthropic",
+    worker: "claude-impl", home, stateRoot, now: NOW }));
+  assert.deepEqual(await readdir(cli), [".credentials.json"]);
+});
+
 test("a refused login or a check run leaves the current copy unchanged", async () => {
   const { home, stateRoot, cli } = await box();
   await writeFile(join(cli, ".credentials.json"), "current");
