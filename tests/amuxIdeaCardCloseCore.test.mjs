@@ -225,7 +225,7 @@ test("the owner's panel sits on the idea's detail, in both languages, and appear
   const summary = readFileSync(resolve(ROOT, "components/admin/AmuxIdeaDetailSummary.tsx"), "utf8");
   assert.match(summary, /<AmuxIdeaCardClosePanel key=\{`card-close-\$\{row\.ideaId\}`\} ideaId=\{row\.ideaId\} \/>/);
   const panel = readFileSync(resolve(ROOT, "components/admin/AmuxIdeaCardClosePanel.tsx"), "utf8");
-  assert.match(panel, /if \(!question\) return null;/);
+  assert.match(panel, /return question \? <AmuxIdeaCardCloseForm ideaId=\{ideaId\} question=\{question\} \/> : null;/);
   assert.match(panel, /ownerConfirmed: true/);
   assert.match(panel, /adminRecentAuthenticationHref/);
   const { adminAmuxIdeaCardCloseMessages: catalog } = await import("../lib/adminMessages/amuxIdeaCardClose.ts");
