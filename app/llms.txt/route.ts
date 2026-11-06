@@ -28,7 +28,12 @@ const PAGES: ReadonlyArray<{ path: string; title: string }> = [
   { path: "/faq", title: "FAQ" },
   { path: "/about", title: "About" },
   { path: "/safety", title: "Safety" },
+  { path: "/safety/approach", title: "Safety approach" },
+  { path: "/safety/security-privacy", title: "Security and privacy" },
+  { path: "/safety/trust-transparency", title: "Trust and transparency" },
   { path: "/support", title: "Support" },
+  { path: "/support/help-centre", title: "Help centre" },
+  { path: "/support/help-centre/chat-workspace", title: "Chat workspace" },
   { path: "/privacy", title: "Privacy" },
   { path: "/terms", title: "Terms" },
 ];
