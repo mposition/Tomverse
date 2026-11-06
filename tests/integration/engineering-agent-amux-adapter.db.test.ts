@@ -1069,8 +1069,65 @@ test("a closed adapter records a publisher's pull request on the engineering sid
     const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
     assert.equal(card.reviewPrNumber, null);
 
-    // A person closes it, as section 11 has them do; escalation turns the mode
-    // off, and the binding is then closed and pruned under a mode that allows it.
+    // A person who sees the pull request merged on GitHub may close it without
+    // turning the agent off (owner decision 2026-11-06), but only on a merge of
+    // this item's own pull request.
+    await setMode("t1");
+    const person = {
+      user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    } as Session;
+    const closeOnMerge = (observedMerge: Parameters<typeof resolveEngineeringAgentStateMismatch>[1]["observedMerge"]) =>
+      runEngineeringAgentTransaction(
+        prisma,
+        (tx) =>
+          resolveEngineeringAgentStateMismatch(tx, {
+            session: person,
+            workItemId: mismatch.id,
+            action: "close_after_observed_merge",
+            observedMerge,
+          }),
+        { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, mismatch.id) },
+      );
+    const merged = {
+      prNumber,
+      merged: true,
+      mergedAt: new Date("2026-11-01T00:00:00.000Z"),
+      mergeCommitSha: sha1("merge"),
+      mergedByKind: "user" as const,
+    };
+    const notObserved = (error: unknown) =>
+      error instanceof EngineeringAgentStoreRefusedError && error.code === "merge_not_observed";
+    await assert.rejects(closeOnMerge(null), notObserved, "GitHub unread decides nothing");
+    await assert.rejects(closeOnMerge({ ...merged, prNumber: prNumber + 1 }), notObserved, "another pull request");
+    await assert.rejects(
+      closeOnMerge({ ...merged, merged: false, mergedAt: null, mergeCommitSha: null }),
+      notObserved,
+      "an unmerged pull request",
+    );
+    const closedOnMerge = await closeOnMerge(merged);
+    assert.equal(closedOnMerge.resolved, true);
+    assert.equal(
+      (await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state,
+      "resolved",
+    );
+    const observedBinding = await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: binding.id } });
+    assert.deepEqual(
+      {
+        merged: (observedBinding.mergeObservation as { merged?: unknown } | null)?.merged,
+        mergeCommitSha: (observedBinding.mergeObservation as { mergeCommitSha?: unknown } | null)?.mergeCommitSha,
+      },
+      { merged: true, mergeCommitSha: merged.mergeCommitSha },
+      "the merge is recorded, so the approval observer does not raise it again",
+    );
+    assert.equal(
+      (await prisma.appSetting.findUnique({ where: { key: MODE_KEY } }))?.value,
+      "t1",
+      "closing on a merge leaves the agent on",
+    );
+
+    // The fixture's binding is then closed and pruned under a mode that allows
+    // it (an item still open would be escalated, which turns the mode off).
     await closeClosedAdapterFixture({ runId, workItemId });
     assert.equal(
       (await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state,
