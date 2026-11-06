@@ -293,6 +293,13 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
       AND n."activeStaleAt" > ${now} AND n."baselineStaleAt" > ${now}
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22PromotionUnknown" u
         WHERE u."workItemId" = w."id")
+      -- A Task waiting on an unfinished dependency can never pass readiness
+      -- (dependency_incomplete). Left in, eight such Tasks with higher scores
+      -- filled every tick's window and a ready Task below them was never read.
+      AND NOT EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
+        JOIN "AmuxWorkItem" dep ON dep."id" = d."dependencyId"
+        WHERE d."taskId" = w."id"
+          AND (dep."status" <> 'done' OR dep."v4TerminalAt" IS NULL))
     ORDER BY n."scoreTotal" DESC, n."taskId" ASC
     LIMIT ${MAX_CANDIDATES_PER_TICK}
   `;
