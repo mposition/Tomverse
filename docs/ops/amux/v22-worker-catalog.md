@@ -60,6 +60,24 @@ required account/session windows still need valid future resets.
 The OAuth token is used only for one bounded HTTPS GET to Anthropic's usage
 endpoint; it never enters the bridge, app, audit, error output or journal.
 
+### Sign-in copies (`tomverse-amux-v22-auth-stage.timer`)
+
+The worker profiles hold copies of the operator's own CLI logins, refreshed by
+`scripts/amux-v22-stage-auth.mjs` (logic in `lib/amux/v22WorkerAuthStage.mjs`)
+running as the operator user. Each copy keeps only the access credential;
+the refresh secret is replaced, so a worker CLI can never rotate the
+operator's login. The operator's own CLI use keeps the source fresh.
+
+Claude (`anthropic:<worker>`, from `~/.claude/.credentials.json` to
+`<worker>/cli/.credentials.json`) is staged only with at least 2 h left on the
+access token. Until 2026-11-06 the timer staged Codex and Copilot only; the
+Claude copies made on 2026-10-12 expired that night, the quota reading
+stopped, and the claim admitted no Anthropic route from then on. The timer
+therefore runs hourly, and its `ExecStart` lists the Claude workers too, with
+each `/var/lib/tomverse-amux-v22-<worker>/cli` in `ReadWritePaths`. A refused
+login leaves the current copy unchanged and the unit fails; check it with
+`journalctl -u tomverse-amux-v22-auth-stage.service`.
+
 The bridge asks its fixed worker socket at most every five minutes, after
 renewing active execution leases. It forwards only the worker, provider,
 remaining/confidence basis points, exhaustion, source, observed/reset times
