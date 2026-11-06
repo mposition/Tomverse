@@ -163,7 +163,8 @@ export function selectRelatedTests(changedPaths, testFiles, readText) {
 /**
  * The failing tests in node:test TAP output: each `not ok` line (at any
  * nesting) with its YAML diagnostic block, so a run log kept to its tail still
- * says which test failed and why. Names are the tests' own titles.
+ * says which test failed and why. Names are the tests' own titles. A `# TODO`
+ * test is reported `not ok` but does not fail the run, so it is left out.
  */
 export function failedTests(tap, { maxFailures = 10, maxLines = 40 } = {}) {
   const lines = String(tap ?? "").split(/\r?\n/);
@@ -171,7 +172,7 @@ export function failedTests(tap, { maxFailures = 10, maxLines = 40 } = {}) {
   const excerpt = [];
   for (let i = 0; i < lines.length && names.length < maxFailures; i += 1) {
     const match = /^(\s*)not ok \d+ - (.*)$/.exec(lines[i]);
-    if (!match) continue;
+    if (!match || /\s#\s*TODO\b/i.test(match[2])) continue;
     names.push(match[2].trim().slice(0, 200));
     const end = new RegExp(`^${match[1]}  \\.\\.\\.$`);
     let taken = 0;
