@@ -33,6 +33,7 @@ const mod = (relativePath: string) =>
 const MAINTENANCE_SECRET = "maintenance-secret-value-32-characters-long";
 let triageCycles = 0;
 let traceAnalyses = 0;
+let ciRepairs = 0;
 
 type Incident = {
   code: string;
@@ -229,6 +230,13 @@ const loadRoute = () => {
         },
       },
     });
+    mock.module(mod("lib/developCiRepair.ts"), {
+      namedExports: {
+        runDevelopCiRepairQuietly: async () => {
+          ciRepairs += 1;
+        },
+      },
+    });
     mock.module(mod("lib/marketingLlmExpiry.ts"), {
       namedExports: {
         runMarketingLlmExpiryQuietly: quiet({
@@ -300,12 +308,14 @@ test("a dropped connection is retried, and the retry is an ordinary run", async 
   world.reconcileErrors = [connectionDropped()];
   triageCycles = 0;
   traceAnalyses = 0;
+  ciRepairs = 0;
 
   const response = await post();
 
-  // Support triage and trace analysis ride along on a run that succeeded.
+  // Support triage, trace analysis and develop CI repair ride along on a run that succeeded.
   assert.equal(triageCycles, 1);
   assert.equal(traceAnalyses, 1);
+  assert.equal(ciRepairs, 1);
 
   assert.equal(response.status, 200);
   assert.equal(world.reconcileCalls, 2);
@@ -321,11 +331,13 @@ test("a drop that survives the retry defers instead of crashing the caller", asy
   world.reconcileErrors = [connectionDropped(), connectionDropped()];
   triageCycles = 0;
   traceAnalyses = 0;
+  ciRepairs = 0;
 
   const response = await post();
 
   assert.equal(triageCycles, 0);
   assert.equal(traceAnalyses, 0);
+  assert.equal(ciRepairs, 0);
 
   assert.equal(world.reconcileCalls, 2);
   assert.equal(response.status, 503);
