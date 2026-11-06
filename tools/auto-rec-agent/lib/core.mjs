@@ -160,6 +160,29 @@ export function selectRelatedTests(changedPaths, testFiles, readText) {
   return byLane;
 }
 
+/**
+ * The failing tests in node:test TAP output: each `not ok` line (at any
+ * nesting) with its YAML diagnostic block, so a run log kept to its tail still
+ * says which test failed and why. Names are the tests' own titles.
+ */
+export function failedTests(tap, { maxFailures = 10, maxLines = 40 } = {}) {
+  const lines = String(tap ?? "").split(/\r?\n/);
+  const names = [];
+  const excerpt = [];
+  for (let i = 0; i < lines.length && names.length < maxFailures; i += 1) {
+    const match = /^(\s*)not ok \d+ - (.*)$/.exec(lines[i]);
+    if (!match) continue;
+    names.push(match[2].trim().slice(0, 200));
+    const end = new RegExp(`^${match[1]}  \\.\\.\\.$`);
+    let taken = 0;
+    for (let j = i; j < lines.length && taken < maxLines; j += 1, taken += 1) {
+      excerpt.push(lines[j]);
+      if (j > i && end.test(lines[j])) break;
+    }
+  }
+  return { names, excerpt: excerpt.join("\n") };
+}
+
 const LINTABLE = /\.(?:ts|tsx|mts|mjs|js|cjs|jsx)$/;
 export const lintableFiles = (paths) => paths.filter((path) => LINTABLE.test(path));
 
