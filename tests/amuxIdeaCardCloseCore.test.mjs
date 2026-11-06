@@ -307,7 +307,7 @@ test("the owner's panel sits on the idea's detail, in both languages, and appear
   const panel = readFileSync(resolve(ROOT, "components/admin/AmuxIdeaCardClosePanel.tsx"), "utf8");
   assert.match(panel, /return view \? <AmuxIdeaCardCloseForm ideaId=\{ideaId\} view=\{view\} \/> : null;/);
   // With no question open, the direct close posts no question and offers no keep.
-  assert.match(panel, /\{ ideaId, direct: true, decision: "close", reason: trimmed, ownerConfirmed: true \}/);
+  assert.match(panel, /\{ ideaId, direct: true, cardIds: cards\.map\(\(card\) => card\.id\), decision: "close"/);
   assert.match(panel, /ownerConfirmed: true/);
   assert.match(panel, /adminRecentAuthenticationHref/);
   const { adminAmuxIdeaCardCloseMessages: catalog } = await import("../lib/adminMessages/amuxIdeaCardClose.ts");

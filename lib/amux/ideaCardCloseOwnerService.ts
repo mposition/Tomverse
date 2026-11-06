@@ -72,8 +72,9 @@ const applyForOwner = (tx: Prisma.TransactionClient, input: {
     answeredByUserId: input.owner.actorUserId, now: input.now,
     audit: (entry) => writeAdminAuditLog({ tx, session: input.session, request: input.request,
       action: entry.action, targetType: "AmuxIdeaCardCloseQuestion", targetId: input.questionId,
-      summary: input.direct ? "Closed the remaining cards of a stalled AMUX idea directly, with no question open." :
-        entry.summary,
+      // Only a close says so: an apply that refused keeps its own summary.
+      summary: input.direct && entry.action === "amux.idea.card_close.closed" ?
+        "Closed the remaining cards of a stalled AMUX idea directly, with no question open." : entry.summary,
       metadata: { ...entry.metadata, reasonDigest: digest.digest, reasonDigestKeyId: digest.digestKeyId,
         ...(input.direct ? { direct: true } : {}) } }),
   });
@@ -109,19 +110,20 @@ export type AmuxIdeaCardCloseDirectResult = AmuxIdeaCardCloseApplied | { outcome
  * (owner decision 2026-11-06): the same cards a question would ask about, by
  * the same scan and judgment, without the day's limit or the quiet period after
  * a keep, since the owner decides it. An idea with an open question, or none to
- * close, is `not_closable`: the detail then shows the question to answer. It
+ * close, or whose cards are no longer exactly the ones the owner was shown, is
+ * `not_closable`: the detail then shows what is there now. It
  * writes the question row and answers it at once, so the cards, escalations and
  * audit take the one apply path. Twelve statements at most: setup and clock,
  * lock, the candidate read, the row, then the apply's eight with its audit.
  */
 export async function closeAmuxIdeaCardsDirectlyForOwner(input: {
-  session: Session; request: Request; ideaId: string; reason: unknown;
+  session: Session; request: Request; ideaId: string; cardIds: readonly string[]; reason: unknown;
 }): Promise<AmuxIdeaCardCloseDirectResult> {
   const owner = await ownerAnswer(input);
   return inOwnerTransaction(async (tx, now) => {
     if (!now) return { outcome: "not_closable" as const };
     const opened = await openAmuxIdeaCardCloseDirectQuestionInTransaction(tx,
-      { ideaId: input.ideaId, actorUserId: owner.actorUserId, now });
+      { ideaId: input.ideaId, actorUserId: owner.actorUserId, now, shownCardIds: input.cardIds });
     if (!opened) return { outcome: "not_closable" as const };
     return applyForOwner(tx, { ...input, questionId: opened.questionId, decision: "close", owner, now,
       direct: true });

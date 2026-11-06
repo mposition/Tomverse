@@ -210,9 +210,15 @@ async function readDirectCandidate(tx: Prisma.TransactionClient,
  * files nothing and starts no paid turn.
  */
 export async function openAmuxIdeaCardCloseDirectQuestionInTransaction(tx: Prisma.TransactionClient,
-  input: { ideaId: string; actorUserId: string; now: Date; env?: AmuxIdeaCardCloseEnv }) {
+  input: { ideaId: string; actorUserId: string; now: Date; shownCardIds: readonly string[];
+    env?: AmuxIdeaCardCloseEnv }) {
   const found = await readDirectCandidate(tx, { ...input, env: input.env ?? process.env });
   if (!found) return null;
+  // Only the cards the owner saw: a card added or finished since the page read
+  // closes nothing, and no row is written.
+  const shown = new Set(input.shownCardIds);
+  if (shown.size !== input.shownCardIds.length || found.asked.length !== shown.size ||
+      !found.asked.every((card) => shown.has(card.id))) return null;
   const questionId = randomUUID();
   const at = input.now.toISOString();
   await tx.$executeRaw`

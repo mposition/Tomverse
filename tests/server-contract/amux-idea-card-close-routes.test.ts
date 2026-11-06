@@ -288,8 +288,8 @@ test("what the service says reaches the panel, and an unknown failure is never a
 const closeDirectly = (body: Record<string, unknown> = {}) =>
   ownerRoute.POST(new Request("https://tomverse.test/api/admin/amux/ideas/card-close", { method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ideaId: IDEA, direct: true, decision: "close", reason: "No longer wanted.",
-      ownerConfirmed: true, ...body }) }));
+    body: JSON.stringify({ ideaId: IDEA, direct: true, cardIds: ["card-a", "card-b"], decision: "close",
+      reason: "No longer wanted.", ownerConfirmed: true, ...body }) }));
 
 test("the owner's direct close takes the same gates, closes only, and names no question", async () => {
   reset();
@@ -299,6 +299,7 @@ test("the owner's direct close takes the same gates, closes only, and names no q
   const input = world.directInput as Record<string, unknown>;
   assert.equal(input.ideaId, IDEA);
   assert.equal(input.reason, "No longer wanted.");
+  assert.deepEqual(input.cardIds, ["card-a", "card-b"], "the cards the page showed");
   assert.equal("questionId" in input, false);
   assert.equal(world.ownerInput, null, "the answer path is not taken");
 
@@ -310,7 +311,8 @@ test("the owner's direct close takes the same gates, closes only, and names no q
     assert.equal((await closeDirectly()).status, status, JSON.stringify(changes));
     assert.equal(world.directInput, null, "the service is not reached");
   }
-  for (const bad of [{ decision: "keep" }, { ownerConfirmed: false }, { questionId: QUESTION }, { direct: false }]) {
+  for (const bad of [{ decision: "keep" }, { ownerConfirmed: false }, { questionId: QUESTION }, { direct: false },
+    { cardIds: [] }, { cardIds: undefined }, { cardIds: ["a b"] }]) {
     reset();
     assert.notEqual((await closeDirectly(bad)).status, 200, JSON.stringify(bad));
     assert.equal(world.directInput, null, JSON.stringify(bad));

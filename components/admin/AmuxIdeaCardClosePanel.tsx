@@ -77,7 +77,8 @@ export function AmuxIdeaCardCloseForm({ ideaId, view }: { ideaId: string; view: 
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(question
           ? { ideaId, questionId: question.questionId, decision, reason: trimmed, ownerConfirmed: true }
-          : { ideaId, direct: true, decision: "close", reason: trimmed, ownerConfirmed: true }),
+          : { ideaId, direct: true, cardIds: cards.map((card) => card.id), decision: "close", reason: trimmed,
+            ownerConfirmed: true }),
       });
       const body = await response.json().catch(() => null) as { outcome?: string; closedCards?: number } | null;
       if (response.ok && body?.outcome === "closed") {

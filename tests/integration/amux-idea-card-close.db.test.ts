@@ -722,8 +722,27 @@ test("keep records the answer, moves nothing, and asks again only after 30 days"
   assert.equal(next.state, "open");
 });
 
-const closeDirectly = (ideaId: string, over: Record<string, unknown> = {}) => closeAmuxIdeaCardsDirectlyForOwner({
-  session: owner(), request: adminRequest(), ideaId, reason: "Stalled for good, secret note.", ...over } as never);
+/** What the page does: read what a direct close would close, then send those cards. */
+const closeDirectly = async (ideaId: string, over: Record<string, unknown> = {}) => {
+  const shown = (await readAmuxIdeaCardCloseOwnerState({ ideaId, actorUserId: OWNER_ID })).direct?.cards
+    .map((entry) => entry.id) ?? ["nothing-shown"];
+  return closeAmuxIdeaCardsDirectlyForOwner({ session: owner(), request: adminRequest(), ideaId, cardIds: shown,
+    reason: "Stalled for good, secret note.", ...over } as never);
+};
+
+test("a direct close closes only the cards the owner was shown", async () => {
+  const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
+  const before = await questionCount();
+  // A card registered after the page read is not among those shown; one finished since is.
+  for (const cardIdsShown of [[cardIds[0]], [...cardIds, randomUUID()], [cardIds[0], cardIds[0]]]) {
+    assert.equal((await closeDirectly(ideaId, { cardIds: cardIdsShown })).outcome, "not_closable",
+      JSON.stringify(cardIdsShown));
+  }
+  assert.equal(await questionCount(), before, "no row for a refused close");
+  for (const id of cardIds) assert.equal((await card(id)).status, ["blocked", "backlog"][cardIds.indexOf(id)]);
+  assert.equal((await closeDirectly(ideaId, { cardIds: [...cardIds].reverse() })).outcome, "closed",
+    "the same cards in any order");
+});
 
 test("the owner closes a kept idea's cards directly, with no question open, through the one apply", async () => {
   const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }, { status: "backlog" },

@@ -24,10 +24,14 @@ const answer = z.object({
   reason: z.string().max(500),
   ownerConfirmed: z.literal(true),
 }).strict();
-/** With no question open, the owner closes the remaining cards directly. */
+/**
+ * With no question open, the owner closes the remaining cards directly: the
+ * cards the page showed, so a card added since closes nothing.
+ */
 const direct = z.object({
   ideaId,
   direct: z.literal(true),
+  cardIds: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)).min(1).max(200),
   decision: z.literal("close"),
   reason: z.string().max(500),
   ownerConfirmed: z.literal(true),
@@ -99,9 +103,11 @@ export async function POST(request: Request): Promise<Response> {
     }
     await consumeApiRateLimit(request, session.user.id,
       "admin-amux-idea-card-close-write", { minute: 5, day: 50 });
-    const parsed = await readLimitedJson(request, 2_048, body);
+    // Room for the direct close's card ids: 200 at most.
+    const parsed = await readLimitedJson(request, 16_384, body);
     const result = "direct" in parsed
-      ? await closeAmuxIdeaCardsDirectlyForOwner({ session, request, ideaId: parsed.ideaId, reason: parsed.reason })
+      ? await closeAmuxIdeaCardsDirectlyForOwner({ session, request, ideaId: parsed.ideaId, cardIds: parsed.cardIds,
+        reason: parsed.reason })
       : await answerAmuxIdeaCardCloseForOwner({ session, request, ideaId: parsed.ideaId,
         questionId: parsed.questionId, decision: parsed.decision, reason: parsed.reason });
     return NextResponse.json({ ...result, retryWrite: false }, { headers: noStore });
