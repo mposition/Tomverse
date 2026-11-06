@@ -27,7 +27,7 @@ import {
 
 /**
  * The question "close this stalled idea's remaining cards?" (owner decision
- * 2026-11-05, docs/policy/amux-decision-maker.md §2-9). The relay's tick finds
+ * 2026-11-05, docs/policy/amux-decision-maker.md §2-10). The relay's tick finds
  * at most one new idea to ask about, behind a default-off switch, and files the
  * question as the same typed-ask card a v22 worker's question uses, so the
  * Decision Maker proposes an answer through its ordinary path and a person

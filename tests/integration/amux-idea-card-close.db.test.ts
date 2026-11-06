@@ -39,7 +39,7 @@ import {
 import { prisma } from "@/lib/prisma";
 
 // Closing a stalled idea's remaining cards (owner decision 2026-11-05,
-// docs/policy/amux-decision-maker.md §2-9) against PostgreSQL, through the real
+// docs/policy/amux-decision-maker.md §2-10) against PostgreSQL, through the real
 // DB boundaries: an operation over its statement ceiling fails here, and each
 // apply runs the card table's deferred guards at COMMIT. Only the seed turns
 // triggers off, because a card's history is not what is under test.
@@ -510,7 +510,7 @@ test("a confirmed close cancels the remaining cards, shows the idea cancelled, a
   assert.equal(before?.stage, "execution");
   const { question, cardId, requestId } = await confirmed(ideaId, "close");
 
-  // §2-9: a confirmed answer is applied in the app; the delivery walk steps past it.
+  // §2-10: a confirmed answer is applied in the app; the delivery walk steps past it.
   const offered = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerDeliveryCandidateRead,
     (tx) => readDecisionMakerDeliveryCandidate(tx, { after: null }));
   assert.equal(offered.status, "undeliverable");

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { before, mock, test } from "node:test";
 
-// Closing a stalled idea's cards (docs/policy/amux-decision-maker.md §2-9): the
+// Closing a stalled idea's cards (docs/policy/amux-decision-maker.md §2-10): the
 // relay's three v22 question routes carry the new question with no change the
 // bridge can see, and the owner's route keeps its gates. The stores are faked;
 // their transactions run against PostgreSQL in
@@ -89,7 +89,8 @@ mock.module(mod("lib/amux/decisionMakerDeliveryCore.ts"), { namedExports: {
 mock.module(mod("lib/amux/v22OwnerQuestionDmService.ts"), { namedExports: {
   AMUX_V22_QUESTION_SYNC_LIMIT: 3,
   openAmuxV22QuestionCards: async (pending: unknown[]) => pending,
-  readAmuxV22QuestionSyncRows: async () => ({ pending: world.v22Pending, closing: world.v22Closing }),
+  readAmuxV22QuestionSyncRows: async () => ({ pending: world.v22Pending, closing: world.v22Closing,
+    refusalCards: [] }),
   runAmuxV22ResolveStep: async () => { world.calls.push("walk"); return { resolved: world.resolved, cursor: { move: "keep" } }; },
   recordDmQuestionLocalCard: async (_tx: unknown, input: unknown) => {
     world.recordedInput = input; return { recorded: true };
