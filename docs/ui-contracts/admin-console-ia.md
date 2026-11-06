@@ -171,7 +171,15 @@ unread, never off. Marketing shows the posts waiting for approval and the
 oldest wait, the drafts and publish switches, the generator's latest run and
 its call count; a count or switch that cannot be read is never drawn as zero
 or off. None of them shows a body, title, URL, user text or an amount of
-money, and Trust and safety stays waiting on a link until its code exists.
+money. Trust and safety is LIVE through the section's own reader
+(`readTrustSafetyDigest()`, which makes the `trust-safety:read` check itself,
+writes nothing and does not read the run table): the observation switch or the
+fault that stops it being believed, and the totals past the deadline, due soon
+(or that no window is approved) and closed late, with the time they were read.
+A counting the section does not take (switch off, or a fault) is "not counted",
+never zero, and an administrator who is not the owner sees that the record is
+the owner's, not a number. No request, email, name or legal-hold split reaches
+the office; its record link is the Trust and safety tab of Agent digests.
 Under the teams, the AMUX execution room separates the display-only Ubuntu
 resident roster approved in orchestration policy v27 (thirteen desks, no Devin
 or virtual engineering runner) from the app's dispatch admission catalog.
