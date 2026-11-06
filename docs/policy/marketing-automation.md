@@ -197,7 +197,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | 수동 승인 | `marketing:write` + step-up · 초안 스위치 · kill switch 아님 (LLM 예산과 무관) |
 | 승인 모드 게시 | 게시 스위치 · kill switch 아님 · 계정이 승인/자율 모드 · 어댑터 health · 채널 복구 계약 존재 · 플랫폼 예산 이내 |
 | 자율 게시 | 승인 모드 게시 조건 · 자율 스위치 · 계정 자율 모드 · 댓글 모니터링 동작 · 채널이 API 게시 취소 가능(Instagram·TikTok 제외, O15) |
-| 졸업 | `marketing:write` + step-up · O3 · 댓글 모니터링 동작 · 채널이 O15 대상 아님 |
+| 졸업 | `marketing:write` + step-up · O3 · 채널이 O15 대상 아님 (댓글 모니터링은 조건이 아니다, 소유자 결정 2026-11-05) |
 | 실험 활성화 | 실험 스위치 · kill switch 아님 · 캐시·CSP 스파이크 통과 기록 · (승인 모드) `marketing:write` + step-up / (자율) 표면 졸업 |
 | SEO 자동 병합 | 에이전트 스위치 · `MARKETING_SEO_AUTO_MERGE=true`(기본 꺼짐) · kill switch 아님 · 졸업 기록(`MARKETING_SEO_AUTO_PR=true`) · 게시 단계와 같은 서명·tree·허용 4개 파일 재검증 · PR이 develop 기준·열림·draft 아님·검증한 commit 그대로 (§9.2) |
 | webhook shadow 처리 | shadow 스위치 · staging 환경 · kill switch 아님 · 서명 검증 통과 (§8.1.1) |
@@ -372,9 +372,9 @@ production 수신기는 서명된 설정 세대가 있으면 범위 밖 이벤�
 **S4b 구현 상태(2026-11-01).** 졸업은 Admin 계정 화면의 "자율 게시로 졸업" 버튼(`marketing:write` + 재인증,
 감사 `marketing_account.graduate`)이 `graduateMarketingChannel()`을 부르는 것이 유일한 경로다. 서버가 계정 행 잠금 아래에서
 O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에서 첫 게시 성공 후 7일, 승인 3건 이상, 수정 비율
-(수정된 승인 ÷ 승인; 반려는 수정과 다른 신호라 분모에서 뺀다, 운영자 결정 2026-11-02) 1/3 이하, 댓글 모니터링 정상, Instagram·TikTok 아님. 미충족 사유는 모두 한 번에 화면에 보인다.
-스냅샷(`graduationSnapshot`)에는 건수와 비율만 고정한다. 댓글 모니터링(S4c)이 없는 동안 `comments_monitor_unhealthy`로 모든 계정의 졸업이
-거절된다. 자율 게시 스위치는 졸업이 건드리지 않는다.
+(수정된 승인 ÷ 승인; 반려는 수정과 다른 신호라 분모에서 뺀다, 운영자 결정 2026-11-02) 1/3 이하, Instagram·TikTok 아님. 미충족 사유는 모두 한 번에 화면에 보인다.
+스냅샷(`graduationSnapshot`)에는 건수와 비율만 고정한다. 댓글 모니터링은 졸업 조건에서 뺐다(소유자 결정 2026-11-05: 모니터에 필요한 Zernio
+Inbox 애드온을 쓰지 않는다). 자율 게시 승인 판정(위 표의 "자율 게시")은 아직 댓글 모니터링을 요구한다. 자율 게시 스위치는 졸업이 건드리지 않는다.
 
 ### 8.3 자동 정지 (구현된 트리거만 안전장치로 계산)
 | 트리거 | 출처 | 범위 |

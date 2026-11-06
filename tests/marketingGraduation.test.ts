@@ -39,14 +39,13 @@ const metrics = (overrides: Partial<MarketingGraduationMetrics> = {}): Marketing
 
 const evaluate = (
   overrides: Partial<MarketingGraduationMetrics> = {},
-  input: { status?: string; channel?: string; commentsMonitorHealthy?: boolean } = {},
+  input: { status?: string; channel?: string } = {},
 ) =>
   evaluateMarketingGraduation({
     status: input.status ?? "approval_mode",
     channel: input.channel ?? "linkedin",
     metrics: metrics(overrides),
     now: NOW,
-    commentsMonitorHealthy: input.commentsMonitorHealthy ?? true,
   });
 
 // ---------------------------------------------------------------------------
@@ -90,20 +89,20 @@ test("Instagram and TikTok never graduate, whatever else is true", () => {
   }
 });
 
-test("without comment monitoring there is no graduation", () => {
-  assert.deepEqual(evaluate({}, { commentsMonitorHealthy: false }).unmet, ["comments_monitor_unhealthy"]);
+test("comment monitoring is not a condition (owner decision 2026-11-05)", () => {
+  assert.equal((MARKETING_GRADUATION_UNMET_CODES as readonly string[]).includes("comments_monitor_unhealthy"), false);
+  assert.equal(evaluate().eligible, true);
 });
 
 test("every unmet condition is reported at once, in the closed order", () => {
   const result = evaluate(
     { firstSuccessAt: null, approvedPostCount: 0, draftCount: 0 },
-    { status: "paused", commentsMonitorHealthy: false },
+    { status: "paused" },
   );
   assert.deepEqual(result.unmet, [
     "not_in_approval_mode",
     "first_success_missing",
     "approvals_below_minimum",
-    "comments_monitor_unhealthy",
   ]);
   for (const code of result.unmet) assert.ok((MARKETING_GRADUATION_UNMET_CODES as readonly string[]).includes(code));
 });
@@ -233,14 +232,13 @@ const world = (
 
 const graduate = (
   database: MarketingTransaction,
-  overrides: Partial<{ expectedGraduationEpoch: number; commentsMonitorHealthy: boolean }> = {},
+  overrides: Partial<{ expectedGraduationEpoch: number }> = {},
 ) =>
   withAuditKey(() =>
     graduateMarketingChannel(database, {
       id: CHANNEL_ID,
       auditLogId: "audit-1",
       expectedGraduationEpoch: 0,
-      commentsMonitorHealthy: true,
       ...overrides,
     }),
   );
@@ -297,11 +295,8 @@ test("operator rejections do not dilute the edit rate: it is edits over approval
 
 test("it answers with every unmet condition and writes nothing", async () => {
   const { database, written } = world({ posts: [approvedPost()] });
-  const result = await graduate(database, { commentsMonitorHealthy: false });
-  assert.deepEqual(result, {
-    graduated: false,
-    unmet: ["approvals_below_minimum", "comments_monitor_unhealthy"],
-  });
+  const result = await graduate(database);
+  assert.deepEqual(result, { graduated: false, unmet: ["approvals_below_minimum"] });
   assert.equal(written.length, 0);
 });
 

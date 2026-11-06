@@ -20,7 +20,6 @@ import {
 import { readMarketingAssetsForConsole } from "@/lib/marketingAssetStore";
 import { readExperimentSnapshot } from "@/lib/marketingExperimentState";
 import { buildExperimentsConsole, type ExperimentsConsoleView } from "@/lib/marketingExperimentView";
-import { readMarketingCommentsMonitorHealthy } from "@/lib/marketingCommentsMonitorHealth";
 import {
   MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
   listOpenMarketingCommentAlerts,
@@ -568,7 +567,6 @@ export async function readMarketingConsole(
   }
 
   if (section === "accounts") {
-    const commentsMonitorHealthy = await readMarketingCommentsMonitorHealthy();
     const channels = await prisma.marketingChannel.findMany({
       orderBy: { createdAt: "desc" },
       take: MARKETING_READ_PAGE_SIZE,
@@ -617,7 +615,7 @@ export async function readMarketingConsole(
           // account that could graduate. The server repeats the test on the click.
           graduation:
             channel.status === "approval_mode"
-              ? await marketingGraduationForConsole(channel.id, commentsMonitorHealthy)
+              ? await marketingGraduationForConsole(channel.id)
               : null,
         })),
       ),
@@ -775,9 +773,9 @@ export async function readMarketingConsole(
 }
 
 /** The graduation reading of one account, or null when it cannot be read: the page then offers no graduation. */
-async function marketingGraduationForConsole(channelId: string, commentsMonitorHealthy: boolean) {
+async function marketingGraduationForConsole(channelId: string) {
   try {
-    const reading = await readMarketingGraduation(prisma, channelId, commentsMonitorHealthy);
+    const reading = await readMarketingGraduation(prisma, channelId);
     return {
       eligible: reading.eligible,
       unmet: reading.unmet,

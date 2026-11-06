@@ -6696,7 +6696,6 @@ export const MARKETING_GRADUATION_UNMET_CODES = [
   "first_success_too_recent",
   "approvals_below_minimum",
   "edit_rate_above_limit",
-  "comments_monitor_unhealthy",
 ] as const;
 export type MarketingGraduationUnmetCode = (typeof MARKETING_GRADUATION_UNMET_CODES)[number];
 
@@ -6724,7 +6723,6 @@ export const evaluateMarketingGraduation = (input: {
   readonly channel: string;
   readonly metrics: MarketingGraduationMetrics;
   readonly now: Date;
-  readonly commentsMonitorHealthy: boolean;
 }): {
   readonly eligible: boolean;
   readonly unmet: MarketingGraduationUnmetCode[];
@@ -6753,7 +6751,6 @@ export const evaluateMarketingGraduation = (input: {
     unmet.push("approvals_below_minimum");
   }
   if (metrics.editedApprovedCount * 3 > metrics.approvedPostCount) unmet.push("edit_rate_above_limit");
-  if (!input.commentsMonitorHealthy) unmet.push("comments_monitor_unhealthy");
   return { eligible: unmet.length === 0, unmet, operatorEditRate, guardRejectionRate };
 };
 
@@ -6829,7 +6826,6 @@ async function measureMarketingGraduation(
 export async function readMarketingGraduation(
   database: MarketingDatabase,
   channelId: string,
-  commentsMonitorHealthy: boolean,
 ) {
   const channel = await database.marketingChannel.findUnique({
     where: { id: channelId },
@@ -6846,7 +6842,6 @@ export async function readMarketingGraduation(
       channel: channel.channel,
       metrics,
       now,
-      commentsMonitorHealthy,
     }),
     metrics,
   };
@@ -6861,8 +6856,8 @@ export async function readMarketingGraduation(
  * began, saying which graduation epoch it was for), repeats O3 on the counts,
  * and compares-and-sets on the epoch. The snapshot keeps counts and rates only.
  * Instagram and TikTok never graduate (O15); the database refuses it too.
- * `commentsMonitorHealthy` is a fact the caller establishes; the monitor itself
- * is not this module's.
+ * Comment monitoring is not a condition (owner decision 2026-11-05: Zernio's
+ * Inbox add-on, which it needs, is not used).
  */
 export async function graduateMarketingChannel(
   database: MarketingTransaction,
@@ -6870,14 +6865,12 @@ export async function graduateMarketingChannel(
     id: string;
     auditLogId: string;
     expectedGraduationEpoch: number;
-    commentsMonitorHealthy: boolean;
   },
 ) {
   const input = {
     id: String(rawInput.id),
     auditLogId: String(rawInput.auditLogId),
     expectedGraduationEpoch: Number(rawInput.expectedGraduationEpoch),
-    commentsMonitorHealthy: rawInput.commentsMonitorHealthy === true,
   };
   const row = await lockMarketingChannel(database, input.id);
   if (row.graduationEpoch !== input.expectedGraduationEpoch) {
@@ -6906,7 +6899,6 @@ export async function graduateMarketingChannel(
     channel: row.channel,
     metrics,
     now,
-    commentsMonitorHealthy: input.commentsMonitorHealthy,
   });
   // Not a thrown refusal: the conditions are the answer the caller shows, all of
   // them at once, and a caller that throws on it rolls back the confirmation too.
