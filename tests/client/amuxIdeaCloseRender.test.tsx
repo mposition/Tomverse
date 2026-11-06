@@ -61,3 +61,31 @@ test("both Admin locales carry every close message, and the no-plan notice point
   assert.ok(ko.sessionReviewDetail.includes(ko.close.open));
   assert.equal(/cancel/i.test(en.sessionReviewHint), false);
 });
+
+test("an analysis with no plan offers the same-content resubmit while the text is kept", () => {
+  const kept = render(<AmuxIdeaDetailSummary row={{ ...row(1, true), rawReadable: true }} />);
+  assert.match(kept, /data-testid="amux-idea-resubmit-submit"/);
+  assert.doesNotMatch(kept, /data-testid="amux-idea-resubmit-purged"/);
+  assert.match(kept, /data-testid="amux-idea-close"/, "closing stays available beside it");
+  const m = kept.includes(adminAmuxIdeaProgressMessages.ko.resubmit.action)
+    ? adminAmuxIdeaProgressMessages.ko : adminAmuxIdeaProgressMessages.en;
+  assert.ok(kept.includes(m.resubmit.action));
+  // A purged body has nothing to send: the notice replaces the button.
+  const purged = render(<AmuxIdeaDetailSummary row={{ ...row(1, true), rawReadable: false }} />);
+  assert.doesNotMatch(purged, /data-testid="amux-idea-resubmit-submit"/);
+  assert.ok(purged.includes(m.resubmit.purged));
+  // Only the no-plan wait of a session idea gets it.
+  assert.doesNotMatch(render(<AmuxIdeaDetailSummary row={{ ...row(2, false, "cancelled"),
+    rawReadable: true }} />), /amux-idea-resubmit/);
+  assert.doesNotMatch(render(<AmuxIdeaDetailSummary row={{ ...row(3, true),
+    submissionOrigin: "owner", rawReadable: true }} />), /amux-idea-resubmit/);
+});
+
+test("both Admin locales carry every resubmit message, and the no-plan notice names the button", () => {
+  const { en, ko } = adminAmuxIdeaProgressMessages;
+  assert.deepEqual(Object.keys(ko.resubmit).sort(), Object.keys(en.resubmit).sort());
+  assert.deepEqual(Object.keys(ko.resubmit.results).sort(), Object.keys(en.resubmit.results).sort());
+  assert.ok(en.sessionReviewDetail.includes(en.resubmit.action));
+  assert.ok(ko.sessionReviewDetail.includes(ko.resubmit.action));
+  assert.equal(ko.resubmit.purged, "원문이 지워져 다시 접수할 수 없습니다. 새로 입력하세요.");
+});

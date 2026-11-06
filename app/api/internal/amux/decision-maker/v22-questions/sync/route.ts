@@ -18,6 +18,10 @@ import {
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import {
+  openAmuxIdeaCardCloseQuestionIfDue,
+  readAmuxIdeaCardCloseSyncForRelay,
+} from "@/lib/amux/ideaCardCloseService";
+import {
   AMUX_V22_QUESTION_SYNC_LIMIT,
   openAmuxV22QuestionCards,
   readAmuxV22QuestionSyncRows,
@@ -35,6 +39,12 @@ import {
  * `cursor` says where the walk goes next. The question text is opened from
  * the run's encrypted result outside the read transaction. Closed until
  * `TOMVERSE_AMUX_DM_ROUTING=enabled`.
+ *
+ * An idea card close question (lib/amux/ideaCardCloseService.ts) rides the same
+ * tick in the same shape, so the bridge needs no change: the walk applies its
+ * confirmed answer, one new question may open while its own switch is on, and
+ * its entries follow the v22 ones in the two lists. A fault in that part leaves
+ * the v22 questions to go on.
  */
 const OPERATION = "decision_maker_v22_question_sync";
 const refused = dmRouteRefusal("synced");
@@ -52,20 +62,23 @@ export async function POST(request: Request) {
       const after = parseDmDeliveryCursor(body.after);
       if (after === undefined) return refused(400, "invalid_request");
       const { resolved: outcome, cursor } = await runAmuxV22ResolveStep(after);
+      await openAmuxIdeaCardCloseQuestionIfDue().catch(() => {
+        console.warn(JSON.stringify({ subsystem: "amux", event: "idea_card_close_open_failed" }));
+      });
       const rows = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionRead,
         (tx, context) => readAmuxV22QuestionSyncRows(tx, context.dbNow));
-      const cards = [...rows.refusalCards,
-        ...await openAmuxV22QuestionCards(rows.pending)].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT);
+      const cards = [...rows.refusalCards, ...await openAmuxV22QuestionCards(rows.pending)];
+      const cardClose = await readAmuxIdeaCardCloseSyncForRelay();
       return amuxJsonNoStore({
         synced: true,
         resolved: outcome,
         cursor: cursor.move === "advance" ? { move: "advance",
           judged_at_ms: cursor.judgedAtMs, request_id: cursor.requestId } :
           { move: cursor.move },
-        pending: cards,
-        closing: rows.closing.map((row) => ({
-          question_id: row.questionId, card_id: row.cardId })),
+        pending: [...cards, ...cardClose.pending].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT),
+        closing: [...rows.closing, ...cardClose.closing].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT)
+          .map((row) => ({ question_id: row.questionId, card_id: row.cardId })),
       });
     } catch (error) {
       if (error instanceof BoardImportError) return refused(error.httpStatus, error.code);
