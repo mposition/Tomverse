@@ -317,6 +317,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // A subscription claim names no price row (owner decision 2026-11-04).
   "20261104150000_amux_v19_subscription_claim_no_price",
   "20261105100000_amux_idea_session_plan_refusal",
+  // Closing a stalled idea's cards (owner decision 2026-11-05): one new table
+  // with a lifecycle guard; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261106100000_amux_idea_card_close_question",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
