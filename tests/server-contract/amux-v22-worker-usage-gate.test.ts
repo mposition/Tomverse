@@ -39,6 +39,28 @@ test("the usage gate skips attempts on archived cards and keeps every other unkn
   assert.match(sql, /a\."id" IS DISTINCT FROM \?/);
 });
 
+test("an unsettled worker leaves the claim to the next settled route, checked once per worker", async () => {
+  const { amuxV22RoutesWithSettledUsage } = await import(mod("lib/amux/v22WorkerUsageGate.ts"));
+  const asked: unknown[] = [];
+  const tx = { $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+    asked.push(values[0]);
+    return values[0] === "codex-chore" ? [{ id: "attempt" }] : [];
+  } };
+  // Production 2026-11-06, investigate/routine: the cheapest route's worker
+  // (codex-chore) was unsettled and copilot-chore was never tried.
+  const routes = [{ workerName: "codex-chore", routeId: "a" },
+    { workerName: "copilot-chore", routeId: "b" }, { workerName: "codex-chore", routeId: "c" }];
+  const settled = await amuxV22RoutesWithSettledUsage(tx as never, routes, null);
+  assert.deepEqual(settled.routes, [{ workerName: "copilot-chore", routeId: "b" }]);
+  assert.equal(settled.unsettled, true);
+  assert.deepEqual(asked, ["codex-chore", "copilot-chore"]);
+  const none = await amuxV22RoutesWithSettledUsage(tx as never,
+    [{ workerName: "codex-chore" }], null);
+  assert.deepEqual(none, { routes: [], unsettled: true });
+  assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx as never,
+    [{ workerName: "copilot-chore" }], null), { routes: [{ workerName: "copilot-chore" }], unsettled: false });
+});
+
 test("an unarchived unknown-usage attempt still refuses the assignment", async () => {
   const { amuxV22WorkerUsageUnverified } = await import(mod("lib/amux/v22WorkerUsageGate.ts"));
   const { calls, tx } = capture([{ id: "attempt" }]);

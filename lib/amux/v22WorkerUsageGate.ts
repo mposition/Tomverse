@@ -30,3 +30,23 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
     LIMIT 1`;
   return rows.length > 0;
 }
+
+/**
+ * The routes whose worker has no unsettled usage, checked before a route is
+ * chosen. Checking only the chosen (cheapest) route refused the whole claim
+ * tick whenever that one worker was unsettled, so a settled worker on the
+ * same Task was never tried (production 2026-11-06: investigate/routine
+ * always chose codex-chore and never reached copilot-chore).
+ */
+export async function amuxV22RoutesWithSettledUsage<T extends { workerName: string }>(
+  tx: Prisma.TransactionClient, routes: readonly T[], priorAttemptId: string | null,
+): Promise<{ routes: T[]; unsettled: boolean }> {
+  const unsettled = new Set<string>();
+  for (const workerName of new Set(routes.map((route) => route.workerName))) {
+    if (await amuxV22WorkerUsageUnverified(tx, workerName, priorAttemptId)) {
+      unsettled.add(workerName);
+    }
+  }
+  return { routes: routes.filter((route) => !unsettled.has(route.workerName)),
+    unsettled: unsettled.size > 0 };
+}
