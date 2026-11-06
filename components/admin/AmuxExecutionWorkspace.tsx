@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowRight, Bot, Clock, GitPullRequest, GripVertical, Mo
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
 import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
+import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
@@ -40,6 +41,8 @@ type Card = {
   progress: { done: number; total: number } | null; briefPresent: boolean;
   /** The newest open escalation's reason code; null when none is open. */
   attentionReason: string | null;
+  /** A v22 worker question still waiting on the owner; null when none. */
+  ownerQuestion: "open" | "answered" | null;
   updatedAt: string;
 };
 type BoardSnapshot = { pageSize: number;
@@ -355,7 +358,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       window.history.replaceState(window.history.state, "", url);
     }
   }, []);
-  const openCard = useCallback(async (id: string, updateHistory = true) => {
+  const openCard = useCallback(async (id: string, updateHistory = true,
+    preferOverview = false) => {
     const request = ++detailRequest.current;
     setDetailOpen(true); setDetailBusy(true); setSelected(null); setDetailError(null);
     setDetailTab("overview"); setCopyNotice("");
@@ -373,7 +377,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       if (request === detailRequest.current) {
         setSelected(result);
         // A card waiting on the owner opens where the owner acts on it.
-        if (canReviewCards && result.escalations.length > 0) setDetailTab("ownerReview");
+        // A worker question is answered on the overview, where it is shown.
+        if (canReviewCards && result.escalations.length > 0 && !preferOverview)
+          setDetailTab("ownerReview");
       }
     } catch (reason) { if (request === detailRequest.current)
       setDetailError(reason instanceof Error && reason.message === "reauth" ? "reauth" : "unavailable"); }
@@ -743,6 +749,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                     {card.taskRole ? " · " + card.taskRole : ""}</p>
                   <p className={styles.cardWorker}><ShieldCheck size={14} aria-hidden="true" />
                     {card.worker ?? m.noWorker}</p>
+                  {card.ownerQuestion === "open" && <button type="button" className={styles.reviewButton}
+                    data-testid={"amux-card-open-question-" + card.id}
+                    onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id, true, true); }}>
+                    {m.questionPending}<MoveRight size={14} aria-hidden="true" /></button>}
                   {canReviewCards && card.attentionReason && <button type="button" className={styles.reviewButton}
                     data-testid={"amux-card-open-review-" + card.id}
                     onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
@@ -892,6 +902,12 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                 }} />
             </div>}
             <div id="amux-panel-overview" role="tabpanel" aria-labelledby="amux-tab-overview" hidden={detailTab !== "overview"} className={styles.panel}>
+      {selected.ownerQuestion && <AmuxTaskQuestionSection key={selected.id + ":" + selected.revision}
+        taskId={selected.id} canAnswer={canReviewCards} onAnswered={() => {
+          void refreshBoard();
+          if (new URL(window.location.href).searchParams.get("taskId") === selected.id)
+            void openCard(selected.id, false, true);
+        }} />}
       {selected.body ? <div><h4 className="font-semibold">{m.criteria}</h4>
         {selectedBody ? <div className="space-y-2 text-sm">
           <p>{amuxVisibleInspectionText(selectedBody.problem)}</p>

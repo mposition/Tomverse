@@ -72,7 +72,8 @@ test("a card waiting on the owner opens on the same owner review Assignment host
   // The review is the Assignment component, not a second implementation.
   assert.match(ui, /import \{ AmuxCardOwnerReview \} from "\.\/AdminAmuxRoutingPanel"/);
   assert.match(ui, /const ownerEscalation = canReviewCards \? selected\?\.escalations\[0\] \?\? null : null/);
-  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0\) setDetailTab\("ownerReview"\)/);
+  // Opened from a waiting worker question, the card stays on its overview.
+  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0 && !preferOverview\)\s*setDetailTab\("ownerReview"\)/);
   // Kept mounted behind `hidden`, so a tab switch cannot drop a decision.
   assert.match(ui, /hidden=\{detailTab !== "ownerReview"\}/);
   // A decision that lands after the owner left the card reloads the board,
@@ -91,6 +92,9 @@ test("a board card says why it waits on the owner, from its newest open escalati
   assert.match(service, /distinct: \["taskId"\]/);
   assert.match(service, /storedAmuxEscalationReasonCode\(row\.reason, row\.specialty\)/);
   assert.match(service, /attentionReason: attentionReason\.get\(row\.id\) \?\? null/);
+  // A waiting worker question: one bounded read per page, open or answered only.
+  assert.match(service, /prisma\.amuxV22TaskQuestion\.findMany\(\{\s*where: \{ taskId: \{ in: ids \}, state: \{ in: \["open", "answered"\] \} \}/);
+  assert.match(service, /ownerQuestion: ownerQuestion\.get\(row\.id\) \?\? null/);
   // The call to act is offered only where the review can be opened.
   assert.match(ui, /\{canReviewCards && card\.attentionReason && <button type="button" className=\{styles\.reviewButton\}/);
   assert.match(ui, /m\.attentionReason\[card\.attentionReason\] \?\? m\.attentionReasonFallback/);
