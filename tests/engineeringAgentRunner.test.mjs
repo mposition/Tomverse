@@ -1,24 +1,19 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import test from "node:test";
 
 import {
-  RUNNER_SYSTEM_PROMPT,
   haltOf,
   observeUnbound,
-  outcomeForSession,
   runRunnerCycle,
 } from "../scripts/engineering-agent-runner-core.mjs";
 import { superviseCycle, SUPERVISED_ENV } from "../scripts/engineering-agent-supervisor.mjs";
 import { prBodyMarker, shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
 
-// The runner service's cycle (docs/policy/engineering-agent.md §2.1, §6-§8,
-// §10-§12) against fake ports: what it asks the app, in what order, and how
-// every ending becomes a run outcome.
-
-const SHA = "a".repeat(40);
+// The runner service's cycle (docs/policy/engineering-agent.md §12) against
+// fake ports: what it asks the app and in what order. It observes and
+// triggers the pull request round; it takes no work and writes no code.
 
 const fakeApp = (overrides = {}) => {
   const calls = [];
@@ -30,25 +25,6 @@ const fakeApp = (overrides = {}) => {
       status: 200,
       json: { accepted: true, dispatchReady: body.dispatchReady, leaseExpiresAt: "x", halt: "none" },
     }),
-    "run/start": { status: 200, json: { started: true, runId: "123456789012", taskId: "t", attemptId: "att", taskRevision: 2 } },
-    "delivery/pull": {
-      status: 200,
-      json: {
-        available: true,
-        delivery: {
-          attemptId: "att",
-          taskId: "t",
-          taskRevision: 2,
-          receiptId: "r",
-          brief: { text: "Fix the typo in the footer.", digest: "d" },
-          briefIssue: null,
-        },
-      },
-    },
-    "delivery/ack": { status: 200, json: { acknowledged: true } },
-    "run/heartbeat": { status: 200, json: { renewed: true } },
-    "run/draft": { status: 200, json: { workItemId: "w" } },
-    "run/finish": { status: 200, json: { settled: true, taskRevision: 3, halt: "none" } },
     ...overrides,
   };
   const app = async (path, body) => {
@@ -59,127 +35,48 @@ const fakeApp = (overrides = {}) => {
   return { app, calls };
 };
 
-const fakeClone = (applies = true) => ({
-  root: "/clone",
-  trackedPaths: new Set(["README.md"]),
-  fsPorts: {},
-  applies: async () => applies,
-  dispose: async () => undefined,
-});
-
-const ports = (app, model, clone = fakeClone(), namespace = { refs: [], pulls: [] }, digests = {}) => ({
+const ports = (app, namespace = { refs: [], pulls: [] }, digests = {}) => ({
   app,
   namespace: async () => namespace,
   commitDigestAt: async (sha) => digests[sha] ?? null,
-  developHead: async () => SHA,
-  clone: async () => clone,
-  model,
-  setInterval: () => 1,
-  clearInterval: () => undefined,
 });
 
-const patch = "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-a\n+b\n";
-const okModel = async () => ({ ok: true, result: { manifest: { summary: "s", tests: [] }, patch }, turns: 1, toolBytes: 0 });
-
-test("a full cycle drafts a T2 patch and ends the run as a T2 draft", async () => {
+test("a cycle observes, triggers the pull request round and reports itself stopped, never ready", async () => {
   const { app, calls } = fakeApp();
-  const result = await runRunnerCycle(ports(app, okModel));
-  assert.deepEqual(result, { finishedNormally: true, halt: "none", reason: "t2_draft" });
+  const result = await runRunnerCycle(ports(app));
+  assert.deepEqual(result, { finishedNormally: true, halt: "none", reason: "observed" });
   assert.deepEqual(
     calls.map((call) => call.path),
-    ["worker/register", "observe/known", "observe/known", "observe/pull-requests", "worker/heartbeat", "run/start", "delivery/pull", "delivery/ack", "run/draft", "run/finish", "worker/heartbeat"],
+    ["worker/register", "observe/known", "observe/known", "observe/pull-requests", "worker/heartbeat"],
   );
-  const start = calls.find((call) => call.path === "run/start").body;
-  assert.equal(start.baseSha, SHA);
-  assert.equal("worker" in start, false, "the runner never names a worker");
-  assert.equal("taskId" in start, false, "AMUX picks the card");
-  const draft = calls.find((call) => call.path === "run/draft").body;
-  assert.equal(draft.patchDigest, createHash("sha256").update(patch, "utf8").digest("hex"));
-  const finish = calls.find((call) => call.path === "run/finish").body;
-  assert.equal(finish.outcome, "t2_draft");
-  assert.equal(finish.usageMicrousd, null, "unknown spend is null, never zero");
-  assert.equal(finish.halt, "none");
+  const beat = calls.find((call) => call.path === "worker/heartbeat").body;
+  assert.equal(beat.status, "stopped");
+  assert.equal(beat.dispatchReady, false, "the runner never offers itself for work");
+  assert.equal(calls.some((call) => call.path.startsWith("run/") || call.path.startsWith("delivery/")), false);
+  assert.equal(shouldSendSuccessHeartbeat(result), true);
 });
 
-test("nothing to do is a normal cycle: closed adapter, not dispatch-ready, nothing assigned", async () => {
+test("a closed adapter is a normal round; a lost runtime lease is not", async () => {
   const closed = fakeApp({ "worker/register": { status: 409, json: { refused: "adapter_closed" } } });
-  assert.equal((await runRunnerCycle(ports(closed.app, okModel))).finishedNormally, true);
+  assert.equal((await runRunnerCycle(ports(closed.app))).finishedNormally, true);
   assert.deepEqual(closed.calls.map((call) => call.path), ["worker/register"]);
 
-  const notReady = fakeApp({
-    "worker/heartbeat": () => ({ status: 200, json: { accepted: true, dispatchReady: false, halt: "none" } }),
+  const lost = fakeApp({ "worker/heartbeat": () => ({ status: 409, json: { accepted: false } }) });
+  assert.deepEqual(await runRunnerCycle(ports(lost.app)), {
+    finishedNormally: false,
+    halt: "unknown",
+    reason: "runtime_lease_lost",
   });
-  const quiet = await runRunnerCycle(ports(notReady.app, okModel));
-  assert.equal(quiet.finishedNormally, true);
-  assert.equal(shouldSendSuccessHeartbeat(quiet), true, "off, frozen or a full queue is still a live round");
-  assert.equal(notReady.calls.some((call) => call.path === "run/start"), false, "a worker the app will not dispatch starts nothing");
-
-  const nothing = fakeApp({ "run/start": { status: 409, json: { started: false, reason: "nothing_assigned" } } });
-  const none = await runRunnerCycle(ports(nothing.app, okModel));
-  assert.deepEqual(none, { finishedNormally: true, halt: "none", reason: "nothing_assigned" });
 });
 
-test("every other ending becomes the outcome the policy names, and a failure is never no change", async () => {
-  const cases = [
-    [async () => ({ ok: false, reason: "no_change" }), "no_change"],
-    [async () => ({ ok: false, reason: "schema_invalid" }), "schema_invalid"],
-    [async () => ({ ok: false, reason: "refused" }), "agent_failed"],
-    [async () => ({ ok: false, reason: "provider_error", status: 529 }), "agent_failed"],
-    [async () => ({ ok: false, reason: "turn_limit" }), "agent_failed"],
-  ];
-  for (const [model, outcome] of cases) {
-    const { app, calls } = fakeApp();
-    const result = await runRunnerCycle(ports(app, model));
-    assert.equal(result.reason, outcome);
-    assert.equal(calls.find((call) => call.path === "run/finish").body.outcome, outcome);
-    assert.equal(calls.some((call) => call.path === "run/draft"), false);
-  }
-  const unappliable = fakeApp();
-  const refused = await runRunnerCycle(ports(unappliable.app, okModel, fakeClone(false)));
-  assert.equal(refused.reason, "schema_invalid", "a patch git will not apply is not submitted");
-
-  const noBrief = fakeApp({
-    "delivery/pull": { status: 200, json: { available: true, delivery: { attemptId: "att", receiptId: "r", taskRevision: 2, brief: null, briefIssue: "digest_mismatch" } } },
-  });
-  assert.equal((await runRunnerCycle(ports(noBrief.app, okModel))).reason, "schema_invalid");
-
-  const secret = fakeApp({ "run/draft": { status: 409, json: { refused: "secret_detected" } } });
-  assert.equal((await runRunnerCycle(ports(secret.app, okModel))).reason, "secret_detected");
-  assert.equal(outcomeForSession({ ok: true }), null);
+test("a failed pull request round decides nothing and does not stop the cycle", async () => {
+  const { app, calls } = fakeApp({ "observe/pull-requests": { status: 503, json: { error: "unavailable" } } });
+  assert.deepEqual(await runRunnerCycle(ports(app)), { finishedNormally: true, halt: "none", reason: "observed" });
+  assert.equal(calls.at(-1).path, "worker/heartbeat", "the runner still reports itself stopped");
 });
 
-test("a lost lease ends the cycle without claiming an ending it cannot record", async () => {
-  const { app, calls } = fakeApp({ "run/heartbeat": { status: 409, json: { renewed: false } } });
-  let tick = null;
-  const cycle = runRunnerCycle({
-    ...ports(app, async () => {
-      await tick();
-      return okModel();
-    }),
-    setInterval: (fn) => {
-      tick = async () => {
-        fn();
-        await new Promise((resolve) => setImmediate(resolve));
-      };
-      return 1;
-    },
-  });
-  const result = await cycle;
-  assert.deepEqual(result, { finishedNormally: false, halt: "unknown", reason: "run_lease_lost" });
-  assert.equal(calls.some((call) => call.path === "run/finish"), false);
-});
-
-test("the prompt says the brief is data, and the model has one tool and no way to run anything", () => {
-  assert.match(RUNNER_SYSTEM_PROMPT, /data/);
-  assert.match(RUNNER_SYSTEM_PROMPT, /read_file/);
-  assert.match(RUNNER_SYSTEM_PROMPT, /cannot run anything/);
-});
-
-test("the runner imports node builtins and the dependency-free core, and nothing else", () => {
-  const allowedLib = new Set([
-    "lib/engineeringAgentModelCall.ts",
-    "lib/engineeringAgentCore.ts",
-  ]);
+test("the runner imports node builtins and the dependency-free core, and holds no model key", () => {
+  const allowedLib = new Set(["lib/engineeringAgentCore.ts"]);
   const seen = new Set();
   const visit = (file) => {
     if (seen.has(file)) return;
@@ -198,24 +95,22 @@ test("the runner imports node builtins and the dependency-free core, and nothing
     }
   };
   visit("scripts/engineering-agent-runner.mjs");
-  assert.ok(seen.has("lib/engineeringAgentModelCall.ts"));
+  assert.ok(seen.has("lib/engineeringAgentCore.ts"));
+  const entry = readFileSync("scripts/engineering-agent-runner.mjs", "utf8");
+  const reads = [...entry.matchAll(/required\("([A-Z_]+)"\)/g)].map((match) => match[1]);
+  assert.ok(!reads.some((name) => /ANTHROPIC|OPENAI|MODEL/.test(name)), `the runner reads ${reads.join(", ")}`);
 });
 
 test("while anything halts, no round sends a success signal (§12, §13-17)", async () => {
   const halted = fakeApp({
     "worker/heartbeat": () => ({ status: 200, json: { accepted: true, dispatchReady: false, halt: "circuit_open" } }),
   });
-  const quiet = await runRunnerCycle(ports(halted.app, okModel));
+  const quiet = await runRunnerCycle(ports(halted.app));
   assert.equal(quiet.halt, "circuit_open");
   assert.equal(shouldSendSuccessHeartbeat(quiet), false);
 
-  const endsHalted = fakeApp({ "run/finish": { status: 200, json: { settled: true, taskRevision: 3, halt: "state_mismatch" } } });
-  const ended = await runRunnerCycle(ports(endsHalted.app, okModel));
-  assert.equal(ended.finishedNormally, true);
-  assert.equal(shouldSendSuccessHeartbeat(ended), false, "a run that ends into a halt is not a healthy round");
-
   const silent = fakeApp({ "worker/heartbeat": () => ({ status: 200, json: { accepted: true, dispatchReady: false } }) });
-  const unknown = await runRunnerCycle(ports(silent.app, okModel));
+  const unknown = await runRunnerCycle(ports(silent.app));
   assert.equal(unknown.halt, "unknown", "an app that names no halt is not taken to have none");
   assert.equal(shouldSendSuccessHeartbeat(unknown), false);
   assert.equal(haltOf({ halt: "made_up" }), "unknown");
@@ -255,14 +150,14 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   assert.equal(await observe([], [{ number: 10, headRef: "feature/x", headSha: A, body: "hello" }]), "none");
 
   const { app, calls } = fakeApp();
-  const result = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/999", sha: A }], pulls: [] }));
+  const result = await runRunnerCycle(ports(app, { refs: [{ ref: "refs/heads/agent/engineering/999", sha: A }], pulls: [] }));
   assert.deepEqual(result, { finishedNormally: true, halt: "unbound_app_ref", reason: "observed_unbound" });
   assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_ref" });
   assert.equal(calls.some((call) => call.path === "run/start"), false, "nothing starts after an unbound observation");
   assert.equal(shouldSendSuccessHeartbeat(result), false);
 
   const unreadable = fakeApp({ "observe/known": { status: 500, json: null } });
-  assert.equal((await runRunnerCycle(ports(unreadable.app, okModel))).finishedNormally, false);
+  assert.equal((await runRunnerCycle(ports(unreadable.app))).finishedNormally, false);
 });
 
 test("an unreadable commit leaves the observation undetermined, and a bound run passes only at its bound head", async () => {
@@ -275,7 +170,7 @@ test("an unreadable commit leaves the observation undetermined, and a bound run 
     "undetermined",
   );
   const { app, calls } = fakeApp({ "observe/known": { status: 200, json: unbound } });
-  const round = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [] }));
+  const round = await runRunnerCycle(ports(app, { refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [] }));
   assert.deepEqual(round, { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" });
   assert.equal(calls.some((call) => call.path === "observe/halt"), false, "nothing recorded for an object not read");
 
@@ -322,11 +217,11 @@ test("a list GitHub did not give whole leaves the round undetermined, and a defi
     "unbound_app_pr",
   );
   const { app, calls } = fakeApp();
-  const round = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/5", sha: "a".repeat(40) }], pulls: null }));
+  const round = await runRunnerCycle(ports(app, { refs: [{ ref: "refs/heads/agent/engineering/5", sha: "a".repeat(40) }], pulls: null }));
   assert.equal(round.halt, "unbound_app_ref");
   assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_ref" });
   const quiet = fakeApp();
-  const undetermined = await runRunnerCycle(ports(quiet.app, okModel, fakeClone(), { refs: [], pulls: null }));
+  const undetermined = await runRunnerCycle(ports(quiet.app, { refs: [], pulls: null }));
   assert.deepEqual(undetermined, { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" });
   assert.equal(quiet.calls.some((call) => call.path === "observe/halt"), false);
 });
@@ -342,7 +237,7 @@ test("a first page of more is judged for what it holds, and never read as the wh
     "nothing definite on the first page, and more pages unread",
   );
   const { app, calls } = fakeApp();
-  const round = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [], pulls: page, refsComplete: true, pullsComplete: false }));
+  const round = await runRunnerCycle(ports(app, { refs: [], pulls: page, refsComplete: true, pullsComplete: false }));
   assert.equal(round.halt, "unbound_app_pr");
   assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_pr" });
 });
@@ -356,7 +251,7 @@ test("the app's records must not move while GitHub is read, or nothing is judged
     },
   });
   const result = await runRunnerCycle(
-    ports(moving.app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/999", sha: "a".repeat(40) }], pulls: [] }),
+    ports(moving.app, { refs: [{ ref: "refs/heads/agent/engineering/999", sha: "a".repeat(40) }], pulls: [] }),
   );
   assert.deepEqual(result, { finishedNormally: false, halt: "unknown", reason: "observation_raced" });
   assert.equal(moving.calls.some((call) => call.path === "observe/halt"), false, "a raced reading records no halt");
