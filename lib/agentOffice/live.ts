@@ -39,6 +39,13 @@
  * Marketing shows what waits for approval, its two switches and its generator's
  * latest run. None of them reads a body, title, URL or a user's words, and no
  * amount of money is shown.
+ *
+ * Trust and safety shows its observation switch (or the fault that stops it
+ * being believed) and the three counts its section computes when opened --
+ * past the deadline, due soon and closed late -- as numbers only. A request, an
+ * email, a name and a legal-hold split never reach the office, and an
+ * administrator without `trust-safety:read` sees that the record is the
+ * owner's, not a number.
  */
 
 import type { DeptStatus } from "@/lib/agentOffice/sim";
@@ -259,6 +266,30 @@ export type AgentOfficeMarketingState =
       calls: number | null;
     };
 
+export type AgentOfficeTrustState =
+  | { kind: "unread" }
+  /** The caller does not hold `trust-safety:read` (the owner's alone). Nothing was read. */
+  | { kind: "not_permitted" }
+  | {
+      kind: "observed";
+      /** The believed switch; null whenever a configuration fault means it is not believed. */
+      mode: "off" | "on" | null;
+      /** The activation check's fault code, or null. */
+      fault: string | null;
+      /** Past their deadline; null when the section does not count (switch off or a fault). */
+      overdue: number | null;
+      /** Due soon; null when not counted. */
+      imminent: number | null;
+      /** The window `imminent` means, in days. 0: no window has been approved; null when not counted. */
+      imminentWithinDays: number | null;
+      /** Closed after their deadline; null when not counted. */
+      closedLate: number | null;
+      /** When the values were computed, by the database clock (UTC ISO). */
+      observedAt: string;
+      /** The version the configuration row holds, or null when there is no row. */
+      version: number | null;
+    };
+
 /** One reviewer of the independent review server, as its latest report shows it. */
 export type AgentOfficeReviewerState = "reviewing" | "idle" | "off" | "lost";
 
@@ -348,6 +379,7 @@ export type AgentOfficeLiveRooms = {
   sre: AgentOfficeSreState;
   support: AgentOfficeSupportState;
   marketing: AgentOfficeMarketingState;
+  trust: AgentOfficeTrustState;
   engineering: AgentOfficeEngineeringState;
   amux: AgentOfficeAmuxState;
 };
@@ -1085,6 +1117,67 @@ export function marketingLiveDept(state: AgentOfficeMarketingState, copy: Market
   facts.push(state.lastRun === null ? copy.lastRunUnread : state.lastRun.at ? copy.lastRun(aestStamp(state.lastRun.at)) : copy.noRun);
   facts.push(state.calls === null ? copy.callsUnread : copy.calls(state.calls));
   return { status, badge, line, detail: facts.join(" · ") };
+}
+
+/**
+ * The Trust and safety room's colour. A read that failed, a switch that is not
+ * believed (a fault, or no believed mode) and a request past its deadline need
+ * a look. A record that is the owner's, and a switch that is off, are waiting;
+ * a believed switch that is on with nothing overdue is done.
+ */
+export function trustTone(state: AgentOfficeTrustState): DeptStatus {
+  if (state.kind === "unread") return "attention";
+  if (state.kind === "not_permitted") return "waiting";
+  if (state.fault !== null || state.mode === null) return "attention";
+  if (state.overdue !== null && state.overdue > 0) return "attention";
+  return state.mode === "off" ? "waiting" : "done";
+}
+
+type TrustCopy = {
+  badges: { on: string; off: string; unknown: string; fault: string; overdue: string; ownerOnly: string; unread: string };
+  unread: string;
+  ownerOnly: string;
+  modes: { on: string; off: string; unknown: string };
+  /** The fault words by the check's code; a code with no word is shown as stored. */
+  faults: Record<string, string>;
+  fault: (label: string) => string;
+  notCounted: string;
+  overdue: (count: number) => string;
+  imminent: (count: number, days: number) => string;
+  imminentUnset: string;
+  closedLate: (count: number) => string;
+  observedAt: (time: string) => string;
+};
+
+/** The Trust and safety room's line and detail, from its state and the console's copy. Numbers only. */
+export function trustLiveDept(state: AgentOfficeTrustState, copy: TrustCopy): AgentOfficeLiveDept {
+  const status = trustTone(state);
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
+  if (state.kind === "not_permitted") return { status, badge: copy.badges.ownerOnly, line: copy.ownerOnly, detail: "" };
+
+  const mode = state.mode === null ? copy.modes.unknown : copy.modes[state.mode];
+  const overdue = state.overdue === null ? copy.notCounted : copy.overdue(state.overdue);
+  const fault = state.fault === null ? null : copy.fault(labelOrCode(copy.faults, state.fault));
+
+  const facts: string[] = [];
+  // A fault takes the line; the count is still a fact beside it.
+  if (fault !== null) facts.push(overdue);
+  if (state.overdue !== null && state.imminent !== null && state.imminentWithinDays !== null && state.closedLate !== null) {
+    // No approved window means nothing is counted as due soon, and the room says so.
+    facts.push(state.imminentWithinDays === 0 ? copy.imminentUnset : copy.imminent(state.imminent, state.imminentWithinDays));
+    facts.push(copy.closedLate(state.closedLate));
+  }
+  facts.push(copy.observedAt(aestStamp(state.observedAt)));
+
+  const badge =
+    fault !== null
+      ? copy.badges.fault
+      : state.overdue !== null && state.overdue > 0
+        ? copy.badges.overdue
+        : state.mode === null
+          ? copy.badges.unknown
+          : copy.badges[state.mode];
+  return { status, badge, line: `${mode} · ${fault ?? overdue}`, detail: facts.join(" · ") };
 }
 
 /** A reviewer's colour: reviewing is working, idle is ready, off waits, lost needs a look. */
