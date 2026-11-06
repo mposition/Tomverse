@@ -208,7 +208,7 @@ held in place: a panel that comes back in a second location fails the spec.
 | `analytics?tab=imports` | `AdminMemoryImportPanel`, the only reader of `/api/admin/memory` and `/api/admin/external-imports`, on its own tab rather than stacked under the funnel |
 | `users` | seeded names, per-row detail link, `AI access held`, `Debt 640 credits` |
 | `users/:id` | plan, Stripe ids, credit purchases, recent conversations |
-| `support?tab=feedback` | open + resolved entries, the status filter, and the stated row limit |
+| `support?tab=feedback` | open + resolved entries, the status filter, and the stated row limit; a finished report starts folded, opens by keyboard with focus kept, opens on a search, and neither state scrolls sideways at phone width |
 | `support?tab=privacy` | data-rights queue with its seeded request |
 | `billing` | lifecycle split and the Free/Pro/Max catalogue |
 | `billing?tab=promotions` | promotion code, risk monitor with abuse signals; **no** role matrix (that lives only on admin access) |

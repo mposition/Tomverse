@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const script = "tools/marketing-video/print-run-result.mjs";
@@ -66,5 +68,35 @@ test("the daily job keeps the stream outside git and through the reader", () => 
   assert.match(daily, /--output-format stream-json --verbose/);
   assert.match(daily, /job\/run-\$\(date -u \+%Y%m%d\)\.jsonl/);
   assert.match(daily, /node print-run-result\.mjs/);
+  // No MCP tool may ride in the prompt (2026-11-04 "Prompt is too long").
+  assert.match(daily, /ENABLE_CLAUDEAI_MCP_SERVERS=false "\$\{CLAUDE_BIN/);
+  assert.match(daily, /--strict-mcp-config/);
+  assert.match(daily, /--disallowedTools "mcp__\*"/);
   assert.match(readFileSync("tools/marketing-video/.gitignore", "utf8"), /^job\/$/m);
+});
+
+test("a pull that replaces the running script hands over to the new copy from the top", (t) => {
+  if (spawnSync("bash", ["-c", "true"]).status !== 0) return t.skip("no bash here");
+  const pull = "git -C ../.. pull --ff-only --quiet\n";
+  const daily = readFileSync("tools/marketing-video/run-daily.sh", "utf8").replace(/\r\n/g, "\n");
+  const cut = daily.indexOf(pull) + pull.length;
+  const guard = daily.slice(cut, daily.indexOf("\n", cut) + 1);
+  assert.match(guard, /exec bash "\$PWD\/run-daily\.sh"/);
+  // The pull is replaced by a copy of the same length, so offsets stay as they would on the box.
+  const stand = 'cp "$NEXT_COPY" "$0"'.padEnd(pull.length - 1, " ") + "\n";
+  const prefix = daily.slice(0, daily.indexOf(pull)) + stand;
+  const dir = mkdtempSync(join(tmpdir(), "media-job-"));
+  try {
+    const next = join(dir, "next.sh");
+    writeFileSync(next, `${prefix}${guard}echo NEW-COPY-RAN\n`);
+    writeFileSync(join(dir, "run-daily.sh"), `${prefix}echo OLD-COPY-RAN\n`);
+    const out = spawnSync("bash", [join(dir, "run-daily.sh")], {
+      encoding: "utf8",
+      env: { ...process.env, MARKETING_APP_URL: "http://x", MARKETING_MEDIA_SUBMIT_SECRET: "x", NEXT_COPY: next },
+    });
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(out.stdout, "NEW-COPY-RAN\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

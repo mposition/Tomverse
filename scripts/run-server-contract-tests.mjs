@@ -15,18 +15,38 @@
 // Each file drives a real route handler and asserts what it did *not* do --
 // principally that a rejected chat request never reaches a provider and never
 // reserves credits.
+//
+// Files reach `node --test` as glob patterns because a list of absolute paths
+// outgrew the 32,767-character Windows command line from a worktree under
+// .claude/worktrees/: spawnSync failed with ENAMETOOLONG before node started.
+// scripts/run-unit-tests.mjs explains the same choice at more length.
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const testsDirectory = join(process.cwd(), "tests", "server-contract");
-const tests = readdirSync(testsDirectory)
-  .filter((name) => name.endsWith(".test.ts") || name.endsWith(".test.mjs"))
-  .sort()
-  .map((name) => join(testsDirectory, name));
+const TESTS_DIRECTORY = "tests/server-contract";
+const SUFFIXES = [".test.ts", ".test.mjs"];
 
-if (tests.length === 0) {
+// A name a glob would read as something other than itself would silently stop
+// running, so it is refused. Same rule as scripts/run-unit-tests.mjs.
+const GLOB_SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+const names = readdirSync(join(process.cwd(), TESTS_DIRECTORY)).filter((name) =>
+  SUFFIXES.some((suffix) => name.endsWith(suffix))
+);
+
+if (names.length === 0) {
   throw new Error("No server contract tests were found.");
+}
+
+const unsafe = names.filter((name) => !GLOB_SAFE_NAME.test(name));
+if (unsafe.length > 0) {
+  console.error(
+    `Cannot run the server contract tests: rename these files in ${TESTS_DIRECTORY}/ ` +
+      "using letters, digits, '.', '_' and '-', because a glob pattern would not " +
+      `select them: ${unsafe.join(", ")}`
+  );
+  process.exit(1);
 }
 
 const result = spawnSync(
@@ -39,8 +59,14 @@ const result = spawnSync(
     "tsx",
     "--test",
     "--test-concurrency=1",
-    ...tests,
+    ...SUFFIXES.map((suffix) => `${TESTS_DIRECTORY}/*${suffix}`),
   ],
   { stdio: "inherit", env: process.env }
 );
+
+// A spawn that never started has `status: null`; without this it would exit 1
+// having printed nothing.
+if (result.error) {
+  console.error(`The server contract tests never started: ${result.error.message}`);
+}
 process.exit(result.status ?? 1);

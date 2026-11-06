@@ -17,6 +17,10 @@ DEST=/usr/local/lib/autorec-agent
 UNIT_DIR=/etc/systemd/system
 ACCOUNT=autorec
 HOME_DIR=/home/autorec
+# The gateway's account: a system user with no login and no home, never autorec.
+GATEWAY_ACCOUNT=autorec-gw
+# Installed under $DEST/npm; lib/contract.mjs DEFAULTS.npmBin points there.
+NPM_VERSION=10.9.10
 
 FILES=(
   tools/auto-rec-agent/bin/autorec-runner.mjs
@@ -40,6 +44,20 @@ fail() { echo "install: $*" >&2; exit "${2:-1}"; }
 [ "$(id -u)" -eq 0 ] || fail "run as root (sudo)" 77
 [[ "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "ref must be a branch or tag name" 64
 id "$ACCOUNT" >/dev/null 2>&1 || fail "account $ACCOUNT does not exist" 64
+# Only /etc/passwd counts: while an older DynamicUser gateway instance runs,
+# nss-systemd resolves the same name, and that account vanishes when it stops.
+# Stopping the instances first also frees the name for useradd.
+if ! getent -s files passwd "$GATEWAY_ACCOUNT" >/dev/null; then
+  systemctl stop 'autorec-gateway@*.service' 2>/dev/null || true
+  id "$GATEWAY_ACCOUNT" >/dev/null 2>&1 && fail "$GATEWAY_ACCOUNT still resolves to a dynamic account; stop autorec-gateway and run again" 75
+  if getent -s files group "$GATEWAY_ACCOUNT" >/dev/null; then
+    useradd --system --gid "$GATEWAY_ACCOUNT" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$GATEWAY_ACCOUNT"
+  else
+    useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$GATEWAY_ACCOUNT"
+  fi
+fi
+[ "$(id -u "$GATEWAY_ACCOUNT")" != "$(id -u "$ACCOUNT")" ] || fail "$GATEWAY_ACCOUNT and $ACCOUNT must be different accounts" 64
+id -nG "$ACCOUNT" | tr ' ' '\n' | grep -qx "$GATEWAY_ACCOUNT" && fail "$ACCOUNT must not be in the $GATEWAY_ACCOUNT group" 64
 command -v git >/dev/null || fail "git is not installed" 64
 [ -x /usr/bin/node ] || fail "/usr/bin/node not found (the units use that path)" 64
 # Ask node itself for the flags the units use, instead of comparing versions
@@ -62,6 +80,11 @@ STAGE="$(mktemp -d "${DEST}.new.XXXXXX")"
 for file in "${FILES[@]}"; do
   install -D -m 0644 -o root -g root "$WORK/repo/$file" "$STAGE/$file"
 done
+# The npm the runner installs dependencies with: the one Node 22 ships and CI
+# uses. Ubuntu's nodejs package brings npm 9, whose `npm ci` refuses this
+# repository's lockfile (apps/mobile's file: link to native-auth).
+/usr/bin/npm install --global --prefix "$STAGE/npm" --ignore-scripts --no-audit --no-fund --loglevel=error "npm@$NPM_VERSION" >/dev/null
+[ "$("$STAGE/npm/bin/npm" --version)" = "$NPM_VERSION" ] || fail "npm $NPM_VERSION did not install" 69
 # The installed tree has no package.json of its own; this one makes the .ts module ESM.
 printf '{ "private": true, "type": "module" }\n' > "$STAGE/package.json"
 printf '%s %s\n' "$REF" "$COMMIT" > "$STAGE/INSTALLED_FROM"
