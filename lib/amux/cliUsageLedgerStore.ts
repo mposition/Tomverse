@@ -217,7 +217,7 @@ async function recordUsage(tx: Prisma.TransactionClient,
       "inputTokens", "outputTokens", "cacheReadInputTokens",
       "cacheCreationInputTokens", "reasoningOutputTokens",
       "inputTokensIncludeCacheRead", "inputTokensIncludeCacheWrite",
-      "reasoningOutputIncludedInOutput", "completedTurns", "pricingVersion",
+      "reasoningOutputIncludedInOutput", "completedTurns", "cliFailure", "pricingVersion",
       "projectedApiCostMicrousd", "actualApiCostMicrousd",
       "createdAt", "retentionUntil"
     ) VALUES (
@@ -238,6 +238,7 @@ async function recordUsage(tx: Prisma.TransactionClient,
       ${receipt.inputTokensIncludeCacheRead},
       ${receipt.inputTokensIncludeCacheWrite},
       ${receipt.reasoningOutputIncludedInOutput}, ${receipt.completedTurns},
+      ${receipt.cliFailure ?? null},
       ${projected === null ? null : price?.version ?? null}, ${projected}, NULL,
       CURRENT_TIMESTAMP::timestamp(3),
       CURRENT_TIMESTAMP::timestamp(3) + interval '13 months'

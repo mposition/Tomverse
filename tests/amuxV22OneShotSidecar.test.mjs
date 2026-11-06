@@ -13,6 +13,7 @@ import { amuxV22ClaudeArgs, amuxV22SidecarEnabled,
   parseAmuxV22OneShotRequest,
   runAmuxV22OneShot, normalizeAmuxV22ClaudeQuota, probeAmuxV22ClaudeQuota } from
   "../lib/amux/v22OneShotSidecar.mjs";
+import { amuxCliUsageReceiptDigest } from "../lib/amux/cliUsageLedgerCore.ts";
 import { amuxV22ReadOnlyActualLauncherConfigDigest, amuxV22ReadOnlyLaunchScope,
   amuxV22ReadOnlyLaunchScopeDigest } from
   "../lib/amux/v22ReadOnlyRetryProtocol.mjs";
@@ -236,6 +237,11 @@ function fakeSpawn(result, options = {}) {
       child.emit("spawn");
       if (options.hang) return;
       child.stdout.end(result);
+      if (options.signal) {
+        child.signalCode = options.signal;
+        child.emit("close", null, options.signal);
+        return;
+      }
       child.exitCode = options.exitCode ?? 0;
       child.emit("close", child.exitCode, null);
     });
@@ -269,6 +275,8 @@ test("the one-shot request and CLI command have bounded capabilities", () => {
   assert.ok(args.includes("--permission-prompts"));
   assert.equal(args.includes("--max-budget-usd"), false,
     "an ordinary run has no dollar stop (owner decision 2026-10-25)");
+  assert.equal(args.includes("--max-turns"), false,
+    "an ordinary run has no turn limit (owner decision 2026-11-06)");
   assert.equal(args[args.indexOf("--tools") + 1],
     "Read,Grep,Glob,Edit,Write");
   assert.equal(args.some((arg) => arg.includes("Bash")), false);
@@ -537,6 +545,57 @@ test("unknown output and deadline never become success or retry", async () => {
     failure: timeoutResult.failure },
     { kind: "outcome_unknown", failure: "deadline" });
   assert.equal(hanging.calls.length, 1);
+});
+
+test("a failed Claude result names its cause as a closed enum, never the CLI text", async () => {
+  const investigate = { ...request, role: "investigate" };
+  for (const [subtype, kind] of [["error_max_turns", "turn_limit"],
+    ["error_during_execution", "execution_error"],
+    ["error_max_budget_usd", "budget_limit"], ["error_new_kind", "unknown"],
+    ["success", "unknown"]]) {
+    const failed = fakeSpawn(JSON.stringify({ ...usage, subtype,
+      is_error: true, num_turns: 13, result: undefined,
+      errors: ["secret-token-in-cli-error"] }), { exitCode: 1 });
+    const result = await runAmuxV22OneShot(investigate, config, {
+      syntheticPlatform: true, spawnChild: failed.spawnChild,
+    });
+    assert.equal(result.kind, "failed", subtype);
+    assert.equal(result.cliStarted, true);
+    assert.equal(result.usageReceipt.status, "failed");
+    assert.equal(result.usageReceipt.cliFailure, kind, subtype);
+    assert.equal(result.usageReceipt.completeness, "reported_partial");
+    assert.equal(result.usageReceipt.completedTurns, 13);
+    assert.equal(result.usageReceiptDigest,
+      amuxCliUsageReceiptDigest(result.usageReceipt));
+    assert.equal(JSON.stringify(result).includes("secret-token"), false);
+  }
+  // More than the old 128-turn ceiling is still a counted, complete run.
+  const long = fakeSpawn(JSON.stringify({ ...usage, num_turns: 400 }));
+  const longResult = await runAmuxV22OneShot(investigate, config, {
+    syntheticPlatform: true, spawnChild: long.spawnChild,
+  });
+  assert.equal(longResult.kind, "succeeded");
+  assert.equal(longResult.usageReceipt.completeness, "reported_complete");
+  assert.equal(longResult.usageReceipt.completedTurns, 400);
+  assert.equal(Object.hasOwn(longResult.usageReceipt, "cliFailure"), false);
+});
+
+test("a signal or a deadline stays an unknown outcome with no failure cause", async () => {
+  const killed = fakeSpawn(JSON.stringify({ ...usage, subtype: "error_max_turns",
+    is_error: true }), { signal: "SIGTERM" });
+  const killedResult = await runAmuxV22OneShot(request, config, {
+    syntheticPlatform: true, spawnChild: killed.spawnChild,
+  });
+  assert.deepEqual({ kind: killedResult.kind, failure: killedResult.failure,
+    receipt: killedResult.usageReceipt },
+  { kind: "outcome_unknown", failure: "signal", receipt: undefined });
+  const hanging = fakeSpawn("", { hang: true });
+  const timeoutResult = await runAmuxV22OneShot(request, config, {
+    syntheticPlatform: true, spawnChild: hanging.spawnChild, deadlineMs: 5,
+  });
+  assert.deepEqual({ kind: timeoutResult.kind, failure: timeoutResult.failure,
+    receipt: timeoutResult.usageReceipt },
+  { kind: "outcome_unknown", failure: "deadline", receipt: undefined });
 });
 
 test("durable claim prevents duplicate CLI invocation across handler restart", async () => {

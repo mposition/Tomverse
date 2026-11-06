@@ -225,8 +225,15 @@ test("Claude all-zero defaults never certify zero spend, while cache-only usage 
     type: "result", subtype: "success",
     modelUsage: { "claude-opus-test": claudeModel(1, 1, 0, 0) },
   }).completeness, "reported_partial");
-  assert.equal(inspectClaude({
+  // No turn limit binds a v22 run since 2026-11-06: a long run is counted.
+  const long = inspectClaude({
     ...base, num_turns: 129,
+    modelUsage: { "claude-opus-test": claudeModel(1, 1, 0, 0) },
+  });
+  assert.equal(long.completeness, "reported_complete");
+  assert.equal(long.completedTurns, 129);
+  assert.equal(inspectClaude({
+    ...base, num_turns: 10_001,
     modelUsage: { "claude-opus-test": claudeModel(1, 1, 0, 0) },
   }).completeness, "reported_partial");
 });
