@@ -25,6 +25,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   displayKey: string | null;
   /** The body's first line (lib/amux/ideaTitleCore.ts); null once the body is purged. */
   title?: string | null;
+  /** The encrypted body is still kept (not purged), so the idea can be submitted again. */
+  rawReadable?: boolean;
   /** The idea lane's state, when the lane took the idea or will take it next (absent: neither). */
   lane?: AmuxIdeaLaneState | null;
   /** Task PRs waiting for GitHub review or merge. */
@@ -266,6 +268,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
       title: idea.title,
+      rawReadable: idea.rawReadable,
       reviewPullRequests: own.filter((card) => card.cardType !== "story" && !card.terminal &&
         card.status === "review" && card.reviewPrNumber !== null)
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey }))
