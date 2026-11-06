@@ -100,7 +100,6 @@ mock.module(mod("lib/amux/v22OwnerQuestionDmService.ts"), { namedExports: {
   },
 } });
 mock.module(mod("lib/amux/ideaCardCloseService.ts"), { namedExports: {
-  AmuxIdeaCardCloseOwnerError: FakeOwnerError,
   openAmuxIdeaCardCloseQuestionIfDue: async () => {
     world.calls.push("open");
     if (world.openError) throw world.openError;
@@ -111,6 +110,9 @@ mock.module(mod("lib/amux/ideaCardCloseService.ts"), { namedExports: {
     return { pending: world.closePending, closing: world.closeClosing };
   },
   readAmuxIdeaCardCloseQuestionForOwner: async (input: unknown) => { world.ownerInput = input; return world.question; },
+} });
+mock.module(mod("lib/amux/ideaCardCloseOwnerService.ts"), { namedExports: {
+  AmuxIdeaCardCloseOwnerError: FakeOwnerError,
   answerAmuxIdeaCardCloseForOwner: async (input: unknown) => {
     world.ownerInput = input;
     if (world.ownerError) throw world.ownerError;

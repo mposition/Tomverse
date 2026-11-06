@@ -23,12 +23,12 @@ import { takeAuditChainLock } from "@/lib/adminAudit";
 import { AMUX_IDEA_CARD_CLOSE_SCAN } from "@/lib/amux/ideaCardCloseCore";
 import {
   amuxIdeaCardCloseRelayCards,
-  answerAmuxIdeaCardCloseForOwner,
   applyAmuxIdeaCardCloseDmAnswer,
   openAmuxIdeaCardCloseQuestionIfDue,
   readAmuxIdeaCardCloseQuestionForOwner,
   readAmuxIdeaCardCloseSyncForRelay,
 } from "@/lib/amux/ideaCardCloseService";
+import { answerAmuxIdeaCardCloseForOwner } from "@/lib/amux/ideaCardCloseOwnerService";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import {
   isAmuxV22QuestionCard,
@@ -124,6 +124,7 @@ beforeEach(async () => {
 
 // A test's ideas leave the scan with it, so the next test asks only about its own.
 const seededIdeas: string[] = [];
+const everySeededIdea: string[] = [];
 afterEach(async () => {
   if (seededIdeas.length === 0) return;
   await asReplica((tx) => tx.$executeRaw`UPDATE "AmuxIdeaSubmission"
@@ -131,7 +132,35 @@ afterEach(async () => {
   seededIdeas.length = 0;
 });
 
+/**
+ * The seed bypasses the guards, so its rows are not ones a real history leaves
+ * (an assignment id bound to nothing, a synthetic content key). The suites that
+ * run after this file in the same database update and read such tables broadly,
+ * so every row seeded here goes with the file.
+ */
+async function removeSeededRows() {
+  if (everySeededIdea.length === 0) return;
+  await asReplica(async (tx) => {
+    const cards = (await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "registeredWorkItemId" AS "id" FROM "AmuxIdeaUnitDecision"
+      WHERE "ideaId" = ANY(${everySeededIdea}) AND "registeredWorkItemId" IS NOT NULL`).map((row) => row.id);
+    await tx.$executeRaw`DELETE FROM "AmuxWorkDependency"
+      WHERE "taskId" = ANY(${cards}) OR "dependencyId" = ANY(${cards})`;
+    await tx.$executeRaw`DELETE FROM "AmuxV22TaskQuestion" WHERE "taskId" = ANY(${cards})`;
+    await tx.$executeRaw`DELETE FROM "AmuxExecutionAttempt" WHERE "taskId" = ANY(${cards})`;
+    await tx.$executeRaw`DELETE FROM "AmuxHumanEscalation" WHERE "taskId" = ANY(${cards})`;
+    await tx.$executeRaw`DELETE FROM "AmuxWorkItem" WHERE "id" = ANY(${cards})`;
+    await tx.$executeRaw`DELETE FROM "AmuxIdeaCardCloseQuestion" WHERE "ideaId" = ANY(${everySeededIdea})`;
+    await tx.$executeRaw`DELETE FROM "AmuxIdeaLaneAttempt" WHERE "ideaId" = ANY(${everySeededIdea})`;
+    await tx.$executeRaw`DELETE FROM "AmuxIdeaUnitDecision" WHERE "ideaId" = ANY(${everySeededIdea})`;
+    await tx.$executeRaw`DELETE FROM "AmuxIdeaDraftUnit" WHERE "ideaId" = ANY(${everySeededIdea})`;
+    await tx.$executeRaw`DELETE FROM "AmuxIdeaSubmission" WHERE "id" = ANY(${everySeededIdea})`;
+  });
+  everySeededIdea.length = 0;
+}
+
 after(async () => {
+  await removeSeededRows();
   await resetAll();
   await prisma.$disconnect();
 });
@@ -151,6 +180,7 @@ const nextKey = () => {
 async function seedIdea(cards: CardSeed[], input: { state?: string; actor?: string; proposed?: boolean } = {}) {
   const ideaId = randomUUID();
   seededIdeas.push(ideaId);
+  everySeededIdea.push(ideaId);
   seedClock += 60_000;
   const submittedAt = new Date(seedClock);
   const completedAt = new Date(seedClock + 1_000);

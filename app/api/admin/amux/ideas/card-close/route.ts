@@ -10,8 +10,9 @@ import { assertRecentAdminAuthentication,
 import { apiSecurityResponse, consumeApiRateLimit,
   readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { AmuxIdeaCardCloseOwnerError, answerAmuxIdeaCardCloseForOwner,
-  readAmuxIdeaCardCloseQuestionForOwner } from "@/lib/amux/ideaCardCloseService";
+import { AmuxIdeaCardCloseOwnerError, answerAmuxIdeaCardCloseForOwner } from
+  "@/lib/amux/ideaCardCloseOwnerService";
+import { readAmuxIdeaCardCloseQuestionForOwner } from "@/lib/amux/ideaCardCloseService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
