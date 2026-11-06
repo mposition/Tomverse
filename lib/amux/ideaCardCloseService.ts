@@ -83,7 +83,14 @@ async function readCandidateRows(tx: Prisma.TransactionClient,
           'foreignDependent', EXISTS (SELECT 1 FROM "AmuxWorkDependency" e
             JOIN "AmuxWorkItem" o ON o."id" = e."taskId"
             WHERE e."dependencyId" = c."id" AND o."status" NOT IN ('done', 'cancelled')
-              AND NOT EXISTS (SELECT 1 FROM own same WHERE same."ideaId" = i."id" AND same."id" = o."id")))
+              AND NOT EXISTS (SELECT 1 FROM own same WHERE same."ideaId" = i."id" AND same."id" = o."id")),
+          -- Why a blocked card is blocked, read as the idea's detail reads it
+          -- (lib/amux/ideaProgressRead.ts); the core picks with amuxIdeaBlockReason.
+          'escalationReason', (SELECT e."reason" FROM "AmuxHumanEscalation" e
+            WHERE e."taskId" = c."id" AND e."status" IN ('open', 'acknowledged')
+            ORDER BY e."createdAt" DESC, e."id" DESC LIMIT 1),
+          'lastAttemptReason', (SELECT a."reason" FROM "AmuxExecutionAttempt" a
+            WHERE a."taskId" = c."id" ORDER BY a."startedAt" DESC, a."id" DESC LIMIT 1))
           ORDER BY c."id")
         FROM own c WHERE c."ideaId" = i."id") AS "cards"
     FROM "AmuxIdeaSubmission" i, clock
@@ -197,11 +204,14 @@ export async function readAmuxIdeaCardCloseSyncRows(tx: Prisma.TransactionClient
   return { pending, closing };
 }
 
-/** The relay's entries for the rows. A row that cannot be read is left out. */
-export function amuxIdeaCardCloseRelayCards(pending: SyncPendingRow[]) {
+/**
+ * The relay's entries for the rows. A row that cannot be read is left out.
+ * `nowMs` is the database clock the cards' ages are counted to.
+ */
+export function amuxIdeaCardCloseRelayCards(pending: SyncPendingRow[], nowMs?: number) {
   return pending.flatMap((row) => {
     const cards = amuxIdeaCardCloseAskedCards(row.cards);
-    return cards ? [amuxIdeaCardCloseRelayCard({ questionId: row.id, reasonCode: row.reasonCode, cards })] : [];
+    return cards ? [amuxIdeaCardCloseRelayCard({ questionId: row.id, reasonCode: row.reasonCode, cards, nowMs })] : [];
   });
 }
 
@@ -212,8 +222,9 @@ export function amuxIdeaCardCloseRelayCards(pending: SyncPendingRow[]) {
 export async function readAmuxIdeaCardCloseSyncForRelay(env: AmuxIdeaCardCloseEnv = process.env) {
   try {
     const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerIdeaCardCloseRead,
-      (tx) => readAmuxIdeaCardCloseSyncRows(tx, { filing: amuxIdeaCardCloseEnabled(env) }));
-    return { pending: amuxIdeaCardCloseRelayCards(rows.pending), closing: rows.closing };
+      async (tx, { dbNow }) => ({ ...await readAmuxIdeaCardCloseSyncRows(tx, { filing: amuxIdeaCardCloseEnabled(env) }),
+        nowMs: dbNow.getTime() }));
+    return { pending: amuxIdeaCardCloseRelayCards(rows.pending, rows.nowMs), closing: rows.closing };
   } catch {
     console.warn(JSON.stringify({ subsystem: "amux", event: "idea_card_close_sync_read_failed" }));
     return { pending: [], closing: [] };
