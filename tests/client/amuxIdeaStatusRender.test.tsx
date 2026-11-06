@@ -54,7 +54,7 @@ test("case 1: a blocked idea says so, why, and links to what the owner can do", 
   assert.match(markup, /data-activity="blocked"/);
   assert.ok(markup.includes(m.activity.blocked), "the step reads blocked");
   assert.ok(markup.includes(m.notice.execution_blocked.title));
-  assert.ok(markup.includes(m.notice.execution_blocked.body), "it says the idea cannot be closed here");
+  assert.ok(markup.includes(m.notice.execution_blocked.body), "it says the idea cannot be closed here but a card-close question may come");
   assert.ok(markup.includes(m.blockReasons.execution_lease_expired), "the Task's reason is shown");
   assert.ok(markup.includes("/admin/amux-execution?tab=assignment&amp;focusEscalation=cm0000000000000000000abcd"),
     "the open review is one click away");
