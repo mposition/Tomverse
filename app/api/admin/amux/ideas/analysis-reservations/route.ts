@@ -330,7 +330,8 @@ export async function DELETE(request: Request): Promise<Response> {
       return NextResponse.json({ error: "not_cancellable", blocked: after?.view.blocked ?? null,
         retryWrite: false, modelCallStarted: false }, { status: 409, headers: noStore });
     }
-    return NextResponse.json({ ideaId: body.ideaId, released, skipped, modelCallStarted: false },
+    return NextResponse.json({ ideaId: body.ideaId, released, skipped, retryWrite: false,
+      modelCallStarted: false },
       { headers: noStore });
   } catch (error) { return failure(error); }
 }

@@ -44,7 +44,7 @@ export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available, 
   const inFlight = useRef(false);
   const storageKey = `amux-idea-reservation-release:${ideaId}`;
 
-  const readBack = async (resolvePending: boolean) => {
+  const readBack = async (resolvePending: boolean, keepRefused = false) => {
     if (inFlight.current || !available) return;
     let pending: string | null;
     try { pending = window.sessionStorage.getItem(storageKey); }
@@ -72,6 +72,9 @@ export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available, 
       }
       // The current read is the verification the unknown outcome waited for.
       if (pending !== null) window.sessionStorage.removeItem(storageKey);
+      // A later read replaces an earlier refusal's notice; the read right
+      // after the refusal keeps it beside the state that explains it.
+      if (!keepRefused) setRefused(false);
       if (releasable.length > 0) {
         setCount(releasable.length);
         setAmount(amuxReservationAmount(releasable.reduce((sum, hold) =>
@@ -123,7 +126,7 @@ export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available, 
     } catch { /* A lost reply keeps the pending marker: only a read-back resolves it. */ }
     finally { inFlight.current = false; }
     setPhase(next);
-    if (next === "checking") void readBack(true);
+    if (next === "checking") void readBack(true, true);
   };
 
   return <AmuxIdeaReservationReleaseView m={m} phase={phase} count={count} amount={amount}

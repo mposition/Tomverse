@@ -178,7 +178,7 @@ test("one click releases every unused hold of the idea through the writer, and n
   assert.deepEqual(await response.json(), { ideaId: "synthetic-idea", released: [
     { holdId: "hold-a", releasedMicroUsd: "10560000", auditId: "audit-hold-a" },
     { holdId: "hold-b", releasedMicroUsd: "10560000", auditId: "audit-hold-b" },
-  ], skipped: 0, modelCallStarted: false });
+  ], skipped: 0, retryWrite: false, modelCallStarted: false });
   assert.deepEqual(writes, ["hold-a", "hold-b"]);
   const again = await route.DELETE(request());
   assert.equal(again.status, 409);

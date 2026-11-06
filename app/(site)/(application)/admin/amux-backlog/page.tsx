@@ -123,18 +123,18 @@ export default async function AdminAmuxBacklogPage({
   const ideaReadBackAvailable = ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
   // Like the card list, it needs a recent owner sign-in (the idea read-back
   // route asks for the same).
+  const requestedIdea = typeof query.idea === "string" ? query.idea.trim().toLowerCase() : "";
+  const openRequestId = isAmuxIdeaRequestId(requestedIdea) ? requestedIdea : null;
   let ideaProgress: AmuxIdeaProgressRow[] | null | "reauthenticate" | undefined;
   if (tab.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication(session)) {
     ideaProgress = "reauthenticate";
   } else if (tab.id === "ideas" && ideaReadBackAvailable) {
-    ideaProgress = await readAmuxIdeaProgressForOwner(session.user.id).catch((error: unknown) => {
+    ideaProgress = await readAmuxIdeaProgressForOwner(session.user.id, openRequestId).catch((error: unknown) => {
       // Codes and class names only (never a message or a row), so a failure can be told apart.
       console.warn(JSON.stringify(amuxIdeaProgressFailureLog(error)));
       return null;
     });
   }
-  const requestedIdea = typeof query.idea === "string" ? query.idea.trim().toLowerCase() : "";
-  const openRequestId = isAmuxIdeaRequestId(requestedIdea) ? requestedIdea : null;
   // An opened idea leads with its own detail (redesign B3); the list returns
   // below the flow, so the page shows one idea at a time.
   const openedIdea = Array.isArray(ideaProgress) && openRequestId
