@@ -75,6 +75,7 @@ export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available, 
       // A later read replaces an earlier refusal's notice; the read right
       // after the refusal keeps it beside the state that explains it.
       if (!keepRefused) setRefused(false);
+      setReauthenticate(false);
       if (releasable.length > 0) {
         setCount(releasable.length);
         setAmount(amuxReservationAmount(releasable.reduce((sum, hold) =>
@@ -143,7 +144,8 @@ export function AmuxIdeaReservationReleaseView({ m, phase, count, amount, quiet 
   m: Messages; phase: AmuxReservationReleasePhase; count: number; amount: string; quiet?: boolean;
   refused: boolean; reauthenticateHref: string | null; onRelease: () => void; onReadBack: () => void;
 }) {
-  if (quiet && !QUIET_SHOWN.has(phase) && !refused) return null;
+  // A refused step-up stays visible even quietly: without it the owner cannot read the holds at all.
+  if (quiet && !QUIET_SHOWN.has(phase) && !refused && !reauthenticateHref) return null;
   const text: Partial<Record<AmuxReservationReleasePhase, string>> = {
     checking: m.checking, sending: m.sending, released: m.released(count), already_released: m.alreadyReleased,
     none: m.none, in_use: m.inUse, outcome_unknown: m.outcomeUnknown, disabled: m.disabled,

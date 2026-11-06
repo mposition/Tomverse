@@ -46,6 +46,10 @@ test("quiet steps show the panel only when there is something to release or a re
     assert.equal(render(phase, { quiet: true }), "", phase);
   }
   assert.ok(render("checking", { quiet: true, refused: true }).includes(m.refused));
+  // A stale sign-in still shows its way back, or a held reservation could never be read.
+  const stale = render("unavailable", { quiet: true, reauthenticateHref: "/admin/reauth" });
+  assert.match(stale, /href="\/admin\/reauth"/);
+  assert.match(stale, /amux-reservation-release-readback/);
 });
 
 test("the held amount rounds up to the cent", () => {
