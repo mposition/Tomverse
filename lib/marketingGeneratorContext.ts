@@ -254,7 +254,55 @@ export type MarketingGeneratorAsset = {
   readonly kind: "image" | "video" | null;
   /** The alt text per locale: what the asset shows, so a post can be about it. */
   readonly alt: Readonly<Record<string, string>>;
+  /**
+   * The text of posts that already carry this asset on some account, newest
+   * first, so a cross-post is written fresh rather than copied (owner decision
+   * 2026-11-06). Guidance for the model, not a gate; bounded by
+   * `MARKETING_PUBLISHED_COPIES_*`.
+   */
+  readonly publishedCopies?: ReadonlyArray<{ readonly locale: string; readonly text: string }>;
 };
+
+/** Posts read for earlier texts, newest first. */
+export const MARKETING_PUBLISHED_COPIES_POSTS_READ = 300;
+/** At most this many earlier texts per asset and locale. */
+export const MARKETING_PUBLISHED_COPIES_PER_ASSET_LOCALE = 2;
+/** Each earlier text is cut to this many characters. */
+export const MARKETING_PUBLISHED_COPY_MAX_CHARS = 400;
+/**
+ * At most this many UTF-8 bytes of earlier text in the whole answer. The rest
+ * of the context was about 95 KB of the 128 KB cap on 2026-11-06, and a context
+ * over the cap stops the generator, so this budget is small and fixed.
+ */
+export const MARKETING_PUBLISHED_COPIES_MAX_BYTES = 16 * 1024;
+
+/**
+ * Each asset's earlier post texts, from posts read newest first: per asset and
+ * locale at most `MARKETING_PUBLISHED_COPIES_PER_ASSET_LOCALE`, each cut to
+ * `MARKETING_PUBLISHED_COPY_MAX_CHARS`, and `MARKETING_PUBLISHED_COPIES_MAX_BYTES`
+ * in all; the first text that does not fit ends the list. A post without rendered text contributes nothing.
+ */
+export function marketingPublishedCopies(
+  posts: ReadonlyArray<{ readonly assetIds: readonly string[]; readonly locale: string; readonly envelope: unknown }>,
+): ReadonlyMap<string, ReadonlyArray<{ readonly locale: string; readonly text: string }>> {
+  const byAsset = new Map<string, { locale: string; text: string }[]>();
+  let bytes = 0;
+  for (const post of posts) {
+    const raw = (post.envelope as { renderedText?: unknown } | null)?.renderedText;
+    if (typeof raw !== "string" || raw.trim() === "") continue;
+    const text = raw.trim().slice(0, MARKETING_PUBLISHED_COPY_MAX_CHARS);
+    for (const assetId of post.assetIds) {
+      const copies = byAsset.get(assetId) ?? [];
+      if (copies.filter((copy) => copy.locale === post.locale).length >= MARKETING_PUBLISHED_COPIES_PER_ASSET_LOCALE) continue;
+      const size = Buffer.byteLength(text, "utf8");
+      if (bytes + size > MARKETING_PUBLISHED_COPIES_MAX_BYTES) return byAsset;
+      copies.push({ locale: post.locale, text });
+      byAsset.set(assetId, copies);
+      bytes += size;
+    }
+  }
+  return byAsset;
+}
 
 /**
  * The registry's assets that one of these accounts' platforms may carry, as
@@ -448,7 +496,7 @@ export async function readMarketingGeneratorContext(
       allowedLocales: true,
     },
   });
-  const [brief, marketIntel, tracked, knownIds, llmSetting, analysisSetting, plans, recentPosts, usedAssetPosts, recentBriefs] = await Promise.all([
+  const [brief, marketIntel, tracked, knownIds, llmSetting, analysisSetting, plans, recentPosts, usedAssetPosts, recentBriefs, copiedPosts] = await Promise.all([
     latestReport(db, "brief"),
     latestReport(db, "market_intel"),
     readMarketingCompetitorsForGenerator(db),
@@ -481,7 +529,19 @@ export async function readMarketingGeneratorContext(
       take: MARKETING_RECENT_BRIEF_TOPICS,
       select: { payload: true },
     }),
+    // The texts posts already carried with each asset, on any account, newest
+    // first: a cross-post is written fresh (owner decision 2026-11-06).
+    db.marketingPost.findMany({
+      where: {
+        assetIds: { isEmpty: false },
+        status: { notIn: [...MARKETING_ASSET_RELEASED_POST_STATUSES] },
+      },
+      orderBy: { createdAt: "desc" },
+      take: MARKETING_PUBLISHED_COPIES_POSTS_READ,
+      select: { assetIds: true, locale: true, envelope: true },
+    }),
   ]);
+  const publishedCopies = marketingPublishedCopies(copiedPosts);
   const recentClaims = marketingRecentClaimIds(recentPosts);
   const usedAssets = marketingUsedAssetIds(usedAssetPosts);
   const recentBriefTopics = recentBriefs.flatMap((row) => {
@@ -536,7 +596,10 @@ export async function readMarketingGeneratorContext(
       await readMarketingAssetRegistry(db),
       channels.map((row) => row.channel),
       await readApprovedMarketingAssetKinds(db),
-    ),
+    ).map((asset) => {
+      const copies = publishedCopies.get(asset.id);
+      return copies ? { ...asset, publishedCopies: copies } : asset;
+    }),
     brief,
     recentBriefTopics,
     marketIntel,
