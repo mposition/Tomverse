@@ -57,9 +57,9 @@ export type MarketingAdapterCapabilities = {
 /**
  * What a health observation is about.
  *
- * Two, because the admission resolver asks two different questions:
- * `adapterHealthy` for publishing and `commentsMonitorHealthy` for autonomy,
- * and a platform can be able to accept a post while its comment API is down.
+ * Two, because a platform can be able to accept a post while its comment API
+ * is down. Only `adapterHealthy` decides an admission now: comment monitoring
+ * stopped being a condition for autonomy (owner, 2026-11-06).
  * The plan's `marketing_provider.health_observed` row is keyed by channel,
  * connection generation *and* capability, so an adapter that could only
  * observe "the account" would have to be reopened in S2d2 to say which.

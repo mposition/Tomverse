@@ -859,7 +859,14 @@ export type MarketingAutomationAccessInputs = {
   recoveryContractAvailable: ReadResult<boolean>;
   platformBudgetAvailable: ReadResult<boolean>;
   autoPublishEnabled: ReadResult<boolean>;
-  commentsMonitorHealthy: ReadResult<boolean>;
+  /**
+   * Not read. Comment monitoring stopped being a condition for autonomous
+   * publishing and for graduation (owner, 2026-11-05 and 2026-11-06: the
+   * Zernio Inbox add-on is not used). Optional rather than removed because
+   * `lib/marketingWebhookProductionApply.ts` still passes it and that file is
+   * hashed whole into `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT`.
+   */
+  commentsMonitorHealthy?: ReadResult<boolean>;
   publicationCancellable: ReadResult<boolean>;
   o4Eligible: ReadResult<boolean>;
   o15Channel: ReadResult<boolean>;
@@ -1193,11 +1200,6 @@ export const resolveMarketingAutomationAccess = (
   );
   requireTrue(
     autonomousReasons,
-    "commentsMonitorHealthy",
-    input.commentsMonitorHealthy,
-  );
-  requireTrue(
-    autonomousReasons,
     "publicationCancellable",
     input.publicationCancellable,
   );
@@ -1213,11 +1215,6 @@ export const resolveMarketingAutomationAccess = (
   );
   requireTrue(graduateReasons, "adminStepUpRecent", input.adminStepUpRecent);
   requireTrue(graduateReasons, "o3Satisfied", input.o3Satisfied);
-  requireTrue(
-    graduateReasons,
-    "commentsMonitorHealthy",
-    input.commentsMonitorHealthy,
-  );
   requireNonO15(graduateReasons, input.o15Channel);
   result.graduate = decision(graduateReasons);
 
