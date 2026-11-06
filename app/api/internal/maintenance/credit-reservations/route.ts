@@ -42,6 +42,7 @@ import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decision
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
 import { runSupportTriageCycleQuietly } from "@/lib/supportTriageCycle";
 import { runTraceReportAnalysisQuietly } from "@/lib/traceReportAnalysis";
+import { runDevelopCiRepairQuietly } from "@/lib/developCiRepair";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 
 const isAuthorized = (request: Request) => {
@@ -244,6 +245,8 @@ export async function POST(request: Request) {
     // while triage is off with nothing to delete, and never throws.
     after(() => runSupportTriageCycleQuietly());
     after(() => runTraceReportAnalysisQuietly());
+    // Off unless the owner turned it on; reads develop CI and calls no model.
+    after(() => runDevelopCiRepairQuietly());
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
