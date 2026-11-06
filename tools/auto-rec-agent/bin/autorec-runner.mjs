@@ -45,6 +45,7 @@ import {
   checkChangeScope,
   classifyReviewExit,
   cycleUrlFrom,
+  failedTests,
   leaseAllowsPublish,
   lintableFiles,
   parseRawDiff,
@@ -308,7 +309,13 @@ async function work(deps, claim, ctx) {
       timeoutMs: LIMITS.testsMs,
     });
     deps.runLog(`tests_${lane.label}`, `${run.stdout.slice(-8_000)}\n${run.stderr.slice(-4_000)}`);
-    if (run.code !== 0 || run.timedOut) return failed("tests", `lane_${lane.label}`);
+    if (run.code !== 0 || run.timedOut) {
+      // The tail above ends in the totals; the failures are earlier in the output.
+      const failures = failedTests(run.stdout);
+      deps.log("tests_failed", { lane: lane.label, timedOut: run.timedOut, failures: failures.names });
+      if (failures.excerpt) deps.runLog(`tests_${lane.label}_failures`, failures.excerpt);
+      return failed("tests", `lane_${lane.label}`);
+    }
   }
   const lintTargets = lintableFiles(changes.filter((change) => change.status !== "D").map((change) => change.path));
   if (lintTargets.length > 0) {
