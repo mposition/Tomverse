@@ -6,6 +6,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaCardClosePanel } from "@/components/admin/AmuxIdeaCardClosePanel";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { AmuxIdeaName, laneLine } from "@/components/admin/AmuxIdeaProgressPanel";
+import { AmuxIdeaResubmitPanel } from "@/components/admin/AmuxIdeaResubmitPanel";
 import { AmuxIdeaReservationReleasePanel } from "@/components/admin/AmuxIdeaReservationReleasePanel";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
@@ -159,6 +160,11 @@ export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false
       {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
         // Keyed by idea: another idea's question never shows while the next one loads.
         <AmuxSessionReviewPanel key={row.ideaId} ideaId={row.ideaId} /> : null}
+      {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
+        // The server checks the idea again; a purged body has nothing to send.
+        row.rawReadable === true ? <AmuxIdeaResubmitPanel key={`resubmit-${row.ideaId}`}
+          ideaId={row.ideaId} /> : <p className="text-zinc-300"
+          data-testid="amux-idea-resubmit-purged">{m.resubmit.purged}</p> : null}
       {row.closable ? <AmuxIdeaClosePanel key={row.ideaId} mode="single" ideaIds={[row.ideaId]} /> : null}
       <AmuxIdeaCardClosePanel key={`card-close-${row.ideaId}`} ideaId={row.ideaId} />
       {row.submissionOrigin === "session" ?
