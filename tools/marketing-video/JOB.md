@@ -27,6 +27,25 @@ not stopped by a rejection: 2026-11-04.
   refused, note it and go on with the next; tomorrow's run goes on as usual.
   Stop the whole run only when `list-approved.mjs` fails or no pack is usable.
 
+## Running commands
+
+The job allows one shape of shell command and denies every other without
+asking: a single command that starts with `node ` or `npx `. On 2026-11-06 and
+2026-11-07 the run stopped at its first call, `ls; ...; node list-approved.mjs;
+echo ...; date`, because the chain did not match.
+
+- Each Bash call is exactly one `node ...` command. No `;`, `&&`, `||`, `|`,
+  `>`, `cd`, `ls`, `cat`, `echo`, `date` or environment prefix. The working
+  directory is already `tools/marketing-video`.
+- Read files with the Read tool and write them with Write. The paths you need
+  are all known: `job/approved.json`, `job/history.json`, and
+  `job/sources/<asset-id>/pack.json` for each id in `job/approved.json`.
+- `<yyyymmdd>` and the Monday check use the Brisbane date, not the box's UTC
+  date (the job runs at 05:00 Brisbane, which is the previous day in UTC). Get
+  it with `node -p "new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Brisbane', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' })"`.
+- A denied call is not a failed step: write the same work as one plain
+  `node ...` command and try again. Never work around the rule another way.
+
 ## Inputs
 
 - `job/approved.json`, written by `node list-approved.mjs`: the assets approved
