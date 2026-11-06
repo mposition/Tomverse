@@ -839,6 +839,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaCardCloseQuestion",
+    publicName: "amux_idea_card_close_questions",
+    prismaModel: "AmuxIdeaCardCloseQuestion",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaTrackedCheckoutEvidence",
     publicName: "amux_idea_tracked_checkout_evidence",
     prismaModel: "AmuxIdeaTrackedCheckoutEvidence",

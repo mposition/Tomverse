@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxIdeaCardClosePanel } from "@/components/admin/AmuxIdeaCardClosePanel";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { AmuxIdeaName, laneLine } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxIdeaResubmitPanel } from "@/components/admin/AmuxIdeaResubmitPanel";
@@ -165,6 +166,7 @@ export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false
           ideaId={row.ideaId} /> : <p className="text-zinc-300"
           data-testid="amux-idea-resubmit-purged">{m.resubmit.purged}</p> : null}
       {row.closable ? <AmuxIdeaClosePanel key={row.ideaId} mode="single" ideaIds={[row.ideaId]} /> : null}
+      <AmuxIdeaCardClosePanel key={`card-close-${row.ideaId}`} ideaId={row.ideaId} />
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?
