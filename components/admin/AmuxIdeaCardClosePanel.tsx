@@ -23,15 +23,7 @@ type Phase = "idle" | "sending" | "closed" | "kept" | "cancelled" | "gone" | "re
  * read back from the page.
  */
 export function AmuxIdeaCardClosePanel({ ideaId }: { ideaId: string }) {
-  const m = useAdminMessages(adminAmuxIdeaCardCloseMessages);
-  const router = useRouter();
   const [question, setQuestion] = useState<AmuxIdeaCardCloseOwnerView | null>(null);
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [closedCards, setClosedCards] = useState(0);
-  const [needsReauthentication, setNeedsReauthentication] = useState(false);
-  const inFlight = useRef(false);
 
   useEffect(() => {
     let live = true;
@@ -45,7 +37,19 @@ export function AmuxIdeaCardClosePanel({ ideaId }: { ideaId: string }) {
     return () => { live = false; };
   }, [ideaId]);
 
-  if (!question) return null;
+  // The form (and its router) mounts only once a question exists, never in the first render.
+  return question ? <AmuxIdeaCardCloseForm ideaId={ideaId} question={question} /> : null;
+}
+
+function AmuxIdeaCardCloseForm({ ideaId, question }: { ideaId: string; question: AmuxIdeaCardCloseOwnerView }) {
+  const m = useAdminMessages(adminAmuxIdeaCardCloseMessages);
+  const router = useRouter();
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [closedCards, setClosedCards] = useState(0);
+  const [needsReauthentication, setNeedsReauthentication] = useState(false);
+  const inFlight = useRef(false);
 
   const answer = async (decision: "close" | "keep") => {
     const trimmed = reason.trim();
