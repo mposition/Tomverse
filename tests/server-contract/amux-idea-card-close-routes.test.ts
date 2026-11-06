@@ -30,6 +30,7 @@ type World = {
   v22Pending: unknown[]; v22Closing: unknown[];
   closePending: unknown[]; closeClosing: unknown[];
   openError: Error | null; resolved: unknown; ownerResult: unknown; ownerError: Error | null; question: unknown;
+  direct: unknown; directInput: unknown;
   calls: string[]; boundaries: string[]; ownerInput: unknown; recordedInput: unknown;
 };
 let world: World;
@@ -40,7 +41,7 @@ const reset = (changes: Partial<World> = {}) => {
     reauthRequired: false, originValid: true,
     v22Pending: [], v22Closing: [], closePending: [], closeClosing: [],
     openError: null, resolved: null, ownerResult: { outcome: "closed", closedCards: 2, auditId: "a" },
-    ownerError: null, question: null, calls: [], boundaries: [], ownerInput: null, recordedInput: null,
+    ownerError: null, question: null, direct: null, directInput: null, calls: [], boundaries: [], ownerInput: null, recordedInput: null,
     ...changes,
   };
   if (world.routing === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
@@ -109,12 +110,19 @@ mock.module(mod("lib/amux/ideaCardCloseService.ts"), { namedExports: {
     world.calls.push("close-read");
     return { pending: world.closePending, closing: world.closeClosing };
   },
-  readAmuxIdeaCardCloseQuestionForOwner: async (input: unknown) => { world.ownerInput = input; return world.question; },
+  readAmuxIdeaCardCloseOwnerState: async (input: unknown) => {
+    world.ownerInput = input; return { question: world.question, direct: world.direct };
+  },
 } });
 mock.module(mod("lib/amux/ideaCardCloseOwnerService.ts"), { namedExports: {
   AmuxIdeaCardCloseOwnerError: FakeOwnerError,
   answerAmuxIdeaCardCloseForOwner: async (input: unknown) => {
     world.ownerInput = input;
+    if (world.ownerError) throw world.ownerError;
+    return world.ownerResult;
+  },
+  closeAmuxIdeaCardsDirectlyForOwner: async (input: unknown) => {
+    world.directInput = input;
     if (world.ownerError) throw world.ownerError;
     return world.ownerResult;
   },
@@ -218,7 +226,10 @@ test("the owner's read shows the idea's open question to the owner alone", async
   assert.deepEqual(world.ownerInput, { ideaId: IDEA, actorUserId: "owner-1" });
   assert.match(shown.headers.get("cache-control") ?? "", /no-store/);
   reset();
-  assert.deepEqual(await (await read()).json(), { question: null });
+  assert.deepEqual(await (await read()).json(), { question: null, direct: null });
+  reset({ direct: { reasonCode: "blocked_task", cards: [] } });
+  assert.deepEqual(await (await read()).json(), { question: null,
+    direct: { reasonCode: "blocked_task", cards: [] } }, "with none open, what a direct close would close");
   reset({ admin: false });
   assert.equal((await read()).status, 404);
   reset({ role: "ops" });
@@ -272,4 +283,39 @@ test("what the service says reaches the panel, and an unknown failure is never a
   const unknown = await answer();
   assert.equal(unknown.status, 503);
   assert.deepEqual(await unknown.json(), { error: "outcome_unknown", retryWrite: false });
+});
+
+const closeDirectly = (body: Record<string, unknown> = {}) =>
+  ownerRoute.POST(new Request("https://tomverse.test/api/admin/amux/ideas/card-close", { method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ideaId: IDEA, direct: true, decision: "close", reason: "No longer wanted.",
+      ownerConfirmed: true, ...body }) }));
+
+test("the owner's direct close takes the same gates, closes only, and names no question", async () => {
+  reset();
+  const closed = await closeDirectly();
+  assert.equal(closed.status, 200);
+  assert.deepEqual(await closed.json(), { outcome: "closed", closedCards: 2, auditId: "a", retryWrite: false });
+  const input = world.directInput as Record<string, unknown>;
+  assert.equal(input.ideaId, IDEA);
+  assert.equal(input.reason, "No longer wanted.");
+  assert.equal("questionId" in input, false);
+  assert.equal(world.ownerInput, null, "the answer path is not taken");
+
+  reset({ ownerResult: { outcome: "not_closable" } });
+  assert.equal((await (await closeDirectly()).json()).outcome, "not_closable");
+  for (const [changes, status] of [[{ admin: false }, 404], [{ role: "ops" }, 403],
+    [{ originValid: false }, 403], [{ reauthRequired: true }, 428]] as const) {
+    reset(changes);
+    assert.equal((await closeDirectly()).status, status, JSON.stringify(changes));
+    assert.equal(world.directInput, null, "the service is not reached");
+  }
+  for (const bad of [{ decision: "keep" }, { ownerConfirmed: false }, { questionId: QUESTION }, { direct: false }]) {
+    reset();
+    assert.notEqual((await closeDirectly(bad)).status, 200, JSON.stringify(bad));
+    assert.equal(world.directInput, null, JSON.stringify(bad));
+    assert.equal(world.ownerInput, null, JSON.stringify(bad));
+  }
+  reset({ ownerError: new FakeOwnerError("busy") });
+  assert.equal((await closeDirectly()).status, 409);
 });

@@ -7,41 +7,54 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaCardCloseMessages } from "@/lib/adminMessages/amuxIdeaCardClose";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
-import type { AmuxIdeaCardCloseOwnerView } from "@/lib/amux/ideaCardCloseService";
+import type { AmuxIdeaCardCloseDirectView, AmuxIdeaCardCloseOwnerView } from "@/lib/amux/ideaCardCloseService";
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300";
 const DANGER = `inline-flex min-h-11 items-center rounded-lg border border-red-500 px-4 text-sm font-medium text-red-300 hover:bg-red-500/10 ${FOCUS}`;
 const QUIET = `inline-flex min-h-11 items-center rounded-lg border border-zinc-600 px-3 text-sm text-zinc-100 hover:bg-zinc-800 ${FOCUS}`;
 
-type Phase = "idle" | "sending" | "closed" | "kept" | "cancelled" | "gone" | "refused" | "unknown";
+type Phase = "idle" | "sending" | "closed" | "kept" | "cancelled" | "gone" | "not_closable" | "refused" | "unknown";
+
+/** An open question to answer, or with none open the cards the owner can close directly. */
+export type AmuxIdeaCardCloseFormView =
+  | { kind: "question"; question: AmuxIdeaCardCloseOwnerView }
+  | { kind: "direct"; direct: AmuxIdeaCardCloseDirectView };
 
 /**
  * The owner's direct answer to "close this stalled idea's remaining cards?",
  * which needs no Decision Maker: it is the way out when the question stayed
- * with the operator or a proposal failed. It shows only while the idea has an
- * open question. The request is never resent on its own; an unknown outcome is
- * read back from the page.
+ * with the operator or a proposal failed. With no question open it offers the
+ * owner's direct close of the same cards (owner decision 2026-11-06): the
+ * Decision Maker answers within minutes and a kept idea is not asked about for
+ * 30 days. It shows whatever the Decision Maker switch: a direct close asks no
+ * one. The request is never resent on its own; an unknown outcome is read back
+ * from the page.
  */
 export function AmuxIdeaCardClosePanel({ ideaId }: { ideaId: string }) {
-  const [question, setQuestion] = useState<AmuxIdeaCardCloseOwnerView | null>(null);
+  const [view, setView] = useState<AmuxIdeaCardCloseFormView | null>(null);
 
   useEffect(() => {
     let live = true;
     void adminFetch(`/api/admin/amux/ideas/card-close?${new URLSearchParams({ ideaId })}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
-      .then((body: { question?: AmuxIdeaCardCloseOwnerView | null } | null) => {
-        if (live) setQuestion(body?.question ?? null);
+      .then((body: { question?: AmuxIdeaCardCloseOwnerView | null; direct?: AmuxIdeaCardCloseDirectView | null } |
+        null) => {
+        if (!live) return;
+        setView(body?.question ? { kind: "question", question: body.question } :
+          body?.direct ? { kind: "direct", direct: body.direct } : null);
       })
       // A read that fails shows nothing: the question stays open for the next visit.
       .catch(() => undefined);
     return () => { live = false; };
   }, [ideaId]);
 
-  // The form (and its router) mounts only once a question exists, never in the first render.
-  return question ? <AmuxIdeaCardCloseForm ideaId={ideaId} question={question} /> : null;
+  // The form (and its router) mounts only once there is something to answer, never in the first render.
+  return view ? <AmuxIdeaCardCloseForm ideaId={ideaId} view={view} /> : null;
 }
 
-function AmuxIdeaCardCloseForm({ ideaId, question }: { ideaId: string; question: AmuxIdeaCardCloseOwnerView }) {
+export function AmuxIdeaCardCloseForm({ ideaId, view }: { ideaId: string; view: AmuxIdeaCardCloseFormView }) {
+  const question = view.kind === "question" ? view.question : null;
+  const { reasonCode, cards } = view.kind === "question" ? view.question : view.direct;
   const m = useAdminMessages(adminAmuxIdeaCardCloseMessages);
   const router = useRouter();
   const [reason, setReason] = useState("");
@@ -62,8 +75,9 @@ function AmuxIdeaCardCloseForm({ ideaId, question }: { ideaId: string; question:
     try {
       const response = await adminFetch("/api/admin/amux/ideas/card-close", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ideaId, questionId: question.questionId, decision, reason: trimmed,
-          ownerConfirmed: true }),
+        body: JSON.stringify(question
+          ? { ideaId, questionId: question.questionId, decision, reason: trimmed, ownerConfirmed: true }
+          : { ideaId, direct: true, decision: "close", reason: trimmed, ownerConfirmed: true }),
       });
       const body = await response.json().catch(() => null) as { outcome?: string; closedCards?: number } | null;
       if (response.ok && body?.outcome === "closed") {
@@ -76,6 +90,9 @@ function AmuxIdeaCardCloseForm({ ideaId, question }: { ideaId: string; question:
       } else if (response.ok && (body?.outcome === "not_open" || body?.outcome === "not_found")) {
         setPhase("gone");
         router.refresh();
+      } else if (response.ok && body?.outcome === "not_closable") {
+        setPhase("not_closable");
+        router.refresh();
       } else if ([400, 403, 404, 409, 415, 428, 429].includes(response.status)) {
         setNeedsReauthentication(response.status === 428);
         setPhase("refused");
@@ -87,16 +104,18 @@ function AmuxIdeaCardCloseForm({ ideaId, question }: { ideaId: string; question:
     } finally { inFlight.current = false; }
   };
 
-  const answered = phase === "closed" || phase === "kept" || phase === "cancelled" || phase === "gone";
-  return <section data-testid="amux-idea-card-close" data-state={phase}
+  const answered = phase === "closed" || phase === "kept" || phase === "cancelled" || phase === "gone" ||
+    phase === "not_closable";
+  return <section data-testid="amux-idea-card-close" data-state={phase} data-kind={view.kind}
     className="space-y-3 rounded-xl border border-amber-500/40 bg-zinc-900 p-4 text-sm">
     <h3 className="font-medium text-zinc-100">{m.title}</h3>
-    <p className="text-zinc-300">{m.reasons[question.reasonCode] ?? m.unknownReason}</p>
-    {question.handedOff ? <p role="alert" className="text-amber-200">{m.handedOff}</p> : null}
+    <p className="text-zinc-300">{m.reasons[reasonCode] ?? m.unknownReason}</p>
+    {question?.handedOff ? <p role="alert" className="text-amber-200">{m.handedOff}</p> : null}
+    {question ? null : <p className="text-zinc-400" data-testid="amux-idea-card-close-direct">{m.direct}</p>}
     <div>
       <p className="text-xs text-zinc-400">{m.cardsLabel}</p>
       <ul className="mt-1 space-y-1 text-xs text-zinc-300" data-testid="amux-idea-card-close-cards">
-        {question.cards.map((card) => <li key={card.id}>
+        {cards.map((card) => <li key={card.id}>
           <span className="font-mono">{card.displayKey ?? card.id}</span> · {card.status}
         </li>)}
       </ul>
@@ -112,9 +131,10 @@ function AmuxIdeaCardCloseForm({ ideaId, question }: { ideaId: string; question:
         <button type="button" disabled={phase === "sending"} onClick={() => void answer("close")} className={DANGER}>
           {m.close}
         </button>
-        <button type="button" disabled={phase === "sending"} onClick={() => void answer("keep")} className={QUIET}>
+        {question ? <button type="button" disabled={phase === "sending"} onClick={() => void answer("keep")}
+          className={QUIET}>
           {m.keep}
-        </button>
+        </button> : null}
       </div>
     </>}
     {phase === "sending" ? <p role="status">{m.sending}</p> : null}
@@ -122,6 +142,7 @@ function AmuxIdeaCardCloseForm({ ideaId, question }: { ideaId: string; question:
     {phase === "kept" ? <p role="status" className="text-zinc-100">{m.kept}</p> : null}
     {phase === "cancelled" ? <p role="status" className="text-amber-200">{m.cancelled}</p> : null}
     {phase === "gone" ? <p role="status" className="text-zinc-300">{m.gone}</p> : null}
+    {phase === "not_closable" ? <p role="status" className="text-zinc-300">{m.notClosable}</p> : null}
     {phase === "unknown" ? <p role="alert" className="text-amber-200">{m.unknown}</p> : null}
     {phase === "refused" ? <p role="alert" className="text-red-200">{m.refused}</p> : null}
     {needsReauthentication ? <a className="underline text-blue-200"

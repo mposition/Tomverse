@@ -56,8 +56,13 @@ type SqlCandidate = { ideaId: string; askedLastDay: number; cards: SqlCard[] | n
  * leaves its proposals behind (see lib/amux/ideaProgressCore.ts).
  */
 async function readCandidateRows(tx: Prisma.TransactionClient,
-  input: { now: Date; staleDays: number; ideaId: string | null }): Promise<SqlCandidate[]> {
+  input: { now: Date; staleDays: number; ideaId: string | null; direct?: { actorUserId: string } }):
+  Promise<SqlCandidate[]> {
   const now = input.now.toISOString();
+  // The owner's direct close: only the owner's own idea, and a recent keep or
+  // cancel does not hold it back. An open question still does: it is answered.
+  const actorUserId = input.direct?.actorUserId ?? null;
+  const direct = input.direct !== undefined;
   return tx.$queryRaw<SqlCandidate[]>`
     WITH clock AS (
       SELECT (${now}::timestamptz AT TIME ZONE 'UTC') AS "now"
@@ -70,8 +75,11 @@ async function readCandidateRows(tx: Prisma.TransactionClient,
       WHERE d."action" = 'register_card' AND d."state" = 'consumed'
     )
     SELECT i."id" AS "ideaId",
+      -- An owner's direct close is answered as it is written, at the same instant,
+      -- and asks nobody, so it does not use up the day's questions.
       (SELECT count(*)::int FROM "AmuxIdeaCardCloseQuestion" r, clock
-        WHERE r."createdAt" > clock."now" - INTERVAL '1 day') AS "askedLastDay",
+        WHERE r."createdAt" > clock."now" - INTERVAL '1 day'
+          AND NOT (r."answerSource" IS NOT DISTINCT FROM 'operator' AND r."answeredAt" = r."createdAt")) AS "askedLastDay",
       (SELECT json_agg(json_build_object(
           'id', c."id", 'displayKey', c."displayKey", 'cardType', c."cardType", 'status', c."status",
           'assigned', (c."owner" IS NOT NULL OR c."claimedAt" IS NOT NULL OR c."v22AssignmentId" IS NOT NULL),
@@ -96,11 +104,12 @@ async function readCandidateRows(tx: Prisma.TransactionClient,
     FROM "AmuxIdeaSubmission" i, clock
     WHERE i."cancelledAt" IS NULL AND i."state" IN ('awaiting_owner', 'completed')
       AND (${input.ideaId}::text IS NULL OR i."id" = ${input.ideaId}::text)
+      AND (${actorUserId}::text IS NULL OR i."actorUserId" = ${actorUserId}::text)
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaLaneAttempt" l WHERE l."ideaId" = i."id")
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaCardCloseQuestion" q WHERE q."ideaId" = i."id" AND (
-        q."state" = 'open' OR
+        q."state" = 'open' OR (NOT ${direct}::boolean AND (
         (q."state" = 'kept' AND q."answeredAt" > clock."now" - (${AMUX_IDEA_CARD_CLOSE_KEEP_DAYS}::int * INTERVAL '1 day')) OR
-        (q."state" = 'cancelled' AND q."updatedAt" > clock."now" - (${AMUX_IDEA_CARD_CLOSE_CANCEL_COOLDOWN_DAYS}::int * INTERVAL '1 day'))))
+        (q."state" = 'cancelled' AND q."updatedAt" > clock."now" - (${AMUX_IDEA_CARD_CLOSE_CANCEL_COOLDOWN_DAYS}::int * INTERVAL '1 day'))))))
       AND (i."state" = 'completed' OR NOT EXISTS (SELECT 1 FROM "AmuxIdeaDraftUnit" u
         WHERE u."ideaId" = i."id" AND u."state" = 'proposed' AND u."unitKind" IN ('node', 'card')
           AND u."expiresAt" > clock."now"))
@@ -179,6 +188,39 @@ export async function openAmuxIdeaCardCloseQuestionIfDue(env: AmuxIdeaCardCloseE
       metadata: { ideaId: current.ideaId, reasonCode: current.reason, cardCount: current.asked.length } });
     return { opened: true as const, questionId, ideaId: current.ideaId };
   });
+}
+
+/** What the owner's direct close would close: the same judgment as a question, with no daily limit. */
+async function readDirectCandidate(tx: Prisma.TransactionClient,
+  input: { ideaId: string; actorUserId: string; now: Date; env: AmuxIdeaCardCloseEnv }) {
+  const staleDays = amuxIdeaCardCloseStaleDays(input.env);
+  return pickCandidate(await readCandidateRows(tx, { now: input.now, staleDays, ideaId: input.ideaId,
+    direct: { actorUserId: input.actorUserId } }), { now: input.now, staleDays, dailyLimit: Infinity });
+}
+
+/**
+ * The owner's direct close, when no question is open (owner decision
+ * 2026-11-06): the Decision Maker answers a question within minutes, and a
+ * kept idea is not asked about for 30 days, so the owner had no way to close a
+ * stalled idea's cards. This writes the question row the owner then answers at
+ * once on the same transaction (ideaCardCloseOwnerService.ts), so the close
+ * takes the one apply path and leaves its record in the one table. The caller
+ * holds the audit chain lock, which the opener also takes, so no question opens
+ * between this read and the insert. Two statements. Not behind the switch: it
+ * files nothing and starts no paid turn.
+ */
+export async function openAmuxIdeaCardCloseDirectQuestionInTransaction(tx: Prisma.TransactionClient,
+  input: { ideaId: string; actorUserId: string; now: Date; env?: AmuxIdeaCardCloseEnv }) {
+  const found = await readDirectCandidate(tx, { ...input, env: input.env ?? process.env });
+  if (!found) return null;
+  const questionId = randomUUID();
+  const at = input.now.toISOString();
+  await tx.$executeRaw`
+    INSERT INTO "AmuxIdeaCardCloseQuestion"
+      ("id", "ideaId", "reasonCode", "cards", "createdAt", "updatedAt")
+    VALUES (${questionId}, ${found.ideaId}, ${found.reason}, ${JSON.stringify(found.asked)}::jsonb,
+      (${at}::timestamptz AT TIME ZONE 'UTC'), (${at}::timestamptz AT TIME ZONE 'UTC'))`;
+  return { questionId, reasonCode: found.reason, cardCount: found.asked.length };
 }
 
 type SyncPendingRow = { id: string; reasonCode: string; cards: unknown };
@@ -446,20 +488,36 @@ export type AmuxIdeaCardCloseOwnerView = {
   questionId: string; reasonCode: string; cards: AmuxIdeaCardCloseAskedCard[];
   handedOff: boolean; createdAt: string;
 };
+/** What the owner could close directly while no question is open. */
+export type AmuxIdeaCardCloseDirectView = { reasonCode: string; cards: AmuxIdeaCardCloseAskedCard[] };
 
-/** The open question of one of the owner's ideas, for its detail. Another owner's reads as none. */
-export async function readAmuxIdeaCardCloseQuestionForOwner(input: { ideaId: string; actorUserId: string }):
-  Promise<AmuxIdeaCardCloseOwnerView | null> {
-  const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerIdeaCardCloseOwnerRead,
-    (tx) => tx.$queryRaw<Array<{ id: string; reasonCode: string; cards: unknown; handedOff: boolean; createdAtMs: number }>>`
+/**
+ * The open question of one of the owner's ideas, for its detail, or, with none
+ * open, what a direct close would close. Another owner's idea reads as neither.
+ * Whatever the switch: a direct close asks no one.
+ */
+export async function readAmuxIdeaCardCloseOwnerState(input: { ideaId: string; actorUserId: string },
+  env: AmuxIdeaCardCloseEnv = process.env):
+  Promise<{ question: AmuxIdeaCardCloseOwnerView | null; direct: AmuxIdeaCardCloseDirectView | null }> {
+  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerIdeaCardCloseOwnerRead, async (tx, { dbNow }) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; reasonCode: string; cards: unknown; handedOff: boolean; createdAtMs: number }>>`
       SELECT q."id", q."reasonCode", q."cards", (q."handoffAt" IS NOT NULL) AS "handedOff",
         (extract(epoch FROM q."createdAt") * 1000)::double precision AS "createdAtMs"
       FROM "AmuxIdeaCardCloseQuestion" q
       JOIN "AmuxIdeaSubmission" i ON i."id" = q."ideaId"
       WHERE q."ideaId" = ${input.ideaId} AND q."state" = 'open' AND i."actorUserId" = ${input.actorUserId}
-      LIMIT 1`);
-  const row = rows[0];
-  const cards = row ? amuxIdeaCardCloseAskedCards(row.cards) : null;
-  return row && cards ? { questionId: row.id, reasonCode: row.reasonCode, cards,
-    handedOff: row.handedOff, createdAt: new Date(row.createdAtMs).toISOString() } : null;
+      LIMIT 1`;
+    const row = rows[0];
+    if (row) {
+      const cards = amuxIdeaCardCloseAskedCards(row.cards);
+      return { question: cards ? { questionId: row.id, reasonCode: row.reasonCode, cards,
+        handedOff: row.handedOff, createdAt: new Date(row.createdAtMs).toISOString() } : null, direct: null };
+    }
+    const found = await readDirectCandidate(tx, { ...input, now: dbNow, env });
+    return { question: null, direct: found ? { reasonCode: found.reason, cards: found.asked } : null };
+  });
 }
+
+/** The open question of one of the owner's ideas alone. */
+export const readAmuxIdeaCardCloseQuestionForOwner = async (input: { ideaId: string; actorUserId: string }) =>
+  (await readAmuxIdeaCardCloseOwnerState(input)).question;
