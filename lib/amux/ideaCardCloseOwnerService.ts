@@ -29,7 +29,7 @@ export class AmuxIdeaCardCloseOwnerError extends Error {
 /**
  * The owner answers on the idea's detail: owner role, recent re-authentication,
  * a reason, and a person's audit entry. It is not the Decision Maker's path, so
- * the kill switch does not stop it (policy §6: "운영자의 직접 답"), and an open
+ * the kill switch does not stop it (docs/policy/amux-decision-maker.md §6: "운영자의 직접 답"), and an open
  * question of the owner's own idea is all it needs. The reason is free text and
  * may quote the idea, so the audit keeps only its keyed digest.
  */
