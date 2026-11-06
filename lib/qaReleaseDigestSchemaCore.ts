@@ -158,7 +158,7 @@ const countsOf = <T extends readonly [string, ...string[]]>(keys: T) =>
     .object(Object.fromEntries(keys.map((key) => [key, count])) as { [K in T[number]]: typeof count })
     .strict();
 
-const latencyMinutes = z.number().min(0).max(100_000).nullable();
+const latencyMinutes = z.number().int().min(0).max(100_000).nullable();
 
 /**
  * Develop merge to dev timing (lib/qaReleaseLatencyCollectCore.ts). Optional,
