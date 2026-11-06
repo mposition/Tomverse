@@ -19,6 +19,8 @@ ACCOUNT=autorec
 HOME_DIR=/home/autorec
 # The gateway's account: a system user with no login and no home, never autorec.
 GATEWAY_ACCOUNT=autorec-gw
+# Installed under $DEST/npm; lib/contract.mjs DEFAULTS.npmBin points there.
+NPM_VERSION=10.9.10
 
 FILES=(
   tools/auto-rec-agent/bin/autorec-runner.mjs
@@ -78,6 +80,11 @@ STAGE="$(mktemp -d "${DEST}.new.XXXXXX")"
 for file in "${FILES[@]}"; do
   install -D -m 0644 -o root -g root "$WORK/repo/$file" "$STAGE/$file"
 done
+# The npm the runner installs dependencies with: the one Node 22 ships and CI
+# uses. Ubuntu's nodejs package brings npm 9, whose `npm ci` refuses this
+# repository's lockfile (apps/mobile's file: link to native-auth).
+/usr/bin/npm install --global --prefix "$STAGE/npm" --ignore-scripts --no-audit --no-fund --loglevel=error "npm@$NPM_VERSION" >/dev/null
+[ "$("$STAGE/npm/bin/npm" --version)" = "$NPM_VERSION" ] || fail "npm $NPM_VERSION did not install" 69
 # The installed tree has no package.json of its own; this one makes the .ts module ESM.
 printf '{ "private": true, "type": "module" }\n' > "$STAGE/package.json"
 printf '%s %s\n' "$REF" "$COMMIT" > "$STAGE/INSTALLED_FROM"
