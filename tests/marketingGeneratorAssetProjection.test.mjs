@@ -58,3 +58,35 @@ test("only assets one of the accounts' platforms may carry, in id order", () => 
   );
   assert.deepEqual(listed.map((entry) => entry.id), ["asset_a", "asset_z"]);
 });
+
+test("each asset's earlier texts are bounded per locale, cut short and capped in all (owner decision 2026-11-06)", async () => {
+  const {
+    marketingPublishedCopies,
+    MARKETING_PUBLISHED_COPIES_MAX_BYTES,
+    MARKETING_PUBLISHED_COPY_MAX_CHARS,
+  } = await import("@/lib/marketingGeneratorContext");
+  const post = (assetIds, locale, renderedText) => ({ assetIds, locale, envelope: { renderedText } });
+  const copies = marketingPublishedCopies([
+    post(["card"], "en", "newest en"),
+    post(["card"], "en", "second en"),
+    post(["card"], "en", "third en is dropped"),
+    post(["card"], "ko", "x".repeat(MARKETING_PUBLISHED_COPY_MAX_CHARS + 50)),
+    post(["card"], "en", "   "),
+    { assetIds: ["short"], locale: "en", envelope: null },
+  ]);
+  assert.deepEqual(copies.get("card"), [
+    { locale: "en", text: "newest en" },
+    { locale: "en", text: "second en" },
+    { locale: "ko", text: "x".repeat(MARKETING_PUBLISHED_COPY_MAX_CHARS) },
+  ]);
+  assert.equal(copies.has("short"), false);
+
+  // Korean is three bytes a character: the byte budget, not a count, bounds the answer.
+  const many = marketingPublishedCopies(
+    Array.from({ length: 200 }, (_, index) => post([`asset-${index}`], "ko", "가".repeat(MARKETING_PUBLISHED_COPY_MAX_CHARS))),
+  );
+  const kept = [...many.values()].flat();
+  const keptBytes = kept.reduce((sum, copy) => sum + Buffer.byteLength(copy.text, "utf8"), 0);
+  assert.ok(keptBytes <= MARKETING_PUBLISHED_COPIES_MAX_BYTES);
+  assert.equal(kept.length, Math.floor(MARKETING_PUBLISHED_COPIES_MAX_BYTES / (MARKETING_PUBLISHED_COPY_MAX_CHARS * 3)));
+});

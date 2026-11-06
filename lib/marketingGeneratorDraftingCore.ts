@@ -74,6 +74,7 @@ export const marketingGeneratorContextSchema = z.object({
       // Optional so a service deployed before the app still reads an older answer.
       kind: z.enum(["image", "video"]).nullable().optional(),
       alt: z.record(z.string(), z.string()).optional(),
+      publishedCopies: z.array(z.object({ locale: z.string(), text: z.string() })).optional(),
     }),
   ),
   brief: z.unknown().nullable(),
@@ -127,6 +128,7 @@ const SYSTEM_PROMPT = [
   "Write each hashtag in the post's language and script, with no space inside it (Traditional Chinese for zh-Hant, Simplified for zh-Hans), as broad topic words such as #AI, #AIassistant or #AIcomparison in English and #AI, #인공지능 or #AI비교 in Korean. Never a hashtag that names another product or company, and never one that boasts or hints at a price, such as #best, #free, #최고 or #무료.",
   "Put the hashtags at the end of the post. On youtube they go in the description, never the title line, and one of them is #Shorts. On threads use at most one. On x the hashtags count toward the post's 280 characters.",
   "The assets list holds only assets this account has not used yet. Give each post a different asset; when there are fewer assets than posts, write fewer posts rather than carry an asset twice.",
+  "An asset's publishedCopies are posts other Tomverse accounts already published with it. Carrying it again is fine, but write the post fresh: a different hook, a different first line and a different angle, and none of their sentences, phrases or structure reused. Only a claim's statement stays word for word.",
   "When no asset fits the brief's topic, do not skip the post: write it about what an asset you were given shows, using only its description. Whenever the assets list holds at least one asset, write at least one post; return no draft only when the list is empty, since a post without an image or a video is never published. Never write what an asset's description does not support, even to stay on the brief's topic.",
   'Answer with one JSON object and nothing else: {"drafts":[{"renderedText":string,"claimIds":[string],"assetIds":[string],"disclosureFlags":["advertising"]}]}.',
 ].join("\n");
@@ -261,6 +263,10 @@ export function marketingA5Messages(
       description: asset.alt?.[scope.locale] ?? null,
       claimIds: asset.claimIds,
       validUntil: asset.validUntil,
+      // What other accounts already posted with it, in this locale (owner decision 2026-11-06).
+      publishedCopies: (asset.publishedCopies ?? [])
+        .filter((copy) => copy.locale === scope.locale)
+        .map((copy) => copy.text),
     })),
   };
   return [
