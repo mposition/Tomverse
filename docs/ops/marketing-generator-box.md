@@ -90,8 +90,9 @@ SEO Agent(GitHub Actions)와 Comments Monitor는 옮기지 않습니다. Comment
      호출이 오히려 늘어납니다.
    - 일반 redeploy를 쓰지 않습니다. 이전 배포의 실행 명령을 그대로 복사하므로 다음 cron이 옛 명령으로 돕니다.
    - `railway deployment list --json`에서 활성 배포의 `meta.serviceManifest.deploy.startCommand`를 확인합니다.
-   - `.railway/agent-runners.ts`의 값은 dev와 staging이 쓰므로 그대로 둡니다. production은 의도적으로 다르며, production에
-     `railway:agents:apply`를 하면 옛 명령으로 돌아갑니다. plan에 이 차이가 보이면 apply 후 이 1번을 다시 합니다.
+   - `.railway/agent-runners.ts`도 production에는 이 no-op 명령을 적습니다(`MARKETING_GENERATOR_PRODUCTION_NOOP_START`,
+     2026-11-07). dev와 staging은 실제 생성기 명령 그대로입니다. 그래서 production `railway:agents:plan`에
+     Marketing Generator의 실행 명령 차이가 나오지 않아야 하고, 나오면 apply하지 말고 그 차이부터 봅니다.
 2. 박스에서 한 번 돌립니다.
 
    ```bash
@@ -119,7 +120,8 @@ systemctl --user disable --now tomverse-marketing-generator.timer
 
 그다음 Railway production의 실행 명령을
 `node --experimental-strip-types scripts/marketing-generator-service.mjs`로 되돌리고 전환 1번처럼 소스에서 새로
-배포합니다. Railway 설정만 바꾸면 되고 코드 변경은 필요 없습니다.
+배포합니다. 같은 때에 `.railway/agent-runners.ts`의 `marketing_generator`에서 production `startCommandByEnvironment`를
+지우는 PR도 냅니다. 그러지 않으면 다음 production apply가 no-op 명령으로 다시 바꿉니다.
 
 ## 코드 갱신
 
