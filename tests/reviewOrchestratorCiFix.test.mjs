@@ -8,12 +8,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import {
+  CI_FIX_ADMISSION_CORE_URL,
+  CI_FIX_ADMISSION_MANIFEST_PATH,
   CI_FIX_AGAIN_LABEL,
   CI_FIX_ANSWER_CHARS,
   CI_FIX_BRANCH_NAME,
@@ -1091,21 +1094,70 @@ function admissionRepo(tree, manifest = manifestFor(tree)) {
   return { parent, root, head: sh(root, "rev-parse", "HEAD"), path: join(root, MARKETING_ADMISSION_CODE_MANIFEST_PATH) };
 }
 
-test("the admission manifest is regenerated when only its files' bytes changed", () => {
+const ORCHESTRATOR = fileURLToPath(new URL("../tools/review-orchestrator/", import.meta.url));
+/** A file's static import and export-from specifiers; a dynamic import() is not one. */
+const staticSpecifiers = (source) => [...source.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm)]
+  .map((match) => match[1] ?? match[2]);
+
+test("the review orchestrator imports nothing outside its directory statically, as the server's checkout holds only it", () => {
+  // The server's checkout is sparse (tools/review-orchestrator). On 2026-11-07 a
+  // static import of scripts/ from lib/ci-fix.mjs stopped the review server itself.
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules") walk(path);
+      } else if (/\.m?js$/.test(entry.name)) files.push(path);
+    }
+  };
+  walk(ORCHESTRATOR);
+  assert.ok(files.length > 10);
+  const outside = files.flatMap((file) => staticSpecifiers(readFileSync(file, "utf8"))
+    .filter((specifier) => specifier.startsWith(".") && relative(ORCHESTRATOR, resolve(dirname(file), specifier)).startsWith(".."))
+    .map((specifier) => `${relative(ORCHESTRATOR, file)} -> ${specifier}`));
+  assert.deepEqual(outside, []);
+  // The check sees the import that did it.
+  assert.deepEqual(staticSpecifiers('import { x } from "./a.mjs";\nimport {\n  y,\n} from "../../../scripts/b.mjs";\nconst c = await import("../c.mjs");\n'),
+    ["./a.mjs", "../../../scripts/b.mjs"]);
+});
+
+test("on a checkout holding only the orchestrator, every entry loads and regeneration says why it cannot run", () => {
+  assert.equal(CI_FIX_ADMISSION_MANIFEST_PATH, MARKETING_ADMISSION_CODE_MANIFEST_PATH);
+  assert.ok(existsSync(fileURLToPath(CI_FIX_ADMISSION_CORE_URL)), "in a whole checkout the code is found");
+  const root = mkdtempSync(join(tmpdir(), "sparse-orchestrator-"));
+  try {
+    const copy = join(root, "tools", "review-orchestrator");
+    cpSync(ORCHESTRATOR, copy, { recursive: true, filter: (source) => !source.split(/[\\/]/).includes("node_modules") });
+    const base = pathToFileURL(`${copy}/`).href;
+    const script = [
+      `for (const name of ["review-orchestrator", "pr-ci-auto-fix", "pr-ci-auto-fix-sender", "review-status-sender"]) await import(new URL(\`bin/\${name}.mjs\`, ${JSON.stringify(base)}));`,
+      `const { regenerateAdmissionManifest } = await import(new URL("lib/ci-fix.mjs", ${JSON.stringify(base)}));`,
+      `console.log(await regenerateAdmissionManifest(process.cwd(), "HEAD"));`,
+    ].join("\n");
+    const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: root, encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout.trim(), "core_unavailable");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the admission manifest is regenerated when only its files' bytes changed", async () => {
   const stale = admissionRepo(admissionTree("export const rule = 2;\n"), manifestFor(admissionTree()));
   const edited = admissionRepo(admissionTree());
   try {
-    assert.equal(regenerateAdmissionManifest(stale.root, stale.head), "regenerated");
+    assert.equal(await regenerateAdmissionManifest(stale.root, stale.head), "regenerated");
     assert.equal(readFileSync(stale.path, "utf8"), manifestFor(admissionTree("export const rule = 2;\n")), "what the generator writes, to the byte");
 
     // The model's edit counts as bytes too; its hand-written manifest does not count at all.
     writeFileSync(join(edited.root, "lib", "helper.ts"), "export const rule = 3;\n");
     writeFileSync(edited.path, "{}\n");
-    assert.equal(regenerateAdmissionManifest(edited.root, edited.head), "regenerated");
+    assert.equal(await regenerateAdmissionManifest(edited.root, edited.head), "regenerated");
     assert.equal(readFileSync(edited.path, "utf8"), manifestFor(admissionTree("export const rule = 3;\n")));
     writeFileSync(join(edited.root, "lib", "helper.ts"), "export const rule = 1;\n");
     writeFileSync(edited.path, "{}\n");
-    assert.equal(regenerateAdmissionManifest(edited.root, edited.head), "current");
+    assert.equal(await regenerateAdmissionManifest(edited.root, edited.head), "current");
     assert.equal(sh(edited.root, "status", "--short"), "", "back to the head's manifest");
   } finally {
     rmSync(stale.parent, { recursive: true, force: true });
@@ -1113,7 +1165,7 @@ test("the admission manifest is regenerated when only its files' bytes changed",
   }
 });
 
-test("the admission manifest is left for a person when what decides a post changes", () => {
+test("the admission manifest is left for a person when what decides a post changes", async () => {
   const cases = [
     ["paths_changed", "a file enters the list", (r) => {
       writeFileSync(join(r.root, "lib", "extra.ts"), "export {};\n");
@@ -1132,7 +1184,7 @@ test("the admission manifest is left for a person when what decides a post chang
     try {
       const before = readFileSync(r.path, "utf8");
       change(r);
-      assert.equal(regenerateAdmissionManifest(r.root, r.head), outcome, what);
+      assert.equal(await regenerateAdmissionManifest(r.root, r.head), outcome, what);
       assert.equal(readFileSync(r.path, "utf8"), before, what);
     } finally {
       rmSync(r.parent, { recursive: true, force: true });
@@ -1147,7 +1199,7 @@ test("the admission manifest is left for a person when what decides a post chang
     writeFileSync(join(named.parent, "secret.ts"), "credential\n");
     sh(named.root, "add", "-A");
     sh(named.root, "commit", "-q", "-m", "names it");
-    assert.equal(regenerateAdmissionManifest(named.root, sh(named.root, "rev-parse", "HEAD")), "paths_changed");
+    assert.equal(await regenerateAdmissionManifest(named.root, sh(named.root, "rev-parse", "HEAD")), "paths_changed");
   } finally {
     rmSync(named.parent, { recursive: true, force: true });
   }
@@ -1161,7 +1213,7 @@ test("the admission manifest is left for a person when what decides a post chang
   ]) {
     const r = admissionRepo(admissionTree(), manifest);
     try {
-      assert.equal(regenerateAdmissionManifest(r.root, r.head), outcome);
+      assert.equal(await regenerateAdmissionManifest(r.root, r.head), outcome);
     } finally {
       rmSync(r.parent, { recursive: true, force: true });
     }
