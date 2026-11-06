@@ -140,3 +140,21 @@ export function chooseAmuxV22WorkerRoute(input: {
   });
   return candidates[0] ?? null;
 }
+
+/** A Task resumed after its owner question waits for the worker that asked --
+ * busy, offline or out of quota alike -- while the approved routes still name
+ * that worker for the Task's current grade. After a grade escalation that
+ * worker no longer serves the Task, so every route the claim allows competes
+ * and the answer reaches whichever worker takes it. */
+export function amuxV22ResumeRoutes<T extends { workerName: string }>(input: {
+  resumeWorker: string | null;
+  approvedRoutes: readonly { workerName: string }[];
+  routes: readonly T[];
+  workerServesGrade: (workerName: string) => boolean;
+}): readonly T[] {
+  const worker = input.resumeWorker;
+  if (worker === null || !input.workerServesGrade(worker) ||
+      !input.approvedRoutes.some((route) => route.workerName === worker))
+    return input.routes;
+  return input.routes.filter((route) => route.workerName === worker);
+}

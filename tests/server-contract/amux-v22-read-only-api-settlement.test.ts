@@ -425,6 +425,8 @@ test("v52 contract touch discards the ordinary grade and binds one frontier rece
     originalReceiptDigest: "a".repeat(64), newReceipt: null,
     classificationFailure: true,
   });
+  // The frontier rerun starts over and still needs the owner's answer.
+  assert.equal(world.questionAnswerClears, 0);
 });
 
 test("v52 settlement blocks a contract publish file omitted from the runner inventory", async () => {
@@ -729,6 +731,8 @@ test("v52 ordinary paths preserve the normal successful destination", async () =
   assert.equal(result.settled, true);
   assert.equal(world.taskUpdateData?.status, "review");
   assert.equal(world.gradeEscalationAudits.length, 0);
+  // A settlement at the same grade spends a resumed run's answer.
+  assert.equal(world.questionAnswerClears, 1);
 });
 
 test("v52 contract touch blocks when a new frontier price is unavailable", async () => {

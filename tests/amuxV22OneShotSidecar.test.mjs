@@ -698,6 +698,9 @@ test("Ubuntu runs one synthetic CLI process and replays its durable result",
         stateDir, run: (input) => runAmuxV22OneShot(input, {
           ...config, binaryPath, worktreePath: root, homePath: root,
           claudeConfigDir: root,
+        }, {
+          // The temp worktree is not a git checkout; base sync has its own tests.
+          syncBase: async () => ({ ok: true, baseSha: "d".repeat(40) }),
         }) });
       const execute = { op: "execute", ...request, role: "review" };
       assert.equal((await handler(execute)).kind, "in_progress");
@@ -930,4 +933,35 @@ test("an implement attempt is checked out on its publication base before the CLI
     spawnChild: (...args) => { order.push("spawn"); return fake.spawnChild(...args); },
   });
   assert.deepEqual(order.slice(0, 3), ["sync", "baseline", "spawn"]);
+});
+
+test("an attempt without a publication base starts on develop's current head", async () => {
+  assert.equal(Object.hasOwn(request, "baseSha"), false);
+  for (const role of ["implement", "investigate"]) {
+    let spawned = 0;
+    const failed = await runAmuxV22OneShot({ ...request, role }, config, {
+      syntheticPlatform: true,
+      syncBase: async (path, sha) => {
+        assert.equal(path, config.worktreePath);
+        assert.equal(sha, null);
+        return { ok: false, reason: "develop_unavailable" };
+      },
+      spawnChild: () => { spawned += 1; throw new Error("must not spawn"); },
+    });
+    assert.equal(failed.kind, "failed");
+    assert.equal(failed.cliStarted, false);
+    assert.equal(failed.failure, "base_sync_develop_unavailable");
+    assert.equal(spawned, 0);
+  }
+
+  const tip = "d".repeat(40);
+  const order = [];
+  const fake = fakeSpawn(JSON.stringify(usage));
+  await runAmuxV22OneShot(request, config, {
+    syntheticPlatform: true,
+    syncBase: async (_path, sha) => { order.push(`sync:${sha}`); return { ok: true, baseSha: tip }; },
+    captureBaseline: async () => { order.push("baseline"); return { ok: true, baseSha: tip }; },
+    spawnChild: (...args) => { order.push("spawn"); return fake.spawnChild(...args); },
+  });
+  assert.deepEqual(order.slice(0, 3), ["sync:null", "baseline", "spawn"]);
 });
