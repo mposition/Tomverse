@@ -22,7 +22,9 @@ test("one-click release lives on the idea detail and keeps an unknown write read
 test("the idea route picks only the owner's holds and releases each through the canonical writer", () => {
   const route = read("app/api/admin/amux/ideas/analysis-reservations/route.ts");
   assert.match(route, /const cancelSchema = z\.object\(\{ ideaId: id, confirmedUnused: z\.literal\(true\) \}\)\.strict\(\);/);
-  assert.match(route, /where: \{ preview: \{ ideaId, confirmedByUserId: ownerId \} \}/);
+  assert.match(route, /const owned = \{ ideaId, confirmedByUserId: ownerId \};/);
+  // Candidates are filtered in the query, so closed holds never fill the bound.
+  assert.match(route, /cliUsageEvents: \{ none: \{\} \},\s*preview: \{ \.\.\.owned, consumedAt: null, outcomeUnknownAt: null,/);
   assert.match(route, /idea\.actorUserId !== ownerId/);
   assert.match(route, /take: IDEA_HOLD_LIMIT/);
   assert.match(route, /commitAmuxIdeaAnalysisUnusedReservationCancellation\(tx, \{\s*session, request, holdId: candidate\.id, expectedPreviewId: candidate\.previewId,/);

@@ -73,7 +73,18 @@ const tx = {
     holds.some((hold) => hold.previewId === where.id) ? { ideaId: "synthetic-idea",
       confirmedByUserId: "synthetic-owner", idea: { actorUserId: ideaOwner } } : null },
   amuxIdeaSubmission: { findUnique: async () => ({ actorUserId: ideaOwner }) },
-  amuxIdeaAnalysisBudgetHold: { findMany: async (query: unknown) => { holdReads.push(query); return holds; } },
+  // Applies the two filters the route asks for: unused candidates, or any open hold.
+  amuxIdeaAnalysisBudgetHold: {
+    findMany: async (query: { where: { status?: string; closedAt?: null }; take?: number }) => {
+      holdReads.push(query);
+      const rows = holds.filter((hold) => query.where.status === "reserved"
+        ? hold.status === "reserved" && hold.closedAt === null && hold.dispatchedAt === null &&
+          hold._count.cliUsageEvents === 0 && hold.preview.consumedAt === null && hold.preview.outcomeUnknownAt === null
+        : query.where.closedAt === null ? hold.closedAt === null : true);
+      return rows.slice(0, query.take ?? rows.length);
+    },
+    count: async () => holds.filter((hold) => hold.status === "released").length,
+  },
 };
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   ...tx, $transaction: async (work: (db: typeof tx) => Promise<unknown>) => work(tx),
@@ -120,8 +131,18 @@ test("the idea read offers only holds the writer would accept, else says why", a
   const first = await view();
   assert.deepEqual(first.releasable, [{ id: "hold-a", reservedMicroUsd: "10560000" }]);
   assert.equal(first.blocked, null);
-  assert.deepEqual((holdReads[0] as { where: unknown }).where,
-    { preview: { ideaId: "synthetic-idea", confirmedByUserId: "synthetic-owner" } });
+  const where = (holdReads[0] as { where: Record<string, unknown> }).where;
+  assert.equal(where.status, "reserved");
+  assert.equal(where.closedAt, null);
+  assert.deepEqual(where.cliUsageEvents, { none: {} });
+  assert.deepEqual(where.preview, { ideaId: "synthetic-idea", confirmedByUserId: "synthetic-owner",
+    consumedAt: null, outcomeUnknownAt: null, state: { in: ["confirmed", "expired", "owner_rejected"] } });
+  // Closed holds never fill the bound: the 26th, unused hold is still offered.
+  holds = [...Array.from({ length: 25 }, (_, index) => newHold(`old-${index}`, { status: "released",
+    closedAt: new Date(), settledMicroUsd: BigInt(0) })), newHold("hold-late")];
+  const late = await view();
+  assert.deepEqual(late.releasable, [{ id: "hold-late", reservedMicroUsd: "10560000" }]);
+  assert.equal(late.releasedCount, 25);
   for (const changes of [{ status: "in_flight" }, { dispatchedAt: new Date() },
     { _count: { cliUsageEvents: 1 } }, { namespace: "agent/other" }] as Array<Partial<Hold>>) {
     holds = [newHold("hold-a", changes)];
@@ -166,7 +187,7 @@ test("a hold claimed meanwhile is skipped; a failure after a commit is an unknow
   holds = [newHold("hold-a"), newHold("hold-b")];
   // The writer sees hold-a claimed under its lock although the read offered it.
   const { findMany } = tx.amuxIdeaAnalysisBudgetHold;
-  tx.amuxIdeaAnalysisBudgetHold.findMany = async (query: unknown) => {
+  tx.amuxIdeaAnalysisBudgetHold.findMany = async (query: Parameters<typeof findMany>[0]) => {
     const offered = structuredClone(await findMany(query));
     holds[0]!.status = "in_flight";
     return offered;
@@ -177,6 +198,11 @@ test("a hold claimed meanwhile is skipped; a failure after a commit is an unknow
     const body = await response.json();
     assert.deepEqual(body.released.map((row: { holdId: string }) => row.holdId), ["hold-b"]);
     assert.equal(body.skipped, 1);
+    // Every candidate claimed meanwhile: nothing released, and the reason comes from a fresh read.
+    holds = [newHold("hold-a")];
+    const none = await route.DELETE(request());
+    assert.equal(none.status, 409);
+    assert.equal((await none.json()).blocked, "in_use");
   } finally { tx.amuxIdeaAnalysisBudgetHold.findMany = findMany; }
 
   holds = [newHold("hold-a"), newHold("hold-b")];

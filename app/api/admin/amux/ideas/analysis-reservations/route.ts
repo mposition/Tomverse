@@ -50,35 +50,47 @@ function cancellable(hold: HoldFacts, preview: PreviewFacts): boolean {
     ["confirmed", "expired", "owner_rejected"].includes(preview.state);
 }
 
-/** Every hold of one owned idea, oldest first; null when the idea is not the owner's. */
-async function ideaHolds(ideaId: string, ownerId: string): Promise<IdeaHold[] | null> {
+const PREVIEW_FACTS = { select: { state: true, consumedAt: true, outcomeUnknownAt: true } } as const;
+
+/** One owned idea's releasable holds, oldest first, else why none can be
+ * released; null when the idea is not the owner's. Candidates are filtered by
+ * the writer's preconditions in the query itself, so closed holds never fill
+ * the bound and hide a later unused one. */
+async function ideaHoldView(ideaId: string, ownerId: string) {
   const idea = await prisma.amuxIdeaSubmission.findUnique({
     where: { id: ideaId }, select: { actorUserId: true },
   });
   if (!idea || idea.actorUserId !== ownerId) return null;
-  return prisma.amuxIdeaAnalysisBudgetHold.findMany({
-    where: { preview: { ideaId, confirmedByUserId: ownerId } },
+  const owned = { ideaId, confirmedByUserId: ownerId };
+  const candidates: IdeaHold[] = (await prisma.amuxIdeaAnalysisBudgetHold.findMany({
+    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "reserved", dispatchedAt: null,
+      closedAt: null, settledMicroUsd: null, reservedMicroUsd: { gt: BigInt(0) },
+      cliUsageEvents: { none: {} },
+      preview: { ...owned, consumedAt: null, outcomeUnknownAt: null,
+        state: { in: ["confirmed", "expired", "owner_rejected"] } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: IDEA_HOLD_LIMIT,
     select: { id: true, previewId: true, namespace: true, status: true,
       reservedMicroUsd: true, dispatchedAt: true, closedAt: true, settledMicroUsd: true,
-      _count: { select: { cliUsageEvents: true } },
-      preview: { select: { state: true, consumedAt: true, outcomeUnknownAt: true } } },
+      _count: { select: { cliUsageEvents: true } }, preview: PREVIEW_FACTS },
+  })).filter((hold) => cancellable(hold, hold.preview));
+  let blocked: "none" | "in_use" | "outcome_unknown" | null = null;
+  if (candidates.length === 0) {
+    // Any open hold left keeps its reservation; only its own resolution settles it.
+    const open = await prisma.amuxIdeaAnalysisBudgetHold.findMany({
+      where: { closedAt: null, preview: owned }, take: IDEA_HOLD_LIMIT,
+      select: { status: true, preview: PREVIEW_FACTS },
+    });
+    blocked = open.some((hold) => hold.preview.outcomeUnknownAt !== null ||
+      hold.preview.consumedAt !== null || hold.status === "outcome_unknown") ? "outcome_unknown"
+      : open.length > 0 ? "in_use" : "none";
+  }
+  const releasedCount = await prisma.amuxIdeaAnalysisBudgetHold.count({
+    where: { status: "released", preview: owned },
   });
-}
-
-/** What the idea detail shows: the holds it can release, else why none can be. */
-function ideaHoldView(holds: IdeaHold[]) {
-  const releasable = holds.filter((hold) => cancellable(hold, hold.preview));
-  const open = holds.filter((hold) => hold.closedAt === null && !releasable.includes(hold));
-  return {
-    releasable: releasable.map((hold) => ({ id: hold.id,
-      reservedMicroUsd: hold.reservedMicroUsd.toString() })),
-    releasedCount: holds.filter((hold) => hold.status === "released").length,
-    // A claimed or unknown hold keeps its reservation; only its own resolution settles it.
-    blocked: releasable.length > 0 ? null : open.some((hold) => hold.preview.outcomeUnknownAt !== null ||
-      hold.preview.consumedAt !== null || hold.status === "outcome_unknown") ? "outcome_unknown" as const
-      : open.length > 0 ? "in_use" as const : "none" as const,
-  };
+  return { candidates, view: {
+    releasable: candidates.map((hold) => ({ id: hold.id, reservedMicroUsd: hold.reservedMicroUsd.toString() })),
+    releasedCount, blocked,
+  } };
 }
 
 async function owner() {
@@ -202,10 +214,10 @@ export async function GET(request: Request): Promise<Response> {
     if (!parsed.success) return NextResponse.json({ error: "Invalid request." },
       { status: 400, headers: noStore });
     if (key[0] === "ideaId") {
-      const holds = await ideaHolds(parsed.data, session.user!.id!);
-      if (!holds) return NextResponse.json({ error: "Not found." },
+      const found = await ideaHoldView(parsed.data, session.user!.id!);
+      if (!found) return NextResponse.json({ error: "Not found." },
         { status: 404, headers: noStore });
-      return NextResponse.json({ state: "idea", ideaId: parsed.data, ...ideaHoldView(holds),
+      return NextResponse.json({ state: "idea", ideaId: parsed.data, ...found.view,
         retryWrite: false }, { headers: noStore });
     }
     const hold = await prisma.amuxIdeaAnalysisBudgetHold.findUnique({
@@ -271,16 +283,15 @@ export async function DELETE(request: Request): Promise<Response> {
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v4-analysis-cancel-write", { minute: 3, day: 20 });
     const body = await readLimitedJson(request, 1_024, cancelSchema);
-    const holds = await ideaHolds(body.ideaId, session.user!.id!);
-    if (!holds) throw new AmuxIdeaAnalysisCancellationError("not_found");
-    const view = ideaHoldView(holds);
-    if (view.releasable.length === 0) {
-      return NextResponse.json({ error: "not_cancellable", blocked: view.blocked,
+    const found = await ideaHoldView(body.ideaId, session.user!.id!);
+    if (!found) throw new AmuxIdeaAnalysisCancellationError("not_found");
+    if (found.candidates.length === 0) {
+      return NextResponse.json({ error: "not_cancellable", blocked: found.view.blocked,
         retryWrite: false, modelCallStarted: false }, { status: 409, headers: noStore });
     }
     const released: Array<{ holdId: string; releasedMicroUsd: string; auditId: string }> = [];
     let skipped = 0;
-    for (const candidate of holds.filter((hold) => view.releasable.some((row) => row.id === hold.id))) {
+    for (const candidate of found.candidates) {
       try {
         released.push(await prisma.$transaction(async (tx) => {
           const preview = await tx.amuxIdeaTransferPreview.findUnique({
@@ -308,7 +319,9 @@ export async function DELETE(request: Request): Promise<Response> {
       }
     }
     if (released.length === 0) {
-      return NextResponse.json({ error: "not_cancellable", blocked: null,
+      // Every candidate was claimed meanwhile; say why from a fresh read.
+      const after = await ideaHoldView(body.ideaId, session.user!.id!);
+      return NextResponse.json({ error: "not_cancellable", blocked: after?.view.blocked ?? null,
         retryWrite: false, modelCallStarted: false }, { status: 409, headers: noStore });
     }
     return NextResponse.json({ ideaId: body.ideaId, released, skipped, modelCallStarted: false },
