@@ -98,8 +98,12 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
     policy: "docs/policy/billing-finance-ops.md",
     recordHref: "/admin/agent-digests?tab=billing-finance-ops",
   },
-  // Approved but not built: a policy and no record screen yet.
-  { id: "trust", icon: "🛡️", policy: "docs/policy/trust-safety-compliance-agent.md", recordHref: null },
+  {
+    id: "trust",
+    icon: "🛡️",
+    policy: "docs/policy/trust-safety-compliance-agent.md",
+    recordHref: "/admin/agent-digests?tab=trust-safety",
+  },
   {
     id: "research",
     icon: "🔭",
