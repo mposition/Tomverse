@@ -508,6 +508,18 @@ export const PROTECTED_TABLES = [
     writers: ["lib/amux/cliUsageLedgerStore.ts", "lib/amux/cliUsageRetention.ts"],
     contract: "docs/policy/development-agent-orchestration.md 버전 40",
   },
+  {
+    table: "TrustSafetyObserverConfig",
+    delegate: "trustSafetyObserverConfig",
+    writers: ["lib/trustSafetyActivationStore.ts"],
+    contract: "docs/policy/trust-safety-compliance-agent.md §5.1",
+  },
+  {
+    table: "TrustSafetyObserverRun",
+    delegate: "trustSafetyObserverRun",
+    writers: ["lib/trustSafetyObserverRun.ts"],
+    contract: "docs/policy/trust-safety-compliance-agent.md §5.1",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -711,8 +723,15 @@ export const DELEGATE_NAME_ALLOWLIST = [
 ];
 
 /**
- * Files whose literals name a protected table beside a write verb and do not
- * write it. Counts are exact: a new statement in the file changes one of them.
+ * Files whose literals name a protected table beside a write verb, reviewed
+ * one by one. Most of them write nothing: a metadata declaration, a checker
+ * that reads source, a migration that creates the table. A few are the
+ * table's own registered writer reaching it with raw SQL rather than the
+ * Prisma delegate, which rule 4 cannot tell apart from any other file -- it
+ * matches text, not call graphs -- so the writer needs an entry here as well
+ * as its `writers` line above. Each reason says which of the two it is.
+ *
+ * Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
   {
@@ -3452,6 +3471,41 @@ export const RAW_SQL_ALLOWLIST = [
     path: "scripts/check-enum-constraints.mjs", table: "PromptRefinerProductOperationalGuard",
     tableMentions: 2, writeVerbs: 20,
     reason: "Two closed constraint-registry identifiers link the latch state and reason checks to their runtime lists. This checker reads source and migration SQL, holds no database client and executes no SQL.",
+  },
+  {
+    path: "lib/trustSafetyObserverRun.ts",
+    table: "TrustSafetyObserverRun",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason: "The designated writer of the run row (docs/policy/trust-safety-compliance-agent.md §5.1): one tagged $queryRaw INSERT with every value bound, on a transaction the wrapper has already given a statement timeout and a deadline. It only inserts -- the table's triggers refuse UPDATE and DELETE -- and it writes no column the database does not stamp itself except the relayed observedAt.",
+  },
+  {
+    path: "prisma/migrations/20261104060000_trust_safety_observer_run/migration.sql",
+    table: "TrustSafetyObserverRun",
+    tableMentions: 6,
+    writeVerbs: 9,
+    reason: "The migration creates the append-only run table with its CHECK constraints and the triggers that stamp recordedAt and deadlineAt from the database clock and refuse UPDATE and DELETE. It seeds no row.",
+  },
+  {
+    path: "prisma/migrations/20261104070000_trust_safety_observer_config/migration.sql",
+    table: "TrustSafetyObserverConfig",
+    tableMentions: 8,
+    writeVerbs: 9,
+    reason: "The migration creates the single-row activation table with its CHECK constraints and the triggers that stamp the deadline and refuse a version that does not move forward, a mode that does not change, and DELETE. It seeds no row, so the absent row is what means off.",
+  },
+  {
+    path: "scripts/check-trust-safety-write-boundary.mjs",
+    table: "TrustSafetyObserverConfig",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "The §5.6 boundary checker names the table in its own rules so that a write reached from anywhere but E1, E2 and E3 is a finding. It opens no database connection and runs no SQL.",
+  },
+  {
+    path: "scripts/check-trust-safety-write-boundary.mjs",
+    table: "TrustSafetyObserverRun",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "The §5.6 boundary checker names the table in its own rules so that a write reached from anywhere but E1, E2 and E3 is a finding. It opens no database connection and runs no SQL.",
   },
 ];
 

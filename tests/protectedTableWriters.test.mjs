@@ -175,6 +175,46 @@ test("the content-free usage ledger has only its record and retention writers", 
     "await tx.amuxCliUsageEvent.findUnique({ where })"), []);
 });
 
+test("the trust-safety observer's two tables have one writer module each", () => {
+  // docs/policy/trust-safety-compliance-agent.md §5.1: each of the two tables
+  // has one writer and both are registered here, so a direct write from any
+  // other module is refused repository-wide. The §5.6 boundary checker proves
+  // something narrower -- that E1, E2 and E3 reach nothing else -- and would
+  // not see a fourth module that wrote the row without going through them.
+  const expected = [
+    ["TrustSafetyObserverConfig", "trustSafetyObserverConfig", "lib/trustSafetyActivationStore.ts"],
+    ["TrustSafetyObserverRun", "trustSafetyObserverRun", "lib/trustSafetyObserverRun.ts"],
+  ];
+  assert.deepEqual(
+    PROTECTED_TABLES.filter(({ table }) =>
+      expected.some(([expectedTable]) => expectedTable === table)
+    ),
+    expected.map(([table, delegate, writer]) => ({
+      table,
+      delegate,
+      writers: [writer],
+      contract: "docs/policy/trust-safety-compliance-agent.md §5.1",
+    }))
+  );
+
+  for (const [, delegate, writer] of expected) {
+    assertOneFinding(
+      `lib/foreign-${delegate}.ts`,
+      `await prisma.${delegate}.create({ data })`,
+      "delegate-write"
+    );
+    assertOneFinding(
+      `lib/escaped-${delegate}.ts`,
+      `const row = prisma.${delegate}; await row.update({ where, data })`,
+      "delegate-write"
+    );
+    assert.deepEqual(one(writer, `await tx.${delegate}.create({ data })`), []);
+    assert.deepEqual(
+      one(`lib/reader-${delegate}.ts`, `await prisma.${delegate}.findUnique({ where })`),
+      []
+    );
+  }
+});
 test("a delegate reached by name at runtime is a finding", () => {
   assertOneFinding(
     "lib/named.ts",
