@@ -7,8 +7,8 @@
  * What it decides, and nothing more:
  *  - which completed check runs on develop's head are a code failure a coding
  *    agent can fix (checks that only compare branches or deployments are not);
- *  - that a head is red twice in a row before anything is submitted, so a
- *    failure the next merge already fixes costs nothing;
+ *  - that a head is red on two sightings at least ten minutes apart before
+ *    anything is submitted, so a failure the next merge fixes costs nothing;
  *  - one repair in flight at a time, and a daily ceiling on new ones.
  * The coding agent reads the failure and decides the fix; nothing here
  * classifies a failure beyond its check name and conclusion.
@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 
 export const DEVELOP_CI_REPAIR_MODE_SETTING_KEY = "developCiRepair.mode";
-/** {redHeadSha, redSeenAt, day, submitted, lastIdeaId, lastHeadSha}, moved only by the pass. */
+/** {redHeadSha, redSeenAt}: the last red sighting, moved only by the pass. */
 export const DEVELOP_CI_REPAIR_STATE_SETTING_KEY = "developCiRepair.state";
 export const DEVELOP_CI_REPAIR_SYSTEM_ACTOR = "develop-ci-repair" as const;
 export const DEVELOP_CI_REPAIR_IDEA_ACTION = "develop_ci_repair.idea_submitted" as const;
@@ -58,74 +58,84 @@ export const parseDevelopCiRepairMode = (value: string | null | undefined): Deve
     ? { mode: "on", ownerUserId: value.slice(3) }
     : { mode: "off" };
 
-export type DevelopCiRepairState = {
-  /** The red head seen on the previous pass, and when. */
-  redHeadSha: string | null;
-  redSeenAt: string | null;
-  /** UTC day the count below belongs to. */
-  day: string | null;
-  submitted: number;
-  lastIdeaId: string | null;
-  lastHeadSha: string | null;
-};
+/**
+ * The only thing the pass keeps between runs: which red head it saw last, and
+ * when. Losing it costs one more sighting, never a limit. The limits are read
+ * from what the submission wrote in its own transaction (the idea row by its
+ * request id, and its system audit entry).
+ */
+export type DevelopCiRepairState = { redHeadSha: string | null; redSeenAt: string | null };
 
-export const EMPTY_DEVELOP_CI_REPAIR_STATE: DevelopCiRepairState = {
-  redHeadSha: null, redSeenAt: null, day: null, submitted: 0, lastIdeaId: null, lastHeadSha: null,
-};
+export const EMPTY_DEVELOP_CI_REPAIR_STATE: DevelopCiRepairState = { redHeadSha: null, redSeenAt: null };
 
 const text = (value: unknown) => (typeof value === "string" && value.length > 0 ? value : null);
 
 export const readDevelopCiRepairState = (value: string | null | undefined): DevelopCiRepairState => {
   try {
     const parsed = JSON.parse(value ?? "") as Record<string, unknown>;
-    return {
-      redHeadSha: text(parsed.redHeadSha),
-      redSeenAt: text(parsed.redSeenAt),
-      day: text(parsed.day),
-      submitted: typeof parsed.submitted === "number" && parsed.submitted >= 0 ? parsed.submitted : 0,
-      lastIdeaId: text(parsed.lastIdeaId),
-      lastHeadSha: text(parsed.lastHeadSha),
-    };
+    const redSeenAt = text(parsed.redSeenAt);
+    const redHeadSha = text(parsed.redHeadSha);
+    if (!redHeadSha || !redSeenAt || Number.isNaN(Date.parse(redSeenAt))) return EMPTY_DEVELOP_CI_REPAIR_STATE;
+    return { redHeadSha, redSeenAt };
   } catch {
     return EMPTY_DEVELOP_CI_REPAIR_STATE;
   }
 };
 
+/**
+ * Between two sightings of one red head: under the cron's fifteen minutes so a
+ * late tick still counts, long enough that an immediate retry or a second
+ * caller is not a second sighting.
+ */
+export const DEVELOP_CI_REPAIR_MIN_SIGHTING_GAP_MS = 10 * 60_000;
+
+export type DevelopCiRepairFacts = {
+  /** An idea already exists for this head (its request id is per head). */
+  submittedForHead: boolean;
+  /** The newest repair idea still waits, runs or holds an unmerged PR. */
+  repairInFlight: boolean;
+  /** Repair ideas audited since the start of this UTC day. */
+  submittedToday: number;
+};
+
 export type DevelopCiRepairDecision =
-  | { action: "none"; reason: "green" | "first_sighting" | "same_head_already_submitted" | "repair_in_flight" | "daily_limit"; state: DevelopCiRepairState }
+  | {
+      action: "none";
+      reason: "green" | "first_sighting" | "waiting" | "same_head_already_submitted" | "repair_in_flight" | "daily_limit";
+      state: DevelopCiRepairState;
+    }
   | { action: "submit"; headSha: string; checks: DevelopCheckRun[]; state: DevelopCiRepairState };
 
-/**
- * What one pass does with develop's head. `repairInFlight` says whether the
- * last submitted idea is still waiting, running or holding an unmerged PR.
- * The returned state is what the pass stores; a submit stores it only after the
- * idea exists (the service adds lastIdeaId and the count).
- */
+/** What one pass does with develop's head. The returned state is what it stores. */
 export const decideDevelopCiRepair = (input: {
   state: DevelopCiRepairState;
   headSha: string;
   checkRuns: readonly DevelopCheckRun[];
-  repairInFlight: boolean;
+  facts: DevelopCiRepairFacts;
   now: Date;
 }): DevelopCiRepairDecision => {
-  const day = input.now.toISOString().slice(0, 10);
-  const counted = input.state.day === day ? input.state : { ...input.state, day, submitted: 0 };
+  const { state, facts } = input;
   const red = redChecksOf(input.checkRuns);
-  if (red.length === 0) {
-    return { action: "none", reason: "green", state: { ...counted, redHeadSha: null, redSeenAt: null } };
-  }
-  if (counted.redHeadSha !== input.headSha) {
+  if (red.length === 0) return { action: "none", reason: "green", state: EMPTY_DEVELOP_CI_REPAIR_STATE };
+  if (state.redHeadSha !== input.headSha || state.redSeenAt === null) {
     return {
       action: "none",
       reason: "first_sighting",
-      state: { ...counted, redHeadSha: input.headSha, redSeenAt: input.now.toISOString() },
+      state: { redHeadSha: input.headSha, redSeenAt: input.now.toISOString() },
     };
   }
-  if (counted.lastHeadSha === input.headSha) return { action: "none", reason: "same_head_already_submitted", state: counted };
-  if (input.repairInFlight) return { action: "none", reason: "repair_in_flight", state: counted };
-  if (counted.submitted >= DEVELOP_CI_REPAIR_PER_DAY) return { action: "none", reason: "daily_limit", state: counted };
-  return { action: "submit", headSha: input.headSha, checks: red, state: counted };
+  if (input.now.getTime() - Date.parse(state.redSeenAt) < DEVELOP_CI_REPAIR_MIN_SIGHTING_GAP_MS) {
+    return { action: "none", reason: "waiting", state };
+  }
+  if (facts.submittedForHead) return { action: "none", reason: "same_head_already_submitted", state };
+  if (facts.repairInFlight) return { action: "none", reason: "repair_in_flight", state };
+  if (facts.submittedToday >= DEVELOP_CI_REPAIR_PER_DAY) return { action: "none", reason: "daily_limit", state };
+  return { action: "submit", headSha: input.headSha, checks: red, state };
 };
+
+/** The start of the UTC day `now` falls in: the daily limit's window. */
+export const developCiRepairDayStart = (now: Date) =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
 /** One idea per red head: a retried pass after a lost answer finds the same row. */
 export const developCiRepairRequestId = (headSha: string) => {

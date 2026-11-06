@@ -45,7 +45,20 @@ type SystemIdea = {
   inspected: Extract<IdeaSubmissionInspection, { ok: true }>;
   /** Identifiers only; never idea text. */
   metadata: Record<string, string | number>;
+  /**
+   * The source's own limits, read again inside the transaction that writes
+   * the idea, after any lock it takes: false refuses the idea and writes nothing.
+   */
+  admit?: (tx: Prisma.TransactionClient) => Promise<boolean>;
 };
+
+/** The source's own limit refused the idea inside its transaction; nothing was written. */
+export class SystemIdeaRefused extends Error {
+  constructor() {
+    super("system_idea_refused");
+    this.name = "SystemIdeaRefused";
+  }
+}
 
 /** Transaction body, for synthetic DB tests; the entry below owns the latch and the keys. */
 export async function commitSystemIdea(
@@ -55,6 +68,7 @@ export async function commitSystemIdea(
   const { ideaId, keys } = input;
   const source = SYSTEM_IDEA_SOURCES[input.source];
   await tx.$executeRaw`SELECT set_config('statement_timeout', ${IDEA_SUBMISSION_STATEMENT_TIMEOUT}, true)`;
+  if (input.admit && !(await input.admit(tx))) throw new SystemIdeaRefused();
   const submittedAt = await databaseNow(tx);
   const { data, sealed } = prepareIdeaSubmissionStorage({ inspected: input.inspected, ideaId, keys, submittedAt });
   await tx.amuxIdeaSubmission.create({ data: { ...data, actorUserId: input.ownerUserId } });

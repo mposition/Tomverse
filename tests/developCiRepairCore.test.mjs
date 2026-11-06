@@ -3,10 +3,12 @@ import test from "node:test";
 
 import {
   DEVELOP_CI_REPAIR_IGNORED_CHECKS,
+  DEVELOP_CI_REPAIR_MIN_SIGHTING_GAP_MS,
   DEVELOP_CI_REPAIR_PER_DAY,
   EMPTY_DEVELOP_CI_REPAIR_STATE,
   decideDevelopCiRepair,
   developCiLogTail,
+  developCiRepairDayStart,
   developCiRepairIdea,
   developCiRepairRequestId,
   parseDevelopCiRepairMode,
@@ -37,38 +39,46 @@ test("only completed code failures count; cancelled runs and branch checks never
   assert.ok(DEVELOP_CI_REPAIR_IGNORED_CHECKS.has("main is in develop's ancestry"));
 });
 
-test("a red head is submitted only on its second sighting", () => {
-  const first = decideDevelopCiRepair({ state: EMPTY_DEVELOP_CI_REPAIR_STATE, headSha: HEAD, checkRuns: red, repairInFlight: false, now: NOW });
+const NONE = { submittedForHead: false, repairInFlight: false, submittedToday: 0 };
+const LATER = new Date(NOW.getTime() + DEVELOP_CI_REPAIR_MIN_SIGHTING_GAP_MS);
+
+test("a red head is submitted only on a second sighting at least the gap later", () => {
+  const first = decideDevelopCiRepair({ state: EMPTY_DEVELOP_CI_REPAIR_STATE, headSha: HEAD, checkRuns: red, facts: NONE, now: NOW });
   assert.equal(first.action, "none");
   assert.equal(first.reason, "first_sighting");
-  assert.equal(first.state.redHeadSha, HEAD);
-  const second = decideDevelopCiRepair({ state: first.state, headSha: HEAD, checkRuns: red, repairInFlight: false, now: NOW });
+  assert.deepEqual(first.state, { redHeadSha: HEAD, redSeenAt: NOW.toISOString() });
+  // An immediate retry or a second caller is not a second sighting.
+  const soon = new Date(NOW.getTime() + DEVELOP_CI_REPAIR_MIN_SIGHTING_GAP_MS - 1);
+  const early = decideDevelopCiRepair({ state: first.state, headSha: HEAD, checkRuns: red, facts: NONE, now: soon });
+  assert.equal(early.reason, "waiting");
+  assert.deepEqual(early.state, first.state);
+  const second = decideDevelopCiRepair({ state: first.state, headSha: HEAD, checkRuns: red, facts: NONE, now: LATER });
   assert.equal(second.action, "submit");
   assert.equal(second.headSha, HEAD);
   assert.deepEqual(second.checks.map((check) => check.id), [2]);
 });
 
 test("a green head clears the sighting, and a new red head starts over", () => {
-  const seen = { ...EMPTY_DEVELOP_CI_REPAIR_STATE, redHeadSha: HEAD, redSeenAt: NOW.toISOString() };
-  const green = decideDevelopCiRepair({ state: seen, headSha: OTHER, checkRuns: [{ id: 1, name: "Build", conclusion: "success" }], repairInFlight: false, now: NOW });
+  const seen = { redHeadSha: HEAD, redSeenAt: NOW.toISOString() };
+  const green = decideDevelopCiRepair({ state: seen, headSha: OTHER, checkRuns: [{ id: 1, name: "Build", conclusion: "success" }], facts: NONE, now: LATER });
   assert.equal(green.reason, "green");
-  assert.equal(green.state.redHeadSha, null);
-  const moved = decideDevelopCiRepair({ state: seen, headSha: OTHER, checkRuns: red, repairInFlight: false, now: NOW });
+  assert.deepEqual(green.state, EMPTY_DEVELOP_CI_REPAIR_STATE);
+  const moved = decideDevelopCiRepair({ state: seen, headSha: OTHER, checkRuns: red, facts: NONE, now: LATER });
   assert.equal(moved.reason, "first_sighting");
   assert.equal(moved.state.redHeadSha, OTHER);
 });
 
 test("one repair at a time, never twice for one head, and a daily ceiling", () => {
-  const seen = { ...EMPTY_DEVELOP_CI_REPAIR_STATE, redHeadSha: HEAD, day: "2026-11-06" };
-  const decide = (state, repairInFlight = false) =>
-    decideDevelopCiRepair({ state, headSha: HEAD, checkRuns: red, repairInFlight, now: NOW });
-  assert.equal(decide(seen, true).reason, "repair_in_flight");
-  assert.equal(decide({ ...seen, lastHeadSha: HEAD }).reason, "same_head_already_submitted");
-  assert.equal(decide({ ...seen, submitted: DEVELOP_CI_REPAIR_PER_DAY }).reason, "daily_limit");
-  // The ceiling is per UTC day.
-  const yesterday = decide({ ...seen, day: "2026-11-05", submitted: DEVELOP_CI_REPAIR_PER_DAY });
-  assert.equal(yesterday.action, "submit");
-  assert.equal(yesterday.state.submitted, 0);
+  const seen = { redHeadSha: HEAD, redSeenAt: NOW.toISOString() };
+  const decide = (facts) => decideDevelopCiRepair({ state: seen, headSha: HEAD, checkRuns: red, facts: { ...NONE, ...facts }, now: LATER });
+  assert.equal(decide({ repairInFlight: true }).reason, "repair_in_flight");
+  assert.equal(decide({ submittedForHead: true }).reason, "same_head_already_submitted");
+  assert.equal(decide({ submittedToday: DEVELOP_CI_REPAIR_PER_DAY }).reason, "daily_limit");
+  assert.equal(decide({ submittedToday: DEVELOP_CI_REPAIR_PER_DAY - 1 }).action, "submit");
+});
+
+test("the daily window starts at the UTC midnight", () => {
+  assert.equal(developCiRepairDayStart(new Date("2026-11-06T23:59:59.000Z")).toISOString(), "2026-11-06T00:00:00.000Z");
 });
 
 test("the request id is a stable UUID per head", () => {
@@ -84,7 +94,8 @@ test("the mode is on only with an owner id, and a broken state reads as empty", 
     assert.deepEqual(parseDevelopCiRepairMode(value), { mode: "off" });
   }
   assert.deepEqual(readDevelopCiRepairState("{not json"), EMPTY_DEVELOP_CI_REPAIR_STATE);
-  assert.deepEqual(readDevelopCiRepairState(JSON.stringify({ submitted: -1, lastIdeaId: 3 })), EMPTY_DEVELOP_CI_REPAIR_STATE);
+  assert.deepEqual(readDevelopCiRepairState(JSON.stringify({ redHeadSha: HEAD, redSeenAt: "not a date" })), EMPTY_DEVELOP_CI_REPAIR_STATE);
+  assert.deepEqual(readDevelopCiRepairState(JSON.stringify({ redHeadSha: HEAD, redSeenAt: NOW.toISOString() })), { redHeadSha: HEAD, redSeenAt: NOW.toISOString() });
 });
 
 test("the log tail drops timestamps and colour codes and keeps the end", () => {

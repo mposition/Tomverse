@@ -12,6 +12,7 @@
  */
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -19,18 +20,23 @@ import { isAdminOwnerAccount } from "@/lib/adminAuth";
 import { AMUX_IDEA_INPUT_MAX_BYTES } from "@/lib/amux/ideaInputCore";
 import { amuxIdeaLaneEnabled, amuxIdeaLaneState } from "@/lib/amux/ideaLaneCore";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
-import { submitSystemIdea } from "@/lib/amux/ideaTraceReportSubmissionService";
+import { SystemIdeaRefused, submitSystemIdea } from "@/lib/amux/ideaTraceReportSubmissionService";
 import {
+  DEVELOP_CI_REPAIR_IDEA_ACTION,
+  DEVELOP_CI_REPAIR_IDEA_TARGET,
   DEVELOP_CI_REPAIR_MAX_JOBS,
   DEVELOP_CI_REPAIR_MODE_SETTING_KEY,
+  DEVELOP_CI_REPAIR_PER_DAY,
   DEVELOP_CI_REPAIR_STATE_SETTING_KEY,
   decideDevelopCiRepair,
+  developCiRepairDayStart,
   developCiLogTail,
   developCiRepairIdea,
   developCiRepairRequestId,
   parseDevelopCiRepairMode,
   readDevelopCiRepairState,
   type DevelopCheckRun,
+  type DevelopCiRepairFacts,
   type DevelopCiRepairMode,
   type DevelopCiRepairState,
 } from "@/lib/developCiRepairCore";
@@ -123,10 +129,12 @@ export const readDevelopJobLogTail = async (
   }
 };
 
-/** Whether the last repair idea still waits, runs or holds an open PR. */
-export const developCiRepairInFlight = async (ideaId: string | null, nowMs: number): Promise<boolean> => {
+type Db = Prisma.TransactionClient | typeof prisma;
+
+/** Whether a repair idea still waits, runs or holds an open PR. */
+export const developCiRepairInFlight = async (ideaId: string | null, nowMs: number, db: Db = prisma): Promise<boolean> => {
   if (!ideaId) return false;
-  const idea = await prisma.amuxIdeaSubmission.findUnique({
+  const idea = await db.amuxIdeaSubmission.findUnique({
     where: { id: ideaId },
     select: {
       state: true,
@@ -152,6 +160,39 @@ export const developCiRepairInFlight = async (ideaId: string | null, nowMs: numb
   return state === null || state.state === "queued" || state.state === "running" || state.state === "pr_open";
 };
 
+/**
+ * The limits, from what a submission writes in its own transaction: the idea
+ * row (its request id is per head) and the system audit entry beside it.
+ */
+export const readDevelopCiRepairFacts = async (headSha: string, now: Date, db: Db = prisma): Promise<DevelopCiRepairFacts> => {
+  const forHead = await db.amuxIdeaSubmission.findUnique({
+    where: { requestId: developCiRepairRequestId(headSha) },
+    select: { id: true },
+  });
+  const submittedToday = await db.adminAuditLog.count({
+    where: { action: DEVELOP_CI_REPAIR_IDEA_ACTION, createdAt: { gte: developCiRepairDayStart(now) } },
+  });
+  const newest = await db.adminAuditLog.findFirst({
+    where: { action: DEVELOP_CI_REPAIR_IDEA_ACTION, targetType: DEVELOP_CI_REPAIR_IDEA_TARGET },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true },
+  });
+  return {
+    submittedForHead: forHead !== null,
+    repairInFlight: await developCiRepairInFlight(newest?.targetId ?? null, now.getTime(), db),
+    submittedToday,
+  };
+};
+
+const admissible = (facts: DevelopCiRepairFacts) =>
+  !facts.submittedForHead && !facts.repairInFlight && facts.submittedToday < DEVELOP_CI_REPAIR_PER_DAY;
+
+/** The in-transaction check: one lock every repair submission takes, then the limits read again. */
+export const developCiRepairAdmit = (headSha: string, now: Date) => async (tx: Prisma.TransactionClient) => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('develop_ci_repair_submit'))`;
+  return admissible(await readDevelopCiRepairFacts(headSha, now, tx));
+};
+
 const writeState = (state: DevelopCiRepairState) => {
   const value = JSON.stringify(state);
   return prisma.appSetting.upsert({
@@ -172,9 +213,15 @@ export type DevelopCiRepairSubmit = (input: {
   headSha: string;
   idea: string;
   checks: number;
+  now: Date;
 }) => Promise<{ ideaId: string }>;
 
-export const submitDevelopCiRepair: DevelopCiRepairSubmit = async ({ ownerUserId, headSha, idea, checks }) => {
+/**
+ * Writes the idea only if the limits still hold inside its transaction, under
+ * one lock every repair submission takes: two passes cannot both pass the
+ * limit, and an idea and its audit entry exist together or not at all.
+ */
+export const submitDevelopCiRepair: DevelopCiRepairSubmit = async ({ ownerUserId, headSha, idea, checks, now }) => {
   const requestId = developCiRepairRequestId(headSha);
   const inspected = inspectAmuxIdeaSubmission(
     JSON.stringify({ version: 1, requestId, input: { version: 1, idea, repositories: [], pullRequests: [] } }),
@@ -185,6 +232,7 @@ export const submitDevelopCiRepair: DevelopCiRepairSubmit = async ({ ownerUserId
     ownerUserId,
     inspected,
     metadata: { headSha, checks },
+    admit: developCiRepairAdmit(headSha, now),
   });
 };
 
@@ -227,13 +275,11 @@ export const runDevelopCiRepairQuietly = async ({
       state,
       headSha: observed.headSha,
       checkRuns: observed.checkRuns,
-      repairInFlight: await developCiRepairInFlight(state.lastIdeaId, now.getTime()),
+      facts: await readDevelopCiRepairFacts(observed.headSha, now),
       now,
     });
-    if (decision.action === "none") {
-      if (JSON.stringify(decision.state) !== JSON.stringify(state)) await writeState(decision.state);
-      return report({ outcome: "none", reason: decision.reason });
-    }
+    if (JSON.stringify(decision.state) !== JSON.stringify(state)) await writeState(decision.state);
+    if (decision.action === "none") return report({ outcome: "none", reason: decision.reason });
     const jobs = decision.checks.slice(0, DEVELOP_CI_REPAIR_MAX_JOBS);
     const tails = await Promise.all(jobs.map((check) => readLogTail(check.id).catch(() => null)));
     const idea = developCiRepairIdea({
@@ -241,14 +287,13 @@ export const runDevelopCiRepairQuietly = async ({
       checks: jobs.map((check, index) => ({ ...check, logTail: tails[index] ?? null })),
       maxBytes: AMUX_IDEA_INPUT_MAX_BYTES,
     });
-    const { ideaId } = await submit({ ownerUserId: owner.id, headSha: decision.headSha, idea, checks: decision.checks.length });
-    await writeState({
-      ...decision.state,
-      submitted: decision.state.submitted + 1,
-      lastIdeaId: ideaId,
-      lastHeadSha: decision.headSha,
-    });
-    return report({ outcome: "submitted", ideaId });
+    try {
+      const { ideaId } = await submit({ ownerUserId: owner.id, headSha: decision.headSha, idea, checks: decision.checks.length, now });
+      return report({ outcome: "submitted", ideaId });
+    } catch (error) {
+      if (error instanceof SystemIdeaRefused) return report({ outcome: "none", reason: "refused_at_commit" });
+      throw error;
+    }
   } catch (error) {
     return report({ outcome: "failed", reason: error instanceof Error ? error.name : "unknown" });
   }
