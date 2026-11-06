@@ -56,7 +56,9 @@ settings are checked; project and managed settings cannot select another
 authentication path either. Settings reads are bounded at 256 KiB and the
 credential file at 64 KiB. An explicitly reported zero/no-reset optional
 model window is inactive, not a fabricated availability measurement; the
-required account/session windows still need valid future resets.
+weekly account window still needs a valid future reset. An explicit null
+five-hour window means no session has started and counts as unused (an
+idle account answers that way; before 2026-11-06 it dropped every reading).
 The OAuth token is used only for one bounded HTTPS GET to Anthropic's usage
 endpoint; it never enters the bridge, app, audit, error output or journal.
 
