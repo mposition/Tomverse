@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxIdeaCardClosePanel } from "@/components/admin/AmuxIdeaCardClosePanel";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { AmuxIdeaName, laneLine } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxIdeaReservationReleasePanel } from "@/components/admin/AmuxIdeaReservationReleasePanel";
@@ -159,6 +160,7 @@ export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false
         // Keyed by idea: another idea's question never shows while the next one loads.
         <AmuxSessionReviewPanel key={row.ideaId} ideaId={row.ideaId} /> : null}
       {row.closable ? <AmuxIdeaClosePanel key={row.ideaId} mode="single" ideaIds={[row.ideaId]} /> : null}
+      <AmuxIdeaCardClosePanel key={`card-close-${row.ideaId}`} ideaId={row.ideaId} />
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?

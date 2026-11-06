@@ -10294,6 +10294,7 @@ model AmuxIdeaSubmission {
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
   laneAttempts        AmuxIdeaLaneAttempt[]
+  cardCloseQuestions  AmuxIdeaCardCloseQuestion[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
@@ -10351,6 +10352,41 @@ model AmuxIdeaLaneAttempt {
 
   @@index([ideaId, claimedAt])
   @@index([claimedAt])
+}
+
+/// One question to the owner about a stalled idea: close its remaining cards,
+/// or keep them (lib/amux/ideaCardCloseService.ts). The Decision Maker proposes;
+/// only a person's confirmation or direct answer closes a card. The row holds
+/// no idea text. Its lifecycle guard and one-open-per-idea index live in SQL.
+model AmuxIdeaCardCloseQuestion {
+  id                String    @id
+  ideaId            String
+  /// open | closed | kept | cancelled
+  state             String    @default("open")
+  /// blocked_task | stale_cards
+  reasonCode        String
+  /// What was asked about: `[{ id, displayKey, cardType, status }]`.
+  cards             Json
+  /// operator | dm_confirmed
+  answerSource      String?
+  answeredByUserId  String?
+  answeredAt        DateTime?
+  /// Why the question closed without an effect (a fixed word).
+  cancelReason      String?
+  /// A confirmed answer could not be read; the owner answers directly.
+  handoffReason     String?
+  handoffAt         DateTime?
+  /// The typed-ask card mirroring this question on the AMUX host, once.
+  localCardId       String?   @unique
+  localCardClosedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, createdAt])
+  @@index([state, createdAt])
+  @@index([createdAt])
 }
 
 /// Intake v19 queue identity created atomically with one session submission.
