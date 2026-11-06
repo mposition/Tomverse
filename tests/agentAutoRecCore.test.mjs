@@ -274,7 +274,12 @@ test("failing tests are picked out of TAP output at any nesting, with their diag
     "      failureType: 'testCodeFailure'",
     "      error: 'Expected values to be strictly equal'",
     "      ...",
-    "not ok 2 - suite",
+    "not ok 2 - known gap # TODO fix undecided",
+    "  ---",
+    "  failureType: 'testCodeFailure'",
+    "  error: 'todo diagnostic'",
+    "  ...",
+    "not ok 3 - suite",
     "  ---",
     "  failureType: 'subtestsFailed'",
     "  ...",
@@ -286,6 +291,7 @@ test("failing tests are picked out of TAP output at any nesting, with their diag
   assert.match(excerpt, /error: 'Expected values to be strictly equal'/);
   assert.match(excerpt, /failureType: 'subtestsFailed'/);
   assert.doesNotMatch(excerpt, /filler/);
+  assert.doesNotMatch(excerpt, /todo diagnostic/);
   assert.deepEqual(failedTests(""), { names: [], excerpt: "" });
   assert.equal(failedTests(tap, { maxFailures: 1 }).names.length, 1);
 });
