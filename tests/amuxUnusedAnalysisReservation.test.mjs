@@ -7,7 +7,13 @@ test("one-click release lives on the idea detail and keeps an unknown write read
   const panel = read("components/admin/AmuxIdeaReservationReleasePanel.tsx");
   const detail = read("components/admin/AmuxIdeaDetailSummary.tsx");
   const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
-  assert.match(detail, /notice === "analysis_waiting" \? <AmuxIdeaReservationReleasePanel/);
+  // Loud while the analysis waits; quiet on owner steps where an earlier preview's hold may remain.
+  assert.match(detail, /\(notice === "analysis_waiting" \|\| QUIET_RELEASE\.has\(notice\)\) \?/);
+  assert.match(detail, /quiet=\{notice !== "analysis_waiting"\}/);
+  const quiet = detail.slice(detail.indexOf("const QUIET_RELEASE"), detail.indexOf("const NOTICE_ACTIONS"));
+  for (const step of ["execution_approval", "continuation", "plan_approval", "plan_finished"]) {
+    assert.ok(quiet.includes(`"${step}"`), step);
+  }
   assert.doesNotMatch(page, /AmuxUnusedAnalysisReservationPanel|tab\.id === "recovery"/);
   assert.match(page, /requestedTab === "intake" \|\| requestedTab === "recovery"/);
   assert.match(panel, /method: "DELETE"/);

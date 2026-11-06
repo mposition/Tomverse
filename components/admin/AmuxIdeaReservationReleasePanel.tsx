@@ -29,9 +29,11 @@ export function amuxReservationAmount(microUsd: bigint): string {
  * named, never released. A lost reply makes the panel read-back only, including
  * after a reload; the button returns only after a read-back shows a hold the
  * writer would still accept, and that writer cannot release a hold twice.
+ * Quiet: shown only when there is something to release or a release to check,
+ * for steps where a hold from an earlier preview may still be held.
  */
-export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available }: {
-  ideaId: string; requestId: string; available: boolean;
+export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available, quiet = false }: {
+  ideaId: string; requestId: string; available: boolean; quiet?: boolean;
 }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages).reservationRelease;
   const [phase, setPhase] = useState<AmuxReservationReleasePhase>(available ? "checking" : "disabled");
@@ -125,17 +127,20 @@ export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available }
   };
 
   return <AmuxIdeaReservationReleaseView m={m} phase={phase} count={count} amount={amount}
-    refused={refused} reauthenticateHref={reauthenticate
+    quiet={quiet} refused={refused} reauthenticateHref={reauthenticate
       ? adminRecentAuthenticationHref(`/admin/amux-backlog?tab=ideas&idea=${encodeURIComponent(requestId)}`) : null}
     onRelease={() => void release()} onReadBack={() => void readBack(true)} />;
 }
 
 /** Hook-free view, so each phase's text and control is testable. */
-export function AmuxIdeaReservationReleaseView({ m, phase, count, amount, refused, reauthenticateHref,
-  onRelease, onReadBack }: {
-  m: Messages; phase: AmuxReservationReleasePhase; count: number; amount: string; refused: boolean;
-  reauthenticateHref: string | null; onRelease: () => void; onReadBack: () => void;
+const QUIET_SHOWN: ReadonlySet<AmuxReservationReleasePhase> = new Set(["releasable", "sending", "released", "unknown"]);
+
+export function AmuxIdeaReservationReleaseView({ m, phase, count, amount, quiet = false, refused,
+  reauthenticateHref, onRelease, onReadBack }: {
+  m: Messages; phase: AmuxReservationReleasePhase; count: number; amount: string; quiet?: boolean;
+  refused: boolean; reauthenticateHref: string | null; onRelease: () => void; onReadBack: () => void;
 }) {
+  if (quiet && !QUIET_SHOWN.has(phase) && !refused) return null;
   const text: Partial<Record<AmuxReservationReleasePhase, string>> = {
     checking: m.checking, sending: m.sending, released: m.released(count), already_released: m.alreadyReleased,
     none: m.none, in_use: m.inUse, outcome_unknown: m.outcomeUnknown, disabled: m.disabled,

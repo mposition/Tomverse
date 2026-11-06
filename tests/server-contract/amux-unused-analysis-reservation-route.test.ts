@@ -150,8 +150,12 @@ test("the idea read offers only holds the writer would accept, else says why", a
     assert.deepEqual(answer.releasable, []);
     assert.equal(answer.blocked, "in_use");
   }
-  for (const preview of [{ consumedAt: new Date() }, { outcomeUnknownAt: new Date() }]) {
-    holds = [newHold("hold-a", { preview: { ...newHold("x").preview, ...preview } })];
+  // A normal claim consumes its preview: that is a hold in use, not an unknown outcome.
+  holds = [newHold("hold-a", { status: "in_flight", preview: { ...newHold("x").preview, consumedAt: new Date() } })];
+  assert.equal((await view()).blocked, "in_use");
+  for (const changes of [{ preview: { ...newHold("x").preview, outcomeUnknownAt: new Date() } },
+    { status: "outcome_unknown" }] as Array<Partial<Hold>>) {
+    holds = [newHold("hold-a", changes)];
     assert.equal((await view()).blocked, "outcome_unknown");
   }
   holds = [newHold("hold-a", { status: "released", closedAt: new Date(), settledMicroUsd: BigInt(0) })];

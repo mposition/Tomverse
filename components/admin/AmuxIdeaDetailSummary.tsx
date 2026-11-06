@@ -29,6 +29,10 @@ const SCREENS = {
   promotion: "/admin/amux-promotion",
   approval: "#amux-v4-frontier-models-heading",
 } as const;
+/** Owner steps where a hold left by an earlier preview of a page may still be
+ * reserved: the release panel shows there only when the server finds one. */
+const QUIET_RELEASE = new Set<AmuxIdeaStatusNoticeKind>(["attention", "execution_approval", "continuation",
+  "owner_input", "plan_approval", "plan_finished"]);
 /** The existing screens each state can act on; the panels below this card carry the rest. */
 const NOTICE_ACTIONS: Partial<Record<AmuxIdeaStatusNoticeKind, Array<keyof typeof SCREENS>>> = {
   attention: ["safety"],
@@ -120,8 +124,11 @@ export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false
           </p> : null}
         </section>
       ) : null}
-      {notice === "analysis_waiting" ? <AmuxIdeaReservationReleasePanel key={`release-${row.ideaId}`}
-        ideaId={row.ideaId} requestId={row.requestId} available={reservationReleaseAvailable} /> : null}
+      {row.submissionOrigin !== "session" && !row.lane && notice !== null &&
+          (notice === "analysis_waiting" || QUIET_RELEASE.has(notice)) ?
+        <AmuxIdeaReservationReleasePanel key={`release-${row.ideaId}`} ideaId={row.ideaId}
+          requestId={row.requestId} available={reservationReleaseAvailable}
+          quiet={notice !== "analysis_waiting"} /> : null}
       {blockedTasks.length > 0 ? (
         <section aria-labelledby="amux-idea-blocked-heading" data-testid="amux-idea-blocked-tasks" className="space-y-2">
           <h3 id="amux-idea-blocked-heading" className="font-medium text-zinc-100">{m.blockedTitle}</h3>

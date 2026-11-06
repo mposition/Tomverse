@@ -77,15 +77,16 @@ async function ideaHoldView(ideaId: string, ownerId: string) {
   if (candidates.length === 0) {
     // Any open hold left keeps its reservation; only its own resolution settles it.
     const open = await prisma.amuxIdeaAnalysisBudgetHold.findMany({
-      where: { closedAt: null, preview: owned }, take: IDEA_HOLD_LIMIT,
-      select: { status: true, preview: PREVIEW_FACTS },
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, closedAt: null, preview: owned },
+      take: IDEA_HOLD_LIMIT, select: { status: true, preview: PREVIEW_FACTS },
     });
+    // A normal claim also sets consumedAt; only a recorded unknown outcome is one.
     blocked = open.some((hold) => hold.preview.outcomeUnknownAt !== null ||
-      hold.preview.consumedAt !== null || hold.status === "outcome_unknown") ? "outcome_unknown"
+      hold.status === "outcome_unknown") ? "outcome_unknown"
       : open.length > 0 ? "in_use" : "none";
   }
   const releasedCount = await prisma.amuxIdeaAnalysisBudgetHold.count({
-    where: { status: "released", preview: owned },
+    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "released", preview: owned },
   });
   return { candidates, view: {
     releasable: candidates.map((hold) => ({ id: hold.id, reservedMicroUsd: hold.reservedMicroUsd.toString() })),
@@ -201,8 +202,6 @@ export async function GET(request: Request): Promise<Response> {
       return NextResponse.json({ error: "analysis_reservation_read_disabled" },
         { status: 409, headers: noStore });
     }
-    await consumeApiRateLimit(request, session.user!.id!,
-      "admin-amux-v4-analysis-reserve-read", { minute: 15, day: 100 });
     const params = new URL(request.url).searchParams;
     const key = [...params.keys()];
     if (key.length !== 1 || !["holdId", "previewId", "ideaId"].includes(key[0]!) ||
@@ -210,6 +209,11 @@ export async function GET(request: Request): Promise<Response> {
       return NextResponse.json({ error: "Invalid request." },
         { status: 400, headers: noStore });
     }
+    // Opening an idea's detail reads its holds; its own bucket keeps that from
+    // spending the exact-hold reads the analysis cost panel depends on.
+    await consumeApiRateLimit(request, session.user!.id!, key[0] === "ideaId"
+      ? "admin-amux-v4-analysis-idea-holds-read" : "admin-amux-v4-analysis-reserve-read",
+    key[0] === "ideaId" ? { minute: 30, day: 500 } : { minute: 15, day: 100 });
     const parsed = id.safeParse(params.get(key[0]!));
     if (!parsed.success) return NextResponse.json({ error: "Invalid request." },
       { status: 400, headers: noStore });
@@ -308,8 +312,10 @@ export async function DELETE(request: Request): Promise<Response> {
           });
         }, { maxWait: 5_000, timeout: 15_000 }));
       } catch (error) {
-        // Claimed or released since the read: that hold is not this click's to release.
-        if (error instanceof AmuxIdeaAnalysisCancellationError && error.code === "not_cancellable") {
+        // Claimed, released or no longer this owner's since the read: that hold
+        // is not this click's to release, and the others still are.
+        if (error instanceof AmuxIdeaAnalysisCancellationError &&
+            (error.code === "not_cancellable" || error.code === "not_found")) {
           skipped++; continue;
         }
         if (released.length === 0) throw error;
