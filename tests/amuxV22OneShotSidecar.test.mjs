@@ -92,6 +92,14 @@ test("profile quota uses the tightest reported window and never invents availabi
     { ...body, five_hour: { utilization: 0, resets_at: at } }]) {
     assert.equal(normalizeAmuxV22ClaudeQuota(bad, at), null);
   }
+  // No session yet: an explicit null five-hour window is unused and the
+  // weekly window decides (production 2026-11-06 answered this way). An
+  // absent or undefined five-hour value, or a missing weekly one, is unknown.
+  assert.equal(normalizeAmuxV22ClaudeQuota({ ...body, five_hour: null }, at)
+    .remaining_basis_points, 8400);
+  assert.equal(normalizeAmuxV22ClaudeQuota({ five_hour: null, seven_day: null }, at), null);
+  assert.equal(normalizeAmuxV22ClaudeQuota({ five_hour: null }, at), null);
+  assert.equal(normalizeAmuxV22ClaudeQuota({ ...body, five_hour: undefined }, at), null);
   const limits = [{ kind: "session", percent: 12.345, resets_at: reset },
     { kind: "weekly_all", percent: 15, resets_at: reset }];
   assert.equal(normalizeAmuxV22ClaudeQuota({ limits }, at).remaining_basis_points, 8500);

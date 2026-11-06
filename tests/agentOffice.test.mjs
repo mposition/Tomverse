@@ -50,6 +50,8 @@ import {
   sreTone,
   supportLiveDept,
   supportTone,
+  trustLiveDept,
+  trustTone,
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "../lib/agentOfficeAmuxState.ts";
 import { AMUX_WORKER_REGISTRY_V31_SEED } from "../lib/amux/workerRegistryCore.ts";
@@ -72,6 +74,7 @@ import { agentOfficeRoutingState } from "../lib/agentOfficeRoutingState.ts";
 import { agentOfficeMarketingState } from "../lib/agentOfficeMarketingState.ts";
 import { agentOfficeSreState } from "../lib/agentOfficeSreState.ts";
 import { agentOfficeSupportState } from "../lib/agentOfficeSupportState.ts";
+import { agentOfficeTrustState } from "../lib/agentOfficeTrustState.ts";
 import {
   AMUX_ROOM,
   DECISION_ROOM,
@@ -150,7 +153,7 @@ test("a record link is kept only while the console has its page and tab", () => 
   assert.equal(consoleHasRecord("/admin/no-such-page"), false);
   // The teams whose screens every branch carries stay linked; a team whose
   // screen a branch lacks is drawn as waiting on a link, never as a dead link.
-  for (const id of ["engineering", "qa", "sre", "support", "marketing", "research", "routing", "digest"]) {
+  for (const id of ["engineering", "qa", "sre", "support", "marketing", "trust", "research", "routing", "digest"]) {
     assert.ok(AGENT_OFFICE_DEPTS.find((dept) => dept.id === id)?.recordHref, `${id} lost its link`);
   }
   // Every link on screen is the declared one filtered by that predicate, and
@@ -213,10 +216,10 @@ test("the console answers in the office's language and finds the team it names",
   ko.command("백실장 어디 있어?");
   assert.match(ko.chat.at(-1).name, /백서진/);
 
-  // A team with no record screen says so.
-  ko.deptStatus.trust = "blocked";
-  ko.command("신뢰안전팀 왜 늦어?");
-  assert.match(ko.chat.at(-1).text, /기록 화면이 없어서/);
+  // A team the demo marks as waiting on its record screen says so (every team has one now, so force one).
+  ko.deptStatus.research = "blocked";
+  ko.command("리서치팀 왜 늦어?");
+  assert.match(ko.chat.at(-1).text, /기록 화면 연결을 기다리고/);
 
   en.command("banana split");
   assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.sim.unknown);
@@ -1546,9 +1549,6 @@ test("the three rooms carry every badge and word in both languages, and the reco
   assert.equal(dept("sre").recordHref, "/admin/sre-ops");
   assert.equal(dept("marketing").recordHref, "/admin/marketing");
   for (const id of ["sre", "support", "marketing"]) assert.equal(AGENT_OFFICE_BLOCKED_DEPTS.has(id), false, id);
-  // Trust has no code and its activation is blocked: it stays waiting on a link.
-  assert.equal(dept("trust").recordHref, null);
-  assert.equal(AGENT_OFFICE_BLOCKED_DEPTS.has("trust"), true);
   // The team lines no longer say a live room has nothing to read, or that it waits on a link.
   for (const locale of ["en", "ko"]) {
     for (const id of ["sre", "support", "marketing"]) {
@@ -1604,6 +1604,275 @@ test("the office reads the three rooms through their own readers, never their co
     for (const match of source.matchAll(/^import (?!type)[^\n]*from "([^"]+)"/gm)) {
       assert.fail(`${file} has a runtime import: ${match[1]}`);
     }
+  }
+});
+
+// ── Trust and safety ───────────────────────────────────────────────────────
+
+const trustView = (overrides = {}) => ({
+  permitted: true,
+  activation: { mode: "on", fault: null, countPermitted: true, pingPermitted: true },
+  version: 3,
+  counts: {
+    observed: { total: 12, legalHold: 1 },
+    overdue: { total: 0, legalHold: 0 },
+    imminent: { total: 0, legalHold: 0 },
+    closedLate: { total: 2, legalHold: 1 },
+    worstLateClosureDays: 3,
+    imminentWithinDays: 0,
+  },
+  observedAt: "2026-11-05T22:30:00.000Z",
+  ...overrides,
+});
+const trustCounts = (overdue, extra = {}) => ({
+  ...trustView().counts,
+  overdue: { total: overdue, legalHold: 0 },
+  ...extra,
+});
+const trustRoom = (view, copy = adminAgentOfficeMessages.en.real.trust) =>
+  trustLiveDept(agentOfficeTrustState(view), copy);
+
+test("the Trust and safety state keeps the switch, the fault, three totals and the read time, and nothing else", () => {
+  // The legal-hold split, the denominator and the worst overrun do not come across.
+  assert.deepEqual(
+    agentOfficeTrustState(trustView({ counts: trustCounts(4) })),
+    {
+      kind: "observed",
+      mode: "on",
+      fault: null,
+      observedAt: "2026-11-05T22:30:00.000Z",
+      version: 3,
+      overdue: 4,
+      imminent: 0,
+      imminentWithinDays: 0,
+      closedLate: 2,
+    }
+  );
+  // Counts the section did not take are null, never zero.
+  const off = agentOfficeTrustState(
+    trustView({ activation: { mode: "off", fault: null, countPermitted: false, pingPermitted: false }, counts: null })
+  );
+  assert.deepEqual(off, {
+    kind: "observed",
+    mode: "off",
+    fault: null,
+    observedAt: "2026-11-05T22:30:00.000Z",
+    version: 3,
+    overdue: null,
+    imminent: null,
+    imminentWithinDays: null,
+    closedLate: null,
+  });
+  const noRow = agentOfficeTrustState(
+    trustView({
+      activation: { mode: null, fault: "config_row_missing", countPermitted: false, pingPermitted: false },
+      version: null,
+      counts: null,
+    })
+  );
+  assert.equal(noRow.mode, null);
+  assert.equal(noRow.fault, "config_row_missing");
+  assert.equal(noRow.version, null);
+  // Not the owner: the reader read nothing, and the room keeps that apart from an unread record.
+  assert.deepEqual(agentOfficeTrustState({ permitted: false }), { kind: "not_permitted" });
+  // Anything that is not the reader's shape is unread, not a guess.
+  assert.deepEqual(agentOfficeTrustState({}), { kind: "unread" });
+  assert.deepEqual(agentOfficeTrustState(trustView({ observedAt: "yesterday" })), { kind: "unread" });
+  assert.deepEqual(
+    agentOfficeTrustState(trustView({ activation: { mode: "maybe", fault: null, countPermitted: true, pingPermitted: true } })),
+    { kind: "unread" }
+  );
+  assert.deepEqual(agentOfficeTrustState(trustView({ counts: trustCounts(-1) })), { kind: "unread" });
+  assert.deepEqual(agentOfficeTrustState(trustView({ counts: trustCounts(2.5) })), { kind: "unread" });
+});
+
+test("the Trust and safety room is waiting for the owner's record or a switch that is off, done on a clean on, and needs a look otherwise", () => {
+  const en = adminAgentOfficeMessages.en.real.trust;
+  const ko = adminAgentOfficeMessages.ko.real.trust;
+
+  // A read that failed.
+  const unread = trustLiveDept({ kind: "unread" }, en);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "Unread");
+  assert.equal(unread.line, en.unread);
+  assert.equal(trustTone({ kind: "unread" }), "attention");
+
+  // Not the owner: waiting, with words and no number.
+  const owner = trustRoom({ permitted: false });
+  assert.equal(owner.status, "waiting");
+  assert.equal(owner.badge, "Owner only");
+  assert.equal(owner.line, "Only the owner can see it");
+  assert.equal(owner.detail, "");
+  assert.equal(trustRoom({ permitted: false }, ko).line, "owner만 볼 수 있음");
+
+  // Off: waiting, and the counts are not taken -- "not counted", not zero.
+  const off = trustRoom(
+    trustView({ activation: { mode: "off", fault: null, countPermitted: false, pingPermitted: false }, counts: null })
+  );
+  assert.equal(off.status, "waiting");
+  assert.equal(off.badge, "Off");
+  assert.equal(off.line, "Observation off · not counted");
+  // The read time is drawn in Brisbane time.
+  assert.equal(off.detail, "read 11-06 08:30 AEST");
+
+  // On with nothing overdue: done. No approved window means nothing is counted as due soon.
+  const clean = trustRoom(trustView());
+  assert.equal(clean.status, "done");
+  assert.equal(clean.badge, "On");
+  assert.equal(clean.line, "Observation on · 0 requests past the deadline");
+  assert.equal(clean.detail, "due-soon window not set · 2 closed after the deadline · read 11-06 08:30 AEST");
+
+  // Past the deadline: needs a look, and the singular is a word.
+  const overdue = trustRoom(trustView({ counts: trustCounts(3) }));
+  assert.equal(overdue.status, "attention");
+  assert.equal(overdue.badge, "Overdue");
+  assert.equal(overdue.line, "Observation on · 3 requests past the deadline");
+  assert.equal(trustRoom(trustView({ counts: trustCounts(1) })).line, "Observation on · 1 request past the deadline");
+
+  // A window, once one is approved, is named with the count.
+  assert.equal(
+    trustRoom(trustView({ counts: trustCounts(0, { imminent: { total: 5, legalHold: 0 }, imminentWithinDays: 7 }) })).detail,
+    "5 due within 7 days · 2 closed after the deadline · read 11-06 08:30 AEST"
+  );
+
+  // A fault takes the line, counts nothing, and shows the check's own code when the room has no word for it.
+  const chain = trustRoom(
+    trustView({
+      activation: { mode: null, fault: "chain_broken", countPermitted: false, pingPermitted: false },
+      counts: null,
+    })
+  );
+  assert.equal(chain.status, "attention");
+  assert.equal(chain.badge, "Switch fault");
+  assert.equal(chain.line, "Observation switch not believed · fault: audit chain broken after the switch entry");
+  assert.equal(chain.detail, "not counted · read 11-06 08:30 AEST");
+  assert.equal(
+    trustRoom(
+      trustView({
+        activation: { mode: null, fault: "brand_new_fault", countPermitted: false, pingPermitted: false },
+        counts: null,
+      })
+    ).line,
+    "Observation switch not believed · fault: brand_new_fault"
+  );
+  // A missing monitor URL is a fault on a believed "on": the counts are taken and ride beside it.
+  const noPing = trustRoom(
+    trustView({ activation: { mode: "on", fault: "ping_url_missing", countPermitted: true, pingPermitted: false } })
+  );
+  assert.equal(noPing.status, "attention");
+  assert.equal(noPing.badge, "Switch fault");
+  assert.equal(noPing.line, "Observation on · fault: no monitor URL, so no ping is sent");
+  assert.equal(
+    noPing.detail,
+    "0 requests past the deadline · due-soon window not set · 2 closed after the deadline · read 11-06 08:30 AEST"
+  );
+  // A switch with no believed mode and no fault is not believed either.
+  assert.equal(
+    trustTone({ kind: "observed", mode: null, fault: null, overdue: null, imminent: null, imminentWithinDays: null, closedLate: null, observedAt: "2026-11-05T22:30:00.000Z", version: 1 }),
+    "attention"
+  );
+
+  // Korean.
+  const koClean = trustRoom(trustView(), ko);
+  assert.equal(koClean.badge, "켜짐");
+  assert.equal(koClean.line, "관측 켜짐 · 기한 지난 요청 0건");
+  assert.equal(koClean.detail, "임박 기준 미정 · 기한 넘겨 종결 2건 · 읽은 시각 11-06 08:30 AEST");
+  assert.equal(trustRoom(trustView({ counts: trustCounts(3) }), ko).badge, "기한 초과");
+  assert.equal(
+    trustRoom(
+      trustView({ activation: { mode: "off", fault: null, countPermitted: false, pingPermitted: false }, counts: null }),
+      ko
+    ).line,
+    "관측 꺼짐 · 세지 않음"
+  );
+  assert.equal(
+    trustRoom(
+      trustView({
+        activation: { mode: null, fault: "signature_unverified", countPermitted: false, pingPermitted: false },
+        counts: null,
+      }),
+      ko
+    ).line,
+    "관측 스위치를 믿을 수 없음 · 오류: 최신 스위치 기록의 서명이 검증되지 않음"
+  );
+
+  // The room shows totals: no hold split, request, email or amount gets onto the screen.
+  for (const room of [clean, overdue, chain, noPing, off, owner]) {
+    assert.doesNotMatch(`${room.line} ${room.detail}`, /hold|@|\$|USD/i);
+  }
+});
+
+test("the Trust and safety room carries every word in both languages, and its record is the digest tab", () => {
+  const keys = (value) =>
+    Object.entries(value).flatMap(([key, inner]) =>
+      inner && typeof inner === "object" ? keys(inner).map((name) => `${key}.${name}`) : [key]
+    );
+  assert.deepEqual(
+    keys(adminAgentOfficeMessages.en.real.trust).sort(),
+    keys(adminAgentOfficeMessages.ko.real.trust).sort()
+  );
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    for (const key of ["on", "off", "unknown", "fault", "overdue", "ownerOnly", "unread"]) {
+      assert.ok(copy.real.trust.badges[key], `${locale} trust badge ${key}`);
+    }
+    // Every fault the activation check can return has a word in the room.
+    for (const fault of [
+      "config_row_missing",
+      "signature_unverified",
+      "binding_mismatch",
+      "unhashed_entry_present",
+      "chain_broken",
+      "ping_url_missing",
+    ]) {
+      assert.ok(copy.real.trust.faults[fault], `${locale} trust fault ${fault}`);
+    }
+    // The team window no longer says the agent is planned or unbuilt.
+    const info = JSON.stringify(copy.teamInfo.teams.trust);
+    assert.doesNotMatch(copy.depts.trust.blockReason, /아직 콘솔에 기록 화면이 없어서|no record screen in the console yet/);
+    assert.doesNotMatch(info, /Planned|not in this build yet|Not built yet|계획 단계|아직 코드가 없|만들어지지 않/);
+  }
+  const dept = AGENT_OFFICE_DEPTS.find((entry) => entry.id === "trust");
+  assert.equal(AGENT_OFFICE_DECLARED_RECORD_HREFS.trust, "/admin/agent-digests?tab=trust-safety");
+  assert.equal(dept.recordHref, "/admin/agent-digests?tab=trust-safety");
+  assert.equal(consoleHasRecord("/admin/agent-digests?tab=trust-safety"), true);
+  assert.equal(AGENT_OFFICE_BLOCKED_DEPTS.has("trust"), false);
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /trust: trustLiveDept\(live\.trust, m\.real\.trust\)/);
+});
+
+test("the office reads the Trust and safety room through the section's own reader and nothing else, and writes nothing", () => {
+  const trust = readFunction("readTrust");
+  // The reader checks `trust-safety:read` itself; the office neither repeats nor bypasses that.
+  assert.match(trust, /agentOfficeTrustState\(await readTrustSafetyDigest\(\)\)/);
+  assert.doesNotMatch(trust, /getServerSession|hasAdminPermission|isAdminSession|authOptions|session/i);
+  // No table is read here: not the run table, not the requests, not the audit log.
+  assert.doesNotMatch(trust, /prisma|\$queryRaw|\$executeRaw|\$transaction|TrustSafety(Observer|Run)|privacyRequest|adminAuditLog/i);
+  assert.doesNotMatch(trust, /\.(create|update|upsert|delete)(Many)?\(|fetch\(|writeAdminAuditLog|writeSystemAuditLog/);
+  assert.match(trust, /event: "admin_agent_office_read_failed", read: "trust_safety"/);
+  assert.match(trust, /return \{ kind: "unread" \}/);
+  assert.match(trust, /\} catch \{/);
+
+  const all = readFileSync("lib/agentOfficeLiveRead.ts", "utf8");
+  assert.match(all, /import \{ readTrustSafetyDigest \} from "@\/lib\/trustSafetyDigestRead";/);
+  assert.match(all, /readMarketing\(\),\s*readTrust\(\),\s*readEngineering\(\),/);
+  // The office's one import of the agent's files is that reader: nothing else of the agent's is named.
+  assert.deepEqual(
+    [...all.matchAll(/from "(@\/lib\/trustSafety[^"]*)"/g)].map((match) => match[1]),
+    ["@/lib/trustSafetyDigestRead"]
+  );
+
+  // The client-safe files take the agent's types and nothing of its values.
+  for (const file of ["lib/agentOffice/live.ts", "lib/agentOfficeTrustState.ts", "components/admin/AgentOfficePanel.tsx"]) {
+    const source = readFileSync(file, "utf8");
+    for (const match of source.matchAll(/^import (?!type)[^\n]*from "(@\/lib\/trustSafety[^"]*)"/gm)) {
+      assert.fail(`${file} imports the agent's code at runtime: ${match[1]}`);
+    }
+  }
+  const state = readFileSync("lib/agentOfficeTrustState.ts", "utf8");
+  assert.doesNotMatch(state, /server-only|from "@\/lib\/prisma"/);
+  for (const match of state.matchAll(/^import (?!type)[^\n]*from "([^"]+)"/gm)) {
+    assert.fail(`lib/agentOfficeTrustState.ts has a runtime import: ${match[1]}`);
   }
 });
 

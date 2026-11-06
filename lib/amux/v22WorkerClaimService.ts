@@ -33,6 +33,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
   "./v22ReadOnlyApiProtocol.mjs";
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
+import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
@@ -312,16 +313,20 @@ async function claimCandidate(taskId: string, assignmentId: string,
           state: { in: ["answered", "resumed"] } },
         orderBy: [{ answeredAt: "desc" }, { id: "desc" }],
         select: { worker: true } });
+      // A15 owns the audited owner-release and reservation-occupancy recovery
+      // path; an unsettled worker takes no new Task, but another one can.
+      const settled = await amuxV22RoutesWithSettledUsage(tx, quotaRoutes,
+        recovery?.priorAttemptId ?? null);
       const resumeRoutes = resume && approved.receipt.routes.some((route) =>
         route.workerName === resume.worker) ?
-        quotaRoutes.filter((route) => route.workerName === resume.worker) :
-        quotaRoutes;
+        settled.routes.filter((route) => route.workerName === resume.worker) :
+        settled.routes;
       const route = chooseAmuxV22WorkerRoute({ routes: resumeRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
         isReview: card.taskRole === "review" });
       if (!route) throw new BoardImportError(
-        exactGradeRouting && matchingRoutes.length === 0 ?
-          "no_worker_for_grade" : "worker_unavailable", 409);
+        exactGradeRouting && matchingRoutes.length === 0 ? "no_worker_for_grade" :
+          settled.unsettled ? "usage_unverified" : "worker_unavailable", 409);
       if (recovery) {
         const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
           _count: { _all: true }, _max: { attemptNumber: true },
@@ -341,23 +346,6 @@ async function claimCandidate(taskId: string, assignmentId: string,
           catalogApprovalId: approved.approvalId, costDigest: quote.costDigest }))
           throw new BoardImportError("recovery_approval_changed", 409);
       }
-      // Never treat a prior v4 worker's absent/partial CLI observation as a
-      // zero-cost run when admitting another cost-bound assignment. A15 owns
-      // the audited owner-release and reservation-occupancy recovery path.
-      const usageUnknown = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT a."id" FROM "AmuxExecutionAttempt" a
-        JOIN "AmuxWorkItem" w ON w."id" = a."taskId"
-        WHERE a."worker" = ${route.workerName}
-          AND a."id" IS DISTINCT FROM ${recovery?.priorAttemptId ?? null}
-          AND a."endedAt" IS NOT NULL
-          AND w."sourceSystem" = 'admin-idea-v4'
-          AND (NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
-               WHERE u."attemptId" = a."id")
-            OR EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
-               WHERE u."attemptId" = a."id"
-                 AND u."completeness" <> 'reported_complete'))
-        LIMIT 1`;
-      if (usageUnknown.length) throw new BoardImportError("usage_unverified", 409);
       const runtime = liveByName.get(route.workerName)!;
       const pinnedRuntime = await tx.$queryRaw<Array<{
         workerName: string; instanceId: string; generation: number;
@@ -485,7 +473,7 @@ export async function tickV22WorkerClaim() {
       if (["not_unassigned_todo", "task_not_ready", "worker_unavailable",
         "one_shot_role_unavailable",
         "review_author_unknown", "reserved_capacity_unavailable",
-        "lane_capacity_full", "conflict"].includes(error.code)) continue;
+        "lane_capacity_full", "conflict", "usage_unverified"].includes(error.code)) continue;
       return { claimed: false as const, reason: error.code };
     }
   }

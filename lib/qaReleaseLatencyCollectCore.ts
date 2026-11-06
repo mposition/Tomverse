@@ -47,13 +47,15 @@ const minutes = (fromMs: number, toIso: unknown): number | null => {
   if (typeof toIso !== "string") return null;
   const to = Date.parse(toIso);
   if (Number.isNaN(to) || to < fromMs) return null;
-  return Math.round((to - fromMs) / 6_000) / 10;
+  // Whole minutes: the digest store accepts only safe integers in a body
+  // (lib/agentDigestCanonicalJson.ts), so a fraction refused the whole digest.
+  return Math.round((to - fromMs) / 60_000);
 };
 const median = (values: number[]): number | null => {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+  return sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 };
 const asArray = (value: unknown, key?: string): unknown[] => {
   const list = key ? (value as Record<string, unknown> | null)?.[key] : value;

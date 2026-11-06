@@ -114,7 +114,7 @@ staging 자동 배포도 이 예외에 포함하지 않는다. 새 경로의 코
 
 ### 2.2 등록 원천
 
-> **2026-11-06: 이 경로는 삭제됐다.** 등록 route와 그것을 부르는 모듈은 만들어졌지만 Runner를 포함해 어떤 서비스도 호출하지 않았고, 아래 원천은 다른 경로가 맡는다. 빨간 develop CI는 develop CI 수리 pass가 AMUX idea lane에 아이디어 하나로 넘기고(`lib/developCiRepair.ts`, 운영자 결정: SEV1 슬롯으로 바로 배정), 실패한 Dependabot PR은 PR CI 자동 수정이 다룬다. `EngineeringAgentRegistration` 테이블과 그 trigger, 원천·상한 상수(`lib/engineeringAgentRegistrationGuard.ts`)는 이미 있는 행 때문에 남는다. 아래는 당시 계약의 기록이다.
+> **2026-11-06: 이 경로는 삭제됐다.** 등록 route와 그것을 부르는 모듈은 만들어졌지만 Runner를 포함해 어떤 서비스도 호출하지 않았고, 아래 원천은 다른 경로가 맡는다. 빨간 develop CI는 develop CI 수리 pass가 AMUX idea lane에 아이디어 하나로 넘기고(운영자 결정: SEV1 슬롯으로 바로 배정), 실패한 Dependabot PR은 PR CI 자동 수정이 다룬다. `EngineeringAgentRegistration` 테이블과 그 trigger, 원천·상한 상수(`lib/engineeringAgentRegistrationGuard.ts`)는 이미 있는 행 때문에 남는다. 아래는 당시 계약의 기록이다.
 
 에이전트는 아래 원천을 분석해 AMUX `backlog`에 카드를 등록한다. **표가 계약이며 목록
 밖은 읽지 않는다.** 원천을 더하거나 바꾸는 것은 이 문서의 개정이다.
