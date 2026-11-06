@@ -24,11 +24,12 @@ import { AMUX_IDEA_CARD_CLOSE_SCAN } from "@/lib/amux/ideaCardCloseCore";
 import {
   amuxIdeaCardCloseRelayCards,
   applyAmuxIdeaCardCloseDmAnswer,
+  isAmuxIdeaCardCloseBusy,
   openAmuxIdeaCardCloseQuestionIfDue,
   readAmuxIdeaCardCloseQuestionForOwner,
   readAmuxIdeaCardCloseSyncForRelay,
 } from "@/lib/amux/ideaCardCloseService";
-import { answerAmuxIdeaCardCloseForOwner } from "@/lib/amux/ideaCardCloseOwnerService";
+import { AmuxIdeaCardCloseOwnerError, answerAmuxIdeaCardCloseForOwner } from "@/lib/amux/ideaCardCloseOwnerService";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import {
   isAmuxV22QuestionCard,
@@ -902,7 +903,7 @@ test("a fault applying one answer neither stops the walk nor changes anything, a
   const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }]);
   await confirmed(ideaId, "close");
   const warn = mock.method(console, "warn", () => undefined);
-  // A worker's transaction holds the card past the boundary's statement timeout.
+  // A worker's transaction holds the card, so the apply's locked read refuses at once.
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   let locked!: () => void;
@@ -923,5 +924,78 @@ test("a fault applying one answer neither stops the walk nor changes anything, a
   assert.match(String(warn.mock.calls[0].arguments[0]), /idea_card_close_apply_failed/);
   warn.mock.restore();
   assert.equal((await runAmuxV22ResolveStep(null)).resolved, "closed", "a walk from the start meets it again");
+  assert.equal((await card(cardIds[0])).status, "cancelled");
+});
+
+test("an answer meeting a worker that holds a card refuses at once instead of deadlocking, and applies after", async () => {
+  // Release review r-20261106-051457-02f6ff: the v22 start (and the claim,
+  // heartbeat, settlement and recovery) lock the card and take the audit chain
+  // only for their closing entry; an answer takes the chain and then locks the
+  // card. The worker side below takes exactly those two locks in that order.
+  const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }]);
+  await drain();
+  const question = (await questionOf(ideaId))!;
+  type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
+  const settle = <T>(work: Promise<T>): Promise<Settled<T>> =>
+    work.then((value) => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let locked!: () => void;
+  const holding = new Promise<void>((resolve) => { locked = resolve; });
+  const worker = settle(prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${cardIds[0]} FOR UPDATE`;
+    locked();
+    await held;
+    await takeAuditChainLock(tx);
+  }, { timeout: 20_000 }));
+  await holding;
+  const answer = () => answerAmuxIdeaCardCloseForOwner({ session: owner(), request: adminRequest(),
+    ideaId, questionId: question.id, decision: "close", reason: "No longer wanted." });
+  let answerSettled = false;
+  const first = settle(answer().finally(() => { answerSettled = true; }));
+  // Let the answer reach the card: refused at once, or waiting on it holding the chain.
+  const waitingOnCard = async () => (await prisma.$queryRaw<Array<{ count: number }>>`
+    SELECT count(*)::int AS "count" FROM pg_stat_activity
+    WHERE wait_event_type = 'Lock' AND query LIKE '%AmuxIdeaCardCloseQuestion%'`)[0]!.count;
+  for (let round = 0; round < 500 && !answerSettled; round += 1) if ((await waitingOnCard()) > 0) break;
+  // The worker reaches its audit entry while the answer is in flight.
+  release();
+  const [workerResult, refused] = await Promise.all([worker, first]);
+  assert.ok(workerResult.ok, `the worker's transaction finished: ${workerResult.ok ? "" : String(workerResult.error)}`);
+  assert.ok(!refused.ok, "the answer did not wait for the card");
+  assert.ok(refused.error instanceof AmuxIdeaCardCloseOwnerError && refused.error.code === "busy",
+    `the owner is told to try again: ${String(refused.error)}`);
+  assert.equal((await questionOf(ideaId))!.state, "open", "nothing of the answer was kept");
+  assert.equal((await card(cardIds[0])).status, "blocked");
+  assert.equal((await answer()).outcome, "closed", "once the worker is done the same answer applies");
+  assert.equal((await card(cardIds[0])).status, "cancelled");
+});
+
+test("the Decision Maker's apply refuses a held card with lock_not_available and the next pass applies it", async () => {
+  const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }]);
+  const { question, requestId } = await confirmed(ideaId, "close");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let locked!: () => void;
+  const holding = new Promise<void>((resolve) => { locked = resolve; });
+  const worker = prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${cardIds[0]} FOR UPDATE`;
+    locked();
+    await held;
+    await takeAuditChainLock(tx);
+  }, { timeout: 20_000 });
+  await holding;
+  const apply = () => withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerIdeaCardCloseApply,
+    (tx, context) => applyAmuxIdeaCardCloseDmAnswer(tx, { questionId: question.id, requestId,
+      decision: "close", now: context.dbNow }));
+  const startedAt = Date.now();
+  const refused = await apply().then(() => null, (error: unknown) => error);
+  const waitedMs = Date.now() - startedAt;
+  release();
+  await worker;
+  assert.ok(isAmuxIdeaCardCloseBusy(refused), `lock_not_available, not a timeout: ${String(refused)}`);
+  assert.ok(waitedMs < 1_000, `it did not wait for the card (${waitedMs} ms)`);
+  assert.equal((await questionOf(ideaId))!.state, "open");
+  assert.deepEqual(await apply(), { applied: true, outcome: "closed" });
   assert.equal((await card(cardIds[0])).status, "cancelled");
 });
