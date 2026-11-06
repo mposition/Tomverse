@@ -1650,11 +1650,9 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   그 파일들이 경로로 지목하는 파일입니다. 게이트를 부르기만 하는 파일이나 아무 게이트도
   닿지 않는 제품 파일은 이미지에 있어도 slice가 아닙니다. 앱 런타임의 import가 하나라도
   풀리지 않거나 런타임 통제 평면 코드에 동적 로딩을 넣으면 분석 자체가 실패합니다.
-- **P1h(모델 호출)**: `lib/engineeringAgentModelCall.ts`,
-  `tests/engineeringAgentModelCall.test.mjs`. 모델 도구는 `read_file` 하나이고, 이 모듈은
-  하위 프로세스·평가·네트워크 global·환경변수·로그를 쓰지 않습니다. 구문 검사는 정직한
-  회귀만 잡으므로, **모듈을 고치면 테스트의 `REVIEWED_MODULE_SHA256`이 실패하고 그 digest를
-  갱신하는 변경이 곧 독립 검토의 대상**입니다(docs/policy/engineering-agent.md §8).
+- **P1h(모델 호출)**: 2026-11-06에 삭제됐습니다. Runner는 더 이상 코드를 쓰지 않고(코딩은
+  AMUX v22 worker와 idea lane의 몫), 묶이지 않은 PR·ref 관측과 PR 승인·병합 관측 round의
+  trigger만 합니다(`scripts/engineering-agent-runner-core.mjs`). 모델 key도 읽지 않습니다.
 - **v5 승인·병합 관측**: `lib/engineeringAgentPrApprovalCore.ts`(docs/policy/engineering-agent.md §9-10 일곱 조건, 순수),
   `lib/engineeringAgentPrObserver.ts`, `lib/amux/reviewMergeObserved.ts`,
   `app/api/internal/engineering-agent/observe/pull-requests/route.ts`. **승인은 병합 전에만 기록하고**,

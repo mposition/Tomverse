@@ -19,6 +19,7 @@ import {
   writeSupportTriageLlmModelSetting,
 } from "@/lib/supportTriageLlmSetting";
 import { readTraceAnalysisMode, TRACE_ANALYSIS_MODES, writeTraceAnalysisMode } from "@/lib/traceReportAnalysis";
+import { readDevelopCiRepairMode, writeDevelopCiRepairMode } from "@/lib/developCiRepair";
 
 /**
  * The support-triage switch and LLM model, set in the Admin console. GET for
@@ -32,9 +33,16 @@ const schema = z
     modelId: z.string().trim().min(1).max(200).nullable().optional(),
     enabled: z.boolean().optional(),
     traceAnalysis: z.enum(TRACE_ANALYSIS_MODES).optional(),
+    developCiRepair: z.boolean().optional(),
   })
   .strict()
-  .refine((body) => body.modelId !== undefined || body.enabled !== undefined || body.traceAnalysis !== undefined);
+  .refine(
+    (body) =>
+      body.modelId !== undefined ||
+      body.enabled !== undefined ||
+      body.traceAnalysis !== undefined ||
+      body.developCiRepair !== undefined
+  );
 
 export async function GET(request: Request) {
   try {
@@ -46,12 +54,13 @@ export async function GET(request: Request) {
       minute: 30,
       day: 600,
     });
-    const [model, options, switchState, health, traceAnalysis] = await Promise.all([
+    const [model, options, switchState, health, traceAnalysis, developCiRepair] = await Promise.all([
       resolveSupportTriageLlmModel(process.env),
       listSupportTriageModelOptions(),
       resolveSupportTriageEnabled(process.env),
       readSupportTriageHealth(),
       readTraceAnalysisMode(),
+      readDevelopCiRepairMode(),
     ]);
     return Response.json(
       {
@@ -63,6 +72,7 @@ export async function GET(request: Request) {
         health,
         traceAnalysis: traceAnalysis.mode,
         traceCasesEnabled: isAutoFixShadowModeEnabled(),
+        developCiRepair: developCiRepair.mode === "on",
       },
       { headers }
     );
@@ -105,7 +115,11 @@ export async function PUT(request: Request) {
       body.traceAnalysis === undefined
         ? undefined
         : (await writeTraceAnalysisMode({ session, request, mode: body.traceAnalysis })).mode;
-    return Response.json({ modelId: model, enabled, traceAnalysis }, { headers });
+    const developCiRepair =
+      body.developCiRepair === undefined
+        ? undefined
+        : (await writeDevelopCiRepairMode({ session, request, enabled: body.developCiRepair })).enabled;
+    return Response.json({ modelId: model, enabled, traceAnalysis, developCiRepair }, { headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
     if (security) return security;
