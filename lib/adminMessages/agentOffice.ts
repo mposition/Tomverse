@@ -82,8 +82,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       trust: {
         name: "Trust & safety",
         task: "Privacy-request (DSR) deadlines, counted",
-        blockReason:
-          "Trust & safety has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
+        blockReason: "Trust & safety is waiting on its record screen.",
       },
       research: {
         name: "Product research",
@@ -448,19 +447,20 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           switch: "The app switch row on its digest tab, off until a person turns it on.",
         },
         trust: {
-          summary: "Planned: a read-only observer of the legal deadlines on personal-data requests, showing how many are overdue or due soon.",
+          summary: "A read-only observer of the legal deadlines on privacy (DSR) requests: how many are past their deadline, due soon or closed late. It counts and shows; it changes no request and tells no one.",
           does: [
-            "As planned, a scheduled service counts overdue and imminent privacy requests from a handful of fields, with legal holds counted apart and nothing stored per request.",
-            "Its policy is approved; its code is not in this build yet.",
+            "Every 30 min a scheduled service asks the app for one round. With the switch on, a round counts every privacy request against its deadline from seven fields (legal holds counted apart, nothing stored per request), records one row about the round and pings an external dead-man monitor.",
+            "The Trust & safety tab of Agent digests recomputes the same counts each time it opens and stores nothing. This room shows the switch, the counts and when they were read, to the owner only.",
           ],
           never: [
-            "No LLM, and no message to anyone.",
-            "Never writes privacy requests or accounts, gives no legal verdict and does no moderation.",
+            "No LLM, and no message to anyone: all that leaves the app is a body-less ping to the external monitor.",
+            "Never writes privacy requests or accounts, gives no legal verdict (no \"compliant\" or \"in breach\") and does no moderation.",
           ],
           human: [
             "Completing or rejecting a request, legal holds and due dates stay with people.",
+            "The owner turns observation on or off, with a recent sign-in; no other role can read the counts.",
           ],
-          switch: "Not built yet, so there is nothing to switch on.",
+          switch: "Off by default. Only the owner turns it on, on the Trust & safety tab of Agent digests (audited), once the policy's stage-1 conditions (section 14) and signatures (section 12) are met.",
         },
         research: {
           summary: "Once a day it copies the issue-backlog report's verdicts on each open GitHub issue into a row the owner reads. It decides nothing.",
@@ -714,6 +714,35 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           `State chain not trusted · ${reason} · ${mode} · generation ${generation}`,
         lastDigest: (time: string) => `last digest ${time}`,
         noDigest: "no digest received yet",
+      },
+      trust: {
+        badges: {
+          on: "On",
+          off: "Off",
+          unknown: "Not believed",
+          fault: "Switch fault",
+          overdue: "Overdue",
+          ownerOnly: "Owner only",
+          unread: "Unread",
+        },
+        unread: "Could not read its record",
+        ownerOnly: "Only the owner can see it",
+        modes: { on: "Observation on", off: "Observation off", unknown: "Observation switch not believed" },
+        faults: {
+          config_row_missing: "no switch row yet",
+          signature_unverified: "newest switch entry does not verify",
+          binding_mismatch: "switch row and audit entry disagree",
+          unhashed_entry_present: "a switch entry has no hash",
+          chain_broken: "audit chain broken after the switch entry",
+          ping_url_missing: "no monitor URL, so no ping is sent",
+        },
+        fault: (label: string) => `fault: ${label}`,
+        notCounted: "not counted",
+        overdue: (count: number) => `${count} ${count === 1 ? "request" : "requests"} past the deadline`,
+        imminent: (count: number, days: number) => `${count} due within ${days} days`,
+        imminentUnset: "due-soon window not set",
+        closedLate: (count: number) => `${count} closed after the deadline`,
+        observedAt: (time: string) => `read ${time}`,
       },
       support: {
         badges: { on: "On", off: "Off", stale: "Stale", failed: "Runs failed", unread: "Unread" },
@@ -1015,8 +1044,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       trust: {
         name: "신뢰·안전팀",
         task: "개인정보 요청(DSR) 기한 관측",
-        blockReason:
-          "신뢰·안전팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
+        blockReason: "신뢰·안전팀은 기록 화면 연결을 기다리고 있어요.",
       },
       research: {
         name: "제품 리서치팀",
@@ -1381,19 +1409,20 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           switch: "digest 탭의 앱 스위치 행. 사람이 켜기 전까지 꺼져 있습니다.",
         },
         trust: {
-          summary: "계획 단계입니다. 개인정보 요청의 법정 기한을 읽기만 하는 관측자로, 기한이 지났거나 임박한 요청 수를 보여 줍니다.",
+          summary: "개인정보(DSR) 요청의 법정 기한을 읽기만 하는 관측자로, 기한이 지났거나 임박했거나 기한을 넘겨 종결된 요청 수를 보여 줍니다. 세어서 보여 줄 뿐 요청을 바꾸거나 누구에게 알리지 않습니다.",
           does: [
-            "계획대로라면 예약 서비스가 몇 개 필드만 읽어 기한 초과·임박 요청을 세고, legal hold는 따로 세며, 요청별로는 아무것도 저장하지 않습니다.",
-            "정책은 승인됐지만, 이 빌드에는 아직 코드가 없습니다.",
+            "30분마다 예약 서비스가 앱에 회차 하나를 요청합니다. 스위치가 켜져 있으면 회차가 일곱 개 필드만 읽어 모든 개인정보 요청을 기한과 견주어 세고(legal hold는 따로 세며 요청별로는 아무것도 저장하지 않음), 회차 행 하나를 남기고, 외부 dead-man monitor에 ping을 보냅니다.",
+            "Agent digests의 신뢰·안전 탭은 열 때마다 같은 count를 다시 계산하고 아무것도 저장하지 않습니다. 이 방은 스위치·count·읽은 시각을 owner에게만 보여 줍니다.",
           ],
           never: [
-            "LLM을 쓰지 않고, 누구에게도 메시지를 보내지 않습니다.",
-            "개인정보 요청이나 계정을 쓰지 않고, 법적 판정이나 moderation을 하지 않습니다.",
+            "LLM을 쓰지 않고 누구에게도 메시지를 보내지 않습니다. 앱 밖으로 나가는 것은 외부 monitor로 가는 본문 없는 ping뿐입니다.",
+            "개인정보 요청이나 계정을 쓰지 않고, 법적 판정(\"준수\"·\"위반\")이나 moderation을 하지 않습니다.",
           ],
           human: [
             "요청 완료·거절, legal hold, 기한 변경은 사람이 합니다.",
+            "관측 켜기·끄기는 owner가 최근 로그인 상태에서 합니다. 다른 role은 count를 읽을 수 없습니다.",
           ],
-          switch: "아직 만들어지지 않아 켤 것이 없습니다.",
+          switch: "기본값은 꺼짐입니다. 정책의 1단계 조건(14절)과 서명(12절)이 갖춰진 뒤에만 owner가 Agent digests의 신뢰·안전 탭에서 켭니다(감사됨).",
         },
         research: {
           summary: "하루 한 번, 열린 GitHub 이슈마다 이슈 backlog 보고서의 판정을 owner가 읽을 행으로 옮겨 적습니다. 아무것도 결정하지 않습니다.",
@@ -1645,6 +1674,35 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           `상태 체인 신뢰 안 됨 · ${reason} · ${mode} · 세대 ${generation}`,
         lastDigest: (time: string) => `마지막 digest ${time}`,
         noDigest: "아직 받은 digest 없음",
+      },
+      trust: {
+        badges: {
+          on: "켜짐",
+          off: "꺼짐",
+          unknown: "믿을 수 없음",
+          fault: "스위치 오류",
+          overdue: "기한 초과",
+          ownerOnly: "owner 전용",
+          unread: "읽지 못함",
+        },
+        unread: "기록을 읽지 못함",
+        ownerOnly: "owner만 볼 수 있음",
+        modes: { on: "관측 켜짐", off: "관측 꺼짐", unknown: "관측 스위치를 믿을 수 없음" },
+        faults: {
+          config_row_missing: "설정 행 없음",
+          signature_unverified: "최신 스위치 기록의 서명이 검증되지 않음",
+          binding_mismatch: "설정 행과 감사 기록이 어긋남",
+          unhashed_entry_present: "해시 없는 스위치 기록이 있음",
+          chain_broken: "스위치 기록 다음의 감사 체인이 끊김",
+          ping_url_missing: "monitor URL이 없어 ping이 나가지 않음",
+        },
+        fault: (label: string) => `오류: ${label}`,
+        notCounted: "세지 않음",
+        overdue: (count: number) => `기한 지난 요청 ${count}건`,
+        imminent: (count: number, days: number) => `${days}일 안 임박 ${count}건`,
+        imminentUnset: "임박 기준 미정",
+        closedLate: (count: number) => `기한 넘겨 종결 ${count}건`,
+        observedAt: (time: string) => `읽은 시각 ${time}`,
       },
       support: {
         badges: { on: "켜짐", off: "꺼짐", stale: "지연", failed: "실행 실패", unread: "읽지 못함" },

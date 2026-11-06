@@ -7,8 +7,8 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { amuxIdeaCardCloseReasonValid, type AmuxIdeaCardCloseDecision } from "./ideaCardCloseCore.ts";
-import { applyAmuxIdeaCardCloseAnswerInTransaction, type AmuxIdeaCardCloseApplied } from
-  "./ideaCardCloseService.ts";
+import { applyAmuxIdeaCardCloseAnswerInTransaction, isAmuxIdeaCardCloseBusy,
+  type AmuxIdeaCardCloseApplied } from "./ideaCardCloseService.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 
@@ -20,7 +20,7 @@ import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
  */
 
 export class AmuxIdeaCardCloseOwnerError extends Error {
-  constructor(readonly code: "forbidden" | "invalid" | "integrity_unavailable") {
+  constructor(readonly code: "forbidden" | "invalid" | "integrity_unavailable" | "busy") {
     super(code);
     this.name = "AmuxIdeaCardCloseOwnerError";
   }
@@ -70,5 +70,9 @@ export async function answerAmuxIdeaCardCloseForOwner(input: {
         summary: entry.summary,
         metadata: { ...entry.metadata, reasonDigest: digest.digest, reasonDigestKeyId: digest.digestKeyId } }),
     });
-  }, { maxWait: 5_000, timeout: 15_000 });
+  }, { maxWait: 5_000, timeout: 15_000 }).catch((error: unknown) => {
+    // A worker held one of the cards; the whole answer rolled back.
+    if (isAmuxIdeaCardCloseBusy(error)) throw new AmuxIdeaCardCloseOwnerError("busy");
+    throw error;
+  });
 }

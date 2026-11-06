@@ -262,7 +262,7 @@ test("what the service says reaches the panel, and an unknown failure is never a
     assert.equal(response.status, 200);
     assert.equal((await response.json()).outcome, outcome);
   }
-  for (const [code, status] of [["forbidden", 403], ["invalid", 400], ["integrity_unavailable", 503]] as const) {
+  for (const [code, status] of [["forbidden", 403], ["invalid", 400], ["integrity_unavailable", 503], ["busy", 409]] as const) {
     reset({ ownerError: new FakeOwnerError(code) });
     const response = await answer();
     assert.equal(response.status, status);

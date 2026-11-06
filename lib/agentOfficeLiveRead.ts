@@ -31,6 +31,7 @@ import type {
   AgentOfficeRoutingState,
   AgentOfficeSreState,
   AgentOfficeSupportState,
+  AgentOfficeTrustState,
 } from "@/lib/agentOffice/live";
 import {
   countAwaitingAmuxEscalations,
@@ -52,6 +53,7 @@ import { agentOfficeReviewState } from "@/lib/agentOfficeReviewState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
 import { agentOfficeSreState } from "@/lib/agentOfficeSreState";
 import { agentOfficeSupportState } from "@/lib/agentOfficeSupportState";
+import { agentOfficeTrustState } from "@/lib/agentOfficeTrustState";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import {
@@ -75,6 +77,7 @@ import { readSwitches as readMarketingSwitches } from "@/lib/marketingConsoleRea
 import { readOpsObserverAdminView } from "@/lib/opsObserverStore";
 import { prisma } from "@/lib/prisma";
 import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
+import { readTrustSafetyDigest } from "@/lib/trustSafetyDigestRead";
 import {
   PRODUCT_RESEARCH_ENABLED_SINCE_SETTING,
   latestProductResearchSuccess,
@@ -303,6 +306,23 @@ async function readMarketing(): Promise<AgentOfficeMarketingState> {
 }
 
 /**
+ * Trust and safety: the section's own reader, unchanged. It checks
+ * `trust-safety:read` itself and returns `{ permitted: false }` having read
+ * nothing when the caller is not the owner, so no permission check is repeated
+ * or bypassed here. It writes nothing, opens two bounded transactions and does
+ * not read the observer's run table (docs/policy/trust-safety-compliance-agent.md
+ * §5.6, §5.3). Only counts, the switch and a time come back, and only those are kept.
+ */
+async function readTrust(): Promise<AgentOfficeTrustState> {
+  try {
+    return agentOfficeTrustState(await readTrustSafetyDigest());
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "trust_safety" });
+    return { kind: "unread" };
+  }
+}
+
+/**
  * Engineering: the switch settings, the agent's own halt reading, open owner
  * items counted by kind, how many runs are in progress and since when, and the
  * newest ended run's status, outcome and times. No patch body, reason, cause key or card is selected: the office says
@@ -469,7 +489,7 @@ async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
 }
 
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, routing, sre, support, marketing, engineering, amux, review, decision, digest, queue] =
+  const [research, qa, finance, routing, sre, support, marketing, trust, engineering, amux, review, decision, digest, queue] =
     await Promise.all([
       readResearch(now),
       readQa(),
@@ -478,6 +498,7 @@ export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<
       readSre(),
       readSupport(),
       readMarketing(),
+      readTrust(),
       readEngineering(),
       readAmuxWorkers(),
       readReview(),
@@ -494,6 +515,7 @@ export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<
     sre,
     support,
     marketing,
+    trust,
     engineering,
     amux,
     review,

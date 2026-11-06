@@ -73,7 +73,6 @@ const experimentActivationDecision = (switchValue: string | undefined) =>
     recoveryContractAvailable: unreadable,
     platformBudgetAvailable: unreadable,
     autoPublishEnabled: unreadable,
-    commentsMonitorHealthy: unreadable,
     publicationCancellable: unreadable,
     o4Eligible: unreadable,
     o15Channel: unreadable,

@@ -187,7 +187,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | 시장 분석·주간 브리프(§4.2) | 분석 스위치(`marketing:write` + step-up으로 켬, 기본 꺼짐) · kill switch 아님 · LLM 생성 예산 이내(원장이 `brief` 예약 때 스위치를 다시 읽음) |
 | 수동 승인 | `marketing:write` + step-up · 초안 스위치 · kill switch 아님 (LLM 예산과 무관) |
 | 승인 모드 게시 | 게시 스위치 · kill switch 아님 · 계정이 승인/자율 모드 · 어댑터 health · 채널 복구 계약 존재 · 플랫폼 예산 이내 |
-| 자율 게시 | 승인 모드 게시 조건 · 자율 스위치 · 계정 자율 모드 · 댓글 모니터링 동작 · 채널이 API 게시 취소 가능(Instagram·TikTok 제외, O15) |
+| 자율 게시 | 승인 모드 게시 조건 · 자율 스위치 · 계정 자율 모드 · 채널이 API 게시 취소 가능(Instagram·TikTok 제외, O15) (댓글 모니터링은 조건이 아니다, 소유자 결정 2026-11-06) |
 | 졸업 | `marketing:write` + step-up · O3 · 채널이 O15 대상 아님 (댓글 모니터링은 조건이 아니다, 소유자 결정 2026-11-05) |
 | 실험 활성화 | 실험 스위치 · kill switch 아님 · 캐시·CSP 스파이크 통과 기록 · (승인 모드) `marketing:write` + step-up / (자율) 표면 졸업 |
 | SEO 자동 병합 | 에이전트 스위치 · `MARKETING_SEO_AUTO_MERGE=true`(기본 꺼짐) · kill switch 아님 · 졸업 기록(`MARKETING_SEO_AUTO_PR=true`) · 게시 단계와 같은 서명·tree·허용 4개 파일 재검증 · PR이 develop 기준·열림·draft 아님·검증한 commit 그대로 (§9.2) |
@@ -365,7 +365,7 @@ production 수신기는 서명된 설정 세대가 있으면 범위 밖 이벤�
 O3를 다시 계산한다: 현재 승인 기간(`approvalStartedAt` 이후)에서 첫 게시 성공 후 7일, 승인 3건 이상, 수정 비율
 (수정된 승인 ÷ 승인; 반려는 수정과 다른 신호라 분모에서 뺀다, 운영자 결정 2026-11-02) 1/3 이하, Instagram·TikTok 아님. 미충족 사유는 모두 한 번에 화면에 보인다.
 스냅샷(`graduationSnapshot`)에는 건수와 비율만 고정한다. 댓글 모니터링은 졸업 조건에서 뺐다(소유자 결정 2026-11-05: 모니터에 필요한 Zernio
-Inbox 애드온을 쓰지 않는다). 자율 게시 승인 판정(위 표의 "자율 게시")은 아직 댓글 모니터링을 요구한다. 자율 게시 스위치는 졸업이 건드리지 않는다.
+Inbox 애드온을 쓰지 않는다). 자율 게시 승인 판정(위 표의 "자율 게시")에서도 뺐다(소유자 결정 2026-11-06). 자율 게시 스위치는 졸업이 건드리지 않는다.
 
 ### 8.3 자동 정지 (구현된 트리거만 안전장치로 계산)
 | 트리거 | 출처 | 범위 |
@@ -573,11 +573,11 @@ Inbox 애드온을 쓰지 않는다). 자율 게시 승인 판정(위 표의 "�
   모델에도 그 본문만 보낸다. 로그에 본문·handle·댓글 URL을 남기지 않는다.
 - 저장은 게시물 단위 알림(건수·위험 코드·최초 감지 시각, 게시물 URL의 host)뿐이며 90일 후 삭제한다. 같은 건수·위험 코드를 적은 시스템 감사 한 줄이 따로 남는다.
 - **선행 조건(사람):** lawful basis·DPIA 검토, 게시 도구의 처리자 지위·DPA·하위처리자·데이터 위치, 호주 APP 8 해외 이전,
-  GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있고, **댓글 모니터링 없이는 자율 게시가 없다.** (졸업 조건에서는 뺐다, 소유자 결정 2026-11-05.)
+  GDPR 고지 → 개인정보처리방침 7개 locale 개정. 선행 전에는 댓글 기능이 꺼져 있다. 댓글 모니터링은 졸업 조건(소유자 결정 2026-11-05)에서도, 자율 게시 조건(소유자 결정 2026-11-06)에서도 뺐다. 모니터에 필요한 Zernio Inbox 애드온을 쓰지 않으므로 자율 게시 계정의 댓글은 사람이 플랫폼에서 직접 본다.
   개정 문안 초안(2026-11-03)은 `privacyPolicy.comments*`이고 확인 필요 항목이 자리표시로 남아 있어, 확인이 끝나 `COMMENTS_PRIVACY_NOTICE_CONFIRMED`(`lib/privacyNoticeStatus.ts`)가 `true`가 될 때까지 페이지가 그 절을 그리지 않는다. 사람이 할 일의 목록과 순서는
   [DPIA 초안 체크리스트](marketing-privacy-dpia-checklist.md)에 있다. 문안이 게시돼도 스위치는 그 체크리스트가 끝나기 전에 켜지 않는다.
   **운영자 결정 2026-11-04:** Zernio(ZERNIO SOFTWARE SL, 스페인)와 DPA를 체결했고, 처리 근거는 정당한 이익이며, 보관 문구를 7개 locale에 채우고 `COMMENTS_PRIVACY_NOTICE_CONFIRMED`를 `true`로 바꾼다. 체크리스트의 보완 요청은 회신 없이 진행하며 잔여 위험은 운영자가 받아들였다(정책 버전 변경 없음; 기록은 체크리스트 §5). 스위치 `MARKETING_COMMENTS_MONITOR_ENABLED`는 별개 결정으로 그대로 꺼져 있다.
-- **고지 상수가 모니터의 첫 조건이다 (2026-11-04, 운영자 결정 — 구현 설명이며 위 구속 조건과 정책 버전을 바꾸지 않는다).** `COMMENTS_PRIVACY_NOTICE_CONFIRMED`가 `false`이면 `MARKETING_COMMENTS_MONITOR_ENABLED=true`여도 모니터는 꺼져 있다. 앱의 판정 하나(`commentsMonitorEnabled`, `lib/marketingCommentsMonitorHealth.ts`)에 상수가 들어 있어, 내부 route는 두 단계 모두 `off`로 답하고 DB·게시 도구에 닿지 않으며, 실행(`runMarketingCommentsMonitor`)도 같고, 건강 판정(`commentsMonitorHealthy`)은 거짓이라 자율 게시 판정도 막힌다(졸업 판정은 이 값을 읽지 않는다, 2026-11-05). 서비스(`marketingCommentsMonitorGate`)는 같은 상수를 보고 worker를 띄우지 않으며 로그에 `privacy_notice_unconfirmed`를 남긴다(app의 `off` 응답 모양은 서비스가 엄격히 읽으므로 그대로다). 상수는 고지 개정 PR에서만 `true`로 바꾸고, 그 뒤에도 변수와 체크리스트는 별도 결정이다.
+- **고지 상수가 모니터의 첫 조건이다 (2026-11-04, 운영자 결정 — 구현 설명이며 위 구속 조건과 정책 버전을 바꾸지 않는다).** `COMMENTS_PRIVACY_NOTICE_CONFIRMED`가 `false`이면 `MARKETING_COMMENTS_MONITOR_ENABLED=true`여도 모니터는 꺼져 있다. 앱의 판정 하나(`commentsMonitorEnabled`, `lib/marketingCommentsMonitorHealth.ts`)에 상수가 들어 있어, 내부 route는 두 단계 모두 `off`로 답하고 DB·게시 도구에 닿지 않으며, 실행(`runMarketingCommentsMonitor`)도 같고, 건강 판정(`commentsMonitorHealthy`)은 거짓이다(자율 게시 판정은 2026-11-06부터, 졸업 판정은 2026-11-05부터 이 값을 읽지 않는다). 서비스(`marketingCommentsMonitorGate`)는 같은 상수를 보고 worker를 띄우지 않으며 로그에 `privacy_notice_unconfirmed`를 남긴다(app의 `off` 응답 모양은 서비스가 엄격히 읽으므로 그대로다). 상수는 고지 개정 PR에서만 `true`로 바꾸고, 그 뒤에도 변수와 체크리스트는 별도 결정이다.
 
 **S4c 구현 상태(2026-11-01).** 스위치는 환경변수 `MARKETING_COMMENTS_MONITOR_ENABLED=true`이며 기본 꺼짐이다(건강 판정을 묻는 웹 앱·게시기와 모니터를 돌리는 서비스 모두에 같은 값을 둔다). 꺼져 있으면
 `runMarketingCommentsMonitor()`는 DB·게시 도구·모델 어느 것도 건드리지 않고 돌아온다. 켜진 실행은 최근 14일 안에 게시된 글의 댓글을
@@ -585,7 +585,7 @@ Inbox 애드온을 쓰지 않는다). 자율 게시 승인 판정(위 표의 "�
 (작성자·id·링크는 읽는 즉시 버린다), 저장은 `comment_alerts` 보고서(건수·닫힌 위험 코드·최초 감지·URL host)와 시스템 감사 한 줄뿐이다.
 알림은 운영자 확인 감사 항목(`marketing_comment_alert.acknowledge`)보다 오래된 동안 열려 있고, 24시간 열려 있으면 계정이 S4a 경로로 정지한다
 (재개 이전에 열린 알림은 다시 정지시키지 않는다). 모든 글을 읽고 분류까지 끝낸 실행만 `marketing_comments_monitor_last_run` 설정에 **시작** 시각을(다음 실행은 그 시각 10분 전 이후의 댓글을 새 것으로 본다; 한 번에 200글까지, 넘으면 표본이라 기록하지 않는다)
-남기며, 3시간 안이면 `commentsMonitorHealthy`가 참이다(자율 게시 판정. 졸업 판정은 2026-11-05부터 읽지 않는다). 분류기가 없으면 `classifier_unavailable`로 아무것도 읽지 않는다.
+남기며, 3시간 안이면 `commentsMonitorHealthy`가 참이다(이 값은 이제 어떤 판정도 읽지 않는다. 졸업은 2026-11-05, 자율 게시는 2026-11-06부터). 분류기가 없으면 `classifier_unavailable`로 아무것도 읽지 않는다.
 
 **S4d 구현 상태(2026-11-02).** 분류기와 실행 경로가 연결됐다. 매시 15분에 Railway `Marketing Comments Monitor` 서비스(생성기와 같은 변수
 `MARKETING_APP_URL`·`MARKETING_GENERATOR_SUBMIT_SECRET`·`MARKETING_LLM_API_KEY`와 스위치만, DB·게시 도구 자격 없음)가 worker를 20분 기한으로 띄운다.
