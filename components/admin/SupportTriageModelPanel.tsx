@@ -59,6 +59,7 @@ export function SupportTriageModelPanel() {
   const [health, setHealth] = useState<SupportTriageHealth | null>(null);
   const [traceAnalysis, setTraceAnalysis] = useState<TraceAnalysisMode | null>(null);
   const [traceCasesEnabled, setTraceCasesEnabled] = useState(true);
+  const [developCiRepair, setDevelopCiRepair] = useState<boolean | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -74,6 +75,7 @@ export function SupportTriageModelPanel() {
           health?: SupportTriageHealth;
           traceAnalysis?: TraceAnalysisMode;
           traceCasesEnabled?: boolean;
+          developCiRepair?: boolean;
         };
         if (!live) return;
         if (!response.ok || !Array.isArray(payload.options)) {
@@ -89,6 +91,7 @@ export function SupportTriageModelPanel() {
         setHealth(payload.health ?? null);
         setTraceAnalysis(payload.traceAnalysis ?? null);
         setTraceCasesEnabled(payload.traceCasesEnabled !== false);
+        setDevelopCiRepair(typeof payload.developCiRepair === "boolean" ? payload.developCiRepair : null);
       } catch {
         if (live) setNotice({ tone: "error", text: m.triageModelLoadFailed });
       }
@@ -98,7 +101,12 @@ export function SupportTriageModelPanel() {
     };
   }, [m.triageModelLoadFailed]);
 
-  const put = async (body: { modelId?: string | null; enabled?: boolean; traceAnalysis?: TraceAnalysisMode }) => {
+  const put = async (body: {
+    modelId?: string | null;
+    enabled?: boolean;
+    traceAnalysis?: TraceAnalysisMode;
+    developCiRepair?: boolean;
+  }) => {
     setBusy(true);
     setNotice(null);
     setReauthenticationRequired(false);
@@ -113,6 +121,7 @@ export function SupportTriageModelPanel() {
         modelId?: string | null;
         enabled?: boolean;
         traceAnalysis?: TraceAnalysisMode;
+        developCiRepair?: boolean;
       };
       if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
         setReauthenticationRequired(true);
@@ -131,6 +140,7 @@ export function SupportTriageModelPanel() {
         setEnabledSource("admin");
       }
       if (payload.traceAnalysis) setTraceAnalysis(payload.traceAnalysis);
+      if (typeof payload.developCiRepair === "boolean") setDevelopCiRepair(payload.developCiRepair);
       setNotice({ tone: "ok", text: m.triageModelSaved });
     } catch {
       setNotice({ tone: "error", text: m.triageModelSaveFailed });
@@ -222,6 +232,22 @@ export function SupportTriageModelPanel() {
             {m.traceAnalysisNoCases}
           </p>
         )}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
+        <span className="text-sm text-zinc-200">
+          {m.developCiRepairLabel}:{" "}
+          {developCiRepair === null ? m.triageSwitchUnknown : developCiRepair ? m.triageSwitchOn : m.triageSwitchOff}
+        </span>
+        <button
+          type="button"
+          data-testid="develop-ci-repair-switch"
+          onClick={() => void put({ developCiRepair: !developCiRepair })}
+          disabled={developCiRepair === null || busy}
+          className="min-h-11 rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:opacity-50"
+        >
+          {developCiRepair ? m.triageSwitchTurnOff : m.triageSwitchTurnOn}
+        </button>
+        <p className="w-full text-xs leading-5 text-zinc-400">{m.developCiRepairHelp}</p>
       </div>
       {health ? <SupportTriageHealthLine health={health} m={m} /> : null}
       {reauthenticationRequired ? (
