@@ -1934,7 +1934,6 @@ const GRADUATION_UNMET_MESSAGE: Record<string, string> = {
   first_success_too_recent: "graduateUnmetFirstSuccessTooRecent",
   approvals_below_minimum: "graduateUnmetApprovalsBelowMinimum",
   edit_rate_above_limit: "graduateUnmetEditRateAboveLimit",
-  comments_monitor_unhealthy: "graduateUnmetCommentsMonitorUnhealthy",
 };
 
 /** Why graduation is not offered yet, or undefined when the server's reading says it may be. The server decides again on the click. */

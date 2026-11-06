@@ -65,7 +65,7 @@ owner-only (rule 14).
 | Operations | Agent digests | `/admin/agent-digests` | `billing-finance-ops` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
-| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio`, `import`, `reconciliation`, `metadata`, `recovery` |
+| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
 | AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
 | AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `safety`, `decision-maker`, `analysis` (owner only) |
@@ -260,7 +260,11 @@ reads the v22 control.
 Each page loads only its open section. On 2026-10-10 the operator retired the
 legacy JSON registration and local-analysis import UI in favour of v4 Ideas.
 Backlog opens on Ideas; `/admin/amux-intake` and Backlog's old `?tab=intake`
-redirect there while preserving the other query fields. The legacy server
+redirect there while preserving the other query fields. On 2026-11-06 the
+operator retired Backlog's **Cleanup and recovery** section the same way: its
+old `?tab=recovery` redirects to Ideas with the other query fields, because
+an idea's detail now releases its own unused analysis reservations (see the
+v49 backlog paragraph below). The legacy server
 APIs, gates, cards and audit records are unchanged; retiring their panels
 neither deletes data nor grants execution.
 
@@ -635,7 +639,7 @@ The safety section distinguishes automatic recovery checks, operator confirmatio
 
 ### AMUX Ideas holds only the idea flow (2026-10-15)
 
-The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to **Cleanup and recovery** (`?tab=recovery`), and the monthly analysis budget, the approval of analysis models and the Task worker and model cost catalogue to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Ideas flow links there and only reads what is approved. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas on the six-step bar; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. No route was retired, so no redirect was added.
+The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to the opened idea's detail (operator decision 2026-11-06, which retired **Cleanup and recovery** and its `?tab=recovery`, now a redirect to Ideas: an idea waiting for its analysis worker shows one release button when the server finds an unclaimed hold with no usage, and otherwise says why none can be released; the owner's later steps show the button only when a hold left by an earlier preview can still be released; there is no reservation ID to look up), and the monthly analysis budget, the approval of analysis models and the Task worker and model cost catalogue to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Ideas flow links there and only reads what is approved. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas on the six-step bar; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. The v49 redesign retired no route; the later `?tab=recovery` retirement keeps its redirect.
 
 ### AMUX Ideas is a one-stop flow with two decisions (2026-10-16)
 

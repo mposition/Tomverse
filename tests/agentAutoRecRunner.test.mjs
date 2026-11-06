@@ -373,3 +373,11 @@ test("the runner refuses to start unless the SIGUSR1 inspector path is closed", 
   assert.equal(startupProblem(["--experimental-strip-types"]), "inspector_signal_enabled");
   assert.equal(startupProblem([]), "inspector_signal_enabled");
 });
+
+test("a failing related test names itself in the journal, not only in the totals", async () => {
+  const tap = ["not ok 1 - the change breaks this", "  ---", "  error: 'boom'", "  ...", "# fail 1"].join("\n");
+  const { deps, events } = fakeRunner({ rules: [[/--test-concurrency=1/, { code: 1, stdout: tap, stderr: "", timedOut: false }]] });
+  assert.equal(await runOnce(deps), 0);
+  const failed = events.find((entry) => entry.event === "tests_failed");
+  assert.deepEqual(failed?.failures, ["the change breaks this"]);
+});

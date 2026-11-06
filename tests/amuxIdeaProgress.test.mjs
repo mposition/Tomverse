@@ -207,6 +207,12 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.equal(row.title, "Synthetic first line");
   assert.ok(values.includes("owner-1") && values.includes(AMUX_IDEA_PROGRESS_LIMIT), "owner scoped and bounded");
   assert.ok(sql.includes(`AND "cancelledAt" IS NULL`), "a closed or cancelled idea leaves the list");
+  // An opened idea older than the newest ones still takes a place inside the same bound.
+  assert.ok(sql.includes(`ORDER BY ("requestId"::text = ?::text) DESC NULLS LAST, "submittedAt" DESC`));
+  assert.equal(values[1], null, "no idea opened: the newest ones, as before");
+  calls.length = 0;
+  await readAmuxIdeaProgressInTx(tx, "owner-1", now, "22222222-2222-4222-8222-222222222222");
+  assert.equal(calls[0].values[1], "22222222-2222-4222-8222-222222222222");
   assert.ok(values.includes(now.toISOString()), "the proposal expiry is compared with the database clock");
   assert.ok(sql.includes(`u."expiresAt" > (?::timestamptz AT TIME ZONE 'UTC')`), "an expired proposal waits for nobody");
   assert.ok(sql.includes(`AND u."unitKind" IN ('node', 'card')`),
@@ -284,7 +290,8 @@ test("the Ideas main follows the approved mockup: inbox on top, input beside the
   assert.match(page, /tab\.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication\(session\)\) \{\n    ideaProgress = "reauthenticate";/,
     "a stale sign-in reads nothing");
   assert.match(page, /\} else if \(tab\.id === "ideas" && ideaReadBackAvailable\) \{/, "read only for the open Ideas tab, behind its switch");
-  assert.match(page, /readAmuxIdeaProgressForOwner\(session\.user\.id\)\.catch/);
+  // The opened idea is read even when older than the newest ones.
+  assert.match(page, /readAmuxIdeaProgressForOwner\(session\.user\.id, openRequestId\)\.catch/);
   assert.equal(page.split("readAmuxIdeaProgressForOwner(").length - 1, 1, "a single server read feeds the inbox and the list");
   // Not opened: the inbox leads at full width, then the input with the list beside it.
   assert.ok(page.indexOf("<AmuxIdeaInbox") < page.indexOf("<AmuxIdeaInputPanel"));

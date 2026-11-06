@@ -257,3 +257,35 @@ test("PR text from the runner is bounded and always ends with the footer", () =>
   assert.ok(long.body.length <= 20_000 + PR_BODY_FOOTER.length + 2);
   assert.equal(boundPrText({ title: "", body: "" }).title, "auto-rec");
 });
+
+test("failing tests are picked out of TAP output at any nesting, with their diagnostics", async () => {
+  const { failedTests } = await import("../tools/auto-rec-agent/lib/core.mjs");
+  const tap = [
+    "TAP version 13",
+    "# Subtest: passes",
+    "ok 1 - passes",
+    "  ---",
+    "  duration_ms: 1",
+    "  ...",
+    "# Subtest: suite",
+    "    # Subtest: inner breaks",
+    "    not ok 1 - inner breaks",
+    "      ---",
+    "      failureType: 'testCodeFailure'",
+    "      error: 'Expected values to be strictly equal'",
+    "      ...",
+    "not ok 2 - suite",
+    "  ---",
+    "  failureType: 'subtestsFailed'",
+    "  ...",
+    ...Array.from({ length: 200 }, (_, i) => `ok ${i + 3} - filler ${i}`),
+    "# fail 2",
+  ].join("\n");
+  const { names, excerpt } = failedTests(tap);
+  assert.deepEqual(names, ["inner breaks", "suite"]);
+  assert.match(excerpt, /error: 'Expected values to be strictly equal'/);
+  assert.match(excerpt, /failureType: 'subtestsFailed'/);
+  assert.doesNotMatch(excerpt, /filler/);
+  assert.deepEqual(failedTests(""), { names: [], excerpt: "" });
+  assert.equal(failedTests(tap, { maxFailures: 1 }).names.length, 1);
+});
