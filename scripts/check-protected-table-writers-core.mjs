@@ -735,6 +735,13 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/amux/ideaLaneService.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The lane claim orders develop CI repair ideas first by an EXISTS read of their system audit entry; the write verbs are its unrelated attempt-row locks. It writes no audit row.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaReadManifestKeyIntent",
     tableMentions: 2,
