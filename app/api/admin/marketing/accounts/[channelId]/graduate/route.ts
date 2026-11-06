@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
 import { z } from "zod";
-import { readMarketingCommentsMonitorHealthy } from "@/lib/marketingCommentsMonitorHealth";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import { MARKETING_GRADUATE_ACTION, graduateMarketingChannel } from "@/lib/marketingStore";
 
@@ -39,12 +38,10 @@ export async function POST(req: Request, context: RouteContext) {
     schema,
     metadata: (body) => ({ graduationEpoch: body.expectedGraduationEpoch }),
     run: async (tx, { body, auditLogId }) => {
-      const commentsMonitorHealthy = await readMarketingCommentsMonitorHealthy();
       const result = await graduateMarketingChannel(tx, {
         id: channelId,
         auditLogId,
         expectedGraduationEpoch: body.expectedGraduationEpoch,
-        commentsMonitorHealthy,
       });
       if (!result.graduated) throw new GraduationUnmet(result.unmet);
       return { id: channelId, graduationEpoch: result.snapshot.graduationEpoch };
