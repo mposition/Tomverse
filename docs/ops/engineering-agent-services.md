@@ -40,7 +40,8 @@
    (`preserve()`). apply 직후 대시보드에서 각 서비스에 아래 이름만 설정하고
    Deploy합니다. 목록 밖의 이름은 다음 apply가 지웁니다.
    - Runner: `ENGINEERING_AGENT_APP_URL`, `ENGINEERING_AGENT_RUNNER_SECRET`,
-     `ENGINEERING_AGENT_ANTHROPIC_API_KEY`(공급자 측 지출 한도가 걸린 전용 key),
+     `ENGINEERING_AGENT_ANTHROPIC_API_KEY`(퇴역 대기: 2026-11-06 이후의 이미지는 읽지 않습니다.
+     그 이미지의 digest를 pin하는 변경에서 IaC 선언과 함께 지우고, 그 뒤 공급자 콘솔에서 key를 폐기합니다),
      `ENGINEERING_AGENT_GITHUB_READ_TOKEN`(이 저장소 하나, 읽기 전용),
      `ENGINEERING_AGENT_RUNNER_DEADMAN_URL`
    - Publisher: `ENGINEERING_AGENT_APP_URL`, `ENGINEERING_AGENT_PUBLISHER_SECRET`,
