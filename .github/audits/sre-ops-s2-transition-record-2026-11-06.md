@@ -1,7 +1,11 @@
-# sre-ops S1b → S2 단계 전환 기록 (초안)
+# sre-ops S1b → S2 단계 전환 기록
 
-> **초안입니다.** 관측은 2026-11-04 Railway 로그에서 읽은 값이고, 판정은 소유자가 합니다. 제안이라고 적은 줄은 대화에서 바꿀 수 있습니다.
-> 근거: docs/policy/sre-ops.md §8(S1b 전환 조건, S2 착수 조건), §9 D5c.
+> 1–5절은 2026-11-04~05 초안의 관측과 결정이고, 6절이 2026-11-06 소유자 결정과 활성화 기록입니다.
+> 근거: docs/policy/sre-ops.md §8(S1b 전환 조건, S2·S3 착수 조건), §9 D5c.
+
+- 작성: 2026-11-04 초안, 2026-11-06 활성화 기록, Claude Code
+- 대상 단계: S1b → S2, 이어서 S3 스위치
+- production: `Ops Observer` 배포는 main `a90cdd9e1`(release #3368, S3 코드 #3343 포함)
 
 ## 1. S1b 전환 조건 (14일)
 
@@ -40,7 +44,7 @@
 | 점검 요일·시간 창 | **결정됨(2026-11-05):** 화요일 10:00–12:00(Brisbane). 코드에 이 값으로 들어 있습니다 |
 | check-in monitor 생성, monitor 셋의 알림 대상이 page 채널이 아님 | **생성됨(2026-11-05).** `ops-observer-channel-check`, 주기 7일, 유예 2일, 이메일 알림 2곳(page 채널 아님). 첫 ping 전에는 알리지 않습니다. URL은 어떤 서비스에도 넣지 않습니다 |
 | Railway의 주 프로세스 종료 인식(D5c) | **통과(소유자 판정 2026-11-05).** 근거와 한계는 4절 |
-| activation genesis(`live`) | **소유자 승인.** `OPS_OBSERVER_PAGE_WEBHOOK_URL` 설정 뒤 Admin 화면에서 |
+| activation genesis(`live`) | **완료(2026-11-06).** 소유자가 `OPS_OBSERVER_PAGE_WEBHOOK_URL`을 넣은 뒤 Admin 화면에서 승인했습니다. 6절 |
 
 ## 3. page 키가 아닌 readiness 검사 영향표 (소유자 결정 2026-11-05)
 
@@ -75,10 +79,25 @@ Railway cron은 이전 회차가 끝나지 않았으면 다음 회차를 시작�
 
 ## 5. S3의 남은 항목
 
-- provider 예산 키와 알림 전달 실패 키는 구현했고 `OPS_OBSERVER_S3_PAGES`가 켜질 때까지 동작하지 않습니다.
+- provider 예산 키와 알림 전달 실패 키는 구현했습니다. 2026-11-06에 `OPS_OBSERVER_S3_PAGES`를 켰습니다(6절).
 - HTTP 5xx 급증 키는 소유자 결정(2026-11-05)으로 뺐습니다. Railway 읽기 전용 token scope를 문서에서 확인하지 못했고, 토큰을 두지 않습니다.
 
-## 6. 판정 (소유자)
+## 6. 소유자 결정과 활성화 (2026-11-06)
 
-- S1b → S2 전환: (미판정)
-- 서명·일시: (미기록)
+**결정.** 소유자는 2026-11-06 대화에서 S2를 지금 켜라고 지시했습니다("활성화 해주세요"). S1b의 다시 센 관측 구간(11-18 07:02 종료 예정)을 기다리지 않습니다. 같은 날 S3 스위치도 켜라고 지시했습니다. 따라서 §8의 S1b 전환 조건과 S2 전환 조건은 **충족 판정 없이 소유자 결정으로 건너뛴 것**으로 남깁니다. 1절의 미확인 두 줄(추가 genesis, `shadowed`에 이르지 않은 예약)도 판정하지 않았습니다.
+
+| 시각(AEST) | 일 | 누가 |
+|---|---|---|
+| 11-06 11:19 | Railway `Tomverse Agents` › `Ops Observer`(production)에 `OPS_OBSERVER_PAGE_WEBHOOK_URL` 설정과 배포 | 소유자(값은 대화에 없습니다) |
+| 11-06 11:22 이전 | Admin `/admin/sre-ops`에서 activation genesis(`live`) 승인. 직전 genesis는 10-13이라 7일 규칙(D5b)에 걸리지 않습니다 | 소유자 |
+| 11-06 11:22 | 첫 page 실행 `mode=live outcome=noop exitCode=0`, 보낸 page 0 | 로그 |
+| 11-06 11:23 | 같은 서비스에 `OPS_OBSERVER_S3_PAGES=true` 설정, Railway가 다시 배포 | Claude Code(소유자 지시) |
+| 11-06 11:31 | `mode=live outcome=advanced reservedItems=0 exitCode=0`. 상태만 저장했고 보낸 page는 없습니다 | 로그 |
+
+**관측 구간.** S2 관측 14일은 2026-11-06 AEST 11:22부터 셉니다(가장 이른 종료 11-20 11:22). S3의 30일은 11:31부터 셉니다(가장 이른 종료 12-06 11:31). 두 구간이 겹쳐 있으므로, 이 기간의 page가 S2 키에서 왔는지 S3 키에서 왔는지는 전송 기록의 키로 나눠 셉니다.
+
+**아직 확인하지 않은 것.**
+- page 채널 휴대폰 도달: 아직 보낸 메시지가 없습니다. 첫 기회는 2026-11-10(화) 10:00–12:00 채널 점검입니다. 소유자가 받으면 check-in URL을 한 번 열어 `ops-observer-channel-check`가 작동합니다.
+- S3 키 두 종의 실제 값과 production의 `AdminNotificationLog` `failed` 빈도는 읽지 않았습니다.
+
+**끄는 방법.** `OPS_OBSERVER_S3_PAGES`를 지우면 S3 키만, `OPS_OBSERVER_ENABLED`를 지우면 전부 다음 회차부터 멈춥니다. Railway 변수는 다음 배포부터 반영됩니다.
