@@ -5,9 +5,6 @@ import test from "node:test";
 import {
   ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV,
   EngineeringAgentGitHubReadError,
-  readEngineeringAgentBacklogAt,
-  readEngineeringAgentCheckRunsAt,
-  readEngineeringAgentDependabotFailures,
   readEngineeringAgentDevelopChecks,
   readEngineeringAgentDevelopHead,
   readEngineeringAgentGitBlob,
@@ -133,69 +130,16 @@ test("v22 base tree is complete, self-consistent and read from the fixed repo", 
     }) }).fetchImpl }), /invalid_response/);
 });
 
-test("the backlog is read at the pin only when the pin is on the backlog branch", async () => {
-  const text = "| ID | 상태·분류 | 다음 완료 단위 |\n|---|---|---|\n| ENG-1 | P2 진행 | 다음 |\n";
-  const content = Buffer.from(text, "utf8").toString("base64");
-  const branch = encodeURIComponent("codex/product-idea-backlog-2026-09-15");
-  const file = { type: "file", encoding: "base64", content };
-  for (const status of ["identical", "ahead"]) {
-    const { fetchImpl, seen } = fakeFetch({
-      [`/compare/${PIN}...${branch}`]: () => ({ status }),
-      "/contents/.github/audits/tomverse-product-idea-backlog.md": () => file,
-    });
-    assert.equal(await readEngineeringAgentBacklogAt(PIN, { env, fetchImpl }), text);
-    assert.ok(seen.every((call) => call.init.method === "GET"), "only reads");
-    assert.ok(seen.every((call) => call.init.headers.Authorization === "Bearer read-only-token"));
-    assert.ok(seen.some((call) => call.url.includes(`ref=${PIN}`)), "the file is read at the pin");
-  }
-  for (const status of ["behind", "diverged"]) {
-    const { fetchImpl } = fakeFetch({
-      [`/compare/${PIN}...${branch}`]: () => ({ status }),
-      "/contents/.github/audits/tomverse-product-idea-backlog.md": () => file,
-    });
-    await assert.rejects(readEngineeringAgentBacklogAt(PIN, { env, fetchImpl }), /invalid_input/);
-  }
-});
-
-test("a backlog that holds a NUL is not text, and the whole source is refused", async () => {
-  const branch = encodeURIComponent("codex/product-idea-backlog-2026-09-15");
-  const content = Buffer.from("| ID | 상태·분류 | 다음 완료 단위 |\n|---|---|---|\n| ENG-1 | P2\u0000 | 다음 |\n", "utf8").toString("base64");
+test("develop's checks need the read-only token, and an error carries a code, never upstream text", async () => {
+  await assert.rejects(readEngineeringAgentDevelopChecks({ env: {}, fetchImpl: fetch }), /not_configured/);
+  const head = "e".repeat(40);
   const { fetchImpl } = fakeFetch({
-    [`/compare/${PIN}...${branch}`]: () => ({ status: "identical" }),
-    "/contents/.github/audits/tomverse-product-idea-backlog.md": () => ({ type: "file", encoding: "base64", content }),
+    "/commits/develop": () => ({ sha: head }),
+    [`/commits/${head}/check-runs`]: () => runs([{ name: "x" }]),
   });
-  await assert.rejects(readEngineeringAgentBacklogAt(PIN, { env, fetchImpl }), /not_text/);
-});
-
-test("an S2 pin is develop's CI only when it is develop's head or behind it", async () => {
-  const checks = runs([{ id: 1, name: "unit", conclusion: "failure" }]);
-  for (const status of ["identical", "ahead"]) {
-    const { fetchImpl } = fakeFetch({
-      [`/compare/${PIN}...develop`]: () => ({ status }),
-      [`/commits/${PIN}/check-runs`]: () => checks,
-    });
-    assert.deepEqual(await readEngineeringAgentCheckRunsAt(PIN, { env, fetchImpl }), checks.check_runs);
-  }
-  for (const status of ["behind", "diverged"]) {
-    const { fetchImpl, seen } = fakeFetch({
-      [`/compare/${PIN}...develop`]: () => ({ status }),
-      [`/commits/${PIN}/check-runs`]: () => checks,
-    });
-    await assert.rejects(readEngineeringAgentCheckRunsAt(PIN, { env, fetchImpl }), /invalid_input/);
-    assert.equal(seen.some((call) => call.url.includes("/check-runs")), false, "a commit off develop is never read");
-  }
-});
-
-test("a pin, a token and an answer are all checked before anything is trusted", async () => {
-  await assert.rejects(readEngineeringAgentBacklogAt("main", { env, fetchImpl: fetch }), /invalid_input/);
-  await assert.rejects(readEngineeringAgentCheckRunsAt(PIN, { env: {}, fetchImpl: fetch }), /not_configured/);
-  const { fetchImpl } = fakeFetch({
-    [`/compare/${PIN}...develop`]: () => ({ status: "identical" }),
-    [`/commits/${PIN}/check-runs`]: () => runs([{ name: "x" }]),
-  });
-  await assert.rejects(readEngineeringAgentCheckRunsAt(PIN, { env, fetchImpl }), (error) => {
+  await assert.rejects(readEngineeringAgentDevelopChecks({ env, fetchImpl }), (error) => {
     assert.ok(error instanceof EngineeringAgentGitHubReadError);
-    assert.equal(error.message, "invalid_response", "the error carries a code, never upstream text");
+    assert.equal(error.message, "invalid_response");
     return true;
   });
 });
@@ -214,34 +158,6 @@ test("a page that is not the whole list is refused, not read as the whole", asyn
     });
     await assert.rejects(readEngineeringAgentDevelopChecks({ env, fetchImpl }), /invalid_response/);
   }
-  const { fetchImpl } = fakeFetch({
-    "/pulls": () => ({ body: [{ number: 7, user: { login: "someone" }, head: { sha: head } }], link: NEXT }),
-  });
-  await assert.rejects(
-    readEngineeringAgentDependabotFailures({ env, fetchImpl }),
-    /invalid_response/,
-    "dependabot's pull requests may be on the next page: the author is never filtered from a cut list",
-  );
-});
-
-test("only dependabot's open pull requests are read, and only their failing checks count", async () => {
-  const head = "b".repeat(40);
-  const other = "c".repeat(40);
-  const { fetchImpl } = fakeFetch({
-    "/pulls": () => [
-      { number: 7, user: { login: "dependabot[bot]" }, head: { sha: head } },
-      { number: 8, user: { login: "someone" }, head: { sha: other } },
-    ],
-    [`/commits/${head}/check-runs`]: () =>
-      runs([
-        { id: 1, name: "unit", conclusion: "failure" },
-        { id: 2, name: "lint", conclusion: "success" },
-        { id: 3, name: "e2e", conclusion: "timed_out" },
-      ]),
-  });
-  assert.deepEqual(await readEngineeringAgentDependabotFailures({ env, fetchImpl }), [
-    { prNumber: 7, headSha: head, failingChecks: ["unit", "e2e"] },
-  ]);
 });
 
 /* The approval observer's read of one published pull request (engineering-agent.md §9-10). */

@@ -607,6 +607,8 @@ production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 
 ## 에이전트 등록 원천
 
+> **2026-11-06: 이 경로는 삭제됐다.** 등록 route와 그것을 부르는 모듈은 만들어졌지만 Runner를 포함해 어떤 서비스도 호출하지 않았고, 아래 원천은 다른 경로가 맡는다. 빨간 develop CI는 develop CI 수리 pass가 AMUX idea lane에 아이디어 하나로 넘기고(`lib/developCiRepair.ts`, 운영자 결정: SEV1 슬롯으로 바로 배정), 실패한 Dependabot PR은 PR CI 자동 수정이 다룬다. `EngineeringAgentRegistration` 테이블과 그 trigger, 원천·상한 상수(`lib/engineeringAgentRegistrationGuard.ts`)는 이미 있는 행 때문에 남는다. 아래는 당시 계약의 기록이다.
+
 사람이 고른 요청과 별개인 두 번째 등록 원천이다. 개별 Agent 정책이 이름 댄 원천을 그 Agent가 분석해 `backlog` 카드를 등록한다. **등록은 실행이 아니고 승격이 아니다.** `backlog`에서 `todo`로 가는 규칙은 바뀌지 않는다.
 
 **원천.** 승인된 것은 엔지니어링 Agent 하나다(`docs/policy/engineering-agent.md` §2.2의 원천 표). 원천을 더하거나 바꾸는 것은 이 문서와 그 Agent 정책 **둘 다**의 개정이다.

@@ -106,8 +106,7 @@ test("the source-system map names every card writer's source system", () => {
     const value = read(path).match(new RegExp(`export const ${constant} = "([^"]+)"`))?.[1];
     assert.ok(value && Object.hasOwn(AMUX_CARD_DISPLAY_SOURCE_SYSTEM_PATH, value), `${constant} = ${value}`);
   }
-  const agentSources = read("lib/amux/agentIntake.ts").match(/"engineering-agent": \[([^\]]*)\]/)?.[1] ?? "";
-  for (const [, source] of agentSources.matchAll(/"([^"]+)"/g)) {
+  for (const source of ["engineering-product-backlog", "engineering-develop-ci", "engineering-dependabot-ci"]) {
     assert.equal(AMUX_CARD_DISPLAY_SOURCE_SYSTEM_PATH[source], "engineeringAgent", source);
   }
 });
