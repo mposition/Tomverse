@@ -33,6 +33,7 @@ import {
   routingLiveDept,
   sreLiveDept,
   supportLiveDept,
+  trustLiveDept,
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
   type AgentOfficeDecisionView,
@@ -130,6 +131,7 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
       sre: sreLiveDept(live.sre, m.real.sre),
       support: supportLiveDept(live.support, m.real.support),
       marketing: marketingLiveDept(live.marketing, m.real.marketing),
+      trust: trustLiveDept(live.trust, m.real.trust),
       engineering: engineeringLiveDept(live.engineering, m.real.engineering),
       digest: digestLiveDept(
         live.digest,

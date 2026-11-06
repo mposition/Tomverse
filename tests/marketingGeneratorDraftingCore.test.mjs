@@ -371,6 +371,7 @@ test("an asset reaches the model as its kind and what it shows in this locale, a
       description: "한 질문에 대한 세 답변을 나란히 보여 줍니다",
       claimIds: [],
       validUntil: "2099-12-31",
+      publishedCopies: [],
     },
   ]);
   // An image with no alt text in this locale still reaches the model, with no description.
@@ -381,6 +382,7 @@ test("an asset reaches the model as its kind and what it shows in this locale, a
     description: null,
     claimIds: [],
     validUntil: "2099-12-31",
+    publishedCopies: [],
   });
   // An asset that names no kind -- a hand-kept registry entry, or a context from an
   // app deployed before kinds were sent -- has no file the publisher can send, so it
@@ -510,4 +512,21 @@ test("a draft keeps its words and allowed tags; a forbidden tag or one past the 
 
 test("a refused answer removes no hashtags", () => {
   assert.deepEqual(readMarketingA5Answer("not json", context, SCOPE).hashtagsRemoved, {});
+});
+
+test("a cross-post sees what other accounts posted with its asset, in its own locale, and is told to write fresh (owner decision 2026-11-06)", () => {
+  const withCopies = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: context.assets.map((asset) => ({
+      ...asset,
+      publishedCopies: [
+        { locale: SCOPE.locale, text: "Same question. Where do the answers differ?" },
+        { locale: "zz-other", text: "not this locale" },
+      ],
+    })),
+  });
+  const [system, user] = marketingA5Messages(withCopies, SCOPE);
+  assert.match(system.content, /publishedCopies are posts other Tomverse accounts already published with it/);
+  assert.match(system.content, /write the post fresh/);
+  assert.deepEqual(JSON.parse(user.content).assets[0].publishedCopies, ["Same question. Where do the answers differ?"]);
 });
