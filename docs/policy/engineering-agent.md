@@ -444,6 +444,8 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 
 ## 8. 서비스와 자격증명
 
+> **2026-11-06: Runner는 더 이상 코드를 쓰지 않는다.** 모델 호출 모듈과 run 실행 단계를 지웠고, Runner는 묶이지 않은 PR·ref 관측(§12)과 공개 PR 승인·병합 관측 round(§9-10)의 trigger만 하며 AMUX에 `stopped`로만 보고해 아무 작업도 배정받지 않는다. 코딩은 AMUX v22 worker와 idea lane이 맡는다. 모델 key(`ENGINEERING_AGENT_ANTHROPIC_API_KEY`)는 이 변경 이후의 이미지가 읽지 않으며, 그 이미지의 digest를 pin하는 변경에서 IaC 선언과 함께 지운다. 아래 표의 Runner 모델 항목은 당시 계약의 기록이다.
+
 에이전트는 GitHub Actions에서 실행되지 않는다. **초안과 게시는 서로 다른 서비스**이며
 자격증명이 겹치지 않는다.
 

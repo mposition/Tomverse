@@ -346,7 +346,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         engineering: {
           summary: "Turns AMUX cards a person has promoted into code changes, and leaves every judgement to the operator.",
           does: [
-            "A Runner (production, every 30 min) drafts a patch for one promoted card with an Anthropic model whose only tool reads tracked files.",
+            "A Runner (production, every 30 min) watches GitHub for a pull request or branch under the agent's name that the app did not publish, and starts the round that reads its published pull requests' approvals and merges. It writes no code; AMUX workers and the idea lane do.",
             "The app, not the model, sets the tier from the list of changed files: a T2 result is a private draft in the app, a T1 result is opened as a pull request to develop by the Publisher (every 10 min).",
           ],
           never: [
@@ -1278,7 +1278,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         engineering: {
           summary: "운영자가 승격한 AMUX 카드를 코드 변경으로 만들고, 판단은 모두 운영자에게 남깁니다.",
           does: [
-            "Runner(production, 30분마다)가 승격된 카드 하나로 패치 초안을 만듭니다. Anthropic 모델을 쓰고, 모델이 쓸 수 있는 도구는 추적 중인 파일 읽기 하나뿐입니다.",
+            "Runner(production, 30분마다)가 앱이 게시하지 않은 Agent 이름의 PR·브랜치가 GitHub에 있는지 살피고, 게시한 PR의 승인·병합을 읽는 round를 시작합니다. 코드는 쓰지 않습니다. 코딩은 AMUX worker와 idea lane이 합니다.",
             "tier는 모델이 아니라 앱이 바뀐 파일 목록으로 정합니다. T2 결과는 앱 안의 비공개 초안이 되고, T1 결과는 Publisher(10분마다)가 develop 대상 PR로 엽니다.",
           ],
           never: [
