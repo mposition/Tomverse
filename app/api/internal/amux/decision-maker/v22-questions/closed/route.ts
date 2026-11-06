@@ -16,12 +16,12 @@ import {
 } from "@/lib/amux/decisionMakerInternalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
-import { recordAmuxV22QuestionLocalCardClosed } from
+import { recordDmQuestionLocalCardClosed } from
   "@/lib/amux/v22OwnerQuestionDmService";
 
 /**
- * Records that the relay closed the local card of a v22 question that left
- * `open`, once. The same report again is a read.
+ * Records that the relay closed the local card of a v22 question or an idea
+ * card close question that left `open`, once. The same report again is a read.
  * Closed until `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 const OPERATION = "decision_maker_v22_question_closed";
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       const body = await readLimitedJson(request, 1_024, requestSchema);
       const result = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22QuestionWrite,
-        (tx, context) => recordAmuxV22QuestionLocalCardClosed(tx, {
+        (tx, context) => recordDmQuestionLocalCardClosed(tx, {
           questionId: body.question_id, cardId: body.card_id, now: context.dbNow }));
       return amuxJsonNoStore(result);
     } catch (error) {

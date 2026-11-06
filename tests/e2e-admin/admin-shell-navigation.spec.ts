@@ -647,7 +647,7 @@ test.describe("admin console shell", () => {
     // Backlog opens on Ideas; the card list is its own section.
     await page.goto("/admin/amux-backlog");
     const backlog = page.getByRole("navigation", { name: "Backlog sections" });
-    await expect(backlog.getByRole("link")).toHaveCount(7);
+    await expect(backlog.getByRole("link")).toHaveCount(6);
     await expect(backlog.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas$/);
     await page.goto("/admin/amux-backlog?tab=list");
     await expect(page.getByTestId("amux-backlog-list")).toBeVisible();
@@ -665,19 +665,21 @@ test.describe("admin console shell", () => {
 });
 
 test.describe("the AMUX group by role", () => {
-  for (const url of ["/admin/amux-backlog?tab=ideas", "/admin/amux-backlog?tab=intake&sourceKey=legacy-a"]) {
+  for (const url of ["/admin/amux-backlog?tab=ideas", "/admin/amux-backlog?tab=intake&sourceKey=legacy-a",
+    "/admin/amux-backlog?tab=recovery&sourceKey=legacy-a"]) {
     test(`Backlog replaces legacy JSON intake with Ideas at ${url}`, async ({ page, signInAs }) => {
       await signInAs("owner");
       await page.goto(url);
       await expect(consoleHeading(page)).toHaveText("Backlog");
       const strip = page.getByRole("navigation", { name: "Backlog sections" });
-      await expect(strip.getByRole("link")).toHaveCount(7);
+      await expect(strip.getByRole("link")).toHaveCount(6);
       await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas/);
       await expect(strip.locator('a[href*="tab=intake"]')).toHaveCount(0);
+      await expect(strip.locator('a[href*="tab=recovery"]')).toHaveCount(0);
       await expect(page.getByTestId("amux-v4-idea-input")).toBeVisible();
       await expect(page.getByTestId("amux-intake-panel")).toHaveCount(0);
       await expect(page.getByTestId("amux-local-intake-panel")).toHaveCount(0);
-      if (url.includes("tab=intake")) {
+      if (url.includes("tab=intake") || url.includes("tab=recovery")) {
         await expect(page).toHaveURL(/\/admin\/amux-backlog\?tab=ideas&sourceKey=legacy-a$/);
       }
     });
@@ -793,6 +795,7 @@ test.describe("the AMUX group by role", () => {
   for (const url of [
     "/admin/amux-backlog",
     "/admin/amux-backlog?tab=intake",
+    "/admin/amux-backlog?tab=recovery",
     "/admin/amux-intake",
     "/admin/amux-promotion?tab=promotion",
     "/admin/amux-execution?tab=cards",

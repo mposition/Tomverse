@@ -45,7 +45,7 @@ mock.module(mod("lib/amux/ideaProgressRead.ts"), { namedExports: {
 } });
 const panels = {};
 for (const name of ["AdminPageTabs", "AmuxBacklogListPanel", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
-  "AmuxIdeaInputPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxAnalysisClaimResolutionPanel",
+  "AmuxIdeaInputPanel", "AmuxAnalysisClaimResolutionPanel",
   "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary"]) {
   const panel = () => null;
   panels[name] = panel;
@@ -75,7 +75,7 @@ test("default and unknown tabs render Ideas without offering legacy intake", asy
     const tabs = tree.find((element) => element.type === panels.AdminPageTabs).props;
     assert.equal(tabs.activeTabId, "ideas");
     assert.deepEqual(tabs.tabs.map((tab) => tab.id),
-      ["ideas", "list", "portfolio", "import", "reconciliation", "metadata", "recovery"]);
+      ["ideas", "list", "portfolio", "import", "reconciliation", "metadata"]);
     assert.equal("intake" in tabs.chips, false);
     assert.ok(tree.some((element) => element.type === panels.AmuxIdeaInputPanel));
     assert.equal(tree.some((element) => element.type === panels.AmuxBacklogListPanel), false);
@@ -85,19 +85,16 @@ test("default and unknown tabs render Ideas without offering legacy intake", asy
   assert.doesNotMatch(page, /AmuxIntakePanel|AmuxLocalIntakePanel/);
 });
 
-test("Ideas holds only the idea flow; portfolio and cleanup have their own sections", async () => {
+test("Ideas holds only the idea flow; portfolio has its own section", async () => {
   const ideas = elements(await open(query({ tab: "ideas" })));
   assert.ok(ideas.some((element) => element.type === panels.AmuxIdeaInputPanel));
-  for (const moved of ["AmuxPortfolioPanel", "AmuxUnusedAnalysisReservationPanel",
-    "AmuxBacklogListPanel"]) {
+  for (const moved of ["AmuxPortfolioPanel", "AmuxBacklogListPanel"]) {
     assert.equal(ideas.some((element) => element.type === panels[moved]), false, moved);
   }
   assert.deepEqual(backlogReads, []);
   const portfolio = elements(await open(query({ tab: "portfolio" })));
   assert.ok(portfolio.some((element) => element.type === panels.AmuxPortfolioPanel));
   assert.equal(portfolio.some((element) => element.type === panels.AmuxIdeaInputPanel), false);
-  const recovery = elements(await open(query({ tab: "recovery" })));
-  assert.ok(recovery.some((element) => element.type === panels.AmuxUnusedAnalysisReservationPanel));
   const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
   const settings = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-settings/page.tsx"), "utf8");
   const analysis = settings.slice(settings.indexOf('if (tab.id === "analysis")'));
@@ -141,6 +138,22 @@ test("old intake tab redirects before panel reads and preserves recovery and fil
   assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], "/admin/amux-backlog?tab=ideas");
   assert.equal(adminRedirectTarget(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], values),
     "/admin/amux-backlog?tab=ideas&analysisHoldId=hold-a&sourceKey=source-a");
+});
+
+test("retired Cleanup and recovery redirects to Ideas before any read and keeps the other queries", async () => {
+  const values = { tab: "recovery", idea: "cfa39925-f53e-4d19-9eb7-3b8ec2e94f68", analysisHoldId: "hold-a" };
+  await assert.rejects(open(query(values)), (error) => {
+    assert.ok(error instanceof Redirect);
+    assert.equal(error.destination,
+      "/admin/amux-backlog?tab=ideas&idea=cfa39925-f53e-4d19-9eb7-3b8ec2e94f68&analysisHoldId=hold-a");
+    return true;
+  });
+  assert.equal(messageReads, 0);
+  assert.deepEqual(backlogReads, []);
+  for (const role of ["ops", "support", "billing", "readonly", null]) {
+    session = role ? { user: { id: "admin-a", role } } : null;
+    await assert.rejects(open(query({ tab: "recovery" })), /NOT_FOUND/);
+  }
 });
 
 test("the redirected Ideas page still renders recovery for the exact preserved hold", async () => {

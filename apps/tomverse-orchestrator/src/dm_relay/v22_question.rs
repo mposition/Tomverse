@@ -237,6 +237,28 @@ mod tests {
         assert_eq!(calls[1], (AppRoute::V22QuestionCard, json!({"question_id": QUESTION, "card_id": "CI-9"})));
     }
 
+    /// An idea card close question (the app's `amuxIdeaCardCloseRelayCard`)
+    /// rides this path as it is: no worker asked it, and a resolved word this
+    /// file has never heard of still counts as work.
+    #[tokio::test]
+    async fn an_idea_card_close_question_is_filed_like_any_other_with_no_change_here() {
+        let entry = json!({"question_id": QUESTION, "worker": "amux-card-close", "provider": "claude",
+            "title": "Idea cards stalled: AMUX-CONT-002",
+            "question": "Should the remaining cards be closed?",
+            "unblocks": "The remaining cards are closed as cancelled, or kept and not asked about for 30 days.",
+            "options": [{"id": "close", "label": "Close the remaining cards as cancelled"},
+                {"id": "keep", "label": "Keep them and do not ask for 30 days"}]});
+        let app = App {
+            sync: answered(200, json!({"synced": true, "resolved": "closed", "pending": [entry.clone()], "closing": []})),
+            calls: Mutex::new(vec![]),
+        };
+        let local = Local { answer: answered(200, json!({"card_id": "CC-1", "created": true})), calls: Mutex::new(vec![]) };
+        let run = sync_v22_questions(&app, &local, None).await;
+        assert_eq!(run, V22QuestionRun { cursor: V22Cursor::Keep, resolved: true, filed: 1, closed: 0 });
+        assert_eq!(local.calls.lock().unwrap()[0], (LocalRoute::V22QuestionFile, entry));
+        assert_eq!(app.calls.lock().unwrap()[1], (AppRoute::V22QuestionCard, json!({"question_id": QUESTION, "card_id": "CC-1"})));
+    }
+
     #[tokio::test]
     async fn a_closing_card_is_recorded_only_after_the_local_close() {
         let closing = json!({"synced": true, "resolved": "answered",
