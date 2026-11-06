@@ -1,0 +1,48 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxIdeaCardCloseMessages = defineAdminMessages({
+  en: {
+    title: "Close the remaining cards?",
+    reasons: {
+      blocked_task: "A Task is blocked and nothing else is moving.",
+      stale_cards: "The remaining cards have not changed for a while.",
+    } as Record<string, string>,
+    unknownReason: "This idea has stopped moving.",
+    handedOff: "A confirmed Decision Maker answer said neither close nor keep, so nothing changed. Decide here.",
+    cardsLabel: "Cards that would close",
+    reasonLabel: "Reason (kept in the audit as a digest)",
+    reasonTooShort: "Write a reason of at least 3 characters.",
+    close: "Close remaining cards",
+    keep: "Keep them",
+    sending: "Sending…",
+    closed: (count: number) => `Closed ${count} ${count === 1 ? "card" : "cards"}.`,
+    kept: "Kept. This idea will not be asked about for 30 days.",
+    cancelled: "Nothing closed: the idea changed after the question. The question is closed.",
+    gone: "This question has already been answered.",
+    unknown: "The outcome is unknown. Refresh the page and check the cards before answering again.",
+    refused: "The answer was refused. Nothing changed.",
+    reauthenticate: "Sign in again",
+  },
+  ko: {
+    title: "남은 카드를 닫을까요?",
+    reasons: {
+      blocked_task: "막힌 Task가 있고 다른 작업도 움직이지 않습니다.",
+      stale_cards: "남은 카드가 한동안 변경되지 않았습니다.",
+    } as Record<string, string>,
+    unknownReason: "이 아이디어는 더 진행되지 않고 있습니다.",
+    handedOff: "확정된 Decision Maker 답이 닫기도 유지도 아니어서 아무것도 바꾸지 않았습니다. 여기서 결정해 주세요.",
+    cardsLabel: "닫히게 될 카드",
+    reasonLabel: "사유(감사에는 digest로 남습니다)",
+    reasonTooShort: "사유를 3자 이상 적어 주세요.",
+    close: "남은 카드 닫기",
+    keep: "유지",
+    sending: "보내는 중…",
+    closed: (count: number) => `카드 ${count}개를 닫았습니다.`,
+    kept: "유지했습니다. 이 아이디어는 30일 동안 다시 묻지 않습니다.",
+    cancelled: "닫지 않았습니다. 질문 뒤에 아이디어 상태가 바뀌어 질문을 닫았습니다.",
+    gone: "이미 답한 질문입니다.",
+    unknown: "결과를 알 수 없습니다. 페이지를 새로 고쳐 카드를 확인한 뒤 다시 답해 주세요.",
+    refused: "답이 거부되어 아무것도 바뀌지 않았습니다.",
+    reauthenticate: "다시 로그인",
+  },
+});

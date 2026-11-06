@@ -3,8 +3,11 @@
 import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxIdeaCardClosePanel } from "@/components/admin/AmuxIdeaCardClosePanel";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { AmuxIdeaName, laneLine } from "@/components/admin/AmuxIdeaProgressPanel";
+import { AmuxIdeaResubmitPanel } from "@/components/admin/AmuxIdeaResubmitPanel";
+import { AmuxIdeaReservationReleasePanel } from "@/components/admin/AmuxIdeaReservationReleasePanel";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
@@ -25,14 +28,16 @@ const LINK = "inline-flex min-h-11 items-center font-medium underline text-blue-
 const SCREENS = {
   cards: "/admin/amux-execution?tab=cards",
   safety: "/admin/amux-settings?tab=safety",
-  recovery: "/admin/amux-backlog?tab=recovery",
   promotion: "/admin/amux-promotion",
   approval: "#amux-v4-frontier-models-heading",
 } as const;
+/** Owner steps where a hold left by an earlier preview of a page may still be
+ * reserved: the release panel shows there only when the server finds one. */
+const QUIET_RELEASE = new Set<AmuxIdeaStatusNoticeKind>(["attention", "execution_approval", "continuation",
+  "owner_input", "plan_approval", "plan_finished"]);
 /** The existing screens each state can act on; the panels below this card carry the rest. */
 const NOTICE_ACTIONS: Partial<Record<AmuxIdeaStatusNoticeKind, Array<keyof typeof SCREENS>>> = {
-  attention: ["safety", "recovery"],
-  analysis_waiting: ["recovery"],
+  attention: ["safety"],
   execution_running: ["cards"],
   execution_waiting: ["cards", "promotion"],
   execution_blocked: ["safety"],
@@ -45,10 +50,15 @@ const NOTICE_ACTIONS: Partial<Record<AmuxIdeaStatusNoticeKind, Array<keyof typeo
  * is on the six steps, which of them are a person's, what is actually happening
  * and what the owner can do about it, and its Tasks with their PRs. Everything here is read from the progress snapshot; there is no action
  * besides opening GitHub, reading its own CLI manifest, cancelling a queued v19 session idea,
- * stopping its in-flight analysis and closing an idea that waits for the owner, because
+ * stopping its in-flight analysis, releasing the unused reservation of an analysis that waits
+ * for its worker and closing an idea that waits for the owner, because
  * other human steps have their own panels below and merge is observed here.
  */
-export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
+export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false }: {
+  row: AmuxIdeaProgressRow;
+  /** The analysis budget read and reserve switches, which the release route also requires. */
+  reservationReleaseAvailable?: boolean;
+}) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
   const step = amuxIdeaProgressStep(row.stage);
   const notice = amuxIdeaStatusNotice(row);
@@ -116,6 +126,11 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
           </p> : null}
         </section>
       ) : null}
+      {row.submissionOrigin !== "session" && !row.lane && notice !== null &&
+          (notice === "analysis_waiting" || QUIET_RELEASE.has(notice)) ?
+        <AmuxIdeaReservationReleasePanel key={`release-${row.ideaId}`} ideaId={row.ideaId}
+          requestId={row.requestId} available={reservationReleaseAvailable}
+          quiet={notice !== "analysis_waiting"} /> : null}
       {blockedTasks.length > 0 ? (
         <section aria-labelledby="amux-idea-blocked-heading" data-testid="amux-idea-blocked-tasks" className="space-y-2">
           <h3 id="amux-idea-blocked-heading" className="font-medium text-zinc-100">{m.blockedTitle}</h3>
@@ -145,7 +160,13 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
       {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
         // Keyed by idea: another idea's question never shows while the next one loads.
         <AmuxSessionReviewPanel key={row.ideaId} ideaId={row.ideaId} /> : null}
+      {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
+        // The server checks the idea again; a purged body has nothing to send.
+        row.rawReadable === true ? <AmuxIdeaResubmitPanel key={`resubmit-${row.ideaId}`}
+          ideaId={row.ideaId} /> : <p className="text-zinc-300"
+          data-testid="amux-idea-resubmit-purged">{m.resubmit.purged}</p> : null}
       {row.closable ? <AmuxIdeaClosePanel key={row.ideaId} mode="single" ideaIds={[row.ideaId]} /> : null}
+      <AmuxIdeaCardClosePanel key={`card-close-${row.ideaId}`} ideaId={row.ideaId} />
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?

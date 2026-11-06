@@ -44,6 +44,13 @@ import { readOpenAmuxPlanRefusal } from "@/lib/amux/ideaSessionPlanRefusalServic
 import { commitAmuxIdeaSessionSubmission as commitPinned } from
   "@/lib/amux/ideaSessionSubmissionService";
 import { inspectAmuxIdeaSessionSubmission } from "@/lib/amux/ideaSessionSubmissionCore";
+import { openAmuxContent } from "@/lib/amux/ideaCrypto";
+import { commitAmuxDueRawIdeaPurge } from "@/lib/amux/ideaRawRetentionService";
+import { AMUX_IDEA_RESUBMIT_ACTION, amuxIdeaResubmitRequestId, inspectAmuxIdeaResubmission,
+  runAmuxIdeaResubmit, type AmuxIdeaResubmitSteps } from "@/lib/amux/ideaSessionResubmitCore";
+import { closeResubmittedAmuxIdea, readAmuxResubmittableIdeaInput } from
+  "@/lib/amux/ideaSessionResubmitService";
+import { readAmuxIdeaSessionSubmissionRequest } from "@/lib/amux/ideaSessionSubmissionService";
 import { applyAmuxPlanRefusalDecisionStep, isAmuxV22QuestionCard, readAmuxV22QuestionSyncRows,
   recordAmuxV22QuestionLocalCard, recordAmuxV22QuestionLocalCardClosed,
   runAmuxV22ResolveStep } from "@/lib/amux/v22OwnerQuestionDmService";
@@ -55,6 +62,12 @@ process.env.ADMIN_USER_IDS = ownerId;
 process.env.ADMIN_EMAILS = ownerEmail;
 process.env.ADMIN_OWNER_EMAILS = ownerEmail;
 process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-intake-operating-scope-audit-key-2026";
+// The owner close digests its reason with the current content key.
+process.env.AMUX_V4_CONTENT_MASTER_KEY_ID = "synthetic-plan-refusal-close";
+process.env.AMUX_V4_CONTENT_MASTER_KEY_VERSION = "1";
+process.env.AMUX_V4_CONTENT_MASTER_KEY_B64 = randomBytes(32).toString("base64");
+process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID = "synthetic-plan-refusal-close-digest";
+process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64 = randomBytes(32).toString("base64");
 const session = { user: { id: ownerId, email: ownerEmail,
   authenticatedAt: new Date().toISOString() },
 expires: new Date(Date.now() + 60 * 60_000).toISOString() } as Session;
@@ -341,4 +354,107 @@ test("an answer that names no option stays open, and the owner can decide once",
   assert.equal(decided.state, "retry");
   assert.equal(decided.decisionSource, "operator");
   assert.equal(decided.decidedByUserId, ownerId);
+});
+
+/** The resubmit steps against this database: the real read of the old idea,
+ * intake read-back and owner close; the write is the intake transaction the
+ * service runs, minus the object store and GitHub pinning it reaches first. */
+function resubmitSteps(onSubmit: () => void = () => {}) {
+  let submits = 0;
+  const steps: AmuxIdeaResubmitSteps = {
+    readBack: readAmuxIdeaSessionSubmissionRequest,
+    readInput: (ideaId) => readAmuxResubmittableIdeaInput(prisma,
+      { ideaId, actorUserId: ownerId }, async () => keysFor(ideaId)),
+    submit: async (requestId, input) => {
+      submits += 1;
+      const inspected = inspectAmuxIdeaResubmission(requestId, input);
+      if (!inspected.ok) return { refused: inspected.code };
+      const ideaId = randomUUID();
+      await prisma.$transaction(async (tx) => {
+        const submission = await commitPinned(tx, { inspected, expectedAuthority: authority,
+          ideaId, keys: keysFor(ideaId), pinnedCommitShas: ["a".repeat(40)] });
+        await commitAmuxSessionAnalysisReservation(tx, { ideaId,
+          requestId: submission.requestId, submissionAuditId: submission.auditId, authority });
+      });
+      onSubmit();
+      return { ideaId };
+    },
+    close: (previousIdeaId, ideaId) => closeResubmittedAmuxIdea({ session, request,
+      previousIdeaId, ideaId }),
+  };
+  return { steps, submits: () => submits };
+}
+
+async function stoppedIdea() {
+  const idea = await refusedIdea();
+  await decideAmuxPlanRefusalAsOwner({ session, request, ideaId: idea.ideaId,
+    refusalId: idea.refusal.id, decision: "stop" });
+  return idea;
+}
+
+test("a stopped idea is submitted again with its kept text, once, and then closed", async () => {
+  const live = await refusedIdea();
+  assert.deepEqual(await readAmuxResubmittableIdeaInput(prisma, { ideaId: live.ideaId,
+    actorUserId: ownerId }, async () => keysFor(live.ideaId)),
+  { ok: false, reason: "not_resubmittable" }, "an idea still in analysis is not resubmitted");
+  const idea = await stoppedIdea();
+  assert.deepEqual(await readAmuxResubmittableIdeaInput(prisma, { ideaId: idea.ideaId,
+    actorUserId: "someone-else" }, async () => keysFor(idea.ideaId)), { ok: false, reason: "not_found" });
+  const parked = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: idea.ideaId },
+    select: { rawPurgeAfter: true } });
+  const run = resubmitSteps();
+  const outcome = await runAmuxIdeaResubmit(run.steps, idea.ideaId);
+  const requestId = amuxIdeaResubmitRequestId(idea.ideaId);
+  assert.equal(outcome.result, "resubmitted");
+  if (outcome.result !== "resubmitted") return;
+  assert.equal(outcome.requestId, requestId);
+  assert.equal(outcome.previousClosed, true);
+
+  const fresh = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: outcome.ideaId } });
+  assert.equal(fresh.requestId, requestId);
+  assert.equal(fresh.submissionOrigin, "session");
+  assert.equal(fresh.state, "submitted");
+  const plain = openAmuxContent({ ciphertext: Buffer.from(fresh.rawCiphertext!),
+    keyId: fresh.rawKeyId!, keyVersion: fresh.rawKeyVersion! }, "idea_raw", fresh.id,
+  keysFor(fresh.id));
+  const body = JSON.parse(plain.toString("utf8"));
+  assert.equal(body.idea, "Synthetic refused idea " + idea.ideaId);
+  assert.deepEqual(body.repositories, ["mposition/Tomverse"]);
+
+  // The old idea is closed and keeps its body clock: nothing here purges or moves it.
+  const old = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: idea.ideaId },
+    select: { state: true, rawPurgeAfter: true, rawPurgedAt: true } });
+  assert.equal(old.state, "cancelled");
+  assert.equal(old.rawPurgeAfter?.getTime(), parked.rawPurgeAfter?.getTime());
+  assert.equal(old.rawPurgedAt, null);
+  const audits = await prisma.adminAuditLog.findMany({ where: { targetId: idea.ideaId,
+    action: { in: [AMUX_IDEA_RESUBMIT_ACTION, "amux.idea.owner_closed"] } },
+  orderBy: { createdAt: "asc" }, select: { action: true, actorUserId: true, metadata: true } });
+  assert.deepEqual(audits.map((row) => row.action), [AMUX_IDEA_RESUBMIT_ACTION, "amux.idea.owner_closed"]);
+  assert.equal(audits[0]!.actorUserId, ownerId);
+  assert.deepEqual(audits[0]!.metadata, { ideaId: outcome.ideaId, requestId });
+
+  // A second click finds the same idea by its request id and writes nothing new.
+  assert.deepEqual(await runAmuxIdeaResubmit(run.steps, idea.ideaId), outcome);
+  assert.equal(run.submits(), 1);
+  assert.equal(await prisma.amuxIdeaSubmission.count({ where: { requestId } }), 1);
+});
+
+test("a lost intake answer is read back by its request id, and a purged body cannot be resubmitted", async () => {
+  const lost = await stoppedIdea();
+  const run = resubmitSteps(() => { throw new Error("synthetic lost answer"); });
+  const outcome = await runAmuxIdeaResubmit(run.steps, lost.ideaId);
+  assert.equal(outcome.result, "resubmitted");
+  assert.equal(run.submits(), 1, "the unknown write was read back, never sent again");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: lost.ideaId },
+    select: { state: true } })).state, "cancelled");
+
+  const purged = await stoppedIdea();
+  assert.equal(await prisma.$transaction((tx) => commitAmuxDueRawIdeaPurge(tx, purged.ideaId)),
+    "purged");
+  const after = resubmitSteps();
+  assert.deepEqual(await runAmuxIdeaResubmit(after.steps, purged.ideaId), { result: "raw_purged" });
+  assert.equal(after.submits(), 0);
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: purged.ideaId },
+    select: { state: true } })).state, "awaiting_owner", "nothing was closed");
 });
