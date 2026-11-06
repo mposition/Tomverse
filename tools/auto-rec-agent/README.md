@@ -68,7 +68,8 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 위조하거나, 검토 없이 publish할 수 없습니다.
 
 **runner가 믿는 도구는 `autorec`이 바꿀 수 없는 경로에 있습니다.** `git`은 `/usr/bin/git`, `npm`은
-`/usr/bin/npm`, 검토 클라이언트와 그 ssh는 설치 폴더의 root 소유 복사본(`deploy/review-ssh`)과 root
+설치 script가 설치 폴더에 넣는 npm 10(`/usr/local/lib/autorec-agent/npm/bin/npm`, CI와 같은 버전대 —
+Ubuntu의 npm 9는 이 저장소의 lockfile을 거부합니다), 검토 클라이언트와 그 ssh는 설치 폴더의 root 소유 복사본(`deploy/review-ssh`)과 root
 소유 설정(`/etc/autorec-ssh/config`, host key 고정)입니다. `~/.local/bin`이나 `~/.ssh/config`에 가짜
 `ssh`를 두어 검토 서버 대신 "accept"를 답하게 할 수 없습니다.
 

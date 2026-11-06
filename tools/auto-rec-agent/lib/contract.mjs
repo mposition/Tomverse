@@ -66,7 +66,8 @@ export const DEFAULTS = Object.freeze({
   logDir: "/home/autorec/logs",
   claudeBin: "/home/autorec/.local/bin/claude",
   gitBin: "/usr/bin/git",
-  npmBin: "/usr/bin/npm",
+  // npm 10 that install.sh puts in the root-owned install tree; Ubuntu's /usr/bin/npm (9) rejects the lockfile.
+  npmBin: "/usr/local/lib/autorec-agent/npm/bin/npm",
   gatewaySocket: "/run/autorec-gateway.sock",
   reviewClient: "/usr/local/lib/autorec-agent/tools/review-orchestrator/client/review.mjs",
   // A root-owned wrapper: /usr/bin/ssh with a root-owned config and pinned host key.
