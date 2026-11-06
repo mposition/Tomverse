@@ -639,6 +639,9 @@ test("Ubuntu runs one synthetic CLI process and replays its durable result",
         stateDir, run: (input) => runAmuxV22OneShot(input, {
           ...config, binaryPath, worktreePath: root, homePath: root,
           claudeConfigDir: root,
+        }, {
+          // The temp worktree is not a git checkout; base sync has its own tests.
+          syncBase: async () => ({ ok: true, baseSha: "d".repeat(40) }),
         }) });
       const execute = { op: "execute", ...request, role: "review" };
       assert.equal((await handler(execute)).kind, "in_progress");
