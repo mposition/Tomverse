@@ -327,7 +327,7 @@ test("the AMUX group holds Backlog, Promotion, Execution and Operations settings
   );
   assert.deepEqual(
     adminNavItemTabs("amux-backlog").map((tab) => tab.id),
-    ["ideas", "list", "portfolio", "import", "reconciliation", "metadata", "recovery"]
+    ["ideas", "list", "portfolio", "import", "reconciliation", "metadata"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-promotion").map((tab) => tab.id),
