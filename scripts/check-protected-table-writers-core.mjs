@@ -1848,14 +1848,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its sixteen write verbs are five SELECT ... FOR UPDATE locks (its own state row at the base, its own reservation in confirm, the head state row before a genesis is judged, its own closed reservations and its own deferred items a retention batch skips when held), two UPDATEs closing its own reservations (abandon in advance, the close in confirm), an UPDATE of its own state row, INSERTs of its own reservation, its items and the items the daily cap deferred, an INSERT into its own transition ledger, the owner genesis INSERTs of its own genesis and generation-0 state rows, and the retention DELETEs of its own closed reservations and deferred items past ninety days. It writes the audit table only through $appendSystemAudit (writeSystemAuditLogEntry) and $appendAdminAudit (writeAdminAuditLog), both in lib/adminAudit.ts.",
   },
   {
-    path: "lib/engineeringAgentStore.ts",
-    table: "EngineeringAgentRegistration",
-    tableMentions: 3,
-    writeVerbs: 17,
-    reason:
-      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the seventeen write verbs are the advisory-lock and FOR UPDATE SELECTs and the module's prose, including the read-only v22 run lock.",
-  },
-  {
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
     tableMentions: 3,

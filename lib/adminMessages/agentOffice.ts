@@ -347,7 +347,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           does: [
             "A Runner (production, every 30 min) drafts a patch for one promoted card with an Anthropic model whose only tool reads tracked files.",
             "The app, not the model, sets the tier from the list of changed files: a T2 result is a private draft in the app, a T1 result is opened as a pull request to develop by the Publisher (every 10 min).",
-            "It also adds cards to the AMUX backlog from the product backlog, failing develop CI and failing dependabot pull requests, within daily limits.",
           ],
           never: [
             "Never merges or approves a pull request, or turns on auto-merge.",
@@ -1309,7 +1308,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           does: [
             "Runner(production, 30분마다)가 승격된 카드 하나로 패치 초안을 만듭니다. Anthropic 모델을 쓰고, 모델이 쓸 수 있는 도구는 추적 중인 파일 읽기 하나뿐입니다.",
             "tier는 모델이 아니라 앱이 바뀐 파일 목록으로 정합니다. T2 결과는 앱 안의 비공개 초안이 되고, T1 결과는 Publisher(10분마다)가 develop 대상 PR로 엽니다.",
-            "제품 backlog 문서, 실패한 develop CI, 실패한 dependabot PR에서 AMUX backlog 카드를 일일 한도 안에서 등록합니다.",
           ],
           never: [
             "어떤 PR도 병합·승인하지 않고 auto-merge를 켜지 않습니다.",
