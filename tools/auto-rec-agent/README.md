@@ -50,7 +50,7 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 | 주체 | 무엇을 하나 | 가진 것 |
 |---|---|---|
 | `autorec` (runner, `autorec-runner.service`) | worktree, Claude Code, 테스트, 검토 요청 | Claude 로그인, 검토 서버용 SSH key. **앱 공유 비밀과 GitHub 토큰은 없음** |
-| `autorec-gw` (gateway, systemd `DynamicUser`, `autorec-gateway@.service`) | claim, result, push, PR | `/etc/autorec/autorec.env`의 세 값 |
+| `autorec-gw` (gateway, 설치 script가 만드는 시스템 계정, `autorec-gateway@.service`) | claim, result, push, PR | `/etc/autorec/autorec.env`의 세 값 |
 
 `autorec`은 에이전트가 쓴 코드(테스트)를 실행합니다. 같은 uid의 프로세스는 서로의
 `/proc/<pid>/environ`을 읽을 수 있으므로, 비밀은 다른 uid인 gateway에만 둡니다(검토 서버의
@@ -68,7 +68,8 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 위조하거나, 검토 없이 publish할 수 없습니다.
 
 **runner가 믿는 도구는 `autorec`이 바꿀 수 없는 경로에 있습니다.** `git`은 `/usr/bin/git`, `npm`은
-`/usr/bin/npm`, 검토 클라이언트와 그 ssh는 설치 폴더의 root 소유 복사본(`deploy/review-ssh`)과 root
+설치 script가 설치 폴더에 넣는 npm 10(`/usr/local/lib/autorec-agent/npm/bin/npm`, CI와 같은 버전대 —
+Ubuntu의 npm 9는 이 저장소의 lockfile을 거부합니다), 검토 클라이언트와 그 ssh는 설치 폴더의 root 소유 복사본(`deploy/review-ssh`)과 root
 소유 설정(`/etc/autorec-ssh/config`, host key 고정)입니다. `~/.local/bin`이나 `~/.ssh/config`에 가짜
 `ssh`를 두어 검토 서버 대신 "accept"를 답하게 할 수 없습니다.
 
@@ -260,7 +261,8 @@ systemctl list-timers autorec-runner.timer
 
 **gateway가 요청을 받지 않는 경우**(`claim_failed`의 `code`로 보입니다. 권장안은 claim되지 않았습니다):
 `gateway_config_missing`(3단계 값 없음), `peer_not_runner`(요청한 프로세스가 runner 본체가 아님 —
-`systemctl start autorec-runner.service`로 실행했는지, gateway가 `systemctl show`를 부를 수 있는지),
+`systemctl start autorec-runner.service`로 실행했는지, gateway가 `systemctl show`를 부를 수 있는지 —
+gateway를 systemd `DynamicUser`로 돌리면 시스템 D-Bus가 연결을 끊어 늘 이 코드가 납니다),
 `peer_unknown`(systemd가 연결한 쪽의 PID를 주지 못함), `ptrace_scope_unsafe`(위 6단계),
 `peer_inspector_signal`(runner unit의 `ExecStart`에 `--disable-sigusr1`이 없음 — 설치 script를 다시
 실행해 unit을 바꿉니다).
@@ -291,7 +293,7 @@ systemctl list-timers autorec-runner.timer
 | 파일 | 역할 |
 |---|---|
 | `bin/autorec-runner.mjs` | runner(`autorec`). 외부 호출은 주입 가능한 `deps` |
-| `bin/autorec-gateway.mjs` | 비밀을 가진 gateway(`DynamicUser`) |
+| `bin/autorec-gateway.mjs` | 비밀을 가진 gateway(`autorec-gw` 계정) |
 | `lib/core.mjs` | 범위 검사, 관련 테스트 선택, 지시문, 결과 본문 등 순수 함수 |
 | `lib/contract.mjs` | 앱 API, 저장소, 브랜치, 경로, 상한 상수 |
 | `deploy/` | systemd unit 넷, env 견본, 검토용 ssh wrapper와 설정, `install.sh` |
