@@ -1638,9 +1638,9 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   `lib/engineeringAgentStateMismatch.ts`, `tests/engineeringAgentCapability.test.mjs`.
   교차 잠금 순서는 `CROSS_LOCK_ORDER` 하나이며 AMUX가 자기 순서를 바꾸면 함께
   바뀌어야 합니다.
-- **P1g(등록 Guard와 secret 검사)**: `lib/engineeringAgentRegistrationGuard.ts`,
-  `lib/engineeringAgentSecretPatterns.ts`, `tests/engineeringAgentRegistrationGuard.test.mjs`.
-  모델의 등록 제안은 여섯 필드뿐이며 우선순위·승격·담당자를 담을 자리가 없습니다.
+- **P1g(secret 검사)**: `lib/engineeringAgentSecretPatterns.ts`. 등록 Guard와 등록 경로는
+  호출자가 없어 2026-11-06에 삭제됐고, `lib/engineeringAgentRegistrationGuard.ts`에는 기존
+  `EngineeringAgentRegistration` 행의 CHECK·trigger가 대조하는 원천·상한 상수만 남았습니다.
 - **P1d(자격증명 도달 분석)**: `lib/agentCredentialReachability.ts`,
   `tests/agentCredentialReachability.test.mjs`. **workflow를 바꾸면 이 테스트의 base 결과
   고정값을 확인합니다** — 전체 금지가 풀리는 것은 사람 검토 제외와 cache 격리 기록뿐입니다.

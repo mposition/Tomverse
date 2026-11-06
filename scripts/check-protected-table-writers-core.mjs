@@ -1836,14 +1836,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The AdminAuditLog delegate only reads terminal and stop receipts. The one SQL write verb is FOR NO KEY UPDATE NOWAIT on PromptRefinerVnextOneShotStage, a row lock before writeSystemAuditLog appends the receipt through the sole audit writer. No statement here inserts, updates or deletes AdminAuditLog.",
   },
   {
-    path: "lib/engineeringAgentStore.ts",
-    table: "EngineeringAgentRegistration",
-    tableMentions: 3,
-    writeVerbs: 17,
-    reason:
-      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the seventeen write verbs are the advisory-lock and FOR UPDATE SELECTs and the module's prose, including the read-only v22 run lock.",
-  },
-  {
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
     tableMentions: 3,

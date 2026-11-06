@@ -319,8 +319,6 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
             <dd className="font-mono">{initial.settings.mode}</dd>
             <dt className="text-zinc-500">{m.freeze}</dt>
             <dd>{initial.settings.frozen ? m.on : m.off}</dd>
-            <dt className="text-zinc-500">{m.registration}</dt>
-            <dd>{initial.settings.registration ? m.on : m.off}</dd>
             <dt className="text-zinc-500">{m.killSwitch}</dt>
             <dd>{initial.settings.killSwitch ? m.engaged : m.notEngaged}</dd>
           </dl>
