@@ -9,6 +9,7 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import { BoardImportError } from "./boardImportCore.ts";
+import { amuxDatabaseDiagnosticCode } from "@/lib/amux/readFailureCore";
 import {
   AMUX_IDEA_CARD_CLOSE_CANCEL_COOLDOWN_DAYS, AMUX_IDEA_CARD_CLOSE_KEEP_DAYS,
   AMUX_IDEA_CARD_CLOSE_SCAN, AMUX_IDEA_CARD_CLOSE_SYNC_LIMIT,
@@ -37,6 +38,10 @@ const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const QUESTION_ID = /^[0-9a-f-]{36}$/;
 /** Who resolves a closed card's open escalation when no person answered. */
 export const AMUX_IDEA_CARD_CLOSE_RESOLVER = "amux-idea-card-close";
+
+/** An answer refused because a worker held one of the cards: nothing changed, try again. */
+export const isAmuxIdeaCardCloseBusy = (error: unknown) =>
+  amuxDatabaseDiagnosticCode(error) === "55P03";
 
 type SqlCard = Omit<AmuxIdeaCardCloseCardFact, "updatedAtMs"> & { updatedAtMs: number };
 type SqlCandidate = { ideaId: string; askedLastDay: number; cards: SqlCard[] | null };
@@ -282,6 +287,14 @@ export type AmuxIdeaCardCloseApplied =
  * that started or a set that changed since the question closes nothing and
  * cancels the question. "keep" only records.
  *
+ * That statement does not wait (NOWAIT, SQLSTATE 55P03 when a row is held).
+ * The worker's writers -- claim, start, heartbeat, settlement, recovery --
+ * lock a card first and take the audit chain only for their closing entry,
+ * so waiting here for a card while holding the chain is a deadlock with any
+ * of them. Refusing at once rolls this back and lets the worker finish; the
+ * Decision Maker's walk applies the answer again on its next pass and the
+ * owner is told to try again (`isAmuxIdeaCardCloseBusy`).
+ *
  * A closed card is `cancelled` with `v4TerminalAt` on the DB clock: that is when
  * it became terminal for result retention and any later content purge (the
  * column's CHECKs admit done and cancelled alike), and `merged` in the progress
@@ -318,7 +331,7 @@ export async function applyAmuxIdeaCardCloseAnswerInTransaction(tx: Prisma.Trans
     JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
     WHERE q."id" = ${input.questionId}
     ORDER BY w."id"
-    FOR UPDATE OF q, w`;
+    FOR UPDATE OF q, w NOWAIT`;
   const head = rows[0];
   if (!head) return { outcome: "not_found" };
   if (head.state !== "open") return { outcome: "not_open" };

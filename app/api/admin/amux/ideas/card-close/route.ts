@@ -32,7 +32,8 @@ function failure(error: unknown): Response {
   }
   if (error instanceof AmuxIdeaCardCloseOwnerError) {
     return NextResponse.json({ error: error.code, retryWrite: false },
-      { status: error.code === "forbidden" ? 403 : error.code === "invalid" ? 400 : 503, headers: noStore });
+      { status: error.code === "forbidden" ? 403 : error.code === "invalid" ? 400 :
+        error.code === "busy" ? 409 : 503, headers: noStore });
   }
   const security = apiSecurityResponse(error);
   if (security) {
