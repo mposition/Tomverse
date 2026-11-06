@@ -45,6 +45,11 @@ const REVIEWED_MENTIONS = {
   "prisma/migrations/20261003090000_ops_observer_delivery/migration.sql": 1,
   // Points back to the same statement of that limit.
   "prisma/migrations/20261004030000_ops_observer_transition/migration.sql": 1,
+  // The trust-safety observer's run row uses the same device, and names the
+  // statement once where it states what the trigger does not bind; it points
+  // at the genesis migration's account and at this sweep rather than
+  // repeating either.
+  "prisma/migrations/20261104060000_trust_safety_observer_run/migration.sql": 1,
 };
 
 const sourceFiles = () => repositoryFiles(root)
