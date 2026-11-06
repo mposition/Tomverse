@@ -109,7 +109,7 @@ async function approvedPost(channelId: string, publishedDaysAgo: number, history
 /** The operator's confirmation entry and the graduation, in one transaction as the route does it. */
 const graduate = (
   channelId: string,
-  options: { epoch?: number; healthy?: boolean; auditLogId?: string } = {},
+  options: { epoch?: number; auditLogId?: string } = {},
 ) =>
   runMarketingTransaction(prisma, async (tx) => {
     const auditLogId =
@@ -127,7 +127,6 @@ const graduate = (
       id: channelId,
       auditLogId,
       expectedGraduationEpoch: options.epoch ?? 0,
-      commentsMonitorHealthy: options.healthy ?? true,
     });
   });
 
@@ -158,12 +157,9 @@ test("a refused graduation changes nothing: unmet conditions are answered, not t
   const row = await approvalChannel();
   await approvedPost(row.id, 8);
   await approvedPost(row.id, 3);
-  // Two approvals, and a monitor that is not running.
-  const result = await graduate(row.id, { healthy: false });
-  assert.deepEqual(result, {
-    graduated: false,
-    unmet: ["approvals_below_minimum", "comments_monitor_unhealthy"],
-  });
+  // Two approvals.
+  const result = await graduate(row.id);
+  assert.deepEqual(result, { graduated: false, unmet: ["approvals_below_minimum"] });
   assert.equal((await prisma.marketingChannel.findUniqueOrThrow({ where: { id: row.id } })).status, "approval_mode");
 });
 
