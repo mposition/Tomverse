@@ -13,7 +13,7 @@ import {
 import { RAILWAY_CRON_SERVICES, buildScheduledJobResources } from "../.railway/scheduled-jobs.ts";
 import { CAPABILITY_TTL_MS } from "../lib/engineeringAgentCapability.ts";
 import { PUBLISHER_HARD_DEADLINE_MS, PUBLISHER_VARIABLES } from "../scripts/engineering-agent-publisher.mjs";
-import { RUNNER_HARD_DEADLINE_MS, RUNNER_VARIABLES } from "../scripts/engineering-agent-runner.mjs";
+import { RUNNER_HARD_DEADLINE_MS, RUNNER_RETIRED_VARIABLES, RUNNER_VARIABLES } from "../scripts/engineering-agent-runner.mjs";
 
 // The engineering agent's two services as deployed (docs/policy/engineering-
 // agent.md §8, §12): one image built on main with nothing but the services'
@@ -73,7 +73,9 @@ test("the image is built on main only, without a repository secret or a cache", 
 test("each service declares exactly the variables it reads, in production only", () => {
   const runner = service("engineering_agent_runner");
   const publisher = service("engineering_agent_publisher");
-  assert.deepEqual([...runner.environments.production].sort(), [...RUNNER_VARIABLES].sort());
+  // A retired variable stays declared until the image that no longer reads it is pinned.
+  assert.deepEqual([...runner.environments.production].sort(), [...RUNNER_VARIABLES, ...RUNNER_RETIRED_VARIABLES].sort());
+  assert.ok(!RUNNER_VARIABLES.some((name) => RUNNER_RETIRED_VARIABLES.includes(name)));
   assert.deepEqual([...publisher.environments.production].sort(), [...PUBLISHER_VARIABLES].sort());
   for (const entry of ENGINEERING_AGENT_SERVICES) {
     assert.deepEqual(Object.keys(entry.environments), ["production"], `${entry.service} runs in production only`);

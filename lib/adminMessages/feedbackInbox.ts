@@ -115,6 +115,9 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     triageModelOwnerOnly: "Only the owner can change the model.",
     triageModelReauthenticate: "Sign in again to change the model.",
     triageModelSignInAgain: "Sign in again",
+    developCiRepairLabel: "Develop CI repair",
+    developCiRepairHelp:
+      "When develop's head stays red for two checks in a row (15 minutes apart), its failing checks and their log ends go to the AMUX idea lane as one SEV1 idea, ahead of other ideas. No model call here; the lane's run fixes it within its own limits, at most 3 repair ideas a day and one at a time, and you merge the draft PR.",
     traceAnalysisModeLabel: "Verified trace analysis",
     traceAnalysisModes: { off: "Off", analyze: "Analyze", fix: "Analyze and open draft PRs" },
     traceAnalysisHelp:
@@ -309,6 +312,9 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     triageSwitchFromEnvironment: "(환경변수 값)",
     triageSwitchTurnOn: "켜기",
     triageSwitchTurnOff: "끄기",
+    developCiRepairLabel: "develop CI 자동 수리",
+    developCiRepairHelp:
+      "develop head가 15분 간격 두 번 연속 빨간색이면, 실패한 check와 로그 끝부분을 AMUX idea lane에 SEV1 아이디어 하나로 넘겨 다른 아이디어보다 먼저 처리합니다. 여기서는 모델을 부르지 않습니다. 수리는 lane이 자기 한도 안에서 하며, 하루 최대 3건·한 번에 하나이고, draft PR 병합은 직접 합니다.",
     traceAnalysisModeLabel: "검증된 추적 ID 분석",
     traceAnalysisModes: { off: "끔", analyze: "분석", fix: "분석 + draft PR" },
     traceAnalysisHelp:

@@ -22,7 +22,6 @@ on:
     paths:
       - docker/engineering-agent.Dockerfile
       - lib/engineeringAgentCore.ts
-      - lib/engineeringAgentModelCall.ts
       - lib/engineeringAgentSecretPatterns.ts
       - scripts/engineering-agent-runner.mjs
       - scripts/engineering-agent-runner-core.mjs
