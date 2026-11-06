@@ -95,7 +95,6 @@ const completeInputs = () => ({
   recoveryContractAvailable: readable(true),
   platformBudgetAvailable: readable(true),
   autoPublishEnabled: readable(true),
-  commentsMonitorHealthy: readable(true),
   publicationCancellable: readable(true),
   o4Eligible: readable(true),
   o15Channel: readable(false),
@@ -153,7 +152,6 @@ const BOOLEAN_REQUIREMENTS = {
     "platformBudgetAvailable",
     "priceFallbackAlertReady",
     "autoPublishEnabled",
-    "commentsMonitorHealthy",
     "publicationCancellable",
     "o4Eligible",
   ],
@@ -161,7 +159,6 @@ const BOOLEAN_REQUIREMENTS = {
     "adminHasMarketingWrite",
     "adminStepUpRecent",
     "o3Satisfied",
-    "commentsMonitorHealthy",
   ],
   experimentActivate: ["experimentsEnabled", "cacheCspSpikePassed"],
   seoAutoMerge: [
@@ -190,6 +187,16 @@ test("the complete admitted inputs enable every feature, webhook apply included 
   const decisions = resolveMarketingAutomationAccess(completeInputs());
   for (const feature of MARKETING_AUTOMATION_FEATURES) {
     assert.equal(decisions[feature].enabled, true, feature);
+  }
+});
+
+test("comment monitoring decides neither autonomous publishing nor graduation (owner decision 2026-11-06)", () => {
+  for (const monitor of [readable(false), { ok: false }, undefined]) {
+    const inputs = completeInputs();
+    inputs.commentsMonitorHealthy = monitor;
+    const decisions = resolveMarketingAutomationAccess(inputs);
+    assert.equal(decisions.autonomousPublish.enabled, true);
+    assert.equal(decisions.graduate.enabled, true);
   }
 });
 

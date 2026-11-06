@@ -1,8 +1,8 @@
 /**
  * What the autonomous insert asks, inside the transaction that writes.
  *
- * `resolveMarketingAutomationAccess()` is pure: it takes thirty-five already
- * read inputs and returns decisions. This module is the other half -- the part
+ * `resolveMarketingAutomationAccess()` is pure: it takes already read
+ * inputs and returns decisions. This module is the other half -- the part
  * that reads them, and reads them where they will still be true when the row
  * is written. Nothing here decides anything the resolver does not; what it
  * decides is *when* each value is read and what holds it still.
@@ -17,8 +17,8 @@
  * which is a root. This module reports; the sealed code decides and refuses.
  *
  * What is not readable yet, and why it is written out rather than defaulted.
- * Five inputs belong to slices that do not exist: adapter and comment health
- * (S2d2's durable observation row), the recovery contract, the platform budget
+ * Four inputs belong to slices that do not exist: adapter health (S2d2's
+ * durable observation row), the recovery contract, the platform budget
  * and O4 eligibility. Each is an explicit unreadable below with the slice that
  * owns it named, so `autonomousPublish` is false today and the reason says
  * which input. A `true` default would have been a decision function that
@@ -45,10 +45,6 @@ import {
   type MarketingAutomationAccessReason,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
-import {
-  MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY,
-  commentsMonitorHealthyFromValue,
-} from "@/lib/marketingCommentsMonitorHealth";
 import { marketingPriceAlertReadyInput } from "@/lib/marketingPriceAlertCore";
 import { MARKETING_CHANNEL_CAPS, MARKETING_NO_AUTONOMY_CHANNELS } from "@/lib/marketingAutomationSchema";
 import {
@@ -90,8 +86,6 @@ const ADMISSION_SETTING_KEYS = [
   MARKETING_AUTO_PUBLISH_KEY,
   MARKETING_EXPERIMENTS_KEY,
   MARKETING_CONFIG_GENERATION_KEY,
-  // Not a switch: the instant the comment monitor last finished a whole run.
-  MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY,
 ] as const;
 
 /**
@@ -220,17 +214,8 @@ const admissionDecisionsFrom = (
         settings.get(MARKETING_AUTO_PUBLISH_KEY),
       ),
     },
-    // The comment monitor (S4c): switched on, and a whole run finished lately.
-    // Off by default, so this is false until a person has done the legal steps
-    // of policy 12.1. S4 still owes O4.
-    commentsMonitorHealthy: {
-      ok: true,
-      value: commentsMonitorHealthyFromValue(
-        settings.get(MARKETING_COMMENTS_MONITOR_LAST_RUN_KEY),
-        now,
-        process.env,
-      ),
-    },
+    // Comment monitoring is not a condition (owner, 2026-11-06: the Zernio
+    // Inbox add-on is not used). S4 still owes O4.
     publicationCancellable: unreadable,
     o4Eligible: unreadable,
     o15Channel: {

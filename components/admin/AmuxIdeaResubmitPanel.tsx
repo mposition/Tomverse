@@ -20,6 +20,13 @@ const UUID = /^[0-9a-f-]{36}$/;
 const ideaHref = (requestId: string) =>
   `/admin/amux-backlog?tab=ideas&idea=${encodeURIComponent(requestId)}`;
 
+/** Opens the new idea with a full page load. A client push kept the old idea's
+ * "not a plan" lines on screen until the owner reloaded (2026-11-06). */
+export function openResubmittedIdea(href: string,
+  location: Pick<Location, "assign"> = window.location) {
+  location.assign(href);
+}
+
 /**
  * "Submit again with the same content" for a session idea whose analysis ended
  * with no plan. The server reads the kept text, submits it as a new idea under
@@ -47,7 +54,7 @@ export function AmuxIdeaResubmitPanel({ ideaId }: { ideaId: string }) {
       if (response.ok && result === "resubmitted" && typeof body?.requestId === "string" &&
           UUID.test(body.requestId)) {
         const href = ideaHref(body.requestId);
-        if (body.previousClosed === true) { router.push(href); return; }
+        if (body.previousClosed === true) { openResubmittedIdea(href); return; }
         setPhase({ kind: "previous_open", href });
         router.refresh();
       } else if (result === "refused" && typeof body?.code === "string") {
