@@ -9,6 +9,8 @@
  * Pure: the service (ideaCardCloseService.ts) reads the rows, this decides.
  */
 
+import { AMUX_IDEA_BLOCK_REASONS, amuxIdeaBlockReason, type AmuxIdeaBlockReason } from "./ideaProgressCore.ts";
+
 /** Default off. A question filed to the Decision Maker is a paid turn. */
 export const AMUX_IDEA_CARD_CLOSE_ENV = "TOMVERSE_AMUX_CARD_CLOSE_DM";
 export const AMUX_IDEA_CARD_CLOSE_DAILY_ENV = "AMUX_IDEA_CARD_CLOSE_MAX_PER_DAY";
@@ -59,12 +61,48 @@ export type AmuxIdeaCardCloseCardFact = {
   workerQuestion: boolean;
   /** A card of another idea, still unfinished, depends on this one. */
   foreignDependent: boolean;
+  /** The open escalation's reason and the last attempt's, as the progress read takes them. */
+  escalationReason?: string | null;
+  lastAttemptReason?: string | null;
 };
 
-/** What a question records about a card, and all it says about it. */
+/**
+ * What a question records about a card, and all it says about it. The last two
+ * came later (2026-11-06): a row written before has neither, and its question
+ * reads as it did. Neither takes part in comparing the cards when answering.
+ */
 export type AmuxIdeaCardCloseAskedCard = {
   id: string; displayKey: string | null; cardType: string | null; status: string;
+  /** Why a blocked card is blocked, as the idea's detail shows it; null when not known. */
+  blockReason?: AmuxIdeaBlockReason | null;
+  /** When the card last changed, as of the question. */
+  updatedAtMs?: number;
 };
+
+/**
+ * A short, neutral sentence per block reason for the question. The codes
+ * themselves are not written: one could hit the routing term list and send the
+ * question to the operator (tests/amuxIdeaCardCloseCore.test.mjs checks each).
+ */
+export const AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT: Readonly<Record<AmuxIdeaBlockReason, string>> = Object.freeze({
+  human_review_required: "a person was asked to review it",
+  execution_blocked: "its run was stopped",
+  attempt_budget_exhausted: "it used up its allowed runs",
+  attempts: "its runs kept failing",
+  execution_lease_expired: "its run stopped reporting",
+  usage_outcome_unknown: "the run's result and cost are unknown",
+  outcome_unknown: "the run's result is unknown",
+  operational_cost_blocked: "a run would go over its cost limit",
+  cost_reconfirmation_required: "its cost estimate needs a new confirmation",
+  canonical_deadline_review_required: "a person must review its deadline",
+  local_card_closed: "its card on the local board was closed",
+  local_card_unlinked: "its card on the local board is no longer linked",
+  local_card_ambiguous: "more than one local board card matches it",
+  assignment_mismatch: "its worker assignment did not match",
+  contract_path_touched: "it changed files that need a person's review",
+  incident_frozen: "work was frozen during an incident",
+  orchestrator_halted: "the work scheduler was halted",
+});
 
 const FINISHED = new Set(["done", "cancelled"]);
 const CLOSABLE = new Set(["backlog", "blocked", "todo"]);
@@ -132,18 +170,28 @@ export function amuxIdeaCardCloseAskedCards(value: unknown): AmuxIdeaCardCloseAs
   const cards: AmuxIdeaCardCloseAskedCard[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object") return null;
-    const { id, displayKey, cardType, status } = entry as Record<string, unknown>;
+    const { id, displayKey, cardType, status, blockReason, updatedAtMs } = entry as Record<string, unknown>;
     if (typeof id !== "string" || typeof status !== "string" ||
         (displayKey !== null && typeof displayKey !== "string") ||
         (cardType !== null && typeof cardType !== "string")) return null;
-    cards.push({ id, displayKey, cardType, status });
+    const asked: AmuxIdeaCardCloseAskedCard = { id, displayKey, cardType, status };
+    // Context only: an unreadable value is left out, never a reason to refuse the row.
+    if (blockReason === null || (AMUX_IDEA_BLOCK_REASONS as readonly unknown[]).includes(blockReason)) {
+      asked.blockReason = blockReason as AmuxIdeaBlockReason | null;
+    }
+    if (typeof updatedAtMs === "number" && Number.isFinite(updatedAtMs)) asked.updatedAtMs = updatedAtMs;
+    cards.push(asked);
   }
   return cards;
 }
 
 export const amuxIdeaCardCloseAskedFrom = (targets: readonly AmuxIdeaCardCloseCardFact[]):
-  AmuxIdeaCardCloseAskedCard[] => targets.map(({ id, displayKey, cardType, status }) =>
-  ({ id, displayKey, cardType, status }));
+  AmuxIdeaCardCloseAskedCard[] => targets.map((card) => ({
+  id: card.id, displayKey: card.displayKey, cardType: card.cardType, status: card.status,
+  ...(card.status === "blocked" ?
+    { blockReason: amuxIdeaBlockReason(card.escalationReason, card.lastAttemptReason) } : {}),
+  updatedAtMs: card.updatedAtMs,
+}));
 
 /**
  * The session name the relay files a question's local card under. No worker
@@ -165,19 +213,45 @@ export const AMUX_IDEA_CARD_CLOSE_TITLE_MAX = 200;
 
 const cardLabel = (card: AmuxIdeaCardCloseAskedCard) => card.displayKey ?? card.id;
 
+const DAY_MS = 86_400_000;
+const wholeDays = (updatedAtMs: number, nowMs: number) => Math.floor(Math.max(0, nowMs - updatedAtMs) / DAY_MS);
+const dayCount = (days: number) => `${days} ${days === 1 ? "day" : "days"}`;
+const unchangedFor = (updatedAtMs: number, nowMs: number) => {
+  const days = wholeDays(updatedAtMs, nowMs);
+  return days === 0 ? "changed within the last day" : `unchanged for ${dayCount(days)}`;
+};
+
+/** One card's line: its number, kind and status, why it is blocked and how long it has not changed. */
+function cardLine(card: AmuxIdeaCardCloseAskedCard, nowMs: number | undefined) {
+  const status = card.status === "blocked" && card.blockReason !== undefined
+    ? `blocked: ${card.blockReason ? AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT[card.blockReason] : "reason not recorded"}`
+    : card.status;
+  const age = nowMs !== undefined && card.updatedAtMs !== undefined ? `; ${unchangedFor(card.updatedAtMs, nowMs)}` : "";
+  return `${cardLabel(card)} (${card.cardType ?? "card"}, ${status}${age})`;
+}
+
 /**
  * The card the relay files, in the shape of a v22 question's pending entry.
- * Written here from card numbers, statuses and the reason code only: never the
- * idea's text. No word of it may hit the routing term list on its own
- * (tests/amuxIdeaCardCloseCore.test.mjs), so a question reaches a DM unless a
- * card's own number says otherwise, and then it stays with the operator.
+ * Written here from card numbers, statuses, each blocked card's reason as a
+ * fixed sentence, how long the cards have not changed and the reason code
+ * only: never the idea's text. No word of it may hit the routing term list on
+ * its own (tests/amuxIdeaCardCloseCore.test.mjs), so a question reaches a DM
+ * unless a card's own number says otherwise, and then it stays with the
+ * operator. A row written before the reasons and dates reads without them.
  */
 export function amuxIdeaCardCloseRelayCard(input: {
-  questionId: string; reasonCode: string; cards: readonly AmuxIdeaCardCloseAskedCard[];
+  questionId: string; reasonCode: string; cards: readonly AmuxIdeaCardCloseAskedCard[]; nowMs?: number;
 }) {
+  const { nowMs } = input;
+  const dated = input.cards.flatMap((card) => card.updatedAtMs === undefined ? [] : [card.updatedAtMs]);
+  // The idea as a whole: how long since any of its remaining cards changed.
+  const quiet = nowMs !== undefined && dated.length === input.cards.length ?
+    wholeDays(Math.max(...dated), nowMs) : null;
   const head = [
     `An AMUX idea has stopped moving (reason code: ${input.reasonCode}). ` +
       "None of its cards is running, in review or assigned to a worker.",
+    ...(quiet === null ? [] : [quiet === 0 ? "One of its remaining cards changed within the last day." :
+      `None of its remaining cards has changed for ${dayCount(quiet)}.`]),
     "Remaining cards:",
   ];
   const tail = "Should the remaining cards be closed?";
@@ -186,7 +260,7 @@ export function amuxIdeaCardCloseRelayCard(input: {
   const room = AMUX_IDEA_CARD_CLOSE_QUESTION_MAX - head.join("\n").length - tail.length - 40;
   let used = 0;
   for (const card of input.cards) {
-    const line = `${cardLabel(card)} (${card.cardType ?? "card"}, ${card.status})`;
+    const line = cardLine(card, nowMs);
     if (used + line.length + 1 > room) break;
     lines.push(line);
     used += line.length + 1;
