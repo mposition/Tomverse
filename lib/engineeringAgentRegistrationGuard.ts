@@ -7,7 +7,7 @@
  * Nothing registers any more. The path that read the shared backlog, develop
  * CI and Dependabot failures and asked a model to propose AMUX backlog cards
  * never had a caller, and it was removed on 2026-11-06: a red develop head
- * now goes to the AMUX idea lane as one idea (lib/developCiRepair.ts), and a
+ * now goes to the AMUX idea lane as one idea (the develop CI repair pass), and a
  * failing Dependabot PR to the PR CI auto-fix.
  */
 
