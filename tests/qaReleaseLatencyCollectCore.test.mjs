@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { agentDigestCanonicalJson } from "../lib/agentDigestCanonicalJson.ts";
 import { collectQaReleaseLatency } from "../lib/qaReleaseLatencyCollectCore.ts";
 
 const A = "a".repeat(40);
@@ -50,9 +51,9 @@ test("each merge in the window is measured from its merge: runner wait, last sta
   assert.deepEqual(result.merges, [
     // Newest first. Still running: no last finish; no dev deployment recorded.
     { pullRequest: 2, mergedAt: "2026-10-20T01:30:00.000Z", firstCheckStartMin: 1, lastCheckStartMin: 2, lastCheckDoneMin: null, devDeployedMin: null },
-    { pullRequest: 1, mergedAt: "2026-10-20T01:00:00.000Z", firstCheckStartMin: 0.5, lastCheckStartMin: 20, lastCheckDoneMin: 20.1, devDeployedMin: 4 },
+    { pullRequest: 1, mergedAt: "2026-10-20T01:00:00.000Z", firstCheckStartMin: 1, lastCheckStartMin: 20, lastCheckDoneMin: 20, devDeployedMin: 4 },
   ]);
-  assert.deepEqual(result.summary, { medianDevDeployedMin: 4, maxDevDeployedMin: 4, medianLastCheckDoneMin: 20.1, maxLastCheckStartMin: 20 });
+  assert.deepEqual(result.summary, { medianDevDeployedMin: 4, maxDevDeployedMin: 4, medianLastCheckDoneMin: 20, maxLastCheckStartMin: 20 });
 });
 
 test("a failed read is unavailable, never an empty list", async () => {
@@ -73,4 +74,13 @@ test("the digest carries the timing and still reads a digest stored without it",
   // No free text: a title cannot ride in a merge row.
   const withTitle = { ...latency, merges: [{ ...latency.merges[0], title: "x" }] };
   assert.equal(shape.latency.safeParse(withTitle).success, false);
+});
+
+test("every timing is a whole minute, so the digest store's canonical JSON accepts it", async () => {
+  // A 30-second wait once came out as 0.5 and the store refused the whole
+  // digest as payload_not_canonical (HTTP 422).
+  const result = await collectQaReleaseLatency({ fetchJson: github(), nowMs: NOW });
+  assert.doesNotThrow(() => agentDigestCanonicalJson(result));
+  const numbers = [...result.merges.flatMap((m) => [m.firstCheckStartMin, m.lastCheckStartMin, m.lastCheckDoneMin, m.devDeployedMin]), ...Object.values(result.summary)];
+  for (const value of numbers) if (value !== null) assert.ok(Number.isSafeInteger(value), String(value));
 });
