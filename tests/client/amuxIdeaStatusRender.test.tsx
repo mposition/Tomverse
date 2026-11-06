@@ -102,7 +102,16 @@ test("case 2: an approved idea waiting for its analysis says it waits, and does 
   assert.match(detail, /data-stage="analysis"/);
   assert.match(detail, /data-activity="waiting"/);
   assert.ok(detail.includes(m.notice.analysis_waiting.body));
-  assert.ok(detail.includes("/admin/amux-backlog?tab=recovery"), "the unused reservation is where it can be released");
+  assert.ok(!detail.includes("tab=recovery"), "the retired Cleanup and recovery section is not linked");
+  assert.match(detail, /data-testid="amux-reservation-release"/, "the unused reservation is released right here");
+  const ready = render(<AmuxIdeaDetailSummary reservationReleaseAvailable row={row({ state: "submitted",
+    chunks: [{ chunkIndex: 0, state: "awaiting_preview", coverageStatus: null, previewState: "confirmed",
+      holdStatus: "reserved" }] })} />);
+  assert.match(ready, /data-testid="amux-reservation-release" data-phase="checking"/);
+  const running = render(<AmuxIdeaDetailSummary reservationReleaseAvailable row={row({ state: "analyzing",
+    chunks: [{ chunkIndex: 0, state: "in_flight", coverageStatus: null, previewState: "in_flight",
+      holdStatus: "in_flight" }] })} />);
+  assert.doesNotMatch(running, /amux-reservation-release/, "a running analysis offers no release");
 
   const input = adminAmuxIdeaInputMessages;
   const card = render(<AmuxIdeaRequestStatusCard state={{ kind: "saved", requestId: "cfa39925-f53e-4d19-9eb7-3b8ec2e94f68",

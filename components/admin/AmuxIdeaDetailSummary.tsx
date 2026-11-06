@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
 import { AmuxIdeaName, laneLine } from "@/components/admin/AmuxIdeaProgressPanel";
+import { AmuxIdeaReservationReleasePanel } from "@/components/admin/AmuxIdeaReservationReleasePanel";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
@@ -25,14 +26,12 @@ const LINK = "inline-flex min-h-11 items-center font-medium underline text-blue-
 const SCREENS = {
   cards: "/admin/amux-execution?tab=cards",
   safety: "/admin/amux-settings?tab=safety",
-  recovery: "/admin/amux-backlog?tab=recovery",
   promotion: "/admin/amux-promotion",
   approval: "#amux-v4-frontier-models-heading",
 } as const;
 /** The existing screens each state can act on; the panels below this card carry the rest. */
 const NOTICE_ACTIONS: Partial<Record<AmuxIdeaStatusNoticeKind, Array<keyof typeof SCREENS>>> = {
-  attention: ["safety", "recovery"],
-  analysis_waiting: ["recovery"],
+  attention: ["safety"],
   execution_running: ["cards"],
   execution_waiting: ["cards", "promotion"],
   execution_blocked: ["safety"],
@@ -45,10 +44,15 @@ const NOTICE_ACTIONS: Partial<Record<AmuxIdeaStatusNoticeKind, Array<keyof typeo
  * is on the six steps, which of them are a person's, what is actually happening
  * and what the owner can do about it, and its Tasks with their PRs. Everything here is read from the progress snapshot; there is no action
  * besides opening GitHub, reading its own CLI manifest, cancelling a queued v19 session idea,
- * stopping its in-flight analysis and closing an idea that waits for the owner, because
+ * stopping its in-flight analysis, releasing the unused reservation of an analysis that waits
+ * for its worker and closing an idea that waits for the owner, because
  * other human steps have their own panels below and merge is observed here.
  */
-export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
+export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false }: {
+  row: AmuxIdeaProgressRow;
+  /** The analysis budget read and reserve switches, which the release route also requires. */
+  reservationReleaseAvailable?: boolean;
+}) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
   const step = amuxIdeaProgressStep(row.stage);
   const notice = amuxIdeaStatusNotice(row);
@@ -116,6 +120,8 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
           </p> : null}
         </section>
       ) : null}
+      {notice === "analysis_waiting" ? <AmuxIdeaReservationReleasePanel key={`release-${row.ideaId}`}
+        ideaId={row.ideaId} requestId={row.requestId} available={reservationReleaseAvailable} /> : null}
       {blockedTasks.length > 0 ? (
         <section aria-labelledby="amux-idea-blocked-heading" data-testid="amux-idea-blocked-tasks" className="space-y-2">
           <h3 id="amux-idea-blocked-heading" className="font-medium text-zinc-100">{m.blockedTitle}</h3>

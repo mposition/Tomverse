@@ -10,8 +10,6 @@ import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxIdeaInbox, AmuxIdeaProgressPanel } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxIdeaDetailSummary } from "@/components/admin/AmuxIdeaDetailSummary";
-import { AmuxUnusedAnalysisReservationPanel } from
-  "@/components/admin/AmuxUnusedAnalysisReservationPanel";
 import { AmuxAnalysisClaimResolutionPanel } from
   "@/components/admin/AmuxAnalysisClaimResolutionPanel";
 import { amuxAnalysisClaimRecoveryHoldId } from
@@ -102,7 +100,10 @@ export default async function AdminAmuxBacklogPage({
   const role = getAdminRole(session);
   const query = await searchParams;
   const requestedTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
-  if (requestedTab === "intake") {
+  // Retired sections keep their addresses (Admin IA redirect rule): legacy
+  // intake and Cleanup and recovery, whose one panel became the release
+  // button on an idea's detail (operator decision 2026-11-06), open Ideas.
+  if (requestedTab === "intake" || requestedTab === "recovery") {
     redirect(adminRedirectTarget("/admin/amux-backlog?tab=ideas", query));
   }
   // Expiration of a transfer preview must not hide recovery of its paid claim.
@@ -180,7 +181,9 @@ export default async function AdminAmuxBacklogPage({
         <>
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
           key={recoveryHoldId} holdId={recoveryHoldId} /> : null}
-        {openedIdea ? <AmuxIdeaDetailSummary row={openedIdea} /> : null}
+        {openedIdea ? <AmuxIdeaDetailSummary row={openedIdea} reservationReleaseAvailable={
+          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
+          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"} /> : null}
         {/* Ideas main (approved v49 mockup): "Decide now" on top at full width, then the
             input beside the list of ideas in progress. An opened idea leads with its
             detail and its flow; the inbox and the list follow it. */}
@@ -219,10 +222,6 @@ export default async function AdminAmuxBacklogPage({
       ) : tab.id === "portfolio" ? (
         <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(
           process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])} />
-      ) : tab.id === "recovery" ? (
-        <AmuxUnusedAnalysisReservationPanel operatorId={session.user.id} available={
-          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
-          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (

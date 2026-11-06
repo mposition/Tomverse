@@ -8,18 +8,20 @@ const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 let authenticated = true;
 let role = "owner";
 let recent = true;
-let ownsPreview = true;
-let writes = 0;
-let auditReads = 0;
-let hold = { id: "synthetic-hold", previewId: "synthetic-preview", status: "reserved",
-  namespace: "agent/amux-intake",
-  reservedMicroUsd: BigInt(10_560_000), dispatchedAt: null as Date | null,
-  settledMicroUsd: null as bigint | null, closedAt: null as Date | null,
-  _count: { cliUsageEvents: 0 } };
-let preview = { confirmedByUserId: "synthetic-owner", ideaId: "synthetic-idea",
-  idea: { actorUserId: "synthetic-owner" }, state: "confirmed",
-  consumedAt: null as Date | null, outcomeUnknownAt: null as Date | null,
-  expiresAt: new Date("2026-10-01T00:00:00.000Z") };
+let ideaOwner = "synthetic-owner";
+let writes: string[] = [];
+let writerFailure: Error | null = null;
+type Hold = { id: string; previewId: string; status: string; namespace: string; reservedMicroUsd: bigint;
+  dispatchedAt: Date | null; settledMicroUsd: bigint | null; closedAt: Date | null;
+  _count: { cliUsageEvents: number };
+  preview: { state: string; consumedAt: Date | null; outcomeUnknownAt: Date | null; expiresAt: Date } };
+const newHold = (id: string, changes: Partial<Hold> = {}): Hold => ({ id, previewId: `${id}-preview`,
+  status: "reserved", namespace: "agent/amux-intake", reservedMicroUsd: BigInt(10_560_000),
+  dispatchedAt: null, settledMicroUsd: null, closedAt: null, _count: { cliUsageEvents: 0 },
+  preview: { state: "confirmed", consumedAt: null, outcomeUnknownAt: null,
+    expiresAt: new Date("2026-10-01T00:00:00.000Z") }, ...changes });
+let holds: Hold[] = [];
+let holdReads: unknown[] = [];
 
 class CancellationError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -53,32 +55,43 @@ mock.module(mod("lib/amux/ideaAnalysisBudgetReservationService.ts"), { namedExpo
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH: true,
   commitAmuxIdeaAnalysisBudgetReservation: async () => { throw new Error("No new reservation"); },
 } });
+// The canonical writer: it re-checks the hold under its locks and refuses a claimed or released one.
 mock.module(mod("lib/amux/ideaAnalysisBudgetCancellationService.ts"), { namedExports: {
   AmuxIdeaAnalysisCancellationError: CancellationError,
   commitAmuxIdeaAnalysisUnusedReservationCancellation: async (_tx: unknown, input: Record<string, unknown>) => {
-    assert.equal(input.holdId, "synthetic-hold");
-    assert.equal(input.expectedPreviewId, "synthetic-preview");
-    if (hold.status !== "reserved" || hold.dispatchedAt) throw new CancellationError("not_cancellable");
-    writes++;
-    hold = { ...hold, status: "released", settledMicroUsd: BigInt(0), closedAt: new Date() };
-    return { holdId: hold.id, releasedMicroUsd: "10560000", auditId: "synthetic-audit" };
+    if (writerFailure) throw writerFailure;
+    const hold = holds.find((row) => row.id === input.holdId);
+    assert.equal(input.expectedPreviewId, hold?.previewId);
+    if (!hold || hold.status !== "reserved" || hold.dispatchedAt) throw new CancellationError("not_cancellable");
+    writes.push(hold.id);
+    Object.assign(hold, { status: "released", settledMicroUsd: BigInt(0), closedAt: new Date() });
+    return { holdId: hold.id, releasedMicroUsd: hold.reservedMicroUsd.toString(), auditId: `audit-${hold.id}` };
   },
 } });
 const tx = {
-  amuxIdeaTransferPreview: { findUnique: async () => ownsPreview ? preview : null },
-  amuxIdeaSubmission: { findUnique: async () => ({ actorUserId: "synthetic-owner" }) },
-  amuxIdeaAnalysisBudgetHold: { findUnique: async () => hold },
-  adminAuditLog: { findFirst: async () => { auditReads++; return { id: "synthetic-audit" }; } },
+  amuxIdeaTransferPreview: { findUnique: async ({ where }: { where: { id: string } }) =>
+    holds.some((hold) => hold.previewId === where.id) ? { ideaId: "synthetic-idea",
+      confirmedByUserId: "synthetic-owner", idea: { actorUserId: ideaOwner } } : null },
+  amuxIdeaSubmission: { findUnique: async () => ({ actorUserId: ideaOwner }) },
+  amuxIdeaAnalysisBudgetHold: { findMany: async (query: unknown) => { holdReads.push(query); return holds; } },
 };
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   ...tx, $transaction: async (work: (db: typeof tx) => Promise<unknown>) => work(tx),
 } } });
 const routePromise = import(mod("app/api/admin/amux/ideas/analysis-reservations/route.ts"));
 const endpoint = "https://example.test/api/admin/amux/ideas/analysis-reservations";
-const request = (body: unknown = { holdId: "synthetic-hold", previewId: "synthetic-preview", confirmedUnused: true }) =>
+const request = (body: unknown = { ideaId: "synthetic-idea", confirmedUnused: true }) =>
   new Request(endpoint, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const read = async () => (await routePromise).GET(new Request(`${endpoint}?ideaId=synthetic-idea`));
+test.beforeEach(() => {
+  authenticated = true; role = "owner"; recent = true; ideaOwner = "synthetic-owner";
+  writes = []; writerFailure = null; holdReads = [];
+  holds = [newHold("hold-a")];
+  process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ = "enabled";
+  process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE = "enabled";
+});
 
-test("unused reservation cancellation fails closed before the writer", async () => {
+test("the idea release fails closed before the writer", async () => {
   const route = await routePromise;
   authenticated = false;
   assert.equal((await route.DELETE(request())).status, 404);
@@ -87,52 +100,103 @@ test("unused reservation cancellation fails closed before the writer", async () 
   role = "owner"; recent = false;
   assert.equal((await route.DELETE(request())).status, 428);
   recent = true;
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ = "enabled";
   delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE;
   assert.equal((await route.DELETE(request())).status, 409);
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE = "enabled";
   for (const body of [
-    { holdId: "synthetic-hold", previewId: "synthetic-preview", confirmedUnused: false },
-    { holdId: "synthetic-hold", previewId: "synthetic-preview", confirmedUnused: true, extra: true },
-    { holdId: "bad id", previewId: "synthetic-preview", confirmedUnused: true },
+    { ideaId: "synthetic-idea", confirmedUnused: false },
+    { ideaId: "synthetic-idea", confirmedUnused: true, holdId: "hold-a" },
+    { holdId: "hold-a", previewId: "hold-a-preview", confirmedUnused: true },
+    { ideaId: "bad id", confirmedUnused: true },
   ]) assert.equal((await route.DELETE(request(body))).status, 400);
-  ownsPreview = false;
+  ideaOwner = "other-owner";
   assert.equal((await route.DELETE(request())).status, 404);
-  ownsPreview = true;
-  preview.idea.actorUserId = "other-owner";
-  assert.equal((await route.DELETE(request())).status, 404);
-  preview.idea.actorUserId = "synthetic-owner";
-  assert.equal(writes, 0);
+  assert.equal((await read()).status, 404);
+  assert.deepEqual(writes, []);
 });
 
-test("expired unused preview stays reachable; claim, usage and unknown proof disable cancellation", async () => {
-  const route = await routePromise;
-  const read = async () => (await (await route.GET(new Request(`${endpoint}?holdId=synthetic-hold`))).json()).hold;
-  assert.equal((await read()).canCancel, true);
-  for (const change of [
-    { namespace: "agent/other" }, { status: "in_flight" },
-    { dispatchedAt: new Date() }, { _count: { cliUsageEvents: 1 } },
-  ]) {
-    const prior = hold; hold = { ...hold, ...change };
-    assert.equal((await read()).canCancel, false); hold = prior;
+test("the idea read offers only holds the writer would accept, else says why", async () => {
+  const view = async () => (await read()).json();
+  const first = await view();
+  assert.deepEqual(first.releasable, [{ id: "hold-a", reservedMicroUsd: "10560000" }]);
+  assert.equal(first.blocked, null);
+  assert.deepEqual((holdReads[0] as { where: unknown }).where,
+    { preview: { ideaId: "synthetic-idea", confirmedByUserId: "synthetic-owner" } });
+  for (const changes of [{ status: "in_flight" }, { dispatchedAt: new Date() },
+    { _count: { cliUsageEvents: 1 } }, { namespace: "agent/other" }] as Array<Partial<Hold>>) {
+    holds = [newHold("hold-a", changes)];
+    const answer = await view();
+    assert.deepEqual(answer.releasable, []);
+    assert.equal(answer.blocked, "in_use");
   }
-  for (const change of [{ consumedAt: new Date() }, { outcomeUnknownAt: new Date() }, { state: "provider_failed" }]) {
-    const prior = preview; preview = { ...preview, ...change };
-    assert.equal((await read()).canCancel, false); preview = prior;
+  for (const preview of [{ consumedAt: new Date() }, { outcomeUnknownAt: new Date() }]) {
+    holds = [newHold("hold-a", { preview: { ...newHold("x").preview, ...preview } })];
+    assert.equal((await view()).blocked, "outcome_unknown");
   }
-  assert.equal(auditReads, 0);
+  holds = [newHold("hold-a", { status: "released", closedAt: new Date(), settledMicroUsd: BigInt(0) })];
+  assert.deepEqual(await view(), { state: "idea", ideaId: "synthetic-idea", releasable: [],
+    releasedCount: 1, blocked: "none", retryWrite: false });
+  holds = [];
+  assert.equal((await view()).blocked, "none");
+  // An expired preview's unused hold stays releasable.
+  holds = [newHold("hold-a", { preview: { ...newHold("x").preview, state: "expired" } })];
+  assert.equal((await view()).releasable.length, 1);
+  assert.deepEqual(writes, []);
 });
 
-test("one canonical cancellation, exact receipt read-back, and no second release", async () => {
+test("one click releases every unused hold of the idea through the writer, and never twice", async () => {
   const route = await routePromise;
+  holds = [newHold("hold-a"), newHold("hold-b"), newHold("hold-c", { dispatchedAt: new Date() })];
   const response = await route.DELETE(request());
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
-  assert.deepEqual(await response.json(), { holdId: "synthetic-hold", releasedMicroUsd: "10560000",
-    auditId: "synthetic-audit", modelCallStarted: false });
-  const readback = await (await route.GET(new Request(`${endpoint}?holdId=synthetic-hold`))).json();
-  assert.equal(readback.hold.canCancel, false);
-  assert.equal(readback.hold.cancellationAuditId, "synthetic-audit");
-  assert.equal((await route.DELETE(request())).status, 409);
-  assert.equal(writes, 1);
+  assert.deepEqual(await response.json(), { ideaId: "synthetic-idea", released: [
+    { holdId: "hold-a", releasedMicroUsd: "10560000", auditId: "audit-hold-a" },
+    { holdId: "hold-b", releasedMicroUsd: "10560000", auditId: "audit-hold-b" },
+  ], skipped: 0, modelCallStarted: false });
+  assert.deepEqual(writes, ["hold-a", "hold-b"]);
+  const again = await route.DELETE(request());
+  assert.equal(again.status, 409);
+  assert.equal((await again.json()).blocked, "in_use");
+  assert.deepEqual(writes, ["hold-a", "hold-b"]);
+});
+
+test("a hold claimed meanwhile is skipped; a failure after a commit is an unknown outcome", async () => {
+  const route = await routePromise;
+  holds = [newHold("hold-a"), newHold("hold-b")];
+  // The writer sees hold-a claimed under its lock although the read offered it.
+  const { findMany } = tx.amuxIdeaAnalysisBudgetHold;
+  tx.amuxIdeaAnalysisBudgetHold.findMany = async (query: unknown) => {
+    const offered = structuredClone(await findMany(query));
+    holds[0]!.status = "in_flight";
+    return offered;
+  };
+  try {
+    const response = await route.DELETE(request());
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.released.map((row: { holdId: string }) => row.holdId), ["hold-b"]);
+    assert.equal(body.skipped, 1);
+  } finally { tx.amuxIdeaAnalysisBudgetHold.findMany = findMany; }
+
+  holds = [newHold("hold-a"), newHold("hold-b")];
+  writes = [];
+  const writer = tx.amuxIdeaTransferPreview.findUnique;
+  let calls = 0;
+  tx.amuxIdeaTransferPreview.findUnique = async (query) => {
+    if (++calls === 2) throw new Error("connection lost");
+    return writer(query);
+  };
+  try {
+    const response = await route.DELETE(request());
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "outcome_unknown", retryWrite: false, modelCallStarted: false });
+    assert.deepEqual(writes, ["hold-a"]);
+  } finally { tx.amuxIdeaTransferPreview.findUnique = writer; }
+
+  writerFailure = new Error("connection lost");
+  holds = [newHold("hold-a")];
+  const lost = await route.DELETE(request());
+  assert.equal(lost.status, 503);
+  assert.equal((await lost.json()).error, "outcome_unknown");
 });
