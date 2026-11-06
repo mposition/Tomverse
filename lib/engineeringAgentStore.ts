@@ -1569,7 +1569,7 @@ export async function resolveEngineeringAgentStateMismatch(
     kind === "C" && input.action === "close_after_observed_merge"
       ? await tx.engineeringAgentBinding.findMany({
           where: { runId: run.id, supersededAt: null },
-          select: { id: true, prNumber: true, mergeObservation: true },
+          select: { id: true, prNumber: true },
         })
       : [];
   const mergedBinding =
@@ -1611,18 +1611,32 @@ export async function resolveEngineeringAgentStateMismatch(
     });
     if (moved.count !== 1) refuse("run_not_active");
   }
-  if (input.action === "close_after_observed_merge" && mergedBinding && mergedBinding.mergeObservation === null) {
-    await recordEngineeringAgentBindingObservation(tx, {
-      bindingId: mergedBinding.id,
-      kind: "merge",
-      observation: {
-        merged: true,
-        mergeCommitSha: observed!.mergeCommitSha,
-        mergedAt: observed!.mergedAt!.toISOString(),
-        mergedByKind: observed!.mergedByKind,
-        observedAt: (await databaseNow(tx)).toISOString(),
-      },
-    });
+  if (input.action === "close_after_observed_merge" && mergedBinding) {
+    // A person's resolution runs under any mode, so the merge is written
+    // without the observer's maintenance switch. A merge the observer already
+    // recorded must be this same merge.
+    const binding = await lockBinding(tx, mergedBinding.id);
+    const recorded = (
+      await tx.engineeringAgentBinding.findUniqueOrThrow({ where: { id: binding.id }, select: { mergeObservation: true } })
+    ).mergeObservation as { merged?: unknown; mergeCommitSha?: unknown } | null;
+    if (recorded === null) {
+      const observation: BindingObservationInput = {
+        bindingId: binding.id,
+        kind: "merge",
+        observation: {
+          merged: true,
+          mergeCommitSha: observed!.mergeCommitSha,
+          mergedAt: observed!.mergedAt!.toISOString(),
+          mergedByKind: observed!.mergedByKind,
+          observedAt: (await databaseNow(tx)).toISOString(),
+        },
+      };
+      if ((await writeBindingObservation(tx, binding, observation)).recorded) {
+        await systemAudit(tx, "engineering-agent-observer", ENGINEERING_AGENT_AUDIT_ACTIONS.bindingObserved, "engineering_agent_binding", binding.id, bindingObservationAudit(observation));
+      }
+    } else if (recorded.merged !== true || recorded.mergeCommitSha !== observed!.mergeCommitSha) {
+      refuse("merge_observation_conflict");
+    }
   }
   if (input.action === "mode_off" || input.action === "escalate_incident") {
     await setEngineeringAgentSwitch(tx, { session: input.session, request: input.request, name: "mode", value: "off" });
@@ -2050,19 +2064,45 @@ export async function moveEngineeringAgentBinding(
  * the same observation again is a no-op; recording a different one is refused
  * by the database.
  */
+type BindingObservationInput =
+  | {
+      bindingId: string;
+      kind: "approval";
+      observation: z.infer<typeof engineeringAgentApprovalObservationSchema>;
+      reviewer: { githubId: number; login: string } | null;
+    }
+  | { bindingId: string; kind: "merge"; observation: z.infer<typeof engineeringAgentMergeObservationSchema> };
+
 export async function recordEngineeringAgentBindingObservation(
   tx: EngineeringAgentTransaction,
-  input:
-    | {
-        bindingId: string;
-        kind: "approval";
-        observation: z.infer<typeof engineeringAgentApprovalObservationSchema>;
-        reviewer: { githubId: number; login: string } | null;
-      }
-    | { bindingId: string; kind: "merge"; observation: z.infer<typeof engineeringAgentMergeObservationSchema> },
+  input: BindingObservationInput,
 ): Promise<{ recorded: boolean }> {
   const binding = await lockBinding(tx, input.bindingId);
   await requireSwitch(tx, "maintenanceAllowed");
+  const written = await writeBindingObservation(tx, binding, input);
+  if (written.recorded) {
+    await systemAudit(tx, "engineering-agent-observer", ENGINEERING_AGENT_AUDIT_ACTIONS.bindingObserved, "engineering_agent_binding", binding.id, bindingObservationAudit(input));
+  }
+  return written;
+}
+
+const bindingObservationAudit = (input: BindingObservationInput) => ({
+  kind: input.kind,
+  verdict: input.kind === "approval" ? input.observation.verdict : null,
+  merged: input.kind === "merge" ? input.observation.merged : null,
+});
+
+/**
+ * The observation write itself, on a binding the caller has locked; the
+ * caller records the audit entry when it wrote. The observer reaches it
+ * through its switch; a person's mismatch resolution reaches it without one,
+ * because a person's resolution runs under any mode.
+ */
+async function writeBindingObservation(
+  tx: EngineeringAgentTransaction,
+  binding: LockedBinding,
+  input: BindingObservationInput,
+): Promise<{ recorded: boolean }> {
   const current = await tx.engineeringAgentBinding.findUniqueOrThrow({
     where: { id: binding.id },
     select: { approvalObservation: true, mergeObservation: true },
@@ -2095,11 +2135,6 @@ export async function recordEngineeringAgentBindingObservation(
     refuse("observation_already_recorded");
   }
   await tx.engineeringAgentBinding.update({ where: { id: binding.id }, data });
-  await systemAudit(tx, "engineering-agent-observer", ENGINEERING_AGENT_AUDIT_ACTIONS.bindingObserved, "engineering_agent_binding", binding.id, {
-    kind: input.kind,
-    verdict: input.kind === "approval" ? input.observation.verdict : null,
-    merged: input.kind === "merge" ? input.observation.merged : null,
-  });
   return { recorded: true };
 }
 

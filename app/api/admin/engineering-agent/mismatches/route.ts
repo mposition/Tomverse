@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { runEngineeringAgentAdminMutation } from "@/lib/engineeringAgentAdminMutations";
-import { readEngineeringAgentPullObservation } from "@/lib/engineeringAgentGitHubRead";
+import { readEngineeringAgentPullMerge } from "@/lib/engineeringAgentGitHubRead";
 import {
   ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS,
   type EngineeringAgentObservedMerge,
@@ -57,7 +57,7 @@ async function observeMerge(workItemId: string): Promise<EngineeringAgentObserve
   const prNumber = await mismatchPullNumber(workItemId);
   if (prNumber === null) return null;
   try {
-    const pull = await readEngineeringAgentPullObservation(prNumber);
+    const pull = await readEngineeringAgentPullMerge(prNumber);
     return {
       prNumber,
       merged: pull.merged,

@@ -197,13 +197,15 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                         action: "close_domain_after_verified_no_write",
                       });
                     })}
-                    {button(`${item.id}:merged`, m.mismatchCloseMerged, () => {
-                      if (!window.confirm(m.confirmMismatchCloseMerged)) return;
-                      void post(`${item.id}:merged`, "/api/admin/engineering-agent/mismatches", {
-                        workItemId: item.id,
-                        action: "close_after_observed_merge",
-                      });
-                    })}
+                    {item.causeKey.startsWith("review_pr:")
+                      ? button(`${item.id}:merged`, m.mismatchCloseMerged, () => {
+                          if (!window.confirm(m.confirmMismatchCloseMerged)) return;
+                          void post(`${item.id}:merged`, "/api/admin/engineering-agent/mismatches", {
+                            workItemId: item.id,
+                            action: "close_after_observed_merge",
+                          });
+                        })
+                      : null}
                     {button(`${item.id}:leave`, m.mismatchLeaveOpen, () =>
                       void post(`${item.id}:leave`, "/api/admin/engineering-agent/mismatches", {
                         workItemId: item.id,

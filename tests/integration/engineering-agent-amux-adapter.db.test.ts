@@ -1070,9 +1070,9 @@ test("a closed adapter records a publisher's pull request on the engineering sid
     assert.equal(card.reviewPrNumber, null);
 
     // A person who sees the pull request merged on GitHub may close it without
-    // turning the agent off (owner decision 2026-11-06), but only on a merge of
-    // this item's own pull request.
-    await setMode("t1");
+    // changing the agent's mode (owner decision 2026-11-06), but only on a merge
+    // of this item's own pull request. The mode is still off here: a person's
+    // resolution does not wait on the observer's maintenance switch.
     const person = {
       user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
       expires: new Date(Date.now() + 3_600_000).toISOString(),
@@ -1105,6 +1105,11 @@ test("a closed adapter records a publisher's pull request on the engineering sid
       notObserved,
       "an unmerged pull request",
     );
+    await assert.rejects(
+      closeOnMerge({ ...merged, mergeCommitSha: null }),
+      notObserved,
+      "a merge without its commit",
+    );
     const closedOnMerge = await closeOnMerge(merged);
     assert.equal(closedOnMerge.resolved, true);
     assert.equal(
@@ -1122,8 +1127,8 @@ test("a closed adapter records a publisher's pull request on the engineering sid
     );
     assert.equal(
       (await prisma.appSetting.findUnique({ where: { key: MODE_KEY } }))?.value,
-      "t1",
-      "closing on a merge leaves the agent on",
+      "off",
+      "closing on a merge leaves the mode as it was",
     );
 
     // The fixture's binding is then closed and pruned under a mode that allows
