@@ -368,12 +368,15 @@ test("a worker checkout moves to its publication base only when clean and the ba
         throw new Error("missing");
       }
       if (command[0] === "fetch") {
+        if (state.fetchFails) throw new Error("network");
         if (state.fetchable?.includes(command.at(-1))) state.present = true;
         return { stdout: Buffer.alloc(0) };
       }
       if (command[0] === "checkout") { state.head = command.at(-1); return { stdout: Buffer.alloc(0) }; }
       if (command[0] === "rev-parse" && command[1] === "--show-toplevel")
         return { stdout: Buffer.from(state.root ?? "/repo") };
+      if (command[0] === "rev-parse" && command.at(-1) === "FETCH_HEAD^{commit}")
+        return { stdout: Buffer.from(state.fetchHead ?? "") };
       if (command[0] === "rev-parse") return { stdout: Buffer.from(state.moved ?? state.head) };
       throw new Error("unexpected git command");
     };
@@ -425,4 +428,25 @@ test("a worker checkout moves to its publication base only when clean and the ba
   for (const [path, sha] of [["repo", base], ["/repo", "B".repeat(40)], ["/repo", undefined]])
     assert.deepEqual(await syncAmuxV22WorktreeBase(path, sha, { run: local.run, realpath }),
       { ok: false, reason: "invalid_input" });
+
+  // No pinned base: the clean checkout follows develop's freshly fetched head.
+  const tip = "d".repeat(40);
+  const latest = repo({ fetchable: ["refs/heads/develop"], fetchHead: tip, head: base });
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", null, { run: latest.run, realpath }),
+    { ok: true, baseSha: tip });
+  assert.deepEqual(latest.calls.find((call) => call.command[0] === "fetch").command,
+    ["fetch", "--no-tags", "--quiet", "origin", "refs/heads/develop"]);
+  assert.deepEqual(latest.calls.find((call) => call.command[0] === "checkout").command.at(-1), tip);
+
+  const dirtyLatest = repo({ dirty: true, fetchHead: tip });
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", null,
+    { run: dirtyLatest.run, realpath }), { ok: false, reason: "worktree_dirty" });
+  assert.deepEqual(names(dirtyLatest.calls), ["status"]);
+
+  for (const state of [{ fetchFails: true, fetchHead: tip }, { fetchHead: "not-a-sha" }]) {
+    const offline = repo(state);
+    assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", null,
+      { run: offline.run, realpath }), { ok: false, reason: "develop_unavailable" });
+    assert.equal(names(offline.calls).includes("checkout"), false);
+  }
 });
