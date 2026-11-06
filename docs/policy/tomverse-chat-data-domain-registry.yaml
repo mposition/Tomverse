@@ -2156,7 +2156,7 @@ domains:
     retentionPolicy: unverified
     implementationStatus: planned
     plannedWorkRef: >-
-      docs/policy/amux-decision-maker.md section 2 item 9, AMUX account deletion and export gate
+      docs/policy/amux-decision-maker.md section 2 item 10, AMUX account deletion and export gate
     subjectReference:
       kind: parent_row
       parentColumn: ideaId

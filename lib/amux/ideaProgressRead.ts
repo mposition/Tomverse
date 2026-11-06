@@ -166,7 +166,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         WHERE c."ideaId" = n."id") AS "chunks",
       (SELECT json_agg(json_build_object(
           'id', w."id", 'cardType', w."cardType", 'status', w."status",
-          -- A closed card is terminal too (ideaCardCloseService.ts); only a done one merged.
+          -- A closed card has v4TerminalAt too (ideaCardCloseService.ts), but only a done one merged.
           'reviewPrNumber', w."reviewPrNumber", 'terminal', (w."v4TerminalAt" IS NOT NULL AND w."status" = 'done'),
           'displayKey', w."displayKey",
           'liveAttempt', EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a

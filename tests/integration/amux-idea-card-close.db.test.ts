@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, mock, test } from "node:test";
 import type { Prisma } from "@prisma/client";
@@ -720,7 +720,9 @@ test("an answer that says neither close nor keep changes nothing and goes to the
 
 test("the owner answers directly, with a person's audit, whatever the router or the kill switch did", async () => {
   // A card's own number hits the term list: no DM, the question stays with the operator.
-  const routedAway = await seedIdea([{ status: "blocked", displayKey: "AMUX-PROD-101" }, { status: "backlog" }]);
+  // Unique per run, so a database another run left behind holds no such key.
+  const routedAway = await seedIdea([{ status: "blocked", displayKey: `AMUX-PROD-${randomInt(100, 1_000_000)}` },
+    { status: "backlog" }]);
   await drain();
   const { question, routed } = await fileToRelay(routedAway.ideaId);
   assert.equal(routed.route, "operator");

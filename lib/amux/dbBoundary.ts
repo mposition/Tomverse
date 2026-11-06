@@ -604,10 +604,10 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
-  // Hand off: setup + question + canonical audit 4 + fence.
+  // Hand off: setup + audit chain lock + question + canonical audit 4 + fence.
   decisionMakerIdeaCardCloseHandoff: {
     operation: "decision_maker_idea_card_close_handoff",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "mutation",
   },
   // The owner's read on the idea's detail: setup + ONE statement + fence.

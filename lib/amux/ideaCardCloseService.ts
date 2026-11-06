@@ -402,11 +402,14 @@ export async function applyAmuxIdeaCardCloseDmAnswer(tx: Prisma.TransactionClien
 /**
  * A confirmed answer that says neither close nor keep changes nothing and goes
  * to a person: the question stays open with its panel on the idea's detail, and
- * this says why, once. A walk that passes it again records nothing more.
+ * this says why, once. A walk that passes it again records nothing more. The
+ * audit chain lock comes before the question's row, the order the owner's
+ * answer and the applied answer take, so the two never wait on each other.
  */
 export async function recordAmuxIdeaCardCloseHandoff(tx: Prisma.TransactionClient, input: {
   questionId: string; requestId: string; reason: string; now: Date;
 }) {
+  await takeAuditChainLock(tx);
   const at = input.now.toISOString();
   const changed = await tx.$executeRaw`
     UPDATE "AmuxIdeaCardCloseQuestion" SET "handoffReason" = ${input.reason},

@@ -241,7 +241,7 @@ test("the boundaries stay within the policy's twelve statements, and the confirm
   const boundaries = readFileSync(resolve(ROOT, "lib/amux/dbBoundary.ts"), "utf8");
   for (const [name, ceiling] of [["decisionMakerIdeaCardCloseScan", 3], ["decisionMakerIdeaCardCloseOpen", 10],
     ["decisionMakerIdeaCardCloseRead", 4], ["decisionMakerIdeaCardCloseApply", 12],
-    ["decisionMakerIdeaCardCloseHandoff", 7], ["decisionMakerIdeaCardCloseOwnerRead", 3],
+    ["decisionMakerIdeaCardCloseHandoff", 8], ["decisionMakerIdeaCardCloseOwnerRead", 3],
     ["decisionMakerV22QuestionResolve", 10], ["decisionMakerV22QuestionWrite", 8]]) {
     const match = new RegExp(`${name}: \\{[^}]*prismaCallCeiling: (\\d+)`).exec(boundaries);
     assert.equal(Number(match?.[1]), ceiling, name);
