@@ -421,3 +421,18 @@ test("the installed units start the runner and the gateway with the SIGUSR1 insp
   assert.equal(runnerArgvIsSealed(["/usr/bin/node", RUNNER_SCRIPT]), false);
   assert.equal(runnerArgvIsSealed(["/usr/bin/node", "--disable-sigusr1", "/tmp/other.mjs"]), false);
 });
+
+test("the gateway runs as a static account the system bus answers, created by the installer", async () => {
+  const { readFileSync } = await import("node:fs");
+  const read = (path) => readFileSync(new URL(`../tools/auto-rec-agent/deploy/${path}`, import.meta.url), "utf8");
+  const settings = read("autorec-gateway@.service").split(/\r?\n/).filter((line) => /^[A-Za-z]+=/.test(line));
+  // A DynamicUser's bus connection is dropped, so the MainPID lookup never answered.
+  assert.equal(settings.some((line) => line.startsWith("DynamicUser=")), false);
+  for (const line of ["User=autorec-gw", "Group=autorec-gw", "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=yes", "RemoveIPC=yes", "RestrictSUIDSGID=yes"]) {
+    assert.ok(settings.includes(line), line);
+  }
+  const install = read("install.sh");
+  assert.match(install, /useradd --system [^\n]*"\$GATEWAY_ACCOUNT"/);
+  // A running DynamicUser instance resolves the same name through nss-systemd; only /etc/passwd counts.
+  assert.match(install, /getent -s files passwd "\$GATEWAY_ACCOUNT"/);
+});
