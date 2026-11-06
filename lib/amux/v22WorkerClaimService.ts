@@ -38,7 +38,7 @@ import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
   amuxV22TaskRoleSupported, amuxV22OneShotRouteSupported, amuxV22Provider,
-  amuxV22WorkerClaimEnabled, chooseAmuxV22WorkerRoute,
+  amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, chooseAmuxV22WorkerRoute,
   AMUX_V22_WORKER_CLAIM_ENV, type AmuxV22ClaimLane } from
   "./v22WorkerClaimCore.ts";
 
@@ -305,9 +305,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const authorWorkers = authors.map((author) => author.workerName);
       const authorProviders = authors.map((author) => author.provider);
       // A Task resumed after its owner question goes back to the worker that
-      // asked and waits for it -- busy, offline or out of quota alike -- as
-      // long as the approved routes still name that worker for the Task. The
-      // answer is pending until a resumed run settles.
+      // asked (amuxV22ResumeRoutes). The answer is pending until a resumed run
+      // settles at the same grade.
       const resume = await tx.amuxV22TaskQuestion.findFirst({
         where: { taskId, answerText: { not: null },
           state: { in: ["answered", "resumed"] } },
@@ -317,10 +316,12 @@ async function claimCandidate(taskId: string, assignmentId: string,
       // path; an unsettled worker takes no new Task, but another one can.
       const settled = await amuxV22RoutesWithSettledUsage(tx, quotaRoutes,
         recovery?.priorAttemptId ?? null);
-      const resumeRoutes = resume && approved.receipt.routes.some((route) =>
-        route.workerName === resume.worker) ?
-        settled.routes.filter((route) => route.workerName === resume.worker) :
-        settled.routes;
+      const resumeRoutes = amuxV22ResumeRoutes({
+        resumeWorker: resume?.worker ?? null,
+        approvedRoutes: approved.receipt.routes, routes: settled.routes,
+        workerServesGrade: (workerName) => !exactGradeRouting ||
+          amuxWorkerMatchesExecutionGrade(card.executionGrade, workerName,
+            ceilings) });
       const route = chooseAmuxV22WorkerRoute({ routes: resumeRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
         isReview: card.taskRole === "review" });

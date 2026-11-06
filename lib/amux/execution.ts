@@ -1717,10 +1717,13 @@ export async function settleAmuxV22TaskExecution(input: {
         await tx.amuxV22TaskQuestion.update({ where: { id: recordedQuestion.id },
           data: { state: "cancelled" } });
       // The answer a resumed run read is kept until a run of the Task settles,
-      // so a resumed run that died first still hands it to the next one.
-      await tx.amuxV22TaskQuestion.updateMany({ where: {
-        taskId: task.id, state: "resumed",
-        answerText: { not: null } }, data: { answerText: null } });
+      // so a resumed run that died first still hands it to the next one. A
+      // grade escalation starts the Task over at a higher grade, so that run
+      // still needs the answer and it is kept for it too.
+      if (!gradeEscalated)
+        await tx.amuxV22TaskQuestion.updateMany({ where: {
+          taskId: task.id, state: "resumed",
+          answerText: { not: null } }, data: { answerText: null } });
       await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.v22.execution.settled", targetType: "AmuxWorkItem",
         targetId: task.id, summary: "Settled an assignment-bound AMUX v22 Task.",
