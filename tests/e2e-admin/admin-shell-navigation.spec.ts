@@ -647,7 +647,7 @@ test.describe("admin console shell", () => {
     // Backlog opens on Ideas; the card list is its own section.
     await page.goto("/admin/amux-backlog");
     const backlog = page.getByRole("navigation", { name: "Backlog sections" });
-    await expect(backlog.getByRole("link")).toHaveCount(7);
+    await expect(backlog.getByRole("link")).toHaveCount(6);
     await expect(backlog.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas$/);
     await page.goto("/admin/amux-backlog?tab=list");
     await expect(page.getByTestId("amux-backlog-list")).toBeVisible();
