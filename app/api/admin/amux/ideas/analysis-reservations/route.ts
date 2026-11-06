@@ -30,8 +30,69 @@ const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const bodySchema = z.object({ holdId: id, previewId: id,
   priceVersionId: id }).strict();
-const cancelSchema = z.object({ holdId: id, previewId: id,
-  confirmedUnused: z.literal(true) }).strict();
+const cancelSchema = z.object({ ideaId: id, confirmedUnused: z.literal(true) }).strict();
+/** One idea has one hold per page; this bounds the read and the releases. */
+const IDEA_HOLD_LIMIT = 20;
+type HoldFacts = { namespace: string; status: string; reservedMicroUsd: bigint;
+  dispatchedAt: Date | null; closedAt: Date | null; settledMicroUsd: bigint | null;
+  _count: { cliUsageEvents: number } };
+type PreviewFacts = { state: string; consumedAt: Date | null; outcomeUnknownAt: Date | null };
+type IdeaHold = HoldFacts & { id: string; previewId: string; preview: PreviewFacts };
+
+/** The writer's own preconditions, read without locks to decide what to offer.
+ * The writer re-checks every one of them under its locks. */
+function cancellable(hold: HoldFacts, preview: PreviewFacts): boolean {
+  return hold.namespace === AMUX_V4_ANALYSIS_NAMESPACE &&
+    hold.reservedMicroUsd > BigInt(0) && hold.status === "reserved" && hold.dispatchedAt === null &&
+    hold.closedAt === null && hold.settledMicroUsd === null &&
+    hold._count.cliUsageEvents === 0 && preview.consumedAt === null &&
+    preview.outcomeUnknownAt === null &&
+    ["confirmed", "expired", "owner_rejected"].includes(preview.state);
+}
+
+const PREVIEW_FACTS = { select: { state: true, consumedAt: true, outcomeUnknownAt: true } } as const;
+
+/** One owned idea's releasable holds, oldest first, else why none can be
+ * released; null when the idea is not the owner's. Candidates are filtered by
+ * the writer's preconditions in the query itself, so closed holds never fill
+ * the bound and hide a later unused one. */
+async function ideaHoldView(ideaId: string, ownerId: string) {
+  const idea = await prisma.amuxIdeaSubmission.findUnique({
+    where: { id: ideaId }, select: { actorUserId: true },
+  });
+  if (!idea || idea.actorUserId !== ownerId) return null;
+  const owned = { ideaId, confirmedByUserId: ownerId };
+  const candidates: IdeaHold[] = (await prisma.amuxIdeaAnalysisBudgetHold.findMany({
+    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "reserved", dispatchedAt: null,
+      closedAt: null, settledMicroUsd: null, reservedMicroUsd: { gt: BigInt(0) },
+      cliUsageEvents: { none: {} },
+      preview: { ...owned, consumedAt: null, outcomeUnknownAt: null,
+        state: { in: ["confirmed", "expired", "owner_rejected"] } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: IDEA_HOLD_LIMIT,
+    select: { id: true, previewId: true, namespace: true, status: true,
+      reservedMicroUsd: true, dispatchedAt: true, closedAt: true, settledMicroUsd: true,
+      _count: { select: { cliUsageEvents: true } }, preview: PREVIEW_FACTS },
+  })).filter((hold) => cancellable(hold, hold.preview));
+  let blocked: "none" | "in_use" | "outcome_unknown" | null = null;
+  if (candidates.length === 0) {
+    // Any open hold left keeps its reservation; only its own resolution settles it.
+    const open = await prisma.amuxIdeaAnalysisBudgetHold.findMany({
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, closedAt: null, preview: owned },
+      take: IDEA_HOLD_LIMIT, select: { status: true, preview: PREVIEW_FACTS },
+    });
+    // A normal claim also sets consumedAt; only a recorded unknown outcome is one.
+    blocked = open.some((hold) => hold.preview.outcomeUnknownAt !== null ||
+      hold.status === "outcome_unknown") ? "outcome_unknown"
+      : open.length > 0 ? "in_use" : "none";
+  }
+  const releasedCount = await prisma.amuxIdeaAnalysisBudgetHold.count({
+    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "released", preview: owned },
+  });
+  return { candidates, view: {
+    releasable: candidates.map((hold) => ({ id: hold.id, reservedMicroUsd: hold.reservedMicroUsd.toString() })),
+    releasedCount, blocked,
+  } };
+}
 
 async function owner() {
   const session = await getServerSession(authOptions);
@@ -141,18 +202,28 @@ export async function GET(request: Request): Promise<Response> {
       return NextResponse.json({ error: "analysis_reservation_read_disabled" },
         { status: 409, headers: noStore });
     }
-    await consumeApiRateLimit(request, session.user!.id!,
-      "admin-amux-v4-analysis-reserve-read", { minute: 15, day: 100 });
     const params = new URL(request.url).searchParams;
     const key = [...params.keys()];
-    if (key.length !== 1 || !["holdId", "previewId"].includes(key[0]!) ||
+    if (key.length !== 1 || !["holdId", "previewId", "ideaId"].includes(key[0]!) ||
         params.getAll(key[0]!).length !== 1) {
       return NextResponse.json({ error: "Invalid request." },
         { status: 400, headers: noStore });
     }
+    // Opening an idea's detail reads its holds; its own bucket keeps that from
+    // spending the exact-hold reads the analysis cost panel depends on.
+    await consumeApiRateLimit(request, session.user!.id!, key[0] === "ideaId"
+      ? "admin-amux-v4-analysis-idea-holds-read" : "admin-amux-v4-analysis-reserve-read",
+    key[0] === "ideaId" ? { minute: 30, day: 500 } : { minute: 15, day: 100 });
     const parsed = id.safeParse(params.get(key[0]!));
     if (!parsed.success) return NextResponse.json({ error: "Invalid request." },
       { status: 400, headers: noStore });
+    if (key[0] === "ideaId") {
+      const found = await ideaHoldView(parsed.data, session.user!.id!);
+      if (!found) return NextResponse.json({ error: "Not found." },
+        { status: 404, headers: noStore });
+      return NextResponse.json({ state: "idea", ideaId: parsed.data, ...found.view,
+        retryWrite: false }, { headers: noStore });
+    }
     const hold = await prisma.amuxIdeaAnalysisBudgetHold.findUnique({
       where: key[0] === "holdId" ? { id: parsed.data } :
         { previewId: parsed.data }, select: { id: true, previewId: true,
@@ -185,19 +256,18 @@ export async function GET(request: Request): Promise<Response> {
       reservedMicroUsd: hold.reservedMicroUsd.toString(),
       dispatchedAt: hold.dispatchedAt?.toISOString() ?? null,
       expiresAt: preview.expiresAt.toISOString(),
-      canCancel: hold.namespace === AMUX_V4_ANALYSIS_NAMESPACE &&
-        hold.reservedMicroUsd > BigInt(0) && hold.status === "reserved" && hold.dispatchedAt === null &&
-        hold.closedAt === null && hold.settledMicroUsd === null &&
-        hold._count.cliUsageEvents === 0 && preview.consumedAt === null &&
-        preview.outcomeUnknownAt === null &&
-        ["confirmed", "expired", "owner_rejected"].includes(preview.state),
+      canCancel: cancellable(hold, preview),
       cancellationAuditId: cancellation?.id ?? null,
     }, retryWrite: false }, { headers: noStore });
   } catch (error) { return failure(error); }
 }
 
-/** Cancel one unused hold through its canonical writer. Expired previews are
- * deliberately reachable; a claimed or unknown hold is never zero-released. */
+/** Release every unused hold of one idea, one canonical writer transaction
+ * each, from one owner click (operator decision 2026-11-06: no exact-ID lookup
+ * step). The server picks the holds; the writer re-checks each under its locks,
+ * so a hold claimed meanwhile is skipped and none is released twice. Expired
+ * previews stay reachable; a claimed or unknown hold is never zero-released.
+ * A failure after some releases is an unknown outcome: the idea is read back. */
 export async function DELETE(request: Request): Promise<Response> {
   try {
     const session = await owner();
@@ -217,19 +287,51 @@ export async function DELETE(request: Request): Promise<Response> {
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v4-analysis-cancel-write", { minute: 3, day: 20 });
     const body = await readLimitedJson(request, 1_024, cancelSchema);
-    const receipt = await prisma.$transaction(async (tx) => {
-      const preview = await tx.amuxIdeaTransferPreview.findUnique({
-        where: { id: body.previewId }, select: { confirmedByUserId: true,
-          idea: { select: { actorUserId: true } } },
-      });
-      if (!preview || preview.confirmedByUserId !== session.user!.id! ||
-          preview.idea.actorUserId !== session.user!.id!) {
-        throw new AmuxIdeaAnalysisCancellationError("not_found");
+    const found = await ideaHoldView(body.ideaId, session.user!.id!);
+    if (!found) throw new AmuxIdeaAnalysisCancellationError("not_found");
+    if (found.candidates.length === 0) {
+      return NextResponse.json({ error: "not_cancellable", blocked: found.view.blocked,
+        retryWrite: false, modelCallStarted: false }, { status: 409, headers: noStore });
+    }
+    const released: Array<{ holdId: string; releasedMicroUsd: string; auditId: string }> = [];
+    let skipped = 0;
+    for (const candidate of found.candidates) {
+      try {
+        released.push(await prisma.$transaction(async (tx) => {
+          const preview = await tx.amuxIdeaTransferPreview.findUnique({
+            where: { id: candidate.previewId }, select: { ideaId: true, confirmedByUserId: true,
+              idea: { select: { actorUserId: true } } },
+          });
+          if (!preview || preview.ideaId !== body.ideaId ||
+              preview.confirmedByUserId !== session.user!.id! ||
+              preview.idea.actorUserId !== session.user!.id!) {
+            throw new AmuxIdeaAnalysisCancellationError("not_found");
+          }
+          return commitAmuxIdeaAnalysisUnusedReservationCancellation(tx, {
+            session, request, holdId: candidate.id, expectedPreviewId: candidate.previewId,
+          });
+        }, { maxWait: 5_000, timeout: 15_000 }));
+      } catch (error) {
+        // Claimed, released or no longer this owner's since the read: that hold
+        // is not this click's to release, and the others still are.
+        if (error instanceof AmuxIdeaAnalysisCancellationError &&
+            (error.code === "not_cancellable" || error.code === "not_found")) {
+          skipped++; continue;
+        }
+        if (released.length === 0) throw error;
+        console.error("AMUX v4 idea reservation release stopped after a partial commit");
+        return NextResponse.json({ error: "outcome_unknown", retryWrite: false,
+          modelCallStarted: false }, { status: 503, headers: noStore });
       }
-      return commitAmuxIdeaAnalysisUnusedReservationCancellation(tx, {
-        session, request, holdId: body.holdId, expectedPreviewId: body.previewId,
-      });
-    }, { maxWait: 5_000, timeout: 15_000 });
-    return NextResponse.json({ ...receipt, modelCallStarted: false }, { headers: noStore });
+    }
+    if (released.length === 0) {
+      // Every candidate was claimed meanwhile; say why from a fresh read.
+      const after = await ideaHoldView(body.ideaId, session.user!.id!);
+      return NextResponse.json({ error: "not_cancellable", blocked: after?.view.blocked ?? null,
+        retryWrite: false, modelCallStarted: false }, { status: 409, headers: noStore });
+    }
+    return NextResponse.json({ ideaId: body.ideaId, released, skipped, retryWrite: false,
+      modelCallStarted: false },
+      { headers: noStore });
   } catch (error) { return failure(error); }
 }

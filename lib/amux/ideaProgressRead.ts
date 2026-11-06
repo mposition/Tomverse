@@ -73,9 +73,10 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  * boundary's own deterministic refusals (call ceiling, commit check) are not
  * retried.
  */
-export async function readAmuxIdeaProgressForOwner(actorUserId: string): Promise<AmuxIdeaProgressRow[]> {
+export async function readAmuxIdeaProgressForOwner(actorUserId: string,
+  openedRequestId: string | null = null): Promise<AmuxIdeaProgressRow[]> {
   const attempt = () => withAmuxDbBoundary(AMUX_DB_BOUNDARIES.ideaProgressListRead,
-    (tx, { dbNow }) => readAmuxIdeaProgressInTx(tx, actorUserId, dbNow));
+    (tx, { dbNow }) => readAmuxIdeaProgressInTx(tx, actorUserId, dbNow, openedRequestId));
   try {
     return await attempt();
   } catch (error) {
@@ -118,7 +119,7 @@ const WAITS_FOR_EXECUTION_APPROVAL: ReadonlySet<AmuxIdeaWaitingFor> =
   new Set(["execution_approval", "continuation", "owner_input"]);
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
-  actorUserId: string, now: Date): Promise<AmuxIdeaProgressRow[]> {
+  actorUserId: string, now: Date, openedRequestId: string | null = null): Promise<AmuxIdeaProgressRow[]> {
   // The columns are timestamp(3) without a time zone holding UTC, so the
   // instant is converted to a naive UTC value before it is compared, and every
   // timestamp leaves as epoch milliseconds (a double, never a session-zone
@@ -137,9 +138,11 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         ("rawPurgedAt" IS NULL AND "rawKeyId" IS NOT NULL) AS "rawReadable", "title"
       FROM "AmuxIdeaSubmission"
       -- A closed or cancelled idea leaves the list, so the bound is spent on
-      -- ideas still in progress.
+      -- ideas still in progress. The opened idea takes the first place even
+      -- when older than the newest ones, so its detail (and the release of
+      -- its unused reservation) opens at any age; the bound is unchanged.
       WHERE "actorUserId" = ${actorUserId} AND "cancelledAt" IS NULL
-      ORDER BY "submittedAt" DESC, "id" ASC
+      ORDER BY ("requestId"::text = ${openedRequestId}::text) DESC NULLS LAST, "submittedAt" DESC, "id" ASC
       LIMIT ${AMUX_IDEA_PROGRESS_LIMIT}
     )
     SELECT

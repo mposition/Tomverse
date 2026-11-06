@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * The auto-rec credential gateway. It is the only process that holds the
- * app's shared secret and the GitHub token, and it runs as its own systemd
- * DynamicUser, never as `autorec`: that account runs code the agent wrote
+ * app's shared secret and the GitHub token, and it runs as its own system
+ * account `autorec-gw`, never as `autorec`: that account runs code the agent wrote
  * (its tests), and any process of the same uid can read another's
  * /proc/<pid>/environ. The same split as review-status-sender.
  *
