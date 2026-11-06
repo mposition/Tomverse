@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
+import { DEVELOP_CI_REPAIR_IDEA_ACTION } from "@/lib/developCiRepairCore";
 import { EngineeringAgentGitHubReadError, readEngineeringAgentPullMerge } from "@/lib/engineeringAgentGitHubRead";
 import { prisma } from "@/lib/prisma";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
@@ -49,7 +50,8 @@ export type AmuxIdeaLaneClaim = {
 };
 
 /**
- * Claims the oldest owner idea the lane may run, or null. Owner ideas only:
+ * Claims the owner idea the lane may run, or null: a develop CI repair idea
+ * first (SEV1, lib/developCiRepair.ts), then the oldest. Owner ideas only:
  * a session idea belongs to the v19 analysis queue, and an owner idea whose
  * analysis already started stays on that path. One claim at a time (advisory
  * lock), within the daily attempt limit. `actorUserId` narrows the scan to one
@@ -96,7 +98,12 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
               AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
         AND (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
           AND a."claimedAt" > p."partStart") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
-      ORDER BY i."submittedAt" ASC, i."id" ASC
+      -- SEV1 first: an idea the develop CI repair pass handed over (its system
+      -- audit entry is the mark; only that pass writes the action), then age.
+      ORDER BY EXISTS (SELECT 1 FROM "AdminAuditLog" l
+          WHERE l."targetType" = 'AmuxIdeaSubmission' AND l."targetId" = i."id"
+            AND l."action" = ${DEVELOP_CI_REPAIR_IDEA_ACTION}) DESC,
+        i."submittedAt" ASC, i."id" ASC
       LIMIT ${CANDIDATES}
     `;
     const nowMs = now.getTime();

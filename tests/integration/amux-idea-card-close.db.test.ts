@@ -403,7 +403,11 @@ test("a blocked Task or unchanged cards are asked about; the question holds numb
   const asked = first.cards as Array<{ id: string; displayKey: string; status: string; cardType: string }>;
   assert.deepEqual(new Set(asked.map((entry) => entry.status)), new Set(["blocked", "backlog"]));
   assert.equal(asked.length, 3, "the finished card is not among them");
-  assert.deepEqual(Object.keys(asked[0]).sort(), ["cardType", "displayKey", "id", "status"]);
+  for (const entry of asked) {
+    assert.deepEqual(Object.keys(entry).sort(), entry.status === "blocked" ?
+      ["blockReason", "cardType", "displayKey", "id", "status", "updatedAtMs"] :
+      ["cardType", "displayKey", "id", "status", "updatedAtMs"]);
+  }
   assert.equal((await questionOf(stale.ideaId))!.reasonCode, "stale_cards");
   const audit = await auditOf(first.id);
   assert.equal(audit.length, 1);
@@ -413,6 +417,71 @@ test("a blocked Task or unchanged cards are asked about; the question holds numb
   // Nothing moved by asking.
   assert.equal((await card(blocked.cardIds[0])).status, "blocked");
   assert.equal((await card(blocked.cardIds[1])).revision, 3);
+});
+
+test("the question says why a blocked Task is blocked and how long the cards have not changed", async () => {
+  const { ideaId, cardIds, displayKeys } = await seedIdea([
+    { status: "blocked", ageDays: 7 }, { status: "blocked", ageDays: 9 }, { status: "backlog", ageDays: 10 }]);
+  // The first: its last attempt ended with an unknown result and cost, as STARTERCHK-001's did.
+  // The second: an open review's reason comes before its attempt's.
+  await asReplica(async (tx) => {
+    const now = new Date();
+    for (const [taskId, reason] of [[cardIds[0], "usage_outcome_unknown"], [cardIds[1], "outcome_unknown"]]) {
+      await tx.$executeRaw`
+        INSERT INTO "AmuxExecutionAttempt" ("id", "taskId", "worker", "workerInstanceId", "workerGeneration",
+          "taskRevision", "attemptNumber", "heartbeatAt", "startedAt", "endedAt", "outcome", "toStatus", "endedBy",
+          "reason", "updatedAt")
+        VALUES (${randomUUID()}, ${taskId}, 'claude-impl', 'fixture-instance', 1, 3, 1, ${now}, ${now}, ${now},
+          'failed', 'blocked', 'claude-impl', ${reason}, ${now})`;
+    }
+  });
+  await prisma.amuxHumanEscalation.create({ data: { taskId: cardIds[1], specialty: "execution-recovery",
+    reason: "human_review_required", openedBy: "tomverse-amux-orchestrator", openedTaskRevision: 3 } });
+  await drain();
+  const question = (await questionOf(ideaId))!;
+  const asked = question.cards as Array<{ id: string; blockReason?: string | null; updatedAtMs: number }>;
+  const byId = new Map(asked.map((entry) => [entry.id, entry]));
+  assert.equal(byId.get(cardIds[0])?.blockReason, "usage_outcome_unknown");
+  assert.equal(byId.get(cardIds[1])?.blockReason, "human_review_required");
+  assert.equal("blockReason" in byId.get(cardIds[2])!, false, "only a blocked card says why");
+  for (const entry of asked) assert.equal(typeof entry.updatedAtMs, "number");
+
+  // The relay's tick renders it on the database clock.
+  const relay = (await readAmuxIdeaCardCloseSyncForRelay(ON)).pending.find((entry) => entry.question_id === question.id)!;
+  assert.ok(relay.question.includes(
+    `${displayKeys[0]} (task, blocked: the run's result and cost are unknown; unchanged for 7 days)`), relay.question);
+  assert.ok(relay.question.includes(
+    `${displayKeys[1]} (task, blocked: a person was asked to review it; unchanged for 9 days)`), relay.question);
+  assert.ok(relay.question.includes(`${displayKeys[2]} (task, backlog; unchanged for 10 days)`), relay.question);
+  assert.ok(relay.question.includes("None of its remaining cards has changed for 7 days."), relay.question);
+  assert.ok(!relay.question.includes("usage_outcome_unknown"), "never the code itself");
+
+  // It still reaches a DM, and a close applies to exactly the cards asked about.
+  const proposal = await proposed(ideaId, select("close"));
+  await judge(proposal.requestId, "confirm");
+  assert.equal((await runAmuxV22ResolveStep(null)).resolved, "closed");
+  assert.equal((await questionOf(ideaId))!.state, "closed");
+  for (const id of cardIds) assert.equal((await card(id)).status, "cancelled");
+});
+
+test("a question written before the reasons and dates is filed and answered as it was", async () => {
+  const { ideaId, cardIds, displayKeys } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
+  await drain();
+  const question = (await questionOf(ideaId))!;
+  const old = (question.cards as Array<Record<string, unknown>>).map(({ id, displayKey, cardType, status }) =>
+    ({ id, displayKey, cardType, status }));
+  await asReplica((tx) => tx.$executeRaw`UPDATE "AmuxIdeaCardCloseQuestion"
+    SET "cards" = ${JSON.stringify(old)}::jsonb WHERE "id" = ${question.id}`);
+  const relay = (await readAmuxIdeaCardCloseSyncForRelay(ON)).pending.find((entry) => entry.question_id === question.id)!;
+  assert.ok(relay.question.includes(`${displayKeys[0]} (task, blocked)\n`), relay.question);
+  assert.doesNotMatch(relay.question, /unchanged|None of its remaining cards/);
+  const view = await readAmuxIdeaCardCloseQuestionForOwner({ ideaId, actorUserId: OWNER_ID });
+  assert.deepEqual(view?.cards.map((entry) => entry.id).sort(), [...cardIds].sort());
+  const proposal = await proposed(ideaId, select("close"));
+  await judge(proposal.requestId, "confirm");
+  assert.equal((await runAmuxV22ResolveStep(null)).resolved, "closed");
+  assert.equal((await questionOf(ideaId))!.state, "closed");
+  for (const id of cardIds) assert.equal((await card(id)).status, "cancelled");
 });
 
 test("an idea with anything moving, finished, or waiting elsewhere is not asked about", async () => {

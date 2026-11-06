@@ -5,6 +5,7 @@ import test from "node:test";
 
 import { DM_ANSWER_MAX_BYTES, irreversibleTermCategories, isDmOptionId } from "../lib/amux/decisionMakerCore.ts";
 import {
+  AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT,
   AMUX_IDEA_CARD_CLOSE_DEFAULT_DAILY,
   AMUX_IDEA_CARD_CLOSE_DEFAULT_STALE_DAYS,
   AMUX_IDEA_CARD_CLOSE_DM_PROVIDER,
@@ -23,7 +24,7 @@ import {
   amuxIdeaCardCloseStaleDays,
   amuxIdeaCardCloseTargets,
 } from "../lib/amux/ideaCardCloseCore.ts";
-import { amuxIdeaProgress } from "../lib/amux/ideaProgressCore.ts";
+import { AMUX_IDEA_BLOCK_REASONS, amuxIdeaProgress } from "../lib/amux/ideaProgressCore.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const NOW = Date.parse("2026-11-05T00:00:00.000Z");
@@ -112,8 +113,12 @@ test("a question closes nothing once the idea moved or its cards changed", () =>
 
 test("the row's cards are read back only in the shape it writes", () => {
   const cards = amuxIdeaCardCloseAskedFrom([card()]);
-  assert.deepEqual(cards, [{ id: "card-1", displayKey: "AMUX-CONT-002", cardType: "task", status: "backlog" }]);
+  assert.deepEqual(cards, [{ id: "card-1", displayKey: "AMUX-CONT-002", cardType: "task", status: "backlog",
+    updatedAtMs: NOW - 8 * DAY }]);
   assert.deepEqual(amuxIdeaCardCloseAskedCards(cards), cards);
+  // A row written before the reasons and dates reads as it did.
+  const old = [{ id: "card-1", displayKey: "AMUX-CONT-002", cardType: "task", status: "blocked" }];
+  assert.deepEqual(amuxIdeaCardCloseAskedCards(old), old);
   for (const bad of [null, "x", [], [null], [{ id: 1, status: "x", displayKey: null, cardType: null }],
     [{ id: "a", displayKey: null, cardType: null }]]) {
     assert.equal(amuxIdeaCardCloseAskedCards(bad), null, JSON.stringify(bad));
@@ -170,6 +175,81 @@ test("the question says only numbers, statuses and the reason, and hits no routi
   // A card's own number can still hit the list; the owner's panel is then the way.
   assert.deepEqual(irreversibleTermCategories("AMUX-PROD-001"), ["release"]);
   assert.ok(text.length < DM_ANSWER_MAX_BYTES * 2, "well inside the card text cap");
+});
+
+test("a blocked card records why, as the idea's detail picks it, and every card when it last changed", () => {
+  const [blocked, open] = amuxIdeaCardCloseAskedFrom([
+    card({ id: "a", status: "blocked", escalationReason: "free text", lastAttemptReason: "usage_outcome_unknown" }),
+    card({ id: "b", status: "backlog", escalationReason: "human_review_required" }),
+  ]);
+  assert.equal(blocked.blockReason, "usage_outcome_unknown", "an unknown escalation reason falls to the attempt's");
+  assert.equal(open.blockReason, undefined, "only a blocked card says why");
+  assert.equal(amuxIdeaCardCloseAskedFrom([card({ status: "blocked" })])[0].blockReason, null, "not known");
+  assert.equal(amuxIdeaCardCloseAskedFrom([card({ status: "blocked", escalationReason: "attempts",
+    lastAttemptReason: "outcome_unknown" })])[0].blockReason, "attempts", "the open review's reason first");
+  // Context only: a value the row cannot vouch for is dropped, the card is kept.
+  const base = { id: "a", displayKey: null, cardType: "task", status: "blocked" };
+  assert.deepEqual(amuxIdeaCardCloseAskedCards([{ ...base, blockReason: "rm -rf", updatedAtMs: "x" }]), [base]);
+  assert.deepEqual(amuxIdeaCardCloseAskedCards([{ ...base, blockReason: null, updatedAtMs: 5 }]),
+    [{ ...base, blockReason: null, updatedAtMs: 5 }]);
+});
+
+test("each block reason is a fixed sentence that hits no routing term, and the codes are not written", () => {
+  assert.deepEqual(Object.keys(AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT).sort(), [...AMUX_IDEA_BLOCK_REASONS].sort());
+  for (const reason of AMUX_IDEA_BLOCK_REASONS) {
+    const text = AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT[reason];
+    assert.deepEqual(irreversibleTermCategories(text), [], reason);
+    const relay = amuxIdeaCardCloseRelayCard({ questionId: "00000000-0000-4000-8000-00000000000a",
+      reasonCode: "blocked_task", nowMs: NOW, cards: [{ id: "card-a", displayKey: "AMUX-CONT-002", cardType: "task",
+        status: "blocked", blockReason: reason, updatedAtMs: NOW - 7 * DAY }] });
+    assert.ok(relay.question.includes(`blocked: ${text}`), reason);
+    assert.ok(!relay.question.includes(reason), `${reason} is not written as a code`);
+    const all = [relay.title, relay.question, relay.unblocks, ...relay.options.map((option) => option.label)].join("\n");
+    assert.deepEqual(irreversibleTermCategories(all), [], reason);
+  }
+});
+
+test("the question says why each blocked card is blocked and how long the cards have not changed", () => {
+  const relay = amuxIdeaCardCloseRelayCard({ questionId: "00000000-0000-4000-8000-00000000000a",
+    reasonCode: "blocked_task", nowMs: NOW, cards: [
+      { id: "s", displayKey: "AMUX-STARTERCHK-001", cardType: "story", status: "backlog", updatedAtMs: NOW - 8 * DAY },
+      { id: "t", displayKey: "AMUX-STARTERCHK-001-T002", cardType: "task", status: "blocked",
+        blockReason: "usage_outcome_unknown", updatedAtMs: NOW - 7 * DAY - 3_600_000 },
+      { id: "u", displayKey: "AMUX-STARTERCHK-001-T003", cardType: "task", status: "blocked", blockReason: null,
+        updatedAtMs: NOW - DAY },
+    ] });
+  assert.equal(relay.question, [
+    "An AMUX idea has stopped moving (reason code: blocked_task). None of its cards is running, in review or assigned to a worker.",
+    "None of its remaining cards has changed for 1 day.",
+    "Remaining cards:",
+    "AMUX-STARTERCHK-001 (story, backlog; unchanged for 8 days)",
+    "AMUX-STARTERCHK-001-T002 (task, blocked: the run's result and cost are unknown; unchanged for 7 days)",
+    "AMUX-STARTERCHK-001-T003 (task, blocked: reason not recorded; unchanged for 1 day)",
+    "Should the remaining cards be closed?",
+  ].join("\n"));
+  const fresh = amuxIdeaCardCloseRelayCard({ questionId: "00000000-0000-4000-8000-00000000000a",
+    reasonCode: "blocked_task", nowMs: NOW, cards: [{ id: "t", displayKey: "AMUX-X-001", cardType: "task",
+      status: "blocked", updatedAtMs: NOW - 60_000 }] });
+  assert.match(fresh.question, /One of its remaining cards changed within the last day\./);
+  assert.match(fresh.question, /AMUX-X-001 \(task, blocked; changed within the last day\)/,
+    "a row with no reason recorded reads as before");
+  // A row written before the dates, or a card without one, says no age for the idea.
+  const mixed = amuxIdeaCardCloseRelayCard({ questionId: "00000000-0000-4000-8000-00000000000a",
+    reasonCode: "stale_cards", nowMs: NOW, cards: [
+      { id: "a", displayKey: "AMUX-X-002", cardType: "task", status: "backlog" },
+      { id: "b", displayKey: "AMUX-X-003", cardType: "task", status: "todo", updatedAtMs: NOW - 9 * DAY },
+    ] });
+  assert.doesNotMatch(mixed.question, /None of its remaining cards/);
+  assert.match(mixed.question, /AMUX-X-002 \(task, backlog\)\nAMUX-X-003 \(task, todo; unchanged for 9 days\)/);
+});
+
+test("a long list with reasons and dates still fits the local AMUX's bound", () => {
+  const cards = Array.from({ length: 300 }, (_, index) => ({ id: `${"x".repeat(60)}-${index}`, displayKey: null,
+    cardType: "task", status: "blocked", blockReason: "canonical_deadline_review_required", updatedAtMs: NOW - 400 * DAY }));
+  const relay = amuxIdeaCardCloseRelayCard({ questionId: "00000000-0000-4000-8000-00000000000a",
+    reasonCode: "blocked_task", nowMs: NOW, cards });
+  assert.ok(relay.question.length <= AMUX_IDEA_CARD_CLOSE_QUESTION_MAX, `${relay.question.length}`);
+  assert.match(relay.question, /and \d+ more\nShould the remaining cards be closed\?$/);
 });
 
 test("only the fixed words of a confirmed answer count, by the delivery candidate's precedence", () => {
