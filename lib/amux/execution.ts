@@ -1597,13 +1597,19 @@ export async function settleAmuxV22TaskExecution(input: {
         where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
         select: { id: true, kind: true, patchDigest: true, baseSha: true },
       }) : null;
-      if (patch && !ownerQuestion && effectivePathDecision === "pass" &&
+      // A run that start never opened (Publisher halted, mode off, no
+      // consent: v22_publication_skipped) leaves the patch private. The Task
+      // still settles and goes to a person's review with no publication
+      // product; refusing here stopped the worker bridge on every accepted
+      // patch (2026-11-06). A run that exists but no longer matches is still
+      // a conflict.
+      if (run && patch && !ownerQuestion && effectivePathDecision === "pass" &&
           (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({
           where: { id: attempt.v22AssignmentId },
           select: { role: true, workItemId: true },
         });
-        if (!run || run.status !== "active" ||
+        if (run.status !== "active" ||
             !["shadow", "t1"].includes(run.modeAtStart) ||
             run.cardId !== task.id || run.baseSha !== patch.baseSha ||
             patch.taskId !== task.id ||
