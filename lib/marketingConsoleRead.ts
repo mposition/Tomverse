@@ -447,7 +447,7 @@ export async function readMarketingConsole(
         assetIds: true,
         approvalExpiresAt: true,
         createdAt: true,
-        channel: { select: { accountSlug: true, channel: true } },
+        channel: { select: { accountSlug: true, channel: true, provider: true } },
       },
     });
     return {
@@ -465,6 +465,8 @@ export async function readMarketingConsole(
         id: post.id,
         accountSlug: post.channel.accountSlug,
         channel: post.channel.channel,
+        // `manual` is a hand-posted account: its files get a download link.
+        provider: post.channel.provider,
         locale: post.locale,
         kind: post.kind,
         status: post.status,
@@ -519,6 +521,8 @@ export async function readMarketingConsole(
         errorCode: true,
         outcomeUnknownAt: true,
         publishAttempt: true,
+        // A hand-posted account's person copies the approved words from here.
+        envelope: true,
         channel: { select: { accountSlug: true, channel: true, provider: true } },
       },
     });
@@ -562,6 +566,9 @@ export async function readMarketingConsole(
         errorCode: post.errorCode,
         outcomeUnknownAt: post.outcomeUnknownAt?.toISOString() ?? null,
         publishAttempt: post.publishAttempt,
+        // Only a hand-posted account's words: a person posts them by hand
+        // (owner 2026-11-07). The publisher's posts are already on the platform.
+        renderedText: post.channel.provider === "manual" ? renderedText(post.envelope) : null,
       })),
     };
   }
