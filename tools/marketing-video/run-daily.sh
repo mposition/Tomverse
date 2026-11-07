@@ -36,23 +36,31 @@ mkdir -p job
 # and their words -- are read only there, and only checked structured notes
 # reach the call that writes copy (docs/policy/marketing-automation.md §2,
 # "external text is data"). The raw ads are deleted before that call starts.
+#
+# The call that reads the ads can only read them: the scripts here fetch the ads
+# and keep its notes, the model gets the Read tool on job/research-raw/ and
+# nothing else (no shell, no write, no other path), and the submission secret is
+# not in its environment. Its notes come back as its answer and are written only
+# when check-research-notes.mjs accepts them.
 mkdir -p job/research-notes
 if ! find job/research-notes -name '*.json' -mtime -7 | grep -q .; then
   day="$(TZ=Australia/Brisbane date +%Y%m%d)"
   rm -rf job/research-raw
-  ENABLE_CLAUDEAI_MCP_SERVERS=false "${CLAUDE_BIN:-claude}" --print "$(sed "s/<yyyymmdd>/$day/g" RESEARCH.md)" \
-    --no-session-persistence \
-    --permission-mode dontAsk --permission-prompts none \
-    --strict-mcp-config \
-    --tools "Bash,Read,Write" \
-    --allowedTools "Bash(node *),Read,Write" \
-    --disallowedTools "mcp__*" \
-    --max-turns 60 \
-    --output-format stream-json --verbose \
-    | tee -a "job/research-$(date -u +%Y%m%d).jsonl" \
-    | node print-run-result.mjs \
-    | tee -a "job/research-$(date -u +%Y%m%d).log" || true
-  node check-research-notes.mjs "job/research-notes/$day.json" job/research-raw/ads.json || rm -f "job/research-notes/$day.json"
+  if node research-ads.mjs job/research-raw; then
+    env -u MARKETING_MEDIA_SUBMIT_SECRET -u MARKETING_APP_URL ENABLE_CLAUDEAI_MCP_SERVERS=false \
+      "${CLAUDE_BIN:-claude}" --print "$(sed "s/<yyyy-mm-dd>/$(TZ=Australia/Brisbane date +%F)/g" RESEARCH.md)" \
+      --no-session-persistence \
+      --permission-mode dontAsk --permission-prompts none \
+      --strict-mcp-config \
+      --tools "Read" \
+      --allowedTools "Read(./job/research-raw/**)" \
+      --disallowedTools "mcp__*" \
+      --max-turns 30 \
+      --output-format stream-json --verbose \
+      | tee -a "job/research-$(date -u +%Y%m%d).jsonl" \
+      | node print-run-result.mjs > "job/research-answer-$day.txt" || true
+    node check-research-notes.mjs "job/research-answer-$day.txt" job/research-raw/ads.json "job/research-notes/$day.json" || true
+  fi
   rm -rf job/research-raw
 fi
 
