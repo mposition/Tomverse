@@ -105,6 +105,7 @@ export function AdminSreDaily({
             (row.total ?? 0) > 0 ? m.daily.alerts(row.total ?? 0) : null,
             row.failingChecks && row.failingChecks.length > 0 ? m.daily.checksFailing(row.failingChecks.length) : null,
             row.readinessUnknown ? m.daily.checksUnknown : null,
+            row.countsComplete ? null : m.daily.partialChip,
           ]
             .filter(Boolean)
             .join(" · ");
@@ -198,7 +199,9 @@ function SreDailyReport({ view }: { view: OpsObserverDigestView }) {
   const total = payload.counts.reduce((sum, row) => sum + row.count, 0);
   const failing = payload.readiness === "unknown" ? [] : Object.entries(payload.readiness).filter(([, ok]) => !ok).map(([name]) => name);
   const unknownChecks = payload.readiness === "unknown";
-  const quiet = total === 0 && failing.length === 0 && !unknownChecks;
+  const partial = !view.countsComplete;
+  // An older report cannot prove nothing was held back, so it is never drawn as a quiet day.
+  const quiet = total === 0 && failing.length === 0 && !unknownChecks && !partial;
   return (
     <AdminTile as="article" className="gap-5" data-testid="sre-daily-report">
       <div className="flex min-w-0 items-start gap-4">
@@ -207,12 +210,20 @@ function SreDailyReport({ view }: { view: OpsObserverDigestView }) {
           <p className="text-xs text-zinc-500">
             {m.daily.reportBy(payload.ownerDate)} · {formatAestDateTime(view.createdAt) ?? "-"}
           </p>
-          <h3 className="text-xl font-bold text-white">{quiet ? m.daily.quietTitle : m.daily.busyTitle}</h3>
+          <h3 className="text-xl font-bold text-white">
+            {quiet ? m.daily.quietTitle : partial && total === 0 && failing.length === 0 ? m.daily.partialTitle : m.daily.busyTitle}
+          </h3>
           <p className="mt-1 text-sm leading-6 text-zinc-400">
-            {quiet ? m.daily.quietDetail : m.daily.busyDetail(total, failing.length)}
+            {quiet
+              ? m.daily.quietDetail
+              : partial && total === 0 && failing.length === 0
+                ? m.daily.partialCounts
+                : m.daily.busyDetail(total, failing.length)}
           </p>
         </div>
-        <AdminStatusChip tone={quiet ? "ok" : "warn"}>{quiet ? m.daily.quiet : m.daily.alerts(total)}</AdminStatusChip>
+        <AdminStatusChip tone={quiet ? "ok" : "warn"}>
+          {quiet ? m.daily.quiet : partial && total === 0 ? m.daily.partialChip : m.daily.alerts(total)}
+        </AdminStatusChip>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

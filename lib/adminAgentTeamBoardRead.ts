@@ -9,7 +9,8 @@ import { parseMarketingLlmMonthlyCap } from "@/lib/marketingLlmBudgetCore";
 import { MARKETING_LLM_COUNTED_MICRO_USD_SQL } from "@/lib/marketingLlmBudgetStore";
 import { readMarketingLlmSettings } from "@/lib/marketingLlmSettingsStore";
 import { prisma } from "@/lib/prisma";
-import { nextScoutRunAt } from "@/lib/productResearchScoutCore";
+import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
+import { PRODUCT_RESEARCH_SCOUT_SWITCH_ENV, nextScoutRunAt } from "@/lib/productResearchScoutCore";
 import { suggestionCounts } from "@/lib/productResearchScoutStore";
 
 export type TeamBoardRead = {
@@ -58,7 +59,10 @@ export async function readTeamBoard(now: Date = new Date()): Promise<TeamBoardRe
     extras: {
       researchOpen: researchCounts?.open ?? null,
       marketingCost,
-      researchNextAt: nextScoutRunAt(now).toISOString(),
+      // The Scout has its own switch: an agent that is off will not run, so no next slot is drawn for it.
+      researchNextAt: isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV)
+        ? nextScoutRunAt(now).toISOString()
+        : null,
     },
     readAt: now.toISOString(),
   };

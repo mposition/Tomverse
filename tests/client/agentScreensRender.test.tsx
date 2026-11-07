@@ -254,3 +254,16 @@ test("the finance settings offer the two writes only to a writer, and keep the i
   assert.match(writer, /billing-finance-ops-turn-off/);
   assert.match(writer, /billing-finance-ops-record-monitors/);
 });
+
+test("an SRE report with partial counts is not drawn as a quiet day, in the list or in the report", () => {
+  const partialDay = { ...quietDay, countsComplete: false };
+  const summaries = [summarizeSreDigest(partialDay)];
+  const list = withRouter(<AdminSreDaily summaries={summaries} selected={null} requestedId={null} limit={14} />);
+  assert.doesNotMatch(list, /Quiet day/);
+  assert.match(list, /Counts partial/);
+  const detail = withRouter(
+    <AdminSreDaily summaries={summaries} selected={partialDay} requestedId={partialDay.id} limit={14} />,
+  );
+  assert.doesNotMatch(detail, /A quiet day/);
+  assert.match(detail, /The counts for this day may be short/);
+});

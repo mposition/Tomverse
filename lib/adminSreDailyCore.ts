@@ -21,7 +21,9 @@ export type SreDailySummary = {
   failingChecks: string[] | null;
   /** The readiness checks could not be read when it was kept. */
   readinessUnknown: boolean;
-  /** Nothing to look at: no message and every check passing. */
+  /** False for a report kept before complete counts existed: its counts may miss messages of the day. */
+  countsComplete: boolean;
+  /** Nothing to look at: no message, every check passing, and the counts known to be whole. */
   quiet: boolean;
   tone: AdminTone;
   bodyGone: boolean;
@@ -38,6 +40,7 @@ export function summarizeSreDigest(view: OpsObserverDigestView): SreDailySummary
       total: null,
       failingChecks: null,
       readinessUnknown: false,
+      countsComplete: true,
       quiet: false,
       tone: "unknown",
       bodyGone: true,
@@ -51,7 +54,8 @@ export function summarizeSreDigest(view: OpsObserverDigestView): SreDailySummary
       : Object.entries(payload.readiness)
           .filter(([, ok]) => !ok)
           .map(([name]) => name);
-  const quiet = total === 0 && !readinessUnknown && (failingChecks?.length ?? 0) === 0;
+  // A count that may be short is never a quiet day: an older report cannot prove nothing was held back.
+  const quiet = total === 0 && !readinessUnknown && (failingChecks?.length ?? 0) === 0 && view.countsComplete;
   return {
     id: view.id,
     createdAt: view.createdAt,
@@ -60,6 +64,7 @@ export function summarizeSreDigest(view: OpsObserverDigestView): SreDailySummary
     total,
     failingChecks,
     readinessUnknown,
+    countsComplete: view.countsComplete,
     quiet,
     tone: quiet ? "ok" : "warn",
     bodyGone: false,

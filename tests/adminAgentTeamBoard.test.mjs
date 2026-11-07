@@ -170,19 +170,16 @@ test("an unread room keeps its team's cost as unavailable, never as 'no record',
   // The generator's month is its own read: an unread marketing room still shows it.
   const kept = cardsOf(allUnread, { ...noExtras, marketingCost: { spentMicroUsd: 1_000_000, capMicroUsd: null } });
   assert.deepEqual(kept.marketing.cost, { kind: "known", spentMicroUsd: 1_000_000, capMicroUsd: null });
-  // The research agent being off, or unread, draws no next-run time; only a running one does.
-  const off = cardsOf({ ...allUnread, research: { kind: "disabled" } }, { ...noExtras, researchNextAt: "2026-11-07T23:00:00.000Z" });
-  assert.equal(off.research.nextAt, null);
-  assert.equal(cards.research.nextAt, null);
-  const on = cardsOf(
-    {
-      ...allUnread,
-      research: {
-        kind: "observed", slot: "2026-11-07T21:30:00.000Z", slotState: "ok", failureStage: null,
-        windowOpen: false, lastSuccessAt: null, silence: "recent", silenceHours: null,
-      },
-    },
+  // The card's next slot is the Scout's and follows the Scout's own switch (null when it is off), not the
+  // observation agent's state.
+  const scoutOff = cardsOf(
+    { ...allUnread, research: { kind: "disabled" } },
+    { ...noExtras, researchNextAt: null },
+  );
+  assert.equal(scoutOff.research.nextAt, null);
+  const scoutOn = cardsOf(
+    { ...allUnread, research: { kind: "disabled" } },
     { ...noExtras, researchNextAt: "2026-11-07T23:00:00.000Z" },
   );
-  assert.equal(on.research.nextAt, "2026-11-07T23:00:00.000Z");
+  assert.equal(scoutOn.research.nextAt, "2026-11-07T23:00:00.000Z");
 });

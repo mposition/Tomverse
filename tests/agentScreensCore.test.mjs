@@ -181,3 +181,12 @@ test("an unreadable finance switch is never off", () => {
   assert.equal(financeHeadStatus(control("disabled")).autoRun, "off");
   assert.equal(financeHeadStatus(control("enabled")).autoRun, "on");
 });
+
+test("a report kept before complete counts existed is never a quiet day", () => {
+  const payload = { ownerDate: "2026-10-01", mode: "shadow", readiness: { db: true }, items: [], counts: [], channelCheckTaken: true };
+  const partial = summarizeSreDigest({ ...digest(payload), countsComplete: false });
+  assert.equal(partial.countsComplete, false);
+  assert.equal(partial.quiet, false);
+  assert.equal(partial.tone, "warn");
+  assert.equal(summarizeSreDigest(digest(payload)).quiet, true);
+});

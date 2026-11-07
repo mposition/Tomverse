@@ -65,7 +65,7 @@ export type TeamBoardExtras = {
   researchOpen: number | null;
   /** The marketing generator's spend this UTC month against its cap. */
   marketingCost: { spentMicroUsd: number; capMicroUsd: number | null } | null;
-  /** The next Scout slot (UTC ISO). */
+  /** The next Scout slot (UTC ISO); null when the Scout is off. */
   researchNextAt: string | null;
 };
 
@@ -166,14 +166,16 @@ export function teamBoardCards(
     })(),
     research: (() => {
       const state = rooms.research;
+      // The card's status is the observation agent's own; the waiting count and the next slot belong to the
+      // Scout, a separate switch, so they are shown whatever the observation agent's state is.
       const rest: Partial<Draft> = {
         waiting: extras.researchOpen,
         waitingUnread: extras.researchOpen === null,
+        nextAt: extras.researchNextAt,
       };
       if (state.kind === "unread") return { ...unread(), ...rest };
-      // An agent that is off will not run: no next-run time is drawn for it.
       if (state.kind === "disabled") return make("idle", status.off, "idle", a.researchOff, rest);
-      const withTime = { ...rest, lastAt: state.lastSuccessAt, nextAt: extras.researchNextAt };
+      const withTime = { ...rest, lastAt: state.lastSuccessAt };
       if (state.silence === "silent") return make("warn", status.needsLook, "running", a.researchSilent, withTime);
       if (state.slotState === "failed") return make("bad", status.needsLook, "running", a.researchFailed, withTime);
       if (state.slotState === "ok") return make("ok", status.working, "running", a.researchRecorded, withTime);
