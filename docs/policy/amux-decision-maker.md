@@ -56,7 +56,9 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 2. **결과 검토(`TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled`, 기본 꺼짐).** 패치 없이 review로 가는 v22 결과
    (investigate의 `needs_owner`·결론 형식 불일치, design·verify 결과, 패치 없는 implement 성공)는 사람
    escalation과 함께 `AmuxV22ResultReview` 행이 되고, relay가 §2-8과 같은 카드로 올린다. 세션 이름은
-   `amux-result-review`, provider는 `claude`다. 선택지는 `approve`(done, `v4TerminalAt`), `retry`(시도
+   `amux-result-review`, provider는 `claude`다. 카드에는 Task의 승인된 완료 조건과 실행 결과(결론의 `findings`, 없으면 결과
+   전체)를 자르지 않고 싣는다. 읽을 수 없거나 카드 한 장(2,000자)에 다 들어가지 않으면 DM에 올리지 않고 사람에게 넘긴다
+   (`evidence_unavailable`). 선택지는 `approve`(done, `v4TerminalAt`), `retry`(시도
    예산 안에서 todo, 넘으면 blocked), `block`(blocked, 사람 escalation 유지)이다. 세 단어가 아닌 답은 사람에게
    넘긴다. 사람이 먼저 답하면 검토 행은 취소된다. 카드를 올리는 것이 DM 호출을 부르므로 켜는 것은 운영자 몫이다.
 3. **investigate 결론(`TOMVERSE_AMUX_V22_CONCLUSION`, 기본 `off`, `prompt`·`auto`).** investigate(verify 포함)

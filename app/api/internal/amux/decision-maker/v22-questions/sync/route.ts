@@ -32,6 +32,7 @@ import { amuxV22ResultReviewDmEnabled } from "@/lib/amux/v22ResultReviewCore";
 import {
   openAmuxV22ResultReviewCards,
   readAmuxV22ResultReviewSyncRows,
+  recordAmuxV22ResultReviewsUnfilable,
 } from "@/lib/amux/v22ResultReviewService";
 
 /**
@@ -88,10 +89,15 @@ export async function POST(request: Request) {
       const cardClose = await readAmuxIdeaCardCloseSyncForRelay();
       const review = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewRead,
-        (tx) => readAmuxV22ResultReviewSyncRows(tx)).then(async (rows) => ({
-        pending: amuxV22ResultReviewDmEnabled() ?
-          await openAmuxV22ResultReviewCards(rows.pending) : [],
-        closing: rows.closing })).catch(() => {
+        (tx) => readAmuxV22ResultReviewSyncRows(tx)).then(async (rows) => {
+        if (!amuxV22ResultReviewDmEnabled()) return { pending: [], closing: rows.closing };
+        const opened = await openAmuxV22ResultReviewCards(rows.pending);
+        if (opened.unfilable.length > 0)
+          await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewHandoff,
+            (tx, context) => recordAmuxV22ResultReviewsUnfilable(tx,
+              { reviewIds: opened.unfilable, now: context.dbNow }));
+        return { pending: opened.cards, closing: rows.closing };
+      }).catch(() => {
         console.warn(JSON.stringify({ subsystem: "amux", event: "v22_result_review_sync_failed" }));
         return { pending: [], closing: [] };
       });

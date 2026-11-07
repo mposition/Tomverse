@@ -63,33 +63,36 @@ export const AMUX_V22_RESULT_REVIEW_DM_WORKER = "amux-result-review";
 /** As the card close question: `claude` routes to `decision-maker-openai`. */
 export const AMUX_V22_RESULT_REVIEW_DM_PROVIDER = "claude";
 export const AMUX_V22_RESULT_REVIEW_QUESTION_MAX = 2_000;
-export const AMUX_V22_RESULT_REVIEW_FINDINGS_MAX = 1_200;
 export const AMUX_V22_RESULT_REVIEW_TITLE_MAX = 200;
 
 /**
- * The card the relay files, in the shape of a v22 question's pending entry.
- * Written from the Task's number, its role and the fixed sentence of its kind;
- * the run's own findings follow, cut to a bound, when the result has them.
- * Words in those findings may send the card to the operator: that is the
- * routing working, not a fault.
+ * The card the relay files, in the shape of a v22 question's pending entry,
+ * or null when the evidence does not fit whole. Written from the Task's
+ * number, its role, the fixed sentence of its kind and its approved
+ * completion criteria; the run's findings (its conclusion's, else the whole
+ * result) follow. Nothing is cut: a review the Decision Maker would judge on
+ * part of the evidence is left to the person instead. Words in the criteria
+ * or findings may send the card to the operator: that is the routing working.
  */
 export function amuxV22ResultReviewRelayCard(input: {
   reviewId: string;
   taskLabel: string;
   role: string | null;
   kind: AmuxV22ResultReviewKind;
-  findings: string | null;
+  criteria: readonly string[];
+  findings: string;
 }) {
-  const findings = input.findings ?
-    input.findings.slice(0, AMUX_V22_RESULT_REVIEW_FINDINGS_MAX) +
-      (input.findings.length > AMUX_V22_RESULT_REVIEW_FINDINGS_MAX ? " [truncated]" : "") : null;
+  if (input.criteria.length === 0 || !input.findings.trim()) return null;
   const question = [
     "A v22 Task finished and waits for review before it can be marked done.",
     `Task: ${input.taskLabel} (${input.role ?? "task"} Task)`,
     `Why it waits: ${AMUX_V22_RESULT_REVIEW_KIND_TEXT[input.kind]}.`,
-    ...(findings ? [`Its findings: ${findings}`] : []),
+    "Its completion criteria:",
+    ...input.criteria.map((criterion) => `- ${criterion}`),
+    `Its findings: ${input.findings}`,
     "Should its result be approved as done, the Task run again, or the Task blocked for a person?",
-  ].join("\n").slice(0, AMUX_V22_RESULT_REVIEW_QUESTION_MAX);
+  ].join("\n");
+  if (question.length > AMUX_V22_RESULT_REVIEW_QUESTION_MAX) return null;
   return {
     question_id: input.reviewId,
     worker: AMUX_V22_RESULT_REVIEW_DM_WORKER,

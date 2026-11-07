@@ -107,7 +107,8 @@ mock.module(mod("lib/amux/dmAutoApplyService.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/v22ResultReviewService.ts"), { namedExports: {
   readAmuxV22ResultReviewSyncRows: async () => ({ pending: world.reviewPending, closing: world.reviewClosing }),
-  openAmuxV22ResultReviewCards: async (pending: unknown[]) => pending,
+  openAmuxV22ResultReviewCards: async (pending: unknown[]) => ({ cards: pending, unfilable: [] }),
+  recordAmuxV22ResultReviewsUnfilable: async () => ({ recorded: 0 }),
 } });
 mock.module(mod("lib/amux/ideaCardCloseService.ts"), { namedExports: {
   openAmuxIdeaCardCloseQuestionIfDue: async () => {

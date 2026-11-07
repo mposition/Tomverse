@@ -6,6 +6,7 @@ import type { Session } from "next-auth";
 
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
 import { applyAmuxV22ResultReviewDecision, openAmuxV22ResultReviewCards, readAmuxV22ResultReviewSyncRows,
+  recordAmuxV22ResultReviewsUnfilable,
   recordAmuxV22ResultReviewHandoff } from "@/lib/amux/v22ResultReviewService";
 import { isAmuxV22QuestionCard, recordDmQuestionLocalCard,
   recordDmQuestionLocalCardClosed } from "@/lib/amux/v22OwnerQuestionDmService";
@@ -246,7 +247,14 @@ test("a result whose body cannot be opened is not filed for the Decision Maker",
   const mine = rows.pending.filter((row) => row.reviewId === seed.reviewId);
   assert.equal(mine.length, 1, "the row is pending");
   // The seed's body is synthetic bytes under no real key: opening it fails.
-  assert.deepEqual(await openAmuxV22ResultReviewCards(mine), []);
+  const opened = await openAmuxV22ResultReviewCards(mine);
+  assert.deepEqual(opened, { cards: [], unfilable: [seed.reviewId] });
+  // It is handed to the person, so it no longer holds a place in the scan.
+  assert.deepEqual(await prisma.$transaction((tx) => recordAmuxV22ResultReviewsUnfilable(tx,
+    { reviewIds: opened.unfilable, now: new Date() })), { recorded: 1 });
+  assert.equal((await reviewOf(seed.reviewId)).handoffReason, "evidence_unavailable");
+  const after = await prisma.$transaction((tx) => readAmuxV22ResultReviewSyncRows(tx));
+  assert.ok(!after.pending.some((row) => row.reviewId === seed.reviewId));
 });
 
 test("the tables accept the dm source and refuse what the lifecycle does not allow", async () => {

@@ -43,7 +43,8 @@ test("only a result with no patch is put to review, and its kind says why", () =
 test("the card's fixed words hit no routing term, so it reaches a DM", () => {
   for (const kind of AMUX_V22_RESULT_REVIEW_KINDS) {
     const card = amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
-      taskLabel: "AMUX-AUTOFILE-004", role: "investigate", kind, findings: null });
+      taskLabel: "AMUX-AUTOFILE-004", role: "investigate", kind,
+      criteria: ["The cause is named"], findings: "Found it." });
     const text = [card.title, card.question, card.unblocks, ...card.options.map((option) => option.label)].join("\n");
     assert.deepEqual(irreversibleTermCategories(text), [], kind);
     assert.ok(card.question.includes(AMUX_V22_RESULT_REVIEW_KIND_TEXT[kind]));
@@ -52,10 +53,13 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
     assert.equal(card.worker, "amux-result-review");
     assert.equal(card.provider, "claude");
   }
-  const long = amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
-    taskLabel: "T", role: null, kind: "needs_owner", findings: "x".repeat(5_000) });
-  assert.ok(long.question.length <= 2_000);
-  assert.match(long.question, /\[truncated\]/);
+  const whole = amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
+    taskLabel: "T", role: null, kind: "needs_owner", criteria: ["A", "B"], findings: "done" });
+  assert.match(whole.question, /Its completion criteria:\n- A\n- B\nIts findings: done/);
+  for (const [criteria, findings] of [[["A"], "x".repeat(2_000)], [[], "done"], [["A"], " "]])
+    assert.equal(amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
+      taskLabel: "T", role: null, kind: "needs_owner", criteria, findings }), null,
+      "evidence that does not fit whole, or is missing, is left to the person");
 });
 
 test("an answer decides only by its fixed words, with the delivery's precedence", () => {

@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
+import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
+import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
@@ -34,7 +36,10 @@ export const AMUX_V22_RESULT_REVIEW_RESOLVER = "system:amux-v22-result-review";
 
 type PendingReview = AmuxV22SealedRow & { reviewId: string; taskId: string;
   attemptId: string; kind: AmuxV22ResultReviewKind; taskLabel: string;
-  role: string | null; sourceSha256: string };
+  role: string | null; sourceSha256: string;
+  bodyCiphertext: Uint8Array | null; bodyKeyId: string | null;
+  bodyKeyVersion: number | null; bodyDigest: string | null;
+  bodyDigestKeyId: string | null };
 
 /** Open reviews with no card yet, on a Task still in review, with their run's
  * result rows; and cards of reviews no longer open that the relay has not
@@ -49,6 +54,9 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
   const pending = await tx.$queryRaw<PendingReview[]>`
     SELECT v."id" AS "reviewId", v."taskId", v."attemptId", v."kind",
       coalesce(w."displayKey", w."id") AS "taskLabel", w."taskRole" AS "role",
+      w."v4BodyCiphertext" AS "bodyCiphertext", w."v4BodyKeyId" AS "bodyKeyId",
+      w."v4BodyKeyVersion" AS "bodyKeyVersion", w."v4BodyDigest" AS "bodyDigest",
+      w."v4BodyDigestKeyId" AS "bodyDigestKeyId",
       r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest",
       r."digestKeyId", r."sourceSha256", r."bodyPurgedAt"
     FROM "AmuxV22ResultReview" v
@@ -68,24 +76,74 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
   return { pending, closing };
 }
 
-/** The cards the relay files, opened outside the DB transaction. The run's
- * conclusion findings go in when it has them, else the start of its result; a
- * purged or unreadable body leaves the card with the fixed words only. */
+/** The Task's approved completion criteria, opened from its sealed body, or
+ * null when they cannot be read. */
+async function openCompletionCriteria(row: PendingReview): Promise<string[] | null> {
+  if (!row.bodyCiphertext || !row.bodyKeyId || !row.bodyKeyVersion ||
+      !row.bodyDigest || !row.bodyDigestKeyId) return null;
+  const keys = await loadAmuxContentKeyRing([
+    { ideaId: row.ideaId, purpose: "card_body", subjectId: row.taskId }]);
+  let plain: Buffer | null = null;
+  try {
+    plain = openAmuxContent({ ciphertext: Buffer.from(row.bodyCiphertext),
+      keyId: row.bodyKeyId, keyVersion: row.bodyKeyVersion }, "card_body", row.taskId, keys);
+    if (!verifyAmuxContentDigest(plain, "card_body", row.taskId, row.bodyDigest,
+      row.bodyDigestKeyId, keys)) return null;
+    const criteria = (JSON.parse(plain.toString("utf8")) as
+      { completionCriteria?: unknown }).completionCriteria;
+    return Array.isArray(criteria) && criteria.length > 0 &&
+      criteria.every((item) => typeof item === "string" && item.trim().length > 0) ?
+      criteria as string[] : null;
+  } finally { plain?.fill(0); }
+}
+
+/**
+ * The cards the relay files, opened outside the DB transaction: the Task's
+ * completion criteria and the run's findings (its conclusion's, else the whole
+ * result), both whole. A review whose evidence cannot be read, or does not fit
+ * a card whole, is not put to the Decision Maker -- approving what it cannot
+ * see would be a blind approval -- and comes back in `unfilable` to be handed
+ * to the person, so it never holds back the reviews behind it.
+ */
 export async function openAmuxV22ResultReviewCards(pending: PendingReview[]) {
   const cards = [];
+  const unfilable: string[] = [];
   for (const row of pending) {
     if (cards.length >= AMUX_V22_RESULT_REVIEW_SYNC_LIMIT) break;
-    let text: string | null = null;
-    try { text = await openAmuxV22TaskResultRow(row.attemptId, row); }
-    catch { text = null; }
-    // A result nobody can read is not put to the Decision Maker: approving
-    // what it cannot see would be a blind approval. It stays with the person.
-    if (!text) continue;
-    const findings = parseAmuxV22Conclusion(text)?.findings ?? text;
-    cards.push(amuxV22ResultReviewRelayCard({ reviewId: row.reviewId,
-      taskLabel: row.taskLabel, role: row.role, kind: row.kind, findings }));
+    let card: ReturnType<typeof amuxV22ResultReviewRelayCard> = null;
+    try {
+      const text = await openAmuxV22TaskResultRow(row.attemptId, row);
+      const criteria = text ? await openCompletionCriteria(row) : null;
+      if (text && criteria) card = amuxV22ResultReviewRelayCard({ reviewId: row.reviewId,
+        taskLabel: row.taskLabel, role: row.role, kind: row.kind, criteria,
+        findings: parseAmuxV22Conclusion(text)?.findings ?? text });
+    } catch { card = null; }
+    if (card) cards.push(card);
+    else unfilable.push(row.reviewId);
   }
-  return cards;
+  return { cards, unfilable };
+}
+
+/** Hands reviews the relay could not file to the person, once each, with one
+ * system audit: the open escalation already waits for them. */
+export async function recordAmuxV22ResultReviewsUnfilable(tx: Prisma.TransactionClient,
+  input: { reviewIds: string[]; now: Date }) {
+  const ids = input.reviewIds.filter((id) => REVIEW_ID.test(id));
+  if (ids.length === 0) return { recorded: 0 };
+  await takeAuditChainLock(tx);
+  const at = input.now.toISOString();
+  const changed = await tx.$executeRaw`
+    UPDATE "AmuxV22ResultReview" SET "handoffReason" = 'evidence_unavailable',
+      "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
+      "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+    WHERE "id" = ANY(${ids}) AND "state" = 'open' AND "handoffAt" IS NULL`;
+  if (changed > 0)
+    await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+      action: "amux.v22.result_review.handed_off", targetType: "AmuxV22ResultReview",
+      targetId: ids[0]!,
+      summary: "Left v22 result reviews to a person: their evidence could not be read or did not fit a card whole.",
+      metadata: { reviewIds: ids, reason: "evidence_unavailable" } });
+  return { recorded: changed };
 }
 
 /** Names the local card of a review, once. Null when no such review exists. */
