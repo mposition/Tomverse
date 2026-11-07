@@ -14,7 +14,7 @@ import {
   submitMarketingAsset,
 } from "@/lib/marketingAssetStore";
 import type { MarketingAssetSubmission } from "@/lib/marketingAssetSubmission";
-import { resolveMarketingAsset } from "@/lib/marketingAssets";
+import { isAiOriginProvenance, resolveMarketingAsset } from "@/lib/marketingAssets";
 import { readMarketingAssetRegistry, resolveMarketingFactsWithSnapshot } from "@/lib/marketingFactResolution";
 import { POST as submitRoute } from "@/app/api/internal/marketing-assets/route";
 import { runMarketingTransaction, type MarketingTransaction } from "@/lib/marketingStore";
@@ -294,6 +294,85 @@ test("the database refuses what the store never sends: a changed file, an AI pic
     ),
     refusedBy("MarketingAsset_interface_check"),
   );
+});
+
+test("a captured video with an AI presenter is stored, approved and published as AI-made; AI screens and presenter images are not", async () => {
+  // Owner decision 2026-11-07: the product screens are captures, the only AI
+  // part is the presenter. It may show the product; it is of AI origin.
+  const presenter = submission({
+    asset: {
+      ...submission().asset,
+      provenance: "capture_with_ai_presenter",
+      disclosure: { youtube: "platform_label", instagram: "platform_label_and_caption" },
+    },
+  });
+  const accepted = await postSubmission(presenter);
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  await tx((client) => confirmMarketingAssetUpload(client, { assetId: ID, bytes: 12_000_000 }));
+  await decide("approved");
+
+  const location = (await readApprovedMarketingAssetLocation(prisma, ID))!;
+  assert.equal(location.provenance, "capture_with_ai_presenter");
+  assert.equal(isAiOriginProvenance(location.provenance), true, "the publisher tells YouTube it is synthetic media");
+  const registry = (await readMarketingAssetRegistry(prisma))!;
+  const entry = registry.assets.find((asset) => asset.id === ID);
+  assert.equal(entry?.depictsProductInterface, true, "the merged registry the Guard reads accepts the row");
+
+  // What was submitted never changes, the provenance least of all.
+  for (const provenance of ["capture", "ai_generated"]) {
+    await assert.rejects(
+      prisma.$executeRawUnsafe(`UPDATE "MarketingAsset" SET "provenance" = $1 WHERE "id" = $2`, provenance, ID),
+      (error: unknown) => error instanceof Error && /immutable|MarketingAsset_interface_check/u.test(error.message),
+    );
+  }
+
+  // The route refuses a presenter image before the database sees it.
+  const image = await postSubmission(
+    submission({
+      asset: { ...presenter.asset, id: "media-20261107-presenter-image" },
+      kind: "image",
+      contentType: "image/png",
+      bytes: 400_000,
+      durationSeconds: null,
+    }),
+  );
+  assert.equal(image.status, 400);
+  assert.equal(image.body.code, "invalid_request");
+
+  // And the database refuses what the store never sends.
+  const insert = (id: string, kind: "image" | "video", provenance: string, disclosure: string, depicts: boolean) =>
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "MarketingAsset" ("id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
+         "validUntil", "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
+         "transcript", "status", "updatedAt")
+       VALUES ($1, $2, $3, ARRAY['youtube'], $4::jsonb, '{"en":"A screen."}', ARRAY[]::TEXT[],
+         '2099-01-01', $5, 'marketing-assets/' || $1 || CASE $2 WHEN 'image' THEN '/original.png' ELSE '/original.mp4' END,
+         CASE $2 WHEN 'image' THEN 'image/png' ELSE 'video/mp4' END, 10, $6,
+         CASE $2 WHEN 'image' THEN NULL ELSE 5 END,
+         CASE $2 WHEN 'image' THEN '{}'::jsonb ELSE '{"en":"Hello."}'::jsonb END, 'submitted', now())`,
+      id,
+      kind,
+      provenance,
+      JSON.stringify({ youtube: disclosure }),
+      depicts,
+      SHA,
+    );
+  await assert.rejects(
+    insert("media-presenter-image", "image", "capture_with_ai_presenter", "platform_label", false),
+    refusedBy("MarketingAsset_presenter_check"),
+  );
+  await assert.rejects(
+    insert("media-presenter-undisclosed", "video", "capture_with_ai_presenter", "none", true),
+    refusedBy("MarketingAsset_disclosure_check"),
+  );
+  for (const provenance of ["ai_generated", "ai_modified"]) {
+    await assert.rejects(
+      insert(`media-${provenance.replace("_", "-")}-ui`, "video", provenance, "platform_label", true),
+      refusedBy("MarketingAsset_interface_check"),
+    );
+  }
+  // The same video disclosed is stored, as the route stored the first.
+  await insert("media-presenter-direct", "video", "capture_with_ai_presenter", "platform_label", true);
 });
 
 test("what the video says passes the Guard before a row exists: a rejection writes nothing and names codes, not words", async () => {

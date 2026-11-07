@@ -2088,7 +2088,7 @@ const REGISTRY = {
     module: "lib/marketingAssets.ts",
     list: "MARKETING_ASSET_PROVENANCES",
     reason:
-      "Where a file came from, in the hand-kept registry's terms. The AI-origin values forbid a product-interface asset and a `none` disclosure, so the list is the one the registry schema checks.",
+      "Where a file came from, in the hand-kept registry's terms. The AI-origin values forbid a `none` disclosure, and all of them but `capture_with_ai_presenter` (a captured video with an AI presenter, video only) forbid a product-interface asset, so the list is the one the registry schema checks.",
   },
   MarketingAsset_status_check: {
     owner: "list",
