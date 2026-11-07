@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { Activity, TimerReset } from "lucide-react";
 import { adminModelMetricsMessages } from "@/lib/adminMessages/modelMetrics";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -13,12 +14,7 @@ export type AdminModelMetricRow = {
   latencyMs: number | null;
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "-";
 
 const statusClass = (status: string) => {
   if (status === "available") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";

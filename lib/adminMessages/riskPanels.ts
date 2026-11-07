@@ -41,7 +41,7 @@ export const adminRiskPanelsMessages = defineAdminMessages({
       empty: "No unresolved report has breached the 24-hour mark.",
       hoursOpen: (hours: number) => `${hours}h unresolved`,
       reported: (type: string, status: string, date: string) =>
-        `${type} · ${status} · reported ${date} UTC`,
+        `${type} · ${status} · reported ${date}`,
     },
     funnel: {
       eyebrow: "Funnel",
@@ -109,7 +109,7 @@ export const adminRiskPanelsMessages = defineAdminMessages({
       empty: "24시간을 넘긴 미처리 신고가 없습니다.",
       hoursOpen: (hours: number) => `${hours}시간 경과`,
       reported: (type: string, status: string, date: string) =>
-        `${type} · ${status} · ${date} UTC 접수`,
+        `${type} · ${status} · ${date} 접수`,
     },
     funnel: {
       eyebrow: "퍼널",

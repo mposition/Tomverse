@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 
 import type { AdminCampaignRow } from "@/lib/adminEmailCampaigns";
@@ -31,8 +32,7 @@ const STATUS_TONE: Record<string, string> = {
   halted: "border-red-800 bg-red-950/50 text-red-200",
 };
 
-const when = (value: Date | null) =>
-  value ? value.toISOString().replace("T", " ").slice(0, 16) : "—";
+const when = (value: Date | null) => formatAestDateTime(value) ?? "—";
 
 export async function AdminEmailCampaignsPanel({
   rows,

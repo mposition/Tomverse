@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Save } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -66,7 +67,7 @@ function CheckpointCard({ row, onSaved }: { row: Checkpoint; onSaved: (rows: Che
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="font-black text-white">{row.name}</h3>
-          <p className="mt-1 text-xs text-zinc-500">{row.observedAt ? m.verifiedAt(new Date(row.observedAt).toLocaleString()) : m.neverVerified}</p>
+          <p className="mt-1 text-xs text-zinc-500">{row.observedAt ? m.verifiedAt(formatAestDateTime(row.observedAt, { seconds: true }) ?? "-") : m.neverVerified}</p>
         </div>
         {row.overdue ? <AlertTriangle className="h-5 w-5 text-amber-300" /> : <CheckCircle2 className="h-5 w-5 text-emerald-300" />}
       </div>

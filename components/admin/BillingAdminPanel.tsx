@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -987,7 +988,7 @@ export function BillingAdminPanel({
     setBaselinePriceCatalog(data.priceCatalog);
     setDraftPriceCatalogUpdatedAt(data.priceCatalogUpdatedAt);
     setCatalogSource(data.priceCatalogSource);
-    setLastSyncedAt(new Date().toLocaleTimeString());
+    setLastSyncedAt(formatAestDateTime(new Date(), { seconds: true }) ?? "-");
   };
 
   const refresh = async () => {

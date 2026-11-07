@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -23,12 +24,7 @@ export type AdminApprovalRow = {
   createdAt: string;
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "-";
 
 const statusClass = (status: string) => {
   if (status === "approved") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
@@ -153,7 +149,7 @@ export function AdminApprovalsPanel() {
                       {statusLabel(row.status)}
                     </span>
                     <span className="font-black text-white">{row.action}</span>
-                    <span className="text-xs text-zinc-500">{dateLabel(row.createdAt)} UTC</span>
+                    <span className="text-xs text-zinc-500">{dateLabel(row.createdAt)}</span>
                   </div>
                   <p className="mt-2 text-sm text-zinc-300">{row.reason || m.noReason}</p>
                   <p className="mt-1 text-xs text-zinc-500">

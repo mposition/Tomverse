@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useState } from "react";
 import { Clipboard, FileText, Loader2 } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -16,11 +17,7 @@ type ReportRow = {
   createdAt: string;
 };
 
-const dateLabel = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
 export function AdminReportsPanel() {
   const m = useAdminMessages(adminReportsMessages);
@@ -84,7 +81,7 @@ export function AdminReportsPanel() {
               <div>
                 <h3 className="text-sm font-bold text-white">{report.title}</h3>
                 <p className="mt-1 text-xs text-zinc-500">
-                  {dateLabel(report.createdAt)} UTC / {report.status}
+                  {dateLabel(report.createdAt)} / {report.status}
                 </p>
               </div>
               <button

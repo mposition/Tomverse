@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, PencilLine } from "lucide-react";
 import {
@@ -258,7 +259,7 @@ export function AdminAutoRewriteOptimizerPanel() {
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-bold text-zinc-100">
-                {new Date(cycle.createdAt).toLocaleString()} · {status(cycle.status)}
+                {formatAestDateTime(cycle.createdAt, { seconds: true }) ?? "-"} · {status(cycle.status)}
                 {cycle.promotedAt ? ` · ${m.promoted}` : ""}
               </span>
               {cycle.status === "passed" && !cycle.promotedAt ? (
