@@ -462,7 +462,14 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
   const canApprove = data?.state === "verified" && quote !== null && data.recoveryEnabled !== false &&
     data.eligibility.approveAttempt && (data.requestKind !== "safe_stop" || data.safeStopEnabled === true) &&
     (!exceptionApproval || data.launchProof?.state === "current");
-  const safeStopSource = safeStopSourceEligible(data ?? undefined);
+  // The unknown-risk exception and its safe stop exist for one fixed Task
+  // only. Another Task offers neither, so it states why instead of showing
+  // controls it can never enable.
+  const exceptionTarget = Boolean(data && (data.riskAcceptance !== null ||
+    data.eligibility.acceptUnknownPriorEffects || data.eligibility.requestSafeStop ||
+    data.requestKind === "safe_stop" || (data.eligibility.reason !== null &&
+      !["already_approved", "exact_target_only"].includes(data.eligibility.reason))));
+  const safeStopSource = exceptionTarget && safeStopSourceEligible(data ?? undefined);
   const canAcceptRisk = Boolean(data && safeStopSource && data.recoveryEnabled !== false &&
     data.eligibility.acceptUnknownPriorEffects && data.riskAcceptance === null);
   const canSafeStop = safeStopSource && data?.recoveryEnabled !== false && data?.safeStopEnabled === true &&
@@ -504,7 +511,9 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
         {data.reason === "terminal_success" && <p className="mt-2 text-amber-200">{m.host.success}</p>}
       </>}
     </div>
-    {data && data.state !== "not_visible" && <section
+    {data && data.state === "unverified" && !exceptionTarget && <p className="mt-3 text-amber-200"
+      data-testid="admin-amux-recovery-exception-unavailable">{m.host.exceptionUnavailable}</p>}
+    {data && data.state !== "not_visible" && exceptionTarget && <section
       className="mt-4 rounded-lg border border-amber-300/40 bg-amber-950/20 p-3"
       data-testid="admin-amux-unknown-risk-exception">
       <h6 className="font-semibold text-amber-100">{m.host.exception.title}</h6>
