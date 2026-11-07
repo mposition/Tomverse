@@ -8,13 +8,17 @@ import { gzipSync } from "node:zlib";
 import { readJson, withLock, writeJsonAtomic } from "./fsutil.mjs";
 import { addWorktree, ensureMirror, git, isInstructionPath, isolateInstructionFiles, removeWorktree } from "./git.mjs";
 import { reviewerEnv } from "./env.mjs";
-import {
-  MARKETING_ADMISSION_CODE_MANIFEST_PATH,
-  MARKETING_ADMISSION_CODE_ROOTS,
-  MARKETING_ADMISSION_CODE_SCHEMA_VERSION,
-  marketingAdmissionCodeClosure,
-  marketingAdmissionCodeManifestText,
-} from "../../../scripts/marketing-admission-code-core.mjs";
+
+/** The generated file regenerateAdmissionManifest writes (MARKETING_ADMISSION_CODE_MANIFEST_PATH). */
+export const CI_FIX_ADMISSION_MANIFEST_PATH = "config/marketing-admission-code-manifest.json";
+/**
+ * The admission manifest's own code, outside this directory. The review
+ * server's checkout is sparse (tools/review-orchestrator only), and the review
+ * server imports this module too: imported statically, a missing file stopped
+ * both (2026-11-07). So it is loaded only to regenerate, and its absence costs
+ * that alone.
+ */
+export const CI_FIX_ADMISSION_CORE_URL = new URL("../../../scripts/marketing-admission-code-core.mjs", import.meta.url);
 
 // The CI auto-fix's proposing half (bin/pr-ci-auto-fix.mjs). It decides which
 // failed pull request to try, asks the subscription Claude CLI for a patch,
@@ -409,7 +413,7 @@ export function failedRuns(runs) {
  */
 export function ciFixPrompt({ workflows, logFile, headBranch = "", packagesInstalled = false, manifestRegenerated = false }) {
   const manifest = manifestRegenerated
-    ? ` The server regenerates ${MARKETING_ADMISSION_CODE_MANIFEST_PATH} from the files as you leave them: do not edit it, and a check saying only that this manifest is out of date needs no change from you.`
+    ? ` The server regenerates ${CI_FIX_ADMISSION_MANIFEST_PATH} from the files as you leave them: do not edit it, and a check saying only that this manifest is out of date needs no change from you.`
     : "";
   const packages = packagesInstalled
     ? " The branch's packages are installed in node_modules (no install script ran): read their type definitions (.d.ts), CHANGELOG and migration notes there to learn an API, and do not guess an import path or option name you cannot find there."
@@ -1118,9 +1122,20 @@ function start({ ledger, record }, { key, pull, retry, ability }, entry) {
  * read, so that stays for the check to fail. The answer is measured against the
  * head's committed manifest, never against what the model left in the file.
  *
- * Returns "regenerated", "current", or why nothing was written.
+ * Returns "regenerated", "current", or why nothing was written
+ * ("core_unavailable": the checkout has no scripts/, see the README).
  */
-export function regenerateAdmissionManifest(worktree, headSha) {
+export async function regenerateAdmissionManifest(worktree, headSha, coreUrl = CI_FIX_ADMISSION_CORE_URL) {
+  let core = null;
+  try {
+    core = await import(coreUrl.href);
+  } catch {
+    return "core_unavailable";
+  }
+  const {
+    MARKETING_ADMISSION_CODE_MANIFEST_PATH, MARKETING_ADMISSION_CODE_ROOTS, MARKETING_ADMISSION_CODE_SCHEMA_VERSION,
+    marketingAdmissionCodeClosure, marketingAdmissionCodeManifestText,
+  } = core;
   const committed = git(["show", `${headSha}:${MARKETING_ADMISSION_CODE_MANIFEST_PATH}`], { cwd: worktree, allowFailure: true });
   if (!committed.ok) return "no_manifest";
   let stored = null;
@@ -1207,7 +1222,7 @@ async function fixFailedCi(pass, chosen) {
     }
     if (packagesInstalled) removePackages(worktree);
     if (regenerate) {
-      const manifest = regenerateAdmissionManifest(worktree, sha);
+      const manifest = await regenerateAdmissionManifest(worktree, sha);
       record(sha, { manifest });
       if (manifest !== "current") log(`ci-fix: #${pull.number} admission manifest: ${manifest}`);
     }
