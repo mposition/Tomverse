@@ -405,6 +405,7 @@ run(
     // statement ceiling and never delivered, nothing closed once work started,
     // and the owner's direct answer.
     "tests/integration/amux-idea-card-close.db.test.ts",
+    "tests/integration/amux-v22-result-review.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.

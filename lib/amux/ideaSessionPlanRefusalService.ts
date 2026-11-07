@@ -161,7 +161,7 @@ export async function parkAmuxSessionIdeaInTx(tx: Tx, ideaId: string, now: Date)
  * docs/policy/amux-decision-maker.md §9's 12 statements. */
 export async function decideAmuxPlanRefusalInTx(tx: Tx, input: { refusalId: string;
   ideaId: string; decision: AmuxPlanRefusalDecision;
-  source: "operator" | "dm_confirmed"; decidedByUserId: string | null; now: Date;
+  source: "operator" | "dm_confirmed" | "dm"; decidedByUserId: string | null; now: Date;
   audit: () => Promise<unknown> }) {
   const decided = await tx.amuxIdeaSessionPlanRefusal.updateMany({
     where: { id: input.refusalId, ideaId: input.ideaId, ...open, idea: ideaLive(input.now) },
@@ -181,16 +181,20 @@ export async function decideAmuxPlanRefusalInTx(tx: Tx, input: { refusalId: stri
  * switch under the audit chain lock. The person's judgment audit names who
  * confirmed it. */
 export const applyAmuxPlanRefusalDmDecision = (tx: Tx, input: { refusalId: string;
-  ideaId: string; requestId: string; decision: AmuxPlanRefusalDecision; now: Date }) =>
+  ideaId: string; requestId: string; decision: AmuxPlanRefusalDecision; now: Date;
+  /** dm: applied without the operator's confirmation (TOMVERSE_AMUX_DM_APPROVER). */
+  source?: "dm_confirmed" | "dm" }) =>
   decideAmuxPlanRefusalInTx(tx, { refusalId: input.refusalId, ideaId: input.ideaId,
-    decision: input.decision, source: "dm_confirmed", decidedByUserId: null, now: input.now,
+    decision: input.decision, source: input.source ?? "dm_confirmed",
+    decidedByUserId: null, now: input.now,
     audit: () => writeSystemAuditLog({ tx,
       systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
       action: AMUX_PLAN_REFUSAL_DECIDED_ACTION,
       targetType: AMUX_PLAN_REFUSAL_AUDIT_TARGET,
       targetId: input.refusalId,
-      summary: "Applied a confirmed Decision Maker proposal to one refused session analysis answer.",
-      metadata: { ideaId: input.ideaId, decision: input.decision, source: "dm_confirmed",
+      summary: "Applied a Decision Maker proposal to one refused session analysis answer.",
+      metadata: { ideaId: input.ideaId, decision: input.decision,
+        source: input.source ?? "dm_confirmed",
         requestId: input.requestId } }) });
 
 /** The open refusal of an idea, for its Admin detail. */
