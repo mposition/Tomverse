@@ -324,7 +324,7 @@ test("the boundaries stay within the policy's twelve statements, and the confirm
   for (const [name, ceiling] of [["decisionMakerIdeaCardCloseScan", 3], ["decisionMakerIdeaCardCloseOpen", 10],
     ["decisionMakerIdeaCardCloseRead", 4], ["decisionMakerIdeaCardCloseApply", 12],
     ["decisionMakerIdeaCardCloseHandoff", 8], ["decisionMakerIdeaCardCloseOwnerRead", 4],
-    ["decisionMakerV22QuestionResolve", 10], ["decisionMakerV22QuestionWrite", 8]]) {
+    ["decisionMakerV22QuestionResolve", 11], ["decisionMakerV22QuestionWrite", 10]]) {
     const match = new RegExp(`${name}: \\{[^}]*prismaCallCeiling: (\\d+)`).exec(boundaries);
     assert.equal(Number(match?.[1]), ceiling, name);
   }

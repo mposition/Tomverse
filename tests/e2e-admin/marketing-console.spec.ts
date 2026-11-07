@@ -92,7 +92,7 @@ test.describe("marketing console", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    // The switch strip lives on the Settings tab, with the webhook blocks.
+    // The switches moved from the rail beside every list to the Settings tab.
     await page.goto("/admin/marketing?tab=settings");
 
     // Scoped to the strip and read from `data-state` rather than from the
