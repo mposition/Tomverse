@@ -712,7 +712,10 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Notification delivery log" })
     ).toBeVisible();
-    await expect(page.getByText(FIXTURE_NOTIFICATION.failed.title)).toBeVisible();
+    // The table and the phone cards both render the row; only one is shown.
+    await expect(
+      page.getByText(FIXTURE_NOTIFICATION.failed.title).locator("visible=true")
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "failed 1" })).toBeVisible();
   });
 

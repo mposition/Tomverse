@@ -141,10 +141,13 @@ test.describe("Admin Console — email campaigns", () => {
     const campaignId = await draftCampaign(adminApi(page));
 
     await page.goto("/admin/email-campaigns");
-    const row = page.getByTestId("admin-campaign-row");
-    await expect(row).toHaveCount(1);
+    await expect(page.getByTestId("admin-campaign-row")).toHaveCount(1);
+    // The status is its own column, so read the whole table row.
+    const row = page
+      .getByRole("row")
+      .filter({ has: page.getByTestId("admin-campaign-row") });
     await expect(row).toContainText(TEMPLATE_KEY);
-    await expect(row).toContainText("draft");
+    await expect(row).toContainText(/draft/i);
 
     await row.getByRole("link", { name: TEMPLATE_KEY }).click();
     await expect(page).toHaveURL(

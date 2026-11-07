@@ -394,7 +394,10 @@ test.describe("platform operations", () => {
       .locator("section")
       .filter({ hasText: "Notification delivery log" });
 
-    await expect(log.getByText(FIXTURE_NOTIFICATION.failed.title)).toBeVisible();
+    // The table and the phone cards both render the row; only one is shown.
+    await expect(
+      log.getByText(FIXTURE_NOTIFICATION.failed.title).locator("visible=true")
+    ).toBeVisible();
     await log.getByRole("button", { name: "Acknowledge" }).click();
 
     await expect(log.getByRole("button", { name: "Acknowledge" })).toHaveCount(0);
