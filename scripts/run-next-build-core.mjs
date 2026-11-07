@@ -46,19 +46,24 @@ export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
  * `largeHeap` remains the explicit local opt-in used by `npm run build:local`.
  * An operator's existing heap limit always wins.
  *
- * GitHub Actions gets more: on 2026-11-07 the TypeScript stage reached
- * 6038 MiB and died at the 6144 ceiling in the Admin E2E and UI-risk builds
- * (the passing build job finished just under it). The workflows' own tsc runs
- * already use 8192 on the same runners. Railway keeps 6144, where a larger
- * ceiling would trade a V8 error for the container's limit.
+ * The ceiling is 8192 MiB everywhere (owner decision 2026-11-07, "CI·Railway
+ * 8GB"): on 2026-11-07 the TypeScript stage reached 6038 MiB and died at the
+ * former 6144 ceiling in the Admin E2E and UI-risk builds, and develop alone
+ * measured about 6.2 GiB in a local tsc under 6144, so a Railway build of
+ * develop sits on the same edge. GitHub Actions got 8192 first; Railway and
+ * `build:local` follow. If a Railway build then stops at the builder
+ * container's memory instead of V8's heap, lower it there with an explicit
+ * NODE_OPTIONS, which still wins.
  */
+export const BUILD_HEAP_MIB = 8192;
+
 export const nodeOptionsForBuild = (env, { largeHeap = false } = {}) => {
   const configured = env.NODE_OPTIONS ?? "";
   const railwayBuild = Boolean(env.RAILWAY_ENVIRONMENT_ID?.trim());
   const githubBuild = env.GITHUB_ACTIONS === "true";
   if ((!githubBuild && !railwayBuild && !largeHeap) ||
       /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
-  return `${configured ? `${configured} ` : ""}--max-old-space-size=${githubBuild ? 8192 : 6144}`;
+  return `${configured ? `${configured} ` : ""}--max-old-space-size=${BUILD_HEAP_MIB}`;
 };
 
 /**

@@ -27,11 +27,11 @@ test("GitHub build has a bounded larger heap without overriding an explicit oper
   }
 });
 
-test("Railway builds use the bounded CI heap and preserve explicit operator limits", () => {
+test("Railway builds use the same 8192 MiB heap as CI and preserve explicit operator limits", () => {
   const railway = { RAILWAY_ENVIRONMENT_ID: "synthetic-build-environment" };
-  assert.equal(nodeOptionsForBuild(railway), "--max-old-space-size=6144");
+  assert.equal(nodeOptionsForBuild(railway), "--max-old-space-size=8192");
   assert.equal(nodeOptionsForBuild({ ...railway, NODE_OPTIONS: "--trace-warnings" }),
-    "--trace-warnings --max-old-space-size=6144");
+    "--trace-warnings --max-old-space-size=8192");
   for (const explicit of ["--max-old-space-size=2048", "--max_old_space_size=2048",
     "--max-old-space-size 2048"]) {
     assert.equal(nodeOptionsForBuild({ ...railway, NODE_OPTIONS: explicit }), explicit);
@@ -56,7 +56,7 @@ test("actual build children inherit the Railway ceiling and an explicit smaller 
   const explicit = childHeapMiB({ ...railway, NODE_OPTIONS: "--max-old-space-size=2048" });
   t.diagnostic(`Railway child heap ${inherited} MiB; explicit 2048 child heap ${explicit} MiB`);
   // V8 adds a small young-generation allowance to the old-space ceiling.
-  assert.ok(inherited >= 6144 && inherited < 6400, `Railway heap: ${inherited}`);
+  assert.ok(inherited >= 8192 && inherited < 8448, `Railway heap: ${inherited}`);
   assert.ok(explicit >= 2048 && explicit < 2304, `Explicit heap: ${explicit}`);
 });
 
@@ -66,9 +66,9 @@ test("a caller can still ask for the same heap off CI", () => {
   // developer had to know about. It does not reproduce on an idle machine, so
   // this borrows CI's ceiling rather than fixing a deterministic failure.
   assert.equal(nodeOptionsForBuild({}, { largeHeap: true }),
-    "--max-old-space-size=6144");
+    "--max-old-space-size=8192");
   assert.equal(nodeOptionsForBuild({ NODE_OPTIONS: "--trace-warnings" }, { largeHeap: true }),
-    "--trace-warnings --max-old-space-size=6144");
+    "--trace-warnings --max-old-space-size=8192");
   // An operator's own limit still wins, exactly as it does on CI.
   assert.equal(
     nodeOptionsForBuild({ NODE_OPTIONS: "--max-old-space-size=5120" }, { largeHeap: true }),
