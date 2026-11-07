@@ -120,7 +120,7 @@ test("delivery wiring: rules for investigate only, the section after the resume 
 
 test("settlement wiring: the verdict applies behind auto, proceed is terminal, and the audit goes through the chain writer in the transaction", () => {
   const source = readFileSync(new URL("../lib/amux/execution.ts", import.meta.url), "utf8");
-  assert.match(source, /conclusionMode === "auto" &&\s+input\.outcome === "succeeded" && !ownerQuestion && !reviewRequired &&/);
+  assert.match(source, /conclusionMode === "auto" &&\s+input\.outcome === "succeeded" && !ownerQuestion && !questionPlan && !reviewRequired &&/);
   assert.match(source, /executionRole === "investigate" &&\s+patch === null && storedPatch === null/);
   assert.match(source, /\.\.\.\(conclusionApplied && next === "done" \? \{ v4TerminalAt: now \} : \{\}\)/);
   assert.match(source, /if \(conclusionApplied\)\s+await writeSystemAuditLog\(\{ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,\s+action: "amux\.v22\.conclusion\.applied"/);

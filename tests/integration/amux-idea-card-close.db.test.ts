@@ -1319,3 +1319,18 @@ test("the DM approver answers a worker question only with an option it offered; 
   assert.equal((await readDecisionMakerRequestState(prisma, free.requestId))!.closing, null,
     "still open for the operator's confirmation");
 });
+
+test("the approver's claim and answer are one transaction: a refused answer rolls the claim back", async () => {
+  const proposal = await proposedWorkerQuestion({ kind: "select", optionId: "a",
+    rationale: "Shorter reads better.", irreversible: false });
+  // The Task left its parked state after the question was filed: the answer
+  // cannot resume it and is refused inside the approver's transaction.
+  await asReplica((tx) => tx.$executeRaw`UPDATE "AmuxWorkItem" SET "status" = 'todo'
+    WHERE "id" = ${proposal.task.id}`);
+  assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
+    { requestId: proposal.requestId, kind: "question", applied: false });
+  assert.equal((await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: proposal.question.id } })).state,
+    "open");
+  assert.equal((await readDecisionMakerRequestState(prisma, proposal.requestId))!.closing, null,
+    "the claim was rolled back with the refused answer: the operator can still confirm or reject it");
+});

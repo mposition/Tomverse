@@ -235,6 +235,12 @@ test("a result whose body is gone is never approved on the DM's word: the review
   const review = await reviewOf(seed.reviewId);
   assert.equal(review.state, "open");
   assert.equal(review.handoffReason, "result_unreadable");
+  const handedAudit = await prisma.adminAuditLog.findFirst({ where: { targetId: seed.reviewId,
+    action: "amux.v22.result_review.handed_off" }, select: { entryHash: true, actorUserId: true,
+    metadata: true } });
+  assert.ok(handedAudit?.entryHash, "the handoff is in the hash chain");
+  assert.equal(handedAudit?.actorUserId, null);
+  assert.equal((handedAudit?.metadata as Record<string, unknown>).reason, "result_unreadable");
   const rows = await prisma.$transaction((tx) => readAmuxV22ResultReviewSyncRows(tx));
   assert.ok(!rows.pending.some((row) => row.reviewId === seed.reviewId), "no card for a handed-off review");
 });

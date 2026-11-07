@@ -251,11 +251,18 @@ export async function applyAmuxV22ResultReviewDecision(tx: Prisma.TransactionCli
   // A result whose body is gone cannot be approved or retried on its
   // strength: the review goes to the person, whose escalation is open.
   if (!row.resultReadable && input.decision !== "block") {
-    await tx.$executeRaw`
+    const handed = await tx.$executeRaw`
       UPDATE "AmuxV22ResultReview" SET "handoffReason" = 'result_unreadable',
         "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
         "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
       WHERE "id" = ${input.reviewId} AND "state" = 'open' AND "handoffAt" IS NULL`;
+    if (handed === 1)
+      await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.v22.result_review.handed_off", targetType: "AmuxV22ResultReview",
+        targetId: row.reviewId,
+        summary: "Left a v22 result review to a person: its result body could not be read.",
+        metadata: { requestId: input.requestId, reason: "result_unreadable",
+          decision: input.decision, source: input.source } });
     return { applied: false as const, outcome: "handed_off" as const };
   }
   let target = amuxV22ResultReviewTarget(input.decision);

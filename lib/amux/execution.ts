@@ -1665,7 +1665,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const executionRole = settlementAssignment ?
         amuxV22ExecutionRole(settlementAssignment.role) : null;
       const conclusionPlan = conclusionMode === "auto" &&
-        input.outcome === "succeeded" && !ownerQuestion && !reviewRequired &&
+        input.outcome === "succeeded" && !ownerQuestion && !questionPlan && !reviewRequired &&
         effectivePathDecision === "pass" && executionRole === "investigate" &&
         patch === null && storedPatch === null && task.sourceSystem === "admin-idea-v4" ?
         amuxV22ConclusionSettlement(storedResult?.conclusionVerdict ?? null) : null;
