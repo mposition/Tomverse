@@ -8,6 +8,13 @@ import type { AmuxCliUsageObservation } from "./cliUsageObservationCore";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const model = z.string().regex(/^[A-Za-z0-9._/\[\]-]{1,160}$/);
 const count = z.number().int().safe().nonnegative();
+/** No turn limit binds a v22 run since 2026-11-06; the 10-minute sidecar
+ * deadline does. A larger count is read as no count, so its receipt is partial. */
+export const AMUX_CLI_MAX_COMPLETED_TURNS = 10_000;
+export const AMUX_CLI_FAILURE_KINDS = ["turn_limit", "execution_error",
+  "budget_limit", "unknown"] as const;
+export type AmuxCliFailureKind = typeof AMUX_CLI_FAILURE_KINDS[number];
+
 const counts = z.object({
   inputTokens: count,
   outputTokens: count,
@@ -40,7 +47,11 @@ export const amuxUsageLedgerReceiptSchema = z.object({
   inputTokensIncludeCacheRead: z.boolean(),
   inputTokensIncludeCacheWrite: z.boolean().nullable(),
   reasoningOutputIncludedInOutput: z.boolean().nullable(),
-  completedTurns: count.max(128),
+  completedTurns: count.max(AMUX_CLI_MAX_COMPLETED_TURNS),
+  /** Why a Claude result that is not a success failed (lib/amux/v22OneShotSidecar.mjs),
+   * as a closed enum; never the CLI's error text. Absent on every other
+   * receipt, so receipts written before it keep their digest. */
+  cliFailure: z.enum(AMUX_CLI_FAILURE_KINDS).optional(),
 }).strict().superRefine((value, context) => {
   if (value.cli === "codex" && value.provider !== "openai" ||
       value.cli === "claude" && value.provider !== "anthropic" ||
@@ -76,6 +87,8 @@ export const amuxUsageLedgerReceiptSchema = z.object({
           value.inputTokensIncludeCacheWrite !== false ||
           value.reasoningOutputIncludedInOutput !== null)) ||
       (value.completeness === "reported_complete" && value.completedTurns === 0) ||
+      (value.cliFailure !== undefined &&
+        (value.cli !== "claude" || value.status !== "failed")) ||
       (value.actualModelId !== null && value.actualModelId.split("/").some(
         (part) => part === "" || part === "." || part === ".."))) {
     context.addIssue({ code: "custom", message: "inconsistent_cli_usage" });

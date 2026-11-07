@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { estimateAmuxCliApiCost, makeAmuxCliUsageReceipt,
+import { amuxCliUsageReceiptDigest, estimateAmuxCliApiCost, makeAmuxCliUsageReceipt,
   amuxCliUsageReceiptSchema, amuxUsageLedgerReceiptSchema } from
   "../lib/amux/cliUsageLedgerCore.ts";
 
@@ -90,4 +90,33 @@ test("native Messages API provenance is settlement-writer-only and exact", () =>
   ]) assert.equal(amuxUsageLedgerReceiptSchema.safeParse({
     ...native, ...changed,
   }).success, false);
+});
+
+test("a CLI failure cause rides only on a failed Claude receipt and leaves older digests alone", () => {
+  const partial = { ...observation, completeness: "reported_partial",
+    completedTurns: 13 };
+  const failed = makeAmuxCliUsageReceipt({ ...base, status: "failed",
+    observation: partial, cliFailure: "turn_limit" });
+  assert.equal(failed.cliFailure, "turn_limit");
+  assert.equal(Object.keys(failed).at(-1), "cliFailure");
+  assert.deepEqual(amuxCliUsageReceiptSchema.parse(
+    JSON.parse(JSON.stringify(failed))), failed);
+  // Without the field the receipt and its digest are what they always were.
+  const plain = makeAmuxCliUsageReceipt({ ...base, observation });
+  assert.equal(Object.hasOwn(plain, "cliFailure"), false);
+  const withoutCause = { ...failed };
+  delete withoutCause.cliFailure;
+  assert.equal(amuxCliUsageReceiptDigest(amuxCliUsageReceiptSchema.parse(withoutCause)),
+    amuxCliUsageReceiptDigest(makeAmuxCliUsageReceipt({ ...base,
+      status: "failed", observation: partial })));
+  for (const bad of [
+    { ...failed, status: "succeeded" },
+    { ...failed, cliFailure: "errors: secret text" },
+    { ...failed, cli: "codex", provider: "openai" },
+  ]) assert.equal(amuxCliUsageReceiptSchema.safeParse(bad).success, false);
+  // The old 128 ceiling no longer applies; a count stays bounded.
+  assert.equal(amuxCliUsageReceiptSchema.safeParse({ ...plain,
+    completedTurns: 400 }).success, true);
+  assert.equal(amuxCliUsageReceiptSchema.safeParse({ ...plain,
+    completedTurns: 10_001 }).success, false);
 });

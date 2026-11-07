@@ -321,6 +321,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // with a lifecycle guard; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261106100000_amux_idea_card_close_question",
+  // Owner decision 2026-11-06: the CLI usage failure kind; no commit-deadline
+  // marker, classifier or deferred trigger changes.
+  "20261106200000_amux_cli_usage_failure_kind",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

@@ -1349,6 +1349,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The replaced capability guard keeps its one SELECT EXISTS read of the person's audit row of the same transaction. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
   },
   {
+    path: "prisma/migrations/20261106200000_amux_cli_usage_failure_kind/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 3,
+    writeVerbs: 4,
+    reason:
+      "Owner decision 2026-11-06: adds the nullable closed-enum cliFailure column with its CHECK, and replaces the usage shape CHECK to raise the completed-turn bound to 10000 and bind cliFailure to failed Claude rows. It writes no row.",
+  },
+  {
     path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
     table: "AmuxCliUsageEvent",
     tableMentions: 1,

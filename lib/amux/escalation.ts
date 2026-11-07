@@ -47,6 +47,10 @@ const ESCALATION_REASON_CODES = new Set([
   "attempt_budget_exhausted",
   "execution_lease_expired",
   "usage_outcome_unknown",
+  // Owner decision 2026-11-06: a failed v22 CLI run whose cause the CLI named.
+  "cli_turn_limit",
+  "cli_execution_error",
+  "cli_budget_limit",
   "operational_cost_blocked",
   "canonical_deadline_review_required",
   // Policy version 15: why the WSL runner blocked an attempt.
