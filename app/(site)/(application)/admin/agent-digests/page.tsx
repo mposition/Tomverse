@@ -32,9 +32,11 @@ import { authOptions } from "@/lib/auth";
  */
 export default async function AdminAgentDigestsPage({ searchParams }: PageProps<"/admin/agent-digests">) {
   const query = await searchParams;
-  const legacy = typeof query.tab === "string" ? ADMIN_AGENT_DIGESTS_LEGACY_TABS[query.tab] : undefined;
+  // A repeated ?tab= names its first value, as resolveAdminTab reads it.
+  const requestedTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
+  const legacy = typeof requestedTab === "string" ? ADMIN_AGENT_DIGESTS_LEGACY_TABS[requestedTab] : undefined;
   if (legacy) redirect(adminRedirectTarget(legacy, query));
-  if (query.tab !== "trust-safety") redirect(adminRedirectTarget(ADMIN_AGENT_DIGESTS_DEFAULT_ROUTE, query));
+  if (requestedTab !== "trust-safety") redirect(adminRedirectTarget(ADMIN_AGENT_DIGESTS_DEFAULT_ROUTE, query));
   const session = await getServerSession(authOptions);
 
   return (

@@ -331,10 +331,10 @@ test("the approved redirect table: every old address lands where the sitemap say
 
 test("the Trust and safety digest keeps its address and every other digest address redirects", () => {
   const page = readFileSync(join(ADMIN_ROUTE_ROOT, "agent-digests", "page.tsx"), "utf8");
-  assert.ok(page.includes("ADMIN_AGENT_DIGESTS_LEGACY_TABS[query.tab]"));
+  assert.ok(page.includes("ADMIN_AGENT_DIGESTS_LEGACY_TABS[requestedTab]"));
   assert.ok(page.includes("redirect(adminRedirectTarget(legacy, query))"));
   // Everything but the one tab that stayed goes to Release.
-  assert.match(page, /query\.tab !== "trust-safety"\) redirect\(adminRedirectTarget\(ADMIN_AGENT_DIGESTS_DEFAULT_ROUTE, query\)\)/);
+  assert.match(page, /requestedTab !== "trust-safety"\) redirect\(adminRedirectTarget\(ADMIN_AGENT_DIGESTS_DEFAULT_ROUTE, query\)\)/);
   assert.equal("trust-safety" in ADMIN_AGENT_DIGESTS_LEGACY_TABS, false);
   const unlisted = ADMIN_UNLISTED_PAGES.find((entry) => entry.href === "/admin/agent-digests");
   assert.ok(unlisted, "the Trust and safety digest is a known page");
@@ -1212,6 +1212,16 @@ test("Platform's default models are Models' Default models tab", () => {
   assert.match(platform, /view=\{tab\.id as "emergency" \| "features" \| "account-defaults"\}/);
   const registry = readFileSync(join(process.cwd(), "components/admin/AdminModelRegistryPanel.tsx"), "utf8");
   assert.doesNotMatch(registry, /\/admin\/platform#default-models/);
+  // A save sends only what its tab draws: a tab opened before another
+  // operator engaged an emergency stop must not write the old value back.
+  const panel = readFileSync(join(process.cwd(), "components/admin/PlatformSettingsPanel.tsx"), "utf8");
+  const body = panel.slice(panel.indexOf('method: "PATCH"'), panel.indexOf("const data = (await response.json()", panel.indexOf('method: "PATCH"')));
+  assert.match(body, /\.\.\.\(show\("emergency"\)\s*\? \{ aiChatEnabled, attachmentsEnabled, publicSharingEnabled \}/);
+  assert.match(body, /\.\.\.\(show\("features"\)/);
+  assert.doesNotMatch(body, /^\s*aiChatEnabled,$/m);
+  // The old hash link is moved on in the browser.
+  assert.match(panel, /window\.location\.hash === "#default-models"/);
+  assert.match(panel, /router\.replace\("\/admin\/models\?tab=defaults#default-models"\)/);
 });
 
 test("the audit integrity check is the Audit log's, and its old address redirects", () => {

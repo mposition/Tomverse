@@ -2,6 +2,7 @@
 
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import {
@@ -37,8 +38,9 @@ import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProv
  * other four are the tabs of Feature flags (`emergency`, `features`,
  * `account-defaults`) and the Default models tab of Models (`default-models`),
  * which is where the default-model block lives since 2026-11-07. Every mount
- * holds the same state, so a save from one tab sends what the page loaded for
- * the sections it does not draw.
+ * holds the same state, but a save sends only the fields of the sections the
+ * mount draws: a tab left open must never write back a value it cannot show,
+ * such as an emergency stop another operator has engaged since it was loaded.
  */
 export type PlatformSettingsView =
   | "all"
@@ -173,6 +175,18 @@ export function PlatformSettingsPanel({
   const memoryCopy = useAdminMessages(adminPlatformMemoryMessages);
   const show = (section: Exclude<PlatformSettingsView, "all">) => view === "all" || view === section;
   const returnPath = platformSettingsPath(view);
+  const router = useRouter();
+  useEffect(() => {
+    // `/admin/platform#default-models` was a link people kept. A hash never
+    // reaches the server, so the move to Models > Default models is made here.
+    if (
+      view !== "default-models" &&
+      window.location.pathname === "/admin/platform" &&
+      window.location.hash === "#default-models"
+    ) {
+      router.replace("/admin/models?tab=defaults#default-models");
+    }
+  }, [view, router]);
   const { models } = useModelCatalog();
   // The effective default lineup, as the server resolved it (lib/appSettings).
   // A response without the field -- an older build answering -- keeps the
@@ -481,16 +495,23 @@ export function PlatformSettingsPanel({
       const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        // Only what this mount draws (the route accepts a partial body): the
+        // emergency stops from the Emergency stops tab, the rollout switches
+        // from the Feature switches tab.
         body: JSON.stringify({
-          aiChatEnabled,
-          attachmentsEnabled,
-          publicSharingEnabled,
-          imageGenerationEnabled,
-          externalConversationImportEnabled: externalImportEnabled,
-          externalConversationContinuationEnabled: externalContinuationEnabled,
-          assistantProfilesEnabled,
-          assistantKnowledgeEnabled,
-          chatStarterEnabled,
+          ...(show("emergency")
+            ? { aiChatEnabled, attachmentsEnabled, publicSharingEnabled }
+            : {}),
+          ...(show("features")
+            ? {
+                imageGenerationEnabled,
+                externalConversationImportEnabled: externalImportEnabled,
+                externalConversationContinuationEnabled: externalContinuationEnabled,
+                assistantProfilesEnabled,
+                assistantKnowledgeEnabled,
+                chatStarterEnabled,
+              }
+            : {}),
         }),
       });
       const data = (await response.json().catch(() => null)) as

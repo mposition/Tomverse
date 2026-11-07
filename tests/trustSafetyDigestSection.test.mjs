@@ -32,7 +32,7 @@ test("the section is a tab of the common digest area, not a page of its own", ()
   assert.ok(page, "the common digest area is still a known page");
   assert.deepEqual(page.sections, ["trust-safety"]);
   assert.equal(ADMIN_NAVIGATION.some((entry) => entry.href === "/admin/agent-digests"), false);
-  assert.match(codeOf(PAGE), /query\.tab !== "trust-safety"\) redirect\(/);
+  assert.match(codeOf(PAGE), /requestedTab !== "trust-safety"\) redirect\(/);
   assert.match(codeOf(PAGE), /<TrustSafetySection /);
 });
 
