@@ -530,9 +530,10 @@ export const AMUX_DB_BOUNDARIES = {
   // Resolve read: setup + switches + the next confirmation + request state +
   // the open question of its card + the open refusal of its card + the open
   // idea card close question of its card + result detail + bodies + fence.
+  // + the open v22 result review of its card (owner decision 2026-11-07).
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 10,
+    prismaCallCeiling: 11,
     isolation: "read",
   },
   // Answer: setup + audit chain lock + switches + the locked question, Task
@@ -563,9 +564,48 @@ export const AMUX_DB_BOUNDARIES = {
   // Card or close record: setup + update + read-back on the idea card close
   // question, then the same two on the v22 question, then on a refused session
   // answer's card, whichever it is + fence.
+  // + the same two on a v22 result review.
   decisionMakerV22QuestionWrite: {
     operation: "decision_maker_v22_question_write",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // A v22 result waiting for review (lib/amux/v22ResultReviewService.ts),
+  // within the same 12 statements. Sync read: setup + the cancel of reviews
+  // whose Task moved + pending + closing + fence.
+  decisionMakerV22ResultReviewRead: {
+    operation: "decision_maker_v22_result_review_read",
+    prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // Apply: setup + audit chain lock + switches + the locked review, Task and
+  // newest attempt + Task + escalation + review + canonical audit 4 + fence.
+  decisionMakerV22ResultReviewApply: {
+    operation: "decision_maker_v22_result_review_apply",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // Hand off: setup + audit chain lock + review + canonical audit 4 + fence.
+  decisionMakerV22ResultReviewHandoff: {
+    operation: "decision_maker_v22_result_review_handoff",
     prismaCallCeiling: 8,
+    isolation: "mutation",
+  },
+  // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:
+  // setup + switches + the open app-answered cards + the next open proposal
+  // among them + request state + result detail + bodies + the open refusal of
+  // its card + fence. The apply then takes the question type's own boundary.
+  decisionMakerAutoApplyRead: {
+    operation: "decision_maker_auto_apply_read",
+    prismaCallCeiling: 9,
+    isolation: "read",
+  },
+  // The approver's one transaction: setup + the request store's direct-answer
+  // close, which is the claim (at most 8) + the question type's applier (at
+  // most 11 past its setup) + fence. Claim and answer commit or roll back together.
+  decisionMakerAutoApply: {
+    operation: "decision_maker_auto_apply",
+    prismaCallCeiling: 22,
     isolation: "mutation",
   },
   // An idea card close question (lib/amux/ideaCardCloseService.ts), each within
