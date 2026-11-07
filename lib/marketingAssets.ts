@@ -14,7 +14,10 @@
  * second. So provenance is recorded per asset, the disclosure is recorded per
  * channel rather than globally -- the platforms do not agree on what they
  * require -- and an asset that is AI generated or AI modified cannot be marked
- * as depicting the product interface.
+ * as depicting the product interface. The one AI-origin provenance that may is
+ * a video whose product screens are all real captures and whose only AI part is
+ * a human presenter (owner decision 2026-11-07): the screens are the product,
+ * and the presenter is disclosed like any other AI-made content.
  *
  * Alt text is per locale and lives here rather than in a post, because it is a
  * property of the asset: the same picture needs the same description whichever
@@ -41,14 +44,17 @@ import {
  * `capture` is a real screenshot or recording of the product. `operator_upload`
  * is a file a person supplied that is not a capture -- a photograph, a logo, a
  * designed graphic. `ai_generated` was produced by a model; `ai_modified` began
- * as one of the first two and was changed by one. The last two are the ones a
- * disclosure rule cares about.
+ * as one of the first two and was changed by one. `capture_with_ai_presenter`
+ * is a video whose product screens are real captures, unchanged, with a
+ * model-made human presenter added (owner decision 2026-11-07). The last three
+ * are the ones a disclosure rule cares about.
  */
 export const MARKETING_ASSET_PROVENANCES = Object.freeze([
   "capture",
   "operator_upload",
   "ai_generated",
   "ai_modified",
+  "capture_with_ai_presenter",
 ] as const);
 export type MarketingAssetProvenance =
   (typeof MARKETING_ASSET_PROVENANCES)[number];
@@ -57,7 +63,24 @@ export type MarketingAssetProvenance =
 export const AI_ORIGIN_PROVENANCES = Object.freeze([
   "ai_generated",
   "ai_modified",
+  "capture_with_ai_presenter",
 ] as const);
+
+/**
+ * The one AI-origin provenance that may depict the product interface: what is
+ * AI-made is the presenter, never a screen. A presenter speaks, so it is a
+ * video's provenance only. A hand-kept registry entry names no kind, so that
+ * rule is the submission schema's (lib/marketingAssetSubmission.ts) and the
+ * database's (MarketingAsset_presenter_check).
+ */
+export const AI_PRESENTER_PROVENANCE = "capture_with_ai_presenter" satisfies MarketingAssetProvenance;
+
+/**
+ * Whether an asset of this provenance is of AI origin. The schema below and the
+ * publisher (which tells YouTube `containsSyntheticMedia`) both ask this.
+ */
+export const isAiOriginProvenance = (provenance: string): boolean =>
+  (AI_ORIGIN_PROVENANCES as readonly string[]).includes(provenance);
 
 /**
  * What a channel is told about an asset's origin.
@@ -112,16 +135,19 @@ export const marketingAssetSchema = z
      * Whether the asset shows the product's own interface. An AI origin cannot
      * claim this: a generated picture of our UI is a picture of something that
      * does not exist, and §7.3 refuses it outright rather than disclosing it.
+     * The exception is `capture_with_ai_presenter`, whose screens are captures.
      */
     depictsProductInterface: z.boolean(),
   })
   .strict()
   .superRefine((asset, context) => {
-    const aiOrigin = (AI_ORIGIN_PROVENANCES as readonly string[]).includes(
-      asset.provenance,
-    );
+    const aiOrigin = isAiOriginProvenance(asset.provenance);
 
-    if (aiOrigin && asset.depictsProductInterface) {
+    if (
+      aiOrigin &&
+      asset.provenance !== AI_PRESENTER_PROVENANCE &&
+      asset.depictsProductInterface
+    ) {
       context.addIssue({
         code: "custom",
         message:
@@ -236,7 +262,11 @@ const deepFreeze = <T>(value: T): T => {
  * object: parse a `capture` asset, set it to `ai_generated`, and the
  * `depictsProductInterface` rule that `superRefine` enforced at parse time has
  * already run. The asset would resolve with a `none` disclosure while claiming
- * to be a photograph of the product.
+ * to be a photograph of the product. The presenter provenance is the same hole
+ * from the other side: it is the one AI origin allowed to show the product, so
+ * setting a checked `capture_with_ai_presenter` asset to `ai_generated` would
+ * carry a model-made interface past the rule that refuses one, and setting it
+ * to `capture` would make an AI presenter read as not of AI origin.
  */
 export function loadMarketingAssetRegistry(raw: unknown): LoadedAssetRegistry {
   const parsed = deepFreeze(

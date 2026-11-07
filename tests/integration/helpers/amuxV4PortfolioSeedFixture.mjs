@@ -16,6 +16,13 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
   const costReceiptDigest = input.costReceiptDigest ?? null;
   const settlementStatus = input.settlementStatus ?? "review";
   const settlementGrade = input.settlementGrade ?? executionGrade;
+  // A settlement that ended the attempt some other way, e.g. a Claude
+  // failure the CLI named: outcome "blocked" with reason "cli_turn_limit".
+  const settlementOutcome = input.settlementOutcome ?? "succeeded";
+  const settlementReason = input.settlementReason ?? null;
+  // The attempt's usage row: by default an unreported Codex outcome; with
+  // claudeCliFailure, the partial receipt a failed Claude result leaves.
+  const claudeCliFailure = input.claudeCliFailure ?? null;
   const ids = { initiative: randomUUID(), epic: randomUUID(),
     feature: randomUUID(), task: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
     sourceApproval: randomUUID() };
@@ -278,10 +285,10 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
      "catalogVersion", "costReceiptDigest", "perAttemptMicroUsd",
      "authorizationAuditLogId", "assignedAt") VALUES
     ($1, $2, $3, $4, 'sev1', 1, 'worker-one', '${instanceId}',
-     1, 'openai', 'model-one', 'investigate', $7, 'route-one', $5,
+     1, $8, 'model-one', 'investigate', $7, 'route-one', $5,
      'catalog-one', 'v1', $5, 3400000, $6, CURRENT_TIMESTAMP)`,
   [assignmentId, ids.task, receiptId, laneSeq, digest, assignmentAudit,
-    executionGrade]);
+    executionGrade, claudeCliFailure ? "anthropic" : "openai"]);
   await db.query(`UPDATE public."AmuxWorkItem"
     SET "owner" = 'worker-one', "claimedAt" = CURRENT_TIMESTAMP,
       "v22AssignmentId" = $2, "revision" = 2
@@ -311,17 +318,34 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
     VALUES ($1, 'project', 'synthetic-recovery', date_trunc('month', CURRENT_TIMESTAMP),
       date_trunc('month', CURRENT_TIMESTAMP) + interval '1 month', $2, $3,
       'reservation', 3400000)`, [randomUUID(), ids.task, attemptId]);
-  await db.query(`INSERT INTO public."AmuxCliUsageEvent"
-    ("id", "invocationId", "receiptDigest", "bindingKind", "attemptId", "taskId",
-     "worker", "cli", "provider", "selectedModelId", "authentication",
-     "startedAt", "endedAt", "status", "completeness", "source",
-     "inputTokensIncludeCacheRead", "inputTokensIncludeCacheWrite",
-     "reasoningOutputIncludedInOutput", "completedTurns", "createdAt", "retentionUntil")
-    VALUES ($1, $2, $3, 'task_attempt', $4, $5, 'worker-one', 'codex', 'openai',
-      'model-one', 'subscription', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-      'outcome_unknown', 'unknown', 'unreported', true, NULL, true, 0,
-      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '13 months')`,
-  [randomUUID(), `recovery-${randomUUID()}`, digest, attemptId, ids.task]);
+  if (claudeCliFailure) {
+    await db.query(`INSERT INTO public."AmuxCliUsageEvent"
+      ("id", "invocationId", "receiptDigest", "bindingKind", "attemptId", "taskId",
+       "worker", "cli", "provider", "selectedModelId", "actualModelId",
+       "authentication", "startedAt", "endedAt", "status", "completeness",
+       "source", "inputTokens", "outputTokens", "cacheReadInputTokens",
+       "cacheCreationInputTokens", "inputTokensIncludeCacheRead",
+       "inputTokensIncludeCacheWrite", "completedTurns", "cliFailure",
+       "createdAt", "retentionUntil")
+      VALUES ($1, $2, $3, 'task_attempt', $4, $5, 'worker-one', 'claude',
+        'anthropic', 'model-one', 'model-one', 'subscription',
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'failed', 'reported_partial',
+        'claude_result', 1, 1, 0, 0, false, false, 13, $6,
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '13 months')`,
+    [randomUUID(), attemptId, digest, attemptId, ids.task, claudeCliFailure]);
+  } else {
+    await db.query(`INSERT INTO public."AmuxCliUsageEvent"
+      ("id", "invocationId", "receiptDigest", "bindingKind", "attemptId", "taskId",
+       "worker", "cli", "provider", "selectedModelId", "authentication",
+       "startedAt", "endedAt", "status", "completeness", "source",
+       "inputTokensIncludeCacheRead", "inputTokensIncludeCacheWrite",
+       "reasoningOutputIncludedInOutput", "completedTurns", "createdAt", "retentionUntil")
+      VALUES ($1, $2, $3, 'task_attempt', $4, $5, 'worker-one', 'codex', 'openai',
+        'model-one', 'subscription', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+        'outcome_unknown', 'unknown', 'unreported', true, NULL, true, 0,
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '13 months')`,
+    [randomUUID(), `recovery-${randomUUID()}`, digest, attemptId, ids.task]);
+  }
   await db.query(`INSERT INTO public."AmuxWorkDelivery"
     ("attemptId", "taskId", "worker", "workerInstanceId", "workerGeneration",
      "taskRevision", "prompt", "status", "updatedAt")
@@ -345,9 +369,9 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
     WHERE "id" = $1`, [ids.task, settlementStatus, settlementGrade]);
   await db.query(`UPDATE public."AmuxExecutionAttempt"
     SET "endedAt" = CURRENT_TIMESTAMP, "leaseExpiresAt" = NULL,
-        "outcome" = 'succeeded', "toStatus" = $2,
+        "outcome" = $3, "toStatus" = $2, "reason" = $4,
         "endedBy" = 'worker-one' WHERE "id" = $1`,
-  [attemptId, settlementStatus]);
+  [attemptId, settlementStatus, settlementOutcome, settlementReason]);
   await db.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
     amux_v22_doing_guard_trigger IMMEDIATE`);
   await input.afterSettlement?.({ ids });
