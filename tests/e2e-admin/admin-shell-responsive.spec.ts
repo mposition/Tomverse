@@ -197,7 +197,7 @@ test.describe("admin console on a narrow viewport", () => {
     const workQueue = navigation.getByRole("link", { name: /^Decisions/ });
     await expect(workQueue).not.toHaveAttribute("title", /./);
     await expect(
-      workQueue.getByText("Everything waiting on an operator, oldest first")
+      workQueue.getByText("Everything waiting on a person, by area")
     ).toBeVisible();
   });
 
@@ -360,7 +360,7 @@ test.describe("admin console on a narrow viewport", () => {
     await page.goto("/admin/providers");
 
     const tabs = page.getByRole("navigation", { name: "Provider sections" });
-    await expect(tabs.getByRole("link", { name: "Health" })).toHaveAttribute(
+    await expect(tabs.getByRole("link", { name: "Status" })).toHaveAttribute(
       "aria-current",
       "page"
     );

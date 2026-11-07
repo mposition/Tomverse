@@ -1,27 +1,31 @@
-// Renders one 4:5 image card from a source pack and writes the asset file the
-// submission needs:
+// Renders one 4:5 image card (1080x1350) from a source pack and a layout the
+// job designed, and writes the asset file the submission needs:
 //   node make-card.mjs <job/sources/<asset-id>/pack.json> <spec.json> <out-dir>
-// The layout is the one the owner approved on 2026-11-03 (Canva DAHZ2Rm5gVc,
-// "r2b"): the real question in a pill, two headline lines, three real answer
-// cards fanned out, the real analysis summary under a callout band, the logo
-// and a call to action. Brand colours only (#ffffff, #18181b, #155dfb,
-// #eff6ff, #f7f8fa, #e4e4e7).
 //
-// Every word on the card comes from the pack: spec.json picks a headline pair,
-// a callout and a call to action from the lines the pack carries, which are
-// the approved short's own on-screen lines. A line the pack does not carry is
-// refused, so the job cannot put new words on a card.
+// The job designs every card itself (owner 2026-11-07: "no card that only
+// changes its words" -- one fixed layout over the same captures was retired).
+// spec.json is {"id", "layout": "<path to an HTML fragment>", "locale"?}. The
+// fragment is a <style> block and the card's elements; it names pictures as
+// `capture:<name>` (in an img src or a CSS url()), and those are the pack's
+// real captures and nothing else.
+//
+// This file checks what the job cannot be trusted to keep, and refuses the
+// card otherwise:
+//  - words: every piece of text on the card is one of the pack's own lines
+//    (question, headline lines, callouts, ctas) or "Tomverse", "Q", "→", "≠";
+//  - pictures: only the pack's captures; nothing is fetched but those files
+//    and the fonts this file links; no script, no CSS generated text;
+//  - colours: every colour drawn is a brand colour (any opacity);
+//  - nothing cut off: every line lies wholly inside the card;
+//  - not a copy: the card must not look like a card of an earlier day
+//    (a difference hash of the picture, so new words on an old look fail).
 //
 // A Simplified Chinese card for RedNote (owner 2026-11-07) is made from a
-// zh-Hant pack with `"locale": "zh-Hans"` in the spec: the spec still names the
-// pack's own lines, and every line the card draws is that line converted to
-// Simplified by OpenCC, character for character -- no new words. The captures
-// are the pack's pictures, unchanged, so the words inside them stay as they
-// were taken.
+// zh-Hant pack with `"locale": "zh-Hans"`: the layout names the pack's own
+// Traditional lines, and each is drawn converted by OpenCC -- no new words.
 //
-// Exit codes: 0 written, 2 usage, 1 anything else (a line that does not fit,
-// a missing image, a refused spec).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Exit codes: 0 written, 2 usage, 1 anything else.
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -41,6 +45,17 @@ const CARD_CHANNELS = {
   "zh-Hant": ["facebook", "instagram", "threads"],
   "zh-Hans": ["rednote"],
 };
+/** #ffffff #18181b #155dfb #eff6ff #f7f8fa #e4e4e7, as the browser reports them. */
+const BRAND_RGB = ["255,255,255", "24,24,27", "21,93,251", "239,246,255", "247,248,250", "228,228,231"];
+/** Marks a card may draw besides the pack's lines. */
+const MARKS = ["Tomverse", "Q", "→", "≠"];
+/**
+ * How many of 256 hash bits must differ from every earlier day's card. Measured
+ * 2026-11-07: the retired layout with only its words changed differed by 32;
+ * four cards of different composition differed from it and each other by 92-144.
+ */
+const MIN_HASH_DISTANCE = 64;
+const LOOKBACK_DAYS = 30;
 
 const fail = (message) => {
   console.error(JSON.stringify({ step: "make-card", error: message }));
@@ -51,33 +66,47 @@ const pack = JSON.parse(readFileSync(packPath, "utf8"));
 const spec = JSON.parse(readFileSync(specPath, "utf8"));
 const packDir = path.dirname(path.resolve(packPath));
 
-// The card's locale: the pack's, or Simplified made from a Traditional pack.
 const locale = spec.locale ?? pack.locale;
 if (locale !== pack.locale && !(locale === "zh-Hans" && pack.locale === "zh-Hant")) {
   fail(`a ${locale} card cannot be made from a ${pack.locale} pack`);
 }
-const toSimplified = OpenCC.Converter({ from: "tw", to: "cn" });
-/** A pack line as this card draws it. */
-const draw = (line) => (locale === pack.locale ? line : toSimplified(line));
-
 if (!CARD_CHANNELS[locale]) fail(`no card channels for locale ${locale}`);
 if (!/^media-[a-z0-9][a-z0-9-]{0,99}$/u.test(spec.id ?? "")) fail("spec.id is not a media asset id");
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-if (!pack.headlines.some((pair) => same(pair, spec.headline))) fail("spec.headline is not one of the pack's lines");
-if (!pack.callouts.includes(spec.callout)) fail("spec.callout is not one of the pack's lines");
-if (!pack.ctas.includes(spec.cta)) fail("spec.cta is not one of the pack's lines");
-const question = pack.question.map(draw);
-const headline = spec.headline.map(draw);
-const callout = draw(spec.callout);
-const cta = draw(spec.cta);
+const toSimplified = OpenCC.Converter({ from: "tw", to: "cn" });
 
-const image = (name) => {
-  const file = path.join(packDir, pack.images[name]);
-  if (!existsSync(file)) fail(`missing image ${name}: ${file}`);
-  return pathToFileURL(file).href;
-};
-const escape = (text) =>
-  String(text).replace(/[&<>"]/gu, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+// The pack's captures: `captures` ({name: {file, text}}), or the first packs'
+// fixed five pictures.
+const captures =
+  pack.captures ??
+  Object.fromEntries(
+    [
+      ["left", pack.captureText?.[0]],
+      ["center", pack.captureText?.[1]],
+      ["right", pack.captureText?.[2]],
+      ["summary", pack.summaryText],
+      ["logo", ""],
+    ].map(([name, text]) => [name, { file: pack.images?.[name], text: text ?? "" }]),
+  );
+for (const [name, capture] of Object.entries(captures)) {
+  if (typeof capture?.file !== "string" || !existsSync(path.join(packDir, capture.file))) fail(`missing capture ${name}`);
+}
+
+const lines = [...pack.question, ...pack.headlines.flat(), ...pack.callouts, ...pack.ctas];
+const normal = (text) => text.replace(/\s+/gu, " ").trim();
+const allowed = new Set([...lines, ...MARKS].map(normal));
+
+const layoutPath = path.resolve(path.dirname(path.resolve(specPath)), spec.layout ?? "");
+if (!spec.layout || !existsSync(layoutPath)) fail("spec.layout names no layout file");
+const layout = readFileSync(layoutPath, "utf8");
+if (/<\s*(script|iframe|object|embed|link|meta|base|frame|input|textarea|select|option|button|video|audio|canvas|use|image|foreignobject)\b|\son[a-z]+\s*=|javascript:|@import|<\s*svg[^>]*\shref|xlink:href/iu.test(layout)) {
+  fail("the layout may hold only HTML, CSS and capture: pictures");
+}
+// Every url() and src names a capture; nothing else is fetched.
+const named = [...layout.matchAll(/(?:src\s*=\s*["']|url\(\s*["']?)([^"')\s]+)/giu)].map((match) => match[1]);
+const unknown = named.filter((ref) => !/^capture:[a-z0-9-]+$/u.test(ref) || !captures[ref.slice(8)]);
+if (unknown.length > 0) fail(`the layout names pictures that are not the pack's captures: ${JSON.stringify(unknown)}`);
+const used = [...new Set(named.map((ref) => ref.slice(8)))];
+const body = layout.replace(/capture:([a-z0-9-]+)/gu, (_, name) => pathToFileURL(path.join(packDir, captures[name].file)).href);
 
 const fonts =
   locale === "zh-Hant"
@@ -85,106 +114,166 @@ const fonts =
     : locale === "zh-Hans"
       ? "'Geist', 'Noto Sans SC', sans-serif"
       : "'Geist', 'Noto Sans KR', sans-serif";
-
 const html = `<!doctype html>
 <html lang="${locale}"><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@500;700;800&family=Noto+Sans+KR:wght@500;700;900&family=Noto+Sans+TC:wght@500;700;900&family=Noto+Sans+SC:wght@500;700;900&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700;800;900&family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Sans+SC:wght@400;500;700;900&display=block">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 1080px; height: 1350px; background: #ffffff; overflow: hidden; }
-  body { position: relative; font-family: ${fonts}; color: #18181b; }
-  .abs { position: absolute; }
-  .pill { left: 56px; top: 64px; width: 968px; height: 140px; border-radius: 70px; background: #f7f8fa; border: 2px solid #e4e4e7; }
-  .q { left: 98px; top: 104px; font-size: 44px; font-weight: 800; color: #155dfb; }
-  .question { left: 152px; top: 78px; width: 836px; height: 112px; display: flex; flex-direction: column; justify-content: center;
-    font-size: 33px; font-weight: 700; line-height: 1.3; }
-  .head { left: 60px; width: 960px; font-size: 108px; font-weight: 800; line-height: 1.08; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; }
-  .h1 { top: 222px; } .h2 { top: 338px; color: #155dfb; }
-  .band { left: 36px; top: 508px; width: 1008px; height: 730px; border-radius: 48px; background: #eff6ff; }
-  .card { width: 400px; height: 559px; object-fit: cover; }
-  .left { left: 14px; top: 505px; transform: rotate(-7deg); }
-  .right { left: 666px; top: 505px; transform: rotate(7deg); }
-  .center { left: 340px; top: 470px; }
-  .summary { left: 250px; top: 890px; width: 760px; height: 361px; object-fit: cover; transform: rotate(-2deg); }
-  .callout { left: 300px; top: 862px; width: 600px; height: 72px; border-radius: 36px; background: #155dfb; color: #ffffff;
-    transform: rotate(-2deg); display: flex; align-items: center; justify-content: center; padding: 0 28px;
-    font-size: 36px; font-weight: 800; white-space: nowrap; overflow: hidden; }
-  .logo { left: 60px; top: 1258px; width: 56px; height: 56px; }
-  .brand { left: 128px; top: 1264px; font-family: 'Geist', sans-serif; font-size: 38px; font-weight: 800; }
-  .cta { right: 60px; top: 1266px; width: 600px; text-align: right; font-size: 32px; font-weight: 800; color: #155dfb; white-space: nowrap; overflow: hidden; }
+  html, body { width: 1080px; height: 1350px; overflow: hidden; }
+  body { position: relative; font-family: ${fonts}; color: #18181b; background: #ffffff; }
 </style></head><body>
-  <div class="abs pill"></div>
-  <div class="abs q">Q</div>
-  <div class="abs question" data-fit="22">${question.map((line) => `<div>${escape(line)}</div>`).join("")}</div>
-  <div class="abs head h1" data-fit="64">${escape(headline[0])}</div>
-  <div class="abs head h2" data-fit="64">${escape(headline[1])}</div>
-  <div class="abs band"></div>
-  <img class="abs card left" src="${image("left")}">
-  <img class="abs card right" src="${image("right")}">
-  <img class="abs card center" src="${image("center")}">
-  <img class="abs summary" src="${image("summary")}">
-  <div class="abs callout" data-fit="24">${escape(callout)}</div>
-  <img class="abs logo" src="${image("logo")}">
-  <div class="abs brand">Tomverse</div>
-  <div class="abs cta" data-fit="22">${escape(cta)}</div>
+${body}
 </body></html>`;
 
 mkdirSync(outDir, { recursive: true });
 const htmlPath = path.join(outDir, `${spec.id}.html`);
 writeFileSync(htmlPath, html);
+const pngPath = path.join(outDir, `${spec.id}.png`);
 
+/** The picture's 256-bit difference hash, as a 0/1 string (16 rows of 16 neighbour comparisons). */
+async function differenceHash(page, file) {
+  const data = readFileSync(file).toString("base64");
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const canvas = Object.assign(document.createElement("canvas"), { width: 17, height: 16 });
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, 17, 16);
+    const px = ctx.getImageData(0, 0, 17, 16).data;
+    const grey = (x, y) => { const i = (y * 17 + x) * 4; return px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114; };
+    let bits = "";
+    for (let y = 0; y < 16; y += 1) for (let x = 0; x < 16; x += 1) bits += grey(x, y) > grey(x + 1, y) ? "1" : "0";
+    return bits;
+  }, data);
+}
+
+/** Cards that earlier days made: job/<yyyymmdd>/media-*-card*.png within the lookback, never today's. */
+function earlierCards(today) {
+  const jobDir = path.dirname(path.resolve(outDir));
+  const cutoff = Number(new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10).replaceAll("-", ""));
+  const found = [];
+  for (const day of existsSync(jobDir) ? readdirSync(jobDir) : []) {
+    if (!/^\d{8}$/u.test(day) || day === today || Number(day) < cutoff) continue;
+    const dir = path.join(jobDir, day);
+    if (!statSync(dir).isDirectory()) continue;
+    for (const file of readdirSync(dir)) if (/^media-.*-card(-\d+)?\.png$/u.test(file)) found.push(path.join(dir, file));
+  }
+  return found;
+}
+
+let cardLines = [];
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1080, height: 1350 }, deviceScaleFactor: 1 });
+  const fetched = [];
+  const capturesAllowed = new Set(used.map((name) => pathToFileURL(path.join(packDir, captures[name].file)).href));
+  await page.route("**/*", (route) => {
+    const url = route.request().url();
+    const ok =
+      url === pathToFileURL(htmlPath).href ||
+      capturesAllowed.has(url) ||
+      url.startsWith("https://fonts.googleapis.com/") ||
+      url.startsWith("https://fonts.gstatic.com/");
+    if (!ok) fetched.push(url);
+    return ok ? route.continue() : route.abort();
+  });
   await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "networkidle", timeout: 60_000 });
   await page.evaluate(() => document.fonts.ready);
-  // Shrink each line until it fits its box; a line that cannot fit at its floor is refused.
-  const overflowing = await page.evaluate(() => {
-    const bad = [];
-    for (const el of document.querySelectorAll("[data-fit]")) {
-      const floor = Number(el.dataset.fit);
-      let size = parseFloat(getComputedStyle(el).fontSize);
-      // A one-line box overflows only sideways (a tall glyph is not a wrap);
-      // the question's two lines must also fit its height.
-      const wraps = el.classList.contains("question");
-      const over = () => el.scrollWidth > el.clientWidth + 1 || (wraps && el.scrollHeight > el.clientHeight + 1);
-      while (over() && size > floor) {
-        size -= 2;
-        el.style.fontSize = `${size}px`;
+  if (fetched.length > 0) fail(`the layout fetched something else: ${JSON.stringify(fetched)}`);
+
+  const found = await page.evaluate((brand) => {
+    const texts = [];
+    const cut = [];
+    const generated = [];
+    const colours = new Set();
+    // Each text node is one whole line: a line split over elements reads as
+    // pieces, and a piece is not one of the pack's lines.
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (!node.textContent.trim() || node.parentElement.closest("style")) continue;
+      texts.push(node.textContent);
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        if (rect.width === 0) continue;
+        if (rect.left < -1 || rect.top < -1 || rect.right > 1081 || rect.bottom > 1351) cut.push(node.textContent);
       }
-      if (over()) bad.push(el.textContent);
+      // A box that clips its text sideways hides part of a line.
+      const owner = node.parentElement;
+      if (owner.scrollWidth > owner.clientWidth + 2 && getComputedStyle(owner).overflowX !== "visible") cut.push(node.textContent);
     }
-    return bad;
-  });
-  if (overflowing.length > 0) fail(`lines do not fit: ${JSON.stringify(overflowing)}`);
-  // The two headline lines share one size, the smaller of the two fitted.
-  await page.evaluate(() => {
-    const heads = [...document.querySelectorAll(".head")];
-    const size = Math.min(...heads.map((el) => parseFloat(getComputedStyle(el).fontSize)));
-    for (const el of heads) el.style.fontSize = `${size}px`;
-  });
-  await page.screenshot({ path: path.join(outDir, `${spec.id}.png`), type: "png" });
+    for (const el of [document.documentElement, ...document.querySelectorAll("body, body *")]) {
+      for (const pseudo of ["::before", "::after", "::marker"]) {
+        const content = getComputedStyle(el, pseudo).content;
+        if (content && content !== "none" && content !== "normal" && content !== '""') generated.push(content);
+      }
+      const style = getComputedStyle(el);
+      if (style.display === "list-item") generated.push("list-item");
+      // The root's own text colour is the browser's black and draws nothing; its background does.
+      const props = el === document.documentElement ? ["backgroundColor", "backgroundImage"] : ["color", "backgroundColor", "backgroundImage", "boxShadow", "textShadow", "filter"];
+      if (el instanceof SVGElement) props.push("fill", "stroke");
+      for (const side of ["Top", "Right", "Bottom", "Left"]) if (parseFloat(style[`border${side}Width`]) > 0) props.push(`border${side}Color`);
+      if (style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0) props.push("outlineColor");
+      for (const prop of props) {
+        for (const m of String(style[prop]).matchAll(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?\s*\)/gu)) {
+          if (m[4] !== undefined && Number(m[4]) === 0) continue;
+          const rgb = `${m[1]},${m[2]},${m[3]}`;
+          if (!brand.includes(rgb)) colours.add(`${rgb} ${el.tagName} ${prop}`);
+        }
+        if (/\b(?:hsla?|lab|lch|oklab|oklch|color)\(/u.test(String(style[prop]))) colours.add(String(style[prop]));
+      }
+    }
+    return { texts, cut, generated, colours: [...colours] };
+  }, BRAND_RGB);
+
+  if (found.generated.length > 0) fail(`CSS may not draw text: ${JSON.stringify(found.generated)}`);
+  const strangers = found.texts.map(normal).filter((text) => text && !allowed.has(text));
+  if (strangers.length > 0) fail(`text that is not one of the pack's lines: ${JSON.stringify(strangers)}`);
+  if (!found.texts.some((text) => pack.headlines.flat().map(normal).includes(normal(text)))) fail("the card shows no headline line");
+  if (found.cut.length > 0) fail(`lines cut off or outside the card: ${JSON.stringify(found.cut)}`);
+  if (found.colours.length > 0) fail(`colours outside the brand palette: ${JSON.stringify(found.colours)}`);
+
+  // Draw the lines in Simplified for a zh-Hans card, after they were checked as the pack's own.
+  if (locale !== pack.locale) {
+    await page.evaluate(() => {
+      window.__lines = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) window.__lines.push(walker.currentNode);
+    });
+    const originals = await page.evaluate(() => window.__lines.map((node) => node.textContent));
+    await page.evaluate((converted) => window.__lines.forEach((node, i) => { node.textContent = converted[i]; }), originals.map((text) => toSimplified(text)));
+    await page.evaluate(() => document.fonts.ready);
+  }
+  await page.screenshot({ path: pngPath, type: "png" });
+
+  const today = path.basename(path.resolve(outDir));
+  const mine = await differenceHash(page, pngPath);
+  for (const earlier of earlierCards(today)) {
+    const theirs = await differenceHash(page, earlier);
+    let distance = 0;
+    for (let i = 0; i < mine.length; i += 1) if (mine[i] !== theirs[i]) distance += 1;
+    if (distance < MIN_HASH_DISTANCE) {
+      fail(`looks like ${path.basename(earlier)} (hash distance ${distance} < ${MIN_HASH_DISTANCE}): change the composition and the captures, not only the words`);
+    }
+  }
+  cardLines = found.texts.map(normal).filter((text) => !MARKS.includes(text));
 } finally {
   await browser.close();
 }
 
-// Every word the card shows, in reading order, for the Guard at submission --
-// the captures' own text included (the answers' model names, numbers and
-// wording are on the card too), so a person approving it sees the Guard's
-// codes for all of it. The captures' text is what the pictures show, so it is
-// never converted.
-if (!Array.isArray(pack.captureText) || pack.captureText.length !== 3) {
-  fail("pack.captureText must hold the left, center and right captures' text");
-}
+// Every word the card shows, for the Guard at submission: its own lines and
+// the words inside the captures it used. The captures' text is what the
+// pictures show, so it is never converted.
+const draw = (line) => (locale === pack.locale ? line : toSimplified(line));
 const transcript = [
-  ...question,
-  ...headline,
-  ...pack.captureText,
-  callout,
-  pack.summaryText,
+  ...cardLines.map(draw),
+  ...used.map((name) => captures[name].text).filter(Boolean),
   "Tomverse",
-  cta.replace(/\s*→\s*$/u, ""),
-].join(" ");
+]
+  .map((text) => text.replace(/\s*→\s*$/u, ""))
+  .join(" ");
 const channels = CARD_CHANNELS[locale];
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
 // The card reuses the approved short's words and captures, so it rests on the
@@ -213,4 +302,4 @@ writeFileSync(
     2,
   ),
 );
-console.log(JSON.stringify({ made: spec.id, png: path.join(outDir, `${spec.id}.png`) }));
+console.log(JSON.stringify({ made: spec.id, png: pngPath, captures: used }));
