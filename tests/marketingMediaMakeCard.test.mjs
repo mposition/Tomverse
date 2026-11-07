@@ -141,7 +141,8 @@ test("an AI photo needs the locale's AI line, makes an ai_generated asset, and n
     assert.match(mixed.stderr, /may not share a card/u);
     // The line has to be seen, not merely present.
     for (const hidden of [
-      photo('<span style="opacity:.2">Photo: AI-generated</span>'),
+      photo('<span style="opacity:.02">Photo: AI-generated</span>'),
+      photo('<span style="color:rgba(255,255,255,0)">Photo: AI-generated</span>'),
       photo('<span style="font-size:8px">Photo: AI-generated</span>'),
       `${photo("Photo: AI-generated")}<div style="position:absolute;right:0;bottom:0;width:400px;height:120px;background:#18181b"></div>`,
     ]) {
@@ -182,6 +183,9 @@ test("a versioned model name must be one features.json lists", { skip }, () => {
     const invented = make(ctx, "20261101", "media-a-card", chips("Now with", "GPT 7."));
     assert.equal(invented.status, 1);
     assert.match(invented.stderr, /GPT 7.{0,2} is not a model name/u);
+    const split = make(ctx, "20261101", "media-c-card", chips("Now with", "GPT <span>7</span>."));
+    assert.equal(split.status, 1);
+    assert.match(split.stderr, /GPT 7.{0,2} is not a model name/u);
     const family = make(ctx, "20261101", "media-b-card", chips("GPT, Claude,", "Gemini."));
     assert.equal(family.status, 0, family.stderr);
   } finally {

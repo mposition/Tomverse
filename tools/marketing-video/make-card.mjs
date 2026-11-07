@@ -248,30 +248,35 @@ try {
         if (/\b(?:hsla?|lab|lch|oklab|oklch|color)\(/u.test(String(style[prop]))) colours.add(String(style[prop]));
       }
     }
-    // The AI line must really be seen: drawn, at least 14 px, at least half
-    // opaque through every ancestor, inside the card, and on top where it sits.
-    let aiLineSeen = aiLine === null;
-    const lines = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    while (aiLine !== null && lines.nextNode()) {
-      const node = lines.currentNode;
-      if (node.textContent.replace(/\s+/gu, " ").trim() !== aiLine) continue;
-      const owner = node.parentElement;
-      let opacity = 1;
-      let shown = true;
-      for (let el = owner; el; el = el.parentElement) {
-        const style = getComputedStyle(el);
-        opacity *= Number(style.opacity);
-        if (style.visibility !== "visible" || style.display === "none") shown = false;
-      }
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      const rect = range.getBoundingClientRect();
-      const inside = rect.width > 0 && rect.left >= 0 && rect.top >= 0 && rect.right <= 1080 && rect.bottom <= 1350;
-      const top = inside ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
-      const onTop = Boolean(top && (top === owner || owner.contains(top)));
-      if (shown && opacity >= 0.5 && parseFloat(getComputedStyle(owner).fontSize) >= 14 && inside && onTop) aiLineSeen = true;
+    // What a reader reads as one phrase: the text of the nearest box that is
+    // not inline, so "GPT <span>7</span>" is read as "GPT 7".
+    const phrases = new Map();
+    const smallest = new Map();
+    const phraseWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (phraseWalker.nextNode()) {
+      const node = phraseWalker.currentNode;
+      if (!node.textContent.trim() || node.parentElement.closest("style")) continue;
+      let box = node.parentElement;
+      while (box !== document.body && getComputedStyle(box).display === "inline") box = box.parentElement;
+      phrases.set(box, `${phrases.get(box) ?? ""}${node.textContent}`);
+      const size = parseFloat(getComputedStyle(node.parentElement).fontSize);
+      smallest.set(box, Math.min(smallest.get(box) ?? size, size));
     }
-    return { texts, cut, generated, colours: [...colours], aiLineSeen };
+    // Where the AI line sits, for the pixel check below: the box whose text
+    // is exactly the line, every piece of it at least 14 px, inside the card.
+    let aiBox = null;
+    if (aiLine !== null) {
+      for (const [box, text] of phrases) {
+        if (text.replace(/\s+/gu, " ").trim() !== aiLine || smallest.get(box) < 14) continue;
+        const rect = box.getBoundingClientRect();
+        if (rect.width > 0 && rect.left >= 0 && rect.top >= 0 && rect.right <= 1080 && rect.bottom <= 1350) {
+          box.dataset.aiLine = "1";
+          aiBox = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+          break;
+        }
+      }
+    }
+    return { texts, cut, generated, colours: [...colours], phrases: [...phrases.values()], aiBox };
   }, [BRAND_RGB, usedAi.length > 0 ? AI_LINE[locale] : null]);
 
   const normal = (text) => text.replace(/\s+/gu, " ").trim();
@@ -279,13 +284,41 @@ try {
   if (found.texts.length === 0) fail("the card shows no words");
   if (found.cut.length > 0) fail(`lines cut off or outside the card: ${JSON.stringify(found.cut)}`);
   if (found.colours.length > 0) fail(`colours outside the brand palette: ${JSON.stringify(found.colours)}`);
-  if (!found.aiLineSeen) {
-    fail(`a card with an AI-made photo shows the line "${AI_LINE[locale]}", visible: at least 14 px, half opaque, inside the card and not covered`);
+  if (usedAi.length > 0) {
+    // Seen, not merely present: the card's pixels where the line sits must
+    // change visibly when the line is hidden -- whatever colour, opacity,
+    // filter or cover the layout gave it.
+    const aiMessage = `a card with an AI-made photo shows the line "${AI_LINE[locale]}" where it can be read: its own element, at least 14 px, inside the card and visible`;
+    if (!found.aiBox) fail(aiMessage);
+    const clip = { x: Math.floor(found.aiBox.x), y: Math.floor(found.aiBox.y), width: Math.ceil(found.aiBox.width), height: Math.ceil(found.aiBox.height) };
+    const shown = await page.screenshot({ clip, type: "png" });
+    await page.evaluate(() => { document.querySelector("[data-ai-line]").style.visibility = "hidden"; });
+    const hidden = await page.screenshot({ clip, type: "png" });
+    await page.evaluate(() => { document.querySelector("[data-ai-line]").style.visibility = ""; });
+    const changed = await page.evaluate(async ([a, b]) => {
+      const pixels = async (b64) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const canvas = Object.assign(document.createElement("canvas"), { width: img.width, height: img.height });
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        return ctx.getImageData(0, 0, img.width, img.height).data;
+      };
+      const [pa, pb] = [await pixels(a), await pixels(b)];
+      let differing = 0;
+      for (let i = 0; i < pa.length; i += 4) {
+        if (Math.abs(pa[i] - pb[i]) + Math.abs(pa[i + 1] - pb[i + 1]) + Math.abs(pa[i + 2] - pb[i + 2]) > 60) differing += 1;
+      }
+      return differing / (pa.length / 4);
+    }, [shown.toString("base64"), hidden.toString("base64")]);
+    if (changed < 0.03) fail(aiMessage);
   }
   // A versioned model name must be one features.json lists, so a card cannot
   // name a model Tomverse does not offer ("GPT 7"). A bare family name
-  // ("GPT, Claude, Gemini") is fine.
-  for (const text of found.texts.map(normal)) {
+  // ("GPT, Claude, Gemini") is fine. Read per phrase, so a name split across
+  // inline elements is read whole.
+  for (const text of found.phrases.map(normal)) {
     for (const match of text.matchAll(MODEL_MENTION)) {
       if (!KNOWN_MODELS.some((name) => text.startsWith(name, match.index))) {
         fail(`"${match[0]}" is not a model name in features.json`);
