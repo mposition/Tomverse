@@ -105,7 +105,8 @@ test("a card of library pictures and the job's own words is written with every w
     assert.deepEqual(entry.claimIds, []);
     assert.deepEqual(entry.allowedChannels, ["facebook", "instagram", "linkedin", "x"]);
     assert.equal(entry.disclosure.x, "none");
-    assert.equal(transcript.en, "Every AI, one place. GPT 6 Luna Claude Sonnet 5.5 Tomverse");
+    // One phrase per line, as the card shows them.
+    assert.deepEqual(transcript.en.split(String.fromCharCode(10)), ["Every AI,", "one place.", "GPT 6 Luna", "Claude Sonnet 5.5", "Tomverse"]);
   } finally {
     rmSync(ctx.root, { recursive: true, force: true });
   }
@@ -119,7 +120,7 @@ test("a capture makes a capture asset whose transcript carries the capture's wor
     const { asset: entry, transcript } = asset(ctx.root, "20261101", "media-20261101-review-en-card");
     assert.equal(entry.provenance, "capture");
     assert.equal(entry.depictsProductInterface, true);
-    assert.match(transcript.en, /Which one do you trust\? answer A words$/u);
+    assert.deepEqual(transcript.en.split(String.fromCharCode(10)), ["Which one", "do you trust?", "answer A words"]);
   } finally {
     rmSync(ctx.root, { recursive: true, force: true });
   }
@@ -144,6 +145,8 @@ test("an AI photo needs the locale's AI line, makes an ai_generated asset, and n
       photo('<span style="opacity:.02">Photo: AI-generated</span>'),
       photo('<span style="color:rgba(255,255,255,0)">Photo: AI-generated</span>'),
       photo('<span style="font-size:8px">Photo: AI-generated</span>'),
+      // Invisible letters on a coloured box: the box is not the line.
+      photo('<span style="color:transparent;background:#155dfb;padding:8px">Photo: AI-generated</span>'),
       `${photo("Photo: AI-generated")}<div style="position:absolute;right:0;bottom:0;width:400px;height:120px;background:#18181b"></div>`,
     ]) {
       const out = make(ctx, "20261101", "media-d-card", hidden);
@@ -172,6 +175,18 @@ test("pictures from anywhere else, script, CSS text, form fields and list marker
       assert.equal(out.status, 1, extra);
       assert.match(out.stderr, reason, extra);
     }
+  } finally {
+    rmSync(ctx.root, { recursive: true, force: true });
+  }
+});
+
+test("inline pieces are read as one phrase, as a reader reads them", { skip }, () => {
+  const ctx = setup();
+  try {
+    const out = make(ctx, "20261101", "media-a-card", chips("Now <span>cheap</span>er", "than ever."));
+    assert.equal(out.status, 0, out.stderr);
+    const { transcript } = asset(ctx.root, "20261101", "media-a-card");
+    assert.ok(transcript.en.split(String.fromCharCode(10)).includes("Now cheaper"), transcript.en);
   } finally {
     rmSync(ctx.root, { recursive: true, force: true });
   }

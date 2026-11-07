@@ -292,9 +292,16 @@ try {
     if (!found.aiBox) fail(aiMessage);
     const clip = { x: Math.floor(found.aiBox.x), y: Math.floor(found.aiBox.y), width: Math.ceil(found.aiBox.width), height: Math.ceil(found.aiBox.height) };
     const shown = await page.screenshot({ clip, type: "png" });
-    await page.evaluate(() => { document.querySelector("[data-ai-line]").style.visibility = "hidden"; });
+    // Only the letters go: the box's background, border and anything else stay,
+    // so a coloured box behind invisible letters does not count as the line.
+    await page.evaluate(() => {
+      const style = document.createElement("style");
+      style.id = "ai-line-off";
+      style.textContent = "[data-ai-line], [data-ai-line] * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }";
+      document.head.append(style);
+    });
     const hidden = await page.screenshot({ clip, type: "png" });
-    await page.evaluate(() => { document.querySelector("[data-ai-line]").style.visibility = ""; });
+    await page.evaluate(() => document.getElementById("ai-line-off").remove());
     const changed = await page.evaluate(async ([a, b]) => {
       const pixels = async (b64) => {
         const img = new Image();
@@ -337,14 +344,16 @@ try {
       fail(`looks like ${path.basename(earlier)} (hash distance ${distance} < ${MIN_HASH_DISTANCE}): change the composition and the pictures, not only the words`);
     }
   }
-  cardLines = found.texts.map(normal).filter(Boolean);
+  // Phrase by phrase, as a reader reads them: inline pieces joined as they
+  // stand ("<span>cheap</span>er" reads "cheaper"), boxes on their own lines.
+  cardLines = found.phrases.map(normal).filter(Boolean);
 } finally {
   await browser.close();
 }
 
 // Every word the card shows, for the Guard at submission: its own lines and
 // the words inside the captures it used.
-const transcript = [...cardLines, ...usedCaptures.map((name) => captures[name].text).filter(Boolean)].join(" ");
+const transcript = [...cardLines, ...usedCaptures.map((name) => captures[name].text).filter(Boolean)].join(String.fromCharCode(10));
 const channels = CARD_CHANNELS[locale];
 const ai = usedAi.length > 0;
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
