@@ -177,6 +177,34 @@ test("host recovery renders real evidence and derives the held/new/worst exposur
     assert.equal(propsOf(blocked).some(props => props["data-testid"] === "admin-amux-approve-recovery"), false);
   }
 });
+test("another Task states why the unknown-risk exception and safe stop are unavailable", () => {
+  // Production 2026-11-07 (AMUX-FILEREQ-004): disabled exception controls with no reason.
+  const other: AmuxHostRecoveryRead = { ...legacyFixture(), eligibility: {
+    acceptUnknownPriorEffects: false, requestSafeStop: false, approveAttempt: false, reason: null } };
+  for (const m of [adminAmuxRecoveryInspectionMessages.ko, adminAmuxRecoveryInspectionMessages.en]) {
+    const tree = AmuxHostRecoveryView({ m, state: { state: "ready", data: other }, confirmed: false,
+      onConfirm: () => {}, onRequest: () => {}, onRefresh: () => {}, onApprove: () => {},
+      onReloadReview: () => {}, canRequest: true });
+    const ids = propsOf(tree).map(props => props["data-testid"]);
+    assert.equal(ids.includes("admin-amux-recovery-exception-unavailable"), true);
+    for (const hidden of ["admin-amux-unknown-risk-exception", "admin-amux-safe-stop-risk",
+      "admin-amux-safe-stop-confirm", "admin-amux-risk-accept-confirm"])
+      assert.equal(ids.includes(hidden), false, hidden);
+    assert.match(textOf(tree), new RegExp(m.host.exceptionUnavailable.slice(0, 20)));
+  }
+  assert.match(textOf(hostView(other)), /Task 한 건에만 열려 있어 이 Task에서는 쓸 수 없습니다/);
+  // Verified evidence for another Task shows its approval, not the reason line.
+  const verified = propsOf(hostView(hostFixture())).map(props => props["data-testid"]);
+  assert.equal(verified.includes("admin-amux-recovery-exception-unavailable"), false);
+  assert.equal(verified.includes("admin-amux-approve-recovery"), true);
+  // The approved FIRST Task keeps its exception and safe-stop controls.
+  for (const fixture of [legacyFixture(), acceptedFixture()]) {
+    const ids = propsOf(hostView(fixture)).map(props => props["data-testid"]);
+    assert.equal(ids.includes("admin-amux-unknown-risk-exception"), true);
+    assert.equal(ids.includes("admin-amux-safe-stop-risk"), true);
+    assert.equal(ids.includes("admin-amux-recovery-exception-unavailable"), false);
+  }
+});
 test("unknown prior effects require a visible default-off acceptance and record no execution or reservation", async () => {
   const initial = hostView(legacyFixture());
   const checkbox = propsOf(initial).find(props => props["data-testid"] === "admin-amux-risk-accept-confirm");

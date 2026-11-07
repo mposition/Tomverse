@@ -135,8 +135,11 @@ test("v37 evidence shape keeps each DB branch aligned with its input proof schem
     "recovery_identity_changed",
     "runtime_observation_unverified",
   ]);
+  // The two proving reasons verify the evidence and are never stored as a
+  // refusal reason (journal proof added 2026-11-07).
   assert.deepEqual(
-    inspectInputReasons.filter((reason) => reason !== "stopped_proven").toSorted(),
+    inspectInputReasons.filter((reason) =>
+      !["stopped_proven", "terminal_journal_proven"].includes(reason)).toSorted(),
     reasonLists[0].slice(0, 3).toSorted(),
   );
   assert.deepEqual(

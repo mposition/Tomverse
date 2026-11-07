@@ -263,6 +263,9 @@ run(
     "tests/integration/amuxV52GradeEscalation.db.test.mjs",
     // Policy v46: a legacy safe stop binds the live runtime after re-registration.
     "tests/integration/amuxV22LegacySafeStopLiveRuntime.db.test.mjs",
+    // A restarted sidecar's journal proves a prior run stopped; the evidence
+    // guard admits that reason only with every stop proof and a clean checkout.
+    "tests/integration/amuxV22RecoveryJournalEvidence.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // The shared AgentDigestItem table: closed agent and kind lists, the

@@ -324,6 +324,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Owner decision 2026-11-06: the CLI usage failure kind; no commit-deadline
   // marker, classifier or deferred trigger changes.
   "20261106200000_amux_cli_usage_failure_kind",
+  // Owner decision 2026-11-07: the recovery evidence guard body admits a
+  // journal-proven terminal; no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261107130000_amux_v22_recovery_journal_evidence",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
