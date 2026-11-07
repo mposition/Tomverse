@@ -24,7 +24,7 @@ export function AdminSwitch({
 }) {
   return (
     <label
-      className={`flex min-h-8 w-full cursor-pointer items-center justify-between gap-3 text-sm text-zinc-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 ${className}`}
+      className={`relative flex min-h-8 w-full cursor-pointer items-center justify-between gap-3 text-sm text-zinc-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 ${className}`}
     >
       <span className="min-w-0">{label}</span>
       <input
@@ -32,7 +32,10 @@ export function AdminSwitch({
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
-        className="peer sr-only"
+        // Covers the whole row, invisibly: a 1px sr-only input sat under the
+        // label text, so a pointer (and Playwright's check()) hit the text
+        // instead of the control.
+        className="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
       />
       <span
         aria-hidden

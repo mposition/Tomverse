@@ -311,7 +311,10 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/users");
 
-    await expect(page.getByText(FIXTURE_CUSTOMERS.activePro.name)).toBeVisible();
+    // The table, not the phone cards rendered (hidden) alongside it.
+    await expect(
+      page.getByRole("table").getByText(FIXTURE_CUSTOMERS.activePro.name)
+    ).toBeVisible();
     await expect(
       page.getByRole("link", {
         name: `Open ${FIXTURE_CUSTOMERS.disputedHold.email}`,
@@ -331,7 +334,8 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByText(FIXTURE_CUSTOMERS.activePro.email)).toBeVisible();
     // Billing section: the credit purchases, with the Stripe ids folded away.
     await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=billing`);
-    await expect(page.getByText("cus_e2e_active_pro")).toBeAttached();
+    // Shown in the detail header and again in the folded billing facts.
+    await expect(page.getByText("cus_e2e_active_pro").first()).toBeAttached();
     await expect(
       page.getByRole("heading", { name: "Extra credit purchases" })
     ).toBeVisible();

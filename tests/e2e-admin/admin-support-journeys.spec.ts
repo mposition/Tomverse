@@ -37,7 +37,9 @@ test.describe("support journeys", () => {
     });
     await expect(link).toBeVisible();
     await expect(
-      page.locator("#main-content").getByRole("link", { name: /^Open / })
+      // Scoped to the results table: the sidebar's "Open Tomverse" link also
+      // starts with "Open".
+      page.getByRole("table").getByRole("link", { name: /^Open / })
     ).toHaveCount(1);
 
     await link.click();
