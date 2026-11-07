@@ -34,6 +34,11 @@ import { answerAmuxV22OwnerQuestionInTransaction } from
   "./v22OwnerQuestionService.ts";
 import { openAmuxV22TaskResultRow, type AmuxV22SealedRow } from
   "./v22TaskResultStore.ts";
+import { amuxV22ResultReviewDecisionFromAnswer,
+  type AmuxV22ResultReviewDecision } from "./v22ResultReviewCore.ts";
+import { applyAmuxV22ResultReviewDecision, readOpenAmuxV22ResultReviewOfCard,
+  recordAmuxV22ResultReviewHandoff, recordAmuxV22ResultReviewLocalCard,
+  recordAmuxV22ResultReviewLocalCardClosed } from "./v22ResultReviewService.ts";
 
 /**
  * A v22 worker's owner question through the Decision Maker (operator decision
@@ -74,6 +79,9 @@ export async function isAmuxV22QuestionCard(
     WHERE "localCardId" = ${cardId}
     UNION ALL
     SELECT 1 AS "found" FROM "AmuxIdeaCardCloseQuestion"
+    WHERE "localCardId" = ${cardId}
+    UNION ALL
+    SELECT 1 AS "found" FROM "AmuxV22ResultReview"
     WHERE "localCardId" = ${cardId}
     LIMIT 1`;
   return rows.length > 0;
@@ -188,6 +196,7 @@ export async function recordAmuxV22QuestionLocalCardClosed(
 export async function recordDmQuestionLocalCard(tx: Prisma.TransactionClient,
   input: { questionId: string; cardId: string }) {
   return await recordAmuxIdeaCardCloseLocalCard(tx, input) ??
+    await recordAmuxV22ResultReviewLocalCard(tx, input) ??
     recordAmuxV22QuestionLocalCard(tx, input);
 }
 
@@ -195,6 +204,7 @@ export async function recordDmQuestionLocalCard(tx: Prisma.TransactionClient,
 export async function recordDmQuestionLocalCardClosed(tx: Prisma.TransactionClient,
   input: { questionId: string; cardId: string; now: Date }) {
   return await recordAmuxIdeaCardCloseLocalCardClosed(tx, input) ??
+    await recordAmuxV22ResultReviewLocalCardClosed(tx, input) ??
     recordAmuxV22QuestionLocalCardClosed(tx, input);
 }
 
@@ -218,6 +228,10 @@ export type AmuxV22ResolveStep =
   | { kind: "card_close"; cursor: Advance; questionId: string; requestId: string;
       decision: AmuxIdeaCardCloseDecision }
   | { kind: "card_close_handoff"; cursor: Advance; questionId: string;
+      requestId: string }
+  | { kind: "result_review"; cursor: Advance; reviewId: string; requestId: string;
+      decision: AmuxV22ResultReviewDecision }
+  | { kind: "result_review_handoff"; cursor: Advance; reviewId: string;
       requestId: string };
 
 /**
@@ -253,7 +267,9 @@ export async function readAmuxV22ResolveStep(
     await readOpenAmuxPlanRefusalOfCard(tx, state.binding.cardId, now) : null;
   const closeQuestion = state && !question && !refusal ?
     await readOpenAmuxIdeaCardCloseQuestionOfCard(tx, state.binding.cardId) : null;
-  if (!question && !refusal && !closeQuestion) return { kind: "skip", cursor };
+  const review = state && !question && !refusal && !closeQuestion ?
+    await readOpenAmuxV22ResultReviewOfCard(tx, state.binding.cardId) : null;
+  if (!question && !refusal && !closeQuestion && !review) return { kind: "skip", cursor };
   // The asking run has not settled yet: the walk waits here and asks again,
   // rather than cancel a question that is about to be parked.
   if (question && !question.attempt.endedAt) return { kind: "wait", cursor: { move: "keep" } };
@@ -282,6 +298,15 @@ export async function readAmuxV22ResolveStep(
     return decision ? { kind: "card_close", ...closeBase, decision } :
       { kind: "card_close_handoff", ...closeBase };
   }
+  if (review) {
+    const reviewBase = { cursor, reviewId: review.id, requestId: judgment.requestId };
+    const decision = candidate?.status === "ready" ?
+      amuxV22ResultReviewDecisionFromAnswer({ judgmentKind: judgment.judgmentKind,
+        outputKind: detail?.outputKind ?? null, optionId: detail?.optionId ?? null,
+        dmAnswer: bodies.dm_answer, operatorAnswer: bodies.operator_answer }) : null;
+    return decision ? { kind: "result_review", ...reviewBase, decision } :
+      { kind: "result_review_handoff", ...reviewBase };
+  }
   if (!question) return { kind: "skip", cursor };
   const base = { cursor, questionId: question.id, taskId: question.taskId,
     requestId: judgment.requestId };
@@ -298,7 +323,10 @@ export async function readAmuxV22ResolveStep(
  * `BoardImportError` and rolls back; the caller cancels the question then.
  */
 export async function applyAmuxV22DmAnswer(tx: Prisma.TransactionClient,
-  input: { questionId: string; requestId: string; message: string; now: Date }) {
+  input: { questionId: string; requestId: string; message: string; now: Date;
+    /** dm: applied without the operator's confirmation (TOMVERSE_AMUX_DM_APPROVER). */
+    source?: "dm_confirmed" | "dm" }) {
+  const source = input.source ?? "dm_confirmed";
   await takeAuditChainLock(tx);
   let killSwitch: boolean | null;
   try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
@@ -307,13 +335,13 @@ export async function applyAmuxV22DmAnswer(tx: Prisma.TransactionClient,
   await answerAmuxV22OwnerQuestionInTransaction(tx, {
     questionId: input.questionId, answer: input.message,
     // The person's judgment audit names who confirmed it.
-    source: "dm_confirmed", answeredByUserId: null, now: input.now,
+    source, answeredByUserId: null, now: input.now,
     audit: (taskId) => writeSystemAuditLog({ tx,
       systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
       action: "amux.v22.owner_question.answered",
       targetType: "AmuxV22TaskQuestion", targetId: input.questionId,
-      summary: "Answered an AMUX v22 worker question with a confirmed Decision Maker proposal.",
-      metadata: { taskId, source: "dm_confirmed", requestId: input.requestId } }),
+      summary: "Answered an AMUX v22 worker question with a Decision Maker proposal.",
+      metadata: { taskId, source, requestId: input.requestId } }),
   });
   return { applied: true as const };
 }
@@ -370,10 +398,37 @@ export const applyAmuxPlanRefusalDecisionStep = (step: { refusalId: string;
  * the cancel. What the relay is told about its cursor comes back with it.
  */
 export async function runAmuxV22ResolveStep(after: DmDeliveryCursor | null):
-  Promise<{ resolved: null | "answered" | "cancelled" | "closed" | "kept"; cursor: AmuxV22ResolveCursor }> {
+  Promise<{ resolved: null | "answered" | "cancelled" | "closed" | "kept" | "reviewed"; cursor: AmuxV22ResolveCursor }> {
   const step = await withAmuxDbBoundary(
     AMUX_DB_BOUNDARIES.decisionMakerV22QuestionResolve,
     (tx, context) => readAmuxV22ResolveStep(tx, after, context.dbNow));
+  if (step.kind === "result_review" || step.kind === "result_review_handoff") {
+    // As a card close: a fault never holds back the questions behind it.
+    try {
+      if (step.kind === "result_review_handoff") {
+        await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewHandoff,
+          (tx, context) => recordAmuxV22ResultReviewHandoff(tx, { reviewId: step.reviewId,
+            requestId: step.requestId, reason: "answer_unreadable", now: context.dbNow }));
+        return { resolved: null, cursor: step.cursor };
+      }
+      const applied = await withAmuxDbBoundary(
+        AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewApply,
+        (tx, context) => applyAmuxV22ResultReviewDecision(tx, { reviewId: step.reviewId,
+          decision: step.decision, source: "dm_confirmed", requestId: step.requestId,
+          now: context.dbNow }));
+      // Held by the kill switch: keep the place. A result nobody can read went
+      // to the person instead: step past it.
+      if (!applied.applied && applied.outcome !== "handed_off")
+        return { resolved: null, cursor: { move: "keep" } };
+      return { resolved: applied.outcome === "cancelled" ? "cancelled" :
+        applied.outcome === "handed_off" ? null : "reviewed",
+        cursor: step.cursor };
+    } catch (error) {
+      console.warn(JSON.stringify({ subsystem: "amux", event: "v22_result_review_apply_failed",
+        sqlState: amuxDatabaseDiagnosticCode(error) }));
+      return { resolved: null, cursor: step.cursor };
+    }
+  }
   if (step.kind === "card_close" || step.kind === "card_close_handoff") {
     // A fault here never holds back the v22 questions behind it: the walk goes
     // on and meets this confirmation again on its next pass, and a write that

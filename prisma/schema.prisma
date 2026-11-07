@@ -7926,6 +7926,7 @@ model AmuxWorkItem {
   v22TaskResults    AmuxV22TaskResult[]
   v22TaskPatches    AmuxV22TaskPatch[]
   v22OwnerQuestions AmuxV22TaskQuestion[]
+  v22ResultReviews  AmuxV22ResultReview[]
   v52ReviewRecords  AmuxV52ReviewRecord[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
@@ -8043,6 +8044,7 @@ model AmuxExecutionAttempt {
   v22TaskResult     AmuxV22TaskResult?
   v22TaskPatch      AmuxV22TaskPatch?
   v22OwnerQuestion  AmuxV22TaskQuestion?
+  v22ResultReview   AmuxV22ResultReview?
   v52ReviewRecord   AmuxV52ReviewRecord?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -8075,6 +8077,11 @@ model AmuxV22TaskResult {
   byteLength      Int
   createdAt       DateTime @default(now())
   bodyPurgedAt    DateTime?
+  /// proceed | replan | stop | needs_owner: the investigate conclusion the
+  /// result ended with, checked at recording; null when it had none.
+  conclusionVerdict String?
+  /// sha256 of the parsed conclusion (canonical JSON); the text stays in the body.
+  conclusionSha256  String?
   patch           AmuxV22TaskPatch?
 
   attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
@@ -8131,7 +8138,7 @@ model AmuxV22TaskQuestion {
   /// open | answered | resumed | cancelled
   state            String    @default("open")
   answerText       String?
-  /// operator | dm_confirmed
+  /// operator | dm_confirmed | dm
   answerSource     String?
   answeredByUserId String?
   answeredAt       DateTime?
@@ -8148,6 +8155,38 @@ model AmuxV22TaskQuestion {
   @@unique([attemptId, taskId])
   @@unique([taskId, sequence])
   @@index([state, createdAt])
+}
+
+/// A v22 result waiting for review, filed to the Decision Maker as a typed-ask
+/// card (owner decision 2026-11-07). The human escalation stays open beside it.
+model AmuxV22ResultReview {
+  id                String    @id
+  taskId            String
+  attemptId         String    @unique
+  /// needs_owner | conclusion_invalid | result_review | prless_implement
+  kind              String
+  /// open | applied | cancelled
+  state             String    @default("open")
+  /// approve | retry | block
+  decision          String?
+  /// dm | dm_confirmed
+  answerSource      String?
+  requestId         String?
+  cancelReason      String?
+  handoffReason     String?
+  handoffAt         DateTime?
+  decidedAt         DateTime?
+  localCardId       String?   @unique
+  localCardClosedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([state, createdAt])
+  @@index([taskId, createdAt])
 }
 
 /// A bounded patch candidate, not a publication grant. The Publisher may
