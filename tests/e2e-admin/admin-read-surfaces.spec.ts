@@ -188,7 +188,7 @@ test.describe("admin read surfaces", () => {
     ).toBeVisible();
     // Today is the default period and is marked as the current one.
     await expect(
-      page.getByRole("link", { name: "Today", exact: true })
+      usage.getByRole("link", { name: "Today", exact: true })
     ).toHaveAttribute("aria-current", "page");
     await expect(usage.getByTestId("admin-usage-models")).toBeVisible();
     await expect(usage.getByTestId("admin-usage-activity")).toBeVisible();
@@ -807,7 +807,7 @@ test.describe("admin read surfaces", () => {
     // in ordinary operation -- which is how three of four senders stayed on the
     // old sending domain through a cutover
     // (docs/ops/email-sending-domains.md §1.2).
-    await page.goto("/admin/alerts?tab=templates");
+    await page.goto("/admin/alerts?tab=mail-test");
 
     const probe = page.getByTestId("operator-alert-probe");
     await expect(
