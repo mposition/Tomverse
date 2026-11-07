@@ -105,6 +105,7 @@ export const AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT: Readonly<Record<AmuxIdeaBlo
   cli_turn_limit: "its run stopped at its turn limit",
   cli_execution_error: "its run stopped with an execution error",
   cli_budget_limit: "its run stopped at its cost limit",
+  review_server_rejected_twice: "the automatic code review rejected its change twice",
 });
 
 const FINISHED = new Set(["done", "cancelled"]);

@@ -30,7 +30,8 @@ test("the usage gate skips attempts on archived cards and keeps every other unkn
   assert.equal(calls.length, 1);
   const { sql, values } = calls[0];
   assert.deepEqual(values, ["codex-impl", null, "task-a",
-    ["cli_turn_limit", "cli_execution_error", "cli_budget_limit"]]);
+    ["cli_turn_limit", "cli_execution_error", "cli_budget_limit"],
+    "review_server_rejected_twice"]);
   assert.match(sql, /w\."archivedAt" IS NULL/);
   // The unknown-usage conditions themselves are unchanged.
   assert.match(sql, /a\."endedAt" IS NOT NULL/);
@@ -47,8 +48,10 @@ test("only the claimed Task's own named CLI failure, retried by the owner agains
   const { sql } = calls[0];
   // COALESCE: a NULL reason or status never drops a row from the gate.
   assert.match(sql, /AND NOT COALESCE\(a\."taskId" = \? AND a\."v22AssignmentId" IS NOT NULL/);
-  assert.match(sql, /a\."outcome" = 'blocked' AND a\."toStatus" = 'blocked'/);
-  assert.match(sql, /a\."reason" = ANY\(\?::text\[\]\)/);
+  assert.match(sql, /AND a\."toStatus" = 'blocked' AND \(\(a\."outcome" = 'blocked' AND a\."reason" = ANY\(\?::text\[\]\)\)/);
+  // A finished run the v52 review rejected twice is left out only with its
+  // own reject record (owner decision 2026-11-07).
+  assert.match(sql, /OR \(a\."outcome" = 'succeeded' AND a\."reason" = \? AND EXISTS \(SELECT 1 FROM "AmuxV52ReviewRecord" r WHERE r\."attemptId" = a\."id" AND r\."taskId" = a\."taskId" AND r\."verdict" = 'reject'\)\)\)/);
   assert.match(sql, /JOIN "AmuxReviewDecision" d ON d\."proposalId" = p\."id" AND d\."escalationId" = p\."escalationId"/);
   assert.match(sql, /p\."attemptId" = a\."id" AND p\."taskId" = a\."taskId" AND p\."outcome" = 'retry' AND d\."outcome" = 'retry'\), FALSE\)/);
 });

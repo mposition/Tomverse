@@ -48,6 +48,7 @@ import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
+import { amuxV52PriorReviewRejections } from "@/lib/amux/v52ReviewRejections";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
@@ -1357,7 +1358,7 @@ export async function settleAmuxV22TaskExecution(input: {
   // a `tier_pending` draft, and the publisher's round reads its tier with
   // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 43 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 };
   const publicationEligible = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
     patchPresent: patch !== null,
@@ -1438,11 +1439,10 @@ export async function settleAmuxV22TaskExecution(input: {
           reviewRecord.authorVendor !== settlementAssignment?.provider ||
           !["accept", "reject", "unknown"].includes(reviewRecord.verdict)))
         return { settled: false as const, reason: "review_unverified" as const };
+      // An owner retry of a twice-rejected run starts the count again
+      // (owner decision 2026-11-07).
       const priorReviewRejections = reviewRecord ?
-        await tx.amuxV52ReviewRecord.count({ where: {
-          taskId: task.id, verdict: "reject",
-          attemptId: { not: attempt.id },
-        } }) : 0;
+        await amuxV52PriorReviewRejections(tx, task.id, attempt.id) : 0;
       const reviewDisposition = reviewRecord ?
         decideAmuxV52ReviewDisposition(
           reviewRecord.verdict as "accept" | "reject" | "unknown",

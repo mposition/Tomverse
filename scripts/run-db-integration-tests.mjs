@@ -255,6 +255,9 @@ run(
     // An owner retry of a named Claude CLI failure reaches the claim; its
     // partial receipt still holds the worker for every other Task.
     "tests/integration/amuxV22CliFailureRetryClaim.db.test.mjs",
+    // A run the v52 review rejected twice may be retried by the owner; the
+    // retry reaches the claim and its first rejection returns once more.
+    "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
     "tests/integration/amuxV22AutoPromotion.db.test.mjs",
     "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",

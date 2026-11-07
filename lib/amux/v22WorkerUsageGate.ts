@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
+import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
 
 /**
  * Whether a worker has an ended v4 attempt whose CLI usage was never reported
@@ -23,6 +24,10 @@ import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
  * worker's (owner decision 2026-11-06; review r-20261107-015440-41ac19).
  * The receipt stays partial: every other Task still sees the attempt and is
  * still refused that worker.
+ *
+ * The same holds for a finished run the v52 review server rejected twice
+ * (outcome succeeded, reason review_server_rejected_twice, with its reject
+ * record), which the owner may also retry (owner decision 2026-11-07).
  */
 export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
   workerName: string, priorAttemptId: string | null, taskId: string): Promise<boolean> {
@@ -42,8 +47,14 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
              AND u."completeness" <> 'reported_complete'))
       AND NOT COALESCE(a."taskId" = ${taskId}
         AND a."v22AssignmentId" IS NOT NULL
-        AND a."outcome" = 'blocked' AND a."toStatus" = 'blocked'
-        AND a."reason" = ANY(${retryableReasons}::text[])
+        AND a."toStatus" = 'blocked'
+        AND ((a."outcome" = 'blocked'
+            AND a."reason" = ANY(${retryableReasons}::text[]))
+          OR (a."outcome" = 'succeeded'
+            AND a."reason" = ${AMUX_V52_REVIEW_REJECTED_TWICE_REASON}
+            AND EXISTS (SELECT 1 FROM "AmuxV52ReviewRecord" r
+              WHERE r."attemptId" = a."id" AND r."taskId" = a."taskId"
+                AND r."verdict" = 'reject')))
         AND EXISTS (SELECT 1 FROM "AmuxReviewProposal" p
           JOIN "AmuxReviewDecision" d ON d."proposalId" = p."id"
             AND d."escalationId" = p."escalationId"

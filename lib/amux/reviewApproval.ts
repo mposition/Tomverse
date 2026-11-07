@@ -21,6 +21,7 @@ import {
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
 import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejections";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
 import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
@@ -223,12 +224,16 @@ async function snapshot(
       displayExact })) outcomes.push("approve");
     outcomes.push("block");
   }
+  // A twice-rejected run is retryable only with its own audited reject verdict.
+  const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
+    await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
   if (baseEligible && task.status === "blocked") {
     outcomes.push("block");
     if (!displayTruncated && displayExact && budget.allowed && dueCorrected &&
         amuxV22ReviewRetryHasVerifiedOutcome({
           sourceSystem: task.sourceSystem, attempt: lastAttempt,
           storedResultAttemptId: latestV4Result?.attemptId ?? null,
+          rejectedReviewAttemptId,
         }) &&
         (lastAttempt !== null || escalation.specialty === "planning-review")) {
       outcomes.push("retry");

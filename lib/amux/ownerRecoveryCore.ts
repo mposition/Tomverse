@@ -85,6 +85,12 @@ export const amuxOwnerRecoveryPreparation = (
     (input.lastAttemptOutcome === "failed" &&
       input.lastAttemptToStatus === "blocked" && isAttemptBudgetReason(input)) ||
     (input.lastAttemptOutcome === "blocked" && input.lastAttemptToStatus === "blocked") ||
+    // A finished run whose patch the v52 review server rejected twice; the
+    // server binds the retry to that attempt's audited verdict
+    // (amuxV22ReviewRetryHasVerifiedOutcome, owner decision 2026-11-07).
+    (input.lastAttemptOutcome === "succeeded" &&
+      input.lastAttemptToStatus === "blocked" &&
+      input.lastAttemptReason === "review_server_rejected_twice") ||
     expiredWithStoredResult(input)
   );
   const executionOutcomeKnown = ambiguousReason === null && protectedTerminalOutcome;
