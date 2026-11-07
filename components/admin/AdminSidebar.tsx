@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, Pin, PinOff } from "lucide-react";
@@ -163,7 +164,7 @@ export function AdminSidebar({
         // fit, and the reachability spec failed with the drawer's own backdrop
         // on top of a link an operator could plainly see.
         className={`group flex min-w-0 items-stretch gap-1 rounded-xl ${
-          active ? "bg-blue-600" : "hover:bg-zinc-900"
+          active ? "bg-blue-500/15" : "hover:bg-zinc-800"
         }`}
       >
         <Link
@@ -180,7 +181,7 @@ export function AdminSidebar({
             badge !== null && badge > 0 ? m.awaitingAction(badge) : ""
           }${writable ? "" : m.readOnlySuffix}`}
           className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold transition ${
-            active ? "text-white" : "text-zinc-300 group-hover:text-white"
+            active ? "text-blue-300" : "text-zinc-300 group-hover:text-white"
           }`}
           // Desktop keeps the hover hint; the drawer renders the same sentence
           // as visible text below, because a `title` is unreachable on touch.
@@ -192,7 +193,7 @@ export function AdminSidebar({
             {variant === "drawer" ? (
               <span
                 className={`mt-0.5 block truncate text-xs font-medium ${
-                  active ? "text-blue-100" : "text-zinc-500"
+                  active ? "text-blue-300/80" : "text-zinc-500"
                 }`}
               >
                 {item.description}
@@ -200,20 +201,17 @@ export function AdminSidebar({
             ) : null}
           </span>
           {badge !== null && badge > 0 ? (
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${
-                active
-                  ? "bg-white/20 text-white"
-                  : "bg-amber-500/15 text-amber-200"
-              }`}
-            >
+            // Solid blue in both states: a count is work waiting, and the
+            // active row is now a soft tint, so the badge no longer has to
+            // invert to stay readable on it.
+            <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-bold tabular-nums text-white">
               {badge}
             </span>
           ) : null}
           {!writable ? (
             <span
               className={`shrink-0 text-xs font-bold uppercase tracking-wide ${
-                active ? "text-blue-100" : "text-zinc-500"
+                active ? "text-blue-300/80" : "text-zinc-500"
               }`}
             >
               {m.readMarker}
@@ -249,19 +247,18 @@ export function AdminSidebar({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-zinc-950">
+    <div className="flex h-full min-h-0 flex-col bg-zinc-900">
       <div className="border-b border-zinc-800 px-4 py-4">
         <Link
           href="/admin/overview"
           className="flex items-center gap-3"
           onClick={onNavigate}
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white">
-            T
-          </span>
+          {/* `unoptimized`, as in the chat chrome: the optimiser refuses this small PNG. */}
+          <Image src="/tomverse-logo.png" alt="" width={36} height={36} className="h-9 w-9 shrink-0" loading="eager" unoptimized />
           <span>
             <span className="block text-sm font-bold text-white">Tomverse</span>
-            <span className="block text-xs font-bold text-blue-300">
+            <span className="block text-xs font-medium text-zinc-500">
               {m.brandSubtitle}
             </span>
           </span>
@@ -277,7 +274,7 @@ export function AdminSidebar({
       <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
         {pinnedItems.length > 0 ? (
           <nav aria-label={m.quickAccess} className="mb-5">
-            <p className="mb-1.5 px-3 text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
+            <p className="mb-1.5 px-3 text-xs font-medium text-zinc-500">
               {m.quickAccess}
             </p>
             <div className="grid gap-0.5">
@@ -306,7 +303,7 @@ export function AdminSidebar({
                   onClick={() => toggleGroup(group.label)}
                   aria-expanded={open}
                   aria-controls={panelId}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-bold uppercase tracking-[0.16em] text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-200"
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
                 >
                   <ChevronDown
                     className={`h-3.5 w-3.5 shrink-0 transition-transform ${
@@ -318,7 +315,7 @@ export function AdminSidebar({
                     {adminNavGroupLabel(group.label, locale)}
                   </span>
                   {!open && groupBadge && groupBadge > 0 ? (
-                    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-200">
+                    <span className="shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-blue-300">
                       {groupBadge}
                     </span>
                   ) : null}
@@ -335,7 +332,7 @@ export function AdminSidebar({
       <div className="border-t border-zinc-800 p-3">
         <Link
           href="/chat"
-          className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 px-3 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-900"
+          className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 px-3 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-800"
         >
           {m.openProduct} <ExternalLink className="h-3.5 w-3.5" aria-hidden />
         </Link>

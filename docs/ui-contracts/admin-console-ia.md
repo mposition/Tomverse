@@ -538,8 +538,10 @@ never its own `tab`, which the lookup has already consumed.
 
 ### The console theme (2026-10-19)
 
-The console has its own theme, **Dark** (the default) or **Light**, chosen
-in the account menu and kept in the `tomverse_admin_theme` cookie. It never
+The console has its own theme, **Light** (the default since 2026-11-07, when
+the redesign was approved light-first) or **Dark**, chosen in the account menu
+and kept in the `tomverse_admin_theme` cookie; a Dark choice made earlier is
+kept. It never
 moves the product theme, and the product theme never moves it. The layout
 reads the cookie, so the first paint is already in the chosen theme.
 
@@ -554,6 +556,32 @@ text on them stays white. A panel that needs a colour uses a palette class or a
 `var(--color-*)`, never a literal, or Light cannot reach it.
 `tests/adminTheme.test.mjs` keeps the stylesheet equal to its generator and
 every Admin component and page free of `dark:`.
+
+### Shared UI primitives (2026-11-07)
+
+The redesign approved on 2026-11-07 draws every page from one set of parts in
+`components/admin/ui/`, so pages stop shipping their own cards, tables and
+modals (there were five modal implementations and three error styles). A page
+that is redesigned uses these and adds none of its own:
+
+| Part | Use | Rule it carries |
+|---|---|---|
+| `AdminTile` | A section of a page | Title, one-line description, optional action |
+| `AdminKpiCard` | One number, optional trend line | `value: null` renders "Unavailable", never 0; four per page at most |
+| `AdminStatusChip` | A status | Five meanings only: ok, warn, bad, info, idle; `unknown` is dashed and never healthy |
+| `AdminDataTable` | Rows | Below `sm` the same rows render as cards; no horizontal scroll |
+| `AdminConfirmDialog` | Asking before a hard-to-undo action | Facts and effects first, focus on Cancel, says when step-up is needed; the caller performs the write |
+| `AdminWriteButton` | A control that changes something | Locked with the required access named when the role cannot write; a shield when step-up follows |
+| `AdminStateBlock` | Error, empty, loading | A failed read is an alert with a retry, never an empty list |
+| `AdminTechInfo` | Policy versions, ids, raw payloads | Closed by default |
+| `AdminCharts` | Sparkline, bars, donut, ring, gauge | Plain SVG, colours through `var(--color-*)`; draws nothing it cannot read |
+| `AdminPixelAvatar` | An AI team's face | The Agent office figure; character art keeps its colours in both themes |
+
+The arithmetic behind them (chart geometry, the Brisbane clock) lives in
+`lib/adminUiCore.ts` and the figures in `lib/adminPixelAvatarPalette.ts`;
+`tests/adminUiCore.test.mjs` and `tests/client/adminUiPrimitivesRender.test.tsx`
+cover them. Times in the console read as AEST (Brisbane, UTC+10): the shell's
+"Updated" clock shows `HH:MM AEST`, never UTC.
 
 ## Language
 
