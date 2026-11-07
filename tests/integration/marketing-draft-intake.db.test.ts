@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import type { Session } from "next-auth";
+
 import { POST } from "@/app/api/internal/marketing-drafts/route";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { MARKETING_ANALYSIS_ENABLED_KEY } from "@/lib/marketingAnalysisCore";
+import { MARKETING_ASSET_ACTIONS, MARKETING_ASSET_NO_DECISION } from "@/lib/marketingAssetCore";
+import { confirmMarketingAssetUpload, decideMarketingAsset, submitMarketingAsset } from "@/lib/marketingAssetStore";
+import {
+  MARKETING_CHAPTERS_DO_NOT_FIT_REFUSAL_CODE,
+  MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE,
+} from "@/lib/marketingVideoChapters";
 import { MARKETING_DRAFTS_KEY } from "@/lib/marketingAutomationAccess";
 import {
   marketingDraftProvenance,
@@ -27,7 +36,7 @@ import {
   intakeMarketingGeneratorDraft,
   type MarketingDraftIntakeReaders,
 } from "@/lib/marketingDraftIntakeStore";
-import { createMarketingChannel, runMarketingTransaction } from "@/lib/marketingStore";
+import { createMarketingChannel, marketingEnvelopeDigest, runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
@@ -51,7 +60,7 @@ const OPEN: MarketingDraftIntakeReaders = {
 const reset = async () => {
   await resetTestFixture(
     prisma,
-    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun", "MarketingLlmCall" RESTART IDENTITY CASCADE`,
+    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun", "MarketingLlmCall", "MarketingAsset" RESTART IDENTITY CASCADE`,
   );
   await prisma.appSetting.deleteMany({ where: { key: MARKETING_DRAFTS_KEY } });
 };
@@ -143,9 +152,9 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-async function approvedChannel() {
+async function approvedChannel(channel: "linkedin" | "youtube" = "linkedin") {
   const row = await createMarketingChannel(prisma, {
-    channel: "linkedin",
+    channel,
     provider: "zernio",
     externalAccountRef: `zernio-${Math.random().toString(36).slice(2)}`,
     defaultLocale: "en",
@@ -548,6 +557,117 @@ async function countedIntake(value: MarketingGeneratorDraft, submissionId: strin
   });
   return { outcome, calls };
 }
+
+// A long YouTube tutorial with chapters (owner decision 2026-11-07), stored and
+// approved through the asset store as a person would: the intake reads the
+// chapters from the approved row.
+const TUTORIAL_ID = "media-20261107-tutorial-en";
+const TUTORIAL_SHA = "c".repeat(64);
+const TUTORIAL_CHAPTERS = [
+  { startSeconds: 0, title: { en: "What you will build" } },
+  { startSeconds: 42, title: { en: "Ask three models" } },
+  { startSeconds: 128, title: { en: "Compare the answers" } },
+];
+const assetOperator = {
+  user: { id: "marketing-operator", email: "owner@example.test" },
+  expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+} as Session;
+
+async function approvedTutorial() {
+  await runMarketingTransaction(prisma, (tx) =>
+    submitMarketingAsset(tx, {
+      asset: {
+        id: TUTORIAL_ID,
+        provenance: "capture",
+        allowedChannels: ["youtube", "linkedin"],
+        alt: { en: "A five-minute tour of Tomverse Review." },
+        claimIds: [],
+        validUntil: "2099-01-31",
+        disclosure: { youtube: "none", linkedin: "none" },
+        depictsProductInterface: true,
+      },
+      kind: "video",
+      contentType: "video/mp4",
+      bytes: 50_000_000,
+      sha256: TUTORIAL_SHA,
+      durationSeconds: 300,
+      transcript: { en: "Ask three models at once and compare their answers side by side." },
+      chapters: TUTORIAL_CHAPTERS,
+    }),
+  );
+  await runMarketingTransaction(prisma, (tx) => confirmMarketingAssetUpload(tx, { assetId: TUTORIAL_ID, bytes: 50_000_000 }));
+  await runMarketingTransaction(prisma, async (tx) => {
+    const auditLogId = await writeAdminAuditLog({
+      session: assetOperator,
+      request: new Request(`https://tomverse.app/api/admin/marketing/assets/${TUTORIAL_ID}/decision`),
+      action: MARKETING_ASSET_ACTIONS.approved,
+      targetType: "MarketingAsset",
+      targetId: TUTORIAL_ID,
+      summary: "Asset decision.",
+      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: MARKETING_ASSET_NO_DECISION, sha256: TUTORIAL_SHA },
+      tx,
+    });
+    return decideMarketingAsset(tx, { assetId: TUTORIAL_ID, decision: "approved", expectedDecisionAuditLogId: null, auditLogId });
+  });
+}
+
+const TUTORIAL_TEXT = "Compare three AI answers in five minutes\nA walkthrough of Tomverse Review.\n\n#AI #Tomverse";
+const TUTORIAL_BLOCK = "00:00 What you will build\n00:42 Ask three models\n02:08 Compare the answers";
+
+test("a YouTube draft carrying a video with chapters is judged and stored with the chapter list at the end of its description", async () => {
+  const row = await approvedChannel("youtube");
+  await draftsOn();
+  await approvedTutorial();
+  const outcome = await intake(draft(row.id, { renderedText: TUTORIAL_TEXT, assets: [{ assetId: TUTORIAL_ID, altKey: "en" }] }), OPEN);
+  // The Guard passed the whole text, list included, to a person.
+  assert.equal(outcome.status, "queued", JSON.stringify(outcome));
+  assert.ok("postId" in outcome);
+
+  const post = await prisma.marketingPost.findUniqueOrThrow({ where: { id: outcome.postId } });
+  const envelope = post.envelope as { renderedText: string };
+  // Code wrote the list, after the model's words; the title line is still first.
+  assert.equal(envelope.renderedText, `${TUTORIAL_TEXT}\n\n${TUTORIAL_BLOCK}`);
+  assert.equal(envelope.renderedText.split("\n")[0], "Compare three AI answers in five minutes");
+  // The digest a person approves, and the publisher compares, covers the list.
+  assert.equal(post.envelopeDigest, marketingEnvelopeDigest(post.envelope as Parameters<typeof marketingEnvelopeDigest>[0]));
+
+  // The same video on LinkedIn carries the words as written: the list is YouTube's only.
+  const linkedin = await approvedChannel();
+  await ledgerCall(2);
+  const elsewhere = await intake(
+    draft(linkedin.id, { logicalDraftId: "draft-2", renderedText: TUTORIAL_TEXT, assets: [{ assetId: TUTORIAL_ID, altKey: "en" }] }),
+    OPEN,
+    { submissionId: "sub-2", llmCallRequestKeys: [callKey(2)] },
+  );
+  assert.ok("postId" in elsewhere, JSON.stringify(elsewhere));
+  const plain = await prisma.marketingPost.findUniqueOrThrow({ where: { id: elsewhere.postId } });
+  assert.equal((plain.envelope as { renderedText: string }).renderedText, TUTORIAL_TEXT);
+});
+
+test("a chapter list the draft's locale has no titles for, or that does not fit, refuses the draft before anything is written", async () => {
+  const row = await approvedChannel("youtube");
+  await draftsOn();
+  // Described and titled in English only. The generator offers it to English
+  // drafts only; a Korean draft that names it anyway has no titles to list.
+  await approvedTutorial();
+  const before = await prisma.marketingPost.count();
+
+  const korean = await intake(
+    draft(row.id, { locale: "ko", renderedText: "다섯 분 만에 세 답변 비교\n안내 영상.", assets: [{ assetId: TUTORIAL_ID, altKey: "ko" }] }),
+    OPEN,
+  );
+  assert.deepEqual(korean, { status: "refused", reasons: [MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE] });
+
+  const long = await intake(
+    draft(row.id, { renderedText: `Title\n${"a".repeat(2_950)}`, assets: [{ assetId: TUTORIAL_ID, altKey: "en" }] }),
+    OPEN,
+  );
+  assert.deepEqual(long, { status: "refused", reasons: [MARKETING_CHAPTERS_DO_NOT_FIT_REFUSAL_CODE] });
+
+  assert.equal(await prisma.marketingPost.count(), before);
+  // Nothing was consumed: the call is still free for a draft that can be taken.
+  assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { requestKey: callKey(1) } })).consumerDigest, null);
+});
 
 test("an intake's calls on its transaction are counted and pinned, facts included", async () => {
   const row = await approvedChannel();

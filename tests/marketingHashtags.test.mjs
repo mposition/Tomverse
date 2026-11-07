@@ -41,7 +41,7 @@ test("each platform has the owner's range, and an unknown platform takes none", 
   assert.deepEqual(marketingHashtagRange("threads"), { min: 0, max: 1 });
   assert.deepEqual(marketingHashtagRange("facebook"), { min: 0, max: 2 });
   assert.deepEqual(marketingHashtagRange("mastodon"), { min: 0, max: 0 });
-  assert.deepEqual([...MARKETING_HASHTAG_REMOVALS], ["hashtag_forbidden", "hashtag_over_limit"]);
+  assert.deepEqual([...MARKETING_HASHTAG_REMOVALS], ["hashtag_forbidden", "hashtag_over_limit", "hashtag_shorts_on_long_form"]);
 });
 
 test("tags past the maximum are taken out after the forbidden ones, and the words stay as written", () => {
@@ -66,6 +66,19 @@ test("YouTube keeps the title line and three tags in the description", () => {
   );
   assert.equal(result.text, "Three answers to one question\nAsk once and compare.\n#Shorts #AI #Tomverse");
   assert.deepEqual(result.removed, { hashtag_over_limit: 1 });
+});
+
+test("a long-form video's post loses #Shorts in any spelling, and the tag after it takes its place (owner decision 2026-11-07)", () => {
+  const text = "Compare three AI answers in five minutes\nA walkthrough.\n#Shorts #AI #Tomverse #AIcomparison";
+  const long = marketingHashtagsWithinBounds(text, "youtube", [], { longForm: true });
+  assert.equal(long.text, "Compare three AI answers in five minutes\nA walkthrough.\n#AI #Tomverse #AIcomparison");
+  assert.deepEqual(long.removed, { hashtag_shorts_on_long_form: 1 });
+  assert.equal(
+    marketingHashtagsWithinBounds("Title\nBody.\n#AI #shorts #Tomverse", "youtube", [], { longForm: true }).text,
+    "Title\nBody.\n#AI #Tomverse",
+  );
+  // A short keeps it, as before.
+  assert.equal(marketingHashtagsWithinBounds(text, "youtube").text, "Compare three AI answers in five minutes\nA walkthrough.\n#Shorts #AI #Tomverse");
 });
 
 test("a text within bounds comes back unchanged, byte for byte", () => {

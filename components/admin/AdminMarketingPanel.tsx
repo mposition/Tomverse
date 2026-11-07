@@ -39,6 +39,7 @@ import {
 } from "@/lib/marketingReportView";
 import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
 import type { ExperimentRowView, ExperimentsConsoleView } from "@/lib/marketingExperimentView";
+import { marketingYoutubeChapterBlock, type MarketingVideoChapter } from "@/lib/marketingVideoChapters";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
@@ -2518,6 +2519,8 @@ function MarketingRow({
     const disclosure = (row.disclosure ?? {}) as Record<string, string>;
     const alt = (row.alt ?? {}) as Record<string, string>;
     const transcript = (row.transcript ?? {}) as Record<string, string>;
+    const chapters = (Array.isArray(row.chapters) ? row.chapters : []) as MarketingVideoChapter[];
+    const chapterLocales = [...new Set(chapters.flatMap((chapter) => Object.keys(chapter.title ?? {})))].sort();
     const size = int(row.bytes);
     return (
       <>
@@ -2551,6 +2554,20 @@ function MarketingRow({
               {m.colTranscript} · {locale}
             </summary>
             <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{value}</p>
+          </details>
+        ))}
+        {/*
+          A long video's chapters, per locale, as the YouTube description will
+          end with them (owner decision 2026-11-07).
+        */}
+        {chapterLocales.map((locale) => (
+          <details key={`chapters:${locale}`} className="mt-2" data-testid="marketing-asset-chapters">
+            <summary className="cursor-pointer text-xs text-zinc-400">
+              {m.colChapters} · {locale}
+            </summary>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
+              {marketingYoutubeChapterBlock(chapters, locale) ?? ""}
+            </p>
           </details>
         ))}
         <p className="mt-2 text-xs">
