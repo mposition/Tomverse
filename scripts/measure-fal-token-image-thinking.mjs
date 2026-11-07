@@ -149,6 +149,19 @@ export const attributeUsage = (calls, buckets) => {
   };
 };
 
+/**
+ * What a call produced. "image" only for the image that was priced: a parsed
+ * response whose asset downloaded, passed the host and size checks and
+ * measured 1024x1024. Anything else stops the run (review finding 2026-11-07:
+ * a failed download used to stay "image" and the run kept paying).
+ */
+export const callOutcome = ({ ok, parsed, dimensions }) => {
+  if (!ok) return "http_error";
+  if (!parsed) return "unparseable";
+  const [width, height] = SIZE.split("x").map(Number);
+  return dimensions?.width === width && dimensions?.height === height ? "image" : "asset_unusable";
+};
+
 const digest = (text) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -361,16 +374,17 @@ const main = async () => {
         if (!response.ok) call.detail = redact(await response.text().catch(() => "")).slice(0, 400);
         call.responseShape = payload ? { keys: Object.keys(payload), imageCount: Array.isArray(payload.images) ? payload.images.length : null } : null;
         const parsed = parseFalImageResponse(payload);
-        call.outcome = !response.ok ? "http_error" : parsed ? "image" : "unparseable";
+        let dimensions = null;
         if (parsed) {
           // Recorded by measurement, never by URL: the link is a public image until it expires.
           const asset = await fetch(parsed.url, { redirect: "manual", signal: AbortSignal.timeout(60_000) }).catch(() => null);
           const usable = asset?.ok && isFalAssetUrl(asset.url) && !falAssetLengthRefused(asset.headers.get("content-length"));
           const bytes = usable ? Buffer.from(await asset.arrayBuffer()) : null;
-          const dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, parsed.mimeType) : null;
+          dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, parsed.mimeType) : null;
           call.asset = { mimeType: parsed.mimeType, measuredWidth: dimensions?.width ?? null, measuredHeight: dimensions?.height ?? null };
           if (!usable) await asset?.body?.cancel().catch(() => undefined);
         }
+        call.outcome = callOutcome({ ok: response.ok, parsed: Boolean(parsed), dimensions });
       }
       write();
       console.log(`  call ${call.index} ${promptKey}: ${call.outcome} (${call.httpStatus ?? "no response"})`);

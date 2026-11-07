@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { attributeUsage, PROMPTS, usageCostMicroUsd } from "../scripts/measure-fal-token-image-thinking.mjs";
+import { attributeUsage, callOutcome, PROMPTS, usageCostMicroUsd } from "../scripts/measure-fal-token-image-thinking.mjs";
 
 // The script spends money, so what it can be tested on without spending any is
 // tested: the arithmetic that turns fal's minute buckets into per-call costs,
@@ -53,6 +53,17 @@ test("cost no call explains voids the maximum rather than being dropped", () => 
 test("a zone-less bucket is read as UTC, the zone it was requested in", () => {
   const calls = [call("2026-11-07T10:00:10Z", "2026-11-07T10:00:30Z")];
   assert.deepEqual(attributeUsage(calls, [{ bucket: "2026-11-07T10:00:00", costMicroUsd: 40_000 }]).perCallMicroUsd, [40_000]);
+});
+
+test("only the priced image counts as an image; anything short of it stops the run", () => {
+  // Review finding 2026-11-07: a parsed response whose asset then failed to
+  // download, or came back the wrong size, stayed "image" and the run kept
+  // sending paid calls.
+  assert.equal(callOutcome({ ok: true, parsed: true, dimensions: { width: 1024, height: 1024 } }), "image");
+  assert.equal(callOutcome({ ok: true, parsed: true, dimensions: null }), "asset_unusable");
+  assert.equal(callOutcome({ ok: true, parsed: true, dimensions: { width: 1024, height: 768 } }), "asset_unusable");
+  assert.equal(callOutcome({ ok: true, parsed: false, dimensions: null }), "unparseable");
+  assert.equal(callOutcome({ ok: false, parsed: false, dimensions: null }), "http_error");
 });
 
 test("the built-in prompts are two different cost axes", () => {
