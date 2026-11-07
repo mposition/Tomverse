@@ -84,3 +84,28 @@ test("a flat thinking surcharge settles at the cap even when no thinking is repo
   assert.equal(settledThinkingCostMicroUsd({ provider: "openai", thinkingCapMicroUsd: 0 }, 0), 0);
   assert.equal(settledThinkingCostMicroUsd({ provider: "xai", thinkingCapMicroUsd: 0 }, 0), 0);
 });
+
+test("fal settles thinking by the endpoint the reservation froze", () => {
+  // fal bills per endpoint, and settlement reads the endpoint from the
+  // reservation's executionProfile -- the request it priced -- never the live
+  // profile.
+  const fal = (apiModelId, thinkingCapMicroUsd) => ({
+    provider: "fal",
+    thinkingCapMicroUsd,
+    executionProfile: { provider: "fal", apiModelId },
+  });
+  // Nano Banana 2: the flat surcharge is owed whatever the count says.
+  assert.equal(settledThinkingCostMicroUsd(fal("fal-ai/nano-banana-2", 2_000), 0), 2_000);
+  // Qwen Image 3 is priced per image: nothing is owed for thinking, and a
+  // cap a revision stated as margin is not settled as cost.
+  assert.equal(settledThinkingCostMicroUsd(fal("alibaba/qwen-image-3/text-to-image", 0), 0), 0);
+  assert.equal(settledThinkingCostMicroUsd(fal("alibaba/qwen-image-3/text-to-image", 3_000), 0), 0);
+  assert.equal(settledThinkingCostMicroUsd(fal("alibaba/qwen-image-3/text-to-image", null), 0), 0);
+  // Token-billed or unlisted: fal's zero count proves nothing, so the cap --
+  // never zero -- and with no cap, the whole reservation.
+  assert.equal(settledThinkingCostMicroUsd(fal("google/nano-banana-2.1", 2_000), 0), 2_000);
+  assert.equal(settledThinkingCostMicroUsd(fal("fal-ai/flux/dev", 2_000), 0), 2_000);
+  assert.equal(settledThinkingCostMicroUsd(fal("fal-ai/flux/dev", null), 0), null);
+  // A snapshot from before executionProfile existed was Nano Banana 2's.
+  assert.equal(settledThinkingCostMicroUsd({ provider: "fal", thinkingCapMicroUsd: 2_000, executionProfile: null }, 0), 2_000);
+});

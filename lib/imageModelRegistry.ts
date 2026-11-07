@@ -10,7 +10,7 @@
 // Pure and client-safe (no server-only import, no Prisma): the workspace model
 // picker renders straight from these profiles.
 
-import { FAL_HIGH_THINKING_SURCHARGE_MICRO_USD } from "@/lib/falImageRequest";
+import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
@@ -729,12 +729,12 @@ export const getImageModelPrice = (
  *     xAI, both verified 2026-08-04. A stated cap is a margin, never owed.
  *   - `flat_per_request`: a fixed surcharge for the thinking level the request
  *     pins. fal's Nano Banana 2 page: "If high thinking is used, an additional
- *     $0.002 will be charged" (re-read 2026-10-21), and `buildFalImageRequest`
- *     always sends `thinking_level: "high"`. The surcharge cannot exceed its
- *     own price, and it is incurred on every request whether or not the
- *     response reports a thinking count -- fal reports none. So the cap is a
- *     bound only at or above that surcharge: below it, the request still
- *     spends the full amount.
+ *     $0.002 will be charged" (re-read 2026-10-21), and that endpoint's row
+ *     pins `high`. The surcharge cannot exceed its own price, and it is
+ *     incurred on every request whether or not the response reports a
+ *     thinking count -- fal reports none. So the cap is a bound only at or
+ *     above that surcharge: below it, the request still spends the full
+ *     amount.
  *   - `per_token_uncapped`: billed per thinking token with no request
  *     parameter that bounds the count. Google direct: thinking "is enabled by
  *     default and cannot be disabled in the API"; `thinking_level` is a level
@@ -744,6 +744,11 @@ export const getImageModelPrice = (
  *     thinking guide updated 2026-10-14 now calls `max_output_tokens` a hard
  *     cutoff including thought tokens, which is the opposite of that
  *     measurement; until a new measurement settles it, it is not a bound.
+ *
+ * fal answers per endpoint, not per provider: its row in
+ * FAL_ENDPOINT_PROFILES (lib/falImageRequest.ts) says which of the three it
+ * is -- google/nano-banana-2.1 is `per_token_uncapped` like Google direct --
+ * and an endpoint with no row has no answer.
  */
 export type ImageThinkingBilling =
   | "not_billed"
@@ -751,60 +756,40 @@ export type ImageThinkingBilling =
   | "per_token_uncapped";
 
 const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
-  Record<ImageModelProvider, ImageThinkingBilling>
+  Record<Exclude<ImageModelProvider, "fal">, Exclude<ImageThinkingBilling, "flat_per_request">>
 > = {
   openai: "not_billed",
   xai: "not_billed",
-  fal: "flat_per_request",
   google: "per_token_uncapped",
 };
 
-/** The surcharge each `flat_per_request` provider's request incurs every time. */
-const IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD: Readonly<
-  Partial<Record<ImageModelProvider, number>>
-> = {
-  fal: FAL_HIGH_THINKING_SURCHARGE_MICRO_USD,
-};
-
-/**
- * The endpoints of a `flat_per_request` provider whose flat surcharge was
- * read from that endpoint's own price page. fal bills per endpoint: Nano
- * Banana 2 adds a fixed high-thinking fee, while google/nano-banana-2.1 is
- * "billed on the tokens each request actually uses" with no cap parameter
- * (fal.ai/models/google/nano-banana-2.1, read 2026-11-07). A runtime fal model
- * on any other endpoint therefore has no proven bound until it is listed here.
- */
-const IMAGE_FLAT_THINKING_ENDPOINTS: Readonly<Partial<Record<ImageModelProvider, readonly string[]>>> = {
-  fal: ["fal-ai/nano-banana-2"],
-};
-
-/** Null for a provider this code has no adapter for. */
-export const imageThinkingBilling = (
-  provider: unknown
-): ImageThinkingBilling | null =>
-  typeof provider === "string" &&
-  Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
-    ? IMAGE_PROVIDER_THINKING_BILLING[provider as ImageModelProvider]
+/** The terms for this model's request: per endpoint on fal, per provider elsewhere. */
+const imageThinkingTerms = (provider: unknown, apiModelId: unknown): FalThinkingTerms | null => {
+  if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
+  return typeof provider === "string" && Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
+    ? { billing: IMAGE_PROVIDER_THINKING_BILLING[provider as keyof typeof IMAGE_PROVIDER_THINKING_BILLING] }
     : null;
+};
+
+/** Null for a provider this code has no adapter for, and for an unlisted fal endpoint. */
+export const imageThinkingBilling = (
+  provider: unknown,
+  apiModelId?: unknown
+): ImageThinkingBilling | null => imageThinkingTerms(provider, apiModelId)?.billing ?? null;
 
 /**
- * The smallest stated cap that bounds what this provider's request spends on
+ * The smallest stated cap that bounds what this model's request spends on
  * thinking: 0 where thinking is not billed, the pinned level's surcharge
- * where it is flat, and null where no stated cap can bound it.
+ * where it is flat, and null where no stated cap can bound it -- including a
+ * fal model whose endpoint has no row, or that names no endpoint at all.
  */
 export const imageThinkingCapMinimumMicroUsd = (
   provider: unknown,
-  apiModelId?: string
+  apiModelId?: unknown
 ): number | null => {
-  const billing = imageThinkingBilling(provider);
-  if (billing === "not_billed") return 0;
-  if (billing === "flat_per_request") {
-    // A model names its endpoint; a surcharge proven for one endpoint is not
-    // a bound on another (IMAGE_FLAT_THINKING_ENDPOINTS).
-    const endpoints = IMAGE_FLAT_THINKING_ENDPOINTS[provider as ImageModelProvider] ?? [];
-    if (apiModelId !== undefined && !endpoints.includes(apiModelId)) return null;
-    return IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD[provider as ImageModelProvider] ?? null;
-  }
+  const terms = imageThinkingTerms(provider, apiModelId);
+  if (terms?.billing === "not_billed") return 0;
+  if (terms?.billing === "flat_per_request") return terms.surchargeMicroUsd;
   return null;
 };
 

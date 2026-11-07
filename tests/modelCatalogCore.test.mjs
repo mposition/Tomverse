@@ -151,6 +151,61 @@ test("a fal revision whose thinking cap is below the pinned surcharge does not s
   assert.ok(reasons.includes("thinking_cap_below_minimum:2000"));
 });
 
+test("a runtime fal model is judged by its endpoint's row, and an unlisted endpoint never serves", () => {
+  // Lookup 2026-11-07: fal bills per endpoint. The judge used to read Nano
+  // Banana 2's flat surcharge as every fal model's bound.
+  const falProfile = (apiModelId) => ({
+    provider: "fal",
+    apiModelId,
+    name: apiModelId,
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  });
+  // Hypothetical prices for the judge's arithmetic, not approved ones.
+  const falRevision = (modelId, thinkingCapMicroUsd) => ({
+    modelId,
+    pricingVersion: `${modelId}-test`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits: 200, outputCostMicroUsd: 40_000 }],
+    verification: {
+      verifiedAt: "2026-11-07",
+      sources: [`https://fal.ai/models/${modelId}`],
+      thinkingCapMicroUsd,
+    },
+  });
+  const judged = (modelId, cap) => {
+    const { models } = resolve(
+      [row(modelId, { profile: falProfile(modelId), enabled: true })],
+      [falRevision(modelId, cap)]
+    );
+    return models.find((m) => m.id === modelId);
+  };
+
+  // Qwen Image 3 is priced per image: a cap of 0 bounds it and it serves.
+  assert.equal(judged("alibaba/qwen-image-3/text-to-image", 0).disabledReason, null);
+
+  // Nano Banana 2.1 is token-billed with no cap parameter. No stated cap --
+  // Nano Banana 2's 2,000 or anything larger -- turns that into a bound, and
+  // there is no surcharge minimum for it to fall short of.
+  for (const cap of [0, 2_000, 1_000_000]) {
+    assert.equal(judged("google/nano-banana-2.1", cap).disabledReason, "worst_case_cost_unbounded", String(cap));
+  }
+  const tokenBilled = judge()({
+    ...IMAGE_MODEL_REGISTRY.find((model) => model.provider === "fal"),
+    id: "google/nano-banana-2.1",
+    apiModelId: "google/nano-banana-2.1",
+  });
+  assert.ok(tokenBilled.reasons.includes("worst_case_cost_unbounded"));
+  assert.equal(tokenBilled.reasons.some((reason) => reason.startsWith("thinking_cap_below_minimum")), false);
+
+  // An endpoint the table does not list is refused, however its revision reads.
+  assert.equal(judged("fal-ai/flux/dev", 2_000).disabledReason, "worst_case_cost_unbounded");
+});
+
 test("turning on an admitted model serves it; a missing provider budget refuses it", () => {
   const on = resolve([row(enabledSeed.id, { enabled: true })]);
   assert.equal(on.models.find((m) => m.id === enabledSeed.id).disabledReason, null);

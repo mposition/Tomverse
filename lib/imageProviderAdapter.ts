@@ -16,12 +16,11 @@ import { readImageDimensions } from "@/lib/imageDimensions";
 import {
   buildFalImageEditRequest,
   buildFalImageRequest,
-  FAL_EDIT_ENDPOINT_SUFFIX,
   falAuthorizationHeader,
+  falEndpointUrl,
   falPlatformHeaders,
   falAssetLengthRefused,
   FAL_MAX_ASSET_BYTES,
-  FAL_RUN_URL_BASE,
   isFalAssetUrl,
   parseFalImageResponse,
 } from "@/lib/falImageRequest";
@@ -662,7 +661,8 @@ const generateWithGoogle = async (
 };
 
 /**
- * Nano Banana 2 through fal: Google's model, fal's invoice.
+ * An image model through fal (an endpoint in FAL_ENDPOINT_PROFILES, which
+ * picks its body): the owner's model, fal's invoice.
  *
  * Three ways this path is deliberately unlike the other three.
  *
@@ -689,6 +689,8 @@ const generateWithFal = async (
   input: { prompt: string; size: ImageSize; editImage?: ImageEditInput }
 ): Promise<ImageProviderResult> => {
   const request = {
+    // The endpoint picks the schema (FAL_ENDPOINT_PROFILES); an unlisted one builds nothing.
+    apiModelId: model.apiModelId,
     prompt: input.prompt,
     size: input.size,
     // PNG for the same reason gpt-image-2 stores PNG: it is lossless, and the
@@ -699,16 +701,16 @@ const generateWithFal = async (
   const body = input.editImage
     ? buildFalImageEditRequest({ ...request, image: input.editImage })
     : generationBody;
-  if (!body || !generationBody) {
+  const endpoint = falEndpointUrl(model.apiModelId, Boolean(input.editImage));
+  if (!body || !generationBody || !endpoint) {
     throw new ImageProviderError(
       "provider_failed",
-      `Image size ${input.size} has no approved fal price for ${model.id}.`
+      `Image size ${input.size} has no approved fal request for ${model.id}.`
     );
   }
   // From the body without the photo: its data URI is the user's bytes.
   const requestParams = { ...auditableRequestParams(generationBody), ...editAuditParams(input.editImage) };
   const apiKey = getFalApiKey();
-  const endpoint = `${FAL_RUN_URL_BASE}/${model.apiModelId}${input.editImage ? FAL_EDIT_ENDPOINT_SUFFIX : ""}`;
 
   let response: Response;
   try {
@@ -839,7 +841,7 @@ const generateWithFal = async (
   return {
     imageBytes,
     mimeType: parsed.mimeType,
-    // fal bills per image and reports no token counts. Zero here is the honest
+    // fal reports no token counts on the listed endpoints. Zero here is the honest
     // reading -- there is no usage to record, not a usage of nothing -- and the
     // fixed price is what settlement compares against.
     inputTokens: 0,
