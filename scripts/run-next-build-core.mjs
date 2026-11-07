@@ -35,13 +35,22 @@
 /** The directory a failed restore makes unusable, relative to the repo root. */
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
-/** Build child workers on CI and Railway share a bound; explicit limits win. */
+/**
+ * Build child workers on CI and Railway share a bound; explicit limits win.
+ *
+ * GitHub Actions gets more: on 2026-11-07 the TypeScript stage reached
+ * 6038 MiB and died at the 6144 ceiling in the Admin E2E and UI-risk builds
+ * (the passing build job finished just under it). The workflows' own tsc runs
+ * already use 8192 on the same runners. Railway keeps 6144, where a larger
+ * ceiling would trade a V8 error for the container's limit.
+ */
 export const nodeOptionsForBuild = (env) => {
   const configured = env.NODE_OPTIONS ?? "";
   const railwayBuild = Boolean(env.RAILWAY_ENVIRONMENT_ID?.trim());
-  if ((env.GITHUB_ACTIONS !== "true" && !railwayBuild) ||
+  const githubBuild = env.GITHUB_ACTIONS === "true";
+  if ((!githubBuild && !railwayBuild) ||
       /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
-  return `${configured ? `${configured} ` : ""}--max-old-space-size=6144`;
+  return `${configured ? `${configured} ` : ""}--max-old-space-size=${githubBuild ? 8192 : 6144}`;
 };
 
 const INTERNAL_ERROR_MARKERS = [

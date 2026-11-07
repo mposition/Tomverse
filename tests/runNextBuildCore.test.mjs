@@ -13,10 +13,13 @@ test("GitHub build has a bounded larger heap without overriding an explicit oper
   assert.equal(nodeOptionsForBuild({}), "");
   assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "1" }), "");
   assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true" }),
-    "--max-old-space-size=6144");
+    "--max-old-space-size=8192");
   assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true",
     NODE_OPTIONS: "--trace-warnings" }),
-  "--trace-warnings --max-old-space-size=6144");
+  "--trace-warnings --max-old-space-size=8192");
+  // A GitHub build on Railway's variables is still a GitHub build.
+  assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true", RAILWAY_ENVIRONMENT_ID: "x" }),
+    "--max-old-space-size=8192");
   for (const explicit of ["--max-old-space-size=5120", "--max_old_space_size=5120"]) {
     assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true", NODE_OPTIONS: explicit }),
       explicit);
