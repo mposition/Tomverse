@@ -157,3 +157,32 @@ test("the Korean copy fills every card in Korean", () => {
   assert.equal(cards.marketing.statusLabel, "확인 불가");
   assert.equal(cards.sre.activity, "읽지 못했어요.");
 });
+
+test("an unread room keeps its team's cost as unavailable, never as 'no record', and an off agent has no next run", () => {
+  const cards = cardsOf(allUnread, { ...noExtras, researchNextAt: "2026-11-07T23:00:00.000Z" });
+  // Marketing and the router keep a monthly record, so an unread room cannot erase it.
+  assert.equal(cards.marketing.cost.kind, "unknown");
+  assert.equal(cards.routing.cost.kind, "unknown");
+  assert.equal(cards.sre.cost.kind, "none");
+  const totals = teamBoardTotals(Object.values(cards));
+  assert.equal(totals.cost, null);
+  assert.equal(totals.costUnread, 2);
+  // The generator's month is its own read: an unread marketing room still shows it.
+  const kept = cardsOf(allUnread, { ...noExtras, marketingCost: { spentMicroUsd: 1_000_000, capMicroUsd: null } });
+  assert.deepEqual(kept.marketing.cost, { kind: "known", spentMicroUsd: 1_000_000, capMicroUsd: null });
+  // The research agent being off, or unread, draws no next-run time; only a running one does.
+  const off = cardsOf({ ...allUnread, research: { kind: "disabled" } }, { ...noExtras, researchNextAt: "2026-11-07T23:00:00.000Z" });
+  assert.equal(off.research.nextAt, null);
+  assert.equal(cards.research.nextAt, null);
+  const on = cardsOf(
+    {
+      ...allUnread,
+      research: {
+        kind: "observed", slot: "2026-11-07T21:30:00.000Z", slotState: "ok", failureStage: null,
+        windowOpen: false, lastSuccessAt: null, silence: "recent", silenceHours: null,
+      },
+    },
+    { ...noExtras, researchNextAt: "2026-11-07T23:00:00.000Z" },
+  );
+  assert.equal(on.research.nextAt, "2026-11-07T23:00:00.000Z");
+});

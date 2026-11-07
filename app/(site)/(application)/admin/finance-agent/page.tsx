@@ -17,6 +17,9 @@ import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead
 
 const TABS = adminNavItemTabs("finance-agent");
 
+/** The route table's tab ids; anything else opens the Overview rather than a blank body. */
+const financeSection = (id: string): FinanceAgentSection => (id === "report" || id === "settings" ? id : "overview");
+
 /**
  * The billing and finance agent (docs/policy/billing-finance-ops.md): the
  * daily pending-price deadline digest, the agent switch and the monitor check.
@@ -77,7 +80,7 @@ export default async function AdminFinanceAgentPage({ searchParams }: PageProps<
         variant="underline"
       />
       {initial ? (
-        <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={initial} section={tab.id as FinanceAgentSection} />
+        <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={initial} section={financeSection(tab.id)} />
       ) : (
         <AdminStateBlock kind="error" title={copy.readFailed} />
       )}

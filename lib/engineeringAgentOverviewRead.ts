@@ -104,7 +104,8 @@ export async function readEngineeringOverviewBody(now: Date = new Date()): Promi
     ),
     settle("pull_requests", async () => {
       const rows = await prisma.engineeringAgentBinding.findMany({
-        where: { supersededAt: null },
+        // In-flight pull requests only, so an older one that still waits for a person is never pushed out by newer ones.
+        where: { supersededAt: null, state: "open" },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 40,
         select: { runId: true, prNumber: true, state: true, approvalObservation: true, mergeObservation: true, createdAt: true },

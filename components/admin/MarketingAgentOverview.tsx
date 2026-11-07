@@ -11,6 +11,7 @@ import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { adminMarketingAgentMessages } from "@/lib/adminMessages/marketingAgent";
+import { parseMarketingLlmMonthlyCap } from "@/lib/marketingLlmBudgetCore";
 import type { MarketingAgentOverview as MarketingAgentOverviewData } from "@/lib/marketingAgentOverviewCore";
 import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
 
@@ -44,7 +45,8 @@ export function MarketingAgentOverview({
   format: MarketingCardFormat;
 }) {
   const m = useAdminMessages(adminMarketingAgentMessages);
-  const capMicro = monthlyCapUsd === null ? null : Math.round(Number(monthlyCapUsd) * 1_000_000);
+  // The ledger's own parser: a malformed cap is "no readable limit", never a half-parsed number.
+  const capMicro = monthlyCapUsd === null ? null : parseMarketingLlmMonthlyCap(monthlyCapUsd);
   const spent = overview.llm?.countedMicroUsd ?? null;
   const fraction = spent !== null && capMicro ? Math.min(1, spent / capMicro) : null;
   const ringColor = fraction === null ? "blue" : fraction >= 0.9 ? "red" : fraction >= 0.7 ? "amber" : "emerald";

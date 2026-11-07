@@ -124,6 +124,11 @@ export function teamBoardCards(
 ): TeamBoardCard[] {
   const a = copy.activity;
   const unread = (): Draft => ({ ...base(a.unread), tone: "unknown", statusLabel: status.unknown });
+  // The two teams that keep a cost record never lose it to an unread room: it is "unavailable", not "no record".
+  const costOf = (): TeamBoardCost =>
+    extras.marketingCost
+      ? { kind: "known", spentMicroUsd: extras.marketingCost.spentMicroUsd, capMicroUsd: extras.marketingCost.capMicroUsd }
+      : { kind: "unknown" };
   const make = (tone: AdminTone, label: string, running: TeamBoardRunning, activity: string, rest: Partial<Draft> = {}): Draft => ({
     ...base(activity),
     tone,
@@ -137,7 +142,8 @@ export function teamBoardCards(
       // The operator queue counts the same posts through its own read, so an unread room can still have a number.
       const queued = rooms.queue.marketing;
       if (state.kind !== "observed") {
-        return { ...unread(), waiting: queued, waitingUnread: queued === null };
+        // The generator's month is its own read, so it survives an unread room.
+        return { ...unread(), waiting: queued, waitingUnread: queued === null, cost: costOf() };
       }
       const pending = state.pending;
       const activity =
@@ -152,9 +158,7 @@ export function teamBoardCards(
         waiting: pending?.count ?? queued,
         waitingUnread: pending === null && queued === null,
         lastAt: state.lastRun?.at ?? null,
-        cost: extras.marketingCost
-          ? { kind: "known", spentMicroUsd: extras.marketingCost.spentMicroUsd, capMicroUsd: extras.marketingCost.capMicroUsd }
-          : { kind: "unknown" },
+        cost: costOf(),
       };
       if (state.drafts === "unreadable") return make("unknown", status.unknown, "unknown", activity, rest);
       if (state.drafts === "off") return make("idle", status.off, "idle", activity, rest);
@@ -165,11 +169,11 @@ export function teamBoardCards(
       const rest: Partial<Draft> = {
         waiting: extras.researchOpen,
         waitingUnread: extras.researchOpen === null,
-        nextAt: extras.researchNextAt,
       };
       if (state.kind === "unread") return { ...unread(), ...rest };
+      // An agent that is off will not run: no next-run time is drawn for it.
       if (state.kind === "disabled") return make("idle", status.off, "idle", a.researchOff, rest);
-      const withTime = { ...rest, lastAt: state.lastSuccessAt };
+      const withTime = { ...rest, lastAt: state.lastSuccessAt, nextAt: extras.researchNextAt };
       if (state.silence === "silent") return make("warn", status.needsLook, "running", a.researchSilent, withTime);
       if (state.slotState === "failed") return make("bad", status.needsLook, "running", a.researchFailed, withTime);
       if (state.slotState === "ok") return make("ok", status.working, "running", a.researchRecorded, withTime);
@@ -238,7 +242,7 @@ export function teamBoardCards(
     })(),
     routing: (() => {
       const state = rooms.routing;
-      if (state.kind !== "observed") return unread();
+      if (state.kind !== "observed") return { ...unread(), cost: { kind: "unknown" } };
       const cost: TeamBoardCost = {
         kind: "known",
         spentMicroUsd: state.spentMonthMicroUsd,
