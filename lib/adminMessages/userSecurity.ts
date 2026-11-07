@@ -60,6 +60,43 @@ export const adminUserSecurityMessages = defineAdminMessages({
       restrictAi: "Restrict AI usage",
       revokeSessions: "Revoke all sessions",
     },
+    status: {
+      calmTitle: "No restrictions right now",
+      restrictedTitle: "This account has restrictions",
+    },
+    actions: {
+      title: "What you can do",
+      description:
+        "Every action needs a reason, goes into the audit log and asks for a recent sign-in.",
+    },
+    cards: {
+      ai: {
+        title: "Restrict AI use",
+        description: "They can still sign in and read chats, but new answers are blocked.",
+        restoreTitle: "Restore AI use",
+        restoreDescription: "New answers work again.",
+      },
+      suspend: {
+        title: "Suspend account",
+        description: "They cannot sign in. Their subscription payment carries on.",
+        liftTitle: "Lift the suspension",
+        liftDescription: "They can sign in again.",
+      },
+      sessions: {
+        title: "Sign out of every device",
+        description: "All devices are signed out. They can sign back in right away.",
+      },
+      unlink: {
+        title: "Unlink a sign-in method",
+        description: "They can no longer sign in with that provider. Owner only.",
+      },
+      delete: {
+        title: "Delete account",
+        description: "Removes the account and everything it owns for good. A second administrator has to approve it.",
+        detail:
+          "This cannot be undone once approved. Type the confirmation text on the next step; the request waits for a second administrator.",
+      },
+    },
     unlinkLabel: "Unlink OAuth (owner, audited):",
     unlink: (provider: string) => `Unlink ${provider}`,
     reauthenticate: "Sign in again to continue",
@@ -117,6 +154,42 @@ export const adminUserSecurityMessages = defineAdminMessages({
       restoreAi: "AI 사용 복구",
       restrictAi: "AI 사용 제한",
       revokeSessions: "모든 세션 폐기",
+    },
+    status: {
+      calmTitle: "지금은 아무 제한이 없어요",
+      restrictedTitle: "이 계정에는 제한이 걸려 있어요",
+    },
+    actions: {
+      title: "할 수 있는 조치",
+      description: "모든 조치는 사유와 함께 감사 기록에 남고, 다시 인증이 필요해요.",
+    },
+    cards: {
+      ai: {
+        title: "AI 사용 제한",
+        description: "로그인과 대화 보기는 되지만 새 답변은 받지 못해요.",
+        restoreTitle: "AI 사용 되돌리기",
+        restoreDescription: "새 답변을 다시 받을 수 있어요.",
+      },
+      suspend: {
+        title: "계정 정지",
+        description: "로그인할 수 없어요. 구독 결제는 그대로 유지돼요.",
+        liftTitle: "정지 풀기",
+        liftDescription: "다시 로그인할 수 있어요.",
+      },
+      sessions: {
+        title: "모든 세션 끊기",
+        description: "모든 기기에서 로그아웃돼요. 다시 로그인하면 바로 쓸 수 있어요.",
+      },
+      unlink: {
+        title: "로그인 연결 해제",
+        description: "그 로그인 방법으로는 더 이상 들어올 수 없어요. owner만 할 수 있어요.",
+      },
+      delete: {
+        title: "계정 삭제",
+        description: "계정과 소유한 모든 데이터를 영구 삭제해요. 다른 관리자의 승인이 필요해요.",
+        detail:
+          "승인되면 되돌릴 수 없어요. 다음 단계에서 확인 문구를 입력하면 요청이 다른 관리자의 승인을 기다려요.",
+      },
     },
     unlinkLabel: "OAuth 연결 해제 (owner, 감사 로그에 기록):",
     unlink: (provider: string) => `${provider} 연결 해제`,
