@@ -407,6 +407,10 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
   pageClaim("claim.chat-import-and-continue", "feature", "/faq", "sections.11.body", "feature.externalImportAndContinuation"),
   pageClaim("claim.chat-image-generation", "feature", "/faq", "sections.12.body", "feature.imageGeneration"),
   pageClaim("claim.chat-file-questions", "feature", "/faq", "sections.13.body", "feature.attachments"),
+  // No gate: Easy is switched by the `REVIEW_EASY_ENABLED` process env var, not
+  // an AppSetting row, so no gate reader here can read the web app's value; the
+  // answer says "where available" instead.
+  pageClaim("claim.review-modes", "feature", "/faq", "sections.14.body"),
   monthlyPriceClaim("claim.pro-monthly-price", "pro", "marketing.claims.proMonthlyPrice"),
   monthlyPriceClaim("claim.max-monthly-price", "max", "marketing.claims.maxMonthlyPrice"),
 ].map(deepFreeze));
@@ -421,9 +425,10 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([
  * empty registry, which is why the test refuses a non-empty registry still
  * calling itself 1. Version 2 is the first content (2026-11-01); version 3 adds `en` to the
  * plan price claims (2026-11-02); version 4 adds `zh-Hant` to the page claims and the
- * gated Chat feature claims (2026-11-03).
+ * gated Chat feature claims (2026-11-03); version 5 adds the Review Easy and
+ * Professional modes claim (2026-11-07).
  */
-export const MARKETING_CLAIM_REGISTRY_VERSION = 4;
+export const MARKETING_CLAIM_REGISTRY_VERSION = 5;
 
 export const marketingClaimById = (id: string): MarketingClaim | null =>
   MARKETING_CLAIMS.find((claim) => claim.id === id) ?? null;

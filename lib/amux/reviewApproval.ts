@@ -228,6 +228,7 @@ async function snapshot(
     if (!displayTruncated && displayExact && budget.allowed && dueCorrected &&
         amuxV22ReviewRetryHasVerifiedOutcome({
           sourceSystem: task.sourceSystem, attempt: lastAttempt,
+          storedResultAttemptId: latestV4Result?.attemptId ?? null,
         }) &&
         (lastAttempt !== null || escalation.specialty === "planning-review")) {
       outcomes.push("retry");
@@ -288,8 +289,11 @@ async function snapshot(
     evidence: fetchedV4,
     workerReportVerified: v4Valid,
   });
+  const lastAttemptResultStored = lastAttempt !== null &&
+    latestV4Result?.attemptId === lastAttempt.id;
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
-    context, report, displayTruncated, displayExact, outcomes, artifact };
+    context, report, displayTruncated, displayExact, outcomes, artifact,
+    lastAttemptResultStored };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -298,7 +302,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
   const { escalation, task, lastAttempt, used, digest, text, context, report,
-    displayTruncated, displayExact, outcomes, artifact } = state;
+    displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored } = state;
   return {
     available: true,
     escalation: {
@@ -321,6 +325,9 @@ export async function getAmuxReviewDetail(escalationId: string) {
       outcome: lastAttempt.outcome,
       to_status: lastAttempt.toStatus,
       ended_at: lastAttempt.endedAt?.toISOString() ?? null,
+      // The server holds this attempt's own final v22 result: an expired
+      // attempt with one finished; only its settlement was lost.
+      result_stored: lastAttemptResultStored,
     } : null,
     review_content: { text, digest, truncated: displayTruncated,
       display_mismatch: !displayExact },

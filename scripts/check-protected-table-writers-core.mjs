@@ -3193,10 +3193,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingAssetStore.ts",
     table: "MarketingAsset",
-    tableMentions: 11,
+    tableMentions: 12,
     writeVerbs: 8,
     reason:
-      "The sole registered writer of the media asset store:it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups, the approved kinds the generator reads, and the approved rows the media CLI reads).",
+      "The sole registered writer of the media asset store:it inserts a submission after the media agent's audit row, records its upload once, and moves it to a person's approval or retirement, each in the caller's transaction. The database's write guard owns every transition, the decision check and the registry version; the other mentions are the reads (the registry FOR SHARE, the console list, the upload, preview and publish lookups, the approved kinds and long-form videos the generator reads, the approved chapters the draft intake reads, and the approved rows the media CLI reads).",
   },
   {
     path: "prisma/migrations/20261031120000_marketing_asset_store/migration.sql",
@@ -3207,12 +3207,28 @@ export const RAW_SQL_ALLOWLIST = [
       "Creates the media asset store, its sequence, its checks (including the transcript's), the one insert-and-update guard and the delete guard. It writes no row.",
   },
   {
+    path: "prisma/migrations/20261107120000_marketing_asset_chapters/migration.sql",
+    table: "MarketingAsset",
+    tableMentions: 3,
+    writeVerbs: 3,
+    reason:
+      "Adds the chapters column (owner decision 2026-11-07), its check and a BEFORE UPDATE trigger that refuses any change to it. The write verbs are the ALTER TABLE statements and the trigger's UPDATE event; it writes no row.",
+  },
+  {
     path: "lib/adminAuditSystemActors.ts",
     table: "MarketingAsset",
     tableMentions: 1,
     writeVerbs: 2,
     reason:
       "The closed system-actor manifest names the asset submission target for marketing-generator. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
+    path: "prisma/migrations/20261107130000_marketing_asset_ai_presenter_provenance/migration.sql",
+    table: "MarketingAsset",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "Adds the capture_with_ai_presenter provenance (owner decision 2026-11-07): it replaces the provenance and disclosure checks, adds the check that keeps the value to videos, and drops the disclosure function the replaced check used. The write verbs are the three ALTER TABLE statements, their two DROP CONSTRAINT actions and the DROP FUNCTION; it writes no row.",
   },
   {
     path: "lib/marketingLlmBudgetStore.ts",

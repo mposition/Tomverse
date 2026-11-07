@@ -1,7 +1,7 @@
 import { AMUX_TASK_EXPECTED_PATHS_MAX,
   type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
-import { amuxV22TaskRoleSupported } from "./v22WorkerClaimCore.ts";
+import { amuxV22TaskRoleSupported, amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { classifyAmuxExecutionPath, deriveAmuxExecutionGrade,
   normalizeAmuxExecutionPath,
   type AmuxExecutionGrade } from "./executionGradeCore.ts";
@@ -118,7 +118,11 @@ export function inspectAmuxV20TaskRegistration(
       contract ||= pathClass === "contract";
       ordinary ||= pathClass === "ordinary";
     }
-    if (contract && ordinary) {
+    // A design, investigate or verify Task changes no file: its paths are the
+    // ones it reads (owner decision 2026-11-07), so only a Task that leaves a
+    // patch must keep contract and ordinary paths apart. A read-only Task that
+    // reads a contract path still settles to frontier below.
+    if (contract && ordinary && amuxV22TaskWritesPatch(proposal.taskRole)) {
       return { ok: false, code: "task_expected_paths_mixed" };
     }
     if (!proposal.executionGrade ||

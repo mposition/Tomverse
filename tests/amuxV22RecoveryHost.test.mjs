@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { amuxCliUsageReceiptDigest } from "../lib/amux/cliUsageLedgerCore.ts";
 import { createAmuxV22SidecarHandler } from "../lib/amux/v22OneShotSidecar.mjs";
+import { amuxV22RecoveryEvidenceSchema, amuxV22RecoveryProofReason } from
+  "../lib/amux/v22TaskRecoveryCore.ts";
 import { parseAmuxV22ReadOnlyRecoveryBinding, parseAmuxV22RecoveryInspectionRequest,
   runAmuxV22RecoveryCheckerOnce,
   inspectAmuxV22RecoveryUnit, readAmuxV22RecoveryJournal } from "../lib/amux/v22RecoveryHost.mjs";
@@ -73,10 +75,13 @@ test("only current live invocation terminal and exact local binding prove stoppe
       assert.equal(JSON.stringify(evidence).includes(secret), false);
     assert.equal(JSON.parse(await readFile(join(stateDir, `${attemptId}.result`), "utf8"))
       .recovery.invocationId, invocationId);
+    // A restart without a checkout proof reads the journal but proves nothing.
     const restarted = createAmuxV22SidecarHandler({ worker: execute.worker, stateDir,
       invocationId: "c".repeat(32), recoveryUnit: async () => unitProof,
       recoveryJournal: syntheticJournal, run: async () => { runs += 1; } });
-    assert.equal((await restarted({ op: "inspect_recovery", ...request })).reason, "legacy_invocation_unbound");
+    const unproven = await restarted({ op: "inspect_recovery", ...request });
+    assert.equal(unproven.reason, "inspection_unverified");
+    assert.equal(unproven.proof.workspaceClean, false);
     assert.equal((await handler({ op: "inspect_recovery", ...request, workerGeneration: 4 })).reason,
       "legacy_invocation_unbound");
     assert.equal((await handler({ op: "inspect_recovery", ...request,
@@ -91,6 +96,94 @@ test("only current live invocation terminal and exact local binding prove stoppe
     await writeFile(terminalPath, JSON.stringify(terminal));
     assert.equal((await handler({ op: "inspect_recovery", ...request })).reason,
       "legacy_invocation_unbound", "journal tampering never changes the current handler's terminal fact");
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+test("a restarted sidecar proves an earlier invocation's durable terminal, and nothing less", async () => {
+  // Production 2026-11-07: AMUX-FILEREQ-004 failed on 11-06, the sidecar
+  // restarted for a bundle install, and three inspections stayed unbound.
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-journal-"));
+  try {
+    const earlier = createAmuxV22SidecarHandler({ worker: execute.worker, stateDir,
+      invocationId, recoveryJournal: syntheticJournal,
+      run: async () => ({ kind: "failed", attemptId, cliStarted: true,
+        recoveryBaseSha: "e".repeat(40), resultText: "Private output" }) });
+    await earlier({ ...execute, role: "implement" }); await finished(earlier);
+    let workspace = { ok: true, baseSha: "f".repeat(40) };
+    let unit = unitProof;
+    let journal = syntheticJournal;
+    let gate = null;
+    const restarted = createAmuxV22SidecarHandler({ worker: execute.worker, stateDir,
+      invocationId: "c".repeat(32), recoveryUnit: async () => unit,
+      recoveryWorkspace: async () => workspace, recoveryJournal: (path) => journal(path),
+      run: async () => { await gate; return { kind: "failed", attemptId: execute.attemptId }; } });
+    const inspect = (change = {}) => restarted({ op: "inspect_recovery", ...request, ...change });
+    const proven = await inspect();
+    assert.equal(proven.reason, "terminal_journal_proven");
+    assert.equal(proven.hostInvocationId, invocationId, "the invocation that wrote the terminal");
+    assert.deepEqual(proven.proof, { terminalOutcome: "failed", sameLiveInvocation: false,
+      noActiveExecution: true, processTreeStopped: true, rootOwnedUnit: true,
+      controlGroupBound: true, journalBound: true, socketTerminal: true,
+      externalEffectsKnown: true, workspaceClean: true });
+    assert.equal(amuxV22RecoveryEvidenceSchema.safeParse(proven).success, true);
+    assert.equal(amuxV22RecoveryProofReason(proven, "implement"), null);
+    for (const secret of [execute.prompt, "Private output", stateDir])
+      assert.equal(JSON.stringify(proven).includes(secret), false);
+
+    for (const change of [{ workerGeneration: 4 }, { priorAttemptTaskRevision: 3 },
+      { workerInstanceId: "00000000-0000-4000-8000-000000000099" },
+      { priorAttemptId: "00000000-0000-4000-8000-000000000098" }])
+      assert.equal((await inspect(change)).reason, "legacy_invocation_unbound");
+    workspace = { ok: false, reason: "dirty_worktree" };
+    const dirty = await inspect();
+    assert.equal(dirty.reason, "inspection_unverified");
+    assert.equal(amuxV22RecoveryProofReason(dirty, "implement"), "external_effects_unknown",
+      "the app names the dirty checkout instead of an unbound invocation");
+    workspace = { ok: true, baseSha: "f".repeat(40) };
+    unit = { ...unitProof, processTreeStopped: false };
+    assert.equal((await inspect()).reason, "inspection_unverified");
+    unit = unitProof;
+    journal = async (path) => path.endsWith(".result") ? null : syntheticJournal(path);
+    assert.equal((await inspect()).reason, "legacy_invocation_unbound", "an unreadable terminal is no proof");
+    journal = async (path) => path.endsWith(".result") ? "{not json" : syntheticJournal(path);
+    assert.equal((await inspect()).reason, "legacy_invocation_unbound");
+    journal = async (path) => path.endsWith(".claimed") ? `${"0".repeat(64)}\n` : syntheticJournal(path);
+    assert.equal((await inspect()).reason, "legacy_invocation_unbound", "the claim must be the terminal's request");
+    journal = syntheticJournal;
+
+    // Any execution in the answering sidecar withholds the stop proof.
+    let release; gate = new Promise((resolve) => { release = resolve; });
+    await restarted({ ...execute, attemptId: "00000000-0000-4000-8000-000000000097" });
+    const busy = await inspect();
+    assert.equal(busy.proof.noActiveExecution, false); assert.equal(busy.proof.processTreeStopped, false);
+    assert.equal(busy.reason, "inspection_unverified");
+    release();
+    for (const deadline = Date.now() + 10_000;
+      (await restarted({ op: "readback", attemptId: "00000000-0000-4000-8000-000000000097" }))
+        .kind === "in_progress";) {
+      if (Date.now() > deadline) throw new Error("synthetic terminal was not durable");
+      await new Promise(resolve => setTimeout(resolve, 2));
+    }
+
+    // A terminal written without a recovery binding stays unbound.
+    const terminalPath = join(stateDir, `${attemptId}.result`);
+    const terminal = JSON.parse(await readFile(terminalPath, "utf8"));
+    delete terminal.recovery;
+    await writeFile(terminalPath, JSON.stringify(terminal));
+    assert.equal((await inspect()).reason, "legacy_invocation_unbound");
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+test("a restarted sidecar with no terminal for the attempt stays unbound", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-no-terminal-"));
+  try {
+    const restarted = createAmuxV22SidecarHandler({ worker: execute.worker, stateDir,
+      invocationId: "c".repeat(32), recoveryUnit: async () => unitProof,
+      recoveryWorkspace: async () => ({ ok: true, baseSha: "f".repeat(40) }),
+      recoveryJournal: syntheticJournal, run: async () => { throw new Error("no run"); } });
+    const none = await restarted({ op: "inspect_recovery", ...request });
+    assert.equal(none.reason, "legacy_invocation_unbound"); assert.equal(none.hostInvocationId, null);
+    await writeFile(join(stateDir, `${attemptId}.claimed`), `${"a".repeat(64)}\n`);
+    assert.equal((await restarted({ op: "inspect_recovery", ...request })).reason,
+      "legacy_invocation_unbound", "a claim without a terminal is an unknown outcome");
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 test("an implement run refused before its CLI started proves stopped on a clean checkout", async () => {

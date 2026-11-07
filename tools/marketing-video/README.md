@@ -31,6 +31,32 @@ scenes of three kinds:
 Each scene may carry a `caption`, burned in so the video works muted. Line
 breaks in a headline are kept, and Korean and Chinese break between words.
 
+## Chapters on a long video
+
+Owner decision 2026-11-07: a long YouTube tutorial carries chapters so a viewer
+can skip to a section. They are the video's own times, so they come with the
+asset, never from the post's model. Add them to the asset file beside
+`transcript`:
+
+```json
+"chapters": [
+  { "startSeconds": 0, "title": { "en": "What you will build" } },
+  { "startSeconds": 42, "title": { "en": "Ask three models at once" } },
+  { "startSeconds": 128, "title": { "en": "Compare the answers" } }
+]
+```
+
+The app refuses them unless they are YouTube's: at least 3 (at most 20), the
+first at 0, each at least 10 seconds after the one before, and the last at least
+10 seconds before the end. `submit-asset.mjs` rounds the length up to a whole
+second, so leave the last chapter a second more than that. Every chapter needs
+a title, one line of at most 60 characters with no `#`, in each locale the asset
+has alt text for. The Guard reads the titles with the transcript. When the generator
+writes the YouTube post for the video, the app adds the list (`00:00 Title`, one
+line each) to the end of the description before the Guard reads the post and a
+person approves it. A video with chapters, or longer than 60 seconds, is
+long-form, and its post carries no `#Shorts`.
+
 ## Cards and feed videos from approved assets
 
 Owner decision 2026-11-04: the daily job makes new assets only from assets a

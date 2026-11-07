@@ -251,6 +251,9 @@ run(
     "tests/integration/amuxCliUsageLedger.db.test.mjs",
     "tests/integration/amuxCliUsageRetention.db.test.mjs",
     "tests/integration/amuxCliUsageWriter.db.test.mjs",
+    // An owner retry of a named Claude CLI failure reaches the claim; its
+    // partial receipt still holds the worker for every other Task.
+    "tests/integration/amuxV22CliFailureRetryClaim.db.test.mjs",
     "tests/integration/amuxV22AutoPromotion.db.test.mjs",
     "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
@@ -260,6 +263,9 @@ run(
     "tests/integration/amuxV52GradeEscalation.db.test.mjs",
     // Policy v46: a legacy safe stop binds the live runtime after re-registration.
     "tests/integration/amuxV22LegacySafeStopLiveRuntime.db.test.mjs",
+    // A restarted sidecar's journal proves a prior run stopped; the evidence
+    // guard admits that reason only with every stop proof and a clean checkout.
+    "tests/integration/amuxV22RecoveryJournalEvidence.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // The shared AgentDigestItem table: closed agent and kind lists, the

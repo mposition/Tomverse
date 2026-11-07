@@ -42,7 +42,12 @@ export function marketingHashtagRange(channel: string): { readonly min: number; 
  * Why a hashtag was taken out of a draft. Its own constant, apart from the
  * draft refusals and the Guard's codes: the draft is kept.
  */
-export const MARKETING_HASHTAG_REMOVALS = Object.freeze(["hashtag_forbidden", "hashtag_over_limit"] as const);
+export const MARKETING_HASHTAG_REMOVALS = Object.freeze([
+  "hashtag_forbidden",
+  "hashtag_over_limit",
+  // #Shorts on a long-form video's post (owner decision 2026-11-07).
+  "hashtag_shorts_on_long_form",
+] as const);
 export type MarketingHashtagRemoval = (typeof MARKETING_HASHTAG_REMOVALS)[number];
 
 /**
@@ -144,14 +149,16 @@ export function marketingHashtagIsForbidden(tag: string, competitorNames: readon
 
 /**
  * The text with its forbidden tags, and every tag past the platform's maximum,
- * taken out, with how many of each. Only a removed tag, the spaces beside it
- * and, when anything was removed, whitespace at the very end change; every
- * other character, a claim's statement included, is left as it was.
+ * taken out, with how many of each. With `longForm`, #Shorts goes too: a long
+ * video is not a Short (owner decision 2026-11-07). Only a removed tag, the
+ * spaces beside it and, when anything was removed, whitespace at the very end
+ * change; every other character, a claim's statement included, is left as it was.
  */
 export function marketingHashtagsWithinBounds(
   text: string,
   channel: string,
   competitorNames: readonly string[] = [],
+  options: { readonly longForm?: boolean } = {},
 ): { readonly text: string; readonly removed: Partial<Record<MarketingHashtagRemoval, number>> } {
   const { max } = marketingHashtagRange(channel);
   const removed: Partial<Record<MarketingHashtagRemoval, number>> = {};
@@ -160,9 +167,11 @@ export function marketingHashtagsWithinBounds(
   for (const match of text.matchAll(HASHTAG)) {
     const reason: MarketingHashtagRemoval | null = marketingHashtagIsForbidden(match[1] ?? "", competitorNames)
       ? "hashtag_forbidden"
-      : kept >= max
-        ? "hashtag_over_limit"
-        : null;
+      : options.longForm && fold(match[1] ?? "") === "shorts"
+        ? "hashtag_shorts_on_long_form"
+        : kept >= max
+          ? "hashtag_over_limit"
+          : null;
     if (reason === null) {
       kept += 1;
       continue;

@@ -70,6 +70,25 @@ test("v22 unknown execution cannot be manually requeued without a verified termi
     sourceSystem: "legacy", attempt: null }), true);
 });
 
+test("an expired v22 attempt may be retried only when the server stored its own final result", () => {
+  const expired = { id: "attempt-1", v22AssignmentId: "assignment",
+    outcome: "expired", toStatus: "blocked", reason: "outcome_unknown" };
+  assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({ sourceSystem: "admin-idea-v4",
+    attempt: expired, storedResultAttemptId: "attempt-1" }), true);
+  for (const [attempt, storedResultAttemptId] of [
+    [expired, null],
+    [expired, undefined],
+    [expired, "attempt-0"],
+    [{ ...expired, id: undefined }, undefined],
+    [{ ...expired, id: "" }, ""],
+    [{ ...expired, v22AssignmentId: null }, "attempt-1"],
+    [{ ...expired, toStatus: "todo" }, "attempt-1"],
+    [{ ...expired, outcome: "failed" }, "attempt-1"],
+    [{ ...expired, outcome: null }, "attempt-1"],
+  ]) assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({ sourceSystem: "admin-idea-v4",
+    attempt, storedResultAttemptId }), false, JSON.stringify({ attempt, storedResultAttemptId }));
+});
+
 test("approval readiness is conditional and names missing settings without values", () => {
   assert.deepEqual(amuxReviewApprovalReadiness({}), { ready: true, enabled: false, missing: [] });
   assert.deepEqual(amuxReviewApprovalReadiness({

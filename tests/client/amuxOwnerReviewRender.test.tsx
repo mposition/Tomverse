@@ -341,6 +341,25 @@ test("unknown execution offers read-only recovery and no blind retry", () => {
     /retry, block/);
 });
 
+test("an expired attempt with its own stored final result offers the server's retry", () => {
+  const expired = (resultStored: boolean) => review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: { ...review().last_attempt!, outcome: "expired",
+      to_status: "blocked", result_stored: resultStored },
+    review_context: { ...review().review_context,
+      escalation_reason: "execution_lease_expired",
+      last_attempt_reason: "outcome_unknown" },
+    allowed_outcomes: ["retry", "block"],
+    proposed_transitions: { retry: "todo", block: "blocked" },
+  });
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(expired(true)), ["retry", "block"]);
+  const tree = render(expired(true));
+  assert.equal(byTestId(tree, "admin-amux-select-retry").length, 1);
+  assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 0);
+  // Without the stored result it is still an unknown run.
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(expired(false)), []);
+});
+
 test("a step-up from a review returns to that escalation, and only a well-formed one", () => {
   assert.equal(amuxAssignmentReviewReturnPath("clreview1234567890123456"),
     "/admin/amux-execution?tab=assignment&focusEscalation=clreview1234567890123456");
