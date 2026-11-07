@@ -27,6 +27,11 @@ export type AgentRunnerService = {
   readonly key: string;
   readonly service: string;
   readonly startCommand: string;
+  /**
+   * A start command for one environment that replaces `startCommand` there.
+   * Absent: `startCommand` everywhere.
+   */
+  readonly startCommandByEnvironment?: Partial<Record<RailwayEnvironment, string>>;
   /** `null` for a service an operator runs by hand. */
   readonly cronSchedule: string | null;
   /**
@@ -193,6 +198,15 @@ const MARKETING_GENERATOR_VARIABLES = [
   "MARKETING_LLM_API_KEY",
   "MARKETING_AI_VISIBILITY_ENABLED",
 ] as const;
+
+/**
+ * What Railway's production Marketing Generator runs: nothing but a line saying
+ * where the generator went. Production drafts on the AMUX box
+ * (docs/ops/marketing-generator-box.md); this is the exact string live in
+ * Railway on 2026-11-07, so a production plan shows no start-command change.
+ */
+export const MARKETING_GENERATOR_PRODUCTION_NOOP_START =
+  `node -e "console.log('Marketing generator moved to the AMUX box; see docs/ops/marketing-generator-box.md')"`;
 
 /**
  * The comment monitor's variables (marketing S4d): the generator's three and
@@ -446,12 +460,16 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     // nothing until a model is pinned and the operator has selected it with a
     // monthly cap in the Admin Console; the ledger refuses every other call.
     //
-    // Production differs on purpose: the generator runs on the AMUX box there and
-    // the live start command does nothing, so an apply restores this one
-    // (docs/ops/marketing-generator-box.md).
+    // Production runs the generator on the AMUX box
+    // (docs/ops/marketing-generator-box.md), so Railway's production service
+    // is a no-op. Running the real generator there as well would draft, and
+    // spend, twice a day.
     key: "marketing_generator",
     service: "Marketing Generator",
     startCommand: "node --experimental-strip-types scripts/marketing-generator-service.mjs",
+    startCommandByEnvironment: {
+      production: MARKETING_GENERATOR_PRODUCTION_NOOP_START,
+    },
     cronSchedule: "0 21 * * *",
     environments: {
       production: MARKETING_GENERATOR_VARIABLES,
@@ -703,7 +721,7 @@ export const buildAgentRunnerResources = <Source, Preserved, Resource>(
               },
             }
           : {}),
-        start: runner.startCommand,
+        start: runner.startCommandByEnvironment?.[environment] ?? runner.startCommand,
         deploy: {
           ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
           ...restartPolicyFields(runner.restart),

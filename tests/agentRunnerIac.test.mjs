@@ -18,6 +18,7 @@ import {
   AGENT_RAILWAY_REGION,
   AGENT_RAILWAY_REPOSITORY,
   AGENT_RUNNER_SERVICES,
+  MARKETING_GENERATOR_PRODUCTION_NOOP_START,
   RAILWAY_DEFAULT_RESTART,
   buildAgentRunnerResources,
 } from "../.railway/agent-runners.ts";
@@ -195,7 +196,7 @@ test("the resource list is exactly the table for that environment, and refuses t
           ? { reference: `${runner.image.reference}@${runner.image.digest}`, autoUpdates: { type: "disabled" } }
           : { repo: "mposition/Tomverse", branch, ...(runner.checkSuites === false ? { checkSuites: false } : {}) }
       );
-      assert.equal(resource.start, runner.startCommand);
+      assert.equal(resource.start, runner.startCommandByEnvironment?.[environment] ?? runner.startCommand);
       assert.deepEqual(resource.deploy, {
         ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
         // Railway stores its own default restart policy as null, so a runner
@@ -467,4 +468,26 @@ test("the orchestrator's restart policy is Railway's default, so it is declared 
   assert.equal(orchestrator.deploy.restartPolicyType, null);
   assert.equal(orchestrator.deploy.restartPolicyMaxRetries, null);
   assert.equal(Object.prototype.hasOwnProperty.call(orchestrator.deploy, "restartPolicyType"), true, "null is declared, not left out");
+});
+
+test("production's Marketing Generator is a no-op because the AMUX box drafts there; staging and dev run the generator", () => {
+  // The box drafts in production (docs/ops/marketing-generator-box.md). A
+  // production apply that declared the real generator would bring back a
+  // second daily run on the paid LLM key.
+  const { dsl } = recordingDsl();
+  const startOf = (environment) =>
+    buildAgentRunnerResources(environment, dsl).find((resource) => resource.name === "Marketing Generator")?.start;
+  const generator = "node --experimental-strip-types scripts/marketing-generator-service.mjs";
+
+  assert.equal(startOf("production"), MARKETING_GENERATOR_PRODUCTION_NOOP_START);
+  assert.doesNotMatch(startOf("production"), /marketing-generator-service/);
+  assert.match(startOf("production"), /^node -e "console\.log\('[^"]*'\)"$/, "the no-op only prints a line");
+  assert.equal(startOf("staging"), generator);
+  assert.equal(startOf("dev"), generator);
+
+  // No other runner overrides its start command per environment.
+  assert.deepEqual(
+    AGENT_RUNNER_SERVICES.filter((runner) => runner.startCommandByEnvironment).map((runner) => runner.key),
+    ["marketing_generator"]
+  );
 });
