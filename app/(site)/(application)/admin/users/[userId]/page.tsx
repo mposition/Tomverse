@@ -3,11 +3,10 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import {
-  ADMIN_USER_DETAIL_TABS,
   AdminUserDetailView,
-  type AdminUserDetailTab,
   type AdminUserPlanLimits,
 } from "@/components/admin/AdminUserDetailView";
+import { ADMIN_USER_DETAIL_TABS, type AdminUserDetailTab } from "@/lib/adminUserDetailTabs";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { authOptions } from "@/lib/auth";
 import { getBillingPlans } from "@/lib/billingConfig";

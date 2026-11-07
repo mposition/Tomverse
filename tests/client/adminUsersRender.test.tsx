@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -15,7 +16,7 @@ import {
   AdminUserSecurityControls,
   type AdminSecurityUser,
 } from "@/components/admin/AdminUserSecurityControls";
-import { ADMIN_USER_DETAIL_TABS } from "@/components/admin/AdminUserDetailView";
+import { ADMIN_USER_DETAIL_TABS } from "@/lib/adminUserDetailTabs";
 import { adminInitials } from "@/components/admin/ui/AdminInitialAvatar";
 import { ADMIN_DETAIL_ROUTES } from "@/lib/adminNavigation";
 import type { AdminUserRow, AdminUserStats } from "@/lib/adminUserTypes";
@@ -227,6 +228,16 @@ test("the step-up promise is on every confirming button before it is pressed", (
 test("the detail sections are the ones the route table declares", () => {
   const declared = ADMIN_DETAIL_ROUTES.find((route) => route.id === "user-detail");
   assert.deepEqual([...ADMIN_USER_DETAIL_TABS], declared?.tabs?.map((tab) => tab.id));
+});
+
+test("the server page reads the section list from a plain module, not from the client view", () => {
+  // A server component handed a value exported by a "use client" file gets a
+  // reference, not the array, so reading it throws on every customer page.
+  const page = readFileSync("app/(site)/(application)/admin/users/[userId]/page.tsx", "utf8");
+  assert.ok(page.includes('from "@/lib/adminUserDetailTabs"'));
+  const fromView = page.match(/import \{([^}]*)\} from "@\/components\/admin\/AdminUserDetailView"/);
+  assert.ok(fromView, "the page imports the view");
+  assert.ok(!fromView[1].includes("ADMIN_USER_DETAIL_TABS"));
 });
 
 test("initials come from a name, else an email, else a question mark", () => {

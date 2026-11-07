@@ -27,10 +27,8 @@ import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminFetch } from "@/lib/adminFetch";
+import { ADMIN_USER_DETAIL_TABS, type AdminUserDetailTab } from "@/lib/adminUserDetailTabs";
 import type { AdminTone } from "@/lib/adminUiCore";
-
-export const ADMIN_USER_DETAIL_TABS = ["overview", "billing", "security", "conversations", "notes"] as const;
-export type AdminUserDetailTab = (typeof ADMIN_USER_DETAIL_TABS)[number];
 
 export type AdminUserPlanLimits = Record<string, { daily: number; monthly: number }>;
 

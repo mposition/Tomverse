@@ -151,12 +151,12 @@ export function ledgerDailyFlow(
   if (keys.length < 2) return null;
   const [fy, fm, fd] = keys[0].split("-").map(Number);
   const [ly, lm, ld] = keys[keys.length - 1].split("-").map(Number);
-  const spanDays = Math.round((new Date(ly, lm - 1, ld).getTime() - new Date(fy, fm - 1, fd).getTime()) / 86_400_000) + 1;
+  const spanDays = Math.round((Date.UTC(ly, lm - 1, ld) - Date.UTC(fy, fm - 1, fd)) / 86_400_000) + 1;
   const count = Math.min(spanDays, maxDays);
   const days: string[] = [];
   for (let offset = spanDays - count; offset < spanDays; offset += 1) {
-    const date = new Date(fy, fm - 1, fd + offset);
-    days.push(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`);
+    const date = new Date(Date.UTC(fy, fm - 1, fd + offset));
+    days.push(`${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`);
   }
   return {
     days,
