@@ -774,8 +774,10 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("cell", { name: FIXTURE_AUDIT_LOG.summary }).first()
     ).toBeVisible();
+    // Scoped to the table: the actor filter above it lists the same address
+    // as an <option>, which is never visible.
     await expect(
-      page.getByText(ADMIN_E2E_IDENTITIES.owner.email).first()
+      page.getByRole("table").getByText(ADMIN_E2E_IDENTITIES.owner.email).first()
     ).toBeVisible();
     await expect(page.getByText(/most recent entries/)).toBeVisible();
   });
