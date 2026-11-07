@@ -206,6 +206,9 @@ test("a versioned model name must be one features.json lists", { skip }, () => {
     const invented = make(ctx, "20261101", "media-a-card", chips("Now with", "GPT 7."));
     assert.equal(invented.status, 1);
     assert.match(invented.stderr, /GPT 7.{0,2} is not a model name/u);
+    const suffixed = make(ctx, "20261101", "media-d-card", chips("Now with", "GPT 6 Luna 999."));
+    assert.equal(suffixed.status, 1);
+    assert.match(suffixed.stderr, /is not a model name/u);
     const split = make(ctx, "20261101", "media-c-card", chips("Now with", "GPT <span>7</span>."));
     assert.equal(split.status, 1);
     assert.match(split.stderr, /GPT 7.{0,2} is not a model name/u);

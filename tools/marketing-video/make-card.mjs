@@ -335,7 +335,11 @@ try {
   // inline elements is read whole.
   for (const text of found.phrases.map(normal)) {
     for (const match of text.matchAll(MODEL_MENTION)) {
-      if (!KNOWN_MODELS.some((name) => text.startsWith(name, match.index))) {
+      // The listed name, then a boundary and no further version: "GPT 6 Luna"
+      // passes, "GPT 6 Lunax" and "GPT 6 Luna 999" do not.
+      const listed = (name) =>
+        text.startsWith(name, match.index) && !/^(?:[\p{L}\p{N}]|\s*[\d.]+)/u.test(text.slice(match.index + name.length));
+      if (!KNOWN_MODELS.some(listed)) {
         fail(`"${match[0]}" is not a model name in features.json`);
       }
     }

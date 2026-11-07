@@ -74,10 +74,11 @@ const strings = [
   ...notes.colours,
   ...notes.new,
 ];
-for (const text of strings) {
+for (const [index, text] of strings.entries()) {
   const w = words(text);
   for (let i = 0; i + 5 <= w.length; i += 1) {
-    if (runs.has(w.slice(i, i + 5).join(" "))) fail(`the notes carry an ad's words: "${w.slice(i, i + 5).join(" ")}"`);
+    // The position only: the refusal is logged, and the ad's words must not be.
+    if (runs.has(w.slice(i, i + 5).join(" "))) fail(`the notes carry five words in a row from an ad (string ${index}, word ${i})`);
   }
 }
 

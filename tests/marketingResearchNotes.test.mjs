@@ -51,6 +51,8 @@ test("five words in a row from an ad, in any field, keep the notes from being wr
     const out = check(notes, ads);
     assert.equal(out.status, 1);
     assert.equal(out.written, null);
+    // The refusal says where, never the ad's words.
+    assert.doesNotMatch(out.stderr, /top model|chats forever/u);
   }
 });
 
