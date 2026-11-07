@@ -116,7 +116,9 @@ test("the DM approver: behind its switch, irreversible stays human, answers are 
   const close = source.indexOf("closeDecisionMakerRequestOnDirectAnswer(tx");
   assert.ok(close > 0 && close < source.indexOf("applyAmuxV22DmAnswer(tx"),
     "the request is closed first, under the chain lock, so a judgment that came first wins");
-  assert.match(source, /if \(!claimed\.recorded\)\s+return \{ requestId: candidate\.requestId, kind: candidate\.kind, applied: false \};/);
+  assert.match(source, /withAmuxDbBoundary\(AMUX_DB_BOUNDARIES\.decisionMakerAutoApply,\s+async \(tx, context\) => \{\s+const claimed = await closeDecisionMakerRequestOnDirectAnswer\(tx,/,
+    "claim and answer in one transaction: a failed answer rolls the claim back");
+  assert.match(source, /if \(!effect\) throw new AmuxDmAutoApplyHeld\(\);/);
   const store = read("lib/amux/decisionMakerRequestStore.ts");
   const open = store.slice(store.indexOf("export async function readNextDecisionMakerOpenProposal"));
   assert.match(open.slice(0, 2_000), /ORDER BY random\(\)/, "one it may not apply never holds back the others");

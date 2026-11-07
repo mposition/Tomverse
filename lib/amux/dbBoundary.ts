@@ -600,11 +600,12 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "read",
   },
-  // Closing the applied request as answered outside the confirm path: setup +
-  // the request store's direct-answer close (at most 8) + fence.
-  decisionMakerAutoApplyClose: {
-    operation: "decision_maker_auto_apply_close",
-    prismaCallCeiling: 10,
+  // The approver's one transaction: setup + the request store's direct-answer
+  // close, which is the claim (at most 8) + the question type's applier (at
+  // most 11 past its setup) + fence. Claim and answer commit or roll back together.
+  decisionMakerAutoApply: {
+    operation: "decision_maker_auto_apply",
+    prismaCallCeiling: 22,
     isolation: "mutation",
   },
   // An idea card close question (lib/amux/ideaCardCloseService.ts), each within

@@ -2,7 +2,6 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { takeAuditChainLock } from "@/lib/adminAudit";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerBodies, readDecisionMakerResultDetail } from
   "@/lib/amux/decisionMakerBodyStore";
@@ -53,6 +52,7 @@ type OpenCard = { cardId: string; kind: string; id: string };
 /** The open questions of the four types that have a local card, one statement. */
 async function readOpenAppAnsweredCards(tx: Prisma.TransactionClient) {
   return tx.$queryRaw<OpenCard[]>`
+    SELECT * FROM (
     SELECT "localCardId" AS "cardId", 'question' AS "kind", "id" FROM "AmuxV22TaskQuestion"
     WHERE "state" = 'open' AND "localCardId" IS NOT NULL
     UNION ALL
@@ -64,6 +64,10 @@ async function readOpenAppAnsweredCards(tx: Prisma.TransactionClient) {
     UNION ALL
     SELECT "localCardId", 'result_review', "id" FROM "AmuxV22ResultReview"
     WHERE "state" = 'open' AND "handoffAt" IS NULL AND "localCardId" IS NOT NULL
+    ) AS open_cards
+    -- A random hundred each tick: cards whose proposals cannot be applied
+    -- never keep the others out of the sample for good.
+    ORDER BY random()
     LIMIT 100`;
 }
 
@@ -122,13 +126,18 @@ export async function readAmuxDmAutoApplyCandidate(tx: Prisma.TransactionClient,
   return decision ? { kind: "result_review", ...base, reviewId: card.id, decision } : null;
 }
 
+/** Thrown inside the one transaction to roll the claim back with the answer. */
+class AmuxDmAutoApplyHeld extends Error {}
+
 /**
- * One step, each part its own transaction within the DM policy's twelve
- * statements: the read; the answer in the question type's own boundary (each
- * applier takes the audit chain lock and reads the kill switch again); then
- * the request's close. A proposal that cannot be applied stays where it is,
- * for the operator's confirmation as before. A lost close leaves a request
- * whose question is no longer open, which the next read no longer finds.
+ * One step: the read, then ONE transaction that claims the request and
+ * applies the answer. The claim (the direct-answer close) takes the audit
+ * chain lock and is refused when the request is no longer open, so a person's
+ * judgment that came first wins. The answer applies in the same transaction;
+ * when it cannot (the kill switch, the question no longer open, a refused
+ * answer) or anything fails, both roll back and the proposal stays open for
+ * the operator. Its statement ceiling is the close's and the applier's
+ * together (docs/policy/amux-decision-maker.md §0a).
  */
 export async function runAmuxDmAutoApplyStep(env: Record<string, string | undefined> = process.env):
   Promise<null | { requestId: string; kind: Candidate["kind"]; applied: boolean }> {
@@ -136,57 +145,46 @@ export async function runAmuxDmAutoApplyStep(env: Record<string, string | undefi
   const candidate = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerAutoApplyRead,
     (tx, context) => readAmuxDmAutoApplyCandidate(tx, context.dbNow));
   if (!candidate) return null;
-  // The close comes first and is the claim: under the audit chain lock it is
-  // refused when the request is no longer open (the operator confirmed,
-  // edited or rejected it since the read), so a proposal a person judged is
-  // never applied. An answer that then fails leaves the question open for the
-  // person's direct answer, as before.
-  const claimed = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerAutoApplyClose,
-    (tx) => closeDecisionMakerRequestOnDirectAnswer(tx, { cardId: candidate.cardId,
-      questionRevision: candidate.questionRevision }));
-  if (!claimed.recorded)
-    return { requestId: candidate.requestId, kind: candidate.kind, applied: false };
-  let applied = false;
+  const result = { requestId: candidate.requestId, kind: candidate.kind };
   try {
-    if (candidate.kind === "question") {
-      const result = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionAnswer,
-        (tx, context) => applyAmuxV22DmAnswer(tx, { questionId: candidate.questionId,
-          requestId: candidate.requestId, message: candidate.message, now: context.dbNow,
-          source: "dm" }));
-      applied = result.applied;
-    } else if (candidate.kind === "refusal") {
-      const result = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerPlanRefusalDecide,
-        async (tx, context) => {
-          await takeAuditChainLock(tx);
-          if ((await readDecisionMakerSwitchesOrThrow(tx)).killSwitch !== false)
-            return { applied: false as const };
-          return applyAmuxPlanRefusalDmDecision(tx, { refusalId: candidate.refusalId,
-            ideaId: candidate.ideaId, requestId: candidate.requestId,
-            decision: candidate.decision, now: context.dbNow, source: "dm" });
-        });
-      applied = result.applied;
-    } else if (candidate.kind === "card_close") {
-      const result = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerIdeaCardCloseApply,
-        (tx, context) => applyAmuxIdeaCardCloseDmAnswer(tx, { questionId: candidate.questionId,
-          requestId: candidate.requestId, decision: candidate.decision, now: context.dbNow,
-          source: "dm" }));
-      applied = result.applied;
-    } else {
-      const result = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewApply,
-        (tx, context) => applyAmuxV22ResultReviewDecision(tx, { reviewId: candidate.reviewId,
-          decision: candidate.decision, source: "dm", requestId: candidate.requestId,
-          now: context.dbNow }));
-      // A Task that moved on cancels the review, and a result nobody can read
-      // goes to the person (applied false): neither applied the DM's answer.
-      applied = result.applied && result.outcome !== "cancelled";
-    }
+    const applied = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerAutoApply,
+      async (tx, context) => {
+        const claimed = await closeDecisionMakerRequestOnDirectAnswer(tx,
+          { cardId: candidate.cardId, questionRevision: candidate.questionRevision });
+        if (!claimed.recorded) return false;
+        const now = context.dbNow;
+        let effect: boolean;
+        if (candidate.kind === "question") {
+          effect = (await applyAmuxV22DmAnswer(tx, { questionId: candidate.questionId,
+            requestId: candidate.requestId, message: candidate.message, now, source: "dm" })).applied;
+        } else if (candidate.kind === "refusal") {
+          effect = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch === false &&
+            (await applyAmuxPlanRefusalDmDecision(tx, { refusalId: candidate.refusalId,
+              ideaId: candidate.ideaId, requestId: candidate.requestId,
+              decision: candidate.decision, now, source: "dm" })).applied;
+        } else if (candidate.kind === "card_close") {
+          effect = (await applyAmuxIdeaCardCloseDmAnswer(tx, { questionId: candidate.questionId,
+            requestId: candidate.requestId, decision: candidate.decision, now,
+            source: "dm" })).applied;
+        } else {
+          const review = await applyAmuxV22ResultReviewDecision(tx, { reviewId: candidate.reviewId,
+            decision: candidate.decision, source: "dm", requestId: candidate.requestId, now });
+          // A Task that moved on cancels the review, and a result nobody can
+          // read goes to the person: both are kept, with the request closed;
+          // only the kill switch (no outcome) rolls back.
+          if (review.outcome === null) throw new AmuxDmAutoApplyHeld();
+          return review.applied && review.outcome !== "cancelled";
+        }
+        if (!effect) throw new AmuxDmAutoApplyHeld();
+        return true;
+      });
+    return { ...result, applied };
   } catch (error) {
-    // A refused answer (the Task moved, the answer too long) rolls back and
-    // stays for the operator; any other failure is logged without content.
-    if (!(error instanceof BoardImportError))
+    // Held, or a refused answer (the Task moved, the answer too long): rolled
+    // back, open for the operator. Any other failure is logged without content.
+    if (!(error instanceof AmuxDmAutoApplyHeld) && !(error instanceof BoardImportError))
       console.warn(JSON.stringify({ subsystem: "amux", event: "dm_auto_apply_failed",
         kind: candidate.kind, sqlState: amuxDatabaseDiagnosticCode(error) }));
-    return { requestId: candidate.requestId, kind: candidate.kind, applied: false };
+    return { ...result, applied: false };
   }
-  return { requestId: candidate.requestId, kind: candidate.kind, applied };
 }
