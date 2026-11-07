@@ -63,8 +63,9 @@ test("the board draws three totals and ten cards, each a link to its team's scre
   assert.match(html, /data-testid="team-board-waiting"/);
   assert.match(html, /data-testid="team-board-cost"/);
   assert.match(html, /data-testid="team-board-working"/);
-  // The decisions link goes to the agents part of the inbox.
-  assert.ok(html.includes('href="/admin/work-queue?tab=agents"'));
+  // The Decisions link opens the inbox on its All tab; the agents tab is still a placeholder.
+  assert.ok(html.includes('href="/admin/work-queue"'));
+  assert.ok(!html.includes('tab=agents'));
 });
 
 test("totals sum what was read and say when something was not", () => {

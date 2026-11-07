@@ -20,7 +20,8 @@ import { adminUiMessages } from "@/lib/adminMessages/ui";
 import type { AgentOfficeLiveRooms } from "@/lib/agentOffice/live";
 import { formatAestClock, formatAestDateTime } from "@/lib/adminUiCore";
 
-const WORK_QUEUE_AGENTS_HREF = "/admin/work-queue?tab=agents";
+// The Decisions page opens on its All tab; the agents tab waits for its own screen, and each card links to its team.
+const WORK_QUEUE_HREF = "/admin/work-queue";
 
 /**
  * Agents home › Team board: three totals and one card per AI team.
@@ -75,7 +76,7 @@ export function AdminAgentTeamBoard({
               </div>
             </div>
             <Link
-              href={WORK_QUEUE_AGENTS_HREF}
+              href={WORK_QUEUE_HREF}
               className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-500"
             >
               {board.openInbox}
