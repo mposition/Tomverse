@@ -9,7 +9,9 @@ import { MARKETING_ASSET_ACTIONS, MARKETING_ASSET_NO_DECISION } from "@/lib/mark
 import {
   confirmMarketingAssetUpload,
   decideMarketingAsset,
+  readApprovedMarketingAssetChapters,
   readApprovedMarketingAssetLocation,
+  readApprovedMarketingAssetMedia,
   readMarketingAssetsForConsole,
   submitMarketingAsset,
 } from "@/lib/marketingAssetStore";
@@ -443,4 +445,120 @@ test("a submission and a person's retirement at once both finish: the submission
   assert.equal(retired.status, "retired");
   assert.equal(answer.status, 200, JSON.stringify(answer.body));
   assert.equal((await row("media-20261031-second")).status, "submitted");
+});
+
+// A long video's YouTube chapters (owner decision 2026-11-07).
+const CHAPTERS = [
+  { startSeconds: 0, title: { en: "What you will build", ko: "만들 것" } },
+  { startSeconds: 42, title: { en: "Ask three models", ko: "세 모델에 묻기" } },
+  { startSeconds: 128, title: { en: "Compare the answers", ko: "답 비교하기" } },
+];
+const tutorial = (chapters: unknown = CHAPTERS) =>
+  submission({ durationSeconds: 300, chapters: chapters as MarketingAssetSubmission["chapters"] });
+
+test("a video's chapters are stored with it, read back on a resend, listed for a person and reach the intake only once approved", async () => {
+  const first = await postSubmission(tutorial());
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  // The same submission again is the same row; other chapters under the id are another file.
+  assert.equal((await postSubmission(tutorial())).status, 200);
+  const moved = await postSubmission(tutorial([CHAPTERS[0], { ...CHAPTERS[1], startSeconds: 50 }, CHAPTERS[2]]));
+  assert.equal(moved.status, 409);
+  assert.equal(moved.body.code, "asset_id_taken");
+
+  const listed = await readMarketingAssetsForConsole(prisma, 10);
+  assert.deepEqual(listed.rows[0].chapters, CHAPTERS);
+  assert.equal((await readApprovedMarketingAssetChapters(prisma, [ID])).size, 0, "a submission is trusted for nothing");
+
+  await tx((client) => confirmMarketingAssetUpload(client, { assetId: ID, bytes: 12_000_000 }));
+  await decide("approved");
+  assert.deepEqual((await readApprovedMarketingAssetChapters(prisma, [ID, "media-other"])).get(ID), CHAPTERS);
+  const media = await readApprovedMarketingAssetMedia(prisma);
+  assert.equal(media.kinds.get(ID), "video");
+  assert.equal(media.longForm.has(ID), true);
+
+  // Chapters are part of the submission: they never change, approved or not.
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`UPDATE "MarketingAsset" SET "chapters" = NULL WHERE "id" = $1`, ID),
+    refusedBy("marketing_asset_submission_is_immutable"),
+  );
+});
+
+test("a short without chapters is not long-form, and a video without chapters reads none", async () => {
+  await submitAndUpload();
+  await decide("approved");
+  const media = await readApprovedMarketingAssetMedia(prisma);
+  assert.equal(media.longForm.has(ID), false, "45 seconds and no chapters is a Short");
+  assert.equal((await readApprovedMarketingAssetChapters(prisma, [ID])).size, 0);
+});
+
+test("the Guard reads chapter titles with the transcript: a title it rejects writes nothing", async () => {
+  const rejected = await postSubmission(
+    tutorial([CHAPTERS[0], { ...CHAPTERS[1], title: { ...CHAPTERS[1].title, en: "Try it at tomverse.app" } }, CHAPTERS[2]]),
+  );
+  assert.equal(rejected.status, 422);
+  assert.equal(rejected.body.code, "transcript_guard_rejected");
+  assert.ok((rejected.body.guardCodes as string[]).includes("hygiene"), JSON.stringify(rejected.body));
+  assert.equal(await assetCount(), 0);
+});
+
+test("the database refuses chapters YouTube would not show, on an image, or without a title per alt locale", async () => {
+  const insert = (id: string, kind: "video" | "image", chapters: unknown, durationSeconds: number | null = 300) =>
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "MarketingAsset" ("id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
+         "validUntil", "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
+         "transcript", "chapters", "status", "updatedAt")
+       VALUES ($1, $2, 'capture', ARRAY['youtube'], '{"youtube":"none"}', '{"en":"A screen.","ko":"화면."}', ARRAY[]::TEXT[],
+         '2099-01-01', true, 'marketing-assets/' || $1 || CASE WHEN $2 = 'video' THEN '/original.mp4' ELSE '/original.png' END,
+         CASE WHEN $2 = 'video' THEN 'video/mp4' ELSE 'image/png' END, 10, $3, $4::INTEGER,
+         '{"en":"Words."}'::jsonb, $5::jsonb, 'submitted', now())`,
+      id,
+      kind,
+      SHA,
+      durationSeconds,
+      JSON.stringify(chapters),
+    );
+  const check = refusedBy("MarketingAsset_chapters_check");
+  // The store's own shape passes, at YouTube's exact boundaries.
+  await insert("media-ok", "video", [CHAPTERS[0], { ...CHAPTERS[1], startSeconds: 10 }, { ...CHAPTERS[2], startSeconds: 20 }], 30);
+  // The first not at 0; a nine-second section; the last nine seconds from the end; a start past the end.
+  await assert.rejects(insert("media-first", "video", [{ ...CHAPTERS[0], startSeconds: 1 }, ...CHAPTERS.slice(1)]), check);
+  await assert.rejects(insert("media-gap", "video", [CHAPTERS[0], { ...CHAPTERS[1], startSeconds: 9 }, CHAPTERS[2]]), check);
+  await assert.rejects(insert("media-tail", "video", CHAPTERS, 137), check);
+  await assert.rejects(insert("media-past", "video", CHAPTERS, 100), check);
+  await assert.rejects(insert("media-order", "video", [CHAPTERS[0], CHAPTERS[2], CHAPTERS[1]]), check);
+  // Fewer than three; not whole seconds; an extra field.
+  await assert.rejects(insert("media-two", "video", CHAPTERS.slice(0, 2)), check);
+  await assert.rejects(insert("media-half", "video", [CHAPTERS[0], { ...CHAPTERS[1], startSeconds: 42.5 }, CHAPTERS[2]]), check);
+  await assert.rejects(insert("media-extra", "video", [{ ...CHAPTERS[0], endSeconds: 42 }, ...CHAPTERS.slice(1)]), check);
+  // A title missing for an alt locale, in an unknown locale, too long, or with a line break.
+  await assert.rejects(insert("media-noko", "video", [{ ...CHAPTERS[0], title: { en: "Intro" } }, ...CHAPTERS.slice(1)]), check);
+  await assert.rejects(
+    insert("media-fr", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, fr: "Intro" } }, ...CHAPTERS.slice(1)]),
+    check,
+  );
+  await assert.rejects(
+    insert("media-longtitle", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: "a".repeat(61) } }, ...CHAPTERS.slice(1)]),
+    check,
+  );
+  await assert.rejects(
+    insert("media-newline", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: "Intro\n00:05 Fake" } }, ...CHAPTERS.slice(1)]),
+    check,
+  );
+  await assert.rejects(
+    insert("media-hashtag", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: "Intro #Shorts" } }, ...CHAPTERS.slice(1)]),
+    check,
+  );
+  // A line separator, a blank title, and one with something to trim.
+  await assert.rejects(
+    insert("media-separator", "video", [
+      { ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: `Intro${String.fromCharCode(0x2028)}00:05 Fake` } },
+      ...CHAPTERS.slice(1),
+    ]),
+    check,
+  );
+  await assert.rejects(insert("media-blank", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: "   " } }, ...CHAPTERS.slice(1)]), check);
+  await assert.rejects(insert("media-padded", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: " Intro" } }, ...CHAPTERS.slice(1)]), check);
+  // Not a list at all, and chapters on an image (no length, so the function alone would answer NULL).
+  await assert.rejects(insert("media-object", "video", { startSeconds: 0 }), check);
+  await assert.rejects(insert("media-image", "image", CHAPTERS, null), check);
 });

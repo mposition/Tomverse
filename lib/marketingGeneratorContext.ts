@@ -38,7 +38,7 @@ import {
 } from "@/lib/marketingClaims";
 import { MARKETING_ASSET_RELEASED_POST_STATUSES } from "@/lib/marketingDraftIntakeCore";
 import { resolveMarketingPageEvidence } from "@/lib/marketingEvidencePages";
-import { readApprovedMarketingAssetKinds } from "@/lib/marketingAssetStore";
+import { readApprovedMarketingAssetMedia } from "@/lib/marketingAssetStore";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
 import {
   MARKETING_LLM_SETTINGS_KEY,
@@ -252,6 +252,11 @@ export type MarketingGeneratorAsset = {
   readonly validUntil: string;
   /** `video` or `image` for a stored asset; null for a hand-kept one, which names no kind. */
   readonly kind: "image" | "video" | null;
+  /**
+   * Present, and true, for a long-form video (chapters, or past a Short's
+   * length): its YouTube post carries no #Shorts (owner decision 2026-11-07).
+   */
+  readonly longForm?: true;
   /** The alt text per locale: what the asset shows, so a post can be about it. */
   readonly alt: Readonly<Record<string, string>>;
   /**
@@ -316,6 +321,7 @@ export function generatorAssetProjection(
   registry: MarketingAssetRegistry | null,
   channels: readonly string[],
   kinds: ReadonlyMap<string, "image" | "video"> = new Map(),
+  longForm: ReadonlySet<string> = new Set(),
 ): MarketingGeneratorAsset[] {
   if (!registry) return [];
   const platforms = new Set(channels);
@@ -328,6 +334,7 @@ export function generatorAssetProjection(
       claimIds: [...asset.claimIds],
       validUntil: asset.validUntil,
       kind: kinds.get(asset.id) ?? null,
+      ...(longForm.has(asset.id) ? { longForm: true as const } : {}),
       alt: { ...asset.alt },
     }))
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
@@ -570,6 +577,9 @@ export async function readMarketingGeneratorContext(
     allowSharing: plan.allowSharing,
     allowDownloads: plan.allowDownloads,
   }));
+  // The registry (FOR SHARE) and then the stored assets' kinds, as before.
+  const assetRegistry = await readMarketingAssetRegistry(db);
+  const assetMedia = await readApprovedMarketingAssetMedia(db);
   return {
     channels: channels.map((row) => ({
       id: row.id,
@@ -593,9 +603,10 @@ export async function readMarketingGeneratorContext(
       ),
     ),
     assets: generatorAssetProjection(
-      await readMarketingAssetRegistry(db),
+      assetRegistry,
       channels.map((row) => row.channel),
-      await readApprovedMarketingAssetKinds(db),
+      assetMedia.kinds,
+      assetMedia.longForm,
     ).map((asset) => {
       const copies = publishedCopies.get(asset.id);
       return copies ? { ...asset, publishedCopies: copies } : asset;

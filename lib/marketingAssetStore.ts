@@ -35,6 +35,7 @@ import {
 import type { MarketingAssetSubmission } from "@/lib/marketingAssetSubmission";
 import type { MarketingAsset } from "@/lib/marketingAssets";
 import type { MarketingTransaction } from "@/lib/marketingStore";
+import { marketingVideoIsLongForm, type MarketingVideoChapter } from "@/lib/marketingVideoChapters";
 
 type AssetReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
@@ -54,6 +55,8 @@ type AssetRow = {
   sha256: string;
   durationSeconds: number | null;
   transcript: Record<string, string>;
+  /** A long video's YouTube chapters (owner decision 2026-11-07); null for none. */
+  chapters: MarketingVideoChapter[] | null;
   status: MarketingAssetStatus;
   uploadedAt: Date | null;
   registryVersion: number | null;
@@ -65,7 +68,7 @@ type AssetRow = {
 const ROW_COLUMNS = Prisma.sql`
   "id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
   to_char("validUntil", 'YYYY-MM-DD') AS "validUntil", "depictsProductInterface",
-  "r2Key", "contentType", "bytes", "sha256", "durationSeconds", "transcript", "status", "uploadedAt",
+  "r2Key", "contentType", "bytes", "sha256", "durationSeconds", "transcript", "chapters", "status", "uploadedAt",
   "registryVersion", "decisionAuditLogId", "decidedAt", "createdAt"`;
 
 /** A row as the registry entry it stands for. */
@@ -97,6 +100,7 @@ const sameSubmission = (row: AssetRow, submission: MarketingAssetSubmission, r2K
   row.sha256 === submission.sha256 &&
   row.durationSeconds === submission.durationSeconds &&
   JSON.stringify(canonical(row.transcript)) === JSON.stringify(canonical(submission.transcript ?? {})) &&
+  JSON.stringify(canonical(row.chapters)) === JSON.stringify(canonical(submission.chapters ?? null)) &&
   row.r2Key === r2Key;
 
 const readRow = async (db: AssetReader, id: string, lock: "share" | "update" | null): Promise<AssetRow | null> => {
@@ -142,13 +146,14 @@ export async function submitMarketingAsset(
     INSERT INTO "MarketingAsset" (
       "id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds", "validUntil",
       "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
-      "transcript", "status", "updatedAt")
+      "transcript", "chapters", "status", "updatedAt")
     VALUES (
       ${asset.id}, ${submission.kind}, ${asset.provenance}, ${[...asset.allowedChannels]}::TEXT[],
       ${JSON.stringify(asset.disclosure)}::jsonb, ${JSON.stringify(asset.alt)}::jsonb,
       ${[...asset.claimIds]}::TEXT[], ${asset.validUntil}::date, ${asset.depictsProductInterface},
       ${r2Key}, ${submission.contentType}, ${submission.bytes}, ${submission.sha256},
-      ${submission.durationSeconds}, ${JSON.stringify(submission.transcript ?? {})}::jsonb, 'submitted',
+      ${submission.durationSeconds}, ${JSON.stringify(submission.transcript ?? {})}::jsonb,
+      ${submission.chapters === undefined ? null : JSON.stringify(submission.chapters)}::jsonb, 'submitted',
       (clock_timestamp() AT TIME ZONE 'UTC'))
   `);
   await writeSystemAuditLog({
@@ -311,12 +316,43 @@ export async function readApprovedMarketingAssetLocation(
   return { r2Key: row.r2Key, kind: row.kind, contentType: row.contentType, bytes: row.bytes, provenance: row.provenance };
 }
 
-/** Each approved asset's kind, for the generator to tell a video from an image. */
-export async function readApprovedMarketingAssetKinds(db: AssetReader): Promise<ReadonlyMap<string, MarketingAssetKind>> {
-  const rows = await db.$queryRaw<Array<{ id: string; kind: MarketingAssetKind }>>(Prisma.sql`
-    SELECT "id", "kind" FROM "MarketingAsset" WHERE "status" = 'approved'
+/**
+ * Each approved asset's kind, for the generator to tell a video from an image,
+ * and the videos that are long-form (chapters, or past a Short's length), whose
+ * YouTube post carries no #Shorts (owner decision 2026-11-07).
+ */
+export async function readApprovedMarketingAssetMedia(db: AssetReader): Promise<{
+  readonly kinds: ReadonlyMap<string, MarketingAssetKind>;
+  readonly longForm: ReadonlySet<string>;
+}> {
+  const rows = await db.$queryRaw<
+    Array<{ id: string; kind: MarketingAssetKind; durationSeconds: number | null; chapters: MarketingVideoChapter[] | null }>
+  >(Prisma.sql`
+    SELECT "id", "kind", "durationSeconds", "chapters" FROM "MarketingAsset" WHERE "status" = 'approved'
   `);
-  return new Map(rows.map((row) => [row.id, row.kind]));
+  return {
+    kinds: new Map(rows.map((row) => [row.id, row.kind])),
+    longForm: new Set(rows.filter((row) => row.kind === "video" && marketingVideoIsLongForm(row)).map((row) => row.id)),
+  };
+}
+
+/**
+ * The chapters of those of these assets that are approved videos with
+ * chapters, for the draft intake to write into a YouTube description. The
+ * rows are not locked: chapters never change after a submission (the
+ * database refuses it), and whether the asset is approved now is the fact
+ * resolution's question, which holds the rows FOR SHARE.
+ */
+export async function readApprovedMarketingAssetChapters(
+  db: AssetReader,
+  ids: readonly string[],
+): Promise<ReadonlyMap<string, readonly MarketingVideoChapter[]>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db.$queryRaw<Array<{ id: string; chapters: MarketingVideoChapter[] }>>(Prisma.sql`
+    SELECT "id", "chapters" FROM "MarketingAsset"
+     WHERE "id" = ANY(${[...ids]}::TEXT[]) AND "status" = 'approved' AND "kind" = 'video' AND "chapters" IS NOT NULL
+  `);
+  return new Map(rows.map((row) => [row.id, row.chapters]));
 }
 
 /**
