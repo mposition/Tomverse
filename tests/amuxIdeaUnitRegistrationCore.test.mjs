@@ -204,6 +204,23 @@ test("v20 Task guard reports each path and role refusal before registration", ()
   }
 });
 
+test("a read-only Task may read contract and ordinary paths together and settles to frontier", () => {
+  // Owner decision 2026-11-07: design, investigate and verify Tasks list the paths they read.
+  const proposal = taskFixture().input.proposal;
+  for (const taskRole of ["investigate", "verify", "design"]) {
+    const candidate = { ...structuredClone(proposal), taskRole, executionGrade: "routine",
+      expectedPaths: ["lib/amux/guard.ts", "src/worker.ts"] };
+    assert.deepEqual(inspectAmuxV20TaskRegistration(candidate),
+      { ok: true, executionGrade: "frontier" }, taskRole);
+  }
+  for (const taskRole of ["implement", "test"]) {
+    const candidate = { ...structuredClone(proposal), taskRole,
+      expectedPaths: ["lib/amux/guard.ts", "src/worker.ts"] };
+    assert.deepEqual(inspectAmuxV20TaskRegistration(candidate),
+      { ok: false, code: "task_expected_paths_mixed" }, taskRole);
+  }
+});
+
 test("the final card registration boundary preserves v20 path and role refusals", () => {
   for (const [options, code] of [
     [{ expectedPaths: undefined }, "task_expected_paths_missing"],

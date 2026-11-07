@@ -166,8 +166,14 @@ export const amuxV22RecoveryEvidenceSchema = z.object({
     projectedCostMicroUsd: money.nullable() }).strict().refine((value) =>
       value.status !== "unknown" || value.projectedCostMicroUsd === null),
   reason: z.enum(["stopped_proven", "legacy_invocation_unbound",
-    "inspection_unverified", "terminal_success"]),
+    "inspection_unverified", "terminal_success", "terminal_journal_proven"]),
 }).strict();
+/** A terminal an earlier sidecar invocation wrote durably (owner decision
+ * 2026-11-07). Its stop proof is the current unit plus that journal record, so
+ * it neither claims the same live invocation nor depends on the bridge's
+ * registration staying unchanged since the prior attempt. */
+export const amuxV22RecoveryJournalProven = (input: { reason: string }) =>
+  input.reason === "terminal_journal_proven";
 const profileAlias = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 const recoveryProfileConfigSchema = z.object({
   version: z.literal(1),
@@ -449,14 +455,20 @@ export function amuxV22SafeStopProofReason(input: AmuxV22SafeStopEvidenceInput) 
 export function amuxV22RecoveryProofReason(input: AmuxV22RecoveryEvidenceInput,
   role: string) {
   if (input.proof.terminalOutcome === "succeeded") return "terminal_success";
-  if (!input.hostInvocationId || !input.proof.sameLiveInvocation ||
+  // Only the journal path binds a terminal it did not run itself.
+  const journal = !input.proof.sameLiveInvocation && input.proof.journalBound;
+  if (!input.hostInvocationId || (!journal && !input.proof.sameLiveInvocation) ||
       input.reason === "legacy_invocation_unbound") return "legacy_invocation_unbound";
   if (!input.proof.noActiveExecution || !input.proof.processTreeStopped ||
       !input.proof.rootOwnedUnit || !input.proof.controlGroupBound ||
       !input.proof.journalBound || !input.proof.socketTerminal ||
-      input.reason !== "stopped_proven") return "inspection_unverified";
+      (!journal && input.reason !== "stopped_proven")) return "inspection_unverified";
   if (!input.proof.externalEffectsKnown) return "external_effects_unknown";
-  if (amuxV22TaskWritesPatch(role) && !input.proof.workspaceClean) return "workspace_unverified";
+  // The journal path keeps no role or base, so it needs a clean checkout for
+  // every role, as the evidence guard does.
+  if ((journal || amuxV22TaskWritesPatch(role)) && !input.proof.workspaceClean)
+    return "workspace_unverified";
+  if (journal && !amuxV22RecoveryJournalProven(input)) return "inspection_unverified";
   return null;
 }
 

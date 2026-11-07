@@ -3322,3 +3322,11 @@ v22 실행은 마감 10분인 CLI 한 번이라 실행 중에 답을 기다릴 �
 - **답하면 같은 worker가 이어서 한다.** 답이 기록되면 Task는 `todo`로 돌아간다. 배정은 질문한 worker에 그 Task의 경로가 남아 있는 한 그 worker를 기다린다. 다음 전달에는 질문, 답, 이전 실행의 변경이 붙는다. 변경은 프롬프트 상한에 들어갈 때만 붙인다.
 - **기록 방식.** 질문 원문은 그 attempt의 암호화된 결과 본문에 남고, `AmuxV22TaskQuestion`에는 digest·상태·순번만 둔다. 답은 재개된 실행이 정산될 때 지운다. 상태는 `open → answered | cancelled`, `answered → resumed`로만 움직이고 행은 지우지 않는다(DB trigger).
 - **답하는 길.** 1단계에서는 운영자가 Admin › AMUX 카드의 결과 보기에서 직접 답한다. Decision Maker 경로는 그 다음 단계다: 질문을 박스 로컬 카드의 typed ask로 올려 DM이 제안하고, 운영자가 Admin에서 확정하면 그 답으로 재개한다.
+
+## v22 sidecar 재시작 뒤의 종료 증거 (운영자 결정 2026-11-07)
+
+sidecar는 실행 종료 기록을 메모리에도 들고 있었고, 점검은 그 메모리 기록만 인정했다. bundle 설치처럼 sidecar가 다시 시작되면 기록이 사라져, 그 전에 끝난 실행의 점검은 항상 `legacy_invocation_unbound`가 됐다. 안전 종료와 위험 수락은 FIRST Task 전용이므로 다른 Task는 결과 불명으로 막히면 재실행할 길이 없었다(AMUX-FILEREQ-004).
+
+- **journal 증거.** 메모리 기록이 없으면 sidecar는 이전 실행이 남긴 terminal journal(`<attempt>.result`)을 읽는다. 그 기록에 요청과 정확히 같은 Task·revision·worker 인스턴스·generation 결속(`recovery.binding`)이 있고, claim digest가 그 기록의 요청 digest와 같아야 한다. terminal은 child가 끝난 뒤에만 쓰이고, sidecar unit의 재시작은 control group 전체를 끝낸다(v46과 같은 근거). 지금 unit이 sidecar 하나만 돌고 있음(`processTreeStopped` 등)과 실행 중인 작업 없음, checkout이 깨끗함을 지금 다시 증명해야 사유 `terminal_journal_proven`이 된다. 이전 실행의 역할과 base는 남아 있지 않으므로 checkout 확인은 역할과 상관없이 요구한다.
+- **기록과 승인.** 이 증거는 `sameLiveInvocation`을 주장하지 않고, `hostInvocationId`는 terminal을 쓴 invocation이다. 증명이 bridge 등록과 무관하므로 이전 attempt 뒤 bridge가 다시 등록됐어도 현재 인스턴스 일치를 요구하지 않는다. `stopped_proven`에는 지금처럼 같은 invocation과 현재 인스턴스 일치를 요구한다. DB evidence guard는 `terminal_journal_proven`을 검증 사유로 받되 같은 invocation 외의 모든 증명과 깨끗한 checkout을 요구한다.
+- **바뀌지 않는 것.** journal이 없거나 읽지 못하거나 결속·claim이 다르면 지금처럼 미검증이다. 이전 attempt의 예약은 그대로 잡혀 있고, 운영자의 "추가 실행 1회 승인"과 그 비용 상한·90초 신선도·감사 결속은 그대로다. FIRST Task의 위험 수락·안전 종료 예외는 넓히지 않는다. Admin은 다른 Task에서 그 예외 상자 대신 쓸 수 없는 이유를 한 줄로 보인다.

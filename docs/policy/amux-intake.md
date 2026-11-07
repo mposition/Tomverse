@@ -128,21 +128,26 @@ contract 작업과 그 밖의 작업이 한 Task에 섞이면 한쪽이 처리�
    예상 경로가 contract 경로와 그 밖의 경로에 함께 걸치면 Task를 나누고 선행 edge로 잇는다. 예를
    들어 migration Task가 먼저이고, 그 위의 구현 Task가 그것을 선행으로 가리킨다. contract 경로와
    경로 정규화는 `development-agent-orchestration.md` 버전 16의 "contract 경로 목록"과 "경로
-   정규화"를 따른다.
+   정규화"를 따른다. 이 분할은 파일을 바꾸는 `implement`·`test` Task에만 적용한다. 파일을 바꾸지
+   않는 `design`·`investigate`·`verify` Task는 두 종류의 경로를 함께 읽어도 나누지 않는다(운영자 결정
+   2026-11-07).
 2. **review Task 제거(v4 같은 항 개정).** Task 분해 목록에서 "독립 리뷰"를 뺀다. 새 분석은
    taskRole `review`를 제안하지 않는다. 검토는 worker 실행 뒤 runner가 독립 검토 서버로 한다.
    - 이미 저장된 분석 기록과 기존 카드의 `review` 역할은 그대로 읽힌다. 역할 enum에서 `review`를
      지우지 않고, **새 제안과 새 등록 단계에서만** 거절한다.
 3. **예상 경로는 Task의 필수 출력(v4 같은 절 4항 개정).** 분석 단위의 Task는 `expectedPaths`를
-   반드시 낸다. 저장소 상대 경로이고, Task당 1~40개다. Story에는 이 필드가 없다. 분석 chunk
+   반드시 낸다. 저장소 상대 경로이고, Task당 1~40개다. `implement`·`test` Task는 바꿀 경로를,
+   `design`·`investigate`·`verify` Task는 결과를 내려고 읽을 경로를 적는다(운영자 결정 2026-11-07).
+   Story에는 이 필드가 없다. 분석 chunk
    schema를 5로 올리며, schema 4 이하로 이미 저장된 분석 기록은 그대로 읽힌다(그 기록의 Task는
    아래 5항의 Guard에서 예상 경로 없음으로 거절된다).
 4. **분석 프롬프트.** 프롬프트에 contract 경로 목록과 1항의 분할 규칙을 넣는다. 목록은 코드의 단일
    공유 상수에서 읽고, 프롬프트나 다른 모듈에 손으로 옮겨 적지 않는다.
 5. **등록 Guard(v19 5항에 추가).** 아래는 모두 결정적 코드이며, LLM 출력은 입력 데이터일 뿐이다.
    - 예상 경로가 없거나, 1~40개 범위 밖이거나, 하나라도 정규화에 실패하면 거절한다.
-   - 경로를 contract 경로와 그 밖의 경로로 나눠 **둘 다 비어 있지 않으면 거절**하고, 사유 코드로
-     분할을 요구한다.
+   - `implement`·`test` Task의 경로를 contract 경로와 그 밖의 경로로 나눠 **둘 다 비어 있지 않으면
+     거절**하고, 사유 코드로 분할을 요구한다. 읽기 전용 Task는 섞여도 거절하지 않고, contract 경로가
+     하나라도 있으면 등급이 frontier가 된다.
    - contract 경로만 있는 Task의 등급은 제안과 무관하게 **frontier로 확정**하고, 그 등급으로 v10의
      비용 상한 receipt를 계산한다.
    - 그 밖의 경로만 있는 Task의 등급은 오케스트레이션 정책이 정하는 결정적 판정을 따른다. intake는
@@ -281,6 +286,15 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
      범위나 완료 조건에 운영자 단계로 적는다. `operate` Task는 `task_role_not_runnable`, 그 역할·등급을
      맡을 가격 있는 worker가 없는 Task는 `task_route_unpriced`로 거절을 기록한다. 결과 불명으로 남기지
      않는다.
+   - **분석 Task는 다음 Task가 쓸 결과를 낸다(운영자 결정 2026-11-07).** 분석은 `investigate` Task를
+     그 결과로 계획이 바뀔 수 있을 때만 따로 만든다(원인을 모르는 버그, 여러 해법 중 선택, 범위
+     판단). 그 밖에는 구현 Task의 brief에 "먼저 관련 코드를 조사한 뒤 구현"을 적어 합친다. `investigate`
+     Task의 완료 조건에는 이 분석이 내릴 결정과 그 결정을 쓰는 후속 Task를 적고, 그 후속 Task가
+     `dependencyRefs`로 분석 Task를 가리킨다. 마지막 chunk(`coverageStatus` complete)의 `investigate`
+     Task를 같은 chunk의 어느 Task도 가리키지 않으면, 새 응답 검사가
+     `investigate_without_consumer`로 그 응답을 거절한다. 이미 저장된 chunk를 다시 읽을 때는 이
+     검사를 하지 않는다. 경고만 하면 받아 줄 수단이 없어 결과 없는 분석 카드가 그대로 등록되므로
+     거절로 정했다.
    - 통과하면 v11의 단위별 결정 행과 노드·카드 생성, 점수 기록, `implement`·`test` Task의 공개 PR
      동의(기본 켜짐)를 **같은 트랜잭션**에서 시스템 actor로 기록한다. 부분 등록은 없다.
    - 하나라도 걸리면 아무것도 등록하지 않고 그 아이디어를 운영자 검토 대기로 둔다. 운영자는 계획
