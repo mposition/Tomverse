@@ -49,6 +49,11 @@ export const adminModelCatalogMessages = defineAdminMessages({
     snapshotLine: (version: number, count: number, until: string) =>
       `v${version} · ${count} models · covered until ${until}`,
     problems: "Rows that could not be applied",
+    pendingImage: "Image models not serving yet",
+    pendingNoProblem: "Draft only: save a profile below first.",
+    newImageModel: "Add a runtime image model",
+    newImageModelHint:
+      "Only providers the code can already call (openai, google, xai, fal). Steps: save the profile, add a price revision (or apply an LLM draft), then turn it on — the judge decides.",
   },
   ko: {
     title: "이미지·코딩 모델 카탈로그",
@@ -97,5 +102,10 @@ export const adminModelCatalogMessages = defineAdminMessages({
     snapshotLine: (version: number, count: number, until: string) =>
       `v${version} · 모델 ${count}개 · ${until}까지 유효`,
     problems: "적용하지 못한 행",
+    pendingImage: "아직 서비스되지 않는 이미지 모델",
+    pendingNoProblem: "초안만 있습니다. 아래에서 프로필부터 저장하세요.",
+    newImageModel: "런타임 이미지 모델 추가",
+    newImageModelHint:
+      "코드가 이미 호출할 수 있는 공급자(openai, google, xai, fal)만 됩니다. 순서: 프로필 저장 → 가격 revision 추가(또는 LLM 초안 적용) → 켜기. 켤 수 있는지는 판정 함수가 정합니다.",
   },
 });

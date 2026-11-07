@@ -106,6 +106,17 @@ export async function GET(req: Request) {
           };
         }),
         problems: image.problems,
+        // Rows the catalogue could not resolve yet -- a runtime model whose
+        // profile is saved but has no price revision, or a draft on its own --
+        // so the panel can finish them instead of only naming the problem.
+        pending: imageRows
+          .filter((row) => !image.models.some((model) => model.id === row.modelId))
+          .map((row) => ({
+            modelId: row.modelId,
+            profile: row.profile,
+            draft: row.draft ?? null,
+            problem: image.problems.find((p) => p.modelId === row.modelId)?.problem ?? null,
+          })),
         revisions,
       },
       coding: { models: coding, snapshot },
