@@ -20,7 +20,7 @@ import type { QaReleaseTrainCargoCandidatesRead } from "@/lib/qaReleaseTrainCarg
 
 const API = "/api/admin/agent-digests/qa-release/train-emergency";
 const READ_API = "/api/admin/agent-digests/qa-release/train-cargo";
-const PAGE_PATH = "/admin/qa-release?tab=train";
+const PAGE_PATH = "/admin/release?tab=qa&view=train";
 const SHOWN_MATCHES = 8;
 
 type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: { emergency: QaReleaseTrainEmergency } };

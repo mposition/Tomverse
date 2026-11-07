@@ -2,6 +2,7 @@
 
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import {
@@ -33,14 +34,37 @@ import { adminFetch } from "@/lib/adminFetch";
 import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
 
 /**
+ * Which part of the settings a mount shows. `all` is the whole screen; the
+ * other four are the tabs of Feature flags (`emergency`, `features`,
+ * `account-defaults`) and the Default models tab of Models (`default-models`),
+ * which is where the default-model block lives since 2026-11-07. Every mount
+ * holds the same state. The route saves all nine flags together, so a save
+ * from a tab sends its own sections' values and takes the others from the
+ * server as they are when it is pressed: a tab left open must never write
+ * back a value it cannot show, such as an emergency stop another operator has
+ * engaged since the page loaded.
+ */
+export type PlatformSettingsView =
+  | "all"
+  | "emergency"
+  | "features"
+  | "account-defaults"
+  | "default-models";
+
+/**
  * Where the reauthentication CTA brings the operator back to.
  *
- * A constant, not `usePathname()`: this panel is the whole of `/admin/platform`
- * and its only other mount is outside `/admin` entirely, where
- * `normalizeAdminCallbackPath()` would fold the callback to `/admin/overview`
- * and drop the operator somewhere other than the settings they were editing.
+ * A constant per view, not `usePathname()`: this panel's only other mount is
+ * outside `/admin` entirely, where `normalizeAdminCallbackPath()` would fold
+ * the callback to `/admin/overview` and drop the operator somewhere other than
+ * the settings they were editing.
  */
-const PLATFORM_SETTINGS_PATH = "/admin/platform";
+const platformSettingsPath = (view: PlatformSettingsView) =>
+  view === "default-models"
+    ? "/admin/models?tab=defaults"
+    : view === "all"
+      ? "/admin/platform"
+      : `/admin/platform?tab=${view}`;
 
 type AdminAppSettingsResponse = {
   settings?: PublicAppSettings;
@@ -65,6 +89,8 @@ type MemoryReleaseStatus = {
 };
 
 type Props = {
+  /** The part of the screen to draw; the whole screen when absent. */
+  view?: PlatformSettingsView;
   settings: PublicAppSettings;
   /**
    * External assistant package import.
@@ -133,6 +159,7 @@ const PROVIDER_LABELS: ReadonlyMap<string, string> = new Map([
 ]);
 
 export function PlatformSettingsPanel({
+  view = "all",
   settings,
   assistantPackageImportEnabled: initialAssistantPackageImportEnabled = false,
   imageGenerationEnabled: initialImageGenerationEnabled,
@@ -148,6 +175,20 @@ export function PlatformSettingsPanel({
 }: Props) {
   const m = useAdminMessages(adminPlatformSettingsMessages);
   const memoryCopy = useAdminMessages(adminPlatformMemoryMessages);
+  const show = (section: Exclude<PlatformSettingsView, "all">) => view === "all" || view === section;
+  const returnPath = platformSettingsPath(view);
+  const router = useRouter();
+  useEffect(() => {
+    // `/admin/platform#default-models` was a link people kept. A hash never
+    // reaches the server, so the move to Models > Default models is made here.
+    if (
+      view !== "default-models" &&
+      window.location.pathname === "/admin/platform" &&
+      window.location.hash === "#default-models"
+    ) {
+      router.replace("/admin/models?tab=defaults#default-models");
+    }
+  }, [view, router]);
   const { models } = useModelCatalog();
   // The effective default lineup, as the server resolved it (lib/appSettings).
   // A response without the field -- an older build answering -- keeps the
@@ -453,20 +494,58 @@ export function PlatformSettingsPanel({
     if (isLoading || isSaving || reauthenticationRequired) return;
     setIsSaving(true);
     try {
+      // The route saves the nine flags together. A mount that draws only some
+      // of them sends the values it shows and reads the rest now, so a stale
+      // copy of a stop it cannot show is never written back. If that read
+      // fails nothing is saved.
+      let current: AdminAppSettingsResponse | null = null;
+      if (!(show("emergency") && show("features"))) {
+        const currentResponse = await adminFetch("/api/admin/app-settings", { cache: "no-store" });
+        current = (await currentResponse.json().catch(() => null)) as AdminAppSettingsResponse | null;
+        const readable =
+          currentResponse.ok &&
+          current?.settings &&
+          [
+            current.imageGenerationEnabled,
+            current.externalConversationImportEnabled,
+            current.externalConversationContinuationEnabled,
+            current.assistantProfilesEnabled,
+            current.assistantKnowledgeEnabled,
+            current.chatStarterEnabled,
+          ].every((value) => typeof value === "boolean");
+        if (!readable) {
+          dispatchAppToast(m.toast.notSaved, "error");
+          return;
+        }
+      }
+      const emergency = show("emergency") || !current?.settings
+        ? { aiChatEnabled, attachmentsEnabled, publicSharingEnabled }
+        : {
+            aiChatEnabled: current.settings.aiChatEnabled,
+            attachmentsEnabled: current.settings.attachmentsEnabled,
+            publicSharingEnabled: current.settings.publicSharingEnabled,
+          };
+      const rollout = show("features") || !current
+        ? {
+            imageGenerationEnabled,
+            externalConversationImportEnabled: externalImportEnabled,
+            externalConversationContinuationEnabled: externalContinuationEnabled,
+            assistantProfilesEnabled,
+            assistantKnowledgeEnabled,
+            chatStarterEnabled,
+          }
+        : {
+            imageGenerationEnabled: current.imageGenerationEnabled,
+            externalConversationImportEnabled: current.externalConversationImportEnabled,
+            externalConversationContinuationEnabled: current.externalConversationContinuationEnabled,
+            assistantProfilesEnabled: current.assistantProfilesEnabled,
+            assistantKnowledgeEnabled: current.assistantKnowledgeEnabled,
+            chatStarterEnabled: current.chatStarterEnabled,
+          };
       const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          aiChatEnabled,
-          attachmentsEnabled,
-          publicSharingEnabled,
-          imageGenerationEnabled,
-          externalConversationImportEnabled: externalImportEnabled,
-          externalConversationContinuationEnabled: externalContinuationEnabled,
-          assistantProfilesEnabled,
-          assistantKnowledgeEnabled,
-          chatStarterEnabled,
-        }),
+        body: JSON.stringify({ ...emergency, ...rollout }),
       });
       const data = (await response.json().catch(() => null)) as
         | AdminAppSettingsResponse
@@ -675,6 +754,9 @@ export function PlatformSettingsPanel({
       {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="border-b border-zinc-800 bg-zinc-900/60 p-5">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+          {view === "default-models" ? (
+            <div />
+          ) : (
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
               <Settings2 className="h-3.5 w-3.5" />
@@ -687,6 +769,7 @@ export function PlatformSettingsPanel({
               {m.description}
             </p>
           </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -701,6 +784,7 @@ export function PlatformSettingsPanel({
               )}
               {m.reload}
             </button>
+            {view === "all" || view === "emergency" || view === "features" ? (
             <button
               type="button"
               onClick={save}
@@ -723,11 +807,14 @@ export function PlatformSettingsPanel({
               )}
               {m.save}
             </button>
+            ) : null}
           </div>
         </div>
       </div>
 
-      <div className="p-5"><ReviewProviderDefaultsSettings scope="platform" /></div>
+      {show("account-defaults") ? (
+        <div className="p-5"><ReviewProviderDefaultsSettings scope="platform" /></div>
+      ) : null}
       {reauthenticationRequired ? (
         <div
           id="admin-platform-reauthentication"
@@ -751,7 +838,7 @@ export function PlatformSettingsPanel({
                 {m.reauth.next}
               </p>
               <Link
-                href={adminRecentAuthenticationHref(PLATFORM_SETTINGS_PATH)}
+                href={adminRecentAuthenticationHref(returnPath)}
                 data-testid="admin-platform-reauthenticate-link"
                 className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
               >
@@ -764,6 +851,7 @@ export function PlatformSettingsPanel({
       ) : null}
 
       <div className="grid gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">
+        {show("emergency") ? (
         <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-300">
@@ -795,6 +883,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
@@ -819,6 +909,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300">
@@ -843,6 +935,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
@@ -886,6 +980,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
@@ -925,6 +1021,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div
           data-testid="admin-memory-release-status"
           className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
@@ -972,6 +1070,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("default-models") ? (
         <div id="default-models" className="grid gap-5 xl:col-span-2">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
@@ -1216,6 +1316,8 @@ export function PlatformSettingsPanel({
           </div>
         </div>
 
+        ) : null}
+        {show("features") ? (
         <div
           className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
           data-testid="admin-package-import-control"
@@ -1267,6 +1369,8 @@ export function PlatformSettingsPanel({
           </div>
         </div>
 
+        ) : null}
+        {show("default-models") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
             {m.selection.eyebrow}
@@ -1296,6 +1400,7 @@ export function PlatformSettingsPanel({
             </p>
           </div>
         </div>
+        ) : null}
       </div>
     </section>
   );

@@ -7,7 +7,6 @@ import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMak
 import { AmuxDecisionMakerRequestsPanel } from "@/components/admin/AmuxDecisionMakerRequestsPanel";
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxDecisionMakerWorkPointer } from "@/components/admin/AmuxDecisionMakerWorkPointer";
-import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
 import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
 import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePanel";
@@ -22,8 +21,12 @@ import {
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
-import { adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
-import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
+import {
+  ADMIN_AMUX_SETTINGS_LEGACY_TABS,
+  adminNavItemTabs,
+  adminRedirectTarget,
+  resolveAdminTabFor,
+} from "@/lib/adminNavigation";
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerDeclarationAccuracyReport } from "@/lib/amux/decisionMakerJudgmentStore";
 import {
@@ -32,12 +35,6 @@ import {
 } from "@/lib/amux/decisionMakerAdminRead";
 import { dmAdminAttentionKind } from "@/lib/amux/decisionMakerAdminCore";
 import { dmAdminRequestDetailHref } from "@/lib/amux/decisionMakerAdminHrefs";
-import {
-  AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
-  AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
-  countOpenAmuxOrchestratorHalts,
-  readAmuxOrchestratorHaltsForAdmin,
-} from "@/lib/amux/orchestratorHaltStore";
 import { readAgentOfficeAmuxWorkers } from "@/lib/agentOfficeLiveRead";
 import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
@@ -62,13 +59,14 @@ export default async function AdminAmuxSettingsPage({
   if (!session?.user?.id || !isAdminSession(session)) notFound();
   const role = getAdminRole(session);
   const query = await searchParams;
+  // Execution safety moved to Safety & recovery (2026-11-07); its old address
+  // keeps working and carries the rest of the query.
+  const legacy = typeof query.tab === "string" ? ADMIN_AMUX_SETTINGS_LEGACY_TABS[query.tab] : undefined;
+  if (legacy) redirect(adminRedirectTarget(legacy, query));
   const resolved = resolveAdminTabFor(TABS, role, query.tab);
   if (!resolved) notFound();
   const { tab } = resolved;
-  const [m, openAmuxOrchestratorHalts] = await Promise.all([
-    getAdminMessages(adminAmuxWorkspaceMessages),
-    countOpenAmuxOrchestratorHalts().catch(() => null),
-  ]);
+  const m = await getAdminMessages(adminAmuxWorkspaceMessages);
   const isOwner = role === "owner";
   const canChange = hasAdminPermission(session, "ops:write");
   const statuses: Record<string, AmuxTabStatus | undefined> = {
@@ -78,12 +76,10 @@ export default async function AdminAmuxSettingsPage({
     // A registry change takes the owner role, the stage's code latch and a
     // recent step-up (orchestration policy version 31, sections 3 and 8).
     workers: !isOwner ? "read_only" : amuxWorkerRegistryWritesOpen() ? undefined : "behind_server_switch",
-    safety: isOwner ? undefined : "read_only",
     "decision-maker": canChange ? undefined : "read_only",
   };
   const tabs = <AdminPageTabs basePath="/admin/amux-settings" tabs={TABS}
-    activeTabId={tab.id} label="AMUX operations settings sections" query={query} role={role}
-    counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxOrchestratorHalts }}
+    activeTabId={tab.id} label="AMUX settings sections" query={query} role={role}
     chips={amuxTabChips(statuses, m.status)} />;
   if (tab.id === "automatic-admission") {
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
@@ -159,10 +155,6 @@ export default async function AdminAmuxSettingsPage({
       </div>
       <AmuxDecisionMakerRequestsPanel list={requests} /></div>;
   }
-  const view = await readAmuxOrchestratorHaltsForAdmin().catch(() => null);
-  return <div className="flex min-w-0 flex-col gap-5">{tabs}
-    <AmuxOrchestratorHaltsPanel view={view} canClear={isOwner} limits={{
-      open: AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT, cleared: AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
-      human: AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
-    }} /></div>;
+  // Every declared tab has returned above; a section the table does not know is a 404.
+  notFound();
 }

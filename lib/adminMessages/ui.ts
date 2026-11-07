@@ -13,6 +13,26 @@ export const adminUiMessages = defineAdminMessages({
     cancel: "Cancel",
     writeLocked: (role: string) => `Needs ${role} access`,
     stepUpNote: "This needs a recent sign-in, and it is recorded in the audit log.",
+    // A tab the redesign has declared but not built yet.
+    comingSoon: {
+      title: "Opening soon",
+      detail: "This section is part of the console redesign and is not built yet. Everything the console already did is still on the other sections.",
+    },
+    views: "Views",
+    // The names of the screens a tab still holds until its own is built.
+    view: {
+      overview: "Overview",
+      train: "Release train",
+      lane: "Merge lane",
+      reports: "Reports",
+      competitors: "Competitors",
+      experiments: "Experiments",
+      approvals: "Drafts",
+      assets: "Assets",
+      comments: "Comment alerts",
+      runs: "Runs",
+      pullRequests: "Pull requests",
+    },
     stepUpAction: (label: string) => `Sign in again and ${label.toLowerCase()}`,
     tone: {
       ok: "Healthy",
@@ -33,6 +53,24 @@ export const adminUiMessages = defineAdminMessages({
     cancel: "취소",
     writeLocked: (role: string) => `${role} 권한이 필요해요`,
     stepUpNote: "최근 인증이 필요하고, 감사 기록에 남아요.",
+    comingSoon: {
+      title: "곧 열려요",
+      detail: "콘솔 재디자인에서 정해 둔 화면이고 아직 만들지 않았어요. 지금까지 콘솔이 하던 일은 다른 탭에 그대로 있어요.",
+    },
+    views: "보기",
+    view: {
+      overview: "개요",
+      train: "릴리스 열차",
+      lane: "병합 레인",
+      reports: "리포트",
+      competitors: "경쟁사",
+      experiments: "실험",
+      approvals: "초안",
+      assets: "자산",
+      comments: "댓글 알림",
+      runs: "실행",
+      pullRequests: "Pull request",
+    },
     stepUpAction: (label: string) => `다시 인증하고 ${label}`,
     tone: {
       ok: "정상",

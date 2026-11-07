@@ -7,7 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardImportMessages } from "@/lib/adminMessages/amuxBoardImport";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=import");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-recovery?tab=legacy");
 
 type PreviewBody = {
   classification?: { create: string[]; noOp: string[]; conflict: string[]; exclude: string[] };
