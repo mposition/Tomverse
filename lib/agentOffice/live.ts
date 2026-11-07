@@ -1541,8 +1541,8 @@ export type AgentOfficeOperatorQueue = Record<OperatorQueueKey, number | null>;
 
 export const OPERATOR_QUEUE_HREFS: Record<OperatorQueueKey, string> = {
   marketing: "/admin/marketing",
-  amuxEscalations: "/admin/amux-execution?tab=assignment",
-  amuxHalts: "/admin/amux-settings?tab=safety",
+  amuxEscalations: "/admin/amux-execution?tab=review",
+  amuxHalts: "/admin/amux-recovery?tab=safety",
 };
 
 /** The to-do total over the counts that were read, and whether any could not be. */

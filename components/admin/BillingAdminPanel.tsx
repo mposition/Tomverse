@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -60,6 +61,12 @@ type Props = BillingConfigPayload & {
   paidUserCount: number;
   activeSubscriptionCount: number;
   initialTab?: "plans" | "prices" | "promotions";
+  /**
+   * The page's `?tab=` is the section: the panel follows `initialTab` and
+   * draws no tab strip of its own, so the address and the screen cannot
+   * disagree (2026-11-07). Left off, the panel switches sections itself.
+   */
+  urlTabs?: boolean;
 };
 
 type EditablePlan = BillingPlanConfig;
@@ -799,6 +806,7 @@ export function BillingAdminPanel({
   paidUserCount,
   activeSubscriptionCount,
   initialTab = "plans",
+  urlTabs = false,
 }: Props) {
   const m = useAdminMessages(adminBillingMessages);
   const [draftPlans, setDraftPlans] = useState<EditablePlan[]>(plans);
@@ -820,8 +828,9 @@ export function BillingAdminPanel({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isValidatingStripe, setIsValidatingStripe] = useState(false);
   const [showSaveReview, setShowSaveReview] = useState(false);
-  const [activeTab, setActiveTab] =
+  const [selectedTab, setActiveTab] =
     useState<"plans" | "prices" | "promotions">(initialTab);
+  const activeTab = urlTabs ? initialTab : selectedTab;
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [stripeValidation, setStripeValidation] = useState<
     Array<{
@@ -878,6 +887,10 @@ export function BillingAdminPanel({
   );
   useEffect(() => {
     publishPromotionDraftState({ dirtyPromotionIds });
+    // The draft lives in this panel. When the operator leaves for a tab that
+    // does not draw it (Diagnostics), nothing is dirty any more, and a stale
+    // list would keep blocking that tab's diagnostics for a draft that is gone.
+    return () => publishPromotionDraftState({ dirtyPromotionIds: [] });
   }, [dirtyPromotionIds]);
 
   const dirtyPriceCount = useMemo(
@@ -987,7 +1000,7 @@ export function BillingAdminPanel({
     setBaselinePriceCatalog(data.priceCatalog);
     setDraftPriceCatalogUpdatedAt(data.priceCatalogUpdatedAt);
     setCatalogSource(data.priceCatalogSource);
-    setLastSyncedAt(new Date().toLocaleTimeString());
+    setLastSyncedAt(formatAestDateTime(new Date(), { seconds: true }) ?? "-");
   };
 
   const refresh = async () => {
@@ -1253,6 +1266,7 @@ export function BillingAdminPanel({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
+        {urlTabs ? null : (
         <div className="inline-flex rounded-2xl border border-zinc-800 bg-zinc-900 p-1">
           {[
             ["plans", m.tabs.plans, WalletCards],
@@ -1280,7 +1294,8 @@ export function BillingAdminPanel({
             );
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        )}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
             <CheckCircle2 className="h-3.5 w-3.5" />
             {m.toolbar.connected}

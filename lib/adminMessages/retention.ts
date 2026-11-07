@@ -15,7 +15,7 @@ export const adminRetentionMessages = defineAdminMessages({
     notLoaded: "Retention status has not loaded yet.",
     manualCleanup: "Manual cleanup",
     manualCleanupHelp: "Run a dry run first. To execute cleanup, type RUN CLEANUP exactly.",
-    dryRunAt: (ranAt: string) => `Dry run ${ranAt} UTC`,
+    dryRunAt: (ranAt: string) => `Dry run ${ranAt}`,
     dryRun: "Dry run",
     executeCleanup: "Execute cleanup",
     signInAgain: "Sign in again to continue",
@@ -40,7 +40,7 @@ export const adminRetentionMessages = defineAdminMessages({
     manualCleanup: "수동 정리",
     manualCleanupHelp:
       "먼저 dry run을 실행하세요. 정리를 실행하려면 RUN CLEANUP을 정확히 입력하세요.",
-    dryRunAt: (ranAt: string) => `Dry run ${ranAt} UTC`,
+    dryRunAt: (ranAt: string) => `Dry run ${ranAt}`,
     dryRun: "Dry run 실행",
     executeCleanup: "정리 실행",
     signInAgain: "다시 로그인하고 계속하기",

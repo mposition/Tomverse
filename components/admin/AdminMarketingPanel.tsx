@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { useCallback, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowRight, Check, ChevronDown, Loader2, Lock, RefreshCw } from "lucide-react";
@@ -108,12 +109,7 @@ type WebhookStagingView = {
   }>;
 };
 
-const stamp = (value: unknown) => {
-  if (typeof value !== "string") return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const stamp = (value: unknown) => (typeof value === "string" ? formatAestDateTime(value) : null);
 
 const text = (value: unknown) => (typeof value === "string" ? value : null);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
@@ -180,10 +176,20 @@ const hostList = (value: string) =>
 export function AdminMarketingPanel({
   initial,
   tabs,
+  part = "page",
 }: {
   initial: MarketingConsoleView;
   /** The section strip, a server component the page renders and this panel places. */
   tabs?: ReactNode;
+  /**
+   * Which part of the screen to draw (2026-11-07). `page` is the whole of it,
+   * as before. `section` is the list without the settings rail, `settings`
+   * the rail without the list, `overview` neither: the header, the overview
+   * strip and the tabs. The redesign's Overview, list tabs and Settings tab
+   * each draw one of them; every part keeps the same payload and the same
+   * controls.
+   */
+  part?: "page" | "section" | "settings" | "overview";
 }) {
   const m = useAdminMessages(adminMarketingMessages);
   const [view, setView] = useState(initial);
@@ -238,7 +244,7 @@ export function AdminMarketingPanel({
         <div className="flex flex-wrap items-center gap-3">
           <MarketingTag tone="neutral">{view.overview.environment}</MarketingTag>
           <span className="text-xs text-zinc-500">
-            {m.updatedAt.replace("{time}", `${(stamp(now) ?? "").slice(11)} UTC`)}
+            {m.updatedAt.replace("{time}", (stamp(now) ?? "").slice(11))}
           </span>
           <button
             type="button"
@@ -260,10 +266,14 @@ export function AdminMarketingPanel({
         </p>
       ) : null}
 
-      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div
+        className={`grid min-w-0 items-start gap-6 ${
+          part === "page" ? "xl:grid-cols-[minmax(0,1fr)_22rem]" : ""
+        }`}
+      >
         <div className="flex min-w-0 flex-col gap-4">
           {tabs}
-          {unavailable ? (
+          {part === "settings" || part === "overview" ? null : unavailable ? (
             <p className="flex items-start gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm leading-6 text-zinc-300">
               <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
               {unavailable.stage === "S4" ? m.unavailableS4 : m.unavailableS5}
@@ -361,6 +371,7 @@ export function AdminMarketingPanel({
           )}
         </div>
 
+        {part === "page" || part === "settings" ? (
         <aside className="flex min-w-0 flex-col gap-4" aria-label={m.automationTitle}>
           <MarketingSwitchStrip
             switches={view.switches}
@@ -406,6 +417,7 @@ export function AdminMarketingPanel({
             </div>
           ) : null}
         </aside>
+        ) : null}
       </div>
     </section>
   );
@@ -580,7 +592,7 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
           <>
             <p className="flex flex-wrap items-center gap-2">
               <span className="text-3xl font-semibold tabular-nums text-white">
-                {(stamp(lastRun.at) ?? "").slice(11)}
+                {(stamp(lastRun.at) ?? "").slice(11, 16)}
               </span>
               {lastRun.factsKept === null ? null : lastRun.factsKept > 0 ? (
                 <MarketingTag tone="success">
@@ -595,7 +607,7 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
               )}
             </p>
             <StatCaption>
-              {`${(stamp(lastRun.at) ?? "").slice(0, 10)} UTC · `}
+              {`${(stamp(lastRun.at) ?? "").slice(0, 10)} AEST · `}
               {m.overviewRunCounts
                 .replace("{competitors}", competitors ? String(competitors.approved) : m.none)
                 .replace("{kept}", lastRun.factsKept === null ? m.none : String(lastRun.factsKept))
@@ -2350,7 +2362,7 @@ function MarketingRow({
           {text(row.renderedText) ?? text(row.excerpt) ?? m.none}
         </p>
         <MarketingPostAssets assetIds={row.assetIds} downloadable={str(row.provider) === "manual"} m={m} />
-        <p className="mt-3 text-xs text-zinc-500" title={`${stamp(row.createdAt) ?? ""} UTC`}>
+        <p className="mt-3 text-xs text-zinc-500" title={stamp(row.createdAt) ?? ""}>
           {m.queueMeta
             .replace("{created}", relative(row.createdAt, now, m) ?? m.none)
             .replace("{expires}", relative(row.approvalExpiresAt, now, m) ?? m.none)

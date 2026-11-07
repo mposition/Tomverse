@@ -20,48 +20,49 @@ import {
  */
 
 const NAV_LABELS = [
-  "Overview",
-  "Work queue",
-  "Analytics",
+  "Today",
+  "Decisions",
+  "Metrics",
   "Users",
   "Support",
-  "Billing",
+  "Plans & pricing",
   "Refunds",
   "Credit ledger",
   "Providers",
   "Models",
   "Routing",
-  "Infrastructure",
-  "Automation",
-  "Alerts",
-  "Email campaigns",
-  "Email delivery",
+  "Agents home",
   "Marketing",
   "Product research",
-  "Engineering agent",
-  "SRE agent",
-  "QA and release",
-  "Agent digests",
-  "Agent office",
-  "Platform settings",
-  // The AMUX group, listed in full to the owner these tests sign in as.
-  "Backlog",
-  "Promotion",
-  "Execution",
-  "Operations settings",
+  "Engineering",
+  "SRE",
+  "Billing & finance",
+  // The Development group, listed in full to the owner these tests sign in as.
+  "Ideas",
+  "Execution board",
+  "Release",
+  "AMUX settings",
+  "Safety & recovery",
+  "Infrastructure",
+  "Automation",
+  "Feature flags",
+  "Email campaigns",
+  "Customer mail",
+  "Operator alerts",
   "Email policy",
   "Audit log",
-  "Retention",
+  "Retention & deletion",
   "Admin access",
 ];
 
 const NAV_GROUPS = [
-  "Command Center",
-  "Customers",
-  "Revenue",
+  "Home",
+  "Customers & Revenue",
   "AI Platform",
-  "Operations",
-  "AMUX",
+  "AI Agents",
+  "Development",
+  "System",
+  "Messaging",
   "Governance",
 ];
 
@@ -193,10 +194,10 @@ test.describe("admin console on a narrow viewport", () => {
 
     // A `title` attribute is a hover affordance and cannot be reached on a
     // touch device, so the drawer renders the same sentence as text.
-    const workQueue = navigation.getByRole("link", { name: /^Work queue/ });
+    const workQueue = navigation.getByRole("link", { name: /^Decisions/ });
     await expect(workQueue).not.toHaveAttribute("title", /./);
     await expect(
-      workQueue.getByText("Everything waiting on an operator, oldest first")
+      workQueue.getByText("Everything waiting on a person, by area")
     ).toBeVisible();
   });
 
@@ -243,13 +244,13 @@ test.describe("admin console on a narrow viewport", () => {
 
     // The collapsed group's badge changes its accessible name.
     const operations = navigation.locator(
-      'button[aria-controls="admin-nav-group-operations"]'
+      'button[aria-controls="admin-nav-group-messaging"]'
     );
     await operations.click();
     await expect(operations).toHaveAttribute("aria-expanded", "false");
-    await expect(navigation.getByRole("link", { name: "Alerts" })).toBeHidden();
+    await expect(navigation.getByRole("link", { name: "Operator alerts" })).toBeHidden();
     await operations.click();
-    await expect(navigation.getByRole("link", { name: /^Alerts/ })).toBeVisible();
+    await expect(navigation.getByRole("link", { name: /^Operator alerts/ })).toBeVisible();
   });
 
   test("choosing a workspace navigates and closes the drawer", async ({
@@ -287,7 +288,7 @@ test.describe("admin console on a narrow viewport", () => {
     await expect(
       page.getByRole("button", { name: "Close navigation" })
     ).toBeHidden();
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
   });
 
   test("the header controls stay usable and nothing overflows sideways", async ({
@@ -359,7 +360,7 @@ test.describe("admin console on a narrow viewport", () => {
     await page.goto("/admin/providers");
 
     const tabs = page.getByRole("navigation", { name: "Provider sections" });
-    await expect(tabs.getByRole("link", { name: "Health" })).toHaveAttribute(
+    await expect(tabs.getByRole("link", { name: "Status" })).toHaveAttribute(
       "aria-current",
       "page"
     );

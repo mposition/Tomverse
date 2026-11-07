@@ -14,7 +14,7 @@
  * the team as waiting on a link rather than linking to a page that 404s.
  */
 
-import { ADMIN_NAVIGATION } from "@/lib/adminNavigation";
+import { ADMIN_NAVIGATION, ADMIN_UNLISTED_PAGES } from "@/lib/adminNavigation";
 
 /**
  * Room order. The first eight teams fill the two rows of team rooms in this
@@ -57,6 +57,14 @@ export type AgentOfficeDeptMeta = {
 /** Whether the console has the page, and the `?tab=` section, a record link names. */
 export function consoleHasRecord(href: string): boolean {
   const [path, query] = href.split("?");
+  // A page with no menu of its own (the Trust and safety digest) is still a
+  // page, with the sections it names and no others.
+  const unlisted = ADMIN_UNLISTED_PAGES.find((page) => page.href === path);
+  if (unlisted) {
+    const section = new URLSearchParams(query ?? "").get("tab");
+    const sections: readonly string[] = "sections" in unlisted ? unlisted.sections : [];
+    return section === null || sections.includes(section);
+  }
   const item = ADMIN_NAVIGATION.find((entry) => entry.href === path);
   if (!item) return false;
   const tab = new URLSearchParams(query ?? "").get("tab");
@@ -77,7 +85,7 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
     id: "qa",
     icon: "🧪",
     policy: "docs/policy/qa-release-agent.md",
-    recordHref: "/admin/qa-release",
+    recordHref: "/admin/release",
   },
   { id: "sre", icon: "📟", policy: "docs/policy/sre-ops.md", recordHref: "/admin/sre-ops" },
   {
@@ -96,7 +104,7 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
     id: "finance",
     icon: "🧾",
     policy: "docs/policy/billing-finance-ops.md",
-    recordHref: "/admin/agent-digests?tab=billing-finance-ops",
+    recordHref: "/admin/finance-agent",
   },
   {
     id: "trust",

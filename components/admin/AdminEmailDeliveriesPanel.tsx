@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 
 import {
@@ -46,8 +47,7 @@ const STATUS_TONE: Record<string, string> = {
   delivered: "border-emerald-900 bg-emerald-950/40 text-emerald-200",
 };
 
-const when = (value: Date | null) =>
-  value ? value.toISOString().replace("T", " ").slice(0, 19) : "—";
+const when = (value: Date | null) => formatAestDateTime(value, { seconds: true }) ?? "—";
 
 const hrefFor = (statuses: readonly string[]) =>
   `/admin/email-delivery?tab=deliveries&status=${statuses.join(",")}`;

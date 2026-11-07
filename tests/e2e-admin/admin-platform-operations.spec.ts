@@ -288,7 +288,7 @@ test.describe("platform operations", () => {
   });
 
   test("a platform setting is saved and read back", async ({ page }) => {
-    await page.goto("/admin/platform");
+    await page.goto("/admin/models?tab=defaults");
 
     const guestModel = page.getByLabel("Leading model");
     await expect(guestModel).toHaveValue(
@@ -321,7 +321,7 @@ test.describe("platform operations", () => {
     // own provider's models (one OpenAI, one Anthropic, one Gemini), so it is
     // replaced with another Anthropic model. The seeded lead stays in the
     // lineup, so it travels unchanged with the save.
-    await page.goto("/admin/platform");
+    await page.goto("/admin/models?tab=defaults");
     const secondSlot = page.getByTestId("admin-guest-lineup-slot-1");
     await expect(secondSlot).toHaveValue(GUEST_BRAND_TRIO_MODEL_IDS[1]);
     const save = page.getByTestId("admin-guest-lineup-save");

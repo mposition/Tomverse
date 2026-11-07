@@ -221,7 +221,7 @@ test("the public apply path checks the shipped latch before the commit", () => {
   // The legacy JSON screen is retired; its old address opens Ideas.
   assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], "/admin/amux-backlog?tab=ideas");
   const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
-  assert.equal(movedTo.label, "Backlog");
+  assert.equal(movedTo.label, "Ideas");
   assert.equal(movedTo.isKnown, true);
   assert.equal(
     adminNavItemTabs("amux-backlog").find((tab) => tab.id === "intake"),

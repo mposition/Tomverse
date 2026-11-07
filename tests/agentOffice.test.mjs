@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 
-import { ADMIN_NAVIGATION } from "../lib/adminNavigation.ts";
+import { ADMIN_NAVIGATION, ADMIN_UNLISTED_PAGES } from "../lib/adminNavigation.ts";
 import { adminAgentOfficeMessages } from "../lib/adminMessages/agentOffice.ts";
 import { adminAgentOfficeFloorMessages } from "../lib/adminMessages/agentOfficeFloor.ts";
 import {
@@ -158,11 +158,12 @@ test("every record link names a page and section the console has", () => {
     if (!dept.recordHref) continue;
     const [path, query] = dept.recordHref.split("?");
     const item = ADMIN_NAVIGATION.find((entry) => entry.href === path);
-    assert.ok(item, `${dept.id}: ${path} is not a console page`);
+    const unlisted = ADMIN_UNLISTED_PAGES.find((entry) => entry.href === path);
+    assert.ok(item || unlisted, `${dept.id}: ${path} is not a console page`);
     const tab = new URLSearchParams(query || "").get("tab");
     if (tab) {
       assert.ok(
-        (item.tabs || []).some((entry) => entry.id === tab),
+        (item ? item.tabs || [] : (unlisted.sections || []).map((id) => ({ id }))).some((entry) => entry.id === tab),
         `${dept.id}: ${path} has no ?tab=${tab}`
       );
     }
@@ -171,8 +172,9 @@ test("every record link names a page and section the console has", () => {
 
 test("a record link is kept only while the console has its page and tab", () => {
   assert.equal(consoleHasRecord("/admin/agent-digests"), true);
-  assert.equal(consoleHasRecord("/admin/qa-release"), true);
-  assert.equal(consoleHasRecord("/admin/qa-release?tab=ci-admission"), true);
+  assert.equal(consoleHasRecord("/admin/release"), true);
+  assert.equal(consoleHasRecord("/admin/release?tab=ci"), true);
+  assert.equal(consoleHasRecord("/admin/qa-release"), false);
   assert.equal(consoleHasRecord("/admin/agent-digests?tab=no-such-section"), false);
   assert.equal(consoleHasRecord("/admin/no-such-page"), false);
   // The teams whose screens every branch carries stay linked; a team whose
@@ -233,7 +235,8 @@ test("the office has no console: it shows records and links where they are acted
 
 test("the office's two sections are addresses, not component state", () => {
   const item = ADMIN_NAVIGATION.find((entry) => entry.id === "office");
-  assert.deepEqual(item.tabs.map((tab) => tab.id), ["live", "dashboard"]);
+  // The team board opens first (2026-11-07); the ids are the addresses the office links.
+  assert.deepEqual(item.tabs.map((tab) => tab.id), ["dashboard", "live"]);
   const page = readFileSync("app/(site)/(application)/admin/office/page.tsx", "utf8");
   assert.match(page, /resolveAdminTab\(TABS, query\.tab\)/);
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");

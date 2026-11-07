@@ -1,12 +1,13 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { AdminApiFailureNotice } from "./AdminApiFailureNotice";
 import { useAdminLocale, useAdminMessages } from "./AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
-import { adminIntlLocale, type AdminMessageShape } from "@/lib/adminLocale";
+import type { AdminMessageShape } from "@/lib/adminLocale";
 import { adminAmuxRecoveryInspectionMessages } from "@/lib/adminMessages/amuxRecoveryInspection";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { bindAmuxRecoveryInspection, type AmuxOwnerRecoveryInspection,
@@ -27,7 +28,7 @@ export const AMUX_HOST_EVIDENCE_AUTO_READ_MS = 5_000;
 export const AMUX_HOST_EVIDENCE_AUTO_READS = 36;
 type Messages = AdminMessageShape<(typeof adminAmuxRecoveryInspectionMessages)["en"]>;
 // The Assignment section, for a caller that names no review to return to.
-const AMUX_RECOVERY_DEFAULT_RETURN_TO = "/admin/amux-execution?tab=assignment";
+const AMUX_RECOVERY_DEFAULT_RETURN_TO = "/admin/amux-execution?tab=review";
 export type AmuxRecoveryInspectionState =
   | { state: "idle" | "loading" | "changed" }
   | { state: "unavailable"; failure: AdminApiFailure | null }
@@ -873,8 +874,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     }, AMUX_HOST_EVIDENCE_AUTO_READ_MS);
     return () => clearInterval(timer);
   }, [waitingKey]);
-  const date = (value: string) => new Intl.DateTimeFormat(adminIntlLocale(locale), {
-    dateStyle: "medium", timeStyle: "medium" }).format(new Date(value));
+  const date = (value: string) => formatAestDateTime(value, { seconds: true }) ?? "—";
   const busy = state.state === "loading" || host.state === "loading";
   return <><AmuxRecoveryInspectionView m={m} state={state} busy={busy} onInspect={() => void inspect()}
     onReloadReview={onReloadReview} date={date} returnTo={returnTo} />

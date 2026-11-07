@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -244,7 +245,7 @@ type PendingDecision = {
   escalation_id: string;
 };
 const PENDING_DECISION_KEY = "amux-review-pending-decision-v1";
-const AMUX_ASSIGNMENT_PATH = "/admin/amux-execution?tab=assignment";
+const AMUX_ASSIGNMENT_PATH = "/admin/amux-execution?tab=review";
 // The same shape the Execution page accepts for `focusEscalation`; anything
 // else would be dropped there, so it is not written into the URL either.
 const AMUX_ESCALATION_ID = /^c[a-z0-9]{20,}$/i;
@@ -1061,13 +1062,8 @@ const useAmuxRoutingFormatters = () => {
     [locale],
   );
   const date = useCallback(
-    (value: string) => Number.isFinite(Date.parse(value))
-      ? new Intl.DateTimeFormat(adminIntlLocale(locale), {
-        dateStyle: "medium",
-        timeStyle: "medium",
-      }).format(new Date(value))
-      : "—",
-    [locale],
+    (value: string) => formatAestDateTime(value, { seconds: true }) ?? "—",
+    [],
   );
   return { number, date };
 };

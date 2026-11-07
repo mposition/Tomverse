@@ -9,13 +9,15 @@ import { adminThemeCss } from "../scripts/generate-admin-theme-css.mjs";
 const read = (path) => readFileSync(join(process.cwd(), path), "utf8");
 const CSS_PATH = "app/(site)/(application)/admin/admin-theme.css";
 
-test("the console stays dark unless Light was chosen explicitly", () => {
+test("the console is light unless Dark was chosen explicitly", () => {
   assert.deepEqual([...ADMIN_THEMES], ["dark", "light"]);
-  assert.equal(resolveAdminTheme(undefined), "dark");
-  assert.equal(resolveAdminTheme(null), "dark");
-  assert.equal(resolveAdminTheme("system"), "dark");
-  assert.equal(resolveAdminTheme("LIGHT"), "dark");
+  assert.equal(resolveAdminTheme(undefined), "light");
+  assert.equal(resolveAdminTheme(null), "light");
+  assert.equal(resolveAdminTheme("system"), "light");
+  assert.equal(resolveAdminTheme("DARK"), "light");
   assert.equal(resolveAdminTheme("light"), "light");
+  // A Dark choice made before the default changed is still honoured.
+  assert.equal(resolveAdminTheme("dark"), "dark");
   // Its own cookie: the product theme is never moved by the console.
   assert.equal(ADMIN_THEME_COOKIE, "tomverse_admin_theme");
   assert.match(adminThemeCookieValue("light"), /^tomverse_admin_theme=light; Path=\/; Max-Age=\d+; SameSite=Lax$/);

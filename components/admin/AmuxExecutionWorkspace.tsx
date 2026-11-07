@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { AlertTriangle, ArrowRight, Bot, Clock, GitPullRequest, GripVertical, MoveRight } from "lucide-react";
@@ -106,7 +107,7 @@ type Parent = { kind: "root" } | { kind: "unassigned" } |
 const keyOf = (parent: Parent) => parent.kind === "root" || parent.kind === "unassigned" ?
   parent.kind :
   `${parent.kind}:${parent.id}`;
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => formatAestDateTime(value, { seconds: true }) ?? "-";
 const USD = (micro: string | null) => micro === null ? null :
   (Number(micro) / 1_000_000).toFixed(4);
 const assessmentValue = (value: unknown) => value && typeof value === "object" &&
@@ -603,7 +604,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       </div>
     </div>
     <p className="text-xs text-zinc-500">{m.globalAttention} <Link
-      href="/admin/amux-settings?tab=safety" className="underline">{m.haltsLink}</Link></p>
+      href="/admin/amux-recovery?tab=safety" className="underline">{m.haltsLink}</Link></p>
     {view === "board" && <div className={styles.toolbar}>
       <label className={styles.search}>
         <Search size={16} aria-hidden="true" />
@@ -631,7 +632,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       <span>{m.activeTasks} <strong>{board ? board.counts.in_progress : m.unknown}</strong></span>
       <span>{m.awaitingWorker} <strong>{board ? board.counts.amux_backlog : m.unknown}</strong></span>
       <span>{m.awaitingReview} <strong>{board ? board.counts.in_review : m.unknown}</strong></span>
-      <Link href="/admin/amux-settings?tab=safety">{m.haltsLink}</Link>
+      <Link href="/admin/amux-recovery?tab=safety">{m.haltsLink}</Link>
     </div>
     {activation && <details data-testid="amux-v22-activation-diagnostic"
       className="rounded border p-3 text-sm border-zinc-700">
@@ -1062,7 +1063,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       {selected.escalations.length > 0 && <section><h4 className="font-semibold">{m.attention}</h4>
         <ul className="text-sm">{selected.escalations.map((item) => <li key={item.id}>
           {item.reason} · {item.status} · {date(item.createdAt)}</li>)}</ul>
-        <Link href={`/admin/amux-execution?tab=assignment&focusEscalation=${encodeURIComponent(selected.escalations[0].id)}`}
+        <Link href={`/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(selected.escalations[0].id)}`}
           className="text-sm underline">
           {m.openReview}</Link>
       </section>}

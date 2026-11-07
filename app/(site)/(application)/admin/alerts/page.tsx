@@ -10,10 +10,12 @@ import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 const TABS = adminNavItemTabs("alerts");
 
 /**
- * Alert policy, templates and the delivery log, one section at a time.
+ * Alert policy, templates, the delivery log and the mail path test, one
+ * section at a time.
  *
- * All three used to render together, so opening the page to acknowledge one
+ * All of them used to render together, so opening the page to acknowledge one
  * failed delivery also mounted two editable forms and issued their fetches.
+ * The mail path test (`?tab=mail-test`) was under Templates until 2026-11-07.
  */
 export default async function AdminAlertsPage({
   searchParams,
@@ -30,12 +32,8 @@ export default async function AdminAlertsPage({
         label="Alert sections"
         query={query}
       />
-      {tab.id === "templates" ? (
-        <>
-          <AdminSlackTemplatesPanel />
-          <AdminOperatorAlertProbePanel />
-        </>
-      ) : null}
+      {tab.id === "templates" ? <AdminSlackTemplatesPanel /> : null}
+      {tab.id === "mail-test" ? <AdminOperatorAlertProbePanel /> : null}
       {tab.id === "deliveries" ? <AdminNotificationsPanel /> : null}
       {tab.id === "policy" ? <AdminAlertPolicyPanel /> : null}
     </div>

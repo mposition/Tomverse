@@ -16,9 +16,13 @@ export type AdminTheme = (typeof ADMIN_THEMES)[number];
 export const ADMIN_THEME_COOKIE = "tomverse_admin_theme";
 export const ADMIN_THEME_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
-/** Anything but an explicit "light" is the console's original dark. */
+/**
+ * Light unless Dark was chosen explicitly (owner, 2026-11-07: the redesigned
+ * console is drawn light-first). An operator who already picked Dark keeps it;
+ * an absent or unknown cookie reads Light.
+ */
 export const resolveAdminTheme = (cookie: string | null | undefined): AdminTheme =>
-  cookie === "light" ? "light" : "dark";
+  cookie === "dark" ? "dark" : "light";
 
 export const adminThemeCookieValue = (theme: AdminTheme) =>
   `${ADMIN_THEME_COOKIE}=${theme}; Path=/; Max-Age=${ADMIN_THEME_COOKIE_MAX_AGE}; SameSite=Lax`;

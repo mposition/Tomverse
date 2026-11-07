@@ -362,9 +362,9 @@ test("an expired attempt with its own stored final result offers the server's re
 
 test("a step-up from a review returns to that escalation, and only a well-formed one", () => {
   assert.equal(amuxAssignmentReviewReturnPath("clreview1234567890123456"),
-    "/admin/amux-execution?tab=assignment&focusEscalation=clreview1234567890123456");
+    "/admin/amux-execution?tab=review&focusEscalation=clreview1234567890123456");
   for (const bad of [null, undefined, "", "not-an-escalation", "c12&tab=cards0000000000000"]) {
-    assert.equal(amuxAssignmentReviewReturnPath(bad), "/admin/amux-execution?tab=assignment");
+    assert.equal(amuxAssignmentReviewReturnPath(bad), "/admin/amux-execution?tab=review");
   }
   const item = review({
     last_attempt: { ...review().last_attempt!, outcome: "expired", to_status: "blocked" },
@@ -373,7 +373,7 @@ test("a step-up from a review returns to that escalation, and only a well-formed
   });
   const panelProps = (tree: ReactNode) => propsOf(tree).find((props) => "identity" in props && "returnTo" in props);
   assert.equal(panelProps(render(item))?.returnTo,
-    "/admin/amux-execution?tab=assignment&focusEscalation=clreview1234567890123456");
+    "/admin/amux-execution?tab=review&focusEscalation=clreview1234567890123456");
   const fromCard = AmuxOwnerReviewView({
     m, review: item, ownerExecution: { state: "idle" }, canInspectCards: true, selectedOutcome: null,
     retryReadConfirmed: false, reviewBusy: false, reauthenticationRequired: false,

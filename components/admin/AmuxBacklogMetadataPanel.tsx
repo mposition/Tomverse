@@ -7,7 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBacklogMetadataMessages } from "@/lib/adminMessages/amuxBacklogMetadata";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=metadata");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-recovery?tab=legacy");
 
 type MetadataBody = {
   valid?: boolean;
