@@ -69,7 +69,7 @@ test("the silence alert is a fixed subject, a fixed sentence, the date and the A
   assert.equal(email.subject, "Tomverse QA release digest has gone quiet");
   assert.match(email.text, /Date \(UTC\): 2026-10-03/);
   assert.match(email.text, /Console: https:\/\/tomverse\.app\/admin\/release/);
-  assert.ok(email.html.includes("tab=qa-release"));
+  assert.ok(email.html.includes("tomverse.app/admin/release"));
   // Deterministic: the retry queue re-renders the same payload.
   assert.deepEqual(email, buildQaReleaseOperatorEmail("digest_stale", {
     date: "2026-10-03",

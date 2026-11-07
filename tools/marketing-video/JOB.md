@@ -53,41 +53,76 @@ echo ...; date`, because the chain did not match.
   now (id, kind, channels, locales). Run it first; if it exits non-zero, stop
   and report.
 - `job/sources/<asset-id>/pack.json`: the source material of one approved
-  short, kept on the box beside its captures. `locale`, `topic`, `question`
-  (two lines), `images` (`left`, `center`, `right`, `summary`, `logo`),
-  `captureText` (the words in the left, center and right captures) and
-  `summaryText`, `headlines` (pairs of lines), `callouts`, `ctas`, `cardAlt`,
-  and `video` / `videoAsset` (the approved short and its asset file).
+  short, kept on the box beside its captures. `locale`, `topic`, `question`,
+  `headlines` (pairs of lines), `callouts`, `ctas`, `cardAlt`, `video` /
+  `videoAsset` (the approved short and its asset file), and `captures`:
+  `{"<name>": {"file", "text", "shows"}}`, the real screen captures, the words
+  in each, and what each shows. The first packs have `images` (`left`,
+  `center`, `right`, `summary`, `logo`) instead; those are their captures.
 - `job/history.json`: what earlier runs made (`[{date, id, locale, kind,
-  source, headline, callout, refused}]`). Create it as `[]` if missing.
+  source, topic, concept, captures, headline, refused}]`). Create it as `[]` if
+  missing.
 
 A pack is **usable** when its `assetId` is in `job/approved.json`. Use only
 usable packs.
 
 ## What to make today
 
-1. **Image cards, every day.** Pick one topic that has a usable pack in all
-   three locales; prefer the topic whose last card is oldest in the history.
-   For each locale:
-   - Pick a headline pair, a callout and a call to action from that locale's
-     pack, choosing the headline pair used least recently in the history (never
-     the same pair two days running) and a callout that does not repeat the
-     headline's words.
-   - Write `job/<yyyymmdd>/<id>.spec.json` as
-     `{"id": "...", "headline": ["...", "..."], "callout": "...", "cta": "..."}`
-     with the lines copied exactly. The id is
-     `media-<yyyymmdd>-<topic>-<locale lower case>-card`, with `-2`, `-3`, ...
-     if that id is in the history.
+1. **Image cards, every day.** Each day's card must look new (owner
+   2026-11-07: "no image that only changes its words"; every card made from one
+   fixed layout was retired). You design each card yourself.
+   - **Topic**: pick the topic (a feature) with a usable pack in all three
+     locales whose last card is oldest in the history, so the features take
+     turns; never yesterday's topic when another one is usable.
+   - **Concept**: pick a composition the history has not used for this topic
+     in the last 7 days. Ideas, all built from the pack's real captures:
+     - *highlighter*: one capture cropped to 200-300 %, a single line of it
+       crossing the card, the rest faded under a white gradient;
+     - *floating map*: one capture tilted 5-8 degrees in 3D on #18181b, deep
+       shadow, a soft #155dfb glow behind it;
+     - *split*: two or three captures side by side as tall strips, the strips
+       not being read darkened under #18181b at 60 %;
+     - *hero pill*: the question or input part of a capture large across the
+       middle, the next step's capture peeking from below;
+     - *clash*: two captures that disagree overlapping at opposite angles;
+     - *flow*: one capture leading to two or three others, thin #155dfb lines.
+     Change the background (white, #f7f8fa, #eff6ff, #155dfb, #18181b) and which
+     captures you use from day to day. Do not draw what looks like a product
+     screen, a button, a price, another company's logo or a chat window; the
+     product is shown only by the captures.
+   - **Words**: one headline pair from the pack, the pair used least recently
+     for this topic, and at most one more line (a callout or a call to action).
+     Few words, very large: a headline line is 96-150 px and heavy (800-900);
+     one of its two lines, or the line's key word set as its own line, in
+     #155dfb. Leave room: no more than three pieces of text besides "Tomverse".
+   - **Layout file**: write `job/<yyyymmdd>/<id>.layout.html`: one `<style>`
+     block and the card's elements for a 1080x1350 body (fonts Geist and Noto
+     Sans KR/TC/SC are already linked; use `position: absolute`). Pictures are
+     `<img src="capture:<name>">` or `background-image: url(capture:<name>)`,
+     cropped with `object-fit` / `object-position` or background size and
+     position. Each pack line goes whole into one element of its own, copied
+     exactly (no `<br>` or `<span>` inside a line). Colours only #ffffff,
+     #18181b, #155dfb, #eff6ff, #f7f8fa, #e4e4e7, at any opacity. Put the logo
+     capture (if the pack has one) and the word "Tomverse" small in a corner.
+   - Write `job/<yyyymmdd>/<id>.spec.json` as `{"id": "...", "layout":
+     "<id>.layout.html"}`. The id is `media-<yyyymmdd>-<topic>-<locale lower
+     case>-card`, with `-2`, `-3`, ... if that id is in the history.
    - `node make-card.mjs job/sources/<pack-asset-id>/pack.json job/<yyyymmdd>/<id>.spec.json job/<yyyymmdd>`
-   - Read the PNG with the Read tool: every line is whole, nothing overlaps the
-     wrong element, the language is the locale's. If it is not, pick another
-     headline pair and make it again (twice at most).
-   - Then one more card, `zh-Hans`, from the same topic's **zh-Hant** pack: a
-     spec with `"locale": "zh-Hans"` added, naming that pack's lines exactly as
-     they are (Traditional). `make-card.mjs` draws them in Simplified itself;
-     never convert or write the Simplified lines yourself. The id ends in
-     `-zh-hans-card`. Its captures stay as they were taken, so the answers in
-     them may read in Traditional; only the card's own lines must be Simplified.
+     It refuses a word that is not the pack's, a picture that is not a capture,
+     a colour outside the palette, a line cut off, and a card that looks like
+     one of an earlier day (the error says which). On a refusal, fix the cause
+     and make it again (three times at most), then go on to the next locale.
+   - Read the PNG with the Read tool and judge it as an art director: one clear
+     focal point, the headline readable at phone size, captures sharp and not
+     stretched, nothing overlapping by accident, the locale's language. If it
+     looks plain or crowded, change the layout and make it again.
+   - Use the same concept for the topic's cards in all locales of the day
+     (each with its own pack's captures and lines).
+   - Then one more card, `zh-Hans`, from the same topic's **zh-Hant** pack: the
+     zh-Hant layout with `"locale": "zh-Hans"` added to its spec. The layout
+     names that pack's lines exactly as they are (Traditional); `make-card.mjs`
+     draws them in Simplified itself. Never convert or write the Simplified lines
+     yourself. The id ends in `-zh-hans-card`.
 2. **Feed videos, on Mondays (Brisbane time).** For each usable pack whose short
    has no feed video in the history yet, in all three locales:
    - `node make-feed-video.mjs job/sources/<pack-asset-id>/pack.json media-<yyyymmdd>-<topic>-<locale lower case>-feed job/<yyyymmdd>`
@@ -96,7 +131,8 @@ usable packs.
    - Exit 3: the Guard refused the transcript. Record it as refused with its
      codes and go on; do not change the words.
    - Exit 1: record the step and status it printed and go on with the next.
-4. Append one entry per asset to `job/history.json`, and delete any helper
+4. Append one entry per asset to `job/history.json` (with `topic`, `concept`
+   and the `captures` it used), and delete any helper
    script or scratch file you made today (keep the PNGs, MP4s, specs and asset
    files).
 
