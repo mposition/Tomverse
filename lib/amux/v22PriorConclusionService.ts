@@ -37,16 +37,17 @@ export async function readAmuxV22PriorConclusionRows(tx: Prisma.TransactionClien
     item.sourceSystem === "admin-idea-v4")
     .slice(0, AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES);
   if (done.length === 0) return null;
+  // The newest result of each prerequisite first, whatever it holds: when
+  // that run gave no conclusion, an earlier run's conclusion is not revived.
   const results = await tx.amuxV22TaskResult.findMany({
-    where: { taskId: { in: done.map((item) => item.id) },
-      conclusionVerdict: { not: null } },
+    where: { taskId: { in: done.map((item) => item.id) } },
     orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
     select: { ...SEALED, attemptId: true, taskId: true, sourceSha256: true,
       conclusionSha256: true },
   });
   const rows = done.flatMap((item) => {
     const row = results.find((result) => result.taskId === item.id);
-    return row ? [{ label: item.displayKey ?? item.id, row }] : [];
+    return row && row.conclusionSha256 ? [{ label: item.displayKey ?? item.id, row }] : [];
   });
   return rows.length > 0 ? { taskId, self, rows } : null;
 }

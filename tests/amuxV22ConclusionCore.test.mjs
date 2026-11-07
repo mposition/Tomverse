@@ -114,6 +114,8 @@ test("delivery wiring: rules for investigate only, the section after the resume 
   const service = readFileSync(new URL("../lib/amux/v22PriorConclusionService.ts", import.meta.url), "utf8");
   assert.match(service, /item\.status === "done" && item\.v4TerminalAt !== null/, "only done and terminal prerequisites");
   assert.match(service, /amuxV22ConclusionSha256\(conclusion\) !== row\.conclusionSha256/, "the text must match its recorded digest");
+  assert.doesNotMatch(service, /conclusionVerdict: \{ not: null \}/, "the newest result is picked before its conclusion is required");
+  assert.match(service, /return row && row\.conclusionSha256 \?/);
 });
 
 test("settlement wiring: the verdict applies behind auto, proceed is terminal, and the audit goes through the chain writer in the transaction", () => {

@@ -48,7 +48,10 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 1. **DM 승인자(`TOMVERSE_AMUX_DM_APPROVER=enabled`, 기본 꺼짐).** 앱이 스스로 답을 적용하는 질문(§2-8의
    v22 worker 질문, §2-9의 계획 거부, §2-10의 남은 카드 닫기, 아래 2의 결과 검토)에 DM 제안이 저장되면, 운영자
    확정 없이 앱이 그 제안을 적용한다. 답 출처는 `dm`이다. DM이 `irreversible`로 표시한 제안, 질문의 고정 답이
-   아닌 답, §3으로 `operator`에 라우팅된 질문은 지금처럼 사람에게 남는다. 적용한 요청은 `direct_answer_close`로
+   아닌 답(v22 worker 질문은 worker가 준 선택지를 고른 `select`만 적용하고 자유 텍스트 답은 다음 프롬프트에
+   검사 없이 들어가므로 확정을 기다린다), §3으로 `operator`에 라우팅된 질문은 지금처럼 사람에게 남는다. 여러 제안이
+   열려 있으면 tick마다 무작위로 하나를 골라, 적용할 수 없는 제안이 뒤의 제안을 막지 않는다. 적용 전에 요청을
+   먼저 닫아(감사 체인 잠금 아래) 운영자 판정이 먼저 왔으면 적용하지 않는다. 적용한 요청은 `direct_answer_close`로
    닫아 Admin이 더 확정을 묻지 않는다. kill switch는 이 경로도 멈춘다. relay tick마다 한 건이다.
 2. **결과 검토(`TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled`, 기본 꺼짐).** 패치 없이 review로 가는 v22 결과
    (investigate의 `needs_owner`·결론 형식 불일치, design·verify 결과, 패치 없는 implement 성공)는 사람

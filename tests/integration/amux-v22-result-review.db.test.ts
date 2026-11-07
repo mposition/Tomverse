@@ -5,7 +5,7 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
-import { applyAmuxV22ResultReviewDecision, readAmuxV22ResultReviewSyncRows,
+import { applyAmuxV22ResultReviewDecision, openAmuxV22ResultReviewCards, readAmuxV22ResultReviewSyncRows,
   recordAmuxV22ResultReviewHandoff } from "@/lib/amux/v22ResultReviewService";
 import { isAmuxV22QuestionCard, recordDmQuestionLocalCard,
   recordDmQuestionLocalCardClosed } from "@/lib/amux/v22OwnerQuestionDmService";
@@ -226,12 +226,27 @@ test("a result whose body is gone is never approved on the DM's word: the review
   assert.ok(!rows.pending.some((row) => row.reviewId === seed.reviewId), "no card for a handed-off review");
 });
 
-test("a conclusion verdict never stands without its digest (the CHECK itself, past the row guards)", async () => {
+test("the CHECKs themselves, past the row guards: a verdict and its digest go together, an applied review has its decision", async () => {
   const seed = await seedReview();
-  const refused = await asReplica((tx) => tx.$executeRaw`
-    UPDATE "AmuxV22TaskResult" SET "conclusionSha256" = NULL WHERE "attemptId" = ${seed.attemptId}`)
-    .then(() => false, (error: Error) => /AmuxV22TaskResult_conclusion_check/.test(error.message));
-  assert.equal(refused, true);
+  const refusedBy = (constraint: string, work: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+    asReplica(work).then(() => false, (error: Error) => error.message.includes(constraint));
+  assert.equal(await refusedBy("AmuxV22TaskResult_conclusion_check", (tx) => tx.$executeRaw`
+    UPDATE "AmuxV22TaskResult" SET "conclusionSha256" = NULL WHERE "attemptId" = ${seed.attemptId}`), true);
+  assert.equal(await refusedBy("AmuxV22TaskResult_conclusion_check", (tx) => tx.$executeRaw`
+    UPDATE "AmuxV22TaskResult" SET "conclusionVerdict" = NULL WHERE "attemptId" = ${seed.attemptId}`), true,
+    "a digest without its verdict too");
+  assert.equal(await refusedBy("AmuxV22ResultReview_state_check", (tx) => tx.$executeRaw`
+    UPDATE "AmuxV22ResultReview" SET "state" = 'applied', "answerSource" = 'dm', "decidedAt" = now()
+    WHERE "id" = ${seed.reviewId}`), true, "applied with no decision");
+});
+
+test("a result whose body cannot be opened is not filed for the Decision Maker", async () => {
+  const seed = await seedReview();
+  const rows = await prisma.$transaction((tx) => readAmuxV22ResultReviewSyncRows(tx));
+  const mine = rows.pending.filter((row) => row.reviewId === seed.reviewId);
+  assert.equal(mine.length, 1, "the row is pending");
+  // The seed's body is synthetic bytes under no real key: opening it fails.
+  assert.deepEqual(await openAmuxV22ResultReviewCards(mine), []);
 });
 
 test("the tables accept the dm source and refuse what the lifecycle does not allow", async () => {

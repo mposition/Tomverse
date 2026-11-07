@@ -17,7 +17,9 @@ import {
 import { readDecisionMakerDeliveryCandidate } from "@/lib/amux/decisionMakerDeliveryRead";
 import type { DmShownProposal } from "@/lib/amux/decisionMakerJudgmentCore";
 import { recordDecisionMakerJudgment } from "@/lib/amux/decisionMakerJudgmentStore";
-import { readDecisionMakerRequestState, recordDecisionMakerTransmitIntent } from "@/lib/amux/decisionMakerRequestStore";
+import { closeDecisionMakerRequestOnDirectAnswer, readDecisionMakerRequestState,
+  recordDecisionMakerTransmitIntent } from "@/lib/amux/decisionMakerRequestStore";
+import { runAmuxDmAutoApplyStep } from "@/lib/amux/dmAutoApplyService";
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { AMUX_IDEA_CARD_CLOSE_SCAN } from "@/lib/amux/ideaCardCloseCore";
@@ -1196,4 +1198,57 @@ test("the Decision Maker's apply refuses a held card with lock_not_available and
   assert.equal((await questionOf(ideaId))!.state, "open");
   assert.deepEqual(await apply(), { applied: true, outcome: "closed" });
   assert.equal((await card(cardIds[0])).status, "cancelled");
+});
+
+// The Decision Maker as the approver (owner decision 2026-11-07,
+// TOMVERSE_AMUX_DM_APPROVER): the same filed card, with no person's judgment.
+const APPROVER = { TOMVERSE_AMUX_DM_APPROVER: "enabled" };
+
+test("the DM approver applies an open proposal without a person, as dm, after claiming the request", async () => {
+  const { ideaId } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
+  await drain();
+  const proposal = await proposed(ideaId, select("close"));
+  assert.equal(await runAmuxDmAutoApplyStep({}), null, "off by default");
+  assert.equal((await questionOf(ideaId))!.state, "open");
+  assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
+    { requestId: proposal.requestId, kind: "card_close", applied: true });
+  const question = (await questionOf(ideaId))!;
+  assert.equal(question.state, "closed");
+  assert.equal(question.answerSource, "dm");
+  assert.equal(question.answeredByUserId, null);
+  assert.equal((await readDecisionMakerRequestState(prisma, proposal.requestId))!.closing, "direct_answer_close",
+    "Admin no longer offers it for confirmation");
+  const audits = await auditOf(question.id);
+  assert.ok(audits.some((row) => row.entryHash && (row.metadata as Record<string, unknown>).source === "dm"),
+    "the hash-chained system audit names the dm source");
+  assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null, "nothing is left to apply");
+});
+
+test("the DM approver leaves an irreversible or unfixed proposal to a person, and never one a person judged", async () => {
+  const irreversible = await seedIdea([{ status: "blocked" }]);
+  const unfixed = await seedIdea([{ status: "blocked" }]);
+  await drain();
+  const first = await proposed(irreversible.ideaId, { kind: "select", optionId: "close",
+    rationale: "Nothing has moved.", irreversible: true });
+  const second = await proposed(unfixed.ideaId, { kind: "free_text", answer: "Maybe close them later.",
+    rationale: "Unsure.", irreversible: false });
+  for (let round = 0; round < 6; round += 1)
+    assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null, "whichever is picked, it is not applied");
+  assert.equal((await questionOf(irreversible.ideaId))!.state, "open");
+  assert.equal((await questionOf(unfixed.ideaId))!.state, "open");
+  assert.equal((await readDecisionMakerRequestState(prisma, first.requestId))!.closing, null);
+  assert.equal((await readDecisionMakerRequestState(prisma, second.requestId))!.closing, null,
+    "still open for the operator's confirmation");
+
+  // A person's judgment that lands between the approver's read and its claim wins:
+  // the claim is refused, so nothing is applied.
+  const judged = await seedIdea([{ status: "blocked" }]);
+  await drain();
+  const third = await proposed(judged.ideaId, select("close"));
+  await judge(third.requestId, "reject");
+  const claim = await prisma.$transaction((tx) => closeDecisionMakerRequestOnDirectAnswer(tx,
+    { cardId: third.cardId, questionRevision: 1 }));
+  assert.equal(claim.recorded, false);
+  assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null);
+  assert.equal((await questionOf(judged.ideaId))!.state, "open");
 });

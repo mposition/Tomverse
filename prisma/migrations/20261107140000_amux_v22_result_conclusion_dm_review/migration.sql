@@ -56,7 +56,8 @@ CREATE TABLE "AmuxV22ResultReview" (
   CONSTRAINT "AmuxV22ResultReview_state_check" CHECK (
     ("state" = 'open' AND "decision" IS NULL AND "answerSource" IS NULL AND
       "decidedAt" IS NULL AND "cancelReason" IS NULL) OR
-    ("state" = 'applied' AND "decision" IN ('approve', 'retry', 'block') AND
+    ("state" = 'applied' AND "decision" IS NOT NULL AND
+      "decision" IN ('approve', 'retry', 'block') AND
       "answerSource" IS NOT NULL AND "decidedAt" IS NOT NULL AND
       "cancelReason" IS NULL) OR
     ("state" = 'cancelled' AND "decision" IS NULL AND "cancelReason" IS NOT NULL)

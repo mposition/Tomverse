@@ -99,10 +99,13 @@ export async function readAmuxDmAutoApplyCandidate(tx: Prisma.TransactionClient,
   const words = { judgmentKind: "confirm", outputKind: detail.outputKind,
     optionId: detail.optionId, dmAnswer };
   if (card.kind === "question") {
-    const body = answerText(detail, dmAnswer);
+    // Only one of the options the worker offered: the routing has already
+    // checked those words; a free-text answer goes into the next prompt
+    // unchecked, so it stays for the operator's confirmation.
+    const body = detail.outputKind === "select" ? answerText(detail, dmAnswer) : null;
     if (!body || !body.trim()) return null;
     const message = `[Decision Maker answer, applied for the owner without a person's confirmation, re ${card.cardId}]\n` +
-      (detail.outputKind === "select" ? `Chosen option: ${body}` : body);
+      `Chosen option: ${body}`;
     return { kind: "question", ...base, questionId: card.id, message };
   }
   if (card.kind === "refusal") {
