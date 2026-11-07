@@ -382,7 +382,86 @@ export type AgentOfficeLiveRooms = {
   trust: AgentOfficeTrustState;
   engineering: AgentOfficeEngineeringState;
   amux: AgentOfficeAmuxState;
+  /** Per AMUX worker: quota, recent outcomes and, for the owner, its work. */
+  amuxDetail: AgentOfficeAmuxDetail;
+  /** The other queues an AMUX worker waits on a person for. */
+  inbox: AgentOfficeInboxCounts;
+  /** Merge-lane merges into develop in the last day. */
+  merges: AgentOfficeMerges;
+  history: AgentOfficeHistory;
 };
+
+/** An attempt's outcome, newest first: succeeded, failed, or blocked/expired (unknown). */
+export type AgentOfficeAttemptMark = "s" | "f" | "u";
+
+export type AgentOfficeWorkerDetail = {
+  /** The latest quota observation, or null when none was ever recorded. */
+  quota: {
+    remainingPercent: number;
+    exhausted: boolean;
+    /** When it comes back (UTC ISO), when the observation says. */
+    resetAt: string | null;
+    observedAt: string;
+  } | null;
+  /** Up to ten ended attempts, newest first. */
+  recent: AgentOfficeAttemptMark[];
+  /**
+   * The open attempt and today's (AEST) CLI usage. Owner only, like the
+   * AMUX card list it comes from; null for anyone else and for an idle worker.
+   */
+  work: {
+    taskId: string;
+    cardKey: string | null;
+    /** Null when the title is sealed and could not be opened. */
+    cardTitle: string | null;
+    startedAt: string;
+    leaseExpiresAt: string | null;
+  } | null;
+  usage: {
+    tokens: number;
+    /** CLI usage priced at API rates: not money spent on a subscription channel. */
+    apiCostMicrousd: number;
+    model: string | null;
+  } | null;
+};
+
+export type AgentOfficeAmuxDetail =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      /** Whether work and usage were read (the owner) or left out. */
+      ownerDetail: boolean;
+      workers: Record<string, AgentOfficeWorkerDetail>;
+    };
+
+/** Null is a count that could not be read: never shown as zero. */
+export type AgentOfficeInboxCounts = {
+  /** Decision Maker items waiting on the owner (lib/amux/decisionMakerAttention.ts). */
+  dmAttention: number | null;
+  /** v22 owner questions a worker is waiting on. */
+  v22Questions: number | null;
+  /** Session plan refusals waiting for a decision. */
+  planRefusals: number | null;
+};
+
+export type AgentOfficeMerges =
+  | { kind: "unread" }
+  | { kind: "observed"; items: { pr: number; mergedAt: string }[] };
+
+/** One execution attempt that overlapped today (AEST): who ran it and when. */
+export type AgentOfficeAttemptSpan = { worker: string; startedAt: string; endedAt: string | null; mark: AgentOfficeAttemptMark | null };
+
+/**
+ * Today's attempts since Brisbane midnight, for rewinding the floor. Only
+ * attempts are recorded over time; where a worker rested, or whether it was
+ * paused, is known only for now. `truncated` says the read hit its cap.
+ */
+export type AgentOfficeHistory =
+  | { kind: "unread" }
+  | { kind: "observed"; since: string; spans: AgentOfficeAttemptSpan[]; truncated: boolean };
+
+/** The part of the office re-read every fifteen seconds (the AMUX room and merges). */
+export type AgentOfficeAmuxPulse = Pick<AgentOfficeLiveRooms, "readAt" | "amux" | "amuxDetail" | "merges" | "history">;
 
 /**
  * Everyone the office draws: the teams' staff, and one figure per record row in

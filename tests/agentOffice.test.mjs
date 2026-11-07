@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { ADMIN_NAVIGATION, ADMIN_UNLISTED_PAGES } from "../lib/adminNavigation.ts";
 import { adminAgentOfficeMessages } from "../lib/adminMessages/agentOffice.ts";
+import { adminAgentOfficeFloorMessages } from "../lib/adminMessages/agentOfficeFloor.ts";
 import {
   AGENT_OFFICE_BLOCKED_DEPTS,
   AGENT_OFFICE_DEPTS,
@@ -76,16 +77,39 @@ import { agentOfficeSreState } from "../lib/agentOfficeSreState.ts";
 import { agentOfficeSupportState } from "../lib/agentOfficeSupportState.ts";
 import { agentOfficeTrustState } from "../lib/agentOfficeTrustState.ts";
 import {
-  AMUX_ROOM,
-  DECISION_ROOM,
-  REVIEW_ROOM,
-  DEPT_ROOMS,
-  ENTRANCE_MAT,
-  PROPS,
-  ROOMS,
-  COLS,
-  ROWS,
-} from "../lib/agentOffice/world.ts";
+  AGENT_OFFICE_CHANNELS,
+  AMUX_ROOM_RECT,
+  DECISION_DESKS,
+  DECISION_ROOM_RECT,
+  FLOOR_H,
+  FLOOR_W,
+  ISLAND_CAPACITY,
+  OPERATOR_ROOM_RECT,
+  REVIEW_DESKS,
+  REVIEW_ROOM_RECT,
+  TEAM_ROOM_DESKS,
+  ZONES,
+  agentOfficeChannel,
+  agentOfficeFloorLayout,
+  floorLightAt,
+  islandDeskCount,
+  islandRect,
+  islandSeat,
+  teamRoomRect,
+  walkPath,
+  workerPlace,
+} from "../lib/agentOffice/floor.ts";
+import { agentOfficeInbox, inboxTotal } from "../lib/agentOffice/inbox.ts";
+import { agentOfficeAmuxDetail, brisbaneMidnight } from "../lib/agentOfficeAmuxState.ts";
+
+/** Every room on the floor, as rectangles. */
+const FLOOR_ROOMS = [
+  ...AGENT_OFFICE_DEPT_IDS.map((id, i) => ({ id, ...teamRoomRect(i) })),
+  { id: "review", ...REVIEW_ROOM_RECT },
+  { id: "decision", ...DECISION_ROOM_RECT },
+  { id: "operator", ...OPERATOR_ROOM_RECT },
+  { id: "amux", ...AMUX_ROOM_RECT },
+];
 
 // The fixtures' names start with their CLI; the registry no longer reads it from them.
 const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
@@ -108,15 +132,15 @@ test("the office holds the nine agent teams and the digest desk", () => {
     [...AGENT_OFFICE_TEAM_IDS].sort(),
     ["engineering", "finance", "marketing", "qa", "research", "routing", "sre", "support", "trust"]
   );
-  assert.equal(DEPT_ROOMS.length, AGENT_OFFICE_DEPT_IDS.length);
+  assert.equal(AGENT_OFFICE_DEPT_IDS.length, 10, "nine teams and the digest desk, one room each");
   assert.ok(AGENT_OFFICE_DEPT_IDS.includes("digest"));
 });
 
 test("each room has exactly one lead and no more staff than desks", () => {
-  for (const room of DEPT_ROOMS) {
-    const crew = AGENT_OFFICE_STAFF.filter((staff) => staff.dept === room.id);
-    assert.equal(crew.filter((staff) => staff.rank === "lead").length, 1, `${room.id} leads`);
-    assert.ok(crew.length <= room.desks.length, `${room.id} has more staff than desks`);
+  for (const id of AGENT_OFFICE_DEPT_IDS) {
+    const crew = AGENT_OFFICE_STAFF.filter((staff) => staff.dept === id);
+    assert.equal(crew.filter((staff) => staff.rank === "lead").length, 1, `${id} leads`);
+    assert.ok(crew.length <= TEAM_ROOM_DESKS, `${id} has more staff than desks`);
   }
   const ids = AGENT_OFFICE_STAFF.map((staff) => staff.id);
   assert.equal(new Set(ids).size, ids.length, "duplicate staff id");
@@ -175,16 +199,9 @@ test("a record link is kept only while the console has its page and tab", () => 
     AGENT_OFFICE_DECISION_RECORD_HREF,
     consoleHasRecord("/admin/amux-settings?tab=decision-maker") ? "/admin/amux-settings?tab=decision-maker" : null
   );
-  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  // A room's header links its record: the AMUX room, the Decision Maker, and a
-  // team room only while it reads a live record -- a link is never offered for
-  // a room the office shows as waiting on one.
-  assert.match(world, /const liveDept = real \? null : engine\.liveDept\(room\.id\);/);
-  assert.match(
-    world,
-    /const recordHref = isAmux\s*\? AGENT_OFFICE_AMUX_RECORD_HREF\s*: isDecision\s*\? AGENT_OFFICE_DECISION_RECORD_HREF\s*: liveDept\s*\? \(agentOfficeDept\(room\.id\)\?\.recordHref \?\? null\)\s*: null;/
-  );
-  assert.match(world, /\{recordHref \? \(/);
+  // A room's name opens its team sheet, which links the record it has.
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /data-testid="agent-office-team-info-record"/);
 });
 
 test("the catalog names every room and person in both languages", () => {
@@ -204,30 +221,16 @@ test("the catalog names every room and person in both languages", () => {
   }
 });
 
-test("the console answers in the office's language and finds the team it names", () => {
-  const en = new AgentOffice(adminAgentOfficeMessages.en);
-  en.command("What is engineering doing?");
-  const enReply = en.chat.at(-1);
-  assert.equal(enReply.from, "staff");
-  assert.match(enReply.name, /Jiho Han/);
-
-  const ko = new AgentOffice(adminAgentOfficeMessages.ko);
-  ko.command("엔지니어링팀 지금 뭐해?");
-  assert.match(ko.chat.at(-1).name, /한지호/);
-
-  ko.command("백실장 어디 있어?");
-  assert.match(ko.chat.at(-1).name, /백서진/);
-
-  // A team the demo marks as waiting on its record screen says so (every team has one now, so force one).
-  ko.deptStatus.research = "blocked";
-  ko.command("리서치팀 왜 늦어?");
-  assert.match(ko.chat.at(-1).text, /기록 화면 연결을 기다리고/);
-
-  en.command("banana split");
-  assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.sim.unknown);
-  // A greeting on the real view is small talk; with no live room nobody is there to answer.
-  en.command("hello there");
-  assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.real.noLiveRoom);
+test("the office has no console: it shows records and links where they are acted on", () => {
+  // Owner decision 2026-11-07: the keyword console is replaced by "waiting on you" and the worker sheet.
+  const office = new AgentOffice(adminAgentOfficeMessages.en);
+  for (const method of ["command", "tick", "pushChat"]) assert.equal(typeof office[method], "undefined", method);
+  for (const file of ["components/admin/AgentOfficePanel.tsx", "components/admin/AgentOfficeLive.tsx", "components/admin/AgentOfficeFloor.tsx"]) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /OperatorConsole|agent-office-console|engine\.command\(/, file);
+    // Nothing on the live office writes: no request but the CLI monitor's own read.
+    assert.doesNotMatch(source, /method: "POST"|method: "PUT"|method: "DELETE"|sendBeacon/, file);
+  }
 });
 
 test("the office's two sections are addresses, not component state", () => {
@@ -240,9 +243,9 @@ test("the office's two sections are addresses, not component state", () => {
   assert.match(panel, /<Link\s+href=\{viewHref\("live"\)\}/);
   assert.match(panel, /<Link\s+href=\{viewHref\("dashboard"\)\}/);
   assert.doesNotMatch(panel, /useState<View>/);
-  // Every dialog keeps the shared focus contract: profile, seated profile and team.
+  // Every dialog keeps the shared focus contract: seated profile and team.
   const dialogs = (panel.match(/role="dialog"/g) || []).length;
-  assert.equal(dialogs, 3);
+  assert.equal(dialogs, 2);
   assert.equal((panel.match(/useOfficeDialog\(onClose,/g) || []).length, dialogs);
 });
 
@@ -380,37 +383,11 @@ test("a live room's status and line are its record's, and a fresh reading moves 
   };
   const office = new AgentOffice(adminAgentOfficeMessages.en, live);
   assert.equal(office.deptStatus.research, "done");
-  // Thanks and orders reach nobody's desk: the room's staff stay put and say
-  // only the record's line (and a moment's emoji for a thank-you).
-  office.command("Thank you, everyone");
-  office.command("Everyone back to your desks");
-  office.command("Call a meeting with every team");
-  const spoken = new Set();
-  for (let i = 0; i < 400; i += 1) {
-    office.tick(0.05);
-    for (const agent of office.agents) if (agent.deptId === "research" && agent.speech) spoken.add(agent.speech);
-  }
-  for (const agent of office.agents) {
-    if (agent.deptId === "research") assert.deepEqual([agent.x, agent.y], [agent.home.x, agent.home.y], agent.id);
-  }
-  assert.deepEqual(
-    [...spoken].filter((line) => line !== live.research.line && line !== adminAgentOfficeMessages.en.real.reactions.thanks),
-    [],
-    "a live room's staff said something the record did not say"
-  );
-
-  // The console answers about it with the record.
-  office.command("What is research doing?");
-  assert.match(office.chat.at(-1).text, /real record/);
-
-  // A fresh reading moves the room and nothing else.
+  assert.equal(office.liveDept("research").line, live.research.line);
   const before = { ...office.deptStatus };
   office.setLive({ research: { status: "attention", badge: "Unread", line: "Could not read its record", detail: "" } });
   assert.equal(office.deptStatus.research, "attention");
   assert.equal(office.snapshot().stats.attention, 1);
-  // ...and the delay report names it in its own words.
-  office.command("Why is it slow?");
-  assert.match(office.chat.at(-1).text, /Product research: Could not read its record/);
   for (const id of Object.keys(before)) {
     if (id !== "research") assert.equal(office.deptStatus[id], before[id], id);
   }
@@ -428,7 +405,12 @@ test("the office reads the research agent's state, never its content, and writes
   assert.doesNotMatch(source, /readProductResearchEnabledSince\(/);
   // The observation row is selected for its slot, outcome and failure stage only.
   assert.match(source, /select: \{ slot: true, outcome: true, failureStage: true \}/);
-  assert.doesNotMatch(source, /payload: true|issueCount: true|title/);
+  assert.doesNotMatch(readFunction("readResearch"), /payload: true|issueCount: true|title/);
+  // The only title the office reads is the card an AMUX worker holds, for the
+  // owner only (owner decision 2026-11-07), as the owner-only card list shows it.
+  const detail = readFunction("readAmuxDetail");
+  assert.ok(detail.indexOf("title: true") > detail.indexOf("if (owner)"), "a card title is read outside the owner branch");
+  assert.equal(source.split("title: true").length - 1, 1);
 });
 
 // ── QA and release ────────────────────────────────────────────────────────
@@ -737,8 +719,8 @@ test("the office reads the engineering agent's state, never what it worked on", 
   // While engineering is live every decision surface points at its own screen
   // and none offers an approve button.
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
-  assert.equal((panel.match(/<LiveDecisionNote m=\{m\} \/>/g) || []).length, 2);
-  const note = panel.slice(panel.indexOf("function LiveDecisionNote"), panel.indexOf("function LiveView"));
+  assert.equal((panel.match(/<LiveDecisionNote m=\{m\} \/>/g) || []).length, 1);
+  const note = panel.slice(panel.indexOf("function LiveDecisionNote"), panel.indexOf("function OperatorQueueList"));
   assert.doesNotMatch(note, /onApprove|approve-button/);
   // No copy shown while engineering is live claims there is nothing to decide.
   for (const locale of ["en", "ko"]) {
@@ -777,11 +759,68 @@ const runtimeRow = (name, overrides = {}) => ({
 });
 const amuxNow = at("2026-10-07T22:05:00Z");
 
-test("the AMUX room sits under the teams, with a desk for every worker", () => {
-  assert.equal(AMUX_ROOM.desks.length, AGENT_OFFICE_AMUX_ROSTER.length);
-  assert.ok(AMUX_ROOM.y > DEPT_ROOMS.reduce((bottom, room) => Math.max(bottom, room.y + room.h), 0));
-  // The entrance's doormat is in the lobby, not in the AMUX room.
-  assert.ok(ENTRANCE_MAT.x >= AMUX_ROOM.x + AMUX_ROOM.w, "the entrance is drawn in the AMUX room");
+test("the AMUX room sits under the teams, with an island for each CLI channel that grows with its workers", () => {
+  const teamsBottom = AGENT_OFFICE_DEPT_IDS.reduce((bottom, _, i) => Math.max(bottom, teamRoomRect(i).y + teamRoomRect(i).h), 0);
+  assert.ok(AMUX_ROOM_RECT.y > teamsBottom);
+  assert.deepEqual([...AGENT_OFFICE_CHANNELS], ["claude", "codex", "copilot", "cursor"]);
+  for (const ch of AGENT_OFFICE_CHANNELS) {
+    const r = islandRect(ch);
+    assert.ok(r.x >= AMUX_ROOM_RECT.x && r.x + r.w <= AMUX_ROOM_RECT.x + AMUX_ROOM_RECT.w, `${ch} island leaves the room`);
+    assert.ok(r.y >= AMUX_ROOM_RECT.y && r.y + r.h <= AMUX_ROOM_RECT.y + AMUX_ROOM_RECT.h, `${ch} island leaves the room`);
+    // Every desk the island can hold sits on the island.
+    for (let i = 0; i < ISLAND_CAPACITY; i++) {
+      const seat = islandSeat(ch, i);
+      assert.ok(seat.x >= r.x && seat.x + 36 <= r.x + r.w && seat.y >= r.y && seat.y + 46 <= r.y + r.h, `${ch} desk ${i} is off its island`);
+    }
+  }
+  // Desks grow in fours with the island's workers, from eight up to its capacity.
+  assert.deepEqual([0, 8, 9, 13, 24, 40].map(islandDeskCount), [8, 8, 12, 16, 24, ISLAND_CAPACITY]);
+  // Provider labels map to islands; anything else has none and is counted, not dropped.
+  assert.deepEqual(
+    ["anthropic", "openai", "github-copilot", "cursor", "devin"].map(agentOfficeChannel),
+    ["claude", "codex", "copilot", "cursor", null]
+  );
+});
+
+test("a worker's record decides where it is drawn, and nobody disappears from the floor", () => {
+  assert.equal(workerPlace("busy", false), "desk");
+  assert.equal(workerPlace("error", false), "desk");
+  assert.equal(workerPlace("lost", true), "desk");
+  assert.equal(workerPlace("ready", false), "lounge");
+  assert.equal(workerPlace("idle", true), "pod");
+  assert.equal(workerPlace("paused", false), "bench");
+  assert.equal(workerPlace("isolated", false), "bench");
+  assert.equal(workerPlace("not_running", false), "none");
+  assert.equal(workerPlace("not_admitted", false), "none");
+  // Sixty-four workers, thirty resting: every one is drawn or counted.
+  const workers = Array.from({ length: 64 }, (_, i) => ({
+    name: `w${i}`,
+    channel: i === 63 ? null : AGENT_OFFICE_CHANNELS[i % 4],
+    state: i < 20 ? "busy" : i < 50 ? "ready" : i < 56 ? "idle" : i < 60 ? "paused" : "lost",
+    quotaExhausted: i >= 50 && i < 56,
+  }));
+  workers.push(...Array.from({ length: 30 }, (_, i) => ({ name: `c${i}`, channel: "codex", state: "busy", quotaExhausted: false })));
+  const layout = agentOfficeFloorLayout(workers);
+  const drawn = layout.spots.filter((spot) => spot.at !== null).length;
+  const counted =
+    layout.overflow.lounge + layout.overflow.pod + layout.overflow.bench + layout.overflow.noChannel +
+    Object.values(layout.overflow.island).reduce((a, b) => a + b, 0);
+  const notRunning = layout.spots.filter((spot) => spot.place === "none").length;
+  assert.equal(drawn + counted, workers.length - notRunning);
+  assert.ok(layout.overflow.island.codex > 0, "a full island counts the rest");
+  assert.equal(layout.overflow.noChannel, 1);
+  // A worker that needs a look is seated before the ones that rest.
+  const lost = layout.spots.find((spot) => spot.name === "w60");
+  assert.notEqual(lost.at, null);
+  // Nobody shares a spot.
+  const at = layout.spots.filter((spot) => spot.at).map((spot) => `${spot.at.x},${spot.at.y}`);
+  assert.equal(new Set(at).size, at.length);
+  // A walk goes down to the aisle, along it and up: never through a desk row.
+  const path = walkPath({ x: 40, y: 400 }, { x: 790, y: 372 });
+  assert.equal(path.length, 3);
+  assert.equal(path[0].y, path[1].y);
+  assert.ok(path[0].y > 400);
+  assert.deepEqual(path[2], { x: 790, y: 372 });
 });
 
 test("each AMUX worker's state is its catalog row read against its runtime the way AMUX reads it", () => {
@@ -851,7 +890,7 @@ test("the display-only v27 roster shows thirteen residents without admitting new
   const unadmitted = state.workers.filter((worker) => /^(cursor|copilot)-/.test(worker.name));
   assert.equal(unadmitted.length, 6);
   assert.ok(unadmitted.every((worker) => worker.state === "not_admitted" && worker.heartbeatAt === null));
-  const view = amuxRoomView(state, AMUX_ROOM.desks.length, adminAgentOfficeMessages.ko.real.amux);
+  const view = amuxRoomView(state, AGENT_OFFICE_AMUX_ROSTER.length, adminAgentOfficeMessages.ko.real.amux);
   assert.equal(view.workers.length, 13);
   assert.match(view.summary, /상주 목록 13 · 배정 연결 7\/7 · 미편입 6/);
   assert.match(view.note, /정책 v27/);
@@ -947,7 +986,7 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
   }
 });
 
-test("the office reads AMUX workers' runtime state, never their work, and draws them outside the demo", () => {
+test("the office reads AMUX workers' runtime state, never their work, and draws them from the record", () => {
   const amux = readFunction("readAmuxWorkers");
   assert.match(amux, /readAmuxRegistryAndDerivedCatalog\(prisma\)/);
   assert.match(
@@ -961,20 +1000,12 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
   );
   assert.match(amux, /read: "amux_workers"/);
 
-  // Workers are drawn by their own layer: not engine agents, so the demo can
-  // neither move them nor give them a line. A click names the room and the
-  // worker, and nothing else.
-  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(world, /isAmux \? amux\.connectionStatus : status/);
-  assert.match(world, /isAmux && amux\.attention > 0/);
-  const layer = world.slice(world.indexOf("const SeatedLayer"), world.indexOf("const PropLayer"));
-  assert.doesNotMatch(layer, /engine|onSelect\b/);
-  assert.equal(layer.match(/onPick\(/g)?.length, 2, "pointer and keyboard open the same profile");
-  assert.match(layer, /onPointerUp=\{\(\) => onPick\(kind, worker\.name\)\}/);
-  assert.match(layer, /role="button"/);
-  assert.match(layer, /tabIndex=\{0\}/);
-  assert.match(world, /<SeatedLayer room=\{AMUX_ROOM\} kind="amux" people=\{amux\.workers\} onPick=\{onPickSeated\} \/>/);
-  assert.match(world, /\{real\?\.note \? \(/);
+  // Workers are drawn from their record by the floor: pointer and keyboard
+  // open the same worker sheet, and the floor acts on nothing.
+  const floor = readFileSync("components/admin/AgentOfficeFloor.tsx", "utf8");
+  assert.equal(floor.match(/props\.onSelectWorker\(w\.name\)/g)?.length, 2, "pointer and keyboard open the same sheet");
+  assert.match(floor, /data-testid="agent-office-amux-person"/);
+  assert.doesNotMatch(floor, /fetch\(|method: "POST"|adminFetch/);
   assert.ok(!AGENT_OFFICE_STAFF.some((staff) => staff.dept === "amux"));
 });
 
@@ -1095,21 +1126,12 @@ test("the office reads the billing and finance agent's state, never its digest",
 
 // ── Chat routing improvement ───────────────────────────────────────────────
 
-test("the routing team has the top row's fourth column, clear of every other room", () => {
-  const routing = ROOMS.find((room) => room.id === "routing");
-  assert.ok(routing);
-  assert.equal(routing.kind, "dept");
-  assert.equal(routing.short, "chat.routing");
-  assert.equal(routing.icon, "🧭");
-  assert.equal(routing.x, 56);
-  assert.equal(routing.y, 2);
-  assert.equal(routing.desks.length, 3);
-  assert.ok(DEPT_ROOMS.includes(routing));
-  assert.equal(ROOMS.filter((room) => room.id === "routing").length, 1);
+test("the routing team has a room of its own, clear of every other room", () => {
+  assert.equal(FLOOR_ROOMS.filter((room) => room.id === "routing").length, 1);
   // No two rooms share floor, and every room sits inside the map.
-  for (const [i, a] of ROOMS.entries()) {
-    assert.ok(a.x >= 0 && a.y >= 0 && a.x + a.w <= COLS && a.y + a.h <= ROWS, `${a.id} leaves the map`);
-    for (const b of ROOMS.slice(i + 1)) {
+  for (const [i, a] of FLOOR_ROOMS.entries()) {
+    assert.ok(a.x >= 0 && a.y >= 0 && a.x + a.w <= FLOOR_W && a.y + a.h <= FLOOR_H, `${a.id} leaves the map`);
+    for (const b of FLOOR_ROOMS.slice(i + 1)) {
       const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
       assert.ok(apart, `${a.id} overlaps ${b.id}`);
     }
@@ -1121,13 +1143,6 @@ test("the routing team has the top row's fourth column, clear of every other roo
   assert.equal(AGENT_OFFICE_BLOCKED_DEPTS.has("routing"), false);
   const crew = AGENT_OFFICE_STAFF.filter((staff) => staff.dept === "routing").map((staff) => staff.id);
   assert.deepEqual(crew, ["routing-lead", "routing-m1", "routing-m2"]);
-  // The console finds the team by its words in both languages.
-  const en = new AgentOffice(adminAgentOfficeMessages.en);
-  en.command("What is the router doing?");
-  assert.match(en.chat.at(-1).name, /Seungmin Ryu/);
-  const ko = new AgentOffice(adminAgentOfficeMessages.ko);
-  ko.command("라우팅팀 지금 뭐해?");
-  assert.match(ko.chat.at(-1).name, /류승민/);
 });
 
 const routingAt = (iso) => new Date(iso);
@@ -1368,8 +1383,8 @@ test("the Support triage room says whether the worker is on, its newest run and 
   assert.equal(on.status, "done");
   assert.equal(on.badge, "On");
   assert.equal(on.line, "Triage is on · latest worker run 11-05 14:10 AEST · success");
-  assert.equal(on.detail, "3 reports taken up today (UTC day) · 0 failed runs today (UTC day)");
-  assert.equal(supportRoom({ health: { reportsToday: 1 } }).detail.split(" · ")[0], "1 report taken up today (UTC day)");
+  assert.equal(on.detail, "3 reports taken up today (the day starts at 10:00 AEST) · 0 failed runs today (the day starts at 10:00 AEST)");
+  assert.equal(supportRoom({ health: { reportsToday: 1 } }).detail.split(" · ")[0], "1 report taken up today (the day starts at 10:00 AEST)");
   assert.equal(supportRoom({ health: { worker: null } }).line, "Triage is on · no worker run has finished yet");
 
   // A run outcome the room has no word for is shown as stored.
@@ -1382,7 +1397,7 @@ test("the Support triage room says whether the worker is on, its newest run and 
   const failed = supportRoom({ health: { failedRunsToday: 2 } });
   assert.equal(failed.status, "attention");
   assert.equal(failed.badge, "Runs failed");
-  assert.match(failed.detail, /2 failed runs today \(UTC day\)$/);
+  assert.match(failed.detail, /2 failed runs today \(the day starts at 10:00 AEST\)$/);
   const stale = supportRoom({ health: { stale: true, failedRunsToday: 2 } });
   assert.equal(stale.status, "attention");
   assert.equal(stale.badge, "Stale");
@@ -1400,7 +1415,7 @@ test("the Support triage room says whether the worker is on, its newest run and 
   const koOn = supportRoom({}, ko);
   assert.equal(koOn.badge, "켜짐");
   assert.equal(koOn.line, "분류가 켜져 있음 · 직전 worker 실행 11-05 14:10 AEST · 성공");
-  assert.equal(koOn.detail, "오늘(UTC 기준 하루) 가져간 신고 3건 · 오늘(UTC 기준 하루) 실패한 실행 0회");
+  assert.equal(koOn.detail, "오늘 가져간 신고 3건(하루는 매일 10:00 AEST에 새로 시작해요) · 오늘 실패한 실행 0회(하루는 매일 10:00 AEST에 새로 시작해요)");
 });
 
 test("a failed read of the Support triage room is unread, never off", () => {
@@ -1476,7 +1491,7 @@ test("the Marketing room needs a look for work waiting on a person, and waits wh
   assert.equal(clear.status, "done");
   assert.equal(clear.badge, "Nothing waiting");
   assert.equal(clear.line, "No post waits for approval");
-  assert.equal(clear.detail, "drafts on · publishing on · generator last ran 11-05 12:00 AEST · 12 generator calls this month (UTC)");
+  assert.equal(clear.detail, "drafts on · publishing on · generator last ran 11-05 12:00 AEST · 12 generator calls this month (the month starts on the 1st at 10:00 AEST)");
 
   // A post waiting is the operator's work: it needs a look, and the line names the oldest wait.
   const waiting = marketingRoom({ overview: { pending: { count: 2, oldestAt: "2026-11-04T23:30:00.000Z" } } });
@@ -1517,7 +1532,7 @@ test("the Marketing room needs a look for work waiting on a person, and waits wh
   assert.equal(koWaiting.line, "승인을 기다리는 게시물 2건 · 가장 오래된 것 11-05 09:30 AEST부터");
   assert.equal(
     marketingRoom({}, ko).detail,
-    "초안 켜짐 · 게시 켜짐 · 생성기 마지막 실행 11-05 12:00 AEST · 이번 달(UTC) 생성기 호출 12회"
+    "초안 켜짐 · 게시 켜짐 · 생성기 마지막 실행 11-05 12:00 AEST · 이번 달 생성기 호출 12회(달은 1일 10:00 AEST에 새로 시작해요)"
   );
   // Nothing in the room shows an amount of money.
   for (const room of [clear, waiting, off, koWaiting]) assert.doesNotMatch(`${room.line} ${room.detail}`, /\$|USD|원\b/);
@@ -1883,69 +1898,19 @@ test("the office reads the Trust and safety room through the section's own reade
 
 const liveLine = (text, status = "done") => ({ status, badge: "", line: text, detail: "" });
 
-test("the office opens with everyone at their desk, still, and every room at its real or link status", () => {
+test("the office opens with every room at its real or link status", () => {
   const live = { research: liveLine("Latest run recorded"), qa: liveLine("Digest silent", "attention") };
   const office = new AgentOffice(adminAgentOfficeMessages.en, live);
-  const homes = new Map(office.agents.map((agent) => [agent.id, `${agent.x},${agent.y}`]));
-  for (const agent of office.agents) {
-    if (agent.rank === "operator") continue;
-    assert.equal(agent.status, "idle", agent.id);
-    assert.equal(`${agent.x},${agent.y}`, `${agent.home.x},${agent.home.y}`, `${agent.id} is not at their desk`);
-  }
   for (const id of AGENT_OFFICE_DEPT_IDS) {
     const expected = live[id]?.status ?? (AGENT_OFFICE_BLOCKED_DEPTS.has(id) ? "blocked" : "waiting");
     assert.equal(office.deptStatus[id], expected, id);
   }
-  // Nobody moves or speaks a line of their own; a live room's lead keeps its
-  // record's line on screen, and that is all anyone says.
-  const said = new Set();
-  for (let i = 0; i < 4000; i += 1) {
-    office.tick(0.05);
-    for (const agent of office.agents) if (agent.speech) said.add(`${agent.id}: ${agent.speech}`);
+  // A team's people are its lead first, then the rest, and fit its room.
+  for (const id of AGENT_OFFICE_DEPT_IDS) {
+    const people = office.deptStaff(id);
+    assert.equal(people[0].rank, "lead", id);
+    assert.ok(people.length <= TEAM_ROOM_DESKS, id);
   }
-  assert.deepEqual(
-    [...said].sort(),
-    ["qa-lead: Digest silent", "research-lead: Latest run recorded"],
-    "someone said something other than a record line"
-  );
-  for (const agent of office.agents) assert.equal(`${agent.x},${agent.y}`, homes.get(agent.id), agent.id);
-});
-
-test("the console answers questions and declines orders: the office moves nobody", () => {
-  const office = new AgentOffice(adminAgentOfficeMessages.en, {
-    engineering: liveLine("Run in progress · started 10-08 22:00 AEST", "working"),
-  });
-  const s = adminAgentOfficeMessages.en.sim;
-  const before = office.agents.map((agent) => `${agent.id}@${agent.x},${agent.y}`);
-  for (const order of ["Everyone back to your desks", "Call a meeting with every team", "Hurry up"]) {
-    office.command(order);
-    assert.equal(office.chat.at(-1).text, s.ordersDeclined, order);
-  }
-  // An order phrased as a question is not an order: it moves nobody.
-  for (const question of ["Call a meeting?", "회의 소집?", "Brief me?", "브리핑?"]) office.command(question);
-  for (let i = 0; i < 400; i += 1) office.tick(0.05);
-  assert.deepEqual(office.agents.map((agent) => `${agent.id}@${agent.x},${agent.y}`), before);
-  // Questions are still answered, from the records.
-  office.command("Status?");
-  const status = office.chat.at(-1).text;
-  assert.ok(status.startsWith(s.statusReal), status);
-  assert.match(status, /Engineering: Run in progress/);
-  office.command("Why is it slow?");
-  assert.match(office.chat.at(-1).text, /Engineering: Run in progress/);
-  office.command("What is engineering doing?");
-  assert.match(office.chat.at(-1).text, /real record/);
-  office.command("What is marketing doing?");
-  // ...and only in the console: nobody stirs, and the only bubble is the
-  // live room's record line.
-  for (let i = 0; i < 40; i += 1) office.tick(0.05);
-  for (const agent of office.agents) {
-    const expected = agent.id === "engineering-lead" ? "Run in progress · started 10-08 22:00 AEST" : null;
-    assert.equal(agent.speech, expected, `${agent.id} said something`);
-  }
-  // A fresh reading changes what the lead says.
-  office.setLive({ engineering: liveLine("2 decisions waiting for you", "attention") });
-  office.tick(0.05);
-  assert.equal(office.agentById.get("engineering-lead").speech, "2 decisions waiting for you");
 });
 
 test("the office has no demo: nothing plays, paces or ends a scripted day", () => {
@@ -1955,21 +1920,22 @@ test("the office has no demo: nothing plays, paces or ends a scripted day", () =
     assert.equal(typeof office[method], "undefined", method);
   }
   const snap = office.snapshot();
-  assert.deepEqual(Object.keys(snap).sort(), ["chat", "deptStatus", "spotlight", "stats"]);
+  assert.deepEqual(Object.keys(snap).sort(), ["deptStatus", "stats"]);
   const sim = readFileSync("lib/agentOffice/sim.ts", "utf8");
   assert.doesNotMatch(sim, /dayScript|PHASE|findPath|beginMeeting|this\.demo|clockText/);
   assert.equal(existsSync("lib/agentOffice/pathfinding.ts"), false);
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.doesNotMatch(panel, /snap\.demo|shell-notice|BriefingModal|setBriefingHandler|m\.shell|m\.briefing/);
-  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.doesNotMatch(world, /PHASE|meetingTitle|ag-bar/);
+  // Workers walk only when a fresh reading moves them (lib/agentOffice/floor.ts):
+  // the floor plays no script and has no timer of its own that moves anyone.
+  const floor = readFileSync("components/admin/AgentOfficeFloor.tsx", "utf8");
+  assert.doesNotMatch(floor, /PHASE|meetingTitle|setInterval|Math\.random\(\) [<>]/);
+  assert.match(floor, /m\.path = walkPath\(/);
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];
     for (const block of ["shell", "briefing", "phases", "phaseApproved"]) assert.equal(copy[block], undefined, `${locale}.${block}`);
     assert.doesNotMatch(JSON.stringify(copy, (key, value) => (typeof value === "function" ? value(2, "x", "y", 1) : value)), /demo|데모|simulat|시뮬/i);
     assert.match(copy.live.eyebrowReal(26), locale === "en" ? /REAL VIEW/ : /실제 화면/);
-    // The quick chips: the two questions the console answers from records, and a thank-you.
-    assert.equal(copy.console.quick.length, 3);
   }
 });
 
@@ -2084,7 +2050,7 @@ test("the review room shows each reviewer's real state, and a silent server as l
   const state = (snapshot, receivedAt, now = "2026-10-09T01:05:00.000Z") =>
     agentOfficeReviewState({ stored: stored(snapshot, receivedAt), now: at(now) });
 
-  const live = reviewRoomView(state(reviewSnapshot()), REVIEW_ROOM.desks.length, copy);
+  const live = reviewRoomView(state(reviewSnapshot()), REVIEW_DESKS, copy);
   assert.equal(live.status, "working");
   assert.equal(live.note, null);
   assert.deepEqual(
@@ -2210,85 +2176,26 @@ test("the status report is what the screen shows, as Markdown, copied or downloa
   assert.match(empty, /## Reviewer CLI quota\n- 보고 없음/);
 
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
-  assert.match(panel, /data-testid="agent-office-report-copy"/);
-  assert.match(panel, /data-testid="agent-office-report-download"/);
+  const liveView = readFileSync("components/admin/AgentOfficeLive.tsx", "utf8");
+  assert.match(liveView, /data-testid="agent-office-report-copy"/);
+  assert.match(liveView, /data-testid="agent-office-report-download"/);
   assert.match(panel, /navigator\.clipboard\.writeText\(reportText\(\)\)/);
   // The report goes to the clipboard or a file; the page posts it nowhere.
   assert.doesNotMatch(panel, /fetch\(|sendBeacon|m\.live\.publish/);
 });
 
-test("live leads answer a greeting or a thank-you in their own voice, and never claim anything", () => {
-  const live = (line) => ({ status: "done", badge: "Fresh", line, detail: "" });
-  const copy = adminAgentOfficeMessages.ko;
-  const office = new AgentOffice(copy, { qa: live("digest 받음"), research: live("기록됨") });
-  const lead = (dept) => office.agentById.get(office.deptLead[dept].id);
-
-  office.command("다들 수고했어요");
-  const replies = office.chat.slice(-2);
-  assert.deepEqual(replies.map((entry) => entry.text).sort(), [copy.real.voices.qa.thanks, copy.real.voices.research.thanks].sort());
-  assert.ok(replies.every((entry) => entry.name.includes(" · ")), "each reply names its lead and room");
-  // On the floor only an emoji, for a moment; then the record line is back.
-  assert.equal(lead("qa").speech, "😊");
-  for (let i = 0; i < 80; i += 1) office.tick(0.05);
-  assert.equal(lead("qa").speech, "digest 받음");
-
-  // A named team: only its lead answers. A question is not small talk.
-  const before = office.chat.length;
-  office.command("QA팀 안녕");
-  assert.equal(office.chat.length, before + 2);
-  assert.equal(office.chat.at(-1).text, copy.real.voices.qa.hello);
-  assert.equal(lead("qa").speech, "👋");
-  office.command("수고했어?");
-  assert.notEqual(office.chat.at(-1).text, copy.real.voices.qa.thanks);
-
-  // A team question is answered in the lead's voice, then with the record.
-  office.command("리서치팀 뭐해?");
-  assert.ok(office.chat.at(-1).text.startsWith(`${copy.real.voices.research.answer}\n`));
-  assert.match(office.chat.at(-1).text, /기록됨/);
-
-  // No voice line states a fact about a team's work: no numbers, no times, no
-  // states, and no activity or promise -- the same words have to be true when
-  // the room's record is silent, its switch is off or it could not be read.
-  const activity = {
-    en: /\b(watch\w*|gather\w*|open|polish\w*|check\w*|runs?|signals?|ledgers?|inbox|keep|I'll|won't|will)\b/i,
-    ko: /지켜|모으|당번|열어|펼쳐|다듬|점검|볼게|할게|지킬|찾아|울리/,
-  };
-  for (const locale of ["en", "ko"]) {
-    const real = adminAgentOfficeMessages[locale].real;
-    for (const [dept, voice] of Object.entries({ ...real.voices, default: real.voiceDefault })) {
-      for (const line of [voice.hello, voice.thanks, voice.answer]) {
-        assert.doesNotMatch(line, /\d|UTC|\bdone\b|\bfailed\b|\bok\b|완료|실패|정상|없음/i, `${locale}.${dept}: ${line}`);
-        assert.doesNotMatch(line, activity[locale], `${locale}.${dept} claims activity: ${line}`);
-      }
-    }
-  }
-  // A room that could not be read, or whose switch is off, is greeted the same way.
-  for (const [badge, status] of [["읽지 못함", "attention"], ["스위치 꺼짐", "waiting"]]) {
-    const quiet = new AgentOffice(copy, { research: { status, badge, line: "기록을 읽지 못함", detail: "" } });
-    quiet.command("안녕");
-    assert.equal(quiet.chat.at(-1).text, copy.real.voices.research.hello, badge);
-  }
-});
-
-test("the office reads its rooms again each minute, and a room whose record changed says so", () => {
-  const qa = (line, status = "done", detail = "") => ({ status, badge: "Fresh", line, detail });
-  const office = new AgentOffice(adminAgentOfficeMessages.en, { qa: qa("Digest received · 10-09 10:55 AEST") });
-  const said = () => office.chat.filter((entry) => entry.text.startsWith("🔔")).map((entry) => entry.text);
-  // The first reading is not a change, nor is one that only moved the read time.
-  office.setLive({ qa: qa("Digest received · 10-09 10:55 AEST") });
-  office.setLive({ qa: qa("Digest received · 10-09 10:55 AEST", "done", "") });
-  assert.deepEqual(said(), []);
-  office.setLive({ qa: qa("Digest silent · last received 10-09 10:55 AEST", "attention") });
-  assert.deepEqual(said(), ["🔔 QA & release · Digest silent · last received 10-09 10:55 AEST"]);
-  const line = office.chat.at(-1);
-  assert.equal(line.name, office.deptLead.qa.name, "the room's lead says it");
-  // A console line carries the time it was said, on the operator's clock.
-  assert.match(line.time, /^\d{2}:\d{2} AEST$/);
-
+test("the office reads its rooms again each minute, and notices what changed between two readings", () => {
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.match(panel, /const LIVE_REFRESH_MS = 60_000;/);
   assert.match(panel, /document\.visibilityState === "visible"\) router\.refresh\(\)/);
   assert.match(panel, /window\.clearInterval\(id\)/);
+  // A new merge celebrates, a halt or a worker gone wrong is announced; the
+  // first reading is not a change.
+  const live = readFileSync("components/admin/AgentOfficeLive.tsx", "utf8");
+  assert.match(live, /if \(!prev\) return;/);
+  assert.match(live, /setCelebrate\(\(n\) => n \+ 1\)/);
+  assert.match(live, /f\.toast\.halted/);
+  assert.match(live, /f\.toast\.down\(/);
 });
 
 test("the dashboard's three windows read the live rooms, not a demo day", () => {
@@ -2353,8 +2260,12 @@ test("the operator's to-do counts the real queues an agent waits on, the same se
   }
 
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
-  assert.match(panel, /const todo = operatorQueueTotal\(live\.queue\)/);
-  assert.equal((panel.match(/<OperatorQueueList m=\{m\} queue=\{queue\} \/>/g) || []).length, 2);
+  assert.match(panel, /const todo = operatorQueueTotal\(queue\)/);
+  assert.match(panel, /const waiting = inboxTotal\(/);
+  assert.equal((panel.match(/<OperatorQueueList m=\{m\} queue=\{queue\} \/>/g) || []).length, 1);
+  // The live office's "waiting on you" is built from the same counts.
+  const liveView = readFileSync("components/admin/AgentOfficeLive.tsx", "utf8");
+  assert.match(liveView, /agentOfficeInbox\(\{ queue: live\.queue, inbox: live\.inbox,/);
   // The office approves nothing: no demo approval is reachable from the page.
   assert.doesNotMatch(panel, /engine\.approve\(|approve-button|agent-office-approve"/);
   for (const locale of ["en", "ko"]) {
@@ -2421,19 +2332,19 @@ test("the quota card shows each reviewer's quota as the review server read it, a
     for (const key of ["available", "low", "exhausted", "unknown", "disabled"]) assert.ok(c.states[key], `${locale}: ${key}`);
   }
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
-  assert.match(panel, /<QuotaCard m=\{m\} view=\{quotaView\} \/>/);
+  // A reviewer's quota is in its profile, opened from the review room.
+  assert.match(panel, /quotaView=\{reviewQuotaView\(live\.review, m\.real\.quota\)\}/);
 });
 
-test("the review room has a desk for each reviewer, and the entrance stays outside it", () => {
-  assert.ok(REVIEW_ROOM.desks.length >= 5);
-  assert.ok(ENTRANCE_MAT.y >= REVIEW_ROOM.y + REVIEW_ROOM.h, "the entrance is drawn in the review room");
+test("the review room has a desk for each reviewer", () => {
+  assert.ok(REVIEW_DESKS >= 5);
   // Reading it selects the one row the review server may write.
   const review = readFunction("readReview");
   assert.match(review, /where: \{ key: REVIEW_ORCHESTRATOR_STATUS_KEY \}/);
   assert.match(review, /select: \{ value: true \}/);
   assert.match(review, /read: "review_orchestrator"/);
-  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(world, /<SeatedLayer room=\{REVIEW_ROOM\} kind="review" people=\{review\.reviewers\} onPick=\{onPickSeated\} \/>/);
+  const floor = readFileSync("components/admin/AgentOfficeFloor.tsx", "utf8");
+  assert.match(floor, /props\.onSelectSeated\("review", r\.name\)/);
 });
 
 test("a seated figure opens a profile read from its room's record, dressed as it is drawn", () => {
@@ -2451,9 +2362,10 @@ test("a seated figure opens a profile read from its room's record, dressed as it
     AGENT_OFFICE_WORKER_COLORS[0][0],
     "the palette wraps"
   );
-  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(world, /agentOfficeSeatedClothes\(kind, i\)/);
-  assert.doesNotMatch(world, /AGENT_OFFICE_WORKER_COLORS|AGENT_OFFICE_WORKER_SKINS/);
+  const liveView = readFileSync("components/admin/AgentOfficeLive.tsx", "utf8");
+  assert.match(liveView, /agentOfficeSeatedClothes\("review", i\)/);
+  assert.match(liveView, /agentOfficeSeatedClothes\("amux", i\)/);
+  assert.doesNotMatch(liveView, /AGENT_OFFICE_WORKER_COLORS|AGENT_OFFICE_WORKER_SKINS/);
 
   // The profile is looked up by name in the room's current view, so it follows
   // the minute refresh, and it offers nothing an engine agent's does: no task,
@@ -2491,7 +2403,6 @@ test("a record that needs a look is counted on its own, never as a decision", ()
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.doesNotMatch(panel, /stats\.approval/);
   assert.match(panel, /m\.dashboard\.metricAttention/);
-  assert.match(panel, /m\.live\.attention\(snap\.stats\.attention\)/);
   // The operator's to-do is the real queues, not a room status.
   assert.match(panel, /<strong>\{todo\.unknown \? `\$\{todo\.total\}\+\?` : todo\.total\}<\/strong>/);
 });
@@ -2557,7 +2468,7 @@ test("a variable set inline on a sprite or a portrait never shadows a theme toke
   const theme = css.slice(css.indexOf(".office {"), css.indexOf("}", css.indexOf(".office {")));
   const tokens = new Set([...theme.matchAll(/(--[a-z0-9-]+):/g)].map((match) => match[1]));
   assert.ok(tokens.has("--accent") && tokens.size > 40);
-  for (const file of ["components/admin/AgentOfficeWorld.tsx", "components/admin/AgentOfficePanel.tsx"]) {
+  for (const file of ["components/admin/AgentOfficeFloor.tsx", "components/admin/AgentOfficePanel.tsx"]) {
     const source = readFileSync(file, "utf8");
     const inline = [...source.matchAll(/"(--[a-z0-9-]+)":/g)].map((match) => match[1]);
     assert.ok(inline.length > 0, `${file} sets no inline variables`);
@@ -2627,22 +2538,25 @@ test("every time the office draws is Brisbane time, the operator's own", async (
   }
 });
 
-test("the office has no lounge: nobody can be in it, so nothing is drawn or said about it", () => {
-  assert.deepEqual(
-    ROOMS.map((room) => room.kind).filter((kind) => !["dept", "operator", "decision", "amux", "review"].includes(kind)),
-    []
+test("the lounge, sleep pods and bench hold only workers whose record puts them there", () => {
+  // Owner decision 2026-11-07: a worker free for work rests in the lounge, one
+  // whose quota is used up sleeps in a pod, one held back sits on the bench.
+  const zones = ["lounge", "pod", "bench"];
+  for (const zone of zones) {
+    const z = ZONES[zone];
+    assert.ok(z.x >= AMUX_ROOM_RECT.x && z.y >= AMUX_ROOM_RECT.y && z.y < AMUX_ROOM_RECT.y + AMUX_ROOM_RECT.h, zone);
+  }
+  const placed = new Set(
+    ["ready", "idle", "starting", "busy", "error", "lost", "paused", "isolated", "blocked", "stopped", "not_running", "not_admitted", "catalog_unknown"]
+      .flatMap((state) => [workerPlace(state, false), workerPlace(state, true)])
   );
-  assert.ok(!PROPS.some((prop) => prop.kind === "sofa" || prop.kind === "coffee"));
+  assert.deepEqual([...placed].sort(), ["bench", "desk", "lounge", "none", "pod"]);
+  // The team rooms have no lounge talk: the staff copy says nothing about one.
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];
     assert.equal(copy.rooms.lounge, undefined);
-    assert.equal(copy.sim.coffee, undefined);
-    assert.equal(copy.sim.delayAway, undefined);
-    assert.equal(copy.agentStatus.onBreak, undefined);
-    assert.doesNotMatch(JSON.stringify(copy, (key, value) => (typeof value === "function" ? value(2, "x", "y") : value)), /lounge|라운지/i);
+    assert.equal(copy.agentStatus?.onBreak, undefined);
   }
-  const css = readFileSync("components/admin/agentOffice.module.css", "utf8");
-  assert.doesNotMatch(css, /lounge|pr-sofa|pr-coffee/);
 });
 
 // ── Decision Maker ────────────────────────────────────────────────────────
@@ -2727,19 +2641,10 @@ test("the Decision Maker room says where questions go, in Brisbane time, and an 
 });
 
 test("the approval room is now the Decision Maker room, drawn from its record", () => {
-  assert.equal(DECISION_ROOM.kind, "decision");
-  assert.equal(DECISION_ROOM.desks.length, 2, "one desk for each instance");
-  for (const desk of DECISION_ROOM.desks) {
-    assert.ok(desk.seat.x > DECISION_ROOM.x && desk.seat.x < DECISION_ROOM.x + DECISION_ROOM.w - 1, "a desk outside the room");
-    assert.ok(desk.seat.y > DECISION_ROOM.y && desk.seat.y < DECISION_ROOM.y + DECISION_ROOM.h - 1, "a desk outside the room");
-  }
-  assert.ok(!ROOMS.some((room) => room.kind === "meeting"));
-  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(
-    world,
-    /<SeatedLayer room=\{DECISION_ROOM\} kind="decision" people=\{decision\.members\} onPick=\{onPickSeated\} \/>/
-  );
-  assert.match(world, /const real = isAmux \? amux : isReview \? review : isDecision \? decision : null;/);
+  assert.equal(DECISION_DESKS, 2, "one desk for each instance");
+  const floor = readFileSync("components/admin/AgentOfficeFloor.tsx", "utf8");
+  assert.match(floor, /props\.onSelectSeated\("decision", d\.name\)/);
+  assert.match(floor, /decision\.map\(\(d, i\) => \{/);
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];
     assert.equal(copy.rooms.meeting, undefined);
@@ -2806,38 +2711,20 @@ test("the digest desk counts each agent's digests and names the newest, never th
     detail: "",
   });
 
-  // A new digest changes the line, so the desk's lead announces it once.
-  const office = new AgentOffice(adminAgentOfficeMessages.ko, { digest: desk });
-  const said = () => office.snapshot().chat.filter((line) => line.text.startsWith("🔔")).map((line) => line.text);
-  office.setLive({ digest: { ...desk, detail: "" } });
-  assert.deepEqual(said(), [], "a new read time alone is not news");
+  // A second digest from the same sender in the same minute draws the same
+  // line; its revision still tells it apart.
   const next = digestLiveDept(
-    agentOfficeDigestState({
-      recent: [{ agentKey: "sre-ops", count: 1 }],
-      latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:00Z") }],
-    }),
+    agentOfficeDigestState({ recent: [{ agentKey: "sre-ops", count: 1 }], latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:00Z") }] }),
     copy,
     names
   );
-  office.setLive({ digest: next });
-  assert.deepEqual(said(), [`🔔 ${office.roomName("digest")} · 최근 digest · ${names["sre-ops"]} · 10-10 11:10 AEST`]);
-  // A second digest from the same sender in the same minute draws the same
-  // line, status and badge; its revision still tells it apart.
   const sameMinute = digestLiveDept(
-    agentOfficeDigestState({
-      recent: [{ agentKey: "sre-ops", count: 2 }],
-      latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:40Z") }],
-    }),
+    agentOfficeDigestState({ recent: [{ agentKey: "sre-ops", count: 2 }], latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:40Z") }] }),
     copy,
     names
   );
   assert.equal(sameMinute.line, next.line);
   assert.notEqual(sameMinute.revision, next.revision);
-  office.setLive({ digest: sameMinute });
-  assert.equal(said().length, 2, "the same-minute digest is announced");
-  office.setLive({ digest: { ...sameMinute, detail: "" } });
-  assert.equal(said().length, 2, "a re-read of the same digests is not");
-
   // The read selects counts and times only.
   const digest = readFunction("readDigest");
   assert.match(digest, /agentDigestItem\.groupBy\(\{ by: \["agentKey"\], where: \{ createdAt: \{ gte: since \} \}, _count: \{ _all: true \} \}\)/);
@@ -2867,7 +2754,7 @@ test("the screen says how fresh it is in one place, and says so when it stops re
   // at the reading itself, so server and client agree.
   assert.match(panel, /export const LIVE_STALE_MS = 2 \* LIVE_REFRESH_MS;/);
   assert.match(panel, /const \[now, setNow\] = useState\(readMs\);/);
-  assert.match(panel, /data-testid="agent-office-stale"/);
+  assert.match(readFileSync("components/admin/AgentOfficeLive.tsx", "utf8"), /data-testid="agent-office-stale"/);
   // The dashboard reads the same moment, and says the same when it stops.
   const dashboard = panel.slice(panel.indexOf("function DashboardView"));
   assert.match(dashboard, /const stale = useStaleReading\(readAt\);/);
@@ -2903,14 +2790,7 @@ test("the staff count is everyone the office draws, and says so when a room coul
   );
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.match(panel, /const staffText = staff\.unknown \? `\$\{staff\.total\}\+` : String\(staff\.total\);/);
-  assert.match(panel, /m\.live\.eyebrowReal\(staffText\)/);
-  assert.match(panel, /engine\.setStaffCount\(staffText\)/);
-  assert.doesNotMatch(panel, /engine\.staff\.length\)\}<\/|eyebrowReal\(engine\.staff\.length\)/);
-  // The console says the same number.
-  const office = new AgentOffice(adminAgentOfficeMessages.en);
-  office.setStaffCount("46");
-  office.command("Status?");
-  assert.match(office.chat.at(-1).text, /46 on duty/);
+  assert.match(panel, /m\.dashboard\.note\(engine\.operatorSeed\.name, AGENT_OFFICE_TEAM_IDS\.length, staffText\)/);
   assert.equal(adminAgentOfficeMessages.ko.dashboard.staffParts("26", "14", "?", "2"), "팀 26 · AMUX 14 · 검토 ? · DM 2");
 });
 
@@ -2922,9 +2802,9 @@ test("a room's name opens what its team does, written from its code and policy",
     for (const [id, team] of Object.entries(copy.teams)) {
       assert.ok(team.summary && team.switch, `${locale}.${id}`);
       for (const list of ["does", "never", "human"]) assert.ok(team[list].length > 0, `${locale}.${id}.${list}`);
-      // Times are the operator's own: a UTC time is always given beside its AEST one.
+      // Times are the operator's own (owner decision 2026-11-07): AEST only, never UTC.
       for (const line of [team.summary, ...team.does, team.switch]) {
-        if (/UTC/.test(line)) assert.match(line, /\d\d:\d\d AEST ?\(\d\d:\d\d UTC\)/, `${locale}.${id}: ${line}`);
+        assert.doesNotMatch(line, /UTC/, `${locale}.${id}: ${line}`);
       }
     }
   }
@@ -2950,10 +2830,8 @@ test("a room's name opens what its team does, written from its code and policy",
   assert.doesNotMatch(en.depts.marketing.task, /KPI/);
 
   // The floor: every room but the operator's names itself with a button.
-  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(world, /room\.kind === "operator" \? \(/);
-  assert.match(world, /if \(!dragRef\.current\.moved\) onSelectTeam\(room\.id as AgentOfficeTeamId\);/);
-  assert.match(world, /aria-label=\{m\.teamInfo\.open\(name\)\}/);
+  const floor = readFileSync("components/admin/AgentOfficeFloor.tsx", "utf8");
+  assert.match(floor, /onClick=\{\(\) => props\.onSelectTeam\(team\.id\)\} data-testid=\{`agent-office-\$\{team\.id\}-name`\}/);
   // The dashboard's team cards open the same window.
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.match(panel, /onClick=\{\(\) => onSelectTeam\(team\.id as AgentOfficeTeamId\)\}/);
@@ -3002,4 +2880,107 @@ test("with R2c on, an assigned seat shows the roster's provider label, not the c
   );
   const reader = readFunction("readAmuxWorkers");
   assert.match(reader, /provider: agentOfficeProviderLabel\(worker\.provider\)/);
+});
+
+// ── Live office v2: waiting on you, worker detail and light ─────────────────
+
+test("waiting on you lists what an agent waits on, most urgent first, and never reads an unread count as zero", () => {
+  const amux = {
+    kind: "observed",
+    catalogConfigured: true,
+    workers: [
+      { name: "codex-impl", provider: "openai", state: "lost", heartbeatAt: null },
+      { name: "claude-impl", provider: "anthropic", state: "idle", heartbeatAt: null },
+      { name: "claude-chore", provider: "anthropic", state: "busy", heartbeatAt: null },
+    ],
+  };
+  const quota = { remainingPercent: 0, exhausted: true, resetAt: "2026-11-07T09:00:00.000Z", observedAt: "2026-11-07T03:00:00.000Z" };
+  const amuxDetail = {
+    kind: "observed",
+    ownerDetail: false,
+    workers: {
+      "codex-impl": { quota: null, recent: [], work: null, usage: null },
+      "claude-impl": { quota, recent: [], work: null, usage: null },
+      "claude-chore": { quota, recent: [], work: null, usage: null },
+    },
+  };
+  const now = Date.parse("2026-11-07T05:00:00Z");
+  const items = agentOfficeInbox({
+    queue: { marketing: 2, amuxEscalations: 0, amuxHalts: 1 },
+    inbox: { dmAttention: 3, v22Questions: null, planRefusals: 0 },
+    amux,
+    amuxDetail,
+    now,
+  });
+  assert.deepEqual(items.map((i) => `${i.kind}:${i.severity}`), [
+    "halt:bad",
+    "workerDown:bad",
+    "dmAttention:warn",
+    "marketing:info",
+    "quota:info",
+    "v22Question:unread",
+  ]);
+  // A busy worker with no quota left is still at work, not resting.
+  assert.equal(items.find((i) => i.kind === "quota").count, 1);
+  assert.equal(items.find((i) => i.kind === "workerDown").worker, "codex-impl");
+  assert.deepEqual(inboxTotal(items), { total: 5, unknown: true, urgent: 2 });
+  // Every item links the screen it is acted on, or opens the worker or island.
+  for (const item of items) assert.ok(item.href || item.worker || item.channel, item.id);
+  // A quota whose reset has passed is not used up any more.
+  const later = agentOfficeInbox({ queue: { marketing: 0, amuxEscalations: 0, amuxHalts: 0 }, inbox: { dmAttention: 0, v22Questions: 0, planRefusals: 0 }, amux, amuxDetail, now: Date.parse("2026-11-07T10:00:00Z") });
+  assert.equal(later.filter((i) => i.kind === "quota").length, 0);
+});
+
+test("a worker's detail keeps ten outcomes, and its card and usage only for the owner", () => {
+  const at = (iso) => new Date(iso);
+  const input = {
+    names: ["codex-impl", "claude-impl"],
+    quotas: [{ worker: "codex-impl", remainingBasisPoints: 6_234, exhausted: false, observedAt: at("2026-11-07T04:00:00Z"), resetAt: null }],
+    attempts: [
+      ...Array.from({ length: 12 }, () => ({ worker: "codex-impl", outcome: "succeeded" })),
+      { worker: "claude-impl", outcome: "failed" },
+      { worker: "claude-impl", outcome: "expired" },
+      { worker: "someone-else", outcome: "failed" },
+    ],
+    open: [{ worker: "codex-impl", taskId: "t1", startedAt: at("2026-11-07T04:10:00Z"), leaseExpiresAt: null, cardKey: "AMUX-701", cardTitle: "Fix it" }],
+    usage: [{ worker: "codex-impl", tokens: 1_200_000n, cost: 840_000n }],
+    models: [{ worker: "codex-impl", model: "gpt-6.1-sol" }],
+  };
+  const owner = agentOfficeAmuxDetail({ ...input, owner: true });
+  assert.equal(owner.workers["codex-impl"].recent.length, 10);
+  assert.deepEqual(owner.workers["claude-impl"].recent, ["f", "u"]);
+  assert.equal(owner.workers["codex-impl"].quota.remainingPercent, 62);
+  assert.equal(owner.workers["codex-impl"].work.cardKey, "AMUX-701");
+  assert.deepEqual(owner.workers["codex-impl"].usage, { tokens: 1_200_000, apiCostMicrousd: 840_000, model: "gpt-6.1-sol" });
+  assert.deepEqual(owner.workers["claude-impl"].usage, { tokens: 0, apiCostMicrousd: 0, model: null });
+  assert.equal(owner.workers["someone-else"], undefined);
+  const admin = agentOfficeAmuxDetail({ ...input, owner: false });
+  assert.equal(admin.ownerDetail, false);
+  assert.equal(admin.workers["codex-impl"].work, null);
+  assert.equal(admin.workers["codex-impl"].usage, null);
+  assert.equal(admin.workers["codex-impl"].recent.length, 10, "outcomes are not the owner's alone");
+  // Today starts at midnight on Brisbane's clock.
+  assert.equal(brisbaneMidnight(at("2026-11-07T05:00:00Z")).toISOString(), "2026-11-06T14:00:00.000Z");
+  assert.equal(brisbaneMidnight(at("2026-11-07T15:30:00Z")).toISOString(), "2026-11-07T14:00:00.000Z");
+  // The page asks for the owner's detail only for the owner.
+  const page = readFileSync("app/(site)/(application)/admin/office/page.tsx", "utf8");
+  assert.match(page, /const owner = getAdminRole\(session\) === "owner";/);
+  assert.match(page, /readAgentOfficeLiveRooms\(new Date\(\), \{ owner \}\)/);
+});
+
+test("the office's light follows Brisbane's clock", () => {
+  assert.equal(floorLightAt(11), "day");
+  assert.equal(floorLightAt(6), "dawn");
+  assert.equal(floorLightAt(18), "dusk");
+  assert.equal(floorLightAt(21.5), "night");
+  assert.equal(floorLightAt(2), "night");
+  assert.equal(floorLightAt(-1), "night");
+});
+
+test("no copy the office shows says UTC: every time is Brisbane's (owner decision 2026-11-07)", () => {
+  const render = (value) => JSON.stringify(value, (key, v) => (typeof v === "function" ? v(2, "x", "y", 1) : v));
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(render(adminAgentOfficeMessages[locale]), /UTC/, locale);
+    assert.doesNotMatch(render(adminAgentOfficeFloorMessages[locale]), /UTC/, locale);
+  }
 });

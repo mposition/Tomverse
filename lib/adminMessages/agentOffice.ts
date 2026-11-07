@@ -264,10 +264,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       blocked: "Waiting on a link",
       waiting: "Idle",
     },
-    agentStatus: {
-      idle: "Idle",
-      working: "Working",
-    },
     live: {
       eyebrowReal: (count: string) => `LIVE OFFICE · ${count} AI STAFF · REAL VIEW`,
       leadReal: "A room marked LIVE shows its team's real state; the others show whether a record screen is linked.",
@@ -313,19 +309,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         "The engineering room shows its real record. Its drafts and decisions are on its own screen; this office approves nothing.",
       liveLink: "Open the engineering agent →",
     },
-    console: {
-      windowTitle: "🎤 operator.console — orders",
-      operatorLabel: "Operator",
-      quick: [
-        { label: "Status", command: "Status report" },
-        { label: "Why so slow?", command: "Why is it slow?" },
-        { label: "👋 Thanks, team", command: "Thank you, everyone" },
-      ],
-      placeholder: "e.g. What is engineering doing? / Why is it slow?",
-      inputLabel: "Operator order",
-      send: "Send",
-      ask: (name: string) => `${name}, what are you doing now?`,
-    },
     teamInfo: {
       windowTitle: "🏢 team_info.md",
       dialogLabel: (name: string) => `What ${name} does`,
@@ -362,7 +345,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         qa: {
           summary: "A rule-based QA and release agent: a daily release-readiness digest, CI failure classes and a develop-only merge lane.",
           does: [
-            "Every day at 07:00 AEST (21:00 UTC) it reads the release-gate evidence and issue-backlog reports, static checks and Actions job results, and stores one digest of numbers, codes, issue numbers and SHAs.",
+            "Every day at 07:00 AEST it reads the release-gate evidence and issue-backlog reports, static checks and Actions job results, and stores one digest of numbers, codes, issue numbers and SHAs.",
             "It sorts CI failures into infra, undetermined, flaky-suspected or consecutive-repro, with at most two rerun suggestions.",
             "A monitor every 30 min calls the digest stale after 28 hours.",
             "The merge lane (production, every 10 min) merges the oldest eligible develop pull request, one at a time, only on an instruction the app issues for its exact head; an unknown or failed outcome latches it.",
@@ -381,7 +364,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           summary: "Watches production for silent breakage: pages the owner for what is urgent and gathers the rest into one daily digest. It alerts and never fixes.",
           does: [
             "Every 10 min it reads the app's own snapshot (readiness checks, scheduled jobs, provider budgets); a page key opens after 3 failed checks in a row and recovers after 2 clean ones.",
-            "Every day at 07:00 AEST (21:00 UTC) it submits a digest of the other readiness checks.",
+            "Every day at 07:00 AEST it submits a digest of the other readiness checks.",
             "Every state change goes into the hash-chained audit log; an alert is a fixed sentence with one Admin link.",
             "A separate dead-man monitor raises the alarm if its heartbeats stop.",
           ],
@@ -432,7 +415,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         finance: {
           summary: "Each day it works out how many days remain before each pending model price must be verified, and records it for the operator.",
           does: [
-            "Every day at 11:00 AEST (01:00 UTC), per environment, it reads the pending verified-price register from the app's own deployed code.",
+            "Every day at 11:00 AEST, per environment, it reads the pending verified-price register from the app's own deployed code.",
             "It records the days left, the marks (30, 14, 7 and 1 days, expired), problems in the register and a verdict as one digest.",
             "A dead-man monitor and a maintenance check notice if it falls silent.",
           ],
@@ -464,7 +447,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         research: {
           summary: "Once a day it copies the issue-backlog report's verdicts on each open GitHub issue into a row the owner reads. It decides nothing.",
           does: [
-            "Every day at 07:30 AEST (21:30 UTC) it reads the open issues read-only and runs the issue-backlog report for develop and main separately.",
+            "Every day at 07:30 AEST it reads the open issues read-only and runs the issue-backlog report for develop and main separately.",
             "It stores one insert-only row per daily slot, kept 90 days.",
             "An alarm is raised after 26 hours without a success.",
           ],
@@ -572,7 +555,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       dialogLabel: (name: string) => `${name}'s profile`,
       doingNow: "Responsible for",
       lastWord: "Last word",
-      ask: "🎤 Ask what they're doing",
       record: "Open its record →",
       noRecord: "This team has no record screen yet.",
       seatedQuota: "Account quota",
@@ -639,23 +621,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     real: {
       chip: "LIVE",
-      changed: (room: string, line: string) => `🔔 ${room} · ${line}`,
-      voices: {
-        engineering: { hello: "Hi, operator! Good to see you.", thanks: "Thank you! That made my day.", answer: "Here's our record." },
-        qa: { hello: "Hello! Nice to see you.", thanks: "Thanks! That means a lot.", answer: "Here's what our record says." },
-        sre: { hello: "Hey, operator!", thanks: "Thank you, really.", answer: "Here's our record." },
-        support: { hello: "Hi there! Lovely to hear from you.", thanks: "Aw, thank you!", answer: "Here's what our record says." },
-        marketing: { hello: "Hey hey, hello!", thanks: "Thanks! You're the best.", answer: "Here's our record." },
-        finance: { hello: "Hello. Good to see you.", thanks: "Thank you. Much appreciated.", answer: "Here's what our record says." },
-        trust: { hello: "Hello, operator.", thanks: "Thank you. I appreciate it.", answer: "Here's our record." },
-        research: { hello: "Hi! So nice to see you.", thanks: "Thanks! You made me smile.", answer: "Here's what our record says." },
-        routing: { hello: "Hello, operator!", thanks: "Thanks! Back to testing.", answer: "Here's what our record says." },
-      },
-      voiceDefault: { hello: "Hello, operator!", thanks: "Thank you!", answer: "Here's our record." },
-      reactions: { hello: "👋", thanks: "😊" },
-      noLiveRoom: "No room reads a real record yet, so nobody is here to answer.",
       boxLabel: "Real record",
-      contentElsewhere: "What it records is shown only in its own section.",
       research: {
         badges: {
           ok: "Recorded",
@@ -757,8 +723,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         },
         lastRun: (time: string, outcome: string) => `latest worker run ${time} · ${outcome}`,
         noRun: "no worker run has finished yet",
-        reportsToday: (count: number) => `${count} ${count === 1 ? "report" : "reports"} taken up today (UTC day)`,
-        failedRunsToday: (count: number) => `${count} failed ${count === 1 ? "run" : "runs"} today (UTC day)`,
+        reportsToday: (count: number) => `${count} ${count === 1 ? "report" : "reports"} taken up today (the day starts at 10:00 AEST)`,
+        failedRunsToday: (count: number) => `${count} failed ${count === 1 ? "run" : "runs"} today (the day starts at 10:00 AEST)`,
         stale: "a run is overdue or retention is stuck",
       },
       marketing: {
@@ -782,7 +748,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         lastRun: (time: string) => `generator last ran ${time}`,
         noRun: "the generator has not run yet",
         lastRunUnread: "the generator's last run could not be read",
-        calls: (count: number) => `${count} generator ${count === 1 ? "call" : "calls"} this month (UTC)`,
+        calls: (count: number) => `${count} generator ${count === 1 ? "call" : "calls"} this month (the month starts on the 1st at 10:00 AEST)`,
         callsUnread: "this month's generator calls could not be read",
       },
       qa: {
@@ -950,29 +916,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         facts: { provider: "Provider", state: "State", heartbeat: "Last heartbeat" },
       },
       console: (line: string) => `This room shows its real record. ${line}.`,
-    },
-    world: {
-      fit: "🗺️ Whole office",
-      close: "🔍 Closer",
-      hint: "Drag to look around · click someone for their profile",
-      lead: "Lead",
-      operator: "Op",
-    },
-    sim: {
-      statusReal: "This is the real view, as of the last refresh.",
-      welcome: (name: string) => `Operator, this is ${name} at the digest desk. Ask me anything here.`,
-      unknown:
-        "These get the fastest answer — “Status report” / “Why is it slow?” / “What is engineering doing?” / “Hello”.",
-      ordersDeclined: "The office shows records and takes no orders: nobody here moves, approves or sends anything.",
-      statusCounts: (done: number, attention: number, blocked: number, onDuty: string) =>
-        `${done} ${done === 1 ? "room" : "rooms"} done · ${attention} ${attention === 1 ? "needs" : "need"} a look · ${blocked} waiting on a link · ${onDuty} on duty.`,
-      delayBlockedSummary: (count: number, rooms: string) =>
-        `Also ${count} teams waiting on a link (${rooms}): the console has no record screen for them, so the office has nothing of theirs to read.`,
-      delayNone: "No delays and nothing stuck.",
-      deptWaiting: (task: string) => `The office does not read this room live yet; its record screen has the record. Its job: “${task}”.`,
-      deptCrew: (list: string) => `Team: ${list}`,
-      crewItem: (name: string, status: string) => `${name} (${status})`,
-      speaker: (name: string, room: string) => `${name} · ${room}`,
     },
   },
   ko: {
@@ -1225,10 +1168,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       blocked: "연동 대기",
       waiting: "대기",
     },
-    agentStatus: {
-      idle: "대기",
-      working: "업무 중",
-    },
     live: {
       eyebrowReal: (count: string) => `LIVE OFFICE · AI 직원 ${count}명 · 실제 화면`,
       leadReal: "'실제' 표시가 붙은 방은 그 팀의 실제 상태이고, 나머지는 기록 화면이 연결됐는지를 보여 줘요.",
@@ -1274,19 +1213,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         "엔지니어링 방은 실제 기록을 보여 줘요. 초안과 결정은 그 Agent 화면에 있고, 이 오피스는 아무것도 승인하지 않아요.",
       liveLink: "엔지니어링 Agent 화면 열기 →",
     },
-    console: {
-      windowTitle: "🎤 operator.console — 운영자 지시창",
-      operatorLabel: "운영자님",
-      quick: [
-        { label: "현황 보고", command: "현황 보고해줘" },
-        { label: "왜 늦어져?", command: "왜 늦어지고 있어?" },
-        { label: "👋 수고했어요", command: "다들 수고했어요" },
-      ],
-      placeholder: "예: 엔지니어링팀 지금 뭐해? / 왜 늦어져?",
-      inputLabel: "운영자 지시 입력",
-      send: "지시",
-      ask: (name: string) => `${name} 지금 뭐해?`,
-    },
     teamInfo: {
       windowTitle: "🏢 team_info.md",
       dialogLabel: (name: string) => `${name}이(가) 하는 일`,
@@ -1323,7 +1249,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         qa: {
           summary: "규칙 기반 QA·릴리스 Agent입니다. 매일 릴리스 준비 digest를 쓰고, CI 실패를 분류하고, develop 전용 병합 lane을 돌립니다.",
           does: [
-            "매일 07:00 AEST(21:00 UTC)에 릴리스 게이트 증거·이슈 backlog 보고서, 정적 검사, Actions job 결과를 읽어 digest 하나를 저장합니다. 숫자·코드·이슈 번호·SHA만 담습니다.",
+            "매일 07:00 AEST에 릴리스 게이트 증거·이슈 backlog 보고서, 정적 검사, Actions job 결과를 읽어 digest 하나를 저장합니다. 숫자·코드·이슈 번호·SHA만 담습니다.",
             "CI 실패를 infra·미결정·flaky 의심·연속 재현으로 나누고, 재실행 제안은 최대 두 개입니다.",
             "모니터가 30분마다 확인해 28시간 넘게 새 digest가 없으면 stale로 봅니다.",
             "병합 lane(production, 10분마다)은 앱이 head를 고정해 내린 지시로만 가장 오래된 develop PR을 하나씩 병합합니다. 결과를 모르거나 실패하면 latch로 멈춥니다.",
@@ -1342,7 +1268,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           summary: "production의 조용한 고장을 지켜봅니다. 급한 것은 owner에게 page하고 나머지는 하루 한 번 digest로 모읍니다. 알리기만 하고 고치지 않습니다.",
           does: [
             "10분마다 앱의 snapshot(준비 상태 검사, 예약 작업, provider 예산)을 읽습니다. page key는 3번 연속 실패하면 열리고 2번 정상이면 회복합니다.",
-            "매일 07:00 AEST(21:00 UTC)에 나머지 준비 상태 검사를 digest로 제출합니다.",
+            "매일 07:00 AEST에 나머지 준비 상태 검사를 digest로 제출합니다.",
             "상태가 바뀔 때마다 해시 체인 감사 기록에 남고, 알림은 고정 문장과 Admin 링크 하나뿐입니다.",
             "heartbeat가 끊기면 별도 dead-man 모니터가 알립니다.",
           ],
@@ -1393,7 +1319,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         finance: {
           summary: "매일 검증이 안 된 모델 가격마다 검증 기한까지 며칠 남았는지 계산해 운영자를 위해 기록합니다.",
           does: [
-            "매일 11:00 AEST(01:00 UTC)에 환경마다, 앱이 배포한 코드의 가격 검증 대기 목록을 읽습니다.",
+            "매일 11:00 AEST에 환경마다, 앱이 배포한 코드의 가격 검증 대기 목록을 읽습니다.",
             "남은 일수, 표시(30·14·7·1일, 만료), 목록의 문제, 판정을 digest 하나로 기록합니다.",
             "dead-man 모니터와 유지보수 점검이 침묵을 알아챕니다.",
           ],
@@ -1425,7 +1351,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         research: {
           summary: "하루 한 번, 열린 GitHub 이슈마다 이슈 backlog 보고서의 판정을 owner가 읽을 행으로 옮겨 적습니다. 아무것도 결정하지 않습니다.",
           does: [
-            "매일 07:30 AEST(21:30 UTC)에 열린 이슈를 읽기 전용으로 읽고, develop과 main 각각에 대해 이슈 backlog 보고서를 돌립니다.",
+            "매일 07:30 AEST에 열린 이슈를 읽기 전용으로 읽고, develop과 main 각각에 대해 이슈 backlog 보고서를 돌립니다.",
             "하루 slot마다 추가만 되는 행 하나를 저장하고 90일 보관합니다.",
             "26시간 동안 성공이 없으면 알림이 납니다.",
           ],
@@ -1533,7 +1459,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       dialogLabel: (name: string) => `${name} 프로필`,
       doingNow: "맡은 일",
       lastWord: "한마디",
-      ask: "🎤 지금 뭐 하는지 물어보기",
       record: "기록 화면 열기 →",
       noRecord: "이 팀의 기록 화면은 아직 없어요.",
       seatedQuota: "계정 남은 사용량",
@@ -1598,23 +1523,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     real: {
       chip: "실제",
-      changed: (room: string, line: string) => `🔔 ${room} · ${line}`,
-      voices: {
-        engineering: { hello: "안녕하세요, 운영자님! 반가워요.", thanks: "감사합니다! 힘이 나요.", answer: "네, 저희 기록은 이래요." },
-        qa: { hello: "안녕하세요! 오늘도 반가워요.", thanks: "고마워요! 기분 좋네요.", answer: "네, 저희 기록을 보여 드릴게요." },
-        sre: { hello: "운영자님, 안녕하세요!", thanks: "감사합니다. 든든하네요.", answer: "네, 저희 기록은 이래요." },
-        support: { hello: "안녕하세요! 말 걸어 주셔서 반가워요.", thanks: "감사합니다! 마음이 따뜻해져요.", answer: "네, 저희 기록을 보여 드릴게요." },
-        marketing: { hello: "하이! 반가워요!", thanks: "고마워요! 최고예요.", answer: "네, 저희 기록은 이래요." },
-        finance: { hello: "안녕하세요. 반갑습니다.", thanks: "감사합니다. 고마운 말씀이에요.", answer: "네, 저희 기록을 보여 드릴게요." },
-        trust: { hello: "안녕하세요, 운영자님.", thanks: "감사합니다. 마음 써 주셔서요.", answer: "네, 저희 기록은 이래요." },
-        research: { hello: "안녕하세요! 정말 반가워요.", thanks: "고마워요! 웃음이 나네요.", answer: "네, 저희 기록을 보여 드릴게요." },
-        routing: { hello: "안녕하세요, 운영자님!", thanks: "고마워요! 다시 시험하러 갈게요.", answer: "네, 저희 기록을 보여 드릴게요." },
-      },
-      voiceDefault: { hello: "안녕하세요, 운영자님!", thanks: "감사합니다!", answer: "네, 저희 기록은 이래요." },
-      reactions: { hello: "👋", thanks: "😊" },
-      noLiveRoom: "아직 실제 기록을 읽는 방이 없어서 답할 사람이 없어요.",
       boxLabel: "실제 기록",
-      contentElsewhere: "기록 내용은 그 팀의 섹션에서만 보여요.",
       research: {
         badges: {
           ok: "기록됨",
@@ -1716,8 +1625,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         },
         lastRun: (time: string, outcome: string) => `직전 worker 실행 ${time} · ${outcome}`,
         noRun: "끝난 worker 실행 아직 없음",
-        reportsToday: (count: number) => `오늘(UTC 기준 하루) 가져간 신고 ${count}건`,
-        failedRunsToday: (count: number) => `오늘(UTC 기준 하루) 실패한 실행 ${count}회`,
+        reportsToday: (count: number) => `오늘 가져간 신고 ${count}건(하루는 매일 10:00 AEST에 새로 시작해요)`,
+        failedRunsToday: (count: number) => `오늘 실패한 실행 ${count}회(하루는 매일 10:00 AEST에 새로 시작해요)`,
         stale: "실행이 늦었거나 보존 작업이 멈춰 있음",
       },
       marketing: {
@@ -1741,7 +1650,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         lastRun: (time: string) => `생성기 마지막 실행 ${time}`,
         noRun: "생성기가 아직 실행된 적 없음",
         lastRunUnread: "생성기의 마지막 실행을 읽지 못함",
-        calls: (count: number) => `이번 달(UTC) 생성기 호출 ${count}회`,
+        calls: (count: number) => `이번 달 생성기 호출 ${count}회(달은 1일 10:00 AEST에 새로 시작해요)`,
         callsUnread: "이번 달 생성기 호출 수를 읽지 못함",
       },
       qa: {
@@ -1906,29 +1815,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         facts: { provider: "공급사", state: "상태", heartbeat: "마지막 heartbeat" },
       },
       console: (line: string) => `이 방은 실제 기록을 보여 드려요. ${line}.`,
-    },
-    world: {
-      fit: "🗺️ 전체 보기",
-      close: "🔍 가까이",
-      hint: "드래그로 둘러보기 · 직원 클릭하면 프로필",
-      lead: "리드",
-      operator: "운영자",
-    },
-    sim: {
-      statusReal: "마지막 갱신 때 읽은 실제 화면이에요.",
-      welcome: (name: string) => `운영자님, 다이제스트실 ${name}입니다. 궁금한 건 여기에 바로 물어보세요.`,
-      unknown:
-        "이렇게 물어보시면 제일 빨라요 — “현황 보고” / “왜 늦어져?” / “엔지니어링팀 뭐해?” / “안녕하세요”.",
-      ordersDeclined: "오피스는 기록을 보여 줄 뿐 지시를 실행하지 않아요. 여기서는 누구도 움직이거나 승인·발송하지 않습니다.",
-      statusCounts: (done: number, attention: number, blocked: number, onDuty: string) =>
-        `완료 ${done}개 방 · 확인 필요 ${attention}개 · 연동 대기 ${blocked}팀 · 근무 인원 ${onDuty}명.`,
-      delayBlockedSummary: (count: number, rooms: string) =>
-        `그 외 연동 대기 ${count}팀(${rooms})은 콘솔에 기록 화면이 없어 오피스가 읽을 것이 없어요.`,
-      delayNone: "지연 없습니다. 대기 중인 병목도 없어요.",
-      deptWaiting: (task: string) => `오피스가 이 방을 아직 실시간으로 읽지 않아요. 기록은 기록 화면에 있어요. 맡은 일은 ‘${task}’입니다.`,
-      deptCrew: (list: string) => `팀원 현황: ${list}`,
-      crewItem: (name: string, status: string) => `${name}(${status})`,
-      speaker: (name: string, room: string) => `${name} · ${room}`,
     },
   },
 });

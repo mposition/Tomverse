@@ -164,6 +164,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/support/engineeringAgentPrObserverHarness.mjs",
   "tests/**/engineering-agent*",
   "tests/**/agent-digest*",
+  "tests/**/agent-office*",
   "tests/security*",
   // §4-4: administration and authentication.
   "app/api/admin/**",
