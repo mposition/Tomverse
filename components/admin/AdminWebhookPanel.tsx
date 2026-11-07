@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw, Webhook } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -18,12 +19,7 @@ type WebhookRow = {
   replayedAt?: string | null;
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "-";
 
 const statusClass = (status: string) => {
   if (status === "processed") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
@@ -139,7 +135,7 @@ export function AdminWebhookPanel() {
                     {row.status}
                   </span>
                   <span className="font-black text-white">{row.eventType}</span>
-                  <span className="text-zinc-600">{dateLabel(row.receivedAt)} UTC</span>
+                  <span className="text-zinc-600">{dateLabel(row.receivedAt)}</span>
                   {row.replayedAt ? (
                     <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 font-black text-blue-200">
                       {m.replayed}

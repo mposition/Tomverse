@@ -798,7 +798,7 @@ export function runPromptRefinerShadowHarness(input: {
     io.mkdirSync(dirname(paths.journal), { recursive: true });
     let lockDescriptor: number;
     try {
-        lockDescriptor = io.openSync(paths.lock, "wx", 0o600);
+        lockDescriptor = io.openSync(/*turbopackIgnore: true*/ paths.lock, "wx", 0o600);
     } catch {
         return fail("lock_unavailable_no_stale_recovery");
     }

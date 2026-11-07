@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { useCallback, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowRight, Check, ChevronDown, Loader2, Lock, RefreshCw } from "lucide-react";
@@ -108,12 +109,7 @@ type WebhookStagingView = {
   }>;
 };
 
-const stamp = (value: unknown) => {
-  if (typeof value !== "string") return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const stamp = (value: unknown) => (typeof value === "string" ? formatAestDateTime(value) : null);
 
 const text = (value: unknown) => (typeof value === "string" ? value : null);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
@@ -238,7 +234,7 @@ export function AdminMarketingPanel({
         <div className="flex flex-wrap items-center gap-3">
           <MarketingTag tone="neutral">{view.overview.environment}</MarketingTag>
           <span className="text-xs text-zinc-500">
-            {m.updatedAt.replace("{time}", `${(stamp(now) ?? "").slice(11)} UTC`)}
+            {m.updatedAt.replace("{time}", (stamp(now) ?? "").slice(11))}
           </span>
           <button
             type="button"
@@ -580,7 +576,7 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
           <>
             <p className="flex flex-wrap items-center gap-2">
               <span className="text-3xl font-semibold tabular-nums text-white">
-                {(stamp(lastRun.at) ?? "").slice(11)}
+                {(stamp(lastRun.at) ?? "").slice(11, 16)}
               </span>
               {lastRun.factsKept === null ? null : lastRun.factsKept > 0 ? (
                 <MarketingTag tone="success">
@@ -595,7 +591,7 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
               )}
             </p>
             <StatCaption>
-              {`${(stamp(lastRun.at) ?? "").slice(0, 10)} UTC · `}
+              {`${(stamp(lastRun.at) ?? "").slice(0, 10)} AEST · `}
               {m.overviewRunCounts
                 .replace("{competitors}", competitors ? String(competitors.approved) : m.none)
                 .replace("{kept}", lastRun.factsKept === null ? m.none : String(lastRun.factsKept))
@@ -2350,7 +2346,7 @@ function MarketingRow({
           {text(row.renderedText) ?? text(row.excerpt) ?? m.none}
         </p>
         <MarketingPostAssets assetIds={row.assetIds} downloadable={str(row.provider) === "manual"} m={m} />
-        <p className="mt-3 text-xs text-zinc-500" title={`${stamp(row.createdAt) ?? ""} UTC`}>
+        <p className="mt-3 text-xs text-zinc-500" title={stamp(row.createdAt) ?? ""}>
           {m.queueMeta
             .replace("{created}", relative(row.createdAt, now, m) ?? m.none)
             .replace("{expires}", relative(row.approvalExpiresAt, now, m) ?? m.none)

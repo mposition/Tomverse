@@ -25,6 +25,16 @@ import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
  * The receipt stays partial: every other Task still sees the attempt and is
  * still refused that worker.
  *
+ * The same owner retry also releases the Task's own expired attempt whose
+ * final result the server stored (lib/amux/reviewApprovalCore.ts,
+ * amuxV22ReviewRetryHasVerifiedOutcome: outcome expired, toStatus blocked,
+ * and the Task's latest AmuxV22TaskResult belongs to exactly that attempt).
+ * The bridge reports CLI usage after it stores the result, so a lease that
+ * expired between the two leaves no usage row at all, and the retry the owner
+ * approved waited as usage_unverified forever (AMUX-FILEGEN-003, review
+ * r-20261107-061707-e4a9a6). Nothing is written for that attempt either: every
+ * other Task is still refused that worker.
+ *
  * The same holds for a finished run the v52 review server rejected twice
  * (outcome succeeded, reason review_server_rejected_twice, with its reject
  * record), which the owner may also retry (owner decision 2026-11-07).
@@ -50,6 +60,11 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
         AND a."toStatus" = 'blocked'
         AND ((a."outcome" = 'blocked'
             AND a."reason" = ANY(${retryableReasons}::text[]))
+          OR (a."outcome" = 'expired'
+            AND (SELECT r."attemptId" FROM "AmuxV22TaskResult" r
+              WHERE r."taskId" = a."taskId"
+              ORDER BY r."createdAt" DESC, r."attemptId" DESC
+              LIMIT 1) = a."id")
           OR (a."outcome" = 'succeeded'
             AND a."reason" = ${AMUX_V52_REVIEW_REJECTED_TWICE_REASON}
             AND EXISTS (SELECT 1 FROM "AmuxV52ReviewRecord" r

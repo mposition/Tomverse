@@ -29,6 +29,7 @@ import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import type { AdminRole } from "@/lib/adminAuthCore";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminThemeCookieValue, type AdminTheme } from "@/lib/adminTheme";
+import { formatAestClock } from "@/lib/adminUiCore";
 
 /**
  * The automatic-refresh period, and the only place it is written down.
@@ -233,7 +234,7 @@ function AdminConsoleChrome({
         every toast twice.
       */}
       <AppToastViewport />
-      <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 border-r border-zinc-800 lg:block">
+      <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 border-r border-zinc-800 bg-zinc-900 lg:block">
         <AdminSidebar
           pathname={pathname}
           role={role}
@@ -275,7 +276,7 @@ function AdminConsoleChrome({
       ) : null}
 
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur-xl">
+        <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-900/95 backdrop-blur-xl">
           {/*
             Tighter gutters and gaps below `sm`. The header now carries one
             more control than it used to, and at 320px with a 200% root font
@@ -295,7 +296,7 @@ function AdminConsoleChrome({
             <button
               type="button"
               onClick={() => setCommandOpen(true)}
-              className="flex min-w-0 max-w-xl flex-1 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-left text-sm text-zinc-400 hover:border-zinc-700"
+              className="flex min-w-0 max-w-xl flex-1 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-left text-sm text-zinc-400 hover:border-zinc-700"
               aria-label={m.openSearch}
             >
               <Search className="h-4 w-4" aria-hidden />
@@ -307,10 +308,10 @@ function AdminConsoleChrome({
               </kbd>
             </button>
             <span
-              className={`hidden rounded-full border px-2.5 py-1 text-xs font-black uppercase tracking-[0.14em] sm:inline-flex ${
+              className={`hidden rounded-full px-3 py-1 text-xs font-bold sm:inline-flex ${
                 environment.toLowerCase() === "production"
-                  ? "border-red-500/30 bg-red-500/10 text-red-200"
-                  : "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                  ? "bg-red-500/15 text-red-300"
+                  : "bg-amber-500/15 text-amber-300"
               }`}
             >
               {environment}
@@ -416,9 +417,9 @@ function AdminConsoleChrome({
           </div>
         </header>
 
-        <main className="min-h-[calc(100dvh-7.5rem)] px-4 py-5 sm:px-6">
+        <main className="min-h-[calc(100dvh-7.5rem)] px-4 py-6 sm:px-8">
           <div className={`mx-auto w-full ${activeItem?.wide ? "max-w-none" : "max-w-[104rem]"}`}>
-            <div className="mb-5 flex flex-col gap-4 border-b border-zinc-800 pb-5 xl:flex-row xl:items-end xl:justify-between">
+            <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-zinc-500">
                   <Link href="/admin/overview" className="hover:text-zinc-300">
@@ -435,7 +436,7 @@ function AdminConsoleChrome({
                   ) : null}
                   <span className="text-zinc-300">{page.label}</span>
                 </div>
-                <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">
+                <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-[1.75rem]">
                   {page.label}
                 </h1>
                 <p className="mt-1 text-sm text-zinc-400">{page.description}</p>
@@ -485,11 +486,10 @@ function AdminConsoleChrome({
                   />{" "}
                   {m.refresh}
                 </button>
+                {/* Brisbane time: the operator reads every time as AEST. */}
                 <span className="text-xs text-zinc-500">
                   {m.updated}{" "}
-                  {lastUpdated
-                    ? `${lastUpdated.toISOString().slice(11, 19)} UTC`
-                    : "--:--:-- UTC"}
+                  {lastUpdated ? `${formatAestClock(lastUpdated)} AEST` : "--:-- AEST"}
                 </span>
               </div>
             </div>
@@ -497,7 +497,7 @@ function AdminConsoleChrome({
           </div>
         </main>
 
-        <footer className="border-t border-zinc-800 bg-zinc-950 px-4 py-3 text-xs text-zinc-400 sm:px-6">
+        <footer className="border-t border-zinc-800 bg-zinc-900 px-4 py-3 text-xs text-zinc-400 sm:px-6">
           <div className="mx-auto flex max-w-[104rem] flex-wrap items-center gap-x-5 gap-y-2">
             <span className="font-black uppercase tracking-[0.14em] text-zinc-300">
               {environment}

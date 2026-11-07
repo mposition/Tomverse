@@ -90,6 +90,9 @@ export type CronTriggerKey = keyof typeof CRON_TRIGGERS;
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
+/** The cron expressions run in UTC; the Jobs screen reads them as AEST (UTC+10, no daylight saving). */
+const AEST_HOURS_AHEAD_OF_UTC = 10;
+
 /**
  * The cron expression an operator would read, in the words the admin Jobs
  * screen uses. Derived rather than typed out beside the numbers, because a
@@ -98,7 +101,7 @@ const pad = (value: number) => String(value).padStart(2, "0");
 export const describeCronTrigger = (trigger: CronTrigger) =>
   trigger.kind === "everyMinutes"
     ? `Every ${trigger.minutes} minutes`
-    : `Daily at ${pad(trigger.hour)}:${pad(trigger.minute)} UTC`;
+    : `Daily at ${pad((trigger.hour + AEST_HOURS_AHEAD_OF_UTC) % 24)}:${pad(trigger.minute)} AEST`;
 
 /** How long one full cycle of this trigger is. */
 export const cronTriggerIntervalMs = (trigger: CronTrigger) =>
@@ -192,9 +195,7 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     key: "provider_model_catalog_monitor",
     name: "Provider model lifecycle and discovery monitor",
     cron: "providerModelCatalog",
-    // The local time is what the operator who reads this actually works in;
-    // it is a restatement of the UTC time beside it, not a second schedule.
-    schedule: scheduleSentence("providerModelCatalog", "(10:00 Australia/Brisbane)"),
+    schedule: scheduleSentence("providerModelCatalog"),
     maximumSilenceMs: minutes(26 * 60),
   },
   {

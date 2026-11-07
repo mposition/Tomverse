@@ -47,13 +47,29 @@ test("only the claimed Task's own named CLI failure, retried by the owner agains
   await amuxV22WorkerUsageUnverified(tx, "claude-chore", null, "task-a");
   const { sql } = calls[0];
   // COALESCE: a NULL reason or status never drops a row from the gate.
-  assert.match(sql, /AND NOT COALESCE\(a\."taskId" = \? AND a\."v22AssignmentId" IS NOT NULL/);
-  assert.match(sql, /AND a\."toStatus" = 'blocked' AND \(\(a\."outcome" = 'blocked' AND a\."reason" = ANY\(\?::text\[\]\)\)/);
+  assert.match(sql, /AND NOT COALESCE\(a\."taskId" = \? AND a\."v22AssignmentId" IS NOT NULL AND a\."toStatus" = 'blocked'/);
+  assert.match(sql, /AND \(\(a\."outcome" = 'blocked' AND a\."reason" = ANY\(\?::text\[\]\)\)/);
   // A finished run the v52 review rejected twice is left out only with its
   // own reject record (owner decision 2026-11-07).
   assert.match(sql, /OR \(a\."outcome" = 'succeeded' AND a\."reason" = \? AND EXISTS \(SELECT 1 FROM "AmuxV52ReviewRecord" r WHERE r\."attemptId" = a\."id" AND r\."taskId" = a\."taskId" AND r\."verdict" = 'reject'\)\)\)/);
   assert.match(sql, /JOIN "AmuxReviewDecision" d ON d\."proposalId" = p\."id" AND d\."escalationId" = p\."escalationId"/);
   assert.match(sql, /p\."attemptId" = a\."id" AND p\."taskId" = a\."taskId" AND p\."outcome" = 'retry' AND d\."outcome" = 'retry'\), FALSE\)/);
+});
+
+test("an expired attempt is left out only when the Task's latest stored result is exactly that attempt", async () => {
+  const { amuxV22WorkerUsageUnverified } = await import(mod("lib/amux/v22WorkerUsageGate.ts"));
+  const { calls, tx } = capture([]);
+  await amuxV22WorkerUsageUnverified(tx, "codex-impl", null, "task-a");
+  const { sql, values } = calls[0];
+  // AMUX-FILEGEN-003: the lease expired after the result was stored and
+  // before the bridge reported usage. The evidence is the review rule's
+  // (amuxV22ReviewRetryHasVerifiedOutcome): the latest result of this Task,
+  // ordered as reviewApproval.ts reads it, must be this attempt's.
+  assert.match(sql, /OR \(a\."outcome" = 'expired' AND \(SELECT r\."attemptId" FROM "AmuxV22TaskResult" r WHERE r\."taskId" = a\."taskId" ORDER BY r\."createdAt" DESC, r\."attemptId" DESC LIMIT 1\) = a\."id"\) OR \(a\."outcome" = 'succeeded'/);
+  // Every branch still needs the owner's retry decision bound to that attempt.
+  assert.ok(sql.indexOf("'expired'") < sql.indexOf('FROM "AmuxReviewProposal" p'));
+  assert.ok(sql.indexOf("'succeeded'") < sql.indexOf('FROM "AmuxReviewProposal" p'));
+  assert.equal(values.length, 5);
 });
 
 test("an unsettled worker leaves the claim to the next settled route, checked once per worker", async () => {

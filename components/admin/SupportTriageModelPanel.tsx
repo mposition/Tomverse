@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useEffect, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -17,7 +18,7 @@ type Option = { id: string; name: string; provider: string };
 type Messages = (typeof adminFeedbackInboxMessages)["en"];
 
 const runLine = (run: SupportTriageHealth["worker"], m: Messages) =>
-  run ? `${new Date(run.at).toLocaleString()} (${run.outcome})` : m.triageHealthNever;
+  run ? `${formatAestDateTime(run.at, { seconds: true }) ?? "-"} (${run.outcome})` : m.triageHealthNever;
 
 /** The last runs, today's counts and the overdue warning. Hook-free, so a render test can walk it. */
 export function SupportTriageHealthLine({ health, m }: { health: SupportTriageHealth; m: Messages }) {

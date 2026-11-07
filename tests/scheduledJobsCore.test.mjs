@@ -258,12 +258,12 @@ test("the schedule a job displays states the schedule it actually runs at", () =
     "Every 15 minutes via credit reconciliation cron"
   );
   assert.equal(jobByKey("provider_probe").schedule, "Every 10 minutes");
-  assert.equal(jobByKey("retention_cleanup").schedule, "Daily at 03:00 UTC");
+  assert.equal(jobByKey("retention_cleanup").schedule, "Daily at 13:00 AEST");
   assert.equal(
     jobByKey("provider_model_catalog_monitor").schedule,
-    "Daily at 00:00 UTC (10:00 Australia/Brisbane)"
+    "Daily at 10:00 AEST"
   );
-  assert.equal(jobByKey("provider_usage_sync").schedule, "Daily at 00:30 UTC");
+  assert.equal(jobByKey("provider_usage_sync").schedule, "Daily at 10:30 AEST");
 });
 
 test("a cron shape this repository does not deploy is refused, not guessed", () => {

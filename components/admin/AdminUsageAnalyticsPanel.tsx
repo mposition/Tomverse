@@ -73,10 +73,11 @@ const makeFormatters = (intlLocale: string, timeZone: string): Formatters => {
     dateStyle: "medium",
     timeStyle: "short",
   });
-  // Day keys are already local calendar dates; format them as UTC so the
-  // formatter does not shift them a second time.
+  // Day keys are already local calendar dates read as midnight UTC. Brisbane
+  // is UTC+10 with no daylight saving, so that instant is 10:00 on the same
+  // date and the formatter does not shift the date a second time.
   const day = new Intl.DateTimeFormat(intlLocale, {
-    timeZone: "UTC",
+    timeZone: "Australia/Brisbane",
     month: "short",
     day: "numeric",
     weekday: "short",

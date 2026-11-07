@@ -25,6 +25,9 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
   const claudeCliFailure = input.claudeCliFailure ?? null;
   // The settled attempt's number; 5 is the last one the budget allows.
   const attemptNumber = input.attemptNumber ?? 1;
+  // false: no usage row at all, as when the lease expired after the result
+  // was stored but before the bridge reported usage (AMUX-FILEGEN-003).
+  const usageReported = input.usageReported ?? true;
   const ids = { initiative: randomUUID(), epic: randomUUID(),
     feature: randomUUID(), task: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
     sourceApproval: randomUUID() };
@@ -320,7 +323,9 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
     VALUES ($1, 'project', 'synthetic-recovery', date_trunc('month', CURRENT_TIMESTAMP),
       date_trunc('month', CURRENT_TIMESTAMP) + interval '1 month', $2, $3,
       'reservation', 3400000)`, [randomUUID(), ids.task, attemptId]);
-  if (claudeCliFailure) {
+  if (!usageReported) {
+    // Nothing recorded for this attempt.
+  } else if (claudeCliFailure) {
     await db.query(`INSERT INTO public."AmuxCliUsageEvent"
       ("id", "invocationId", "receiptDigest", "bindingKind", "attemptId", "taskId",
        "worker", "cli", "provider", "selectedModelId", "actualModelId",
@@ -390,5 +395,6 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
   return { taskId: ids.task, priorAttemptId: attemptId,
     priorAssignmentId: assignmentId, promotionId: receiptId,
     instanceId, recoveryInstanceId, laneSequence: laneSeq, digest,
-    sourceApprovalId: ids.sourceApproval, readOnlyExecutorKind: recoveryExecutorKind };
+    sourceApprovalId: ids.sourceApproval, readOnlyExecutorKind: recoveryExecutorKind,
+    ideaId };
 }
