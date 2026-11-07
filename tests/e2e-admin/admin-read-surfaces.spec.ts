@@ -591,17 +591,20 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByText(/newest entries only/)).toBeVisible();
   });
 
-  test("providers renders health, usage sync, and per-model metrics", async ({
+  test("providers renders the status banner, cards, and per-model metrics, with the usage sync a link away", async ({
     page,
   }) => {
     await page.goto("/admin/providers");
 
+    await expect(page.getByTestId("provider-status-banner")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Provider health" })
+      page.getByRole("heading", { name: "Keys, balances and verification" })
     ).toBeVisible();
+    // The one sync button is on Usage & cost; this tab only points there.
+    await expect(page.getByTestId("provider-sync-moved")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Sync provider usage APIs" })
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("heading", { name: "Failure rate and latency watch" })
     ).toBeVisible();
@@ -617,9 +620,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/models");
 
-    await expect(
-      page.getByRole("heading", { name: "Model catalogue and API configuration" })
-    ).toBeVisible();
+    await expect(page.getByTestId("model-registry-panel")).toBeVisible();
     await expect(page.getByText(FIXTURE_MODEL.enabled.name).first()).toBeVisible();
     // The list opens on the Operational lifecycle view, so the blocked row is
     // one explicit selection away rather than on screen by default.
@@ -633,19 +634,23 @@ test.describe("admin read surfaces", () => {
     ).toBeVisible();
   });
 
-  test("providers' usage and cost tab renders provider spend alongside model metrics", async ({
+  test("providers' usage and cost tab renders the cost chart, the reconciliation, and the one sync button", async ({
     page,
   }) => {
     await page.goto("/admin/providers?tab=usage-cost");
 
     await expect(consoleHeading(page)).toHaveText("Providers");
-    await expect(
-      page.getByRole("heading", { name: "Failure rate and latency watch" })
-    ).toBeVisible();
+    await expect(page.getByTestId("provider-cost-chart")).toBeVisible();
+    await expect(page.getByTestId("provider-budget-ring")).toBeVisible();
+    await expect(page.getByTestId("provider-reconciliation")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Sync provider usage APIs" })
     ).toBeVisible();
-    await expect(page.getByText(FIXTURE_MODEL.enabled.name).first()).toBeVisible();
+    await expect(page.getByTestId("admin-image-generation-panel")).toBeVisible();
+    // Per-model metrics belong to the Status tab.
+    await expect(
+      page.getByRole("heading", { name: "Failure rate and latency watch" })
+    ).toHaveCount(0);
   });
 
   test("infrastructure renders its operations panel", async ({ page }) => {

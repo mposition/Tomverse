@@ -109,8 +109,10 @@ test.describe("platform operations", () => {
 
     await page.reload();
     await expect(
+      // The registry is a table now; one row per model.
       page
-        .locator("article")
+        .getByRole("table")
+        .getByRole("row")
         .filter({ hasText: FIXTURE_MODEL.enabled.name })
         .getByText("limited")
         .first()
@@ -200,7 +202,8 @@ test.describe("platform operations", () => {
       .fill(FIXTURE_MODEL.enabled.id);
 
     const row = page
-      .locator("article")
+      .getByRole("table")
+      .getByRole("row")
       .filter({ hasText: FIXTURE_MODEL.enabled.id });
     await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: /^Edit / }).click();
@@ -250,7 +253,8 @@ test.describe("platform operations", () => {
       .fill(FIXTURE_APP_SETTINGS.guestDefaultModelId);
 
     const row = page
-      .locator("article")
+      .getByRole("table")
+      .getByRole("row")
       .filter({ hasText: FIXTURE_APP_SETTINGS.guestDefaultModelId });
     await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: /^Edit / }).click();
