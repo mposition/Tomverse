@@ -5,6 +5,7 @@ import { amuxV22DeliveryBaseShaEnabled, amuxV22DeliveryBudgetMicrousd,
   amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
+  v22KnownCliFailureReason,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from
   "../lib/amux/v22TaskExecutionCore.ts";
@@ -153,4 +154,35 @@ test("the publication base reaches the box only behind its default-off switch", 
   assert.equal(amuxV22DeliveryBaseShaEnabled(undefined), false);
   assert.equal(amuxV22DeliveryBaseShaEnabled("true"), false);
   assert.equal(amuxV22DeliveryBaseShaEnabled("enabled"), true);
+});
+
+test("only a failed Claude receipt naming its CLI cause is a known failure", () => {
+  const attemptId = "attempt-1";
+  const event = { invocationId: attemptId, status: "failed", cli: "claude",
+    source: "claude_result", actualModelId: "claude-opus-5-5",
+    selectedModelId: "claude-opus-5-5", cliFailure: "turn_limit" };
+  const known = (events, expectedExecutionSource = "claude_result") =>
+    v22KnownCliFailureReason({ attemptId, events, expectedExecutionSource });
+  assert.equal(known([event]), "cli_turn_limit");
+  assert.equal(known([{ ...event, cliFailure: "execution_error" }]),
+    "cli_execution_error");
+  assert.equal(known([{ ...event, cliFailure: "budget_limit" }]),
+    "cli_budget_limit");
+  assert.equal(known([{ ...event, source: "unreported", actualModelId: null }]),
+    "cli_turn_limit");
+  for (const [events, source] of [
+    [[], "claude_result"],
+    [[event, event], "claude_result"],
+    [[{ ...event, cliFailure: "unknown" }], "claude_result"],
+    [[{ ...event, cliFailure: null }], "claude_result"],
+    [[{ ...event, cliFailure: undefined }], "claude_result"],
+    [[{ ...event, cliFailure: "toString" }], "claude_result"],
+    [[{ ...event, status: "succeeded" }], "claude_result"],
+    [[{ ...event, status: "outcome_unknown" }], "claude_result"],
+    [[{ ...event, invocationId: "attempt-2" }], "claude_result"],
+    [[{ ...event, actualModelId: "claude-other" }], "claude_result"],
+    [[event], "codex_jsonl"],
+    [[event], "anthropic_messages_api"],
+    [[event], null],
+  ]) assert.equal(known(events, source), null);
 });

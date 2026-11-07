@@ -53,7 +53,14 @@ test("v22 unknown execution cannot be manually requeued without a verified termi
     toStatus: "blocked", reason: "reported_result" };
   assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
     sourceSystem: "admin-idea-v4", attempt }), true);
+  // A CLI failure whose cause the CLI named is known (owner decision 2026-11-06).
+  for (const reason of ["cli_turn_limit", "cli_execution_error", "cli_budget_limit"])
+    assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
+      sourceSystem: "admin-idea-v4", attempt: { ...attempt, reason } }), true);
   for (const uncertain of [
+    { ...attempt, reason: null },
+    { ...attempt, reason: "cli_unknown" },
+    { ...attempt, reason: "cli_turn_limit", outcome: "failed" },
     { ...attempt, reason: "usage_outcome_unknown" },
     { ...attempt, outcome: "expired", reason: "outcome_unknown" },
     { ...attempt, v22AssignmentId: null },

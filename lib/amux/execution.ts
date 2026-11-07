@@ -66,6 +66,7 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
   v22ExecutionSourceForProvider,
+  v22KnownCliFailureReason,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
@@ -1511,7 +1512,7 @@ export async function settleAmuxV22TaskExecution(input: {
           cacheReadInputTokens: true, cacheCreationInputTokens: true,
           inputTokensIncludeCacheRead: true,
           inputTokensIncludeCacheWrite: true, completedTurns: true,
-          pricingVersion: true },
+          cliFailure: true, pricingVersion: true },
       });
       const events = apiExecutionReceipt && storedEvents.length === 0 &&
           settlementRecovery?.apiExecutionFrame ?
@@ -1525,6 +1526,11 @@ export async function settleAmuxV22TaskExecution(input: {
           where: { attemptId: input.attemptId },
           select: { taskId: true, bodyPurgedAt: true },
         }) : null;
+      // The assignment's provider names the CLI that ran it; an unknown
+      // provider matches no source and never settles.
+      const expectedExecutionSource = apiExecutionReceipt ?
+        "anthropic_messages_api" as const :
+        v22ExecutionSourceForProvider(settlementAssignment?.provider ?? "anthropic");
       const receiptsComplete = v22ExecutionReceiptVerified({
         attemptId: attempt.id, invocationIds: expectedIds, events,
         outcome: input.outcome,
@@ -1532,16 +1538,17 @@ export async function settleAmuxV22TaskExecution(input: {
         budgetBound: !!settlementRecovery?.riskAcceptanceId,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
-        // The assignment's provider names the CLI that ran it; an unknown
-        // provider matches no source and never settles.
-        expectedExecutionSource: apiExecutionReceipt ?
-          "anthropic_messages_api" :
-          v22ExecutionSourceForProvider(settlementAssignment?.provider ?? "anthropic"),
+        expectedExecutionSource,
       }) && (!apiExecutionReceipt || (events.length === 1 &&
         v22ReadOnlyApiReceiptMatchesUsage({ attemptId: attempt.id,
           outcome: input.outcome,
           pricingVersion: settlementRecovery!.apiExecutionFrame!.pricingVersion,
           receipt: apiExecutionReceipt, event: events[0]! })));
+      // Only a run whose receipt is not complete needs its cause: the CLI
+      // named it, so this is a known failure rather than an unknown outcome.
+      const knownCliFailure = receiptsComplete ? null :
+        v22KnownCliFailureReason({ attemptId: attempt.id,
+          events: storedEvents, expectedExecutionSource });
       if (input.outcome === "succeeded" &&
           (!storedResult || storedResult.taskId !== task.id ||
             storedResult.bodyPurgedAt !== null))
@@ -1670,7 +1677,7 @@ export async function settleAmuxV22TaskExecution(input: {
         budget.exhausted_limit ?? reviewDisposition?.reason ??
           (receiptsComplete ?
             (input.outcome === "blocked" ? "reported_result" : "execution_blocked") :
-            "usage_outcome_unknown");
+            knownCliFailure ?? "usage_outcome_unknown");
       if (gradeEscalated && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
@@ -1699,7 +1706,8 @@ export async function settleAmuxV22TaskExecution(input: {
           reason: gradeEscalated ? "contract_path_touched" :
             next === "blocked" ? blockedReason :
             budget.exhausted_limit ?? reviewDisposition?.reason ??
-                (receiptsComplete ? "reported_result" : "usage_outcome_unknown") },
+                (receiptsComplete ? "reported_result" :
+                  knownCliFailure ?? "usage_outcome_unknown") },
       });
       await tx.amuxWorkerRuntime.updateMany({ where: {
         workerName: input.worker, instanceId: input.instanceId,
@@ -1735,7 +1743,8 @@ export async function settleAmuxV22TaskExecution(input: {
         targetId: task.id, summary: "Settled an assignment-bound AMUX v22 Task.",
         metadata: { attemptId: attempt.id, outcome: input.outcome,
           toStatus: next, invocationIds: expectedIds,
-          receiptsComplete, reservedCostMicrousd:
+          receiptsComplete, cliFailureReason: knownCliFailure,
+          reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString(),
           apiExecutionReceiptDigest: apiExecutionReceipt?.digest ?? null,
           v52PathDecision: gradeGuard ?

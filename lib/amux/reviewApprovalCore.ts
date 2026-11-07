@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "@/lib/amux/v22TaskExecutionCore";
 import { amuxReviewPrivateProxyOrigin } from "@/lib/originProtection";
 
 export const AMUX_REVIEW_PROPOSAL_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -134,7 +135,11 @@ export const amuxV4ReviewEvidenceMatches = (input: {
 
 /** An unknown v22 worker result may still be running outside the app lease.
  * Legacy review keeps its existing contract; a v22 retry needs an exact,
- * receipt-backed terminal result rather than an operator guess. */
+ * receipt-backed terminal result, or a CLI failure whose cause the CLI named
+ * after a normal exit (owner decision 2026-11-06), rather than an operator
+ * guess. Whether a retry is affordable is still the attempt budget's call. */
+const V22_RETRYABLE_BLOCK_REASONS = new Set<string>(["reported_result",
+  ...AMUX_V22_CLI_FAILURE_REASON_CODES]);
 export const amuxV22ReviewRetryHasVerifiedOutcome = (input: {
   sourceSystem: string | null;
   attempt: { v22AssignmentId: string | null; outcome: string | null;
@@ -143,7 +148,8 @@ export const amuxV22ReviewRetryHasVerifiedOutcome = (input: {
   (input.attempt.v22AssignmentId !== null &&
     input.attempt.outcome === "blocked" &&
     input.attempt.toStatus === "blocked" &&
-    input.attempt.reason === "reported_result");
+    input.attempt.reason !== null &&
+    V22_RETRYABLE_BLOCK_REASONS.has(input.attempt.reason));
 
 export type AmuxReviewSubject = {
   escalation_id: string;

@@ -30,7 +30,9 @@ export type AmuxCliUsageObservation = {
 };
 
 const CODEX_LINE_MAX_BYTES = 1_048_576;
-const MAX_TURNS = 128;
+/** Mirrors AMUX_CLI_MAX_COMPLETED_TURNS (lib/amux/cliUsageLedgerCore.ts) and the
+ * ledger CHECK; a v22 run has no turn limit since 2026-11-06. */
+const MAX_TURNS = 10_000;
 const MAX_MODELS = 16;
 const MODEL_ID = /^[A-Za-z0-9._/\[\]-]{1,160}$/;
 const validModelId = (value: string): boolean => MODEL_ID.test(value) &&

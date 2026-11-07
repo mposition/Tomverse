@@ -115,6 +115,39 @@ test("CLI usage is append-only, scoped and retained for 13 months", {
         /source_check|shape_check/);
       await db.query("ROLLBACK TO SAVEPOINT subscription_refusal");
     }
+    // Owner decision 2026-11-06: a failed Claude row keeps the cause its CLI
+    // named, as a closed enum; a run has no turn limit, so more than the old
+    // 128 completed turns is a valid count.
+    const failureRow = (status, cliFailure, completedTurns) => db.query(
+      `INSERT INTO "AmuxCliUsageEvent" (
+        "id", "invocationId", "receiptDigest", "bindingKind", "attemptId",
+        "taskId", "worker", "cli", "provider", "selectedModelId",
+        "actualModelId", "authentication", "startedAt", "endedAt", "status",
+        "completeness", "source", "inputTokens", "outputTokens",
+        "cacheReadInputTokens", "inputTokensIncludeCacheRead",
+        "inputTokensIncludeCacheWrite", "completedTurns", "cliFailure",
+        "createdAt", "retentionUntil") VALUES ($1, $2, $3, 'task_attempt',
+        $4, $5, 'worker-a', 'claude', 'anthropic', 'claude-opus-5',
+        'claude-opus-5', 'subscription', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+        $6, 'reported_partial', 'claude_result', 100, 25, 10, false, false,
+        $7, $8, CURRENT_TIMESTAMP::timestamp(3),
+        CURRENT_TIMESTAMP::timestamp(3) + interval '13 months')
+        RETURNING "cliFailure", "completedTurns"`,
+      [randomUUID(), randomUUID(), "d".repeat(64), attemptId, taskId,
+        status, completedTurns, cliFailure]);
+    for (const cliFailure of ["turn_limit", "execution_error", "budget_limit", "unknown"]) {
+      const row = (await failureRow("failed", cliFailure, 13)).rows[0];
+      assert.deepEqual(row, { cliFailure, completedTurns: 13 });
+    }
+    assert.equal((await failureRow("failed", null, 400)).rows[0].completedTurns, 400);
+    for (const [status, cliFailure, turns] of [["succeeded", "turn_limit", 1],
+      ["failed", "error_max_turns", 1], ["failed", "secret text", 1],
+      ["failed", null, 10_001]]) {
+      await db.query("SAVEPOINT failure_refusal");
+      await assert.rejects(failureRow(status, cliFailure, turns),
+        /cliFailure_check|shape_check/);
+      await db.query("ROLLBACK TO SAVEPOINT failure_refusal");
+    }
   } finally {
     await db.query("ROLLBACK").catch(() => undefined);
     await db.end();
