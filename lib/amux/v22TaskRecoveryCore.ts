@@ -464,7 +464,10 @@ export function amuxV22RecoveryProofReason(input: AmuxV22RecoveryEvidenceInput,
       !input.proof.journalBound || !input.proof.socketTerminal ||
       (!journal && input.reason !== "stopped_proven")) return "inspection_unverified";
   if (!input.proof.externalEffectsKnown) return "external_effects_unknown";
-  if (amuxV22TaskWritesPatch(role) && !input.proof.workspaceClean) return "workspace_unverified";
+  // The journal path keeps no role or base, so it needs a clean checkout for
+  // every role, as the evidence guard does.
+  if ((journal || amuxV22TaskWritesPatch(role)) && !input.proof.workspaceClean)
+    return "workspace_unverified";
   if (journal && !amuxV22RecoveryJournalProven(input)) return "inspection_unverified";
   return null;
 }

@@ -658,6 +658,8 @@ test("a journal report the app cannot confirm stays unverified", async () => {
     [{ proof: { ...journal.proof, journalBound: false } }, "legacy_invocation_unbound"],
     [{ proof: { ...journal.proof, externalEffectsKnown: false, workspaceClean: false } },
       "external_effects_unknown"],
+    // A read-only role still needs a clean checkout on the journal path, as the DB guard does.
+    [{ proof: { ...journal.proof, workspaceClean: false } }, "workspace_unverified"],
   ] as const) {
     reset(); await requestInspection();
     const read = await submitEvidence({ ...journal, ...change });
