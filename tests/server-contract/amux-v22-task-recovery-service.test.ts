@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -572,6 +572,113 @@ test("the actual no-memory legacy producer stays unknown through the checker and
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
+});
+test("a restarted sidecar's journal proves an earlier run stopped and opens one capped attempt with the old hold kept", async () => {
+  // Production 2026-11-07 (AMUX-FILEREQ-004): the run failed on 11-06, the
+  // sidecar restarted for a bundle install and the bridge registered again.
+  reset(); const service = await load(); await requestInspection();
+  const old = structuredClone(world.attempt);
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-journal-"));
+  const syntheticJournal = (path: string) => readFile(path, "utf8").catch(() => null);
+  const capture: { transmitted?: AmuxV22RecoveryEvidenceInput } = {};
+  try {
+    const earlier = createAmuxV22SidecarHandler({ worker: "claude-test", stateDir,
+      invocationId: "a".repeat(32), recoveryJournal: syntheticJournal,
+      quota: undefined, protocolCapabilities: undefined, modelAccess: undefined,
+      recoveryUnit: undefined, recoveryWorkspace: undefined,
+      run: async () => ({ kind: "failed", attemptId, cliStarted: true }) });
+    await earlier({ op: "execute", version: 1, attemptId, worker: "claude-test",
+      role: "design", modelId: "claude-opus", budgetMicrousd: 3_400_000,
+      prompt: "Private synthetic prompt", recoveryBinding: { version: 1, taskId: "task-1234",
+        taskRevision: 7, workerInstanceId: instanceId, workerGeneration: 2,
+        targetHost: "amux-ubuntu" } });
+    for (const deadline = Date.now() + 10_000;
+      (await earlier({ op: "readback", attemptId })).kind === "in_progress";) {
+      if (Date.now() > deadline) throw new Error("synthetic terminal was not durable");
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    let runs = 0;
+    const restarted = createAmuxV22SidecarHandler({ worker: "claude-test", stateDir,
+      invocationId: "c".repeat(32), recoveryJournal: syntheticJournal,
+      quota: undefined, protocolCapabilities: undefined, modelAccess: undefined,
+      recoveryUnit: async () => ({ rootOwnedUnit: true, controlGroupBound: true,
+        processTreeStopped: true }),
+      recoveryWorkspace: async () => ({ ok: true, baseSha: "d".repeat(40) }),
+      run: async () => { runs += 1; throw new Error("no provider call in this regression"); } });
+    world.runtime.instanceId = "0f5a2c9e-6d1b-4e3a-9c7f-2b8d4e6a1c03"; world.runtime.generation = 7;
+    const checker = await runAmuxV22RecoveryCheckerOnce({ enabled: "1",
+      workerName: "claude-test", socketPath: "/run/tomverse-amux-v22-claude-test/task.sock",
+      syncSecret: "i".repeat(40), internalUrl: "https://tomverse.test/" }, {
+      fetcher: async (_url: URL, init: RequestInit) => {
+        if (init.method === "GET")
+          return Response.json(await service.pendingAmuxV22RecoveryInspections("claude-test"));
+        const transmitted = JSON.parse(String(init.body)) as AmuxV22RecoveryEvidenceInput;
+        capture.transmitted = transmitted;
+        const recorded = await service.reportAmuxV22RecoveryEvidence(transmitted);
+        return Response.json({ recorded: recorded.recorded, evidenceId: recorded.evidenceId });
+      },
+      inspectSocket: async (_path: string, body: unknown) => restarted(body),
+    });
+    assert.equal(checker.state, "reported");
+    assert.equal(capture.transmitted?.reason, "terminal_journal_proven");
+    assert.equal(capture.transmitted?.hostInvocationId, "a".repeat(32));
+    assert.equal(capture.transmitted?.proof.sameLiveInvocation, false);
+    assert.equal(JSON.stringify(capture.transmitted).includes("Private synthetic prompt"), false);
+
+    const read = await service.readAmuxV22TaskRecovery(owner, "task-1234", requestId);
+    assert.equal(read.state, "verified"); assert.equal(read.reason, null);
+    assert.deepEqual(read.eligibility, { acceptUnknownPriorEffects: false,
+      requestSafeStop: false, approveAttempt: true, reason: null });
+    assert.equal(read.cost!.oldHeldMicroUsd, "3400000");
+    assert.equal(read.cost!.additionalCapMicroUsd, "3400000");
+    assert.equal(read.cost!.worstExposureMicroUsd, "6800000");
+    const approved = await service.approveAmuxV22TaskRecovery({ session: owner,
+      request: new Request("https://tomverse.test"), action: "approve_attempt",
+      taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+      requestId: approvalRequestId, inspectionId: read.inspectionId!,
+      evidenceId: read.evidenceId!, evidenceDigest: read.evidenceDigest!,
+      costDigest: read.cost!.costDigest });
+    assert.equal(approved.state, "approved"); assert.equal(world.task.status, "todo");
+    assert.equal(approved.cost!.oldHeldMicroUsd, "3400000");
+    assert.deepEqual(world.attempt, old);
+    assert.equal(world.changedOld + world.ledgerWrites + world.attemptWrites + runs, 0);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+test("a journal report the app cannot confirm stays unverified", async () => {
+  const journal = { hostInvocationId: "a".repeat(32), reason: "terminal_journal_proven" as const,
+    proof: { terminalOutcome: "failed" as const, sameLiveInvocation: false, noActiveExecution: true,
+      processTreeStopped: true, rootOwnedUnit: true, controlGroupBound: true, journalBound: true,
+      socketTerminal: true, externalEffectsKnown: true, workspaceClean: true } };
+  for (const [change, reason] of [
+    [{ hostInvocationId: null }, "legacy_invocation_unbound"],
+    [{ proof: { ...journal.proof, noActiveExecution: false } }, "inspection_unverified"],
+    [{ proof: { ...journal.proof, processTreeStopped: false } }, "inspection_unverified"],
+    [{ proof: { ...journal.proof, journalBound: false } }, "legacy_invocation_unbound"],
+    [{ proof: { ...journal.proof, externalEffectsKnown: false, workspaceClean: false } },
+      "external_effects_unknown"],
+    // A read-only role still needs a clean checkout on the journal path, as the DB guard does.
+    [{ proof: { ...journal.proof, workspaceClean: false } }, "workspace_unverified"],
+  ] as const) {
+    reset(); await requestInspection();
+    const read = await submitEvidence({ ...journal, ...change });
+    assert.equal(read.state, "unverified"); assert.equal(read.reason, reason);
+    assert.equal(read.eligibility.approveAttempt, false);
+  }
+  // Only the journal reason verifies a terminal of an earlier invocation, and
+  // a live stopped_proven report still needs the attempt's runtime.
+  reset(); await requestInspection();
+  assert.equal((await submitEvidence({ proof: { ...journal.proof } })).reason,
+    "inspection_unverified");
+  reset(); await requestInspection();
+  assert.equal((await submitEvidence({ proof: { ...journal.proof, journalBound: false } })).reason,
+    "legacy_invocation_unbound");
+  reset(); await requestInspection();
+  world.runtime.generation = 7;
+  assert.equal((await submitEvidence({ ...journal, reason: "stopped_proven",
+    proof: { ...journal.proof, sameLiveInvocation: true } })).reason,
+  "runtime_observation_unverified");
 });
 test("the actual unknown producer authorizes only the approved FIRST Task risk intent without execution", async () => {
   reset();
