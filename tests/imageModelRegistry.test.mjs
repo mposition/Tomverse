@@ -189,6 +189,15 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   assert.equal(imageThinkingBilling("fal"), "flat_per_request");
   assert.equal(imageThinkingBilling("openai"), "not_billed");
   assert.equal(imageThinkingBilling("xai"), "not_billed");
+  // Qwen bills per image with no separate thinking charge (price page read
+  // 2026-11-07), and no Qwen model is seeded: this answers only for a runtime row.
+  assert.equal(imageThinkingBilling("qwen"), "not_billed");
+  assert.equal(imageThinkingCapMinimumMicroUsd("qwen", "qwen-image-2.0"), 0);
+  assert.equal(imageThinkingCapMinimumMicroUsd("qwen", "qwen-image-2.0-pro-2026-06-22"), 0);
+  // Per-image billing was read for the qwen-image family only; the same
+  // endpoint prices z-image-turbo's prompt_extend separately.
+  assert.equal(imageThinkingCapMinimumMicroUsd("qwen", "z-image-turbo"), null);
+  assert.equal(IMAGE_MODEL_REGISTRY.some((model) => model.provider === "qwen"), false);
   for (const model of listEnabledImageModels()) {
     assert.equal(imageThinkingCapEnforced(model), true, model.id);
   }
@@ -652,7 +661,7 @@ test("every registered model resolves to an owner that can be labelled", () => {
   // The label table lives in the component and is typed exhaustively, so this
   // asserts the other half: that no registry entry produces an owner outside
   // the union the table is keyed by.
-  const known = new Set(["openai", "google", "xai", "fal"]);
+  const known = new Set(["openai", "google", "xai", "fal", "qwen"]);
   for (const model of IMAGE_MODEL_REGISTRY) {
     const { owner, gateway } = imageModelBrandParts(model);
     assert.ok(known.has(owner), `${model.id} owner ${owner} has no brand label`);

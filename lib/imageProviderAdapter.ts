@@ -12,6 +12,7 @@ import {
   imageThinkingCapEnforced,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import { BoundedBufferError, readResponseToBuffer } from "@/lib/boundedBuffer";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
   buildFalImageEditRequest,
@@ -37,6 +38,15 @@ import {
   GOOGLE_INTERACTIONS_URL,
   parseGoogleImageResponse,
 } from "@/lib/googleImageRequest";
+import {
+  buildQwenImageRequest,
+  isQwenAssetUrl,
+  parseQwenImageResponse,
+  QWEN_IMAGE_GENERATION_URL,
+  qwenErrorEnvelope,
+  qwenFailurePhase,
+  qwenRequestId,
+} from "@/lib/qwenImageRequest";
 import {
   buildXaiImageEditRequest,
   buildXaiImageRequest,
@@ -255,6 +265,18 @@ const getFalApiKey = () => {
   return key;
 };
 
+/** The key the Qwen chat provider uses (DASHSCOPE_API_KEY); no image-scoped name is invented. */
+const getQwenApiKey = () => {
+  const key = resolveProviderApiKey("qwen");
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
+};
+
 const getXaiApiKey = () => {
   const key = resolveProviderApiKey("xai");
   if (!key) {
@@ -380,6 +402,9 @@ export const generateImageWithProvider = async (input: {
   }
   if (model.provider === "fal") {
     return generateWithFal(model, input);
+  }
+  if (model.provider === "qwen") {
+    return generateWithQwen(model, input);
   }
   if (model.provider !== "openai") {
     throw new ImageProviderError(
@@ -979,4 +1004,184 @@ const generateWithXai = async (
     lastError ??
     new ImageProviderError("provider_failed", "Image provider request failed.")
   );
+};
+
+/**
+ * Qwen on Alibaba Cloud Model Studio International: one synchronous call, then
+ * the result fetched from the URL it returns (valid 24 hours).
+ *
+ * Reached only through a runtime catalogue row the judge admitted -- no Qwen
+ * model is seeded -- and generation only: the edit check above refuses this
+ * provider.
+ *
+ * Shaped like the fal path, for the same reasons:
+ *   * **one attempt.** Billing is per image, and a generation that succeeded
+ *     and lost its response looks like a transport failure; a second attempt
+ *     would buy a second image the user does not pay for.
+ *   * **the result is a link.** It is checked against Singapore's public OSS
+ *     endpoint before it is followed and again on the response, with
+ *     redirects not followed, so a provider body cannot make this server
+ *     fetch an intranet endpoint or anywhere else; the body is read under
+ *     fal's 16 MiB limit (the same 1K image), declared or not.
+ *   * **the file is measured against what was priced.** Its MIME must be one
+ *     the profile may store and its header must say 1024x1024.
+ */
+const generateWithQwen = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const body = buildQwenImageRequest({
+    apiModelId: model.apiModelId,
+    prompt: input.prompt,
+    size: input.size,
+  });
+  if (!body) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no Qwen request mapping for ${model.id}.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getQwenApiKey();
+
+  let response: Response;
+  try {
+    response = await fetch(QWEN_IMAGE_GENERATION_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new ImageProviderError(
+      "provider_failed",
+      error instanceof Error && error.name === "TimeoutError"
+        ? "Image provider request timed out."
+        : "Image provider request failed.",
+      null,
+      null,
+      requestParams
+    );
+  }
+
+  const payload = await response.json().catch(() => null);
+  const providerRequestId = qwenRequestId(payload);
+  if (!response.ok) {
+    throw new ImageProviderError(
+      qwenFailurePhase(payload) ??
+        classifyImageProviderFailure(response.status, qwenErrorEnvelope(payload)),
+      `Image provider rejected the request (HTTP ${response.status}).`,
+      response.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  const parsed = parseQwenImageResponse(payload);
+  if (!parsed) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned no usable image payload.",
+      response.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  let asset: Response;
+  try {
+    asset = await fetch(parsed.url, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset could not be downloaded.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+  // Cancelled, not drained, as on the fal path: an unread image body pins its
+  // connection, and reading it would spend the memory the limit refuses.
+  const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
+  if (!asset.ok || !isQwenAssetUrl(asset.url)) {
+    await releaseAsset();
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset was not served from the expected location.",
+      asset.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+  // The response names no type, so the file's own Content-Type does, and it
+  // has to be one this profile may store.
+  const mimeType = (asset.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  if (!model.outputMimeTypes.includes(mimeType)) {
+    await releaseAsset();
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset is not a type this model may store.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+  // A declared length over the limit is refused unread, and the stream itself
+  // is capped while it is read: a chunked or compressed body declares nothing
+  // useful up front, and reading it whole first would spend the memory the
+  // limit exists to refuse.
+  let imageBytes: Buffer;
+  try {
+    imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
+  } catch (error) {
+    throw new ImageProviderError(
+      "provider_failed",
+      error instanceof BoundedBufferError
+        ? "Image provider asset was larger than the accepted limit."
+        : "Image provider asset could not be read.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+  if (imageBytes.byteLength === 0) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset was empty.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+  const dimensions = readImageDimensions(imageBytes, mimeType);
+  const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+  if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned a different size than the one that was priced.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  return {
+    imageBytes,
+    mimeType,
+    // Billed per image; no token usage to record.
+    inputTokens: 0,
+    thinkingTokens: 0,
+    outputTokens: 0,
+    providerRequestId,
+    provenance: [...model.provenance],
+    outputWidth: dimensions.width,
+    outputHeight: dimensions.height,
+    requestParams,
+  };
 };

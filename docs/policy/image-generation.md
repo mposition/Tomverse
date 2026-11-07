@@ -528,7 +528,7 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
 | `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
 | `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
-| `qwen-image-2.0-pro-2026-06-22` | 미등록 | 미확인 | 별도 endpoint·리전·한국어 글자 정확도 검증 |
+| Qwen Image (`qwen-image-2.0`·`-2.0-pro`·`-3.0`·`-3.0-pro`) | 미등록 · **직접 어댑터 구현(기본 꺼짐, 2026-11-07)** | 장당 2.0 $0.035 / 2.0-pro $0.075 / 3.0 1K $0.03 / 3.0-pro 1K $0.04 (운영자 조사, `verified` 아님) | 아래 "Qwen 직접 어댑터" — 결과 저장 리전, 예산 env, 판매 크레딧, 약관, 한국어 글자 정확도 |
 | Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
@@ -741,6 +741,48 @@ Grok 활성화(2026-08-05)가 이 규칙의 결과다: hold 해제는 `disabledR
    flag가 켜진 환경에 예산이 없으면 `/api/ready`가 그때부터 실패한다.
 3. registry `disabledReason: null` 배포. production flag는 OFF 유지(§15).
 4. staging flag ON → 1K 정사각 1회 생성 + gpt-image-2와 2-모델 비교 1회.
+
+#### Qwen 직접 어댑터 (2026-11-07, 기본 꺼짐)
+
+Alibaba Cloud Model Studio International(싱가포르) 동기 endpoint
+(`dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`,
+채팅과 같은 `DASHSCOPE_API_KEY`)를 부르는 `lib/qwenImageRequest.ts`와
+`generateWithQwen`이 있다. **adapter 구현은 활성화가 아니다.** 코드 seed에 Qwen 모델이
+없으므로 운영자가 런타임 카탈로그 프로필과 가격 revision을 추가하기 전에는 실행 경로가
+없고, 추가해도 production에서 `IMAGE_PROVIDER_QWEN_COST_MICROUSD_PER_DAY`·`_PER_MONTH`가
+없으면 판정이 `provider_budget_missing`으로 거절한다.
+
+- 요청 고정: `size: "1024*1024"`(2.0 기본은 한 변 2048), `n: 1`, `watermark: false`,
+  `prompt_extend: false`. `enable_thinking`은 `prompt_extend=true`를 요구하므로 꺼진다.
+  이미지당 과금이고 가격표에 thinking·프롬프트 재작성 별도 과금이 없어
+  `IMAGE_PROVIDER_THINKING_BILLING.qwen = "not_billed"`이다. 이 판단은 가격을 읽은
+  `qwen-image-*` 계열에만 적용된다(같은 endpoint의 `z-image-turbo`는 prompt_extend를 따로
+  과금한다). 다른 Qwen 모델은 `worst_case_cost_unbounded`로 판정된다. 따라서 최악 원가는
+  출력가 + 프롬프트 예산 5,000µUSD이고, 예컨대 2.0은 40,000µUSD · 바닥 45크레딧이다.
+  **바닥은 판매가가 아니다** — 판매 크레딧은 별도 승인이다(§12 조건 5).
+- 재시도하지 않는다. 장당 과금에서 응답을 잃은 성공 뒤의 재시도는 두 번째 이미지를 산다.
+- 결과는 24시간 유효한 URL이다. https로 싱가포르 공개 OSS endpoint
+  `<bucket>.oss-ap-southeast-1.aliyuncs.com`만 따라가고(접미사가 아니라 허용 목록이다 —
+  `.aliyuncs.com`에는 `-internal` 내부망 endpoint와 본토·홍콩 리전도 있다) redirect는
+  따르지 않는다. 본문은 선언 길이와 무관하게 읽는 동안 16 MiB로 제한하고, 파일의 MIME이
+  프로필 저장 허용 목록에 있고 헤더가 1024×1024여야 저장한다.
+- **생성만이다.** 편집은 `IMAGE_EDIT_PRICING`의 승인된 할증(3.0은 입력 이미지 장당
+  $0.003)이 없어 adapter가 거절한다.
+
+**미확인 — 활성화 전에 유료 smoke로 확인한다.** API 레퍼런스의 결과 URL 예시는 3.0·2.1 모두
+`dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com`, 즉 **중국 본토 버킷**이고, 싱가포르
+배포의 결과 저장 리전을 적은 문장은 없다. `lib/providerDataDestinations.ts`의 Qwen 행은
+저장을 SG 약정, 처리를 `NOT_PINNED`로 적고 있으며 이미지 결과가 본토를 경유하거나 본토에
+저장되는지는 확인되지 않았다. 그래서 `isQwenAssetUrl`은 싱가포르 공개 endpoint만 받는다 —
+본토 호스트가 오면 조용히 저장하지 않고 smoke가 실패한다. 실제 싱가포르 결과 호스트가 다른
+이름이면 그 증거로 허용 목록을 고친다. 거절해도 공급자 쪽 저장은 되돌리지 못하므로, 실제
+호스트 확인이 활성화의 선행 조건이다.
+
+활성화 순서: ① 판매 크레딧 승인 ② 약관 4.48 판단 ③ 키 확인 ④ staging에 예산 env 선배포
+⑤ staging 런타임 카탈로그에 프로필 + 공식 출처(`www.alibabacloud.com`) 가격 revision을
+추가하고 켜기 ⑥ staging 유료 생성 1회로 결과 호스트 리전·1024×1024·`usage` 장수 확인
+⑦ production 예산 env 선배포 후 같은 카탈로그 행 추가. smoke는 adapter를 거치므로 카탈로그
+행이 먼저 있어야 한다(fal처럼 별도 smoke 스크립트는 없다).
 
 #### 등록-비활성은 사용자에게 보인다
 
