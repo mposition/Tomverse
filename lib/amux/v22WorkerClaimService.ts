@@ -313,9 +313,11 @@ async function claimCandidate(taskId: string, assignmentId: string,
         orderBy: [{ answeredAt: "desc" }, { id: "desc" }],
         select: { worker: true } });
       // A15 owns the audited owner-release and reservation-occupancy recovery
-      // path; an unsettled worker takes no new Task, but another one can.
+      // path; an unsettled worker takes no new Task, but another one can. An
+      // owner-approved retry of this Task's named CLI failure is not held by
+      // that failure (amuxV22WorkerUsageUnverified).
       const settled = await amuxV22RoutesWithSettledUsage(tx, quotaRoutes,
-        recovery?.priorAttemptId ?? null);
+        recovery?.priorAttemptId ?? null, taskId);
       const resumeRoutes = amuxV22ResumeRoutes({
         resumeWorker: resume?.worker ?? null,
         approvedRoutes: approved.receipt.routes, routes: settled.routes,
