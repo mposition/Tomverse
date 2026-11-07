@@ -1,16 +1,23 @@
 export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
-import { AlertTriangle, CheckCircle2, KeyRound, XCircle } from "lucide-react";
 import { AdminImageGenerationPanel } from "@/components/admin/AdminImageGenerationPanel";
 import { AdminModelMetricsPanel } from "@/components/admin/AdminModelMetricsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
 import { AdminProviderOpsPanel } from "@/components/admin/AdminProviderOpsPanel";
 import { AdminProviderUsageSyncPanel } from "@/components/admin/AdminProviderUsageSyncPanel";
+import { ProviderCostBoard } from "@/components/admin/providers/ProviderCostBoard";
+import { ProviderSyncMoved } from "@/components/admin/providers/ProviderSyncMoved";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
-import { adminProvidersPageMessages } from "@/lib/adminMessages/providersPage";
+import { adminProviderBoardMessages } from "@/lib/adminMessages/providerBoard";
+import {
+  buildFallbackChains,
+  latestCheckLatencyByProvider,
+} from "@/lib/adminProviderBoardCore";
+import { loadProviderCostSeries } from "@/lib/adminProviderCostSeries";
 import {
   buildModelMetricRows,
   loadProviderHealthDashboard,
@@ -21,27 +28,35 @@ import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("providers");
 
+const settled = <T,>(result: PromiseSettledResult<T>, read: string): T | null => {
+  if (result.status === "fulfilled") return result.value;
+  // Reported, never absorbed: the screen says which read did not come back.
+  console.warn({ event: "admin_providers_read_failed", read });
+  return null;
+};
+
 /**
  * Providers, with usage/cost and incidents as its own sections.
  *
- * Three separate workspaces used to render overlapping subsets of the same
- * three panels: `/admin/providers` had a client-side tab strip whose third tab
- * rendered the model registry -- a whole other page, mounted twice in the tree
- * -- while `/admin/usage-cost` re-rendered the health panel and metrics table,
- * and `/admin/incidents` and `/admin/fallback-policies` rendered the *identical*
- * ops panel as each other. The registry now lives only on `/admin/models`, and
- * the two incident routes redirect to one tab.
+ * Each section reads what it draws with `allSettled`, so one read that fails
+ * (provider health is the one most likely to, during an incident) leaves the
+ * rest of the section usable and says which part is missing instead of
+ * sending the whole workspace to the error boundary.
+ *
+ * Usage sync is on the Usage & cost section only. The Status section and a
+ * provider's own page link there instead of carrying a second button.
  */
 export default async function AdminProvidersPage({
   searchParams,
 }: PageProps<"/admin/providers">) {
   const query = await searchParams;
-  const m = await getAdminMessages(adminProvidersPageMessages);
+  const bm = await getAdminMessages(adminProviderBoardMessages);
   const tab = resolveAdminTab(TABS, query.tab);
   const session = await getServerSession(authOptions);
   const role = getAdminRole(session) || "readonly";
   const canManageCredits = role === "owner" || role === "billing";
-  const canRunVerification = role === "owner" || role === "ops";
+  // ops:write, which is what the verification, incident and sync routes check.
+  const canWrite = role === "owner" || role === "ops";
 
   const tabs = (
     <AdminPageTabs
@@ -52,68 +67,94 @@ export default async function AdminProvidersPage({
       query={query}
     />
   );
+  const unread = (what: string) => (
+    <AdminStateBlock kind="error" title={bm.readFailed(what)} detail={bm.readFailedDetail} />
+  );
 
   if (tab.id === "incidents") {
-    const ops = await loadProviderOpsData();
+    const [opsResult, dashboardResult] = await Promise.allSettled([
+      loadProviderOpsData(),
+      loadProviderHealthDashboard(),
+    ]);
+    const ops = settled(opsResult, "ops");
+    const dashboard = settled(dashboardResult, "health");
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AdminProviderOpsPanel
-          models={ops.models}
-          incidents={ops.incidents}
-          checks={ops.checks}
-        />
+        {ops ? (
+          <AdminProviderOpsPanel
+            models={ops.models}
+            incidents={ops.incidents}
+            checks={ops.checks}
+            chains={dashboard ? buildFallbackChains(dashboard.providers, ops.models) : null}
+            canWrite={canWrite}
+          />
+        ) : (
+          unread(bm.reads.ops)
+        )}
       </div>
     );
   }
 
-  const [dashboard, ops] = await Promise.all([
+  if (tab.id === "usage-cost") {
+    const [dashboardResult, seriesResult] = await Promise.allSettled([
+      loadProviderHealthDashboard(),
+      loadProviderCostSeries(),
+    ]);
+    const dashboard = settled(dashboardResult, "health");
+    const series = settled(seriesResult, "cost-series");
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <ProviderCostBoard
+          series={series}
+          rows={
+            dashboard
+              ? dashboard.providers.map((row) => ({
+                  provider: row.provider,
+                  displayName: row.displayName,
+                  apiKeyConfigured: row.apiKeyConfigured,
+                  monthCostMicroUsd: row.monthCostMicroUsd,
+                  providerReportedMonthCostMicroUsd: row.providerReportedMonthCostMicroUsd,
+                  monthBudgetMicroUsd: row.monthBudgetMicroUsd,
+                  projectedMonthEndMicroUsd: row.projectedMonthEndMicroUsd,
+                  lastUsageSyncAt: row.lastUsageSyncAt,
+                }))
+              : null
+          }
+        />
+        <AdminProviderUsageSyncPanel canWrite={canWrite} />
+        <AdminImageGenerationPanel />
+      </div>
+    );
+  }
+
+  const [dashboardResult, opsResult] = await Promise.allSettled([
     loadProviderHealthDashboard(),
     loadProviderOpsData(),
   ]);
-  const modelMetricRows = buildModelMetricRows(dashboard, ops);
-
-  if (tab.id === "usage-cost") {
-    return (
-      <div className="flex min-w-0 flex-col gap-5">
-        {tabs}
-        <AdminProviderUsageSyncPanel />
-        <AdminImageGenerationPanel />
-        <AdminModelMetricsPanel rows={modelMetricRows} />
-      </div>
-    );
-  }
+  const dashboard = settled(dashboardResult, "health");
+  const ops = settled(opsResult, "ops");
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-xl font-black text-white">{m.healthTitle}</h2>
-        <p className="text-sm text-zinc-400">
-          {m.healthDescription}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">
-          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden /> {m.legend.available}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-amber-300">
-          <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> {m.legend.limited}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-red-300">
-          <XCircle className="h-3.5 w-3.5" aria-hidden /> {m.legend.outage}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-zinc-300">
-          <KeyRound className="h-3.5 w-3.5" aria-hidden /> {m.legend.key}
-        </span>
-      </div>
-      <AdminProviderUsageSyncPanel />
-      <AdminProviderHealthPanel
-        initialDashboard={dashboard}
-        canManageCredits={canManageCredits}
-        canRunVerification={canRunVerification}
-      />
-      <AdminModelMetricsPanel rows={modelMetricRows} />
+      {dashboard ? (
+        <AdminProviderHealthPanel
+          initialDashboard={dashboard}
+          canManageCredits={canManageCredits}
+          canRunVerification={canWrite}
+          latencyByProvider={ops ? latestCheckLatencyByProvider(ops.checks) : {}}
+        />
+      ) : (
+        unread(bm.reads.health)
+      )}
+      <ProviderSyncMoved />
+      {dashboard && ops ? (
+        <AdminModelMetricsPanel rows={buildModelMetricRows(dashboard, ops)} />
+      ) : (
+        unread(bm.reads.ops)
+      )}
     </div>
   );
 }

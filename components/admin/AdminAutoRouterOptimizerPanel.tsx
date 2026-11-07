@@ -3,6 +3,12 @@
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
+import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
+import { optimizerCycleTone } from "@/components/admin/routing/optimizerTone";
+import { adminRoutingScreensMessages } from "@/lib/adminMessages/routingScreens";
 import {
   describeAdminApiFailure,
   readAdminApiFailure,
@@ -104,8 +110,19 @@ const usd = (micro: number) => `US$${(micro / 1_000_000).toFixed(micro < 10_000 
  * only: the decisions a cycle replayed are users' messages, and none of them
  * reach this screen.
  */
-export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux: boolean }) {
+export function AdminAutoRouterOptimizerPanel({
+  canSendToAmux,
+  canWrite = true,
+}: {
+  canSendToAmux: boolean;
+  /** Draws the controls locked with the access they need; the route still decides. */
+  canWrite?: boolean;
+}) {
   const m = useAdminMessages(adminAutoRouterOptimizerMessages);
+  const screens = useAdminMessages(adminRoutingScreensMessages);
+  const [confirming, setConfirming] = useState<
+    { kind: "promote"; cycleId: string } | { kind: "roll_back" } | null
+  >(null);
   const { locale: apiLocale } = useAdminLocale();
   const [state, setState] = useState<OptimizerState | null>(null);
   const [draft, setDraft] = useState(OFF);
@@ -214,23 +231,27 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
   const recommendationKind = (value: string) =>
     (m.recommendationKinds as Record<string, string>)[value] ?? value;
 
-  return (
-    <section
-      data-testid="admin-auto-router-optimizer"
-      className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5"
-    >
-      <h2 className="flex items-center gap-2 text-base font-bold text-zinc-100">
-        <Sparkles className="h-4 w-4 text-blue-300" aria-hidden />
-        {m.title}
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-zinc-400">{m.description}</p>
+  const locked = !canWrite;
+  const writeProps = { writable: canWrite, requiredRole: screens.needsRole } as const;
+  const confirmCopy = screens.confirm.router;
 
-      <div className="mt-4 flex flex-wrap items-end gap-3">
+  return (
+    <AdminTile
+      data-testid="admin-auto-router-optimizer"
+      title={
+        <span className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-blue-300" aria-hidden />
+          {m.title}
+        </span>
+      }
+      description={m.description}
+    >
+      <div className="flex flex-wrap items-end gap-3">
         <label className="flex min-w-64 flex-col gap-1 text-xs font-bold text-zinc-300">
           {m.modelLabel}
           <select
             value={draft}
-            disabled={!state || busy}
+            disabled={!state || busy || locked}
             onChange={(event) => setDraft(event.target.value)}
             data-testid="admin-auto-router-optimizer-model"
             className="min-h-11 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm font-medium text-zinc-100"
@@ -243,35 +264,34 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
             ))}
           </select>
         </label>
-        <button
-          type="button"
+        <AdminWriteButton
+          {...writeProps}
           onClick={() => void send({ action: "set_model", modelId: draft === OFF ? null : draft })}
           disabled={!state || busy || draft === (state.optimizerModelId ?? OFF)}
           data-testid="admin-auto-router-optimizer-save"
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white disabled:opacity-50"
         >
           {m.save}
-        </button>
-        <button
-          type="button"
+        </AdminWriteButton>
+        <AdminWriteButton
+          {...writeProps}
+          variant="secondary"
           onClick={() => void send({ action: "run" })}
           disabled={!state?.optimizerModelId || busy || running}
           data-testid="admin-auto-router-optimizer-run"
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-blue-500 px-4 text-sm font-bold text-blue-200 disabled:opacity-50"
         >
           {running || busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
           {running ? m.running : m.run}
-        </button>
+        </AdminWriteButton>
       </div>
-      <p className="mt-3 text-xs text-zinc-500">{m.costNote}</p>
+      <p className="text-xs text-zinc-500">{m.costNote}</p>
 
-      <fieldset className="mt-4 flex flex-wrap items-center gap-4" data-testid="admin-auto-router-optimizer-automation">
+      <fieldset className="flex flex-wrap items-center gap-4" data-testid="admin-auto-router-optimizer-automation">
         <legend className="mb-2 text-xs font-bold text-zinc-300">{m.automationTitle}</legend>
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input
             type="checkbox"
             checked={automation.daily}
-            disabled={!state || busy}
+            disabled={!state || busy || locked}
             onChange={(event) => setAutomation({ ...automation, daily: event.target.checked })}
             data-testid="admin-auto-router-optimizer-daily"
             className="h-5 w-5"
@@ -282,15 +302,16 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
           <input
             type="checkbox"
             checked={automation.autoPromote}
-            disabled={!state || busy}
+            disabled={!state || busy || locked}
             onChange={(event) => setAutomation({ ...automation, autoPromote: event.target.checked })}
             data-testid="admin-auto-router-optimizer-auto-promote"
             className="h-5 w-5"
           />
           {m.autoPromote}
         </label>
-        <button
-          type="button"
+        <AdminWriteButton
+          {...writeProps}
+          variant="secondary"
           onClick={() => void send({ action: "set_automation", ...automation })}
           disabled={
             !state ||
@@ -299,22 +320,21 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
               automation.autoPromote === state.automation.autoPromote)
           }
           data-testid="admin-auto-router-optimizer-automation-save"
-          className="min-h-11 rounded-xl border border-zinc-600 px-4 text-sm font-bold text-zinc-200 disabled:opacity-50"
         >
           {m.save}
-        </button>
+        </AdminWriteButton>
         <p className="w-full text-xs text-zinc-500">{m.automationNote}</p>
       </fieldset>
 
       {state ? (
-        <p className="mt-2 text-xs text-zinc-400" data-testid="admin-auto-router-optimizer-spend">
+        <p className="text-xs text-zinc-400" data-testid="admin-auto-router-optimizer-spend">
           {m.spend}: {usd(state.spend.todayMicroUsd)} {m.today} · {usd(state.spend.monthMicroUsd)} {m.month} ·{" "}
           {m.caps} {usd(state.spend.runCapMicroUsd)} / {usd(state.spend.dayCapMicroUsd)} / {usd(state.spend.monthCapMicroUsd)}
         </p>
       ) : null}
 
       {refusal ? (
-        <p role="status" className="mt-3 rounded-xl border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+        <p role="status" className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
           {reason(refusal)}
         </p>
       ) : null}
@@ -323,7 +343,7 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
       <AutoRouterTunables settings={state?.settings} busy={busy} send={(action) => void send(action)} />
 
       {state ? (
-        <div className="mt-5 rounded-2xl border border-zinc-800 p-4" data-testid="admin-auto-router-optimizer-active">
+        <div className="rounded-2xl border border-zinc-800 p-4" data-testid="admin-auto-router-optimizer-active">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm font-bold text-zinc-200">
               {m.activeTitle}:{" "}
@@ -331,15 +351,15 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
                 {state.active.cycleId ? `${m.activePromoted} ${state.active.cycleId}` : m.activeDefault}
               </span>
             </p>
-            <button
-              type="button"
-              onClick={() => void send({ action: "roll_back" })}
+            <AdminWriteButton
+              {...writeProps}
+              variant="secondary"
+              onClick={() => setConfirming({ kind: "roll_back" })}
               disabled={busy || !state.active.canRollBack}
               data-testid="admin-auto-router-optimizer-roll-back"
-              className="min-h-11 rounded-xl border border-zinc-600 px-4 text-sm font-bold text-zinc-200 disabled:opacity-50"
             >
               {m.rollBack}
-            </button>
+            </AdminWriteButton>
           </div>
           <details className="mt-2">
             <summary className="cursor-pointer text-xs font-bold text-zinc-400">{m.showGuidance}</summary>
@@ -350,13 +370,13 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
 
       {state ? (
         <label
-          className="mt-5 flex min-h-11 items-center gap-2 text-sm text-zinc-300"
+          className="flex min-h-11 items-center gap-2 text-sm text-zinc-300"
           data-testid="admin-auto-router-rec-agent"
         >
           <input
             type="checkbox"
             checked={state.recAgent?.enabled === true}
-            disabled={busy || !state.recAgent}
+            disabled={busy || !state.recAgent || locked}
             onChange={(event) => void send({ action: "set_rec_agent", enabled: event.target.checked })}
             data-testid="admin-auto-router-rec-agent-toggle"
             className="h-5 w-5"
@@ -379,9 +399,9 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
         />
       ) : null}
 
-      <h3 className="mt-5 text-sm font-bold text-zinc-200">{m.cyclesTitle}</h3>
-      {state && state.cycles.length === 0 ? <p className="mt-2 text-sm text-zinc-500">{m.noCycles}</p> : null}
-      <ul className="mt-2 space-y-3">
+      <h3 className="text-sm font-bold text-zinc-200">{m.cyclesTitle}</h3>
+      {state && state.cycles.length === 0 ? <p className="text-sm text-zinc-500">{m.noCycles}</p> : null}
+      <ul className="flex flex-col gap-3">
         {state?.cycles.map((cycle) => (
           <li
             key={cycle.id}
@@ -390,20 +410,20 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
             className="rounded-2xl border border-zinc-800 p-4 text-sm text-zinc-300"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-bold text-zinc-100">
-                {formatAestDateTime(cycle.createdAt, { seconds: true }) ?? "-"} · {status(cycle.status)}
-                {cycle.promotedAt ? ` · ${m.promoted}` : ""}
+              <span className="flex flex-wrap items-center gap-2 font-bold text-zinc-100">
+                {formatAestDateTime(cycle.createdAt, { seconds: true }) ?? "-"}
+                <AdminStatusChip tone={optimizerCycleTone(cycle.status)}>{status(cycle.status)}</AdminStatusChip>
+                {cycle.promotedAt ? <AdminStatusChip tone="info">{m.promoted}</AdminStatusChip> : null}
               </span>
               {cycle.status === "passed" && !cycle.promotedAt ? (
-                <button
-                  type="button"
-                  onClick={() => void send({ action: "promote", cycleId: cycle.id })}
+                <AdminWriteButton
+                  {...writeProps}
+                  onClick={() => setConfirming({ kind: "promote", cycleId: cycle.id })}
                   disabled={busy}
                   data-testid="admin-auto-router-optimizer-promote"
-                  className="min-h-11 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white disabled:opacity-50"
                 >
                   {m.promote}
-                </button>
+                </AdminWriteButton>
               ) : null}
             </div>
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
@@ -512,6 +532,22 @@ export function AdminAutoRouterOptimizerPanel({ canSendToAmux }: { canSendToAmux
           </li>
         ))}
       </ul>
-    </section>
+
+      <AdminConfirmDialog
+        open={confirming !== null}
+        title={confirming?.kind === "promote" ? confirmCopy.promoteTitle : confirmCopy.rollBackTitle}
+        summary={confirming?.kind === "promote" ? confirmCopy.promoteSummary : confirmCopy.rollBackSummary}
+        effects={[confirming?.kind === "promote" ? confirmCopy.promoteEffect : confirmCopy.rollBackEffect]}
+        confirmLabel={confirming?.kind === "promote" ? m.promote : m.rollBack}
+        busy={busy}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => {
+          const target = confirming;
+          setConfirming(null);
+          if (target?.kind === "promote") void send({ action: "promote", cycleId: target.cycleId });
+          else if (target?.kind === "roll_back") void send({ action: "roll_back" });
+        }}
+      />
+    </AdminTile>
   );
 }

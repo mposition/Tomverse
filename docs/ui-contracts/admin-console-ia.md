@@ -675,6 +675,19 @@ The arithmetic behind them (chart geometry, the Brisbane clock) lives in
 cover them. Times in the console read as AEST (Brisbane, UTC+10): the shell's
 "Updated" clock shows `HH:MM AEST`, never UTC.
 
+### AI platform screens (2026-11-07)
+
+Providers, Models and Routing are drawn from the shared parts. Three rules
+carry over from the old screens: the provider usage **Sync now** button lives
+only on Providers > Usage & cost (Status and the provider detail page link to
+it, the sync API is unchanged); a switch an operator turned off is never turned
+back on by automation, and the incident tab says so; the Models > Default
+models tab draws the same saves as before (guest lead, guest lineup with one
+slot per provider), and the logged-in default stays a code constant with no
+admin write. A figure the loaders do not provide (per-provider p95, 7-day
+request trend per model, post-change reaction numbers) is left off the screen
+rather than stored or invented.
+
 ## Language
 
 The console is written in **English and Korean**, and in nothing else. It is an

@@ -13,6 +13,8 @@ export const adminRoutingShadowMessages = defineAdminMessages({
       title: "Serving deployment readiness",
       caveat: "Captured from the serving process at the displayed observation time. It does not attest release gates or bind historical measurements to this deployment.",
       unavailable: "This response has no runtime readback. Readiness and effective modes are unknown.",
+      ready: "Ready for rollout",
+      notReady: "Not ready for rollout",
     },
     emptyBefore: (days: number) =>
       `No shadow runs in the last ${days} days. Shadow routing is off unless`,
@@ -56,6 +58,8 @@ export const adminRoutingShadowMessages = defineAdminMessages({
       title: "현재 응답하는 배포의 출시 준비 상태",
       caveat: "표시된 관측 시각에 응답한 서버의 상태입니다. 출시 항목의 사람 확인이나 과거 측정값의 배포 결속을 대신하지 않습니다.",
       unavailable: "이 응답에는 runtime readback이 없습니다. 출시 준비 상태와 실제 적용 모드는 알 수 없습니다.",
+      ready: "출시 준비됨",
+      notReady: "출시 준비 안 됨",
     },
     emptyBefore: (days: number) =>
       `최근 ${days}일 동안 shadow 실행이 없습니다. Shadow 라우팅은`,

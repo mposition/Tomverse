@@ -1,10 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Image as ImageIcon, Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminImageGenerationMessages } from "@/lib/adminMessages/imageGeneration";
+import { adminProviderBoardMessages } from "@/lib/adminMessages/providerBoard";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminKpiCard } from "@/components/admin/ui/AdminKpiCard";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { adminFetch } from "@/lib/adminFetch";
 
 // The operations view over GET /api/admin/image-generation (PR 4): budget
@@ -131,6 +136,7 @@ function Stat({ label, value, detail }: { label: string; value: string; detail?:
 
 export function AdminImageGenerationPanel() {
   const m = useAdminMessages(adminImageGenerationMessages);
+  const board = useAdminMessages(adminProviderBoardMessages).cost;
   const { locale } = useAdminLocale();
   const intlLocale = adminIntlLocale(locale);
   const [report, setReport] = useState<AdminImageGenerationReport | null>(null);
@@ -181,34 +187,26 @@ export function AdminImageGenerationPanel() {
       report.invariants.thumbnailsExhausted +
       report.invariants.orphanedReservations
     : 0;
+  // Image spend is the sum over every provider's own budget row; the
+  // `budget` block is the legacy OpenAI-only shape and would undercount.
+  const imageSpendMonth = report
+    ? report.providerBudgets.reduce((sum, entry) => sum + entry.usedThisMonthMicroUsd, 0)
+    : 0;
+  const imageSpendToday = report
+    ? report.providerBudgets.reduce((sum, entry) => sum + entry.usedTodayMicroUsd, 0)
+    : 0;
 
   return (
-    <section
+    <AdminTile
       data-testid="admin-image-generation-panel"
-      className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/60 p-5">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-200">
-            <ImageIcon className="h-3.5 w-3.5" />
-            {m.badge}
-          </div>
-          <h2 className="mt-3 text-2xl font-black text-white">{m.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            {m.description}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      title={m.title}
+      description={m.description}
+      action={
+        <>
           {report && (
-            <span
-              className={`rounded-full border px-3 py-1 text-xs font-bold ${
-                report.flagEnabled
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                  : "border-zinc-700 bg-zinc-900 text-zinc-400"
-              }`}
-            >
+            <AdminStatusChip tone={report.flagEnabled ? "ok" : "idle"}>
               {report.flagEnabled ? m.flagOn : m.flagOff}
-            </span>
+            </AdminStatusChip>
           )}
           <button
             type="button"
@@ -217,22 +215,29 @@ export function AdminImageGenerationPanel() {
               void load();
             }}
             disabled={isLoading}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
             {m.refresh}
           </button>
-        </div>
-      </div>
-
-      {error && (
-        <p className="border-b border-red-900/50 bg-red-950/30 px-5 py-3 text-sm font-semibold text-red-300">
-          {error}
-        </p>
+        </>
+      }
+    >
+      {error && <AdminStateBlock kind="error" title={error} onRetry={() => { setIsLoading(true); void load(); }} />}
+      {/* A read that has not come back is not drawn as a number, let alone a zero. */}
+      {report || error ? (
+        <AdminKpiCard
+          label={board.imageTitle}
+          value={report ? usd(imageSpendMonth) : null}
+          detail={report ? board.imageDetail(usd(imageSpendToday)) : undefined}
+          onRetry={error ? () => { setIsLoading(true); void load(); } : undefined}
+        />
+      ) : (
+        <AdminStateBlock kind="loading" />
       )}
 
       {report && (
-        <div className="grid gap-5 p-5">
+        <div className="grid gap-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Stat
               label={m.budgetToday}
@@ -591,6 +596,6 @@ export function AdminImageGenerationPanel() {
           )}
         </div>
       )}
-    </section>
+    </AdminTile>
   );
 }

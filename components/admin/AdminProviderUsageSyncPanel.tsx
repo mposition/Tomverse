@@ -6,6 +6,12 @@ import { adminIntlLocale, type AdminMessageShape } from "@/lib/adminLocale";
 import { adminProviderUsageSyncMessages } from "@/lib/adminMessages/providerUsageSync";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
+import type { AdminTone } from "@/lib/adminUiCore";
 
 type UsageSyncMessages = AdminMessageShape<
   (typeof adminProviderUsageSyncMessages)["en"]
@@ -68,11 +74,11 @@ const money = (microUsd: number | null) =>
     ? "-"
     : `${microUsd < 0 ? "-" : ""}$${Math.abs(microUsd / 1_000_000).toFixed(2)}`;
 
-const statusClass: Record<SyncResult["status"], string> = {
-  synced: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
-  internal: "border-sky-500/30 bg-sky-500/10 text-sky-200",
-  skipped: "border-zinc-700 bg-zinc-900 text-zinc-300",
-  failed: "border-red-500/30 bg-red-500/10 text-red-200",
+const STATUS_TONE: Record<SyncResult["status"], AdminTone> = {
+  synced: "ok",
+  internal: "info",
+  skipped: "idle",
+  failed: "bad",
 };
 
 const diagnosticGuidance = (result: SyncResult, g: UsageSyncMessages["guidance"]) => {
@@ -134,7 +140,7 @@ const diagnosticGuidance = (result: SyncResult, g: UsageSyncMessages["guidance"]
   return null;
 };
 
-export function AdminProviderUsageSyncPanel() {
+export function AdminProviderUsageSyncPanel({ canWrite = true }: { canWrite?: boolean }) {
   const m = useAdminMessages(adminProviderUsageSyncMessages);
   const { locale } = useAdminLocale();
   const intlLocale = adminIntlLocale(locale);
@@ -176,62 +182,41 @@ export function AdminProviderUsageSyncPanel() {
   };
 
   return (
-    <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            {m.eyebrow}
-          </p>
-          <h3 className="mt-2 text-xl font-black text-white">
-            {m.title}
-          </h3>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-            {m.description}
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+    <AdminTile
+      title={m.title}
+      description={m.description}
+      data-testid="provider-usage-sync"
+      action={
+        <>
           <input
             type="date"
             value={date}
             onChange={(event) => setDate(event.target.value)}
-            className="h-11 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-white outline-none transition focus:border-blue-500"
+            aria-label={m.date(date)}
+            className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-white outline-none transition focus:border-blue-500"
           />
-          <button
-            type="button"
+          <AdminWriteButton
             onClick={runSync}
             disabled={loading}
-            className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            writable={canWrite}
+            requiredRole="ops:write"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden />
             {loading ? m.syncing : m.syncNow}
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200">
-          {error}
-        </div>
-      )}
+          </AdminWriteButton>
+        </>
+      }
+    >
+      {error && <AdminStateBlock kind="error" title={error} onRetry={runSync} />}
 
       {summary && response && (
-        <div className="mt-4">
-          <div className="flex flex-wrap gap-2 text-xs font-bold text-zinc-300">
-            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-200">
-              {m.synced(summary.synced)}
-            </span>
-            <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-sky-200">
-              {m.internal(summary.internal)}
-            </span>
-            <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1">
-              {m.skipped(summary.skipped)}
-            </span>
-            <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-red-200">
-              {m.failed(summary.failed)}
-            </span>
-            <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1">
-              {m.date(response.date)}
-            </span>
+        <div>
+          <div className="flex flex-wrap gap-2">
+            <AdminStatusChip tone="ok">{m.synced(summary.synced)}</AdminStatusChip>
+            <AdminStatusChip tone="info">{m.internal(summary.internal)}</AdminStatusChip>
+            <AdminStatusChip tone="idle">{m.skipped(summary.skipped)}</AdminStatusChip>
+            <AdminStatusChip tone="bad">{m.failed(summary.failed)}</AdminStatusChip>
+            <AdminStatusChip tone="idle">{m.date(response.date)}</AdminStatusChip>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {response.results.map((result) => {
@@ -239,139 +224,126 @@ export function AdminProviderUsageSyncPanel() {
               return (
                 <div
                   key={result.provider}
-                  className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-sm"
+                  className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 text-sm"
                 >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-black text-white">{result.displayName}</span>
-                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusClass[result.status]}`}>
-                    {result.status}
-                  </span>
-                </div>
-                <p className="mt-2 font-bold text-zinc-300">
-                  {result.status === "internal"
-                    ? m.internalCost(money(result.internalCostMicroUsd || 0))
-                    : m.reportedCost(money(result.reportedCostMicroUsd))}
-                </p>
-                {result.usageSourceLabel && (
-                  <p className="mt-1 text-xs text-sky-200">
-                    {m.usageSource(result.usageSourceLabel)}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-black text-white">{result.displayName}</span>
+                    <AdminStatusChip tone={STATUS_TONE[result.status]}>{result.status}</AdminStatusChip>
+                  </div>
+                  <p className="mt-2 font-bold text-zinc-300">
+                    {result.status === "internal"
+                      ? m.internalCost(money(result.internalCostMicroUsd || 0))
+                      : m.reportedCost(money(result.reportedCostMicroUsd))}
                   </p>
-                )}
-                {result.reconciliationLabel && (
-                  <p className="mt-1 text-xs text-zinc-400">
-                    {m.reconciliation(result.reconciliationLabel)}
-                  </p>
-                )}
-                {result.internalUsage && (
-                  <p className="mt-1 text-xs text-zinc-500">
-                    {m.internalUsage(
-                      result.internalUsage.requestCount,
-                      result.internalUsage.inputTokens.toLocaleString(intlLocale),
-                      result.internalUsage.cachedInputTokens.toLocaleString(intlLocale),
-                      result.internalUsage.outputTokens.toLocaleString(intlLocale)
-                    )}
-                  </p>
-                )}
-                <p className="mt-1 text-xs leading-5 text-zinc-500">{result.message}</p>
-                {result.status === "failed" && result.diagnostic && (
-                  <details className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs">
-                    <summary className="cursor-pointer font-black text-red-200">
-                      {m.viewFailureDetails}
-                    </summary>
-                    <dl className="mt-3 grid gap-2 text-zinc-400">
-                      <div>
-                        <dt className="font-bold text-zinc-500">{m.source}</dt>
-                        <dd>{result.diagnostic.source}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-bold text-zinc-500">{m.endpoint}</dt>
-                        <dd className="break-all font-mono text-[11px]">
-                          {result.diagnostic.endpoint}
-                        </dd>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <dt className="font-bold text-zinc-500">{m.http}</dt>
-                          <dd>{result.diagnostic.httpStatus ?? m.noResponse}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-bold text-zinc-500">{m.code}</dt>
-                          <dd>{result.diagnostic.errorCode || m.unknown}</dd>
-                        </div>
-                      </div>
-                      {(result.diagnostic.attemptCount !== undefined ||
-                        result.diagnostic.elapsedMs !== undefined) && (
-                        <div className="grid grid-cols-2 gap-2">
+                  {result.usageSourceLabel && (
+                    <p className="mt-1 text-xs text-sky-200">{m.usageSource(result.usageSourceLabel)}</p>
+                  )}
+                  {result.reconciliationLabel && (
+                    <p className="mt-1 text-xs text-zinc-400">{m.reconciliation(result.reconciliationLabel)}</p>
+                  )}
+                  {result.internalUsage && (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {m.internalUsage(
+                        result.internalUsage.requestCount,
+                        result.internalUsage.inputTokens.toLocaleString(intlLocale),
+                        result.internalUsage.cachedInputTokens.toLocaleString(intlLocale),
+                        result.internalUsage.outputTokens.toLocaleString(intlLocale)
+                      )}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">{result.message}</p>
+                  {result.status === "failed" && result.diagnostic && (
+                    <div className="mt-3">
+                      <AdminTechInfo summary={m.viewFailureDetails}>
+                        <dl className="grid gap-2 font-sans text-zinc-400">
                           <div>
-                            <dt className="font-bold text-zinc-500">{m.requestsAttempted}</dt>
-                            <dd>{result.diagnostic.attemptCount ?? m.unknown}</dd>
+                            <dt className="font-bold text-zinc-500">{m.source}</dt>
+                            <dd>{result.diagnostic.source}</dd>
                           </div>
                           <div>
-                            <dt className="font-bold text-zinc-500">{m.elapsed}</dt>
-                            <dd>
-                              {result.diagnostic.elapsedMs === undefined
-                                ? m.unknown
-                                : `${(result.diagnostic.elapsedMs / 1_000).toFixed(1)}s`}
+                            <dt className="font-bold text-zinc-500">{m.endpoint}</dt>
+                            <dd className="break-all font-mono text-[11px]">{result.diagnostic.endpoint}</dd>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <dt className="font-bold text-zinc-500">{m.http}</dt>
+                              <dd>{result.diagnostic.httpStatus ?? m.noResponse}</dd>
+                            </div>
+                            <div>
+                              <dt className="font-bold text-zinc-500">{m.code}</dt>
+                              <dd>{result.diagnostic.errorCode || m.unknown}</dd>
+                            </div>
+                          </div>
+                          {(result.diagnostic.attemptCount !== undefined ||
+                            result.diagnostic.elapsedMs !== undefined) && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <dt className="font-bold text-zinc-500">{m.requestsAttempted}</dt>
+                                <dd>{result.diagnostic.attemptCount ?? m.unknown}</dd>
+                              </div>
+                              <div>
+                                <dt className="font-bold text-zinc-500">{m.elapsed}</dt>
+                                <dd>
+                                  {result.diagnostic.elapsedMs === undefined
+                                    ? m.unknown
+                                    : `${(result.diagnostic.elapsedMs / 1_000).toFixed(1)}s`}
+                                </dd>
+                              </div>
+                            </div>
+                          )}
+                          {(result.diagnostic.attemptTimeoutMs !== undefined ||
+                            result.diagnostic.failureStage !== undefined) && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <dt className="font-bold text-zinc-500">{m.perRequestTimeout}</dt>
+                                <dd>
+                                  {result.diagnostic.attemptTimeoutMs === undefined
+                                    ? m.unknown
+                                    : `${result.diagnostic.attemptTimeoutMs / 1_000}s`}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="font-bold text-zinc-500">{m.failureStageLabel}</dt>
+                                <dd>
+                                  {result.diagnostic.failureStage
+                                    ? m.failureStage[result.diagnostic.failureStage]
+                                    : m.unknown}
+                                </dd>
+                              </div>
+                            </div>
+                          )}
+                          {result.diagnostic.detail && (
+                            <div>
+                              <dt className="font-bold text-zinc-500">{m.providerDetail}</dt>
+                              <dd className="break-words leading-5">{result.diagnostic.detail}</dd>
+                            </div>
+                          )}
+                          <div>
+                            <dt className="font-bold text-zinc-500">{m.providerRequestId}</dt>
+                            <dd className="break-all font-mono text-[11px]">
+                              {result.diagnostic.providerRequestId || m.notReturned}
                             </dd>
                           </div>
-                        </div>
-                      )}
-                      {(result.diagnostic.attemptTimeoutMs !== undefined ||
-                        result.diagnostic.failureStage !== undefined) && (
-                        <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <dt className="font-bold text-zinc-500">{m.perRequestTimeout}</dt>
-                            <dd>
-                              {result.diagnostic.attemptTimeoutMs === undefined
-                                ? m.unknown
-                                : `${result.diagnostic.attemptTimeoutMs / 1_000}s`}
-                            </dd>
+                            <dt className="font-bold text-zinc-500">{m.tomverseTrace}</dt>
+                            <dd className="break-all font-mono text-[11px]">{result.diagnostic.traceId}</dd>
                           </div>
-                          <div>
-                            <dt className="font-bold text-zinc-500">{m.failureStageLabel}</dt>
-                            <dd>
-                              {result.diagnostic.failureStage
-                                ? m.failureStage[result.diagnostic.failureStage]
-                                : m.unknown}
-                            </dd>
-                          </div>
-                        </div>
-                      )}
-                      {result.diagnostic.detail && (
-                        <div>
-                          <dt className="font-bold text-zinc-500">{m.providerDetail}</dt>
-                          <dd className="break-words leading-5">
-                            {result.diagnostic.detail}
-                          </dd>
-                        </div>
-                      )}
-                      <div>
-                        <dt className="font-bold text-zinc-500">{m.providerRequestId}</dt>
-                        <dd className="break-all font-mono text-[11px]">
-                          {result.diagnostic.providerRequestId || m.notReturned}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="font-bold text-zinc-500">{m.tomverseTrace}</dt>
-                        <dd className="break-all font-mono text-[11px]">
-                          {result.diagnostic.traceId}
-                        </dd>
-                      </div>
+                        </dl>
+                      </AdminTechInfo>
                       {guidance && (
-                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2 text-amber-100">
-                          <dt className="font-black">{m.recommendedCheck}</dt>
-                          <dd className="mt-1 leading-5">{guidance}</dd>
+                        <div className="mt-2 rounded-xl bg-amber-500/10 p-3 text-xs text-amber-100">
+                          <p className="font-black">{m.recommendedCheck}</p>
+                          <p className="mt-1 leading-5">{guidance}</p>
                         </div>
                       )}
-                    </dl>
-                  </details>
-                )}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
       )}
-    </section>
+    </AdminTile>
   );
 }
