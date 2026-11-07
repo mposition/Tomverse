@@ -575,7 +575,7 @@ export const localizedAdminSearchablePages = (
     return {
       id: page.id,
       label: locale === "ko" ? ko.label : page.label,
-      href: page.href,
+      href: "openHref" in page ? page.openHref : page.href,
       description: locale === "ko" ? ko.description : page.description,
       group: null,
       groupLabel: null,

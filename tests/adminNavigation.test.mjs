@@ -411,7 +411,10 @@ test("detail routes keep their parent breadcrumb and their parent nav entry", ()
 test("the palette can reach every page, including the unlisted ones", () => {
   const pages = new Set(ADMIN_SEARCHABLE_PAGES.map((page) => page.href));
   for (const item of ADMIN_NAVIGATION) assert.ok(pages.has(item.href));
-  for (const page of ADMIN_UNLISTED_PAGES) assert.ok(pages.has(page.href));
+  // An unlisted page opens at `openHref` when its bare address would redirect.
+  for (const page of ADMIN_UNLISTED_PAGES) assert.ok(pages.has("openHref" in page ? page.openHref : page.href));
+  assert.ok(pages.has("/admin/agent-digests?tab=trust-safety"), "the palette opens the Trust and safety digest on its tab");
+  assert.equal(pages.has("/admin/agent-digests"), false);
   // Every page is findable by its own label, which the old
   // `ALL_ITEMS.slice(0, 9)` empty state could not claim.
   for (const page of ADMIN_SEARCHABLE_PAGES) {

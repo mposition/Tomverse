@@ -1234,6 +1234,8 @@ export const ADMIN_UNLISTED_PAGES = [
     aliases: ["trust", "safety", "trust and safety", "dsr", "privacy deadline", "digest", "observer"],
     /** The one `?tab=` this page renders; every other value redirects. */
     sections: ["trust-safety"],
+    /** Where the palette and pins open it: the bare address redirects to Release. */
+    openHref: "/admin/agent-digests?tab=trust-safety",
   },
 ] as const;
 
@@ -1749,7 +1751,7 @@ export const ADMIN_SEARCHABLE_PAGES = [
   ...ADMIN_UNLISTED_PAGES.map((page) => ({
     id: page.id,
     label: page.label,
-    href: page.href,
+    href: "openHref" in page ? page.openHref : page.href,
     description: page.description,
     group: null as AdminNavGroup | null,
     aliases: page.aliases,

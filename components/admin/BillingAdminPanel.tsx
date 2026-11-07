@@ -887,6 +887,10 @@ export function BillingAdminPanel({
   );
   useEffect(() => {
     publishPromotionDraftState({ dirtyPromotionIds });
+    // The draft lives in this panel. When the operator leaves for a tab that
+    // does not draw it (Diagnostics), nothing is dirty any more, and a stale
+    // list would keep blocking that tab's diagnostics for a draft that is gone.
+    return () => publishPromotionDraftState({ dirtyPromotionIds: [] });
   }, [dirtyPromotionIds]);
 
   const dirtyPriceCount = useMemo(
