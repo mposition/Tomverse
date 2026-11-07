@@ -110,6 +110,10 @@ test("the DM approver: behind its switch, irreversible stays human, answers are 
   assert.match(source, /state\.closing !== null/, "a judged or closed request is never applied again");
   assert.equal((source.match(/source: "dm"/g) ?? []).length, 4, "each of the four question types records dm");
   assert.match(source, /if \(applied\) \{\s+await withAmuxDbBoundary\(AMUX_DB_BOUNDARIES\.decisionMakerAutoApplyClose,\s+\(tx\) => closeDecisionMakerRequestOnDirectAnswer/);
+  const store = read("lib/amux/decisionMakerRequestStore.ts");
+  const open = store.slice(store.indexOf("export async function readNextDecisionMakerOpenProposal"));
+  assert.match(open.slice(0, 2_000), /ORDER BY random\(\)/, "one it may not apply never holds back the others");
+  assert.match(open.slice(0, 2_000), /'confirm', 'edit_confirm', 'reject'/, "a judged request is not open");
   const migration = read("prisma/migrations/20261107140000_amux_v22_result_conclusion_dm_review/migration.sql");
   for (const table of ["AmuxV22TaskQuestion", "AmuxIdeaCardCloseQuestion"])
     assert.match(migration, new RegExp(`ALTER TABLE "${table}"[\\s\\S]*?'operator', 'dm_confirmed', 'dm'`), table);

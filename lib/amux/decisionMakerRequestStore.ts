@@ -1238,10 +1238,13 @@ export async function closeDecisionMakerRequestOnDirectAnswer(
 }
 
 /**
- * Owner decision 2026-11-07 (the Decision Maker as the approver): the oldest
- * request routed to a DM, on one of the given cards, whose terminal result is
- * a proposal and which nothing has closed -- a proposal no person has judged.
- * One statement; null when there is none.
+ * Owner decision 2026-11-07 (the Decision Maker as the approver): one request
+ * routed to a DM, on one of the given cards, whose terminal result is a
+ * proposal and which nothing has closed -- a proposal no person has judged.
+ * Picked at random, so a proposal the approver may not apply (marked
+ * irreversible, or an answer that is none of the fixed words) never holds
+ * back the others; it waits for the operator as before. One statement; null
+ * when there is none.
  */
 export async function readNextDecisionMakerOpenProposal(
   client: LedgerReader,
@@ -1260,7 +1263,7 @@ export async function readNextDecisionMakerOpenProposal(
       AND NOT EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
         WHERE ev."requestId" = r."id" AND ev."kind" IN
           ('assign_discarded', 'stale_close', 'direct_answer_close', 'confirm', 'edit_confirm', 'reject'))
-    ORDER BY r."createdAt", r."id"
+    ORDER BY random()
     LIMIT 1
   `;
   const id = rows[0]?.id;

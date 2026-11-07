@@ -71,7 +71,8 @@ const answerText = (detail: { outputKind: string | null; optionId: string | null
   dmAnswer: string | undefined) =>
   detail.outputKind === "select" ? detail.optionId : dmAnswer ?? null;
 
-/** The read step: the next open proposal the DM may decide alone, or null. */
+/** The read step: an open proposal the DM may decide alone, or null (also when
+ * the one picked this tick is not one it may apply). */
 export async function readAmuxDmAutoApplyCandidate(tx: Prisma.TransactionClient, now: Date):
   Promise<Candidate | null> {
   let killSwitch: boolean | null;
