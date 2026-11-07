@@ -129,7 +129,7 @@ export function AmuxOperatingScopePanel({ operatorId }: { operatorId: string }) 
   };
 
   return <section aria-labelledby="amux-operating-scope-title"
-    className="space-y-3 rounded-lg border p-4 text-sm border-zinc-700">
+    className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm">
     <h4 id="amux-operating-scope-title" className="font-semibold">{m.title}</h4>
     <p>{m.hint}</p>
     {current?.state === "current" ? <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">

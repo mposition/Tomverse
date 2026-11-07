@@ -285,7 +285,7 @@ test("a failed read logs a reason made of codes and class names only", () => {
   assert.ok(page.includes("amuxIdeaProgressFailureLog(error)"), "the page logs the reason, not the bare event");
 });
 
-test("the Ideas main follows the approved mockup: inbox on top, input beside the list, and opens a row's idea by its request id", () => {
+test("the Ideas main follows the approved mockup: inbox on top, the input above the list, and opens a row's idea by its request id", () => {
   const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
   assert.match(page, /tab\.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication\(session\)\) \{\n    ideaProgress = "reauthenticate";/,
     "a stale sign-in reads nothing");
@@ -295,7 +295,7 @@ test("the Ideas main follows the approved mockup: inbox on top, input beside the
   assert.equal(page.split("readAmuxIdeaProgressForOwner(").length - 1, 1, "a single server read feeds the inbox and the list");
   // Not opened: the inbox leads at full width, then the input with the list beside it.
   assert.ok(page.indexOf("<AmuxIdeaInbox") < page.indexOf("<AmuxIdeaInputPanel"));
-  assert.ok(page.includes("progressRows={openedIdea ? undefined : ideaProgress}"), "the list sits beside the input only on the main view");
+  assert.ok(page.includes("progressRows={openedIdea ? undefined : ideaProgress}"), "the list sits below the input only on the main view");
   // Opened: its detail and flow lead; the inbox and list follow in one panel.
   assert.ok(page.indexOf("<AmuxIdeaInputPanel") < page.indexOf("<AmuxIdeaProgressPanel"));
   assert.ok(page.includes('<AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}'));
@@ -304,10 +304,12 @@ test("the Ideas main follows the approved mockup: inbox on top, input beside the
   assert.match(panel, /data-testid="amux-idea-list-unavailable"/, "the list keeps its card when the read failed");
   assert.equal(/adminFetch|method:/.test(panel), false, "the list only links; it never writes");
   const input = read("components/admin/AmuxIdeaInputPanel.tsx");
-  assert.ok(input.includes("lg:grid-cols-[minmax(0,1fr)_23.75rem]"), "two columns from the desktop width, one on a phone");
+  assert.equal(input.includes("lg:grid-cols-[minmax(0,1fr)_23.75rem]"), false, "the list no longer sits in a narrow right-hand column");
+  assert.ok(input.indexOf("amux-idea-main-grid") < input.indexOf("<AmuxIdeaList"), "the input card comes first and the list follows at full width");
+  assert.ok(input.includes("<AmuxAnalysisBudgetMeter />"), "the budget line sits under the idea box");
   assert.equal(input.includes("{messages.step}") || input.includes("{messages.description}"), false,
     "the old panel header (eyebrow, large title, long description) is gone; the console page has its own h1");
-  assert.ok(input.indexOf("<AmuxIdeaList") < input.indexOf("<AmuxInitialPlanPanel"), "the flow panels follow below the two columns");
+  assert.ok(input.indexOf("<AmuxIdeaList") < input.indexOf("<AmuxInitialPlanPanel"), "the flow panels follow below the list");
   assert.ok(input.includes("data-testid=\"amux-idea-settings-footnote\""), "the footnote points to Analysis settings");
   const recover = input.slice(input.indexOf("const recoverFromReceipts"), input.indexOf("useEffect(() => {", input.indexOf("const recoverFromReceipts")));
   assert.ok(recover.indexOf('recovered.kind === "pending"') < recover.indexOf("openRequestId &&"),

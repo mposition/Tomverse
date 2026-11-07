@@ -101,7 +101,7 @@ export function AmuxSessionBudgetResolutionPanel() {
   }, [load]);
 
   return <section aria-labelledby="amux-session-budget-resolution-title"
-    className="space-y-3 rounded-lg border border-zinc-700 p-4 text-sm"
+    className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm"
     data-testid="amux-session-budget-resolution">
     <h4 id="amux-session-budget-resolution-title" className="font-semibold">{m.title}</h4>
     <p>{m.hint}</p>

@@ -807,7 +807,7 @@ The safety section distinguishes automatic recovery checks, operator confirmatio
 
 ### AMUX Ideas holds only the idea flow (2026-10-15)
 
-The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to the opened idea's detail (operator decision 2026-11-06, which retired **Cleanup and recovery** and its `?tab=recovery`, now a redirect to Ideas: an idea waiting for its analysis worker shows one release button when the server finds an unclaimed hold with no usage, and otherwise says why none can be released; the owner's later steps show the button only when a hold left by an earlier preview can still be released; there is no reservation ID to look up), and the monthly analysis budget, the approval of analysis models and the Task worker and model cost catalogue to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Ideas flow links there and only reads what is approved. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas on the six-step bar; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. The v49 redesign retired no route; the later `?tab=recovery` retirement keeps its redirect.
+The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to the opened idea's detail (operator decision 2026-11-06, which retired **Cleanup and recovery** and its `?tab=recovery`, now a redirect to Ideas: an idea waiting for its analysis worker shows one release button when the server finds an unclaimed hold with no usage, and otherwise says why none can be released; the owner's later steps show the button only when a hold left by an earlier preview can still be released; there is no reservation ID to look up), and the monthly analysis budget, the approval of analysis models and the Task worker and model cost catalogue to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Ideas flow links there and only reads what is approved. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas as cards on the five-step bar (idea, execution approval, plan approval, run, PR; an opened idea's detail keeps its six steps), ideas that wait for a person first; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. The v49 redesign retired no route; the later `?tab=recovery` retirement keeps its redirect.
 
 ### AMUX Ideas is a one-stop flow with two decisions (2026-10-16)
 
@@ -836,6 +836,60 @@ engineering agent keeps its four sections, and its old
 `/admin/product-research?tab=observations`, the record it showed in
 production, with the rest of its query
 (`ADMIN_ENGINEERING_AGENT_LEGACY_TABS`). No route was retired.
+
+### The Development screens (2026-11-07)
+
+Step 7 of the redesign draws Ideas, the Execution board, Release, AMUX settings
+and Safety & recovery from the shared parts. It changes what is drawn; every
+approval, decision, budget and halt route, its permission, its step-up and its
+audit record is as it was, and `tests/adminAmuxDevScreens.test.mjs` pins that.
+
+- **Ideas.** The new-idea card (the pixel avatar, the one-stop button and the
+  collapsed steps) leads, with this month's analysis budget as one line under
+  the box (`AmuxAnalysisBudgetMeter`: a read of the existing snapshot route, "sign
+  in again" when the sign-in is stale, "could not be read" when it fails, never an
+  empty bar). Ideas in progress are cards at full width below it. A card whose
+  idea waits for a person is outlined and carries the decision as its cue; it
+  only links to the idea, where the existing approval panels and their blocking
+  dialog are. The card list shows a count per state and each card's kind,
+  priority, portfolio score and state. The counts and the kind, priority and
+  state come from the newest cards' own read (`listAmuxCardsForAdmin`) and say
+  so ("the N most recently changed of M"); an older card shows no state, and a
+  failed read shows "Unavailable", never zero.
+- **Execution board.** The six server lanes are drawn in five columns: Waiting
+  (Tomverse Backlog, AMUX Backlog and Todo as sub-lists, each still a
+  `data-amux-lane` section, and AMUX Backlog still the only drop target), Waiting
+  on you (the attention lane, so its count is the server's), Running, In review
+  and Done (the idea lane's recent merges; older finished cards stay in the
+  history below). A card shows its worker's avatar, its channel (Claude, Codex,
+  Copilot or Cursor, read from the worker's name) and the time since it last
+  changed; the board snapshot carries no per-card cost, so none is drawn. A card
+  stopped by the work itself (a lost run, an unknown outcome, a limit) has a red
+  edge and a link to Safety & recovery. The card dialog, the move panel and the
+  Decision Maker judgment are unchanged. Diagnostics still reads "Opening soon"
+  and points at the review queue, where the worker report and the assignment
+  evidence are.
+- **Release › QA.** It opens on the next train (its AEST time and the time left),
+  today's route (a train counts as departed only when its admission was
+  recorded), production against main, the pull requests picked for the next
+  train, and the note that an operator merges a train with merge-train. The old
+  overview, train and lane views follow. Each read is settled on its own; a read
+  that fails is named, never drawn as nothing. The departure board stays the one
+  fixed-dark file.
+- **Release › CI queue.** The runner budget is drawn as a grid of runners in use,
+  with the warning not to mark a waiting pull request ready again or re-run its
+  CI; how the line works is behind the technical disclosure. Reordering, stopping
+  and the budget controls are unchanged.
+- **AMUX settings › Workers.** Workers are cards grouped by channel, what needs
+  a look first inside each, with a banner when any cannot take work. The turn-on,
+  pause and resume buttons are the registry's own, sent once and read back. No
+  per-worker weekly quota is recorded, so no quota bar is drawn.
+- **Safety & recovery.** An open halt is one big card: what was checked and two
+  choices (clear it and resume, or leave it). Clearing is the existing form with
+  its three confirmations, the halt key and the recent sign-in, owner only, and
+  not offered while the server is checking the halt itself. Cleared halts are the
+  automatic recovery record. Legacy tools open with an "Old tools" note, each
+  still a closed section.
 
 ### Decision Maker requests are judged in Execution (2026-10-19)
 

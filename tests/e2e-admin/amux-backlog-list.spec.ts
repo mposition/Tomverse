@@ -1,7 +1,7 @@
 import { expect, test } from "./support/console";
 import { adminFixtureDatabase } from "./support/database";
 
-test("backlog lists four columns, searches all pages and keeps the filter in the URL", async ({ page, signInAs }) => {
+test("backlog lists six columns, searches all pages and keeps the filter in the URL", async ({ page, signInAs }) => {
   const db = adminFixtureDatabase();
   await db.amuxWorkItem.createMany({ data: Array.from({ length: 52 }, (_, index) => ({
     id: `backlog-list-${index}`, sourceSystem: "test-backlog", sourceKey: `CARD-${index}`,
@@ -12,7 +12,7 @@ test("backlog lists four columns, searches all pages and keeps the filter in the
   await page.goto("/admin/amux-backlog?tab=list");
   await page.getByRole("button", { name: "Decline", exact: true }).click();
   const list = page.getByTestId("amux-backlog-list");
-  await expect(list.getByRole("columnheader")).toHaveText(["Card number", "Created", "Summary", "Score"]);
+  await expect(list.getByRole("columnheader")).toHaveText(["Card number", "Kind", "Priority", "Score", "Created", "State"]);
   await expect(list.getByTestId("amux-backlog-row")).toHaveCount(50);
   await page.screenshot({ path: "test-results-admin/backlog-desktop.png" });
   await list.getByRole("link", { name: "Next page" }).click();
@@ -22,7 +22,7 @@ test("backlog lists four columns, searches all pages and keeps the filter in the
   await expect(page).toHaveURL(/tab=list&cardNumber=card-0$/);
   await expect(list.getByTestId("amux-backlog-row")).toHaveCount(1);
   await expect(list.getByTestId("amux-backlog-row")).toContainText("Backlog summary 0");
-  await expect(list.getByTestId("amux-backlog-row")).toContainText("Not scored");
+  await expect(list.getByText("Not scored")).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(list.getByRole("searchbox")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

@@ -116,7 +116,7 @@ test("lane cards offer no card controls and stay out of card counts and archive-
   // Counts, the attention total and archive-all read only the card snapshot.
   assert.match(ui, /const activeCardCount = board \? AMUX_EXECUTION_VISIBLE_LANES\.reduce\(\s*\(total, lane\) => total \+ board\.counts\[lane\], 0\) : 0;/);
   assert.match(ui, /await requestArchiveAllActiveCards\(\);/);
-  assert.match(ui, /const laneCount = board\.counts\[lane\] \+ \(attention \? dmTotal : 0\);/);
+  assert.match(ui, /\(sum, lane\) => sum \+ board\.counts\[lane\] \+ \(lane === "attention" \? dmTotal : 0\)/);
   for (const line of ui.split("\n").filter((text) => /activeCardCount|archiveAll|laneCount|uniqueCards|loadedCards/.test(text)))
     assert.equal(/laneIdeas|laneCards|laneDone/.test(line), false, line);
   assert.equal(read("components/admin/amuxExecutionArchiveRequest.ts").includes("lane"), false);

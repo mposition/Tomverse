@@ -7,11 +7,14 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel, type AmuxBuildPreviewHooks } from "@/components/admin/AmuxFrontierModelsPanel";
 import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
+import { AmuxAnalysisBudgetMeter } from "@/components/admin/AmuxAnalysisBudgetMeter";
 import { AmuxIdeaList, type AmuxIdeaProgressRows } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxIdeaBusyDialog, type AmuxBusyTone } from "@/components/admin/AmuxIdeaBusyDialog";
 import { AmuxIdeaRequestStatusCard, type AmuxIdeaRequestCardState } from "@/components/admin/AmuxIdeaRequestStatusCard";
+import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
+import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
   canSetAsidePreviousIdea,
@@ -112,6 +115,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   laneAvailable?: boolean;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
+  const screens = useAdminMessages(adminAmuxScreensMessages).ideas;
   const [idea, setIdea] = useState("");
   const [repositories, setRepositories] = useState("");
   const [pullRequests, setPullRequests] = useState("");
@@ -617,11 +621,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   return (
     <section className="flex w-full min-w-0 flex-col gap-5" data-testid="amux-v4-idea-input">
       {buildDialogView}
-      {/* Ideas main (approved v49 mockup): the new-idea card on the left and the
-          ideas in progress on the right, one column on a narrow screen. The
-          flow panels of the saved idea follow below at full width. */}
-      <div className={progressRows === undefined ? "flex min-w-0 flex-col gap-4"
-        : "grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_23.75rem] lg:items-start"}
+      {/* Ideas main (admin redesign, 2026-11-07): the new-idea card on top and
+          the ideas in progress below it at full width, so each idea's five-step
+          bar has room. The flow panels of the saved idea follow below. */}
+      <div className={progressRows === undefined ? "flex min-w-0 flex-col gap-4" : "flex min-w-0 flex-col gap-5"}
       data-testid="amux-idea-main-grid">
         <div className="flex min-w-0 flex-col gap-4">
           {card ? (
@@ -649,9 +652,15 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
               {setAsideControls}
             </AmuxIdeaRequestStatusCard>
           ) : (
-            <div className="flex flex-col gap-3 rounded-xl border p-4 text-sm border-zinc-800 bg-zinc-900/60 text-zinc-100">
+            <div className="flex flex-col gap-3 rounded-2xl border p-5 text-sm border-blue-500/25 bg-zinc-900 text-zinc-100">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-semibold">{messages.title}</h2>
+                <div className="flex min-w-0 items-center gap-3">
+                  <AdminPixelAvatar team="amux" tile={52} unit={2} body={false} />
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-bold">{messages.title}</h2>
+                    <p className="text-xs text-zinc-400">{screens.cardHint}</p>
+                  </div>
+                </div>
                 <span data-testid="amux-idea-save-chip" className={`rounded-md border px-2 py-0.5 text-xs font-medium ${submissionAvailable
                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
                   : "border-zinc-700 bg-zinc-800 text-zinc-300"}`}>
@@ -672,6 +681,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                 <span id="amux-v4-idea-hint">{messages.ideaHint}</span>
                 <span id="amux-v4-idea-count">{messages.byteCount(ideaBytes)}</span>
               </p>
+              {analysisBudgetAvailable ? <AmuxAnalysisBudgetMeter /> : null}
               {/* Session intake: the saved repositories are chosen from the operating scope, never typed. */}
               {sessionIntake ? (
                 <AmuxIdeaScopeRepositoryPicker read={scopeRead} deselected={deselectedRepositories}

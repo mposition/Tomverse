@@ -6,11 +6,15 @@ import { useState, type ReactNode } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaClosePanel } from "@/components/admin/AmuxIdeaClosePanel";
+import { AdminStepper } from "@/components/admin/ui/AdminStepper";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { amuxIdeaFlowSteps } from "@/lib/adminAmuxFlow";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
+import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { AMUX_IDEA_LANE_MAX_ATTEMPTS } from "@/lib/amux/ideaLaneCore";
-import { amuxIdeaProgressStep, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
+import type { AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 import { amuxIdeaName, amuxIdeaNameText } from "@/lib/amux/ideaTitleCore";
 
@@ -147,10 +151,13 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
 }
 
 /**
- * "Ideas in progress": compact rows with the stage badge and the six-step
- * bar. It keeps its card when the read failed, so the page layout does not
- * move; the reason is stated once, in the inbox's place. Ideas waiting for
- * the owner after analysis can be ticked and closed together.
+ * "Ideas in progress": one card per idea with the five-step bar (idea,
+ * execution approval, plan approval, run, PR). Ideas that wait for a person
+ * come first and carry the decision as their cue; the row still only links to
+ * the idea, where the existing approval panels are. It keeps its card when the
+ * read failed, so the page layout does not move; the reason is stated once, in
+ * the inbox's place. Ideas waiting for the owner after analysis can be ticked
+ * and closed together.
  */
 export function AmuxIdeaList({ rows, activeRequestId, children }: {
   rows: AmuxIdeaProgressRows;
@@ -159,6 +166,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
   children?: ReactNode;
 }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
+  const screens = useAdminMessages(adminAmuxScreensMessages).ideas;
   const router = useRouter();
   const keepDraft = useDraftGuard();
   const list = Array.isArray(rows) ? rows : null;
@@ -174,72 +182,80 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
     const row = list?.find((entry) => entry.ideaId === ideaId);
     return row ? label(row, m.untitled) : `${m.untitled} ${ideaId.slice(0, 8)}`;
   };
+  // What waits for a person comes first; the server's order is kept inside each group.
+  const decisionTitle = (waitingFor: AmuxIdeaWaitingFor) => ({
+    execution_approval: m.executionApproval, continuation: m.continuationApproval,
+    owner_input: m.ownerInput, plan_approval: m.planApproval, session_review: m.sessionReview,
+  })[waitingFor];
+  const ordered = list === null ? [] : [
+    ...list.filter((row) => row.waitingFor !== null || row.tasks.inReview > 0),
+    ...list.filter((row) => !(row.waitingFor !== null || row.tasks.inReview > 0)),
+  ];
 
   return (
-    <section aria-labelledby="amux-idea-list-heading" data-testid="amux-idea-list"
-      className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="amux-idea-list-heading" className="text-base font-semibold text-zinc-100">
-          {m.listTitle}
-          {list && list.length > 0 ? <span className="ml-2 text-xs font-normal text-zinc-400">{m.listCount(list.length)}</span> : null}
-        </h2>
-        {/* A server read: saving or approving below changes it, so it can be read again. */}
+    <AdminTile as="section" aria-label={m.listTitle} data-testid="amux-idea-list"
+      title={<>{m.listTitle}{list && list.length > 0
+        ? <span className="ml-2 text-xs font-normal text-zinc-400">{m.listCount(list.length)}</span> : null}</>}
+      description={screens.listLede}
+      action={
+        // A server read: saving or approving below changes it, so it can be read again.
         <button type="button" onClick={() => router.refresh()}
-          className={`min-h-11 rounded-lg border border-zinc-600 px-3 text-sm text-zinc-100 hover:bg-zinc-800 ${FOCUS}`}>
+          className={`min-h-11 rounded-xl border border-zinc-700 px-3 text-sm font-medium text-zinc-100 hover:bg-zinc-800 ${FOCUS}`}>
           {m.refresh}
-        </button>
-      </div>
+        </button>}>
       {list === null ? <p className="text-sm text-zinc-400" data-testid="amux-idea-list-unavailable">{m.listUnavailable}</p>
         : list.length === 0 ? <p className="text-sm text-zinc-300">{m.listEmpty}</p> : (
-          <ul className="grid gap-2">
-            {list.map((row) => {
-              const step = amuxIdeaProgressStep(row.stage);
+          <ul className="grid gap-3">
+            {ordered.map((row) => {
+              const flow = amuxIdeaFlowSteps(row.stage, { attention: row.attention || row.activity === "blocked" });
               // A person acts when a decision waits, or a PR waits for GitHub review.
               const human = row.waitingFor !== null || row.tasks.inReview > 0;
+              const stopped = row.attention || row.activity === "blocked";
               const active = row.requestId === activeRequestId;
               return (
                 <li key={row.ideaId} className="flex items-stretch gap-2">
                   {closable.length > 0 ? (
-                    <label className="flex min-h-11 w-8 shrink-0 items-start justify-center pt-3">
+                    <label className="flex min-h-11 w-8 shrink-0 items-start justify-center pt-4">
                       {row.closable ? <input type="checkbox" checked={selected.includes(row.ideaId)}
                         onChange={() => toggle(row.ideaId)} aria-label={m.close.select(label(row, m.untitled))}
                         data-testid="amux-idea-close-select" className={`h-5 w-5 ${FOCUS}`} /> : null}
                     </label>
                   ) : null}
                   <Link href={amuxIdeaHref(row.requestId)} onClick={keepDraft} aria-current={active ? "page" : undefined}
-                    className={`block min-h-11 min-w-0 flex-1 space-y-2 rounded-lg border p-3 text-sm hover:bg-zinc-800/60 ${FOCUS} ${active
-                      ? "border-blue-400 ring-1 ring-blue-400" : "border-zinc-800"}`}
-                    data-testid="amux-idea-progress-row" data-stage={row.stage}>
-                    <span className="block font-semibold text-zinc-100"><AmuxIdeaName row={row} untitled={m.untitled} /></span>
-                    <span className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className={`rounded-full border px-2 py-0.5 ${row.attention || row.activity === "blocked"
-                        ? "border-red-500/40 bg-red-500/10 text-red-200"
-                        : human ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-                          : "border-blue-500/40 bg-blue-500/10 text-blue-200"}`}>
-                        {row.attention ? (row.lane ? (row.lane.state === "pr_closed" ? m.lane.badgePrClosed : m.lane.badgeFailed)
-                          : m.attention) : m.stages[row.stage]}
-                      </span>
-                      <span className="text-zinc-400">
-                        {step ? m.stepOf(step) : null}{step ? " · " : ""}{human ? m.human : row.activity ? m.activity[row.activity] : m.automatic}
-                        {row.tasks.total > 0 ? ` · ${m.tasks(row.tasks.done, row.tasks.total)}` : ""}
-                        {row.tasks.inReview > 0 ? ` · ${m.inReview(row.tasks.inReview)}` : ""}
-                      </span>
+                    className={`block min-h-11 min-w-0 flex-1 space-y-3 rounded-2xl border p-4 text-sm hover:bg-zinc-800/60 ${FOCUS} ${active
+                      ? "ring-2 ring-blue-400" : ""} ${stopped ? "border-red-500/50 bg-red-500/5"
+                      : human ? "border-blue-500/60 bg-blue-500/10" : "border-zinc-800 bg-zinc-900"}`}
+                    data-testid="amux-idea-progress-row" data-stage={row.stage} data-decision={human ? "true" : undefined}>
+                    <span className="flex flex-wrap items-start justify-between gap-2">
+                      <span className="min-w-0 font-bold text-zinc-100"><AmuxIdeaName row={row} untitled={m.untitled} /></span>
+                      {human ? (
+                        <span className="inline-flex min-h-8 items-center rounded-xl bg-blue-600 px-3 text-xs font-bold text-white"
+                          data-testid="amux-idea-decision-cue">
+                          {row.waitingFor !== null ? decisionTitle(row.waitingFor) : m.githubReview}
+                        </span>
+                      ) : (
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${stopped
+                          ? "bg-red-500/15 text-red-300" : "bg-blue-500/15 text-blue-300"}`}>
+                          {row.attention ? (row.lane ? (row.lane.state === "pr_closed" ? m.lane.badgePrClosed : m.lane.badgeFailed)
+                            : m.attention) : m.stages[row.stage]}
+                        </span>
+                      )}
                     </span>
-                    {step ? (
-                      <span className="grid grid-cols-6 gap-1" aria-hidden="true">
-                        {Array.from({ length: 6 }, (_, index) => (
-                          <span key={index} className={`h-1 rounded-full ${index < step - 1
-                            ? "bg-blue-500" : index === step - 1
-                              ? (row.attention || row.activity === "blocked" ? "bg-red-500" : human ? "bg-amber-500"
-                                : row.activity === "waiting" ? "bg-zinc-500" : "bg-blue-300")
-                              : "bg-zinc-800"}`} />
-                        ))}
-                      </span>
+                    {flow ? (
+                      <AdminStepper label={screens.flow.label} stateWords={screens.flow.states}
+                        steps={flow.map((step) => ({ ...step, label: screens.flow.steps[step.id] }))}
+                        data-testid="amux-idea-flow" />
                     ) : null}
+                    <span className="block text-xs text-zinc-400">
+                      {human ? m.human : row.activity ? m.activity[row.activity] : m.automatic}
+                      {row.tasks.total > 0 ? ` · ${m.tasks(row.tasks.done, row.tasks.total)}` : ""}
+                      {row.tasks.inReview > 0 ? ` · ${m.inReview(row.tasks.inReview)}` : ""}
+                      {` · ${m.stages[row.stage]}`}
+                    </span>
                     {row.lane ? (
                       <span className="block text-xs text-zinc-300" data-testid="amux-idea-lane">{laneLine(row.lane, m)}</span>
                     ) : null}
-                    <span className="block text-xs text-zinc-400">{m.savedAt(when(row.submittedAt))}</span>
+                    <span className="block text-xs text-zinc-500">{m.savedAt(when(row.submittedAt))}</span>
                   </Link>
                 </li>
               );
@@ -252,7 +268,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
           onClear={() => setPicked([])} onSent={() => setCloseSent(true)} />
       ) : null}
       {children}
-    </section>
+    </AdminTile>
   );
 }
 

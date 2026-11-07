@@ -60,6 +60,7 @@ import { amuxIdeaLaneEnabled } from "@/lib/amux/ideaLaneCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { amuxBacklogPage, amuxBacklogSearch } from "@/lib/amux/adminBacklogListCore";
+import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxBacklogList } from "@/lib/amux/adminBacklogRead";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -119,6 +120,18 @@ export default async function AdminAmuxBacklogPage({
   const search = amuxBacklogSearch(query.cardNumber);
   const backlogList = tab.id === "list" && search.valid && hasRecentAdminAuthentication(session)
     ? await readAmuxBacklogList(search.search, amuxBacklogPage(query.page)) : null;
+  // The counts and each card's kind, priority and state come from the newest
+  // cards' own read, only once the paged list itself was readable. A failed
+  // read is drawn as unavailable, never as zero.
+  const cardSummary = backlogList === null ? null : await listAmuxCardsForAdmin().then((read) => ({
+    total: read.total,
+    limit: read.limit,
+    cards: read.rows.map(({ id, status, kind, priority }) => ({ id, status, kind, priority })),
+  })).catch((error: unknown) => {
+    console.warn(JSON.stringify({ subsystem: "amux", event: "backlog_card_summary_read_failed",
+      name: error instanceof Error ? error.name : null }));
+    return null;
+  });
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
   const ideaMessages = await getAdminMessages(adminAmuxIdeaProgressMessages);
   // Ideas: the decide-now inbox and the progress list read the same snapshot,
@@ -179,7 +192,7 @@ export default async function AdminAmuxBacklogPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {tab.id === "list" ? (
-        <AmuxBacklogListPanel data={backlogList} search={search.search} valid={search.valid} />
+        <AmuxBacklogListPanel data={backlogList} search={search.search} valid={search.valid} summary={cardSummary} />
       ) : tab.id === "ideas" ? (
         <>
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel

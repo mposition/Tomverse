@@ -90,7 +90,7 @@ test("Execution reads the waiting requests for its board and opens the panel on 
 
   const workspace = read("components/admin/AmuxExecutionWorkspace.tsx");
   // The lane's count includes the requests, and a failed read says so.
-  assert.match(workspace, /const laneCount = board\.counts\[lane\] \+ \(attention \? dmTotal : 0\);/);
+  assert.match(workspace, /\(sum, lane\) => sum \+ board\.counts\[lane\] \+ \(lane === "attention" \? dmTotal : 0\)/);
   assert.match(workspace, /attention && decisionMaker === null && <p role="alert"/);
   assert.match(workspace, /\/admin\/amux-execution\?tab=cards&dmRequest=/);
   // The board is the console palette, so the Admin theme remaps it too.
