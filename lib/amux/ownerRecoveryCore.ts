@@ -36,9 +36,18 @@ type OwnerRecoveryInput = {
   workerReportVerified: boolean;
   artifactConnected: boolean;
   serverAllowsRetry: boolean;
+  /** The server holds this exact attempt's own final v22 result. */
+  lastAttemptResultStored?: boolean;
 };
 
+/** An expired attempt whose final result the server stored finished; only its
+ * settlement was lost (owner decision 2026-11-07). */
+const expiredWithStoredResult = (input: OwnerRecoveryInput) =>
+  input.lastAttemptResultStored === true && input.lastAttemptEndedAt !== null &&
+  input.lastAttemptOutcome === "expired" && input.lastAttemptToStatus === "blocked";
+
 const exactReason = (input: OwnerRecoveryInput) => {
+  if (expiredWithStoredResult(input)) return null;
   const reasons = [input.escalationReason, input.lastAttemptReason];
   if (reasons.includes("execution_lease_expired"))
     return "execution_lease_expired" as const;
@@ -75,7 +84,8 @@ export const amuxOwnerRecoveryPreparation = (
     (input.lastAttemptOutcome === "failed" && input.lastAttemptToStatus === "todo") ||
     (input.lastAttemptOutcome === "failed" &&
       input.lastAttemptToStatus === "blocked" && isAttemptBudgetReason(input)) ||
-    (input.lastAttemptOutcome === "blocked" && input.lastAttemptToStatus === "blocked")
+    (input.lastAttemptOutcome === "blocked" && input.lastAttemptToStatus === "blocked") ||
+    expiredWithStoredResult(input)
   );
   const executionOutcomeKnown = ambiguousReason === null && protectedTerminalOutcome;
   const noAttemptHumanReviewContext =

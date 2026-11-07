@@ -39,6 +39,9 @@ test("retry is bounded, planning correction is revision-proven, and approval nee
   assert.match(service, /task\.revision > escalation\.openedTaskRevision/);
   assert.match(service, /task\.dueParseState === "valid"/);
   assert.match(service, /!displayTruncated && displayExact && budget\.allowed && dueCorrected &&\s*amuxV22ReviewRetryHasVerifiedOutcome\(/);
+  // The stored-result exception reads the Task's own latest v22 result row,
+  // fetched in the same snapshot transaction the decision writer re-runs.
+  assert.match(service, /attempt: lastAttempt,\s*storedResultAttemptId: latestV4Result\?\.attemptId \?\? null,/);
   assert.match(service, /\(lastAttempt !== null \|\| escalation\.specialty === "planning-review"\)/);
   assert.match(service, /amuxReviewApprovalHasEvidence\(\{ sourceSystem: task\.sourceSystem/);
   assert.match(service, /display_mismatch: !displayExact/);

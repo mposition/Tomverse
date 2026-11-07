@@ -174,6 +174,8 @@ export type AmuxReviewDetail = {
     outcome: string;
     to_status: string;
     ended_at: string | null;
+    /** The server holds this attempt's own final v22 result. */
+    result_stored?: boolean;
   } | null;
   review_content: { text: string; digest: string;
     truncated: boolean; display_mismatch?: boolean } | null;
@@ -405,6 +407,10 @@ export async function readAmuxOwnerExecutionMetadata({
 
 const isOutcomeUnknown = (review: ReviewDetail) => {
   const attemptOutcome = review.last_attempt?.outcome?.toLowerCase() ?? "";
+  // An expired attempt whose own final result the server stored finished;
+  // only its settlement was lost (owner decision 2026-11-07).
+  if (attemptOutcome === "expired" && review.last_attempt?.result_stored === true &&
+      review.last_attempt.to_status === "blocked") return false;
   const attemptReason = review.review_context.last_attempt_reason?.toLowerCase() ?? "";
   return attemptOutcome === "expired" || attemptOutcome.includes("unknown") ||
     attemptReason.includes("outcome_unknown");
@@ -430,6 +436,7 @@ const recoveryPreparationForReview = (review: ReviewDetail) =>
     artifactConnected: isValidAmuxReviewArtifact(review.review_artifact),
     serverAllowsRetry: review.allowed_outcomes.includes("retry") &&
       review.proposed_transitions.retry === "todo",
+    lastAttemptResultStored: review.last_attempt?.result_stored === true,
   });
 
 export const visibleAmuxOwnerReviewOutcomes = (review: ReviewDetail) => {
