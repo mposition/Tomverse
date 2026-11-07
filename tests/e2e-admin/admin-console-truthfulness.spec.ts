@@ -111,7 +111,7 @@ test.describe("the console says only what it knows", () => {
     // environment it is reporting on.
     await expect(
       page.getByTestId("admin-health-process-window")
-    ).toContainText("redeployed");
+    ).toContainText("started at");
   });
 
   test("a healthy Overview shows real figures and no unread cards", async ({

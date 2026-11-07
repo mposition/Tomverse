@@ -17,7 +17,7 @@ import {
   decisionWaitTone,
 } from "@/lib/adminDecisionCopy";
 import { DECISION_AREAS, type DecisionArea, type DecisionInbox } from "@/lib/adminDecisionInbox";
-import type { AdminHomeTeam } from "@/lib/adminHomeAgents";
+import type { AdminHomeTeam } from "@/lib/adminHomeTeams";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminHomeMessages } from "@/lib/adminMessages/home";
 import { adminOverviewMessages } from "@/lib/adminMessages/overview";

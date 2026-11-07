@@ -327,6 +327,7 @@ export const adminHomeMessages = defineAdminMessages({
       unavailableDetail: "The rest of the console is unaffected. The server log has admin_usage_analytics_failed.",
       product: {
         windowChip: "Last 30 days",
+        noRate: "No one yet",
         northStar: "Weekly active",
         northStarDetail: "People who used it in the last 7 days",
         activation: "Used it within a day",
@@ -684,6 +685,7 @@ export const adminHomeMessages = defineAdminMessages({
       unavailableDetail: "콘솔의 다른 화면은 영향이 없어요. 서버 로그의 admin_usage_analytics_failed를 확인하세요.",
       product: {
         windowChip: "최근 30일",
+        noRate: "아직 없어요",
         northStar: "주간 활성",
         northStarDetail: "최근 7일에 쓴 사람이에요",
         activation: "하루 안에 써 본 사람",

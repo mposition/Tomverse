@@ -8,7 +8,7 @@ import { AdminQuickAccessPanel } from "@/components/admin/AdminQuickAccessPanel"
 import { getAdminRole } from "@/lib/adminAuth";
 import { buildDecisionInbox } from "@/lib/adminDecisionInbox";
 import { loadAdminDecisionInbox } from "@/lib/adminDecisionInboxLoad";
-import { adminHomeTeams } from "@/lib/adminHomeAgents";
+import { adminHomeTeams } from "@/lib/adminHomeTeams";
 import { adminHomeMessages } from "@/lib/adminMessages/home";
 import { readAgentOfficeLiveRooms } from "@/lib/agentOfficeLiveRead";
 import {

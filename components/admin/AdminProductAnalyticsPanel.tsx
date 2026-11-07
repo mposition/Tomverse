@@ -116,6 +116,8 @@ export async function AdminProductAnalyticsPanel({
   }
   const sourceRows = [...bySource.values()].sort((left, right) => right.count - left.count).slice(0, 6);
   const review = dashboard.reviewFunnel30d;
+  // A rate over nobody is not 0.0%: that would read as a measured failure.
+  const reviewRate = (rate: number) => (review.startedUsers > 0 ? `${rate.toFixed(1)}%` : p.noRate);
 
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="admin-product-analytics">
@@ -138,7 +140,7 @@ export async function AdminProductAnalyticsPanel({
         />
         <AdminKpiCard
           label={p.activation}
-          value={`${dashboard.activationRate30d.toFixed(1)}%`}
+          value={dashboard.signupUsers30d > 0 ? `${dashboard.activationRate30d.toFixed(1)}%` : p.noRate}
           detail={p.activationDetail(dashboard.activatedUsers30d, dashboard.signupUsers30d)}
         />
         <AdminKpiCard label={p.day1} value={number.format(dashboard.returnDay1Users30d)} detail={p.returnDetail} />
@@ -183,21 +185,20 @@ export async function AdminProductAnalyticsPanel({
           <Stat label={m.reviewStarted} value={number.format(review.startedUsers)} detail={m.uniqueActors} />
           <Stat
             label={m.reviewCompleted}
-            value={`${review.completionRate.toFixed(1)}%`}
+            value={reviewRate(review.completionRate)}
             detail={m.completedActors(review.completedUsers)}
           />
           <Stat
             label={m.upgradeIntent}
-            value={`${review.upgradeIntentRate.toFixed(1)}%`}
+            value={reviewRate(review.upgradeIntentRate)}
             detail={m.afterReview(review.upgradeIntentUsers)}
           />
-          <Stat label={m.checkout} value={`${review.checkoutRate.toFixed(1)}%`} detail={m.afterReview(review.checkoutUsers)} />
-          <Stat label={m.purchase} value={`${review.purchaseRate.toFixed(1)}%`} detail={m.afterReview(review.purchaseUsers)} />
+          <Stat label={m.checkout} value={reviewRate(review.checkoutRate)} detail={m.afterReview(review.checkoutUsers)} />
+          <Stat label={m.purchase} value={reviewRate(review.purchaseRate)} detail={m.afterReview(review.purchaseUsers)} />
         </div>
       </AdminTile>
 
       <Disclosure summary={m.topCampaigns}>
-        <h3 className="sr-only">{m.topCampaigns}</h3>
         {dashboard.topCampaigns30d.length ? (
           <ul className="grid gap-2 sm:grid-cols-2">
             {dashboard.topCampaigns30d.map((campaign) => (

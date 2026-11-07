@@ -21,6 +21,8 @@ export async function AdminReviewUseSummary({ dashboard }: { dashboard: ProductA
     return <AdminStateBlock kind="error" title={r.unread} />;
   }
   const number = new Intl.NumberFormat(home.intlLocale);
+  // A rate over nobody is not 0.0%: that would read as a measured failure.
+  const rate = (value: number) => (review.startedUsers > 0 ? `${value.toFixed(1)}%` : home.metrics.product.noRate);
   return (
     <section className="flex flex-col gap-3" data-testid="admin-review-use">
       <div>
@@ -31,12 +33,12 @@ export async function AdminReviewUseSummary({ dashboard }: { dashboard: ProductA
         <AdminKpiCard label={r.started} value={number.format(review.startedUsers)} detail={r.startedDetail} />
         <AdminKpiCard
           label={r.completion}
-          value={`${review.completionRate.toFixed(1)}%`}
+          value={rate(review.completionRate)}
           detail={r.completionDetail(review.completedUsers)}
         />
         <AdminKpiCard
           label={r.upgrade}
-          value={`${review.upgradeIntentRate.toFixed(1)}%`}
+          value={rate(review.upgradeIntentRate)}
           detail={r.upgradeDetail(review.upgradeIntentUsers)}
         />
       </div>
