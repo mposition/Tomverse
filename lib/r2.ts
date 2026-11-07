@@ -96,7 +96,12 @@ export async function createR2UploadUrl(
   );
 }
 
-export async function createR2ReadUrl(key: string, expiresInSeconds = 300) {
+export async function createR2ReadUrl(
+  key: string,
+  expiresInSeconds = 300,
+  /** Saved as this file name instead of shown in the browser. The caller passes a safe name. */
+  options: { attachmentName?: string } = {}
+) {
   const { client, bucket } = getR2Client();
 
   return getSignedUrl(
@@ -104,6 +109,9 @@ export async function createR2ReadUrl(key: string, expiresInSeconds = 300) {
     new GetObjectCommand({
       Bucket: bucket,
       Key: key,
+      ...(options.attachmentName
+        ? { ResponseContentDisposition: `attachment; filename="${options.attachmentName}"` }
+        : {}),
     }),
     { expiresIn: expiresInSeconds }
   );

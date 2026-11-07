@@ -447,7 +447,7 @@ export async function readMarketingConsole(
         assetIds: true,
         approvalExpiresAt: true,
         createdAt: true,
-        channel: { select: { accountSlug: true, channel: true } },
+        channel: { select: { accountSlug: true, channel: true, provider: true } },
       },
     });
     return {
@@ -465,6 +465,8 @@ export async function readMarketingConsole(
         id: post.id,
         accountSlug: post.channel.accountSlug,
         channel: post.channel.channel,
+        // `manual` is a hand-posted account: its files get a download link.
+        provider: post.channel.provider,
         locale: post.locale,
         kind: post.kind,
         status: post.status,

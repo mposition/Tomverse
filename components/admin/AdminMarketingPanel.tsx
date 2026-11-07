@@ -2227,9 +2227,12 @@ const guardTone = (decision: unknown): "success" | "warning" | "danger" | "neutr
  */
 export function MarketingPostAssets({
   assetIds,
+  downloadable = false,
   m,
 }: {
   assetIds: unknown;
+  /** A hand-posted account's post: each file also gets a link that saves it, to upload by hand. */
+  downloadable?: boolean;
   m: Record<string, string>;
 }) {
   const ids = Array.isArray(assetIds)
@@ -2246,16 +2249,27 @@ export function MarketingPostAssets({
     <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-400" data-testid="marketing-post-assets">
       <span>{m.postAssets}</span>
       {ids.map((id) => (
-        <a
-          key={id}
-          href={ASSET_PATH(id, "preview")}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-mono text-zinc-300 underline underline-offset-2 hover:text-white"
-          data-testid="marketing-asset-preview-link"
-        >
-          {id}
-        </a>
+        <span key={id} className="inline-flex items-center gap-2">
+          <a
+            href={ASSET_PATH(id, "preview")}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-zinc-300 underline underline-offset-2 hover:text-white"
+            data-testid="marketing-asset-preview-link"
+          >
+            {id}
+          </a>
+          {downloadable ? (
+            <a
+              href={`${ASSET_PATH(id, "preview")}?download=1`}
+              download
+              className="rounded-md border border-zinc-700 px-1.5 py-0.5 text-zinc-200 hover:border-zinc-500 hover:text-white"
+              data-testid="marketing-asset-download-link"
+            >
+              {m.postAssetDownload}
+            </a>
+          ) : null}
+        </span>
       ))}
     </p>
   );
@@ -2301,7 +2315,7 @@ function MarketingRow({
         <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-100" data-testid="marketing-queue-text">
           {text(row.renderedText) ?? text(row.excerpt) ?? m.none}
         </p>
-        <MarketingPostAssets assetIds={row.assetIds} m={m} />
+        <MarketingPostAssets assetIds={row.assetIds} downloadable={str(row.provider) === "manual"} m={m} />
         <p className="mt-3 text-xs text-zinc-500" title={`${stamp(row.createdAt) ?? ""} UTC`}>
           {m.queueMeta
             .replace("{created}", relative(row.createdAt, now, m) ?? m.none)
@@ -2342,7 +2356,7 @@ function MarketingRow({
             }
           />
         </div>
-        <MarketingPostAssets assetIds={row.assetIds} m={m} />
+        <MarketingPostAssets assetIds={row.assetIds} downloadable={str(row.provider) === "manual"} m={m} />
       </>
     );
   }
