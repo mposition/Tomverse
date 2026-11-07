@@ -9,6 +9,7 @@ import { MARKETING_ANALYSIS_ENABLED_KEY } from "@/lib/marketingAnalysisCore";
 import { MARKETING_ASSET_ACTIONS, MARKETING_ASSET_NO_DECISION } from "@/lib/marketingAssetCore";
 import { confirmMarketingAssetUpload, decideMarketingAsset, submitMarketingAsset } from "@/lib/marketingAssetStore";
 import {
+  MARKETING_CHAPTERS_AMBIGUOUS_REFUSAL_CODE,
   MARKETING_CHAPTERS_DO_NOT_FIT_REFUSAL_CODE,
   MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE,
 } from "@/lib/marketingVideoChapters";
@@ -573,11 +574,11 @@ const assetOperator = {
   expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
 } as Session;
 
-async function approvedTutorial() {
+async function approvedTutorial(id = TUTORIAL_ID, sha256 = TUTORIAL_SHA) {
   await runMarketingTransaction(prisma, (tx) =>
     submitMarketingAsset(tx, {
       asset: {
-        id: TUTORIAL_ID,
+        id,
         provenance: "capture",
         allowedChannels: ["youtube", "linkedin"],
         alt: { en: "A five-minute tour of Tomverse Review." },
@@ -589,25 +590,25 @@ async function approvedTutorial() {
       kind: "video",
       contentType: "video/mp4",
       bytes: 50_000_000,
-      sha256: TUTORIAL_SHA,
+      sha256,
       durationSeconds: 300,
       transcript: { en: "Ask three models at once and compare their answers side by side." },
       chapters: TUTORIAL_CHAPTERS,
     }),
   );
-  await runMarketingTransaction(prisma, (tx) => confirmMarketingAssetUpload(tx, { assetId: TUTORIAL_ID, bytes: 50_000_000 }));
+  await runMarketingTransaction(prisma, (tx) => confirmMarketingAssetUpload(tx, { assetId: id, bytes: 50_000_000 }));
   await runMarketingTransaction(prisma, async (tx) => {
     const auditLogId = await writeAdminAuditLog({
       session: assetOperator,
-      request: new Request(`https://tomverse.app/api/admin/marketing/assets/${TUTORIAL_ID}/decision`),
+      request: new Request(`https://tomverse.app/api/admin/marketing/assets/${id}/decision`),
       action: MARKETING_ASSET_ACTIONS.approved,
       targetType: "MarketingAsset",
-      targetId: TUTORIAL_ID,
+      targetId: id,
       summary: "Asset decision.",
-      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: MARKETING_ASSET_NO_DECISION, sha256: TUTORIAL_SHA },
+      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: MARKETING_ASSET_NO_DECISION, sha256 },
       tx,
     });
-    return decideMarketingAsset(tx, { assetId: TUTORIAL_ID, decision: "approved", expectedDecisionAuditLogId: null, auditLogId });
+    return decideMarketingAsset(tx, { assetId: id, decision: "approved", expectedDecisionAuditLogId: null, auditLogId });
   });
 }
 
@@ -644,7 +645,7 @@ test("a YouTube draft carrying a video with chapters is judged and stored with t
   assert.equal((plain.envelope as { renderedText: string }).renderedText, TUTORIAL_TEXT);
 });
 
-test("a chapter list the draft's locale has no titles for, or that does not fit, refuses the draft before anything is written", async () => {
+test("a chapter list the draft's locale has no titles for, that does not fit, or that is one of two refuses the draft before anything is written", async () => {
   const row = await approvedChannel("youtube");
   await draftsOn();
   // Described and titled in English only. The generator offers it to English
@@ -663,6 +664,22 @@ test("a chapter list the draft's locale has no titles for, or that does not fit,
     OPEN,
   );
   assert.deepEqual(long, { status: "refused", reasons: [MARKETING_CHAPTERS_DO_NOT_FIT_REFUSAL_CODE] });
+
+  // Two videos with chapters in one draft: a YouTube post is one video, and
+  // neither list is dropped silently.
+  const SECOND = "media-20261107-tutorial-en-2";
+  await approvedTutorial(SECOND, "d".repeat(64));
+  const both = await intake(
+    draft(row.id, {
+      renderedText: TUTORIAL_TEXT,
+      assets: [
+        { assetId: TUTORIAL_ID, altKey: "en" },
+        { assetId: SECOND, altKey: "en" },
+      ],
+    }),
+    OPEN,
+  );
+  assert.deepEqual(both, { status: "refused", reasons: [MARKETING_CHAPTERS_AMBIGUOUS_REFUSAL_CODE] });
 
   assert.equal(await prisma.marketingPost.count(), before);
   // Nothing was consumed: the call is still free for a draft that can be taken.
