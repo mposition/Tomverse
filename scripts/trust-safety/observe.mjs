@@ -9,7 +9,8 @@
 //
 // The request carries no body and no query, because the route reads neither
 // (§4). The response is the closed enum, and the child does not interpret it
-// beyond "the route answered" -- the round's own record is the row it wrote,
+// beyond "the route answered" and the one not-activated `failed` below that
+// exits 0 -- the round's own record is the row it wrote,
 // and the dead-man monitor, not this process, is what notices silence (§8).
 
 import { CHILD_TIMEOUT_MS } from "./timing-core.mjs";
@@ -23,6 +24,14 @@ export const EXIT = Object.freeze({
   requestFailed: 3,
   routeRefused: 4,
 });
+
+/**
+ * The route's status for a round that failed only because the activation row
+ * was never written (§6's `config_row_missing`). It is the one `failed` this
+ * child exits 0 for: until the owner activates, every period answers it, and
+ * a CRASHED deploy each time would hide the failure that matters.
+ */
+export const NOT_ACTIVATED_STATUS = 202;
 
 /**
  * Make the one request. Pure in its inputs: the caller passes the environment
@@ -87,6 +96,9 @@ export async function observeOnce({ env, fetchImpl = fetch, log = console.log })
     }),
   );
   if (!response.ok) return EXIT.routeRefused;
+  // A 2xx that still says `failed` is success only at the not-activated
+  // status; any other pairing is a route answering something it should not.
+  if (outcome === "failed" && response.status !== NOT_ACTIVATED_STATUS) return EXIT.routeRefused;
   return EXIT.ok;
 }
 
