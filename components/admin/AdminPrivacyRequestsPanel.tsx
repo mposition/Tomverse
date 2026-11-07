@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, Loader2, Plus, RefreshCw, Save } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -52,7 +53,7 @@ function PrivacyCard({ row, onSaved }: { row: PrivacyRow; onSaved: (row: Privacy
             is one unbreakable token, so without both the status pills are
             pushed past a 320px viewport and the page scrolls sideways. */}
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1"><p className="break-all font-black text-white">{row.email}</p><p className="mt-1 text-xs text-zinc-500">{m.card.due(row.requestType, new Date(row.dueAt).toLocaleString())}</p></div>
+          <div className="min-w-0 flex-1"><p className="break-all font-black text-white">{row.email}</p><p className="mt-1 text-xs text-zinc-500">{m.card.due(row.requestType, formatAestDateTime(row.dueAt, { seconds: true }) ?? "-")}</p></div>
           <div className="flex shrink-0 flex-wrap items-center gap-2"><span className="rounded-full border border-zinc-700 px-2 py-1 text-xs font-bold text-zinc-200">{row.status}</span>{row.legalHold ? <span className="rounded-full border border-amber-500/30 px-2 py-1 text-xs font-bold text-amber-200">{m.card.legalHold}</span> : null}<ChevronRight className="h-4 w-4 text-zinc-500" /></div>
         </div>
       </summary>

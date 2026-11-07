@@ -68,7 +68,7 @@ for (const route of adminRoutes) {
     // that this tree has hydrated and that any mismatch has already been
     // reported. The timeout is generous because every script on the page is
     // being held back on purpose.
-    await expect(page.getByText(/Updated \d\d:\d\d:\d\d UTC/)).toBeVisible({
+    await expect(page.getByText(/Updated \d\d:\d\d AEST/)).toBeVisible({
       timeout: 30_000,
     });
 
@@ -82,7 +82,7 @@ test("the provider console renders one verification control per provider", async
 }) => {
   await signInAs("ops");
   await page.goto("/admin/providers");
-  await expect(page.getByText(/Updated \d\d:\d\d:\d\d UTC/)).toBeVisible();
+  await expect(page.getByText(/Updated \d\d:\d\d AEST/)).toBeVisible();
 
   // Counted across the whole document rather than inside `<main>`: a stranded
   // streamed copy sits outside `<main>`, so scoping the query would hide the

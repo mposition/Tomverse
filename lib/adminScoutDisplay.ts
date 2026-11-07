@@ -4,7 +4,10 @@
  * component; Light is the generated remap
  * (app/(site)/(application)/admin/admin-theme.css).
  */
+import { formatAestDate } from "@/lib/adminUiCore";
 import type { ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
+
+const AEST_ZONE = "Australia/Brisbane";
 
 export const fill = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), template);
@@ -42,10 +45,9 @@ export const compactNumber = (value: number) =>
 export const fullNumber = (value: number, locale: string) => value.toLocaleString(dateLocale(locale));
 
 /**
- * A time in the viewer's own zone: "Today 21:44", "Tomorrow 04:00", or the
- * date for any other day. The server renders in its zone and the browser in
- * the viewer's, so the `<time>` that shows it suppresses the hydration text
- * mismatch and carries the exact instant in `dateTime`.
+ * A time in AEST (Brisbane): "Today 21:44", "Tomorrow 04:00", or the date for
+ * any other day. The server and the browser format in the same zone, and the
+ * `<time>` that shows it carries the exact instant in `dateTime`.
  */
 export function localTime(
   iso: string,
@@ -54,16 +56,17 @@ export function localTime(
   now: Date = new Date(),
 ): string {
   const date = new Date(iso);
-  const time = new Intl.DateTimeFormat(dateLocale(locale), { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  const time = new Intl.DateTimeFormat(dateLocale(locale), { timeZone: AEST_ZONE, hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
   if (days === null) return time;
-  const key = (value: Date) => `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`;
-  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const key = (value: Date) => formatAestDate(value);
+  // Brisbane has no daylight saving, so a day is always 24 hours.
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const day =
     key(date) === key(now)
       ? days.today
       : key(date) === key(tomorrow)
         ? days.tomorrow
-        : new Intl.DateTimeFormat(dateLocale(locale), { month: "numeric", day: "numeric" }).format(date);
+        : new Intl.DateTimeFormat(dateLocale(locale), { timeZone: AEST_ZONE, month: "numeric", day: "numeric" }).format(date);
   return `${day} ${time}`;
 }
 

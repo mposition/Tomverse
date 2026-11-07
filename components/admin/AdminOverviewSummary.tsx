@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import { AdminSnapshotActions } from "@/components/admin/AdminSnapshotActions";
@@ -409,8 +410,7 @@ export async function AdminOverviewSummary({
                   </p>
                 </div>
                 <span className="text-xs text-zinc-500">
-                  {new Date(entry.createdAt).toISOString().replace("T", " ").slice(0, 16)}{" "}
-                  UTC
+                  {formatAestDateTime(entry.createdAt) ?? "-"}
                 </span>
               </div>
             ))

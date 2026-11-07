@@ -1,8 +1,9 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAdaptiveStatisticsMessages } from "@/lib/adminMessages/adaptiveStatistics";
 import { adminFetch } from "@/lib/adminFetch";
 import type { getAdaptiveStatisticsReport } from "@/lib/adaptiveStatisticsReport";
@@ -30,7 +31,6 @@ function Stat({ title, value, detail }: { title: string; value: string; detail?:
 const duration = (value: number | null) => value === null ? "—" : `${value.toFixed(1)} ms`;
 
 export function AdminAdaptiveStatisticsPanel() {
-  const { locale } = useAdminLocale();
   const m = useAdminMessages(adminAdaptiveStatisticsMessages);
   const [days, setDays] = useState<7 | 30>(7);
   const [report, setReport] = useState<Report | null>(null);
@@ -65,7 +65,7 @@ export function AdminAdaptiveStatisticsPanel() {
     {loading && <p role="status" className="mt-4 text-sm text-zinc-400">{m.loading}</p>}
     {error && <p role="alert" className="mt-4 text-sm text-red-300">{m.error}</p>}
     {report && <div className="mt-4 space-y-4">
-      <p className="text-xs text-zinc-400">{new Date(report.since).toLocaleString(locale)} – {new Date(report.observedAt).toLocaleString(locale)}</p>
+      <p className="text-xs text-zinc-400">{formatAestDateTime(report.since, { seconds: true }) ?? "-"} – {formatAestDateTime(report.observedAt, { seconds: true }) ?? "-"}</p>
       <p className="rounded-lg border border-amber-600/40 bg-amber-500/10 p-3 text-sm text-amber-100">{m.denominator}</p>
       {(report.coverage.refinerTruncated || report.coverage.autoRouterTruncated || report.coverage.providerUsageTruncated) && <p className="rounded-lg border border-amber-600/40 p-3 text-sm">{m.partial}</p>}
       {report.refiner.requests === 0 && report.autoRouter.recordedRuns === 0 && <p className="text-sm text-zinc-400">{m.noData}</p>}

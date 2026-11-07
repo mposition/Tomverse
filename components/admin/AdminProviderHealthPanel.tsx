@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -80,10 +81,7 @@ const balanceMoney = (amount: number, currency: string) => {
     return `${currency} ${amount.toFixed(4)}`;
   }
 };
-const dateLabel = (value: string | null, fallback: string) => {
-  if (!value) return fallback;
-  return new Date(value).toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null, fallback: string) => formatAestDateTime(value) ?? fallback;
 const statusClass: Record<ProviderHealthStatus, string> = {
   available: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
   limited: "border-amber-500/30 bg-amber-500/10 text-amber-300",

@@ -50,7 +50,7 @@ export function AdminPolicyNoticeComposer({
   locales: readonly string[];
   /** YYYY-MM-DD, or null while the notice has no date. */
   effectiveDate: string | null;
-  /** When the amendment was published, as shown to the operator (UTC). */
+  /** When the amendment was published, as shown to the operator (AEST). */
   owedBefore: string;
   /** Every locale renders to an approved hash on this deployment. */
   wordingApproved: boolean;
