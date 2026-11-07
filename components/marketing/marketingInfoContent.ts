@@ -63,6 +63,10 @@ export const infoPages = {
       {
         "title": "내 파일에 대해 질문할 수 있나요?",
         "body": "제공되는 환경에서는 파일을 첨부하거나 로그인 후 Google Drive에서 파일을 골라 그 내용에 대해 질문할 수 있습니다. 파일 형식과 크기, 개수 제한은 플랜에 따라 다르니 화면의 안내를 확인하세요."
+      },
+      {
+        "title": "Review의 Easy와 Professional은 무엇이 다른가요?",
+        "body": "Review에는 두 가지 모드가 있습니다. Easy는 AI가 처음인 분을 위한 모드로, 답을 받을 회사만 고르면 제공되는 환경에서 Tomverse가 질문마다 모델을 골라 드립니다. Professional은 모델마다 무엇을 잘하는지 아는 분을 위한 모드로, 비교할 모델을 직접 고르고 Deep Research와 이미지 모델도 직접 정합니다."
       }
     ],
     "cta": {
@@ -130,6 +134,10 @@ export const infoPages = {
       {
         "title": "Can I ask about my own files?",
         "body": "Where available, attach a file, or choose one from Google Drive after signing in, and ask questions about it. File types, sizes and counts depend on your plan; check the limits shown on screen."
+      },
+      {
+        "title": "What is the difference between Easy and Professional in Review?",
+        "body": "Review has two modes. Easy is for people new to AI: pick the companies you want answers from, and Tomverse chooses a model for each question, where available. Professional is for people who know what each model is good at: choose the exact models yourself, and decide on Deep Research and image models too."
       }
     ],
     "cta": {
@@ -197,6 +205,10 @@ export const infoPages = {
       {
         "title": "可以就自己的文件提问吗？",
         "body": "在提供该功能的环境中，附加文件或登录后从 Google Drive 选择文件，即可就文件内容提问。文件类型、大小和数量限制取决于套餐，请查看屏幕上的说明。"
+      },
+      {
+        "title": "Review 中的 Easy 和 Professional 有什么区别？",
+        "body": "Review 有两种模式。Easy 适合刚接触 AI 的人：选择想获得回答的公司，在提供该功能的环境中，Tomverse 会为每个问题选择模型。Professional 适合了解各个模型擅长什么的人：自己选择要比较的具体模型，并自行决定是否使用 Deep Research 和图像模型。"
       }
     ],
     "cta": {
@@ -264,6 +276,10 @@ export const infoPages = {
       {
         "title": "可以針對自己的檔案提問嗎？",
         "body": "在提供此功能的環境中，附加檔案或登入後從 Google Drive 選擇檔案，就能針對檔案內容提問。檔案類型、大小和數量限制取決於方案，請查看畫面上的說明。"
+      },
+      {
+        "title": "Review 中的 Easy 與 Professional 有什麼不同？",
+        "body": "Review 有兩種模式。Easy 適合剛接觸 AI 的人：選擇想獲得回答的公司，在提供此功能的環境中，Tomverse 會為每個問題挑選模型。Professional 適合了解各個模型擅長什麼的人：自行選擇要比較的具體模型，並自行決定是否使用 Deep Research 與圖像模型。"
       }
     ],
     "cta": {
@@ -331,6 +347,10 @@ export const infoPages = {
       {
         "title": "Puis-je poser des questions sur mes fichiers ?",
         "body": "Là où c’est proposé, joignez un fichier, ou choisissez-en un dans Google Drive après connexion, et posez des questions sur son contenu. Les types, tailles et nombres de fichiers dépendent de votre offre ; consultez les limites affichées à l’écran."
+      },
+      {
+        "title": "Quelle est la différence entre Easy et Professional dans Review ?",
+        "body": "Review propose deux modes. Easy s’adresse aux personnes qui découvrent l’IA : choisissez les entreprises dont vous voulez les réponses et, là où c’est proposé, Tomverse choisit un modèle pour chaque question. Professional s’adresse aux personnes qui savent ce que chaque modèle fait bien : choisissez vous-même les modèles exacts et décidez aussi de Deep Research et des modèles d’image."
       }
     ],
     "cta": {
@@ -398,6 +418,10 @@ export const infoPages = {
       {
         "title": "Kann ich Fragen zu meinen eigenen Dateien stellen?",
         "body": "Wo verfügbar, hängen Sie eine Datei an oder wählen Sie nach der Anmeldung eine aus Google Drive und stellen Sie Fragen zu ihrem Inhalt. Dateitypen, Größen und Anzahl hängen von Ihrem Tarif ab; beachten Sie die Grenzen auf dem Bildschirm."
+      },
+      {
+        "title": "Worin unterscheiden sich Easy und Professional in Review?",
+        "body": "Review hat zwei Modi. Easy ist für Menschen, die neu bei KI sind: Wählen Sie die Unternehmen, von denen Sie Antworten möchten, und Tomverse wählt, wo verfügbar, für jede Frage ein Modell aus. Professional ist für Menschen, die wissen, wofür sich jedes Modell eignet: Wählen Sie die Modelle selbst und entscheiden Sie auch über Deep Research und Bildmodelle."
       }
     ],
     "cta": {
@@ -465,6 +489,10 @@ export const infoPages = {
       {
         "title": "¿Puedo hacer preguntas sobre mis archivos?",
         "body": "Donde esté disponible, adjunta un archivo, o elige uno de Google Drive después de iniciar sesión, y haz preguntas sobre su contenido. Los tipos, tamaños y cantidad de archivos dependen de tu plan; consulta los límites que se muestran en pantalla."
+      },
+      {
+        "title": "¿Qué diferencia hay entre Easy y Professional en Review?",
+        "body": "Review tiene dos modos. Easy es para quienes empiezan con la IA: elige las empresas de las que quieres respuestas y, donde esté disponible, Tomverse elige un modelo para cada pregunta. Professional es para quienes saben en qué es bueno cada modelo: elige tú mismo los modelos exactos y decide también sobre Deep Research y los modelos de imagen."
       }
     ],
     "cta": {
@@ -532,6 +560,10 @@ export const infoPages = {
       {
         "title": "Posso fazer perguntas sobre meus arquivos?",
         "body": "Onde disponível, anexe um arquivo, ou escolha um no Google Drive depois de entrar, e faça perguntas sobre o conteúdo. Tipos, tamanhos e quantidade de arquivos dependem do seu plano; confira os limites mostrados na tela."
+      },
+      {
+        "title": "Qual é a diferença entre Easy e Professional no Review?",
+        "body": "O Review tem dois modos. Easy é para quem está começando com IA: escolha as empresas de quem você quer respostas e, onde disponível, o Tomverse escolhe um modelo para cada pergunta. Professional é para quem sabe em que cada modelo é bom: escolha você mesmo os modelos exatos e decida também sobre Deep Research e os modelos de imagem."
       }
     ],
     "cta": {
