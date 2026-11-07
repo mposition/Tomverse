@@ -32,7 +32,7 @@ test("the AMUX floor shows the resident roster, not obsolete runtime workers", a
     })),
   });
   await signInAs("owner");
-  await page.goto("/admin/office");
+  await page.goto("/admin/office?tab=live");
   await page.getByRole("button", { name: "Decline", exact: true }).click();
   const workers = page.getByTestId("agent-office-amux-person");
   await expect(workers).toHaveCount(13);

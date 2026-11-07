@@ -176,10 +176,20 @@ const hostList = (value: string) =>
 export function AdminMarketingPanel({
   initial,
   tabs,
+  part = "page",
 }: {
   initial: MarketingConsoleView;
   /** The section strip, a server component the page renders and this panel places. */
   tabs?: ReactNode;
+  /**
+   * Which part of the screen to draw (2026-11-07). `page` is the whole of it,
+   * as before. `section` is the list without the settings rail, `settings`
+   * the rail without the list, `overview` neither: the header, the overview
+   * strip and the tabs. The redesign's Overview, list tabs and Settings tab
+   * each draw one of them; every part keeps the same payload and the same
+   * controls.
+   */
+  part?: "page" | "section" | "settings" | "overview";
 }) {
   const m = useAdminMessages(adminMarketingMessages);
   const [view, setView] = useState(initial);
@@ -256,10 +266,14 @@ export function AdminMarketingPanel({
         </p>
       ) : null}
 
-      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div
+        className={`grid min-w-0 items-start gap-6 ${
+          part === "page" ? "xl:grid-cols-[minmax(0,1fr)_22rem]" : ""
+        }`}
+      >
         <div className="flex min-w-0 flex-col gap-4">
           {tabs}
-          {unavailable ? (
+          {part === "settings" || part === "overview" ? null : unavailable ? (
             <p className="flex items-start gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm leading-6 text-zinc-300">
               <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
               {unavailable.stage === "S4" ? m.unavailableS4 : m.unavailableS5}
@@ -357,6 +371,7 @@ export function AdminMarketingPanel({
           )}
         </div>
 
+        {part === "page" || part === "settings" ? (
         <aside className="flex min-w-0 flex-col gap-4" aria-label={m.automationTitle}>
           <MarketingSwitchStrip
             switches={view.switches}
@@ -402,6 +417,7 @@ export function AdminMarketingPanel({
             </div>
           ) : null}
         </aside>
+        ) : null}
       </div>
     </section>
   );

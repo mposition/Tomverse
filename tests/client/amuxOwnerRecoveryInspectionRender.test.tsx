@@ -51,7 +51,7 @@ test("a refused step-up returns to the review the caller names, else the Assignm
   const notice = (returnTo?: string) => propsOf(AmuxRecoveryInspectionView({ m: adminAmuxRecoveryInspectionMessages.en,
     state: { state: "unavailable", failure }, onInspect: () => {}, onReloadReview: () => {},
     date: (value) => value, ...(returnTo ? { returnTo } : {}) })).find((props) => props.failure === failure);
-  assert.equal(notice()?.returnTo, "/admin/amux-execution?tab=assignment");
+  assert.equal(notice()?.returnTo, "/admin/amux-execution?tab=review");
   assert.equal(notice("/admin/amux-execution?tab=cards&taskId=task-1")?.returnTo,
     "/admin/amux-execution?tab=cards&taskId=task-1");
   const host = propsOf(AmuxHostRecoveryView({ m: adminAmuxRecoveryInspectionMessages.en,

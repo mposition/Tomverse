@@ -399,7 +399,7 @@ async function renderNotification(
       to: recipient,
       ...buildQaReleaseOperatorEmail(qaReleaseEmail.email, {
         date,
-        consoleUrl: `${consoleBase}/admin/qa-release`,
+        consoleUrl: `${consoleBase}/admin/release`,
       }),
     };
   }

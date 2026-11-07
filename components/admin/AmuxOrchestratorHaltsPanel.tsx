@@ -14,7 +14,7 @@ import type { AmuxOrchestratorAdminHalt, AmuxOrchestratorAdminView, AmuxOrchestr
 import type { AdminLocale, AdminMessageShape } from "@/lib/adminLocale";
 
 const CLEAR_PATH = "/api/admin/amux/orchestrator-halts";
-const RETURN_TO = "/admin/amux-settings?tab=safety";
+const RETURN_TO = "/admin/amux-recovery?tab=safety";
 const muted = "text-zinc-400";
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600";
 type Messages = AdminMessageShape<typeof adminAmuxOrchestratorHaltsMessages.en>;

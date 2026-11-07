@@ -33,7 +33,7 @@ test.describe("admin access control", () => {
     await page.goto("/admin/overview");
 
     await expect(page).toHaveURL(/\/auth\/signin\?callbackUrl=%2Fadmin%2Foverview|\/auth\/signin\?callbackUrl=\/admin\/overview/);
-    await expect(consoleHeading(page)).not.toHaveText("Overview");
+    await expect(consoleHeading(page)).not.toHaveText("Today");
   });
 
   test("a signed-in non-administrator is refused without learning the console exists", async ({

@@ -78,7 +78,7 @@ test("the QA and release tab leads with what needs the operator, and CI admissio
   await signInAs("owner");
   // The old address still lands here (ADMIN_AGENT_DIGESTS_LEGACY_TABS).
   await page.goto("/admin/agent-digests?tab=qa-release");
-  await expect(page).toHaveURL(/\/admin\/qa-release\?tab=overview$/);
+  await expect(page).toHaveURL(/\/admin\/release\?tab=qa$/);
   await page.getByRole("button", { name: "Decline", exact: true }).click();
 
   const tab = page.getByTestId("qa-release-tab");
@@ -109,8 +109,8 @@ test("the QA and release tab leads with what needs the operator, and CI admissio
   await page.screenshot({ path: "test-results-admin/qa-release-tab-light.png", fullPage: true });
 
   // CI admission is a tab of its own.
-  await page.getByRole("link", { name: /^CI admission/ }).click();
-  await expect(page).toHaveURL(/tab=ci-admission/);
+  await page.getByRole("link", { name: /^CI queue/ }).click();
+  await expect(page).toHaveURL(/tab=ci/);
   await expect(page.getByTestId("ci-admission-section")).toBeVisible();
   await expect(page.getByTestId("qa-release-tab")).toHaveCount(0);
 });

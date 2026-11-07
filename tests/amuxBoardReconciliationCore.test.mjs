@@ -5,8 +5,8 @@ import test from "node:test";
 import {
   ADMIN_LEGACY_ROUTES,
   ADMIN_SEARCHABLE_PAGES,
+  adminHrefIsVisibleTo,
   adminNavItemTabs,
-  adminSearchablePagesFor,
   resolveAdminPageMeta,
 } from "../lib/adminNavigation.ts";
 import {
@@ -236,23 +236,19 @@ test("the public apply path checks the shipped latch before the commit", () => {
   assert.match(panel, /applyReady \? messages\.applyPermitted : messages\.applyDisabled/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);
-  // The screen moved into Backlog's Source reconciliation section; its old address
-  // still resolves there.
-  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-reconciliation"], "/admin/amux-backlog?tab=reconciliation");
-  const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
-  assert.equal(movedTo.label, "Backlog");
+  // The screen moved into the Legacy tools tab of Safety & recovery
+  // (2026-11-07); its old address still resolves there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-reconciliation"], "/admin/amux-recovery?tab=legacy");
+  const movedTo = resolveAdminPageMeta("/admin/amux-recovery");
+  assert.equal(movedTo.label, "Safety & recovery");
   assert.equal(movedTo.isKnown, true);
   assert.equal(
-    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "reconciliation")?.label,
-    "Source reconciliation",
+    adminNavItemTabs("amux-recovery").find((tab) => tab.id === "legacy")?.label,
+    "Legacy tools",
   );
-  // Listed to the owner only: every other role would receive a 404.
+  // The tab is listed to the owner only: every other role would receive a 404.
   for (const role of ["billing", "support", "ops", "readonly"]) {
-    assert.equal(
-      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-backlog"),
-      false,
-      role,
-    );
+    assert.equal(adminHrefIsVisibleTo(role, "/admin/amux-recovery?tab=legacy"), false, role);
   }
   assert.equal(
     ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-reconciliation"),

@@ -48,7 +48,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/overview");
 
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
     await expect(
       page.getByRole("heading", { name: "Operations snapshot" })
     ).toBeVisible();
@@ -73,7 +73,7 @@ test.describe("admin read surfaces", () => {
       page.getByRole("link", { name: /^Support, 4 awaiting action/ }).first()
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /^Work queue, 5 awaiting action/ }).first()
+      page.getByRole("link", { name: /^Decisions, 5 awaiting action/ }).first()
     ).toBeVisible();
     // Recent administrator activity replays the seeded audit row.
     await expect(page.getByText(FIXTURE_AUDIT_LOG.summary)).toBeVisible();
@@ -150,7 +150,7 @@ test.describe("admin read surfaces", () => {
     await page.goto("/admin/approvals");
 
     await expect(page).toHaveURL("/admin/work-queue");
-    await expect(consoleHeading(page)).toHaveText("Work queue");
+    await expect(consoleHeading(page)).toHaveText("Decisions");
     await expect(
       page.getByRole("heading", { name: "High-risk admin approvals" })
     ).toHaveCount(0);
@@ -178,7 +178,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/analytics");
 
-    await expect(consoleHeading(page)).toHaveText("Analytics");
+    await expect(consoleHeading(page)).toHaveText("Metrics");
     // Streamed behind loading.tsx: wait for the one settled copy.
     await expect(page.getByTestId("admin-usage-analytics")).toHaveCount(1);
     const usage = page.locator("#main-content");
@@ -186,9 +186,12 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Who is using Tomverse" })
     ).toBeVisible();
-    // Today is the default period and is marked as the current one.
+    // Today is the default period and is marked as the current one. Scoped to
+    // the report's own period links: the sidebar now has a "Today" entry too.
     await expect(
-      page.getByRole("link", { name: "Today", exact: true })
+      usage
+        .getByTestId("admin-usage-analytics")
+        .getByRole("link", { name: "Today", exact: true })
     ).toHaveAttribute("aria-current", "page");
     await expect(usage.getByTestId("admin-usage-models")).toBeVisible();
     await expect(usage.getByTestId("admin-usage-activity")).toBeVisible();
@@ -215,7 +218,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/analytics?tab=product");
 
-    await expect(consoleHeading(page)).toHaveText("Analytics");
+    await expect(consoleHeading(page)).toHaveText("Metrics");
     await expect(
       page.getByRole("heading", { name: "Event funnel · last 30 days" })
     ).toBeVisible();
@@ -807,7 +810,7 @@ test.describe("admin read surfaces", () => {
     // in ordinary operation -- which is how three of four senders stayed on the
     // old sending domain through a cutover
     // (docs/ops/email-sending-domains.md §1.2).
-    await page.goto("/admin/alerts?tab=templates");
+    await page.goto("/admin/alerts?tab=mail-test");
 
     const probe = page.getByTestId("operator-alert-probe");
     await expect(
