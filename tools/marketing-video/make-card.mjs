@@ -1,40 +1,41 @@
-// Renders one 4:5 image card (1080x1350) from a source pack and a layout the
-// job designed, and writes the asset file the submission needs:
-//   node make-card.mjs <job/sources/<asset-id>/pack.json> <spec.json> <out-dir>
+// Renders one 4:5 image card (1080x1350) that the job designed and wrote, and
+// writes the asset file the submission needs:
+//   node make-card.mjs <spec.json> <out-dir>
 //
-// The job designs every card itself (owner 2026-11-07: "no card that only
-// changes its words" -- one fixed layout over the same captures was retired).
-// spec.json is {"id", "layout": "<path to an HTML fragment>", "locale"?}. The
-// fragment is a <style> block and the card's elements; it names pictures as
-// `capture:<name>` (in an img src or a CSS url()), and those are the pack's
-// real captures and nothing else.
+// Owner 2026-11-07: the job researches the market's ads and designs each card
+// itself, words included, in the style the owner approved (examples/), and a
+// person sees every card in Admin before anything is posted. So the words are
+// the job's; what this file keeps is what the job cannot be trusted to keep.
 //
-// This file checks what the job cannot be trusted to keep, and refuses the
-// card otherwise:
-//  - words: every piece of text on the card is one of the pack's own lines
-//    (question, headline lines, callouts, ctas) or "Tomverse", "Q", "→", "≠";
-//  - pictures: only the pack's captures; nothing is fetched but those files
-//    and the fonts this file links; no script, no CSS generated text;
-//  - colours: every colour drawn is a brand colour (any opacity);
-//  - nothing cut off: every line lies wholly inside the card;
-//  - not a copy: the card must not look like a card of an earlier day
-//    (a difference hash of the picture, so new words on an old look fail).
+// spec.json: {"id", "locale", "layout": "<HTML fragment, relative to the
+// spec>", "alt": "<alt text>", "pack"?: "job/sources/<id>/pack.json"}. The
+// fragment is a <style> block and the card's elements. Pictures are named as
+// `capture:<name>` (a real screen capture from the pack) or `library:<name>`
+// (library/library.json: the logo, model marks, photos), in an img src or a
+// CSS url(), and are nothing else.
 //
-// A Simplified Chinese card for RedNote (owner 2026-11-07) is made from a
-// zh-Hant pack with `"locale": "zh-Hans"`: the layout names the pack's own
-// Traditional lines, and each is drawn converted by OpenCC -- no new words.
+// It refuses the card when:
+//  - a picture is not a capture or a library entry, anything else is fetched,
+//    or the layout carries script, frames, form fields or CSS-generated text;
+//  - a colour drawn is not a brand colour (pictures themselves excepted);
+//  - a line lies outside the card or is clipped by its box;
+//  - an AI-made library photo is used without the locale's AI line on the card,
+//    or together with a product capture (an AI asset may not show the product);
+//  - the card looks like a card of an earlier day (a difference hash of the
+//    picture, so new words on an old look fail).
+// Every word the card shows goes into the transcript the Guard judges at
+// submission, with the words inside the captures it used.
 //
 // Exit codes: 0 written, 2 usage, 1 anything else.
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import * as OpenCC from "opencc-js/t2cn";
 import { chromium } from "playwright";
 
-const [packPath, specPath, outDir] = process.argv.slice(2);
-if (!packPath || !specPath || !outDir) {
-  console.error("usage: node make-card.mjs <pack.json> <spec.json> <out-dir>");
+const [specPath, outDir] = process.argv.slice(2);
+if (!specPath || !outDir) {
+  console.error("usage: node make-card.mjs <spec.json> <out-dir>");
   process.exit(2);
 }
 
@@ -45,10 +46,15 @@ const CARD_CHANNELS = {
   "zh-Hant": ["facebook", "instagram", "threads"],
   "zh-Hans": ["rednote"],
 };
+/** The line a card with an AI-made photo shows, per locale. */
+const AI_LINE = {
+  en: "Photo: AI-generated",
+  ko: "사진: AI 생성",
+  "zh-Hant": "照片：AI 生成",
+  "zh-Hans": "照片：AI 生成",
+};
 /** #ffffff #18181b #155dfb #eff6ff #f7f8fa #e4e4e7, as the browser reports them. */
 const BRAND_RGB = ["255,255,255", "24,24,27", "21,93,251", "239,246,255", "247,248,250", "228,228,231"];
-/** Marks a card may draw besides the pack's lines. */
-const MARKS = ["Tomverse", "Q", "→", "≠"];
 /**
  * How many of 256 hash bits must differ from every earlier day's card. Measured
  * 2026-11-07: the retired layout with only its words changed differed by 32;
@@ -56,57 +62,67 @@ const MARKS = ["Tomverse", "Q", "→", "≠"];
  */
 const MIN_HASH_DISTANCE = 64;
 const LOOKBACK_DAYS = 30;
+const AI_PROVENANCES = ["ai_generated", "ai_modified"];
 
 const fail = (message) => {
   console.error(JSON.stringify({ step: "make-card", error: message }));
   process.exit(1);
 };
 
-const pack = JSON.parse(readFileSync(packPath, "utf8"));
 const spec = JSON.parse(readFileSync(specPath, "utf8"));
-const packDir = path.dirname(path.resolve(packPath));
-
-const locale = spec.locale ?? pack.locale;
-if (locale !== pack.locale && !(locale === "zh-Hans" && pack.locale === "zh-Hant")) {
-  fail(`a ${locale} card cannot be made from a ${pack.locale} pack`);
-}
+const locale = spec.locale;
 if (!CARD_CHANNELS[locale]) fail(`no card channels for locale ${locale}`);
 if (!/^media-[a-z0-9][a-z0-9-]{0,99}$/u.test(spec.id ?? "")) fail("spec.id is not a media asset id");
-const toSimplified = OpenCC.Converter({ from: "tw", to: "cn" });
+if (typeof spec.alt !== "string" || spec.alt.trim().length < 20) fail("spec.alt must describe the card");
 
-// The pack's captures: `captures` ({name: {file, text}}), or the first packs'
-// fixed five pictures.
-const captures =
-  pack.captures ??
-  Object.fromEntries(
-    [
-      ["left", pack.captureText?.[0]],
-      ["center", pack.captureText?.[1]],
-      ["right", pack.captureText?.[2]],
-      ["summary", pack.summaryText],
-      ["logo", ""],
-    ].map(([name, text]) => [name, { file: pack.images?.[name], text: text ?? "" }]),
-  );
-for (const [name, capture] of Object.entries(captures)) {
-  if (typeof capture?.file !== "string" || !existsSync(path.join(packDir, capture.file))) fail(`missing capture ${name}`);
+const toolDir = path.dirname(fileURLToPath(import.meta.url));
+const libraryDir = path.join(toolDir, "library");
+const library = JSON.parse(readFileSync(path.join(libraryDir, "library.json"), "utf8"));
+
+// The pack's captures, if the card uses a pack: `captures` ({name: {file,
+// text}}), or the first packs' fixed five pictures.
+let captures = {};
+let packDir = null;
+if (spec.pack) {
+  const packPath = path.resolve(spec.pack);
+  const pack = JSON.parse(readFileSync(packPath, "utf8"));
+  packDir = path.dirname(packPath);
+  captures =
+    pack.captures ??
+    Object.fromEntries(
+      [
+        ["left", pack.captureText?.[0]],
+        ["center", pack.captureText?.[1]],
+        ["right", pack.captureText?.[2]],
+        ["summary", pack.summaryText],
+        ["logo", ""],
+      ].map(([name, text]) => [name, { file: pack.images?.[name], text: text ?? "" }]),
+    );
 }
-
-const lines = [...pack.question, ...pack.headlines.flat(), ...pack.callouts, ...pack.ctas];
-const normal = (text) => text.replace(/\s+/gu, " ").trim();
-const allowed = new Set([...lines, ...MARKS].map(normal));
+const pictureFile = (kind, name) => {
+  if (kind === "capture") return captures[name] && packDir ? path.join(packDir, captures[name].file) : null;
+  return library[name] ? path.join(libraryDir, library[name].file) : null;
+};
 
 const layoutPath = path.resolve(path.dirname(path.resolve(specPath)), spec.layout ?? "");
 if (!spec.layout || !existsSync(layoutPath)) fail("spec.layout names no layout file");
 const layout = readFileSync(layoutPath, "utf8");
 if (/<\s*(script|iframe|object|embed|link|meta|base|frame|input|textarea|select|option|button|video|audio|canvas|use|image|foreignobject)\b|\son[a-z]+\s*=|javascript:|@import|<\s*svg[^>]*\shref|xlink:href/iu.test(layout)) {
-  fail("the layout may hold only HTML, CSS and capture: pictures");
+  fail("the layout may hold only HTML, CSS and capture: or library: pictures");
 }
-// Every url() and src names a capture; nothing else is fetched.
 const named = [...layout.matchAll(/(?:src\s*=\s*["']|url\(\s*["']?)([^"')\s]+)/giu)].map((match) => match[1]);
-const unknown = named.filter((ref) => !/^capture:[a-z0-9-]+$/u.test(ref) || !captures[ref.slice(8)]);
-if (unknown.length > 0) fail(`the layout names pictures that are not the pack's captures: ${JSON.stringify(unknown)}`);
-const used = [...new Set(named.map((ref) => ref.slice(8)))];
-const body = layout.replace(/capture:([a-z0-9-]+)/gu, (_, name) => pathToFileURL(path.join(packDir, captures[name].file)).href);
+const unknown = named.filter((ref) => {
+  const m = /^(capture|library):([a-z0-9-]+)$/u.exec(ref);
+  return !m || !pictureFile(m[1], m[2]) || !existsSync(pictureFile(m[1], m[2]));
+});
+if (unknown.length > 0) fail(`the layout names pictures that are not captures or library entries: ${JSON.stringify(unknown)}`);
+const used = [...new Set(named)].map((ref) => ref.split(":"));
+const usedCaptures = used.filter(([kind]) => kind === "capture").map(([, name]) => name);
+const usedAi = used.filter(([kind, name]) => kind === "library" && AI_PROVENANCES.includes(library[name].provenance));
+if (usedAi.length > 0 && usedCaptures.length > 0) {
+  fail("an AI-made photo and a product capture may not share a card (an AI asset may not depict the product)");
+}
+const body = layout.replace(/(capture|library):([a-z0-9-]+)/gu, (_, kind, name) => pathToFileURL(pictureFile(kind, name)).href);
 
 const fonts =
   locale === "zh-Hant"
@@ -116,11 +132,11 @@ const fonts =
       : "'Geist', 'Noto Sans KR', sans-serif";
 const html = `<!doctype html>
 <html lang="${locale}"><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700;800;900&family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Sans+SC:wght@400;500;700;900&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+KR:wght@500;700&family=Noto+Serif+TC:wght@500;700&family=Noto+Serif+SC:wght@500;700&display=block">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 1080px; height: 1350px; overflow: hidden; }
-  body { position: relative; font-family: ${fonts}; color: #18181b; background: #ffffff; }
+  body { position: relative; font-family: ${fonts}; color: #18181b; background: #ffffff; -webkit-font-smoothing: antialiased; }
 </style></head><body>
 ${body}
 </body></html>`;
@@ -148,7 +164,7 @@ async function differenceHash(page, file) {
   }, data);
 }
 
-/** Cards that earlier days made: job/<yyyymmdd>/media-*-card*.png within the lookback, never today's. */
+/** Cards that earlier days made (job/<yyyymmdd>/media-*-card*.png within the lookback, never today's) and the examples. */
 function earlierCards(today) {
   const jobDir = path.dirname(path.resolve(outDir));
   const cutoff = Number(new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10).replaceAll("-", ""));
@@ -159,6 +175,9 @@ function earlierCards(today) {
     if (!statSync(dir).isDirectory()) continue;
     for (const file of readdirSync(dir)) if (/^media-.*-card(-\d+)?\.png$/u.test(file)) found.push(path.join(dir, file));
   }
+  // The approved examples are style, not cards to copy.
+  const examples = path.join(toolDir, "examples");
+  for (const file of existsSync(examples) ? readdirSync(examples) : []) if (file.endsWith(".png")) found.push(path.join(examples, file));
   return found;
 }
 
@@ -167,12 +186,12 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1080, height: 1350 }, deviceScaleFactor: 1 });
   const fetched = [];
-  const capturesAllowed = new Set(used.map((name) => pathToFileURL(path.join(packDir, captures[name].file)).href));
+  const allowedUrls = new Set(used.map(([kind, name]) => pathToFileURL(pictureFile(kind, name)).href));
   await page.route("**/*", (route) => {
     const url = route.request().url();
     const ok =
       url === pathToFileURL(htmlPath).href ||
-      capturesAllowed.has(url) ||
+      allowedUrls.has(url) ||
       url.startsWith("https://fonts.googleapis.com/") ||
       url.startsWith("https://fonts.gstatic.com/");
     if (!ok) fetched.push(url);
@@ -187,12 +206,12 @@ try {
     const cut = [];
     const generated = [];
     const colours = new Set();
-    // Each text node is one whole line: a line split over elements reads as
-    // pieces, and a piece is not one of the pack's lines.
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
       if (!node.textContent.trim() || node.parentElement.closest("style")) continue;
+      const style = getComputedStyle(node.parentElement);
+      if (style.visibility === "hidden" || style.display === "none") continue;
       texts.push(node.textContent);
       const range = document.createRange();
       range.selectNodeContents(node);
@@ -200,7 +219,6 @@ try {
         if (rect.width === 0) continue;
         if (rect.left < -1 || rect.top < -1 || rect.right > 1081 || rect.bottom > 1351) cut.push(node.textContent);
       }
-      // A box that clips its text sideways hides part of a line.
       const owner = node.parentElement;
       if (owner.scrollWidth > owner.clientWidth + 2 && getComputedStyle(owner).overflowX !== "visible") cut.push(node.textContent);
     }
@@ -228,23 +246,13 @@ try {
     return { texts, cut, generated, colours: [...colours] };
   }, BRAND_RGB);
 
+  const normal = (text) => text.replace(/\s+/gu, " ").trim();
   if (found.generated.length > 0) fail(`CSS may not draw text: ${JSON.stringify(found.generated)}`);
-  const strangers = found.texts.map(normal).filter((text) => text && !allowed.has(text));
-  if (strangers.length > 0) fail(`text that is not one of the pack's lines: ${JSON.stringify(strangers)}`);
-  if (!found.texts.some((text) => pack.headlines.flat().map(normal).includes(normal(text)))) fail("the card shows no headline line");
+  if (found.texts.length === 0) fail("the card shows no words");
   if (found.cut.length > 0) fail(`lines cut off or outside the card: ${JSON.stringify(found.cut)}`);
   if (found.colours.length > 0) fail(`colours outside the brand palette: ${JSON.stringify(found.colours)}`);
-
-  // Draw the lines in Simplified for a zh-Hans card, after they were checked as the pack's own.
-  if (locale !== pack.locale) {
-    await page.evaluate(() => {
-      window.__lines = [];
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      while (walker.nextNode()) window.__lines.push(walker.currentNode);
-    });
-    const originals = await page.evaluate(() => window.__lines.map((node) => node.textContent));
-    await page.evaluate((converted) => window.__lines.forEach((node, i) => { node.textContent = converted[i]; }), originals.map((text) => toSimplified(text)));
-    await page.evaluate(() => document.fonts.ready);
+  if (usedAi.length > 0 && !found.texts.some((text) => normal(text) === AI_LINE[locale])) {
+    fail(`a card with an AI-made photo shows the line "${AI_LINE[locale]}"`);
   }
   await page.screenshot({ path: pngPath, type: "png" });
 
@@ -255,46 +263,35 @@ try {
     let distance = 0;
     for (let i = 0; i < mine.length; i += 1) if (mine[i] !== theirs[i]) distance += 1;
     if (distance < MIN_HASH_DISTANCE) {
-      fail(`looks like ${path.basename(earlier)} (hash distance ${distance} < ${MIN_HASH_DISTANCE}): change the composition and the captures, not only the words`);
+      fail(`looks like ${path.basename(earlier)} (hash distance ${distance} < ${MIN_HASH_DISTANCE}): change the composition and the pictures, not only the words`);
     }
   }
-  cardLines = found.texts.map(normal).filter((text) => !MARKS.includes(text));
+  cardLines = found.texts.map(normal).filter(Boolean);
 } finally {
   await browser.close();
 }
 
 // Every word the card shows, for the Guard at submission: its own lines and
-// the words inside the captures it used. The captures' text is what the
-// pictures show, so it is never converted.
-const draw = (line) => (locale === pack.locale ? line : toSimplified(line));
-const transcript = [
-  ...cardLines.map(draw),
-  ...used.map((name) => captures[name].text).filter(Boolean),
-  "Tomverse",
-]
-  .map((text) => text.replace(/\s*→\s*$/u, ""))
-  .join(" ");
+// the words inside the captures it used.
+const transcript = [...cardLines, ...usedCaptures.map((name) => captures[name].text).filter(Boolean)].join(" ");
 const channels = CARD_CHANNELS[locale];
+const ai = usedAi.length > 0;
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
-// The card reuses the approved short's words and captures, so it rests on the
-// same claims: a post that carries it declares them and the Guard judges them
-// again at submission and at every post.
-const sourceAsset = path.join(packDir, pack.videoAsset ?? "");
-if (!pack.videoAsset || !existsSync(sourceAsset)) fail("the pack names no source asset file to take its claims from");
-const claimIds = [...(JSON.parse(readFileSync(sourceAsset, "utf8")).asset?.claimIds ?? [])];
 writeFileSync(
   path.join(outDir, `${spec.id}.asset.json`),
   JSON.stringify(
     {
       asset: {
         id: spec.id,
-        provenance: "capture",
+        provenance: ai ? "ai_modified" : usedCaptures.length > 0 ? "capture" : "operator_upload",
         allowedChannels: channels,
-        claimIds,
+        // A feature claim needs its FAQ sentence in the words (the Guard's
+        // feature_not_public); a card states the feature in its own words.
+        claimIds: [],
         validUntil,
-        disclosure: Object.fromEntries(channels.map((channel) => [channel, "none"])),
-        depictsProductInterface: true,
-        alt: { [locale]: draw(pack.cardAlt) },
+        disclosure: Object.fromEntries(channels.map((channel) => [channel, ai ? "caption_disclosure" : "none"])),
+        depictsProductInterface: usedCaptures.length > 0,
+        alt: { [locale]: spec.alt.trim() },
       },
       transcript: { [locale]: transcript },
     },
@@ -302,4 +299,4 @@ writeFileSync(
     2,
   ),
 );
-console.log(JSON.stringify({ made: spec.id, png: pngPath, captures: used }));
+console.log(JSON.stringify({ made: spec.id, png: pngPath, pictures: used.map((pair) => pair.join(":")) }));

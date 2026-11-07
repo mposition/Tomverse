@@ -1,0 +1,48 @@
+{
+  "note": "What a card may say about Tomverse. Say only these; never a price, 'free', credits, plan names, 'best', 'only', 'first', or a promise that an answer is correct. Model and company names are fine (owner 2026-11-07), and model marks come from library/. Checked 2026-11-07 against the app and the FAQ (claim.* ids in lib/marketingClaims.ts).",
+  "features": [
+    {
+      "id": "chat",
+      "what": "Chat with leading models in one workspace; pick the model per question.",
+      "models": ["GPT 6 Luna", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Gemini Flash"],
+      "source": "claim.chat-and-review; model chips in the app"
+    },
+    {
+      "id": "review",
+      "what": "Ask one question to three models at once and read the answers side by side.",
+      "source": "claim.review-three-models"
+    },
+    {
+      "id": "analysis",
+      "what": "Tomverse answer analysis: where the answers agree, where they differ, what is missing, what needs checking, and contradictions, each point with the answers' own quotes. It does not say which answer is right.",
+      "realExample": {
+        "question": "Planning a 2-day trip near Sydney with my elderly parents. Suggest an itinerary with very little walking.",
+        "models": ["GPT 6 Luna", "Claude Haiku 5.5", "Gemini Flash"],
+        "counts": { "consensus": 7, "importantDifferences": 6, "missingPoints": 7, "verificationNeeded": 6, "contradictions": 1 },
+        "contradiction": "Gemini Flash: \"Skip the Scenic Railway (which has steep steps)\". Claude Haiku 5.5: \"The Scenic Railway runs down a steep incline in a seated, enclosed carriage\"."
+      },
+      "source": "real analysis recorded 2026-11-01 (marketing-reels/en-compare-short/rec/lang-en/analysis.txt)"
+    },
+    {
+      "id": "images",
+      "what": "One prompt, images from several image models side by side; keep the one you like.",
+      "models": ["GPT Image 2", "Nano Banana 2", "Grok Imagine"],
+      "source": "claim.chat-image-generation; image model chips in the app"
+    },
+    {
+      "id": "files",
+      "what": "Ask about your files: PDFs, documents and spreadsheets.",
+      "source": "claim.chat-file-questions"
+    },
+    {
+      "id": "assistants",
+      "what": "Build your own AI assistant: give it a name and instructions, add your files, pick a model, and reuse it.",
+      "source": "claim.chat-assistants"
+    },
+    {
+      "id": "web-search",
+      "what": "Turn on web search so answers come with their sources.",
+      "source": "web search chip in the composer"
+    }
+  ]
+}

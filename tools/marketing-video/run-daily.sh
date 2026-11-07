@@ -37,7 +37,7 @@ ENABLE_CLAUDEAI_MCP_SERVERS=false "${CLAUDE_BIN:-claude}" --print "$(cat JOB.md)
   --tools "Bash,Read,Write,Edit" \
   --allowedTools "Bash(node *),Bash(npx *),Read,Write,Edit" \
   --disallowedTools "mcp__*" \
-  --max-turns 120 \
+  --max-turns 200 \
   --output-format stream-json --verbose \
   | tee -a "job/run-$(date -u +%Y%m%d).jsonl" \
   | node print-run-result.mjs \

@@ -1578,7 +1578,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게시기가 쓸 R2 키는 `readApprovedMarketingAssetLocation()`(승인 상태일 때만).
   박스의 일일 작업(운영자 2026-11-04)은 `GET /api/internal/marketing-assets/approved`(같은 Bearer, kill switch면 503,
   `readApprovedMarketingAssetsForMediaCli`: id·종류·채널·locale·유효기간만, 파일·키·문구 없음)로 승인 자산을 읽고, 그 쇼츠의
-  소스 팩(박스의 `job/sources/<id>/`)에서만 en·ko·zh-Hant 카드(작업이 날마다 구도를 새로 짜고, `make-card.mjs`가 팩 문구·팩 캡처·브랜드 색·이전 날과 다른 그림만 통과)와 주 1회 4:5 피드판
+  Meta 광고 라이브러리 조사(`research-ads.mjs`)를 바탕으로 en·ko·zh-Hant·zh-Hans 카드를 날마다 직접 디자인하고(운영자 2026-11-07: 문구도 작업이 쓰되 사실은 `features.json`만, 그림은 `library/`와 소스 팩(박스의 `job/sources/<id>/`) 캡처만, `make-card.mjs`가 브랜드 색·AI 사진 표시·이전 날과 다른 그림을 검사하고 보이는 글자 전부를 Guard에 넘김)와 주 1회 4:5 피드판
   (`make-feed-video.mjs`, 쇼츠 그대로)을 만들어 제출합니다. 반려·거절은 작업을 멈추지 않습니다.
   제출에는 locale별 `transcript`(영상 필수, locale당 최대 20,000자)가 있고, `lib/marketingAssetGuard.ts`가 같은 트랜잭션에서
   초안 접수와 같은 사실 검증·`guardDraft`로 검사합니다(범위 `asset:<id>`, 첫 허용 채널). reject면 422와 Guard 코드만 돌려주고
