@@ -18,6 +18,7 @@ import AgentOfficeFloor, {
 import s from "@/components/admin/agentOfficeFloor.module.css";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAgentOfficeFloorMessages, type AgentOfficeFloorCopy } from "@/lib/adminMessages/agentOfficeFloor";
+import { adminFetch } from "@/lib/adminFetch";
 import type { AdminMessageShape } from "@/lib/adminLocale";
 
 type FloorCopy = AdminMessageShape<AgentOfficeFloorCopy>;
@@ -148,7 +149,7 @@ export default function AgentOfficeLive({
       if (reading || document.visibilityState !== "visible") return;
       reading = true;
       try {
-        const res = await fetch("/api/admin/office/amux", { cache: "no-store", credentials: "same-origin" });
+        const res = await adminFetch("/api/admin/office/amux", { cache: "no-store", credentials: "same-origin" });
         const body = res.ok ? ((await res.json()) as AgentOfficeAmuxPulse) : null;
         if (!stopped && body && typeof body.readAt === "string" && body.amux && body.history) setPulse(body);
       } catch {

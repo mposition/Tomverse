@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@/components/admin/AgentOfficeFloor";
 import s from "@/components/admin/agentOfficeFloor.module.css";
 import { useAdminLocale } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 import type { AdminMessageShape } from "@/lib/adminLocale";
 import type { AgentOfficeFloorCopy } from "@/lib/adminMessages/agentOfficeFloor";
 import { BRIEFING_LINKS, type StoredAgentOfficeBriefing } from "@/lib/agentOffice/briefing";
@@ -33,7 +34,7 @@ export default function AgentOfficeBriefing({ f }: { f: FloorCopy }) {
   const [version, setVersion] = useState(0);
   useEffect(() => {
     let alive = true;
-    fetch(ENDPOINT, { cache: "no-store", credentials: "same-origin" })
+    adminFetch(ENDPOINT, { cache: "no-store", credentials: "same-origin" })
       .then(async (res) => {
         if (!alive) return;
         if (res.status === 404) setHidden(true);
@@ -55,8 +56,10 @@ export default function AgentOfficeBriefing({ f }: { f: FloorCopy }) {
     setAsking(true);
     setNotice(null);
     try {
-      const res = await fetch(ENDPOINT, {
+      // One model call; give it longer than the 15 s default read deadline.
+      const res = await adminFetch(ENDPOINT, {
         method: "POST",
+        timeoutMs: 60_000,
         cache: "no-store",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },

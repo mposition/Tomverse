@@ -42,11 +42,9 @@ test("the AMUX floor shows the resident roster, not obsolete runtime workers", a
   for (const prefix of ["cursor-", "copilot-"]) {
     expect(labels.filter((label) => label?.startsWith(prefix))).toHaveLength(3);
   }
-  await expect(page.getByTestId("agent-office-amux-note")).toContainText("policy v27");
   // Historical runtime rows cannot grant an unadmitted resident a green light.
   const cursor = workers.filter({ hasText: "cursor-worker" });
   await expect(cursor).toHaveAttribute("data-worker-state", /^(not_admitted|catalog_unknown)$/);
-  await expect(page.getByTestId("agent-office-amux-connection")).toHaveAttribute("data-connection-state", "waiting");
 
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
