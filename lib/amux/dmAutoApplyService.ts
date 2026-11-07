@@ -33,8 +33,9 @@ import { applyAmuxV22DmAnswer } from "@/lib/amux/v22OwnerQuestionDmService";
  * that is not one of the question's fixed words, and every question routed to
  * the operator in the first place (the routing term list sends money, outside
  * posts, deletion, credentials and production merges there). The kill switch
- * stops it like any DM path. After the answer applies, the request is closed
- * as answered outside the confirm path, so Admin no longer offers it.
+ * stops it like any DM path. The request is closed as answered outside the
+ * confirm path before the answer applies, so Admin no longer offers it and a
+ * person's judgment that came first wins.
  */
 
 type Candidate =
@@ -132,6 +133,16 @@ export async function runAmuxDmAutoApplyStep(env: Record<string, string | undefi
   const candidate = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerAutoApplyRead,
     (tx, context) => readAmuxDmAutoApplyCandidate(tx, context.dbNow));
   if (!candidate) return null;
+  // The close comes first and is the claim: under the audit chain lock it is
+  // refused when the request is no longer open (the operator confirmed,
+  // edited or rejected it since the read), so a proposal a person judged is
+  // never applied. An answer that then fails leaves the question open for the
+  // person's direct answer, as before.
+  const claimed = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerAutoApplyClose,
+    (tx) => closeDecisionMakerRequestOnDirectAnswer(tx, { cardId: candidate.cardId,
+      questionRevision: candidate.questionRevision }));
+  if (!claimed.recorded)
+    return { requestId: candidate.requestId, kind: candidate.kind, applied: false };
   let applied = false;
   try {
     if (candidate.kind === "question") {
@@ -162,7 +173,9 @@ export async function runAmuxDmAutoApplyStep(env: Record<string, string | undefi
         (tx, context) => applyAmuxV22ResultReviewDecision(tx, { reviewId: candidate.reviewId,
           decision: candidate.decision, source: "dm", requestId: candidate.requestId,
           now: context.dbNow }));
-      applied = result.applied;
+      // A Task that moved on cancels the review, and a result nobody can read
+      // goes to the person (applied false): neither applied the DM's answer.
+      applied = result.applied && result.outcome !== "cancelled";
     }
   } catch (error) {
     // A refused answer (the Task moved, the answer too long) rolls back and
@@ -171,14 +184,6 @@ export async function runAmuxDmAutoApplyStep(env: Record<string, string | undefi
       console.warn(JSON.stringify({ subsystem: "amux", event: "dm_auto_apply_failed",
         kind: candidate.kind, sqlState: amuxDatabaseDiagnosticCode(error) }));
     return { requestId: candidate.requestId, kind: candidate.kind, applied: false };
-  }
-  if (applied) {
-    await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerAutoApplyClose,
-      (tx) => closeDecisionMakerRequestOnDirectAnswer(tx, { cardId: candidate.cardId,
-        questionRevision: candidate.questionRevision })).catch((error) => {
-      console.warn(JSON.stringify({ subsystem: "amux", event: "dm_auto_apply_close_failed",
-        sqlState: amuxDatabaseDiagnosticCode(error) }));
-    });
   }
   return { requestId: candidate.requestId, kind: candidate.kind, applied };
 }

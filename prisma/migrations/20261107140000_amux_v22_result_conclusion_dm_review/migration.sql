@@ -18,7 +18,8 @@ ALTER TABLE "AmuxV22TaskResult"
   ADD COLUMN "conclusionSha256" TEXT,
   ADD CONSTRAINT "AmuxV22TaskResult_conclusion_check" CHECK (
     ("conclusionVerdict" IS NULL AND "conclusionSha256" IS NULL) OR
-    ("conclusionVerdict" IN ('proceed', 'replan', 'stop', 'needs_owner') AND
+    ("conclusionVerdict" IS NOT NULL AND "conclusionSha256" IS NOT NULL AND
+      "conclusionVerdict" IN ('proceed', 'replan', 'stop', 'needs_owner') AND
       "conclusionSha256" ~ '^[0-9a-f]{64}$')
   );
 

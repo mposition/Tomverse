@@ -416,8 +416,12 @@ export async function runAmuxV22ResolveStep(after: DmDeliveryCursor | null):
         (tx, context) => applyAmuxV22ResultReviewDecision(tx, { reviewId: step.reviewId,
           decision: step.decision, source: "dm_confirmed", requestId: step.requestId,
           now: context.dbNow }));
-      if (!applied.applied) return { resolved: null, cursor: { move: "keep" } };
-      return { resolved: applied.outcome === "cancelled" ? "cancelled" : "reviewed",
+      // Held by the kill switch: keep the place. A result nobody can read went
+      // to the person instead: step past it.
+      if (!applied.applied && applied.outcome !== "handed_off")
+        return { resolved: null, cursor: { move: "keep" } };
+      return { resolved: applied.outcome === "cancelled" ? "cancelled" :
+        applied.outcome === "handed_off" ? null : "reviewed",
         cursor: step.cursor };
     } catch (error) {
       console.warn(JSON.stringify({ subsystem: "amux", event: "v22_result_review_apply_failed",

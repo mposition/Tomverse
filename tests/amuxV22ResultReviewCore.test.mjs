@@ -109,7 +109,10 @@ test("the DM approver: behind its switch, irreversible stays human, answers are 
   assert.match(source, /amuxDmProposalAutoApplicable\(\{ resultKind: "proposal",\s+outputKind: detail\.outputKind, irreversible: detail\.irreversible \}\)/);
   assert.match(source, /state\.closing !== null/, "a judged or closed request is never applied again");
   assert.equal((source.match(/source: "dm"/g) ?? []).length, 4, "each of the four question types records dm");
-  assert.match(source, /if \(applied\) \{\s+await withAmuxDbBoundary\(AMUX_DB_BOUNDARIES\.decisionMakerAutoApplyClose,\s+\(tx\) => closeDecisionMakerRequestOnDirectAnswer/);
+  const close = source.indexOf("closeDecisionMakerRequestOnDirectAnswer(tx");
+  assert.ok(close > 0 && close < source.indexOf("applyAmuxV22DmAnswer(tx"),
+    "the request is closed first, under the chain lock, so a judgment that came first wins");
+  assert.match(source, /if \(!claimed\.recorded\)\s+return \{ requestId: candidate\.requestId, kind: candidate\.kind, applied: false \};/);
   const store = read("lib/amux/decisionMakerRequestStore.ts");
   const open = store.slice(store.indexOf("export async function readNextDecisionMakerOpenProposal"));
   assert.match(open.slice(0, 2_000), /ORDER BY random\(\)/, "one it may not apply never holds back the others");

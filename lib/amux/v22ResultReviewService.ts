@@ -78,7 +78,10 @@ export async function openAmuxV22ResultReviewCards(pending: PendingReview[]) {
     let text: string | null = null;
     try { text = await openAmuxV22TaskResultRow(row.attemptId, row); }
     catch { text = null; }
-    const findings = text ? parseAmuxV22Conclusion(text)?.findings ?? text : null;
+    // A result nobody can read is not put to the Decision Maker: approving
+    // what it cannot see would be a blind approval. It stays with the person.
+    if (!text) continue;
+    const findings = parseAmuxV22Conclusion(text)?.findings ?? text;
     cards.push(amuxV22ResultReviewRelayCard({ reviewId: row.reviewId,
       taskLabel: row.taskLabel, role: row.role, kind: row.kind, findings }));
   }
@@ -132,7 +135,8 @@ export async function readOpenAmuxV22ResultReviewOfCard(tx: Prisma.TransactionCl
 
 type LockedReview = { reviewId: string; state: string; attemptId: string; taskId: string;
   taskStatus: string; taskRevision: number; sourceSystem: string | null;
-  archived: boolean; attemptNumber: number | null; newestAttemptId: string | null };
+  archived: boolean; attemptNumber: number | null; newestAttemptId: string | null;
+  resultReadable: boolean };
 
 /**
  * Applies a decision on a review: under the audit chain lock and the kill
@@ -157,9 +161,11 @@ export async function applyAmuxV22ResultReviewDecision(tx: Prisma.TransactionCli
     SELECT v."id" AS "reviewId", v."state", v."attemptId", v."taskId",
       w."status" AS "taskStatus", w."revision" AS "taskRevision", w."sourceSystem",
       w."archivedAt" IS NOT NULL AS "archived",
-      a."attemptNumber", a."id" AS "newestAttemptId"
+      a."attemptNumber", a."id" AS "newestAttemptId",
+      (r."bodyPurgedAt" IS NULL AND r."ciphertext" IS NOT NULL) AS "resultReadable"
     FROM "AmuxV22ResultReview" v
     JOIN "AmuxWorkItem" w ON w."id" = v."taskId"
+    LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = v."attemptId" AND r."taskId" = v."taskId"
     LEFT JOIN LATERAL (
       SELECT x."id", x."attemptNumber" FROM "AmuxExecutionAttempt" x
       WHERE x."taskId" = v."taskId" ORDER BY x."startedAt" DESC, x."id" DESC LIMIT 1
@@ -176,6 +182,16 @@ export async function applyAmuxV22ResultReviewDecision(tx: Prisma.TransactionCli
         "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
       WHERE "id" = ${input.reviewId} AND "state" = 'open'`;
     return { applied: true as const, outcome: "cancelled" as const };
+  }
+  // A result whose body is gone cannot be approved or retried on its
+  // strength: the review goes to the person, whose escalation is open.
+  if (!row.resultReadable && input.decision !== "block") {
+    await tx.$executeRaw`
+      UPDATE "AmuxV22ResultReview" SET "handoffReason" = 'result_unreadable',
+        "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
+        "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+      WHERE "id" = ${input.reviewId} AND "state" = 'open' AND "handoffAt" IS NULL`;
+    return { applied: false as const, outcome: "handed_off" as const };
   }
   let target = amuxV22ResultReviewTarget(input.decision);
   if (target === "todo" && settlementDestinationForBudget({ requested_status: "todo",

@@ -210,6 +210,30 @@ test("an unreadable answer hands the review to a person once, and the card dispa
     { questionId: filed.reviewId, cardId: card, now: new Date() })), { recorded: true });
 });
 
+test("a result whose body is gone is never approved on the DM's word: the review goes to the person", async () => {
+  const seed = await seedReview();
+  await asReplica((tx) => tx.$executeRaw`
+    UPDATE "AmuxV22TaskResult" SET "bodyPurgedAt" = now(), "ciphertext" = NULL, "keyId" = NULL,
+      "keyVersion" = NULL WHERE "attemptId" = ${seed.attemptId}`);
+  assert.deepEqual(await apply(seed.reviewId, "approve", { replica: true }),
+    { applied: false, outcome: "handed_off" });
+  assert.equal((await taskOf(seed.taskId)).status, "review");
+  assert.equal((await escalationOf(seed.taskId)).status, "open");
+  const review = await reviewOf(seed.reviewId);
+  assert.equal(review.state, "open");
+  assert.equal(review.handoffReason, "result_unreadable");
+  const rows = await prisma.$transaction((tx) => readAmuxV22ResultReviewSyncRows(tx));
+  assert.ok(!rows.pending.some((row) => row.reviewId === seed.reviewId), "no card for a handed-off review");
+});
+
+test("a conclusion verdict never stands without its digest (the CHECK itself, past the row guards)", async () => {
+  const seed = await seedReview();
+  const refused = await asReplica((tx) => tx.$executeRaw`
+    UPDATE "AmuxV22TaskResult" SET "conclusionSha256" = NULL WHERE "attemptId" = ${seed.attemptId}`)
+    .then(() => false, (error: Error) => /AmuxV22TaskResult_conclusion_check/.test(error.message));
+  assert.equal(refused, true);
+});
+
 test("the tables accept the dm source and refuse what the lifecycle does not allow", async () => {
   const seed = await seedReview();
   const refused = async (promise: Promise<unknown>) => {
