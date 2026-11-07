@@ -168,8 +168,8 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
     assert.equal(insertedValues[0]?.[2], receipt.digest);
     assert.equal(insertedValues[0]?.[8], "anthropic_api");
     assert.equal(insertedValues[0]?.[18], "anthropic_messages_api");
-    assert.equal(insertedValues[0]?.[28], "price-v1");
-    assert.equal(insertedValues[0]?.[29], BigInt(receipt.projectedCostMicroUsd));
+    assert.equal(insertedValues[0]?.[29], "price-v1");
+    assert.equal(insertedValues[0]?.[30], BigInt(receipt.projectedCostMicroUsd));
     assert.equal(priceReads, 0,
       "native settlement must not consult the assignment price");
     existingDigests.set(attemptId, first.receiptDigest);
@@ -284,8 +284,8 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
     await recordAmuxCliUsage(tx as never, ordinaryReceipt);
     assert.equal(priceReads, 1,
       "ordinary CLI projection reads the price the assignment reserved against");
-    assert.equal(insertedValues[2]?.[28], "price-v2");
-    assert.equal(insertedValues[2]?.[29], BigInt(6));
+    assert.equal(insertedValues[2]?.[29], "price-v2");
+    assert.equal(insertedValues[2]?.[30], BigInt(6));
     assert.ok(authorityCalls >= 5);
 
     // No verified cache-write rate: a run that wrote to the cache is unpriced.
@@ -295,12 +295,12 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
       binding: { kind: "task_attempt" as const,
         attemptId: "00000000-0000-4000-8000-000000000008" },
       observed: { ...ordinaryReceipt.observed, cacheCreationInputTokens: 5 } });
-    assert.equal(insertedValues[3]?.[29], null);
+    assert.equal(insertedValues[3]?.[30], null);
     await recordAmuxCliUsage(tx as never, { ...ordinaryReceipt,
       invocationId: "00000000-0000-4000-8000-000000000009",
       binding: { kind: "task_attempt" as const,
         attemptId: "00000000-0000-4000-8000-000000000009" } });
-    assert.equal(insertedValues[4]?.[29], BigInt(6),
+    assert.equal(insertedValues[4]?.[30], BigInt(6),
       "a run with no cache writes is still priced");
     routeCacheWrite = 400_000;
 
@@ -311,7 +311,7 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
       invocationId: "00000000-0000-4000-8000-00000000000a",
       binding: { kind: "task_attempt" as const,
         attemptId: "00000000-0000-4000-8000-00000000000a" } });
-    assert.equal(insertedValues[5]?.[28], "legacy-price");
-    assert.equal(insertedValues[5]?.[29], BigInt(6));
+    assert.equal(insertedValues[5]?.[29], "legacy-price");
+    assert.equal(insertedValues[5]?.[30], BigInt(6));
     legacyAssignment = false;
   });
