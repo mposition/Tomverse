@@ -38,6 +38,11 @@ const rooms: AgentOfficeLiveRooms = {
   trust: { kind: "not_permitted" },
   engineering: unread,
   amux: { kind: "no_catalog" },
+  // The office's own rooms; the board reads none of them.
+  amuxDetail: unread,
+  inbox: { dmAttention: null, v22Questions: null, planRefusals: null },
+  merges: unread,
+  history: unread,
 };
 
 const extras = {
