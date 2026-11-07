@@ -37,7 +37,9 @@ export const AMUX_V22_OWNER_QUESTION_STATES =
 export type AmuxV22OwnerQuestionState =
   (typeof AMUX_V22_OWNER_QUESTION_STATES)[number];
 
-export const AMUX_V22_OWNER_ANSWER_SOURCES = ["operator", "dm_confirmed"] as const;
+/** dm: a Decision Maker answer the app applied without the operator's
+ * confirmation (owner decision 2026-11-07, behind TOMVERSE_AMUX_DM_APPROVER). */
+export const AMUX_V22_OWNER_ANSWER_SOURCES = ["operator", "dm_confirmed", "dm"] as const;
 export type AmuxV22OwnerAnswerSource =
   (typeof AMUX_V22_OWNER_ANSWER_SOURCES)[number];
 
@@ -128,8 +130,9 @@ export const AMUX_V22_OWNER_QUESTION_RULES = [
 ].join("\n");
 
 const answerLines = (answer: string, source: AmuxV22OwnerAnswerSource) => [
-  `The owner answered (${source === "operator" ?
-    "operator" : "Decision Maker proposal confirmed by the operator"}):`,
+  `The owner answered (${source === "operator" ? "operator" :
+    source === "dm" ? "Decision Maker, acting for the owner" :
+      "Decision Maker proposal confirmed by the operator"}):`,
   answer,
 ].join("\n");
 

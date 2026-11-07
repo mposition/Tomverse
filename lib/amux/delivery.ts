@@ -18,8 +18,14 @@ import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
   "@/lib/amux/v22TaskExecutionCore";
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
   "@/lib/amux/v22ExternalAuthorityCore";
-import { AMUX_V22_OWNER_QUESTION_RULES, buildAmuxV22ResumeSection } from
-  "@/lib/amux/v22OwnerQuestionCore";
+import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
+  buildAmuxV22ResumeSection } from "@/lib/amux/v22OwnerQuestionCore";
+import { AMUX_V22_CONCLUSION_ENV, AMUX_V22_CONCLUSION_RULES,
+  amuxV22ConclusionMode, buildAmuxV22PriorConclusionSection } from
+  "@/lib/amux/v22ConclusionCore";
+import { AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS,
+  openAmuxV22PriorConclusions, readAmuxV22PriorConclusionRows } from
+  "@/lib/amux/v22PriorConclusionService";
 import { AMUX_V22_RESUME_ROWS_PRISMA_CALLS, openAmuxV22ResumeContext,
   readAmuxV22ResumeRows } from "@/lib/amux/v22OwnerQuestionService";
 import { amuxV22WorkerSafeStopFenced } from
@@ -301,10 +307,12 @@ export async function pullAmuxWorkDelivery(input: {
   // another Task's sealed brief with stale keys.
   const v22Enabled = amuxV22TaskExecutionEnabled(
     process.env[AMUX_V22_TASK_EXECUTION_ENV]);
-  const { sealedCandidate, candidateCard, resumeRows } = v22Enabled ?
+  const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
+  const { sealedCandidate, candidateCard, resumeRows, priorRows } = v22Enabled ?
     await withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.deliveryKeyRead,
       prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryKeyRead.prismaCallCeiling +
-        AMUX_V22_RESUME_ROWS_PRISMA_CALLS }, async (tx) => {
+        AMUX_V22_RESUME_ROWS_PRISMA_CALLS + AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS },
+    async (tx) => {
       const sealedCandidate = await tx.amuxWorkDelivery.findFirst({
         where: { worker: input.worker, prompt: AMUX_V22_SEALED_DELIVERY_MARKER,
           status: { in: ["queued", "leased"] }, acknowledgedAt: null,
@@ -323,8 +331,13 @@ export async function pullAmuxWorkDelivery(input: {
       // the answer and the previous change (v22OwnerQuestionCore.ts).
       const resumeRows = sealedCandidate ? await readAmuxV22ResumeRows(tx,
         sealedCandidate.taskId) : null;
-      return { sealedCandidate, candidateCard, resumeRows };
-    }) : { sealedCandidate: null, candidateCard: null, resumeRows: null };
+      // Owner decision 2026-11-07: the conclusions of the finished Tasks this
+      // one depends on go into its prompt as reference material.
+      const priorRows = sealedCandidate && conclusionMode !== "off" ?
+        await readAmuxV22PriorConclusionRows(tx, sealedCandidate.taskId) : null;
+      return { sealedCandidate, candidateCard, resumeRows, priorRows };
+    }) : { sealedCandidate: null, candidateCard: null, resumeRows: null,
+      priorRows: null };
   const snapshot = candidateCard?.sourceSnapshot;
   const ideaId = snapshot && typeof snapshot === "object" &&
     !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
@@ -349,13 +362,17 @@ export async function pullAmuxWorkDelivery(input: {
       ] : []),
     ]) : null;
   const resume = resumeRows ? await openAmuxV22ResumeContext(resumeRows) : null;
+  // A body purged at 90 days, or one that cannot be opened, leaves its entry out.
+  const priorEntries = priorRows ? await openAmuxV22PriorConclusions(priorRows)
+    .catch(() => []) : [];
   const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow, now: Date,
     protocolCapabilities: readonly string[]) => {
     if (delivery.prompt !== AMUX_V22_SEALED_DELIVERY_MARKER) {
       if (amuxWorkerRuntimeUsesReadOnlyApi(protocolCapabilities))
         throw new Error("ordinary delivery cannot use a read-only API runtime");
-      return { prompt: delivery.prompt, v22Execution: null };
+      return { prompt: delivery.prompt, v22Execution: null,
+        priorConclusionDigest: null };
     }
     if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
     if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
@@ -561,8 +578,12 @@ export async function pullAmuxWorkDelivery(input: {
       }
       const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
         `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n`;
+      // An investigate (or verify) run ends with a structured conclusion.
+      const conclusionRules = conclusionMode !== "off" &&
+        amuxV22ExecutionRole(assignment.role) === "investigate" ?
+        `${AMUX_V22_CONCLUSION_RULES}\n\n` : "";
       const tail = `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
-        `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` +
+        `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
         AMUX_V22_WORKER_AUTHORITY_NOTICE;
       const section = resume ? buildAmuxV22ResumeSection({
         ...resume, promptBytesWithoutSection:
@@ -572,6 +593,14 @@ export async function pullAmuxWorkDelivery(input: {
       // brief when it was given; only a brief that grew since gets here.
       if (section === null) throw new Error("v22 resume answer does not fit the prompt");
       const resumeSection = section ? `${section}\n` : "";
+      // Reference material only, after the resume answer, which must go whole:
+      // it takes what room is left under the sidecar's prompt bound, and is
+      // left out when nothing fits. The brief and its digest are unchanged.
+      const prior = priorRows?.taskId === delivery.taskId && priorEntries.length > 0 ?
+        buildAmuxV22PriorConclusionSection({ entries: priorEntries,
+          budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
+            Buffer.byteLength(head + resumeSection + tail, "utf8") }) : null;
+      const priorSection = prior ? `${prior.section}\n` : "";
       // The question this delivery resumes is marked once, by the pull that
       // first carries it; a pull of the same attempt again finds it resumed.
       if (resumeRows?.question.state === "answered") {
@@ -582,7 +611,8 @@ export async function pullAmuxWorkDelivery(input: {
         if (marked.count !== 1) throw new Error("v22 resume question changed");
       }
       return {
-        prompt: head + resumeSection + tail,
+        prompt: head + resumeSection + priorSection + tail,
+        priorConclusionDigest: prior?.digest ?? null,
         // The sidecar runs the execution role; the assignment keeps the Task's.
         v22Execution: { modelId: assignment.modelId,
           role: amuxV22ExecutionRole(assignment.role),
@@ -777,6 +807,9 @@ export async function pullAmuxWorkDelivery(input: {
           worker_instance_id: input.instanceId,
           worker_generation: input.generation,
           task_revision: delivery.taskRevision,
+          // The digest of the prior-conclusion section this prompt carries.
+          ...(content.priorConclusionDigest ?
+            { prior_conclusion_digest: content.priorConclusionDigest } : {}),
         },
         tx,
       });
