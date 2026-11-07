@@ -73,6 +73,12 @@ export const marketingAssetSubmissionSchema = z
     if (!MARKETING_ASSET_ID.test(submission.asset.id)) {
       context.addIssue({ code: "custom", message: "a stored asset id is media- followed by lower case letters, digits and -" });
     }
+    // A presenter speaks, so this provenance is a video's (owner decision
+    // 2026-11-07; AI_PRESENTER_PROVENANCE). The registry entry has no kind, so
+    // the rule is here and in MarketingAsset_presenter_check.
+    if (submission.asset.provenance === "capture_with_ai_presenter" && submission.kind !== "video") {
+      context.addIssue({ code: "custom", message: "capture_with_ai_presenter is a video's provenance" });
+    }
     if (!Object.hasOwn(MARKETING_ASSET_CONTENT_TYPES[submission.kind], submission.contentType)) {
       context.addIssue({ code: "custom", message: `${submission.contentType} is not a ${submission.kind} type` });
     }

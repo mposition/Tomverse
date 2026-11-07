@@ -1,6 +1,6 @@
 import "server-only";
 
-import { AI_ORIGIN_PROVENANCES } from "@/lib/marketingAssets";
+import { isAiOriginProvenance } from "@/lib/marketingAssets";
 import { readApprovedMarketingAssetLocation } from "@/lib/marketingAssetStore";
 import type { MarketingPublishAdapter } from "@/lib/marketingPublishAdapter";
 import { prisma } from "@/lib/prisma";
@@ -26,7 +26,7 @@ async function resolveStoredAsset(assetId: string): Promise<ZernioResolvedAsset 
   return {
     url: await createR2ReadUrl(location.r2Key, ASSET_URL_SECONDS),
     kind: location.kind,
-    aiOrigin: (AI_ORIGIN_PROVENANCES as readonly string[]).includes(location.provenance),
+    aiOrigin: isAiOriginProvenance(location.provenance),
   };
 }
 
