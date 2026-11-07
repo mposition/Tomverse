@@ -30,6 +30,7 @@ import { AMUX_V22_RECOVERY_HOST_SCOPE, AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
   amuxV22ReadOnlyApiExecutorEnabled, configuredAmuxV22ReadOnlyApiMetadata,
   configuredAmuxV22RecoveryProfile, amuxV22SafeStopJournalBinding,
   amuxV22RecoveryDigest, amuxV22RecoveryCost, amuxV22RecoveryProofReason,
+  amuxV22RecoveryJournalProven,
   amuxV22ReadOnlyRetryRouteCost, amuxV22ReadOnlyLaunchScope,
   amuxV22ReadOnlyLaunchScopeDigest, amuxV22ReadOnlyLaunchProofScope,
   amuxV22ReadOnlyLaunchScopeMatchesIntent, amuxV22ReadOnlyLaunchExecutorKind,
@@ -409,6 +410,13 @@ function evidenceAuditAction(requestKind: string) {
   return requestKind === "safe_stop" ?
     "amux.v22.recovery.safe_stop_reported" : "amux.v22.recovery.inspected";
 }
+/** Journal evidence proves the stop from the sidecar unit and the durable
+ * terminal it reads, not from the bridge registration the prior attempt ran
+ * under: a bridge that registered again since then changes nothing it shows. */
+const journalProvenReport = (report: unknown) => {
+  const parsed = amuxV22RecoveryEvidenceSchema.safeParse(report);
+  return parsed.success && amuxV22RecoveryJournalProven(parsed.data);
+};
 /** Reuse the existing worker observation window; never refresh immutable evidence. */
 function evidenceFresh(recordedAt: Date, now: Date) {
   const age = now.getTime() - recordedAt.getTime();
@@ -894,7 +902,8 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
     // A runtime change only matters to a proof that would otherwise verify. A
     // legacy report already proves nothing about the prior invocation, and a
     // restart since that attempt must not hide that reason (policy v46).
-    if (reason === null && !await currentRuntime(tx, inspection))
+    if (reason === null && !amuxV22RecoveryJournalProven(input) &&
+        !await currentRuntime(tx, inspection))
       reason = "runtime_observation_unverified";
     const auditId = await recordAmuxV22RecoveryEvidenceAudit(tx, input.evidenceId, {
       taskId: task.id, inspectionId: inspection.id, priorAttemptId: inspection.priorAttemptId,
@@ -1268,7 +1277,8 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
       }
       if (evidence?.verified && !evidenceFresh(evidence.recordedAt, now)) {
         state = "unverified"; reason = "evidence_stale";
-      } else if (evidence?.verified && !await currentRuntime(tx, inspection)) {
+      } else if (evidence?.verified && !journalProvenReport(evidence.report) &&
+          !await currentRuntime(tx, inspection)) {
         state = "unverified"; reason = "runtime_observation_unverified";
       }
     } catch {
@@ -1388,7 +1398,8 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
         inspection.priorAttemptId !== input.priorAttemptId || !evidence?.verified ||
         evidence.id !== input.evidenceId || evidence.evidenceDigest !== input.evidenceDigest ||
         evidence.recordedAt < inspection.requestedAt || reportDigest !== evidence.evidenceDigest ||
-        proofRefused || (inspection.requestKind === "inspect" && !await currentRuntime(tx, inspection)) ||
+        proofRefused || (inspection.requestKind === "inspect" &&
+          !journalProvenReport(evidence?.report) && !await currentRuntime(tx, inspection)) ||
         (inspection.requestKind === "safe_stop" &&
           (fenced.size !== inspection.profileWorkerNames.length || safeOtherWork)) ||
         !evidenceFresh(evidence.recordedAt, now) ||
