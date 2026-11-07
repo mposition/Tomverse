@@ -429,6 +429,9 @@ run(
     // Verified-trace analysis: off by default, facts only, one idea per case and
     // the daily limits, nothing past a report the server already ruled out.
     "tests/integration/trace-report-analysis.db.test.ts",
+    // Develop CI repair: off by default, a red head handed over once on its
+    // second sighting, audited as the system, and taken by the lane first.
+    "tests/integration/develop-ci-repair.db.test.ts",
     // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
     // supersede on a changed input, nothing for a closed or deleted report.
     "tests/integration/support-triage-worker.db.test.ts",

@@ -27,7 +27,6 @@ const CREATES_CARD = /\.amuxWorkItem\.(?:create|createMany|upsert)\s*\(|INSERT\s
 const NUMBERED = {
   "lib/amux/intakeRegistration.ts": "conversationIntake",
   "lib/amux/localIntakeRegistration.ts": "localIntake",
-  "lib/amux/agentIntake.ts": "engineeringAgent",
   "lib/amux/boardImportService.ts": "workboardImport",
   "app/api/internal/amux/tasks/route.ts": "snapshotSync",
   "lib/amux/ideaUnitDecisionStore.ts": "feature",

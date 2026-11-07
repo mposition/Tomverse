@@ -75,7 +75,6 @@ export type EngineeringAgentConsolePayload = {
   settings?: {
     mode: string;
     frozen: boolean;
-    registration: boolean;
     killSwitch: boolean;
     pullRequests: { occupied: number; limit: number; firstT1Window: boolean };
     decisions: { occupied: number; limit: number };
@@ -195,7 +194,7 @@ export async function readEngineeringAgentConsole(
   }
 
   const switches = await readEngineeringAgentSwitches(prisma);
-  const [bindings, pendingPublish, activeRuns, openOwnerItems, firstT1, registrationRow] = await Promise.all([
+  const [bindings, pendingPublish, activeRuns, openOwnerItems, firstT1] = await Promise.all([
     prisma.engineeringAgentBinding.count({ where: { state: { in: ["open", "closed"] }, supersededAt: null } }),
     prisma.engineeringAgentWorkItem.count({
       where: { kind: "publish", state: { in: ["queued", "claimed", "needs_lookup", "outcome_unknown"] } },
@@ -207,7 +206,6 @@ export async function readEngineeringAgentConsole(
       orderBy: { startedAt: "asc" },
       select: { startedAt: true },
     }),
-    prisma.appSetting.findUnique({ where: { key: "feature.engineeringAgentRegistration" }, select: { value: true } }),
   ]);
   const queues = decideOwnerQueues({
     openPrBindings: bindings + pendingPublish + activeRuns,
@@ -220,7 +218,6 @@ export async function readEngineeringAgentConsole(
     settings: {
       mode: switches.mode,
       frozen: switches.frozen,
-      registration: registrationRow?.value === "on",
       killSwitch: killSwitchEngaged(process.env[ENGINEERING_AGENT_KILL_SWITCH_ENV]),
       pullRequests: {
         occupied: bindings + pendingPublish + activeRuns,

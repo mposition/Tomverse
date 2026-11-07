@@ -12,7 +12,6 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { REGISTRATION_SOURCES } from "@/lib/engineeringAgentRegistrationGuard";
 import { checkListing, gitObjectId, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
 
@@ -23,10 +22,7 @@ const API_VERSION = "2022-11-28";
 const TIMEOUT_MS = 8_000;
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_TREE_JSON_BYTES = 5 * 1024 * 1024;
-const MAX_BACKLOG_BYTES = 1024 * 1024;
 const MAX_CHECK_RUNS = 100;
-/** One page of open pull requests; more than this and the list is refused, not cut. */
-const MAX_OPEN_PULLS = 100;
 const SHA = /^[0-9a-f]{40}$/;
 
 export const ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV = "ENGINEERING_AGENT_GITHUB_READ_TOKEN";
@@ -144,58 +140,6 @@ const record = (value: unknown): Record<string, unknown> | null =>
 
 type Deps = { env?: Readonly<Record<string, string | undefined>>; fetchImpl?: FetchLike };
 const withDefaults = (deps: Deps) => ({ env: deps.env ?? process.env, fetchImpl: deps.fetchImpl ?? fetch });
-
-/** The shared backlog branch's head commit: the pin a registration round starts from (§2.2 S1). */
-export async function readEngineeringAgentBacklogHead(deps: Deps = {}): Promise<string> {
-  const branch = REGISTRATION_SOURCES.S1.branch;
-  const body = record(await githubJson(`/commits/${encodeURIComponent(branch)}`, withDefaults(deps)));
-  const sha = typeof body?.sha === "string" ? body.sha.toLowerCase() : null;
-  if (sha === null || !SHA.test(sha)) throw new EngineeringAgentGitHubReadError("invalid_response");
-  return sha;
-}
-
-/**
- * A pinned commit must be the branch's head or behind it on the same line: a
- * commit of another branch is not the source, whatever it holds.
- */
-async function requireOnBranch(
-  pinnedCommit: string,
-  branch: string,
-  resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
-) {
-  if (!SHA.test(pinnedCommit)) throw new EngineeringAgentGitHubReadError("invalid_input");
-  const comparison = record(
-    await githubJson(`/compare/${pinnedCommit}...${encodeURIComponent(branch)}`, resolved),
-  );
-  if (comparison?.status !== "identical" && comparison?.status !== "ahead") {
-    throw new EngineeringAgentGitHubReadError("invalid_input");
-  }
-}
-
-/** The backlog document as it stands at a pinned commit of the backlog branch (§2.2 S1). */
-export async function readEngineeringAgentBacklogAt(pinnedCommit: string, deps: Deps = {}): Promise<string> {
-  if (!SHA.test(pinnedCommit)) throw new EngineeringAgentGitHubReadError("invalid_input");
-  const resolved = withDefaults(deps);
-  await requireOnBranch(pinnedCommit, REGISTRATION_SOURCES.S1.branch, resolved);
-  const file = record(
-    await githubJson(
-      `/contents/${REGISTRATION_SOURCES.S1.path.split("/").map(encodeURIComponent).join("/")}?ref=${pinnedCommit}`,
-      resolved,
-    ),
-  );
-  if (file?.type !== "file" || file.encoding !== "base64" || typeof file.content !== "string") {
-    throw new EngineeringAgentGitHubReadError("invalid_response");
-  }
-  const bytes = Buffer.from(file.content.replace(/\n/g, ""), "base64");
-  if (bytes.byteLength > MAX_BACKLOG_BYTES) throw new EngineeringAgentGitHubReadError("oversized_response");
-  // A NUL is not text: the whole source is refused, not the row that holds it.
-  if (bytes.includes(0)) throw new EngineeringAgentGitHubReadError("not_text");
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new EngineeringAgentGitHubReadError("not_text");
-  }
-}
 
 export type EngineeringAgentCheckRun = { id: number; name: string; conclusion: string | null };
 
@@ -348,73 +292,6 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
   }
   return { base, rootTreeId, baseGitattributes,
     baseCommitterDate };
-}
-
-/**
- * The check runs of an S2 proposal's pinned commit, which must be develop's
- * head or behind it on develop: a caller's commit of another line is not
- * develop's CI, whatever fails there.
- */
-export async function readEngineeringAgentCheckRunsAt(sha: string, deps: Deps = {}): Promise<EngineeringAgentCheckRun[]> {
-  if (!SHA.test(sha)) throw new EngineeringAgentGitHubReadError("invalid_input");
-  const resolved = withDefaults(deps);
-  await requireOnBranch(sha, "develop", resolved);
-  return checkRunsAt(sha, resolved);
-}
-
-/** One dependabot pull request as it stands now: its head and the checks that fail there (§2.2 S3). */
-export async function readEngineeringAgentDependabotPull(
-  prNumber: number,
-  deps: Deps = {},
-): Promise<{ prNumber: number; headSha: string; failingChecks: string[] } | null> {
-  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
-  const resolved = withDefaults(deps);
-  const value = record(await githubJson(`/pulls/${prNumber}`, resolved));
-  const user = record(value?.user);
-  const head = record(value?.head);
-  if (value?.state !== "open" || user?.login !== "dependabot[bot]") return null;
-  const headSha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
-  if (headSha === null || !SHA.test(headSha)) throw new EngineeringAgentGitHubReadError("invalid_response");
-  const runs = await checkRunsAt(headSha, resolved);
-  const failingChecks = runs
-    .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out")
-    .map((run) => run.name);
-  return { prNumber, headSha, failingChecks };
-}
-
-/**
- * Open dependabot pull requests and the checks that fail on each head (§2.2
- * S3). The PRs are only read. The author is filtered from the whole open
- * list, never from a cut of it: more open pull requests than one page holds
- * is a refusal, not a shorter list.
- */
-export async function readEngineeringAgentDependabotFailures(
-  deps: Deps = {},
-): Promise<Array<{ prNumber: number; headSha: string; failingChecks: string[] }>> {
-  const resolved = withDefaults(deps);
-  const page = await githubPage(`/pulls?state=open&per_page=${MAX_OPEN_PULLS}`, resolved);
-  const pulls = page.body;
-  if (!Array.isArray(pulls) || page.hasNext || pulls.length > MAX_OPEN_PULLS) {
-    throw new EngineeringAgentGitHubReadError("invalid_response");
-  }
-  const out: Array<{ prNumber: number; headSha: string; failingChecks: string[] }> = [];
-  for (const pull of pulls) {
-    const value = record(pull);
-    const user = record(value?.user);
-    const head = record(value?.head);
-    if (user?.login !== "dependabot[bot]") continue;
-    const prNumber = value?.number;
-    const headSha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
-    if (typeof prNumber !== "number" || !Number.isSafeInteger(prNumber) || headSha === null || !SHA.test(headSha)) {
-      throw new EngineeringAgentGitHubReadError("invalid_response");
-    }
-    const runs = await checkRunsAt(headSha, resolved);
-    const failingChecks = runs
-      .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out")
-      .map((run) => run.name);
-    out.push({ prNumber, headSha, failingChecks });
-  }
-  return out;
 }
 
 /* ------------------------------------------------------------------------- */

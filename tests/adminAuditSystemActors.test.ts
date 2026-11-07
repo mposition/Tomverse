@@ -159,6 +159,8 @@ test("the system actor list is closed and changes only by review", () => {
     "product-research-observer",
     "product-research-retention",
     "product-research-scout",
+    // A red develop head handed to the idea lane as one SEV1 idea.
+    "develop-ci-repair",
     // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
     "billing-finance-ops-intake",
     "support-triage-account-deletion",
