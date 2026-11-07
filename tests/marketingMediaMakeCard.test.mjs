@@ -50,9 +50,10 @@ function setup() {
   const packDir = join(root, "sources", "media-x-short");
   mkdirSync(packDir, { recursive: true });
   writeFileSync(join(packDir, "a.png"), stripes([21, 93, 251]));
+  writeFileSync(join(packDir, "src.asset.json"), JSON.stringify({ asset: { claimIds: ["claim-1"] } }));
   writeFileSync(
     join(packDir, "pack.json"),
-    JSON.stringify({ assetId: "media-x-short", locale: "en", captures: { a: { file: "a.png", text: "answer A words" } } }),
+    JSON.stringify({ assetId: "media-x-short", locale: "en", videoAsset: "src.asset.json", captures: { a: { file: "a.png", text: "answer A words" } } }),
   );
   return { root, pack: join(packDir, "pack.json") };
 }
@@ -120,6 +121,8 @@ test("a capture makes a capture asset whose transcript carries the capture's wor
     const { asset: entry, transcript } = asset(ctx.root, "20261101", "media-20261101-review-en-card");
     assert.equal(entry.provenance, "capture");
     assert.equal(entry.depictsProductInterface, true);
+    // It keeps the claims of the approved short its captures came from.
+    assert.deepEqual(entry.claimIds, ["claim-1"]);
     assert.deepEqual(transcript.en.split(String.fromCharCode(10)), ["Which one", "do you trust?", "answer A words"]);
   } finally {
     rmSync(ctx.root, { recursive: true, force: true });

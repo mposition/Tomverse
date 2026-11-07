@@ -88,10 +88,16 @@ const KNOWN_MODELS = JSON.parse(readFileSync(path.join(toolDir, "features.json")
 // text}}), or the first packs' fixed five pictures.
 let captures = {};
 let packDir = null;
+// A card that shows a pack's captures rests on the same claims as the approved
+// short they came from, as cards did before (2026-11-04).
+let packClaimIds = [];
 if (spec.pack) {
   const packPath = path.resolve(spec.pack);
   const pack = JSON.parse(readFileSync(packPath, "utf8"));
   packDir = path.dirname(packPath);
+  const sourceAsset = path.join(packDir, pack.videoAsset ?? "");
+  if (!pack.videoAsset || !existsSync(sourceAsset)) fail("the pack names no source asset file to take its claims from");
+  packClaimIds = [...(JSON.parse(readFileSync(sourceAsset, "utf8")).asset?.claimIds ?? [])];
   captures =
     pack.captures ??
     Object.fromEntries(
@@ -369,9 +375,13 @@ writeFileSync(
         // them, so the asset is AI generated (lib/marketingAssets.ts).
         provenance: ai ? "ai_generated" : usedCaptures.length > 0 ? "capture" : "operator_upload",
         allowedChannels: channels,
-        // A feature claim needs its FAQ sentence in the words (the Guard's
-        // feature_not_public); a card states the feature in its own words.
-        claimIds: [],
+        // A card with captures keeps its source short's claims. A card without
+        // them declares none: a feature claim needs its FAQ paragraph verbatim
+        // in the words (the Guard's feature_not_public), which neither the card
+        // nor a post carrying it could hold; its stated facts go to a person
+        // through the Guard's undeclared_fact. The owner decides on 2026-11-07
+        // whether the Guard should check an asset's feature gate instead.
+        claimIds: usedCaptures.length > 0 ? packClaimIds : [],
         validUntil,
         disclosure: Object.fromEntries(channels.map((channel) => [channel, ai ? "caption_disclosure" : "none"])),
         depictsProductInterface: usedCaptures.length > 0,

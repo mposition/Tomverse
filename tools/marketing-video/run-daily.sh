@@ -57,9 +57,11 @@ if ! find job/research-notes -name '*.json' -mtime -7 | grep -q .; then
       --disallowedTools "mcp__*" \
       --max-turns 30 \
       --output-format stream-json --verbose \
-      | tee -a "job/research-$(date -u +%Y%m%d).jsonl" \
-      | node print-run-result.mjs > "job/research-answer-$day.txt" || true
-    node check-research-notes.mjs "job/research-answer-$day.txt" job/research-raw/ads.json "job/research-notes/$day.json" || true
+      | node print-run-result.mjs > job/research-raw/answer.txt || true
+    # Only the check's own line is kept: the call's stream and its unchecked
+    # answer can carry the ads' words, so they stay in research-raw and go with it.
+    node check-research-notes.mjs job/research-raw/answer.txt job/research-raw/ads.json "job/research-notes/$day.json" \
+      >> "job/research-$(date -u +%Y%m%d).log" 2>&1 || true
   fi
   rm -rf job/research-raw
 fi
