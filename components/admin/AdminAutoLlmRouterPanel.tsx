@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Route } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import {
   describeAdminApiFailure,
   readAdminApiFailure,
@@ -9,10 +9,14 @@ import {
 } from "@/lib/adminApiOutcome";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminAutoLlmRouterMessages } from "@/lib/adminMessages/autoLlmRouter";
+import { adminRoutingScreensMessages } from "@/lib/adminMessages/routingScreens";
 import {
   useAdminLocale,
   useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminFetch } from "@/lib/adminFetch";
 
 type RouterModelOption = { id: string; name: string; provider: string };
@@ -23,14 +27,34 @@ type RouterSetting = {
   options: RouterModelOption[];
 };
 
+/** What the Auto overview draws for the router model: unread, off, or a model. */
+export type AutoRouterModelState = "unknown" | "off" | RouterModelOption;
+
 const OFF = "";
+
+const modelStateOf = (setting: RouterSetting): AutoRouterModelState => {
+  if (setting.modelId === null) return "off";
+  return setting.options.find((option) => option.id === setting.modelId) ?? "unknown";
+};
 
 /**
  * Which model makes Auto's per-prompt choice. One select, one save; off is a
  * real choice in the list, not an absent value.
+ *
+ * `canWrite` only draws the controls locked with the access they need; the
+ * route refuses a write from any other role on its own. `onModelChange`
+ * reports the saved model after every read and save so a screen drawing the
+ * router (the Auto overview) never shows a model that is not the saved one.
  */
-export function AdminAutoLlmRouterPanel() {
+export function AdminAutoLlmRouterPanel({
+  canWrite = true,
+  onModelChange,
+}: {
+  canWrite?: boolean;
+  onModelChange?: (state: AutoRouterModelState) => void;
+} = {}) {
   const m = useAdminMessages(adminAutoLlmRouterMessages);
+  const screens = useAdminMessages(adminRoutingScreensMessages);
   const { locale: apiLocale } = useAdminLocale();
   const [setting, setSetting] = useState<RouterSetting | null>(null);
   const [draft, setDraft] = useState(OFF);
@@ -45,6 +69,7 @@ export function AdminAutoLlmRouterPanel() {
     setDraft(next.modelId ?? OFF);
     setRewriteDraft(next.rewrite);
     setImageTriageDraft(next.imageTriage);
+    onModelChange?.(modelStateOf(next));
   };
 
   const load = useCallback(async () => {
@@ -63,6 +88,8 @@ export function AdminAutoLlmRouterPanel() {
         describeAdminApiFailure({ status: 0, fallback: m.loadFailed, locale: apiLocale })
       );
     }
+    // `apply` closes over `onModelChange`, which a parent passes as a stable setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiLocale, m.loadFailed]);
 
   useEffect(() => {
@@ -105,23 +132,27 @@ export function AdminAutoLlmRouterPanel() {
     draft === (setting?.modelId ?? OFF) &&
     rewriteDraft === (setting?.rewrite ?? false) &&
     imageTriageDraft === (setting?.imageTriage ?? false);
+  const locked = !canWrite;
 
   return (
-    <section
+    <AdminTile
+      title={m.title}
+      description={m.description}
+      action={
+        setting ? (
+          <AdminStatusChip tone={setting.modelId === null ? "idle" : "ok"}>
+            {setting.modelId === null ? screens.overview.routerOff : screens.overview.routerOn}
+          </AdminStatusChip>
+        ) : null
+      }
       data-testid="admin-auto-llm-router"
-      className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5"
     >
-      <h2 className="flex items-center gap-2 text-base font-bold text-zinc-100">
-        <Route className="h-4 w-4 text-blue-300" aria-hidden />
-        {m.title}
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-zinc-400">{m.description}</p>
-      <div className="mt-4 flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <label className="flex min-w-64 flex-col gap-1 text-xs font-bold text-zinc-300">
           {m.label}
           <select
             value={draft}
-            disabled={!setting || saving}
+            disabled={!setting || saving || locked}
             onChange={(event) => {
               setDraft(event.target.value);
               setSaved(false);
@@ -137,27 +168,27 @@ export function AdminAutoLlmRouterPanel() {
             ))}
           </select>
         </label>
-        <button
-          type="button"
+        <AdminWriteButton
+          writable={canWrite}
+          requiredRole={screens.needsRole}
           onClick={() => void save()}
           disabled={!setting || saving || unchanged}
           data-testid="admin-auto-llm-router-save"
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white disabled:opacity-50"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
           {saving ? m.saving : m.save}
-        </button>
+        </AdminWriteButton>
         {saved ? (
           <span role="status" className="text-xs font-medium text-zinc-300">
             {m.saved}
           </span>
         ) : null}
       </div>
-      <label className="mt-4 flex min-h-11 items-start gap-2 text-sm text-zinc-300">
+      <label className="flex min-h-11 items-start gap-2 text-sm text-zinc-300">
         <input
           type="checkbox"
           checked={rewriteDraft}
-          disabled={!setting || saving}
+          disabled={!setting || saving || locked}
           onChange={(event) => {
             setRewriteDraft(event.target.checked);
             setSaved(false);
@@ -170,11 +201,11 @@ export function AdminAutoLlmRouterPanel() {
           <span className="mt-1 block text-xs text-zinc-500">{m.rewriteDescription}</span>
         </span>
       </label>
-      <label className="mt-4 flex min-h-11 items-start gap-2 text-sm text-zinc-300">
+      <label className="flex min-h-11 items-start gap-2 text-sm text-zinc-300">
         <input
           type="checkbox"
           checked={imageTriageDraft}
-          disabled={!setting || saving}
+          disabled={!setting || saving || locked}
           onChange={(event) => {
             setImageTriageDraft(event.target.checked);
             setSaved(false);
@@ -187,8 +218,8 @@ export function AdminAutoLlmRouterPanel() {
           <span className="mt-1 block text-xs text-zinc-500">{m.imageTriageDescription}</span>
         </span>
       </label>
-      <p className="mt-3 text-xs text-zinc-500">{m.costNote}</p>
+      <p className="text-xs text-zinc-500">{m.costNote}</p>
       {failure ? <AdminApiFailureNotice failure={failure} onRetry={() => void load()} /> : null}
-    </section>
+    </AdminTile>
   );
 }

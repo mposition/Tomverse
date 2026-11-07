@@ -956,7 +956,7 @@ test("Routing is the router, its optimizers, its shadow comparison and the owner
   const page = readPage("routing");
   assert.doesNotMatch(page, /AdminAmuxRoutingPanel/);
   assert.match(page, /<AdminRoutingShadowPanel \/>/);
-  assert.match(page, /<AdminAutoLlmRouterPanel \/>/);
+  assert.match(page, /<AutoRouterTab canWrite=\{canWrite\} \/>/);
   assert.match(page, /href="\/admin\/amux-execution\?tab=review"/);
   assert.match(readPage("amux-execution"), /<AdminAmuxRoutingPanel canInspectCards=\{isOwner\} focusEscalationId=/);
 });
