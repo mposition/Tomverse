@@ -140,16 +140,28 @@ export const amuxV4ReviewEvidenceMatches = (input: {
  * guess. Whether a retry is affordable is still the attempt budget's call. */
 const V22_RETRYABLE_BLOCK_REASONS = new Set<string>(["reported_result",
   ...AMUX_V22_CLI_FAILURE_REASON_CODES]);
+/** An expired attempt whose final result the server already stored is a
+ * finished run, not an unknown one: the bridge posts that result only after
+ * the sidecar returned it, so the CLI is no longer running. Only its
+ * settlement failed after the result landed (owner decision 2026-11-07,
+ * AMUX-FILEGEN-003 after a 409 settle). `storedResultAttemptId` is the attempt
+ * id of the Task's latest stored v22 result and must be this exact attempt. */
 export const amuxV22ReviewRetryHasVerifiedOutcome = (input: {
   sourceSystem: string | null;
-  attempt: { v22AssignmentId: string | null; outcome: string | null;
+  attempt: { id?: string; v22AssignmentId: string | null; outcome: string | null;
     toStatus: string | null; reason: string | null } | null;
+  storedResultAttemptId?: string | null;
 }) => input.sourceSystem !== "admin-idea-v4" || input.attempt === null ||
   (input.attempt.v22AssignmentId !== null &&
     input.attempt.outcome === "blocked" &&
     input.attempt.toStatus === "blocked" &&
     input.attempt.reason !== null &&
-    V22_RETRYABLE_BLOCK_REASONS.has(input.attempt.reason));
+    V22_RETRYABLE_BLOCK_REASONS.has(input.attempt.reason)) ||
+  (input.attempt.v22AssignmentId !== null &&
+    input.attempt.outcome === "expired" &&
+    input.attempt.toStatus === "blocked" &&
+    typeof input.attempt.id === "string" && input.attempt.id.length > 0 &&
+    input.storedResultAttemptId === input.attempt.id);
 
 export type AmuxReviewSubject = {
   escalation_id: string;
