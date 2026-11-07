@@ -446,11 +446,23 @@ async function readRequiredChecks(
  * A pull request's merge and its branches, from one read: enough to tell
  * whether an idea lane PR (amux-idea/<attemptId> into develop) merged.
  */
+/** Who merged, as a kind only (§9-10: the merger is an observation, never an identity). */
+function mergedByKindOf(
+  pull: Record<string, unknown> | null,
+  merged: boolean,
+): EngineeringAgentPullObservation["mergedByKind"] {
+  if (!merged) return "unknown";
+  if (record(pull?.performed_via_github_app)) return "app";
+  const mergedBy = record(pull?.merged_by);
+  return mergedBy?.type === "Bot" ? "bot" : mergedBy?.type === "User" ? "user" : "unknown";
+}
+
 export async function readEngineeringAgentPullMerge(
   prNumber: number,
   deps: Deps = {},
 ): Promise<{ state: "open" | "closed"; merged: boolean; mergedAt: Date | null; closedAt: Date | null;
-  baseRef: string; headRef: string }> {
+  baseRef: string; headRef: string; mergeCommitSha: string | null;
+  mergedByKind: EngineeringAgentPullObservation["mergedByKind"] }> {
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
   const pull = record(await githubJson(`/pulls/${prNumber}`, withDefaults(deps)));
   const state = pull?.state;
@@ -459,12 +471,14 @@ export async function readEngineeringAgentPullMerge(
   const merged = pull?.merged === true;
   const mergedAt = merged ? instant(pull?.merged_at) : null;
   const closedAt = state === "closed" ? instant(pull?.closed_at) : null;
+  const mergeCommitSha = merged && typeof pull?.merge_commit_sha === "string" ? pull.merge_commit_sha.toLowerCase() : null;
   if (pull?.number !== prNumber || (state !== "open" && state !== "closed") || typeof baseRef !== "string" ||
       typeof headRef !== "string" || (state === "closed" && closedAt === null) ||
-      (merged && (mergedAt === null || state !== "closed"))) {
+      (merged && (mergedAt === null || state !== "closed" || mergeCommitSha === null || !SHA.test(mergeCommitSha)))) {
     throw new EngineeringAgentGitHubReadError("invalid_response");
   }
-  return { state, merged, mergedAt, closedAt, baseRef, headRef };
+  return { state, merged, mergedAt, closedAt, baseRef, headRef, mergeCommitSha,
+    mergedByKind: mergedByKindOf(pull, merged) };
 }
 
 /**
@@ -496,10 +510,7 @@ export async function readEngineeringAgentPullObservation(
   ) {
     throw new EngineeringAgentGitHubReadError("invalid_response");
   }
-  const mergedBy = record(pull?.merged_by);
-  const mergedByKind = !merged ? "unknown" :
-    record(pull?.performed_via_github_app) ? "app" :
-    mergedBy?.type === "Bot" ? "bot" : mergedBy?.type === "User" ? "user" : "unknown";
+  const mergedByKind = mergedByKindOf(pull, merged);
 
   const page = await githubPage(`/pulls/${prNumber}/reviews?per_page=${MAX_REVIEWS}`, resolved);
   if (!Array.isArray(page.body) || page.hasNext || page.body.length > MAX_REVIEWS) {

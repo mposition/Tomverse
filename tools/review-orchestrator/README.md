@@ -560,6 +560,11 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 - 파일 내용만 바뀐 경우에만 씁니다. 목록에 파일이 들어오거나 빠지면(`paths_changed`) 스스로 나가는 게시를 결정하는 코드가 바뀐 것이므로 그대로 두어 사람이 읽게 합니다.
 - 스키마나 root가 다른 manifest(`other_schema`), 찾지 못한 import(`unresolved`)도 쓰지 않습니다. checkout 밖이나 일반 파일이 아닌 곳을 가리키는 import는 읽기 전에 `unresolved`가 됩니다.
 - 결과는 ledger의 `manifest`와 서버 로그에 남습니다. 병합은 여전히 운영자가 하고, 그 diff에 manifest 변경이 보입니다.
+- 이 코드는 `scripts/marketing-admission-code-core.mjs`에 있는데, 서버 checkout은 sparse(`tools/review-orchestrator`만)라 `scripts/`가 없습니다.
+  켜기 전에 한 번 `sudo -u review git -C /home/review/review-orchestrator sparse-checkout add scripts`를 실행합니다. 없으면 재생성만
+  `core_unavailable`로 남고 review 서버와 CI 수정은 그대로 돕니다. 2026-11-07에는 이 파일을 정적으로 import해서 review 서버까지 뜨지 못했습니다.
+  `tools/review-orchestrator`는 자기 폴더 밖을 정적으로 import하지 않습니다(`tests/reviewOrchestratorCiFix.test.mjs`가 검사합니다).
+- 운영자 승인 2026-11-07(채팅): 이 스위치를 켭니다.
 
 **Dependabot PR(운영자 결정 2026-10-26).**
 - 수정은 업데이트된 패키지에 맞춰 코드를 고치는 것입니다. 업데이트를 되돌리지 말라고 프롬프트에 적습니다.

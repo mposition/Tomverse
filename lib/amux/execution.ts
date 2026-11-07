@@ -66,6 +66,7 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
   v22ExecutionSourceForProvider,
+  v22KnownCliFailureReason,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
@@ -1511,7 +1512,7 @@ export async function settleAmuxV22TaskExecution(input: {
           cacheReadInputTokens: true, cacheCreationInputTokens: true,
           inputTokensIncludeCacheRead: true,
           inputTokensIncludeCacheWrite: true, completedTurns: true,
-          pricingVersion: true },
+          cliFailure: true, pricingVersion: true },
       });
       const events = apiExecutionReceipt && storedEvents.length === 0 &&
           settlementRecovery?.apiExecutionFrame ?
@@ -1525,6 +1526,11 @@ export async function settleAmuxV22TaskExecution(input: {
           where: { attemptId: input.attemptId },
           select: { taskId: true, bodyPurgedAt: true },
         }) : null;
+      // The assignment's provider names the CLI that ran it; an unknown
+      // provider matches no source and never settles.
+      const expectedExecutionSource = apiExecutionReceipt ?
+        "anthropic_messages_api" as const :
+        v22ExecutionSourceForProvider(settlementAssignment?.provider ?? "anthropic");
       const receiptsComplete = v22ExecutionReceiptVerified({
         attemptId: attempt.id, invocationIds: expectedIds, events,
         outcome: input.outcome,
@@ -1532,16 +1538,17 @@ export async function settleAmuxV22TaskExecution(input: {
         budgetBound: !!settlementRecovery?.riskAcceptanceId,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
-        // The assignment's provider names the CLI that ran it; an unknown
-        // provider matches no source and never settles.
-        expectedExecutionSource: apiExecutionReceipt ?
-          "anthropic_messages_api" :
-          v22ExecutionSourceForProvider(settlementAssignment?.provider ?? "anthropic"),
+        expectedExecutionSource,
       }) && (!apiExecutionReceipt || (events.length === 1 &&
         v22ReadOnlyApiReceiptMatchesUsage({ attemptId: attempt.id,
           outcome: input.outcome,
           pricingVersion: settlementRecovery!.apiExecutionFrame!.pricingVersion,
           receipt: apiExecutionReceipt, event: events[0]! })));
+      // Only a run whose receipt is not complete needs its cause: the CLI
+      // named it, so this is a known failure rather than an unknown outcome.
+      const knownCliFailure = receiptsComplete ? null :
+        v22KnownCliFailureReason({ attemptId: attempt.id,
+          events: storedEvents, expectedExecutionSource });
       if (input.outcome === "succeeded" &&
           (!storedResult || storedResult.taskId !== task.id ||
             storedResult.bodyPurgedAt !== null))
@@ -1597,13 +1604,19 @@ export async function settleAmuxV22TaskExecution(input: {
         where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
         select: { id: true, kind: true, patchDigest: true, baseSha: true },
       }) : null;
-      if (patch && !ownerQuestion && effectivePathDecision === "pass" &&
+      // A run that start never opened (Publisher halted, mode off, no
+      // consent: v22_publication_skipped) leaves the patch private. The Task
+      // still settles and goes to a person's review with no publication
+      // product; refusing here stopped the worker bridge on every accepted
+      // patch (2026-11-06). A run that exists but no longer matches is still
+      // a conflict.
+      if (run && patch && !ownerQuestion && effectivePathDecision === "pass" &&
           (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({
           where: { id: attempt.v22AssignmentId },
           select: { role: true, workItemId: true },
         });
-        if (!run || run.status !== "active" ||
+        if (run.status !== "active" ||
             !["shadow", "t1"].includes(run.modeAtStart) ||
             run.cardId !== task.id || run.baseSha !== patch.baseSha ||
             patch.taskId !== task.id ||
@@ -1664,7 +1677,7 @@ export async function settleAmuxV22TaskExecution(input: {
         budget.exhausted_limit ?? reviewDisposition?.reason ??
           (receiptsComplete ?
             (input.outcome === "blocked" ? "reported_result" : "execution_blocked") :
-            "usage_outcome_unknown");
+            knownCliFailure ?? "usage_outcome_unknown");
       if (gradeEscalated && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
@@ -1693,7 +1706,8 @@ export async function settleAmuxV22TaskExecution(input: {
           reason: gradeEscalated ? "contract_path_touched" :
             next === "blocked" ? blockedReason :
             budget.exhausted_limit ?? reviewDisposition?.reason ??
-                (receiptsComplete ? "reported_result" : "usage_outcome_unknown") },
+                (receiptsComplete ? "reported_result" :
+                  knownCliFailure ?? "usage_outcome_unknown") },
       });
       await tx.amuxWorkerRuntime.updateMany({ where: {
         workerName: input.worker, instanceId: input.instanceId,
@@ -1717,16 +1731,20 @@ export async function settleAmuxV22TaskExecution(input: {
         await tx.amuxV22TaskQuestion.update({ where: { id: recordedQuestion.id },
           data: { state: "cancelled" } });
       // The answer a resumed run read is kept until a run of the Task settles,
-      // so a resumed run that died first still hands it to the next one.
-      await tx.amuxV22TaskQuestion.updateMany({ where: {
-        taskId: task.id, state: "resumed",
-        answerText: { not: null } }, data: { answerText: null } });
+      // so a resumed run that died first still hands it to the next one. A
+      // grade escalation starts the Task over at a higher grade, so that run
+      // still needs the answer and it is kept for it too.
+      if (!gradeEscalated)
+        await tx.amuxV22TaskQuestion.updateMany({ where: {
+          taskId: task.id, state: "resumed",
+          answerText: { not: null } }, data: { answerText: null } });
       await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.v22.execution.settled", targetType: "AmuxWorkItem",
         targetId: task.id, summary: "Settled an assignment-bound AMUX v22 Task.",
         metadata: { attemptId: attempt.id, outcome: input.outcome,
           toStatus: next, invocationIds: expectedIds,
-          receiptsComplete, reservedCostMicrousd:
+          receiptsComplete, cliFailureReason: knownCliFailure,
+          reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString(),
           apiExecutionReceiptDigest: apiExecutionReceipt?.digest ?? null,
           v52PathDecision: gradeGuard ?

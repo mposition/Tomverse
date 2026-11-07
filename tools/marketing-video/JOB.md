@@ -22,10 +22,30 @@ not stopped by a rejection: 2026-11-04.
   the product screen, and never make a new Remotion short from scenes (the
   owner rejected that style on 2026-10-31).
 - Every asset is made in all three locales, `en`, `ko` and `zh-Hant`, each its
-  own asset (owner decision 2026-11-03).
+  own asset (owner decision 2026-11-03). Image cards are also made in `zh-Hans`
+  for RedNote, from the zh-Hant pack (owner decision 2026-11-07): see step 1.
 - **A refusal or a rejection does not stop the job.** If one locale's asset is
   refused, note it and go on with the next; tomorrow's run goes on as usual.
   Stop the whole run only when `list-approved.mjs` fails or no pack is usable.
+
+## Running commands
+
+The job allows one shape of shell command and denies every other without
+asking: a single command that starts with `node ` or `npx `. On 2026-11-06 and
+2026-11-07 the run stopped at its first call, `ls; ...; node list-approved.mjs;
+echo ...; date`, because the chain did not match.
+
+- Each Bash call is exactly one `node ...` command. No `;`, `&&`, `||`, `|`,
+  `>`, `cd`, `ls`, `cat`, `echo`, `date` or environment prefix. The working
+  directory is already `tools/marketing-video`.
+- Read files with the Read tool and write them with Write. The paths you need
+  are all known: `job/approved.json`, `job/history.json`, and
+  `job/sources/<asset-id>/pack.json` for each id in `job/approved.json`.
+- `<yyyymmdd>` and the Monday check use the Brisbane date, not the box's UTC
+  date (the job runs at 05:00 Brisbane, which is the previous day in UTC). Get
+  it with `node -p "new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Brisbane', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' })"`.
+- A denied call is not a failed step: write the same work as one plain
+  `node ...` command and try again. Never work around the rule another way.
 
 ## Inputs
 
@@ -62,6 +82,12 @@ usable packs.
    - Read the PNG with the Read tool: every line is whole, nothing overlaps the
      wrong element, the language is the locale's. If it is not, pick another
      headline pair and make it again (twice at most).
+   - Then one more card, `zh-Hans`, from the same topic's **zh-Hant** pack: a
+     spec with `"locale": "zh-Hans"` added, naming that pack's lines exactly as
+     they are (Traditional). `make-card.mjs` draws them in Simplified itself;
+     never convert or write the Simplified lines yourself. The id ends in
+     `-zh-hans-card`. Its captures stay as they were taken, so the answers in
+     them may read in Traditional; only the card's own lines must be Simplified.
 2. **Feed videos, on Mondays (Brisbane time).** For each usable pack whose short
    has no feed video in the history yet, in all three locales:
    - `node make-feed-video.mjs job/sources/<pack-asset-id>/pack.json media-<yyyymmdd>-<topic>-<locale lower case>-feed job/<yyyymmdd>`

@@ -425,6 +425,8 @@ test("v52 contract touch discards the ordinary grade and binds one frontier rece
     originalReceiptDigest: "a".repeat(64), newReceipt: null,
     classificationFailure: true,
   });
+  // The frontier rerun starts over and still needs the owner's answer.
+  assert.equal(world.questionAnswerClears, 0);
 });
 
 test("v52 settlement blocks a contract publish file omitted from the runner inventory", async () => {
@@ -544,6 +546,30 @@ test("v52 review record binds an implement patch, assignment and audit once", as
   }
 });
 
+test("an accepted patch whose start opened no publication run settles privately for review", async () => {
+  // Production 2026-11-06: the Publisher was halted, start skipped the run
+  // (v22_publication_skipped), and settlement refused the accepted patch with
+  // 409, which stopped the worker bridge and left the Task outcome_unknown.
+  world = makeWorld("succeeded");
+  world.attemptNumber = 1;
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "advanced";
+  world.reviewVerdict = "accept";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+    files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+  const input = await settlementInput("succeeded");
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...input, changedPaths: ["lib/ordinary.ts"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "review");
+  assert.equal(world.attemptUpdateData?.reason, "review_server_accepted");
+  assert.equal(world.escalations.length, 1);
+  assert.equal(world.escalations[0]?.reason, "human_review_required");
+});
+
 test("v52 review unknown blocks without another attempt", async () => {
   world = makeWorld("succeeded");
   world.attemptNumber = 1;
@@ -652,6 +678,73 @@ test("worker-blocked outcome preserves owner retry eligibility with and without 
   }
 });
 
+const claudeFailedEvent = (cliFailure: string | null) => ({
+  invocationId: attemptId, receiptDigest: "8".repeat(64), status: "failed",
+  completeness: "reported_partial", projectedApiCostMicrousd: BigInt(1),
+  cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+  selectedModelId: "claude-opus-5-5", provider: "anthropic",
+  authentication: "subscription", inputTokens: BigInt(1),
+  outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+  cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+  inputTokensIncludeCacheWrite: false, completedTurns: 13, cliFailure,
+  pricingVersion: null });
+
+/** The box bridge settles a failed CLI run as "failed" with its receipt and,
+ * refused for an incomplete receipt, again as "blocked" with none. */
+async function settleLikeBridge() {
+  const verified = await (await execution).settleAmuxV22TaskExecution({
+    attemptId, worker, instanceId, generation: 1, taskRevision: 5,
+    outcome: "failed", invocationIds: [attemptId] });
+  assert.deepEqual(verified, { settled: false, reason: "usage_unverified" });
+  return (await execution).settleAmuxV22TaskExecution({
+    attemptId, worker, instanceId, generation: 1, taskRevision: 5,
+    outcome: "blocked", invocationIds: [] });
+}
+
+async function ownerMayRetry() {
+  const { amuxV22ReviewRetryHasVerifiedOutcome } =
+    await import(mod("lib/amux/reviewApprovalCore.ts"));
+  return amuxV22ReviewRetryHasVerifiedOutcome({ sourceSystem: "admin-idea-v4",
+    attempt: { v22AssignmentId: "assignment-one", outcome: "blocked",
+      toStatus: "blocked", reason: String(world.attemptUpdateData?.reason) } });
+}
+
+test("a Claude turn-limit failure is a known failure the owner may retry", async () => {
+  for (const [cliFailure, reason] of [["turn_limit", "cli_turn_limit"],
+    ["execution_error", "cli_execution_error"],
+    ["budget_limit", "cli_budget_limit"]]) {
+    world = makeWorld("failed");
+    world.storedEvents = [claudeFailedEvent(cliFailure)];
+    const result = await settleLikeBridge();
+    assert.equal(result.settled, true);
+    // The partial receipt certifies no cost: the Task waits for the owner
+    // instead of requeueing itself, but for a known cause.
+    assert.equal(world.taskUpdateData?.status, "blocked");
+    assert.equal(world.attemptUpdateData?.outcome, "blocked");
+    assert.equal(world.attemptUpdateData?.reason, reason);
+    assert.equal(world.escalations.at(-1)?.reason, reason);
+    assert.equal(await ownerMayRetry(), true);
+  }
+});
+
+test("a failure with no named cause, or no receipt at all, stays unknown", async () => {
+  for (const events of [[claudeFailedEvent("unknown")],
+    [claudeFailedEvent(null)], []]) {
+    world = makeWorld("failed");
+    world.storedEvents = events;
+    const result = events.length ? await settleLikeBridge() :
+      // A deadline, signal or lost sidecar leaves no receipt; the bridge
+      // settles it blocked straight away.
+      await (await execution).settleAmuxV22TaskExecution({
+        attemptId, worker, instanceId, generation: 1, taskRevision: 5,
+        outcome: "blocked", invocationIds: [] });
+    assert.equal(result.settled, true);
+    assert.equal(world.taskUpdateData?.status, "blocked");
+    assert.equal(world.attemptUpdateData?.reason, "usage_outcome_unknown");
+    assert.equal(await ownerMayRetry(), false);
+  }
+});
+
 test("v52 ordinary paths preserve the normal successful destination", async () => {
   world = makeWorld("succeeded");
   world.gradeGuard = true;
@@ -662,6 +755,8 @@ test("v52 ordinary paths preserve the normal successful destination", async () =
   assert.equal(result.settled, true);
   assert.equal(world.taskUpdateData?.status, "review");
   assert.equal(world.gradeEscalationAudits.length, 0);
+  // A settlement at the same grade spends a resumed run's answer.
+  assert.equal(world.questionAnswerClears, 1);
 });
 
 test("v52 contract touch blocks when a new frontier price is unavailable", async () => {

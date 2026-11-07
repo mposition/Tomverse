@@ -73,7 +73,8 @@ export async function readAmuxCardTitle(row: Pick<CardRow, "id" | "title" |
 async function cardSummaries(rows: CardRow[]) {
   const ids = rows.map((row) => row.id);
   const storyIds = rows.filter((row) => row.cardType === "story").map((row) => row.id);
-  const [titles, scores, dependencies, lanes, progress, openEscalations] = await Promise.all([
+  const [titles, scores, dependencies, lanes, progress, openEscalations,
+    waitingQuestions] = await Promise.all([
     Promise.all(rows.map(readAmuxCardTitle)),
     ids.length ? prisma.$queryRaw<Array<{ taskId: string;
       taskRevision: number; scoreTotal: number; activeStaleAt: Date }>>`
@@ -104,7 +105,15 @@ async function cardSummaries(rows: CardRow[]) {
       orderBy: [{ taskId: "asc" }, { createdAt: "desc" }], distinct: ["taskId"],
       select: { taskId: true, reason: true, specialty: true },
     }) : [],
+    // A worker question still waiting: open, or answered but not yet resumed.
+    ids.length ? prisma.amuxV22TaskQuestion.findMany({
+      where: { taskId: { in: ids }, state: { in: ["open", "answered"] } },
+      orderBy: [{ taskId: "asc" }, { sequence: "desc" }], distinct: ["taskId"],
+      select: { taskId: true, state: true },
+    }) : [],
   ]);
+  const ownerQuestion = new Map(waitingQuestions.map((row) =>
+    [row.taskId, row.state === "open" ? "open" as const : "answered" as const]));
   const attentionReason = new Map(openEscalations.map((row) =>
     [row.taskId, storedAmuxEscalationReasonCode(row.reason, row.specialty)]));
   const latestScore = new Map(scores.map((score) => [score.taskId, score]));
@@ -144,6 +153,7 @@ async function cardSummaries(rows: CardRow[]) {
     progress: storyProgress.get(row.id) ?? null,
     briefPresent: Boolean(row.executionBriefDigest || row.v4BriefDigest),
     attentionReason: attentionReason.get(row.id) ?? null,
+    ownerQuestion: ownerQuestion.get(row.id) ?? null,
     updatedAt: row.updatedAt.toISOString(),
   }));
 }

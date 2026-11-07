@@ -102,6 +102,9 @@ export const AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT: Readonly<Record<AmuxIdeaBlo
   contract_path_touched: "it changed files that need a person's review",
   incident_frozen: "work was frozen during an incident",
   orchestrator_halted: "the work scheduler was halted",
+  cli_turn_limit: "its run stopped at its turn limit",
+  cli_execution_error: "its run stopped with an execution error",
+  cli_budget_limit: "its run stopped at its cost limit",
 });
 
 const FINISHED = new Set(["done", "cancelled"]);

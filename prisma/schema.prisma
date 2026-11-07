@@ -8113,6 +8113,8 @@ model AmuxCliUsageEvent {
   inputTokensIncludeCacheWrite Boolean?
   reasoningOutputIncludedInOutput Boolean?
   completedTurns             Int
+  /// Why a failed Claude result failed, as a closed enum (never CLI text).
+  cliFailure                 String?
   pricingVersion             String?
   projectedApiCostMicrousd   BigInt?
   actualApiCostMicrousd      BigInt?
