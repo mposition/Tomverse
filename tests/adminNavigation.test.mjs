@@ -495,8 +495,13 @@ test("the table's write roles match what the pages' routes check", () => {
   // The credit ledger writes nothing, so it declares no write role.
   const ledger = ADMIN_NAVIGATION.find((item) => item.id === "credit-ledger");
   assert.equal(ledger.writeRoles, undefined);
-  const panel = readFileSync(join(process.cwd(), "components/admin/AdminCreditLedgerPanel.tsx"), "utf8");
-  assert.doesNotMatch(panel, /method:\s*"(POST|PATCH|PUT|DELETE)"/);
+  // The panel and its client-side table (type chips, customer search) are both
+  // read-only: neither sends a write or any request.
+  for (const file of ["components/admin/AdminCreditLedgerPanel.tsx", "components/admin/AdminCreditLedgerTable.tsx"]) {
+    const source = readFileSync(join(process.cwd(), file), "utf8");
+    assert.doesNotMatch(source, /method:\s*"(POST|PATCH|PUT|DELETE)"/, file);
+    assert.doesNotMatch(source, /adminFetch|fetch\(/, file);
+  }
 });
 
 test("a badge with no known count renders nothing rather than zero", () => {
@@ -956,7 +961,7 @@ test("Routing is the router, its optimizers, its shadow comparison and the owner
   const page = readPage("routing");
   assert.doesNotMatch(page, /AdminAmuxRoutingPanel/);
   assert.match(page, /<AdminRoutingShadowPanel \/>/);
-  assert.match(page, /<AdminAutoLlmRouterPanel \/>/);
+  assert.match(page, /<AutoRouterTab canWrite=\{canWrite\} \/>/);
   assert.match(page, /href="\/admin\/amux-execution\?tab=review"/);
   assert.match(readPage("amux-execution"), /<AdminAmuxRoutingPanel canInspectCards=\{isOwner\} focusEscalationId=/);
 });
@@ -1202,10 +1207,11 @@ test("the retired Support tab still lands on the inbox", () => {
 test("Billing's sections are addresses, not component state", () => {
   assert.deepEqual(adminNavItemTabs("billing").map((tab) => tab.id), ["plans", "prices", "promotions", "diagnostics"]);
   const page = readPage("billing");
-  assert.match(page, /urlTabs/);
   assert.match(page, /initialTab=\{tab\.id as "plans" \| "prices" \| "promotions"\}/);
-  assert.match(readFileSync(join(process.cwd(), "components/admin/BillingAdminPanel.tsx"), "utf8"),
-    /const activeTab = urlTabs \? initialTab : selectedTab;/);
+  // The panel draws no tab strip and keeps no tab state of its own: the screen is whatever `?tab=` says.
+  const panel = readFileSync(join(process.cwd(), "components/admin/BillingAdminPanel.tsx"), "utf8");
+  assert.match(panel, /const activeTab = initialTab;/);
+  assert.doesNotMatch(panel, /urlTabs|setActiveTab/);
 });
 
 test("Platform's default models are Models' Default models tab", () => {

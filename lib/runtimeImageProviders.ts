@@ -4,7 +4,7 @@
  * other provider needs an adapter first. Dependency-free so the client panels
  * can read the same list the server's profile schema enforces.
  */
-export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal"] as const;
+export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal", "qwen"] as const;
 export type RuntimeImageProvider = (typeof RUNTIME_IMAGE_PROVIDERS)[number];
 
 export const isRuntimeImageProvider = (provider: string): provider is RuntimeImageProvider =>

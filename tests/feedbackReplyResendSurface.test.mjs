@@ -40,7 +40,8 @@ const resendBlock = (() => {
   const start = panel.indexOf("{canResendReply(feedback) ? (");
   assert.ok(start > 0, "the re-send affordance moved; this test cannot see it");
   const end = panel.indexOf("feedback-reply-resend-preview", start);
-  const closing = panel.indexOf("</span>\n                    ) : null}", start);
+  // The block runs to the hint under the button, the last thing it renders.
+  const closing = panel.indexOf("m.replyDelivery.resendHint", start);
   assert.ok(end > 0 && closing > 0, "the re-send preview is gone");
   return panel.slice(start, closing);
 })();

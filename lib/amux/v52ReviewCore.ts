@@ -45,7 +45,14 @@ export function validAmuxV52ReviewEvidence(value: AmuxV52ReviewEvidence) {
     value.reviewerVendors.length >= (value.touchesContract ? 2 : 1);
 }
 
-/** A first rejection returns to the same grade; a second needs a person. */
+export const AMUX_V52_REVIEW_REJECTED_TWICE_REASON =
+  "review_server_rejected_twice";
+
+/** A first rejection returns to the same grade; a second needs a person.
+ * `priorRejections` counts the Task's other rejected attempts since the
+ * owner last retried a twice-rejected run (lib/amux/execution.ts), so an
+ * owner retry gets one automatic return again rather than blocking on its
+ * first rejection. */
 export function decideAmuxV52ReviewDisposition(
   verdict: AmuxV52ReviewVerdict, priorRejections: number,
 ): { status: "review" | "todo" | "blocked"; reason: string } {
@@ -56,6 +63,6 @@ export function decideAmuxV52ReviewDisposition(
   if (verdict === "reject" && priorRejections === 0)
     return { status: "todo", reason: "review_server_rejected" };
   if (verdict === "reject")
-    return { status: "blocked", reason: "review_server_rejected_twice" };
+    return { status: "blocked", reason: AMUX_V52_REVIEW_REJECTED_TWICE_REASON };
   return { status: "blocked", reason: "review_server_unknown" };
 }

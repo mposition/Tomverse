@@ -1,30 +1,68 @@
 export const dynamic = "force-dynamic";
 
-import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { getServerSession } from "next-auth/next";
+import { AdminPageTabs, type AdminPageTabChip } from "@/components/admin/AdminPageTabs";
 import { OperatorPlaybooksPanel, SupportAgePanel } from "@/components/admin/AdminRiskPanels";
-import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
 import { AdminWorkQueuePanel } from "@/components/admin/AdminWorkQueuePanel";
+import { getAdminRole } from "@/lib/adminAuth";
 import { feedbackSlaRows, loadFeedbackRows } from "@/lib/adminConsoleData";
+import { DECISION_AREAS, type DecisionArea } from "@/lib/adminDecisionInbox";
+import { loadAdminDecisionInbox } from "@/lib/adminDecisionInboxLoad";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminHomeMessages } from "@/lib/adminMessages/home";
+import { adminWorkQueueMessages } from "@/lib/adminMessages/workQueue";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
-import { loadAdminWorkQueue } from "@/lib/adminWorkQueue";
+import { authOptions } from "@/lib/auth";
+import { WORK_QUEUE_SOURCE_LIMIT } from "@/lib/adminWorkQueue";
 
 const TABS = adminNavItemTabs("work-queue");
 
 /**
- * Decisions: one list of work that is actually waiting on a person.
+ * Decisions: one inbox of what is waiting on a person, filtered by area.
  *
- * Two-person approval used to be a second tab. It is not a queue anymore:
- * an eligible administrator executes the action, and the audit log is the
- * record. `/admin/approvals` redirects here.
+ * The inbox is read once (`lib/adminDecisionInboxLoad.ts`): the work queue's
+ * rows, which carry a start time, and the badge counts for the agent and AMUX
+ * approvals, which are counted but not listed anywhere a queue can read. The
+ * area tabs are the same list through a filter, so a count on a tab and the
+ * rows under it cannot disagree. It reads and links only: each decision is
+ * made on the screen that owns it.
  *
- * The area tabs are declared in the route table (2026-11-07). The All tab is
- * the queue as it was; the four areas wait for the screen that gathers the
- * decisions now spread over the agent and AMUX pages, and say so.
+ * Two-person approval is not a queue anymore: an eligible administrator
+ * executes the action, and the audit log is the record. `/admin/approvals`
+ * redirects here.
  */
 export default async function AdminWorkQueuePage({ searchParams }: PageProps<"/admin/work-queue">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
   const now = new Date();
+  const role = getAdminRole(await getServerSession(authOptions)) || "readonly";
+  const [home, { queue: q }, inbox] = await Promise.all([
+    getAdminMessages(adminHomeMessages),
+    getAdminMessages(adminWorkQueueMessages),
+    loadAdminDecisionInbox(role, now),
+  ]);
+  const d = home.decisions;
+
+  const area: DecisionArea | null = (DECISION_AREAS as readonly string[]).includes(tab.id)
+    ? (tab.id as DecisionArea)
+    : null;
+
+  const chips: Record<string, AdminPageTabChip> = { all: { label: String(inbox.total) } };
+  for (const key of DECISION_AREAS) chips[key] = { label: String(inbox.byArea[key]) };
+
+  const categoryName = (category: string) =>
+    (q.categories as Readonly<Record<string, string>>)[category] ?? category;
+  const notices = [
+    inbox.queueUnread ? d.queueUnread : null,
+    inbox.failedCategories.length > 0 ? d.failed(inbox.failedCategories.map(categoryName).join(", ")) : null,
+    inbox.unreadSources.length > 0
+      ? d.unreadSources(inbox.unreadSources.map((kind) => d.kinds[kind].screen).join(", "))
+      : null,
+  ].filter((text): text is string => text !== null);
+  const truncatedNotice =
+    inbox.truncatedCategories.length > 0
+      ? d.truncated(WORK_QUEUE_SOURCE_LIMIT, inbox.truncatedCategories.map(categoryName).join(", "))
+      : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -34,16 +72,15 @@ export default async function AdminWorkQueuePage({ searchParams }: PageProps<"/a
         activeTabId={tab.id}
         label="Decision sections"
         query={query}
+        chips={chips}
       />
+      <AdminWorkQueuePanel inbox={inbox} area={area} notices={notices} truncatedNotice={truncatedNotice} />
       {tab.id === "all" ? (
         <>
-          <AdminWorkQueuePanel queue={await loadAdminWorkQueue(now)} now={now} />
           <SupportAgePanel slaRows={feedbackSlaRows(await loadFeedbackRows(), now)} />
           <OperatorPlaybooksPanel />
         </>
-      ) : (
-        <AdminTabPlaceholder />
-      )}
+      ) : null}
     </div>
   );
 }

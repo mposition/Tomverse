@@ -45,7 +45,7 @@ test.describe("account recovery eligibility", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}?tab=security`);
 
     // Eligible: deletion is scheduled, so the restore group is on screen.
     await expect(
@@ -113,7 +113,7 @@ test.describe("account recovery eligibility", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=security`);
 
     await expect(page.getByTestId("admin-user-security-controls")).toBeVisible();
     await expect(
@@ -127,6 +127,7 @@ test.describe("account recovery eligibility", () => {
       page.getByTestId("admin-security-deletion-schedule")
     ).toHaveCount(0);
     // The controls that do apply to an active account are still there.
+    await page.getByTestId("admin-security-card-suspend-toggle").click();
     await expect(page.getByTestId("admin-security-suspend")).toBeVisible();
   });
 
@@ -135,14 +136,15 @@ test.describe("account recovery eligibility", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.suspended.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.suspended.id}?tab=security`);
 
     await expect(
       page.getByTestId("admin-security-account-status")
     ).toHaveText("Account suspended");
     await expect(page.getByTestId("admin-security-restore-group")).toHaveCount(0);
+    await page.getByTestId("admin-security-card-suspend-toggle").click();
     await expect(page.getByTestId("admin-security-suspend")).toHaveText(
-      "Unsuspend account"
+      "Sign in again and unsuspend account"
     );
     // The suspension reason is the state explanation the operator needs.
     await expect(page.getByText("Confirmed payment fraud")).toBeVisible();
@@ -153,7 +155,7 @@ test.describe("account recovery eligibility", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}?tab=security`);
     const requests = countSecurityRequests(page);
     const restore = page.getByTestId("admin-security-restore");
 
@@ -185,22 +187,24 @@ test.describe("account recovery eligibility", () => {
     expect(requests).toHaveLength(1);
   });
 
-  test("a role without the permission is refused by the server, and the console says so", async ({
+  test("a role without the permission cannot restore, and the console says so", async ({
     page,
     signInAs,
   }) => {
     // billing has neither support:write nor ops:write, which is what
     // /api/admin/users/:id/security requires for restore_account.
     await signInAs("billing");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}?tab=security`);
 
     await page
       .getByTestId("admin-security-reason")
       .fill("Billing should not be able to restore an account.");
     await page.getByTestId("admin-security-ticket").fill("TOMV-7777");
-    await page.getByTestId("admin-security-restore").click();
-
-    await expect(page.getByTestId("admin-security-request-error")).toBeVisible();
+    // The control is withheld up front (the write button is disabled with a
+    // "Needs support access" note) rather than refused after a click.
+    const restore = page.getByTestId("admin-security-restore");
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAttribute("title", "Needs support access");
     // The account is unchanged.
     await expect(
       page.getByTestId("admin-security-account-status")
@@ -219,7 +223,7 @@ test.describe("account recovery eligibility", () => {
     // Inside the 8-hour console window but past the 30-minute step-up window,
     // so the console renders and the mutation is refused with 428.
     await signInAs("owner", { authenticatedMinutesAgo: 45 });
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}?tab=security`);
 
     await page
       .getByTestId("admin-security-reason")
@@ -239,7 +243,7 @@ test.describe("account recovery eligibility", () => {
     ).toHaveAttribute(
       "href",
       `/auth/admin-reauthenticate?callbackUrl=${encodeURIComponent(
-        `/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}`
+        `/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}?tab=security`
       )}&mode=recent`
     );
     await expect(
@@ -252,7 +256,7 @@ test.describe("account recovery eligibility", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}?tab=security`);
     await expect(page.getByTestId("admin-security-restore")).toBeVisible();
 
     // A second operator completes the recovery while this page is still open,

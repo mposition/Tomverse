@@ -100,6 +100,26 @@ test("a thrown round logs a code-shaped code and no message", () => {
   assert.match(code, /error instanceof TrustSafetyRoundRefused/);
 });
 
+test("only a missing activation row answers failed at 202; every other failure stays non-2xx", () => {
+  // Owner direction 2026-11-07: before activation every period answers
+  // `failed` with `config_row_missing`, and a CRASHED deploy each time would
+  // bury a real failure. The child exits 0 at 202 only, so the 202 must be
+  // tied to that one fault and to nothing else.
+  assert.match(code, /const NOT_ACTIVATED_STATUS = 202;/);
+  for (const literal of [
+    'result.outcome === "failed" && result.activation.fault === "config_row_missing"',
+    'result.outcome !== "failed" ? 200 : notActivated ? NOT_ACTIVATED_STATUS : 500',
+    // The body is the enum's `failed` all the same: §6 keeps the missing row
+    // a fault, and §4 closes the response at the enum.
+    "json({ outcome: result.outcome }, status)",
+  ]) {
+    assert.ok(code.includes(literal), literal);
+  }
+  // The thrown path never reaches 202.
+  const thrown = code.slice(code.indexOf("} catch (error)"));
+  assert.doesNotMatch(thrown, /NOT_ACTIVATED_STATUS|202/);
+});
+
 test("the route holds no judgement of its own", () => {
   // §5.6 counts writes from the route inward. The route authenticates and
   // answers; the round is where the three transactions are.

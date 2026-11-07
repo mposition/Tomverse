@@ -300,6 +300,39 @@ prefer_ubuntu_archive() {
 }
 prefer_ubuntu_archive /etc/apt/apt-mirrors.txt
 
+# On 2026-11-07 (#3439) one Admin E2E shard drew ubuntu-26.04 image
+# 20261101.64.1, whose apt had no Ubuntu source at all: `apt-get update` read
+# only packages.microsoft.com, and install-deps failed three times on "Unable to
+# locate package fonts-unifont". The same run's other jobs drew 20261101.186.1,
+# which reads archive.ubuntu.com through apt-mirrors.txt. So when no Ubuntu
+# source exists, add the archive for this release -- and only then: a configured
+# mirror, custom or not, is left alone.
+ensure_ubuntu_archive() {
+  local apt_dir="$1" keyring="$2" codename="$3" arch="$4"
+  [ "${GITHUB_ACTIONS:-false}" = "true" ] || return 0
+  # archive.ubuntu.com serves amd64 alone; other architectures live on ports.
+  [ -n "$codename" ] && [ "$arch" = "amd64" ] || return 0
+  if grep -rEqs '(archive|security|ports)[.]ubuntu[.]com|apt-mirrors[.]txt' "$apt_dir/sources.list" "$apt_dir/sources.list.d"; then
+    return 0
+  fi
+  if [ ! -f "$keyring" ]; then
+    echo "::warning::apt has no Ubuntu source and ${keyring} is missing; leaving apt as it is."
+    return 0
+  fi
+  local suites="Components: main restricted universe multiverse
+Signed-By: ${keyring}"
+  if printf 'Types: deb\nURIs: https://archive.ubuntu.com/ubuntu\nSuites: %s %s-updates %s-backports\n%s\n\nTypes: deb\nURIs: https://security.ubuntu.com/ubuntu\nSuites: %s-security\n%s\n' \
+      "$codename" "$codename" "$codename" "$suites" "$codename" "$suites" |
+      sudo tee "$apt_dir/sources.list.d/tomverse-ubuntu-archive.sources" >/dev/null; then
+    echo "::warning::This runner image has no Ubuntu apt source; added archive.ubuntu.com for ${codename}."
+  else
+    echo "::warning::Could not add the Ubuntu archive source; continuing without it."
+  fi
+}
+ensure_ubuntu_archive /etc/apt /usr/share/keyrings/ubuntu-archive-keyring.gpg \
+  "$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")" \
+  "$(dpkg --print-architecture 2>/dev/null)"
+
 # Applies to the apt-get calls Playwright makes for us, which is the only way
 # to reach them -- `install-deps` takes no apt flags. Written before the first
 # attempt so even a single-attempt run benefits.

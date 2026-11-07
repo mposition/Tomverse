@@ -52,6 +52,7 @@ import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
+import { amuxV52PriorReviewRejections } from "@/lib/amux/v52ReviewRejections";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
@@ -1363,7 +1364,7 @@ export async function settleAmuxV22TaskExecution(input: {
   // + 6: an applied investigate conclusion writes its own system audit (4)
   // and a result put to Decision Maker review its row (1), with one spare.
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 43 + 6 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 };
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
   const resultReviewDm = amuxV22ResultReviewDmEnabled();
   const publicationEligible = v22PublishPreflightEligible({
@@ -1446,11 +1447,10 @@ export async function settleAmuxV22TaskExecution(input: {
           reviewRecord.authorVendor !== settlementAssignment?.provider ||
           !["accept", "reject", "unknown"].includes(reviewRecord.verdict)))
         return { settled: false as const, reason: "review_unverified" as const };
+      // An owner retry of a twice-rejected run starts the count again
+      // (owner decision 2026-11-07).
       const priorReviewRejections = reviewRecord ?
-        await tx.amuxV52ReviewRecord.count({ where: {
-          taskId: task.id, verdict: "reject",
-          attemptId: { not: attempt.id },
-        } }) : 0;
+        await amuxV52PriorReviewRejections(tx, task.id, attempt.id) : 0;
       const reviewDisposition = reviewRecord ?
         decideAmuxV52ReviewDisposition(
           reviewRecord.verdict as "accept" | "reject" | "unknown",

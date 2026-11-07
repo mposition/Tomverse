@@ -5,10 +5,33 @@ import { AdminModelDiscoveryPanel } from "@/components/admin/AdminModelDiscovery
 import { AdminModelRegistryPanel } from "@/components/admin/AdminModelRegistryPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminModelsBoardMessages } from "@/lib/adminMessages/modelsBoard";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { readPlatformSettingsPanelProps } from "@/lib/adminPlatformSettingsRead";
 
 const TABS = adminNavItemTabs("models");
+
+/**
+ * The Default models tab reads the platform settings on the server. A failed
+ * read is reported as one: the tab never opens on empty selectors that would
+ * look like "no default is set".
+ */
+async function DefaultModelsTab() {
+  const m = (await getAdminMessages(adminModelsBoardMessages)).defaults;
+  let props: Awaited<ReturnType<typeof readPlatformSettingsPanelProps>>;
+  try {
+    props = await readPlatformSettingsPanelProps();
+  } catch (error) {
+    console.warn({
+      event: "admin_default_models_read_failed",
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    return <AdminStateBlock kind="error" title={m.loadFailedTitle} detail={m.loadFailedDetail} />;
+  }
+  return <PlatformSettingsPanel view="default-models" {...props} />;
+}
 
 /**
  * Four sections, and only the open one is mounted.
@@ -46,7 +69,7 @@ export default async function AdminModelsPage({
       ) : tab.id === "catalog" ? (
         <AdminModelCatalogPanel />
       ) : tab.id === "defaults" ? (
-        <PlatformSettingsPanel view="default-models" {...(await readPlatformSettingsPanelProps())} />
+        <DefaultModelsTab />
       ) : (
         <AdminModelRegistryPanel />
       )}

@@ -88,6 +88,18 @@ async function waitForHydration(page: Page, selector: string) {
   }, selector);
 }
 
+/**
+ * The four actions are cards, closed until opened; the form inside a card is
+ * the only place the shared reason, expiry and note are drawn. A card that is
+ * already open (the restore card of a pending deletion) is left as it is.
+ */
+type SecurityCard = "restore" | "ai" | "suspend" | "sessions" | "unlink" | "delete";
+async function openCard(page: Page, card: SecurityCard) {
+  const toggle = page.getByTestId(`admin-security-card-${card}-toggle`);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
 async function openHarness(page: Page, state?: string) {
   const response = await page.goto(state ? `${HARNESS}?state=${state}` : HARNESS);
   expect(response?.status()).toBeLessThan(400);
@@ -168,9 +180,11 @@ test("restore_account sends until: null even with an expiry left in the form", a
   );
   await openHarness(page, "pendingDeletion");
 
-  // The expiry input lives in the restrictions block, visibly separated from
-  // the restoration block, but its state is still shared.
+  // The expiry input lives in the AI-restriction card, apart from the
+  // restoration card, but its state is still shared.
+  await openCard(page, "ai");
   await page.getByTestId("admin-security-until").fill("2099-01-01T09:00");
+  await openCard(page, "restore");
   await page.getByTestId("admin-security-reason").fill(REASON);
   await page.getByTestId("admin-security-ticket").fill(TICKET);
   await page.getByTestId("admin-security-restore").click();
@@ -192,7 +206,9 @@ test("session revocation sends until: null even with an expiry left in the form"
   );
   await openHarness(page);
 
+  await openCard(page, "suspend");
   await page.getByTestId("admin-security-until").fill("2099-01-01T09:00");
+  await openCard(page, "sessions");
   await page.getByTestId("admin-security-reason").fill(REASON);
   await page.getByTestId("admin-security-revoke-sessions").click();
 
@@ -213,11 +229,14 @@ test("suspend and restrict_ai send the chosen expiry as an ISO instant", async (
   );
   await openHarness(page);
 
+  await openCard(page, "suspend");
   await page.getByTestId("admin-security-until").fill("2099-03-04T05:06");
   await page.getByTestId("admin-security-reason").fill(REASON);
   await page.getByTestId("admin-security-suspend").click();
   await expect.poll(() => requests.length).toBe(1);
 
+  // A successful action closes its card and clears the form.
+  await openCard(page, "ai");
   await page.getByTestId("admin-security-until").fill("2099-03-04T05:06");
   await page.getByTestId("admin-security-reason").fill(REASON);
   await page.getByTestId("admin-security-toggle-ai").click();
@@ -331,6 +350,7 @@ test("a response body that cannot be parsed still produces a visible error", asy
   );
   await openHarness(page);
 
+  await openCard(page, "sessions");
   await page.getByTestId("admin-security-reason").fill(REASON);
   await page.getByTestId("admin-security-revoke-sessions").click();
 
@@ -372,7 +392,7 @@ test("a successful restoration shows progress, confirms, and refreshes the accou
   // In-flight: an action-specific progress label, and no second click possible.
   await expect(restore).toHaveText("Restoring...");
   await expect(restore).toBeDisabled();
-  await expect(page.getByTestId("admin-security-revoke-sessions")).toBeDisabled();
+  await expect(page.getByTestId("admin-security-card-sessions-toggle")).toBeDisabled();
   gate.release();
 
   const toast = page.getByTestId("app-toast");
@@ -390,6 +410,7 @@ test("a successful restoration shows progress, confirms, and refreshes the accou
   );
   await expect(page.getByTestId("admin-security-deletion-schedule")).toHaveCount(0);
   await expect(page.getByTestId("admin-security-restore")).toHaveCount(0);
+  await openCard(page, "ai");
   await expect(page.getByTestId("admin-security-reason")).toHaveValue("");
 });
 
@@ -422,14 +443,18 @@ test("every security input has a real label and helper text, not just a placehol
 }) => {
   await openHarness(page, "pendingDeletion");
 
+  // Only one card's form is drawn at a time: the restore card (open for a
+  // pending deletion) carries the reason, note and ticket; the expiry lives in
+  // the AI-restriction and suspension cards.
   const fields = [
-    { testId: "admin-security-reason", label: /Audit reason/ },
-    { testId: "admin-security-incident-note", label: /Security incident note/ },
-    { testId: "admin-security-until", label: /Control expiry/ },
-    { testId: "admin-security-ticket", label: /Support ticket reference/ },
+    { card: "restore" as const, testId: "admin-security-reason", label: /Audit reason/ },
+    { card: "restore" as const, testId: "admin-security-incident-note", label: /Security incident note/ },
+    { card: "restore" as const, testId: "admin-security-ticket", label: /Support ticket reference/ },
+    { card: "ai" as const, testId: "admin-security-until", label: /Control expiry/ },
   ];
 
   for (const field of fields) {
+    await openCard(page, field.card);
     const input = page.getByTestId(field.testId);
     const id = await input.getAttribute("id");
     expect(id, `${field.testId} needs an id to be labelled`).toBeTruthy();
@@ -448,6 +473,14 @@ test("the expiry field says what it applies to, when it lifts, and which clock i
 }) => {
   await openHarness(page, "pendingDeletion");
 
+  // The restoration card is open first and has no expiry, so the expiry never
+  // reads as a requirement of restoring an account.
+  const restoreGroup = page.getByTestId("admin-security-restore-group");
+  await expect(restoreGroup).toBeVisible();
+  await expect(restoreGroup.getByTestId("admin-security-until")).toHaveCount(0);
+  await expect(restoreGroup.getByTestId("admin-security-ticket")).toHaveCount(1);
+
+  await openCard(page, "ai");
   const hintId = (
     await page.getByTestId("admin-security-until").getAttribute("aria-describedby")
   )?.split(" ")[0];
@@ -457,13 +490,6 @@ test("the expiry field says what it applies to, when it lifts, and which clock i
   await expect(hint).toContainText(/lifts automatically/i);
   await expect(hint).toContainText(/local time/i);
   await expect(hint).toContainText(/cancelling a scheduled deletion/i);
-
-  // The restoration inputs and the restriction inputs are separate blocks, so
-  // the expiry never reads as a requirement of restoring an account.
-  const restoreGroup = page.getByTestId("admin-security-restore-group");
-  await expect(restoreGroup).toBeVisible();
-  await expect(restoreGroup.getByTestId("admin-security-until")).toHaveCount(0);
-  await expect(restoreGroup.getByTestId("admin-security-ticket")).toHaveCount(1);
 });
 
 test("an inline error is wired to its field through aria-describedby", async ({
@@ -585,13 +611,14 @@ test("a toast never overflows a 320px viewport or blocks a security control", as
 
   // Every primary control stays reachable at its own centre point while the
   // toast is on screen -- measured with elementFromPoint, not toBeAttached().
-  for (const testId of [
-    "admin-security-reason",
-    "admin-security-until",
-    "admin-security-suspend",
-    "admin-security-toggle-ai",
-    "admin-security-revoke-sessions",
-  ]) {
+  for (const [card, testId] of [
+    ["suspend", "admin-security-reason"],
+    ["suspend", "admin-security-until"],
+    ["suspend", "admin-security-suspend"],
+    ["ai", "admin-security-toggle-ai"],
+    ["sessions", "admin-security-revoke-sessions"],
+  ] as const) {
+    await openCard(page, card);
     const control = page.getByTestId(testId);
     await control.scrollIntoViewIfNeeded();
     const box = await control.boundingBox();

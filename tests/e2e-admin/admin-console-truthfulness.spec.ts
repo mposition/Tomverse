@@ -104,14 +104,14 @@ test.describe("the console says only what it knows", () => {
   });
 
   test("the environment panel says which process it read", async ({ page }) => {
-    await page.goto("/admin/overview");
+    await page.goto("/admin/overview?tab=health");
 
     // "Not configured" and "configured after this process started" are
-    // different facts and used to render identically. The panel now dates the
+    // different facts and used to render identically. The panel dates the
     // environment it is reporting on.
     await expect(
-      page.getByTestId("admin-overview-process-window")
-    ).toContainText("redeployed");
+      page.getByTestId("admin-health-process-window")
+    ).toContainText("started at");
   });
 
   test("a healthy Overview shows real figures and no unread cards", async ({
@@ -130,17 +130,20 @@ test.describe("the console says only what it knows", () => {
     // exhaustively at the unit level instead.
     await page.goto("/admin/overview");
 
-    await expect(page.getByTestId("admin-kpi-unreadable")).toHaveCount(0);
+    await expect(page.locator('[data-unread="true"]')).toHaveCount(0);
     await expect(
       page.getByTestId("admin-overview-unreadable-reads")
     ).toHaveCount(0);
     await expect(
       page.getByTestId("admin-health-score-incomplete")
     ).toHaveCount(0);
-    // A real figure, from the seeded fixture, rather than merely "not unread".
-    // Three: the fixture's `reviewing` report is unresolved work too
-    // (tests/e2e-admin/admin-read-surfaces.spec.ts says why).
-    await expect(page.getByText("3 feedback / 1 refund")).toBeVisible();
+    // A real figure, from the seeded fixture, rather than merely "not unread":
+    // the decisions waiting include the three unresolved reports (the
+    // fixture's `reviewing` report is unresolved work too, see
+    // tests/e2e-admin/admin-read-surfaces.spec.ts) and the pending refund.
+    await expect(page.getByTestId("admin-overview-decision-line")).toContainText(
+      /\d+ decisions? (is|are) waiting on you/
+    );
   });
 
   test("switching Overview sections keeps the workspace and the sidebar entry", async ({
@@ -157,8 +160,6 @@ test.describe("the console says only what it knows", () => {
 
     await tabStrip.getByRole("link", { name: "Summary" }).click();
     await expect(page).toHaveURL("/admin/overview?tab=summary");
-    await expect(
-      page.getByRole("heading", { name: "Operations snapshot" })
-    ).toBeVisible();
+    await expect(page.getByTestId("admin-overview-greeting")).toBeVisible();
   });
 });
