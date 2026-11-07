@@ -13,9 +13,11 @@ import { AmuxLegacyToolSection } from "@/components/admin/AmuxLegacyToolSection"
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
 import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
@@ -67,8 +69,9 @@ export default async function AdminAmuxRecoveryPage({
   const resolved = resolveAdminTabFor(TABS, role, query.tab);
   if (!resolved) notFound();
   const { tab } = resolved;
-  const [m, openAmuxOrchestratorHalts] = await Promise.all([
+  const [m, screens, openAmuxOrchestratorHalts] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
+    getAdminMessages(adminAmuxScreensMessages),
     countOpenAmuxOrchestratorHalts().catch(() => null),
   ]);
   const isOwner = role === "owner";
@@ -101,7 +104,7 @@ export default async function AdminAmuxRecoveryPage({
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <p className="max-w-3xl text-sm text-zinc-300">{m.legacy.intro}</p>
+        <AdminTile title={screens.safety.legacyTitle} description={m.legacy.intro} data-testid="amux-legacy-intro" />
         {LEGACY_SECTIONS.map((id) => (
           <AmuxLegacyToolSection
             key={id}

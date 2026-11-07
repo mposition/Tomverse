@@ -7,6 +7,7 @@ import { getServerSession } from "next-auth/next";
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecutionSupportingRecords";
 import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
@@ -17,12 +18,14 @@ import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMa
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { ADMIN_AMUX_EXECUTION_LEGACY_TABS, adminRedirectTarget, adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
 import {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
   countAwaitingAmuxEscalations,
 } from "@/lib/adminNavigationCounts";
+import { readBoardWorkerChannels } from "@/lib/amux/adminBoardWorkerChannels";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
@@ -79,8 +82,9 @@ export default async function AdminAmuxExecutionPage({
     return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
   };
 
-  const [m, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
+  const [m, screens, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
+    getAdminMessages(adminAmuxScreensMessages),
     // The tabs' badges. A failed count shows no badge rather than a zero.
     countAwaitingAmuxEscalations().catch(() => null),
     countDecisionMakerAttention().catch(() => null),
@@ -114,12 +118,14 @@ export default async function AdminAmuxExecutionPage({
     // Authorization for the section, decided here and not by the route
     // table's `viewRoles`, exactly as the page it replaced decided it.
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-    const [{ rows, total, limit }, usage, decisionMaker, laneIdeas] = await Promise.all([
+    const [{ rows, total, limit }, usage, decisionMaker, laneIdeas, workerChannels] = await Promise.all([
       listAmuxCardsForAdmin(),
       readAmuxCliUsageSummaryForAdmin().catch(() => null),
       readDecisionMakerAttentionForAdmin({ withBodies: canJudge }).catch(() => null),
       // Display rows beside the cards; a failed read shows none (the Ideas tab has them).
       readAmuxIdeaLaneBoardForOwner(session.user.id).catch(() => null),
+      // The channel of each card's worker is the class it was registered with; unread: no badges.
+      readBoardWorkerChannels(),
     ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
@@ -131,7 +137,8 @@ export default async function AdminAmuxExecutionPage({
             {m.testCardIntake}
           </Link>
         ) : null}
-        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas} initialTaskId={typeof query.taskId === "string" &&
+        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas}
+          workerChannels={workerChannels} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>
           <AmuxCardListPanel rows={rows} total={total} limit={limit} />
@@ -148,6 +155,14 @@ export default async function AdminAmuxExecutionPage({
         {tabs}
         {drawer}
         <AdminTabPlaceholder />
+        {/* Until its own screen is built, the evidence diagnostics will draw from is in the review queue. */}
+        <AdminTile title={screens.board.diagnostics.title} description={screens.board.diagnostics.detail}
+          data-testid="amux-diagnostics-pointer">
+          <Link href="/admin/amux-execution?tab=review"
+            className="inline-flex min-h-10 w-fit items-center rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800">
+            {screens.board.diagnostics.link}
+          </Link>
+        </AdminTile>
       </div>
     );
   }

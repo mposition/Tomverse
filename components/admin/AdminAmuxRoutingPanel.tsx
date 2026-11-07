@@ -598,7 +598,7 @@ export function AmuxOwnerReviewView({
       </header>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-assigned-work">
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5" data-testid="admin-amux-assigned-work">
           <div className="flex items-center gap-2 text-zinc-100">
             <FileText aria-hidden="true" className="h-5 w-5 text-blue-300" />
             <h5 className="font-bold">{m.assignedWork}</h5>
@@ -626,7 +626,7 @@ export function AmuxOwnerReviewView({
           )}
         </section>
 
-        <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-worker-report">
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5" data-testid="admin-amux-worker-report">
           <div className="flex items-center gap-2 text-zinc-100">
             <CheckCircle2 aria-hidden="true" className="h-5 w-5 text-blue-300" />
             <h5 className="font-bold">{m.workerReport}</h5>
@@ -661,7 +661,7 @@ export function AmuxOwnerReviewView({
         </section>
       </div>
 
-      <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-review-progress">
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5" data-testid="admin-amux-review-progress">
         <h5 className="font-bold text-zinc-100">{m.reviewProgress}</h5>
         <dl className="mt-4 grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
@@ -683,7 +683,7 @@ export function AmuxOwnerReviewView({
         </dl>
       </section>
 
-      <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-cost-summary">
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5" data-testid="admin-amux-cost-summary">
         <h5 className="font-bold text-zinc-100">{m.attemptAndCost}</h5>
         {ownerExecution.state === "loading" ? (
           <p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-400">
@@ -1786,16 +1786,16 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
 
   return (
     <section
-      className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20"
+      className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900"
       data-testid="admin-amux-routing-panel"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/60 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 p-5">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
+          <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-bold text-blue-300">
             <Activity className="h-3.5 w-3.5" />
             {m.eyebrow}
           </div>
-          <h2 className="mt-3 text-2xl font-black text-white">{m.title}</h2>
+          <h2 className="mt-3 text-xl font-bold text-white">{m.title}</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">
             {m.description}
           </p>

@@ -5,6 +5,8 @@ import { useState } from "react";
 import { z } from "zod";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxPortfolioMessages } from
   "@/lib/adminMessages/amuxPortfolio";
@@ -210,10 +212,8 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
   };
 
   const score = previewScoreResponse.safeParse(preview);
-  return <section className="space-y-4 rounded-xl border p-4 text-sm border-zinc-700">
-    <h3 className="font-semibold">{m.title}</h3>
-    <p>{m.hint}</p>
-    <p className="text-xs">{m.noPromotion}</p>
+  return <AdminTile className="space-y-4 text-sm" title={m.title} description={m.hint}>
+    <p className="text-xs text-zinc-400">{m.noPromotion}</p>
     {!writeAvailable ? <p role="status">{m.disabled}</p> : null}
     <div className="grid gap-3 md:grid-cols-2">
       <label>{m.subjectKind}
@@ -289,22 +289,28 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
       <button type="button" disabled={busy} onClick={() => void loadReadiness()}
         className="ml-2 min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">{m.readiness}</button>
     </div>
-    {readiness ? <div className="space-y-1 rounded border p-3 border-zinc-700">
+    {readiness ? <div className="space-y-1 rounded-xl border p-3 border-zinc-800">
       <p>{m.readinessHint}</p>
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
-        {JSON.stringify(readiness, null, 2)}
-      </pre>
+      <AdminTechInfo>
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
+          {JSON.stringify(readiness, null, 2)}
+        </pre>
+      </AdminTechInfo>
     </div> : null}
-    {latest ? <div className="space-y-1 rounded border p-3 border-zinc-700">
+    {latest ? <div className="space-y-1 rounded-xl border p-3 border-zinc-800">
       <p>{m.historical}</p>
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
-        {JSON.stringify(latest, null, 2)}
-      </pre>
+      <AdminTechInfo>
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
+          {JSON.stringify(latest, null, 2)}
+        </pre>
+      </AdminTechInfo>
     </div> : null}
-    {preview ? <div className="space-y-2 rounded border p-3 border-zinc-700">
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
-        {JSON.stringify(preview, null, 2)}
-      </pre>
+    {preview ? <div className="space-y-2 rounded-xl border p-3 border-zinc-800">
+      <AdminTechInfo defaultOpen>
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
+          {JSON.stringify(preview, null, 2)}
+        </pre>
+      </AdminTechInfo>
       {score.success ? <p role="status">{score.data.score.activeFresh ? m.fresh : m.stale}</p> : null}
       <label className="flex gap-2"><input type="checkbox" checked={confirmed}
         onChange={(event) => setConfirmed(event.target.checked)} />{m.confirmEvidence}</label>
@@ -326,5 +332,5 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
         {common.apiFailure.reauthenticate}
       </Link> : null}
     </div> : null}
-  </section>;
+  </AdminTile>;
 }

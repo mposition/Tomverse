@@ -10,6 +10,7 @@ import { CiAdmissionSection } from "@/components/admin/CiAdmissionSection";
 import { QaReleaseLaneVerdictsSection } from "@/components/admin/QaReleaseLaneVerdictsSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
 import { QaReleaseTrainBoard } from "@/components/admin/QaReleaseTrainBoard";
+import { ReleaseTrainOverview, ReleaseTrainOverviewLoading } from "@/components/admin/ReleaseTrainOverview";
 import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
 import { QaReleaseTrainEmergencySection } from "@/components/admin/QaReleaseTrainEmergencySection";
 import { QaReleaseTrainRefresher } from "@/components/admin/QaReleaseTrainRefresher";
@@ -83,6 +84,10 @@ export default async function AdminReleasePage({ searchParams }: PageProps<"/adm
         <CiAdmissionSection key={tab.id} initial={admission} canWrite={canWrite} />
       ) : (
         <>
+          {/* The next train, today's route and what rides it; the views below hold the detail. */}
+          <Suspense fallback={<ReleaseTrainOverviewLoading />}>
+            <ReleaseTrainOverview nowMs={now.getTime()} />
+          </Suspense>
           <AdminViewSwitch
             basePath="/admin/release"
             tabId="qa"

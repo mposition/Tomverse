@@ -60,7 +60,7 @@ export function AmuxDecisionMakerReportView({
 }) {
   return (
     <section
-      className="flex min-w-0 flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-900 p-5"
+      className="flex min-w-0 flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
       data-testid="amux-decision-maker-report-panel"
     >
       <header className="flex flex-col gap-1.5">

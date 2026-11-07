@@ -5,6 +5,9 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminChannelIcon, adminChannelName } from "@/components/admin/ui/AdminChannelIcon";
+import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
+import { AMUX_WORKER_CHANNELS } from "@/lib/adminAmuxFlow";
 import {
   AmuxCliModelIssueChips,
   AmuxWorkerCapabilityEditor,
@@ -325,6 +328,12 @@ export function AmuxWorkersOverviewView({
   const rows = overview.rows;
   const shown = filterAmuxWorkerRows(rows, filter, query);
   const groups = groupAmuxWorkerRows(shown);
+  // The groups' order (what needs a look first) holds inside each channel.
+  const orderedRows = groups.flatMap(({ rows: groupRows }) => groupRows);
+  const channels = AMUX_WORKER_CHANNELS.map((channel) => ({
+    channel,
+    rows: orderedRows.filter((row) => row.providerClass === channel),
+  })).filter((entry) => entry.rows.length > 0);
   const openRow = openWorker === null ? null : rows.find((row) => row.workerName === openWorker) ?? null;
   const { summary } = overview;
 
@@ -575,6 +584,19 @@ export function AmuxWorkersOverviewView({
       {overview.liveReadable ? null : <p role="alert" className="text-sm text-amber-300" data-testid="amux-workers-live-unread">{m.liveUnread}</p>}
       {overview.capabilitiesReadable ? null : <p role="alert" className="text-sm text-amber-300" data-testid="amux-workers-capabilities-unread">{m.capabilitiesUnread}</p>}
 
+      {summary.attention.count > 0 ? (
+        <div role="alert" className="flex flex-wrap items-center gap-4 rounded-2xl bg-red-500/10 p-4" data-testid="amux-workers-banner">
+          <AdminPixelAvatar team="amux" tile={48} unit={2} body={false} />
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-red-200">{m.screen.bannerTitle(summary.attention.count)}</p>
+            <p className="text-sm text-red-200/80">{attentionDetail === m.summary.attentionNone ? m.screen.bannerBody : `${attentionDetail}. ${m.screen.bannerBody}`}</p>
+          </div>
+          <button type="button" className={buttonClass} onClick={() => onFilter("attention")} data-testid="amux-workers-banner-show">
+            {m.screen.bannerAction}
+          </button>
+        </div>
+      ) : null}
+
       <div className="grid gap-3 md:grid-cols-3" data-testid="amux-workers-summary">
         {card("assignable", m.summary.assignable, summary.assignable.count, assignableDetail, "ok")}
         {card("attention", m.summary.attention, summary.attention.count, attentionDetail, "attention")}
@@ -615,76 +637,78 @@ export function AmuxWorkersOverviewView({
       ) : shown.length === 0 ? (
         <p className="text-sm text-zinc-300" data-testid="amux-workers-no-match">{m.noMatch}</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-zinc-700" data-testid="amux-workers-table-scroll">
-          <table className="w-full min-w-[56rem] border-collapse text-left text-sm text-zinc-100">
-            <thead>
-              <tr className="text-xs font-semibold text-zinc-400">
-                <th scope="col" className="px-3 py-2">{m.column.worker}</th>
-                <th scope="col" className="px-3 py-2">{m.column.status}</th>
-                <th scope="col" className="px-3 py-2">{m.column.role}</th>
-                <th scope="col" className="px-3 py-2">{m.column.capability}</th>
-                <th scope="col" className="px-3 py-2 text-right">{m.column.next}</th>
-              </tr>
-            </thead>
-            {groups.map(({ group, rows: groupRows }) => (
-              <tbody key={group} data-testid={`amux-workers-group-${group}`}>
-                <tr className="bg-zinc-800/60">
-                  <th scope="colgroup" colSpan={5} className="px-3 py-2 text-left text-xs font-bold text-zinc-200">
-                    {m.groupTitle[group]} {groupRows.length}
-                  </th>
-                </tr>
-                {groupRows.map((row) => (
-                  <tr key={row.workerName} className="border-t border-zinc-700 align-top" data-testid={`amux-worker-row-${row.workerName}`}>
-                    <th scope="row" className="px-3 py-3 text-left font-normal">
-                      <div className="font-mono text-sm font-semibold">{row.workerName}</div>
-                      <div className="text-xs text-zinc-400">{m.mode[row.mode]} · {row.providerLabel}</div>
-                    </th>
-                    <td className="px-3 py-3">
+        <div className="flex flex-col gap-6" data-testid="amux-workers-table-scroll">
+          {channels.map(({ channel, rows: channelRows }) => (
+            <section key={channel} aria-label={adminChannelName(channel)} className="flex flex-col gap-3" data-testid={`amux-workers-channel-${channel}`}>
+              <h3 className="flex items-center gap-2 text-base font-bold text-zinc-100">
+                <AdminChannelIcon channel={channel} size={22} />
+                {adminChannelName(channel)}
+                <span className="text-xs font-normal text-zinc-500">{m.screen.channelCount(channelRows.length)}</span>
+              </h3>
+              <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {channelRows.map((row) => (
+                  <li
+                    key={row.workerName}
+                    data-group={row.group}
+                    className={`flex min-w-0 flex-col gap-3 rounded-2xl border p-4 ${
+                      row.group === "attention"
+                        ? "border-red-500/50 bg-red-500/5"
+                        : row.group === "paused" || row.group === "retired"
+                          ? "border-dashed border-zinc-700 bg-zinc-900 opacity-75"
+                          : "border-zinc-800 bg-zinc-900"
+                    }`}
+                    data-testid={`amux-worker-row-${row.workerName}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <AdminPixelAvatar team="amux" tile={40} unit={2} body={false} />
+                      <div className="min-w-0 flex-1">
+                        <p className="break-all font-mono text-sm font-bold text-zinc-100">{row.workerName}</p>
+                        <p className="text-xs text-zinc-400">{m.mode[row.mode]} · {row.providerLabel}</p>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">{changeButtons(row)}</div>
+                    </div>
+                    <div>
                       <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${TONE_PILL[row.tone]}`} data-testid={`amux-worker-status-${row.workerName}`}>
                         <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[row.tone]}`} />
                         {m.status[row.status]}
                       </span>
-                      <p className="mt-1 max-w-xs text-sm text-zinc-300" data-testid={`amux-worker-reason-${row.workerName}`}>{amuxWorkerReasonText(m, row)}</p>
-                    </td>
-                    <td className="px-3 py-3"><span className={chipClass}>{row.roleCeiling}</span></td>
-                    <td className="px-3 py-3">
-                      <div className="flex max-w-xs flex-wrap gap-1">
-                        {row.model === null && row.routingTags.length === 0 ? (
-                          <span className="text-xs text-zinc-400">{m.noCapability}</span>
-                        ) : (
-                          <>
-                            {usedModel(row) === null ? null : <span className={chipClass}>{usedModel(row)}</span>}
-                            <AmuxCliModelIssueChips
-                              m={cm}
-                              cliModels={models}
-                              cli={row.providerClass}
-                              model={usedModel(row)}
-                              onFix={fixable(row) ? () => onFix!(row) : undefined}
-                            />
-                            {row.routingTags.map((tag) => <span key={tag} className={chipClass}>{tag}</span>)}
-                          </>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap justify-end gap-2">
-                        {changeButtons(row)}
-                        <button
-                          type="button"
-                          className={buttonClass}
-                          aria-label={m.actions.detailsLabel(row.workerName)}
-                          onClick={() => onOpen(row.workerName)}
-                          data-testid={`amux-worker-details-${row.workerName}`}
-                        >
-                          {m.actions.details}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      <p className="mt-1.5 text-sm text-zinc-300" data-testid={`amux-worker-reason-${row.workerName}`}>{amuxWorkerReasonText(m, row)}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      <span className={chipClass}>{row.roleCeiling}</span>
+                      {row.model === null && row.routingTags.length === 0 ? (
+                        <span className="text-xs text-zinc-400">{m.noCapability}</span>
+                      ) : (
+                        <>
+                          {usedModel(row) === null ? null : <span className={chipClass}>{usedModel(row)}</span>}
+                          <AmuxCliModelIssueChips
+                            m={cm}
+                            cliModels={models}
+                            cli={row.providerClass}
+                            model={usedModel(row)}
+                            onFix={fixable(row) ? () => onFix!(row) : undefined}
+                          />
+                          {row.routingTags.map((tag) => <span key={tag} className={chipClass}>{tag}</span>)}
+                        </>
+                      )}
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        className={buttonClass}
+                        aria-label={m.actions.detailsLabel(row.workerName)}
+                        onClick={() => onOpen(row.workerName)}
+                        data-testid={`amux-worker-details-${row.workerName}`}
+                      >
+                        {m.actions.details}
+                      </button>
+                    </div>
+                  </li>
                 ))}
-              </tbody>
-            ))}
-          </table>
+              </ul>
+            </section>
+          ))}
+          <p className="text-xs text-zinc-500">{m.screen.quotaNote}</p>
         </div>
       )}
 
