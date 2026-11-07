@@ -94,6 +94,8 @@ export const adminAgentOfficeFloorMessages = defineAdminMessages({
         escalation: "AMUX escalations",
         planRefusal: "Refused plans",
         marketing: "Marketing approvals",
+        workerDown: "AMUX workers",
+        quota: "Worker quotas",
       } as Record<string, string>,
     },
     sheet: {
@@ -287,6 +289,8 @@ export const adminAgentOfficeFloorMessages = defineAdminMessages({
         escalation: "AMUX 에스컬레이션",
         planRefusal: "계획 거절",
         marketing: "마케팅 승인",
+        workerDown: "AMUX 워커",
+        quota: "워커 할당량",
       } as Record<string, string>,
     },
     sheet: {

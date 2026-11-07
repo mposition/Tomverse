@@ -322,7 +322,6 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
               engine={engine}
               live={live}
               liveDepts={liveDepts}
-              amuxView={amuxView}
               reviewView={reviewView}
               decisionView={decisionView}
               cliMonitorEnabled={cliMonitorEnabled}

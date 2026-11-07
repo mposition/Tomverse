@@ -17,6 +17,7 @@ import { agentOfficeChannel, AGENT_OFFICE_CHANNELS, type AgentOfficeChannel } fr
 
 export const AGENT_OFFICE_CARDS_HREF = "/admin/amux-execution?tab=cards";
 export const AGENT_OFFICE_IDEAS_HREF = "/admin/amux-backlog?tab=ideas";
+export const AGENT_OFFICE_WORKERS_HREF = "/admin/amux-settings?tab=workers";
 
 export type InboxSeverity = "bad" | "warn" | "info" | "unread";
 export type InboxKind =
@@ -67,7 +68,9 @@ export function agentOfficeInbox(input: {
     else if (n > 0) items.push({ id, kind, severity, count: n, href });
   };
   count("halt", "halt", "bad", input.queue.amuxHalts, OPERATOR_QUEUE_HREFS.amuxHalts);
-  if (input.amux.kind === "observed") {
+  if (input.amux.kind !== "observed") {
+    items.push({ id: "down:unread", kind: "workerDown", severity: "unread", count: null, href: AGENT_OFFICE_WORKERS_HREF });
+  } else {
     for (const worker of input.amux.workers) {
       if (worker.state === "error" || worker.state === "lost") {
         items.push({
@@ -88,7 +91,9 @@ export function agentOfficeInbox(input: {
   count("escalation", "escalation", "warn", input.queue.amuxEscalations, OPERATOR_QUEUE_HREFS.amuxEscalations);
   count("refusal", "planRefusal", "info", input.inbox.planRefusals, AGENT_OFFICE_IDEAS_HREF);
   count("marketing", "marketing", "info", input.queue.marketing, OPERATOR_QUEUE_HREFS.marketing);
-  if (input.amux.kind === "observed" && input.amuxDetail.kind === "observed") {
+  if (input.amux.kind === "observed" && input.amuxDetail.kind !== "observed") {
+    items.push({ id: "quota:unread", kind: "quota", severity: "unread", count: null, href: AGENT_OFFICE_WORKERS_HREF });
+  } else if (input.amux.kind === "observed" && input.amuxDetail.kind === "observed") {
     const detail = input.amuxDetail.workers;
     for (const channel of AGENT_OFFICE_CHANNELS) {
       const resting = input.amux.workers.filter(

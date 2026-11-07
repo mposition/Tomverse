@@ -37,7 +37,6 @@ import { agentOfficeInbox, inboxTotal, quotaExhaustedNow, type AgentOfficeInboxI
 import { busyAt, replayMoment, replayState, replaySteps } from "@/lib/agentOffice/replay";
 import type {
   AgentOfficeAmuxPulse,
-  AgentOfficeAmuxView,
   AgentOfficeAmuxWorkerState,
   AgentOfficeDecisionView,
   AgentOfficeLiveDept,
@@ -97,7 +96,6 @@ export default function AgentOfficeLive({
   engine,
   live: served,
   liveDepts,
-  amuxView,
   reviewView,
   decisionView,
   cliMonitorEnabled,
@@ -111,7 +109,6 @@ export default function AgentOfficeLive({
   engine: AgentOffice;
   live: AgentOfficeLiveRooms;
   liveDepts: Record<string, AgentOfficeLiveDept>;
-  amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
   decisionView: AgentOfficeDecisionView;
   cliMonitorEnabled: boolean;
@@ -205,6 +202,7 @@ export default function AgentOfficeLive({
   const detail = live.amuxDetail.kind === "observed" ? live.amuxDetail.workers : null;
   const ownerDetail = live.amuxDetail.kind === "observed" && live.amuxDetail.ownerDetail;
   const amuxWorkers = useMemo(() => (live.amux.kind === "observed" ? live.amux.workers : []), [live.amux]);
+  const heartbeats = useMemo(() => new Map(amuxWorkers.map((w) => [w.name, w.heartbeatAt])), [amuxWorkers]);
   const history = live.history;
   const steps = history.kind === "observed" ? replaySteps(history.since, now) : 0;
   const replayAt = rewind !== null && history.kind === "observed" ? replayMoment(history.since, now, rewind) : null;
@@ -479,7 +477,7 @@ export default function AgentOfficeLive({
               </div>
             </>
           ) : (
-            <Roster f={f} m={m} amuxView={amuxView} workers={workers} detail={detail} ownerDetail={ownerDetail} now={now} problemsOnly={problemsOnly} onOpen={openWorker} />
+            <Roster f={f} heartbeats={heartbeats} workers={workers} detail={detail} ownerDetail={ownerDetail} now={now} problemsOnly={problemsOnly} onOpen={openWorker} />
           )}
         </div>
 
@@ -904,8 +902,7 @@ function WorkerSheet({
 
 function Roster({
   f,
-  m,
-  amuxView,
+  heartbeats,
   workers,
   detail,
   ownerDetail,
@@ -914,8 +911,7 @@ function Roster({
   onOpen,
 }: {
   f: FloorCopy;
-  m: OfficeCopy;
-  amuxView: AgentOfficeAmuxView;
+  heartbeats: ReadonlyMap<string, string | null>;
   workers: FloorWorker[];
   detail: Record<string, AgentOfficeWorkerDetail> | null;
   ownerDetail: boolean;
@@ -926,7 +922,10 @@ function Roster({
   const rank = (w: FloorWorker) =>
     w.state === "error" || w.state === "lost" ? 0 : w.quotaExhausted && workerPlace(w.state, true) === "pod" ? 1 : w.state === "isolated" || w.state === "blocked" ? 2 : w.state === "busy" ? 3 : w.state === "ready" ? 4 : RUNNING.includes(w.state) ? 5 : 6;
   const rows = [...workers].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).filter((w) => !problemsOnly || w.needsLook);
-  const heartbeat = new Map(amuxView.workers.map((w) => [w.name, w.facts.find((x) => x.label === m.real.amux.facts.heartbeat)?.value ?? ""]));
+  const heartbeat = (name: string) => {
+    const hb = ago(heartbeats.get(name) ?? null, now, f);
+    return hb ? f.sheet.heartbeatAgo(hb.text) : "";
+  };
   return (
     <div className={cn(s.card, s.roster)} data-testid="agent-office-roster">
       <table className={s.tbl}>
@@ -952,7 +951,7 @@ function Roster({
                 <td><span className={cn(s.chip, stateTone(w.state, w.quotaExhausted))}>{w.quotaExhausted && workerPlace(w.state, true) === "pod" ? f.sheet.quotaOut : w.label}</span></td>
                 <td>{work ? <><b style={{ color: "var(--act)" }}>{work.cardKey ?? "–"}</b> <span className={s.faint}>{work.cardTitle ?? ""}</span></> : <span className={s.faint}>{ownerDetail ? f.roster.none : f.sheet.ownerOnly}</span>}</td>
                 <td className={s.num}>{work ? f.sheet.minutes(Math.max(0, Math.round((now - Date.parse(work.startedAt)) / 60_000))) : <span className={s.faint}>–</span>}</td>
-                <td className={s.num}>{heartbeat.get(w.name) || "–"}</td>
+                <td className={s.num}>{heartbeat(w.name) || "–"}</td>
                 <td>
                   <span className={s.row}>
                     <span className={s.qtrack} style={{ width: 56, flex: "none" }}>

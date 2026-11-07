@@ -246,3 +246,21 @@ test("an end that cannot be read counts as still running", () => {
   const t0 = Date.parse("2026-11-06T14:00:00.000Z");
   assert.deepEqual([...busyAt([{ worker: "x", startedAt: new Date(t0).toISOString(), endedAt: "garbage", mark: "s" }], t0 + 1)], ["x"]);
 });
+
+test("an AMUX read that failed is an unread item in the inbox, never an empty inbox", async () => {
+  const { agentOfficeInbox, inboxTotal } = await import("../lib/agentOffice/inbox.ts");
+  const zero = { queue: { marketing: 0, amuxEscalations: 0, amuxHalts: 0 }, inbox: { dmAttention: 0, v22Questions: 0, planRefusals: 0 }, now: Date.parse("2026-11-07T02:00:00.000Z") };
+  const blind = agentOfficeInbox({ ...zero, amux: { kind: "unread" }, amuxDetail: { kind: "unread" } });
+  assert.deepEqual(blind.map((i) => [i.kind, i.severity]), [["workerDown", "unread"]]);
+  assert.equal(inboxTotal(blind).unknown, true);
+  const noDetail = agentOfficeInbox({ ...zero, amux: { kind: "observed", catalogConfigured: true, workers: [] }, amuxDetail: { kind: "unread" } });
+  assert.deepEqual(noDetail.map((i) => [i.kind, i.severity]), [["quota", "unread"]]);
+  const read = agentOfficeInbox({ ...zero, amux: { kind: "observed", catalogConfigured: true, workers: [] }, amuxDetail: { kind: "observed", ownerDetail: false, workers: {} } });
+  assert.deepEqual(read, []);
+});
+
+test("the roster's heartbeats follow the fifteen-second reading", () => {
+  const live = read("components/admin/AgentOfficeLive.tsx");
+  assert.match(live, /const heartbeats = useMemo\(\(\) => new Map\(amuxWorkers\.map\(\(w\) => \[w\.name, w\.heartbeatAt\]\)\)/);
+  assert.doesNotMatch(live, /amuxView/);
+});
