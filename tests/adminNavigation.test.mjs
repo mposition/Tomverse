@@ -1212,13 +1212,22 @@ test("Platform's default models are Models' Default models tab", () => {
   assert.match(platform, /view=\{tab\.id as "emergency" \| "features" \| "account-defaults"\}/);
   const registry = readFileSync(join(process.cwd(), "components/admin/AdminModelRegistryPanel.tsx"), "utf8");
   assert.doesNotMatch(registry, /\/admin\/platform#default-models/);
-  // A save sends only what its tab draws: a tab opened before another
-  // operator engaged an emergency stop must not write the old value back.
+  // The route saves the nine flags together, so a tab sends its own sections'
+  // values and reads the rest from the server when Save is pressed: a tab
+  // opened before another operator engaged an emergency stop must not write
+  // the old value back, and a failed read saves nothing.
   const panel = readFileSync(join(process.cwd(), "components/admin/PlatformSettingsPanel.tsx"), "utf8");
-  const body = panel.slice(panel.indexOf('method: "PATCH"'), panel.indexOf("const data = (await response.json()", panel.indexOf('method: "PATCH"')));
-  assert.match(body, /\.\.\.\(show\("emergency"\)\s*\? \{ aiChatEnabled, attachmentsEnabled, publicSharingEnabled \}/);
-  assert.match(body, /\.\.\.\(show\("features"\)/);
-  assert.doesNotMatch(body, /^\s*aiChatEnabled,$/m);
+  const save = panel.slice(panel.indexOf("const save = async"), panel.indexOf("const data = (await response.json()", panel.indexOf("const save = async")));
+  assert.match(save, /if \(!\(show\("emergency"\) && show\("features"\)\)\) \{\s*const currentResponse = await adminFetch\("\/api\/admin\/app-settings", \{ cache: "no-store" \}\);/);
+  assert.match(save, /if \(!readable\) \{\s*dispatchAppToast\(m\.toast\.notSaved, "error"\);\s*return;/);
+  assert.match(save, /const emergency = show\("emergency"\) \|\| !current\?\.settings\s*\? \{ aiChatEnabled, attachmentsEnabled, publicSharingEnabled \}/);
+  assert.match(save, /const rollout = show\("features"\) \|\| !current/);
+  assert.match(save, /body: JSON\.stringify\(\{ \.\.\.emergency, \.\.\.rollout \}\)/);
+  // The route still takes all nine together (its own rule, unchanged).
+  assert.match(
+    readFileSync(join(process.cwd(), "app/api/admin/app-settings/route.ts"), "utf8"),
+    /Feature flags are saved together\./
+  );
   // The old hash link is moved on in the browser.
   assert.match(panel, /window\.location\.hash === "#default-models"/);
   assert.match(panel, /router\.replace\("\/admin\/models\?tab=defaults#default-models"\)/);

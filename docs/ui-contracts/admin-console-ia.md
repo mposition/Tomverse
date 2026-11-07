@@ -124,9 +124,10 @@ they were written under):
   draws the emergency stops, the feature switches and the account defaults of
   the old Platform settings; its default-model block is the **Default models**
   tab of Models (`?tab=defaults`). It is one panel drawing a part of one
-  state (`view`), and a save sends only the fields of the sections the tab
-  draws, so a tab left open cannot write back a stop another operator engaged
-  meanwhile. The old `/admin/platform#default-models` link is moved on in the
+  state (`view`). The route saves the nine flags together, so a tab sends its
+  own sections' values and reads the rest from the server when Save is
+  pressed (and saves nothing if that read fails): a tab left open cannot write
+  back a stop another operator engaged meanwhile. The old `/admin/platform#default-models` link is moved on in the
   browser (a hash never reaches the server).
 - **Messaging** is a new group: Email campaigns (writing a campaign is the
   `new` tab), Customer mail, Operator alerts (the mail path test left

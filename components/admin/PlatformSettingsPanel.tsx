@@ -38,9 +38,11 @@ import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProv
  * other four are the tabs of Feature flags (`emergency`, `features`,
  * `account-defaults`) and the Default models tab of Models (`default-models`),
  * which is where the default-model block lives since 2026-11-07. Every mount
- * holds the same state, but a save sends only the fields of the sections the
- * mount draws: a tab left open must never write back a value it cannot show,
- * such as an emergency stop another operator has engaged since it was loaded.
+ * holds the same state. The route saves all nine flags together, so a save
+ * from a tab sends its own sections' values and takes the others from the
+ * server as they are when it is pressed: a tab left open must never write
+ * back a value it cannot show, such as an emergency stop another operator has
+ * engaged since the page loaded.
  */
 export type PlatformSettingsView =
   | "all"
@@ -492,27 +494,58 @@ export function PlatformSettingsPanel({
     if (isLoading || isSaving || reauthenticationRequired) return;
     setIsSaving(true);
     try {
+      // The route saves the nine flags together. A mount that draws only some
+      // of them sends the values it shows and reads the rest now, so a stale
+      // copy of a stop it cannot show is never written back. If that read
+      // fails nothing is saved.
+      let current: AdminAppSettingsResponse | null = null;
+      if (!(show("emergency") && show("features"))) {
+        const currentResponse = await adminFetch("/api/admin/app-settings", { cache: "no-store" });
+        current = (await currentResponse.json().catch(() => null)) as AdminAppSettingsResponse | null;
+        const readable =
+          currentResponse.ok &&
+          current?.settings &&
+          [
+            current.imageGenerationEnabled,
+            current.externalConversationImportEnabled,
+            current.externalConversationContinuationEnabled,
+            current.assistantProfilesEnabled,
+            current.assistantKnowledgeEnabled,
+            current.chatStarterEnabled,
+          ].every((value) => typeof value === "boolean");
+        if (!readable) {
+          dispatchAppToast(m.toast.notSaved, "error");
+          return;
+        }
+      }
+      const emergency = show("emergency") || !current?.settings
+        ? { aiChatEnabled, attachmentsEnabled, publicSharingEnabled }
+        : {
+            aiChatEnabled: current.settings.aiChatEnabled,
+            attachmentsEnabled: current.settings.attachmentsEnabled,
+            publicSharingEnabled: current.settings.publicSharingEnabled,
+          };
+      const rollout = show("features") || !current
+        ? {
+            imageGenerationEnabled,
+            externalConversationImportEnabled: externalImportEnabled,
+            externalConversationContinuationEnabled: externalContinuationEnabled,
+            assistantProfilesEnabled,
+            assistantKnowledgeEnabled,
+            chatStarterEnabled,
+          }
+        : {
+            imageGenerationEnabled: current.imageGenerationEnabled,
+            externalConversationImportEnabled: current.externalConversationImportEnabled,
+            externalConversationContinuationEnabled: current.externalConversationContinuationEnabled,
+            assistantProfilesEnabled: current.assistantProfilesEnabled,
+            assistantKnowledgeEnabled: current.assistantKnowledgeEnabled,
+            chatStarterEnabled: current.chatStarterEnabled,
+          };
       const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        // Only what this mount draws (the route accepts a partial body): the
-        // emergency stops from the Emergency stops tab, the rollout switches
-        // from the Feature switches tab.
-        body: JSON.stringify({
-          ...(show("emergency")
-            ? { aiChatEnabled, attachmentsEnabled, publicSharingEnabled }
-            : {}),
-          ...(show("features")
-            ? {
-                imageGenerationEnabled,
-                externalConversationImportEnabled: externalImportEnabled,
-                externalConversationContinuationEnabled: externalContinuationEnabled,
-                assistantProfilesEnabled,
-                assistantKnowledgeEnabled,
-                chatStarterEnabled,
-              }
-            : {}),
-        }),
+        body: JSON.stringify({ ...emergency, ...rollout }),
       });
       const data = (await response.json().catch(() => null)) as
         | AdminAppSettingsResponse
