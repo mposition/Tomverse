@@ -45,7 +45,7 @@ export function AdminReasonDialog({
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const dialogRef = useRef<HTMLElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
-  useModalDialog({ open, onClose, dialogRef, panelRef: dialogRef, initialFocusRef: cancelRef });
+  useModalDialog({ open, onClose: busy ? () => {} : onClose, dialogRef, panelRef: dialogRef, initialFocusRef: cancelRef });
 
   useEffect(() => {
     if (!open) return;
