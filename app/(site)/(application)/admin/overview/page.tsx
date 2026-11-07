@@ -37,7 +37,7 @@ const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
 const TABS = adminNavItemTabs("overview");
 
 /** `2026-09-14T02:31:00.000Z` -> `2026-09-14 12:31 AEST`, as the rest of the page does. */
-const minuteLabel = (value: Date) => formatAestDateTime(value) ?? "-";
+const minuteLabel = (value: Date) => formatAestDateTime(value) || "-";
 
 const settled = <T,>(result: PromiseSettledResult<T>): T | null =>
   result.status === "fulfilled" ? result.value : null;
@@ -300,7 +300,7 @@ export default async function AdminOverviewPage({
   ].slice(0, 6);
 
   const generatedAtLabel =
-    formatAestDateTime(dashboard ? dashboard.generatedAt : now) ?? "-";
+    formatAestDateTime(dashboard ? dashboard.generatedAt : now) || "-";
 
   // The snapshot is pasted into incident notes and tickets, so a figure that
   // was never read has to say so there too. A zero in a pasted report outlives
