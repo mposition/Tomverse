@@ -305,7 +305,9 @@ test("the owner's panel sits on the idea's detail, in both languages, and appear
   const summary = readFileSync(resolve(ROOT, "components/admin/AmuxIdeaDetailSummary.tsx"), "utf8");
   assert.match(summary, /<AmuxIdeaCardClosePanel key=\{`card-close-\$\{row\.ideaId\}`\} ideaId=\{row\.ideaId\} \/>/);
   const panel = readFileSync(resolve(ROOT, "components/admin/AmuxIdeaCardClosePanel.tsx"), "utf8");
-  assert.match(panel, /return question \? <AmuxIdeaCardCloseForm ideaId=\{ideaId\} question=\{question\} \/> : null;/);
+  assert.match(panel, /return view \? <AmuxIdeaCardCloseForm ideaId=\{ideaId\} view=\{view\} \/> : null;/);
+  // With no question open, the direct close posts no question and offers no keep.
+  assert.match(panel, /\{ ideaId, direct: true, cardIds: cards\.map\(\(card\) => card\.id\), decision: "close"/);
   assert.match(panel, /ownerConfirmed: true/);
   assert.match(panel, /adminRecentAuthenticationHref/);
   const { adminAmuxIdeaCardCloseMessages: catalog } = await import("../lib/adminMessages/amuxIdeaCardClose.ts");
@@ -321,7 +323,7 @@ test("the boundaries stay within the policy's twelve statements, and the confirm
   const boundaries = readFileSync(resolve(ROOT, "lib/amux/dbBoundary.ts"), "utf8");
   for (const [name, ceiling] of [["decisionMakerIdeaCardCloseScan", 3], ["decisionMakerIdeaCardCloseOpen", 10],
     ["decisionMakerIdeaCardCloseRead", 4], ["decisionMakerIdeaCardCloseApply", 12],
-    ["decisionMakerIdeaCardCloseHandoff", 8], ["decisionMakerIdeaCardCloseOwnerRead", 3],
+    ["decisionMakerIdeaCardCloseHandoff", 8], ["decisionMakerIdeaCardCloseOwnerRead", 4],
     ["decisionMakerV22QuestionResolve", 10], ["decisionMakerV22QuestionWrite", 8]]) {
     const match = new RegExp(`${name}: \\{[^}]*prismaCallCeiling: (\\d+)`).exec(boundaries);
     assert.equal(Number(match?.[1]), ceiling, name);
