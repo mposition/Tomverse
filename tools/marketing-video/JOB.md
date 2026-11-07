@@ -108,7 +108,8 @@ echo ...; date`, because the chain did not match.
      one key word in #155dfb (italic serif works).
      - Then write `ko`, `zh-Hant` and `zh-Hans` versions as natural copy in each
        language, not word for word.
-     - Keep model and feature names as they appear in `features.json`.
+     - Keep model and feature names exactly as they appear in `features.json`;
+       `make-card.mjs` refuses a versioned model name it does not list.
      - `zh-Hans` is written in Simplified characters.
    - **Layout file**: write `job/<yyyymmdd>/<id>.layout.html`, one per locale.
      - It holds one `<style>` block and the card's elements for a 1080x1350
@@ -119,7 +120,8 @@ echo ...; date`, because the chain did not match.
      - Colours are only #ffffff, #18181b, #155dfb, #eff6ff, #f7f8fa and
        #e4e4e7, at any opacity.
      - A card with a `photo-*` library picture shows the AI line for its locale
-       as its own element, small in a corner:
+       as its own element, small in a corner but plainly visible (at least
+       14 px, not faded below half, not covered):
        - en "Photo: AI-generated"
        - ko "사진: AI 생성"
        - zh-Hant and zh-Hans "照片：AI 生成"

@@ -19,8 +19,10 @@
 //    or the layout carries script, frames, form fields or CSS-generated text;
 //  - a colour drawn is not a brand colour (pictures themselves excepted);
 //  - a line lies outside the card or is clipped by its box;
-//  - an AI-made library photo is used without the locale's AI line on the card,
-//    or together with a product capture (an AI asset may not show the product);
+//  - an AI-made library photo is used without the locale's AI line visibly on
+//    the card, or together with a product capture (an AI asset may not show
+//    the product);
+//  - a versioned model name is not one features.json lists;
 //  - the card looks like a card of an earlier day (a difference hash of the
 //    picture, so new words on an old look fail).
 // Every word the card shows goes into the transcript the Guard judges at
@@ -63,6 +65,8 @@ const BRAND_RGB = ["255,255,255", "24,24,27", "21,93,251", "239,246,255", "247,2
 const MIN_HASH_DISTANCE = 64;
 const LOOKBACK_DAYS = 30;
 const AI_PROVENANCES = ["ai_generated", "ai_modified"];
+/** A model family followed, within a few words, by a version number. */
+const MODEL_MENTION = /\b(?:GPT|Claude|Gemini|Grok|Llama|Mistral|Qwen|DeepSeek|Kimi|Nano Banana)\b[^,.;:!?\n]{0,20}?\d/gu;
 
 const fail = (message) => {
   console.error(JSON.stringify({ step: "make-card", error: message }));
@@ -78,6 +82,7 @@ if (typeof spec.alt !== "string" || spec.alt.trim().length < 20) fail("spec.alt 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const libraryDir = path.join(toolDir, "library");
 const library = JSON.parse(readFileSync(path.join(libraryDir, "library.json"), "utf8"));
+const KNOWN_MODELS = JSON.parse(readFileSync(path.join(toolDir, "features.json"), "utf8")).features.flatMap((feature) => feature.models ?? []);
 
 // The pack's captures, if the card uses a pack: `captures` ({name: {file,
 // text}}), or the first packs' fixed five pictures.
@@ -201,7 +206,7 @@ try {
   await page.evaluate(() => document.fonts.ready);
   if (fetched.length > 0) fail(`the layout fetched something else: ${JSON.stringify(fetched)}`);
 
-  const found = await page.evaluate((brand) => {
+  const found = await page.evaluate(([brand, aiLine]) => {
     const texts = [];
     const cut = [];
     const generated = [];
@@ -243,16 +248,49 @@ try {
         if (/\b(?:hsla?|lab|lch|oklab|oklch|color)\(/u.test(String(style[prop]))) colours.add(String(style[prop]));
       }
     }
-    return { texts, cut, generated, colours: [...colours] };
-  }, BRAND_RGB);
+    // The AI line must really be seen: drawn, at least 14 px, at least half
+    // opaque through every ancestor, inside the card, and on top where it sits.
+    let aiLineSeen = aiLine === null;
+    const lines = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (aiLine !== null && lines.nextNode()) {
+      const node = lines.currentNode;
+      if (node.textContent.replace(/\s+/gu, " ").trim() !== aiLine) continue;
+      const owner = node.parentElement;
+      let opacity = 1;
+      let shown = true;
+      for (let el = owner; el; el = el.parentElement) {
+        const style = getComputedStyle(el);
+        opacity *= Number(style.opacity);
+        if (style.visibility !== "visible" || style.display === "none") shown = false;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rect = range.getBoundingClientRect();
+      const inside = rect.width > 0 && rect.left >= 0 && rect.top >= 0 && rect.right <= 1080 && rect.bottom <= 1350;
+      const top = inside ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
+      const onTop = Boolean(top && (top === owner || owner.contains(top)));
+      if (shown && opacity >= 0.5 && parseFloat(getComputedStyle(owner).fontSize) >= 14 && inside && onTop) aiLineSeen = true;
+    }
+    return { texts, cut, generated, colours: [...colours], aiLineSeen };
+  }, [BRAND_RGB, usedAi.length > 0 ? AI_LINE[locale] : null]);
 
   const normal = (text) => text.replace(/\s+/gu, " ").trim();
   if (found.generated.length > 0) fail(`CSS may not draw text: ${JSON.stringify(found.generated)}`);
   if (found.texts.length === 0) fail("the card shows no words");
   if (found.cut.length > 0) fail(`lines cut off or outside the card: ${JSON.stringify(found.cut)}`);
   if (found.colours.length > 0) fail(`colours outside the brand palette: ${JSON.stringify(found.colours)}`);
-  if (usedAi.length > 0 && !found.texts.some((text) => normal(text) === AI_LINE[locale])) {
-    fail(`a card with an AI-made photo shows the line "${AI_LINE[locale]}"`);
+  if (!found.aiLineSeen) {
+    fail(`a card with an AI-made photo shows the line "${AI_LINE[locale]}", visible: at least 14 px, half opaque, inside the card and not covered`);
+  }
+  // A versioned model name must be one features.json lists, so a card cannot
+  // name a model Tomverse does not offer ("GPT 7"). A bare family name
+  // ("GPT, Claude, Gemini") is fine.
+  for (const text of found.texts.map(normal)) {
+    for (const match of text.matchAll(MODEL_MENTION)) {
+      if (!KNOWN_MODELS.some((name) => text.startsWith(name, match.index))) {
+        fail(`"${match[0]}" is not a model name in features.json`);
+      }
+    }
   }
   await page.screenshot({ path: pngPath, type: "png" });
 
@@ -283,7 +321,9 @@ writeFileSync(
     {
       asset: {
         id: spec.id,
-        provenance: ai ? "ai_modified" : usedCaptures.length > 0 ? "capture" : "operator_upload",
+        // The library's photos are model-made pictures with our words set on
+        // them, so the asset is AI generated (lib/marketingAssets.ts).
+        provenance: ai ? "ai_generated" : usedCaptures.length > 0 ? "capture" : "operator_upload",
         allowedChannels: channels,
         // A feature claim needs its FAQ sentence in the words (the Guard's
         // feature_not_public); a card states the feature in its own words.
