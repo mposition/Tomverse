@@ -23,6 +23,8 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
   // The attempt's usage row: by default an unreported Codex outcome; with
   // claudeCliFailure, the partial receipt a failed Claude result leaves.
   const claudeCliFailure = input.claudeCliFailure ?? null;
+  // The settled attempt's number; 5 is the last one the budget allows.
+  const attemptNumber = input.attemptNumber ?? 1;
   // false: no usage row at all, as when the lease expired after the result
   // was stored but before the bridge reported usage (AMUX-FILEGEN-003).
   const usageReported = input.usageReported ?? true;
@@ -308,9 +310,9 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
      "taskRevision", "attemptNumber", "reservedCostMicrousd",
      "heartbeatAt", "leaseExpiresAt", "startedAt", "v22AssignmentId",
      "updatedAt") VALUES ($1, $2, 'worker-one', '${instanceId}', 1,
-     3, 1, 3400000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
+     3, $4, 3400000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
      CURRENT_TIMESTAMP, $3, CURRENT_TIMESTAMP)`,
-  [attemptId, ids.task, assignmentId]);
+  [attemptId, ids.task, assignmentId, attemptNumber]);
   await db.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
     amux_v22_doing_guard_trigger IMMEDIATE`);
   await input.afterAttempt?.({ ids, attemptId, assignmentId, instanceId });
