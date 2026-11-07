@@ -583,6 +583,48 @@ test("v5 Tasks name their expected paths and never propose a review Task", () =>
   }
 });
 
+test("a complete new answer refuses an investigate Task that no Task depends on", () => {
+  // Owner decision 2026-11-07: an analysis Task hands its result to a later Task.
+  const signal = (metrics) => ({ metrics, uncertainty: "low",
+    rationale: "A bounded proposal.", evidenceRefIds: [sourceRef] });
+  const taskSignal = signal({ contribution: 3, urgency: 2, dependencyUnlock: 2,
+    workerCoverage: 3, effort: 2, deliveryRisk: 1 });
+  const v5Story = { ...story(), portfolioSignal: signal({ impact: 3 }) };
+  const investigate = { ...task("c0:card-2"), portfolioSignal: taskSignal, taskRole: "investigate",
+    executionBrief: "Find why the router fails before choosing a fix.",
+    completionCriteria: ["Decide the router fix; c0:card-3 implements it."],
+    expectedPaths: ["lib/amux/router.ts", "prisma/migrations/0001/migration.sql"] };
+  const implement = (dependencyRefs) => ({ ...task("c0:card-3"), portfolioSignal: taskSignal,
+    dependencyRefs, expectedPaths: ["lib/amux/router.ts"] });
+  const answer = (units, extra = {}) => ({ ...chunk(units), schemaVersion: 5, ...extra });
+  const fresh = (value) => inspectAmuxAnalysisChunk({
+    raw: JSON.stringify(value), expectedPreviewId: "preview-01", expectedChunkIndex: 0,
+    expectedRevisionChunkIndex: 0, previousContinuationKind: null,
+    permittedSourceRefIds: [sourceRef],
+    permittedTargetRefs: [{ ref: "feature_existing_01", kind: "node", level: "feature" }],
+    requiredSchemaVersion: 5 });
+
+  // Consumed: accepted, and a read-only Task may read contract and ordinary paths together.
+  const consumed = fresh(answer([v5Story, investigate, implement(["c0:card-2"])]));
+  assert.equal(consumed.ok, true, JSON.stringify(consumed));
+
+  // Nothing depends on it in the closing chunk: refused, naming the unit.
+  for (const units of [[v5Story, investigate], [v5Story, investigate, implement([])]]) {
+    assert.deepEqual(fresh(answer(units)), { ok: false, code: "schema_rejected",
+      at: { rule: "investigate_without_consumer", field: "dependencyRefs", unit: 1, kind: "card" } });
+  }
+  // Other read-only roles are not held to it.
+  assert.equal(fresh(answer([v5Story, { ...investigate, taskRole: "verify" }])).ok, true);
+
+  // More cards follow: the consumer may come on the next page.
+  const more = answer([v5Story, investigate], { coverageStatus: "more", continuationKind: "output",
+    remainingScope: "c0:card-3 implements the router fix." });
+  assert.equal(fresh(more).ok, true, JSON.stringify(fresh(more)));
+
+  // A stored chunk is re-read under the contract it was admitted with.
+  assert.equal(inspect(answer([v5Story, investigate])).ok, true);
+});
+
 test("a new response is admitted only under the schema its prompt asked for", () => {
   // Review finding on amux-intake v20: declaring an older schema must not skip
   // the expected-path and no-review contract.
