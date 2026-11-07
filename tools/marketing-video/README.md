@@ -70,9 +70,11 @@ node make-feed-video.mjs <pack.json> <id> <out-dir>     # 4:5 feed version of th
 
 A source pack (`job/sources/<asset-id>/pack.json`, on the box only) is the
 material one approved short was made from: its real captures, its question and
-its approved on-screen lines. `make-card.mjs` draws the layout the owner
-approved on 2026-11-03 (Canva `DAHZ2Rm5gVc`) in brand colours, from lines the
-pack carries only. `make-feed-video.mjs` renders the `Feed` composition: the
+its approved on-screen lines. The job designs each card itself (owner
+2026-11-07: no card that only changes its words); `make-card.mjs` renders the
+job's layout and refuses words the pack does not carry, pictures that are not
+its captures, colours outside the brand palette, cut-off lines, and a look an
+earlier day already used (`tests/marketingMediaMakeCard.test.mjs`). `make-feed-video.mjs` renders the `Feed` composition: the
 approved short, whole, on a 1080x1350 frame.
 
 ## The daily job

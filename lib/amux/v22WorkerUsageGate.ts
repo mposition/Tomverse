@@ -23,6 +23,16 @@ import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
  * worker's (owner decision 2026-11-06; review r-20261107-015440-41ac19).
  * The receipt stays partial: every other Task still sees the attempt and is
  * still refused that worker.
+ *
+ * The same owner retry also releases the Task's own expired attempt whose
+ * final result the server stored (lib/amux/reviewApprovalCore.ts,
+ * amuxV22ReviewRetryHasVerifiedOutcome: outcome expired, toStatus blocked,
+ * and the Task's latest AmuxV22TaskResult belongs to exactly that attempt).
+ * The bridge reports CLI usage after it stores the result, so a lease that
+ * expired between the two leaves no usage row at all, and the retry the owner
+ * approved waited as usage_unverified forever (AMUX-FILEGEN-003, review
+ * r-20261107-061707-e4a9a6). Nothing is written for that attempt either: every
+ * other Task is still refused that worker.
  */
 export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
   workerName: string, priorAttemptId: string | null, taskId: string): Promise<boolean> {
@@ -42,8 +52,14 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
              AND u."completeness" <> 'reported_complete'))
       AND NOT COALESCE(a."taskId" = ${taskId}
         AND a."v22AssignmentId" IS NOT NULL
-        AND a."outcome" = 'blocked' AND a."toStatus" = 'blocked'
-        AND a."reason" = ANY(${retryableReasons}::text[])
+        AND a."toStatus" = 'blocked'
+        AND ((a."outcome" = 'blocked'
+            AND a."reason" = ANY(${retryableReasons}::text[]))
+          OR (a."outcome" = 'expired'
+            AND (SELECT r."attemptId" FROM "AmuxV22TaskResult" r
+              WHERE r."taskId" = a."taskId"
+              ORDER BY r."createdAt" DESC, r."attemptId" DESC
+              LIMIT 1) = a."id"))
         AND EXISTS (SELECT 1 FROM "AmuxReviewProposal" p
           JOIN "AmuxReviewDecision" d ON d."proposalId" = p."id"
             AND d."escalationId" = p."escalationId"
