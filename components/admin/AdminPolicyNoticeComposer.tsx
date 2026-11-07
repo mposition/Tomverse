@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, Loader2, Scale } from "lucide-react";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
 
 import { dispatchAppToast } from "@/lib/appToast";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
@@ -149,41 +152,40 @@ export function AdminPolicyNoticeComposer({
   };
 
   return (
-    <section
-      className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
+    <AdminTile
+      title={m.title}
+      description={
+        <>
+          {m.intro}
+          <span className="mt-1 block text-xs text-zinc-300">
+            {effectiveDate ? m.audience(owedBefore) : m.noDate}
+          </span>
+        </>
+      }
       data-testid="admin-policy-notice-composer"
     >
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        {m.badge}
-      </p>
-      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">{m.intro}</p>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-        {effectiveDate ? m.audience(owedBefore) : m.noDate}
-      </p>
       {!wordingApproved ? (
-        <p className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/40 p-4 text-sm leading-6 text-amber-100">
+        <p className="rounded-xl bg-amber-500/10 p-3 text-sm leading-6 text-amber-200">
           {m.notApproved}
         </p>
       ) : null}
       {!mayWrite ? (
-        <p className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/40 p-4 text-sm text-amber-100">
+        <p className="rounded-xl bg-amber-500/10 p-3 text-sm text-amber-200">
           {m.readOnly}
         </p>
       ) : null}
       {!campaignsEnabled ? (
-        <p className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/40 p-4 text-sm leading-6 text-amber-100">
+        <p className="rounded-xl bg-amber-500/10 p-3 text-sm leading-6 text-amber-200">
           {m.disabled}
         </p>
       ) : null}
       {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
 
-      <div className="mt-5 flex flex-wrap gap-3">
-        <button
-          type="button"
+      <div className="flex flex-wrap gap-3">
+        <AdminWriteButton
+          variant="secondary"
           onClick={() => void preview()}
           disabled={Boolean(busy)}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:border-zinc-600 disabled:opacity-60"
           data-testid="admin-policy-notice-preview"
         >
           {busy === "preview" ? (
@@ -192,14 +194,12 @@ export function AdminPolicyNoticeComposer({
             <Eye className="h-4 w-4" aria-hidden />
           )}
           {busy === "preview" ? m.previewing : m.preview}
-        </button>
-        <button
-          type="button"
+        </AdminWriteButton>
+        <AdminWriteButton
+          writable={mayWrite}
+          requiredRole="ops:write"
           onClick={() => void create()}
-          disabled={
-            Boolean(busy) || !mayWrite || !campaignsEnabled || !ready || !copyDigest
-          }
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={Boolean(busy) || !campaignsEnabled || !ready || !copyDigest}
           data-testid="admin-policy-notice-create"
         >
           {busy === "create" ? (
@@ -208,14 +208,14 @@ export function AdminPolicyNoticeComposer({
             <Scale className="h-4 w-4" aria-hidden />
           )}
           {busy === "create" ? m.creating : m.create}
-        </button>
+        </AdminWriteButton>
       </div>
       {!copyDigest ? (
-        <p className="mt-2 text-xs text-zinc-500">{m.previewFirst}</p>
+        <p className="text-xs text-zinc-500">{m.previewFirst}</p>
       ) : null}
 
       {previews.length > 0 ? (
-        <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-3">
           <div className="flex flex-wrap gap-2 px-2 py-1">
             {locales.map((entry) => (
               <button
@@ -223,10 +223,10 @@ export function AdminPolicyNoticeComposer({
                 type="button"
                 onClick={() => setLanguage(entry)}
                 aria-pressed={language === entry}
-                className={`min-h-10 rounded-xl border px-4 text-sm font-bold ${
+                className={`min-h-10 rounded-xl px-4 text-sm font-bold ${
                   language === entry
-                    ? "border-blue-500 bg-blue-950 text-blue-100"
-                    : "border-zinc-800 bg-zinc-900 text-zinc-400"
+                    ? "bg-zinc-100 text-zinc-900"
+                    : "border border-zinc-700 bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
                 }`}
               >
                 {entry.toUpperCase()}
@@ -247,12 +247,14 @@ export function AdminPolicyNoticeComposer({
             </>
           ) : null}
           {copyDigest ? (
-            <p className="mt-3 break-all px-2 font-mono text-[10px] leading-4 text-zinc-500">
-              {m.digest}: {copyDigest}
-            </p>
+            <div className="mt-3">
+                <AdminTechInfo summary={m.digest}>
+                  <span className="break-all">{copyDigest}</span>
+                </AdminTechInfo>
+              </div>
           ) : null}
         </div>
       ) : null}
-    </section>
+    </AdminTile>
   );
 }

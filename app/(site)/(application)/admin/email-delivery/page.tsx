@@ -56,24 +56,31 @@ export default async function AdminEmailDeliveryPage({
       {tab.id === "suppressions" ? (
         <AdminAddressRevealProvider>
           <AdminEmailSuppressionsPanel
-            rows={await listSuppressions({ emailAddress: null, limit: 100 })}
+            rows={await listSuppressions({ emailAddress: null, limit: 100 }).catch(
+              () => null
+            )}
             mayRevealAddresses={mayRevealAddresses}
           />
         </AdminAddressRevealProvider>
       ) : (
         await (async () => {
           const filters = parseDeliveryFilters(query);
-          const [page, statusCounts] = await Promise.all([
+          // A read that fails is shown as failed, never as an empty log.
+          const [page, statusCounts] = await Promise.allSettled([
             listEmailDeliveries(filters),
             emailDeliveryStatusCounts(),
           ]);
           return (
             <AdminAddressRevealProvider>
               <AdminEmailDeliveriesPanel
-                rows={page.rows}
+                rows={page.status === "fulfilled" ? page.value.rows : null}
                 filters={filters}
-                statusCounts={statusCounts}
-                nextCursor={page.nextCursor}
+                statusCounts={
+                  statusCounts.status === "fulfilled" ? statusCounts.value : null
+                }
+                nextCursor={
+                  page.status === "fulfilled" ? page.value.nextCursor : null
+                }
                 mayRevealAddresses={mayRevealAddresses}
               />
             </AdminAddressRevealProvider>

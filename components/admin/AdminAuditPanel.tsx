@@ -1,13 +1,22 @@
 "use client";
 
 import { formatAestDateTime } from "@/lib/adminUiCore";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Clipboard, Eye, Loader2, Search, ShieldCheck, X } from "lucide-react";
+import { Clipboard, Download, Eye, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminAuditMessages } from "@/lib/adminMessages/audit";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminAuditIntegrityCard } from "@/components/admin/AdminAuditIntegrityPanel";
+import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { useModalDialog } from "@/components/useModalDialog";
 import { adminFetch } from "@/lib/adminFetch";
+import type { AdminTone } from "@/lib/adminUiCore";
 
 export type AdminAuditRow = {
   id: string;
@@ -41,15 +50,245 @@ type Props = {
 
 const dateTimeLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
-const actionTone = (action: string) => {
-  if (action.includes("delete") || action.includes("refund.approve")) {
-    return "border-red-500/30 bg-red-500/10 text-red-200";
-  }
-  if (action.includes("billing") || action.includes("refund")) {
-    return "border-amber-500/30 bg-amber-500/10 text-amber-200";
-  }
-  return "border-blue-500/30 bg-blue-500/10 text-blue-200";
+const isHighRisk = (action: string) =>
+  action.includes("delete") || action.includes("refund.approve");
+
+const actionTone = (action: string): AdminTone => {
+  if (isHighRisk(action)) return "bad";
+  if (action.includes("billing") || action.includes("refund")) return "warn";
+  return "info";
 };
+
+const actorLabel = (row: AdminAuditRow, unknownAdmin: string) =>
+  row.actorEmail || row.actorUserId || unknownAdmin;
+
+/** A round initial, so a list of people reads as people. */
+function ActorBadge({ name }: { name: string }) {
+  return (
+    <span
+      aria-hidden
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-xs font-bold uppercase text-blue-300"
+    >
+      {name.trim().charAt(0) || "?"}
+    </span>
+  );
+}
+
+/**
+ * The records as a table: who, what, target, when. Pure, so the screen can be
+ * rendered without the router the filters need.
+ */
+export function AdminAuditTable({
+  rows,
+  loadingDetailId = null,
+  onOpenDetail,
+  toolbar,
+}: {
+  rows: readonly AdminAuditRow[];
+  loadingDetailId?: string | null;
+  onOpenDetail: (row: AdminAuditRow) => void;
+  toolbar?: React.ReactNode;
+}) {
+  const m = useAdminMessages(adminAuditMessages);
+  const detailButton = (row: AdminAuditRow) => (
+    <button
+      type="button"
+      onClick={() => onOpenDetail(row)}
+      disabled={loadingDetailId === row.id}
+      aria-label={`${m.details}: ${row.action}`}
+      className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {loadingDetailId === row.id ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : (
+        <Eye className="h-3.5 w-3.5" aria-hidden />
+      )}
+      {m.details}
+    </button>
+  );
+  const columns: AdminDataColumn<AdminAuditRow>[] = [
+    {
+      key: "actor",
+      header: m.columns.actor,
+      render: (row) => (
+        <div className="flex min-w-0 items-center gap-2.5">
+          <ActorBadge name={actorLabel(row, m.unknownAdmin)} />
+          <span className="min-w-0 truncate font-bold text-zinc-100">{row.actorEmail || m.unknownAdmin}</span>
+        </div>
+      ),
+    },
+    {
+      key: "action",
+      header: m.columns.action,
+      render: (row) => <AdminStatusChip tone={actionTone(row.action)}>{row.action}</AdminStatusChip>,
+    },
+    {
+      key: "summary",
+      header: m.detail.summary,
+      render: (row) => <span className="text-zinc-300">{row.summary}</span>,
+    },
+    {
+      key: "target",
+      header: m.columns.target,
+      render: (row) => (
+        <div className="min-w-0 text-xs text-zinc-400">
+          <div className="font-bold text-zinc-200">{row.targetType}</div>
+          <div className="max-w-[12rem] truncate">{row.targetId || "-"}</div>
+        </div>
+      ),
+    },
+    {
+      key: "time",
+      header: m.columns.time,
+      render: (row) => <span className="whitespace-nowrap text-xs text-zinc-400">{dateTimeLabel(row.createdAt)}</span>,
+    },
+    {
+      key: "context",
+      header: m.columns.context,
+      align: "right",
+      hideOnCard: true,
+      render: detailButton,
+    },
+  ];
+  return (
+    <AdminDataTable
+      caption={m.table}
+      columns={columns}
+      rows={rows}
+      rowKey={(row) => row.id}
+      toolbar={toolbar}
+      cardTitle={(row) => (
+        <span className="flex min-w-0 items-center gap-2">
+          <ActorBadge name={actorLabel(row, m.unknownAdmin)} />
+          <span className="truncate">{row.actorEmail || m.unknownAdmin}</span>
+        </span>
+      )}
+      cardMeta={(row) => (
+        <span className="flex flex-col items-start gap-1">
+          <AdminStatusChip tone={actionTone(row.action)}>{row.action}</AdminStatusChip>
+          <span className="whitespace-normal text-zinc-300">{row.summary}</span>
+          <span>
+            {row.targetType}
+            {row.targetId ? ` ${row.targetId}` : ""} · {dateTimeLabel(row.createdAt)}
+          </span>
+        </span>
+      )}
+      cardAside={detailButton}
+      emptyState={<AdminStateBlock kind="empty" title={m.noMatches} />}
+    />
+  );
+}
+
+/** One entry in full. Request details and metadata stay folded away. */
+function AuditDetailDialog({ row, onClose }: { row: AdminAuditRow; onClose: () => void }) {
+  const { locale } = useAdminLocale();
+  const m = useAdminMessages(adminAuditMessages);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  useModalDialog({ open: true, onClose, dialogRef, panelRef: dialogRef, initialFocusRef: closeRef });
+
+  const copy = async () => {
+    const text = [
+      "Tomverse Admin Audit Event",
+      `Time: ${dateTimeLabel(row.createdAt)}`,
+      `Actor: ${row.actorEmail || row.actorUserId || "Unknown admin"}`,
+      `Action: ${row.action}`,
+      `Target: ${row.targetType} ${row.targetId || ""}`.trim(),
+      `IP: ${row.ipAddress || "-"}`,
+      `User agent: ${row.userAgent || "-"}`,
+      "",
+      row.summary,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      dispatchAppToast(m.toast.copied, "success");
+    } catch {
+      dispatchAppToast(m.toast.copyFailed, "error");
+    }
+  };
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      lang={locale}
+      data-locale-root
+      className="fixed inset-0 z-[150] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-audit-detail-title"
+        data-testid="admin-audit-detail"
+        className="flex max-h-[88vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-t-3xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl sm:rounded-3xl"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-zinc-500">{m.detail.title}</p>
+            <h2 id="admin-audit-detail-title" className="mt-0.5 break-words text-lg font-bold text-white">
+              {row.action}
+            </h2>
+          </div>
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            aria-label={m.detail.close}
+            className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-zinc-400 hover:bg-zinc-800"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+        <dl className="grid gap-3 rounded-2xl bg-zinc-950/60 p-4 text-sm sm:grid-cols-2">
+          <div className="min-w-0">
+            <dt className="text-xs text-zinc-500">{m.detail.who}</dt>
+            <dd className="mt-0.5 break-all font-bold text-zinc-100">{actorLabel(row, m.unknownAdmin)}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-xs text-zinc-500">{m.detail.when}</dt>
+            <dd className="mt-0.5 font-bold text-zinc-100">{dateTimeLabel(row.createdAt)}</dd>
+          </div>
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="text-xs text-zinc-500">{m.detail.target}</dt>
+            <dd className="mt-0.5 break-all text-zinc-100">
+              <span className="font-bold">{row.targetType}</span>
+              {row.targetId ? ` ${row.targetId}` : ""}
+            </dd>
+          </div>
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="text-xs text-zinc-500">{m.detail.summary}</dt>
+            <dd className="mt-0.5 leading-6 text-zinc-200">{row.summary}</dd>
+          </div>
+        </dl>
+        <AdminTechInfo summary={m.detail.tech}>
+          <p className="break-all">id: {row.id}</p>
+          <p className="mt-1 break-all">IP: {row.ipAddress || "-"}</p>
+          <p className="mt-1 break-all">UA: {row.userAgent || "-"}</p>
+          <pre className="mt-3 max-h-80 overflow-auto rounded-xl bg-zinc-950 p-3 leading-5 text-zinc-300">
+            {JSON.stringify(row.metadata || {}, null, 2)}
+          </pre>
+        </AdminTechInfo>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800"
+          >
+            <Clipboard className="h-4 w-4" aria-hidden />
+            {m.detail.copy}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body
+  );
+}
+
+const SELECT_CLASS =
+  "h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
 
 export function AdminAuditPanel({
   rows,
@@ -68,6 +307,7 @@ export function AdminAuditPanel({
       ? requestedTarget
       : "all"
   );
+  const [actorFilter, setActorFilter] = useState("all");
   const [detail, setDetail] = useState<AdminAuditRow | null>(null);
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
 
@@ -75,11 +315,25 @@ export function AdminAuditPanel({
     () => ["all", ...Array.from(new Set(rows.map((row) => row.targetType))).sort()],
     [rows]
   );
+  const actors = useMemo(
+    () => [
+      "all",
+      ...Array.from(
+        new Set(
+          rows
+            .map((row) => row.actorEmail || row.actorUserId)
+            .filter((value): value is string => Boolean(value))
+        )
+      ).sort(),
+    ],
+    [rows]
+  );
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return rows.filter((row) => {
       if (targetFilter !== "all" && row.targetType !== targetFilter) return false;
+      if (actorFilter !== "all" && (row.actorEmail || row.actorUserId) !== actorFilter) return false;
       if (!normalizedQuery) return true;
       return [
         // `id` first, because the id is what the integrity checker hands an
@@ -97,12 +351,10 @@ export function AdminAuditPanel({
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalizedQuery));
     });
-  }, [query, rows, targetFilter]);
+  }, [query, rows, targetFilter, actorFilter]);
 
-  const highRiskCount = rows.filter(
-    (row) => row.action.includes("delete") || row.action.includes("refund.approve")
-  ).length;
-  const uniqueActors = new Set(rows.map((row) => row.actorEmail || row.actorUserId).filter(Boolean)).size;
+  const highRiskCount = rows.filter((row) => isHighRisk(row.action)).length;
+  const uniqueActors = actors.length - 1;
 
   const updateLocation = (nextQuery: string, nextTarget: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -112,27 +364,6 @@ export function AdminAuditPanel({
     else params.set("target", nextTarget);
     const suffix = params.toString();
     router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
-  };
-
-  const copyAudit = async (row: AdminAuditRow) => {
-    const text = [
-      "Tomverse Admin Audit Event",
-      `Time: ${dateTimeLabel(row.createdAt)}`,
-      `Actor: ${row.actorEmail || row.actorUserId || "Unknown admin"}`,
-      `Action: ${row.action}`,
-      `Target: ${row.targetType} ${row.targetId || ""}`.trim(),
-      `IP: ${row.ipAddress || "-"}`,
-      `User agent: ${row.userAgent || "-"}`,
-      "",
-      row.summary,
-    ].join("\n");
-
-    try {
-      await navigator.clipboard.writeText(text);
-      dispatchAppToast(m.toast.copied, "success");
-    } catch {
-      dispatchAppToast(m.toast.copyFailed, "error");
-    }
   };
 
   const loadDetail = async (row: AdminAuditRow) => {
@@ -186,253 +417,141 @@ export function AdminAuditPanel({
   };
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            {m.eyebrow}
+    <div className="flex min-w-0 flex-col gap-5">
+      <AdminAuditIntegrityCard />
+
+      {/* A row named in the URL, rendered whether or not it is in that
+          window. The integrity checker walks oldest-first and stops at the
+          first bad row, so the id it hands over is usually older than
+          anything listed below -- which is why "entry X is invalid" used to
+          be a dead end. */}
+      {requestedEntryId && requestedEntry ? (
+        <AdminTile
+          title={m.requestedEntry}
+          className="border-blue-900"
+          data-testid="admin-audit-requested-entry"
+        >
+          <p className="break-all font-mono text-xs text-zinc-400">{requestedEntry.id}</p>
+          <p className="text-sm font-bold text-white">{requestedEntry.action}</p>
+          <p className="text-xs text-zinc-400">
+            {dateTimeLabel(requestedEntry.createdAt)} ·{" "}
+            {requestedEntry.actorEmail || requestedEntry.actorUserId || m.unknownAdmin} ·{" "}
+            {requestedEntry.targetType}
+            {requestedEntry.targetId ? ` ${requestedEntry.targetId}` : ""}
           </p>
-          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          <p className="text-sm leading-6 text-zinc-200">{requestedEntry.summary}</p>
+          <div>
+            <button
+              type="button"
+              onClick={() => void loadDetail(requestedEntry)}
+              className="min-h-10 cursor-pointer rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800"
+              data-testid="admin-audit-requested-entry-open"
+            >
+              {m.openFullEntry}
+            </button>
+          </div>
+        </AdminTile>
+      ) : null}
+
+      {/* A link that resolves to nothing is a different fact from no link,
+          and saying so beats a workspace that silently ignores its own query
+          string. */}
+      {requestedEntryId && !requestedEntry ? (
+        <div data-testid="admin-audit-requested-entry-missing">
+          <AdminStateBlock
+            kind="error"
+            title={
+              <>
+                {m.missingEntryBefore} <span className="font-mono break-all">{requestedEntryId}</span>
+                {m.missingEntryAfter}
+              </>
+            }
+          />
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-white">{m.title}</h2>
+          <p className="mt-0.5 text-sm text-zinc-400">
             {m.description}
             {rowLimit ? m.rowLimit(rowLimit) : ""}
           </p>
-
-          {/* A row named in the URL, rendered whether or not it is in that
-              window. The integrity checker walks oldest-first and stops at the
-              first bad row, so the id it hands over is usually older than
-              anything listed below -- which is why "entry X is invalid" used to
-              be a dead end. */}
-          {requestedEntryId && requestedEntry ? (
-            <div
-              className="mt-3 rounded-2xl border border-blue-900 bg-blue-950/30 p-4"
-              data-testid="admin-audit-requested-entry"
-            >
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-300">
-                {m.requestedEntry}
-              </p>
-              <p className="mt-2 font-mono text-xs break-all text-zinc-400">
-                {requestedEntry.id}
-              </p>
-              <p className="mt-2 text-sm font-bold text-white">
-                {requestedEntry.action}
-              </p>
-              <p className="mt-1 text-xs text-zinc-400">
-                {dateTimeLabel(requestedEntry.createdAt)} ·{" "}
-                {requestedEntry.actorEmail ||
-                  requestedEntry.actorUserId ||
-                  m.unknownAdmin}{" "}
-                · {requestedEntry.targetType}
-                {requestedEntry.targetId ? ` ${requestedEntry.targetId}` : ""}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">
-                {requestedEntry.summary}
-              </p>
-              <button
-                type="button"
-                onClick={() => void loadDetail(requestedEntry)}
-                className="mt-3 min-h-11 rounded-xl border border-zinc-800 px-3 text-sm font-bold text-zinc-200 hover:border-zinc-700"
-                data-testid="admin-audit-requested-entry-open"
-              >
-                {m.openFullEntry}
-              </button>
-            </div>
-          ) : null}
-
-          {/* A link that resolves to nothing is a different fact from no link,
-              and saying so beats a workspace that silently ignores its own
-              query string. */}
-          {requestedEntryId && !requestedEntry ? (
-            <p
-              className="mt-3 rounded-2xl border border-amber-900 bg-amber-950/30 p-4 text-sm leading-6 text-amber-100"
-              data-testid="admin-audit-requested-entry-missing"
-            >
-              {m.missingEntryBefore}{" "}
-              <span className="font-mono break-all">{requestedEntryId}</span>
-              {m.missingEntryAfter}
-            </p>
-          ) : null}
-        </div>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-              {m.events}
-            </p>
-            <p className="mt-1 text-xl font-black text-white">{rows.length}</p>
-          </div>
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-              {m.actors}
-            </p>
-            <p className="mt-1 text-xl font-black text-white">{uniqueActors}</p>
-          </div>
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-200/80">
-              {m.highRisk}
-            </p>
-            <p className="mt-1 text-xl font-black text-red-100">{highRiskCount}</p>
-          </div>
         </div>
         <button
           type="button"
           onClick={exportCsv}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 xl:self-start"
+          className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800"
         >
-          <Clipboard className="h-3.5 w-3.5" />
+          <Download className="h-4 w-4" aria-hidden />
           {m.exportCsv}
         </button>
       </div>
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_15rem]">
-        <label className="relative block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-          <input
-            value={query}
-            onChange={(event) => {
-              const value = event.target.value;
-              setQuery(value);
-              updateLocation(value, targetFilter);
-            }}
-            placeholder={m.searchPlaceholder}
-            className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-          />
-        </label>
-        <select
-          value={targetFilter}
-          onChange={(event) => {
-            const value = event.target.value;
-            setTargetFilter(value);
-            updateLocation(query, value);
-          }}
-          className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-        >
-          {targets.map((target) => (
-            <option key={target} value={target}>
-              {target === "all" ? m.allTargets : target}
-            </option>
-          ))}
-        </select>
-      </div>
+      <AdminAuditTable
+        rows={filteredRows}
+        loadingDetailId={loadingDetailId}
+        onOpenDetail={(row) => void loadDetail(row)}
+        toolbar={
+          <>
+            <label className="relative block min-w-[12rem] flex-1">
+              <span className="sr-only">{m.searchLabel}</span>
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500"
+                aria-hidden
+              />
+              <input
+                value={query}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setQuery(value);
+                  updateLocation(value, targetFilter);
+                }}
+                placeholder={m.searchPlaceholder}
+                className="h-10 w-full rounded-xl border border-zinc-700 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+              />
+            </label>
+            <select
+              aria-label={m.actorFilter}
+              value={actorFilter}
+              onChange={(event) => setActorFilter(event.target.value)}
+              className={SELECT_CLASS}
+            >
+              {actors.map((actor) => (
+                <option key={actor} value={actor}>
+                  {actor === "all" ? m.allActors : actor}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label={m.targetFilter}
+              value={targetFilter}
+              onChange={(event) => {
+                const value = event.target.value;
+                setTargetFilter(value);
+                updateLocation(query, value);
+              }}
+              className={SELECT_CLASS}
+            >
+              {targets.map((target) => (
+                <option key={target} value={target}>
+                  {target === "all" ? m.allTargets : target}
+                </option>
+              ))}
+            </select>
+            <span className="w-full text-xs text-zinc-500">
+              {m.summaryLine(rows.length, uniqueActors, highRiskCount)}
+            </span>
+          </>
+        }
+      />
 
-      <div className="mt-5 overflow-x-auto">
-        <table className="w-full min-w-[980px] border-separate border-spacing-y-2 text-left text-sm">
-          <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
-            <tr>
-              <th className="px-3 py-2">{m.columns.time}</th>
-              <th className="px-3 py-2">{m.columns.actor}</th>
-              <th className="px-3 py-2">{m.columns.action}</th>
-              <th className="px-3 py-2">{m.columns.target}</th>
-              <th className="px-3 py-2">{m.columns.summary}</th>
-              <th className="px-3 py-2">{m.columns.context}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.map((log) => (
-              <tr key={log.id} className="bg-zinc-900/70 text-zinc-200">
-                <td className="rounded-l-2xl px-3 py-3 text-xs text-zinc-400">
-                  {dateTimeLabel(log.createdAt)}
-                </td>
-                <td className="px-3 py-3">
-                  <div className="font-bold">{log.actorEmail || m.unknownAdmin}</div>
-                  <div className="mt-1 max-w-[12rem] truncate text-xs text-zinc-500">
-                    {log.actorUserId || "-"}
-                  </div>
-                </td>
-                <td className="px-3 py-3">
-                  <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${actionTone(log.action)}`}>
-                    {log.action}
-                  </span>
-                </td>
-                <td className="px-3 py-3 text-xs text-zinc-400">
-                  <div className="font-bold text-zinc-300">{log.targetType}</div>
-                  <div className="mt-1 max-w-[12rem] truncate">{log.targetId || "-"}</div>
-                </td>
-                <td className="px-3 py-3 text-sm text-zinc-300">{log.summary}</td>
-                <td className="rounded-r-2xl px-3 py-3">
-                  <button
-                    type="button"
-                    onClick={() => copyAudit(log)}
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
-                  >
-                    <Clipboard className="h-3.5 w-3.5" />
-                    {m.copy}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadDetail(log)}
-                    disabled={loadingDetailId === log.id}
-                    className="ml-2 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {loadingDetailId === log.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Eye className="h-3.5 w-3.5" />
-                    )}
-                    {m.details}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filteredRows.length === 0 ? (
-          <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            {m.noMatches}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="mt-4 flex items-start gap-2 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
-        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+      <p className="flex items-start gap-2 rounded-2xl bg-blue-500/10 p-4 text-sm leading-6 text-blue-200">
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         {m.footer}
-      </div>
+      </p>
 
-      {detail ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-h-[86vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl shadow-black">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-                  {m.detail.eyebrow}
-                </p>
-                <h3 className="mt-2 text-xl font-black text-white">{detail.action}</h3>
-                <p className="mt-1 text-sm text-zinc-500">
-                  {dateTimeLabel(detail.createdAt)} / {detail.actorEmail || m.unknownAdmin}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDetail(null)}
-                className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-zinc-700 text-zinc-400 transition hover:bg-zinc-900 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.target}</p>
-                <p className="mt-2 text-sm font-bold text-white">{detail.targetType}</p>
-                <p className="mt-1 break-all text-xs text-zinc-400">{detail.targetId || "-"}</p>
-              </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.request}</p>
-                <p className="mt-2 break-all text-xs text-zinc-400">IP: {detail.ipAddress || "-"}</p>
-                <p className="mt-1 break-all text-xs text-zinc-400">UA: {detail.userAgent || "-"}</p>
-              </div>
-            </div>
-            <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.summary}</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">{detail.summary}</p>
-            </div>
-            <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.metadata}</p>
-              <pre className="mt-3 max-h-96 overflow-auto rounded-xl bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">
-                {JSON.stringify(detail.metadata || {}, null, 2)}
-              </pre>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </section>
+      {detail ? <AuditDetailDialog row={detail} onClose={() => setDetail(null)} /> : null}
+    </div>
   );
 }

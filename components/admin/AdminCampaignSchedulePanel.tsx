@@ -1,9 +1,16 @@
-import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 
+import type { EmailCampaignsMessages } from "@/components/admin/AdminEmailCampaignsPanel";
+import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import type { AdminCampaignWaveRow } from "@/lib/adminEmailCampaigns";
-import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminMessagesFor } from "@/lib/adminLocale";
+import { getAdminLocale } from "@/lib/adminLocaleServer";
 import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
+import { formatAestDateTime, type AdminTone } from "@/lib/adminUiCore";
 
 /**
  * Waves by the time they are due.
@@ -25,161 +32,189 @@ import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns"
  * next month.
  */
 
-const WAVE_STATUS_TONE: Record<string, string> = {
-  pending: "border-zinc-700 bg-zinc-900 text-zinc-300",
-  expanding: "border-blue-800 bg-blue-950/50 text-blue-200",
-  expanded: "border-blue-800 bg-blue-950/50 text-blue-200",
-  sending: "border-blue-800 bg-blue-950/50 text-blue-200",
-  done: "border-emerald-900 bg-emerald-950/40 text-emerald-200",
-  cancelled: "border-zinc-700 bg-zinc-900 text-zinc-400",
-  halted: "border-red-800 bg-red-950/50 text-red-200",
+const WAVE_STATUS_TONE: Record<string, AdminTone> = {
+  pending: "idle",
+  expanding: "info",
+  expanded: "info",
+  sending: "info",
+  done: "ok",
+  cancelled: "idle",
+  halted: "bad",
 };
 
 const when = (value: Date | null) => formatAestDateTime(value) ?? "—";
 
-export async function AdminCampaignSchedulePanel({
+export function AdminCampaignScheduleView({
+  m: messages,
   rows,
   limit,
 }: {
-  rows: AdminCampaignWaveRow[];
+  m: EmailCampaignsMessages;
+  /** `null` when the read failed: shown as an error, never as a clear schedule. */
+  rows: AdminCampaignWaveRow[] | null;
   limit: number;
 }) {
-  const messages = await getAdminMessages(adminEmailCampaignsMessages);
   const m = messages.schedule;
+  if (rows === null) {
+    return (
+      <AdminTile title={m.title} description={m.intro}>
+        <AdminStateBlock kind="error" title={m.loadFailed} />
+      </AdminTile>
+    );
+  }
   const overdue = rows.filter((row) => row.overdue);
   const upcoming = rows.filter((row) => !row.overdue);
 
-  const table = (list: AdminCampaignWaveRow[], testid: string) => (
-    <div className="mt-3 overflow-x-auto">
-      <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
-        <thead>
-          <tr className="border-b border-zinc-800 text-xs uppercase tracking-wider text-zinc-500">
-            <th scope="col" className="py-2 pr-4 font-bold">
-              {m.columns.due}
-            </th>
-            <th scope="col" className="py-2 pr-4 font-bold">
-              {m.columns.campaign}
-            </th>
-            <th scope="col" className="py-2 pr-4 font-bold">
-              {m.columns.wave}
-            </th>
-            <th scope="col" className="py-2 pr-4 font-bold">
-              {m.columns.status}
-            </th>
-            <th scope="col" className="py-2 pr-4 font-bold">
-              {m.columns.trigger}
-            </th>
-            <th scope="col" className="py-2 font-bold">
-              {m.columns.expanded}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map((row) => (
-            <tr
-              key={row.id}
-              className="border-b border-zinc-900 align-top last:border-b-0"
-              data-testid={testid}
-            >
-              <td className="py-3 pr-4 font-mono text-xs text-zinc-300">
-                {when(row.scheduledAt)}
-              </td>
-              <td className="py-3 pr-4">
-                <Link
-                  href={`/admin/email-campaigns/${row.campaignId}`}
-                  className="font-bold text-blue-300 underline-offset-4 hover:underline"
-                >
-                  {row.campaignTemplateKey}
-                </Link>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {m.campaignStatus(row.campaignStatus)}
-                </p>
-              </td>
-              <td className="py-3 pr-4 text-xs text-zinc-300">
-                {row.kind}
-                {row.sequence > 1 ? ` #${row.sequence}` : ""}
-                {row.dryRun ? (
-                  <span className="ml-2 inline-flex rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 font-bold text-zinc-300">
-                    {m.dryRun}
-                  </span>
-                ) : null}
-              </td>
-              <td className="py-3 pr-4">
-                <span
-                  className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-bold ${
-                    WAVE_STATUS_TONE[row.status] ??
-                    "border-zinc-700 bg-zinc-900 text-zinc-300"
-                  }`}
-                >
-                  {row.status}
-                </span>
-              </td>
-              <td className="py-3 pr-4 text-xs text-zinc-300">
-                {row.triggerMode}
-              </td>
-              <td className="py-3 text-xs text-zinc-300">
-                {row.expandedCount}
-                {row.recipientCap === null ? "" : m.cap(row.recipientCap)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-
-  return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        {messages.eyebrow}
-      </p>
-      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        {m.intro}
-      </p>
-      <p className="mt-2 max-w-3xl text-xs leading-5 text-zinc-500">
-        {m.showingSoonest(limit)}
-      </p>
-
-      <div className="mt-5">
-        <h3 className="text-sm font-black text-white">
-          {m.overdueHeading}{" "}
-          <span className="text-zinc-500">({overdue.length})</span>
-        </h3>
-        {overdue.length === 0 ? (
-          <p
-            className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"
-            data-testid="admin-campaign-schedule-clear"
-          >
-            {m.overdueClear}
-          </p>
-        ) : (
+  const table = (list: AdminCampaignWaveRow[], testid: string) => {
+    const columns: AdminDataColumn<AdminCampaignWaveRow>[] = [
+      {
+        key: "due",
+        header: m.columns.due,
+        render: (row) => (
+          <span data-testid={testid} className="font-mono text-xs text-zinc-300">
+            {when(row.scheduledAt)}
+          </span>
+        ),
+      },
+      {
+        key: "campaign",
+        header: m.columns.campaign,
+        render: (row) => (
           <>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-200">
-              {m.overdueExplanationBefore}{" "}
-              <code className="text-amber-100">
-                CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE
-              </code>{" "}
-              {m.overdueExplanationAfter}
-            </p>
-            {table(overdue, "admin-campaign-wave-overdue")}
+            <Link
+              href={`/admin/email-campaigns/${row.campaignId}`}
+              className="font-bold text-blue-300 underline-offset-4 hover:underline"
+            >
+              {row.campaignTemplateKey}
+            </Link>
+            <span className="mt-0.5 block text-xs text-zinc-500">
+              {m.campaignStatus(row.campaignStatus)}
+            </span>
+          </>
+        ),
+      },
+      {
+        key: "wave",
+        header: m.columns.wave,
+        render: (row) => (
+          <span className="text-xs text-zinc-300">
+            {row.kind}
+            {row.sequence > 1 ? ` #${row.sequence}` : ""}
+            {row.dryRun ? (
+              <span className="ml-2 inline-flex">
+                <AdminStatusChip tone="idle">{m.dryRun}</AdminStatusChip>
+              </span>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        key: "status",
+        header: m.columns.status,
+        render: (row) => (
+          <AdminStatusChip tone={row.overdue ? "bad" : (WAVE_STATUS_TONE[row.status] ?? "idle")}>
+            {m.waveStatuses[row.status] ?? row.status}
+          </AdminStatusChip>
+        ),
+      },
+      {
+        key: "trigger",
+        header: m.columns.trigger,
+        hideOnCard: true,
+        render: (row) => (
+          <span className="text-xs text-zinc-300">
+            {messages.list.triggers[row.triggerMode] ?? row.triggerMode}
+          </span>
+        ),
+      },
+      {
+        key: "expanded",
+        header: m.columns.expanded,
+        hideOnCard: true,
+        render: (row) => (
+          <span className="text-xs text-zinc-300">
+            {row.expandedCount}
+            {row.recipientCap === null ? "" : m.cap(row.recipientCap)}
+          </span>
+        ),
+      },
+    ];
+    return (
+      <AdminDataTable
+        caption={m.title}
+        columns={columns}
+        rows={list}
+        rowKey={(row) => row.id}
+        cardTitle={(row) => (
+          <Link
+            href={`/admin/email-campaigns/${row.campaignId}`}
+            className="text-blue-300 underline-offset-4 hover:underline"
+          >
+            {row.campaignTemplateKey}
+          </Link>
+        )}
+        cardMeta={(row) => (
+          <>
+            {when(row.scheduledAt)} · {row.kind}
+            {row.sequence > 1 ? ` #${row.sequence}` : ""}
           </>
         )}
-      </div>
+        cardAside={(row) => (
+          <AdminStatusChip tone={row.overdue ? "bad" : (WAVE_STATUS_TONE[row.status] ?? "idle")}>
+            {m.waveStatuses[row.status] ?? row.status}
+          </AdminStatusChip>
+        )}
+      />
+    );
+  };
 
-      <div className="mt-6">
-        <h3 className="text-sm font-black text-white">
-          {m.upcomingHeading}{" "}
-          <span className="text-zinc-500">({upcoming.length})</span>
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <AdminTile title={m.title} description={`${m.intro} ${m.showingSoonest(limit)}`} />
+
+      <section
+        className={`flex min-w-0 flex-col gap-3 rounded-2xl p-5 ${
+          overdue.length > 0 ? "border border-red-500/40 bg-zinc-900" : "border border-zinc-800 bg-zinc-900"
+        }`}
+      >
+        <h3 className="text-sm font-bold text-white">
+          {m.overdueHeading} <span className="text-zinc-500">({overdue.length})</span>
+        </h3>
+        {overdue.length === 0 ? (
+          <div data-testid="admin-campaign-schedule-clear">
+            <AdminStateBlock kind="empty" title={m.overdueClear} />
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-amber-200">{m.overdueExplanation}</p>
+            {table(overdue, "admin-campaign-wave-overdue")}
+            <AdminTechInfo summary={m.overdueTechSummary}>
+              {m.overdueTechBefore}{" "}
+              <code className="text-amber-200">CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE</code>{" "}
+              {m.overdueTechAfter}
+            </AdminTechInfo>
+          </>
+        )}
+      </section>
+
+      <section className="flex min-w-0 flex-col gap-3">
+        <h3 className="text-sm font-bold text-white">
+          {m.upcomingHeading} <span className="text-zinc-500">({upcoming.length})</span>
         </h3>
         {upcoming.length === 0 ? (
-          <p className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-            {m.upcomingEmpty}
-          </p>
+          <AdminStateBlock kind="empty" title={m.upcomingEmpty} />
         ) : (
           table(upcoming, "admin-campaign-wave-upcoming")
         )}
-      </div>
-    </section>
+      </section>
+    </div>
   );
+}
+
+export async function AdminCampaignSchedulePanel(props: {
+  rows: AdminCampaignWaveRow[] | null;
+  limit: number;
+}) {
+  const m = adminMessagesFor(adminEmailCampaignsMessages, await getAdminLocale());
+  return <AdminCampaignScheduleView m={m} {...props} />;
 }
