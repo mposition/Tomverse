@@ -55,6 +55,21 @@ test.describe("marketing console", () => {
     );
   });
 
+  test("the overview opens under the agent's head and shows the post waiting for a person", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    await page.goto("/admin/marketing?tab=overview");
+
+    await expect(page.getByTestId("agent-header")).toBeVisible();
+    // The switch is a reading that links to Settings; the page has no run-now control.
+    await expect(page.getByTestId("agent-auto-run")).toHaveAttribute("href", /tab=settings/);
+    await expect(page.getByTestId("marketing-pending-card").first()).toBeVisible();
+    await expect(page.getByTestId("marketing-action-approve").first()).toBeVisible();
+    await expect(page.getByTestId("marketing-webhook-card")).toHaveCount(0);
+  });
+
   test("the publish-state section carries both what went out and what got stuck", async ({
     page,
     signInAs,
@@ -77,7 +92,8 @@ test.describe("marketing console", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto("/admin/marketing?tab=queue");
+    // The switch strip lives on the Settings tab, with the webhook blocks.
+    await page.goto("/admin/marketing?tab=settings");
 
     // Scoped to the strip and read from `data-state` rather than from the
     // rendered word, so the assertion survives a locale change. The admin lane

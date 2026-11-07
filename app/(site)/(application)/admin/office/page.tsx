@@ -1,7 +1,11 @@
 export const dynamic = "force-dynamic";
 
+import { AdminAgentTeamBoard } from "@/components/admin/AdminAgentTeamBoard";
+import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AgentOfficePanel } from "@/components/admin/AgentOfficePanel";
-import { getAdminLocale } from "@/lib/adminLocaleServer";
+import { readTeamBoard } from "@/lib/adminAgentTeamBoardRead";
+import { getAdminLocale, getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAgentPageMessages } from "@/lib/adminMessages/agentPage";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { readAgentOfficeLiveRooms } from "@/lib/agentOfficeLiveRead";
 import { getServerSession } from "next-auth/next";
@@ -34,13 +38,31 @@ const TABS = adminNavItemTabs("office");
 export default async function AdminAgentOfficePage({ searchParams }: PageProps<"/admin/office">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
+  if (tab.id === "dashboard") {
+    // The Team board reads the office's own rooms and draws them as cards; the live floor is the other tab.
+    const [board, copy] = await Promise.all([readTeamBoard(), getAdminMessages(adminAgentPageMessages)]);
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        <p className="text-sm text-zinc-400">{copy.board.description}</p>
+        <AdminPageTabs
+          basePath="/admin/office"
+          tabs={TABS}
+          activeTabId={tab.id}
+          label="Agents home sections"
+          query={query}
+          variant="underline"
+        />
+        <AdminAgentTeamBoard rooms={board.rooms} extras={board.extras} readAt={board.readAt} />
+      </div>
+    );
+  }
   const [locale, live, session] = await Promise.all([
     getAdminLocale(), readAgentOfficeLiveRooms(), getServerSession(authOptions),
   ]);
   return (
     <AgentOfficePanel
       key={locale}
-      view={tab.id === "dashboard" ? "dashboard" : "live"}
+      view="live"
       live={live}
       cliMonitorEnabled={getAdminRole(session) === "owner" && agentOfficeCliMonitorCredential() !== null}
     />

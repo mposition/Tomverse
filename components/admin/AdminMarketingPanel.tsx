@@ -13,7 +13,12 @@ import {
   type MarketingAction,
   type MarketingBatchResult,
 } from "@/components/admin/MarketingActions";
+import { MarketingAgentOverview } from "@/components/admin/MarketingAgentOverview";
 import { MarketingAnalysisSwitch, MarketingBriefReport } from "@/components/admin/MarketingAnalysis";
+import { MarketingApprovalCard, type MarketingCardFormat } from "@/components/admin/MarketingApprovalCard";
+import { AdminAgentHeader } from "@/components/admin/ui/AdminAgentHeader";
+import { adminMarketingAgentMessages } from "@/lib/adminMessages/marketingAgent";
+import type { MarketingAgentOverview as MarketingAgentOverviewData } from "@/lib/marketingAgentOverviewCore";
 import { MarketingMorningCard } from "@/components/admin/MarketingMorning";
 import { MarketingWeeklyStrategyCard } from "@/components/admin/MarketingStrategy";
 import { MarketingWeeklyReportCard } from "@/components/admin/MarketingWeeklyReport";
@@ -177,8 +182,11 @@ export function AdminMarketingPanel({
   initial,
   tabs,
   part = "page",
+  agent,
 }: {
   initial: MarketingConsoleView;
+  /** The Overview tab's extra reads (lib/marketingAgentOverviewRead.ts); only that tab loads them. */
+  agent?: MarketingAgentOverviewData;
   /** The section strip, a server component the page renders and this panel places. */
   tabs?: ReactNode;
   /**
@@ -192,6 +200,7 @@ export function AdminMarketingPanel({
   part?: "page" | "section" | "settings" | "overview";
 }) {
   const m = useAdminMessages(adminMarketingMessages);
+  const a = useAdminMessages(adminMarketingAgentMessages);
   const [view, setView] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -228,40 +237,113 @@ export function AdminMarketingPanel({
   const rows = channel ? view.rows.filter((row) => str(row.channel) === channel) : view.rows;
   const now = view.overview.readAt;
 
-  // Three bands, in the order an operator asks the questions: what needs me
-  // (the overview), what is in this section (the list, under its tabs), and
-  // what is switched on and what it costs (the settings rail). The rail is
-  // beside the list on a wide screen and below it on a narrow one.
-  return (
-    <section className="flex min-w-0 flex-col gap-6" data-testid="marketing-console">
-      <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs text-zinc-500">{m.consoleEyebrow}</p>
-          <h2 className="mt-1 text-2xl font-bold text-white">{m.consoleTitle}</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">{m.consoleDescription}</p>
-          {view.canWrite ? null : <p className="mt-1 text-xs text-zinc-500">{m.readOnlyNote}</p>}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <MarketingTag tone="neutral">{view.overview.environment}</MarketingTag>
-          <span className="text-xs text-zinc-500">
-            {m.updatedAt.replace("{time}", (stamp(now) ?? "").slice(11))}
-          </span>
-          <button
-            type="button"
-            onClick={done}
-            disabled={busy}
-            className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-[13px] font-semibold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {m.refresh}
-          </button>
-        </div>
-      </header>
+  // What the cards need from the panel: the page's clock, the channel names and
+  // the Guard's words are the panel's own, so the cards draw and never decide.
+  const cardFormat: MarketingCardFormat = {
+    relative: (iso) => relative(iso, now, m),
+    stamp: (iso) => stamp(iso),
+    channelName,
+    guardWord: (decision) => guardWord(decision, m),
+    guardTone,
+  };
+  // The approval controls are the row's own (`queueActions`), in the order a
+  // person reads them: fix the words, turn it down, approve it.
+  const QUEUE_ORDER = ["edit", "reject", "approve"];
+  const queueRail = (row: Row, railSection: string, only?: readonly string[]) => (
+    <MarketingActionRail
+      actions={(view.canWrite ? queueActions(row, m) : [])
+        .filter((action) => !only || only.includes(action.id))
+        .sort((x, y) => {
+          const rank = (id: string) => (QUEUE_ORDER.includes(id) ? QUEUE_ORDER.indexOf(id) : QUEUE_ORDER.length);
+          return rank(x.id) - rank(y.id);
+        })}
+      section={railSection}
+      onDone={done}
+      m={m}
+    />
+  );
+  const drafts = view.switches.drafts;
+  const waiting = view.overview.pending === null
+    ? null
+    : view.rows
+        .filter((row) => row.status === "pending_approval")
+        .slice(0, 3)
+        .map((row) => (
+          <MarketingApprovalCard
+            key={String(row.id)}
+            row={row}
+            variant="compact"
+            format={cardFormat}
+            rail={queueRail(row, "overview", ["approve", "reject"])}
+          />
+        ));
 
-      <MarketingOverview view={view} m={m} />
+  // The agent's head, its tabs, then one part of the screen: the Overview, a
+  // list (the tab's rows), or the settings rail. The settings rail -- and the
+  // webhook blocks inside it -- draw on the Settings tab only.
+  return (
+    <section className="flex min-w-0 flex-col gap-5" data-testid="marketing-console">
+      <AdminAgentHeader
+        team="marketing"
+        name={a.name}
+        status={
+          drafts === "on"
+            ? { tone: "ok", label: a.status.working }
+            : drafts === "off"
+              ? { tone: "idle", label: a.status.off }
+              : { tone: "unknown", label: a.status.unknown }
+        }
+        description={a.description}
+        meta={[
+          {
+            icon: "clock",
+            label: view.overview.lastRun
+              ? view.overview.lastRun.at
+                ? a.lastRun(stamp(view.overview.lastRun.at) ?? m.none)
+                : a.neverRan
+              : m.overviewUnreadable,
+          },
+          { icon: "shield", label: a.environment(view.overview.environment) },
+        ]}
+        autoRun={{
+          state: drafts === "on" ? "on" : drafts === "off" ? "off" : "unknown",
+          href: "/admin/marketing?tab=settings",
+        }}
+      />
+
+      {tabs}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-zinc-500">
+          {m.updatedAt.replace("{time}", (stamp(now) ?? "").slice(11))}
+          {view.canWrite ? null : ` · ${m.readOnlyNote}`}
+        </p>
+        <button
+          type="button"
+          onClick={done}
+          disabled={busy}
+          className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-[13px] font-semibold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {m.refresh}
+        </button>
+      </div>
+
+      {part === "page" ? <MarketingOverview view={view} m={m} /> : null}
+
+      {part === "overview" && agent ? (
+        <MarketingAgentOverview
+          overview={view.overview}
+          agent={agent}
+          monthlyCapUsd={view.llm.settings?.monthlyUsdCap ?? null}
+          model={view.llm.settings?.model ?? null}
+          pendingCards={waiting}
+          format={cardFormat}
+        />
+      ) : null}
 
       {error ? (
-        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
           {error}
         </p>
       ) : null}
@@ -272,7 +354,6 @@ export function AdminMarketingPanel({
         }`}
       >
         <div className="flex min-w-0 flex-col gap-4">
-          {tabs}
           {part === "settings" || part === "overview" ? null : unavailable ? (
             <p className="flex items-start gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm leading-6 text-zinc-300">
               <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
@@ -350,7 +431,25 @@ export function AdminMarketingPanel({
                 </p>
               ) : (
                 <div className="grid gap-3">
-                  {rows.map((row) => (
+                  {rows.map((row) =>
+                    view.section === "queue" ? (
+                      <MarketingApprovalCard
+                        key={String(row.id)}
+                        row={row}
+                        variant="full"
+                        format={cardFormat}
+                        rail={queueRail(row, view.section)}
+                        assets={
+                          <MarketingPostAssets assetIds={row.assetIds} downloadable={str(row.provider) === "manual"} m={m} />
+                        }
+                        statusTag={
+                          <>
+                            {row.status === "pending_approval" ? null : <StatusTag status={row.status} m={m} />}
+                            {row.legalHold === true ? <MarketingTag tone="warning">{m.legalHeld}</MarketingTag> : null}
+                          </>
+                        }
+                      />
+                    ) : (
                     <article
                       key={String(row.id)}
                       data-testid="marketing-row"
@@ -364,7 +463,8 @@ export function AdminMarketingPanel({
                         m={m}
                       />
                     </article>
-                  ))}
+                    ),
+                  )}
                 </div>
               )}
             </>

@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { Loader2, Lock } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminDataTable } from "@/components/admin/ui/AdminDataTable";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { adminEngineeringAgentMessages } from "@/lib/adminMessages/engineeringAgent";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import type {
@@ -252,76 +255,50 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
       {initial.runs ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
-          {initial.runs.length === 0 ? (
-            <p className="text-sm text-zinc-400">{m.emptyRuns}</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-zinc-500">
-                  <tr>
-                    <th className="px-2 py-1 font-medium">{m.run}</th>
-                    <th className="px-2 py-1 font-medium">{m.card}</th>
-                    <th className="px-2 py-1 font-medium">{m.modeAtStart}</th>
-                    <th className="px-2 py-1 font-medium">{m.status}</th>
-                    <th className="px-2 py-1 font-medium">{m.outcome}</th>
-                    <th className="px-2 py-1 font-medium">{m.halt}</th>
-                    <th className="px-2 py-1 font-medium">{m.started}</th>
-                    <th className="px-2 py-1 font-medium">{m.ended}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {initial.runs.map((run) => (
-                    <tr key={run.id} className="border-t border-zinc-800">
-                      <td className="px-2 py-1 font-mono">{run.id}</td>
-                      <td className="px-2 py-1 font-mono">{run.cardId}</td>
-                      <td className="px-2 py-1">{run.modeAtStart}</td>
-                      <td className="px-2 py-1">{run.status}</td>
-                      <td className="px-2 py-1">{run.outcome ?? ""}</td>
-                      <td className="px-2 py-1">{run.halt}</td>
-                      <td className="px-2 py-1 text-xs">{run.startedAt}</td>
-                      <td className="px-2 py-1 text-xs">{run.endedAt ?? ""}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <AdminDataTable
+            caption={m.run}
+            rows={initial.runs}
+            rowKey={(run) => run.id}
+            emptyState={<AdminStateBlock kind="empty" title={m.emptyRuns} />}
+            columns={[
+              { key: "run", header: m.run, render: (run) => <span className="font-mono text-xs">{run.id}</span> },
+              { key: "card", header: m.card, render: (run) => <span className="font-mono text-xs">{run.cardId}</span> },
+              { key: "mode", header: m.modeAtStart, render: (run) => run.modeAtStart },
+              { key: "status", header: m.status, render: (run) => run.status },
+              { key: "outcome", header: m.outcome, render: (run) => run.outcome ?? "" },
+              { key: "halt", header: m.halt, render: (run) => run.halt },
+              { key: "started", header: m.started, render: (run) => formatAestDateTime(run.startedAt) ?? "" },
+              { key: "ended", header: m.ended, render: (run) => formatAestDateTime(run.endedAt) ?? "" },
+            ]}
+            cardTitle={(run) => <span className="font-mono text-xs">{run.id}</span>}
+            cardMeta={(run) => `${run.status}${run.outcome ? ` · ${run.outcome}` : ""}`}
+          />
         </div>
       ) : null}
 
       {initial.pullRequests ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
-          {initial.pullRequests.length === 0 ? (
-            <p className="text-sm text-zinc-400">{m.emptyPullRequests}</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-zinc-500">
-                  <tr>
-                    <th className="px-2 py-1 font-medium">{m.pullRequest}</th>
-                    <th className="px-2 py-1 font-medium">{m.run}</th>
-                    <th className="px-2 py-1 font-medium">{m.state}</th>
-                    <th className="px-2 py-1 font-medium">{m.current}</th>
-                    <th className="px-2 py-1 font-medium">{m.approval}</th>
-                    <th className="px-2 py-1 font-medium">{m.merged}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {initial.pullRequests.map((row) => (
-                    <tr key={row.id} className="border-t border-zinc-800">
-                      <td className="px-2 py-1 font-mono">#{row.prNumber}</td>
-                      <td className="px-2 py-1 font-mono">{row.runId}</td>
-                      <td className="px-2 py-1">{row.state}</td>
-                      <td className="px-2 py-1">{row.current ? m.current : m.superseded}</td>
-                      <td className="px-2 py-1">{row.approvalVerdict ?? m.notObserved}</td>
-                      <td className="px-2 py-1">{row.merged === null ? m.notObserved : row.merged ? m.yes : m.no}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <AdminDataTable
+            caption={m.pullRequest}
+            rows={initial.pullRequests}
+            rowKey={(row) => row.id}
+            emptyState={<AdminStateBlock kind="empty" title={m.emptyPullRequests} />}
+            columns={[
+              { key: "pr", header: m.pullRequest, render: (row) => <span className="font-mono text-xs">#{row.prNumber}</span> },
+              { key: "run", header: m.run, render: (row) => <span className="font-mono text-xs">{row.runId}</span> },
+              { key: "state", header: m.state, render: (row) => row.state },
+              { key: "current", header: m.current, render: (row) => (row.current ? m.current : m.superseded) },
+              { key: "approval", header: m.approval, render: (row) => row.approvalVerdict ?? m.notObserved },
+              {
+                key: "merged",
+                header: m.merged,
+                render: (row) => (row.merged === null ? m.notObserved : row.merged ? m.yes : m.no),
+              },
+            ]}
+            cardTitle={(row) => <span className="font-mono text-xs">#{row.prNumber}</span>}
+            cardMeta={(row) => `${row.state} · ${row.approvalVerdict ?? m.notObserved}`}
+          />
         </div>
       ) : null}
 

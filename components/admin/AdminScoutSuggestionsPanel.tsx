@@ -11,7 +11,6 @@ import {
   SCOUT_SEND_SPACING_MS,
   SEVERITY_RANK,
   STATE_CHIP,
-  compactNumber,
   fill,
   localTime,
   nextScoutSendBatch,
@@ -19,7 +18,10 @@ import {
 } from "@/lib/adminScoutDisplay";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
+import { ScoutAgentAside } from "@/components/admin/ScoutAgentAside";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
+import type { ScoutDaySummary } from "@/lib/productResearchScoutCore";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
 import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
 
@@ -55,7 +57,17 @@ const SEND_BUTTON = `${BUTTON} border-blue-800 text-blue-300 hover:bg-blue-950`;
 const SEGMENT =
   "min-h-9 px-3 text-xs font-medium text-zinc-400 hover:text-zinc-100 aria-pressed:bg-zinc-800 aria-pressed:font-semibold aria-pressed:text-zinc-50";
 
-export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleView }) {
+export function AdminScoutSuggestionsPanel({
+  initial,
+  week,
+}: {
+  initial: ScoutConsoleView;
+  /**
+   * The last seven days for the side tiles (newest first), or null when they
+   * could not be read. Left out, the side tiles are not drawn at all.
+   */
+  week?: readonly ScoutDaySummary[] | null;
+}) {
   const m = useAdminMessages(adminProductResearchScoutMessages);
   const { locale } = useAdminLocale();
   const [rows, setRows] = useState<Record<string, RowState>>({});
@@ -189,7 +201,7 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
         <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className={`${CHIP} ${SEVERITY_CHIP[suggestion.severity] ?? NEUTRAL_CHIP}`}>{severityLabel(suggestion.severity)}</span>
+              <AdminStatusChip tone={suggestion.severity === "high" ? "bad" : suggestion.severity === "medium" ? "warn" : "idle"}>{severityLabel(suggestion.severity)}</AdminStatusChip>
               <span className={`${CHIP} ${NEUTRAL_CHIP}`}>{areaLabel(suggestion.area)}</span>
               {showSubject ? <span className="text-xs text-zinc-400">{subjectLabel(suggestion.subject)}</span> : null}
               <span className="font-mono text-xs text-zinc-500">
@@ -241,8 +253,6 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
     );
   };
 
-  const lastRun = initial.lastRun;
-  const runHealthy = lastRun !== null && lastRun.failed === 0 && lastRun.unsettled === 0;
   const selectedCount = [...selected].filter((id) => rows[id]?.kind !== "done").length;
 
   return (
@@ -267,59 +277,8 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
         </div>
       )}
 
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label={m.tileOpen}>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5">
-          <p className="text-xs font-medium text-zinc-400">{m.tileOpen}</p>
-          <p className="mt-1 text-xl font-bold tabular-nums text-zinc-50">{fill(m.tileOpenValue, { count: pending.length })}</p>
-          <p className="mt-1 text-xs text-zinc-400">
-            {fill(m.tileOpenDetail, {
-              high: bySeverity("high"),
-              medium: bySeverity("medium"),
-              low: bySeverity("low"),
-              subjects: new Set(pending.map((row) => row.subject)).size,
-            })}
-          </p>
-        </div>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5">
-          <p className="text-xs font-medium text-zinc-400">{m.tileLastRun}</p>
-          <p className="mt-1 text-xl font-bold tabular-nums text-zinc-50">
-            {lastRun === null ? m.lastRunNone : <time dateTime={lastRun.endedAt} suppressHydrationWarning>{localTime(lastRun.endedAt, locale, { today: m.todayWord, tomorrow: m.tomorrowWord })}</time>}
-          </p>
-          {lastRun === null ? null : (
-            <p className={`mt-1 text-xs ${runHealthy ? "text-zinc-400" : "text-amber-300"}`}>
-              <span aria-hidden className={runHealthy ? "text-emerald-400" : "text-amber-400"}>
-                ●{" "}
-              </span>
-              {fill(m.lastRunDetail, { calls: lastRun.calls, failed: lastRun.failed, kept: lastRun.kept })}
-              {lastRun.unsettled > 0 ? ` · ${fill(m.lastRunUnsettled, { count: lastRun.unsettled })}` : null}
-            </p>
-          )}
-        </div>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5">
-          <p className="text-xs font-medium text-zinc-400">{m.tileNextRun}</p>
-          <p className="mt-1 text-xl font-bold tabular-nums text-zinc-50">
-            <time dateTime={initial.nextRunAt} suppressHydrationWarning>{localTime(initial.nextRunAt, locale, { today: m.todayWord, tomorrow: m.tomorrowWord })}</time>
-          </p>
-          <p className="mt-1 text-xs text-zinc-400">
-            {m.nextRunDetail.split("{time}")[0]}
-            <time dateTime={initial.nextRunAt} suppressHydrationWarning>{localTime(initial.nextRunAt, locale, null)}</time>
-            {m.nextRunDetail.split("{time}")[1]}
-          </p>
-        </div>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5">
-          <p className="text-xs font-medium text-zinc-400">{m.tileToday}</p>
-          <p className="mt-1 text-xl font-bold tabular-nums text-zinc-50">
-            {fill(m.todayValue, { calls: initial.usageToday.calls, cap: initial.settings.dailyCallCap })}
-          </p>
-          <p className="mt-1 text-xs text-zinc-400">
-            {fill(m.todayDetail, {
-              input: compactNumber(initial.usageToday.inputTokens),
-              output: compactNumber(initial.usageToday.outputTokens),
-            })}
-          </p>
-        </div>
-      </section>
-
+      <div className={week === undefined ? "contents" : "grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]"}>
+      <div className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <div className="flex overflow-hidden rounded-lg border border-zinc-700" role="group" aria-label={m.severityFilter}>
@@ -547,6 +506,9 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
           )}
         </div>
       ) : null}
+      </div>
+      {week === undefined ? null : <ScoutAgentAside initial={initial} week={week} />}
+      </div>
     </div>
   );
 }
