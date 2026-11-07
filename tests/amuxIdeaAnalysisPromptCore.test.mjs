@@ -49,7 +49,7 @@ test("prompt candidate states the bounded proposal schema and no write authority
   assert.ok(result.prompt.includes("parentStoryRef (nullable for Task"));
   assert.ok(result.prompt.includes("both contract and ordinary expected paths"));
   assert.ok(result.prompt.includes(
-    "Regardless of work type, a mixed contract/ordinary path class must always be split"));
+    "an implement or test Task with a mixed contract/ordinary path class must always be split"));
   assert.ok(result.prompt.includes("split it into separate Tasks"));
   assert.ok(result.prompt.includes("through dependencyRefs"));
   assert.ok(result.prompt.includes("Do not propose review work"));
@@ -65,6 +65,26 @@ test("prompt candidate states the bounded proposal schema and no write authority
   assert.equal(data.continuation.previousChunkIndex, 1);
   assert.equal(data.continuation.previousContinuationKind, "input");
   assert.equal(data.sourceTexts.length, 2);
+});
+
+test("an investigate Task is proposed only for a plan-changing result that a later Task uses", () => {
+  // Owner decision 2026-11-07 (docs/policy/amux-intake.md v19 item 5).
+  const { prompt } = buildAmuxIdeaAnalysisPrompt(valid());
+  assert.ok(prompt.includes(
+    "Propose a separate investigate Task only when its result can change the plan"));
+  assert.ok(prompt.includes("first investigates the relevant code and then implements"));
+  assert.ok(prompt.includes("must state the decision this investigation makes and name, by localId, " +
+    "the Task that uses that decision"));
+  assert.ok(prompt.includes("an investigate Task that no Task in this chunk lists in dependencyRefs is refused"));
+  assert.ok(prompt.includes("every investigate Task names its decision and the Task that uses it"));
+  // A read-only Task lists the paths it reads, and they need no class split.
+  assert.ok(prompt.includes("For an implement or test Task, expectedPaths lists the repository-relative " +
+    "paths the Task is expected to change"));
+  assert.ok(prompt.includes("For a design, investigate or verify Task, which changes no file, " +
+    "it lists the paths the Task will read"));
+  assert.ok(prompt.includes("its read paths may mix both classes without a split"));
+  // The old wording made every Task list only the paths it changes.
+  assert.equal(prompt.includes("such as lib/amux/example.ts: 1 to"), false);
 });
 
 test("prompt v7 keeps the admitted schemas for stored v6 and v5 analyses", () => {

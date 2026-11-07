@@ -12,7 +12,8 @@ import { scanAmuxV4Input } from "./localIntakeCore.ts";
 // 5 (amux-intake v20): every Task names its expected paths, and no new
 // proposal uses taskRole review.
 export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 5 as const;
-/** amux-intake v20 item 3: repository-relative paths, 1 to 40 per Task. */
+/** amux-intake v20 item 3: repository-relative paths, 1 to 40 per Task. A
+ * read-only Task (design, investigate, verify) lists the paths it reads. */
 export const AMUX_TASK_EXPECTED_PATHS_MAX = 40;
 export const AMUX_TASK_EXPECTED_PATH_MAX_BYTES = 512;
 export const AMUX_ANALYSIS_CHUNK_MAX_BYTES = 65_536;
@@ -206,7 +207,7 @@ export const AMUX_ANALYSIS_SCHEMA_RULES = [
   "paths_before_schema_5", "local_id_duplicate", "parent_level", "feature_ref_kind",
   "parent_story_ref", "story_dependency", "dependency_ref_kind",
   "duplicate_candidate_ref_kind", "evidence_card_ref", "dependency_cycle",
-  "outcome_combination",
+  "outcome_combination", "investigate_without_consumer",
 ] as const;
 export type AmuxAnalysisSchemaRule = (typeof AMUX_ANALYSIS_SCHEMA_RULES)[number];
 
@@ -700,7 +701,9 @@ export function inspectAmuxAnalysisChunk(
       firstUnit((unit) => unit.kind === "node" && unit.displayPrefix !== undefined,
         "prefix_before_schema_4", "displayPrefix");
     }
-    // amux-intake v20: from schema 5 every Task names its expected paths and
+    // amux-intake v20: from schema 5 every Task names its expected paths (the
+    // files it changes, or for a design, investigate or verify Task the files
+    // it reads, owner decision 2026-11-07) and
     // no Task is a review Task; before it, no unit has expected paths. Stored
     // units are re-read by inspectAmuxStoredAnalysisUnit, which keeps both.
     if (data.schemaVersion === AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION) {
@@ -746,6 +749,18 @@ export function inspectAmuxAnalysisChunk(
         (outcome === "reject" && coverageStatus !== "complete") ||
         (outcome === "propose" && units.length === 0 && !emptyClose) ||
         (outcome === "reject" && units.length !== 0)) refuse("outcome_combination", "outcome");
+    // Owner decision 2026-11-07: an investigate Task exists to hand its result
+    // to a later Task. A complete chunk is the last one, so every Task that
+    // could depend on an investigate Task it proposes is in this answer; one
+    // no Task depends on would only wait for an owner. A stored chunk is
+    // re-read under the contract it was admitted with.
+    if (requiredSchemaVersion !== null && coverageStatus === "complete") {
+      const consumed = new Set(units.flatMap((unit) =>
+        unit.kind === "card" && unit.cardType === "task" ? unit.dependencyRefs : []));
+      firstUnit((unit) => unit.kind === "card" && unit.cardType === "task" &&
+        unit.taskRole === "investigate" && !consumed.has(unit.localId),
+      "investigate_without_consumer", "dependencyRefs");
+    }
     const chunk: AmuxAnalysisChunk = {
       schemaVersion: data.schemaVersion as AmuxAnalysisChunk["schemaVersion"],
       previewId: expectedPreviewId,
