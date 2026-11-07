@@ -39,6 +39,55 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       "Configure platform-level behavior that is not part of billing, provider health, or user support workflows.",
     reload: "Reload DB",
     save: "Save platform settings",
+    stops: {
+      title: "Emergency stops",
+      description:
+        "Turn one off and the server stops that feature for everyone at once. Changes apply when you save. Saving needs a recent sign-in and is recorded in the audit log.",
+      running: "Running",
+      stopped: "Stopped",
+      cleanupNote:
+        "Deleting attachments and revoking shares keep working while a stop is on, so cleanup stays safe.",
+      cards: {
+        aiChat: { label: "AI chat", detail: "Answers from every model" },
+        attachments: { label: "Attachments", detail: "Uploading and reading files" },
+        publicSharing: { label: "Public sharing", detail: "Links anyone can open" },
+      },
+    },
+    switches: {
+      title: "Feature switches",
+      description: "New features ship switched off and are turned on here.",
+      humanOff: "A switch a person turned off is never turned back on by automation.",
+      onForEveryone: "On for everyone",
+      off: "Off",
+      waitsForProfiles: "Waits for profiles",
+      saveNote: "Changes apply when you save. Saving needs a recent sign-in and is recorded in the audit log.",
+      details: "Policy notes for each switch",
+      items: {
+        chatStarter: { label: "Chat starter cards", detail: "Suggestions on a new chat's welcome screen" },
+        imageGeneration: { label: "Image generation", detail: "Make images from a prompt (opt-in beta)" },
+        externalImport: { label: "Import conversations", detail: "Bring ChatGPT, Claude and Gemini history in" },
+        externalContinuation: { label: "Continue an imported chat", detail: "Start a new chat from an imported one" },
+        assistantProfiles: { label: "Assistant profiles", detail: "Private assistants with their own instructions" },
+        assistantKnowledge: { label: "Assistant knowledge files", detail: "Files an assistant can read; needs profiles on" },
+      },
+      memory: {
+        title: "Account memory",
+        summary: "Shown here, but changed only through the approval procedure. Stopping it has its own control in Analytics.",
+        extraction: "Extraction",
+        injection: "Injection",
+        on: "On",
+        off: "Off",
+        details: "Why there is no switch here",
+      },
+      packageImport: {
+        title: "External assistant package import",
+        summary:
+          "Has its own switch and its own audit record, separate from the save above. Say why you are changing it.",
+        details: "Policy notes",
+        enabled: "Enabled",
+        disabled: "Disabled",
+      },
+    },
     reauth: {
       title: "Nothing was saved",
       body:
@@ -209,6 +258,54 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       "결제, 공급자 상태, 사용자 지원 워크플로에 속하지 않는 플랫폼 수준 동작을 설정합니다.",
     reload: "DB 다시 불러오기",
     save: "플랫폼 설정 저장",
+    stops: {
+      title: "긴급 차단",
+      description:
+        "하나를 끄면 서버가 그 기능을 모든 사용자에게 바로 멈춰요. 저장하면 적용돼요. 저장할 때는 최근 인증이 필요하고, 감사 로그에 남아요.",
+      running: "켜져 있어요",
+      stopped: "멈춰 있어요",
+      cleanupNote:
+        "차단 중에도 첨부파일 삭제와 공유 해제는 계속 쓸 수 있어서, 정리는 안전하게 할 수 있어요.",
+      cards: {
+        aiChat: { label: "AI 채팅", detail: "모든 모델 답변" },
+        attachments: { label: "첨부파일", detail: "파일 올리기와 읽기" },
+        publicSharing: { label: "공개 공유", detail: "누구나 열 수 있는 링크" },
+      },
+    },
+    switches: {
+      title: "기능 스위치",
+      description: "새 기능은 꺼진 채로 배포하고, 여기서 켜요.",
+      humanOff: "사람이 끈 스위치는 자동화가 다시 켜지 않아요.",
+      onForEveryone: "모두에게 켜짐",
+      off: "꺼짐",
+      waitsForProfiles: "프로필을 기다려요",
+      saveNote: "저장하면 적용돼요. 저장할 때는 최근 인증이 필요하고, 감사 로그에 남아요.",
+      details: "스위치별 정책 메모",
+      items: {
+        chatStarter: { label: "채팅 시작 카드", detail: "새 대화 첫 화면의 추천 카드" },
+        imageGeneration: { label: "이미지 생성", detail: "요청으로 이미지 만들기 (옵트인 베타)" },
+        externalImport: { label: "대화 가져오기", detail: "ChatGPT, Claude, Gemini 대화 기록 가져오기" },
+        externalContinuation: { label: "가져온 대화 이어가기", detail: "가져온 대화에서 새 대화 시작" },
+        assistantProfiles: { label: "어시스턴트 프로필", detail: "자기 지침을 가진 비공개 어시스턴트" },
+        assistantKnowledge: { label: "어시스턴트 지식 파일", detail: "어시스턴트가 읽는 파일, 프로필이 켜져야 해요" },
+      },
+      memory: {
+        title: "계정 메모리",
+        summary: "여기서는 보기만 해요. 승인 절차로만 바뀌고, 멈추는 방법은 분석 화면에 따로 있어요.",
+        extraction: "추출",
+        injection: "주입",
+        on: "켜짐",
+        off: "꺼짐",
+        details: "여기에 스위치가 없는 이유",
+      },
+      packageImport: {
+        title: "외부 어시스턴트 패키지 가져오기",
+        summary: "위의 저장과 별개인 전용 스위치이고, 감사 기록도 따로 남아요. 바꾸는 이유를 적어 주세요.",
+        details: "정책 메모",
+        enabled: "켜짐",
+        disabled: "꺼짐",
+      },
+    },
     reauth: {
       title: "아무것도 저장되지 않았습니다",
       body:

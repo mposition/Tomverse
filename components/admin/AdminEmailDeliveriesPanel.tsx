@@ -1,22 +1,29 @@
-import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 
 import {
   AdminRevealableAddress,
   AdminRevealAddressesButton,
 } from "@/components/admin/AdminAddressReveal";
-
+import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
+import { AdminFilterChips } from "@/components/admin/ui/AdminFilterChips";
+import { AdminKpiCard } from "@/components/admin/ui/AdminKpiCard";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import type { AdminEmailDeliveryRow } from "@/lib/adminEmailDeliveries";
-import { getAdminMessages } from "@/lib/adminLocaleServer";
-import { adminEmailDeliveryMessages } from "@/lib/adminMessages/emailDelivery";
 import {
+  DELIVERY_CLASSIFICATIONS,
   DELIVERY_STATUSES,
   UNDELIVERED_STATUSES,
   type DeliveryFilters,
 } from "@/lib/adminEmailDeliveryFilters";
+import { adminMessagesFor, type AdminMessageShape } from "@/lib/adminLocale";
+import { getAdminLocale } from "@/lib/adminLocaleServer";
+import { adminEmailDeliveryMessages } from "@/lib/adminMessages/emailDelivery";
+import { formatAestDateTime, type AdminTone } from "@/lib/adminUiCore";
 
 /**
- * The outbox, read back.
+ * The outbox, read back, as the customer mail screen.
  *
  * Contract: docs/policy/email-notifications.md §9.5, §13.7.
  *
@@ -33,213 +40,302 @@ import {
  * change: a message that should not have been abandoned is enqueued again,
  * which writes a new row with its own idempotency key rather than reviving one
  * whose key the provider may still be suppressing.
+ *
+ * The numbers above the table are all-time counts by status, the only count the
+ * loader gives. A figure the loader cannot give (a seven-day window, unsubscribe
+ * totals) is left out rather than invented.
  */
 
-const STATUS_TONE: Record<string, string> = {
-  abandoned: "border-red-800 bg-red-950/50 text-red-200",
-  failed: "border-red-800 bg-red-950/50 text-red-200",
-  bounced: "border-amber-800 bg-amber-950/50 text-amber-200",
-  complained: "border-amber-800 bg-amber-950/50 text-amber-200",
-  suppressed: "border-zinc-700 bg-zinc-900 text-zinc-300",
-  skipped: "border-zinc-700 bg-zinc-900 text-zinc-300",
-  pending: "border-zinc-700 bg-zinc-900 text-zinc-300",
-  sent: "border-emerald-900 bg-emerald-950/40 text-emerald-200",
-  delivered: "border-emerald-900 bg-emerald-950/40 text-emerald-200",
+export type EmailDeliveryMessages = AdminMessageShape<
+  (typeof adminEmailDeliveryMessages)["en"]
+>;
+
+const STATUS_TONE: Record<string, AdminTone> = {
+  abandoned: "bad",
+  failed: "bad",
+  bounced: "warn",
+  complained: "warn",
+  pending: "info",
+  sent: "ok",
+  delivered: "ok",
+  suppressed: "idle",
+  skipped: "idle",
 };
 
 const when = (value: Date | null) => formatAestDateTime(value, { seconds: true }) ?? "—";
 
-const hrefFor = (statuses: readonly string[]) =>
-  `/admin/email-delivery?tab=deliveries&status=${statuses.join(",")}`;
+const sameSet = (left: readonly string[], right: readonly string[]) =>
+  left.length === right.length && right.every((entry) => left.includes(entry));
 
-export async function AdminEmailDeliveriesPanel({
+const classificationQuery = (kinds: readonly string[]) =>
+  kinds.length > 0 ? `&classification=${kinds.join(",")}` : "";
+
+/** A view of the log as a URL. Filters the chip does not change are kept. */
+const deliveryHref = (
+  filters: DeliveryFilters,
+  patch: { statuses?: readonly string[]; classifications?: readonly string[] }
+) =>
+  `/admin/email-delivery?tab=deliveries&status=${(patch.statuses ?? filters.statuses).join(",")}${classificationQuery(
+    patch.classifications ?? filters.classifications
+  )}`;
+
+export function AdminEmailDeliveriesView({
+  m: messages,
   rows,
   filters,
   statusCounts,
   nextCursor,
   mayRevealAddresses,
 }: {
-  rows: AdminEmailDeliveryRow[];
+  m: EmailDeliveryMessages;
+  /** `null` when the read failed: shown as an error, never as an empty log. */
+  rows: AdminEmailDeliveryRow[] | null;
   filters: DeliveryFilters;
-  statusCounts: Record<string, number>;
+  /** `null` when the counts could not be read. */
+  statusCounts: Record<string, number> | null;
   nextCursor: string | null;
   /** D10: `owner` and `ops`. Resolved on the server. */
   mayRevealAddresses: boolean;
 }) {
-  const messages = await getAdminMessages(adminEmailDeliveryMessages);
   const m = messages.deliveries;
-  const showing = new Set(filters.statuses);
+  const showing = new Set<string>(filters.statuses);
   const hidden = DELIVERY_STATUSES.filter((status) => !showing.has(status));
-  const hiddenRows = hidden.reduce(
-    (total, status) => total + (statusCounts[status] ?? 0),
-    0
-  );
+  const count = (status: string) => statusCounts?.[status] ?? 0;
+  const hiddenRows = hidden.reduce((total, status) => total + count(status), 0);
+
+  const handedOff = count("sent") + count("delivered") + count("bounced") + count("complained");
+  const unreadCounts = statusCounts === null;
+
+  const columns: AdminDataColumn<AdminEmailDeliveryRow>[] = [
+    {
+      key: "recipient",
+      header: m.columns.recipient,
+      render: (row) => (
+        <span data-testid="email-delivery-row" className="block">
+          <AdminRevealableAddress rowId={row.id} masked={row.emailAddressMasked} />
+          <span className="mt-0.5 block text-xs text-zinc-500">
+            {row.jurisdictionCountry} · {row.language}
+          </span>
+        </span>
+      ),
+    },
+    {
+      key: "kind",
+      header: m.columns.template,
+      render: (row) => (
+        <>
+          <span className="block text-sm text-zinc-100">
+            {m.kinds[row.templateVersion.classification] ?? row.templateVersion.classification}
+          </span>
+          <span className="mt-0.5 block font-mono text-xs text-zinc-500">
+            {row.templateVersion.template.key} · v{row.templateVersion.version}
+            {row.lane !== "standard" ? ` · ${row.lane}` : ""}
+          </span>
+        </>
+      ),
+    },
+    {
+      key: "subject",
+      header: m.columns.subject,
+      // Written by us and identical for every recipient of this version, which
+      // is what makes a row identifiable without reading anybody's mail.
+      render: (row) => (
+        <span className="block max-w-xs truncate text-zinc-200">
+          {row.renderedSubject || m.noSubject}
+        </span>
+      ),
+    },
+    {
+      key: "created",
+      header: m.columns.created,
+      render: (row) => <span className="font-mono text-xs text-zinc-400">{when(row.createdAt)}</span>,
+    },
+    {
+      key: "status",
+      header: m.columns.status,
+      render: (row) => (
+        <>
+          <AdminStatusChip tone={STATUS_TONE[row.status] ?? "idle"}>
+            {m.statuses[row.status] ?? row.status}
+          </AdminStatusChip>
+          {row.skipReason ? (
+            <span className="mt-1 block font-mono text-xs text-zinc-500">{row.skipReason}</span>
+          ) : null}
+          {row.deferReason && row.nextAttemptAt ? (
+            // A pending row that is on schedule, not stuck: the backlog alert
+            // leaves these out, so the list has to say why.
+            <span className="mt-1 block font-mono text-xs text-zinc-500">
+              {row.deferReason} → {when(row.nextAttemptAt)}
+            </span>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: "attempts",
+      header: m.columns.attempts,
+      hideOnCard: true,
+      render: (row) => <span className="font-mono text-xs">{row.attempts}</span>,
+    },
+    {
+      key: "lastError",
+      header: m.columns.lastError,
+      hideOnCard: true,
+      render: (row) => (
+        <span className="font-mono text-xs text-zinc-400">{row.lastErrorKind ?? "—"}</span>
+      ),
+    },
+  ];
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        {messages.eyebrow}
-      </p>
-      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        {m.intro}
-      </p>
-
-      {/* D10: masked by default, revealed by a deliberate audited act. The
-          sentence is on screen rather than in a comment -- an operator who sees
-          dots and no explanation concludes the data is missing. */}
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <AdminRevealAddressesButton
-          kind="delivery"
-          rowIds={rows.map((row) => row.id)}
-          allowed={mayRevealAddresses}
+    <div className="flex min-w-0 flex-col gap-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="email-delivery-kpis">
+        <AdminKpiCard
+          label={m.kpi.sent.label}
+          value={unreadCounts ? null : handedOff.toLocaleString("en-US")}
+          detail={m.kpi.sent.detail}
+        />
+        <AdminKpiCard
+          label={m.kpi.delivered.label}
+          value={
+            unreadCounts || handedOff === 0
+              ? null
+              : `${((count("delivered") / handedOff) * 100).toFixed(1)}%`
+          }
+          detail={m.kpi.delivered.detail(count("delivered"), handedOff)}
+        />
+        <AdminKpiCard
+          label={m.kpi.bounced.label}
+          value={unreadCounts ? null : count("bounced").toLocaleString("en-US")}
+          detail={m.kpi.bounced.detail(count("complained"))}
+          tone={count("bounced") + count("complained") > 0 ? "warn" : "neutral"}
+        />
+        <AdminKpiCard
+          label={m.kpi.held.label}
+          value={unreadCounts ? null : count("suppressed").toLocaleString("en-US")}
+          detail={m.kpi.held.detail}
         />
       </div>
 
-      <nav
-        aria-label={m.filtersLabel}
-        className="mt-5 flex flex-wrap gap-2"
+      <AdminTile
+        title={m.title}
+        description={m.intro}
+        action={
+          rows ? (
+            // D10: masked by default, revealed by a deliberate audited act. The
+            // sentence is on screen rather than in a comment -- an operator who
+            // sees dots and no explanation concludes the data is missing.
+            <AdminRevealAddressesButton
+              kind="delivery"
+              rowIds={rows.map((row) => row.id)}
+              allowed={mayRevealAddresses}
+            />
+          ) : null
+        }
       >
-        <Link
-          href={hrefFor(UNDELIVERED_STATUSES)}
-          data-testid="email-delivery-filter-undelivered"
-          className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-            hidden.length > 0
-              ? "border-blue-700 bg-blue-950/50 text-blue-200"
-              : "border-zinc-700 bg-zinc-900 text-zinc-300"
-          }`}
-        >
-          {m.didNotArrive}
-        </Link>
-        {DELIVERY_STATUSES.map((status) => (
-          <Link
-            key={status}
-            href={hrefFor([status])}
-            data-testid={`email-delivery-filter-${status}`}
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-              showing.has(status) && showing.size === 1
-                ? "border-blue-700 bg-blue-950/50 text-blue-200"
-                : "border-zinc-700 bg-zinc-900 text-zinc-300"
-            }`}
-          >
-            {status}
-            <span className="ml-2 font-mono text-zinc-500">
-              {statusCounts[status] ?? 0}
-            </span>
-          </Link>
-        ))}
-      </nav>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-14 shrink-0 text-xs font-medium text-zinc-500">{m.kindGroup}</span>
+            <AdminFilterChips
+              label={m.kindFiltersLabel}
+              chips={[
+                {
+                  key: "all",
+                  label: m.allKinds,
+                  href: deliveryHref(filters, { classifications: [] }),
+                  active: filters.classifications.length === 0,
+                  testId: "email-delivery-kind-all",
+                },
+                ...DELIVERY_CLASSIFICATIONS.map((kind) => ({
+                  key: kind,
+                  label: m.kinds[kind] ?? kind,
+                  href: deliveryHref(filters, { classifications: [kind] }),
+                  active: filters.classifications.length === 1 && filters.classifications[0] === kind,
+                  testId: `email-delivery-kind-${kind}`,
+                })),
+              ]}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-14 shrink-0 text-xs font-medium text-zinc-500">{m.statusGroup}</span>
+            <AdminFilterChips
+              label={m.filtersLabel}
+              chips={[
+                {
+                  key: "undelivered",
+                  label: m.didNotArrive,
+                  href: deliveryHref(filters, { statuses: UNDELIVERED_STATUSES }),
+                  active: sameSet(filters.statuses, UNDELIVERED_STATUSES),
+                  testId: "email-delivery-filter-undelivered",
+                },
+                ...DELIVERY_STATUSES.map((status) => ({
+                  key: status,
+                  label: m.statuses[status] ?? status,
+                  href: deliveryHref(filters, { statuses: [status] }),
+                  active: showing.size === 1 && showing.has(status),
+                  count: statusCounts ? count(status) : undefined,
+                  testId: `email-delivery-filter-${status}`,
+                })),
+              ]}
+            />
+          </div>
+        </div>
+        {/* Said on screen, not implied by an empty table: a filtered view that
+            does not name what it excludes reads as a total. */}
+        {rows ? (
+          <p data-testid="email-delivery-scope" className="text-xs text-zinc-500">
+            {m.scope(rows.length, filters.statuses.join(", "))}
+            {hidden.length > 0 && statusCounts ? m.hiddenRows(hiddenRows) : ""}
+          </p>
+        ) : null}
+      </AdminTile>
 
-      {/* Said on screen, not implied by an empty table: a filtered view that
-          does not name what it excludes reads as a total. */}
-      <p
-        data-testid="email-delivery-scope"
-        className="mt-4 text-xs text-zinc-500"
-      >
-        {m.scope(rows.length, filters.statuses.join(", "))}
-        {hidden.length > 0 ? m.hiddenRows(hiddenRows) : ""}
-      </p>
-
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[64rem] text-left text-sm">
-          <thead className="text-xs uppercase tracking-wide text-zinc-500">
-            <tr>
-              <th className="py-2 pr-4 font-semibold">{m.columns.status}</th>
-              <th className="py-2 pr-4 font-semibold">{m.columns.template}</th>
-              <th className="py-2 pr-4 font-semibold">{m.columns.recipient}</th>
-              <th className="py-2 pr-4 font-semibold">{m.columns.attempts}</th>
-              <th className="py-2 pr-4 font-semibold">{m.columns.lastError}</th>
-              <th className="py-2 pr-4 font-semibold">{m.columns.created}</th>
-            </tr>
-          </thead>
-          <tbody className="text-zinc-300">
-            {rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={6}
-                  data-testid="email-delivery-empty"
-                  className="py-6 text-sm text-zinc-500"
-                >
-                  {m.empty}
-                </td>
-              </tr>
-            ) : null}
-            {rows.map((row) => (
-              <tr
-                key={row.id}
-                data-testid="email-delivery-row"
-                className="border-t border-zinc-900 align-top"
+      {rows === null ? (
+        <AdminStateBlock kind="error" title={m.loadFailed} />
+      ) : (
+        <AdminDataTable
+          caption={m.title}
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          cardTitle={(row) => (
+            <AdminRevealableAddress rowId={row.id} masked={row.emailAddressMasked} />
+          )}
+          cardMeta={(row) => (
+            <>
+              {row.renderedSubject || m.noSubject} · {when(row.createdAt)}
+            </>
+          )}
+          cardAside={(row) => (
+            <AdminStatusChip tone={STATUS_TONE[row.status] ?? "idle"}>
+              {m.statuses[row.status] ?? row.status}
+            </AdminStatusChip>
+          )}
+          emptyState={
+            <div data-testid="email-delivery-empty">
+              <AdminStateBlock kind="empty" title={m.empty} />
+            </div>
+          }
+          footer={
+            nextCursor ? (
+              <Link
+                data-testid="email-delivery-next"
+                href={`${deliveryHref(filters, {})}&cursor=${nextCursor}`}
+                className="inline-flex min-h-8 items-center rounded-full border border-zinc-700 bg-zinc-900 px-4 text-xs font-bold text-zinc-200 hover:bg-zinc-800"
               >
-                <td className="py-3 pr-4">
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                      STATUS_TONE[row.status] ??
-                      "border-zinc-700 bg-zinc-900 text-zinc-300"
-                    }`}
-                  >
-                    {row.status}
-                  </span>
-                  {row.skipReason ? (
-                    <span className="mt-1 block font-mono text-[11px] text-zinc-500">
-                      {row.skipReason}
-                    </span>
-                  ) : null}
-                  {row.deferReason && row.nextAttemptAt ? (
-                    // A pending row that is on schedule, not stuck: the backlog
-                    // alert leaves these out, so the list has to say why.
-                    <span className="mt-1 block font-mono text-[11px] text-zinc-500">
-                      {row.deferReason} → {when(row.nextAttemptAt)}
-                    </span>
-                  ) : null}
-                </td>
-                <td className="py-3 pr-4">
-                  <span className="font-mono text-xs text-zinc-200">
-                    {row.templateVersion.template.key}
-                  </span>
-                  <span className="mt-1 block text-[11px] text-zinc-500">
-                    {row.templateVersion.classification} · v
-                    {row.templateVersion.version} · {row.lane}
-                  </span>
-                  {/* Written by us and identical for every recipient of this
-                      version, which is what makes a row identifiable without
-                      reading anybody's mail. */}
-                  {row.renderedSubject ? (
-                    <span className="mt-1 block max-w-md truncate text-[11px] text-zinc-400">
-                      {row.renderedSubject}
-                    </span>
-                  ) : null}
-                </td>
-                <td className="py-3 pr-4">
-                  <AdminRevealableAddress
-                    rowId={row.id}
-                    masked={row.emailAddressMasked}
-                  />
-                  <span className="mt-1 block text-[11px] text-zinc-500">
-                    {row.jurisdictionCountry} · {row.language}
-                  </span>
-                </td>
-                <td className="py-3 pr-4 font-mono text-xs">{row.attempts}</td>
-                <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
-                  {row.lastErrorKind ?? "—"}
-                </td>
-                <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
-                  {when(row.createdAt)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {nextCursor ? (
-        <Link
-          data-testid="email-delivery-next"
-          href={`/admin/email-delivery?tab=deliveries&status=${filters.statuses.join(",")}&cursor=${nextCursor}`}
-          className="mt-4 inline-block rounded-full border border-zinc-700 bg-zinc-900 px-4 py-1.5 text-xs font-semibold text-zinc-200"
-        >
-          {m.older}
-        </Link>
-      ) : null}
-    </section>
+                {m.older}
+              </Link>
+            ) : undefined
+          }
+        />
+      )}
+    </div>
   );
+}
+
+export async function AdminEmailDeliveriesPanel(
+  props: Omit<Parameters<typeof AdminEmailDeliveriesView>[0], "m">
+) {
+  const m = adminMessagesFor(adminEmailDeliveryMessages, await getAdminLocale());
+  return <AdminEmailDeliveriesView m={m} {...props} />;
 }

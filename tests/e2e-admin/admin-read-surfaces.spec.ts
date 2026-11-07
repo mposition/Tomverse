@@ -656,8 +656,9 @@ test.describe("admin read surfaces", () => {
   test("infrastructure renders its operations panel", async ({ page }) => {
     await page.goto("/admin/infrastructure");
 
+    await expect(page.getByTestId("admin-infrastructure")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Railway, R2, and database operations" })
+      page.getByRole("heading", { name: "Application database" }).first()
     ).toBeVisible();
   });
 
@@ -671,15 +672,21 @@ test.describe("admin read surfaces", () => {
       page.getByRole("heading", { name: "Scheduled jobs" }).first()
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: FIXTURE_JOB_RUN.succeeded.label })
+      page.getByRole("cell", { name: FIXTURE_JOB_RUN.succeeded.label })
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: FIXTURE_JOB_RUN.failed.label })
+      page.getByRole("cell", { name: FIXTURE_JOB_RUN.failed.label })
     ).toBeVisible();
-    // The seeded runs are joined onto those cards, so "Never" would mean the
+    // The seeded runs are joined onto those rows, so "Never" would mean the
     // dashboard rendered without them.
-    await expect(page.getByText("Last run:").first()).toBeVisible();
-    await expect(page.getByText(/Consecutive failures: 1/).first()).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Last run" })
+    ).toBeVisible();
+    await expect(page.getByText("1 in a row failed").first()).toBeVisible();
+    // The failed job is also explained in a card of its own.
+    await expect(page.getByTestId("scheduled-job-failure").first()).toContainText(
+      FIXTURE_JOB_RUN.failed.label
+    );
   });
 
   test("automation's webhooks tab renders the billing event monitor", async ({
@@ -690,7 +697,10 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Billing event monitor" })
     ).toBeVisible();
-    await expect(page.getByText(FIXTURE_WEBHOOK.failed.stripeEventId)).toBeVisible();
+    // The table and its phone cards both carry the id; only the table shows.
+    await expect(
+      page.getByText(FIXTURE_WEBHOOK.failed.stripeEventId).first()
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "Reprocess" })).toBeVisible();
   });
 
@@ -725,18 +735,28 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Notification delivery log" })
     ).toBeVisible();
-    await expect(page.getByText(FIXTURE_NOTIFICATION.failed.title)).toBeVisible();
+    // The table and the phone cards both render the row; only one is shown.
+    await expect(
+      page.getByText(FIXTURE_NOTIFICATION.failed.title).locator("visible=true")
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "failed 1" })).toBeVisible();
   });
 
   test("platform settings renders the stored defaults", async ({ page }) => {
     await page.goto("/admin/platform");
 
+    // The first section is the emergency stops, in their own red zone.
     await expect(
-      page.getByRole("heading", { name: "Product defaults and guest experience" })
+      page.getByRole("heading", { name: "Emergency stops" })
+    ).toBeVisible();
+    await expect(page.getByTestId("admin-kill-switch-ai-chat")).toBeVisible();
+    await expect(page.getByRole("switch", { name: "AI chat" })).toBeVisible();
+    await page.goto("/admin/platform?tab=features");
+    await expect(
+      page.getByRole("heading", { name: "Feature switches" })
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Operational feature controls" })
+      page.getByText("A switch a person turned off is never turned back on by automation.")
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Save platform settings" })
@@ -754,8 +774,10 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("cell", { name: FIXTURE_AUDIT_LOG.summary }).first()
     ).toBeVisible();
+    // Scoped to the table: the actor filter above it lists the same address
+    // as an <option>, which is never visible.
     await expect(
-      page.getByText(ADMIN_E2E_IDENTITIES.owner.email).first()
+      page.getByRole("table").getByText(ADMIN_E2E_IDENTITIES.owner.email).first()
     ).toBeVisible();
     await expect(page.getByText(/most recent entries/)).toBeVisible();
   });
@@ -961,15 +983,15 @@ test.describe("admin read surfaces", () => {
     // Every published policy is rendered, including the two that used to be
     // stated here and performed by nothing.
     await expect(
-      page.getByText("Delete provider check records older than 30 days.")
+      page.getByText("Delete provider check records older than 30 days.").first()
     ).toBeVisible();
     await expect(
-      page.getByText(/Delete alert delivery logs older than 90 days/)
+      page.getByText(/Delete alert delivery logs older than 90 days/).first()
     ).toBeVisible();
     // The audit log is a floor, not a queue: its number is history, and the
     // card must not offer it as work the cleanup will do.
     await expect(
-      page.getByText("Beyond the floor", { exact: true })
+      page.getByText("Beyond the floor", { exact: true }).first()
     ).toBeVisible();
   });
 

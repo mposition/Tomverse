@@ -29,11 +29,11 @@ const declaredStatuses = () => {
   return [...union.matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
 };
 
-const statusStyleKeys = () => {
+const statusToneKeys = () => {
   const body = panel.match(
-    /const statusStyle: Record<InfrastructureStatus, string> = \{([\s\S]*?)\n\};/
+    /const STATUS_TONE: Record<InfrastructureStatus, AdminTone> = \{([\s\S]*?)\n\};/
   )?.[1];
-  assert.ok(body, "statusStyle map was not found.");
+  assert.ok(body, "STATUS_TONE map was not found.");
   return [...body.matchAll(/^\s{2}([a-z_]+):/gm)].map((match) => match[1]);
 };
 
@@ -48,23 +48,22 @@ test("disabled is a first-class status, separate from unconfigured", () => {
   );
 });
 
-test("every infrastructure status has a badge style in the admin panel", () => {
+test("every infrastructure status has a tone in the admin panel", () => {
   const statuses = declaredStatuses();
-  const styled = statusStyleKeys();
+  const toned = statusToneKeys();
   for (const status of statuses) {
     assert.ok(
-      styled.includes(status),
-      `statusStyle is missing a badge style for "${status}".`
+      toned.includes(status),
+      `STATUS_TONE is missing a tone for "${status}".`
     );
   }
-  assert.equal(styled.length, statuses.length);
+  assert.equal(toned.length, statuses.length);
 });
 
-test("the disabled badge is not drawn as an error or a warning", () => {
-  const disabledStyle = panel.match(/\n {2}disabled: "([^"]+)",/)?.[1];
-  assert.ok(disabledStyle, "No disabled badge style was found.");
-  assert.equal(/red|amber/.test(disabledStyle), false);
-  assert.match(panel, /if \(status === "disabled"\) return <PauseCircle/);
+test("the disabled status is idle, never drawn as an error or a warning", () => {
+  assert.match(panel, /\n {2}disabled: "idle",/);
+  // Not set up is dashed, so it cannot read as healthy either.
+  assert.match(panel, /\n {2}unconfigured: "unknown",/);
 });
 
 test("the Railway card explains the disabled state to the operator", () => {

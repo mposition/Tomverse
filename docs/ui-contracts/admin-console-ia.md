@@ -695,6 +695,8 @@ that is redesigned uses these and adds none of its own:
 | `AdminTechInfo` | Policy versions, ids, raw payloads | Closed by default |
 | `AdminCharts` | Sparkline, bars, donut, ring, gauge | Plain SVG, colours through `var(--color-*)`; draws nothing it cannot read |
 | `AdminPixelAvatar` | An AI team's face | The Agent office figure; character art keeps its colours in both themes |
+| `AdminToggleSwitch` | An on/off setting | A real `<input type="checkbox" role="switch">` with an accessible name, so it submits and toggles like a checkbox; the knob stays white in Light |
+| `AdminFilterChips` | A row of filters that are links | Each chip is a link that keeps the other filters in the URL; the active one is marked with `aria-current` |
 
 The arithmetic behind them (chart geometry, the Brisbane clock) lives in
 `lib/adminUiCore.ts` and the figures in `lib/adminPixelAvatarPalette.ts`;

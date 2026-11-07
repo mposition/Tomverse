@@ -1,7 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import { AdminCampaignSchedulePanel } from "@/components/admin/AdminCampaignSchedulePanel";
-import { AdminCampaignComposer } from "@/components/admin/AdminCampaignComposer";
+import {
+  AdminCampaignComposer,
+  AdminCampaignNewTab,
+} from "@/components/admin/AdminCampaignComposer";
 import { AdminEmailCampaignsPanel } from "@/components/admin/AdminEmailCampaignsPanel";
 import { AdminPolicyNoticeComposer } from "@/components/admin/AdminPolicyNoticeComposer";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
@@ -72,33 +75,37 @@ export default async function AdminEmailCampaignsPage({
       />
       {tab.id === "schedule" ? (
         <AdminCampaignSchedulePanel
-          rows={await listCampaignSchedule({ limit: LIMIT })}
+          rows={await listCampaignSchedule({ limit: LIMIT }).catch(() => null)}
           limit={LIMIT}
         />
       ) : tab.id === "new" ? (
-        <>
-          <AdminPolicyNoticeComposer
-            mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
-            campaignsEnabled={campaignsEnabled}
-            templateKey={POLICY_CHANGE_NOTICE_TEMPLATE}
-            locales={SUPPORTED_LANGUAGES}
-            effectiveDate={POLICY_CHANGE_NOTICE_EFFECTIVE_DATE}
-            owedBefore={formatAestDateTime(CHANGE_NOTICE_OWED_BEFORE) ?? CHANGE_NOTICE_OWED_BEFORE}
-            wordingApproved={SUPPORTED_LANGUAGES.every((language) =>
-              isPolicyChangeNoticeWordingApproved(language, appUrl())
-            )}
-          />
-          <AdminCampaignComposer
-            mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
-            campaignsEnabled={campaignsEnabled}
-            starterContent={assistantKnowledgeCampaignContent({
-              includePackageImport: packageImportAvailable,
-            })}
-          />
-        </>
+        <AdminCampaignNewTab
+          notice={
+            <AdminPolicyNoticeComposer
+              mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
+              campaignsEnabled={campaignsEnabled}
+              templateKey={POLICY_CHANGE_NOTICE_TEMPLATE}
+              locales={SUPPORTED_LANGUAGES}
+              effectiveDate={POLICY_CHANGE_NOTICE_EFFECTIVE_DATE}
+              owedBefore={formatAestDateTime(CHANGE_NOTICE_OWED_BEFORE) ?? CHANGE_NOTICE_OWED_BEFORE}
+              wordingApproved={SUPPORTED_LANGUAGES.every((language) =>
+                isPolicyChangeNoticeWordingApproved(language, appUrl())
+              )}
+            />
+          }
+          product={
+            <AdminCampaignComposer
+              mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
+              campaignsEnabled={campaignsEnabled}
+              starterContent={assistantKnowledgeCampaignContent({
+                includePackageImport: packageImportAvailable,
+              })}
+            />
+          }
+        />
       ) : (
         <AdminEmailCampaignsPanel
-          rows={await listAdminCampaigns({ limit: LIMIT })}
+          rows={await listAdminCampaigns({ limit: LIMIT }).catch(() => null)}
           limit={LIMIT}
         />
       )}

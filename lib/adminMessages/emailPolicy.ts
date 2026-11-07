@@ -10,6 +10,8 @@ export const adminEmailPolicyMessages = defineAdminMessages({
         "Subject prefixes, footer blocks, unsubscribe wording, quiet hours and consent notice intervals, per jurisdiction. Exactly one version is in force; a delivery already in flight keeps the version it was rendered under.",
       refresh: "Refresh",
       seedDraft: "Seed draft",
+      loadFailedDetail: "The policy versions could not be read, so nothing is shown. Try again.",
+      status: { active: "In force", draft: "Draft, waiting for approval", superseded: "Replaced" },
       versionCounts: (profiles: number, countries: number) =>
         `${profiles} profiles · ${countries} countries`,
       noVersions:
@@ -37,6 +39,8 @@ export const adminEmailPolicyMessages = defineAdminMessages({
         countries: "Countries",
         fallback: "— (fallback)",
         sources: "Sources and confirmation dates",
+        inForce: "Version",
+        techSummary: "prefix, footer, sources",
       },
       nothingSelected: "Nothing selected.",
       toast: {
@@ -50,6 +54,9 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       },
     },
     domains: {
+      recordsTitle: "DNS records",
+      recordsDescription:
+        "Mail only stays out of spam when SPF, DKIM and DMARC are all in place. DMARC is not reported by the provider, so it is never shown as healthy here.",
       title: "Sending domains",
       intro:
         "Transactional and marketing mail send from separate domains so their reputations and DMARC policies are separate. That is the only layer that separates: the sending IP, the provider account and its suppression list are shared across every domain in the region.",
@@ -75,25 +82,27 @@ export const adminEmailPolicyMessages = defineAdminMessages({
   ko: {
     eyebrow: "이메일",
     policy: {
-      title: "관할권 정책",
+      title: "관할 정책",
       intro:
-        "관할권별 제목 접두어, 푸터 블록, 수신 거부 문구, 야간 발송 제한, 동의 안내 주기입니다. 적용 중인 버전은 정확히 하나이며, 이미 발송 중인 delivery는 렌더링된 당시의 버전을 유지합니다.",
+        "나라마다 다른 메일 규칙이에요. 제목 접두어, 푸터, 수신 거부 문구, 야간 발송 제한, 동의 안내 주기를 정해요. 적용 중인 버전은 하나뿐이고, 이미 보내는 중인 메일은 만들어질 때의 버전을 그대로 써요.",
       refresh: "새로고침",
-      seedDraft: "초안 생성",
+      seedDraft: "초안 만들기",
+      loadFailedDetail: "정책 버전을 읽지 못해서 아무것도 보여 주지 않았어요. 다시 시도해 주세요.",
+      status: { active: "적용 중", draft: "초안, 승인 대기", superseded: "대체됨" },
       versionCounts: (profiles: number, countries: number) =>
         `프로필 ${profiles}개 · 국가 ${countries}개`,
       noVersions:
-        "아직 정책 버전이 없습니다. 초안을 생성하면 draft가 만들어지며, 활성화되기 전에는 그 버전으로 아무것도 발송되지 않습니다.",
+        "아직 정책 버전이 없어요. 초안을 만들어도 적용하기 전에는 그 버전으로 메일이 나가지 않아요.",
       fields: {
         created: "생성",
         activated: "활성화",
         superseded: "대체됨",
         approvedBy: "승인자",
       },
-      reasonLabel: "이 버전을 활성화하는 이유",
+      reasonLabel: "이 버전을 적용하는 이유",
       reasonHelp:
-        "활성화는 감사 로그에 남습니다. 제출한 관리자가 그 버전을 활성화하고, 누가 왜 했는지가 기록됩니다.",
-      activate: "활성화",
+        "적용은 감사 기록에 남아요. 제출한 관리자가 이 버전을 적용하고, 누가 왜 했는지 기록돼요.",
+      activate: "적용하기",
       profile: {
         subjectPrefix: "제목 접두어",
         footerBlocks: "푸터 블록",
@@ -105,40 +114,45 @@ export const adminEmailPolicyMessages = defineAdminMessages({
         noDuty: "의무 없음",
         quietHours: "야간 발송 제한",
         countries: "국가",
-        fallback: "— (fallback)",
+        fallback: "— (그 밖의 나라)",
         sources: "출처와 확인 날짜",
+        inForce: "적용 버전",
+        techSummary: "제목 접두어, 푸터, 출처",
       },
-      nothingSelected: "선택된 버전이 없습니다.",
+      nothingSelected: "선택한 버전이 없어요.",
       toast: {
-        loadFailed: "관할권 정책 버전을 불러오지 못했습니다.",
-        refused: "요청이 거절되었습니다.",
-        draftCreated: "초안이 생성되었습니다. 활성화되기 전에는 아무것도 바뀌지 않습니다.",
-        draftExists: "해당 초안이 이미 있습니다.",
-        draftFailed: "초안을 생성하지 못했습니다.",
-        activated: "활성화되었습니다. 이전 버전은 이제 대체(superseded) 상태입니다.",
-        activateFailed: "버전을 활성화하지 못했습니다.",
+        loadFailed: "관할 정책 버전을 불러오지 못했어요.",
+        refused: "요청이 거절됐어요.",
+        draftCreated: "초안을 만들었어요. 적용하기 전에는 아무것도 바뀌지 않아요.",
+        draftExists: "그 초안은 이미 있어요.",
+        draftFailed: "초안을 만들지 못했어요.",
+        activated: "적용했어요. 이전 버전은 이제 대체된 상태예요.",
+        activateFailed: "버전을 적용하지 못했어요.",
       },
     },
     domains: {
+      recordsTitle: "DNS 기록",
+      recordsDescription:
+        "메일이 스팸함에 가지 않으려면 SPF, DKIM, DMARC 세 가지가 모두 맞아야 해요. 공급자는 DMARC를 알려 주지 않아서, 여기서는 DMARC를 정상으로 보여 주지 않아요.",
       title: "발송 도메인",
       intro:
-        "transactional 메일과 marketing 메일은 평판과 DMARC 정책을 분리하기 위해 서로 다른 도메인에서 발송합니다. 분리되는 계층은 이것뿐입니다: 발송 IP, 공급자 계정, 그리고 그 계정의 수신 차단 목록은 region 안의 모든 도메인이 공유합니다.",
+        "서비스 메일과 마케팅 메일은 평판과 DMARC 정책을 따로 두려고 서로 다른 도메인에서 보내요. 나뉘는 건 이것뿐이에요. 발송 IP, 공급자 계정, 수신 차단 목록은 같은 지역의 모든 도메인이 함께 써요.",
       transactional: "Transactional",
       marketing: "Marketing",
       notConfigured: "설정 안 됨",
       providerErrorSuffix:
-        "아래 내용은 도메인 자체에 대한 판단이 아닙니다 — 공급자에 연결하지 못했으므로, 이 화면은 빈 목록에서 끌어낸 결과가 아니라 결과 없음으로 표시합니다.",
+        "아래는 도메인 자체에 대한 판단이 아니에요. 공급자에 연결하지 못해서, 빈 목록에서 결과를 짐작하지 않고 결과 없음으로 보여 줘요.",
       recordUnknown: "알 수 없음",
-      dmarcNotIssued: "공급자가 발급하지 않음 — zone에서 확인하세요",
+      dmarcNotIssued: "공급자가 알려 주지 않아요. DNS 영역에서 직접 확인해 주세요",
       severity: {
         error: "차단",
         warning: "미해결",
         info: "수동 확인",
       },
-      nothingToReport: "보고할 설정이 없습니다.",
+      nothingToReport: "알려 드릴 설정이 없어요.",
       blockingCount: (count: number) => `차단 항목 ${count}건. `,
       readAt: (time: string) =>
-        `${time}에 읽었습니다. DNS 레코드 자체는 도메인 등록 기관에서 추가합니다. docs/ops/email-sending-domains.md를 참고하세요.`,
+        `${time}에 읽었어요. DNS 기록은 도메인 등록 기관에서 추가해요. 방법은 docs/ops/email-sending-domains.md에 있어요.`,
     },
   },
 });

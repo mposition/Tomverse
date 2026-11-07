@@ -3,6 +3,9 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, Loader2, Send } from "lucide-react";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
 
 import { dispatchAppToast } from "@/lib/appToast";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
@@ -33,7 +36,7 @@ type Preview = {
 };
 
 const inputClass =
-  "mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-teal-500";
+  "mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-blue-500";
 
 export function AdminCampaignComposer({
   mayWrite,
@@ -184,33 +187,29 @@ export function AdminCampaignComposer({
   };
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-300">
-            {m.badge}
-          </p>
-          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">{m.intro}</p>
-          <p className="mt-2 max-w-3xl text-xs leading-5 text-teal-200/80">
-            {m.audience}
-          </p>
-        </div>
-      </div>
-
+    <AdminTile
+      title={m.title}
+      description={
+        <>
+          {m.intro}
+          <span className="mt-1 block text-xs text-zinc-500">{m.audience}</span>
+        </>
+      }
+      data-testid="admin-campaign-composer"
+    >
       {!mayWrite ? (
-        <p className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/40 p-4 text-sm text-amber-100">
+        <p className="rounded-xl bg-amber-500/10 p-3 text-sm text-amber-200">
           {m.readOnly}
         </p>
       ) : null}
       {!campaignsEnabled ? (
-        <p className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/40 p-4 text-sm leading-6 text-amber-100">
+        <p className="rounded-xl bg-amber-500/10 p-3 text-sm leading-6 text-amber-200">
           {m.disabled}
         </p>
       ) : null}
       {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
         <div className="min-w-0">
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">
@@ -222,10 +221,11 @@ export function AdminCampaignComposer({
                   key={language}
                   type="button"
                   onClick={() => setLocale(language)}
-                  className={`min-h-10 rounded-xl border px-4 text-sm font-bold ${
+                  aria-pressed={locale === language}
+                  className={`min-h-10 rounded-xl px-4 text-sm font-bold ${
                     locale === language
-                      ? "border-teal-500 bg-teal-950 text-teal-100"
-                      : "border-zinc-800 bg-zinc-900 text-zinc-400"
+                      ? "bg-zinc-100 text-zinc-900"
+                      : "border border-zinc-700 bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
                   }`}
                 >
                   {language.toUpperCase()}
@@ -263,7 +263,7 @@ export function AdminCampaignComposer({
             </label>
             {current.media ? (
               <fieldset className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
-                <legend className="px-1 text-xs font-bold uppercase tracking-wider text-teal-300">
+                <legend className="px-1 text-xs font-bold uppercase tracking-wider text-blue-300">
                   {m.media}
                 </legend>
                 <label className="text-xs font-bold text-zinc-400">
@@ -309,7 +309,7 @@ export function AdminCampaignComposer({
                 onClick={() =>
                   update("media", { posterUrl: "", alt: "", badge: "" })
                 }
-                className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-bold text-zinc-200 transition hover:border-teal-500 hover:text-white"
+                className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 hover:text-white"
               >
                 {m.addMedia}
               </button>
@@ -319,7 +319,7 @@ export function AdminCampaignComposer({
                 key={index}
                 className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4"
               >
-                <legend className="px-1 text-xs font-bold uppercase tracking-wider text-teal-300">
+                <legend className="px-1 text-xs font-bold uppercase tracking-wider text-blue-300">
                   {m.feature(index + 1)}
                 </legend>
                 <label className="text-xs font-bold text-zinc-400">
@@ -376,11 +376,10 @@ export function AdminCampaignComposer({
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <button
-              type="button"
+            <AdminWriteButton
+              variant="secondary"
               onClick={() => void preview()}
               disabled={Boolean(busy)}
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:border-zinc-600 disabled:opacity-60"
             >
               {busy === "preview" ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -388,14 +387,12 @@ export function AdminCampaignComposer({
                 <Eye className="h-4 w-4" aria-hidden />
               )}
               {busy === "preview" ? m.previewing : m.preview}
-            </button>
-            <button
-              type="button"
+            </AdminWriteButton>
+            <AdminWriteButton
+              writable={mayWrite}
+              requiredRole="ops:write"
               onClick={() => void create()}
-              disabled={
-                Boolean(busy) || !mayWrite || !campaignsEnabled || !copyDigest
-              }
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-black text-white hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={Boolean(busy) || !campaignsEnabled || !copyDigest}
             >
               {busy === "create" ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -403,11 +400,11 @@ export function AdminCampaignComposer({
                 <Send className="h-4 w-4" aria-hidden />
               )}
               {busy === "create" ? m.creating : m.create}
-            </button>
+            </AdminWriteButton>
           </div>
         </div>
 
-        <div className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
+        <div className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-3">
           <h3 className="px-2 py-1 text-sm font-black text-white">{m.previewTitle}</h3>
           {currentPreview ? (
             <>
@@ -421,9 +418,11 @@ export function AdminCampaignComposer({
                 className="h-[720px] w-full rounded-xl bg-white"
               />
               {copyDigest ? (
-                <p className="mt-3 break-all px-2 font-mono text-[10px] leading-4 text-zinc-500">
-                  {m.digest}: {copyDigest}
-                </p>
+                <div className="mt-3">
+                <AdminTechInfo summary={m.digest}>
+                  <span className="break-all">{copyDigest}</span>
+                </AdminTechInfo>
+              </div>
               ) : null}
             </>
           ) : (
@@ -433,6 +432,55 @@ export function AdminCampaignComposer({
           )}
         </div>
       </div>
-    </section>
+    </AdminTile>
+  );
+}
+
+/**
+ * The "New campaign" section: one writing surface at a time.
+ *
+ * The two composers used to sit open one above the other. Here an operator
+ * picks what they are writing and only that composer is shown. The other stays
+ * mounted but hidden, so switching back does not lose a half-written update or
+ * a preview that was already rendered. The composers themselves, their requests
+ * and their gates are unchanged.
+ */
+export function AdminCampaignNewTab({
+  product,
+  notice,
+}: {
+  product: React.ReactNode;
+  notice: React.ReactNode;
+}) {
+  const m = useAdminMessages(adminEmailCampaignsMessages).newTab;
+  const [kind, setKind] = useState<"product" | "notice">("product");
+  const options = [
+    { id: "product", label: m.product, hint: m.productHint },
+    { id: "notice", label: m.notice, hint: m.noticeHint },
+  ] as const;
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <div role="group" aria-label={m.kindLabel} className="grid gap-3 sm:grid-cols-2">
+        {options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            aria-pressed={kind === option.id}
+            data-testid={`admin-campaign-new-${option.id}`}
+            onClick={() => setKind(option.id)}
+            className={`rounded-2xl border p-4 text-left transition ${
+              kind === option.id
+                ? "border-blue-500 bg-blue-500/10"
+                : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
+            }`}
+          >
+            <span className="block text-sm font-bold text-white">{option.label}</span>
+            <span className="mt-0.5 block text-xs text-zinc-400">{option.hint}</span>
+          </button>
+        ))}
+      </div>
+      <div hidden={kind !== "product"}>{product}</div>
+      <div hidden={kind !== "notice"}>{notice}</div>
+    </div>
   );
 }
