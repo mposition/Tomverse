@@ -56,7 +56,7 @@ test("case 1: a blocked idea says so, why, and links to what the owner can do", 
   assert.ok(markup.includes(m.notice.execution_blocked.title));
   assert.ok(markup.includes(m.notice.execution_blocked.body), "it says the idea cannot be closed here but a card-close question may come");
   assert.ok(markup.includes(m.blockReasons.execution_lease_expired), "the Task's reason is shown");
-  assert.ok(markup.includes("/admin/amux-execution?tab=assignment&amp;focusEscalation=cm0000000000000000000abcd"),
+  assert.ok(markup.includes("/admin/amux-execution?tab=review&amp;focusEscalation=cm0000000000000000000abcd"),
     "the open review is one click away");
   assert.ok(markup.includes("/admin/amux-execution?tab=cards&amp;taskId=task-AMUX-CONTSEED-002"));
   assert.doesNotMatch(markup, /data-testid="amux-idea-close"/, "closing is not offered, as the close route refuses it");
@@ -72,7 +72,7 @@ test("a blocked Task with no open review and no known reason says exactly that",
   assert.ok(markup.includes(m.blockReasonUnknown));
   assert.ok(markup.includes(m.blockedNoReview));
   assert.doesNotMatch(markup, /focusEscalation/);
-  assert.ok(markup.includes("/admin/amux-settings?tab=safety"), "the recovery screen is the place left to look");
+  assert.ok(markup.includes("/admin/amux-recovery?tab=safety"), "the recovery screen is the place left to look");
 });
 
 test("an idea whose Tasks all wait is not called running", () => {

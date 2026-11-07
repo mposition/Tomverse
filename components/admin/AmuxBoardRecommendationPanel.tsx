@@ -7,7 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardRecommendationMessages } from "@/lib/adminMessages/amuxBoardRecommendation";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-promotion?tab=recommendation");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-recovery?tab=legacy");
 
 type RecommendationBody = {
   snapshotId?: string;

@@ -13,7 +13,11 @@ import type {
 } from "@/lib/engineeringAgentConsoleRead";
 import { adminFetch } from "@/lib/adminFetch";
 
-const PAGE_PATH = "/admin/engineering-agent";
+/** Where a step-up brings the operator back to: the tab (and view) the section is on. */
+const returnPathFor = (section: string) =>
+  section === "pull-requests"
+    ? "/admin/engineering-agent?tab=runs&view=pull-requests"
+    : `/admin/engineering-agent?tab=${section}`;
 const FIRST_T1_WINDOW_DAYS = 14;
 
 type Notice = { tone: "ok" | "error"; text: string } | null;
@@ -113,7 +117,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
       {reauthenticationRequired ? (
         <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-300">
           {m.reauthenticationRequired}
-          <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
+          <a className="font-medium underline" href={adminRecentAuthenticationHref(returnPathFor(initial.section))}>
             {m.signInAgain}
           </a>
         </p>

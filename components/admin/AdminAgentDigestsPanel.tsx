@@ -28,7 +28,7 @@ import type { QaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
 import { QA_RELEASE_LANE_TAB_HREF, QA_RELEASE_SECTION_IDS, QA_RELEASE_TRAIN_TAB_HREF, card, openSection, type QaReleaseTrainView } from "@/components/admin/qaReleaseTabParts";
 
-const PAGE_PATH = "/admin/qa-release";
+const PAGE_PATH = "/admin/release?tab=qa";
 const CONTROL_ROUTE = "/api/admin/agent-digests/qa-release/control";
 const RUN_URL = "https://github.com/mposition/Tomverse/actions/runs/";
 

@@ -1,10 +1,20 @@
 export const dynamic = "force-dynamic";
 
+import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminMarketingPanel } from "@/components/admin/AdminMarketingPanel";
 import { AdminPageTabs, type AdminPageTabChip } from "@/components/admin/AdminPageTabs";
+import { AdminViewSwitch } from "@/components/admin/AdminViewSwitch";
 import { hasAdminPermission } from "@/lib/adminAuth";
-import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminUiMessages } from "@/lib/adminMessages/ui";
+import {
+  ADMIN_MARKETING_LEGACY_TABS,
+  adminNavItemTabs,
+  adminRedirectTarget,
+  resolveAdminTab,
+  resolveAdminView,
+} from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
 import { readMarketingConsole } from "@/lib/marketingConsoleRead";
 import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
@@ -12,7 +22,21 @@ import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 const TABS = adminNavItemTabs("marketing");
 
 /**
- * The marketing automation's record, read only
+ * The redesign's tabs and the console sections behind them (2026-11-07).
+ *
+ * Approvals and Reports & competitors each still hold the old sections that
+ * have no tab of their own, as views of the tab (`?view=`): Approvals the
+ * drafts, the assets and the comment alerts, Reports the reports, the
+ * competitors and the experiments. Overview and Settings draw the parts of the
+ * old screen that were always on every section: the overview strip and the
+ * settings rail. Every old `?tab=` link lands on its view
+ * (ADMIN_MARKETING_LEGACY_TABS), so no section is unreachable.
+ */
+const QUEUE_VIEWS = ["drafts", "assets", "comments"] as const;
+const REPORT_VIEWS = ["reports", "competitors", "experiments"] as const;
+
+/**
+ * The marketing automation's record
  * (docs/policy/marketing-automation.md §6.1, §8).
  *
  * The rows are loaded here and rendered into the HTML rather than fetched
@@ -31,48 +55,88 @@ export default async function AdminMarketingPage({
   searchParams,
 }: PageProps<"/admin/marketing">) {
   const query = await searchParams;
+  const legacy = typeof query.tab === "string" ? ADMIN_MARKETING_LEGACY_TABS[query.tab] : undefined;
+  if (legacy) redirect(adminRedirectTarget(legacy, query));
   const tab = resolveAdminTab(TABS, query.tab);
   const session = await getServerSession(authOptions);
-  const initial = await readMarketingConsole(
-    tab.id as MarketingConsoleSection,
-    hasAdminPermission(session, "marketing:write")
-  );
+  const ui = await getAdminMessages(adminUiMessages);
+
+  // Which old section's data the tab draws, and which part of the old screen.
+  const queueView = resolveAdminView(QUEUE_VIEWS, query.view);
+  const reportView = resolveAdminView(REPORT_VIEWS, query.view);
+  const section: MarketingConsoleSection =
+    tab.id === "queue" ? (queueView === "drafts" ? "queue" : queueView)
+    : tab.id === "reports" ? reportView
+    : tab.id === "published" ? "published"
+    : tab.id === "accounts" ? "accounts"
+    : "queue";
+  const part = tab.id === "overview" ? "overview" : tab.id === "settings" ? "settings" : "section";
+  const initial = await readMarketingConsole(section, hasAdminPermission(session, "marketing:write"));
 
   // What each tab holds, from the overview the loader already read: the
-  // drafts waiting for a person (in the attention colour), the accounts, and
-  // the stage a section waits for. An unreadable count draws nothing.
-  const { pending, accounts, competitors } = initial.overview;
+  // drafts waiting for a person (in the attention colour) and the accounts.
+  // An unreadable count draws nothing.
+  const { pending, accounts } = initial.overview;
   const chips: Record<string, AdminPageTabChip | undefined> = {
     queue: pending && pending.count > 0 ? { label: String(pending.count), attention: true } : undefined,
     accounts: accounts && accounts.total > 0 ? { label: String(accounts.total) } : undefined,
-    competitors: competitors && competitors.approved > 0 ? { label: String(competitors.approved) } : undefined,
-    comments: { label: "S4", locked: true },
   };
+  // The strip carries no `view`: switching tab starts that tab on its first view.
+  const tabQuery = { ...query, view: undefined };
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {/*
-        Keyed by section so a client navigation between tabs remounts the
-        panel with the new payload. Without it the panel's `useState(initial)`
-        keeps the previous section's rows while the tab strip says otherwise,
-        which is the section living in component state -- the thing the Admin
-        IA contract's second rule forbids. The strip is still a server
-        component and still links `?tab=`; the panel only places it under its
-        overview.
+        Keyed by section and part so a client navigation between tabs remounts
+        the panel with the new payload. Without it the panel's
+        useState(initial) keeps the previous section's rows while the tab
+        strip says otherwise, which is the section living in component state --
+        the thing the Admin IA contract's second rule forbids. The strip is
+        still a server component and still links ?tab=; the panel only
+        places it under its overview.
       */}
       <AdminMarketingPanel
-        key={tab.id}
+        key={`${section}-${part}`}
         initial={initial}
+        part={part}
         tabs={
-          <AdminPageTabs
-            basePath="/admin/marketing"
-            tabs={TABS}
-            activeTabId={tab.id}
-            label="Marketing sections"
-            query={query}
-            chips={chips}
-            variant="underline"
-          />
+          <>
+            <AdminPageTabs
+              basePath="/admin/marketing"
+              tabs={TABS}
+              activeTabId={tab.id}
+              label="Marketing sections"
+              query={tabQuery}
+              chips={chips}
+              variant="underline"
+            />
+            {tab.id === "queue" ? (
+              <AdminViewSwitch
+                basePath="/admin/marketing"
+                tabId="queue"
+                query={tabQuery}
+                activeId={queueView}
+                views={[
+                  { id: "drafts", label: ui.view.approvals },
+                  { id: "assets", label: ui.view.assets },
+                  { id: "comments", label: ui.view.comments },
+                ]}
+              />
+            ) : null}
+            {tab.id === "reports" ? (
+              <AdminViewSwitch
+                basePath="/admin/marketing"
+                tabId="reports"
+                query={tabQuery}
+                activeId={reportView}
+                views={[
+                  { id: "reports", label: ui.view.reports },
+                  { id: "competitors", label: ui.view.competitors },
+                  { id: "experiments", label: ui.view.experiments },
+                ]}
+              />
+            ) : null}
+          </>
         }
       />
     </div>

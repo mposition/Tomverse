@@ -12,15 +12,21 @@ import type { AdminRole } from "@/lib/adminAuthCore";
  * Icons live in `components/admin/adminNavigationIcons.ts`, keyed by item id,
  * because a `lucide-react` import would make this module unusable from a plain
  * Node test.
+ *
+ * Eight groups, thirty-two entries, at most six entries to a group (operator
+ * approval, 2026-11-07). Every tab of every page is declared here, including
+ * the ones whose screen is not built yet, so the later screen work changes a
+ * page and never this table.
  */
 
 export const ADMIN_NAV_GROUPS = [
-  "Command Center",
-  "Customers",
-  "Revenue",
+  "Home",
+  "Customers & Revenue",
   "AI Platform",
-  "Operations",
-  "AMUX",
+  "AI Agents",
+  "Development",
+  "System",
+  "Messaging",
   "Governance",
 ] as const;
 
@@ -99,13 +105,16 @@ export type AdminNavItem = {
 };
 
 export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
+  // ---------------------------------------------------------------- Home
   {
     id: "overview",
-    label: "Overview",
+    label: "Today",
     href: "/admin/overview",
     description: "Operational snapshot, attention queue, and recent activity",
-    group: "Command Center",
+    group: "Home",
     aliases: [
+      "overview",
+      "today",
       "home",
       "dashboard",
       "kpi",
@@ -133,20 +142,49 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
   },
   {
     id: "work-queue",
-    label: "Work queue",
+    label: "Decisions",
     href: "/admin/work-queue",
-    description: "Everything waiting on an operator, oldest first",
-    group: "Command Center",
+    description: "Everything waiting on a person, by area",
+    group: "Home",
     badge: "workQueue",
-    aliases: ["queue", "todo", "pending", "backlog", "approvals"],
+    aliases: ["work queue", "decisions", "decide", "inbox", "queue", "todo", "pending", "backlog", "approvals"],
+    tabs: [
+      {
+        id: "all",
+        label: "All",
+        description: "Everything waiting on a person, oldest first",
+      },
+      {
+        id: "customers",
+        label: "Customers & revenue",
+        description: "Support, refunds, privacy requests and billing decisions",
+      },
+      {
+        id: "agents",
+        label: "Agents",
+        description: "What the AI agents are waiting on a person for",
+      },
+      {
+        id: "development",
+        label: "Development",
+        description: "Idea approvals, plan approvals, escalations and halts",
+      },
+      {
+        id: "system",
+        label: "System",
+        description: "Webhooks, scheduled jobs and alert deliveries that need a look",
+      },
+    ],
   },
   {
     id: "analytics",
-    label: "Analytics",
+    label: "Metrics",
     href: "/admin/analytics",
-    description: "Active users, usage, model share, product funnel, and import/memory metrics",
-    group: "Command Center",
+    description: "Active users, usage, model share, product funnel, AI Review, and import/memory metrics",
+    group: "Home",
     aliases: [
+      "analytics",
+      "metrics",
       "usage",
       "active users",
       "dau",
@@ -175,27 +213,28 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       },
       {
         id: "product",
-        label: "Product analytics",
+        label: "Product & funnel",
         description: "Acquisition, activation, and revenue funnel",
-      },
-      {
-        id: "imports",
-        label: "Imports & memory",
-        description: "External conversation import and memory metrics",
       },
       {
         id: "ai-review",
         label: "AI Review",
         description: "Reliability, adoption, and reviewer-pair evidence",
       },
+      {
+        id: "imports",
+        label: "Imports & memory",
+        description: "External conversation import and memory metrics",
+      },
     ],
   },
+  // --------------------------------------------------- Customers & Revenue
   {
     id: "users",
     label: "Users",
     href: "/admin/users",
     description: "Accounts, usage, plans, and account controls",
-    group: "Customers",
+    group: "Customers & Revenue",
     writeRoles: ["owner", "support"],
     aliases: ["customers", "accounts", "people", "subscribers", "email"],
   },
@@ -203,15 +242,18 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "support",
     label: "Support",
     href: "/admin/support",
-    description: "Feedback inbox and data-rights request queue",
-    group: "Customers",
+    description: "Inquiries, the automatic fix review, and data-rights requests",
+    group: "Customers & Revenue",
     writeRoles: ["owner", "support"],
     badge: "support",
     aliases: [
       "feedback",
       "inbox",
+      "inquiries",
       "tickets",
       "cases",
+      "auto fix",
+      "autofix",
       "privacy",
       "gdpr",
       "data rights",
@@ -220,8 +262,13 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     tabs: [
       {
         id: "feedback",
-        label: "Feedback",
+        label: "Inquiries",
         description: "Reports and requests submitted from the product",
+      },
+      {
+        id: "autofix",
+        label: "Auto-fix review",
+        description: "Fixes the automation proposed from verified reports, waiting for a person",
       },
       {
         id: "privacy",
@@ -232,14 +279,16 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
   },
   {
     id: "billing",
-    label: "Billing",
+    label: "Plans & pricing",
     href: "/admin/billing",
-    description: "Plans, price catalogue, promotions, and promotion risk",
-    group: "Revenue",
+    description: "Plans, price catalogue, promotions, and promotion diagnostics",
+    group: "Customers & Revenue",
     writeRoles: ["owner", "billing"],
     aliases: [
+      "billing",
       "plans",
       "prices",
+      "pricing",
       "stripe",
       "subscriptions",
       "catalogue",
@@ -247,17 +296,28 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "coupon",
       "discount",
       "risk",
+      "diagnostics",
     ],
     tabs: [
       {
         id: "plans",
-        label: "Plans & prices",
+        label: "Plans",
         description: "Plan catalogue, Stripe IDs, and lifecycle counters",
       },
       {
+        id: "prices",
+        label: "Prices",
+        description: "Localized prices for each plan and currency",
+      },
+      {
         id: "promotions",
-        label: "Promotions & risk",
+        label: "Promotions",
         description: "Promotion codes and their abuse signals",
+      },
+      {
+        id: "diagnostics",
+        label: "Diagnostics",
+        description: "Read-only checks on each promotion code",
       },
     ],
   },
@@ -266,20 +326,21 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Refunds",
     href: "/admin/refunds",
     description: "Refund review queue and reviewed requests",
-    group: "Revenue",
+    group: "Customers & Revenue",
     writeRoles: ["owner", "billing"],
     badge: "refunds",
     aliases: ["cancellations", "chargeback", "dispute", "money back"],
   },
   {
+    // No `writeRoles`: the page reads the ledger and nothing on it writes.
     id: "credit-ledger",
     label: "Credit ledger",
     href: "/admin/credit-ledger",
     description: "Credit grants, settlements, and outstanding debt",
-    group: "Revenue",
-    writeRoles: ["owner", "billing"],
+    group: "Customers & Revenue",
     aliases: ["credits", "ledger", "grants", "settlement", "debt"],
   },
+  // ------------------------------------------------------------ AI Platform
   {
     id: "providers",
     label: "Providers",
@@ -305,7 +366,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     tabs: [
       {
         id: "health",
-        label: "Health",
+        label: "Status",
         description: "Availability, keys, and per-model metrics",
       },
       {
@@ -324,7 +385,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "models",
     label: "Models",
     href: "/admin/models",
-    description: "Model registry, availability, and what discovery has found",
+    description: "Model registry, what discovery has found, and the default models",
     group: "AI Platform",
     writeRoles: ["owner", "ops"],
     badge: "modelLifecycle",
@@ -339,6 +400,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "candidates",
       "lifecycle",
       "backlog",
+      "default model",
+      "guest lineup",
+      "fallback model",
     ],
     tabs: [
       {
@@ -352,6 +416,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "Models a provider listed that nobody has decided about",
       },
       {
+        id: "defaults",
+        label: "Default models",
+        description: "The fallback model, the guest lineup and the account default",
+      },
+      {
         id: "catalog",
         label: "Image & coding catalog",
         description: "Enable or hold image and coding models, price history, LLM drafts, the Code snapshot",
@@ -359,25 +428,505 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    // `ops:write` is what every auto-router route checks, so the table says so;
+    // it said nothing, and the screen never marked itself read-only.
     id: "routing",
     label: "Routing",
     href: "/admin/routing",
-    description: "Chat shadow routing",
+    description: "Auto router, optimizers, shadow comparison and statistics",
     group: "AI Platform",
+    writeRoles: ["owner", "ops"],
     aliases: [
       "auto",
+      "auto router",
       "router",
+      "optimizer",
       "shadow",
+      "statistics",
       "task profile",
       "candidates",
     ],
+    tabs: [
+      {
+        id: "auto",
+        label: "Auto router",
+        description: "The Auto model router, its mode and its tunables",
+      },
+      {
+        id: "optimizer",
+        label: "Optimizer",
+        description: "Router and rewrite optimizer recommendations",
+      },
+      {
+        id: "shadow",
+        label: "Shadow comparison",
+        description: "What the router would have chosen against what ran",
+      },
+      {
+        id: "stats",
+        label: "Statistics",
+        description: "Adaptive routing statistics",
+        viewRoles: ["owner"],
+      },
+    ],
   },
+  // -------------------------------------------------------------- AI Agents
+  {
+    // A shell: a pixel office for the agent teams that links each team to the
+    // page that holds its record. A LIVE room reads that team's operating
+    // state, read only; nothing on the page writes, so it carries no badge and
+    // no writeRoles.
+    id: "office",
+    label: "Agents home",
+    href: "/admin/office",
+    // The office floor scales to the space it is given.
+    wide: true,
+    description: "The agent teams at a glance, each with a link to its record",
+    group: "AI Agents",
+    aliases: ["office", "agents", "agent teams", "pixel office", "live office", "team board", "agents home"],
+    // The office draws its own tab strip, as the original UI did; its tabs are
+    // links to these sections. The team board opens first (2026-11-07).
+    tabs: [
+      {
+        id: "dashboard",
+        label: "Team board",
+        description: "Team board, digest brief and each team's record link",
+      },
+      {
+        id: "live",
+        label: "Live office",
+        description: "The office floor and the operator console",
+      },
+    ],
+  },
+  {
+    id: "marketing",
+    label: "Marketing",
+    href: "/admin/marketing",
+    description:
+      "Draft approvals, published posts, brand accounts, and what the automation reported",
+    group: "AI Agents",
+    writeRoles: ["owner", "ops"],
+    badge: "marketing",
+    aliases: [
+      "social",
+      "posts",
+      "linkedin",
+      "zernio",
+      "campaign",
+      "brand account",
+      "draft queue",
+      "approvals",
+      "competitors",
+      "assets",
+      "guard",
+    ],
+    tabs: [
+      {
+        id: "overview",
+        label: "Overview",
+        description: "Mode, switches, the last run and what is waiting",
+      },
+      {
+        id: "queue",
+        label: "Approvals",
+        description: "Drafts waiting on a person, and what the Guard said about each",
+      },
+      {
+        id: "published",
+        label: "Publishing",
+        description:
+          "Every approved post: waiting, in flight, published, failed, or unconfirmed",
+      },
+      {
+        id: "accounts",
+        label: "Accounts",
+        description: "Brand accounts, their mode, and why a paused one is paused",
+      },
+      {
+        id: "reports",
+        label: "Reports & competitors",
+        description: "Weekly summaries, competitor facts, and which hosts a person approved as official",
+      },
+      {
+        id: "settings",
+        label: "Settings",
+        description: "Switches and webhook wiring for the marketing automation",
+      },
+    ],
+  },
+  {
+    id: "product-research",
+    label: "Product research",
+    href: "/admin/product-research",
+    description:
+      "What the Scout suggests improving on the public pages, generated files and catalogue, and its runs and spending",
+    group: "AI Agents",
+    writeRoles: ["owner", "ops"],
+    badge: "productResearch",
+    aliases: [
+      "scout",
+      "improvement",
+      "suggestion",
+      "product research",
+      "observation",
+      "issue backlog",
+      "slot",
+    ],
+    tabs: [
+      {
+        id: "suggestions",
+        label: "Suggestions",
+        description: "Open Scout suggestions by page or file, to dismiss or send to AMUX",
+        badge: "productResearch",
+      },
+      {
+        id: "runs",
+        label: "Runs & cost",
+        description: "Whether the Scout ran, the model and daily cap an owner chose, and the last seven days",
+      },
+      {
+        id: "observations",
+        label: "Issue observations",
+        description:
+          "Observation slots, the newest one's rows, and the staging and production windows",
+      },
+    ],
+  },
+  {
+    id: "engineering-agent",
+    label: "Engineering",
+    href: "/admin/engineering-agent",
+    description: "The engineering agent's record: decisions waiting, runs, pull requests and its mode",
+    group: "AI Agents",
+    writeRoles: ["owner", "ops"],
+    aliases: [
+      "engineering agent",
+      "engineering",
+      "agent",
+      "t2 draft",
+      "patch",
+      "pull request",
+      "publisher",
+      "runner",
+      "freeze",
+    ],
+    tabs: [
+      {
+        id: "overview",
+        label: "Overview",
+        description: "Mode, switches, the last run and what is waiting",
+      },
+      {
+        id: "queue",
+        label: "Decisions waiting",
+        description: "T2 drafts, decisions and state mismatches waiting on a person",
+      },
+      {
+        id: "runs",
+        label: "Runs & PRs",
+        description: "Each run and the pull requests the agent bound, with how each ended",
+      },
+      {
+        id: "settings",
+        label: "Settings",
+        description: "Mode, freeze, the kill switch and the owner queue against its caps",
+      },
+    ],
+  },
+  {
+    id: "sre-ops",
+    label: "SRE",
+    href: "/admin/sre-ops",
+    description: "The ops observer's state chain, its trust verdict, its daily report and the owner's genesis",
+    group: "AI Agents",
+    writeRoles: ["owner"],
+    aliases: ["sre", "sre agent", "ops observer", "genesis", "trust", "state chain", "pager", "daily report"],
+    tabs: [
+      {
+        id: "overview",
+        label: "Overview",
+        description: "The state chain, its trust verdict and the owner's genesis",
+      },
+      {
+        id: "daily",
+        label: "Daily report",
+        description: "What the ops observer reported each day",
+      },
+      {
+        id: "settings",
+        label: "Settings",
+        description: "Mode and switches for the ops observer",
+      },
+    ],
+  },
+  {
+    // The pending-price deadline digest left Agent digests for its own page
+    // (2026-11-07), with the agent's switch and its monitor check.
+    id: "finance-agent",
+    label: "Billing & finance",
+    href: "/admin/finance-agent",
+    description: "The daily pending-price deadline digest, the agent switch and the monitor check",
+    group: "AI Agents",
+    writeRoles: ["owner", "ops"],
+    aliases: ["finance", "billing agent", "price deadline", "billing-finance-ops", "digest", "pending price"],
+    tabs: [
+      {
+        id: "overview",
+        label: "Overview",
+        description: "The agent switch, the monitor check and the newest digest",
+      },
+      {
+        id: "report",
+        label: "Price deadline report",
+        description: "The daily pending-price deadline report",
+      },
+      {
+        id: "settings",
+        label: "Settings",
+        description: "Mode and switches for the billing and finance agent",
+      },
+    ],
+  },
+  // ------------------------------------------------------------ Development
+  // AMUX: the development-agent work board (docs/policy/development-agent-orchestration.md).
+  // Ideas is owner-only -- the page and every API route behind it answer 404
+  // to any other role -- so it is shown to the owner alone. The execution
+  // board opens to every admin because its review queue does; its board is
+  // owner-only like the page it replaced.
+  {
+    id: "amux-backlog",
+    label: "Ideas",
+    href: "/admin/amux-backlog",
+    description: "Idea input, the card list and portfolio assessment",
+    group: "Development",
+    writeRoles: ["owner"],
+    viewRoles: ["owner"],
+    aliases: [
+      "amux",
+      "backlog",
+      "intake",
+      "idea analysis",
+      "new idea",
+      "register card",
+      "priority",
+      "cost estimate",
+      "portfolio",
+      "assessment",
+    ],
+    tabs: [
+      {
+        id: "ideas",
+        label: "Ideas",
+        description: "Enter an idea, approve its execution and its plan",
+      },
+      {
+        id: "list",
+        label: "Card list",
+        description: "Backlog cards, creation dates, summaries and recorded scores",
+      },
+      {
+        id: "portfolio",
+        label: "Portfolio",
+        description: "Strategic assessment and score of each card",
+      },
+    ],
+  },
+  {
+    id: "amux-execution",
+    label: "Execution board",
+    href: "/admin/amux-execution",
+    description: "AMUX cards and their execution state, the review queue, and diagnostics",
+    group: "Development",
+    // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
+    // route checks it); the owner-only board writes nothing.
+    writeRoles: ["owner", "ops"],
+    // Halts belong to Safety & recovery, so this counts what waits on a
+    // person here: escalations and Decision Maker requests.
+    badge: "amuxOwnerAttention",
+    aliases: [
+      "amux",
+      "board",
+      "cards",
+      "execution",
+      "attempt",
+      "assignment",
+      "escalation",
+      "human review",
+      "review",
+      "review queue",
+      "diagnostics",
+      "worker performance",
+      "decision log",
+      "incident",
+    ],
+    tabs: [
+      {
+        id: "cards",
+        label: "Board",
+        description: "Every AMUX card stored in Tomverse and its execution state",
+        viewRoles: ["owner"],
+        badge: "amuxDecisionMaker",
+      },
+      {
+        id: "review",
+        label: "Review queue",
+        description: "Why AMUX assigned the work, and escalations waiting on a person",
+        badge: "amuxEscalations",
+      },
+      {
+        id: "diagnostics",
+        label: "Diagnostics",
+        description: "Worker performance and the decision log",
+      },
+    ],
+  },
+  {
+    // QA and release left Agent digests for its own page (owner, 2026-10-23),
+    // and moved to /admin/release with the redesign (2026-11-07): the merge
+    // lane, CI admission and the release train are one pipeline the operator
+    // works in, not one agent's daily report.
+    id: "release",
+    label: "Release",
+    href: "/admin/release",
+    description: "From develop merge to production: the merge lane, the release train and the CI queue",
+    group: "Development",
+    writeRoles: ["owner", "ops"],
+    aliases: [
+      "qa",
+      "qa-release",
+      "release",
+      "release readiness",
+      "merge lane",
+      "release train",
+      "control revision",
+      "ci admission",
+      "ci queue",
+      "runners",
+    ],
+    tabs: [
+      {
+        id: "qa",
+        label: "QA & release",
+        description:
+          "What needs the operator, production against main, the merge lane and the release train",
+      },
+      {
+        id: "ci",
+        label: "CI queue",
+        description: "Pull requests waiting for runners, their order and live runner usage",
+      },
+    ],
+  },
+  {
+    id: "amux-settings",
+    label: "AMUX settings",
+    href: "/admin/amux-settings",
+    description: "AMUX automatic admission, workers, Decision Maker controls and analysis budget",
+    group: "Development",
+    // A worker registry change takes the owner role and a recent step-up in
+    // its route (orchestration policy version 31, section 3).
+    writeRoles: ["owner", "ops"],
+    aliases: [
+      "amux",
+      "settings",
+      "worker",
+      "workers",
+      "registry",
+      "worker registry",
+      "automatic admission",
+      "auto admission",
+      "orchestrator",
+      "decision maker",
+      "kill switch",
+      "analysis settings",
+      "analysis budget",
+    ],
+    tabs: [
+      {
+        id: "automatic-admission",
+        label: "Automatic admission",
+        description: "Owner approval for ready Tasks to enter unassigned Todo",
+        viewRoles: ["owner"],
+      },
+      {
+        id: "workers",
+        label: "Workers",
+        description: "Register AI workers, choose what each can do, and turn them on or off",
+      },
+      {
+        id: "decision-maker",
+        label: "Decision Maker",
+        description: "The Decision Maker kill switch and the mode of each instance",
+      },
+      {
+        id: "analysis",
+        label: "Analysis budget & models",
+        description: "Monthly analysis budget and approved analysis models",
+        viewRoles: ["owner"],
+      },
+    ],
+  },
+  {
+    // Halts, unused reservations and the retired promotion and import tools,
+    // gathered in one place (2026-11-07). Every admin role reads the halts, as
+    // it did in Operations settings; the owner alone clears one.
+    id: "amux-recovery",
+    label: "Safety & recovery",
+    href: "/admin/amux-recovery",
+    description: "Execution safety and halts, reservation recovery, and the retired AMUX tools",
+    group: "Development",
+    writeRoles: ["owner"],
+    badge: "amuxOrchestratorHalts",
+    aliases: [
+      "amux",
+      "safety",
+      "recovery",
+      "halt",
+      "halts",
+      "outcome unknown",
+      "reservation",
+      "claim",
+      "claim resolution",
+      "legacy",
+      "catalog import",
+      "board import",
+      "reconciliation",
+      "source revision",
+      "metadata",
+      "promotion",
+      "recommendation",
+      "auto-promotion",
+      "grant",
+    ],
+    tabs: [
+      {
+        id: "safety",
+        label: "Execution safety",
+        description: "Automatic recovery, evidence to inspect and operator halt decisions",
+        badge: "amuxOrchestratorHalts",
+      },
+      {
+        id: "reservations",
+        label: "Reservations & claims",
+        description: "Unused analysis reservations and claims that need a decision",
+        viewRoles: ["owner"],
+      },
+      {
+        id: "legacy",
+        label: "Legacy tools",
+        description: "Catalog import, source reconciliation, card metadata and card promotion",
+        viewRoles: ["owner"],
+      },
+    ],
+  },
+  // ----------------------------------------------------------------- System
   {
     id: "infrastructure",
     label: "Infrastructure",
     href: "/admin/infrastructure",
     description: "Railway, R2, database, and Prisma operations",
-    group: "Operations",
+    group: "System",
     writeRoles: ["owner", "ops", "billing"],
     aliases: ["railway", "r2", "database", "prisma", "hosting", "storage"],
   },
@@ -386,7 +935,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Automation",
     href: "/admin/automation",
     description: "Scheduled jobs, webhook delivery, and operations reports",
-    group: "Operations",
+    group: "System",
     writeRoles: ["owner", "ops", "billing"],
     badge: "automation",
     aliases: [
@@ -417,14 +966,126 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "platform",
+    label: "Feature flags",
+    href: "/admin/platform",
+    description: "Emergency stops, feature switches and account defaults",
+    group: "System",
+    writeRoles: ["owner", "ops"],
+    aliases: [
+      "platform",
+      "platform settings",
+      "settings",
+      "defaults",
+      "feature flags",
+      "kill switch",
+      "emergency",
+      "switches",
+      "guest default",
+    ],
+    tabs: [
+      {
+        id: "emergency",
+        label: "Emergency stops",
+        description: "Kill switches for chat, attachments and public sharing",
+      },
+      {
+        id: "features",
+        label: "Feature switches",
+        description: "Rollout switches for product features",
+      },
+      {
+        id: "account-defaults",
+        label: "Account defaults",
+        description: "Defaults that new and existing accounts start from",
+      },
+    ],
+  },
+  // -------------------------------------------------------------- Messaging
+  {
+    id: "email-campaigns",
+    label: "Email campaigns",
+    href: "/admin/email-campaigns",
+    description:
+      "Campaign drafts, what each one is waiting on, and the waves that are due",
+    group: "Messaging",
+    writeRoles: ["owner", "ops"],
+    badge: "emailCampaigns",
+    aliases: [
+      "campaign",
+      "fan-out",
+      "fanout",
+      "wave",
+      "reminder",
+      "retirement notice",
+      "bulk email",
+      "announcement",
+      "attestation",
+      "approve campaign",
+      "new campaign",
+    ],
+    tabs: [
+      {
+        id: "campaigns",
+        label: "Campaigns",
+        description: "Every campaign, its status, and what still blocks its send",
+      },
+      {
+        id: "schedule",
+        label: "Schedule",
+        description: "Waves by the time they are due, overdue ones first",
+      },
+      {
+        id: "new",
+        label: "New campaign",
+        description: "Write a campaign or a policy-change notice",
+      },
+    ],
+  },
+  {
+    id: "email-delivery",
+    label: "Customer mail",
+    href: "/admin/email-delivery",
+    description: "What was sent to whom, what was refused, and which addresses are suppressed",
+    group: "Messaging",
+    writeRoles: ["owner", "ops"],
+    badge: "abandonedLegalEmail",
+    aliases: [
+      "email delivery",
+      "outbox",
+      "delivery log",
+      "bounce",
+      "complaint",
+      "suppression",
+      "unsubscribe",
+      "abandoned",
+      "dead letter",
+      "did not arrive",
+      "never received",
+      "email history",
+    ],
+    tabs: [
+      {
+        id: "deliveries",
+        label: "Delivery log",
+        description: "Every message and what became of it",
+      },
+      {
+        id: "suppressions",
+        label: "Suppressions",
+        description: "Addresses we will not mail, and why",
+      },
+    ],
+  },
+  {
     id: "alerts",
-    label: "Alerts",
+    label: "Operator alerts",
     href: "/admin/alerts",
-    description: "Alert thresholds, templates, and the delivery log",
-    group: "Operations",
+    description: "Alert thresholds, templates, the delivery log and the mail path test",
+    group: "Messaging",
     writeRoles: ["owner", "ops"],
     badge: "alerts",
-    aliases: ["notifications", "slack", "discord", "thresholds", "paging"],
+    aliases: ["alerts", "notifications", "slack", "discord", "thresholds", "paging", "probe"],
     tabs: [
       {
         id: "policy",
@@ -441,513 +1102,10 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Delivery log",
         description: "What was sent, to where, and whether it landed",
       },
-    ],
-  },
-  {
-    id: "email-campaigns",
-    label: "Email campaigns",
-    href: "/admin/email-campaigns",
-    description:
-      "Campaign drafts, what each one is waiting on, and the waves that are due",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    badge: "emailCampaigns",
-    aliases: [
-      "campaign",
-      "fan-out",
-      "fanout",
-      "wave",
-      "reminder",
-      "retirement notice",
-      "bulk email",
-      "announcement",
-      "attestation",
-      "approve campaign",
-    ],
-    tabs: [
       {
-        id: "campaigns",
-        label: "Campaigns",
-        description: "Every campaign, its status, and what still blocks its send",
-      },
-      {
-        id: "schedule",
-        label: "Schedule",
-        description: "Waves by the time they are due, overdue ones first",
-      },
-    ],
-  },
-  {
-    id: "email-delivery",
-    label: "Email delivery",
-    href: "/admin/email-delivery",
-    description: "What was sent to whom, what was refused, and which addresses are suppressed",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    badge: "abandonedLegalEmail",
-    aliases: [
-      "outbox",
-      "delivery log",
-      "bounce",
-      "complaint",
-      "suppression",
-      "abandoned",
-      "dead letter",
-      "did not arrive",
-      "never received",
-      "email history",
-    ],
-    tabs: [
-      {
-        id: "deliveries",
-        label: "Deliveries",
-        description: "Every message and what became of it",
-      },
-      {
-        id: "suppressions",
-        label: "Suppressions",
-        description: "Addresses we will not mail, and why",
-      },
-    ],
-  },
-  {
-    id: "marketing",
-    label: "Marketing",
-    href: "/admin/marketing",
-    description:
-      "Draft queue, published posts, brand accounts, and what the automation reported",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    badge: "marketing",
-    aliases: [
-      "social",
-      "posts",
-      "linkedin",
-      "zernio",
-      "campaign",
-      "brand account",
-      "draft queue",
-      "guard",
-    ],
-    tabs: [
-      {
-        id: "queue",
-        label: "Queue",
-        description: "Drafts waiting on a person, and what the Guard said about each",
-      },
-      {
-        id: "published",
-        label: "Publish state",
-        description:
-          "Every approved post: waiting, in flight, published, failed, or unconfirmed",
-      },
-      {
-        id: "accounts",
-        label: "Accounts",
-        description: "Brand accounts, their mode, and why a paused one is paused",
-      },
-      {
-        id: "experiments",
-        label: "Experiments",
-        description: "Landing copy experiments and their results",
-      },
-      {
-        id: "reports",
-        label: "Reports",
-        description: "Weekly summaries, competitor facts, and retention runs",
-      },
-      {
-        id: "competitors",
-        label: "Competitors",
-        description: "Who the market agent tracks, and which hosts a person approved as official",
-      },
-      {
-        id: "assets",
-        label: "Assets",
-        description: "Images and videos the media agent submitted, and which a person approved for posts",
-      },
-      {
-        id: "comments",
-        label: "Comments",
-        description: "Comment alerts the monitor raised and nobody has answered",
-      },
-    ],
-  },
-  {
-    id: "product-research",
-    label: "Product research",
-    href: "/admin/product-research",
-    description:
-      "What the Scout suggests improving on the public pages, generated files and catalogue, and its runs and spending",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    badge: "productResearch",
-    aliases: [
-      "scout",
-      "improvement",
-      "suggestion",
-      "product research",
-      "observation",
-      "issue backlog",
-      "slot",
-    ],
-    tabs: [
-      {
-        id: "suggestions",
-        label: "Suggestions",
-        description: "Open Scout suggestions by page or file, to dismiss or send to AMUX",
-        badge: "productResearch",
-      },
-      {
-        id: "runs",
-        label: "Runs and cost",
-        description: "Whether the Scout ran, the model and daily cap an owner chose, and the last seven days",
-      },
-      {
-        id: "observations",
-        label: "Issue observations",
-        description:
-          "Observation slots, the newest one's rows, and the staging and production windows",
-      },
-    ],
-  },
-  {
-    id: "engineering-agent",
-    label: "Engineering agent",
-    href: "/admin/engineering-agent",
-    description: "The engineering agent's record: T2 drafts, runs, pull requests and its mode",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    aliases: [
-      "engineering",
-      "agent",
-      "t2 draft",
-      "patch",
-      "pull request",
-      "publisher",
-      "runner",
-      "freeze",
-    ],
-    tabs: [
-      {
-        id: "queue",
-        label: "Owner queue",
-        description: "T2 drafts, decisions and state mismatches waiting on a person",
-      },
-      {
-        id: "runs",
-        label: "Runs",
-        description: "Each run, the mode it started under, how it ended and any halt",
-      },
-      {
-        id: "pull-requests",
-        label: "Pull requests",
-        description: "What the agent bound: pull request, snapshot, approval and merge observations",
-      },
-      {
-        id: "settings",
-        label: "Mode",
-        description: "Mode, freeze, the kill switch and the owner queue against its caps",
-      },
-    ],
-  },
-  {
-    id: "sre-ops",
-    label: "SRE agent",
-    href: "/admin/sre-ops",
-    description: "The ops observer's state chain, its trust verdict and the owner's genesis",
-    group: "Operations",
-    writeRoles: ["owner"],
-    aliases: ["sre", "ops observer", "genesis", "trust", "state chain", "pager"],
-  },
-  {
-    // QA and release left Agent digests for its own page (owner, 2026-10-23):
-    // the merge lane, CI admission and the release train are one pipeline the
-    // operator works in, not one agent's daily report.
-    id: "qa-release",
-    label: "QA and release",
-    href: "/admin/qa-release",
-    description: "From develop merge to production: the merge lane, CI admission and the release train",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    aliases: ["qa", "release", "release readiness", "merge lane", "release train", "control revision", "ci admission", "runners"],
-    tabs: [
-      {
-        id: "overview",
-        label: "Overview",
-        description: "What needs the operator, production against main, the merge lane and the latest digest",
-      },
-      {
-        // Its own tab (owner, 2026-10-25): the next train's cargo, an
-        // emergency departure and the departure board of past trains.
-        id: "train",
-        label: "Release train",
-        description: "The next train's cargo, an emergency departure and the departure board of past trains",
-      },
-      {
-        id: "lane",
-        label: "Merge lane",
-        description: "What the merge lane will merge, and which pull requests are yours, with the files that decide it",
-      },
-      {
-        id: "ci-admission",
-        label: "CI admission",
-        description: "Pull requests waiting for runners, their order and live runner usage",
-      },
-    ],
-  },
-  {
-    id: "agent-digests",
-    label: "Agent digests",
-    href: "/admin/agent-digests",
-    description: "What each agent reported each day, and the operator control it runs under",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    aliases: ["digest", "price deadline", "billing-finance-ops"],
-    tabs: [
-      {
-        id: "billing-finance-ops",
-        label: "Billing and finance",
-        description: "The daily pending-price deadline digest, the agent switch and the monitor check",
-      },
-      {
-        id: "trust-safety",
-        label: "Trust and safety",
-        description: "DSR deadlines counted when the page opens, and the observation switch",
-      },
-    ],
-  },
-  {
-    // A shell: a pixel office for the eight agent teams that plays a demo day
-    // and links each team to the page that holds its record. A LIVE room reads
-    // that team's operating state, read only; nothing on the page writes, so
-    // it carries no badge and no writeRoles.
-    id: "office",
-    label: "Agent office",
-    href: "/admin/office",
-    // The office floor scales to the space it is given.
-    wide: true,
-    description: "A pixel office shell for the eight agent teams, with a link to each team's record",
-    group: "Operations",
-    aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
-    // The office draws its own tab strip, as the original UI did; its tabs are
-    // links to these sections, and one demo engine runs under both.
-    tabs: [
-      {
-        id: "live",
-        label: "Live office",
-        description: "The office floor, the operator console and the demo approval",
-      },
-      {
-        id: "dashboard",
-        label: "Dashboard",
-        description: "Team board, demo approval, digest brief and each team's record link",
-      },
-    ],
-  },
-  {
-    id: "platform",
-    label: "Platform settings",
-    href: "/admin/platform",
-    description: "Product defaults and emergency feature controls",
-    group: "Operations",
-    writeRoles: ["owner", "ops"],
-    aliases: [
-      "settings",
-      "defaults",
-      "feature flags",
-      "kill switch",
-      "guest default",
-    ],
-  },
-  // AMUX: the development-agent work board (docs/policy/development-agent-orchestration.md).
-  // Backlog and Promotion are owner-only -- the pages and every API route
-  // behind them answer 404 to any other role -- so they are shown to the owner
-  // alone. Execution opens to every admin because its Assignment section does;
-  // its Cards section is owner-only like the page it replaced.
-  {
-    id: "amux-backlog",
-    label: "Backlog",
-    href: "/admin/amux-backlog",
-    description:
-      "Idea input, card list, portfolio assessment, catalog import, source reconciliation and card metadata",
-    group: "AMUX",
-    writeRoles: ["owner"],
-    viewRoles: ["owner"],
-    aliases: [
-      "amux",
-      "intake",
-      "idea analysis",
-      "new idea",
-      "register card",
-      "catalog import",
-      "board import",
-      "reconciliation",
-      "source revision",
-      "metadata",
-      "priority",
-      "cost estimate",
-      "portfolio",
-      "assessment",
-      "unused reservation",
-    ],
-    tabs: [
-      {
-        id: "ideas",
-        label: "Ideas",
-        description: "Enter an idea, approve its execution and its plan",
-      },
-      {
-        id: "list",
-        label: "List",
-        description: "Backlog cards, creation dates, summaries and recorded scores",
-      },
-      {
-        id: "portfolio",
-        label: "Portfolio assessment",
-        description: "Strategic assessment and score of each card",
-      },
-      {
-        id: "import",
-        label: "Catalog import",
-        description: "Preview a workboard catalog, approve it, then import it",
-      },
-      {
-        id: "reconciliation",
-        label: "Source reconciliation",
-        description: "Accept or reject each card's new source revision",
-      },
-      {
-        id: "metadata",
-        label: "Card metadata",
-        description: "Kind, priority and cost estimate for one backlog card",
-      },
-    ],
-  },
-  {
-    id: "amux-promotion",
-    label: "Promotion",
-    href: "/admin/amux-promotion",
-    description:
-      "Recommendation pool, manual promotion and legacy grant-based auto-promotion",
-    group: "AMUX",
-    writeRoles: ["owner"],
-    viewRoles: ["owner"],
-    aliases: [
-      "amux",
-      "recommendation",
-      "recommendation pool",
-      "promote",
-      "promotion",
-      "auto-promotion",
-      "grant",
-      "halt",
-      "todo",
-    ],
-    tabs: [
-      {
-        id: "recommendation",
-        label: "Recommendation pool",
-        description: "A backlog snapshot and a person's decision on each card",
-      },
-      {
-        id: "promotion",
-        label: "Manual promotion",
-        description: "Promote one to three backlog cards a person picked",
-      },
-      {
-        id: "auto-promotion",
-        label: "Auto-promotion",
-        description: "Legacy grants, halt and resume for limited automatic promotion",
-      },
-    ],
-  },
-  {
-    id: "amux-execution",
-    label: "Execution",
-    href: "/admin/amux-execution",
-    description: "AMUX cards, their execution state, and why AMUX assigned the work",
-    group: "AMUX",
-    // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
-    // route checks it); the owner-only card list writes nothing.
-    writeRoles: ["owner", "ops"],
-    // Halts belong to Operations settings, so this counts what waits on a
-    // person here: escalations and Decision Maker requests.
-    badge: "amuxOwnerAttention",
-    aliases: [
-      "amux",
-      "cards",
-      "execution",
-      "attempt",
-      "assignment",
-      "escalation",
-      "human review",
-      "review",
-      "incident",
-    ],
-    tabs: [
-      {
-        id: "cards",
-        label: "Cards",
-        description: "Every AMUX card stored in Tomverse and its execution state",
-        viewRoles: ["owner"],
-        badge: "amuxDecisionMaker",
-      },
-      {
-        id: "assignment",
-        label: "Assignment",
-        description: "Why AMUX assigned the work, and escalations waiting on a person",
-        badge: "amuxEscalations",
-      },
-    ],
-  },
-  {
-    id: "amux-settings",
-    label: "Operations settings",
-    href: "/admin/amux-settings",
-    description:
-      "AMUX automatic admission, workers, execution safety, recovery evidence and Decision Maker controls",
-    group: "AMUX",
-    // A worker registry change takes the owner role and a recent step-up in
-    // its route (orchestration policy version 31, section 3).
-    writeRoles: ["owner", "ops"],
-    badge: "amuxOrchestratorHalts",
-    aliases: [
-      "amux",
-      "settings",
-      "worker",
-      "workers",
-      "registry",
-      "worker registry",
-      "automatic admission",
-      "auto admission",
-      "recovery",
-      "halt",
-      "orchestrator",
-      "outcome unknown",
-      "decision maker",
-      "kill switch",
-      "analysis settings",
-    ],
-    tabs: [
-      {
-        id: "automatic-admission",
-        label: "Automatic admission",
-        description: "Owner approval for ready Tasks to enter unassigned Todo",
-        viewRoles: ["owner"],
-      },
-      {
-        id: "workers",
-        label: "Workers",
-        description: "Register AI workers, choose what each can do, and turn them on or off",
-      },
-      { id: "safety", label: "Execution safety and recovery", description: "Automatic recovery, evidence to inspect and operator halt decisions", badge: "amuxOrchestratorHalts" },
-      { id: "decision-maker", label: "Decision Maker", description: "The Decision Maker kill switch and the mode of each instance" },
-      {
-        id: "analysis",
-        label: "Analysis settings",
-        description: "Monthly analysis budget and approved analysis models",
-        viewRoles: ["owner"],
+        id: "mail-test",
+        label: "Mail path test",
+        description: "Send a test operator alert through the mail path",
       },
     ],
   },
@@ -956,7 +1114,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Email policy",
     href: "/admin/email-policy",
     description: "Jurisdiction profiles for outbound mail, and which version is in force",
-    group: "Governance",
+    group: "Messaging",
     writeRoles: ["owner", "ops"],
     aliases: [
       "email",
@@ -986,28 +1144,41 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       },
     ],
   },
+  // ------------------------------------------------------------- Governance
   {
     id: "audit",
     label: "Audit log",
     href: "/admin/audit",
-    description: "Administrator activity, with actor and target",
+    description: "Administrator activity with actor and target, and the integrity check of the log",
     group: "Governance",
-    aliases: ["log", "history", "activity", "trail", "who changed"],
+    aliases: ["log", "history", "activity", "trail", "who changed", "integrity", "hash chain", "tamper"],
+    tabs: [
+      {
+        id: "log",
+        label: "Records",
+        description: "Administrator activity, with actor and target",
+      },
+      {
+        id: "integrity",
+        label: "Integrity check",
+        description: "Tamper-evidence for the audit log",
+      },
+    ],
   },
   {
     id: "retention",
-    label: "Retention",
+    label: "Retention & deletion",
     href: "/admin/retention",
     description: "Retention windows and destructive cleanup",
     group: "Governance",
     writeRoles: ["owner", "ops"],
-    aliases: ["cleanup", "purge", "delete", "data lifecycle"],
+    aliases: ["retention", "cleanup", "purge", "delete", "data lifecycle"],
   },
   {
     id: "admin-access",
     label: "Admin access",
     href: "/admin/admin-access",
-    description: "Roles, expiry, operational readiness, and audit integrity",
+    description: "Administrator roles and expiry, and operational readiness",
     group: "Governance",
     writeRoles: ["owner"],
     aliases: [
@@ -1016,7 +1187,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "rbac",
       "administrators",
       "readiness",
-      "integrity",
     ],
     tabs: [
       {
@@ -1028,11 +1198,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "readiness",
         label: "Operational readiness",
         description: "Checkpoints an operator must confirm",
-      },
-      {
-        id: "integrity",
-        label: "Audit integrity",
-        description: "Tamper-evidence for the audit log",
       },
     ],
   },
@@ -1055,6 +1220,20 @@ export const ADMIN_UNLISTED_PAGES = [
     description:
       "Search customers, refunds, traces, and audit events across the console",
     aliases: ["find", "lookup", "trace", "everything"],
+  },
+  {
+    // The Trust and safety digest has no menu of its own yet; it kept the
+    // address it always had (the activation step-up and the Agent office link
+    // it). Every other `/admin/agent-digests` address redirects
+    // (ADMIN_AGENT_DIGESTS_LEGACY_TABS).
+    id: "agent-digests",
+    label: "Trust and safety digest",
+    href: "/admin/agent-digests",
+    description:
+      "DSR deadlines counted when the page opens, and the trust and safety observation switch",
+    aliases: ["trust", "safety", "trust and safety", "dsr", "privacy deadline", "digest", "observer"],
+    /** The one `?tab=` this page renders; every other value redirects. */
+    sections: ["trust-safety"],
   },
 ] as const;
 
@@ -1088,9 +1267,9 @@ export const ADMIN_DETAIL_ROUTES = [
     pattern: /^\/admin\/amux-u21-test-card$/,
     label: "AMUX U21 test card",
     description: "Owner-only synthetic candidate receipt diagnostic",
-    parentLabel: "AMUX execution",
+    parentLabel: "Execution board",
     parentHref: "/admin/amux-execution",
-    group: "AMUX" as const,
+    group: "Development" as const,
     viewRoles: ["owner"] as const,
   },
   {
@@ -1114,7 +1293,16 @@ export const ADMIN_DETAIL_ROUTES = [
     description: "Account timeline, billing, credits, and security controls",
     parentLabel: "Users",
     parentHref: "/admin/users",
-    group: "Customers" as const,
+    group: "Customers & Revenue" as const,
+    // The detail page's sections, declared with the rest of the table so the
+    // screen work that builds them does not edit it (2026-11-07).
+    tabs: [
+      { id: "overview", label: "Overview", description: "Who the customer is, their plan and recent activity" },
+      { id: "billing", label: "Billing", description: "Subscription, credits, refunds and invoices" },
+      { id: "security", label: "Security", description: "Sign-in methods, sessions and account locks" },
+      { id: "conversations", label: "Conversations", description: "The customer's conversations and what ran in them" },
+      { id: "notes", label: "Notes & timeline", description: "Operator notes and the account timeline" },
+    ],
   },
   {
     id: "campaign-detail",
@@ -1124,7 +1312,7 @@ export const ADMIN_DETAIL_ROUTES = [
       "The copy this campaign sends, who has attested to what, and whether it may go out",
     parentLabel: "Email campaigns",
     parentHref: "/admin/email-campaigns",
-    group: "Operations" as const,
+    group: "Messaging" as const,
   },
   {
     // The ops-observer page message link (docs/policy/sre-ops.md §3 rule 1).
@@ -1134,9 +1322,9 @@ export const ADMIN_DETAIL_ROUTES = [
     pattern: /^\/admin\/agents\/sre-ops\/items\/[^/]+$/,
     label: "Ops observer message",
     description: "What one page message was about: its signals, message kinds and times",
-    parentLabel: "SRE agent",
+    parentLabel: "SRE",
     parentHref: "/admin/sre-ops",
-    group: "Operations" as const,
+    group: "AI Agents" as const,
   },
   {
     id: "provider-detail",
@@ -1236,15 +1424,22 @@ export const ADMIN_LEGACY_ROUTES: Readonly<Record<string, string>> = {
   // documents and runbooks name these addresses, so each lands on its own
   // section, except retired JSON intake now opens Ideas. A role the destination
   // refuses is redirected and then answers 404 there, exactly as it did here:
-  // the redirect confirms nothing the destination would not.
+  // the redirect confirms nothing the destination would not. The import,
+  // reconciliation, metadata and promotion screens are the Legacy tools of
+  // Safety & recovery since 2026-11-07.
   "/admin/amux-intake": "/admin/amux-backlog?tab=ideas",
-  "/admin/amux-board-import": "/admin/amux-backlog?tab=import",
-  "/admin/amux-reconciliation": "/admin/amux-backlog?tab=reconciliation",
-  "/admin/amux-backlog-metadata": "/admin/amux-backlog?tab=metadata",
-  "/admin/amux-board-recommendation": "/admin/amux-promotion?tab=recommendation",
-  "/admin/amux-board-promotion": "/admin/amux-promotion?tab=promotion",
-  "/admin/amux-board-auto-promotion": "/admin/amux-promotion?tab=auto-promotion",
+  "/admin/amux-board-import": "/admin/amux-recovery?tab=legacy",
+  "/admin/amux-reconciliation": "/admin/amux-recovery?tab=legacy",
+  "/admin/amux-backlog-metadata": "/admin/amux-recovery?tab=legacy",
+  "/admin/amux-board-recommendation": "/admin/amux-recovery?tab=legacy",
+  "/admin/amux-board-promotion": "/admin/amux-recovery?tab=legacy",
+  "/admin/amux-board-auto-promotion": "/admin/amux-recovery?tab=legacy",
   "/admin/amux-cards": "/admin/amux-execution?tab=cards",
+  // Pages the 2026-11-07 redesign retired. The Promotion page is the Legacy
+  // tools tab; QA and release is the Release page (its own `?tab=` values are
+  // ADMIN_QA_RELEASE_LEGACY_TABS).
+  "/admin/amux-promotion": "/admin/amux-recovery?tab=legacy",
+  "/admin/qa-release": "/admin/release?tab=qa",
 };
 
 /**
@@ -1319,29 +1514,90 @@ export const adminRedirectTarget = (
 /**
  * Product research left the engineering agent's screen for its own workspace
  * (2026-10-19). The old tab link opens the section it showed in production,
- * the observation record.
+ * the observation record. The pull request record is a view of Runs & PRs
+ * since 2026-11-07.
  */
 export const ADMIN_ENGINEERING_AGENT_LEGACY_TABS: Readonly<Record<string, string>> = {
   "product-research": "/admin/product-research?tab=observations",
+  "pull-requests": "/admin/engineering-agent?tab=runs&view=pull-requests",
 };
 
 /**
- * QA and release, and CI admission, left Agent digests for their own page
- * (2026-10-23). Operator emails, commit statuses and the agent office link
- * these addresses with their `?tab=`. A bare `/admin/agent-digests` is the
- * sidebar's own link and opens the digests that stayed.
+ * Agent digests is no longer a menu (2026-11-07). QA and release, and CI
+ * admission, are the Release page; the billing and finance digest is its own
+ * agent page. Operator emails, commit statuses and the agent office link these
+ * addresses with their `?tab=`. A bare `/admin/agent-digests` opens Release,
+ * its first tab having been QA; the Trust and safety digest kept the address
+ * (`?tab=trust-safety`) and is not redirected.
  */
 export const ADMIN_AGENT_DIGESTS_LEGACY_TABS: Readonly<Record<string, string>> = {
-  "qa-release": "/admin/qa-release?tab=overview",
-  "ci-admission": "/admin/qa-release?tab=ci-admission",
+  "qa-release": "/admin/release?tab=qa",
+  "ci-admission": "/admin/release?tab=ci",
+  "billing-finance-ops": "/admin/finance-agent",
 };
 
-/** The old section links remain bookmarks, never a second control surface. */
+/** Where a bare or unknown `/admin/agent-digests` request lands. */
+export const ADMIN_AGENT_DIGESTS_DEFAULT_ROUTE = "/admin/release";
+
+/**
+ * `/admin/qa-release`'s four sections, now two tabs of Release with the first
+ * tab's three views (`?view=`). The merge lane's and the train's links are in
+ * emails, commit statuses and audit summaries.
+ */
+export const ADMIN_QA_RELEASE_LEGACY_TABS: Readonly<Record<string, string>> = {
+  overview: "/admin/release?tab=qa",
+  train: "/admin/release?tab=qa&view=train",
+  lane: "/admin/release?tab=qa&view=lane",
+  "ci-admission": "/admin/release?tab=ci",
+};
+
+/**
+ * Backlog sections that moved to Safety & recovery (2026-11-07). `intake` is
+ * older: the retired JSON intake screen, which opens Ideas.
+ */
+export const ADMIN_AMUX_BACKLOG_LEGACY_TABS: Readonly<Record<string, string>> = {
+  intake: "/admin/amux-backlog?tab=ideas",
+  import: "/admin/amux-recovery?tab=legacy",
+  reconciliation: "/admin/amux-recovery?tab=legacy",
+  metadata: "/admin/amux-recovery?tab=legacy",
+  recovery: "/admin/amux-recovery?tab=reservations",
+};
+
+/** Execution safety left Operations settings for Safety & recovery. */
+export const ADMIN_AMUX_SETTINGS_LEGACY_TABS: Readonly<Record<string, string>> = {
+  safety: "/admin/amux-recovery?tab=safety",
+};
+
+/** The audit chain check is part of the Audit log. */
+export const ADMIN_ADMIN_ACCESS_LEGACY_TABS: Readonly<Record<string, string>> = {
+  integrity: "/admin/audit?tab=integrity",
+};
+
+/**
+ * Marketing sections that have no tab of their own in the redesign. Each stays
+ * reachable, built as it is, as a view of the tab it belongs to until the
+ * Marketing screen is rebuilt: competitors and experiments with the reports,
+ * assets and the comment alerts with the approvals.
+ */
+export const ADMIN_MARKETING_LEGACY_TABS: Readonly<Record<string, string>> = {
+  competitors: "/admin/marketing?tab=reports&view=competitors",
+  experiments: "/admin/marketing?tab=reports&view=experiments",
+  assets: "/admin/marketing?tab=queue&view=assets",
+  comments: "/admin/marketing?tab=queue&view=comments",
+};
+
+/**
+ * The old section links remain bookmarks, never a second control surface.
+ * `assignment` is the review queue under its new name; `halts` moved with
+ * execution safety to Safety & recovery.
+ */
 export const ADMIN_AMUX_EXECUTION_LEGACY_TABS: Readonly<Record<string, string>> = {
-  halts: "/admin/amux-settings?tab=safety",
+  assignment: "/admin/amux-execution?tab=review",
+  halts: "/admin/amux-recovery?tab=safety",
   "decision-maker": "/admin/amux-settings?tab=decision-maker",
   workers: "/admin/amux-settings?tab=workers",
 };
+
 
 /**
  * The tab a page should open on.
@@ -1355,6 +1611,19 @@ export const resolveAdminTab = <T extends AdminNavTab>(
 ): T => {
   const value = Array.isArray(requested) ? requested[0] : requested;
   return tabs.find((tab) => tab.id === value) || tabs[0];
+};
+
+/**
+ * The view a tab opens on, for a tab that holds more than one existing screen
+ * until its own is built (`?tab=reports&view=competitors`). Unknown and
+ * missing values open the first view, as an unknown tab opens the first tab.
+ */
+export const resolveAdminView = <T extends string>(
+  views: readonly T[],
+  requested: QueryValue
+): T => {
+  const value = Array.isArray(requested) ? requested[0] : requested;
+  return views.find((view) => view === value) || views[0];
 };
 
 export const adminNavItemTabs = (id: string): readonly AdminNavTab[] => {

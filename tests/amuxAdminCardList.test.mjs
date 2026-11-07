@@ -21,9 +21,9 @@ test("the AMUX card list is an owner-only section that is not advertised to othe
   assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-cards"], "/admin/amux-execution?tab=cards");
   const meta = resolveAdminPageMeta("/admin/amux-execution");
   assert.equal(meta.isKnown, true);
-  assert.equal(meta.label, "Execution");
+  assert.equal(meta.label, "Execution board");
   const cards = adminNavItemTabs("amux-execution").find((tab) => tab.id === "cards");
-  assert.equal(cards?.label, "Cards");
+  assert.equal(cards?.label, "Board");
   assert.deepEqual(cards?.viewRoles, ["owner"]);
   for (const role of ["billing", "support", "ops", "readonly"]) {
     assert.equal(adminHrefIsVisibleTo(role, "/admin/amux-execution?tab=cards"), false, role);

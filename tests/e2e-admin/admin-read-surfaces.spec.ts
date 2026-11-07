@@ -48,7 +48,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/overview");
 
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
     await expect(
       page.getByRole("heading", { name: "Operations snapshot" })
     ).toBeVisible();
@@ -73,7 +73,7 @@ test.describe("admin read surfaces", () => {
       page.getByRole("link", { name: /^Support, 4 awaiting action/ }).first()
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /^Work queue, 5 awaiting action/ }).first()
+      page.getByRole("link", { name: /^Decisions, 5 awaiting action/ }).first()
     ).toBeVisible();
     // Recent administrator activity replays the seeded audit row.
     await expect(page.getByText(FIXTURE_AUDIT_LOG.summary)).toBeVisible();
@@ -150,7 +150,7 @@ test.describe("admin read surfaces", () => {
     await page.goto("/admin/approvals");
 
     await expect(page).toHaveURL("/admin/work-queue");
-    await expect(consoleHeading(page)).toHaveText("Work queue");
+    await expect(consoleHeading(page)).toHaveText("Decisions");
     await expect(
       page.getByRole("heading", { name: "High-risk admin approvals" })
     ).toHaveCount(0);
@@ -178,7 +178,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/analytics");
 
-    await expect(consoleHeading(page)).toHaveText("Analytics");
+    await expect(consoleHeading(page)).toHaveText("Metrics");
     // Streamed behind loading.tsx: wait for the one settled copy.
     await expect(page.getByTestId("admin-usage-analytics")).toHaveCount(1);
     const usage = page.locator("#main-content");
@@ -215,7 +215,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/analytics?tab=product");
 
-    await expect(consoleHeading(page)).toHaveText("Analytics");
+    await expect(consoleHeading(page)).toHaveText("Metrics");
     await expect(
       page.getByRole("heading", { name: "Event funnel · last 30 days" })
     ).toBeVisible();

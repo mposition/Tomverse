@@ -7,7 +7,7 @@
   per-page section tabs
 - Severity when violated: release blocker for the redirect table; ordinary
   review for everything else
-- Last reviewed: 2026-10-12
+- Last reviewed: 2026-11-07
 
 ## Scope
 
@@ -15,6 +15,7 @@
 | --- | --- |
 | Route table, groups, aliases, tabs, view roles, redirect map | `lib/adminNavigation.ts` |
 | Icon per entry | `components/admin/adminNavigationIcons.ts` |
+| A tab with no screen yet; a second strip for the screens a tab still holds | `components/admin/AdminTabPlaceholder.tsx`, `components/admin/AdminViewSwitch.tsx` |
 | Badge shape and per-entry derivation (client-safe) | `lib/adminNavigationBadges.ts` |
 | Badge loader (server-only) | `lib/adminNavigationCounts.ts` |
 | Shell, header, breadcrumb, auto-refresh | `components/admin/AdminConsoleShell.tsx` |
@@ -35,44 +36,114 @@
 
 ## The navigation
 
-Seven groups, thirty-two entries. One page, one job. The owner sees all
-thirty-two; every other role sees thirty, because two AMUX entries are
-owner-only (rule 14).
+Eight groups, thirty-two entries, at most six entries to a group (operator
+approval, 2026-11-07). One page, one job. The owner sees all thirty-two; every
+other role sees thirty-one, because Ideas is owner-only (rule 14).
+
+Every tab of every page is declared in `lib/adminNavigation.ts`, including the
+ones whose screen is not built yet, so the screen work that follows changes a
+page and never the table. A tab with no screen draws `AdminTabPlaceholder`
+("Opening soon") rather than an empty list.
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
-| Command Center | Overview | `/admin/overview` | `summary`, `health` |
-| Command Center | Work queue | `/admin/work-queue` | — |
-| Command Center | Analytics | `/admin/analytics` | `usage`, `product`, `imports`, `ai-review` |
-| Customers | Users | `/admin/users` | — |
-| Customers | Support | `/admin/support` | `feedback`, `privacy` (retired `fixes` falls to `feedback`) |
-| Revenue | Billing | `/admin/billing` | `plans`, `promotions` |
-| Revenue | Refunds | `/admin/refunds` | — |
-| Revenue | Credit ledger | `/admin/credit-ledger` | — |
+| Home | Today | `/admin/overview` | `summary`, `health` |
+| Home | Decisions | `/admin/work-queue` | `all`, `customers`, `agents`, `development`, `system` |
+| Home | Metrics | `/admin/analytics` | `usage`, `product`, `ai-review`, `imports` |
+| Customers & Revenue | Users | `/admin/users` | — (the detail page declares `overview`, `billing`, `security`, `conversations`, `notes`) |
+| Customers & Revenue | Support | `/admin/support` | `feedback`, `autofix`, `privacy` (retired `fixes` falls to `feedback`) |
+| Customers & Revenue | Plans & pricing | `/admin/billing` | `plans`, `prices`, `promotions`, `diagnostics` |
+| Customers & Revenue | Refunds | `/admin/refunds` | — |
+| Customers & Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
-| AI Platform | Models | `/admin/models` | `registry`, `discovery` |
-| AI Platform | Routing | `/admin/routing` | — |
-| Operations | Infrastructure | `/admin/infrastructure` | — |
-| Operations | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
-| Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
-| Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
-| Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
-| Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `competitors`, `comments` |
-| Operations | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
-| Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
-| Operations | SRE agent | `/admin/sre-ops` | — |
-| Operations | QA and release | `/admin/qa-release` | `overview`, `train`, `lane`, `ci-admission` |
-| Operations | Agent digests | `/admin/agent-digests` | `billing-finance-ops` |
-| Operations | Agent office | `/admin/office` | `live`, `dashboard` |
-| Operations | Platform settings | `/admin/platform` | — |
-| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio`, `import`, `reconciliation`, `metadata` |
-| AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
-| AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
-| AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `safety`, `decision-maker`, `analysis` (owner only) |
-| Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
-| Governance | Audit log | `/admin/audit` | — |
-| Governance | Retention | `/admin/retention` | — |
-| Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness`, `integrity` |
+| AI Platform | Models | `/admin/models` | `registry`, `discovery`, `defaults`, `catalog` |
+| AI Platform | Routing | `/admin/routing` | `auto`, `optimizer`, `shadow`, `stats` (owner only) |
+| AI Agents | Agents home | `/admin/office` | `dashboard` (Team board, opens first), `live` |
+| AI Agents | Marketing | `/admin/marketing` | `overview`, `queue`, `published`, `accounts`, `reports`, `settings` |
+| AI Agents | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
+| AI Agents | Engineering | `/admin/engineering-agent` | `overview`, `queue`, `runs`, `settings` |
+| AI Agents | SRE | `/admin/sre-ops` | `overview`, `daily`, `settings` |
+| AI Agents | Billing & finance | `/admin/finance-agent` | `overview`, `report`, `settings` |
+| Development | Ideas (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio` |
+| Development | Execution board | `/admin/amux-execution` | `cards` (owner only), `review`, `diagnostics` |
+| Development | Release | `/admin/release` | `qa`, `ci` |
+| Development | AMUX settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `decision-maker`, `analysis` (owner only) |
+| Development | Safety & recovery | `/admin/amux-recovery` | `safety`, `reservations` (owner only), `legacy` (owner only) |
+| System | Infrastructure | `/admin/infrastructure` | — |
+| System | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
+| System | Feature flags | `/admin/platform` | `emergency`, `features`, `account-defaults` |
+| Messaging | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule`, `new` |
+| Messaging | Customer mail | `/admin/email-delivery` | `deliveries`, `suppressions` |
+| Messaging | Operator alerts | `/admin/alerts` | `policy`, `templates`, `deliveries`, `mail-test` |
+| Messaging | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
+| Governance | Audit log | `/admin/audit` | `log`, `integrity` |
+| Governance | Retention & deletion | `/admin/retention` | — |
+| Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness` |
+
+Korean labels are in `lib/adminNavigationLocale.ts` (Today = 오늘, Decisions =
+결정함, Metrics = 지표, Agents home = 에이전트 홈, Execution board = 실행 보드,
+Release = 릴리스, Safety & recovery = 안전·복구, Feature flags = 기능 플래그,
+Messaging = 메시징). `tests/adminNavigation.test.mjs` writes the whole table out
+and fails when the code and this list disagree.
+
+### The 2026-11-07 restructuring
+
+The operator approved the eight-group sitemap on 2026-11-07. This step moves
+the menu and keeps every screen; the screens are rebuilt in the steps after it.
+What moved, and what it means for the paragraphs below (which keep the names
+they were written under):
+
+- **Command Center, Customers and Revenue** became Home and Customers &
+  Revenue. Billing is Plans & pricing and its editor's client tabs are URL tabs
+  (`urlTabs`): the address names the section the screen shows. Prices and
+  Diagnostics are tabs of their own; Diagnostics holds what sat under the
+  promotion editor.
+- **AI Agents** is a new group. Marketing, Product research, Engineering, SRE
+  and the Agent office moved into it from Operations; QA and release and the
+  billing and finance digest left Agent digests (below). The Agent office
+  opens on its Team board (`?tab=dashboard`); the live office is
+  `?tab=live`, and the ids are the addresses the office itself links.
+- **Development** is the AMUX group plus Release. Backlog is Ideas, Execution
+  is the Execution board (its Assignment tab is the **review queue**,
+  `?tab=review`; **diagnostics** is declared and waits for its screen), and
+  Operations settings is AMUX settings without Execution safety. **Safety &
+  recovery** (`/admin/amux-recovery`) holds the halts (`safety`, readable by
+  every role, cleared by the owner, carrying the `amuxOrchestratorHalts`
+  badge), unused reservations and claims (`reservations`, owner only) and the
+  retired AMUX tools (`legacy`, owner only: Catalog import, Source
+  reconciliation, Card metadata and the three Promotion screens, each a
+  closed section behind its own switch and owner check). The Promotion page is
+  gone as a menu and redirects there.
+- **Release** (`/admin/release`) is QA and release: its `qa` tab still holds
+  the old overview, release train and merge lane as views (`?view=`), and `ci`
+  is CI admission. The Trust and safety digest has no menu yet and keeps
+  `/admin/agent-digests?tab=trust-safety` (listed in `ADMIN_UNLISTED_PAGES`).
+  **Billing & finance** (`/admin/finance-agent`) holds the digest panel
+  Agent digests had.
+- **System** is Infrastructure, Automation and Feature flags. Feature flags
+  draws the emergency stops, the feature switches and the account defaults of
+  the old Platform settings; its default-model block is the **Default models**
+  tab of Models (`?tab=defaults`). It is one panel drawing a part of one
+  state (`view`), so a save from any tab sends what the page loaded for the
+  parts it does not draw.
+- **Messaging** is a new group: Email campaigns (writing a campaign is the
+  `new` tab), Customer mail, Operator alerts (the mail path test left
+  Templates for `mail-test`) and Email policy, moved from Governance.
+- **Governance**: the audit integrity check is a tab of the Audit log.
+- **Views.** Where a new tab still holds more than one of the screens it
+  replaced, the screens are views of the tab (`?view=`, `AdminViewSwitch`):
+  Release › QA (overview, train, lane), Marketing › Approvals (drafts, assets, comments),
+  Marketing › Reports & competitors (reports, competitors, experiments),
+  Engineering › Runs & PRs (runs, pull requests). The Approvals tab also holds
+  the assets and the comment alerts. A view is not a tab: it is never in the route table, and the
+  screen work that replaces it edits a page, not the table.
+- **Write roles that now match the routes.** Routing declares
+  `writeRoles: ["owner", "ops"]`, which is what every auto-router route
+  checks (`ops:write`); the Credit ledger writes nothing and declares none.
+
+The paragraphs from here to "Old route → new route" were written under the names the
+entries had before 2026-11-07 (Operations, AMUX, Agent digests, Operations
+settings); the restructuring above says where each went.
 
 **Marketing** is the marketing automation's record: what the Guard sent to a
 person, what went out, which brand accounts exist and what the automation
@@ -337,7 +408,7 @@ resolves to the *section* it named, or its explicitly approved replacement,
 rather than to the first tab of whichever page absorbed it.
 `tests/adminNavigation.test.mjs` fails if a retired route
 loses its redirect route or points at a tab that does not exist, and
-`tests/e2e-admin/admin-shell-navigation.spec.ts` drives all sixteen in a browser.
+`tests/e2e-admin/admin-shell-navigation.spec.ts` drives them in a browser.
 
 | Old route | New destination | Why |
 | --- | --- | --- |
@@ -350,14 +421,32 @@ loses its redirect route or points at a tab that does not exist, and
 | `/admin/webhooks` | `/admin/automation?tab=webhooks` | As above |
 | `/admin/approvals` | `/admin/work-queue` | Two-person approval was retired; the address still opens the queue |
 | `/admin/amux-intake` | `/admin/amux-backlog?tab=ideas` | v4 Ideas replaces the retired legacy JSON intake UI |
-| `/admin/amux-board-import` | `/admin/amux-backlog?tab=import` | As above |
-| `/admin/amux-reconciliation` | `/admin/amux-backlog?tab=reconciliation` | As above |
-| `/admin/amux-backlog-metadata` | `/admin/amux-backlog?tab=metadata` | As above |
-| `/admin/amux-board-recommendation` | `/admin/amux-promotion?tab=recommendation` | As above |
-| `/admin/amux-board-promotion` | `/admin/amux-promotion?tab=promotion` | As above |
-| `/admin/amux-board-auto-promotion` | `/admin/amux-promotion?tab=auto-promotion` | As above |
+| `/admin/amux-board-import` | `/admin/amux-recovery?tab=legacy` | Legacy tools of Safety & recovery (2026-11-07); it was `/admin/amux-backlog?tab=import` |
+| `/admin/amux-reconciliation` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-backlog-metadata` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-board-recommendation` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-board-promotion` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-board-auto-promotion` | `/admin/amux-recovery?tab=legacy` | As above |
 | `/admin/amux-cards` | `/admin/amux-execution?tab=cards` | As above |
 | `/admin/amux-execution?tab=workers` | `/admin/amux-settings?tab=workers` | Workers moved to Operations settings (2026-10-20); the request's other query is kept, its stale `tab` is not |
+| `/admin/amux-promotion` (any `?tab=`) | `/admin/amux-recovery?tab=legacy` | The Promotion page is the Legacy tools tab (2026-11-07) |
+| `/admin/qa-release` | `/admin/release?tab=qa` | QA and release is Release (2026-11-07) |
+| `/admin/qa-release?tab=overview` | `/admin/release?tab=qa` | `ADMIN_QA_RELEASE_LEGACY_TABS` |
+| `/admin/qa-release?tab=train` | `/admin/release?tab=qa&view=train` | As above |
+| `/admin/qa-release?tab=lane` | `/admin/release?tab=qa&view=lane` | As above |
+| `/admin/qa-release?tab=ci-admission` | `/admin/release?tab=ci` | As above |
+| `/admin/agent-digests?tab=qa-release` | `/admin/release?tab=qa` | `ADMIN_AGENT_DIGESTS_LEGACY_TABS` |
+| `/admin/agent-digests?tab=ci-admission` | `/admin/release?tab=ci` | As above |
+| `/admin/agent-digests?tab=billing-finance-ops` | `/admin/finance-agent` | The billing and finance digest is its own agent page |
+| `/admin/agent-digests` (bare, or any other tab) | `/admin/release` | Its first tab was QA; only `?tab=trust-safety` still renders there |
+| `/admin/amux-backlog?tab=import`, `reconciliation`, `metadata` | `/admin/amux-recovery?tab=legacy` | `ADMIN_AMUX_BACKLOG_LEGACY_TABS` |
+| `/admin/amux-backlog?tab=recovery` | `/admin/amux-recovery?tab=reservations` | As above (it opened Ideas from 2026-11-06 until 2026-11-07) |
+| `/admin/amux-backlog?tab=intake` | `/admin/amux-backlog?tab=ideas` | As above |
+| `/admin/amux-settings?tab=safety` | `/admin/amux-recovery?tab=safety` | Execution safety is Safety & recovery; the halt clear's step-up returns there |
+| `/admin/amux-execution?tab=assignment` | `/admin/amux-execution?tab=review` | The review queue under its new name; `halts` now lands on `/admin/amux-recovery?tab=safety` |
+| `/admin/admin-access?tab=integrity` | `/admin/audit?tab=integrity` | The chain check is part of the Audit log |
+| `/admin/marketing?tab=competitors` | `/admin/marketing?tab=reports&view=competitors` | `ADMIN_MARKETING_LEGACY_TABS`; `experiments` opens `?tab=reports&view=experiments`, `assets` `?tab=queue&view=assets`, `comments` `?tab=queue&view=comments` |
+| `/admin/engineering-agent?tab=pull-requests` | `/admin/engineering-agent?tab=runs&view=pull-requests` | Runs & PRs holds both records |
 
 The AMUX redirects decide nothing about access. A role the destination refuses
 is redirected and then gets the destination's 404, as it got one from the old

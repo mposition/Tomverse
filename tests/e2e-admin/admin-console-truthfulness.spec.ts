@@ -66,7 +66,7 @@ test.describe("the console says only what it knows", () => {
     page,
   }) => {
     await page.goto("/admin/overview");
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
 
     await page.getByTestId("admin-health-score-link").click();
     await expect(page).toHaveURL("/admin/overview?tab=health");
@@ -153,7 +153,7 @@ test.describe("the console says only what it knows", () => {
       "href",
       /tab=health$/
     );
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
 
     await tabStrip.getByRole("link", { name: "Summary" }).click();
     await expect(page).toHaveURL("/admin/overview?tab=summary");

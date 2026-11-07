@@ -60,7 +60,7 @@ test("the merge lane tab says what the lane is doing and which pull requests are
   await adminFixtureDatabase().appSetting.create({ data: { key: KEY, value: JSON.stringify(record) } });
 
   await signInAs("owner");
-  await page.goto("/admin/qa-release?tab=lane");
+  await page.goto("/admin/release?tab=qa&view=lane");
   await page.getByRole("button", { name: "Decline", exact: true }).click();
 
   const section = page.getByTestId("qa-release-lane-verdicts");
@@ -79,8 +79,8 @@ test("the merge lane tab says what the lane is doing and which pull requests are
   await page.screenshot({ path: "test-results-admin/qa-release-lane-tab.png", fullPage: true });
 
   // The operator's count rides on the tab, from any tab of the page.
-  await page.goto("/admin/qa-release?tab=overview");
-  await expect(page.getByRole("link", { name: /^Merge lane, / })).toContainText("1");
+  await page.goto("/admin/release?tab=qa");
+  await expect(page.getByRole("link", { name: /^Merge lane/ })).toContainText("1");
   // The overview raises them too and shows where work stands.
   await expect(page.getByTestId("qa-release-attention-lane_human")).toContainText("#2881");
   await expect(page.getByTestId("qa-release-flow")).toContainText("yours 1");
