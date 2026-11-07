@@ -10,20 +10,33 @@ import { assertRecentAdminAuthentication,
 import { apiSecurityResponse, consumeApiRateLimit,
   readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { AmuxIdeaCardCloseOwnerError, answerAmuxIdeaCardCloseForOwner } from
-  "@/lib/amux/ideaCardCloseOwnerService";
-import { readAmuxIdeaCardCloseQuestionForOwner } from "@/lib/amux/ideaCardCloseService";
+import { AmuxIdeaCardCloseOwnerError, answerAmuxIdeaCardCloseForOwner,
+  closeAmuxIdeaCardsDirectlyForOwner } from "@/lib/amux/ideaCardCloseOwnerService";
+import { readAmuxIdeaCardCloseOwnerState } from "@/lib/amux/ideaCardCloseService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const ideaId = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
-const body = z.object({
+const answer = z.object({
   ideaId,
   questionId: z.string().uuid(),
   decision: z.enum(["close", "keep"]),
   reason: z.string().max(500),
   ownerConfirmed: z.literal(true),
 }).strict();
+/**
+ * With no question open, the owner closes the remaining cards directly: the
+ * cards the page showed, so a card added since closes nothing.
+ */
+const direct = z.object({
+  ideaId,
+  direct: z.literal(true),
+  cardIds: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)).min(1).max(200),
+  decision: z.literal("close"),
+  reason: z.string().max(500),
+  ownerConfirmed: z.literal(true),
+}).strict();
+const body = z.union([answer, direct]);
 
 function failure(error: unknown): Response {
   if (isAdminReauthenticationError(error)) {
@@ -44,7 +57,10 @@ function failure(error: unknown): Response {
     { status: 503, headers: noStore });
 }
 
-/** The open card close question of one of the owner's ideas, or none. */
+/**
+ * The open card close question of one of the owner's ideas, or with none open
+ * what a direct close would close, or neither.
+ */
 export async function GET(request: Request): Promise<Response> {
   try {
     const session = await getServerSession(authOptions);
@@ -60,15 +76,15 @@ export async function GET(request: Request): Promise<Response> {
     if (!parsed.success) {
       return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
     }
-    const question = await readAmuxIdeaCardCloseQuestionForOwner({
-      ideaId: parsed.data, actorUserId: session.user.id });
-    return NextResponse.json({ question }, { headers: noStore });
+    const state = await readAmuxIdeaCardCloseOwnerState({ ideaId: parsed.data, actorUserId: session.user.id });
+    return NextResponse.json(state, { headers: noStore });
   } catch (error) { return failure(error); }
 }
 
 /**
- * The owner closes or keeps a stalled idea's remaining cards. It answers what
- * happened (closed, kept, cancelled, not_open, not_found); an unknown outcome
+ * The owner closes or keeps a stalled idea's remaining cards, or closes them
+ * directly with no question open. It answers what happened (closed, kept,
+ * cancelled, not_open, not_found, not_closable); an unknown outcome
  * is read back from the idea, never resent blind.
  */
 export async function POST(request: Request): Promise<Response> {
@@ -87,9 +103,13 @@ export async function POST(request: Request): Promise<Response> {
     }
     await consumeApiRateLimit(request, session.user.id,
       "admin-amux-idea-card-close-write", { minute: 5, day: 50 });
-    const parsed = await readLimitedJson(request, 2_048, body);
-    const result = await answerAmuxIdeaCardCloseForOwner({ session, request, ideaId: parsed.ideaId,
-      questionId: parsed.questionId, decision: parsed.decision, reason: parsed.reason });
+    // Room for the direct close's card ids: 200 at most.
+    const parsed = await readLimitedJson(request, 16_384, body);
+    const result = "direct" in parsed
+      ? await closeAmuxIdeaCardsDirectlyForOwner({ session, request, ideaId: parsed.ideaId, cardIds: parsed.cardIds,
+        reason: parsed.reason })
+      : await answerAmuxIdeaCardCloseForOwner({ session, request, ideaId: parsed.ideaId,
+        questionId: parsed.questionId, decision: parsed.decision, reason: parsed.reason });
     return NextResponse.json({ ...result, retryWrite: false }, { headers: noStore });
   } catch (error) { return failure(error); }
 }

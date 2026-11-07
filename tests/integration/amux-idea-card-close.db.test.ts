@@ -26,10 +26,12 @@ import {
   applyAmuxIdeaCardCloseDmAnswer,
   isAmuxIdeaCardCloseBusy,
   openAmuxIdeaCardCloseQuestionIfDue,
+  readAmuxIdeaCardCloseOwnerState,
   readAmuxIdeaCardCloseQuestionForOwner,
   readAmuxIdeaCardCloseSyncForRelay,
 } from "@/lib/amux/ideaCardCloseService";
-import { AmuxIdeaCardCloseOwnerError, answerAmuxIdeaCardCloseForOwner } from "@/lib/amux/ideaCardCloseOwnerService";
+import { AmuxIdeaCardCloseOwnerError, answerAmuxIdeaCardCloseForOwner,
+  closeAmuxIdeaCardsDirectlyForOwner } from "@/lib/amux/ideaCardCloseOwnerService";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import {
   isAmuxV22QuestionCard,
@@ -718,6 +720,133 @@ test("keep records the answer, moves nothing, and asks again only after 30 days"
   const next = (await questionOf(ideaId))!;
   assert.notEqual(next.id, question.id, "asked again after them");
   assert.equal(next.state, "open");
+});
+
+/** What the page does: read what a direct close would close, then send those cards. */
+const closeDirectly = async (ideaId: string, over: Record<string, unknown> = {}) => {
+  const shown = (await readAmuxIdeaCardCloseOwnerState({ ideaId, actorUserId: OWNER_ID })).direct?.cards
+    .map((entry) => entry.id) ?? ["nothing-shown"];
+  return closeAmuxIdeaCardsDirectlyForOwner({ session: owner(), request: adminRequest(), ideaId, cardIds: shown,
+    reason: "Stalled for good, secret note.", ...over } as never);
+};
+
+test("a direct close closes only the cards the owner was shown", async () => {
+  const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
+  const before = await questionCount();
+  // A card registered after the page read is not among those shown; one finished since is.
+  for (const cardIdsShown of [[cardIds[0]], [...cardIds, randomUUID()], [cardIds[0], cardIds[0]]]) {
+    assert.equal((await closeDirectly(ideaId, { cardIds: cardIdsShown })).outcome, "not_closable",
+      JSON.stringify(cardIdsShown));
+  }
+  assert.equal(await questionCount(), before, "no row for a refused close");
+  for (const id of cardIds) assert.equal((await card(id)).status, ["blocked", "backlog"][cardIds.indexOf(id)]);
+  assert.equal((await closeDirectly(ideaId, { cardIds: [...cardIds].reverse() })).outcome, "closed",
+    "the same cards in any order");
+});
+
+test("the owner closes a kept idea's cards directly, with no question open, through the one apply", async () => {
+  const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }, { status: "backlog" },
+    { cardType: "story", status: "backlog" }]);
+  const { question } = await confirmed(ideaId, "keep");
+  assert.equal((await runAmuxV22ResolveStep(null)).resolved, "kept");
+  const escalation = await prisma.amuxHumanEscalation.create({ data: { taskId: cardIds[0],
+    specialty: "execution-recovery", reason: "usage_outcome_unknown", openedBy: "tomverse-amux-orchestrator",
+    openedTaskRevision: 3 } });
+
+  // The kept idea is not asked about again, but the owner sees what a direct close would close.
+  await drain();
+  assert.equal((await questionOf(ideaId))!.id, question.id);
+  const state = await readAmuxIdeaCardCloseOwnerState({ ideaId, actorUserId: OWNER_ID });
+  assert.equal(state.question, null);
+  assert.equal(state.direct?.reasonCode, "blocked_task");
+  assert.deepEqual(state.direct?.cards.map((entry) => entry.id).sort(), [...cardIds].sort());
+  assert.deepEqual(await readAmuxIdeaCardCloseOwnerState({ ideaId, actorUserId: "someone-else" }),
+    { question: null, direct: null }, "another owner's idea reads as neither");
+
+  await assert.rejects(closeDirectly(ideaId, { reason: "no" }), /invalid/);
+  await assert.rejects(closeDirectly(ideaId, { session: owner({
+    authenticatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString() }) }), /Sign in again/);
+  assert.equal((await card(cardIds[0])).status, "blocked", "nothing moved by a refusal");
+
+  const result = await closeDirectly(ideaId);
+  assert.equal(result.outcome, "closed");
+  assert.equal(result.outcome === "closed" && result.closedCards, 3);
+  for (const id of cardIds) {
+    const after = await card(id);
+    assert.equal(after.status, "cancelled");
+    assert.equal(after.revision, 4);
+    assert.ok(after.v4TerminalAt);
+  }
+  const resolved = await prisma.amuxHumanEscalation.findUniqueOrThrow({ where: { id: escalation.id } });
+  assert.equal(resolved.status, "resolved");
+  assert.equal(resolved.resolvedById, OWNER_ID);
+  const row = (await questionOf(ideaId))!;
+  assert.notEqual(row.id, question.id, "its own row in the one table");
+  assert.equal(row.state, "closed");
+  assert.equal(row.answerSource, "operator");
+  assert.equal(row.answeredByUserId, OWNER_ID);
+  assert.equal(row.localCardId, null, "filed to no one");
+  const audit = await auditOf(row.id);
+  assert.deepEqual(audit.map((entry) => entry.action), ["amux.idea.card_close.closed"]);
+  assert.equal(audit[0].actorUserId, OWNER_ID, "a person's entry");
+  assert.ok(audit[0].entryHash);
+  const metadata = audit[0].metadata as Record<string, unknown>;
+  assert.equal(metadata.direct, true);
+  assert.match(String(metadata.reasonDigest), /^[a-f0-9]{64}$/);
+  assert.ok(!JSON.stringify(metadata).includes("secret note"));
+  assert.equal((await stageOf(ideaId))?.stage, "cancelled", "every card closed: the idea shows cancelled");
+  assert.deepEqual((await readAmuxIdeaCardCloseSyncForRelay(ON)).pending
+    .filter((entry) => entry.question_id === row.id), [], "never filed to the relay");
+  assert.equal((await closeDirectly(ideaId)).outcome, "not_closable", "nothing left to close");
+});
+
+test("a direct close needs no question and takes no place in the day's limit", async () => {
+  const { ideaId, cardIds } = await seedIdea([{ status: "backlog", ageDays: 9 }]);
+  // Off: the switch holds back only the paid question.
+  assert.equal((await readAmuxIdeaCardCloseOwnerState({ ideaId, actorUserId: OWNER_ID }, {})).direct?.reasonCode,
+    "stale_cards");
+  assert.equal((await closeDirectly(ideaId)).outcome, "closed");
+  assert.equal((await card(cardIds[0])).status, "cancelled");
+
+  const next = await seedIdea([{ status: "blocked" }]);
+  await drain({ ...ON, AMUX_IDEA_CARD_CLOSE_MAX_PER_DAY: String(await questionCount()) });
+  assert.equal((await questionOf(next.ideaId))?.state, "open",
+    "the direct close's row is not one of the day's questions");
+});
+
+test("a direct close refuses what a question would not ask about, and leaves an open question to be answered", async () => {
+  const running = await seedIdea([{ status: "blocked" }, { status: "review", receipt: true }]);
+  const assigned = await seedIdea([{ status: "blocked" }, { status: "todo", assigned: true }]);
+  const recent = await seedIdea([{ status: "backlog", ageDays: 1 }]);
+  const finished = await seedIdea([{ status: "done" }]);
+  const theirs = await seedIdea([{ status: "blocked" }], { actor: `card-close-other-${randomUUID()}` });
+  const live = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
+  await asReplica((tx) => tx.$executeRaw`
+    INSERT INTO "AmuxExecutionAttempt" ("id", "taskId", "worker", "workerInstanceId", "workerGeneration",
+      "taskRevision", "attemptNumber", "heartbeatAt", "leaseExpiresAt", "startedAt", "updatedAt")
+    VALUES (${randomUUID()}, ${live.cardIds[1]}, 'claude-impl', 'fixture-instance', 1, 3, 1,
+      ${new Date()}, ${new Date(Date.now() + 60_000)}, ${new Date()}, ${new Date()})`);
+  const dependedOn = await seedIdea([{ status: "blocked" }]);
+  const dependent = await seedIdea([{ status: "backlog", ageDays: 1 }]);
+  await asReplica((tx) => tx.$executeRaw`
+    INSERT INTO "AmuxWorkDependency" ("taskId", "dependencyId") VALUES (${dependent.cardIds[0]}, ${dependedOn.cardIds[0]})`);
+  for (const seeded of [running, assigned, recent, finished, theirs, live, dependedOn]) {
+    assert.equal((await readAmuxIdeaCardCloseOwnerState({ ideaId: seeded.ideaId, actorUserId: OWNER_ID })).direct,
+      null, seeded.ideaId);
+    assert.equal((await closeDirectly(seeded.ideaId)).outcome, "not_closable", seeded.ideaId);
+  }
+  assert.equal((await card(running.cardIds[0])).status, "blocked");
+  assert.equal((await card(dependedOn.cardIds[0])).status, "blocked");
+
+  const asked = await seedIdea([{ status: "blocked" }]);
+  await drain();
+  const open = (await questionOf(asked.ideaId))!;
+  assert.equal(open.state, "open");
+  const state = await readAmuxIdeaCardCloseOwnerState({ ideaId: asked.ideaId, actorUserId: OWNER_ID });
+  assert.equal(state.question?.questionId, open.id, "the open question is what the detail shows");
+  assert.equal(state.direct, null);
+  assert.equal((await closeDirectly(asked.ideaId)).outcome, "not_closable");
+  assert.equal((await questionOf(asked.ideaId))!.id, open.id, "no second row");
 });
 
 test("work that started before the answer is applied closes nothing and cancels the question", async () => {

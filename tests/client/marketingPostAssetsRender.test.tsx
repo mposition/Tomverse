@@ -63,6 +63,20 @@ for (const locale of ["en", "ko"] as const) {
     for (const id of IDS) assert.ok(text.includes(id));
   });
 
+  test(`${locale}: a hand-posted account's files can be saved, and only there (owner 2026-11-07)`, () => {
+    const downloads = (tree: ReactNode) =>
+      propsOf(tree).filter((props) => props["data-testid"] === "marketing-asset-download-link");
+    const saved = downloads(MarketingPostAssets({ assetIds: IDS, downloadable: true, m }));
+    assert.deepEqual(
+      saved.map((link) => link.href),
+      IDS.map((id) => `/api/admin/marketing/assets/${id}/preview?download=1`),
+    );
+    for (const link of saved) assert.equal(link.download, true);
+    assert.ok(textOf(MarketingPostAssets({ assetIds: IDS, downloadable: true, m })).includes(m.postAssetDownload));
+    assert.equal(downloads(MarketingPostAssets({ assetIds: IDS, m })).length, 0);
+    assert.equal(downloads(MarketingPostAssets({ assetIds: [], downloadable: true, m })).length, 0);
+  });
+
   test(`${locale}: a post with no files says so instead of showing nothing`, () => {
     for (const assetIds of [[], null, undefined, "media-x", [""], [3]]) {
       const tree = MarketingPostAssets({ assetIds, m });
@@ -77,5 +91,6 @@ test("both languages carry the attached-files lines", () => {
     const m = adminMarketingMessages[locale] as unknown as Record<string, string>;
     assert.ok(m.postAssets && m.postAssets.length > 0);
     assert.ok(m.postNoAssets && m.postNoAssets.length > 0);
+    assert.ok(m.postAssetDownload && m.postAssetDownload.length > 0);
   }
 });

@@ -12,12 +12,20 @@
 // the approved short's own on-screen lines. A line the pack does not carry is
 // refused, so the job cannot put new words on a card.
 //
+// A Simplified Chinese card for RedNote (owner 2026-11-07) is made from a
+// zh-Hant pack with `"locale": "zh-Hans"` in the spec: the spec still names the
+// pack's own lines, and every line the card draws is that line converted to
+// Simplified by OpenCC, character for character -- no new words. The captures
+// are the pack's pictures, unchanged, so the words inside them stay as they
+// were taken.
+//
 // Exit codes: 0 written, 2 usage, 1 anything else (a line that does not fit,
 // a missing image, a refused spec).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import * as OpenCC from "opencc-js/t2cn";
 import { chromium } from "playwright";
 
 const [packPath, specPath, outDir] = process.argv.slice(2);
@@ -26,11 +34,12 @@ if (!packPath || !specPath || !outDir) {
   process.exit(2);
 }
 
-/** The channels a card may go to, per locale: the accounts that post in it (owner 2026-11-03). */
+/** The channels a card may go to, per locale: the accounts that post in it (owner 2026-11-03, 2026-11-07). */
 const CARD_CHANNELS = {
   en: ["facebook", "instagram", "linkedin", "x"],
-  ko: ["facebook", "instagram"],
+  ko: ["facebook", "instagram", "threads"],
   "zh-Hant": ["facebook", "instagram", "threads"],
+  "zh-Hans": ["rednote"],
 };
 
 const fail = (message) => {
@@ -42,12 +51,25 @@ const pack = JSON.parse(readFileSync(packPath, "utf8"));
 const spec = JSON.parse(readFileSync(specPath, "utf8"));
 const packDir = path.dirname(path.resolve(packPath));
 
-if (!CARD_CHANNELS[pack.locale]) fail(`no card channels for locale ${pack.locale}`);
+// The card's locale: the pack's, or Simplified made from a Traditional pack.
+const locale = spec.locale ?? pack.locale;
+if (locale !== pack.locale && !(locale === "zh-Hans" && pack.locale === "zh-Hant")) {
+  fail(`a ${locale} card cannot be made from a ${pack.locale} pack`);
+}
+const toSimplified = OpenCC.Converter({ from: "tw", to: "cn" });
+/** A pack line as this card draws it. */
+const draw = (line) => (locale === pack.locale ? line : toSimplified(line));
+
+if (!CARD_CHANNELS[locale]) fail(`no card channels for locale ${locale}`);
 if (!/^media-[a-z0-9][a-z0-9-]{0,99}$/u.test(spec.id ?? "")) fail("spec.id is not a media asset id");
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 if (!pack.headlines.some((pair) => same(pair, spec.headline))) fail("spec.headline is not one of the pack's lines");
 if (!pack.callouts.includes(spec.callout)) fail("spec.callout is not one of the pack's lines");
 if (!pack.ctas.includes(spec.cta)) fail("spec.cta is not one of the pack's lines");
+const question = pack.question.map(draw);
+const headline = spec.headline.map(draw);
+const callout = draw(spec.callout);
+const cta = draw(spec.cta);
 
 const image = (name) => {
   const file = path.join(packDir, pack.images[name]);
@@ -58,15 +80,15 @@ const escape = (text) =>
   String(text).replace(/[&<>"]/gu, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
 
 const fonts =
-  pack.locale === "zh-Hant"
+  locale === "zh-Hant"
     ? "'Geist', 'Noto Sans TC', sans-serif"
-    : pack.locale === "ko"
-      ? "'Geist', 'Noto Sans KR', sans-serif"
+    : locale === "zh-Hans"
+      ? "'Geist', 'Noto Sans SC', sans-serif"
       : "'Geist', 'Noto Sans KR', sans-serif";
 
 const html = `<!doctype html>
-<html lang="${pack.locale}"><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@500;700;800&family=Noto+Sans+KR:wght@500;700;900&family=Noto+Sans+TC:wght@500;700;900&display=block">
+<html lang="${locale}"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@500;700;800&family=Noto+Sans+KR:wght@500;700;900&family=Noto+Sans+TC:wght@500;700;900&family=Noto+Sans+SC:wght@500;700;900&display=block">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 1080px; height: 1350px; background: #ffffff; overflow: hidden; }
@@ -93,18 +115,18 @@ const html = `<!doctype html>
 </style></head><body>
   <div class="abs pill"></div>
   <div class="abs q">Q</div>
-  <div class="abs question" data-fit="22">${pack.question.map((line) => `<div>${escape(line)}</div>`).join("")}</div>
-  <div class="abs head h1" data-fit="64">${escape(spec.headline[0])}</div>
-  <div class="abs head h2" data-fit="64">${escape(spec.headline[1])}</div>
+  <div class="abs question" data-fit="22">${question.map((line) => `<div>${escape(line)}</div>`).join("")}</div>
+  <div class="abs head h1" data-fit="64">${escape(headline[0])}</div>
+  <div class="abs head h2" data-fit="64">${escape(headline[1])}</div>
   <div class="abs band"></div>
   <img class="abs card left" src="${image("left")}">
   <img class="abs card right" src="${image("right")}">
   <img class="abs card center" src="${image("center")}">
   <img class="abs summary" src="${image("summary")}">
-  <div class="abs callout" data-fit="24">${escape(spec.callout)}</div>
+  <div class="abs callout" data-fit="24">${escape(callout)}</div>
   <img class="abs logo" src="${image("logo")}">
   <div class="abs brand">Tomverse</div>
-  <div class="abs cta" data-fit="22">${escape(spec.cta)}</div>
+  <div class="abs cta" data-fit="22">${escape(cta)}</div>
 </body></html>`;
 
 mkdirSync(outDir, { recursive: true });
@@ -149,20 +171,21 @@ try {
 // Every word the card shows, in reading order, for the Guard at submission --
 // the captures' own text included (the answers' model names, numbers and
 // wording are on the card too), so a person approving it sees the Guard's
-// codes for all of it.
+// codes for all of it. The captures' text is what the pictures show, so it is
+// never converted.
 if (!Array.isArray(pack.captureText) || pack.captureText.length !== 3) {
   fail("pack.captureText must hold the left, center and right captures' text");
 }
 const transcript = [
-  ...pack.question,
-  ...spec.headline,
+  ...question,
+  ...headline,
   ...pack.captureText,
-  spec.callout,
+  callout,
   pack.summaryText,
   "Tomverse",
-  spec.cta.replace(/\s*→\s*$/u, ""),
+  cta.replace(/\s*→\s*$/u, ""),
 ].join(" ");
-const channels = CARD_CHANNELS[pack.locale];
+const channels = CARD_CHANNELS[locale];
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
 // The card reuses the approved short's words and captures, so it rests on the
 // same claims: a post that carries it declares them and the Guard judges them
@@ -182,9 +205,9 @@ writeFileSync(
         validUntil,
         disclosure: Object.fromEntries(channels.map((channel) => [channel, "none"])),
         depictsProductInterface: true,
-        alt: { [pack.locale]: pack.cardAlt },
+        alt: { [locale]: draw(pack.cardAlt) },
       },
-      transcript: { [pack.locale]: transcript },
+      transcript: { [locale]: transcript },
     },
     null,
     2,
