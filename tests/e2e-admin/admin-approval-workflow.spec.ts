@@ -24,10 +24,10 @@ const fillPlanAdjustment = async (
   // container matches the same text filter as the panel itself.
   const section = page
     .locator("section")
-    .filter({ hasText: "Manual plan adjustment" })
+    .filter({ hasText: "Change the plan by hand" })
     .last();
   await section.getByRole("combobox").selectOption(plan);
-  await section.getByPlaceholder("Reason for audit log").fill(reason);
+  await section.getByPlaceholder("Why (saved in the audit log)").fill(reason);
   await section.getByPlaceholder("ADJUST PLAN").fill(confirm);
   return section;
 };
@@ -38,7 +38,7 @@ test.describe("high-risk admin actions", () => {
     signInAs,
   }) => {
     await signInAs("billing");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=billing`);
 
     const requests: string[] = [];
     page.on("request", (request) => {
@@ -52,14 +52,14 @@ test.describe("high-risk admin actions", () => {
 
     const section = page
       .locator("section")
-      .filter({ hasText: "Manual plan adjustment" })
+      .filter({ hasText: "Change the plan by hand" })
       .last();
-    // `exact` matters: the customer detail page also carries a "Save note".
-    const save = section.getByRole("button", { name: "Save", exact: true });
+    // `exact` keeps this to the plan button, not another save on the page.
+    const save = section.getByRole("button", { name: "Change plan", exact: true });
     await expect(save).toBeDisabled();
 
     // Reason alone is not enough.
-    await section.getByPlaceholder("Reason for audit log").fill(REASON);
+    await section.getByPlaceholder("Why (saved in the audit log)").fill(REASON);
     await expect(save).toBeDisabled();
 
     // Nor is a confirmation phrase that only looks right.
@@ -80,13 +80,13 @@ test.describe("high-risk admin actions", () => {
     const database = adminFixtureDatabase();
 
     await signInAs("billing");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=billing`);
     const section = await fillPlanAdjustment(page, {
       plan: "Max",
       reason: REASON,
       confirm: "ADJUST PLAN",
     });
-    await section.getByRole("button", { name: "Save", exact: true }).click();
+    await section.getByRole("button", { name: "Change plan", exact: true }).click();
 
     await expect
       .poll(async () =>

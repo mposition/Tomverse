@@ -303,15 +303,18 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/users");
 
-    await expect(page.getByText(FIXTURE_CUSTOMERS.activePro.name)).toBeVisible();
+    // The table, not the phone cards rendered (hidden) alongside it.
+    await expect(
+      page.getByRole("table").getByText(FIXTURE_CUSTOMERS.activePro.name)
+    ).toBeVisible();
     await expect(
       page.getByRole("link", {
-        name: `View details for ${FIXTURE_CUSTOMERS.disputedHold.email}`,
+        name: `Open ${FIXTURE_CUSTOMERS.disputedHold.email}`,
       })
     ).toBeVisible();
     // The disputed-hold customer is the one carrying debt, and the row says so.
-    await expect(page.getByText("AI access held")).toBeVisible();
-    await expect(page.getByText(/Debt 640 credits/)).toBeVisible();
+    await expect(page.getByText("AI access held").first()).toBeVisible();
+    await expect(page.getByText(/Owes 640 credits/).first()).toBeVisible();
   });
 
   test("the customer detail page renders plan, usage, credits, and timeline", async ({
@@ -321,11 +324,16 @@ test.describe("admin read surfaces", () => {
 
     await expect(consoleHeading(page)).toHaveText("Customer detail");
     await expect(page.getByText(FIXTURE_CUSTOMERS.activePro.email)).toBeVisible();
-    await expect(page.getByText("cus_e2e_active_pro")).toBeVisible();
+    // Billing section: the credit purchases, with the Stripe ids folded away.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=billing`);
+    // Shown in the detail header and again in the folded billing facts.
+    await expect(page.getByText("cus_e2e_active_pro").first()).toBeAttached();
     await expect(
-      page.getByRole("heading", { name: "Additional credit purchases" })
+      page.getByRole("heading", { name: "Extra credit purchases" })
     ).toBeVisible();
     await expect(page.getByText(FIXTURE_CREDIT.packId).first()).toBeVisible();
+    // Conversations section.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=conversations`);
     await expect(
       page.getByRole("heading", { name: "Recent conversations" })
     ).toBeVisible();
@@ -363,12 +371,14 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByTestId("admin-user-detail-messages-today")
     ).toHaveText("2");
-    // Usage is only half the detail; the relations alongside it must render
-    // too, so a green run means data reached the screen rather than an empty
-    // panel that merely stopped erroring.
+    // Usage is only half the detail; the relations on the other sections must
+    // render too, so a green run means data reached the screen rather than an
+    // empty panel that merely stopped erroring.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=conversations`);
     await expect(
       page.getByText(FIXTURE_CONVERSATION.title).first()
     ).toBeVisible();
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=billing`);
     await expect(page.getByText(FIXTURE_CREDIT.packId).first()).toBeVisible();
   });
 
@@ -387,54 +397,53 @@ test.describe("admin read surfaces", () => {
     ).toHaveText("0");
   });
 
-  test("support's feedback tab shows open and resolved entries with a filter", async ({
+  test("support's feedback tab lists open and resolved reports with a filter", async ({
     page,
   }) => {
     await page.goto("/admin/support?tab=feedback");
 
+    const rows = page.getByTestId("feedback-list-item");
     await expect(consoleHeading(page)).toHaveText("Support");
-    await expect(page.getByText(FIXTURE_FEEDBACK.open.message)).toBeVisible();
-    await expect(page.getByText(FIXTURE_FEEDBACK.resolved.message)).toBeVisible();
+    await expect(rows.filter({ hasText: FIXTURE_FEEDBACK.open.message })).toBeVisible();
+    await expect(rows.filter({ hasText: FIXTURE_FEEDBACK.resolved.message })).toBeVisible();
     // The bounded read states its own scope rather than presenting itself as
     // every report ever filed.
     await expect(page.getByText(/Showing the \d+ most recent reports/)).toBeVisible();
 
+    // The status filter is the first control named "resolved" on the page.
     await page.getByRole("button", { name: "resolved", exact: true }).first().click();
-    await expect(page.getByText(FIXTURE_FEEDBACK.resolved.message)).toBeVisible();
+    await expect(rows.filter({ hasText: FIXTURE_FEEDBACK.resolved.message })).toBeVisible();
     await expect(page.getByText(FIXTURE_FEEDBACK.open.message)).toHaveCount(0);
   });
 
-  test("a finished report starts folded and opens from the keyboard with its actions", async ({
+  test("a finished report is a quiet row until it is opened, then shows its actions", async ({
     page,
   }) => {
     await page.goto("/admin/support?tab=feedback");
 
+    const row = page
+      .getByTestId("feedback-list-item")
+      .filter({ hasText: FIXTURE_FEEDBACK.resolved.message });
     const entry = page
       .getByTestId("feedback-entry")
       .filter({ hasText: FIXTURE_FEEDBACK.resolved.message });
-    const toggle = entry.getByTestId("feedback-fold-toggle");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toHaveCount(0);
+    await expect(row).not.toHaveAttribute("aria-current", "true");
+    await expect(entry).toHaveCount(0);
 
-    // A working report has no fold at all.
-    const working = page
-      .getByTestId("feedback-entry")
-      .filter({ hasText: FIXTURE_FEEDBACK.open.message });
-    await expect(working.getByTestId("feedback-fold-toggle")).toHaveCount(0);
-    await expect(working.getByRole("button", { name: "reviewing", exact: true })).toBeVisible();
+    // A report still waiting on someone is the one open by default, and it
+    // is never the finished one.
+    await expect(page.getByTestId("feedback-entry")).toHaveCount(1);
+    await expect(
+      page.getByTestId("feedback-entry").getByRole("button", { name: "reviewing", exact: true })
+    ).toBeVisible();
 
-    // Focus stays on the same control through both changes.
-    await toggle.focus();
+    // Opening from the keyboard keeps focus on the same row.
+    await row.focus();
     await page.keyboard.press("Enter");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expect(toggle).toBeFocused();
+    await expect(row).toHaveAttribute("aria-current", "true");
+    await expect(row).toBeFocused();
     await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toBeEnabled();
     await expect(entry.getByText("Internal notes", { exact: true })).toBeVisible();
-
-    await page.keyboard.press("Enter");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(toggle).toBeFocused();
-    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toHaveCount(0);
   });
 
   test("a search opens the finished report it found", async ({ page }) => {
@@ -442,16 +451,34 @@ test.describe("admin read surfaces", () => {
       `/admin/support?tab=feedback&q=${encodeURIComponent(FIXTURE_FEEDBACK.resolved.id)}`
     );
 
+    const row = page.getByTestId("feedback-list-item");
+    await expect(row).toHaveCount(1);
+    await expect(row).toHaveAttribute("aria-current", "true");
     const entry = page.getByTestId("feedback-entry");
     await expect(entry).toHaveCount(1);
-    await expect(entry.getByTestId("feedback-fold-toggle")).toHaveAttribute(
-      "aria-expanded",
-      "true"
-    );
     await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toBeEnabled();
   });
 
-  test("the feedback list does not scroll sideways at phone width, folded or open", async ({
+  test("support's auto-fix review lists the case waiting for a person, and only reads", async ({
+    page,
+  }) => {
+    await page.goto("/admin/support?tab=autofix");
+
+    // The fixture's verified report has a case the rules passed to a person.
+    const row = page
+      .getByTestId("autofix-review-row")
+      .filter({ hasText: FIXTURE_FEEDBACK.open.message });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("Needs a look");
+    await expect(row.getByRole("link", { name: "Open the inquiry" })).toHaveAttribute(
+      "href",
+      new RegExp(`q=${FIXTURE_FEEDBACK.open.id}`)
+    );
+    // Nothing on this tab runs, approves or changes a fix.
+    await expect(page.getByTestId("autofix-review").locator("button")).toHaveCount(0);
+  });
+
+  test("the feedback list does not scroll sideways at phone width, in the list or the report", async ({
     page,
   }) => {
     // An unbroken line is the worst case: a pasted URL, with nowhere to wrap.
@@ -468,16 +495,21 @@ test.describe("admin read surfaces", () => {
       page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth
       );
-    const toggle = page
-      .getByTestId("feedback-entry")
-      .filter({ hasText: "https://example.com/" })
-      .getByTestId("feedback-fold-toggle");
+    const row = page
+      .getByTestId("feedback-list-item")
+      .filter({ hasText: "https://example.com/" });
 
-    await expect(toggle).toBeVisible();
+    await expect(row).toBeVisible();
     expect(await overflow()).toBe(0);
 
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // On a phone the list gives way to the report, with a way back.
+    await row.click();
+    await expect(
+      page.getByTestId("feedback-entry").filter({ hasText: "https://example.com/" })
+    ).toBeVisible();
+    expect(await overflow()).toBe(0);
+    await page.getByRole("button", { name: "Back to the list" }).click();
+    await expect(row).toBeVisible();
     expect(await overflow()).toBe(0);
   });
 
@@ -498,16 +530,13 @@ test.describe("admin read surfaces", () => {
     await page.goto("/admin/billing");
 
     await expect(
-      page.getByRole("heading", { name: "Refunds and cancellations split" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", {
-        name: "Plans, fixed market prices, Stripe IDs, and promotion codes",
-      })
+      page.getByRole("heading", { name: "Subscribers, cancellations and refunds" })
     ).toBeVisible();
     for (const plan of ["Free", "Pro", "Max"]) {
       await expect(page.getByRole("heading", { name: plan, exact: true })).toBeVisible();
     }
+    // Nothing is unsaved on a fresh load, so the one save bar is not drawn.
+    await expect(page.getByTestId("admin-save-bar")).toHaveCount(0);
   });
 
   test("billing's promotions tab renders the code catalogue and its risk signals", async ({

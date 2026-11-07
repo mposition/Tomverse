@@ -1,18 +1,15 @@
 "use client";
 
-import { formatAestDateTime } from "@/lib/adminUiCore";
+import { formatAestDateTime, type AdminTone } from "@/lib/adminUiCore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   BellRing,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
+  ChevronLeft,
   Clipboard,
   Download,
   Mail,
   Loader2,
-  MessageSquare,
   Search,
   X,
 } from "lucide-react";
@@ -21,6 +18,11 @@ import type { AdminMessageShape } from "@/lib/adminLocale";
 import { adminFeedbackInboxMessages } from "@/lib/adminMessages/feedbackInbox";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import {
   FEEDBACK_CLOSURE_OUTCOMES,
   FEEDBACK_USER_REPLY_MAX_LENGTH,
@@ -39,7 +41,7 @@ import {
 } from "@/components/admin/useSupportInboxRefresh";
 import { adminFetch } from "@/lib/adminFetch";
 
-type FeedbackInboxMessages = AdminMessageShape<
+export type FeedbackInboxMessages = AdminMessageShape<
   (typeof adminFeedbackInboxMessages)["en"]
 >;
 
@@ -195,6 +197,11 @@ type Props = {
    * a total is how a backlog goes unnoticed.
    */
   rowLimit?: number;
+  /**
+   * Whether the viewer may change anything here. It only draws the write
+   * controls locked, with the access they need; every route refuses on its own.
+   */
+  canWrite?: boolean;
 };
 
 /** The server's account of what happened to the submitter email, verbatim. */
@@ -234,18 +241,23 @@ const canResendReply = (feedback: FeedbackRow) =>
   (!feedback.replyDelivery || feedback.replyDelivery.status === "abandoned");
 
 /**
- * Whether a report shows its full card. One still being worked always does. A
- * finished one is folded until the operator opens it or a search finds it: a
- * search can match a trace ID or any line of the body, which a folded row does
- * not show, and the duplicate links land on `?q=<id>`.
+ * Which report the detail pane shows. A report the operator chose stays shown
+ * for as long as it is in the rows -- through a refresh, and through a status
+ * change that moves it out of the active filter, so the reply's delivery line
+ * does not vanish under their hand. With no choice, the first report still
+ * waiting on someone in the visible list, else the first visible one.
  */
-export const isFeedbackCardOpen = (
-  status: string,
-  operatorChoice: boolean | undefined,
-  searching: boolean
-) => !isTerminalFeedbackStatus(status) || (operatorChoice ?? searching);
+export const resolveSelectedFeedbackId = (
+  items: readonly FeedbackRow[],
+  visible: readonly FeedbackRow[],
+  chosenId: string | null
+): string | null => {
+  if (chosenId && items.some((item) => item.id === chosenId)) return chosenId;
+  const waiting = visible.find((item) => isFeedbackAwaitingOperator(item.status));
+  return (waiting ?? visible[0])?.id ?? null;
+};
 
-/** The first line with text in it, for a folded report's summary. */
+/** The first line with text in it, for a report's summary in the list. */
 export const feedbackFirstLine = (message: string) =>
   message.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
 
@@ -294,12 +306,16 @@ const replyDeliverySentence = (
   return `${copy.pending(delivery.attempts)}${suffix}`;
 };
 
-const statusClass = (status: string) => {
-  if (status === "resolved") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  if (status === "reviewing") return "border-blue-500/30 bg-blue-500/10 text-blue-200";
-  if (status === "closed") return "border-zinc-700 bg-zinc-950 text-zinc-400";
-  return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+/** Open waits on someone, reviewing is being worked, the rest are finished. */
+const statusTone = (status: string): AdminTone => {
+  if (status === "resolved") return "ok";
+  if (status === "reviewing") return "info";
+  if (status === "closed") return "idle";
+  return "warn";
 };
+
+const statusText = (status: string, m: FeedbackInboxMessages) =>
+  (m.statuses as Record<string, string>)[status] ?? status;
 
 const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
@@ -308,7 +324,42 @@ const escapeCsv = (value: unknown) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
+const supportReplyHref = (feedback: FeedbackRow) => {
+  if (!feedback.email) return null;
+  const subject = encodeURIComponent(`Tomverse support: ${feedback.type} request`);
+  const body = encodeURIComponent(
+    [
+      `Hi,`,
+      "",
+      "Thanks for contacting Tomverse support. We reviewed your report and wanted to follow up.",
+      "",
+      "---",
+      `Trace ID: ${feedback.traceId || "-"}`,
+      `Model: ${feedback.modelId || "-"}`,
+      `Plan: ${feedback.plan || "-"}`,
+      `Path: ${feedback.path || "-"}`,
+    ].join("\n")
+  );
+  return `mailto:${feedback.email}?subject=${subject}&body=${body}`;
+};
+
+const FIELD =
+  "h-10 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
+
+/** The reporter's first letter in a quiet circle: identity, not a status colour. */
+function FeedbackAvatar({ label }: { label: string }) {
+  const initial = Array.from(label.trim())[0]?.toUpperCase() ?? "?";
+  return (
+    <span
+      aria-hidden
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-sm font-bold text-zinc-200"
+    >
+      {initial}
+    </span>
+  );
+}
+
+export function FeedbackInboxPanel({ rows, rowLimit, canWrite = true }: Props) {
   const router = useRouter();
   const m = useAdminMessages(adminFeedbackInboxMessages);
   const pathname = usePathname();
@@ -324,8 +375,15 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     initialStatus
   );
   const [busyId, setBusyId] = useState<string | null>(null);
-  /** What the operator did to a finished report's fold, by report id. */
-  const [foldChoices, setFoldChoices] = useState<Record<string, boolean>>({});
+  /** The report the operator opened, by id -- never an index, so a refresh cannot move it. */
+  const [chosenId, setChosenId] = useState<string | null>(null);
+  /**
+   * Below `lg` the list and the report share one column: this says which of
+   * the two is showing. A link that lands on one report (`?q=<id>`) opens it.
+   */
+  const [showDetail, setShowDetail] = useState(() =>
+    items.some((item) => item.id === (searchParams.get("q") || ""))
+  );
   /**
    * Closing is never one click: resolved/closed go through a small dialog
    * that collects the outcome code and the user-facing reply, and previews
@@ -378,6 +436,12 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
         .some((value) => value!.toLowerCase().includes(normalizedQuery));
     });
   }, [items, query, statusFilter]);
+
+  // Pin whatever the detail pane resolves to, so a report that arrives or a
+  // refresh that reorders the list never swaps the one being read.
+  const selectedId = resolveSelectedFeedbackId(items, filteredItems, chosenId);
+  if (selectedId !== chosenId) setChosenId(selectedId);
+  const selected = items.find((item) => item.id === selectedId) ?? null;
 
   // Unclosed, not just `open`: a verified-trace report arrives in `reviewing`.
   const openCount = items.filter((item) => isFeedbackAwaitingOperator(item.status)).length;
@@ -432,11 +496,10 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
             : item
         )
       );
-      // The card an operator just closed stays open: the reply's delivery line
-      // appears in it, and it should not vanish under their hand.
-      if (isTerminalFeedbackStatus(status)) {
-        setFoldChoices((current) => ({ ...current, [id]: true }));
-      }
+      // The report an operator just closed stays open in the detail pane: the
+      // reply's delivery line appears in it, and it should not vanish under
+      // their hand.
+      setChosenId(id);
       // Re-read the rows and the sidebar badge counts from the server: the
       // local merge above shows the change at once, the refresh makes every
       // count on the screen agree with it.
@@ -518,25 +581,6 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     }
   };
 
-  const supportReplyHref = (feedback: FeedbackRow) => {
-    if (!feedback.email) return null;
-    const subject = encodeURIComponent(`Tomverse support: ${feedback.type} request`);
-    const body = encodeURIComponent(
-      [
-        `Hi,`,
-        "",
-        "Thanks for contacting Tomverse support. We reviewed your report and wanted to follow up.",
-        "",
-        "---",
-        `Trace ID: ${feedback.traceId || "-"}`,
-        `Model: ${feedback.modelId || "-"}`,
-        `Plan: ${feedback.plan || "-"}`,
-        `Path: ${feedback.path || "-"}`,
-      ].join("\n")
-    );
-    return `mailto:${feedback.email}?subject=${subject}&body=${body}`;
-  };
-
   const exportCsv = () => {
     const csv = [
       ["id", "createdAt", "email", "type", "status", "traceId", "modelId", "plan", "path", "message"],
@@ -564,381 +608,132 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const statusCount = (status: (typeof statuses)[number]) =>
+    items.filter((item) => item.status === status).length;
+
   return (
-    <section id="feedback" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            {m.eyebrow}
-          </p>
-          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            {m.description}
-            {rowLimit ? m.rowLimit(rowLimit) : ""}
-          </p>
-        </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
-          <MessageSquare className="h-3.5 w-3.5" />
-          {m.openCount(openCount)}
-        </span>
-        <button
-          type="button"
-          onClick={exportCsv}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
-        >
-          <Download className="h-3.5 w-3.5" />
-          {m.exportCsv}
-        </button>
-      </div>
-
-      <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]">
-        <label className="relative block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-          <input
-            value={query}
-            onChange={(event) => {
-              const value = event.target.value;
-              setQuery(value);
-              updateLocation(value, statusFilter);
-            }}
-            placeholder={m.searchPlaceholder}
-            className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-          />
-        </label>
-        <div className="flex flex-wrap gap-2">
-          {(["all", ...statuses] as const).map((status) => (
-            <button
-              key={status}
-              type="button"
-              onClick={() => {
-                setStatusFilter(status);
-                updateLocation(query, status);
-              }}
-              className={`rounded-xl border px-3 py-2 text-xs font-black capitalize transition ${
-                statusFilter === status
-                  ? "border-blue-500/40 bg-blue-500/20 text-blue-100"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
-              }`}
-            >
-              {m.statuses[status]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-3">
-        {filteredItems.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            {m.empty}
-          </div>
-        ) : (
-          filteredItems.map((feedback) => {
-            const busy = busyId === feedback.id;
-            const cardOpen = isFeedbackCardOpen(
-              feedback.status,
-              foldChoices[feedback.id],
-              Boolean(query.trim())
-            );
-            const foldToggle = isTerminalFeedbackStatus(feedback.status) ? (
-              <FeedbackFoldToggle
-                feedback={feedback}
-                open={cardOpen}
-                onToggle={() =>
-                  setFoldChoices((current) => ({ ...current, [feedback.id]: !cardOpen }))
-                }
-                m={m}
-              />
-            ) : null;
-            // Both returns put the toggle first in the same keyed article, so
-            // React keeps its DOM node and keyboard focus stays on it.
-            if (!cardOpen) {
-              return (
-                <article
-                  key={feedback.id}
-                  data-testid="feedback-entry"
-                  className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/70"
-                >
-                  {foldToggle}
-                </article>
-              );
+    <section id="feedback" className="flex min-w-0 flex-col gap-4">
+      {items.length === 0 ? (
+        <AdminStateBlock
+          kind="empty"
+          title={m.emptyAll}
+          detail={rowLimit ? m.rowLimit(rowLimit).trim() : undefined}
+        />
+      ) : (
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">
+          <AdminTile
+            as="div"
+            data-testid="feedback-list"
+            title={m.title}
+            description={`${m.description}${rowLimit ? m.rowLimit(rowLimit) : ""}`}
+            action={
+              <AdminStatusChip tone={openCount > 0 ? "warn" : "ok"}>
+                {m.openCount(openCount)}
+              </AdminStatusChip>
             }
-            return (
-              <article
-                key={feedback.id}
-                data-testid="feedback-entry"
-                className="min-w-0 break-words rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
+            className={showDetail ? "max-lg:hidden" : ""}
+          >
+            <div className="flex items-center gap-2">
+              <label className="relative block min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden />
+                <input
+                  value={query}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setQuery(value);
+                    setChosenId(null);
+                    updateLocation(value, statusFilter);
+                  }}
+                  aria-label={m.searchPlaceholder}
+                  placeholder={m.searchPlaceholder}
+                  className={FIELD}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={exportCsv}
+                title={m.exportCsv}
+                aria-label={m.exportCsv}
+                className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 text-zinc-200 transition hover:bg-zinc-800"
               >
-                {foldToggle}
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
-                        {feedback.type}
-                      </span>
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(feedback.status)}`}>
-                        {feedback.status}
-                      </span>
-                      <span className="text-xs text-zinc-500">
-                        {dateLabel(feedback.createdAt)}
-                      </span>
-                      {/*
-                        Whether the reporter asked for *progress* notices. The
-                        answer to their report is a separate question with a
-                        separate rule (canEmailReply), and conflating the two
-                        is the defect this badge used to feed.
-                      */}
-                      <span
-                        data-testid="feedback-notify-badge"
-                        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${
-                          feedback.emailUpdatesConsent
-                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                            : "border-zinc-700 bg-zinc-950 text-zinc-500"
-                        }`}
-                      >
-                        <BellRing className="h-3 w-3" />
-                        {feedback.emailUpdatesConsent
-                          ? m.emailUpdatesOn
-                          : m.noEmailUpdates}
-                      </span>
-                    </div>
-                    <div className="mt-3 text-sm font-bold text-white">
-                      {feedback.email || m.guest}
-                    </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
-                      {feedback.message}
-                    </p>
-                    {feedback.autoFixCase?.analysis ? (
-                      <TraceAnalysisBlock analysis={feedback.autoFixCase.analysis} m={m} />
-                    ) : null}
-                    {feedback.triage ? (
-                      <TriageProposal
-                        triage={feedback.triage}
-                        m={m}
-                        onUseDraft={
-                          isTerminalFeedbackStatus(feedback.status)
-                            ? undefined
-                            : (userReply) =>
-                                setCloseTarget({
-                                  feedback,
-                                  status: "resolved",
-                                  draft: { userReply },
-                                })
-                        }
-                      />
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => copyContext(feedback)}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
-                    >
-                      <Clipboard className="h-3.5 w-3.5" />
-                      {m.copyContext}
-                    </button>
-                    {supportReplyHref(feedback) ? (
-                      <a
-                        href={supportReplyHref(feedback) || undefined}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20"
-                      >
-                        <Mail className="h-3.5 w-3.5" />
-                        {m.reply}
-                      </a>
-                    ) : null}
-                    {statuses.map((status) => {
-                      // The status a report already has is normally a dead
-                      // button. The exception is a closure the reporter was
-                      // never told about: pressing it again is how the
-                      // withheld announcement finally goes out, and without
-                      // that the withhold checkbox would be a one-way door.
-                      const canStillAnnounce =
-                        feedback.status === status &&
-                        isTerminalFeedbackStatus(status) &&
-                        !feedback.completionSnapshot &&
-                        canEmailReply(feedback);
-                      return (
-                      <button
-                        key={status}
-                        type="button"
-                        data-testid={
-                          canStillAnnounce ? "feedback-status-announce-again" : undefined
-                        }
-                        disabled={busy || (feedback.status === status && !canStillAnnounce)}
-                        onClick={() =>
-                          isTerminalFeedbackStatus(status)
-                            ? // Closing asks for the outcome and the
-                              // user-facing reply first; it is never one click.
-                              setCloseTarget({ feedback, status })
-                            : updateStatus(feedback.id, status)
-                        }
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold capitalize text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {busy && feedback.status !== status ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : feedback.status === status ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />
-                        ) : null}
-                        {m.statuses[status]}
-                      </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {isTerminalFeedbackStatus(feedback.status) ? (
-                  <div
-                    data-testid="feedback-reply-delivery"
-                    className="mt-3 flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-5 text-zinc-300 md:flex-row md:items-center md:justify-between"
-                  >
-                    <span>
-                      <span className="text-zinc-500">{m.replyDelivery.label}: </span>
-                      {replyDeliverySentence(feedback, m.replyDelivery)}
+                <Download className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+            <div role="group" aria-label={m.statusFilterLabel} className="flex flex-wrap gap-2">
+              {(["all", ...statuses] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  aria-pressed={statusFilter === status}
+                  aria-label={m.statuses[status]}
+                  onClick={() => {
+                    setStatusFilter(status);
+                    setChosenId(null);
+                    updateLocation(query, status);
+                  }}
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-bold transition ${
+                    statusFilter === status
+                      ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                      : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                  }`}
+                >
+                  <span aria-hidden>{m.statuses[status]}</span>
+                  {status !== "all" && statusCount(status) > 0 ? (
+                    <span aria-hidden className="text-zinc-500">
+                      {statusCount(status)}
                     </span>
-                    {canResendReply(feedback) ? (
-                      <span className="flex flex-col items-start gap-1 md:max-w-md md:items-end">
-                        {/*
-                          The text the mail will carry, read from the same
-                          record the renderer uses -- not the row's latest
-                          reply, which can differ once a report has been
-                          closed twice.
-                        */}
-                        <span
-                          data-testid="feedback-reply-resend-preview"
-                          className="w-full whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/70 p-2 text-left text-zinc-200"
-                        >
-                          <span className="block text-zinc-500">{m.replyDelivery.previewLabel}</span>
-                          {feedback.completionSnapshot?.userReply}
-                        </span>
-                        <button
-                          type="button"
-                          data-testid="feedback-reply-resend"
-                          disabled={busy}
-                          onClick={() => resendReply(feedback)}
-                          className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
-                          {busy ? m.replyDelivery.resending : m.replyDelivery.resend}
-                        </button>
-                        <span className="text-zinc-500">{m.replyDelivery.resendHint}</span>
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            {filteredItems.length === 0 ? (
+              <AdminStateBlock kind="empty" title={m.empty} />
+            ) : (
+              <ul className="flex min-w-0 flex-col gap-1.5">
+                {filteredItems.map((feedback) => (
+                  <li key={feedback.id} className="min-w-0">
+                    <FeedbackListItem
+                      feedback={feedback}
+                      selected={feedback.id === selectedId}
+                      onSelect={() => {
+                        setChosenId(feedback.id);
+                        setShowDetail(true);
+                      }}
+                      m={m}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </AdminTile>
 
-                {feedback.emailUpdatesConsent && feedback.email && feedback.status === "open" ? (
-                  <p
-                    data-testid="feedback-reviewing-email-hint"
-                    className="mt-2 text-xs font-semibold leading-5 text-blue-200/80"
-                  >
-                    {m.reviewingEmailHint}
-                  </p>
-                ) : null}
-
-                <div className="mt-3 grid gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-500 md:grid-cols-2 xl:grid-cols-4">
-                  <span className="truncate">{m.meta.trace(feedback.traceId || "-")}</span>
-                  <span className="truncate">{m.meta.model(feedback.modelId || "-")}</span>
-                  <span className="truncate">{m.meta.plan(feedback.plan || "-")}</span>
-                  <span>{m.meta.attachments(feedback.attachmentCount)}</span>
-                  <span className="truncate">{m.meta.path(feedback.path || "-")}</span>
-                  <span className="truncate xl:col-span-3">
-                    {m.meta.userAgent(feedback.userAgent || "-")}
-                  </span>
-                </div>
-
-                {/*
-                  Server-side trace evidence, kept visually separate from the
-                  reporter's own words above. Everything here is either an
-                  authenticated fact from the signed token/evidence row or is
-                  explicitly labelled as a client claim. Phase 1 shows
-                  observability only -- no auto-fix state exists yet, so none
-                  is invented here.
-                */}
-                {traceVerificationLabel(feedback, m.verification) ? (
-                  <div
-                    data-testid="feedback-trace-verification"
-                    className="mt-2 grid gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-400"
-                  >
-                    <span className="font-bold text-zinc-200">
-                      {traceVerificationLabel(feedback, m.verification)}
-                    </span>
-                    <span className="truncate">
-                      {m.traceSource}
-                      {feedback.errorReportVerification === "verified"
-                        ? m.traceSourceAuthenticated
-                        : m.traceSourceClaim(feedback.traceProvenance || "unknown")}
-                    </span>
-                    {feedback.clientErrorCode ? (
-                      <span className="truncate">
-                        {m.clientCode(feedback.clientErrorCode)}
-                      </span>
-                    ) : null}
-                    {evidenceAvailabilityLabel(feedback.evidenceAvailability, m.evidence) ? (
-                      <span className="truncate">
-                        {evidenceAvailabilityLabel(feedback.evidenceAvailability, m.evidence)}
-                      </span>
-                    ) : null}
-                    {feedback.autoFixCase ? (
-                      <span
-                        data-testid="feedback-autofix-case"
-                        className="truncate"
-                      >
-                        {m.shadowDiagnosis}
-                        {feedback.autoFixCase.state}
-                        {feedback.autoFixCase.classification
-                          ? ` — ${feedback.autoFixCase.classification}`
-                          : ""}
-                        {feedback.autoFixCase.ineligibilityReason
-                          ? ` (${feedback.autoFixCase.ineligibilityReason})`
-                          : ""}
-                      </span>
-                    ) : null}
-                    {feedback.traceEvidence ? (
-                      <div
-                        data-testid="feedback-trace-evidence"
-                        className="mt-1 grid gap-1 border-t border-zinc-800 pt-2 md:grid-cols-2"
-                      >
-                        <span className="truncate">
-                          {m.evidenceRow.serverCode(
-                            feedback.traceEvidence.errorCode || "-",
-                            feedback.traceEvidence.classificationSource
-                          )}
-                        </span>
-                        <span className="truncate">
-                          {m.evidenceRow.route(feedback.traceEvidence.routeClass)}
-                          {feedback.traceEvidence.phase
-                            ? ` / ${feedback.traceEvidence.phase}`
-                            : ""}
-                        </span>
-                        <span className="truncate">
-                          {m.evidenceRow.release(
-                            feedback.traceEvidence.release || "-",
-                            feedback.traceEvidence.environment
-                          )}
-                        </span>
-                        <span className="truncate">
-                          {m.evidenceRow.provider(
-                            feedback.traceEvidence.provider || "-",
-                            feedback.traceEvidence.modelId || "-"
-                          )}
-                        </span>
-                        <span className="truncate">
-                          {m.evidenceRow.occurred(feedback.traceEvidence.occurredAt)}
-                        </span>
-                        <span className="truncate">
-                          {m.evidenceRow.sentryEvent(feedback.traceEvidence.sentryEventId || "-")}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                <div className="mt-3">
-                  <AdminNotesBox targetType="Feedback" targetId={feedback.id} />
-                </div>
-              </article>
-            );
-          })
-        )}
-      </div>
+          <div className={`flex min-w-0 flex-col gap-3 ${showDetail ? "" : "max-lg:hidden"}`}>
+            <button
+              type="button"
+              onClick={() => setShowDetail(false)}
+              className="inline-flex min-h-10 items-center gap-1.5 self-start rounded-xl px-2 text-sm font-bold text-blue-300 hover:bg-blue-500/10 lg:hidden"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+              {m.backToList}
+            </button>
+            {selected ? (
+              <FeedbackDetail
+                key={selected.id}
+                feedback={selected}
+                busy={busyId === selected.id}
+                canWrite={canWrite}
+                m={m}
+                onCopy={() => void copyContext(selected)}
+                onResend={() => void resendReply(selected)}
+                onStatus={(status) => void updateStatus(selected.id, status)}
+                onOpenClosing={(target) => setCloseTarget({ feedback: selected, ...target })}
+              />
+            ) : (
+              <AdminStateBlock kind="empty" title={m.pickOne} />
+            )}
+          </div>
+        </div>
+      )}
 
       {closeTarget ? (
         <FeedbackCompletionDialog
@@ -958,6 +753,369 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * One report in the list: who, when, its state and its first line. A reply
+ * that never reached the reporter is named here, because the resend offer sits
+ * in the report itself and a finished one is otherwise a quiet row.
+ */
+export function FeedbackListItem({
+  feedback,
+  selected,
+  onSelect,
+  m,
+}: {
+  feedback: FeedbackRow;
+  selected: boolean;
+  onSelect: () => void;
+  m: FeedbackInboxMessages;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="feedback-list-item"
+      data-feedback-id={feedback.id}
+      aria-current={selected ? "true" : undefined}
+      onClick={onSelect}
+      className={`flex w-full min-w-0 cursor-pointer items-start gap-3 rounded-2xl border p-3 text-left transition ${
+        selected
+          ? "border-blue-500 bg-blue-500/10"
+          : "border-transparent hover:bg-zinc-800"
+      }`}
+    >
+      <FeedbackAvatar label={feedback.email || m.guest} />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <AdminStatusChip tone={statusTone(feedback.status)}>
+            {statusText(feedback.status, m)}
+          </AdminStatusChip>
+          <span className="whitespace-nowrap text-xs text-zinc-500">
+            {dateLabel(feedback.createdAt)}
+          </span>
+          {canResendReply(feedback) && (
+            <span data-testid="feedback-fold-reply-undelivered">
+              <AdminStatusChip tone="warn">{m.foldReplyUndelivered}</AdminStatusChip>
+            </span>
+          )}
+        </span>
+        <span className="mt-1 block truncate text-sm font-bold text-zinc-100">
+          {feedbackFirstLine(feedback.message) || "-"}
+        </span>
+        <span className="block truncate text-xs text-zinc-500">
+          {feedback.email || m.guest}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The open report as a conversation: the reporter's message, what the server
+ * knows about it, the proposals made for it, then the ways to answer and move
+ * it. Internal detail (ids, browser, app version) is folded into the technical
+ * details at the bottom.
+ */
+function FeedbackDetail({
+  feedback,
+  busy,
+  canWrite,
+  m,
+  onCopy,
+  onResend,
+  onStatus,
+  onOpenClosing,
+}: {
+  feedback: FeedbackRow;
+  busy: boolean;
+  canWrite: boolean;
+  m: FeedbackInboxMessages;
+  onCopy: () => void;
+  onResend: () => void;
+  onStatus: (status: (typeof statuses)[number]) => void;
+  onOpenClosing: (target: {
+    status: "resolved" | "closed";
+    draft?: { userReply: string };
+  }) => void;
+}) {
+  const verificationLabel = traceVerificationLabel(feedback, m.verification);
+  const availabilityLabel = evidenceAvailabilityLabel(feedback.evidenceAvailability, m.evidence);
+  const replyHref = supportReplyHref(feedback);
+  return (
+    <AdminTile
+      as="article"
+      data-testid="feedback-entry"
+      data-feedback-id={feedback.id}
+      className="min-w-0 break-words"
+    >
+      <div className="flex flex-wrap items-start gap-3">
+        <FeedbackAvatar label={feedback.email || m.guest} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-bold text-white">{feedback.email || m.guest}</p>
+          <p className="truncate text-xs text-zinc-400">
+            {[feedback.plan, feedback.type].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <AdminStatusChip tone={statusTone(feedback.status)}>
+            {statusText(feedback.status, m)}
+          </AdminStatusChip>
+          {/*
+            Whether the reporter asked for *progress* notices. The answer to
+            their report is a separate question with a separate rule
+            (canEmailReply), and conflating the two is the defect this badge
+            used to feed.
+          */}
+          <span data-testid="feedback-notify-badge" className="inline-flex">
+            <AdminStatusChip tone={feedback.emailUpdatesConsent ? "ok" : "idle"}>
+              <BellRing className="h-3 w-3" aria-hidden />
+              {feedback.emailUpdatesConsent ? m.emailUpdatesOn : m.noEmailUpdates}
+            </AdminStatusChip>
+          </span>
+          {feedback.userId ? (
+            <a
+              href={`/admin/users/${encodeURIComponent(feedback.userId)}`}
+              className="inline-flex min-h-8 items-center rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 hover:bg-zinc-800"
+            >
+              {m.viewUser}
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-zinc-950 p-4">
+        <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-100 [overflow-wrap:anywhere]">
+          {feedback.message}
+        </p>
+        <p className="mt-2 text-xs text-zinc-500">
+          {dateLabel(feedback.createdAt)} · {feedback.type}
+        </p>
+      </div>
+
+      {/*
+        What the server can vouch for, kept visually apart from the reporter's
+        own words above. It is either an authenticated fact from the signed
+        token or an evidence row, or it is labelled as a client claim. Phase 1
+        shows observability only -- no auto-fix state is invented here.
+      */}
+      {verificationLabel ? (
+        <div
+          data-testid="feedback-trace-verification"
+          className={`grid gap-1 rounded-xl px-3 py-2 text-xs ${
+            feedback.errorReportVerification === "verified"
+              ? "bg-emerald-500/10 text-emerald-300"
+              : "bg-amber-500/10 text-amber-300"
+          }`}
+        >
+          <span className="font-bold">{verificationLabel}</span>
+          <span className="text-zinc-400 [overflow-wrap:anywhere]">
+            {m.traceSource}
+            {feedback.errorReportVerification === "verified"
+              ? m.traceSourceAuthenticated
+              : m.traceSourceClaim(feedback.traceProvenance || "unknown")}
+          </span>
+          {availabilityLabel ? <span className="text-zinc-400">{availabilityLabel}</span> : null}
+        </div>
+      ) : null}
+
+      {feedback.autoFixCase?.analysis ? (
+        <TraceAnalysisBlock analysis={feedback.autoFixCase.analysis} m={m} />
+      ) : null}
+      {feedback.triage ? (
+        <TriageProposal
+          triage={feedback.triage}
+          m={m}
+          canWrite={canWrite}
+          onUseDraft={
+            isTerminalFeedbackStatus(feedback.status)
+              ? undefined
+              : (userReply) => onOpenClosing({ status: "resolved", draft: { userReply } })
+          }
+        />
+      ) : null}
+
+      {isTerminalFeedbackStatus(feedback.status) ? (
+        <div
+          data-testid="feedback-reply-delivery"
+          className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs leading-5 text-zinc-300"
+        >
+          <span>
+            <span className="text-zinc-500">{m.replyDelivery.label}: </span>
+            {replyDeliverySentence(feedback, m.replyDelivery)}
+          </span>
+          {canResendReply(feedback) ? (
+            <span className="flex flex-col items-start gap-1">
+              {/*
+                The text the mail will carry, read from the same record the
+                renderer uses -- not the row's latest reply, which can differ
+                once a report has been closed twice.
+              */}
+              <span
+                data-testid="feedback-reply-resend-preview"
+                className="w-full whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900 p-2 text-left text-zinc-200"
+              >
+                <span className="block text-zinc-500">{m.replyDelivery.previewLabel}</span>
+                {feedback.completionSnapshot?.userReply}
+              </span>
+              <AdminWriteButton
+                data-testid="feedback-reply-resend"
+                writable={canWrite}
+                requiredRole="support"
+                disabled={busy}
+                onClick={onResend}
+                className="min-h-11"
+              >
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Mail className="h-3.5 w-3.5" aria-hidden />}
+                {busy ? m.replyDelivery.resending : m.replyDelivery.resend}
+              </AdminWriteButton>
+              <span className="text-zinc-500">{m.replyDelivery.resendHint}</span>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-zinc-800 p-3">
+        <p className="text-sm font-bold text-white">{m.answerTitle}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {!isTerminalFeedbackStatus(feedback.status) ? (
+            <AdminWriteButton
+              writable={canWrite}
+              requiredRole="support"
+              disabled={busy}
+              onClick={() => onOpenClosing({ status: "resolved" })}
+            >
+              <Mail className="h-3.5 w-3.5" aria-hidden />
+              {m.replyAndResolve}
+            </AdminWriteButton>
+          ) : null}
+          <button
+            type="button"
+            onClick={onCopy}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800"
+          >
+            <Clipboard className="h-3.5 w-3.5" aria-hidden />
+            {m.copyContext}
+          </button>
+          {replyHref ? (
+            <a
+              href={replyHref}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold text-blue-300 transition hover:bg-blue-500/10"
+            >
+              <Mail className="h-3.5 w-3.5" aria-hidden />
+              {m.reply}
+            </a>
+          ) : null}
+        </div>
+        <div role="group" aria-label={m.changeStatus} className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-zinc-400">{m.changeStatus}</span>
+          {statuses.map((status) => {
+            // The status a report already has is normally a dead
+            // button. The exception is a closure the reporter was
+            // never told about: pressing it again is how the
+            // withheld announcement finally goes out, and without
+            // that the withhold checkbox would be a one-way door.
+            const canStillAnnounce =
+              feedback.status === status &&
+              isTerminalFeedbackStatus(status) &&
+              !feedback.completionSnapshot &&
+              canEmailReply(feedback);
+            return (
+              <AdminWriteButton
+                key={status}
+                variant="secondary"
+                size="sm"
+                writable={canWrite}
+                requiredRole="support"
+                data-testid={canStillAnnounce ? "feedback-status-announce-again" : undefined}
+                disabled={busy || (feedback.status === status && !canStillAnnounce)}
+                onClick={() =>
+                  isTerminalFeedbackStatus(status)
+                    ? // Closing asks for the outcome and the
+                      // user-facing reply first; it is never one click.
+                      onOpenClosing({ status })
+                    : onStatus(status)
+                }
+              >
+                {busy && feedback.status !== status ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : feedback.status === status ? (
+                  <span aria-hidden className="h-2 w-2 rounded-full bg-emerald-500" />
+                ) : null}
+                {m.statuses[status]}
+              </AdminWriteButton>
+            );
+          })}
+        </div>
+        {feedback.emailUpdatesConsent && feedback.email && feedback.status === "open" ? (
+          <p
+            data-testid="feedback-reviewing-email-hint"
+            className="text-xs font-semibold leading-5 text-blue-300"
+          >
+            {m.reviewingEmailHint}
+          </p>
+        ) : null}
+      </div>
+
+      <AdminNotesBox targetType="Feedback" targetId={feedback.id} />
+
+      <AdminTechInfo summary={m.techSummary}>
+        <div className="grid gap-1.5 [overflow-wrap:anywhere] md:grid-cols-2">
+          <span>{m.meta.id(feedback.id)}</span>
+          <span>{m.meta.trace(feedback.traceId || "-")}</span>
+          <span>{m.meta.model(feedback.modelId || "-")}</span>
+          <span>{m.meta.plan(feedback.plan || "-")}</span>
+          <span>{m.meta.attachments(feedback.attachmentCount)}</span>
+          <span>{m.meta.language(feedback.language)}</span>
+          <span>{m.meta.path(feedback.path || "-")}</span>
+          <span className="md:col-span-2">{m.meta.userAgent(feedback.userAgent || "-")}</span>
+          {feedback.clientErrorCode ? <span>{m.clientCode(feedback.clientErrorCode)}</span> : null}
+          {feedback.autoFixCase ? (
+            <span data-testid="feedback-autofix-case" className="md:col-span-2">
+              {m.shadowDiagnosis}
+              {feedback.autoFixCase.state}
+              {feedback.autoFixCase.classification
+                ? ` — ${feedback.autoFixCase.classification}`
+                : ""}
+              {feedback.autoFixCase.ineligibilityReason
+                ? ` (${feedback.autoFixCase.ineligibilityReason})`
+                : ""}
+            </span>
+          ) : null}
+        </div>
+        {feedback.traceEvidence ? (
+          <div
+            data-testid="feedback-trace-evidence"
+            className="mt-3 grid gap-1.5 border-t border-zinc-800 pt-3 [overflow-wrap:anywhere] md:grid-cols-2"
+          >
+            <span>
+              {m.evidenceRow.serverCode(
+                feedback.traceEvidence.errorCode || "-",
+                feedback.traceEvidence.classificationSource
+              )}
+            </span>
+            <span>
+              {m.evidenceRow.route(feedback.traceEvidence.routeClass)}
+              {feedback.traceEvidence.phase ? ` / ${feedback.traceEvidence.phase}` : ""}
+            </span>
+            <span>
+              {m.evidenceRow.release(
+                feedback.traceEvidence.release || "-",
+                feedback.traceEvidence.environment
+              )}
+            </span>
+            <span>
+              {m.evidenceRow.provider(
+                feedback.traceEvidence.provider || "-",
+                feedback.traceEvidence.modelId || "-"
+              )}
+            </span>
+            <span>{m.evidenceRow.occurred(dateLabel(feedback.traceEvidence.occurredAt))}</span>
+            <span>{m.evidenceRow.sentryEvent(feedback.traceEvidence.sentryEventId || "-")}</span>
+          </div>
+        ) : null}
+      </AdminTechInfo>
+    </AdminTile>
   );
 }
 
@@ -1062,11 +1220,11 @@ function FeedbackCompletionDialog({
         aria-modal="true"
         aria-label={m.dialog.label(m.statuses[status])}
         data-testid="feedback-completion-dialog"
-        className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl"
+        className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-black capitalize text-white">
+            <h3 className="text-lg font-bold capitalize text-white">
               {m.dialog.title(m.statuses[status])}
             </h3>
             <p
@@ -1087,13 +1245,13 @@ function FeedbackCompletionDialog({
             data-testid="feedback-completion-cancel"
             onClick={onCancel}
             aria-label={m.dialog.cancel}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-900"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-800"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
 
-        <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+        <label className="mt-4 block text-xs font-bold text-zinc-400">
           {m.dialog.outcome}
           <select
             ref={selectRef}
@@ -1117,7 +1275,7 @@ function FeedbackCompletionDialog({
           </select>
         </label>
 
-        <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+        <label className="mt-4 block text-xs font-bold text-zinc-400">
           {notifiable && !alreadyCompleted && !withholdEmail
             ? m.dialog.reply
             : m.dialog.replyInternal}
@@ -1144,7 +1302,7 @@ function FeedbackCompletionDialog({
         </p>
 
         {notifiable && !alreadyCompleted ? (
-          <label className="mt-4 flex items-start gap-2 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-xs font-semibold leading-5 text-zinc-200">
+          <label className="mt-4 flex items-start gap-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs font-semibold leading-5 text-zinc-200">
             <input
               type="checkbox"
               data-testid="feedback-completion-withhold"
@@ -1164,9 +1322,9 @@ function FeedbackCompletionDialog({
         {preview && notifiable && !alreadyCompleted && !withholdEmail ? (
           <div
             data-testid="feedback-completion-preview"
-            className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3"
+            className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 p-3"
           >
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+            <p className="text-xs font-bold text-zinc-400">
               {m.dialog.preview(feedback.language)}
             </p>
             <p className="mt-2 text-sm font-bold text-white">{preview.subject}</p>
@@ -1176,16 +1334,15 @@ function FeedbackCompletionDialog({
           </div>
         ) : null}
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl border border-zinc-700 px-4 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
+            className="min-h-10 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800"
           >
             {m.dialog.cancel}
           </button>
-          <button
-            type="button"
+          <AdminWriteButton
             data-testid="feedback-completion-confirm"
             disabled={busy || !replyValid || outcomeCode === ""}
             onClick={() =>
@@ -1196,9 +1353,8 @@ function FeedbackCompletionDialog({
                 ...(withholdEmail ? { notifyReporter: false } : {}),
               })
             }
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             {draft
               ? notifiable &&
                 !alreadyCompleted &&
@@ -1209,7 +1365,7 @@ function FeedbackCompletionDialog({
               : notifiable && !alreadyCompleted && !withholdEmail
                 ? m.dialog.confirm(m.statuses[status])
                 : m.dialog.confirmWithoutEmail}
-          </button>
+          </AdminWriteButton>
         </div>
       </div>
     </div>
@@ -1226,16 +1382,16 @@ export function TraceAnalysisBlock({
 }) {
   return (
     <div
-      className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-sm leading-6 text-zinc-200"
+      className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-sm leading-6 text-zinc-200"
       data-testid="feedback-trace-analysis"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="font-bold text-amber-100">{m.traceAnalysisTitle}</span>
+        <span className="font-bold text-amber-300">{m.traceAnalysisTitle}</span>
         {analysis.status === "done" ? (
           <>
-            <span className="rounded-full border border-amber-500/30 px-2 py-0.5 font-bold text-amber-100">
+            <AdminStatusChip tone="warn">
               {(m.traceAnalysisKinds as Record<string, string>)[analysis.kind] ?? analysis.kind}
-            </span>
+            </AdminStatusChip>
             <span className="text-zinc-400">
               {(m.traceAnalysisConfidence as Record<string, string>)[analysis.confidence] ?? analysis.confidence}
             </span>
@@ -1254,7 +1410,7 @@ export function TraceAnalysisBlock({
           </p>
           {analysis.prNumber ? (
             <a
-              className="mt-2 inline-block font-medium underline"
+              className="mt-2 inline-block font-medium text-blue-300 underline"
               data-testid="feedback-trace-analysis-pr"
               href={`https://github.com/mposition/Tomverse/pull/${analysis.prNumber}`}
               rel="noreferrer"
@@ -1283,24 +1439,24 @@ export function TriageProposal({
   triage,
   m,
   onUseDraft,
+  canWrite = true,
 }: {
   triage: NonNullable<FeedbackRow["triage"]>;
   m: FeedbackInboxMessages;
   /** Opens the closing dialog with the draft as the reply; absent on a closed report. */
   onUseDraft?: (userReply: string) => void;
+  canWrite?: boolean;
 }) {
   const laneLabel =
     (m.triageLanes as Record<string, string>)[triage.lane] ?? triage.lane;
   return (
     <div
-      className="mt-3 rounded-xl border border-blue-500/25 bg-blue-500/5 p-3"
+      className="rounded-xl border border-dashed border-blue-500/40 bg-blue-500/5 p-3"
       data-testid="feedback-triage-proposal"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="font-bold text-blue-100">{m.triageTitle}</span>
-        <span className="rounded-full border border-blue-500/30 px-2 py-0.5 font-bold text-blue-100">
-          {laneLabel}
-        </span>
+        <span className="font-bold text-blue-300">{m.triageTitle}</span>
+        <AdminStatusChip tone="info">{laneLabel}</AdminStatusChip>
         <span className="text-zinc-400">
           {triage.laneSource === "llm" ? m.triageByModel : m.triageByKeyword}
         </span>
@@ -1312,7 +1468,7 @@ export function TriageProposal({
             <a
               key={id}
               href={`/admin/support?tab=feedback&q=${encodeURIComponent(id)}`}
-              className="font-mono text-blue-200 underline underline-offset-2 hover:text-blue-100"
+              className="font-mono text-blue-300 underline underline-offset-2 hover:text-blue-200"
             >
               {id.slice(0, 10)}
             </a>
@@ -1321,99 +1477,35 @@ export function TriageProposal({
       ) : null}
       {triage.replyDraft ? (
         <div className="mt-2">
-          <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
             <span>{m.triageDraft}</span>
             <span className="flex flex-wrap gap-2">
-            {onUseDraft ? (
+              {onUseDraft ? (
+                <AdminWriteButton
+                  size="sm"
+                  variant="ghost"
+                  writable={canWrite}
+                  requiredRole="support"
+                  data-testid="feedback-triage-use-draft"
+                  onClick={() => onUseDraft(triage.replyDraft ?? "")}
+                >
+                  <Mail className="h-3 w-3" aria-hidden />
+                  {m.triageUseDraft}
+                </AdminWriteButton>
+              ) : null}
               <button
                 type="button"
-                data-testid="feedback-triage-use-draft"
-                onClick={() => onUseDraft(triage.replyDraft ?? "")}
-                className="inline-flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1 font-bold text-blue-100 transition hover:bg-blue-500/20"
+                onClick={() => void navigator.clipboard?.writeText(triage.replyDraft ?? "")}
+                className="inline-flex min-h-8 items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 transition hover:bg-zinc-800"
               >
-                <Mail className="h-3 w-3" />
-                {m.triageUseDraft}
+                <Clipboard className="h-3 w-3" aria-hidden />
+                {m.triageCopyDraft}
               </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void navigator.clipboard?.writeText(triage.replyDraft ?? "")}
-              className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 font-bold text-zinc-200 transition hover:bg-zinc-800"
-            >
-              <Clipboard className="h-3 w-3" />
-              {m.triageCopyDraft}
-            </button>
             </span>
           </div>
-          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-200">{triage.replyDraft}</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-200 [overflow-wrap:anywhere]">{triage.replyDraft}</p>
         </div>
       ) : null}
     </div>
-  );
-}
-
-/**
- * The one control that folds and opens a finished report. Folded, it is the
- * report's summary line, wrapping below the chips rather than scrolling on a
- * narrow screen. A reply that never reached the reporter is named here because
- * the resend offer sits inside the fold.
- */
-export function FeedbackFoldToggle({
-  feedback,
-  open,
-  onToggle,
-  m,
-}: {
-  feedback: FeedbackRow;
-  open: boolean;
-  onToggle: () => void;
-  m: FeedbackInboxMessages;
-}) {
-  if (open) {
-    return (
-      <button
-        type="button"
-        data-testid="feedback-fold-toggle"
-        aria-expanded={true}
-        onClick={onToggle}
-        className="mb-3 inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
-      >
-        <ChevronDown className="h-3.5 w-3.5" />
-        {m.foldReport}
-      </button>
-    );
-  }
-  return (
-    <button
-      type="button"
-      data-testid="feedback-fold-toggle"
-      aria-expanded={false}
-      onClick={onToggle}
-      className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-2xl p-3 text-left transition hover:bg-zinc-800"
-    >
-      <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
-      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
-          {feedback.type}
-        </span>
-        <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(feedback.status)}`}>
-          {isTerminalFeedbackStatus(feedback.status) ? m.statuses[feedback.status] : feedback.status}
-        </span>
-        <span className="whitespace-nowrap text-xs text-zinc-500">
-          {dateLabel(feedback.createdAt)}
-        </span>
-        {canResendReply(feedback) ? (
-          <span
-            data-testid="feedback-fold-reply-undelivered"
-            className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-200"
-          >
-            {m.foldReplyUndelivered}
-          </span>
-        ) : null}
-        <span className="min-w-0 flex-1 basis-40 truncate text-sm text-zinc-200">
-          {feedbackFirstLine(feedback.message)}
-        </span>
-      </span>
-    </button>
   );
 }
