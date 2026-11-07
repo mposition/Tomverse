@@ -146,9 +146,20 @@ export function AdminEmailSuppressionsView({
             <AdminRevealableAddress rowId={row.id} masked={row.emailAddressMasked} />
           )}
           cardMeta={(row) => (
-            <span className="mt-1 block font-normal">
-              {row.causes.map((cause) => m.reasons[cause.reason] ?? cause.reason).join(", ")} ·{" "}
-              {row.scope === "global" ? m.allMail : row.purposeKey}
+            // No test ids here: the table above carries them, and both are in the DOM.
+            <span className="mt-1 flex flex-col gap-1 font-normal">
+              <span>{row.scope === "global" ? m.allMail : row.purposeKey}</span>
+              {row.causes.map((cause) => (
+                <span key={cause.id} className="flex flex-col">
+                  <span className="font-bold text-zinc-300">{m.reasons[cause.reason] ?? cause.reason}</span>
+                  <span className="font-mono">
+                    {m.source(cause.source)}
+                    {cause.sourceClassification ? ` (${cause.sourceClassification})` : ""} ·{" "}
+                    {m.occurred(when(cause.occurredAt))} ·{" "}
+                    {cause.expiresAt ? m.expires(when(cause.expiresAt)) : m.never}
+                  </span>
+                </span>
+              ))}
             </span>
           )}
           emptyState={
