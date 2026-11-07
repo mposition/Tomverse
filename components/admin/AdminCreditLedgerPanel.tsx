@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { CircleDollarSign } from "lucide-react";
 import { adminIntlLocale, adminMessagesFor } from "@/lib/adminLocale";
@@ -16,8 +17,7 @@ export type AdminCreditLedgerRow = {
   createdAt: string;
 };
 
-const dateLabel = (value: string) =>
-  new Date(value).toISOString().replace("T", " ").slice(0, 16);
+const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
 export async function AdminCreditLedgerPanel({
   rows,
@@ -48,7 +48,7 @@ export async function AdminCreditLedgerPanel({
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-t border-zinc-800 text-zinc-300">
-                <td className="whitespace-nowrap px-3 py-3 text-xs text-zinc-500">{dateLabel(row.createdAt)} UTC</td>
+                <td className="whitespace-nowrap px-3 py-3 text-xs text-zinc-500">{dateLabel(row.createdAt)}</td>
                 <td className="max-w-64 px-3 py-3"><Link href={`/admin/users/${encodeURIComponent(row.userId)}`} className="block truncate font-black text-blue-300 hover:text-blue-200">{row.userEmail || row.userId}</Link></td>
                 <td className="px-3 py-3"><span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs font-bold">{row.type}</span></td>
                 <td className={`px-3 py-3 font-black ${row.creditsDelta >= 0 ? "text-emerald-300" : "text-amber-300"}`}>{row.creditsDelta >= 0 ? "+" : ""}{row.creditsDelta.toLocaleString(intlLocale)}</td>
