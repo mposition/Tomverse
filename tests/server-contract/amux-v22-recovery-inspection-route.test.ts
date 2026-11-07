@@ -48,6 +48,9 @@ const report = { inspectionId: uuid, evidenceId: uuid, requestDigest: "a".repeat
     processTreeStopped: false, rootOwnedUnit: false, controlGroupBound: false, journalBound: false,
     socketTerminal: false, externalEffectsKnown: false, workspaceClean: false },
   usage: { status: "unknown", projectedCostMicroUsd: null }, reason: "legacy_invocation_unbound" };
+// Seed workers (lib/amux/workerRegistryCore.ts); the recovery profile config
+// stays unset, so per-worker buckets cannot depend on it.
+const seedReport = { ...report, workerName: "claude-impl" };
 const authorizedHeaders = (secret = inspectorSecret) => ({
   authorization: `Bearer ${secret}`,
 });
@@ -78,11 +81,11 @@ test("fixed checker supports a bounded worker queue and refuses raw process outp
   process.env.TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET = controllerSecret;
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
   assert.equal((await GET(get("workerName=claude-test&command=restart"))).status, 400);
-  assert.equal((await GET(get("workerName=claude-test"))).status, 200);
+  assert.equal((await GET(get("workerName=claude-impl"))).status, 200);
   for (const extra of [{ path: "/private" }, { stdout: "secret" }, { command: "restart" }])
     assert.equal((await POST(post({ ...report, ...extra }))).status, 400);
   assert.equal(state.writes, 0);
-  const response = await POST(post(report)); assert.equal(response.status, 200);
+  const response = await POST(post(seedReport)); assert.equal(response.status, 200);
   assert.equal(state.writes, 1); assert.match(response.headers.get("cache-control")!, /no-store/);
 });
 test("the independent master flag prevents pending lookup and reports before reading the body", async () => {
@@ -92,43 +95,41 @@ test("the independent master flag prevents pending lookup and reports before rea
   process.env.TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET = controllerSecret;
   delete process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED;
   const writes = state.writes; const reads = state.reads;
-  assert.equal((await GET(get("workerName=claude-test"))).status, 409);
+  assert.equal((await GET(get("workerName=claude-impl"))).status, 409);
   assert.equal((await POST(post({ arbitrary: "must not be parsed" }))).status, 409);
   assert.equal(state.writes, writes); assert.equal(state.reads, reads);
 });
-const profiles = JSON.stringify({ version: 1, profiles: [
-  { alias: "claude", workerNames: ["claude-test"] }, { alias: "codex", workerNames: ["codex-test"] }] });
 const enableInspector = () => {
   process.env.TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET = inspectorSecret;
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
-  process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON = profiles;
+  delete process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON;
   dayBuckets.clear(); limitCalls.length = 0;
 };
-test("each configured worker has its own daily bucket and no shared IP leg", async () => {
+test("each seed worker has its own daily bucket and no shared IP leg", async () => {
   const { GET, POST } = await route();
   enableInspector();
   for (let call = 0; call < 2_000; call++)
-    assert.equal((await GET(get("workerName=claude-test"))).status, 200);
-  assert.equal((await GET(get("workerName=claude-test"))).status, 429);
-  assert.equal((await GET(get("workerName=codex-test"))).status, 200);
-  assert.equal((await POST(post(report))).status, 200);
-  assert.equal((await POST(post({ ...report, workerName: "codex-test" }))).status, 200);
+    assert.equal((await GET(get("workerName=claude-impl"))).status, 200);
+  assert.equal((await GET(get("workerName=claude-impl"))).status, 429);
+  assert.equal((await GET(get("workerName=copilot-worker"))).status, 200);
+  assert.equal((await POST(post(seedReport))).status, 200);
+  assert.equal((await POST(post({ ...report, workerName: "copilot-worker" }))).status, 200);
   assert.deepEqual(new Set(limitCalls.map((call) => `${call.scope}|${call.key}`)), new Set([
-    "amux-recovery-inspection-read|amux-fixed-recovery-checker:claude-test",
-    "amux-recovery-inspection-read|amux-fixed-recovery-checker:codex-test",
-    "amux-recovery-inspection-report|amux-fixed-recovery-checker:claude-test",
-    "amux-recovery-inspection-report|amux-fixed-recovery-checker:codex-test"]));
+    "amux-recovery-inspection-read|amux-fixed-recovery-checker:claude-impl",
+    "amux-recovery-inspection-read|amux-fixed-recovery-checker:copilot-worker",
+    "amux-recovery-inspection-report|amux-fixed-recovery-checker:claude-impl",
+    "amux-recovery-inspection-report|amux-fixed-recovery-checker:copilot-worker"]));
   assert.ok(limitCalls.every((call) => call.skipIpBucket === true));
 });
 test("the same worker is held to its report day limit", async () => {
   const { POST } = await route();
   enableInspector();
   for (let call = 0; call < 1_000; call++)
-    assert.equal((await POST(post(report))).status, 200);
-  assert.equal((await POST(post(report))).status, 429);
-  assert.equal((await POST(post({ ...report, workerName: "codex-test" }))).status, 200);
+    assert.equal((await POST(post(seedReport))).status, 200);
+  assert.equal((await POST(post(seedReport))).status, 429);
+  assert.equal((await POST(post({ ...report, workerName: "copilot-worker" }))).status, 200);
 });
-test("an invalid or unconfigured worker name never creates a worker bucket", async () => {
+test("an invalid or non-seed worker name never creates a worker bucket", async () => {
   const { GET, POST } = await route();
   enableInspector();
   for (const name of ["", "claude test", "../claude", "x".repeat(129)])
@@ -139,8 +140,9 @@ test("an invalid or unconfigured worker name never creates a worker bucket", asy
   assert.equal((await GET(get("workerName=rogue-2"))).status, 200);
   assert.equal((await POST(post({ ...report, workerName: "rogue-3" }))).status, 200);
   assert.deepEqual([...new Set(limitCalls.map((call) => call.key))], ["amux-fixed-recovery-checker"]);
-  delete process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON;
+  process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON = JSON.stringify({ version: 1,
+    profiles: [{ alias: "rogue", workerNames: ["rogue-1"] }] });
   limitCalls.length = 0;
-  assert.equal((await GET(get("workerName=claude-test"))).status, 200);
+  assert.equal((await GET(get("workerName=rogue-1"))).status, 200);
   assert.deepEqual(limitCalls.map((call) => call.key), ["amux-fixed-recovery-checker"]);
 });

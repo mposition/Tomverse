@@ -4,22 +4,26 @@ import { amuxJsonNoStore, amuxInternalErrorResponse, isAmuxInputError } from "@/
 import { AMUX_LIFECYCLE_ROUTE_BUDGET_MS, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { amuxV22RecoveryWorkerSchema, amuxV22RecoveryEvidenceSchema, amuxV22TaskRecoveryEnabled,
-  AMUX_V22_TASK_RECOVERY_ENABLED_ENV, isAmuxV22RecoveryInspectorAuthorized,
-  configuredAmuxV22RecoveryProfile } from
+  AMUX_V22_TASK_RECOVERY_ENABLED_ENV, isAmuxV22RecoveryInspectorAuthorized } from
   "@/lib/amux/v22TaskRecoveryCore";
+import { AMUX_WORKER_REGISTRY_V31_SEED } from "@/lib/amux/workerRegistryCore";
 import { pendingAmuxV22RecoveryInspections, reportAmuxV22RecoveryEvidence } from "@/lib/amux/v22TaskRecoveryService";
 const RECOVERY_CHECKER_KEY = "amux-fixed-recovery-checker";
 // Owner decision 2026-11-07: one bucket per worker. Every inspector timer
 // (one per worker, once a minute) shares the dedicated Bearer secret and the
 // box's address, so a single fixed key or the IP leg made the workers exhaust
-// one daily bucket together. Only a worker named in the recovery profile
-// config gets its own bucket, so the bucket count stays bounded by that
-// config; any other schema-valid name shares the old fixed bucket. The IP leg
+// one daily bucket together. Only a worker in the code-fixed v31 registry seed
+// gets its own bucket, so the bucket count stays bounded by that list; any
+// other schema-valid name shares the old fixed bucket. The recovery profile
+// config is not used here: it is the controller's stop boundary, not a list of
+// inspectors. The IP leg
 // is skipped because the subject is that bounded worker identity behind the
 // inspector secret, not the caller's address.
+const RECOVERY_CHECKER_WORKERS: ReadonlySet<string> =
+  new Set(AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => entry.workerName));
 function consumeRecoveryCheckerLimit(request: Request, workerName: string, scope: string,
   limits: { minute: number; day: number }) {
-  const key = configuredAmuxV22RecoveryProfile(workerName) ?
+  const key = RECOVERY_CHECKER_WORKERS.has(workerName) ?
     `${RECOVERY_CHECKER_KEY}:${workerName}` : RECOVERY_CHECKER_KEY;
   return consumeApiRateLimit(request, key, scope, limits, { skipIpBucket: true });
 }
