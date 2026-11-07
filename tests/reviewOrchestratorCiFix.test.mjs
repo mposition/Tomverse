@@ -200,6 +200,9 @@ test("the prompt keeps logs as data, opens every file, workflows too, and asks f
   for (const path of [".github/workflows/x.yml", ".github/actions/a/action.yml"]) {
     assert.equal(judgePrCiAutoFixDiff({ nameStatus: `M\0${path}\0`, numstat: `1\t1\t${path}\0` }).push, true, path);
   }
+  // #3425: two fixes silenced build warnings while the build died of an OOM.
+  assert.match(prompt, /A warning fails no job/);
+  assert.match(prompt, /ran out of memory is fixed where its memory limit is set/);
   assert.doesNotMatch(prompt, /Dependabot/);
   assert.match(ciFixPrompt({ workflows: ["PR Fast Gate"], logFile: "/x/ci.log", headBranch: "dependabot/npm_and_yarn/develop/g" }),
     /adapt the code to the updated packages rather than undo the update/);
@@ -895,6 +898,44 @@ test("a failed step's own last lines are shown, and a TODO test is not a failure
   assert.match(shown.text, /the last words/);
   assert.doesNotMatch(shown.text, /^ok 1$/m);
   assert.equal(shown.key, "");
+});
+
+// #3425 (2026-11-07): next build's type check died at the heap ceiling, then
+// printed ten Turbopack warnings. The step's last 60 lines were all warnings,
+// so the model saw no OOM and twice "fixed" the warnings.
+test("a build killed for memory shows its OOM, not the warnings printed after it", () => {
+  const warning = (i) => [
+    stamp(`./lib/file${i}.ts:116:29`),
+    stamp("Warning: Dynamic filesystem access causes tracing of the whole project"),
+    ...Array.from({ length: 25 }, (_, j) => stamp(`  warning ${i} detail ${j}`)),
+  ];
+  const log = [
+    stamp("##[group]Run npm run build"),
+    stamp("npm run build"),
+    stamp("##[endgroup]"),
+    stamp("  Running TypeScript ..."),
+    ...Array.from({ length: 80 }, (_, i) => stamp(`build progress ${i}`)),
+    stamp("<--- Last few GCs --->"),
+    stamp("[3534:0xf686000]   189641 ms: Mark-Compact 6036.3 (6181.1) -> 6020.6 (6181.3) MB, allocation failure"),
+    stamp(""),
+    stamp("FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory"),
+    stamp("----- Native stack trace -----"),
+    ...Array.from({ length: 8 }, (_, i) => stamp(` ${i + 1}: 0xe48bbe node::OOMErrorHandler`)),
+    stamp("Failed to type check."),
+    stamp(""),
+    stamp("Turbopack build encountered 10 warnings:"),
+    ...Array.from({ length: 10 }, (_, i) => warning(i)).flat(),
+    stamp("##[error]Process completed with exit code 1."),
+  ].join("\n");
+  const { text, key } = failureExcerpt(log, 4000);
+  assert.match(text, /FATAL ERROR: .*JavaScript heap out of memory[\s\S]*Failed to type check\./);
+  assert.match(key, /JavaScript heap out of memory/);
+  assert.doesNotMatch(key, /Warning:/, "the warnings printed after the OOM are not what failed");
+  // The same for a build the wrapper reports as killed.
+  const killed = failureExcerpt([stamp("##[group]Run npm run build"), ...Array.from({ length: 100 }, (_, i) => stamp(`noise ${i}`)),
+    stamp("[build] next build terminated by signal SIGKILL."), ...Array.from({ length: 100 }, (_, i) => stamp(`Warning: w ${i}`)),
+    stamp("##[error]Process completed with exit code 1.")].join("\n"), 4000);
+  assert.match(killed.key, /terminated by signal SIGKILL/);
 });
 
 test("jobs that failed in the same step with no failure line are named once", async () => {
