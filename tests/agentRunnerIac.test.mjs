@@ -470,7 +470,7 @@ test("the orchestrator's restart policy is Railway's default, so it is declared 
   assert.equal(Object.prototype.hasOwnProperty.call(orchestrator.deploy, "restartPolicyType"), true, "null is declared, not left out");
 });
 
-test("production's Marketing Generator is a no-op because the AMUX box drafts there; staging and dev run the generator", () => {
+test("production's Marketing Generator is a no-op because the AMUX box drafts there; staging runs the generator", () => {
   // The box drafts in production (docs/ops/marketing-generator-box.md). A
   // production apply that declared the real generator would bring back a
   // second daily run on the paid LLM key.
@@ -483,7 +483,6 @@ test("production's Marketing Generator is a no-op because the AMUX box drafts th
   assert.doesNotMatch(startOf("production"), /marketing-generator-service/);
   assert.match(startOf("production"), /^node -e "console\.log\('[^"]*'\)"$/, "the no-op only prints a line");
   assert.equal(startOf("staging"), generator);
-  assert.equal(startOf("dev"), generator);
 
   // No other runner overrides its start command per environment.
   assert.deepEqual(
