@@ -260,6 +260,45 @@ test("a month budget that is not above the day budget is flagged, not blocked", 
   assert.deepEqual(approved.limits, { day: 50_000_000, month: 500_000_000 });
 });
 
+test("qwen's budget is its own envelope, and production without it has no limits", () => {
+  // The default-off switch for Qwen image generation: until both variables
+  // exist, the judge's providerBudgetReady (limits !== null) refuses every
+  // runtime Qwen model in production.
+  assert.deepEqual(imageProviderBudgetEnvNames("qwen"), {
+    day: "IMAGE_PROVIDER_QWEN_COST_MICROUSD_PER_DAY",
+    month: "IMAGE_PROVIDER_QWEN_COST_MICROUSD_PER_MONTH",
+  });
+  const missing = resolveImageProviderBudget({}, { production: true, provider: "qwen" });
+  assert.equal(missing.limits, null);
+  assert.deepEqual(
+    missing.problems.map((problem) => problem.reason),
+    ["missing_in_production", "missing_in_production"]
+  );
+  // Another provider's budget is not Qwen's.
+  const others = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_MONTH: "50000000",
+    },
+    { production: true, provider: "qwen" }
+  );
+  assert.equal(others.limits, null);
+  const set = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_QWEN_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_QWEN_COST_MICROUSD_PER_MONTH: "50000000",
+    },
+    { production: true, provider: "qwen" }
+  );
+  assert.deepEqual(set.limits, { day: 12_000_000, month: 50_000_000 });
+  assert.equal(imageProviderBudgetBucketKey("qwen"), "image-provider:qwen");
+  // Seeded with no Qwen model, so no deploy needs a Qwen budget today.
+  assert.equal(
+    resolveActiveImageProviderBudgets({}, { production: true }).some((entry) => entry.provider === "qwen"),
+    false
+  );
+});
+
 test("the bucket key is one function, shared by admission, refund and the report", () => {
   // It was private to lib/imageGenerationService.ts, so the admin report could
   // not reach it and showed per-provider limits beside one provider's usage.

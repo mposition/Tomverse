@@ -40,6 +40,8 @@ function makeWorld(outcome: Outcome) {
     assignmentRole: "investigate",
     reviewVerdict: null as "accept" | "reject" | "unknown" | null,
     priorReviewRejections: 0,
+    ownerRetriedRejectionAttemptNumber: null as number | null,
+    reviewRejectionCountWhere: null as Record<string, unknown> | null,
     reviewAuditCount: 0,
     reviewCreated: null as Record<string, unknown> | null,
     assignmentAuditPresent: true,
@@ -193,12 +195,18 @@ const tx = {
       verdict: world.reviewVerdict, authorVendor: "anthropic",
       auditLog: { entryHash: "a".repeat(64) },
     } : null),
-    count: async () => world.priorReviewRejections,
+    count: async ({ where }: { where: Record<string, unknown> }) => {
+      world.reviewRejectionCountWhere = where;
+      return world.priorReviewRejections;
+    },
     create: async ({ data }: { data: Record<string, unknown> }) => {
       world.reviewCreated = data;
       return data;
     },
   },
+  amuxReviewProposal: { findFirst: async () =>
+    world.ownerRetriedRejectionAttemptNumber === null ? null :
+      { attempt: { attemptNumber: world.ownerRetriedRejectionAttemptNumber } } },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: {
       role: "implement", grade: "routine", receiptDigest: "a".repeat(64),
@@ -487,6 +495,34 @@ test("v52 review reject retries once at the same grade, then blocks", async () =
     assert.equal(world.attemptUpdateData?.reason, reason);
     assert.equal(world.taskUpdateData?.executionGrade, undefined,
       "review rejection cannot escalate grade");
+  }
+});
+
+test("an owner retry of a twice-rejected run counts only later rejections", async () => {
+  for (const [retried, expectedWhere] of [
+    [null, { taskId, verdict: "reject", attemptId: { not: attemptId } }],
+    [2, { taskId, verdict: "reject", attemptId: { not: attemptId },
+      attempt: { attemptNumber: { gt: 2 } } }],
+  ] as const) {
+    world = makeWorld("succeeded");
+    world.attemptNumber = 1;
+    world.gradeGuard = true;
+    world.assignmentRole = "implement";
+    world.taskGrade = "advanced";
+    world.reviewVerdict = "reject";
+    world.ownerRetriedRejectionAttemptNumber = retried;
+    world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+      sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+      files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+    const input = await settlementInput("succeeded");
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      ...input, changedPaths: ["lib/ordinary.ts"],
+    });
+    assert.equal(result.settled, true);
+    assert.deepEqual(world.reviewRejectionCountWhere, expectedWhere);
+    // The mocked count after the retry is 0: its first rejection goes back.
+    assert.equal(world.taskUpdateData?.status, "todo");
+    assert.equal(world.attemptUpdateData?.reason, "review_server_rejected");
   }
 });
 

@@ -151,6 +151,61 @@ test("a fal revision whose thinking cap is below the pinned surcharge does not s
   assert.ok(reasons.includes("thinking_cap_below_minimum:2000"));
 });
 
+test("a runtime fal model is judged by its endpoint's row, and an unlisted endpoint never serves", () => {
+  // Lookup 2026-11-07: fal bills per endpoint. The judge used to read Nano
+  // Banana 2's flat surcharge as every fal model's bound.
+  const falProfile = (apiModelId) => ({
+    provider: "fal",
+    apiModelId,
+    name: apiModelId,
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  });
+  // Hypothetical prices for the judge's arithmetic, not approved ones.
+  const falRevision = (modelId, thinkingCapMicroUsd) => ({
+    modelId,
+    pricingVersion: `${modelId}-test`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits: 200, outputCostMicroUsd: 40_000 }],
+    verification: {
+      verifiedAt: "2026-11-07",
+      sources: [`https://fal.ai/models/${modelId}`],
+      thinkingCapMicroUsd,
+    },
+  });
+  const judged = (modelId, cap) => {
+    const { models } = resolve(
+      [row(modelId, { profile: falProfile(modelId), enabled: true })],
+      [falRevision(modelId, cap)]
+    );
+    return models.find((m) => m.id === modelId);
+  };
+
+  // Qwen Image 3 is priced per image: a cap of 0 bounds it and it serves.
+  assert.equal(judged("alibaba/qwen-image-3/text-to-image", 0).disabledReason, null);
+
+  // Nano Banana 2.1 is token-billed with no cap parameter. No stated cap --
+  // Nano Banana 2's 2,000 or anything larger -- turns that into a bound, and
+  // there is no surcharge minimum for it to fall short of.
+  for (const cap of [0, 2_000, 1_000_000]) {
+    assert.equal(judged("google/nano-banana-2.1", cap).disabledReason, "worst_case_cost_unbounded", String(cap));
+  }
+  const tokenBilled = judge()({
+    ...IMAGE_MODEL_REGISTRY.find((model) => model.provider === "fal"),
+    id: "google/nano-banana-2.1",
+    apiModelId: "google/nano-banana-2.1",
+  });
+  assert.ok(tokenBilled.reasons.includes("worst_case_cost_unbounded"));
+  assert.equal(tokenBilled.reasons.some((reason) => reason.startsWith("thinking_cap_below_minimum")), false);
+
+  // An endpoint the table does not list is refused, however its revision reads.
+  assert.equal(judged("fal-ai/flux/dev", 2_000).disabledReason, "worst_case_cost_unbounded");
+});
+
 test("turning on an admitted model serves it; a missing provider budget refuses it", () => {
   const on = resolve([row(enabledSeed.id, { enabled: true })]);
   assert.equal(on.models.find((m) => m.id === enabledSeed.id).disabledReason, null);
@@ -211,6 +266,54 @@ test("a model that exists only in the database needs a full profile and a price"
   const added = priced.models.find((m) => m.id === "gpt-image-3");
   assert.equal(added.disabledReason, null);
   assert.equal(added.provider, "openai");
+});
+
+test("a runtime Qwen model serves only with Qwen's own source, credits at the floor and a budget", () => {
+  const profile = {
+    provider: "qwen",
+    apiModelId: "qwen-image-2.0",
+    name: "Qwen Image 2.0",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  // Test figures, not a sale price: the $0.035 image plus the 5,000 prompt
+  // budget is a 40,000 worst case, so the floor is ceil(40,000 / 900) = 45.
+  const qwenRevision = (credits, sources = ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"]) => ({
+    modelId: "qwen-image-2.0",
+    pricingVersion: `qwen-image-2-0-test-${credits}-${sources.length}`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits, outputCostMicroUsd: 35_000 }],
+    verification: { verifiedAt: "2026-11-07", sources, thinkingCapMicroUsd: 0 },
+  });
+  const served = (revisions, budgetReady = true) =>
+    resolve([row("qwen-image-2.0", { profile, enabled: true })], revisions, budgetReady).models.find(
+      (m) => m.id === "qwen-image-2.0"
+    );
+
+  const atFloor = served([qwenRevision(45)]);
+  assert.equal(minimumCreditsForImageOption(atFloor, atFloor.prices[0]), 45);
+  assert.equal(atFloor.disabledReason, null);
+  assert.equal(atFloor.provider, "qwen");
+  assert.deepEqual(judge()(atFloor), { admitted: true });
+
+  // The default-off switch: no provider budget, no service.
+  assert.notEqual(served([qwenRevision(45)], false).disabledReason, null);
+  assert.deepEqual(judge(false)(atFloor).reasons, ["provider_budget_missing"]);
+
+  assert.notEqual(served([qwenRevision(44)]).disabledReason, null);
+  assert.ok(judge()({ ...atFloor, prices: qwenRevision(44).prices }).reasons.includes("credits_below_floor:medium/1024x1024"));
+  // Another provider's documentation is not Qwen's price.
+  assert.equal(
+    served([qwenRevision(45, ["https://developers.openai.com/api/docs/pricing"])]).disabledReason,
+    "price_unverified"
+  );
+  // A Qwen model outside the family whose per-image billing was read has no
+  // proven bound, even with a zero cap stated.
+  assert.ok(judge()({ ...atFloor, apiModelId: "z-image-turbo" }).reasons.includes("worst_case_cost_unbounded"));
 });
 
 test("a revision below the floor never serves, even when the row says inherit or there is no row", () => {

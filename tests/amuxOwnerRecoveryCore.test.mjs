@@ -80,6 +80,29 @@ test("an expired attempt whose own final result the server stored is a finished 
   assert.equal(prepare({ ...stored, serverAllowsRetry: false }).retryPreviewReady, false);
 });
 
+test("a run the v52 review rejected twice is a finished run the owner may retry", () => {
+  // AMUX-ROUTERFAIL-004: the open escalation says execution_blocked.
+  const rejected = { escalationReason: "execution_blocked",
+    lastAttemptReason: "review_server_rejected_twice",
+    lastAttemptOutcome: "succeeded", lastAttemptToStatus: "blocked" };
+  const result = prepare(rejected);
+  assert.equal(result.reason, "terminal_recorded");
+  assert.equal(result.executionOutcomeKnown, true);
+  assert.equal(result.decisionContextReady, true);
+  assert.equal(result.retryPreviewReady, true);
+  assert.equal(result.approvalExecutionSourceReady, false);
+  for (const input of [
+    { ...rejected, lastAttemptReason: "review_server_unknown" },
+    { ...rejected, lastAttemptReason: "review_history_unavailable" },
+    { ...rejected, lastAttemptEndedAt: null },
+  ]) {
+    const unknown = prepare(input);
+    assert.equal(unknown.executionOutcomeKnown, false, JSON.stringify(input));
+    assert.equal(unknown.retryPreviewReady, false, JSON.stringify(input));
+  }
+  assert.equal(prepare({ ...rejected, serverAllowsRetry: false }).retryPreviewReady, false);
+});
+
 test("only protected terminal outcome and target pairs count as known execution", () => {
   for (const input of [
     { lastAttemptOutcome: "started", lastAttemptToStatus: null,

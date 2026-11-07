@@ -54,6 +54,8 @@ const ESCALATION_REASON_CODES = new Set([
   // Owner decision 2026-11-07: an investigate conclusion parked the Task.
   "analysis_stop",
   "analysis_replan",
+  // Owner decision 2026-11-07: the v52 review server rejected a run twice.
+  "review_server_rejected_twice",
   "operational_cost_blocked",
   "canonical_deadline_review_required",
   // Policy version 15: why the WSL runner blocked an attempt.
