@@ -58,15 +58,37 @@ const view = (overrides: Partial<ScoutConsoleView> = {}): ScoutConsoleView => ({
   ...overrides,
 });
 
-test("the top row says what is waiting and whether the Scout ran, before any list", () => {
-  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} />);
+const WEEK = Array.from({ length: 7 }, (_, index) => ({
+  day: `2026-10-${String(19 - index).padStart(2, "0")}`,
+  calls: 25,
+  failed: 0,
+  kept: index + 1,
+  inputTokens: 350_000,
+  outputTokens: 30_000,
+}));
+
+test("the side tiles say what the Scout kept, today's calls against the limit and the last run, before any list", () => {
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} week={WEEK} />);
   assert.match(html, new RegExp(m.stateOn));
-  assert.match(html, new RegExp(`${m.tileOpen}</p><p[^>]*>4</p>`));
-  assert.match(html, /High 1 · Medium 1 · Low 2 · 3 places/);
-  assert.match(html, /25 judged · 0 failed · 38 new suggestions/);
+  assert.match(html, /data-testid="scout-agent-aside"/);
+  // 1 + 2 + ... + 7 kept in the seven days, drawn as bars, and what was sent so far.
+  assert.match(html, />28</);
+  assert.match(html, /<svg[^>]*role="img"[^>]*aria-label="Suggestions kept per day"/);
+  assert.match(html, /Sent to AMUX: 0/);
+  // The ring is calls against the daily limit, and says the Scout records no dollars.
   assert.match(html, /30 \/ 50/);
-  assert.match(html, /412.3K input · 38.1K output tokens/);
-  assert.ok(html.indexOf(m.tileOpen) < html.indexOf('data-testid="admin-product-research-scout-group"'));
+  assert.match(html, /Daily limit 50 calls/);
+  assert.match(html, /not dollars/);
+  assert.match(html, /25 judged, 0 failed, 38 kept/);
+  assert.ok(html.indexOf('data-testid="scout-agent-aside"') > html.indexOf('data-testid="admin-product-research-scout-group"'));
+});
+
+test("day counts that could not be read are said so, and the tile draws no bars", () => {
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} week={null} />);
+  assert.match(html, /Daily counts could not be read\./);
+  assert.doesNotMatch(html, /Suggestions kept per day/);
+  // Left out entirely, the panel draws no side tiles.
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} />), /scout-agent-aside/);
 });
 
 test("suggestions are grouped by place; a group with a high one opens and the rest stay folded", () => {
