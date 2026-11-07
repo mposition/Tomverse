@@ -785,7 +785,10 @@ const IMAGE_PER_IMAGE_BILLED_MODELS: Readonly<Partial<Record<ImageModelProvider,
 const imageThinkingTerms = (provider: unknown, apiModelId: unknown): FalThinkingTerms | null => {
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
   // A family read as per-image is not a bound on the provider's other models.
-  const family = IMAGE_PER_IMAGE_BILLED_MODELS[provider as ImageModelProvider];
+  const family =
+    typeof provider === "string" && Object.hasOwn(IMAGE_PER_IMAGE_BILLED_MODELS, provider)
+      ? IMAGE_PER_IMAGE_BILLED_MODELS[provider as ImageModelProvider]
+      : undefined;
   if (family && typeof apiModelId === "string" && !family.test(apiModelId)) return null;
   return typeof provider === "string" && Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
     ? { billing: IMAGE_PROVIDER_THINKING_BILLING[provider as keyof typeof IMAGE_PROVIDER_THINKING_BILLING] }
