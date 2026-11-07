@@ -99,6 +99,7 @@ test("the release overview reads each source on its own and never draws a failed
   assert.ok(overview.includes("admin_release_overview_read_failed"));
   // A train counts as departed only when its admission was recorded.
   assert.ok(overview.includes("qaTrainRoute(nowMs, hours, admittedHours ?? new Set())"));
+  assert.ok(overview.includes("admission.emergency ? []"), "an emergency train never stands for a scheduled hour");
   assert.ok(overview.includes("value={selection === null ? null : selection.numbers.length}"));
   assert.ok(overview.includes("main === null || main.pullRequests === null ? null"));
   assert.ok(overview.includes('data-testid="release-merge-train-note"'), "merging stays the operator's merge-train");

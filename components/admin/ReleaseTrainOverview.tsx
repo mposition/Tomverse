@@ -56,7 +56,7 @@ export async function ReleaseTrainOverview({ nowMs }: { nowMs: number }) {
   const hours = reported?.hours ?? parseQaReleaseTrainSlots(QA_RELEASE_TRAIN_DEFAULT_SLOTS) ?? [];
   const scheduleUnread = scheduleRead.status === "rejected";
   const admittedHours = admissionsRead.status === "fulfilled"
-    ? new Set(admissionsRead.value.flatMap((admission) => qaTrainSlotHourToday(admission.slot, nowMs) ?? []))
+    ? new Set(admissionsRead.value.flatMap((admission) => (admission.emergency ? [] : qaTrainSlotHourToday(admission.slot, nowMs) ?? [])))
     : null;
   const route = qaTrainRoute(nowMs, hours, admittedHours ?? new Set());
   const next = qaTrainNext(nowMs, hours);

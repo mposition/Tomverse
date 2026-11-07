@@ -37,14 +37,14 @@ export function AdminStepper({
   className?: string;
 } & Omit<React.HTMLAttributes<HTMLOListElement>, "children">) {
   return (
-    <ol {...rest} aria-label={label} className={`flex min-w-0 items-center gap-1 ${className}`}>
+    <ol {...rest} aria-label={label} className={`flex min-w-0 flex-col gap-1.5 lg:flex-row lg:items-center lg:gap-1 ${className}`}>
       {steps.map((step, index) => (
         <li
           key={step.id}
           data-step={step.id}
           data-state={step.state}
           aria-current={step.state === "current" || step.state === "attention" ? "step" : undefined}
-          className={`flex min-w-0 items-center gap-1.5 ${index < steps.length - 1 ? "flex-1" : ""}`}
+          className={`flex min-w-0 items-center gap-1.5 ${index < steps.length - 1 ? "lg:flex-1" : ""}`}
         >
           <span
             aria-hidden="true"
@@ -57,7 +57,7 @@ export function AdminStepper({
             <span className="sr-only"> ({stateWords[step.state]})</span>
           </span>
           {index < steps.length - 1 ? (
-            <span aria-hidden="true" className={`h-0.5 min-w-3 flex-1 rounded-full ${step.state === "done" ? "bg-emerald-500/60" : "bg-zinc-800"}`} />
+            <span aria-hidden="true" className={`hidden h-0.5 min-w-3 flex-1 rounded-full lg:block ${step.state === "done" ? "bg-emerald-500/60" : "bg-zinc-800"}`} />
           ) : null}
         </li>
       ))}
