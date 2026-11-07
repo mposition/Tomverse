@@ -184,9 +184,17 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   assert.equal(maxImageRequestCostMicroUsd(stated, price), null);
   assert.equal(minimumCreditsForImageOption(stated, price), null);
 
-  // fal's high thinking is a flat surcharge on a level the request pins, and
-  // the other two bill no thinking at all: each enabled model's cap holds.
-  assert.equal(imageThinkingBilling("fal"), "flat_per_request");
+  // fal answers per endpoint: Nano Banana 2's high thinking is a flat
+  // surcharge on a level the request pins, and the other two providers bill
+  // no thinking at all: each enabled model's cap holds.
+  assert.equal(imageThinkingBilling("fal", "fal-ai/nano-banana-2"), "flat_per_request");
+  assert.equal(imageThinkingBilling("fal", "google/nano-banana-2.1"), "per_token_uncapped");
+  assert.equal(imageThinkingBilling("fal", "alibaba/qwen-image-3/text-to-image"), "not_billed");
+  // A fal model that names no endpoint, or one the table does not list, has
+  // no answer -- and so no bound.
+  assert.equal(imageThinkingBilling("fal"), null);
+  assert.equal(imageThinkingBilling("fal", "fal-ai/flux/dev"), null);
+  assert.equal(imageThinkingBilling("fal", "toString"), null);
   assert.equal(imageThinkingBilling("openai"), "not_billed");
   assert.equal(imageThinkingBilling("xai"), "not_billed");
   // Qwen bills per image with no separate thinking charge (price page read
@@ -204,6 +212,9 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   // A provider with no adapter, or a prototype key, has no billing answer.
   assert.equal(imageThinkingBilling("ideogram"), null);
   assert.equal(imageThinkingBilling("toString"), null);
+  // Review finding 2026-11-07: an inherited key with a model id must not throw.
+  assert.equal(imageThinkingBilling("toString", "qwen-image-3.0"), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("constructor", "qwen-image-3.0"), null);
   assert.equal(imageThinkingBilling(undefined), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("ideogram"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("google"), null);
@@ -219,7 +230,9 @@ test("a flat thinking surcharge is a bound only when the cap covers it", () => {
     ...fal,
     priceVerification: { ...fal.priceVerification, thinkingCapMicroUsd },
   });
-  assert.equal(imageThinkingCapMinimumMicroUsd("fal"), 2_000);
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal", "fal-ai/nano-banana-2"), 2_000);
+  // No endpoint named: no surcharge to stand on (fail closed, not NB2's).
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("openai"), 0);
   for (const understated of [0, 1, 1_999]) {
     assert.equal(imageThinkingCapEnforced(withCap(understated)), false, String(understated));
@@ -238,6 +251,34 @@ test("a flat thinking surcharge is a bound only when the cap covers it", () => {
   assert.equal(imageThinkingCapMinimumMicroUsd("fal", "fal-ai/nano-banana-2"), 2_000);
   assert.equal(imageThinkingCapEnforced(tokenBilled), false);
   assert.equal(maxImageRequestCostMicroUsd(tokenBilled, price), null);
+  // Any cap at all, however generous: pinning `minimal` lowers the level, not
+  // the count, and nothing in the request bounds the count.
+  assert.equal(imageThinkingCapEnforced({ ...tokenBilled, priceVerification: { ...fal.priceVerification, thinkingCapMicroUsd: 1_000_000 } }), false);
+
+  // An endpoint the table does not list is unbounded whatever its cap says.
+  const unlisted = { ...withCap(2_000), id: "fal-ai/flux/dev", apiModelId: "fal-ai/flux/dev" };
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal", "fal-ai/flux/dev"), null);
+  assert.equal(imageThinkingCapEnforced(unlisted), false);
+  assert.equal(maxImageRequestCostMicroUsd(unlisted, price), null);
+});
+
+test("a fal endpoint priced per image bounds thinking at zero", () => {
+  // Qwen Image 3 through fal: a different schema with no thinking field, sold
+  // per image. A cap of 0 is a bound and the worst case is image + prompt.
+  const fal = getImageModel("fal-ai/nano-banana-2");
+  const qwen = {
+    ...fal,
+    id: "alibaba/qwen-image-3/text-to-image",
+    apiModelId: "alibaba/qwen-image-3/text-to-image",
+    priceVerification: { ...fal.priceVerification, thinkingCapMicroUsd: 0 },
+  };
+  // A hypothetical option for the arithmetic, not an approved price.
+  const price = { quality: "medium", size: "1024x1024", credits: 60, outputCostMicroUsd: 40_000 };
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal", qwen.apiModelId), 0);
+  assert.equal(imageThinkingCapEnforced(qwen), true);
+  assert.equal(maxImageRequestCostMicroUsd(qwen, price), 40_000 + IMAGE_PROMPT_BUDGET_MICRO_USD);
+  // Still a cap: an unknown one is not a bound even where nothing is billed.
+  assert.equal(imageThinkingCapEnforced({ ...qwen, priceVerification: { ...qwen.priceVerification, thinkingCapMicroUsd: null } }), false);
 });
 
 test("every enabled option prices at or above the policy minimum", () => {

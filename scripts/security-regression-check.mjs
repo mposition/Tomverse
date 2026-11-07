@@ -3940,14 +3940,18 @@ const checks = [
     // specific request. A field quietly dropped here does not break anything
     // visible -- it just makes the audit trail describe a request the product
     // no longer makes.
+    // The thinking level now sits in the endpoint's row of
+    // FAL_ENDPOINT_PROFILES and the body reads it from there; Qwen's body pins
+    // its own prompt rewriting off for the same reason `system_prompt` is "".
     test: (source) =>
       [
         "num_images: 1",
         'aspect_ratio: "1:1"',
-        'thinking_level: "high"',
+        "thinking_level: thinkingLevel",
         "enable_web_search: false",
         "limit_generations: true",
         'system_prompt: ""',
+        "enable_prompt_expansion: false",
       ].every((field) => source.includes(field)),
   },
   {
@@ -3958,8 +3962,12 @@ const checks = [
     // request had already been pinned to ask for `high`, and the policy text
     // still said high thinking was off. The number and the field are one
     // decision -- 2,000 microUSD of a 87,000 worst case and a floor of 97 --
-    // and nothing but a check keeps them saying the same thing.
-    test: (source) => source.includes('thinking_level: "high"'),
+    // and nothing but a check keeps them saying the same thing. They are one
+    // row now: Nano Banana 2's level and its flat surcharge.
+    test: (source) =>
+      /"fal-ai\/nano-banana-2": \{[^}]*thinkingLevel: "high",\s*thinking: \{ billing: "flat_per_request", surchargeMicroUsd: FAL_HIGH_THINKING_SURCHARGE_MICRO_USD \}/.test(
+        source
+      ),
   },
   {
     // docs/policy/engineering-agent.md §8: each service holds exactly its own
