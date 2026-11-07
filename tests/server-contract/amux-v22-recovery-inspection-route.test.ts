@@ -5,6 +5,11 @@ import { mock, test } from "node:test";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const state = { reads: 0, writes: 0 };
 class Invalid extends Error {}
+class RateLimited extends Error {}
+// A day-bucket fake of consumeApiRateLimit: records which key and scope each
+// call used, and refuses once a (scope, key) bucket passes its day limit.
+const dayBuckets = new Map<string, number>();
+const limitCalls: Array<{ key: string; scope: string; skipIpBucket: boolean | undefined }> = [];
 mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: { AMUX_LIFECYCLE_ROUTE_BUDGET_MS: 12_000,
   withAmuxRouteBudget: async (callback: () => Promise<unknown>) => callback() } });
 mock.module(mod("lib/amux/internalRoute.ts"), { namedExports: {
@@ -12,7 +17,15 @@ mock.module(mod("lib/amux/internalRoute.ts"), { namedExports: {
   isAmuxInputError: (error: unknown) => error instanceof Invalid,
   amuxInternalErrorResponse: () => Response.json({ error: "internal" }, { status: 500 }),
 } });
-mock.module(mod("lib/apiSecurity.ts"), { namedExports: { consumeApiRateLimit: async () => {}, apiSecurityResponse: () => null,
+mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
+  consumeApiRateLimit: async (_request: Request, key: string, scope: string,
+    limits: { minute: number; day: number }, options: { skipIpBucket?: boolean } = {}) => {
+    limitCalls.push({ key, scope, skipIpBucket: options.skipIpBucket });
+    const bucket = `${scope}|${key}`; const count = (dayBuckets.get(bucket) ?? 0) + 1;
+    if (count > limits.day) throw new RateLimited(); dayBuckets.set(bucket, count);
+  },
+  apiSecurityResponse: (error: unknown) => error instanceof RateLimited ?
+    Response.json({ error: "API_RATE_LIMITED" }, { status: 429 }) : null,
   readLimitedJson: async (request: Request, limit: number, schema: { safeParse: (value: unknown) => { success: boolean; data: unknown } }) => {
     const raw = await request.text(); if (raw.length > limit) throw new Invalid();
     const result = schema.safeParse(JSON.parse(raw)); if (!result.success) throw new Invalid(); return result.data;
@@ -82,4 +95,52 @@ test("the independent master flag prevents pending lookup and reports before rea
   assert.equal((await GET(get("workerName=claude-test"))).status, 409);
   assert.equal((await POST(post({ arbitrary: "must not be parsed" }))).status, 409);
   assert.equal(state.writes, writes); assert.equal(state.reads, reads);
+});
+const profiles = JSON.stringify({ version: 1, profiles: [
+  { alias: "claude", workerNames: ["claude-test"] }, { alias: "codex", workerNames: ["codex-test"] }] });
+const enableInspector = () => {
+  process.env.TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET = inspectorSecret;
+  process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
+  process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON = profiles;
+  dayBuckets.clear(); limitCalls.length = 0;
+};
+test("each configured worker has its own daily bucket and no shared IP leg", async () => {
+  const { GET, POST } = await route();
+  enableInspector();
+  for (let call = 0; call < 2_000; call++)
+    assert.equal((await GET(get("workerName=claude-test"))).status, 200);
+  assert.equal((await GET(get("workerName=claude-test"))).status, 429);
+  assert.equal((await GET(get("workerName=codex-test"))).status, 200);
+  assert.equal((await POST(post(report))).status, 200);
+  assert.equal((await POST(post({ ...report, workerName: "codex-test" }))).status, 200);
+  assert.deepEqual(new Set(limitCalls.map((call) => `${call.scope}|${call.key}`)), new Set([
+    "amux-recovery-inspection-read|amux-fixed-recovery-checker:claude-test",
+    "amux-recovery-inspection-read|amux-fixed-recovery-checker:codex-test",
+    "amux-recovery-inspection-report|amux-fixed-recovery-checker:claude-test",
+    "amux-recovery-inspection-report|amux-fixed-recovery-checker:codex-test"]));
+  assert.ok(limitCalls.every((call) => call.skipIpBucket === true));
+});
+test("the same worker is held to its report day limit", async () => {
+  const { POST } = await route();
+  enableInspector();
+  for (let call = 0; call < 1_000; call++)
+    assert.equal((await POST(post(report))).status, 200);
+  assert.equal((await POST(post(report))).status, 429);
+  assert.equal((await POST(post({ ...report, workerName: "codex-test" }))).status, 200);
+});
+test("an invalid or unconfigured worker name never creates a worker bucket", async () => {
+  const { GET, POST } = await route();
+  enableInspector();
+  for (const name of ["", "claude test", "../claude", "x".repeat(129)])
+    assert.equal((await GET(get(`workerName=${encodeURIComponent(name)}`))).status, 400);
+  assert.equal((await POST(post({ ...report, workerName: "claude test" }))).status, 400);
+  assert.equal(limitCalls.length, 0);
+  assert.equal((await GET(get("workerName=rogue-1"))).status, 200);
+  assert.equal((await GET(get("workerName=rogue-2"))).status, 200);
+  assert.equal((await POST(post({ ...report, workerName: "rogue-3" }))).status, 200);
+  assert.deepEqual([...new Set(limitCalls.map((call) => call.key))], ["amux-fixed-recovery-checker"]);
+  delete process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON;
+  limitCalls.length = 0;
+  assert.equal((await GET(get("workerName=claude-test"))).status, 200);
+  assert.deepEqual(limitCalls.map((call) => call.key), ["amux-fixed-recovery-checker"]);
 });
