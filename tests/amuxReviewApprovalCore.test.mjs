@@ -89,6 +89,34 @@ test("an expired v22 attempt may be retried only when the server stored its own 
     attempt, storedResultAttemptId }), false, JSON.stringify({ attempt, storedResultAttemptId }));
 });
 
+test("a run the v52 review rejected twice may be retried only with its own reject record", () => {
+  // Owner decision 2026-11-07 (AMUX-ROUTERFAIL-004): the run finished with a
+  // patch and a recorded verdict; only the one automatic return was used up.
+  const rejected = { id: "attempt-2", v22AssignmentId: "assignment",
+    outcome: "succeeded", toStatus: "blocked",
+    reason: "review_server_rejected_twice" };
+  assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({ sourceSystem: "admin-idea-v4",
+    attempt: rejected, rejectedReviewAttemptId: "attempt-2" }), true);
+  for (const [attempt, rejectedReviewAttemptId] of [
+    [rejected, null],
+    [rejected, undefined],
+    [rejected, "attempt-1"],
+    [{ ...rejected, id: undefined }, undefined],
+    [{ ...rejected, id: "" }, ""],
+    [{ ...rejected, v22AssignmentId: null }, "attempt-2"],
+    [{ ...rejected, toStatus: "review" }, "attempt-2"],
+    [{ ...rejected, outcome: "blocked" }, "attempt-2"],
+    [{ ...rejected, outcome: "expired" }, "attempt-2"],
+    // A review whose result is not known stays closed.
+    [{ ...rejected, reason: "review_server_unknown" }, "attempt-2"],
+    [{ ...rejected, reason: "review_history_unavailable" }, "attempt-2"],
+    [{ ...rejected, reason: "review_server_unknown", outcome: "blocked" }, "attempt-2"],
+    [{ ...rejected, reason: "review_server_rejected" }, "attempt-2"],
+  ]) assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({ sourceSystem: "admin-idea-v4",
+    attempt, rejectedReviewAttemptId }), false,
+  JSON.stringify({ attempt, rejectedReviewAttemptId }));
+});
+
 test("approval readiness is conditional and names missing settings without values", () => {
   assert.deepEqual(amuxReviewApprovalReadiness({}), { ready: true, enabled: false, missing: [] });
   assert.deepEqual(amuxReviewApprovalReadiness({

@@ -94,8 +94,8 @@ What moved, and what it means for the paragraphs below (which keep the names
 they were written under):
 
 - **Command Center, Customers and Revenue** became Home and Customers &
-  Revenue. Billing is Plans & pricing and its editor's client tabs are URL tabs
-  (`urlTabs`): the address names the section the screen shows. Prices and
+  Revenue. Billing is Plans & pricing and its editor follows the URL
+  (`initialTab`): the address names the section the screen shows. Prices and
   Diagnostics are tabs of their own; Diagnostics holds what sat under the
   promotion editor.
 - **AI Agents** is a new group. Marketing, Product research, Engineering, SRE
@@ -195,10 +195,12 @@ sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 **Agent office** is a pixel office for the eight agent teams and the digest
 desk, after the original AI OFFICE UI by godseng.mom. It shows records and
 decides nothing. It is live only (operator decision, 2026-10-09), and the demo
-engine the original played is gone (operator decision, 2026-10-10): every
-team's staff sit at their desks, nobody moves or speaks a scripted line, the
-console answers questions from the records and declines every order, and the
-office approves nothing. It is the one entry marked `wide` in the route
+engine the original played is gone (operator decision, 2026-10-10). Since the
+live office redesign (owner decision, 2026-11-07) the live section is a summary
+strip, the floor, "waiting on you" with a worker sheet, a roster and a today
+strip; the keyword console is gone. Nobody plays a script: a worker walks only
+when a fresh reading moves it to another place (`lib/agentOffice/floor.ts`),
+and the office approves nothing. It is the one entry marked `wide` in the route
 table: the console drops its reading width there, because the floor is a
 canvas that grows with the screen.
 The facts on it are the record links and the rooms marked LIVE. Each team
@@ -254,21 +256,30 @@ A counting the section does not take (switch off, or a fault) is "not counted",
 never zero, and an administrator who is not the owner sees that the record is
 the owner's, not a number. No request, email, name or legal-hold split reaches
 the office; its record link is the Trust and safety tab of Agent digests.
-Under the teams, the AMUX execution room separates the display-only Ubuntu
-resident roster approved in orchestration policy v27 (thirteen desks, no Devin
-or virtual engineering runner) from the app's dispatch admission catalog.
+Under the teams, the AMUX execution room is an open office with one desk island
+per CLI channel (Claude, Codex, Copilot, Cursor), a lounge, sleep pods and a
+bench. It separates the display-only Ubuntu resident roster approved in
+orchestration policy v27 (no Devin or virtual engineering runner) from the
+app's dispatch admission catalog.
 The roster is labelled as a policy roster, not a live process-health reading;
 it grants no registration, claim or execution authority. Workers absent from
 the usable admission catalog are labelled not admitted, never stopped or
 connected, even if an old runtime row exists. Each admitted worker's
-dispatch state is read from its runtime row. Past thirteen,
-the ones that need a look are drawn first and the room says in words how many
-are not drawn, as it does for a failed read or a missing catalog. Each worker is
-drawn seated with its real state -- the operator's exclusions first, then its
-runtime row read the way AMUX reads it when it hands out work (live while the
-lease has not run out and the status is idle or busy) -- and, while the
-route table has it, a link to the AMUX execution page. Each worker is one row
-of its record, and nothing about the cards they work on is read.
+dispatch state is read from its runtime row -- the operator's exclusions
+first, then its runtime row read the way AMUX reads it when it hands out work
+(live while the lease has not run out and the status is idle or busy). Where a
+worker is drawn follows that state: at its desk while busy or failed (with a
+"!"), in the lounge while free for work, in a sleep pod while its latest quota
+observation says it is used up, on the bench while paused, isolated or blocked,
+and nowhere (a covered desk) while not running. An island's desks grow in
+fours with its workers up to 24; whoever does not fit, or has no island, is
+counted on the floor and listed in the roster, never dropped. For everyone the
+office reads each worker's latest quota observation and its last ten ended
+attempts' outcomes. For the owner only -- the AMUX card list is the owner's --
+it also reads the open attempt with the card it holds (display key and title,
+opened the way the card list opens it) and today's CLI usage priced at API
+rates, shown as such and never as money spent. Nothing else of a card, and no
+prompt or output, is read.
 The room's connection light is green while at least one admitted worker has
 a live idle/busy dispatch bridge. Individual lost/error bridges remain red,
 with a separate warning count and attention status in the dashboard; green
@@ -284,12 +295,14 @@ the latest report in one AppSetting row stamped with the app's receipt time.
 Each reviewer is drawn seated as reviewing, idle or off, and a report older
 than five minutes draws them all as without a report. The same report carries
 each reviewer's account quota as the review server's own check last read it
-(a state and one amount: percent, credits or USD); a quota card in the live
-rail shows it, greyed and dated when the report is old, and says so when a
-server too old to send it reports.
-The operator's to-do -- the tab, the dashboard's operator metric and both
-operator windows -- is the queues where an agent waits on a person: marketing
-posts pending approval, AMUX escalations and AMUX halts nobody has cleared.
+(a state and one amount: percent, credits or USD); a reviewer's profile shows
+it, and says so when a server too old to send it reports.
+The operator's to-do on the dashboard is the queues where an agent waits on a
+person: marketing posts pending approval, AMUX escalations and AMUX halts
+nobody has cleared. The live section's "waiting on you" (and the tab's count)
+adds the Decision Maker items, open v22 worker questions, open plan refusals,
+each AMUX worker in error or lost, and each channel whose resting workers have
+used up their quota, most urgent first.
 They are read with the sidebar badges'
 own count functions (`lib/adminNavigationCounts.ts`), each links to the
 screen where it is acted on, and a count that fails to read is drawn as
@@ -299,17 +312,31 @@ each live team room, the AMUX execution room and the review server -- with
 their states, what needs a look first, and each team's record screen; what an
 agent produced stays on that screen. The status report copies or downloads
 that view as Markdown and is sent nowhere. While the tab is visible the page
-reads again every minute, and a live room whose record changed says so in the
-console in its lead's name. Live leads answer a greeting or a thank-you in
-their own voice with social lines only -- no figure, time, state, activity or
-promise, so the words stay true when a room is silent, off or unread, which a
-test holds -- react on the floor with an emoji for a moment, and otherwise
-keep the record line.
+reads again every minute, and the AMUX room (workers, their detail, today's
+attempts and merges) every fifteen seconds through the read-only
+`GET /api/admin/office/amux`. The today strip rewinds the floor to any five
+minutes since Brisbane midnight, or plays the day: a past floor is drawn from
+execution attempts only (a desk means an attempt covered that moment), and the
+summary, inbox, roster and sheet stay as they are now (`lib/agentOffice/replay.ts`).
+Between two readings the live section notices a new
+merge-lane merge into develop (a celebration), a halt opened or cleared, and a
+worker gone wrong; a sound plays for those only when the operator turned it on
+in this browser. The floor's light follows Brisbane's clock (day, dawn, dusk,
+night).
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
 `tests/agentOffice.test.mjs`). The page writes nothing and carries no badge
-and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it
+and no `writeRoles`, with one owner-only exception: the AI briefing (owner
+decision and paid-call approval, 2026-11-07; `lib/agentOfficeBriefing.ts`). Off
+unless `AGENT_OFFICE_BRIEFING_ENABLED` is `true`; the owner asks with a recent
+sign-in; each new briefing is one model call (`AGENT_OFFICE_BRIEFING_MODEL`,
+default `gpt-6-luna`) reserved under a lock against a limit of 40 a Brisbane
+day, one in flight, audited as `agent_office.briefing_requested` before it runs
+and never retried; an answer under five minutes old is shown again. Its only
+writes are its own usage and last-answer settings and that audit entry. The
+model reads counts, states and worker names, never a card title, and may link
+only the screens in `BRIEFING_LINKS`; it approves, sends or changes nothing. Its two sections are `?tab=` addresses (rule 2); it
 draws its own tab strip, as the original did, and those tabs are links, so
 moving between them keeps the panel mounted and brings a fresh reading of
 the LIVE rooms. The console shell owns the page's `h1`, so
@@ -677,6 +704,19 @@ The arithmetic behind them (chart geometry, the Brisbane clock) lives in
 cover them. Times in the console read as AEST (Brisbane, UTC+10): the shell's
 "Updated" clock shows `HH:MM AEST`, never UTC.
 
+### AI platform screens (2026-11-07)
+
+Providers, Models and Routing are drawn from the shared parts. Three rules
+carry over from the old screens: the provider usage **Sync now** button lives
+only on Providers > Usage & cost (Status and the provider detail page link to
+it, the sync API is unchanged); a switch an operator turned off is never turned
+back on by automation, and the incident tab says so; the Models > Default
+models tab draws the same saves as before (guest lead, guest lineup with one
+slot per provider), and the logged-in default stays a code constant with no
+admin write. A figure the loaders do not provide (per-provider p95, 7-day
+request trend per model, post-change reaction numbers) is left off the screen
+rather than stored or invented.
+
 ## Language
 
 The console is written in **English and Korean**, and in nothing else. It is an
@@ -833,3 +873,41 @@ change (`POST /api/admin/amux/workers`), sent once and read back; a refusal is
 shown in plain words and an unknown outcome sends nothing more. The drawer
 edits what a worker can do through the existing capability editor. Its copy
 names no policy version, build stage or internal refusal code.
+
+### Home screens: Today, Decisions and Metrics (2026-11-07, redesign step 3)
+
+The three Home entries were redrawn from the approved designs. No loader, route, role, write path or redirect changed; only what is drawn did.
+
+- **Today** (`components/admin/AdminOverviewSummary.tsx`) shows the greeting and how many decisions wait, at most four numbers (users, estimated monthly revenue, AI cost this month, paid conversion), where the decisions are by area, the AI cost today by provider, the service status, "Decide now", and the latest administrator changes. The team strip reads the Agent office's own live read through its `*Tone` functions (`lib/adminHomeTeams.ts`) and shows a tone, never a team's output. The numbers the old page carried that are not on it (plan mix, promotions, churn watch, usage counts, the environment table) live on Metrics and their own screens, or on the health score tab. A figure that could not be read is `null` and draws as unavailable; the health score's link and "ceiling" note stay on this page (`admin-health-score-link`, `admin-health-score-incomplete`).
+- **Health score** keeps the arithmetic of `lib/adminHealthScore.ts` unchanged and draws it as a gauge, a one-line verdict, the reasons points were lost (each with its deduction and the screen that fixes it) and the fastest ways to raise it. There is no 30-day line: the score is computed on demand and no history of it is stored. Unread inputs still deduct nothing and mark the score as a ceiling, and the environment groups, with their headings, stay on this tab.
+- **Decisions** (`lib/adminDecisionInbox.ts`, `lib/adminDecisionInboxLoad.ts`, `components/admin/AdminWorkQueuePanel.tsx`) is one inbox read once: the work queue's rows (with the time each started waiting) plus the sidebar badge counts for the agent and AMUX approvals, which are counted but not listed row by row (marketing drafts, product suggestions, AMUX escalations, orchestrator halts, Decision Maker requests). The area tabs are the same list through a filter. It only reads and links: the decision is made on the screen that owns it, so it has no write, step-up or confirmation. A line whose screen the role cannot open (`adminHrefIsVisibleTo`) is left out. A source that failed is named in a notice and an inbox is never drawn as clear while one is missing. The sidebar's Decisions badge keeps its own, narrower definition (refunds, feedback, privacy requests), so the inbox total can be larger than the badge.
+- **Metrics** (`components/admin/AdminUsageAnalyticsPanel.tsx`, `AdminProductAnalyticsPanel.tsx`, `AdminReviewUseSummary.tsx`) puts the period picker (`?period=`, unchanged) at the top right of the usage tab, with four numbers, the active-accounts line (the previous period dashed where the report's fixed 30-day series can hold both), model share by provider, a weekday-by-hour heatmap in AEST, country share and the footer figures. The model table, weekly and monthly users, new-account return and the distributions are folded under "More detail". The product tab draws the funnel from the ledger's 30-day event counts, sign-up sources and the launch funnel, with the raw event table, Google Analytics delivery and campaign lists folded below. Elements the data does not hold are not drawn (a monthly revenue history, a cohort retention table, a plan donut on the product tab, the review model-agreement matrix): no store or migration was added for them.
+- Shared parts added to `components/admin/ui/`: `AdminLineChart`, `AdminHeatmap`, `AdminFunnel`, `AdminShareList`, `AdminSegmentedLinks`, `AdminProviderMark`. Regression tests: `tests/adminDecisionInbox.test.mjs`, `tests/adminLineChartCore.test.mjs`, `tests/client/adminHomeRender.test.tsx`.
+
+### Customers & Revenue screens (2026-11-07)
+
+The six screens of the group are drawn from the shared parts above and change
+no route, role, step-up or audit behaviour:
+
+- **Users** is a list only (five count cards that filter it, search, one
+  `AdminDataTable`). A customer is `/admin/users/[userId]` with `?tab=`
+  `overview`, `billing`, `security`, `conversations`, `notes` (the
+  `user-detail` entry's tabs); the detail is read once in the browser and kept
+  across sections. The list has no per-user country or last-activity read, so
+  it shows join date and time zone; the credit bar needs the plan's daily
+  limit and is left off without one.
+- **Security** shows the account's state, then the actions as cards (restrict
+  AI, suspend, sign out everywhere, unlink a sign-in, delete). A card opens to
+  the shared reason (required), expiry (only for the two actions that take
+  one) and note. Every card sends the route's existing payload; the
+  confirming button carries the step-up shield. There is no "notify the user"
+  field: the route has none, and adding one would be a new send.
+- **Plans & pricing** has one save bar. Every change goes through the review
+  dialog before the one PATCH; the former saves that skipped the review are
+  gone.
+- **Refunds** approve through `AdminConfirmDialog` with the step-up note. The
+  monthly bars and totals are computed from the rows read, and say so.
+- **Credit ledger** is read-only; its totals describe the rows read, not a
+  period.
+- **Support**'s Auto-fix review tab is the same newest reports as the inquiries
+  tab, seen by the automation's case. It has no store of its own and no write.

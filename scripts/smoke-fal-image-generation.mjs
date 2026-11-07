@@ -79,7 +79,7 @@ if (!model) {
 // content one on the very first call.
 const prompt = value("prompt") ?? "a plain ceramic mug on a wooden table";
 
-const body = buildFalImageRequest({ prompt, size: SIZE, outputFormat: "png" });
+const body = buildFalImageRequest({ apiModelId: MODEL_ID, prompt, size: SIZE, outputFormat: "png" });
 if (!body) {
   console.error("The request builder refused these parameters.");
   process.exit(1);

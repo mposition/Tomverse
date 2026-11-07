@@ -117,6 +117,7 @@ if (evidence.responseShape?.imageCount !== 1) {
 // --- 2. the request it proves is the request we still make ---------------
 
 const built = buildFalImageRequest({
+  apiModelId: MODEL_ID,
   prompt: "x",
   size: evidence.size,
   outputFormat: evidence.requestBody?.output_format,

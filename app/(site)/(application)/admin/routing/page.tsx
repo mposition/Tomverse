@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminRoutingShadowPanel } from "@/components/admin/AdminRoutingShadowPanel";
 import { AdminAdaptiveStatisticsPanel } from "@/components/admin/AdminAdaptiveStatisticsPanel";
-import { AdminAutoLlmRouterPanel } from "@/components/admin/AdminAutoLlmRouterPanel";
+import { AutoRouterTab } from "@/components/admin/routing/AutoRouterOverview";
 import { AdminAutoRouterOptimizerPanel } from "@/components/admin/AdminAutoRouterOptimizerPanel";
 import { AdminAutoRewriteOptimizerPanel } from "@/components/admin/AdminAutoRewriteOptimizerPanel";
 import { getServerSession } from "next-auth/next";
@@ -14,9 +14,16 @@ import { authOptions } from "@/lib/auth";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
-import { adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
+import {
+  ADMIN_NAVIGATION,
+  adminItemIsWritable,
+  adminNavItemTabs,
+  resolveAdminTabFor,
+} from "@/lib/adminNavigation";
 
 const TABS = adminNavItemTabs("routing");
+// Fail closed: if the entry is ever renamed, nothing on the page draws as writable.
+const ROUTING_ITEM = ADMIN_NAVIGATION.find((item) => item.id === "routing");
 
 /**
  * Routing, in its own workspace rather than as a tab on Models.
@@ -26,6 +33,9 @@ const TABS = adminNavItemTabs("routing");
  * the server would make, which is a different question with a different
  * audience; folding it into the registry page would put an experiment's
  * numbers beside an editable table.
+ *
+ * The Auto router tab opens on an overview (the flow, four numbers and the
+ * shadow comparison as one bar) above the settings that change the router.
  *
  * The four panels that used to stack on this page are one tab each
  * (2026-11-07): the Auto router, the optimizers, the shadow comparison, and
@@ -45,6 +55,8 @@ export default async function AdminRoutingPage({ searchParams }: PageProps<"/adm
   const resolved = resolveAdminTabFor(TABS, role, query.tab);
   if (!resolved) notFound();
   const { tab } = resolved;
+  // Only draws the controls locked; every route refuses a write from another role itself.
+  const canWrite = role !== null && ROUTING_ITEM !== undefined && adminItemIsWritable(role, ROUTING_ITEM);
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -56,7 +68,7 @@ export default async function AdminRoutingPage({ searchParams }: PageProps<"/adm
         query={query}
         role={role}
       />
-      <p className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
+      <p className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-300">
         {m.routingMoved.before}
         <Link
           href="/admin/amux-execution?tab=review"
@@ -68,8 +80,8 @@ export default async function AdminRoutingPage({ searchParams }: PageProps<"/adm
       </p>
       {tab.id === "optimizer" ? (
         <>
-          <AdminAutoRouterOptimizerPanel canSendToAmux={role === "owner"} />
-          <AdminAutoRewriteOptimizerPanel />
+          <AdminAutoRouterOptimizerPanel canSendToAmux={role === "owner"} canWrite={canWrite} />
+          <AdminAutoRewriteOptimizerPanel canWrite={canWrite} />
         </>
       ) : tab.id === "shadow" ? (
         <AdminRoutingShadowPanel />
@@ -77,7 +89,7 @@ export default async function AdminRoutingPage({ searchParams }: PageProps<"/adm
         // The tab's `viewRoles` only hides it; this is what refuses another role.
         role === "owner" ? <AdminAdaptiveStatisticsPanel /> : notFound()
       ) : (
-        <AdminAutoLlmRouterPanel />
+        <AutoRouterTab canWrite={canWrite} />
       )}
     </div>
   );

@@ -1,11 +1,19 @@
 import { getServerSession } from "next-auth/next";
 import { notFound } from "next/navigation";
 import { AdminUsersPanel } from "@/components/admin/AdminUsersPanel";
+import { AdminReadFailed } from "@/components/admin/ui/AdminReadFailed";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminUsersMessages } from "@/lib/adminMessages/users";
 import { authOptions } from "@/lib/auth";
 import { getAdminUsersPage, getAdminUserStats } from "@/lib/adminUsers";
 import { normalizeAdminUserSegment } from "@/lib/adminUserTypes";
-import { prisma } from "@/lib/prisma";
+import { getBillingPlans } from "@/lib/billingConfig";
 
+/**
+ * The Users list. The three reads are independent: a failed count leaves the
+ * cards saying "Unavailable", a failed plan read leaves the credit bars off,
+ * and only a failed list is an error -- it is never drawn as "no users".
+ */
 export default async function AdminUsersPage({
   searchParams,
 }: PageProps<"/admin/users">) {
@@ -24,18 +32,28 @@ export default async function AdminUsersPage({
     : [null];
   while (parsedCursors.length <= pageIndex) parsedCursors.push(null);
   if (cursor) parsedCursors[pageIndex] = cursor;
-  const [page, stats, conversationCount] = await Promise.all([
+  const [pageRead, statsRead, plansRead] = await Promise.allSettled([
     getAdminUsersPage({ query: q, segment, cursor, take }),
     getAdminUserStats(),
-    prisma.conversation.count(),
+    getBillingPlans(),
   ]);
+  if (pageRead.status === "rejected") {
+    console.warn({ event: "admin_users_read_failed", read: "list" });
+    const m = await getAdminMessages(adminUsersMessages);
+    return <AdminReadFailed title={m.toast.searchFailed} />;
+  }
+  const page = pageRead.value;
+  const dailyCreditLimits =
+    plansRead.status === "fulfilled"
+      ? Object.fromEntries(plansRead.value.map((plan) => [plan.name, plan.dailyMessageLimit]))
+      : {};
   return (
     <AdminUsersPanel
       rows={page.users}
       initialNextCursor={page.nextCursor}
-      stats={stats}
+      stats={statsRead.status === "fulfilled" ? statsRead.value : null}
       currentUserId={session.user.id}
-      conversationCount={conversationCount}
+      dailyCreditLimits={dailyCreditLimits}
       initialSegment={segment}
       initialQuery={q}
       initialPageSize={take}

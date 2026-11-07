@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { getServerSession } from "next-auth/next";
 import { AdminBillingLifecyclePanel } from "@/components/admin/AdminBillingLifecyclePanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
@@ -8,10 +9,14 @@ import {
   type PromoRiskRow,
 } from "@/components/admin/AdminRiskPanels";
 import { PromotionDiagnosticsPanel } from "@/components/admin/PromotionDiagnosticsPanel";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { hasAdminPermission } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminBillingMessages } from "@/lib/adminMessages/billing";
 import { adminRiskPanelsMessages } from "@/lib/adminMessages/riskPanels";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { getAdminUserStats } from "@/lib/adminUsers";
+import { authOptions } from "@/lib/auth";
 import {
   getBillingPlans,
   getBillingPromotions,
@@ -24,16 +29,29 @@ import { prisma } from "@/lib/prisma";
 
 const TABS = adminNavItemTabs("billing");
 
+/** A read that failed is `null` -- never a zero or an empty list. */
+const settledValue = <T,>(result: PromiseSettledResult<T>): T | null => {
+  if (result.status === "fulfilled") return result.value;
+  console.error("Failed to read billing console data:", result.reason);
+  return null;
+};
+
 /**
  * Plans & pricing: the plan catalogue, the localized prices, promotions, and
  * the read-only promotion diagnostics -- one address each (`?tab=plans`,
  * `prices`, `promotions`, `diagnostics`). The editor used to switch between
  * its first three in component state, so the address said "plans" while the
- * screen showed prices; it now follows the URL (`urlTabs`).
+ * screen showed prices; it now follows the URL (`initialTab`).
  *
  * The three editor tabs render the same panel in the same place, so a draft an
  * operator has not saved survives moving between them in one visit; it is
  * still lost on a reload, as it always was.
+ *
+ * Reads are settled one by one: a plan, price or promotion read that fails
+ * shows an error instead of an editor that would save over unread values, and
+ * a count that fails reads "Unavailable" rather than 0. Whether the role may
+ * save is the route's own check (`billing:write`), read here so the save
+ * button can say so before it is pressed.
  *
  * `syncBillingDefaultsToDatabase()` runs here and nowhere else in the UI. It
  * used to run on *every* admin page render -- opening the audit log wrote plan
@@ -49,6 +67,11 @@ export default async function AdminBillingPage({
 
   await syncBillingDefaultsToDatabase();
 
+  const [m, session] = await Promise.all([
+    getAdminMessages(adminBillingMessages),
+    getServerSession(authOptions),
+  ]);
+
   const tabs = (
     <AdminPageTabs
       basePath="/admin/billing"
@@ -61,41 +84,87 @@ export default async function AdminBillingPage({
 
   if (tab.id === "diagnostics") {
     // Read-only, and it loads nothing of its own: the promotion list is all it needs.
+    const [promotionsRead] = await Promise.allSettled([getBillingPromotions()]);
+    const promotions = settledValue(promotionsRead);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <PromotionDiagnosticsPanel promotions={await getBillingPromotions()} />
+        {promotions ? (
+          <PromotionDiagnosticsPanel promotions={promotions} />
+        ) : (
+          <AdminStateBlock
+            kind="error"
+            title={m.readFailed.promotionsTitle}
+            detail={m.readFailed.promotionsDetail}
+          />
+        )}
       </div>
     );
   }
 
-  const [plans, promotions, pricing, userStats] = await Promise.all([
-    getBillingPlans(),
-    getBillingPromotions(),
-    getBillingPriceCatalogWithMeta(),
-    getAdminUserStats(),
-  ]);
-  const promoRisks = tab.id === "promotions" ? await loadPromoRisks(promotions) : [];
-  const refunds =
+  const [plansRead, promotionsRead, pricingRead, statsRead] =
+    await Promise.allSettled([
+      getBillingPlans(),
+      getBillingPromotions(),
+      getBillingPriceCatalogWithMeta(),
+      getAdminUserStats(),
+    ]);
+  const plans = settledValue(plansRead);
+  const promotions = settledValue(promotionsRead);
+  const pricing = settledValue(pricingRead);
+  const userStats = settledValue(statsRead);
+
+  if (!plans || !promotions || !pricing) {
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AdminStateBlock
+          kind="error"
+          title={m.readFailed.title}
+          detail={m.readFailed.detail}
+        />
+      </div>
+    );
+  }
+
+  const refundReads =
     tab.id === "plans"
-      ? await Promise.all([
+      ? await Promise.allSettled([
           prisma.refundRequest.count({ where: { status: "pending" } }),
           prisma.refundRequest.count({ where: { status: "approved" } }),
           prisma.refundRequest.count({ where: { status: "rejected" } }),
         ])
       : null;
+  const refunds = refundReads?.map((result) => settledValue(result)) ?? null;
+
+  let afterPromotions: React.ReactNode = null;
+  if (tab.id === "promotions") {
+    const risks = await loadPromoRisks(promotions).catch((error) => {
+      console.error("Failed to read promotion risk signals:", error);
+      return null;
+    });
+    afterPromotions = risks ? (
+      <PromotionRiskPanel promoRisks={risks} />
+    ) : (
+      <AdminStateBlock
+        kind="error"
+        title={m.readFailed.riskTitle}
+        detail={m.readFailed.riskDetail}
+      />
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {refunds ? (
         <AdminBillingLifecyclePanel
-          activePaidUsers={userStats.activePaidSubscriptions}
-          activeSubscriptions={userStats.activePaidSubscriptions}
+          activePaidUsers={userStats?.activePaidSubscriptions ?? null}
+          activeSubscriptions={userStats?.activePaidSubscriptions ?? null}
           pendingRefunds={refunds[0]}
           approvedRefunds={refunds[1]}
           rejectedRefunds={refunds[2]}
-          cancelAtPeriodEnd={userStats.cancelingSubscriptions}
+          cancelAtPeriodEnd={userStats?.cancelingSubscriptions ?? null}
         />
       ) : null}
       <BillingAdminPanel
@@ -104,12 +173,15 @@ export default async function AdminBillingPage({
         priceCatalog={pricing.catalog}
         priceCatalogUpdatedAt={pricing.updatedAt}
         priceCatalogSource={pricing.source}
-        paidUserCount={userStats.activePaidSubscriptions}
-        activeSubscriptionCount={userStats.activePaidSubscriptions}
+        canWrite={hasAdminPermission(session, "billing:write")}
+        subscribers={{
+          free: userStats?.freeUsers ?? null,
+          pro: userStats?.proUsers ?? null,
+          max: userStats?.maxUsers ?? null,
+        }}
         initialTab={tab.id as "plans" | "prices" | "promotions"}
-        urlTabs
+        afterPromotions={afterPromotions}
       />
-      {tab.id === "promotions" ? <PromotionRiskPanel promoRisks={promoRisks} /> : null}
     </div>
   );
 }

@@ -1298,16 +1298,26 @@ export const reservationOutputCostMicroUsd = (
  * or above that surcharge -- whether or not the response reports a thinking
  * count. fal reports none, and reading that as zero
  * settles 80,000 for an image fal bills at 82,000 (policy section 16.8),
- * releasing the difference back to the provider budget. Any other provider
+ * releasing the difference back to the provider budget. fal answers per
+ * endpoint, read from the endpoint the reservation froze: one that bills no
+ * thinking (Qwen Image 3) settles zero, and every other fal case -- including
+ * an older snapshot that names no endpoint, which was Nano Banana 2's --
+ * settles the cap, because fal's zero count proves nothing. Any other provider
  * settles zero when it reported no thinking and the reserved cap when it did:
  * no image provider here has a verified per-token thinking price to settle
  * less.
  */
 export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: number): number | null => {
-  const record = snapshot as { thinkingCapMicroUsd?: unknown; provider?: unknown } | null;
+  const record = snapshot as {
+    thinkingCapMicroUsd?: unknown;
+    provider?: unknown;
+    executionProfile?: { apiModelId?: unknown } | null;
+  } | null;
   const cap = record?.thinkingCapMicroUsd;
   const reservedCap = typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
-  if (imageThinkingBilling(record?.provider) === "flat_per_request") return reservedCap;
+  const billing = imageThinkingBilling(record?.provider, record?.executionProfile?.apiModelId);
+  if (billing === "flat_per_request") return reservedCap;
+  if (record?.provider === "fal") return billing === "not_billed" ? 0 : reservedCap;
   if (!(thinkingTokens > 0)) return 0;
   return reservedCap;
 };

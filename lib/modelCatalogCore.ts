@@ -22,6 +22,7 @@ import {
   type ImageModelPriceVerification,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import { RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
 
 export const MODEL_CATALOG_CATEGORIES = ["chat", "image", "coding", "video"] as const;
 export type ModelCatalogCategory = (typeof MODEL_CATALOG_CATEGORIES)[number];
@@ -127,8 +128,8 @@ export type ImageProfileOverride = z.infer<typeof imageProfileOverrideSchema>;
  */
 export const imageFullProfileSchema = z
   .object({
-    provider: z.enum(["openai", "google", "xai", "fal"]),
-    modelOwner: z.enum(["openai", "google", "xai", "fal"]).optional(),
+    provider: z.enum(RUNTIME_IMAGE_PROVIDERS),
+    modelOwner: z.enum(RUNTIME_IMAGE_PROVIDERS).optional(),
     apiModelId: z.string().trim().min(1).max(120),
     name: z.string().trim().min(1).max(80),
     shortName: z.string().trim().min(1).max(40).optional(),
@@ -271,7 +272,7 @@ export const judgeImageModel = (
   if (!imageThinkingCapEnforced(model)) {
     reasons.push("worst_case_cost_unbounded");
     const cap = model.priceVerification.thinkingCapMicroUsd;
-    const minimum = imageThinkingCapMinimumMicroUsd(model.provider);
+    const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId);
     if (cap !== null && minimum !== null && cap < minimum) {
       reasons.push(`thinking_cap_below_minimum:${minimum}`);
     }

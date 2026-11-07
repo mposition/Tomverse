@@ -2141,8 +2141,13 @@ request 하나만 처리하며, queue가 비었거나 gate가 꺼져 있으면 �
   `TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET`만 받는다. broad
   `TOMVERSE_AMUX_SYNC_SECRET`과 root
   `TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET`은 거절한다. route, DTO, actor,
-  `amux.v22.recovery.inspected` writer와 rate limit은 v36 그대로이며 새 권한·route·writer를
-  만들지 않는다. 전용 secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다.
+  `amux.v22.recovery.inspected` writer는 v36 그대로이며 새 권한·route·writer를
+  만들지 않는다. rate limit은 운영자 결정(2026-11-07)으로 worker별 버킷이다. 읽기 분당 30·하루
+  2,000회, 보고 분당 20·하루 1,000회를 코드에 고정된 worker 목록
+  (`lib/amux/workerRegistryCore.ts`의 `AMUX_WORKER_REGISTRY_V31_SEED`)에 있는 worker마다 따로 세고,
+  그 밖의 이름은 하나의 고정 버킷을 함께 쓴다. 복구 profile 설정은 controller의 경계이므로 이 한도의
+  기준이 아니다. worker가 모두 같은 box
+  주소에서 오므로 IP 버킷은 쓰지 않는다(전용 secret 인증 뒤의 제한된 worker 이름이 주체다). 전용 secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다.
 - controller는 기존 root 전용 service·전용 secret·두 exact-true gate와 v37의 단회
   durable intent를 그대로 쓴다. timer는 새 stop 권한을 만들지 않고 owner가 exact Task에
   만든 pending `safe_stop` 또는 그 읽기 전용 재확인만 전달한다. worker start/restart,
@@ -2979,7 +2984,9 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
   - `accept`: v49의 게시 경로(Engineering Publisher의 `develop` PR)로 간다. `done`은 v49·v50의 병합
     관측이다.
   - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 두 번째 reject 뒤에는 `blocked`가 되고 사람에게
-    간다.
+    간다. 운영자 결정(2026-11-07): 그 시도는 패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서
+    재시도할 수 있다(시도 예산 안에서, 그 시도의 reject 기록이 있을 때만). 재시도는 마지막 reject의
+    지적을 prompt에 받고, 재시도 뒤 첫 reject는 다시 같은 등급으로 한 번 돌아간다.
   - `unknown`, 요청 오류, 서버 오류: 다시 보내지 않는다. Task는 `blocked`가 되고 사람에게 간다.
 - **신호이지 승인이 아니다.** accept는 PR의 사람 required review·병합(v49)이나 v50 자동 병합의
   조건을 대신하지 않으며, 이 버전은 그 조건을 바꾸지 않는다.

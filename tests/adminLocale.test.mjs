@@ -145,6 +145,8 @@ test("the palette finds a page by either language in either console", () => {
  * Korean console.
  */
 const COMPONENTS_WITHOUT_COPY = new Set([
+  // Draws who is asking (a pixel figure, initials or an icon) and no words.
+  "AdminDecisionAvatar.tsx",
   "AdminConsolePreferences.tsx",
   "AdminLocaleProvider.tsx",
   // Renders only the strings its caller passes in `m`, which the caller read

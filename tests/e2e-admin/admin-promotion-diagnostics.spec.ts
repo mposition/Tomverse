@@ -226,10 +226,11 @@ test.describe("promotion diagnostics", () => {
     await expect(
       page.getByTestId("promotion-diagnostics-summary")
     ).toHaveCount(0);
-    await expect(error.getByRole("button", { name: "Retry" })).toBeVisible();
+    // The shared error block names its retry "Try again".
+    await expect(error.getByRole("button", { name: "Try again" })).toBeVisible();
 
     await page.unroute("**/api/admin/billing/promotions/diagnose");
-    await error.getByRole("button", { name: "Retry" }).click();
+    await error.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByTestId("promotion-diagnostics-summary")).toBeVisible();
     await expect(page.getByTestId("promotion-diagnostics-error")).toHaveCount(0);
   });

@@ -1,19 +1,32 @@
 "use client";
 
-import { formatAestDateTime } from "@/lib/adminUiCore";
+import { formatAestDateTime, type AdminTone } from "@/lib/adminUiCore";
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CheckCircle2, Download, Loader2, RotateCcw, XCircle } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import {
   describeAdminApiFailure,
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AdminBars } from "@/components/admin/ui/AdminCharts";
+import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { describeRefundApproval } from "@/lib/adminRefundOutcomeCopy";
+import {
+  approvedRefundMonths,
+  creditUseShare,
+  waitingDays,
+} from "@/lib/adminRefundStats";
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
 import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminRefundsMessages } from "@/lib/adminMessages/refunds";
+import { adminUiMessages } from "@/lib/adminMessages/ui";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 
@@ -58,6 +71,8 @@ export type RefundRequestRow = {
   };
 };
 
+type StatusFilter = "all" | "pending" | "approved" | "rejected";
+
 type Props = {
   rows: RefundRequestRow[];
   /**
@@ -65,12 +80,22 @@ type Props = {
    * read as "of the rows shown" rather than as totals.
    */
   rowLimit?: number;
+  /**
+   * When the server rendered the page. The waiting-days chip and the "this
+   * month" figures are measured from it; without it they are left out rather
+   * than guessed from the browser clock (which would differ between the server
+   * and the client render).
+   */
+  generatedAt?: string;
+  /** False when the signed-in role cannot decide refunds; the buttons lock. */
+  writable?: boolean;
 };
 
-const statusClass = (status: string) => {
-  if (status === "approved") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  if (status === "rejected") return "border-red-500/30 bg-red-500/10 text-red-300";
-  return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+const STATUS_TONE: Record<string, AdminTone> = {
+  pending: "warn",
+  processing: "info",
+  approved: "ok",
+  rejected: "bad",
 };
 
 const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "-";
@@ -79,7 +104,7 @@ const money = (amountMinor: number | null, currencyValue: string | null) => {
   const currency = normalizeBillingCurrency(currencyValue || "USD") || "USD";
   return typeof amountMinor === "number"
     ? formatBillingMinor(amountMinor, currency, "en")
-    : "-";
+    : null;
 };
 
 const escapeCsv = (value: unknown) => {
@@ -87,7 +112,37 @@ const escapeCsv = (value: unknown) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-export function RefundRequestsPanel({ rows, rowLimit }: Props) {
+const initialsOf = (email: string | null) =>
+  (email || "").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "?";
+
+/** One labelled figure in a request card; an unread figure says so. */
+function Stat({
+  label,
+  children,
+  detail,
+}: {
+  label: string;
+  /** `null` when the figure cannot be stated. */
+  children: React.ReactNode | null;
+  detail?: React.ReactNode;
+}) {
+  const ui = useAdminMessages(adminUiMessages);
+  const unread = children === null;
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <div
+        data-unread={unread ? "true" : undefined}
+        className={`mt-1 font-bold tabular-nums ${unread ? "text-base text-zinc-400" : "text-2xl text-white"}`}
+      >
+        {unread ? ui.unavailable : children}
+      </div>
+      {detail ? <p className="mt-1 text-xs text-zinc-500">{detail}</p> : null}
+    </div>
+  );
+}
+
+export function RefundRequestsPanel({ rows, rowLimit, generatedAt, writable = true }: Props) {
   const m = useAdminMessages(adminRefundsMessages);
   const { locale: apiLocale } = useAdminLocale();
   const intlLocale = adminIntlLocale(apiLocale);
@@ -95,10 +150,10 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedStatus = searchParams.get("status");
-  const initialStatus = ["all", "pending", "approved", "rejected"].includes(
+  const initialStatus: StatusFilter = ["all", "pending", "approved", "rejected"].includes(
     requestedStatus || ""
   )
-    ? (requestedStatus as "all" | "pending" | "approved" | "rejected")
+    ? (requestedStatus as StatusFilter)
     : "pending";
   // The toast fades; a step-up refusal needs something that does not. The
   // operator has to leave this screen to renew their sign-in, and a sentence
@@ -106,11 +161,10 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
   const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [items, setItems] = useState(rows);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [creditReviewConfirmed, setCreditReviewConfirmed] = useState<Record<string, boolean>>({});
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">(
-    initialStatus
-  );
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatus);
   const visiblePendingCount = items.filter((item) => item.status === "pending").length;
   const approvedCount = items.filter((item) => item.status === "approved").length;
   const rejectedCount = items.filter((item) => item.status === "rejected").length;
@@ -118,8 +172,10 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
     statusFilter === "all"
       ? items
       : items.filter((item) => item.status === statusFilter);
+  const confirming = items.find((item) => item.id === confirmId) ?? null;
+  const months = approvedRefundMonths(items, generatedAt);
 
-  const selectStatus = (status: typeof statusFilter) => {
+  const selectStatus = (status: StatusFilter) => {
     setStatusFilter(status);
     const params = new URLSearchParams(searchParams.toString());
     if (status === "pending") params.delete("status");
@@ -218,224 +274,371 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
     }
   };
 
-  return (
-    <section id="refunds" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            {m.eyebrow}
-          </p>
-          <h2 className="mt-2 text-2xl font-black text-white">
-            {m.title}
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            {m.description}
-            {rowLimit ? m.rowLimit(rowLimit) : ""}
-          </p>
-        </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
-          <RotateCcw className="h-3.5 w-3.5" />
-          {m.pendingBadge(visiblePendingCount)}
-        </span>
-        <button
-          type="button"
-          onClick={exportCsv}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
-        >
-          <Download className="h-3.5 w-3.5" />
-          {m.exportCsv}
-        </button>
-      </div>
+  const monthLabel = (key: string) => {
+    const [year, month] = key.split("-").map(Number);
+    // Mid-month, local time: the month is the same whichever zone formats it.
+    return new Intl.DateTimeFormat(intlLocale, { month: "short" }).format(
+      new Date(year, month - 1, 15)
+    );
+  };
 
-      <div className="mt-5 grid gap-3">
-        <div className="flex flex-wrap gap-2">
-          {[
-            ["pending", m.filters.pending(visiblePendingCount)],
-            ["approved", m.filters.approved(approvedCount)],
-            ["rejected", m.filters.rejected(rejectedCount)],
-            ["all", m.filters.all(items.length)],
-          ].map(([value, label]) => (
+  const filterTabs: Array<[StatusFilter, string]> = [
+    ["pending", m.filters.pending(visiblePendingCount)],
+    ["approved", m.filters.approved(approvedCount)],
+    ["rejected", m.filters.rejected(rejectedCount)],
+    ["all", m.filters.all(items.length)],
+  ];
+
+  return (
+    <section id="refunds" className="flex min-w-0 flex-col gap-5">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-800">
+        <div role="group" aria-label={m.filtersLabel} className="flex flex-wrap gap-1">
+          {filterTabs.map(([value, label]) => (
             <button
               key={value}
               type="button"
-              onClick={() => selectStatus(value as typeof statusFilter)}
-              className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-black transition ${
+              aria-pressed={statusFilter === value}
+              onClick={() => selectStatus(value)}
+              className={`-mb-px cursor-pointer border-b-2 px-3 py-2.5 text-sm font-bold transition ${
                 statusFilter === value
-                  ? "border-blue-500/40 bg-blue-500/20 text-blue-100"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
+                  ? "border-blue-500 text-white"
+                  : "border-transparent text-zinc-400 hover:text-white"
               }`}
             >
               {label}
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={exportCsv}
+          className="mb-2 inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 transition hover:bg-zinc-800"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden />
+          {m.exportCsv}
+        </button>
+      </div>
+      {rowLimit ? <p className="-mt-2 text-xs text-zinc-500">{m.rowLimit(rowLimit)}</p> : null}
 
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-200/80">{m.counters.pending}</p>
-            <p className="mt-1 text-2xl font-black text-white">{visiblePendingCount}</p>
-          </div>
-          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-200/80">{m.counters.approved}</p>
-            <p className="mt-1 text-2xl font-black text-white">{approvedCount}</p>
-          </div>
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200/80">{m.counters.rejected}</p>
-            <p className="mt-1 text-2xl font-black text-white">{rejectedCount}</p>
-          </div>
-        </div>
-
-        {filteredItems.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            {m.empty}
-          </div>
-        ) : (
-          filteredItems.map((request) => {
-            const pending = request.status === "pending";
-            const busy = busyId === request.id;
-            return (
-              <article key={request.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(request.status)}`}>
-                        {request.status}
+      <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex min-w-0 flex-col gap-4">
+          {filteredItems.length === 0 ? (
+            <AdminStateBlock kind="empty" title={m.empty.title} detail={m.empty.detail} />
+          ) : (
+            filteredItems.map((request) => {
+              const pending = request.status === "pending";
+              const busy = busyId === request.id;
+              const risk = request.creditRisk;
+              const needsReview = Boolean(risk?.requiresReview);
+              const share = creditUseShare(risk);
+              const days = pending ? waitingDays(request.requestedAt, generatedAt) : null;
+              const refunded = money(request.refundAmountCents, request.refundCurrency);
+              const interval =
+                request.subscriptionBillingInterval === "monthly" || request.subscriptionBillingInterval === "yearly"
+                  ? m.interval[request.subscriptionBillingInterval]
+                  : request.subscriptionBillingInterval;
+              const statusWord =
+                request.status in m.status
+                  ? m.status[request.status as keyof typeof m.status]
+                  : request.status;
+              const timeline = request.timelineEvents ?? [];
+              return (
+                <AdminTile key={request.id} as="article" className="gap-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span
+                        aria-hidden
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-sm font-bold text-blue-300"
+                      >
+                        {initialsOf(request.email)}
                       </span>
-                      <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
-                        {request.plan || m.unknownPlan}
-                      </span>
-                      <span className="text-xs text-zinc-500">
-                        {m.requested(dateLabel(request.requestedAt))}
-                      </span>
+                      <div className="min-w-0">
+                        <h3 className="truncate text-base font-bold text-white">
+                          {request.email || m.noEmail}
+                        </h3>
+                        <p className="truncate text-xs text-zinc-500">
+                          {[request.plan || m.unknownPlan, interval].filter(Boolean).join(" · ")}
+                          {" · "}
+                          {m.requested(dateLabel(request.requestedAt))}
+                        </p>
+                      </div>
                     </div>
-                    <h3 className="mt-3 truncate text-base font-bold text-white">
-                      {request.email || m.noEmail}
-                    </h3>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
-                      {request.reason || m.noReason}
-                    </p>
+                    {pending ? (
+                      days === null ? (
+                        <AdminStatusChip tone="warn">{statusWord}</AdminStatusChip>
+                      ) : (
+                        <AdminStatusChip tone={days >= 3 ? "warn" : "info"}>
+                          {m.waiting(days)}
+                        </AdminStatusChip>
+                      )
+                    ) : (
+                      <AdminStatusChip tone={STATUS_TONE[request.status] ?? "idle"}>
+                        {statusWord}
+                      </AdminStatusChip>
+                    )}
                   </div>
-                  <div className="grid gap-2 text-xs text-zinc-500 lg:min-w-[280px]">
-                    <span>{m.details.stripeCustomer(request.stripeCustomerId || "-")}</span>
-                    <span>{m.details.subscription(request.stripeSubscriptionId || "-")}</span>
-                    <span>{m.details.status(request.subscriptionStatus || "-")}</span>
-                    <span>{m.details.billing(request.subscriptionBillingInterval || "-")}</span>
-                    <span>{m.details.periodEnd(dateLabel(request.subscriptionCurrentPeriodEnd))}</span>
-                    <span>{m.details.stripeRefund(request.stripeRefundId || "-")}</span>
-                    <span>{m.details.refundStatus(request.stripeRefundStatus || "-")}</span>
-                    <span>{m.details.refundAmount(money(request.refundAmountCents, request.refundCurrency))}</span>
-                    <span>{m.details.reviewed(dateLabel(request.reviewedAt))}</span>
+
+                  <div className="grid gap-4 rounded-2xl bg-zinc-950/60 p-4 sm:grid-cols-3">
+                    <Stat
+                      label={pending ? m.stats.amountPending : m.stats.amountDone}
+                      detail={pending ? m.stats.amountPendingDetail : undefined}
+                    >
+                      {pending ? null : refunded}
+                    </Stat>
+                    <Stat label={m.stats.creditsUsed}>
+                      {share === null ? null : share.kind === "none" ? (
+                        <span className="text-base text-zinc-300">{m.stats.noPurchases}</span>
+                      ) : (
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              role="img"
+                              aria-label={`${share.percent}%`}
+                              className="h-2 min-w-16 flex-1 overflow-hidden rounded-full bg-zinc-800"
+                            >
+                              <span
+                                className="block h-full rounded-full bg-blue-500"
+                                style={{ width: `${share.percent}%` }}
+                              />
+                            </span>
+                            <span className="text-base">{share.percent}%</span>
+                          </div>
+                          <p className="mt-1 text-xs font-normal text-zinc-500">
+                            {m.stats.creditsUsedDetail(
+                              share.used.toLocaleString(intlLocale),
+                              share.purchased.toLocaleString(intlLocale)
+                            )}
+                          </p>
+                        </div>
+                      )}
+                    </Stat>
+                    <Stat
+                      label={m.stats.creditsLeft}
+                      detail={
+                        risk
+                          ? m.stats.creditsLeftDetail((risk.remainingCostMicroUsd / 1_000_000).toFixed(2))
+                          : undefined
+                      }
+                    >
+                      {risk ? risk.remainingCredits.toLocaleString(intlLocale) : null}
+                    </Stat>
                   </div>
-                </div>
 
-                {request.adminNote && (
-                  <p className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs leading-5 text-zinc-400">
-                    {m.adminNote(request.adminNote)}
-                  </p>
-                )}
+                  <blockquote className="border-l-2 border-blue-500/50 pl-4 text-sm leading-6 text-zinc-200">
+                    {request.reason ? (
+                      <span className="whitespace-pre-wrap">&ldquo;{request.reason}&rdquo;</span>
+                    ) : (
+                      <span className="text-zinc-500">{m.noReason}</span>
+                    )}
+                  </blockquote>
 
-                {request.creditRisk?.requiresReview ? (
-                  <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200">
-                      {m.creditRisk.title}
+                  {request.adminNote ? (
+                    <p className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs leading-5 text-zinc-400">
+                      {m.adminNote(request.adminNote)}
                     </p>
-                    <div className="mt-3 grid gap-2 text-xs text-red-100 sm:grid-cols-2 lg:grid-cols-4">
-                      <span>{m.creditRisk.purchases(request.creditRisk.purchaseCount)}</span>
-                      <span>{m.creditRisk.remaining(request.creditRisk.remainingCredits.toLocaleString(intlLocale), (request.creditRisk.remainingCostMicroUsd / 1_000_000).toFixed(2))}</span>
-                      <span>{m.creditRisk.estimatedConsumed(request.creditRisk.estimatedUsedCredits.toLocaleString(intlLocale), (request.creditRisk.estimatedConsumedCostMicroUsd / 1_000_000).toFixed(2))}</span>
-                      <span className="font-black">{m.creditRisk.unrecovered(request.creditRisk.unrecoveredCredits.toLocaleString(intlLocale), (request.creditRisk.unrecoveredCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                  ) : null}
+
+                  {!pending ? (
+                    <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
+                      <span>{m.refundStatus(request.stripeRefundStatus || "-")}</span>
+                      <span>{m.reviewed(dateLabel(request.reviewedAt))}</span>
+                    </p>
+                  ) : null}
+
+                  {risk?.requiresReview ? (
+                    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
+                      <p className="text-sm font-bold text-red-200">{m.creditRisk.title}</p>
+                      <div className="mt-3 grid gap-2 text-xs text-red-100 sm:grid-cols-2">
+                        <span>{m.creditRisk.purchases(risk.purchaseCount)}</span>
+                        <span>{m.creditRisk.remaining(risk.remainingCredits.toLocaleString(intlLocale), (risk.remainingCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                        <span>{m.creditRisk.estimatedConsumed(risk.estimatedUsedCredits.toLocaleString(intlLocale), (risk.estimatedConsumedCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                        <span className="font-bold">{m.creditRisk.unrecovered(risk.unrecoveredCredits.toLocaleString(intlLocale), (risk.unrecoveredCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                      </div>
+                      <p className="mt-2 text-xs text-red-200/80">
+                        {m.creditRisk.billingRisk(risk.billingRiskStatus)}
+                      </p>
+                      {pending ? (
+                        <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-white">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(creditReviewConfirmed[request.id])}
+                            onChange={(event) =>
+                              setCreditReviewConfirmed((current) => ({
+                                ...current,
+                                [request.id]: event.target.checked,
+                              }))
+                            }
+                            className="mt-0.5 h-4 w-4"
+                          />
+                          {m.creditRisk.confirm}
+                        </label>
+                      ) : null}
                     </div>
-                    <p className="mt-2 text-xs text-red-200/80">
-                      {m.creditRisk.billingRisk(request.creditRisk.billingRiskStatus)}
-                    </p>
-                    {request.status === "pending" ? (
-                      <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-white">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(creditReviewConfirmed[request.id])}
-                          onChange={(event) =>
-                            setCreditReviewConfirmed((current) => ({
-                              ...current,
-                              [request.id]: event.target.checked,
-                            }))
-                          }
-                          className="mt-0.5 h-4 w-4"
-                        />
-                        {m.creditRisk.confirm}
-                      </label>
-                    ) : null}
-                  </div>
-                ) : null}
+                  ) : null}
 
-                {request.timelineEvents && request.timelineEvents.length > 0 ? (
-                  <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                      {m.timeline}
-                    </p>
-                    <div className="mt-3 grid gap-2">
-                      {request.timelineEvents.map((event) => (
-                        <div key={event.id} className="flex gap-3 text-xs">
-                          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-400" />
-                          <div>
-                            <p className="font-black text-zinc-200">{event.eventType}</p>
-                            <p className="mt-0.5 text-zinc-400">{event.message}</p>
-                            <p className="mt-0.5 text-zinc-600">
+                  <div>
+                    <p className="text-xs font-bold text-zinc-500">{m.timeline}</p>
+                    <ol className="mt-2 flex flex-col">
+                      <li className="flex gap-3 border-t border-zinc-800 py-2 text-sm first:border-t-0">
+                        <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                        <div className="min-w-0">
+                          <p className="font-bold text-zinc-100">{m.requestedEvent}</p>
+                          <p className="text-xs text-zinc-500">{dateLabel(request.requestedAt)}</p>
+                        </div>
+                      </li>
+                      {timeline.map((event) => (
+                        <li key={event.id} className="flex gap-3 border-t border-zinc-800 py-2 text-sm">
+                          <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                          <div className="min-w-0">
+                            <p className="font-bold text-zinc-100">{event.message}</p>
+                            <p className="text-xs text-zinc-500">
                               {m.timelineMeta(dateLabel(event.createdAt), event.actorEmail)}
                             </p>
                           </div>
-                        </div>
+                        </li>
                       ))}
-                    </div>
+                    </ol>
                   </div>
-                ) : null}
 
-                {pending && (
-                  <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">
-                    <input
-                      value={notes[request.id] || ""}
-                      onChange={(event) =>
-                        setNotes((current) => ({
-                          ...current,
-                          [request.id]: event.target.value,
-                        }))
-                      }
-                      placeholder={m.notePlaceholder}
-                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={
-                          Boolean(busyId) ||
-                          Boolean(
-                            request.creditRisk?.requiresReview &&
-                              !creditReviewConfirmed[request.id]
-                          )
+                  <AdminTechInfo summary={m.technical.summary}>
+                    <ul className="flex flex-col gap-1 break-all">
+                      <li>{m.technical.requestId(request.id)}</li>
+                      <li>{m.technical.stripeCustomer(request.stripeCustomerId || "-")}</li>
+                      <li>{m.technical.subscription(request.stripeSubscriptionId || "-")}</li>
+                      <li>{m.technical.subscriptionStatus(request.subscriptionStatus || "-")}</li>
+                      <li>{m.technical.periodEnd(dateLabel(request.subscriptionCurrentPeriodEnd))}</li>
+                      <li>{m.technical.stripeRefund(request.stripeRefundId || "-")}</li>
+                      <li>{m.technical.stripeCharge(request.stripeChargeId || "-")}</li>
+                    </ul>
+                  </AdminTechInfo>
+
+                  {pending ? (
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                      <input
+                        value={notes[request.id] || ""}
+                        onChange={(event) =>
+                          setNotes((current) => ({
+                            ...current,
+                            [request.id]: event.target.value,
+                          }))
                         }
-                        onClick={() => updateRequest(request.id, "approve")}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                        {m.approve}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={Boolean(busyId)}
-                        onClick={() => updateRequest(request.id, "reject")}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 px-4 py-2.5 text-sm font-bold text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <XCircle className="h-4 w-4" />
-                        {m.reject}
-                      </button>
+                        placeholder={m.notePlaceholder}
+                        className="min-h-10 w-full flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                      />
+                      <div className="flex flex-wrap gap-2 lg:justify-end">
+                        <AdminWriteButton
+                          variant="secondary"
+                          writable={writable}
+                          requiredRole="billing"
+                          disabled={Boolean(busyId)}
+                          onClick={() => updateRequest(request.id, "reject")}
+                        >
+                          {m.reject}
+                        </AdminWriteButton>
+                        <AdminWriteButton
+                          stepUp
+                          writable={writable}
+                          requiredRole="billing"
+                          disabled={Boolean(busyId) || (needsReview && !creditReviewConfirmed[request.id])}
+                          onClick={() => setConfirmId(request.id)}
+                        >
+                          {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                          {m.approve}
+                        </AdminWriteButton>
+                      </div>
                     </div>
+                  ) : null}
+                </AdminTile>
+              );
+            })
+          )}
+        </div>
+
+        {months ? (
+          <aside className="flex min-w-0 flex-col gap-4" aria-label={m.aside.thisMonth}>
+            <AdminTile title={m.aside.thisMonth}>
+              <p className="text-3xl font-bold tabular-nums tracking-tight text-white">
+                {months.thisMonth.count === 0
+                  ? m.aside.thisMonthNone
+                  : [
+                      m.aside.thisMonthCount(months.thisMonth.count),
+                      ...months.thisMonth.amounts.map(
+                        (amount) => money(amount.minor, amount.currency) ?? ""
+                      ),
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+              </p>
+              {months.thisMonth.withoutAmount > 0 ? (
+                <p className="text-xs text-amber-300">
+                  {m.aside.unknownAmounts(months.thisMonth.withoutAmount)}
+                </p>
+              ) : null}
+              <p className="text-xs text-zinc-500">{m.aside.thisMonthBasis(items.length)}</p>
+              {months.hasData ? (
+                <div className="mt-2 border-t border-zinc-800 pt-3">
+                  <p className="text-sm font-bold text-white">{m.aside.monthlyTitle}</p>
+                  <AdminBars
+                    values={months.counts}
+                    width={280}
+                    height={72}
+                    gap={6}
+                    highlight={months.counts.length - 1}
+                    label={m.aside.monthlyLabel(months.counts.length)}
+                    className="mt-3 h-[72px] w-full"
+                  />
+                  <div className="mt-1 flex justify-between text-xs text-zinc-500">
+                    <span>{monthLabel(months.keys[0])}</span>
+                    <span className="font-bold text-zinc-300">
+                      {monthLabel(months.keys[months.keys.length - 1])}
+                    </span>
                   </div>
-                )}
-              </article>
-            );
-          })
-        )}
+                  <p className="mt-2 text-xs text-zinc-500">{m.aside.monthlyBasis(items.length)}</p>
+                </div>
+              ) : null}
+            </AdminTile>
+          </aside>
+        ) : null}
       </div>
+
+      <AdminConfirmDialog
+        open={Boolean(confirming)}
+        title={m.confirmApprove.title}
+        stepUp
+        confirmLabel={m.approve}
+        busy={Boolean(confirming && busyId === confirming.id)}
+        summary={
+          confirming ? (
+            <div className="flex flex-col gap-1">
+              <p className="font-bold text-white">
+                {m.confirmApprove.customer(confirming.email || m.noEmail)}
+              </p>
+              <p>{m.confirmApprove.amount}</p>
+              {confirming.creditRisk ? (
+                <p>
+                  {m.confirmApprove.creditsLeft(
+                    confirming.creditRisk.remainingCredits.toLocaleString(intlLocale)
+                  )}
+                </p>
+              ) : null}
+            </div>
+          ) : null
+        }
+        effects={[
+          m.confirmApprove.effects.refund,
+          m.confirmApprove.effects.cancel,
+          m.confirmApprove.effects.free,
+          m.confirmApprove.effects.email,
+          m.confirmApprove.effects.second,
+        ]}
+        onConfirm={async () => {
+          if (!confirming) return;
+          await updateRequest(confirming.id, "approve");
+          setConfirmId(null);
+        }}
+        onClose={() => setConfirmId(null)}
+      />
     </section>
   );
 }

@@ -206,9 +206,13 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **provider budget은 경로별 실발생 원가로 정산한다**: 성공 = 실비,
   moderation 차단·provider 오류 = 발생한 원가를 budget에 기록(사용자는
   전액 환급, 차액은 Tomverse 부담), provider 미호출 실패 = 예약 전액 해제.
-  성공의 thinking 몫은 예약이 고정한 cap이다. 요청당 고정 할증(fal high
-  thinking)은 응답이 thinking을 보고하지 않아도 cap으로, 그 밖의 provider는
-  thinking이 보고됐을 때만 cap으로 기록한다(`settledThinkingCostMicroUsd`).
+  성공의 thinking 몫은 예약이 고정한 cap이다. 요청당 고정 할증(fal Nano Banana 2
+  high thinking)은 응답이 thinking을 보고하지 않아도 cap으로, 그 밖의 provider는
+  thinking이 보고됐을 때만 cap으로 기록한다(`settledThinkingCostMicroUsd`). fal은
+  예약 snapshot의 `executionProfile.apiModelId`로 endpoint별로 정한다(§16.9):
+  thinking을 과금하지 않는 endpoint(Qwen Image 3)는 0, 그 밖의 fal은 — endpoint를
+  적지 않은 예전 snapshot 포함 — cap이다. fal은 thinking 수를 보고하지 않으므로
+  0이라는 보고가 아무것도 증명하지 않는다.
 - 사용자 응답에 원시 내부 USD를 노출하지 않고, 모든 limit 오류의
   `resetAt`은 생성 시점보다 미래여야 한다.
 
@@ -528,7 +532,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
 | `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
 | `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
-| `qwen-image-2.0-pro-2026-06-22` | 미등록 | 미확인 | 별도 endpoint·리전·한국어 글자 정확도 검증 |
+| Qwen Image (`qwen-image-2.0`·`-2.0-pro`·`-3.0`·`-3.0-pro`) | 미등록 · **직접 어댑터 구현(기본 꺼짐, 2026-11-07)** | 장당 2.0 $0.035 / 2.0-pro $0.075 / 3.0 1K $0.03 / 3.0-pro 1K $0.04 (운영자 조사, `verified` 아님) | 아래 "Qwen 직접 어댑터" — 결과 저장 리전, 예산 env, 판매 크레딧, 약관, 한국어 글자 정확도 |
+| `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
+| `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
 | Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
@@ -609,11 +615,16 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 가격 개정은 `thinkingCapMicroUsd`에 숫자를 적을 수 있지만, 그 숫자가 상한이 되려면
 우리가 보내는 요청이 그것을 지킬 수 있어야 한다. `imageThinkingCapEnforced`
 (`lib/imageModelRegistry.ts`)가 provider별로 답한다 — OpenAI·xAI는 이미지 요청에
-thinking 과금이 없고, fal은 요청이 고정한 `thinking_level: "high"`에 대한 요청당
-고정 할증(`FAL_HIGH_THINKING_SURCHARGE_MICRO_USD` = 2,000)이라 cap이 그 이상일
-때만 상한이며, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. 그래서 cap을
-적은 Google 개정과 cap이 할증보다 작은 fal 개정은 판정·최악 원가·어댑터 dispatch에서
-모두 거절된다. Google을 여는 것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
+thinking 과금이 없고, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. fal은
+gateway라 **endpoint별로** 답한다(2026-11-07, `FAL_ENDPOINT_PROFILES`,
+`lib/falImageRequest.ts`, §16.9): Nano Banana 2는 요청이 고정한
+`thinking_level: "high"`에 대한 요청당 고정 할증(`FAL_HIGH_THINKING_SURCHARGE_MICRO_USD`
+= 2,000)이라 cap이 그 이상일 때만 상한이고, Qwen Image 3는 이미지당 과금이라 0이
+상한이며, Nano Banana 2.1은 토큰 과금에 상한 파라미터가 없어 Google 직접 호출과 같이
+상한이 없다. 표에 없는 fal endpoint도 상한이 없다. 그래서 cap을 적은 Google·Nano
+Banana 2.1 개정, cap이 할증보다 작은 Nano Banana 2 개정, 표에 없는 endpoint의 fal
+개정은 판정·최악 원가·어댑터 dispatch에서 모두 거절된다. Google이나 Nano Banana 2.1을
+여는 것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
 
 2026-10-14 갱신된 thinking 가이드(`https://ai.google.dev/gemini-api/docs/thinking`)는
 `max_output_tokens`가 thought 토큰을 포함한 hard cutoff라고 적는다. 이미지 모델에 대한
@@ -741,6 +752,48 @@ Grok 활성화(2026-08-05)가 이 규칙의 결과다: hold 해제는 `disabledR
    flag가 켜진 환경에 예산이 없으면 `/api/ready`가 그때부터 실패한다.
 3. registry `disabledReason: null` 배포. production flag는 OFF 유지(§15).
 4. staging flag ON → 1K 정사각 1회 생성 + gpt-image-2와 2-모델 비교 1회.
+
+#### Qwen 직접 어댑터 (2026-11-07, 기본 꺼짐)
+
+Alibaba Cloud Model Studio International(싱가포르) 동기 endpoint
+(`dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`,
+채팅과 같은 `DASHSCOPE_API_KEY`)를 부르는 `lib/qwenImageRequest.ts`와
+`generateWithQwen`이 있다. **adapter 구현은 활성화가 아니다.** 코드 seed에 Qwen 모델이
+없으므로 운영자가 런타임 카탈로그 프로필과 가격 revision을 추가하기 전에는 실행 경로가
+없고, 추가해도 production에서 `IMAGE_PROVIDER_QWEN_COST_MICROUSD_PER_DAY`·`_PER_MONTH`가
+없으면 판정이 `provider_budget_missing`으로 거절한다.
+
+- 요청 고정: `size: "1024*1024"`(2.0 기본은 한 변 2048), `n: 1`, `watermark: false`,
+  `prompt_extend: false`. `enable_thinking`은 `prompt_extend=true`를 요구하므로 꺼진다.
+  이미지당 과금이고 가격표에 thinking·프롬프트 재작성 별도 과금이 없어
+  `IMAGE_PROVIDER_THINKING_BILLING.qwen = "not_billed"`이다. 이 판단은 가격을 읽은
+  `qwen-image-*` 계열에만 적용된다(같은 endpoint의 `z-image-turbo`는 prompt_extend를 따로
+  과금한다). 다른 Qwen 모델은 `worst_case_cost_unbounded`로 판정된다. 따라서 최악 원가는
+  출력가 + 프롬프트 예산 5,000µUSD이고, 예컨대 2.0은 40,000µUSD · 바닥 45크레딧이다.
+  **바닥은 판매가가 아니다** — 판매 크레딧은 별도 승인이다(§12 조건 5).
+- 재시도하지 않는다. 장당 과금에서 응답을 잃은 성공 뒤의 재시도는 두 번째 이미지를 산다.
+- 결과는 24시간 유효한 URL이다. https로 싱가포르 공개 OSS endpoint
+  `<bucket>.oss-ap-southeast-1.aliyuncs.com`만 따라가고(접미사가 아니라 허용 목록이다 —
+  `.aliyuncs.com`에는 `-internal` 내부망 endpoint와 본토·홍콩 리전도 있다) redirect는
+  따르지 않는다. 본문은 선언 길이와 무관하게 읽는 동안 16 MiB로 제한하고, 파일의 MIME이
+  프로필 저장 허용 목록에 있고 헤더가 1024×1024여야 저장한다.
+- **생성만이다.** 편집은 `IMAGE_EDIT_PRICING`의 승인된 할증(3.0은 입력 이미지 장당
+  $0.003)이 없어 adapter가 거절한다.
+
+**미확인 — 활성화 전에 유료 smoke로 확인한다.** API 레퍼런스의 결과 URL 예시는 3.0·2.1 모두
+`dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com`, 즉 **중국 본토 버킷**이고, 싱가포르
+배포의 결과 저장 리전을 적은 문장은 없다. `lib/providerDataDestinations.ts`의 Qwen 행은
+저장을 SG 약정, 처리를 `NOT_PINNED`로 적고 있으며 이미지 결과가 본토를 경유하거나 본토에
+저장되는지는 확인되지 않았다. 그래서 `isQwenAssetUrl`은 싱가포르 공개 endpoint만 받는다 —
+본토 호스트가 오면 조용히 저장하지 않고 smoke가 실패한다. 실제 싱가포르 결과 호스트가 다른
+이름이면 그 증거로 허용 목록을 고친다. 거절해도 공급자 쪽 저장은 되돌리지 못하므로, 실제
+호스트 확인이 활성화의 선행 조건이다.
+
+활성화 순서: ① 판매 크레딧 승인 ② 약관 4.48 판단 ③ 키 확인 ④ staging에 예산 env 선배포
+⑤ staging 런타임 카탈로그에 프로필 + 공식 출처(`www.alibabacloud.com`) 가격 revision을
+추가하고 켜기 ⑥ staging 유료 생성 1회로 결과 호스트 리전·1024×1024·`usage` 장수 확인
+⑦ production 예산 env 선배포 후 같은 카탈로그 행 추가. smoke는 adapter를 거치므로 카탈로그
+행이 먼저 있어야 한다(fal처럼 별도 smoke 스크립트는 없다).
 
 #### 등록-비활성은 사용자에게 보인다
 
@@ -1335,6 +1388,10 @@ registry의 `disabledNote`는 "high thinking 비활성"이라고 적고 있었�
 
 증거는 `.github/audits/evidence/fal-nano-banana-2-smoke/`에 있고,
 `npm run check:fal-smoke-evidence`가 PR Fast Gate에서 결론을 **다시 계산한다.**
+비교 대상은 `FAL_ENDPOINT_PROFILES`의 `fal-ai/nano-banana-2` 행으로 오늘 만든
+body다(2026-11-07부터 body는 endpoint 행이 정한다, §16.9). **이 증거는 그 endpoint만
+덮는다.** 다른 fal endpoint는 schema·CDN·MIME·배달 크기를 각자 smoke로 증명해야 하고,
+`scripts/smoke-fal-image-generation.mjs`는 아직 Nano Banana 2에 고정돼 있다.
 
 #### 실측이 확정한 것
 
@@ -1371,3 +1428,84 @@ registry의 `disabledNote`는 "high thinking 비활성"이라고 적고 있었�
 렌더링하므로, 남겨 두면 이미 해제된 hold를 계속 설명한다 — 그것을 확인하러 오는
 바로 그 화면에서. `tests/imageModelRegistry.test.mjs`가 활성 모델의 note를
 금지한다.
+
+### 16.9 fal은 endpoint마다 다른 계약이다 (2026-11-07)
+
+fal은 모델이 아니라 gateway다. endpoint마다 요청 schema와 가격 페이지가 따로 있으므로
+`provider: "fal"`은 무엇을 보낼지도, 무엇이 청구되는지도 답하지 못한다. 이전에는 Nano
+Banana 2 body 하나가 모든 fal 모델로 갔고, 판정은 Nano Banana 2의 할증을 모든 fal
+모델의 상한으로 읽었다.
+
+`lib/falImageRequest.ts`의 `FAL_ENDPOINT_PROFILES` 한 표가 endpoint마다 넷을 정한다:
+body 형식, 편집 endpoint, thinking 과금, 고정할 `thinking_level`. 요청 builder, 판정
+(`imageThinkingCapEnforced`), adapter dispatch, 정산(`settledThinkingCostMicroUsd`)이
+모두 이 표를 읽는다. **표에 없는 endpoint는 넷 모두에서 거절된다.**
+
+| endpoint | body | 편집 endpoint | thinking 과금 | `thinking_level` | 상태 |
+|---|---|---|---|---|---|
+| `fal-ai/nano-banana-2` | `nano_banana` | `fal-ai/nano-banana-2/edit` | 요청당 고정 2,000µUSD | `high` | 활성 (§16.8) |
+| `google/nano-banana-2.1` | `nano_banana` | `google/nano-banana-2.1/edit` | 토큰당, 상한 파라미터 없음 | `minimal` | 판정 거절 |
+| `alibaba/qwen-image-3/text-to-image` | `qwen_image` | `alibaba/qwen-image-3/edit` | 없음 (이미지당 과금) | 없음 | 런타임 행·가격 개정 대기 |
+
+2026-11-07에 읽은 원문(fetch 도구 경유이며 `verified`로 승격하지 않는다):
+
+- Nano Banana 2.1 모델 페이지(`https://fal.ai/models/google/nano-banana-2.1`): "billed on
+  the tokens each request actually uses, as reported by Google", 해상도·web search·thinking에
+  고정 할증 없음, thinking은 출력 텍스트로 과금, `thinking_level` 기본값 `medium`이고
+  `minimal`이 가장 싸다. thinking 상한 언급 없음. 예시는 짧은 프롬프트·`medium`·1K에서 $0.040.
+- Nano Banana 2.1 API(`/api`, `/edit/api`): 필드명은 Nano Banana 2와 같다. `thinking_level`은
+  생략해도 꺼지지 않고 `medium`이 된다. 응답 schema에 usage·token 필드가 없다. 편집은
+  `image_urls`.
+- Qwen Image 3 API(`https://fal.ai/models/alibaba/qwen-image-3/text-to-image/api`):
+  `image_size`(enum 또는 `{width, height}`, 기본 `square_hd`, enum의 픽셀 크기 미기재),
+  `enable_prompt_expansion`(기본 **true**, LLM 프롬프트 재작성), `enable_safety_checker`(기본
+  true), `negative_prompt`(기본 `""`), `num_images`(기본 1), `output_format`(기본 png).
+  `resolution`·`aspect_ratio`·`thinking_level`은 없다. 응답 이미지에 width·height가 없다.
+  이 페이지에 가격 문장은 없다.
+
+#### Qwen Image 3 고정 필드
+
+| 필드 | 고정값 | 이유 |
+|---|---|---|
+| `image_size` | `{width: 1024, height: 1024}` | enum은 픽셀을 말하지 않는다. 배달 크기 검사가 이 픽셀로 잰다 |
+| `num_images` | `1` | 이미지당 과금 |
+| `enable_prompt_expansion` | `false` | 기본값은 우리가 쓰지 않은 프롬프트다. `system_prompt: ""`와 같은 이유 |
+| `negative_prompt` | `""` | 같은 이유 |
+| `enable_safety_checker` | `true` | moderation은 물려받지 않고 정한다 |
+| `output_format` | 명시 | 요청은 가정하지 않는다 |
+
+응답에 width·height가 없어도 파서는 받아들이고, adapter가 내려받은 bytes로 크기를 잰다
+(§16.5 요구사항 그대로).
+
+#### Qwen Image 3 fal 경로가 켜지려면
+
+코드 쪽은 끝났다. 남은 것은 운영 결정이다.
+
+1. 가격 원문 확인과 `priceVerification.sources`·`verifiedAt`. 1K $0.04 / 2K $0.075는 조사
+   전언이고 원문을 읽지 못했다. `{width, height}`로 지정한 1024×1024가 1K 단가로
+   과금되는지도 확인해야 한다.
+2. Nano Banana 2와 같은 smoke 1회(유료, 승인 필요). §16.8의 증거는 Nano Banana 2만 덮는다.
+3. 판매 크레딧 승인(§3·§4).
+4. 런타임 카탈로그 행과 가격 개정. 예산은 provider 단위인 fal 예산(§16.6)을 함께 쓴다.
+
+편집은 계속 막힌다. `IMAGE_EDIT_PRICING`이 모델 id로 고정돼 있고, Qwen 편집 schema는
+읽지 않았으므로 builder가 편집 body를 만들지 않는다.
+
+#### Nano Banana 2.1 — 측정은 준비하고 활성화는 하지 않는다
+
+`minimal` 고정은 수준을 낮출 뿐 토큰 수를 묶지 않는다. 그래서 cap을 얼마로 적어도 판정은
+`worst_case_cost_unbounded`다.
+
+`scripts/measure-fal-token-image-thinking.mjs`가 측정을 준비한다. **실행하지 않았다**(유료,
+§15 승인 필요). adapter와 같은 builder로 `minimal` 요청을 N회 보내고, fal usage API의 분
+단위 bucket에서 호출별 원가를 귀속시켜 관측 최대값을 낸다. usage API는 요청 단위 필터가
+없고 수치를 estimate라고 부르므로, 호출을 1분 넘게 띄우고, 두 호출이 겹치거나 어느 호출로도
+설명되지 않는 bucket이 있으면 최대값을 내지 않는다. 비용은 fal 예시 기준 호출당 약 $0.04,
+기본값(프롬프트 2종 × 반복 3회 = 6회)으로 약 $0.24다(추정).
+
+**관측 최대값은 상한이 아니다.** §12 조건 6은 thinking을 provider가 허용하는 상한·최악
+조건으로 계산하라고 하고, §12.1의 재검토 조건은 상한을 거는 요청 파라미터나 과금 상한을
+명시한 공식 문서다. 관측된 표본 최대값을 상한으로 인정하는 조건은 이 정책에 **없다.**
+2026-08-14 Google 실측도 파라미터가 과금을 묶는지를 물었지, 표본 최대값을 상한으로 쓰지
+않았다. 측정 결과로 Nano Banana 2.1을 열려면 그 조건을 정하는 운영자 결정이 먼저이고, 그
+전에는 코드에 우회 경로를 만들지 않는다.

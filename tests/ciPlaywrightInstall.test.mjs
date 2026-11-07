@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -303,6 +303,56 @@ test("hosted CI selects the Ubuntu archive without changing custom mirror entrie
         run("true");
         assert.equal(read(path), "# http://azure.archive.ubuntu.com/ubuntu\nhttps://archive.ubuntu.com/ubuntu/\tpriority:1\n  https://archive.ubuntu.com/ubuntu\r\n\thttps://archive.ubuntu.com/ubuntu priority:2\nhttps://security.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu-other\n");
     });
+});
+
+// #3439 (2026-11-07): ubuntu-26.04 image 20261101.64.1 had no Ubuntu apt source,
+// so install-deps could not find a single font package.
+function withAptFixture(action) {
+    const root = mkdtempSync(join(tmpdir(), "tomverse-ci-apt-sources-"));
+    const aptDir = join(root, "apt");
+    const keyring = join(root, "ubuntu-archive-keyring.gpg");
+    mkdirSync(join(aptDir, "sources.list.d"), { recursive: true });
+    const source = read(SCRIPT_PATH).replaceAll("\r", "").match(/ensure_ubuntu_archive\(\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(source, "the Ubuntu source check is missing");
+    const added = join(aptDir, "sources.list.d", "tomverse-ubuntu-archive.sources");
+    const run = ({ githubActions = "true", arch = "amd64", codename = "resolute" } = {}) => execFileSync(bash,
+        ["-c", `sudo() { "$@"; }\n${source}\nensure_ubuntu_archive "$1" "$2" "$3" "$4"`, "apt-fixture",
+            aptDir.replaceAll("\\", "/"), keyring.replaceAll("\\", "/"), codename, arch],
+        { encoding: "utf8", windowsHide: true, env: { ...process.env, GITHUB_ACTIONS: githubActions } });
+    try {
+        action({ aptDir, keyring, added, run });
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+}
+
+test("a hosted runner with no Ubuntu apt source gets the archive for its release", { skip: noWindowsBash }, () => {
+    withAptFixture(({ aptDir, keyring, added, run }) => {
+        writeFileSync(join(aptDir, "sources.list.d", "microsoft-prod.list"), "deb [arch=amd64] https://packages.microsoft.com/ubuntu/26.04/prod resolute main\n");
+        run(); assert.equal(existsSync(added), false, "no keyring: apt is left as it is");
+        writeFileSync(keyring, "key");
+        run({ githubActions: "false" }); assert.equal(existsSync(added), false, "a local run is left alone");
+        run({ arch: "arm64" }); assert.equal(existsSync(added), false, "archive.ubuntu.com has no arm64");
+        run({ codename: "" }); assert.equal(existsSync(added), false);
+        assert.match(run(), /no Ubuntu apt source; added archive\.ubuntu\.com for resolute/);
+        const text = read(added);
+        assert.match(text, /^URIs: https:\/\/archive\.ubuntu\.com\/ubuntu\nSuites: resolute resolute-updates resolute-backports$/m);
+        assert.match(text, /^URIs: https:\/\/security\.ubuntu\.com\/ubuntu\nSuites: resolute-security$/m);
+        assert.equal((text.match(/^Signed-By: .*ubuntu-archive-keyring\.gpg$/gm) ?? []).length, 2);
+    });
+});
+
+test("a runner whose apt already names an Ubuntu source is left alone", { skip: noWindowsBash }, () => {
+    for (const [file, text] of [
+        ["ubuntu.sources", "Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\nSuites: resolute\n"],
+        ["custom.list", "deb https://archive.ubuntu.com/ubuntu resolute main\n"],
+    ]) {
+        withAptFixture(({ aptDir, keyring, added, run }) => {
+            writeFileSync(keyring, "key");
+            writeFileSync(join(aptDir, "sources.list.d", file), text);
+            run(); assert.equal(existsSync(added), false, file);
+        });
+    }
 });
 
 test("local runs and missing mirror lists do not change apt configuration", { skip: noWindowsBash }, () => {

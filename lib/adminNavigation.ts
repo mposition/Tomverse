@@ -472,10 +472,10 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
   },
   // -------------------------------------------------------------- AI Agents
   {
-    // A shell: a pixel office for the agent teams that links each team to the
-    // page that holds its record. A LIVE room reads that team's operating
-    // state, read only; nothing on the page writes, so it carries no badge and
-    // no writeRoles.
+    // A pixel office for the agent teams and the AMUX workers, drawn from their
+    // records, that links each one to the page that holds its record. Read
+    // only, so it carries no badge and no writeRoles; the owner's AI briefing
+    // writes only its own settings rows and audit entry (lib/agentOfficeBriefing.ts).
     id: "office",
     label: "Agents home",
     href: "/admin/office",
@@ -495,7 +495,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "live",
         label: "Live office",
-        description: "The office floor and the operator console",
+        description: "The floor, what waits on you, each worker's sheet, the roster and today's merges",
       },
     ],
   },

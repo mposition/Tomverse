@@ -37,11 +37,21 @@ import { TrustSafetyRoundRefused, isBudgetInsufficient } from "@/lib/trustSafety
 // someone deliberately turned off. `disabled` begins once a person has written
 // the row through E3 and set it to `off`. Either way nothing is written and no
 // ping goes out.
+//
+// That pre-activation `failed` answers 202, not 500. The body is still the
+// enum's `failed` -- §6 keeps the missing row a fault -- but the status lets
+// the child exit 0 for this one case, so a cron service deployed ahead of the
+// owner's activation does not show CRASHED every period and bury a real
+// failure under them (owner direction 2026-11-07). Every other `failed` --
+// another fault, a thrown round, a refusal -- stays non-2xx.
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
   "Content-Type": "application/json; charset=utf-8",
 } as const;
+
+/** The status of the one `failed` the child treats as success: no config row yet. */
+const NOT_ACTIVATED_STATUS = 202;
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), { status, headers: NO_STORE_HEADERS });
@@ -85,7 +95,10 @@ export async function POST(request: Request) {
         ping: result.ping,
       }),
     );
-    return json({ outcome: result.outcome }, result.outcome === "failed" ? 500 : 200);
+    const notActivated =
+      result.outcome === "failed" && result.activation.fault === "config_row_missing";
+    const status = result.outcome !== "failed" ? 200 : notActivated ? NOT_ACTIVATED_STATUS : 500;
+    return json({ outcome: result.outcome }, status);
   } catch (error) {
     // The error's name and a code-shaped code, never a message and never the
     // query: a refusal from the arming function or a late COMMIT arrives here
