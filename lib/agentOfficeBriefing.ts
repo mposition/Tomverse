@@ -49,7 +49,7 @@ import { prisma } from "@/lib/prisma";
 
 export const AGENT_OFFICE_BRIEFING_ENABLED_ENV = "AGENT_OFFICE_BRIEFING_ENABLED";
 export const AGENT_OFFICE_BRIEFING_MODEL_ENV = "AGENT_OFFICE_BRIEFING_MODEL";
-const DEFAULT_MODEL_ID = "gpt-6-luna";
+const BRIEFING_DEFAULT_MODEL_ID = "gpt-6-luna";
 /**
  * {day, calls, claim: {id, until} | null}: the Brisbane day's calls, moved only
  * by `reserve`, and the one call in flight, whatever day it started on.
@@ -70,7 +70,7 @@ export const agentOfficeBriefingEnabled = (env: NodeJS.ProcessEnv = process.env)
   env[AGENT_OFFICE_BRIEFING_ENABLED_ENV] === "true";
 
 const configuredModelId = (env: NodeJS.ProcessEnv = process.env) =>
-  env[AGENT_OFFICE_BRIEFING_MODEL_ENV]?.trim() || DEFAULT_MODEL_ID;
+  env[AGENT_OFFICE_BRIEFING_MODEL_ENV]?.trim() || BRIEFING_DEFAULT_MODEL_ID;
 
 export type AgentOfficeBriefingStatus = {
   enabled: boolean;

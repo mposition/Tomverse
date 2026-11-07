@@ -77,7 +77,7 @@ test("only the floor is rewound; the summary, inbox and sheet stay now", () => {
 test("the AMUX room is re-read every fifteen seconds through a read-only route", () => {
   const live = read("components/admin/AgentOfficeLive.tsx");
   assert.match(live, /const AMUX_PULSE_MS = 15_000;/);
-  assert.match(live, /fetch\("\/api\/admin\/office\/amux"/);
+  assert.match(live, /adminFetch\("\/api\/admin\/office\/amux"/);
   assert.match(live, /document\.visibilityState !== "visible"/);
   const route = read("app/api/admin/office/amux/route.ts");
   assert.match(route, /export async function GET/);
