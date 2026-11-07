@@ -39,7 +39,7 @@ export const BRIEFING_LINKS = {
   escalations: OPERATOR_QUEUE_HREFS.amuxEscalations,
   marketing: OPERATOR_QUEUE_HREFS.marketing,
   workers: "/admin/amux-settings?tab=workers",
-  safety: "/admin/amux-settings?tab=safety",
+  safety: "/admin/amux-recovery?tab=safety",
 } as const;
 export type BriefingLink = keyof typeof BRIEFING_LINKS;
 const LINK_KEYS = Object.keys(BRIEFING_LINKS) as BriefingLink[];

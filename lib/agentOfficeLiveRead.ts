@@ -510,8 +510,9 @@ async function readAmuxDetail(amux: AgentOfficeAmuxState, owner: boolean, now: D
   const names = amux.workers.map((worker) => worker.name);
   if (names.length === 0) return { kind: "observed", ownerDetail: owner, workers: {} };
   try {
-    // The newest observation per worker, and its ended attempts of the last
-    // two weeks newest first (the mapping keeps ten each).
+    // The newest observation per worker, and each worker's own ten newest
+    // ended attempts (one small read per worker, so a busy worker cannot crowd
+    // out another's history).
     const [quotas, attempts] = await Promise.all([
       prisma.amuxQuotaObservation.findMany({
         where: { worker: { in: names }, observedAt: { lte: now } },
@@ -519,12 +520,16 @@ async function readAmuxDetail(amux: AgentOfficeAmuxState, owner: boolean, now: D
         orderBy: [{ worker: "asc" }, { observedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
         select: { worker: true, remainingBasisPoints: true, exhausted: true, observedAt: true, resetAt: true },
       }),
-      prisma.amuxExecutionAttempt.findMany({
-        where: { worker: { in: names }, endedAt: { not: null, lte: now, gte: new Date(now.getTime() - 14 * 86_400_000) } },
-        orderBy: [{ endedAt: "desc" }, { id: "desc" }],
-        take: names.length * 10 + 200,
-        select: { worker: true, outcome: true },
-      }),
+      Promise.all(
+        names.map((worker) =>
+          prisma.amuxExecutionAttempt.findMany({
+            where: { worker, endedAt: { not: null, lte: now } },
+            orderBy: [{ endedAt: "desc" }, { id: "desc" }],
+            take: 10,
+            select: { worker: true, outcome: true },
+          })
+        )
+      ).then((rows) => rows.flat()),
     ]);
     let open: Parameters<typeof agentOfficeAmuxDetail>[0]["open"] = [];
     let usage: { worker: string; tokens: number; cost: number }[] = [];

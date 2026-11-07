@@ -16,7 +16,9 @@ export function busyAt(spans: readonly AgentOfficeAttemptSpan[], at: number): Se
   const busy = new Set<string>();
   for (const span of spans) {
     const start = Date.parse(span.startedAt);
-    const end = span.endedAt === null ? Number.POSITIVE_INFINITY : Date.parse(span.endedAt);
+    // An end that cannot be read counts as still running.
+    const parsedEnd = span.endedAt === null ? Number.NaN : Date.parse(span.endedAt);
+    const end = Number.isFinite(parsedEnd) ? parsedEnd : Number.POSITIVE_INFINITY;
     if (Number.isFinite(start) && start <= at && at < end) busy.add(span.worker);
   }
   return busy;

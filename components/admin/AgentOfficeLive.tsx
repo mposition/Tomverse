@@ -50,7 +50,7 @@ import type { AgentOffice, DeptStatus, OfficeCopy } from "@/lib/agentOffice/sim"
 import { aestClock, aestStamp, brisbaneIso } from "@/lib/agentOffice/time";
 
 const WORKERS_HREF = "/admin/amux-settings?tab=workers";
-const SAFETY_HREF = "/admin/amux-settings?tab=safety";
+const SAFETY_HREF = "/admin/amux-recovery?tab=safety";
 const CARDS_HREF = "/admin/amux-execution?tab=cards";
 const RUNNING: readonly AgentOfficeAmuxWorkerState[] = ["ready", "idle", "busy", "starting", "error", "lost", "paused", "isolated", "blocked"];
 const SOUND_KEY = "tomverse.agentOffice.sound";

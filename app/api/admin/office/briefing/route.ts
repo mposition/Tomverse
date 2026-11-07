@@ -52,7 +52,14 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 256, schema);
     await consumeApiRateLimit(request, session.user.id, "admin-office-briefing", { minute: 4, day: 100 });
     const result = await requestAgentOfficeBriefing({ session, request, locale: body.locale });
-    const status = result.kind === "done" || result.kind === "reused" ? 200 : result.kind === "failed" ? 502 : 409;
+    const status =
+      result.kind === "done" || result.kind === "reused"
+        ? 200
+        : result.kind === "failed"
+          ? 502
+          : result.kind === "off" || result.kind === "model_unavailable"
+            ? 503
+            : 409;
     return Response.json(result, { status, headers });
   } catch (error) {
     const security = apiSecurityResponse(error);

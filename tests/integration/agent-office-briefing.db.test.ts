@@ -187,3 +187,39 @@ test("a call running across Brisbane midnight still holds the claim, and ending 
   assert.equal((await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "en", now: () => later, llm: sneaky, readFacts })).kind, "done");
   assert.deepEqual(JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}").claim, foreign);
 });
+
+test("a claim lost while the office was read is not called on, and its answer is never stored", async () => {
+  const calls = { n: 0 };
+  const takeOver = async () => {
+    // Another request took the claim after this one's lapsed.
+    const raw = JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}");
+    await prisma.appSetting.update({
+      where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
+      data: { value: JSON.stringify({ ...raw, claim: { id: "newer", until: new Date(NOW.getTime() + 60_000).toISOString() } }) },
+    });
+    return FACTS;
+  };
+  const result = await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "ko", now: () => NOW, llm: answer(calls), readFacts: takeOver });
+  assert.deepEqual(result, { kind: "failed" });
+  assert.equal(calls.n, 0);
+  assert.equal(await setting(AGENT_OFFICE_BRIEFING_LATEST_KEY), null);
+  // The newer claim stays.
+  assert.equal(JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}").claim.id, "newer");
+});
+
+test("the claim is renewed from the moment of the call", async () => {
+  const calls = { n: 0 };
+  let clock = NOW.getTime();
+  const seen: { until?: string } = {};
+  const llm: AgentOfficeBriefingLlm = async (input) => {
+    seen.until = JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}").claim?.until;
+    return answer(calls)(input);
+  };
+  const readFacts = async () => {
+    clock += 15_000;
+    return FACTS;
+  };
+  const result = await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "ko", now: () => new Date(clock), llm, readFacts });
+  assert.equal(result.kind, "done");
+  assert.equal(seen.until, new Date(NOW.getTime() + 15_000 + 90_000).toISOString());
+});

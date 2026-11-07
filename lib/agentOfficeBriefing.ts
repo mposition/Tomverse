@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { getActiveAiModel } from "@/lib/activeAiModel";
@@ -57,7 +58,12 @@ export const AGENT_OFFICE_BRIEFING_USAGE_KEY = "agentOffice.briefing.usage";
 export const AGENT_OFFICE_BRIEFING_LATEST_KEY = "agentOffice.briefing.latest";
 const MAX_OUTPUT_TOKENS = 700;
 const TIMEOUT_MS = 45_000;
-/** A claim outlives the call's timeout, so a second click cannot start another. */
+/**
+ * The office read before the call is cut off here; the claim is then renewed
+ * for CLAIM_MS, which outlives the call's TIMEOUT_MS, so a second click cannot
+ * start another call while this one may still run.
+ */
+const FACTS_MS = 20_000;
 const CLAIM_MS = 90_000;
 
 export const agentOfficeBriefingEnabled = (env: NodeJS.ProcessEnv = process.env) =>
@@ -190,26 +196,50 @@ async function reserve(input: { session: Session; request: Request; locale: Brie
   });
 }
 
+/** The usage row as stored, or null when there is none or it cannot be read. */
+async function readUsageRow(tx: Prisma.TransactionClient): Promise<Record<string, unknown> | null> {
+  const row = await tx.appSetting.findUnique({ where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY }, select: { value: true } });
+  try {
+    return row ? (JSON.parse(row.value) as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+const ownsClaim = (raw: Record<string, unknown> | null, claimId: string) =>
+  (raw?.claim as { id?: unknown } | null | undefined)?.id === claimId;
+
 /**
- * Ends this call's own claim and keeps the row's day and count as they are. A
- * claim another call holds, or a row that cannot be read, is left alone.
+ * Right before the call: if this request still holds its claim, it is renewed
+ * for CLAIM_MS from now; if not (it lapsed during the read and another request
+ * took it), the call is not made.
+ */
+async function renew(claimId: string, now: Date): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('agent_office_briefing'))`;
+    const raw = await readUsageRow(tx);
+    if (!raw || !ownsClaim(raw, claimId)) return false;
+    await tx.appSetting.update({
+      where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
+      data: { value: JSON.stringify({ ...raw, claim: { id: claimId, until: new Date(now.getTime() + CLAIM_MS).toISOString() } }) },
+    });
+    return true;
+  });
+}
+
+/**
+ * Ends this call's own claim and keeps the row's day and count as they are,
+ * and stores the answer only while the claim was still this call's. A claim
+ * another call holds, or a row that cannot be read, is left alone.
  */
 async function release(claimId: string, stored: StoredAgentOfficeBriefing | null): Promise<void> {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('agent_office_briefing'))`;
-    const row = await tx.appSetting.findUnique({ where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY }, select: { value: true } });
-    let raw: Record<string, unknown> | null = null;
-    try {
-      raw = row ? (JSON.parse(row.value) as Record<string, unknown>) : null;
-    } catch {
-      raw = null;
-    }
-    if (raw && (raw.claim as { id?: unknown } | null | undefined)?.id === claimId) {
-      await tx.appSetting.update({
-        where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
-        data: { value: JSON.stringify({ ...raw, claim: null }) },
-      });
-    }
+    const raw = await readUsageRow(tx);
+    if (!raw || !ownsClaim(raw, claimId)) return;
+    await tx.appSetting.update({
+      where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
+      data: { value: JSON.stringify({ ...raw, claim: null }) },
+    });
     if (stored) {
       const value = JSON.stringify(stored);
       await tx.appSetting.upsert({
@@ -241,11 +271,20 @@ export async function requestAgentOfficeBriefing(input: {
   let stored: StoredAgentOfficeBriefing | null = null;
   try {
     const at = now();
-    const facts = input.readFacts
-      ? await input.readFacts(at)
-      : agentOfficeBriefingFacts(await readAgentOfficeLiveRooms(at, { owner: true }), at);
-    const answer = await llm({ facts, locale: input.locale });
-    if (answer) stored = { at: at.toISOString(), locale: input.locale, modelId: answer.modelId, briefing: answer.briefing };
+    const read = input.readFacts
+      ? input.readFacts(at)
+      : readAgentOfficeLiveRooms(at, { owner: true }).then((live) => agentOfficeBriefingFacts(live, at));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const facts = await Promise.race([
+      read,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), FACTS_MS);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (facts && (await renew(reserved.claimId, now()))) {
+      const answer = await llm({ facts, locale: input.locale });
+      if (answer) stored = { at: at.toISOString(), locale: input.locale, modelId: answer.modelId, briefing: answer.briefing };
+    }
   } finally {
     await release(reserved.claimId, stored);
   }

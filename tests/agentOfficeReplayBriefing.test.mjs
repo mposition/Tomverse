@@ -17,6 +17,7 @@ import {
   agentOfficeBriefingReusable,
 } from "../lib/agentOffice/briefing.ts";
 import { adminAgentOfficeFloorMessages } from "../lib/adminMessages/agentOfficeFloor.ts";
+import { ADMIN_NAVIGATION } from "../lib/adminNavigation.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -204,7 +205,9 @@ test("the briefing is off by default, owner only, reserved and audited before th
   // Agent spending is not the user's credits or a Chat budget.
   assert.doesNotMatch(lib, /from "@\/lib\/credit|chatBudget|creditLedger/);
   // The model never reads a card title.
-  assert.match(lib, /agentOfficeBriefingFacts\(await readAgentOfficeLiveRooms\(at, \{ owner: true \}\), at\)/);
+  assert.match(lib, /readAgentOfficeLiveRooms\(at, \{ owner: true \}\)\.then\(\(live\) => agentOfficeBriefingFacts\(live, at\)\)/);
+  // The claim is renewed (or the call skipped) right before the model is called.
+  assert.match(lib, /if \(facts && \(await renew\(reserved\.claimId, now\(\)\)\)\) \{\s*const answer = await llm\(/);
   const route = read("app/api/admin/office/briefing/route.ts");
   assert.equal((route.match(/getAdminRole\(session\) !== "owner"/g) ?? []).length, 2);
   assert.match(route, /hasValidMutationOrigin\(request\)/);
@@ -224,4 +227,22 @@ test("the briefing asks for AEST, no em dash, and treats unread as unread", () =
     const copy = JSON.stringify(adminAgentOfficeFloorMessages[locale].briefing) + JSON.stringify(adminAgentOfficeFloorMessages[locale].today);
     assert.doesNotMatch(copy, /UTC|—/);
   }
+});
+
+test("every screen the office links is a console page and section", () => {
+  const files = ["components/admin/AgentOfficeLive.tsx", "lib/agentOffice/inbox.ts", "lib/agentOffice/briefing.ts", "lib/agentOffice/live.ts"];
+  const hrefs = new Set(files.flatMap((file) => [...read(file).matchAll(/"(\/admin\/[a-z0-9-]+(?:\?tab=[a-z0-9-]+)?)"/g)].map((m) => m[1])));
+  assert.ok(hrefs.size >= 5);
+  for (const href of hrefs) {
+    const [path, query] = href.split("?");
+    const item = ADMIN_NAVIGATION.find((entry) => entry.href === path);
+    assert.ok(item, `${href}: no console page`);
+    const tab = new URLSearchParams(query ?? "").get("tab");
+    if (tab) assert.ok((item.tabs ?? []).some((entry) => entry.id === tab), `${href}: no such section`);
+  }
+});
+
+test("an end that cannot be read counts as still running", () => {
+  const t0 = Date.parse("2026-11-06T14:00:00.000Z");
+  assert.deepEqual([...busyAt([{ worker: "x", startedAt: new Date(t0).toISOString(), endedAt: "garbage", mark: "s" }], t0 + 1)], ["x"]);
 });
