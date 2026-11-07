@@ -1446,6 +1446,7 @@ export async function acknowledgeEngineeringAgentDecision(
 /** The actions the console offers. `retry_lookup` is the publisher's next round, not a button. */
 export const ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS = [
   "close_domain_after_verified_no_write",
+  "close_after_observed_merge",
   "leave_open",
   "mode_off",
   "escalate_incident",
@@ -1466,6 +1467,15 @@ async function mismatchRunId(
   }
   return null;
 }
+
+/** What GitHub reported for a mismatch's pull request, read just before the action. */
+export type EngineeringAgentObservedMerge = {
+  prNumber: number;
+  merged: boolean;
+  mergedAt: Date | null;
+  mergeCommitSha: string | null;
+  mergedByKind: "user" | "bot" | "app" | "unknown";
+};
 
 /**
  * The AMUX rows a mismatch concerns -- its run's attempt, its card, then its
@@ -1496,11 +1506,20 @@ export async function lockEngineeringAgentMismatchAmuxRows(
  * run and whether it closes the item. Neither side is corrected to match the
  * other: closing the domain side ends the run as abandoned only when nothing
  * of it was ever allowed to write to GitHub, and escalation turns the agent off
- * and leaves the rest to the incident.
+ * and leaves the rest to the incident. A C item may also close once GitHub
+ * reports its own pull request merged (owner decision 2026-11-06): the merge
+ * is recorded on the binding, so the approval observer does not raise it
+ * again, and the agent stays on.
  */
 export async function resolveEngineeringAgentStateMismatch(
   tx: EngineeringAgentTransaction,
-  input: { session: Session; request?: Request; workItemId: string; action: MismatchAction },
+  input: {
+    session: Session;
+    request?: Request;
+    workItemId: string;
+    action: MismatchAction;
+    observedMerge?: EngineeringAgentObservedMerge | null;
+  },
 ): Promise<{ auditLogId: string; resolved: boolean }> {
   humanActorId(input.session);
   if (!(ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS as readonly string[]).includes(input.action)) {
@@ -1544,6 +1563,24 @@ export async function resolveEngineeringAgentStateMismatch(
   const consumed = await tx.engineeringAgentCapability.count({
     where: { consumedAt: { not: null }, workItem: { runId: run.id } },
   });
+  // The merge must be of this run's own current pull request, as read now.
+  const observed = input.observedMerge ?? null;
+  const currentBindings =
+    kind === "C" && input.action === "close_after_observed_merge"
+      ? await tx.engineeringAgentBinding.findMany({
+          where: { runId: run.id, supersededAt: null },
+          select: { id: true, prNumber: true },
+        })
+      : [];
+  const mergedBinding =
+    currentBindings.length === 1 &&
+    observed !== null &&
+    observed.merged &&
+    observed.mergedAt !== null &&
+    observed.mergeCommitSha !== null &&
+    currentBindings[0]!.prNumber === observed.prNumber
+      ? currentBindings[0]!
+      : null;
   const verdict = decideMismatchAction({
     kind,
     action: input.action,
@@ -1556,6 +1593,7 @@ export async function resolveEngineeringAgentStateMismatch(
     workItemState: kind === "A" ? (runItems.find((candidate) => candidate.kind === "publish")?.state ?? null) : (publishItem?.state ?? null),
     workItemTerminal: publishItem?.state === "published",
     lookupVerifiedNoWrite: consumed === 0,
+    mergeObserved: mergedBinding !== null,
     // One item per cause (its key is unique), so a cause cannot recur here.
     recurrences: 0,
   });
@@ -1573,6 +1611,33 @@ export async function resolveEngineeringAgentStateMismatch(
     });
     if (moved.count !== 1) refuse("run_not_active");
   }
+  if (input.action === "close_after_observed_merge" && mergedBinding) {
+    // A person's resolution runs under any mode, so the merge is written
+    // without the observer's maintenance switch. A merge the observer already
+    // recorded must be this same merge.
+    const binding = await lockBinding(tx, mergedBinding.id);
+    const recorded = (
+      await tx.engineeringAgentBinding.findUniqueOrThrow({ where: { id: binding.id }, select: { mergeObservation: true } })
+    ).mergeObservation as { merged?: unknown; mergeCommitSha?: unknown } | null;
+    if (recorded === null) {
+      const observation: BindingObservationInput = {
+        bindingId: binding.id,
+        kind: "merge",
+        observation: {
+          merged: true,
+          mergeCommitSha: observed!.mergeCommitSha,
+          mergedAt: observed!.mergedAt!.toISOString(),
+          mergedByKind: observed!.mergedByKind,
+          observedAt: (await databaseNow(tx)).toISOString(),
+        },
+      };
+      if ((await writeBindingObservation(tx, binding, observation)).recorded) {
+        await systemAudit(tx, "engineering-agent-observer", ENGINEERING_AGENT_AUDIT_ACTIONS.bindingObserved, "engineering_agent_binding", binding.id, bindingObservationAudit(observation));
+      }
+    } else if (recorded.merged !== true || recorded.mergeCommitSha !== observed!.mergeCommitSha) {
+      refuse("merge_observation_conflict");
+    }
+  }
   if (input.action === "mode_off" || input.action === "escalate_incident") {
     await setEngineeringAgentSwitch(tx, { session: input.session, request: input.request, name: "mode", value: "off" });
   }
@@ -1586,7 +1651,13 @@ export async function resolveEngineeringAgentStateMismatch(
     targetType: "engineering_agent_work_item",
     targetId: locked.id,
     summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.mismatchActed} ${locked.id}`,
-    metadata: { kind, action: input.action, resolved: verdict.resolves, runId: run.id },
+    metadata: {
+      kind,
+      action: input.action,
+      resolved: verdict.resolves,
+      runId: run.id,
+      ...(mergedBinding ? { prNumber: mergedBinding.prNumber, mergeCommitSha: observed!.mergeCommitSha } : {}),
+    },
     tx,
   });
   return { auditLogId, resolved: verdict.resolves };
@@ -1993,19 +2064,45 @@ export async function moveEngineeringAgentBinding(
  * the same observation again is a no-op; recording a different one is refused
  * by the database.
  */
+type BindingObservationInput =
+  | {
+      bindingId: string;
+      kind: "approval";
+      observation: z.infer<typeof engineeringAgentApprovalObservationSchema>;
+      reviewer: { githubId: number; login: string } | null;
+    }
+  | { bindingId: string; kind: "merge"; observation: z.infer<typeof engineeringAgentMergeObservationSchema> };
+
 export async function recordEngineeringAgentBindingObservation(
   tx: EngineeringAgentTransaction,
-  input:
-    | {
-        bindingId: string;
-        kind: "approval";
-        observation: z.infer<typeof engineeringAgentApprovalObservationSchema>;
-        reviewer: { githubId: number; login: string } | null;
-      }
-    | { bindingId: string; kind: "merge"; observation: z.infer<typeof engineeringAgentMergeObservationSchema> },
+  input: BindingObservationInput,
 ): Promise<{ recorded: boolean }> {
   const binding = await lockBinding(tx, input.bindingId);
   await requireSwitch(tx, "maintenanceAllowed");
+  const written = await writeBindingObservation(tx, binding, input);
+  if (written.recorded) {
+    await systemAudit(tx, "engineering-agent-observer", ENGINEERING_AGENT_AUDIT_ACTIONS.bindingObserved, "engineering_agent_binding", binding.id, bindingObservationAudit(input));
+  }
+  return written;
+}
+
+const bindingObservationAudit = (input: BindingObservationInput) => ({
+  kind: input.kind,
+  verdict: input.kind === "approval" ? input.observation.verdict : null,
+  merged: input.kind === "merge" ? input.observation.merged : null,
+});
+
+/**
+ * The observation write itself, on a binding the caller has locked; the
+ * caller records the audit entry when it wrote. The observer reaches it
+ * through its switch; a person's mismatch resolution reaches it without one,
+ * because a person's resolution runs under any mode.
+ */
+async function writeBindingObservation(
+  tx: EngineeringAgentTransaction,
+  binding: LockedBinding,
+  input: BindingObservationInput,
+): Promise<{ recorded: boolean }> {
   const current = await tx.engineeringAgentBinding.findUniqueOrThrow({
     where: { id: binding.id },
     select: { approvalObservation: true, mergeObservation: true },
@@ -2038,11 +2135,6 @@ export async function recordEngineeringAgentBindingObservation(
     refuse("observation_already_recorded");
   }
   await tx.engineeringAgentBinding.update({ where: { id: binding.id }, data });
-  await systemAudit(tx, "engineering-agent-observer", ENGINEERING_AGENT_AUDIT_ACTIONS.bindingObserved, "engineering_agent_binding", binding.id, {
-    kind: input.kind,
-    verdict: input.kind === "approval" ? input.observation.verdict : null,
-    merged: input.kind === "merge" ? input.observation.merged : null,
-  });
   return { recorded: true };
 }
 

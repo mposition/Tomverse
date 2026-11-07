@@ -425,6 +425,8 @@ test("v52 contract touch discards the ordinary grade and binds one frontier rece
     originalReceiptDigest: "a".repeat(64), newReceipt: null,
     classificationFailure: true,
   });
+  // The frontier rerun starts over and still needs the owner's answer.
+  assert.equal(world.questionAnswerClears, 0);
 });
 
 test("v52 settlement blocks a contract publish file omitted from the runner inventory", async () => {
@@ -542,6 +544,30 @@ test("v52 review record binds an implement patch, assignment and audit once", as
     if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
     else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
   }
+});
+
+test("an accepted patch whose start opened no publication run settles privately for review", async () => {
+  // Production 2026-11-06: the Publisher was halted, start skipped the run
+  // (v22_publication_skipped), and settlement refused the accepted patch with
+  // 409, which stopped the worker bridge and left the Task outcome_unknown.
+  world = makeWorld("succeeded");
+  world.attemptNumber = 1;
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "advanced";
+  world.reviewVerdict = "accept";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+    files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+  const input = await settlementInput("succeeded");
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...input, changedPaths: ["lib/ordinary.ts"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "review");
+  assert.equal(world.attemptUpdateData?.reason, "review_server_accepted");
+  assert.equal(world.escalations.length, 1);
+  assert.equal(world.escalations[0]?.reason, "human_review_required");
 });
 
 test("v52 review unknown blocks without another attempt", async () => {
@@ -662,6 +688,8 @@ test("v52 ordinary paths preserve the normal successful destination", async () =
   assert.equal(result.settled, true);
   assert.equal(world.taskUpdateData?.status, "review");
   assert.equal(world.gradeEscalationAudits.length, 0);
+  // A settlement at the same grade spends a resumed run's answer.
+  assert.equal(world.questionAnswerClears, 1);
 });
 
 test("v52 contract touch blocks when a new frontier price is unavailable", async () => {

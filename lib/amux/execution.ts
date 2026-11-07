@@ -1597,13 +1597,19 @@ export async function settleAmuxV22TaskExecution(input: {
         where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
         select: { id: true, kind: true, patchDigest: true, baseSha: true },
       }) : null;
-      if (patch && !ownerQuestion && effectivePathDecision === "pass" &&
+      // A run that start never opened (Publisher halted, mode off, no
+      // consent: v22_publication_skipped) leaves the patch private. The Task
+      // still settles and goes to a person's review with no publication
+      // product; refusing here stopped the worker bridge on every accepted
+      // patch (2026-11-06). A run that exists but no longer matches is still
+      // a conflict.
+      if (run && patch && !ownerQuestion && effectivePathDecision === "pass" &&
           (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({
           where: { id: attempt.v22AssignmentId },
           select: { role: true, workItemId: true },
         });
-        if (!run || run.status !== "active" ||
+        if (run.status !== "active" ||
             !["shadow", "t1"].includes(run.modeAtStart) ||
             run.cardId !== task.id || run.baseSha !== patch.baseSha ||
             patch.taskId !== task.id ||
@@ -1717,10 +1723,13 @@ export async function settleAmuxV22TaskExecution(input: {
         await tx.amuxV22TaskQuestion.update({ where: { id: recordedQuestion.id },
           data: { state: "cancelled" } });
       // The answer a resumed run read is kept until a run of the Task settles,
-      // so a resumed run that died first still hands it to the next one.
-      await tx.amuxV22TaskQuestion.updateMany({ where: {
-        taskId: task.id, state: "resumed",
-        answerText: { not: null } }, data: { answerText: null } });
+      // so a resumed run that died first still hands it to the next one. A
+      // grade escalation starts the Task over at a higher grade, so that run
+      // still needs the answer and it is kept for it too.
+      if (!gradeEscalated)
+        await tx.amuxV22TaskQuestion.updateMany({ where: {
+          taskId: task.id, state: "resumed",
+          answerText: { not: null } }, data: { answerText: null } });
       await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.v22.execution.settled", targetType: "AmuxWorkItem",
         targetId: task.id, summary: "Settled an assignment-bound AMUX v22 Task.",

@@ -223,10 +223,11 @@ test("the PR observer records how a lane PR stands, only for the run's own branc
   const mergedAt = new Date("2026-11-03T23:52:28Z");
   const closedAt = new Date("2026-11-03T20:00:00Z");
   type Pull = { state: "open" | "closed"; merged: boolean; mergedAt: Date | null; closedAt: Date | null;
-    baseRef: string; headRef: string };
+    baseRef: string; headRef: string; mergeCommitSha: string | null; mergedByKind: "user" | "bot" | "app" | "unknown" };
   const pull = (attemptId: string, end: "open" | "closed" | "merged", headRef = `amux-idea/${attemptId}`): Pull => ({
     state: end === "open" ? "open" : "closed", merged: end === "merged", mergedAt: end === "merged" ? mergedAt : null,
-    closedAt: end === "open" ? null : end === "merged" ? mergedAt : closedAt, baseRef: "develop", headRef });
+    closedAt: end === "open" ? null : end === "merged" ? mergedAt : closedAt, baseRef: "develop", headRef,
+    mergeCommitSha: end === "merged" ? "a".repeat(40) : null, mergedByKind: end === "merged" ? "user" : "unknown" });
   const pulls: Record<number, Pull> = {
     9_000_001: pull(merged.id, "merged"),
     9_000_002: pull(waiting.id, "open"),

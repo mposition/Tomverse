@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
-  amuxV22WorkerClaimEnabled, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
+  amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
   amuxV22TaskRoleSupported, amuxV22TaskWritesPatch, chooseAmuxV22WorkerRoute } from
   "../lib/amux/v22WorkerClaimCore.ts";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
@@ -163,8 +163,33 @@ test("review independence traces implementation through intermediate Task edges"
   assert.match(claim, /w\."taskRole" = 'implement'/);
   assert.match(claim, /w\."v4TerminalAt" IS NOT NULL/);
   // A Task resumed after an owner question narrows the quota routes (those
-  // whose worker has settled usage) to the worker that asked
-  // (lib/amux/v22OwnerQuestionCore.ts).
-  assert.match(claim, /settled\.routes\.filter\(\(route\) => route\.workerName === resume\.worker\)/);
+  // whose worker has settled usage) through amuxV22ResumeRoutes, which only
+  // holds the Task for a worker that still serves the Task's grade.
+  assert.match(claim, /amuxV22ResumeRoutes\(\{\s+resumeWorker: resume\?\.worker \?\? null,\s+approvedRoutes: approved\.receipt\.routes, routes: settled\.routes,/);
+  assert.match(claim, /amuxWorkerMatchesExecutionGrade\(card\.executionGrade, workerName,/);
   assert.match(claim, /chooseAmuxV22WorkerRoute\(\{ routes: resumeRoutes,/);
+});
+
+test("a resumed Task waits for the asking worker only while it serves the Task's grade", () => {
+  const route = (workerName) => ({ routeId: `route-${workerName}`, workerName });
+  const approvedRoutes = [route("codex-chore"), route("claude-contract")];
+  const routes = [route("claude-contract")];
+  const grades = new Map([["codex-chore", "chore"],
+    ["claude-contract", "contract"]]);
+  const serves = (grade) => (workerName) => grades.get(workerName) === grade;
+  // Same grade: the Task waits for the worker that asked, even while that
+  // worker is busy and has no claimable route.
+  assert.deepEqual(amuxV22ResumeRoutes({ resumeWorker: "codex-chore",
+    approvedRoutes, routes, workerServesGrade: serves("chore") }), []);
+  // After escalation the asking worker no longer serves the Task: every
+  // allowed route competes and the kept answer goes to whichever takes it.
+  assert.deepEqual(amuxV22ResumeRoutes({ resumeWorker: "codex-chore",
+    approvedRoutes, routes, workerServesGrade: serves("contract") }), routes);
+  // A worker the approved routes no longer name does not hold the Task.
+  assert.deepEqual(amuxV22ResumeRoutes({ resumeWorker: "retired-worker",
+    approvedRoutes, routes, workerServesGrade: () => true }), routes);
+  assert.deepEqual(amuxV22ResumeRoutes({ resumeWorker: null,
+    approvedRoutes, routes, workerServesGrade: () => true }), routes);
+  assert.deepEqual(amuxV22ResumeRoutes({ resumeWorker: "claude-contract",
+    approvedRoutes, routes, workerServesGrade: serves("contract") }), routes);
 });
