@@ -87,7 +87,12 @@ export async function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricR
         rows={sortedRows}
         rowKey={(row) => row.modelId}
         cardTitle={(row) => row.modelName}
-        cardMeta={signal}
+        cardMeta={(row) => (
+          <span>
+            {m.failures5m}: {row.failureCount5m} · {m.lastLatency}:{" "}
+            {row.latencyMs === null ? m.noLatency : `${row.latencyMs} ms`} · {signal(row)}
+          </span>
+        )}
         cardAside={(row) => (
           <AdminStatusChip tone={toneOf(row.status)}>{word(row.status)}</AdminStatusChip>
         )}

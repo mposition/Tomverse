@@ -226,7 +226,7 @@ export function AutoRouterOverviewView({
         />
         <AdminKpiCard
           label={o.kpiLatency}
-          value={report ? ms(report.decisionMicrosP95) : null}
+          value={report && report.decided + report.undecided > 0 ? ms(report.decisionMicrosP95) : null}
           detail={o.kpiLatencyDetail}
           onRetry={failed ? onRetry : undefined}
         />

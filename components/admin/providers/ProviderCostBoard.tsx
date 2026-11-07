@@ -181,7 +181,7 @@ function Reconciliation({ rows }: { rows: readonly CostBoardRow[] | null }) {
       data-testid="provider-reconciliation"
     >
       {rows === null ? (
-        <AdminStateBlock kind="error" title={m.budgetUnread} />
+        <AdminStateBlock kind="error" title={m.reconUnread} />
       ) : (
         <AdminDataTable
           caption={m.reconCaption}

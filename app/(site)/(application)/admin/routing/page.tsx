@@ -22,7 +22,8 @@ import {
 } from "@/lib/adminNavigation";
 
 const TABS = adminNavItemTabs("routing");
-const ROUTING_ITEM = ADMIN_NAVIGATION.find((item) => item.id === "routing") ?? {};
+// Fail closed: if the entry is ever renamed, nothing on the page draws as writable.
+const ROUTING_ITEM = ADMIN_NAVIGATION.find((item) => item.id === "routing");
 
 /**
  * Routing, in its own workspace rather than as a tab on Models.
@@ -55,7 +56,7 @@ export default async function AdminRoutingPage({ searchParams }: PageProps<"/adm
   if (!resolved) notFound();
   const { tab } = resolved;
   // Only draws the controls locked; every route refuses a write from another role itself.
-  const canWrite = role !== null && adminItemIsWritable(role, ROUTING_ITEM);
+  const canWrite = role !== null && ROUTING_ITEM !== undefined && adminItemIsWritable(role, ROUTING_ITEM);
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
   return (
     <div className="flex min-w-0 flex-col gap-5">
