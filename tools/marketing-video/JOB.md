@@ -22,7 +22,8 @@ not stopped by a rejection: 2026-11-04.
   the product screen, and never make a new Remotion short from scenes (the
   owner rejected that style on 2026-10-31).
 - Every asset is made in all three locales, `en`, `ko` and `zh-Hant`, each its
-  own asset (owner decision 2026-11-03).
+  own asset (owner decision 2026-11-03). Image cards are also made in `zh-Hans`
+  for RedNote, from the zh-Hant pack (owner decision 2026-11-07): see step 1.
 - **A refusal or a rejection does not stop the job.** If one locale's asset is
   refused, note it and go on with the next; tomorrow's run goes on as usual.
   Stop the whole run only when `list-approved.mjs` fails or no pack is usable.
@@ -81,6 +82,12 @@ usable packs.
    - Read the PNG with the Read tool: every line is whole, nothing overlaps the
      wrong element, the language is the locale's. If it is not, pick another
      headline pair and make it again (twice at most).
+   - Then one more card, `zh-Hans`, from the same topic's **zh-Hant** pack: a
+     spec with `"locale": "zh-Hans"` added, naming that pack's lines exactly as
+     they are (Traditional). `make-card.mjs` draws them in Simplified itself;
+     never convert or write the Simplified lines yourself. The id ends in
+     `-zh-hans-card`. Its captures stay as they were taken, so the answers in
+     them may read in Traditional; only the card's own lines must be Simplified.
 2. **Feed videos, on Mondays (Brisbane time).** For each usable pack whose short
    has no feed video in the history yet, in all three locales:
    - `node make-feed-video.mjs job/sources/<pack-asset-id>/pack.json media-<yyyymmdd>-<topic>-<locale lower case>-feed job/<yyyymmdd>`
