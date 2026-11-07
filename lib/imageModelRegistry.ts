@@ -766,6 +766,18 @@ const IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD: Readonly<
   fal: FAL_HIGH_THINKING_SURCHARGE_MICRO_USD,
 };
 
+/**
+ * The endpoints of a `flat_per_request` provider whose flat surcharge was
+ * read from that endpoint's own price page. fal bills per endpoint: Nano
+ * Banana 2 adds a fixed high-thinking fee, while google/nano-banana-2.1 is
+ * "billed on the tokens each request actually uses" with no cap parameter
+ * (fal.ai/models/google/nano-banana-2.1, read 2026-11-07). A runtime fal model
+ * on any other endpoint therefore has no proven bound until it is listed here.
+ */
+const IMAGE_FLAT_THINKING_ENDPOINTS: Readonly<Partial<Record<ImageModelProvider, readonly string[]>>> = {
+  fal: ["fal-ai/nano-banana-2"],
+};
+
 /** Null for a provider this code has no adapter for. */
 export const imageThinkingBilling = (
   provider: unknown
@@ -781,11 +793,16 @@ export const imageThinkingBilling = (
  * where it is flat, and null where no stated cap can bound it.
  */
 export const imageThinkingCapMinimumMicroUsd = (
-  provider: unknown
+  provider: unknown,
+  apiModelId?: string
 ): number | null => {
   const billing = imageThinkingBilling(provider);
   if (billing === "not_billed") return 0;
   if (billing === "flat_per_request") {
+    // A model names its endpoint; a surcharge proven for one endpoint is not
+    // a bound on another (IMAGE_FLAT_THINKING_ENDPOINTS).
+    const endpoints = IMAGE_FLAT_THINKING_ENDPOINTS[provider as ImageModelProvider] ?? [];
+    if (apiModelId !== undefined && !endpoints.includes(apiModelId)) return null;
     return IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD[provider as ImageModelProvider] ?? null;
   }
   return null;
@@ -799,11 +816,11 @@ export const imageThinkingCapMinimumMicroUsd = (
  * for a cap below the flat surcharge the request incurs anyway.
  */
 export const imageThinkingCapEnforced = (
-  model: Pick<ImageModelProfile, "provider" | "priceVerification">
+  model: Pick<ImageModelProfile, "provider" | "apiModelId" | "priceVerification">
 ): boolean => {
   const cap = model.priceVerification.thinkingCapMicroUsd;
   if (cap === null) return false;
-  const minimum = imageThinkingCapMinimumMicroUsd(model.provider);
+  const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId);
   return minimum !== null && cap >= minimum;
 };
 

@@ -220,6 +220,15 @@ test("a flat thinking surcharge is a bound only when the cap covers it", () => {
   assert.equal(maxImageRequestCostMicroUsd(withCap(2_000), price), 87_000);
   // A wider stated margin still bounds the request; it is reserved, not owed.
   assert.equal(imageThinkingCapEnforced(withCap(3_000)), true);
+
+  // Lookup 2026-11-07: fal bills per endpoint. google/nano-banana-2.1 is
+  // token-billed with no cap parameter, so the Nano Banana 2 surcharge is not
+  // a bound on it -- a runtime fal profile with a 2,000 cap must not pass.
+  const tokenBilled = { ...withCap(2_000), id: "google/nano-banana-2.1", apiModelId: "google/nano-banana-2.1" };
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal", "google/nano-banana-2.1"), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal", "fal-ai/nano-banana-2"), 2_000);
+  assert.equal(imageThinkingCapEnforced(tokenBilled), false);
+  assert.equal(maxImageRequestCostMicroUsd(tokenBilled, price), null);
 });
 
 test("every enabled option prices at or above the policy minimum", () => {
