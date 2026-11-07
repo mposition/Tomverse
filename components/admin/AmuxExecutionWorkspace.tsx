@@ -15,8 +15,8 @@ import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEv
 import { AdminChannelIcon, adminChannelName } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
 import {
-  AMUX_BOARD_COLUMNS, AMUX_WORKER_CHANNELS, amuxBoardCardStuck, amuxElapsed, amuxWorkerChannel,
-  type AmuxBoardColumn,
+  AMUX_BOARD_COLUMNS, AMUX_WORKER_CHANNELS, amuxBoardCardStuck, amuxElapsed,
+  type AmuxBoardColumn, type AmuxWorkerChannel,
 } from "@/lib/adminAmuxFlow";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -220,8 +220,13 @@ function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
 }
 
 export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
-  canReviewCards = false, decisionMaker, laneIdeas }: {
+  canReviewCards = false, decisionMaker, laneIdeas, workerChannels }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /**
+   * Each registered worker's channel, from the registry the page read. Absent
+   * or a worker not in it: no channel badge, never one guessed from a name.
+   */
+  workerChannels?: Record<string, AmuxWorkerChannel> | null;
   /** Whether a card waiting on the owner opens on its owner review. */
   canReviewCards?: boolean;
   /**
@@ -622,7 +627,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   const renderCard = (card: Card, lane: AmuxExecutionLane) => {
     const stuck = amuxBoardCardStuck({ lane, attentionReason: card.attentionReason, ownerQuestion: card.ownerQuestion });
     const asksOwner = lane === "attention" && !stuck;
-    const channel = amuxWorkerChannel(card.worker);
+    const channel = card.worker ? workerChannels?.[card.worker] ?? null : null;
     const since = elapsedText(card.updatedAt);
     return <li key={card.id}
       className={styles.card + (stuck ? " " + styles.cardStuck : asksOwner ? " " + styles.cardApprove : "")}

@@ -46,10 +46,21 @@ export function amuxIdeaFlowSteps(
 export type AmuxWorkerChannel = "claude" | "codex" | "copilot" | "cursor";
 export const AMUX_WORKER_CHANNELS: readonly AmuxWorkerChannel[] = ["claude", "codex", "copilot", "cursor"];
 
-/** The CLI a worker runs, read from its name (`claude-1`, `codex-impl`); null for a name that says none. */
-export function amuxWorkerChannel(workerName: string | null | undefined): AmuxWorkerChannel | null {
-  const name = (workerName ?? "").trim().toLowerCase();
-  return AMUX_WORKER_CHANNELS.find((channel) => name === channel || name.startsWith(`${channel}-`) || name.startsWith(`${channel}_`)) ?? null;
+/**
+ * Each registered worker's channel (the CLI it runs), from the class it was
+ * registered with. A name says nothing about it (the registry registers the two
+ * independently), so a worker that is not registered, or whose class is not one
+ * of the four channels, has none and is drawn without a badge.
+ */
+export function amuxWorkerChannels(
+  rows: ReadonlyArray<{ workerName: string; providerClass: string }>
+): Record<string, AmuxWorkerChannel> {
+  const channels: Record<string, AmuxWorkerChannel> = {};
+  for (const row of rows) {
+    const channel = AMUX_WORKER_CHANNELS.find((candidate) => candidate === row.providerClass);
+    if (channel) channels[row.workerName] = channel;
+  }
+  return channels;
 }
 
 export type AmuxBoardColumn = "waiting" | "approval" | "running" | "review" | "done";

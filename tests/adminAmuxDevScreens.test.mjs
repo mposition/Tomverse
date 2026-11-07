@@ -52,6 +52,9 @@ test("the card list counts only what its read returned, and says the counts are 
   assert.ok(panel.includes("summary ? summary.total : null"), "an unread count is null (Unavailable), never 0");
   assert.equal(/\?\?\s*0\b/.test(panel), false, "no null is turned into a zero");
   assert.ok(panel.includes("c.bounded("), "a bounded read states its bound");
+  // A bad search keeps its form (it can be fixed or cleared), and a phone card still reaches the card.
+  assert.ok(panel.indexOf("{searchForm}") < panel.indexOf("m.invalidSearch"), "the search form is shown with the invalid-search message");
+  assert.ok(/cardTitle=\{\(row\) => \(\s*<Link/.test(panel), "the phone card's title links to the card");
 });
 
 test("the board groups the server lanes into five columns without changing a lane or its drop target", () => {
@@ -71,6 +74,11 @@ test("the board groups the server lanes into five columns without changing a lan
   // A stopped card is red and links to Safety & recovery; it is never one the owner is asked about.
   assert.ok(board.includes("amuxBoardCardStuck({ lane, attentionReason: card.attentionReason, ownerQuestion: card.ownerQuestion })"));
   assert.ok(board.includes('href="/admin/amux-recovery?tab=safety" className={styles.safetyLink}'));
+  // The channel is the class the worker was registered with, never a guess from its name.
+  assert.ok(board.includes("workerChannels?.[card.worker]"));
+  assert.equal(board.includes("amuxWorkerChannel("), false);
+  const executionPage = read("app/(site)/(application)/admin/amux-execution/page.tsx");
+  assert.ok(executionPage.includes("workerChannels={registry === null ? null : amuxWorkerChannels(registry.rows)}"));
   // A worker avatar and channel badge, and an age read when the board was read, not on each render.
   assert.ok(board.includes('<AdminPixelAvatar team="amux"'));
   assert.ok(board.includes("setNowMs(Date.now())"));

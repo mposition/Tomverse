@@ -131,6 +131,33 @@ export async function AmuxBacklogListPanel({ data, search, valid, summary }: {
     },
   ];
 
+  // Kept on every branch that has a valid or an invalid search, so a bad value can be fixed or cleared here.
+  const searchForm = (
+    <form action="/admin/amux-backlog" method="get" className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="tab" value="list" />
+      <label className="flex min-w-0 items-center gap-2 text-sm">
+        <span className="sr-only">{m.search}</span>
+        <input
+          key={search}
+          type="search"
+          name="cardNumber"
+          defaultValue={search}
+          maxLength={128}
+          placeholder={m.searchPlaceholder}
+          className="h-9 w-72 max-w-full rounded-xl border border-zinc-700 bg-transparent px-3"
+        />
+      </label>
+      <button type="submit" className={iconClass} aria-label={m.search} title={m.search}>
+        <Search size={16} />
+      </button>
+      {search && (
+        <Link href={amuxBacklogHref("")} className={iconClass} aria-label={m.clear} title={m.clear}>
+          <X size={16} />
+        </Link>
+      )}
+    </form>
+  );
+
   return (
     <section className="flex min-w-0 flex-col gap-4" data-testid="amux-backlog-list">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="amux-backlog-counts">
@@ -151,7 +178,10 @@ export async function AmuxBacklogListPanel({ data, search, valid, summary }: {
           </p>
         </AdminTile>
       ) : !valid ? (
-        <AdminStateBlock kind="error" title={m.invalidSearch} />
+        <AdminTile>
+          {searchForm}
+          <AdminStateBlock kind="error" title={m.invalidSearch} />
+        </AdminTile>
       ) : data ? (
         <div data-testid="amux-backlog-table">
           <AdminDataTable
@@ -159,8 +189,12 @@ export async function AmuxBacklogListPanel({ data, search, valid, summary }: {
             columns={columns}
             rows={data.rows}
             rowKey={(row) => row.id}
-            cardTitle={(row) => row.summary ?? row.cardNumber}
-            cardMeta={(row) => row.cardNumber}
+            cardTitle={(row) => (
+              <Link className="hover:underline" href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(row.id)}`}>
+                {row.summary ?? row.cardNumber}
+              </Link>
+            )}
+            cardMeta={(row) => <span className="font-mono">{row.cardNumber}</span>}
             cardAside={(row) => {
               const card = meta.get(row.id);
               return card ? <AdminStatusChip tone={STATUS_TONE[amuxCardStatusGroup(card.status)]}>{statusWord(card.status)}</AdminStatusChip> : null;
@@ -168,29 +202,7 @@ export async function AmuxBacklogListPanel({ data, search, valid, summary }: {
             emptyState={<AdminStateBlock kind="empty" title={search ? m.noMatches : m.empty} />}
             toolbar={
               <>
-                <form action="/admin/amux-backlog" method="get" className="flex flex-wrap items-center gap-2">
-                  <input type="hidden" name="tab" value="list" />
-                  <label className="flex min-w-0 items-center gap-2 text-sm">
-                    <span className="sr-only">{m.search}</span>
-                    <input
-                      key={search}
-                      type="search"
-                      name="cardNumber"
-                      defaultValue={search}
-                      maxLength={128}
-                      placeholder={m.searchPlaceholder}
-                      className="h-9 w-72 max-w-full rounded-xl border border-zinc-700 bg-transparent px-3"
-                    />
-                  </label>
-                  <button type="submit" className={iconClass} aria-label={m.search} title={m.search}>
-                    <Search size={16} />
-                  </button>
-                  {search && (
-                    <Link href={amuxBacklogHref("")} className={iconClass} aria-label={m.clear} title={m.clear}>
-                      <X size={16} />
-                    </Link>
-                  )}
-                </form>
+                {searchForm}
                 <p className="ml-auto text-xs text-zinc-400" data-testid="amux-backlog-count">
                   {m.shown(data.rows.length, data.total)}
                 </p>

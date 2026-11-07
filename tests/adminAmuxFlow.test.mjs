@@ -13,7 +13,7 @@ import {
   amuxBoardColumn,
   amuxElapsed,
   amuxIdeaFlowSteps,
-  amuxWorkerChannel,
+  amuxWorkerChannels,
   qaTrainNext,
   qaTrainRoute,
   qaTrainSlotHourToday,
@@ -38,14 +38,16 @@ test("a stopped step is marked attention, and a cancelled idea has no bar", () =
   assert.deepEqual(states("done", { attention: true }), ["done", "done", "done", "done", "done"]);
 });
 
-test("a worker's channel comes from its name and nothing else", () => {
-  assert.equal(amuxWorkerChannel("claude-1"), "claude");
-  assert.equal(amuxWorkerChannel("Codex-impl"), "codex");
-  assert.equal(amuxWorkerChannel("copilot_chore"), "copilot");
-  assert.equal(amuxWorkerChannel("cursor"), "cursor");
-  assert.equal(amuxWorkerChannel("claudette-2"), null);
-  assert.equal(amuxWorkerChannel(null), null);
-  assert.equal(amuxWorkerChannel(""), null);
+test("a worker's channel comes from the class it was registered with, never from its name", () => {
+  const channels = amuxWorkerChannels([
+    { workerName: "claude-1", providerClass: "claude" },
+    { workerName: "reviewer-a", providerClass: "codex" },
+    { workerName: "codex-impl", providerClass: "copilot" },
+    { workerName: "mystery", providerClass: "other" },
+  ]);
+  assert.deepEqual(channels, { "claude-1": "claude", "reviewer-a": "codex", "codex-impl": "copilot" });
+  // An unregistered worker has no channel, however it is named.
+  assert.equal(channels["cursor-1"], undefined);
 });
 
 test("the six server lanes group into five columns, and the attention lane stays whole", () => {
