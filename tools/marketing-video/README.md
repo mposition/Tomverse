@@ -73,8 +73,12 @@ node make-feed-video.mjs <pack.json> <id> <out-dir>     # 4:5 feed version of th
 ```
 
 - `research-ads.mjs` saves a few current ads of each advertiser in
-  `research-brands.json`, a still for a video, and contact sheets the job reads.
-  No login, nothing posted.
+  `research-brands.json`, a still for a video, and contact sheets. No login,
+  nothing posted. A separate CLI call (`RESEARCH.md`) reads them and writes
+  structured notes. `check-research-notes.mjs` refuses notes of another shape
+  or with five words in a row from an ad. `run-daily.sh` then deletes the raw
+  ads, so the call that writes copy sees only checked notes
+  (docs/policy/marketing-automation.md §2).
 - The job writes words from `features.json` and pictures from
   `library/library.json`: the logo, model marks (owner 2026-11-07) and AI-made
   photos. It can also use real captures from a source pack

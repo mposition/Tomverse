@@ -255,7 +255,9 @@ try {
     const phraseWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     while (phraseWalker.nextNode()) {
       const node = phraseWalker.currentNode;
-      if (!node.textContent.trim() || node.parentElement.closest("style")) continue;
+      // Spaces between inline pieces are kept: "<b>the</b> <b>only</b>" reads
+      // "the only", not "theonly".
+      if (node.parentElement.closest("style")) continue;
       let box = node.parentElement;
       while (box !== document.body && getComputedStyle(box).display === "inline") box = box.parentElement;
       phrases.set(box, `${phrases.get(box) ?? ""}${node.textContent}`);

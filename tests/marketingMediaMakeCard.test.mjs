@@ -187,6 +187,11 @@ test("inline pieces are read as one phrase, as a reader reads them", { skip }, (
     assert.equal(out.status, 0, out.stderr);
     const { transcript } = asset(ctx.root, "20261101", "media-a-card");
     assert.ok(transcript.en.split(String.fromCharCode(10)).includes("Now cheaper"), transcript.en);
+    // Spaces between inline pieces are kept, so the Guard reads the words apart.
+    const spaced = make(ctx, "20261101", "media-b-card", chips("the <span>only</span> <span>free</span>", "AI tool."));
+    assert.equal(spaced.status, 0, spaced.stderr);
+    const lines = asset(ctx.root, "20261101", "media-b-card").transcript.en.split(String.fromCharCode(10));
+    assert.ok(lines.includes("the only free"), lines.join(" | "));
   } finally {
     rmSync(ctx.root, { recursive: true, force: true });
   }
