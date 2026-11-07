@@ -127,6 +127,42 @@ export function v22ExecutionReceiptVerified(input: {
       event.status === "succeeded" || event.status === "failed");
 }
 
+/** Owner decision 2026-11-06: a failed Claude result whose CLI named the
+ * cause (the sidecar records it only after a normal exit with a valid
+ * result) is a known failure, not an unknown outcome. Its reason lets the
+ * owner retry the Task from review. It is not a cost observation: a partial
+ * receipt stays partial and the attempt still settles blocked. */
+export const AMUX_V22_CLI_FAILURE_REASONS = {
+  turn_limit: "cli_turn_limit",
+  execution_error: "cli_execution_error",
+  budget_limit: "cli_budget_limit",
+} as const;
+export type AmuxV22CliFailureReason =
+  typeof AMUX_V22_CLI_FAILURE_REASONS[keyof typeof AMUX_V22_CLI_FAILURE_REASONS];
+export const AMUX_V22_CLI_FAILURE_REASON_CODES: readonly AmuxV22CliFailureReason[] =
+  Object.values(AMUX_V22_CLI_FAILURE_REASONS);
+
+export function v22KnownCliFailureReason(input: {
+  attemptId: string;
+  events: Array<{ invocationId: string; status: string; cli: string;
+    source: string; actualModelId: string | null; selectedModelId: string;
+    cliFailure?: string | null }>;
+  expectedExecutionSource: V22ExecutionSource | null;
+}): AmuxV22CliFailureReason | null {
+  if (input.expectedExecutionSource !== "claude_result" ||
+      input.events.length !== 1) return null;
+  const event = input.events[0]!;
+  if (event.invocationId !== input.attemptId || event.status !== "failed" ||
+      event.cli !== "claude" ||
+      (event.source !== "claude_result" && event.source !== "unreported") ||
+      (event.actualModelId !== null &&
+        event.actualModelId !== event.selectedModelId)) return null;
+  const kind = event.cliFailure ?? "";
+  return Object.hasOwn(AMUX_V22_CLI_FAILURE_REASONS, kind) ?
+    AMUX_V22_CLI_FAILURE_REASONS[kind as keyof typeof AMUX_V22_CLI_FAILURE_REASONS] :
+    null;
+}
+
 /** The native API receipt and the immutable usage-ledger projection must say
  * exactly the same thing before the ordinary v22 settlement may proceed. */
 export function v22ReadOnlyApiReceiptMatchesUsage(input: {

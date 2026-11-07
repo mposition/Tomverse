@@ -688,6 +688,13 @@ const REGISTRY = {
       "The five approved Auto stop causes are content-free operational classifications. The pause writer and strict owner resume route validate this same list before a durable transition.",
   },
   // --- AMUX development-agent orchestration ------------------------------
+  AmuxCliUsageEvent_cliFailure_check: {
+    owner: "list",
+    module: "lib/amux/cliUsageLedgerCore.ts",
+    list: "AMUX_CLI_FAILURE_KINDS",
+    reason:
+      "Why a failed Claude result failed, from the CLI's own subtype (owner decision 2026-11-06). The receipt schema parses with this list; NULL is every other receipt, including all rows written before the column existed.",
+  },
   AmuxIdeaFrontierModelApproval_provider_check: {
     owner: "list",
     module: "lib/amux/ideaAnalysisChannelCore.ts",

@@ -603,10 +603,11 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 8,
     isolation: "mutation",
   },
-  // The owner's read on the idea's detail: setup + ONE statement + fence.
+  // The owner's read on the idea's detail: setup + the open question + fence, and
+  // with none open, the direct close's candidate read.
   decisionMakerIdeaCardCloseOwnerRead: {
     operation: "decision_maker_idea_card_close_owner_read",
-    prismaCallCeiling: 3,
+    prismaCallCeiling: 4,
     isolation: "read",
   },
   // A confirmed proposal on a refused session answer (ideaSessionPlanRefusalService.ts):

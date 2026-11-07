@@ -22,7 +22,7 @@ if (!packPath || !id || !outDir) {
 /** The feeds a 4:5 video goes to, per locale; Instagram already carries the 9:16 short. */
 const FEED_CHANNELS = {
   en: ["facebook", "linkedin", "x"],
-  ko: ["facebook"],
+  ko: ["facebook", "threads"],
   "zh-Hant": ["facebook", "threads"],
 };
 

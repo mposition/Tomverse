@@ -84,6 +84,7 @@ test("CLI usage writer binds the attempt, deduplicates and audits atomically", {
       assert.equal(row?.taskId, taskId);
       assert.equal(row?.inputTokens, BigInt(100));
       assert.equal(row?.projectedApiCostMicrousd, null);
+      assert.equal(row?.cliFailure, null);
       const summary = await readAmuxCliUsageSummaryForAdmin(tx);
       const current = summary.rows.find((entry) => entry.worker === "worker-a" &&
         entry.model === "claude-opus-5");
@@ -99,6 +100,16 @@ test("CLI usage writer binds the attempt, deduplicates and audits atomically", {
       assert.equal(await tx.amuxCliUsageEvent.count({
         where: { invocationId: receipt.invocationId },
       }), 1);
+      // Owner decision 2026-11-06: the cause a failed Claude CLI named is kept
+      // with the receipt it came in, and the digest covers it.
+      const named = { ...receipt, invocationId: randomUUID(),
+        completedTurns: 13, cliFailure: "turn_limit" };
+      await recordAmuxCliUsage(tx, named);
+      assert.equal((await tx.amuxCliUsageEvent.findUnique({
+        where: { invocationId: named.invocationId },
+      }))?.cliFailure, "turn_limit");
+      await assert.rejects(recordAmuxCliUsage(tx, { ...named,
+        cliFailure: "execution_error" }), /receipt_conflict/);
       throw rollback;
     }, { timeout: 15_000 }), (error) => error === rollback);
   } finally { await prisma.$disconnect(); }
