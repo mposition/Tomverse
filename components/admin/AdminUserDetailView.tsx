@@ -178,8 +178,17 @@ type Props = {
   currentUserId: string;
   /** Plan limits by plan name; empty when the plans could not be read. */
   planLimits: AdminUserPlanLimits;
-  /** Whether the viewer's role may write; the routes still decide. */
-  canWrite: boolean;
+  /** What the viewer's role may write, per kind of write; the routes still decide. */
+  access: AdminUserAccess;
+};
+
+export type AdminUserAccess = {
+  /** Resync, plan change, hold release, credit refund (`billing:write`). */
+  billing: boolean;
+  /** Restrict, suspend, sign out, restore (`support:write` or `ops:write`). */
+  security: boolean;
+  /** Unlink a sign-in (`user:delete`). */
+  unlink: boolean;
 };
 
 const fieldClass =
@@ -196,7 +205,7 @@ const dollars = (micro: number, digits = 2) => (micro / 1_000_000).toFixed(digit
  * page above this component renders the same tree for each of them. Every
  * write below is the call the old modal made, with the same payload.
  */
-export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, canWrite }: Props) {
+export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, access }: Props) {
   const m = useAdminMessages(adminUsersMessages);
   const { locale: apiLocale } = useAdminLocale();
   const intl = adminIntlLocale(apiLocale);
@@ -484,7 +493,7 @@ export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, ca
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} returnTo={tabHref(tab)} /> : null}
 
       <header data-testid="admin-user-detail-header" className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
@@ -649,8 +658,8 @@ export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, ca
                 <AdminWriteButton
                   variant="secondary"
                   size="sm"
-                  writable={canWrite}
-                  requiredRole="support"
+                  writable={access.billing}
+                  requiredRole="billing"
                   disabled={busy}
                   onClick={() => void resyncBilling(user.id)}
                 >
@@ -742,8 +751,8 @@ export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, ca
                 </label>
                 <AdminWriteButton
                   variant="danger"
-                  writable={canWrite}
-                  requiredRole="support"
+                  writable={access.billing}
+                  requiredRole="billing"
                   onClick={() => void releaseBillingHold(user.id)}
                   disabled={busy || riskReleaseReason.trim().length < 5 || riskReleaseConfirm !== "RELEASE BILLING HOLD"}
                 >
@@ -822,7 +831,7 @@ export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, ca
                           />
                           <AdminWriteButton
                             variant="danger"
-                            writable={canWrite}
+                            writable={access.billing}
                             requiredRole="billing"
                             stepUp
                             onClick={() => void refundCreditPurchase(user.id, purchase)}
@@ -898,8 +907,8 @@ export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, ca
               />
               <AdminWriteButton
                 variant="primary"
-                writable={canWrite}
-                requiredRole="support"
+                writable={access.billing}
+                requiredRole="billing"
                 onClick={() => void adjustUserPlan(user.id)}
                 disabled={busy || adjustConfirm !== "ADJUST PLAN" || adjustReason.trim().length < 5}
               >
@@ -979,7 +988,9 @@ export function AdminUserDetailView({ userId, tab, currentUserId, planLimits, ca
               onBusyChange={(next) => setBillingAction(next ? "security" : null)}
               onApplied={() => loadUserDetail(user.id)}
               currentUserId={currentUserId}
-              canWrite={canWrite}
+              canWrite={access.security}
+              canUnlink={access.unlink}
+              returnTo={tabHref("security")}
             />
           </div>
           <div className="flex min-w-0 flex-col gap-4">

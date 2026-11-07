@@ -18,7 +18,10 @@ import { prisma } from "@/lib/prisma";
  * `user-detail`); a stale or misspelt value opens the overview. The detail
  * itself is read in the browser from `/api/admin/users/:id`, so this page only
  * checks that the customer exists, reads the plan limits the credit figures are
- * measured against, and hands over the viewer's write access.
+ * measured against, and hands over the viewer's write access. Access is read
+ * per kind of write, with the permission each route checks: billing writes are
+ * `billing:write`, the security actions `support:write` or `ops:write`, and
+ * unlinking a sign-in `user:delete`. The routes still refuse on their own.
  */
 export default async function AdminUserDetailPage({
   params,
@@ -54,7 +57,12 @@ export default async function AdminUserDetailPage({
       tab={tab}
       currentUserId={session.user.id}
       planLimits={planLimits}
-      canWrite={hasAdminPermission(session, "support:write")}
+      access={{
+        billing: hasAdminPermission(session, "billing:write"),
+        security:
+          hasAdminPermission(session, "support:write") || hasAdminPermission(session, "ops:write"),
+        unlink: hasAdminPermission(session, "user:delete"),
+      }}
     />
   );
 }

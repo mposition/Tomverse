@@ -109,6 +109,10 @@ type Props = {
   currentUserId?: string;
   /** False draws every action locked, naming the access it needs. The route still decides. */
   canWrite?: boolean;
+  /** Unlinking a sign-in is gated apart from the other actions (the owner's `user:delete`). */
+  canUnlink?: boolean;
+  /** Where a renewed sign-in returns to, including the section (`?tab=security`). */
+  returnTo?: string;
 };
 
 type CardId = "restore" | "ai" | "suspend" | "sessions" | "unlink" | "delete";
@@ -177,6 +181,8 @@ export function AdminUserSecurityControls({
   onApplied,
   currentUserId,
   canWrite = true,
+  canUnlink = canWrite,
+  returnTo,
 }: Props) {
   const pathname = usePathname();
   const m = useAdminMessages(adminUserSecurityMessages);
@@ -198,7 +204,14 @@ export function AdminUserSecurityControls({
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   // The restoration is the one thing a pending deletion is waiting for, so it
   // opens first; every other card starts closed.
-  const [open, setOpen] = useState<CardId | null>(pendingDeletion ? "restore" : null);
+  // `undefined` means the operator has not chosen: the restore card is then the
+  // open one while a deletion is pending -- including when the account becomes
+  // pending after this panel was drawn (the detail reloads in place). A choice,
+  // even "none", stands until the next action succeeds.
+  const [choice, setChoice] = useState<CardId | "none" | undefined>(undefined);
+  const open: CardId | null =
+    choice === undefined ? (pendingDeletion ? "restore" : null) : choice === "none" ? null : choice;
+  const setOpen = (next: CardId | null) => setChoice(next === null ? "none" : next);
 
   const ids = {
     reason: `${fieldId}-reason`,
@@ -288,7 +301,7 @@ export function AdminUserSecurityControls({
       setIncidentNote("");
       setSupportTicketReference("");
       setFieldErrors({});
-      setOpen(null);
+      setChoice(undefined);
       const alreadyRestored = Boolean(data.alreadyRestored);
       dispatchAppToast(
         adminSecurityActionSuccessMessage(action, { alreadyRestored }),
@@ -701,7 +714,7 @@ export function AdminUserSecurityControls({
                           variant="danger"
                           size="sm"
                           stepUp
-                          writable={canWrite}
+                          writable={canUnlink}
                           requiredRole="owner"
                           disabled={disabled}
                           onClick={() => void applyAction("unlink_oauth", account.provider)}
@@ -749,7 +762,7 @@ export function AdminUserSecurityControls({
                 // The step-up URL, not the console-session one: the console
                 // session is still valid here, and the plain reauthentication
                 // page answers that by redirecting straight back to this screen.
-                href={adminRecentAuthenticationHref(pathname)}
+                href={adminRecentAuthenticationHref(returnTo ?? pathname)}
                 data-testid="admin-security-reauthenticate-link"
                 className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-red-400/50 px-2.5 py-1.5 font-bold text-red-100 underline-offset-4 transition hover:bg-red-500/20 hover:underline"
               >
