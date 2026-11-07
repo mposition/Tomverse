@@ -11,9 +11,20 @@ import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { adminMarketingAgentMessages } from "@/lib/adminMessages/marketingAgent";
-import { parseMarketingLlmMonthlyCap } from "@/lib/marketingLlmBudgetCore";
 import type { MarketingAgentOverview as MarketingAgentOverviewData } from "@/lib/marketingAgentOverviewCore";
 import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
+
+/**
+ * The stored cap ("20", "0.5") in millionths of a dollar, or null when it is not a plain positive decimal.
+ * The ledger's own parser is not imported here: it sits in a module that pulls in node:crypto, which a
+ * client bundle cannot take. A malformed cap is "no readable limit", never a half-parsed number.
+ */
+const capMicroUsd = (raw: string): number | null => {
+  const match = /^(\d{1,9})(?:\.(\d{1,6}))?$/u.exec(raw.trim());
+  if (!match) return null;
+  const micro = Number(match[1]) * 1_000_000 + Number((match[2] || "").padEnd(6, "0") || "0");
+  return micro > 0 ? micro : null;
+};
 
 const usd = (micro: number) => `US$ ${(micro / 1_000_000).toFixed(2)}`;
 
@@ -45,8 +56,7 @@ export function MarketingAgentOverview({
   format: MarketingCardFormat;
 }) {
   const m = useAdminMessages(adminMarketingAgentMessages);
-  // The ledger's own parser: a malformed cap is "no readable limit", never a half-parsed number.
-  const capMicro = monthlyCapUsd === null ? null : parseMarketingLlmMonthlyCap(monthlyCapUsd);
+  const capMicro = monthlyCapUsd === null ? null : capMicroUsd(monthlyCapUsd);
   const spent = overview.llm?.countedMicroUsd ?? null;
   const fraction = spent !== null && capMicro ? Math.min(1, spent / capMicro) : null;
   const ringColor = fraction === null ? "blue" : fraction >= 0.9 ? "red" : fraction >= 0.7 ? "amber" : "emerald";
@@ -161,7 +171,7 @@ export function MarketingAgentOverview({
               <div className="min-w-0">
                 <p className="text-2xl font-bold tabular-nums text-white">{usd(spent)}</p>
                 <p className="text-xs text-zinc-400">
-                  {capMicro ? m.costOf(usd(capMicro)) : m.costNoCap}
+                  {capMicro !== null ? m.costOf(usd(capMicro)) : m.costNoCap}
                 </p>
                 <p className="text-xs text-zinc-500">{m.costCalls(overview.llm?.calls ?? 0)}</p>
               </div>

@@ -264,3 +264,12 @@ test("the webhook blocks and the switch strip live on the Settings tab alone", (
 test("both languages carry every new key", () => {
   assert.deepEqual(Object.keys(adminMarketingAgentMessages.ko).sort(), Object.keys(en).sort());
 });
+
+test("the monthly limit is read as a plain positive decimal; anything else is no readable limit", () => {
+  assert.match(renderOverview(overview(), agent(), { cap: "0.5" }), /Monthly limit US\$ 0\.50/);
+  for (const cap of ["abc", "0", "-3", "1e3", "5."]) {
+    const html = renderOverview(overview(), agent(), { cap });
+    assert.match(html, new RegExp(en.costNoCap), cap);
+    assert.doesNotMatch(html, /Monthly limit/, cap);
+  }
+});

@@ -271,7 +271,20 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
               { key: "ended", header: m.ended, render: (run) => formatAestDateTime(run.endedAt) ?? "" },
             ]}
             cardTitle={(run) => <span className="font-mono text-xs">{run.id}</span>}
-            cardMeta={(run) => `${run.status}${run.outcome ? ` · ${run.outcome}` : ""}`}
+            // The phone card keeps every fact the table has: card, mode, halt and both times.
+            cardMeta={(run) =>
+              [
+                run.status,
+                run.outcome,
+                run.cardId,
+                run.modeAtStart,
+                run.halt,
+                formatAestDateTime(run.startedAt),
+                formatAestDateTime(run.endedAt),
+              ]
+                .filter((part): part is string => typeof part === "string" && part !== "")
+                .join(" · ")
+            }
           />
         </div>
       ) : null}
@@ -297,7 +310,16 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
               },
             ]}
             cardTitle={(row) => <span className="font-mono text-xs">#{row.prNumber}</span>}
-            cardMeta={(row) => `${row.state} · ${row.approvalVerdict ?? m.notObserved}`}
+            // The phone card keeps the run, whether it is the current binding, the approval and the merge reading.
+            cardMeta={(row) =>
+              [
+                row.state,
+                row.runId,
+                row.current ? m.current : m.superseded,
+                row.approvalVerdict ?? m.notObserved,
+                `${m.merged}: ${row.merged === null ? m.notObserved : row.merged ? m.yes : m.no}`,
+              ].join(" · ")
+            }
           />
         </div>
       ) : null}
