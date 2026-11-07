@@ -77,7 +77,8 @@ test.describe("marketing console", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto("/admin/marketing?tab=queue");
+    // The switches moved from the rail beside every list to the Settings tab.
+    await page.goto("/admin/marketing?tab=settings");
 
     // Scoped to the strip and read from `data-state` rather than from the
     // rendered word, so the assertion survives a locale change. The admin lane
