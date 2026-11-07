@@ -306,6 +306,8 @@ export type TeamBoardTotals = {
   runningFloor: boolean;
   /** Spend and cap over the teams that keep a cost record. */
   cost: { spentMicroUsd: number; capMicroUsd: number | null; teams: number } | null;
+  /** Teams whose cost record could not be read: the cost total is a floor (or unknown when nothing was read). */
+  costUnread: number;
 };
 
 export function teamBoardTotals(cards: readonly TeamBoardCard[]): TeamBoardTotals {
@@ -317,6 +319,7 @@ export function teamBoardTotals(cards: readonly TeamBoardCard[]): TeamBoardTotal
     running: cards.filter((card) => card.running === "running").length,
     total: cards.length,
     runningFloor: cards.some((card) => card.running === "unknown"),
+    costUnread: cards.filter((card) => card.cost.kind === "unknown").length,
     cost:
       known.length === 0
         ? null

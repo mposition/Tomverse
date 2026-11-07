@@ -70,6 +70,14 @@ export function MarketingAgentOverview({
         >
           {pendingCards === null || overview.pending === null ? (
             <AdminStateBlock kind="error" title={m.waitingUnread} />
+          ) : pendingCards.length === 0 && overview.pending.count > 0 ? (
+            // The cards come from the newest rows the tab read; the count is the whole queue.
+            <p
+              data-testid="marketing-pending-elsewhere"
+              className="rounded-2xl border border-amber-500/40 p-4 text-sm text-amber-300"
+            >
+              {m.waitingElsewhere(overview.pending.count)}
+            </p>
           ) : pendingCards.length === 0 ? (
             <AdminStateBlock kind="empty" title={m.waitingNone} />
           ) : (

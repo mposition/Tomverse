@@ -30,6 +30,8 @@ export const adminAgentPageMessages = defineAdminMessages({
       costDetail: (cap: string, teams: number) =>
         `Limit ${cap}, counted apart from customer credits. Teams with a cost record: ${teams}.`,
       costNone: "No team has a cost record this month.",
+      costFloor: "At least one team's cost could not be read, so the real total may be higher.",
+      costUnreadAll: "The cost records could not be read.",
       costCapNone: "No limit could be read.",
       workingTitle: "Teams working now",
       workingOf: (n: number, total: number) => `${n} / ${total}`,
@@ -126,6 +128,8 @@ export const adminAgentPageMessages = defineAdminMessages({
       costDetail: (cap: string, teams: number) =>
         `한도 ${cap}, 사용자 크레딧과 따로 계산해요. 비용 기록이 있는 팀 ${teams}개.`,
       costNone: "이번 달 비용 기록이 있는 팀이 없어요.",
+      costFloor: "비용을 읽지 못한 팀이 있어서 실제 합계는 이보다 클 수 있어요.",
+      costUnreadAll: "비용 기록을 읽지 못했어요.",
       costCapNone: "읽을 수 있는 한도가 없어요.",
       workingTitle: "지금 일하는 팀",
       workingOf: (n: number, total: number) => `${n} / ${total}`,

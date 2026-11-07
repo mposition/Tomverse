@@ -111,3 +111,21 @@ test("the agent head shows the switch as a reading that links to settings, never
   assert.match(html, /Unavailable/);
   assert.doesNotMatch(html, /<button/);
 });
+
+test("an unread cost record makes the cost total a floor, and an all-unread one says it could not be read", () => {
+  const floor = renderToStaticMarkup(
+    <AdminAgentTeamBoard rooms={rooms} extras={{ ...extras, marketingCost: null }} readAt={rooms.readAt} />,
+  );
+  // Routing is read, marketing is not: the amount is shown with "+?" and the note, not as the whole.
+  assert.match(floor, /US\$ 2\.50/);
+  assert.match(floor, /At least one team&#x27;s cost could not be read/);
+  const none = renderToStaticMarkup(
+    <AdminAgentTeamBoard
+      rooms={{ ...rooms, routing: unread }}
+      extras={{ ...extras, marketingCost: null }}
+      readAt={rooms.readAt}
+    />,
+  );
+  assert.match(none, /The cost records could not be read\./);
+  assert.doesNotMatch(none, /No team has a cost record this month\./);
+});

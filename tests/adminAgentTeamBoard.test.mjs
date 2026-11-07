@@ -142,7 +142,11 @@ test("cost is summed only over teams that keep a record, and a missing cap is no
   // An unreadable marketing month is "unknown" on its card and adds nothing to the sum.
   const unknown = cardsOf(rooms, noExtras);
   assert.equal(unknown.marketing.cost.kind, "unknown");
-  assert.equal(teamBoardTotals(Object.values(unknown)).cost?.teams, 1);
+  const unknownTotals = teamBoardTotals(Object.values(unknown));
+  assert.equal(unknownTotals.cost?.teams, 1);
+  // The unread marketing month is carried to the total, which is then a floor, not the whole.
+  assert.equal(unknownTotals.costUnread, 1);
+  assert.equal(both.costUnread, 0);
   // A team with no cost record says so rather than showing 0.
   assert.equal(unknown.sre.cost.kind, "none");
 });

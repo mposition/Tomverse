@@ -73,7 +73,8 @@ export default async function AdminProductResearchPage({
   const scout = await readScoutConsole(session, tab.id === "runs" ? "runs" : "suggestions");
   const header = {
     state: scoutState(scout),
-    nextRunAt: scout.nextRunAt,
+    // An agent that is off will not run: no next-run time is drawn for it.
+    nextRunAt: scout.enabled ? scout.nextRunAt : null,
     testAccountConfigured: scout.testAccountConfigured,
   };
   // The side tiles' seven days: read on their own, null when they fail.
@@ -112,7 +113,7 @@ async function readScoutHeader() {
   const settings = await readScoutSettings().catch(() => null);
   return {
     state: !enabled ? ("off" as const) : settings ? scoutState({ enabled, settings }) : null,
-    nextRunAt: nextScoutRunAt(new Date()).toISOString(),
+    nextRunAt: enabled ? nextScoutRunAt(new Date()).toISOString() : null,
     testAccountConfigured: scoutTestAccountEmail() !== null,
   };
 }

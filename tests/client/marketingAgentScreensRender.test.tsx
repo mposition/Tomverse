@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
 import { AdminMarketingPanel, type MarketingConsoleView } from "@/components/admin/AdminMarketingPanel";
 import { MarketingAgentOverview } from "@/components/admin/MarketingAgentOverview";
@@ -124,6 +125,14 @@ const agent = (patch: Partial<AgentData> = {}): AgentData => ({
   ...patch,
 });
 
+// The Overview's refresh control reads the router, so a render of that part mounts one.
+const router = {
+  back: () => {}, forward: () => {}, refresh: () => {}, push: () => {},
+  replace: () => {}, prefetch: () => {}, bfcacheId: "marketing-agent-fixture",
+} as unknown as AppRouterInstance;
+const withRouter = (node: React.ReactNode) =>
+  renderToStaticMarkup(<AppRouterContext.Provider value={router}>{node}</AppRouterContext.Provider>);
+
 const renderOverview = (
   o: MarketingConsoleOverview,
   a: AgentData,
@@ -172,8 +181,18 @@ test("a read that failed is said so and never drawn as nothing", () => {
   assert.doesNotMatch(html, /data-testid="marketing-scheduled-list"/);
 });
 
+test("a waiting count above zero is never drawn as nothing, even with no card in the rows it read", () => {
+  const html = renderOverview(overview({ pending: { count: 4, oldestAt: null } }), agent(), { cards: [] });
+  assert.match(html, /data-testid="marketing-pending-elsewhere"/);
+  assert.match(html, /4 posts are waiting for approval/);
+  assert.doesNotMatch(html, new RegExp(en.waitingNone));
+});
+
 test("nothing waiting, scheduled or run reads as nothing; no monthly limit draws no ring", () => {
-  const html = renderOverview(overview(), agent({ scheduled: [], runs: [] }), { cards: [], cap: null });
+  const html = renderOverview(overview({ pending: { count: 0, oldestAt: null } }), agent({ scheduled: [], runs: [] }), {
+    cards: [],
+    cap: null,
+  });
   assert.match(html, new RegExp(en.waitingNone));
   assert.match(html, new RegExp(en.scheduledNone));
   assert.match(html, new RegExp(en.runsNone));
@@ -223,7 +242,7 @@ test("the approval tab keeps the row's controls: fix the words, reject, then app
 });
 
 test("the Overview waits on people with the approve and reject controls, and holds no webhook block", () => {
-  const html = renderToStaticMarkup(<AdminMarketingPanel initial={view()} part="overview" agent={agent()} />);
+  const html = withRouter(<AdminMarketingPanel initial={view()} part="overview" agent={agent()} />);
   assert.match(html, /data-testid="marketing-pending-card"/);
   assert.match(html, /data-testid="marketing-action-approve"/);
   assert.match(html, /data-testid="marketing-action-reject"/);
@@ -236,7 +255,7 @@ test("the webhook blocks and the switch strip live on the Settings tab alone", (
   assert.match(settings, /data-testid="marketing-webhook-card"/);
   assert.match(settings, /data-testid="marketing-switches"/);
   for (const part of ["overview", "section"] as const) {
-    const html = renderToStaticMarkup(<AdminMarketingPanel initial={view()} part={part} agent={agent()} />);
+    const html = withRouter(<AdminMarketingPanel initial={view()} part={part} agent={agent()} />);
     assert.doesNotMatch(html, /marketing-webhook-card/, part);
     assert.doesNotMatch(html, /marketing-webhook-staging|marketing-webhook-verification-sign/, part);
   }

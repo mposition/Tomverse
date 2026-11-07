@@ -14,6 +14,7 @@ import {
   type MarketingBatchResult,
 } from "@/components/admin/MarketingActions";
 import { MarketingAgentOverview } from "@/components/admin/MarketingAgentOverview";
+import { MarketingOverviewRefresh } from "@/components/admin/MarketingOverviewRefresh";
 import { MarketingAnalysisSwitch, MarketingBriefReport } from "@/components/admin/MarketingAnalysis";
 import { MarketingApprovalCard, type MarketingCardFormat } from "@/components/admin/MarketingApprovalCard";
 import { AdminAgentHeader } from "@/components/admin/ui/AdminAgentHeader";
@@ -318,15 +319,19 @@ export function AdminMarketingPanel({
           {m.updatedAt.replace("{time}", (stamp(now) ?? "").slice(11))}
           {view.canWrite ? null : ` · ${m.readOnlyNote}`}
         </p>
-        <button
-          type="button"
-          onClick={done}
-          disabled={busy}
-          className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-[13px] font-semibold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {m.refresh}
-        </button>
+        {part === "overview" && agent ? (
+          <MarketingOverviewRefresh busy={busy} onRefresh={done} />
+        ) : (
+          <button
+            type="button"
+            onClick={done}
+            disabled={busy}
+            className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-[13px] font-semibold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {m.refresh}
+          </button>
+        )}
       </div>
 
       {part === "page" ? <MarketingOverview view={view} m={m} /> : null}

@@ -99,13 +99,17 @@ export function AdminAgentTeamBoard({
                 <>
                   <p className="text-3xl font-bold tabular-nums tracking-tight text-white">
                     {teamBoardUsd(cost.spentMicroUsd)}
+                    {totals.costUnread > 0 ? <span aria-hidden> +?</span> : null}
                   </p>
                   <p className="text-xs text-zinc-500">
                     {cost.capMicroUsd !== null
                       ? board.costDetail(teamBoardUsd(cost.capMicroUsd), cost.teams)
                       : board.costCapNone}
                   </p>
+                  {totals.costUnread > 0 ? <p className="text-xs text-amber-300">{board.costFloor}</p> : null}
                 </>
+              ) : totals.costUnread > 0 ? (
+                <p className="mt-1 text-sm text-amber-300">{board.costUnreadAll}</p>
               ) : (
                 <p className="mt-1 text-sm text-zinc-400">{board.costNone}</p>
               )}

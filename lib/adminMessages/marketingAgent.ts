@@ -16,6 +16,10 @@ export const adminMarketingAgentMessages = defineAdminMessages({
     waitingAll: "See all",
     waitingNone: "Nothing is waiting for a person.",
     waitingUnread: "The waiting posts could not be counted, so nothing is drawn as none.",
+    waitingElsewhere: (n: number) =>
+      n === 1
+        ? "1 post is waiting for approval. Open Approvals to see it."
+        : `${n} posts are waiting for approval. Open Approvals to see them.`,
     scheduledTitle: "Scheduled posts",
     scheduledDetail: "Approved posts that are queued to go out.",
     scheduledNone: "No post is scheduled.",
@@ -71,6 +75,7 @@ export const adminMarketingAgentMessages = defineAdminMessages({
     waitingAll: "모두 보기",
     waitingNone: "사람을 기다리는 게시물이 없어요.",
     waitingUnread: "대기 중인 게시물을 세지 못했어요. 없는 것으로 보여 주지 않아요.",
+    waitingElsewhere: (n: number) => `승인을 기다리는 게시물이 ${n}건 있어요. 승인 대기 탭에서 확인해요.`,
     scheduledTitle: "예약된 게시물",
     scheduledDetail: "승인을 받고 올라갈 차례를 기다리는 게시물이에요.",
     scheduledNone: "예약된 게시물이 없어요.",
