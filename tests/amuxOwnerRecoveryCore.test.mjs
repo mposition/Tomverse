@@ -56,6 +56,30 @@ test("expired lease and unknown outcome never expose retry preparation", () => {
   }
 });
 
+test("an expired attempt whose own final result the server stored is a finished run", () => {
+  const stored = { escalationReason: "execution_lease_expired",
+    lastAttemptReason: "outcome_unknown", lastAttemptOutcome: "expired",
+    lastAttemptToStatus: "blocked", lastAttemptResultStored: true };
+  const result = prepare(stored);
+  assert.equal(result.reason, "terminal_recorded");
+  assert.equal(result.executionOutcomeKnown, true);
+  assert.equal(result.decisionContextReady, true);
+  assert.equal(result.retryPreviewReady, true);
+  for (const input of [
+    { ...stored, lastAttemptResultStored: false },
+    { ...stored, lastAttemptResultStored: undefined },
+    { ...stored, lastAttemptEndedAt: null },
+    { ...stored, lastAttemptToStatus: "todo" },
+    { ...stored, lastAttemptOutcome: "outcome_unknown" },
+  ]) {
+    const unknown = prepare(input);
+    assert.equal(unknown.executionOutcomeKnown, false, JSON.stringify(input));
+    assert.equal(unknown.retryPreviewReady, false, JSON.stringify(input));
+  }
+  // The server's allowed outcomes stay the authority.
+  assert.equal(prepare({ ...stored, serverAllowsRetry: false }).retryPreviewReady, false);
+});
+
 test("only protected terminal outcome and target pairs count as known execution", () => {
   for (const input of [
     { lastAttemptOutcome: "started", lastAttemptToStatus: null,
