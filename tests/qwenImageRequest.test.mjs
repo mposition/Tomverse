@@ -116,13 +116,21 @@ test("a size with no approved mapping is refused, not sent", () => {
   }
 });
 
-test("a result is fetched only from an Alibaba Cloud host outside mainland China", () => {
+test("a result is fetched only from Singapore's public OSS endpoint", () => {
   assert.equal(isQwenAssetUrl(ASSET_URL), true);
   // The API reference's own example host: a mainland (Shenzhen) bucket.
   assert.equal(isQwenAssetUrl("https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/xxx.png?Expires=xxx"), false);
   assert.equal(isQwenAssetUrl("https://dashscope-result-hk.oss-cn-hongkong.aliyuncs.com/a.png"), false);
+  // Review finding 2026-11-07: the same domain names Alibaba's intranet endpoints.
+  assert.equal(isQwenAssetUrl("https://bucket.oss-ap-southeast-1-internal.aliyuncs.com/a.png"), false);
+  assert.equal(isQwenAssetUrl("https://bucket.oss-us-east-1.aliyuncs.com/a.png"), false);
+  assert.equal(isQwenAssetUrl("https://bucket.oss-accelerate.aliyuncs.com/a.png"), false);
+  assert.equal(isQwenAssetUrl("https://dashscope-intl.aliyuncs.com/a.png"), false);
+  assert.equal(isQwenAssetUrl("https://a.b.oss-ap-southeast-1.aliyuncs.com/a.png"), false);
+  assert.equal(isQwenAssetUrl("https://oss-ap-southeast-1.aliyuncs.com/a.png"), false);
   assert.equal(isQwenAssetUrl("http://dashscope-result-sgp.oss-ap-southeast-1.aliyuncs.com/a.png"), false);
   assert.equal(isQwenAssetUrl("https://dashscope-result-sgp.oss-ap-southeast-1.aliyuncs.com:8443/a.png"), false);
+  assert.equal(isQwenAssetUrl("https://user@dashscope-result-sgp.oss-ap-southeast-1.aliyuncs.com/a.png"), false);
   assert.equal(isQwenAssetUrl("https://aliyuncs.com.example.org/a.png"), false);
   assert.equal(isQwenAssetUrl("https://169.254.169.254/latest/meta-data"), false);
   assert.equal(isQwenAssetUrl("not a url"), false);
@@ -242,6 +250,31 @@ test("a result that is not the priced file is refused before it is stored", asyn
     () => new Response(pngHeader(1024, 1024), { headers: { "content-type": "image/png", "content-length": String(64 * 1024 * 1024) } }),
     /larger than the accepted limit/
   );
+  // Review finding 2026-11-07: a body that declares no length is capped while
+  // it is read, and the stream is cancelled rather than drained.
+  let pulled = 0;
+  let cancelled = false;
+  const chunk = new Uint8Array(1024 * 1024);
+  await refuse(
+    () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulled += 1;
+            controller.enqueue(chunk);
+            if (pulled > 64) controller.close();
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { "content-type": "image/png" } }
+      ),
+    /larger than the accepted limit/
+  );
+  assert.equal(cancelled, true);
+  assert.ok(pulled <= 20, `read ${pulled} MiB before refusing`);
+  await refuse(() => new Response(new Uint8Array(0), { headers: { "content-type": "image/png" } }), /empty/);
   await refuse(() => new Response(pngHeader(2048, 2048), { headers: { "content-type": "image/png" } }), /different size/);
   await refuse(() => new Response(Buffer.from("not a png"), { headers: { "content-type": "image/png" } }), /different size/);
 

@@ -23,7 +23,8 @@ import type { ImageSize } from "@/lib/imageGenerationPricing";
 // deployment. lib/providerDataDestinations.ts records Qwen storage as
 // committed to SG with processing NOT_PINNED; whether image results transit or
 // rest in mainland China is not established. `isQwenAssetUrl` therefore
-// refuses mainland-region hosts instead of quietly storing from them.
+// accepts only Singapore's public OSS endpoint, so a mainland result fails the
+// smoke instead of being quietly stored.
 
 /**
  * The synchronous endpoint on the Singapore domain chat already uses
@@ -79,21 +80,24 @@ export const buildQwenImageRequest = (
   };
 };
 
-const ASSET_HOST_SUFFIX = ".aliyuncs.com";
-
 /**
- * Where a generated file may be fetched from: https on an Alibaba Cloud host,
- * and not a mainland China region.
+ * Singapore's public OSS endpoint, one bucket label in front of it.
  *
- * The suffix rather than an exact host because the bucket name is unverified;
- * the only one on record is the reference's example. `.aliyuncs.com` is
- * Alibaba's own domain, so a response cannot point this request at an
- * internal address. A label beginning `oss-cn-` or `cn-` names a China
- * region -- the reference's example `oss-cn-shenzhen`, and Hong Kong's
- * `cn-hongkong`, which is not the Singapore the destination row records
- * either -- and is refused until a paid smoke shows where a Singapore
- * request's results really live.
+ * An allowlist, not a suffix: `.aliyuncs.com` also names Alibaba's intranet
+ * endpoints (`oss-ap-southeast-1-internal.aliyuncs.com`), every mainland
+ * region (the reference's own example is `oss-cn-shenzhen`) and Hong Kong
+ * (`oss-cn-hongkong`), none of which is the Singapore the destination row
+ * records. Naming the one public region excludes all of them, and a region
+ * Alibaba adds later, without a list of what to refuse.
+ *
+ * The bucket label is any valid OSS bucket name because the real one is
+ * unverified -- the only one on record is the reference's mainland example.
+ * If the paid smoke shows Singapore results living elsewhere, this pattern
+ * changes with that evidence; until then such a result is refused, not stored.
  */
+const ASSET_HOST = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.oss-ap-southeast-1\.aliyuncs\.com$/;
+
+/** Where a generated file may be fetched from: https on `ASSET_HOST`, nothing else. */
 export const isQwenAssetUrl = (value: string): boolean => {
   let url: URL;
   try {
@@ -102,9 +106,7 @@ export const isQwenAssetUrl = (value: string): boolean => {
     return false;
   }
   if (url.protocol !== "https:" || url.port !== "" || url.username || url.password) return false;
-  const host = url.hostname.toLowerCase();
-  if (!host.endsWith(ASSET_HOST_SUFFIX)) return false;
-  return !host.split(".").some((label) => /^(?:oss-)?cn-/.test(label));
+  return ASSET_HOST.test(url.hostname);
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>

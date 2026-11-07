@@ -12,6 +12,7 @@ import {
   imageThinkingCapEnforced,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import { BoundedBufferError, readResponseToBuffer } from "@/lib/boundedBuffer";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
   buildFalImageEditRequest,
@@ -1017,10 +1018,11 @@ const generateWithXai = async (
  *   * **one attempt.** Billing is per image, and a generation that succeeded
  *     and lost its response looks like a transport failure; a second attempt
  *     would buy a second image the user does not pay for.
- *   * **the result is a link.** It is checked before it is followed and again
- *     on the response, with redirects not followed, so a provider body cannot
- *     make this server fetch somewhere else; the declared length is refused
- *     before the body is read (fal's 16 MiB limit, the same 1K image).
+ *   * **the result is a link.** It is checked against Singapore's public OSS
+ *     endpoint before it is followed and again on the response, with
+ *     redirects not followed, so a provider body cannot make this server
+ *     fetch an intranet endpoint or anywhere else; the body is read under
+ *     fal's 16 MiB limit (the same 1K image), declared or not.
  *   * **the file is measured against what was priced.** Its MIME must be one
  *     the profile may store and its header must say 1024x1024.
  */
@@ -1130,22 +1132,28 @@ const generateWithQwen = async (
       requestParams
     );
   }
-  if (falAssetLengthRefused(asset.headers.get("content-length"))) {
-    await releaseAsset();
+  // A declared length over the limit is refused unread, and the stream itself
+  // is capped while it is read: a chunked or compressed body declares nothing
+  // useful up front, and reading it whole first would spend the memory the
+  // limit exists to refuse.
+  let imageBytes: Buffer;
+  try {
+    imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
+  } catch (error) {
     throw new ImageProviderError(
       "provider_failed",
-      "Image provider asset declared a size larger than the accepted limit.",
+      error instanceof BoundedBufferError
+        ? "Image provider asset was larger than the accepted limit."
+        : "Image provider asset could not be read.",
       null,
       providerRequestId,
       requestParams
     );
   }
-
-  const imageBytes = Buffer.from(await asset.arrayBuffer());
-  if (imageBytes.byteLength === 0 || imageBytes.byteLength > FAL_MAX_ASSET_BYTES) {
+  if (imageBytes.byteLength === 0) {
     throw new ImageProviderError(
       "provider_failed",
-      "Image provider asset was empty or larger than the accepted limit.",
+      "Image provider asset was empty.",
       null,
       providerRequestId,
       requestParams
