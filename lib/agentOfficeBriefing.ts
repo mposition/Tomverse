@@ -17,6 +17,8 @@
  */
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
 import type { Session } from "next-auth";
@@ -25,8 +27,9 @@ import { getActiveAiModel } from "@/lib/activeAiModel";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   AGENT_OFFICE_BRIEFING_PER_DAY,
-  AGENT_OFFICE_BRIEFING_REUSE_MS,
   AGENT_OFFICE_BRIEFING_SCHEMA,
+  agentOfficeBriefingClaimHeld,
+  agentOfficeBriefingReusable,
   agentOfficeBriefingDay,
   agentOfficeBriefingFacts,
   agentOfficeBriefingPrompt,
@@ -46,7 +49,10 @@ import { prisma } from "@/lib/prisma";
 export const AGENT_OFFICE_BRIEFING_ENABLED_ENV = "AGENT_OFFICE_BRIEFING_ENABLED";
 export const AGENT_OFFICE_BRIEFING_MODEL_ENV = "AGENT_OFFICE_BRIEFING_MODEL";
 const DEFAULT_MODEL_ID = "gpt-6-luna";
-/** {day, calls, claimUntil} for the Brisbane day, moved only by `reserve`. */
+/**
+ * {day, calls, claim: {id, until} | null}: the Brisbane day's calls, moved only
+ * by `reserve`, and the one call in flight, whatever day it started on.
+ */
 export const AGENT_OFFICE_BRIEFING_USAGE_KEY = "agentOffice.briefing.usage";
 export const AGENT_OFFICE_BRIEFING_LATEST_KEY = "agentOffice.briefing.latest";
 const MAX_OUTPUT_TOKENS = 700;
@@ -140,7 +146,7 @@ export type AgentOfficeBriefingResult =
   | { kind: "done"; stored: StoredAgentOfficeBriefing }
   | { kind: "failed" };
 
-type Reservation = { kind: "reserved"; calls: number } | { kind: "limit" } | { kind: "busy" } | { kind: "reused"; stored: StoredAgentOfficeBriefing };
+type Reservation = { kind: "reserved"; calls: number; claimId: string } | { kind: "limit" } | { kind: "busy" } | { kind: "reused"; stored: StoredAgentOfficeBriefing };
 
 /**
  * Reserves one call under a lock every request takes: a fresh briefing is
@@ -157,15 +163,14 @@ async function reserve(input: { session: Session; request: Request; locale: Brie
     });
     const value = (key: string) => rows.find((row) => row.key === key)?.value ?? null;
     const latest = parseStoredAgentOfficeBriefing(value(AGENT_OFFICE_BRIEFING_LATEST_KEY));
-    if (latest && latest.locale === input.locale && input.now.getTime() - Date.parse(latest.at) < AGENT_OFFICE_BRIEFING_REUSE_MS) {
-      return { kind: "reused", stored: latest };
-    }
+    if (latest && agentOfficeBriefingReusable(latest, input.locale, input.now.getTime())) return { kind: "reused", stored: latest };
     const day = agentOfficeBriefingDay(input.now);
     const usage = parseAgentOfficeBriefingUsage(value(AGENT_OFFICE_BRIEFING_USAGE_KEY), day);
-    if (usage.claimUntil && Date.parse(usage.claimUntil) > input.now.getTime()) return { kind: "busy" };
-    if (usage.calls >= AGENT_OFFICE_BRIEFING_PER_DAY) return { kind: "limit" };
+    if (agentOfficeBriefingClaimHeld(usage.claim, input.now.getTime())) return { kind: "busy" };
+    if (usage.unreadable || usage.calls >= AGENT_OFFICE_BRIEFING_PER_DAY) return { kind: "limit" };
     const calls = usage.calls + 1;
-    const next = JSON.stringify({ day, calls, claimUntil: new Date(input.now.getTime() + CLAIM_MS).toISOString() });
+    const claimId = randomUUID();
+    const next = JSON.stringify({ day, calls, claim: { id: claimId, until: new Date(input.now.getTime() + CLAIM_MS).toISOString() } });
     await tx.appSetting.upsert({
       where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
       create: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY, value: next },
@@ -181,21 +186,28 @@ async function reserve(input: { session: Session; request: Request; locale: Brie
       summary: `Agent office briefing call ${calls} of ${AGENT_OFFICE_BRIEFING_PER_DAY} today`,
       metadata: { modelId: input.modelId, locale: input.locale, day, calls },
     });
-    return { kind: "reserved", calls };
+    return { kind: "reserved", calls, claimId };
   });
 }
 
-/** Ends the claim; the day's count stays. A newer day's row is left alone. */
-async function release(now: Date, stored: StoredAgentOfficeBriefing | null): Promise<void> {
-  const day = agentOfficeBriefingDay(now);
+/**
+ * Ends this call's own claim and keeps the row's day and count as they are. A
+ * claim another call holds, or a row that cannot be read, is left alone.
+ */
+async function release(claimId: string, stored: StoredAgentOfficeBriefing | null): Promise<void> {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('agent_office_briefing'))`;
     const row = await tx.appSetting.findUnique({ where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY }, select: { value: true } });
-    const usage = parseAgentOfficeBriefingUsage(row?.value ?? null, day);
-    if (row) {
+    let raw: Record<string, unknown> | null = null;
+    try {
+      raw = row ? (JSON.parse(row.value) as Record<string, unknown>) : null;
+    } catch {
+      raw = null;
+    }
+    if (raw && (raw.claim as { id?: unknown } | null | undefined)?.id === claimId) {
       await tx.appSetting.update({
         where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
-        data: { value: JSON.stringify({ day, calls: usage.calls, claimUntil: null }) },
+        data: { value: JSON.stringify({ ...raw, claim: null }) },
       });
     }
     if (stored) {
@@ -235,7 +247,7 @@ export async function requestAgentOfficeBriefing(input: {
     const answer = await llm({ facts, locale: input.locale });
     if (answer) stored = { at: at.toISOString(), locale: input.locale, modelId: answer.modelId, briefing: answer.briefing };
   } finally {
-    await release(now(), stored);
+    await release(reserved.claimId, stored);
   }
   return stored ? { kind: "done", stored } : { kind: "failed" };
 }

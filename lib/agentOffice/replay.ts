@@ -1,8 +1,9 @@
 /**
  * Rewinding the AMUX floor to an earlier moment today, from the attempts the
  * office already read. Only attempts are recorded over time, so the past floor
- * says exactly that: a worker sat at its desk when an attempt of its covered
- * the moment; one at its desk now but not then is drawn resting; every other
+ * says exactly that: a worker sits at its desk only when an attempt of its
+ * covered the moment. One at its desk now (busy, or failed with "!") but not
+ * then is drawn resting, as nothing records when a failure began; every other
  * place (bench, covered desk) is today's. Pure: no clock, no reads.
  */
 import type { AgentOfficeAmuxWorkerState, AgentOfficeAttemptSpan } from "./live";
@@ -24,7 +25,7 @@ export function busyAt(spans: readonly AgentOfficeAttemptSpan[], at: number): Se
 /** The state a worker is drawn with at a past moment (see the file comment). */
 export function replayState(now: AgentOfficeAmuxWorkerState, busyThen: boolean): AgentOfficeAmuxWorkerState {
   if (busyThen) return "busy";
-  return now === "busy" ? "idle" : now;
+  return now === "busy" || now === "error" || now === "lost" ? "idle" : now;
 }
 
 /** How many slider steps lie between the day's start and now (at least one). */

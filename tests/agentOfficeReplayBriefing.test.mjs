@@ -13,6 +13,8 @@ import {
   parseAgentOfficeBriefing,
   parseAgentOfficeBriefingUsage,
   parseStoredAgentOfficeBriefing,
+  agentOfficeBriefingClaimHeld,
+  agentOfficeBriefingReusable,
 } from "../lib/agentOffice/briefing.ts";
 import { adminAgentOfficeFloorMessages } from "../lib/adminMessages/agentOfficeFloor.ts";
 
@@ -39,9 +41,13 @@ test("rewinding seats a worker only while one of its attempts covered the moment
 test("a rewound worker keeps today's place unless attempts say otherwise", () => {
   assert.equal(replayState("idle", true), "busy");
   assert.equal(replayState("busy", false), "idle");
-  // Paused, lost and not running are known only for now and stay as they are.
+  // A desk means an attempt covered the moment: a failure today is not drawn
+  // before it, as nothing records when it began.
+  assert.equal(replayState("lost", false), "idle");
+  assert.equal(replayState("error", false), "idle");
+  assert.equal(replayState("lost", true), "busy");
+  // Paused and not running are known only for now and stay as they are.
   assert.equal(replayState("paused", false), "paused");
-  assert.equal(replayState("lost", false), "lost");
   assert.equal(replayState("not_running", false), "not_running");
 });
 
@@ -160,10 +166,25 @@ test("the one check on the model's answer: shape, lengths and links from the lis
 test("the day's limit counts Brisbane days and fails closed on a row it cannot read", () => {
   const day = agentOfficeBriefingDay(new Date("2026-11-06T14:30:00.000Z"));
   assert.equal(day, "2026-11-07");
-  assert.deepEqual(parseAgentOfficeBriefingUsage(null, day), { calls: 0, claimUntil: null });
-  assert.deepEqual(parseAgentOfficeBriefingUsage(JSON.stringify({ day: "2026-11-06", calls: 39 }), day), { calls: 0, claimUntil: null });
-  assert.deepEqual(parseAgentOfficeBriefingUsage(JSON.stringify({ day, calls: 3, claimUntil: "x" }), day), { calls: 3, claimUntil: "x" });
-  assert.equal(parseAgentOfficeBriefingUsage("{broken", day).calls, AGENT_OFFICE_BRIEFING_PER_DAY);
+  assert.deepEqual(parseAgentOfficeBriefingUsage(null, day), { calls: 0, claim: null, unreadable: false });
+  assert.deepEqual(parseAgentOfficeBriefingUsage(JSON.stringify({ day: "2026-11-06", calls: 39, claim: null }), day), { calls: 0, claim: null, unreadable: false });
+  // A claim taken yesterday still holds across midnight.
+  const claim = { id: "c1", until: "2026-11-06T14:31:00.000Z" };
+  assert.deepEqual(parseAgentOfficeBriefingUsage(JSON.stringify({ day: "2026-11-06", calls: 39, claim }), day), { calls: 0, claim, unreadable: false });
+  assert.deepEqual(parseAgentOfficeBriefingUsage(JSON.stringify({ day, calls: 3, claim }), day), { calls: 3, claim, unreadable: false });
+  assert.deepEqual(parseAgentOfficeBriefingUsage("{broken", day), { calls: AGENT_OFFICE_BRIEFING_PER_DAY, claim: null, unreadable: true });
+  const at = Date.parse("2026-11-06T14:30:30.000Z");
+  assert.equal(agentOfficeBriefingClaimHeld(claim, at), true);
+  assert.equal(agentOfficeBriefingClaimHeld(claim, Date.parse(claim.until)), false);
+  assert.equal(agentOfficeBriefingClaimHeld({ id: "c2", until: "garbage" }, at), true);
+  assert.equal(agentOfficeBriefingClaimHeld(null, at), false);
+  const stored = { at: "2026-11-07T00:00:00.000Z", locale: "ko", modelId: "m", briefing: { headline: "h", points: [] } };
+  const t0 = Date.parse(stored.at);
+  assert.equal(agentOfficeBriefingReusable(stored, "ko", t0 + 60_000), true);
+  assert.equal(agentOfficeBriefingReusable(stored, "en", t0 + 60_000), false);
+  assert.equal(agentOfficeBriefingReusable(stored, "ko", t0 + 5 * 60_000), false);
+  // A stored answer dated ahead of the clock is never reused.
+  assert.equal(agentOfficeBriefingReusable(stored, "ko", t0 - 1), false);
   assert.equal(parseAgentOfficeBriefingUsage(JSON.stringify({ day, calls: -1 }), day).calls, AGENT_OFFICE_BRIEFING_PER_DAY);
   assert.equal(parseStoredAgentOfficeBriefing("{"), null);
   assert.equal(parseStoredAgentOfficeBriefing(JSON.stringify({ at: "2026-11-07T00:00:00.000Z", locale: "fr", modelId: "m", briefing: { headline: "h", points: [] } })), null);

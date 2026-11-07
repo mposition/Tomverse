@@ -198,18 +198,41 @@ export function agentOfficeBriefingDay(now: Date): string {
   return (brisbaneIso(now.toISOString()) ?? now.toISOString()).slice(0, 10);
 }
 
+export type AgentOfficeBriefingClaim = { id: string; until: string };
+
 /**
- * Today's calls and an in-flight claim, from the usage row. No row, or another
- * day's, is zero; a row that cannot be read counts as the limit reached.
+ * Today's calls and the call in flight, from the usage row. The claim is kept
+ * whatever day it was taken on, so a call running across Brisbane midnight
+ * still holds it. No row, or another day's, is zero calls; a row that cannot
+ * be read counts as the limit reached and as a claim held until it is fixed.
  */
-export function parseAgentOfficeBriefingUsage(value: string | null | undefined, day: string): { calls: number; claimUntil: string | null } {
-  if (value === null || value === undefined) return { calls: 0, claimUntil: null };
+export function parseAgentOfficeBriefingUsage(
+  value: string | null | undefined,
+  day: string
+): { calls: number; claim: AgentOfficeBriefingClaim | null; unreadable: boolean } {
+  if (value === null || value === undefined) return { calls: 0, claim: null, unreadable: false };
   try {
-    const raw = JSON.parse(value ?? "") as { day?: unknown; calls?: unknown; claimUntil?: unknown };
-    if (raw.day !== day) return { calls: 0, claimUntil: null };
+    const raw = JSON.parse(value) as { day?: unknown; calls?: unknown; claim?: unknown };
+    const c = raw.claim as { id?: unknown; until?: unknown } | null | undefined;
+    const claim = c && typeof c.id === "string" && typeof c.until === "string" ? { id: c.id, until: c.until } : null;
+    if (raw.day !== day) return { calls: 0, claim, unreadable: false };
     const calls = typeof raw.calls === "number" && Number.isInteger(raw.calls) && raw.calls >= 0 ? raw.calls : AGENT_OFFICE_BRIEFING_PER_DAY;
-    return { calls, claimUntil: typeof raw.claimUntil === "string" ? raw.claimUntil : null };
+    return { calls, claim, unreadable: false };
   } catch {
-    return { calls: AGENT_OFFICE_BRIEFING_PER_DAY, claimUntil: null };
+    return { calls: AGENT_OFFICE_BRIEFING_PER_DAY, claim: null, unreadable: true };
   }
+}
+
+/** A claim still in force at `now`. An unparseable `until` holds (fails closed). */
+export function agentOfficeBriefingClaimHeld(claim: AgentOfficeBriefingClaim | null, now: number): boolean {
+  if (!claim) return false;
+  const until = Date.parse(claim.until);
+  return !Number.isFinite(until) || until > now;
+}
+
+/** A stored answer reused instead of a call: same language, at most REUSE_MS old, never from the future. */
+export function agentOfficeBriefingReusable(stored: StoredAgentOfficeBriefing | null, locale: BriefingLocale, now: number): boolean {
+  if (!stored || stored.locale !== locale) return false;
+  const age = now - Date.parse(stored.at);
+  return age >= 0 && age < AGENT_OFFICE_BRIEFING_REUSE_MS;
 }

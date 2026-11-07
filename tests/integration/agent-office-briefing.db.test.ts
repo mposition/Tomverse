@@ -82,7 +82,7 @@ test("one call is reserved, audited, answered and stored; a fresh answer is reus
   assert.equal(first.kind, "done");
   assert.equal(calls.n, 1);
   const usage = JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}");
-  assert.deepEqual(usage, { day: agentOfficeBriefingDay(NOW), calls: 1, claimUntil: null });
+  assert.deepEqual(usage, { day: agentOfficeBriefingDay(NOW), calls: 1, claim: null });
   const stored = JSON.parse((await setting(AGENT_OFFICE_BRIEFING_LATEST_KEY)) ?? "{}");
   assert.equal(stored.modelId, "stub-model");
   assert.equal(stored.locale, "ko");
@@ -104,14 +104,14 @@ test("one call is reserved, audited, answered and stored; a fresh answer is reus
 test("the day's limit and a claim in flight refuse before any call", async () => {
   const calls = { n: 0 };
   const day = agentOfficeBriefingDay(NOW);
-  await prisma.appSetting.create({ data: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY, value: JSON.stringify({ day, calls: AGENT_OFFICE_BRIEFING_PER_DAY, claimUntil: null }) } });
+  await prisma.appSetting.create({ data: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY, value: JSON.stringify({ day, calls: AGENT_OFFICE_BRIEFING_PER_DAY, claim: null }) } });
   assert.deepEqual(
     await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "ko", now: () => NOW, llm: answer(calls), readFacts }),
     { kind: "limit" }
   );
   await prisma.appSetting.update({
     where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
-    data: { value: JSON.stringify({ day, calls: 1, claimUntil: new Date(NOW.getTime() + 30_000).toISOString() }) },
+    data: { value: JSON.stringify({ day, calls: 1, claim: { id: "other", until: new Date(NOW.getTime() + 30_000).toISOString() } }) },
   });
   assert.deepEqual(
     await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "ko", now: () => NOW, llm: answer(calls), readFacts }),
@@ -126,7 +126,7 @@ test("a failed call still counts, ends its claim and stores nothing", async () =
   const result = await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "ko", now: () => NOW, llm: answer(calls, false), readFacts });
   assert.deepEqual(result, { kind: "failed" });
   assert.equal(calls.n, 1);
-  assert.deepEqual(JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}"), { day: agentOfficeBriefingDay(NOW), calls: 1, claimUntil: null });
+  assert.deepEqual(JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}"), { day: agentOfficeBriefingDay(NOW), calls: 1, claim: null });
   assert.equal(await setting(AGENT_OFFICE_BRIEFING_LATEST_KEY), null);
   assert.equal((await audits()).length, 1);
 });
@@ -147,4 +147,43 @@ test("two requests at once make one call", async () => {
   assert.equal((await first).kind, "done");
   assert.deepEqual(second, { kind: "busy" });
   assert.equal(calls.n, 1);
+});
+
+test("a call running across Brisbane midnight still holds the claim, and ending it never frees another's", async () => {
+  const calls = { n: 0 };
+  // 23:59:30 AEST, then 00:00:10 AEST the next day.
+  const beforeMidnight = new Date("2026-11-07T13:59:30.000Z");
+  const afterMidnight = new Date("2026-11-07T14:00:10.000Z");
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const slow: AgentOfficeBriefingLlm = async (input) => {
+    await gate;
+    return answer(calls)(input);
+  };
+  const first = requestAgentOfficeBriefing({ session: session(), request: request(), locale: "ko", now: () => beforeMidnight, llm: slow, readFacts });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const second = await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "ko", now: () => afterMidnight, llm: answer(calls), readFacts });
+  assert.deepEqual(second, { kind: "busy" });
+  release();
+  assert.equal((await first).kind, "done");
+  assert.equal(calls.n, 1);
+  // The claim is gone and the day and count stay as the reservation wrote them.
+  assert.deepEqual(JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}"), { day: agentOfficeBriefingDay(beforeMidnight), calls: 1, claim: null });
+
+  // A claim someone else holds is left alone when this call ends.
+  const foreign = { id: "someone-else", until: new Date(afterMidnight.getTime() + 60_000).toISOString() };
+  await prisma.appSetting.update({
+    where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
+    data: { value: JSON.stringify({ day: agentOfficeBriefingDay(afterMidnight), calls: 0, claim: null }) },
+  });
+  const sneaky: AgentOfficeBriefingLlm = async (input) => {
+    await prisma.appSetting.update({
+      where: { key: AGENT_OFFICE_BRIEFING_USAGE_KEY },
+      data: { value: JSON.stringify({ day: agentOfficeBriefingDay(afterMidnight), calls: 1, claim: foreign }) },
+    });
+    return answer(calls)(input);
+  };
+  const later = new Date(afterMidnight.getTime() + 10 * 60_000);
+  assert.equal((await requestAgentOfficeBriefing({ session: session(), request: request(), locale: "en", now: () => later, llm: sneaky, readFacts })).kind, "done");
+  assert.deepEqual(JSON.parse((await setting(AGENT_OFFICE_BRIEFING_USAGE_KEY)) ?? "{}").claim, foreign);
 });
