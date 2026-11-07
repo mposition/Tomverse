@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { KeyRound, LifeBuoy, ShieldCheck } from "lucide-react";
 import type { ConfiguredAdminAccess } from "@/lib/adminAuth";
 import { adminAccessMessages } from "@/lib/adminMessages/adminAccess";
@@ -14,7 +15,7 @@ const roleRows: Array<[string, AccessLevel, AccessLevel, AccessLevel, AccessLeve
 ];
 
 const dateLabel = (value: string | null | undefined, never: string) =>
-  value ? new Date(value).toISOString().replace("T", " ").slice(0, 16) : never;
+  formatAestDateTime(value) ?? never;
 
 export async function AdminAccessPanel({ access }: { access: ConfiguredAdminAccess[] }) {
   const m = await getAdminMessages(adminAccessMessages);

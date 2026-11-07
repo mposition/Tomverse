@@ -41,6 +41,7 @@ import {
   type ModelUsageClass,
 } from "@/lib/models";
 import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import {
   candidateFamilyIdentity,
   modelProductSurface,
@@ -1499,7 +1500,7 @@ export const adoptionPreflightRefusal = (input: {
       if (verdict === "expired") {
         return {
           status: 409,
-          message: `The standard-credit exception for ${GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.apiModels.join(" and ")} ended after ${GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.reviewBy} UTC. This price needs at least ${floor.credits} credits (${floor.usageClass}).`,
+          message: `The standard-credit exception for ${GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.apiModels.join(" and ")} ended at ${formatAestDateTime(Date.parse(GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.reviewBy) + 24 * 60 * 60 * 1000)}. This price needs at least ${floor.credits} credits (${floor.usageClass}).`,
         };
       }
       return {

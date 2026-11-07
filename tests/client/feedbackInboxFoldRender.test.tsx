@@ -106,7 +106,7 @@ test("a finished report starts as one summary line and a working one stays a ful
 
   // The folded one shows the summary only.
   assert.ok(out.includes("Export failed on the long chat."));
-  assert.ok(out.includes("2026-11-05 01:30 UTC"));
+  assert.ok(out.includes("2026-11-05 11:30 AEST"));
   assert.ok(!out.includes("The second line stays inside the fold."));
   assert.ok(!out.includes("trace-finished"));
   assert.equal(count(out, m.copyContext), 1, "only the working report offers its actions");

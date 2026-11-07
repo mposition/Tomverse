@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -300,11 +301,7 @@ const statusClass = (status: string) => {
   return "border-amber-500/30 bg-amber-500/10 text-amber-200";
 };
 
-const dateLabel = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
 const escapeCsv = (value: unknown) => {
   const text = String(value ?? "");
@@ -507,7 +504,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
       `Plan: ${feedback.plan || "-"}`,
       `Attachments: ${feedback.attachmentCount}`,
       `Path: ${feedback.path || "-"}`,
-      `Created: ${dateLabel(feedback.createdAt)} UTC`,
+      `Created: ${dateLabel(feedback.createdAt)}`,
       `User agent: ${feedback.userAgent || "-"}`,
       "",
       feedback.message,
@@ -682,7 +679,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         {feedback.status}
                       </span>
                       <span className="text-xs text-zinc-500">
-                        {dateLabel(feedback.createdAt)} UTC
+                        {dateLabel(feedback.createdAt)}
                       </span>
                       {/*
                         Whether the reporter asked for *progress* notices. The
@@ -1403,7 +1400,7 @@ export function FeedbackFoldToggle({
           {isTerminalFeedbackStatus(feedback.status) ? m.statuses[feedback.status] : feedback.status}
         </span>
         <span className="whitespace-nowrap text-xs text-zinc-500">
-          {dateLabel(feedback.createdAt)} UTC
+          {dateLabel(feedback.createdAt)}
         </span>
         {canResendReply(feedback) ? (
           <span

@@ -69,7 +69,7 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       blockingCount: (count: number) =>
         `${count} blocking finding${count === 1 ? "" : "s"}. `,
       readAt: (time: string) =>
-        `Read at ${time} UTC. The DNS records themselves are added at the registrar; see docs/ops/email-sending-domains.md.`,
+        `Read at ${time}. The DNS records themselves are added at the registrar; see docs/ops/email-sending-domains.md.`,
     },
   },
   ko: {
@@ -138,7 +138,7 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       nothingToReport: "보고할 설정이 없습니다.",
       blockingCount: (count: number) => `차단 항목 ${count}건. `,
       readAt: (time: string) =>
-        `${time} UTC에 읽었습니다. DNS 레코드 자체는 도메인 등록 기관에서 추가합니다. docs/ops/email-sending-domains.md를 참고하세요.`,
+        `${time}에 읽었습니다. DNS 레코드 자체는 도메인 등록 기관에서 추가합니다. docs/ops/email-sending-domains.md를 참고하세요.`,
     },
   },
 });

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -75,11 +76,7 @@ const readNavigationState = (searchParams: URLSearchParams) => {
   return { status, page, cursor: cursors[page], cursors };
 };
 
-const dateLabel = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
 const statusClass = (status: string) => {
   if (status === "sent") {
@@ -413,7 +410,7 @@ export function AdminNotificationsPanel() {
                       {row.channel}
                     </span>
                     <span className="text-xs text-zinc-500">
-                      {dateLabel(row.createdAt)} UTC
+                      {dateLabel(row.createdAt)}
                     </span>
                   </div>
                   <h3 className="mt-3 text-sm font-bold text-white">{row.title}</h3>
